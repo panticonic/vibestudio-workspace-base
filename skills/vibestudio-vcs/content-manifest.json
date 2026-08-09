@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 2,
+  "generatedBy": "scripts/generate-vcs-skill-release.mjs",
+  "files": [
+    {
+      "path": "SKILL.md",
+      "sha256": "70d853fd290f10d805c27537f3378ef06ddd0ae0041adba0c8e4faa94a4e0ea2"
+    },
+    {
+      "path": "agents/openai.yaml",
+      "sha256": "5a939a11ed40ec60dc571638c15af3bb2018a06780c8ce8afc5212ee800b881f"
+    },
+    {
+      "path": "evaluations/schema-fixtures.json",
+      "sha256": "bae0edd16397e52093d10013f3b6174f7b32c1a1ef4a68ff8cf32acba53ee001"
+    },
+    {
+      "path": "package.json",
+      "sha256": "bf8b90f00a21da2310903dc38dcd832721c470794044bd97e85a0558b835aa03"
+    },
+    {
+      "path": "references/authoring-basics.md",
+      "sha256": "154a022556ea0dec2e18833c3a98e6130739c0142926576854e56f5f53192f32"
+    },
+    {
+      "path": "references/checks-and-publication.md",
+      "sha256": "f67cd60d377a7e4e74985ddcbd6e42fe56300922a1e967b0b2908a57bbd4ed0e"
+    },
+    {
+      "path": "references/compare-and-merge.md",
+      "sha256": "b64d8f8961970c904d8bdde718f5722155be1286fe1a41517ac400d00120474e"
+    },
+    {
+      "path": "references/contexts-and-state.md",
+      "sha256": "7041768a90a2c1dc22c69a3ff733d423b86b4b213189b8616627a5c6b3a93d77"
+    },
+    {
+      "path": "references/external-snapshot-import.md",
+      "sha256": "4792e7623d38b951e4dea177f0a3ab76bba16dde890c3f9d5c503ac25d8ed47b"
+    },
+    {
+      "path": "references/file-move-copy.md",
+      "sha256": "e9c907179cfff579c11ea68b4c0eb12d4ef29617309ace5107473507c8e6ec57"
+    },
+    {
+      "path": "references/provenance-and-blame.md",
+      "sha256": "f247f9dba5d0bba5ac066720907e0179b91ceb645060e95ad2069c6ab7e493cb"
+    },
+    {
+      "path": "references/public-contract.json",
+      "sha256": "2b44f0d4a1a1c1b2f1fbeb671cd44a924f9eddce0878f4183dc3fb59a623949c"
+    },
+    {
+      "path": "references/public-contract.md",
+      "sha256": "c556567501dc5af5c0f41ca3bbfdfb8756064caa791077e110b7de1f13ac160f"
+    },
+    {
+      "path": "references/revert-counteractions.md",
+      "sha256": "cb0cce8fb272f2c06cbe32a612b425c4294c32186467a1763820abed663d70ca"
+    },
+    {
+      "path": "references/scenarios.md",
+      "sha256": "989bc46c9225282490aaef0b9c1b472e831cf389fa2c52cbddf2c2ccc5cee3c0"
+    },
+    {
+      "path": "references/semantic-commit.md",
+      "sha256": "0f2ea1526c131872381509e3ffa53f45dcacb0f8b6aca61ef9d970860a259a88"
+    },
+    {
+      "path": "references/typed-recovery.md",
+      "sha256": "da812b84a24fb5faf50d0dba3732f5569637dfb609d1615e956f1292910c9564"
+    }
+  ],
+  "packageDigest": "e58456eba29eadc6f3faf012cdd83452a78dd905919c166dd6f82ea2b1ad959e"
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@workspace/integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "High-level API clients for OAuth-protected services (Gmail, Calendar, etc.). Designed for agent eval use.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./calendar": "./src/calendar.ts",
+    "./drive": "./src/drive.ts",
+    "./github": "./src/github.ts",
+    "./remoteProviders": "./src/remoteProviders.ts",
+    "./providers": "./src/providers.ts",
+    "./github-issue-mirror": "./src/github-issue-mirror.ts"
+  },
+  "dependencies": {
+    "@vibestudio/credential-client": "workspace:*",
+    "@workspace/runtime": "workspace:*"
+  }
+}

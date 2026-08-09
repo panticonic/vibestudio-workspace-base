@@ -1,0 +1,10 @@
+{
+  "kind": "product-seed-source",
+  "unitKind": "app",
+  "name": "@workspace-apps/mobile",
+  "sourceRepo": "apps/mobile",
+  "sourceDigest": "1a511c63f9c0e131fba28e3624ce867e8d479b8d4d39888d6acf32fcb2fd452d",
+  "signatureKeyId": "vibestudio-dev-seed-v1",
+  "signature": "vibestudio-dev-seed-sha256:ff83c1673cc01dce159bdabf62898d41217d0d0ac2fcedbf0194c508cca7afe3",
+  "createdBy": "vibestudio"
+}

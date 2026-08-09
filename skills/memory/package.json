@@ -1,0 +1,9 @@
+{
+  "name": "@workspace-skills/memory",
+  "version": "0.1.0",
+  "private": true,
+  "vibestudio": {
+    "title": "Workspace Memory",
+    "kind": "skill"
+  }
+}
