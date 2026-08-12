@@ -44,6 +44,10 @@ export interface ScaffoldPublicationFailureData {
       | "repair-source-and-recommit"
       | "stop-integrity-investigation";
   };
+  recovery?: {
+    action: "repair-source";
+    instruction: string;
+  };
 }
 
 export class ScaffoldPublicationError extends Error {
@@ -104,6 +108,36 @@ function errorDetail(error: unknown): {
     code,
     message: error instanceof Error ? error.message : String(error),
     ...(errorData === undefined ? {} : { errorData }),
+  };
+}
+
+function publicationFailureRecovery(
+  detail: ReturnType<typeof errorDetail>,
+  contextId: string
+): Pick<ScaffoldPublicationFailureData, "retry" | "recovery"> {
+  const commandIdPolicy =
+    detail.code === "ExternalEffectFailed"
+      ? "reuse-identical-only-if-outcome-uncertain"
+      : detail.code === "BuildGateFailed"
+        ? "repair-source-and-recommit"
+        : detail.code === "IntegrityFailure"
+          ? "stop-integrity-investigation"
+          : "reobserve-status-and-use-new-command";
+  return {
+    retry: {
+      operation: "vcs.push",
+      statusRequest: { contextId },
+      commandIdPolicy,
+    },
+    ...(detail.code === "BuildGateFailed"
+      ? {
+          recovery: {
+            action: "repair-source" as const,
+            instruction:
+              "Inspect the bounded build diagnostics, repair the committed source, then commit and publish a new exact revision.",
+          },
+        }
+      : {}),
   };
 }
 
@@ -352,18 +386,7 @@ async function writeProjectFiles(
         published: false,
         publicationRequest,
         vcsError: detail,
-        retry: {
-          operation: "vcs.push",
-          statusRequest: { contextId },
-          commandIdPolicy:
-            detail.code === "ExternalEffectFailed"
-              ? "reuse-identical-only-if-outcome-uncertain"
-              : detail.code === "BuildGateFailed"
-                ? "repair-source-and-recommit"
-                : detail.code === "IntegrityFailure"
-                  ? "stop-integrity-investigation"
-                  : "reobserve-status-and-use-new-command",
-        },
+        ...publicationFailureRecovery(detail, contextId),
       },
       error
     );
@@ -406,7 +429,62 @@ export interface CreateProjectParams {
   projectType: string;
   name: string;
   title?: string;
+  /** Emoji, ./relative image path, or a curated lucide:<name>/brand:<name> catalog id. */
+  icon?: string;
   template?: string;
+}
+
+export type ProjectIconCatalog = string[];
+
+export interface ProjectCatalogQuery {
+  resource: "icon";
+  query?: string;
+  families?: Array<"lucide" | "brand">;
+  limit?: number;
+}
+
+export interface ProjectCatalogEntry {
+  resource: "icon";
+  id: string;
+  family: "lucide" | "brand";
+  name: string;
+}
+
+export interface ProjectCatalogResult {
+  protocol: "workspace-dev-catalog.v1";
+  resource: "icon";
+  query: string | null;
+  total: number;
+  entries: ProjectCatalogEntry[];
+  truncated: number;
+}
+
+export interface ProjectIconFailureData {
+  code: "project_icon_invalid";
+  icon: string;
+  kind: "lucide" | "brand";
+  name: string;
+  suggestions: string[];
+  catalogQuery: ProjectCatalogQuery;
+  catalog: ProjectCatalogResult;
+  recovery: {
+    action: "correct-request";
+    instruction: string;
+  };
+}
+
+export class ProjectIconError extends Error {
+  readonly code = "project_icon_invalid";
+  readonly errorData: ProjectIconFailureData;
+
+  constructor(errorData: ProjectIconFailureData) {
+    super(
+      `Unknown curated ${errorData.kind} icon: ${errorData.name || "(empty)"}. ` +
+        "Use the bounded catalog result in errorData.catalog or call searchProjectCatalog()."
+    );
+    this.name = "ProjectIconError";
+    this.errorData = errorData;
+  }
 }
 
 interface ResolvedProject {
@@ -418,8 +496,181 @@ interface ResolvedProject {
   preflight: ProjectPreflightReport;
 }
 
+const BRAND_ICON_COLORS: Readonly<Record<string, string>> = {
+  claude: "#D97757",
+  git: "#F05032",
+  gmail: "#EA4335",
+  gnubash: "#4EAA25",
+  javascript: "#F7DF1E",
+  react: "#61DAFB",
+  svelte: "#FF3E00",
+  typescript: "#3178C6",
+};
+
+function catalogDirectory(kind: "lucide" | "brand"): string {
+  return `skills/workspace-dev/assets/icons/${kind === "brand" ? "brands" : "lucide"}`;
+}
+
+async function catalogNames(kind: "lucide" | "brand"): Promise<string[]> {
+  const entries = await fs.readdir(catalogDirectory(kind));
+  const names = entries
+    .filter((entry) => entry.endsWith(".svg"))
+    .map((entry) => entry.slice(0, -4))
+    .sort((left, right) => left.localeCompare(right));
+  if (kind === "brand") {
+    const metadata = Object.keys(BRAND_ICON_COLORS).sort((left, right) =>
+      left.localeCompare(right)
+    );
+    if (names.length !== metadata.length || names.some((name, index) => name !== metadata[index])) {
+      throw new Error(
+        "The curated brand icon assets and color metadata disagree; repair the workspace-dev catalog"
+      );
+    }
+  }
+  return names;
+}
+
+/** Return the exact icon ids accepted by {@link createProjects}. */
+export async function listProjectIcons(): Promise<ProjectIconCatalog> {
+  return (await searchProjectCatalog({ resource: "icon" })).entries.map((entry) => entry.id);
+}
+
+/** Bounded discovery for curated project resources accepted by scaffolding. */
+export async function searchProjectCatalog(
+  query: ProjectCatalogQuery
+): Promise<ProjectCatalogResult> {
+  const families: Array<"lucide" | "brand"> = query.families?.length
+    ? [...new Set(query.families)]
+    : ["lucide", "brand"];
+  const entries = (
+    await Promise.all(
+      families.map(async (family) => catalogEntries(family, await catalogNames(family)))
+    )
+  ).flat();
+  return filterProjectCatalog(entries, query.query, query.limit);
+}
+
+function catalogEntries(family: "lucide" | "brand", names: string[]): ProjectCatalogEntry[] {
+  return names.map((name) => ({
+    resource: "icon",
+    id: `${family}:${name}`,
+    family,
+    name,
+  }));
+}
+
+function filterProjectCatalog(
+  entries: ProjectCatalogEntry[],
+  query: string | undefined,
+  requestedLimit: number | undefined
+): ProjectCatalogResult {
+  const normalizedQuery = query?.trim().toLowerCase() ?? "";
+  const limit = Math.max(
+    1,
+    Math.min(requestedLimit ?? (normalizedQuery ? 12 : entries.length), 500)
+  );
+  const ranked = entries
+    .map((entry) => ({
+      entry,
+      score: normalizedQuery
+        ? entry.id === normalizedQuery || entry.name === normalizedQuery
+          ? -1_000
+          : entry.id.includes(normalizedQuery) || entry.name.includes(normalizedQuery)
+            ? -500 + Math.abs(entry.name.length - normalizedQuery.length)
+            : editDistance(normalizedQuery, entry.name)
+        : 0,
+    }))
+    .sort((left, right) => left.score - right.score || left.entry.id.localeCompare(right.entry.id));
+  const selected = ranked.slice(0, limit).map(({ entry }) => entry);
+  return {
+    protocol: "workspace-dev-catalog.v1",
+    resource: "icon",
+    query: normalizedQuery || null,
+    total: entries.length,
+    entries: selected,
+    truncated: Math.max(0, entries.length - selected.length),
+  };
+}
+
+function editDistance(left: string, right: string): number {
+  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
+    const current = [leftIndex];
+    for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
+      current[rightIndex] = Math.min(
+        (current[rightIndex - 1] ?? 0) + 1,
+        (previous[rightIndex] ?? 0) + 1,
+        (previous[rightIndex - 1] ?? 0) + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+      );
+    }
+    previous.splice(0, previous.length, ...current);
+  }
+  return previous[right.length] ?? Math.max(left.length, right.length);
+}
+
+function invalidProjectIcon(
+  icon: string,
+  kind: "lucide" | "brand",
+  name: string,
+  available: string[]
+): ProjectIconError {
+  const suggestions = [...available]
+    .sort(
+      (left, right) =>
+        editDistance(name, left) - editDistance(name, right) || left.localeCompare(right)
+    )
+    .slice(0, 5)
+    .map((candidate) => `${kind}:${candidate}`);
+  const catalogQuery: ProjectCatalogQuery = {
+    resource: "icon",
+    query: name,
+    families: [kind],
+    limit: 12,
+  };
+  return new ProjectIconError({
+    code: "project_icon_invalid",
+    icon,
+    kind,
+    name,
+    suggestions,
+    catalogQuery,
+    catalog: filterProjectCatalog(catalogEntries(kind, available), name, catalogQuery.limit),
+    recovery: {
+      action: "correct-request",
+      instruction:
+        "Pass one exact id from errorData.catalog.entries, call searchProjectCatalog(errorData.catalogQuery), or omit icon.",
+    },
+  });
+}
+
+async function materializeCatalogIcon(
+  icon: string | undefined,
+  files: Record<string, string>
+): Promise<string | undefined> {
+  const declaredKind = /^(lucide|brand):/u.exec(icon ?? "")?.[1] as "lucide" | "brand" | undefined;
+  if (!declaredKind) return icon;
+  const match = /^(lucide|brand):([a-z0-9-]+)$/u.exec(icon ?? "");
+  const kind = declaredKind;
+  const available = await catalogNames(kind);
+  const name = match?.[2] ?? "";
+  if (!match || !available.includes(name)) {
+    throw invalidProjectIcon(icon!, kind, name, available);
+  }
+  const library = kind === "brand" ? "brands" : "lucide";
+  const brandColor = BRAND_ICON_COLORS[name];
+  if (kind === "brand" && !brandColor) throw new Error(`Missing brand color metadata: ${name}`);
+  const source = `skills/workspace-dev/assets/icons/${library}/${name}.svg`;
+  let svg = (await fs.readFile(source, "utf-8")) as string;
+  svg =
+    kind === "brand"
+      ? `<!-- Source: Simple Icons 16.27.1 (CC0 collection); brand rights remain with their owners. -->\n${svg.replace("<svg ", `<svg fill="${brandColor}" `)}`
+      : svg.replaceAll("currentColor", "#8B5CF6");
+  files["assets/icon.svg"] = svg;
+  return "./assets/icon.svg";
+}
+
 async function resolveProject(params: CreateProjectParams): Promise<ResolvedProject> {
-  const { projectType, name, title = name, template } = params;
+  const { projectType, name, title = name, icon, template } = params;
 
   assertProjectIdentity(name, title);
 
@@ -437,6 +688,7 @@ async function resolveProject(params: CreateProjectParams): Promise<ResolvedProj
   }
 
   const files: Record<string, string> = {};
+  const manifestIcon = await materializeCatalogIcon(icon, files);
 
   switch (projectType) {
     case "panel": {
@@ -469,6 +721,7 @@ async function resolveProject(params: CreateProjectParams): Promise<ResolvedProj
           projectType: "panel",
           name,
           title,
+          icon: manifestIcon,
           entry: "index.ts",
           ...(panelTemplate !== "default" ? { template: panelTemplate } : {}),
           dependencies: {
@@ -523,6 +776,7 @@ async function resolveProject(params: CreateProjectParams): Promise<ResolvedProj
           projectType: "panel",
           name,
           title,
+          icon: manifestIcon,
           entry: "index.tsx",
           ...(panelTemplate !== "default" ? { template: panelTemplate } : {}),
           exposeModules: ["react", "react/jsx-runtime", "react/jsx-dev-runtime"],
@@ -624,6 +878,7 @@ function ${toPascalCase(name)}Content() {
           projectType: "worker",
           name,
           title,
+          icon: manifestIcon,
           entry: "index.ts",
           durableClasses: [className],
           dependencies: {
@@ -720,6 +975,7 @@ describe("${className}", () => {
           projectType: "worker",
           name,
           title,
+          icon: manifestIcon,
           entry: "index.ts",
           dependencies: { "@workspace/runtime": "workspace:*" },
         });
@@ -840,18 +1096,7 @@ export async function createProjects(projects: CreateProjectParams[]): Promise<
         published: false,
         publicationRequest,
         vcsError: detail,
-        retry: {
-          operation: "vcs.push",
-          statusRequest: { contextId },
-          commandIdPolicy:
-            detail.code === "ExternalEffectFailed"
-              ? "reuse-identical-only-if-outcome-uncertain"
-              : detail.code === "BuildGateFailed"
-                ? "repair-source-and-recommit"
-                : detail.code === "IntegrityFailure"
-                  ? "stop-integrity-investigation"
-                  : "reobserve-status-and-use-new-command",
-        },
+        ...publicationFailureRecovery(detail, contextId),
       },
       error
     );

@@ -69,6 +69,7 @@ import {
 import type { ConnectPairing } from "@vibestudio/shared/connect";
 import type { PanelLocation } from "@vibestudio/shared/panelLocation";
 import type { PanelPlacementHint } from "@vibestudio/shared/types";
+import type { PersistedLayout } from "../layout/types.js";
 import { decodePanelStateArgs } from "@vibestudio/shared/panelStateArgs";
 import {
   browserUrlFromPanelSource,
@@ -78,6 +79,12 @@ import {
 } from "@vibestudio/shared/panelChrome";
 import type { WorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
 import { createTemplateManagementClient } from "@workspace/template-management";
+import { HostCommandRegistry } from "@vibestudio/shell-core/panelCommandRegistry";
+import {
+  HOST_COMMAND_CONTRIBUTION_EVENT,
+  HOST_COMMAND_RUN_EVENT,
+} from "@vibestudio/shared/hostCommands";
+import { createBrowserSiteActions } from "./browserSiteActions";
 // Type for the shell transport bridge injected by the preload script
 type ShellTransportBridge = {
   send: (envelope: RpcEnvelope) => Promise<void>;
@@ -156,7 +163,6 @@ const extensionsClient = createTypedServiceClient(
 );
 const browserDataClient = createBrowserDataClient({
   callService: (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-  callTarget: (targetId, method, args) => rpc.call(targetId, method, args),
 });
 const browserEnvironmentClient = createTypedServiceClient(
   "browserEnvironment",
@@ -194,6 +200,16 @@ const autofillClient = createTypedServiceClient(
 const viewClient = createTypedServiceClient("view", viewMethods, (service, method, args) =>
   rpc.call("main", `${service}.${method}`, args)
 );
+const browserSiteActions = createBrowserSiteActions({
+  native: {
+    getBrowserPageIdentity: (panelId) => viewClient.getBrowserPageIdentity(panelId),
+    setNativeBrowserZoom: (panelId, origin, zoomFactor) =>
+      viewClient.setNativeBrowserZoom(panelId, origin, zoomFactor),
+    clearNativeBrowserSiteData: (panelId, origin) =>
+      viewClient.clearNativeBrowserSiteData(panelId, origin),
+  },
+  data: browserDataClient,
+});
 const workspaceClient = createTypedServiceClient(
   "workspace",
   workspaceMethods,
@@ -244,7 +260,6 @@ import type {
   ThemeConfig,
   PanelFocusResult,
   MovePanelRequest,
-  PaletteCommand,
 } from "@vibestudio/shared/types";
 import type { BrowserNavigationIntent } from "@vibestudio/shared/panelCommands";
 // =============================================================================
@@ -301,6 +316,49 @@ async function getPanelStateArgs(panelId: string): Promise<Record<string, unknow
   return decodePanelStateArgs(detail.currentHistory.state_args);
 }
 
+async function localPresentationKey(name: "layout" | "collapsed"): Promise<string> {
+  const workspaceId = await workspaceClient.getActive();
+  if (typeof workspaceId !== "string" || workspaceId.length === 0) {
+    throw new Error("Active workspace is unavailable");
+  }
+  return `vibestudio:workspace:${workspaceId}:shell-presentation:${name}:v1`;
+}
+
+async function loadLocalLayout(): Promise<unknown> {
+  const raw = window.localStorage.getItem(await localPresentationKey("layout"));
+  return raw === null ? null : (JSON.parse(raw) as unknown);
+}
+
+async function saveLocalLayout(layout: PersistedLayout): Promise<void> {
+  window.localStorage.setItem(
+    await localPresentationKey("layout"),
+    JSON.stringify(layout)
+  );
+}
+
+async function loadCollapsedPanelIds(): Promise<string[]> {
+  const raw = window.localStorage.getItem(await localPresentationKey("collapsed"));
+  if (raw === null) return [];
+  const parsed = JSON.parse(raw) as unknown;
+  if (
+    typeof parsed !== "object" ||
+    parsed === null ||
+    (parsed as { version?: unknown }).version !== 1 ||
+    !Array.isArray((parsed as { ids?: unknown }).ids) ||
+    !(parsed as { ids: unknown[] }).ids.every((id) => typeof id === "string")
+  ) {
+    throw new Error("Invalid current shell collapsed-state record");
+  }
+  return [...new Set((parsed as { ids: string[] }).ids)];
+}
+
+async function saveCollapsedPanelIds(ids: Iterable<string>): Promise<void> {
+  window.localStorage.setItem(
+    await localPresentationKey("collapsed"),
+    JSON.stringify({ version: 1, ids: [...new Set(ids)].sort() })
+  );
+}
+
 // =============================================================================
 // Panel Service
 // =============================================================================
@@ -315,13 +373,13 @@ export const panel = {
   observe: (panelId: string) => productPanelRuntime.panelTree.get(panelId).observe(),
   getPresentation: (panelId: string) => viewClient.getPresentation(panelId),
   getPresentations: (panelIds: string[]) => viewClient.getPresentations(panelIds),
+  getLocalPresentation: (panelId: string) => viewClient.getLocalPresentation(panelId),
   getFocusedPanelId: () => viewClient.getFocusedPanelId(),
   setFocusedPanelId: (panelId: string) => viewClient.setFocusedPanelId(panelId),
   focus: focusPanel,
-  /** Per-device persisted PanelLayout (validated/pruned again shell-side on restore). */
-  getPanelLayout: () => viewClient.getPanelLayout(),
-  savePanelLayout: (layout: Parameters<typeof viewClient.savePanelLayout>[0]) =>
-    viewClient.savePanelLayout(layout),
+  /** Per-device product presentation owned by the workspace shell. */
+  getPanelLayout: loadLocalLayout,
+  savePanelLayout: saveLocalLayout,
   ensureLoaded: (panelId: string) => viewClient.ensurePanelLoaded(panelId),
   updateTheme: (theme: ThemeAppearance) => viewClient.updateTheme(theme),
   updateThemeConfig: (config: ThemeConfig) => viewClient.updateThemeConfig(config),
@@ -361,11 +419,11 @@ export const panel = {
   findInPage: (panelId: string, text: string, options: { forward: boolean; findNext: boolean }) =>
     viewClient.findInPage(panelId, text, options),
   stopFindInPage: (panelId: string) => viewClient.stopFindInPage(panelId),
-  getBrowserSiteState: (panelId: string) => viewClient.getBrowserSiteState(panelId),
-  toggleBrowserBookmark: (panelId: string) => viewClient.toggleBrowserBookmark(panelId),
+  getBrowserSiteState: (panelId: string) => browserSiteActions.getBrowserSiteState(panelId),
+  toggleBrowserBookmark: (panelId: string) => browserSiteActions.toggleBrowserBookmark(panelId),
   setBrowserZoom: (panelId: string, zoomFactor: number) =>
-    viewClient.setBrowserZoom(panelId, zoomFactor),
-  clearBrowserSiteData: (panelId: string) => viewClient.clearBrowserSiteData(panelId),
+    browserSiteActions.setBrowserZoom(panelId, zoomFactor),
+  clearBrowserSiteData: (panelId: string) => browserSiteActions.clearBrowserSiteData(panelId),
   printBrowserPage: (panelId: string) => viewClient.printBrowserPage(panelId),
   saveBrowserPagePdf: (panelId: string) => viewClient.saveBrowserPagePdf(panelId),
   stopBrowserMedia: (panelId: string) => viewClient.stopBrowserMedia(panelId),
@@ -376,7 +434,15 @@ export const panel = {
   archive: (panelId: string) => workspaceStateClient.slot.close(panelId),
   createAboutPanel: async (page: string) => {
     const createOptions =
-      page === "new" ? { slug: `new-${crypto.randomUUID().slice(0, 8)}`, focus: true } : undefined;
+      page === "new"
+        ? {
+            slug: `new-${crypto.randomUUID().slice(0, 8)}`,
+            focus: true,
+            placement: {
+              disposition: "side-if-room" as const,
+            },
+          }
+        : undefined;
     const result = await viewClient.createPanel(null, `about/${page}`, createOptions);
     return { ...result, kind: "workspace" as const };
   },
@@ -481,50 +547,33 @@ export const panel = {
       ...(request.beforePanelId !== undefined ? { beforeSlotId: request.beforePanelId } : {}),
       ...(request.afterPanelId !== undefined ? { afterSlotId: request.afterPanelId } : {}),
     }),
-  getCollapsedIds: () => viewClient.getCollapsedPanelIds(),
-  setCollapsed: (panelId: string, collapsed: boolean) =>
-    viewClient.setPanelCollapsed(panelId, collapsed),
-  expandIds: (panelIds: string[]) => viewClient.expandPanelIds(panelIds),
+  getCollapsedIds: loadCollapsedPanelIds,
+  setCollapsed: async (panelId: string, collapsed: boolean) => {
+    const ids = new Set(await loadCollapsedPanelIds());
+    if (collapsed) ids.add(panelId);
+    else ids.delete(panelId);
+    await saveCollapsedPanelIds(ids);
+  },
+  expandIds: async (panelIds: string[]) => {
+    const ids = new Set(await loadCollapsedPanelIds());
+    for (const panelId of panelIds) ids.delete(panelId);
+    await saveCollapsedPanelIds(ids);
+  },
 };
 // =============================================================================
-// Command palette (shell-local registry over attributed panel ↔ shell events)
+// Panel commands (shared registry; desktop presents them in the command palette)
 // =============================================================================
-type PanelPaletteContribution = {
-  panelId: string;
-  commands: PaletteCommand[];
-};
+const hostCommandRegistry = new HostCommandRegistry();
 
-const paletteContributions = new Map<string, PaletteCommand[]>();
-const isPaletteCommand = (value: unknown): value is PaletteCommand => {
-  const command = value as Partial<PaletteCommand> | null;
-  return (
-    !!command &&
-    typeof command === "object" &&
-    typeof command.id === "string" &&
-    typeof command.label === "string" &&
-    (command.hint === undefined || typeof command.hint === "string") &&
-    (command.section === undefined || typeof command.section === "string")
-  );
-};
+rpc.on(HOST_COMMAND_CONTRIBUTION_EVENT, (event) => hostCommandRegistry.accept(event));
 
-rpc.on("runtime:palette-contribution", ({ caller, payload }) => {
-  if (caller.callerKind !== "panel" && caller.callerKind !== "app") return;
-  const commands = (payload as { commands?: unknown } | null)?.commands;
-  if (!Array.isArray(commands) || !commands.every(isPaletteCommand)) return;
-  const panelId = caller.callerPanelId ?? caller.callerId;
-  if (commands.length === 0) paletteContributions.delete(panelId);
-  else paletteContributions.set(panelId, commands);
-});
-
-export const palette = {
-  list: async (): Promise<PanelPaletteContribution[]> => {
+export const hostCommands = {
+  list: async () => {
     const focusedPanelId = await viewClient.getFocusedPanelId().catch(() => null);
-    return [...paletteContributions]
-      .map(([panelId, commands]) => ({ panelId, commands }))
-      .sort((a, b) => (a.panelId === focusedPanelId ? -1 : b.panelId === focusedPanelId ? 1 : 0));
+    return hostCommandRegistry.list(focusedPanelId);
   },
   run: (panelId: string, commandId: string) =>
-    rpc.emit(panelId, "runtime:palette-run", { commandId }),
+    rpc.emit(panelId, HOST_COMMAND_RUN_EVENT, { commandId }),
 };
 // =============================================================================
 // View Service
@@ -569,11 +618,29 @@ export type NativePanelSlotSyncResult =
 type NativeShellOverlayBridge = {
   on: (handler: (event: NativeShellOverlayEvent) => void) => () => void;
 };
+type DesiredNativePanelSlot = {
+  nativeSlotId: string;
+  bindingId: string;
+  bindingSequence: number;
+  panelId: string;
+  bounds: NativePanelSlotBounds;
+  focused: boolean;
+};
+const desiredNativePanelSlots = new Map<string, DesiredNativePanelSlot>();
+let desiredNativePanelSlotRevision = 0;
+const syncDesiredNativePanelSlots = async () => {
+  const revision = ++desiredNativePanelSlotRevision;
+  return viewClient.syncNativePanelSlots({
+    rendererInstanceId: nativeSlotRendererInstanceId,
+    revision,
+    slots: [...desiredNativePanelSlots.values()],
+  });
+};
 export const view = {
   forwardMouseClick: (viewId: string, point: { x: number; y: number }) =>
     viewClient.forwardMouseClick(viewId, point),
   setThemeCss: (css: string) => viewClient.setThemeCss(css),
-  bindNativePanelSlot: (request: {
+  bindNativePanelSlot: async (request: {
     nativeSlotId: string;
     bindingId: string;
     rendererInstanceId: string;
@@ -582,8 +649,24 @@ export const view = {
     panelId: string;
     bounds: NativePanelSlotBounds;
     focused?: boolean;
-  }) => viewClient.bindNativePanelSlot(request),
-  updateNativePanelSlot: (request: {
+  }) => {
+    desiredNativePanelSlots.set(request.nativeSlotId, {
+      nativeSlotId: request.nativeSlotId,
+      bindingId: request.bindingId,
+      bindingSequence: request.bindingSequence,
+      panelId: request.panelId,
+      bounds: request.bounds,
+      focused: request.focused === true,
+    });
+    const observed = await syncDesiredNativePanelSlots();
+    return (
+      observed.slots[request.nativeSlotId] ?? {
+        status: "missing" as const,
+        reason: `native adapter did not observe ${request.nativeSlotId}`,
+      }
+    );
+  },
+  updateNativePanelSlot: async (request: {
     nativeSlotId: string;
     bindingId: string;
     rendererInstanceId: string;
@@ -591,16 +674,44 @@ export const view = {
     operationSequence: number;
     bounds?: NativePanelSlotBounds;
     focused?: boolean;
-  }) => viewClient.updateNativePanelSlot(request),
-  clearNativePanelSlot: (request: {
+  }) => {
+    const current = desiredNativePanelSlots.get(request.nativeSlotId);
+    if (!current || current.bindingId !== request.bindingId) {
+      return {
+        status: "missing" as const,
+        reason: `unknown native panel slot: ${request.nativeSlotId}`,
+      };
+    }
+    desiredNativePanelSlots.set(request.nativeSlotId, {
+      ...current,
+      ...(request.bounds ? { bounds: request.bounds } : {}),
+      ...(typeof request.focused === "boolean" ? { focused: request.focused } : {}),
+    });
+    const observed = await syncDesiredNativePanelSlots();
+    return (
+      observed.slots[request.nativeSlotId] ?? {
+        status: "missing" as const,
+        reason: `native adapter did not observe ${request.nativeSlotId}`,
+      }
+    );
+  },
+  clearNativePanelSlot: async (request: {
     nativeSlotId: string;
     bindingId: string;
     rendererInstanceId: string;
     bindingSequence: number;
     operationSequence: number;
-  }) => viewClient.clearNativePanelSlot(request),
-  setHostedShellReady: (request: { ready: boolean; rendererInstanceId: string }) =>
-    viewClient.setHostedShellReady(request),
+  }) => {
+    const current = desiredNativePanelSlots.get(request.nativeSlotId);
+    if (current?.bindingId === request.bindingId) {
+      desiredNativePanelSlots.delete(request.nativeSlotId);
+      await syncDesiredNativePanelSlots();
+    }
+  },
+  setHostedShellReady: async (request: { ready: boolean; rendererInstanceId: string }) => {
+    await viewClient.setHostedShellReady(request);
+    if (request.ready) await syncDesiredNativePanelSlots();
+  },
   setShellOverlay: (active: boolean) => viewClient.setShellOverlay(active),
   showNativeShellOverlay: (options: NativeShellOverlayOptions) =>
     viewClient.showNativeShellOverlay(options),
@@ -1015,11 +1126,8 @@ export const directEvents = {
 // =============================================================================
 import type { NotificationPayload } from "@vibestudio/shared/events";
 export const notification = {
-  show: (
-    opts: Omit<NotificationPayload, "id"> & {
-      id?: string;
-    }
-  ) => notificationClient.show(opts),
+  show: (opts: Omit<NotificationPayload, "id" | "sourcePanelId" | "iconDataUrl">) =>
+    notificationClient.show(opts),
   reportAction: (id: string, actionId: string) => notificationClient.reportAction(id, actionId),
   dismiss: (id: string) => notificationClient.dismiss(id),
 };

@@ -37,6 +37,8 @@ maintained as parallel prose constants.
   participants, presence, and notifications.
 - `unit-diagnostics`, `server-logs`, `harness-tools`: bounded operational and
   provenance inspection.
+- `local-models`: persistent model installation, readiness, and real delegated
+  inference through the ordinary agent runtime.
 - `eval-lifecycle`, `harness-resilience`, `edge-cases`: cancellation,
   persistence, cleanup, transport errors, large results, and recovery.
 - `self-development`: exact dirty semantic builds, current/isolated launches,
@@ -48,10 +50,11 @@ maintained as parallel prose constants.
 
 ## Escalation order
 
-Run the exact scenario first. After repair, run its category, then smoke. Use a
-full suite only when the change is cross-cutting enough that category/smoke
-cannot bound the risk. Run `pnpm smoke:full` separately for real remote/mobile
-pairing and packaged-client coverage.
+Run the exact scenario first. After repair, expand only to the smallest set
+whose behavior could have changed and is not already covered by focused
+conventional tests. Category, smoke, and full-suite runs are evidence-directed
+escalations, not mandatory stages. Use `pnpm smoke:full` only when real
+remote/mobile pairing or packaged-client coverage is relevant to the repair.
 
 ## Choosing the right layer
 

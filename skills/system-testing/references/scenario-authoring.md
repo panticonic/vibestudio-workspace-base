@@ -13,20 +13,31 @@ prompts hide them.
 
 ## Judge the agent; diagnose the trajectory
 
-An agentic case passes when the agent completes the user task and reports that
-outcome. Do not duplicate the implementation in a mechanical validator or
-require markers, ceremonial fields, redundant observations, exact object
-layouts, or one preferred tool choreography.
+An ordinary agentic case's automated row is a transport/lifecycle outcome: the
+turn finished and produced a final response, or explicitly reported that it
+could not complete the task. It is not a quality score. Do not duplicate the
+implementation in a mechanical validator or require status-marker syntax,
+ceremonial fields, redundant observations, exact object layouts, or one
+preferred tool choreography.
 
-The harness records tool failures independently from task completion. Review
-failed calls (including caught eval failures), retries, unusually long
-trajectories, cleanup errors, and runtime diagnostics even when the agent
-ultimately succeeds. These are ergonomics findings: inspect the full trajectory
-and repair the platform, documentation, or tool surface that made the sensible
-path difficult.
+When the outcome has objective facts independent of the agent's prose, select
+`validation: "agent-evidence"` and validate those facts. Examples include a
+saved clean workspace state, a successful build, the model identity that ran a
+child task, or absence of leaked owned resources. Accept any product path that
+establishes the outcome; do not turn the evidence gate into call choreography
+or a style score. This is the normal complement to a vague user prompt: product
+guidance teaches the behavior and independent evidence proves it happened.
 
-Keep exact schema/effect assertions in `@workspace/testkit`. A system-test case
-may opt into exact validation only when it is explicitly a deterministic or
+The harness records tool failures independently from task completion and marks
+every ordinary agent trajectory for review. Review failed calls (including
+caught eval failures), retries, unusually long trajectories, cleanup errors,
+and runtime diagnostics even when the agent ultimately succeeds. Also look for
+needless searching, repeated rediscovery, and work abandoned after consuming
+time. These are ergonomics findings: inspect the full trajectory and repair the
+platform, documentation, or tool surface that made the sensible path difficult.
+
+Keep exact schema/effect assertions in `@workspace/testkit`. Use
+`validation: "harness"` only when the case is explicitly a deterministic or
 wire-protocol probe rather than a model-judgment task.
 
 ## Isolate tests
@@ -37,6 +48,12 @@ workspace source must select a typed repository fixture:
 - `CONTENT_WORKSPACE_REPO_FIXTURE` owns an empty `projects/...` content repo.
 - `BUILDABLE_PACKAGE_WORKSPACE_REPO_FIXTURE` owns a `packages/...` repo seeded
   with the canonical minimal manifest and source entry.
+- `BUILDABLE_EXTENSION_WORKSPACE_REPO_FIXTURE` owns an `extensions/...` repo
+  with a trusted extension manifest, source, icon, and focused failing test.
+- `BUILDABLE_APP_WORKSPACE_REPO_FIXTURE` owns an `apps/...` repo with a terminal
+  app manifest, source, icon, and focused failing test.
+- `OPTIMIZABLE_PANEL_WORKSPACE_REPO_FIXTURE` owns a minimal `panels/...` repo
+  with a deliberately wasteful but behaviorally trivial bundle.
 
 The harness imports that repository as one exact snapshot into a fresh task
 context. Setup does not publish it. A fixture that never reached main disappears

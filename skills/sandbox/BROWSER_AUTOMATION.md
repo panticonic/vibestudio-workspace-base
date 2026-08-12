@@ -38,17 +38,18 @@ const results = await page.evaluate(() =>
 console.log("Scraped", results.length, "items");
 ```
 
-Two lines to get started:
+Three lines to get started for multi-step work:
 
 1. `const handle = await openPanel(url)` — opens a browser panel; may prompt on first structural use
-2. `const page = await handle.cdp.page()` — connects the canonical CDP client
+2. `let session = await handle.cdp.session()` — connects the canonical client and records the immutable panel generation
+3. `let page = session.page` — uses the page fenced to that generation
 
-Reuse the same `page` while `handle.observe().runtimeEntityId` is unchanged.
-Do not call `openPanel()` or `handle.cdp.page()` repeatedly for one runtime
-incarnation: repeated opens create duplicate panels and repeated page calls
-create duplicate CDP connections. `handle.navigate()` and `handle.rebuild()`
-replace the runtime incarnation; after either resolves, discard the old page
-and obtain one fresh `await handle.cdp.page()` from the same handle.
+Do not call `openPanel()`, `handle.cdp.session()`, or `handle.cdp.page()`
+repeatedly for one runtime incarnation: repeated opens create duplicate panels
+and repeated acquisition creates duplicate CDP connections.
+`handle.navigate()` and `handle.rebuild()` replace the runtime incarnation;
+after either resolves, refresh the session and continue with the returned
+session and page.
 
 Before the first live interaction, discover the intended roles and computed
 accessible names with `getByRole(role).all()` plus `locator.inspect()`.
@@ -116,7 +117,7 @@ const page = await handle.cdp.page();
 
 `openPanel()` returns only at application boot-ready. Existing-panel handles are
 non-owned: observe first, and do not call `handle.navigate`,
-`handle.reload`, or `handle.close` on them unless requested. Do not call
+`handle.reload`, or `handle.archive` on them unless requested. Do not call
 `handle.cdp.navigate(url)` or `page.goto(url)` on the current chat panel, a
 parent chat panel, or any workspace panel discovered from `panelTree` unless
 the requested task is to replace that exact panel. Open a browser panel for web
@@ -132,19 +133,19 @@ behind the exact context-boundary decision.
 
 The panel slot is durably created before application readiness settles. If
 `openPanel()` throws `PanelOperationError`, use
-`error.failure.provenance.panelId` to inspect or close that committed slot;
+`error.failure.provenance.panelId` to inspect or archive that committed slot;
 blindly repeating `openPanel()` creates a duplicate.
 
 ## Panel Ownership
 
 Panels opened by the workflow are owned by it. Hold handles in your component's
-state; close temporary owned panels when the workflow is done:
+state; archive temporary owned panels when the workflow is done:
 
 ```ts
-await browser?.close();
+await browser?.archive();
 ```
 
-Do not close panels discovered with `panelTree.*` unless requested.
+Do not archive panels discovered with `panelTree.*` unless requested.
 
 ## Reconnection by Panel ID
 
@@ -169,20 +170,21 @@ handle persisting.
 
 ## Page API Reference
 
-Obtain a `page` from a panel handle, then use the methods below.
-`handle.cdp.page()` returns the canonical Playwright-style page driven by our
-workerd-native CDP client (`@workspace/cdp-client`). It is the single
-browser-automation surface — there is no separate compatibility tier
-to choose, and you do not import or install any `playwright*` package.
+Obtain a generation-fenced session from a panel handle, then use its page.
+`handle.cdp.session()` and the one-off `handle.cdp.page()` use the same
+canonical Playwright-style page driven by our workerd-native CDP client
+(`@workspace/cdp-client`). This is one browser-automation surface — there is no
+separate compatibility tier to choose, and you do not import or install any
+`playwright*` package.
 
 ```typescript
 const browser = await openPanel("https://example.com");
-const page = await browser.cdp.page();
+const session = await browser.cdp.session();
+const page = session.page;
 ```
 
-`handle.cdp.page()` loads the standalone `@workspace/cdp-client`
-internally; do not import that package directly for ordinary page work. There is
-no second page-acquisition API.
+The handle loads `@workspace/cdp-client` internally; do not import that package
+directly for ordinary page work.
 
 ### Performance profiling
 
@@ -447,7 +449,7 @@ options are rejected instead of ignored.
 
 ```typescript
 await page.close(); // disconnect this automation client; panel remains open
-await browser.close(); // close the owned browser panel handle
+await browser.archive(); // archive the owned browser panel and its subtree
 ```
 
 ### Not supported
@@ -482,6 +484,7 @@ The handle also has direct navigation methods (no page object needed):
 
 | Method                                             | Description                                                                |
 | -------------------------------------------------- | -------------------------------------------------------------------------- |
+| `handle.cdp.session()`                             | Connect a generation-fenced CDP session for multi-step automation          |
 | `handle.cdp.page()`                                | Connect the canonical CDP client and return the Playwright-style page      |
 | `handle.cdp.getCdpEndpoint()`                      | Get `{ wsEndpoint, token }` for raw `CdpConnection.connect`                |
 | `handle.cdp.consoleHistory({ limit, errorLimit })` | Read host-captured historical console logs and the separate error buffer   |
@@ -492,7 +495,7 @@ The handle also has direct navigation methods (no page object needed):
 | `handle.cdp.goForward()`                           | Navigate forward                                                           |
 | `handle.cdp.reload()`                              | Reload page                                                                |
 | `handle.cdp.stop()`                                | Stop loading                                                               |
-| `handle.close()`                                   | Close browser panel                                                        |
+| `handle.archive()`                                 | Archive browser panel and its subtree                                       |
 
 ## Examples
 
@@ -639,8 +642,8 @@ export default function BrowserController({ props, chat }) {
 
 ## Tips
 
-- **Acquire or create one handle and reuse it** — `openPanel`/`panelTree`/`getPanelHandle` work from server-side eval, panels, workers, and DOs; once you hold the handle, `handle.cdp.page()` drives the browser page.
-- **Hold a handle/page in component state and reuse it within one runtime incarnation** — re-open only for a new target. After `handle.navigate()` or `handle.rebuild()`, keep the handle but replace the page with one fresh `await handle.cdp.page()`.
+- **Acquire or create one handle and reuse it** — `openPanel`/`panelTree`/`getPanelHandle` work from server-side eval, panels, workers, and DOs; once you hold the handle, `handle.cdp.session()` drives multi-step browser work with immutable-generation provenance.
+- **Hold one session and refresh it across lifecycle changes** — after `handle.navigate()` or `handle.rebuild()`, call `session = (await session.refresh()).session` and continue with `session.page`. Refresh reports `current`, `reconnected`, or `replaced` and never replays an action.
 - **Prefer locators with auto-wait** — `page.getByRole(...)` / `page.locator(...)` wait for the element automatically; reach for `page.evaluate()` for complex DOM queries that need full DOM API access.
 - **For SPAs, wait for application state** — after `page.goto(url)`, use
   `page.waitForFunction(...)` or a stable locator that represents the loaded
@@ -651,7 +654,6 @@ export default function BrowserController({ props, chat }) {
 - **Imported cookies are auto-synced** — if you imported browser data via the browser-import skill, browser panels will have those cookies available automatically.
 - **Connection lifetime follows the runtime incarnation** — browser
   `page.goto()` navigation keeps the same page connection. Workspace-panel
-  `handle.navigate()` and `handle.rebuild()` replace the runtime, so keep the
-  handle and obtain a fresh page without opening a duplicate panel. If another
-  lifecycle operation returns a different `runtimeEntityId`, treat it the same
-  way.
+  `handle.navigate()` and `handle.rebuild()` replace the runtime, so refresh the
+  existing session and use its returned page without opening a duplicate
+  panel.

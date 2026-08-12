@@ -19,6 +19,7 @@ import type {
 } from "@workspace/pubsub";
 import type { MessageTier, ParticipantRef } from "@workspace/agentic-protocol";
 import type { RecoveryCoordinator } from "@vibestudio/shell-core/recoveryCoordinator";
+import type { ResidentSessionRegistrar } from "@vibestudio/shared/residentSession";
 import type { SandboxOptions, SandboxResult, ScopesApi } from "@workspace/eval";
 import type { ChatMethodResult } from "./invocation-result.js";
 import type { AgentSubscriptionConfig } from "./agent-subscription-config.js";
@@ -64,6 +65,7 @@ export interface ConnectionConfig {
     ): Promise<Response>;
     on(event: string, listener: (event: { payload: unknown }) => void): () => void;
     selfId: string;
+    registerResidentSession?: ResidentSessionRegistrar["registerResidentSession"];
   };
   protocol?: string;
   recoveryCoordinator?: Pick<
@@ -74,6 +76,9 @@ export interface ConnectionConfig {
    * the pubsub client's generic default quickly because tool lifecycle events
    * count as envelopes even when they collapse into one visible card. */
   replayMessageLimit?: number;
+  /** Resident Durable Object operations receive finite callbacks instead of
+   * owning a channel response stream. */
+  deliveryMode?: "stream" | "resident";
 }
 
 /** A selectable agent type, enriched from worker manifest `agent` metadata. */
@@ -130,8 +135,10 @@ export interface AgenticChatActions {
   ) => Promise<void>;
   /**
    * The host minted this channel for the current panel mount, so an empty
-   * transcript is already authoritative and provisional activation need not
-   * wait for replay to settle.
+   * transcript is already authoritative, the opening prompt belongs to this
+   * mount, and provisional activation need not wait for replay to settle.
+   * False on rematerialization: durable opening-prompt state must not be
+   * interpreted as a new delivery or a request for another first agent.
    */
   firstAgentChannelIsNew?: boolean;
   /**
@@ -209,6 +216,8 @@ export interface ChatSandboxValue {
     options?: {
       idempotencyKey?: string;
       tier?: MessageTier;
+      mentions?: string[];
+      replyTo?: string;
       metadata?: Record<string, unknown>;
     }
   ) => Promise<unknown>;
@@ -283,16 +292,6 @@ export interface ChatSandboxValue {
   contextId: string;
   channelId: string | null;
   rpc: { call: (target: string, method: string, args: unknown[]) => Promise<unknown> };
-}
-
-/** Sandbox config injected by the panel (keeps agentic-chat runtime-agnostic) */
-export interface SandboxConfig {
-  rpc: { call: (target: string, method: string, args: unknown[]) => Promise<unknown> };
-  loadImport: (
-    specifier: string,
-    ref: string | undefined,
-    externals: string[]
-  ) => Promise<{ bundle: string; format: "cjs" | "async-cjs" }>;
 }
 
 /** Dependencies provided to the tool provider factory */

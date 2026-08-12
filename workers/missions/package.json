@@ -1,0 +1,49 @@
+{
+  "name": "@workspace-workers/missions",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "title": "Automations",
+    "kind": "worker",
+    "entry": "index.ts",
+    "durable": {
+      "classes": [{ "className": "MissionsDO" }]
+    },
+    "authority": {
+      "provides": [],
+      "requests": [
+        {
+          "capability": "reviewed-closure.activate",
+          "resource": { "kind": "prefix", "prefix": "closure:" },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "reviewed-closure.suspend",
+          "resource": { "kind": "prefix", "prefix": "mission:" },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "reviewed-closure.retire",
+          "resource": { "kind": "prefix", "prefix": "mission:" },
+          "tier": "critical",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "reviewed-closure.bind-session",
+          "resource": { "kind": "prefix", "prefix": "mission:" },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/shared": "workspace:*",
+    "@workspace/runtime": "workspace:*"
+  },
+  "devDependencies": { "vitest": "^3.2.2" }
+}

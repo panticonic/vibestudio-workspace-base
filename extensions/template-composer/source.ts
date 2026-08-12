@@ -36,7 +36,7 @@ function transportUrl(url: string): string {
 
 function credentialFor(
   source: Pick<TemplateRegistrySource, "url" | "credential">
-): Record<string, never> | { logicalCredential: { name: string; remoteUrl: string } } {
+): { credentialId: null } | { logicalCredential: { name: string; remoteUrl: string } } {
   return source.credential
     ? {
         logicalCredential: {
@@ -44,7 +44,7 @@ function credentialFor(
           remoteUrl: transportUrl(source.url),
         },
       }
-    : {};
+    : { credentialId: null };
 }
 
 export class TemplateCredentialRequired extends Error {
@@ -166,8 +166,8 @@ function promotedForUrl(
 
 /**
  * Exact immutable acquisition. The ref is used only to fetch the repository;
- * a moving branch is allowed to have advanced after the lock was written.
- * Identity and integrity come from the locked commit and snapshot.
+ * a moving branch is allowed to have advanced after the state was written.
+ * Identity and integrity come from the operation's selected commit and snapshot.
  */
 export async function acquireTemplateSnapshot(
   ctx: ExtensionContextLike,
@@ -285,9 +285,7 @@ export function catalogPin(
     catalog.coordinates.commit !== registryCommit ||
     catalog.coordinates.snapshot !== registrySnapshot
   ) {
-    throw new Error(
-      "The template catalog changed after it was shown; refresh and review it again"
-    );
+    throw new Error("The template catalog changed after it was shown; refresh and review it again");
   }
   const entry = catalog.entries.find((candidate) => candidate.id === catalogId);
   if (!entry) throw new Error(`Unknown or retired template registry entry: ${catalogId}`);

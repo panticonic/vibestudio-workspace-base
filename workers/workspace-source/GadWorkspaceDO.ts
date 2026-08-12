@@ -15,7 +15,6 @@ import type {
   SettleRequest,
   WorkClaim,
 } from "@vibestudio/shared/durableWork";
-import type { DurableObjectSchemaMigration } from "@vibestudio/durable/schema";
 import {
   gadWireMethods,
   StoredRegistryMutationInputSchema,
@@ -29,7 +28,6 @@ import type {
   DeleteChannelMembershipInput,
   PutChannelMembershipInput,
 } from "@vibestudio/shared/channelInvites";
-import { withPrivateAccountSubject } from "@vibestudio/shared/actorIdentity";
 import { parseLineageKey } from "@vibestudio/shared/authority/contextIntegrity";
 import {
   channelEnvelopePageInfo,
@@ -41,7 +39,6 @@ import type {
   AgentHealthInspection,
   ChannelEnvelopeInspection,
   StoredChannelMessageTypeDefinition,
-  ChannelPublication,
   ChannelRosterInspection,
   EnvelopeLineage,
   InvocationStateInspection,
@@ -94,7 +91,6 @@ import {
 } from "@vibestudio/shared/userNotifications";
 import {
   AGENTIC_EVENT_PAYLOAD_KIND,
-  AGENTIC_PROTOCOL_VERSION,
   GENESIS_EVENT_HASH,
   assertAgenticEventStoredValuesEncoded,
   brandId,
@@ -110,7 +106,6 @@ import {
   type ChannelEnvelope,
   type ChannelId,
   type EnvelopeId,
-  type InvocationId,
   type LogEnvelope,
   type LogEventCausality,
   type LogKind,
@@ -126,13 +121,10 @@ import {
   type LogEnvelopeSemanticInput,
 } from "@workspace/agentic-protocol";
 import {
-  manifestHashForEntries,
   sha256HexSyncText,
   sortForCanonicalJson,
   canonicalJson,
   stateHashForRoot,
-  EMPTY_MANIFEST_HASH,
-  EMPTY_STATE_HASH,
 } from "@vibestudio/content-addressing";
 import { createSemanticVcsSchema, SEMANTIC_VCS_REQUIRED_TABLES } from "./semanticVcsSchema.js";
 import { SemanticVcsError, SemanticVcsStore } from "./semanticVcsStore.js";
@@ -499,14 +491,8 @@ function stringPrefixUpperBound(prefix: string): string | null {
 }
 
 /** Quote each term so user input can't inject FTS5 query syntax. */
-function sanitizeFtsQuery(query: string): string {
-  return query
-    .split(/\s+/u)
-    .map((term) => term.replace(/"/gu, "").trim())
-    .filter(Boolean)
-    .slice(0, 8)
-    .map((term) => `"${term}"`)
-    .join(" ");
+function ftsQuery(terms: readonly string[], operator: " " | " OR "): string {
+  return terms.map((term) => `"${term}"`).join(operator);
 }
 
 /** Split raw text into whitespace-separated word tokens (≤ `cap`), quotes and
@@ -529,14 +515,6 @@ function snippetAround(text: string, query: string, radius = 160): string {
   const start = Math.max(0, index - radius);
   const end = Math.min(text.length, index + firstTerm.length + radius);
   return `${start > 0 ? "…" : ""}${text.slice(start, end)}${end < text.length ? "…" : ""}`;
-}
-
-/** One bounded insight fragment for a §7.5 attachment line (whitespace
- *  collapsed, hard-capped, ellipsized) — semantics are recalled verbatim, never
- *  synthesized, so this only trims. */
-function truncateInsight(text: string, max: number): string {
-  const collapsed = text.replace(/\s+/gu, " ").trim();
-  return collapsed.length > max ? `${collapsed.slice(0, max - 1)}…` : collapsed;
 }
 
 function summarizeJsonForInspection(value: unknown, depth = 0): unknown {
@@ -780,27 +758,6 @@ export class GadWorkspaceDO extends DurableObjectBase {
       : null;
   }
 
-  protected override schemaProductionBaseline() {
-    return { version: 61, name: "gad-workspace-v61" } as const;
-  }
-
-  protected override schemaMigrations(): readonly DurableObjectSchemaMigration[] {
-    return [
-      {
-        version: 62,
-        name: "durable-publication-delivery-outbox",
-        validateSource: (sql) => {
-          const logEvents = sql
-            .exec(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'log_events'`)
-            .toArray();
-          if (logEvents.length === 0) {
-            throw new Error("GAD v61 source is missing log_events");
-          }
-        },
-        migrate: (sql) => createPublicationDeliveryOutbox(sql),
-      },
-    ];
-  }
   protected createTables(): void {
     this.createFreshSchema();
   }
@@ -1365,12 +1322,20 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   private semanticWorkspace(): SemanticWorkspace {
     return new SemanticWorkspace({
-      workspaceId: this.objectKey,
+      workspaceId: this.semanticWorkspaceId(),
       sql: this.sql,
       store: this.semanticVcsStore(),
       now: nowIso,
       transaction: (fn) => this.transaction(fn),
     });
+  }
+
+  private semanticWorkspaceId(): string {
+    const configured = this.env["WORKSPACE_ID"];
+    if (typeof configured !== "string" || configured.length === 0) {
+      throw new Error("GadWorkspaceDO requires the topology-owned WORKSPACE_ID binding");
+    }
+    return configured;
   }
 
   @schemaRpc()
@@ -2022,17 +1987,6 @@ export class GadWorkspaceDO extends DurableObjectBase {
     return this.transaction(() => {
       const existed = this.logHeadRow(input.logId, input.head) != null;
       // This head's OWN events (post-fork; inherited ones live on the parent).
-      const eventIds = (
-        this.sql
-          .exec(
-            `SELECT envelope_id FROM log_events WHERE log_id = ? AND head = ?`,
-            input.logId,
-            input.head
-          )
-          .toArray() as JsonRecord[]
-      )
-        .map((r) => asString(r["envelope_id"]))
-        .filter((id): id is string => !!id);
       this.sql.exec(
         `DELETE FROM log_events WHERE log_id = ? AND head = ?`,
         input.logId,
@@ -3459,14 +3413,6 @@ export class GadWorkspaceDO extends DurableObjectBase {
     );
   }
 
-  private semanticWorkspaceId(): string {
-    const configured = this.env["WORKSPACE_ID"];
-    if (typeof configured !== "string" || configured.length === 0) {
-      throw new Error("GadWorkspaceDO requires the topology-owned WORKSPACE_ID binding");
-    }
-    return configured;
-  }
-
   // -------------------------------------------------------------------------
   // Memory (WS4) — FTS index over messages/files/commits + provenance recall
   // -------------------------------------------------------------------------
@@ -3484,16 +3430,48 @@ export class GadWorkspaceDO extends DurableObjectBase {
     return this.memoryIndexMode;
   }
 
-  /** Reconcile commit messages from the semantic event DAG. The recall index is
-   * disposable; workspace events remain the authority. */
+  /** Reconcile searchable commit documents from the semantic event DAG. The
+   * recall index is disposable; workspace events and their authored work-unit
+   * intents remain the authority. */
   private ensureCommitMemoryIndex(): void {
     this.ensureMemoryIndex();
+
+    // Commit memory originally indexed only the event message. Rebuild that
+    // disposable projection once so existing workspaces gain the authored
+    // intent terms as well; subsequent calls only project newly committed
+    // events. This marker is deliberately internal rather than part of the
+    // public file-index marker namespace.
+    const projectionVersionKey = "memory:commit-projection-version";
+    const projectionVersion = "2";
+    if (this.getStateValue(projectionVersionKey) !== projectionVersion) {
+      this.sql.exec(
+        `DELETE FROM gad_memory_fts
+          WHERE kind = 'commit'
+            AND event_id IN (SELECT event_id FROM gad_workspace_events)`
+      );
+    }
+
     const missing = this.sql
       .exec(
-        `SELECT e.event_id, e.result_workspace_fact_root_id, e.message
+        `SELECT e.event_id,
+                e.result_workspace_fact_root_id,
+                e.message,
+                (
+                  SELECT GROUP_CONCAT(intent_summary, CHAR(10))
+                    FROM (
+                      SELECT DISTINCT TRIM(w.intent_summary) AS intent_summary
+                        FROM gad_workspace_event_applications ea
+                        JOIN gad_work_unit_applications a
+                          ON a.application_id = ea.application_id
+                        JOIN gad_work_units w
+                          ON w.work_unit_id = a.work_unit_id
+                       WHERE ea.event_id = e.event_id
+                         AND TRIM(COALESCE(w.intent_summary, '')) <> ''
+                       ORDER BY ea.ordinal
+                    )
+                ) AS intent_summaries
            FROM gad_workspace_events e
           WHERE e.kind <> 'genesis'
-            AND TRIM(COALESCE(e.message, '')) <> ''
             AND NOT EXISTS (
               SELECT 1 FROM gad_memory_fts m
                WHERE m.kind = 'commit'
@@ -3502,7 +3480,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
       )
       .toArray() as JsonRecord[];
     for (const row of missing) {
-      const summary = asString(row["message"]);
+      const message = asString(row["message"])?.trim();
+      const intentSummaries = asString(row["intent_summaries"])?.trim();
+      const summary = [message, intentSummaries]
+        .filter((part): part is string => Boolean(part))
+        .filter((part, index, parts) => parts.indexOf(part) === index)
+        .join("\n");
       const eventId = asString(row["event_id"]);
       const workspaceFactRootId = asString(row["result_workspace_fact_root_id"]);
       if (!summary || !eventId || !workspaceFactRootId) continue;
@@ -3513,6 +3496,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         anchor: { workspaceEventId: eventId, workspaceFactRootId },
       });
     }
+    this.setStateValue(projectionVersionKey, projectionVersion);
   }
 
   private indexMemoryRow(row: {
@@ -3650,7 +3634,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
       : [];
     let rows: JsonRecord[];
     if (mode === "fts") {
-      const baseMatch = sanitizeFtsQuery(input.query);
+      const queryTerms = recallTokens([input.query]);
+      const baseMatch = ftsQuery(queryTerms, " ");
       // Keyword steering only WIDENS: OR the base query with the keyword terms so
       // recall matches either — never AND-ed (would narrow), never load-bearing.
       const keywordMatch = recallTokens(input.recallKeywords)
@@ -3663,50 +3648,63 @@ export class GadWorkspaceDO extends DurableObjectBase {
         : baseMatch;
       if (!match) return { results: [] };
       const kindFilter = kinds ? ` AND kind IN (${kinds.map(() => "?").join(",")})` : "";
-      rows = this.sql
-        .exec(
-          `SELECT text, kind, log_id, head, event_id, path, content_hash, anchor_json,
+      const queryRows = (candidateMatch: string): JsonRecord[] =>
+        this.sql
+          .exec(
+            `SELECT text, kind, log_id, head, event_id, path, content_hash, anchor_json,
                   bm25(gad_memory_fts) AS score
              FROM gad_memory_fts
             WHERE gad_memory_fts MATCH ?${kindFilter}${pathFilter}
             ORDER BY score LIMIT ?`,
-          match,
-          ...(kinds ?? []),
-          ...pathBindings,
-          fetchLimit
-        )
-        .toArray() as JsonRecord[];
+            candidateMatch,
+            ...(kinds ?? []),
+            ...pathBindings,
+            fetchLimit
+          )
+          .toArray() as JsonRecord[];
+      rows = queryRows(match);
+      // Natural recall queries often mix a repository/path hint with the
+      // distinctive remembered phrase. Preserve precise all-term matching
+      // first, then widen only an empty page instead of making callers learn
+      // FTS query syntax or repeatedly guess which term the index retained.
+      if (rows.length === 0 && queryTerms.length > 1) {
+        const broadBase = ftsQuery(queryTerms, " OR ");
+        const broadMatch = keywordMatch ? `(${broadBase}) OR ${keywordMatch}` : broadBase;
+        rows = queryRows(broadMatch);
+      }
     } else {
       const queryTerms = recallTokens([input.query]);
       const keywordTerms = recallTokens(input.recallKeywords);
       if (queryTerms.length === 0 && keywordTerms.length === 0) return { results: [] };
-      const likeBindings: string[] = [];
-      const likeOf = (term: string): string => {
-        likeBindings.push(`%${term.replace(/[%_\\]/gu, "\\$&")}%`);
-        return `text LIKE ? ESCAPE '\\'`;
-      };
-      // Base query terms AND together; steering keywords OR onto the whole base
-      // (widen, never narrow) — mirrors the fts branch's `(base) OR keywords`.
-      const baseClause = queryTerms.length ? `(${queryTerms.map(likeOf).join(" AND ")})` : "";
-      const keywordClause = keywordTerms.length ? keywordTerms.map(likeOf).join(" OR ") : "";
-      const matchClause =
-        baseClause && keywordClause
-          ? `(${baseClause} OR ${keywordClause})`
-          : baseClause || keywordClause;
       const kindFilter = kinds ? ` AND kind IN (${kinds.map(() => "?").join(",")})` : "";
-      rows = this.sql
-        .exec(
-          `SELECT text, kind, log_id, head, event_id, path, content_hash, anchor_json,
+      const queryRows = (operator: " AND " | " OR "): JsonRecord[] => {
+        const likeBindings: string[] = [];
+        const likeOf = (term: string): string => {
+          likeBindings.push(`%${term.replace(/[%_\\]/gu, "\\$&")}%`);
+          return `text LIKE ? ESCAPE '\\'`;
+        };
+        const baseClause = queryTerms.length ? `(${queryTerms.map(likeOf).join(operator)})` : "";
+        const keywordClause = keywordTerms.length ? keywordTerms.map(likeOf).join(" OR ") : "";
+        const matchClause =
+          baseClause && keywordClause
+            ? `(${baseClause} OR ${keywordClause})`
+            : baseClause || keywordClause;
+        return this.sql
+          .exec(
+            `SELECT text, kind, log_id, head, event_id, path, content_hash, anchor_json,
                   NULL AS score
              FROM gad_memory_fts
             WHERE ${matchClause}${kindFilter}${pathFilter}
             LIMIT ?`,
-          ...likeBindings,
-          ...(kinds ?? []),
-          ...pathBindings,
-          fetchLimit
-        )
-        .toArray() as JsonRecord[];
+            ...likeBindings,
+            ...(kinds ?? []),
+            ...pathBindings,
+            fetchLimit
+          )
+          .toArray() as JsonRecord[];
+      };
+      rows = queryRows(" AND ");
+      if (rows.length === 0 && queryTerms.length > 1) rows = queryRows(" OR ");
     }
 
     const pageRows = this.dedupRecallRows(rows, limit);
@@ -4709,6 +4707,36 @@ export class GadWorkspaceDO extends DurableObjectBase {
       .toArray()[0] as JsonRecord | undefined;
     if (!channelRow) return null;
     return this.lineageForChannelRow(channelRow);
+  }
+
+  @schemaRpc()
+  resolveTrajectoryForkPoint(input: {
+    trajectoryId: string;
+    branchId: string;
+    channelId: string;
+    channelSeq: number;
+  }): { seq: number } {
+    this.ensureReady();
+    const row = this.sql
+      .exec(
+        `SELECT MAX(origin.seq) AS seq
+           FROM log_events AS channel
+           JOIN log_events AS origin
+             ON origin.log_id = channel.origin_log_id
+            AND origin.head = channel.origin_head
+            AND origin.envelope_id = channel.origin_envelope_id
+          WHERE channel.log_id = ?
+            AND channel.seq <= ?
+            AND channel.origin_log_id = ?
+            AND channel.origin_head = ?`,
+        input.channelId,
+        input.channelSeq,
+        input.trajectoryId,
+        input.branchId
+      )
+      .one() as JsonRecord;
+    const seq = row["seq"];
+    return { seq: seq == null ? 0 : asNumber(seq) };
   }
 
   @schemaRpc()

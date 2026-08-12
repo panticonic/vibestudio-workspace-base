@@ -5,7 +5,11 @@
  * (hydration happens in executors, never in the fold).
  */
 
-import type { InvocationTransport, ParticipantRef } from "@workspace/agentic-protocol";
+import type {
+  AgentToolFailure,
+  InvocationTransport,
+  ParticipantRef,
+} from "@workspace/agentic-protocol";
 import { logIdForChannel } from "@vibestudio/trajectory-identity";
 
 export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
@@ -35,6 +39,8 @@ export interface AgentModelSpec {
   cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
   contextWindow: number;
   maxTokens: number;
+  /** Provider service tiers supported by this exact catalog model. */
+  serviceTiers?: Array<"priority">;
   /**
    * Optional provider-transport silence deadline. Absent means the model call
    * is unbounded and can be stopped only by explicit lifecycle/caller
@@ -45,6 +51,13 @@ export interface AgentModelSpec {
   thinkingLevelMap?: Record<string, unknown>;
   headers?: Record<string, string>;
   compat?: Record<string, unknown>;
+}
+
+/** Exact model identity that produced a durable assistant message. */
+export interface AssistantModelIdentity {
+  provider: string;
+  api: string;
+  model: string;
 }
 
 export type RespondPolicy =
@@ -93,6 +106,8 @@ export interface AgentLoopConfig {
   /** Absent preserves the background-only fallback behavior. */
   fallbackScope?: "unattended" | "all-turns";
   thinkingLevel: ThinkingLevel;
+  /** Request the accelerated Codex service tier for eligible model calls. */
+  fastMode: boolean;
   approvalLevel: 0 | 1 | 2;
   respondPolicy: RespondPolicy;
   systemPromptHash: string;
@@ -106,6 +121,9 @@ export interface AgentLoopConfig {
   /** Execution ordering declared by local AgentTool metadata. Missing entries
    * fail safe to sequential execution. */
   localToolExecutionModes?: Record<string, "sequential" | "parallel">;
+  /** Cancellation settlement declared by local AgentTool metadata. Missing
+   * entries are interruptible. */
+  localToolCancellationModes?: Record<string, "interruptible" | "settle">;
   roster: RosterSnapshot;
   agentHopLimit?: number;
   /** Channel publication discipline (gated by `publishPolicyPolicy`, appended
@@ -118,13 +136,13 @@ export interface AgentLoopConfig {
   /** Max subagent nesting depth (enforced at spawn by the vessel). Absent ⇒
    *  the vessel's implementation default. */
   maxSubagentDepth?: number;
-  /** Maximum child contexts this supervisor may own at once. A terminal child
-   *  keeps its slot until `close_subagent` completes teardown successfully. */
+  /** Maximum concurrently executing child runs. Retained terminal results do
+   *  not consume execution capacity. */
   maxSubagents?: number;
 }
 
 export interface AgentTurnContextPolicy {
-  mode?: "full" | "heartbeat" | "isolated";
+  mode?: "full" | "isolated";
   includeWorkspacePrompt?: boolean;
   includeSkillIndex?: boolean;
   promptFile?: string;
@@ -133,7 +151,40 @@ export interface AgentTurnContextPolicy {
 }
 
 export interface AgentTurnMetadata {
-  origin?: "agent-initiated" | "heartbeat" | "scheduled";
+  origin?: "agent-initiated" | "scheduled";
+  /** Durable reviewed automation provenance for this exact tick. */
+  automation?: {
+    missionId: string;
+    runId: string;
+    name: string;
+    revision: number;
+    action: "prompt" | "eval" | "method";
+    trigger: "manual" | "scheduled";
+    startedAt: number;
+    createdAt: number;
+    activatedAt?: number;
+    runNumber?: number;
+    schedule:
+      | {
+          /** Missing only on durable turn snapshots written before calendar schedules. */
+          kind?: "interval";
+          everyMs: number;
+          anchorAt?: number;
+          jitterMs?: number;
+          untilAt?: number;
+          maxRuns?: number;
+        }
+      | {
+          kind: "cron";
+          expression: string;
+          timezone: string;
+          untilAt?: number;
+          maxRuns?: number;
+        }
+      | null;
+  };
+  /** Model-free turns close after their directly journaled invocation settles. */
+  completion?: "after-invocation";
   contextPolicy?: AgentTurnContextPolicy;
   delivery?: "none" | "channel" | "last-contact";
   ackToken?: string;
@@ -142,6 +193,10 @@ export interface AgentTurnMetadata {
    *  deferred post-turn queue and promoted (one per turn) after close, instead
    *  of steering the open turn. */
   deliverAfterTurn?: boolean;
+  /** Exact retained child run whose terminal report this deferred prompt
+   * carries. Runtime-owned: it lets a same-turn suspend release the report
+   * without treating every completed-but-unintegrated child as pending input. */
+  supervisedTerminalRunId?: string;
   /**
    * A machine-stable user-interface selection carried by the same message as
    * its readable text. The context builder exposes this bounded structure to
@@ -190,6 +245,8 @@ export interface ModelRequestDescriptor {
   auth?: ModelAuthMode;
   modelBaseUrl?: string;
   thinkingLevel: ThinkingLevel;
+  /** Provider-native service tier pinned at request materialization time. */
+  serviceTier?: "priority";
   systemPromptHash: string;
   /** Per-call instruction appended after the hydrated transcript. */
   immediatePrompt?: string;
@@ -363,6 +420,7 @@ export type SessionEntry =
       sourceMessageId?: string;
       senderRef?: ParticipantRef;
       content: unknown;
+      structuredInput?: unknown;
       metadata?: AgentTurnMetadata;
     }
   | {
@@ -375,22 +433,34 @@ export type SessionEntry =
       senderRef?: ParticipantRef;
       blocks: unknown[];
       outcome?: string;
+      /** Present only for model-produced messages. Runtime diagnostics and
+       * model-free direct invocations have no model identity to invent. */
+      model?: AssistantModelIdentity;
     }
   | {
       kind: "tool-result";
       seq: number;
       invocationId: string;
+      attemptId?: string;
       name: string;
       result: unknown;
       isError: boolean;
+      /** True only when this finalized tool asked the owning model turn to
+       * stop after its entire sibling batch settles. */
+      terminate?: boolean;
       /** Retained so a terminal infrastructure failure cannot be forgotten
        * while parallel sibling invocations are still settling. */
       terminalOutcome?: "tool_error" | "infrastructure_error";
       terminalReasonCode?: string;
+      /** Typed recovery survives folding so parallel sibling settlement cannot
+       * turn a recoverable infrastructure failure into a terminal turn. */
+      failureRecovery?: AgentToolFailure["recovery"];
     }
   | { kind: "note"; seq: number; text: string };
 
 export interface AgentState {
+  /** Invalidates non-authoritative fold caches when model-context projection changes. */
+  modelContextVersion: number;
   logId: string;
   head: string;
   channelId: string;
@@ -422,6 +492,8 @@ export interface AgentState {
   deferredPostTurnQueue: DeferredPrompt[];
 }
 
+export const MODEL_CONTEXT_VERSION = 1;
+
 /**
  * A trajectory fork inherits semantic conversation entries, not executable
  * delivery state. Replaying the parent's prefix under a new agent identity can
@@ -441,6 +513,7 @@ export function normalizeForkControlState(state: AgentState): AgentState {
   );
   return {
     ...state,
+    modelContextVersion: MODEL_CONTEXT_VERSION,
     pendingPrompt,
     pendingPromptPreparations,
     steeringQueue: state.steeringQueue.filter((entry) => entry.seq > state.forkSeq),
@@ -465,6 +538,7 @@ export interface InitialStateInput {
 export function initialAgentState(input: InitialStateInput): AgentState {
   const logId = input.logId ?? logIdForChannel(input.channelId);
   return {
+    modelContextVersion: MODEL_CONTEXT_VERSION,
     logId,
     head: input.head ?? logId,
     channelId: input.channelId,

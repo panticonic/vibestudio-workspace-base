@@ -280,11 +280,19 @@ function makeContext(callerKind: string | null = "shell", callerId = "shell") {
   const emit = vi.fn();
   const rpcStream = vi.fn(async () => new Response());
   const health = { healthy: vi.fn(), degraded: vi.fn(), unhealthy: vi.fn() };
-  const resolveService = vi.fn(async () => ({
-    kind: "durable-object" as const,
-    targetId: "do:vibestudio/internal:BrowserDataDO:environment-key",
-    objectKey: "environment-key",
-  }));
+  const resolveService = vi.fn(async (protocol: string) =>
+    protocol === "vibestudio.browser-vault.v1"
+      ? {
+          kind: "durable-object" as const,
+          targetId: "do:vibestudio/internal:BrowserVaultDO:environment-key",
+          objectKey: "environment-key",
+        }
+      : {
+          kind: "durable-object" as const,
+          targetId: "do:workers/browser-data:BrowserDataDO:browser:user-1",
+          objectKey: "browser:user-1",
+        }
+  );
   return {
     ctx: {
       rpc: { call: rpcCall, stream: rpcStream },
@@ -347,14 +355,27 @@ describe("@workspace-extensions/browser-data", () => {
     const api = (await activate(ctx as never)).providerContracts.browserData;
     expect(health.healthy).not.toHaveBeenCalled();
     await api.listImportJobs();
-    expect(resolveService).toHaveBeenCalledWith("vibestudio.browser-data.v1");
+    expect(resolveService).toHaveBeenCalledWith("vibestudio.browser-data.v1", "browser:user-1");
+    expect(resolveService).toHaveBeenCalledWith("vibestudio.browser-vault.v1");
     expect(rpcCall).toHaveBeenCalledWith(
-      "do:vibestudio/internal:BrowserDataDO:environment-key",
+      "do:workers/browser-data:BrowserDataDO:browser:user-1",
       "listImportJobs"
     );
     expect(health.healthy).toHaveBeenCalledWith({
       summary: "Browser environment storage ready",
     });
+  });
+
+  it("brokers canonical history reads through its admitted Durable Object source", async () => {
+    const { ctx, rpcCall } = makeContext("panel");
+    const api = (await activate(ctx as never)).providerContracts.browserData;
+
+    await expect(api.getHistory({ limit: 60 })).resolves.toEqual([]);
+    expect(rpcCall).toHaveBeenCalledWith(
+      "do:workers/browser-data:BrowserDataDO:browser:user-1",
+      "getHistory",
+      { limit: 60 }
+    );
   });
 
   it("degrades health on store resolution failure and retries the dependency", async () => {
@@ -369,7 +390,7 @@ describe("@workspace-extensions/browser-data", () => {
     });
 
     await expect(api.listImportJobs()).resolves.toEqual([]);
-    expect(resolveService).toHaveBeenCalledTimes(2);
+    expect(resolveService).toHaveBeenCalledTimes(4);
     expect(health.healthy).toHaveBeenCalledWith({
       summary: "Browser environment storage ready",
     });
@@ -415,13 +436,13 @@ describe("@workspace-extensions/browser-data", () => {
       );
     });
     expect(rpcCall).toHaveBeenCalledWith(
-      "do:vibestudio/internal:BrowserDataDO:environment-key",
+      "do:workers/browser-data:BrowserDataDO:browser:user-1",
       "addBookmarksBatch",
       [{ title: "Example", url: "https://example.com" }],
       { sourceId: "opaque-chrome" }
     );
     expect(rpcCall).toHaveBeenCalledWith(
-      "do:vibestudio/internal:BrowserDataDO:environment-key",
+      "do:workers/browser-data:BrowserDataDO:browser:user-1",
       "recordImportBatch",
       expect.objectContaining({ dataType: "bookmarks", batchIndex: 0 })
     );

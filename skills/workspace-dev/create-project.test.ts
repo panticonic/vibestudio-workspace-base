@@ -229,6 +229,111 @@ describe("createProjects", () => {
     });
   });
 
+  it("materializes a curated Lucide identity without adding an icon runtime", async () => {
+    addFile(
+      "skills/workspace-dev/assets/icons/lucide/messages-square.svg",
+      '<svg stroke="currentColor"><path d="M1 1" /></svg>'
+    );
+    const { createProjects } = await import("./create-project.js");
+
+    await createProjects([
+      { projectType: "panel", name: "inbox", title: "Inbox", icon: "lucide:messages-square" },
+    ]);
+
+    expect(JSON.parse(mocks.files.get("panels/inbox/package.json") as string)).toMatchObject({
+      vibestudio: { icon: "./assets/icon.svg" },
+    });
+    expect(mocks.files.get("panels/inbox/assets/icon.svg")).toBe(
+      '<svg stroke="#8B5CF6"><path d="M1 1" /></svg>'
+    );
+  });
+
+  it("discovers the exact curated icon catalog instead of requiring guessed names", async () => {
+    addFile("skills/workspace-dev/assets/icons/lucide/database.svg", "<svg />");
+    addFile("skills/workspace-dev/assets/icons/lucide/messages-square.svg", "<svg />");
+    for (const name of [
+      "claude",
+      "git",
+      "gmail",
+      "gnubash",
+      "javascript",
+      "react",
+      "svelte",
+      "typescript",
+    ]) {
+      addFile(`skills/workspace-dev/assets/icons/brands/${name}.svg`, "<svg />");
+    }
+    const { listProjectIcons, searchProjectCatalog } = await import("./create-project.js");
+
+    await expect(listProjectIcons()).resolves.toEqual([
+      "brand:claude",
+      "brand:git",
+      "brand:gmail",
+      "brand:gnubash",
+      "brand:javascript",
+      "brand:react",
+      "brand:svelte",
+      "brand:typescript",
+      "lucide:database",
+      "lucide:messages-square",
+    ]);
+    await expect(
+      searchProjectCatalog({ resource: "icon", query: "message square", limit: 1 })
+    ).resolves.toMatchObject({
+      protocol: "workspace-dev-catalog.v1",
+      resource: "icon",
+      query: "message square",
+      total: 10,
+      entries: [{ resource: "icon", id: "lucide:messages-square", family: "lucide" }],
+      truncated: 9,
+    });
+  });
+
+  it("returns a structured catalog repair plan before creating an unknown icon", async () => {
+    addFile("skills/workspace-dev/assets/icons/lucide/database.svg", "<svg />");
+    const { createProjects, ProjectIconError } = await import("./create-project.js");
+
+    const failure = await createProjects([
+      { projectType: "panel", name: "board", icon: "lucide:columns-3" },
+    ]).catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(ProjectIconError);
+    expect((failure as InstanceType<typeof ProjectIconError>).errorData).toEqual({
+      code: "project_icon_invalid",
+      icon: "lucide:columns-3",
+      kind: "lucide",
+      name: "columns-3",
+      suggestions: ["lucide:database"],
+      catalogQuery: {
+        resource: "icon",
+        query: "columns-3",
+        families: ["lucide"],
+        limit: 12,
+      },
+      catalog: {
+        protocol: "workspace-dev-catalog.v1",
+        resource: "icon",
+        query: "columns-3",
+        total: 1,
+        entries: [
+          {
+            resource: "icon",
+            id: "lucide:database",
+            family: "lucide",
+            name: "database",
+          },
+        ],
+        truncated: 0,
+      },
+      recovery: {
+        action: "correct-request",
+        instruction: expect.stringContaining("errorData.catalog.entries"),
+      },
+    });
+    expect(mocks.edit).not.toHaveBeenCalled();
+    expect(mocks.commit).not.toHaveBeenCalled();
+  });
+
   it("keeps the built-in default panel deterministic without consulting template files", async () => {
     addFile("templates/default/template.json", JSON.stringify({ framework: "svelte" }));
     const { createProjects } = await import("./create-project.js");
@@ -437,6 +542,10 @@ describe("createProjects", () => {
     }]).catch((error: unknown) => error)) as InstanceType<typeof ScaffoldPublicationError>;
 
     expect(failure.errorData.retry.commandIdPolicy).toBe("repair-source-and-recommit");
+    expect(failure.errorData.recovery).toEqual({
+      action: "repair-source",
+      instruction: expect.stringContaining("repair the committed source"),
+    });
     await expect(recoverProjectPublication(failure)).rejects.toMatchObject({
       errorData: {
         stage: "repair-source",

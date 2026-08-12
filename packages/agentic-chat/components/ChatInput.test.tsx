@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import React from "react";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { Theme } from "@radix-ui/themes";
@@ -48,6 +47,8 @@ function renderInput(
     flushNarration?: FlushNarration;
     undoableAction?: UndoableAction;
     pendingSendCount?: number;
+    defaultMentions?: readonly string[];
+    disabled?: boolean;
     context?: Partial<ChatContextValue>;
     inputContext?: Partial<ChatInputContextValue>;
   } = {}
@@ -90,7 +91,7 @@ function renderInput(
   render(
     <Theme>
       <ChatProvider value={ctx} inputValue={inputCtx}>
-        <ChatInput />
+        <ChatInput defaultMentions={opts.defaultMentions} disabled={opts.disabled} />
       </ChatProvider>
     </Theme>
   );
@@ -114,6 +115,44 @@ describe("ChatInput keyboard shortcuts", () => {
     expect(onSendMessage).toHaveBeenCalledTimes(1);
     const [, options] = onSendMessage.mock.calls[0]!;
     expect(options?.metadata?.deliverAfterTurn).toBeUndefined();
+  });
+
+  it("routes unaddressed text to product-supplied default recipients", async () => {
+    const { onSendMessage } = renderInput({
+      input: "Bridge-wide directive",
+      defaultMentions: ["agent-engineering", "agent-navigation", "agent-engineering"],
+    });
+
+    await keyDown({ key: "Enter" });
+
+    const [, options] = onSendMessage.mock.calls[0]!;
+    expect(options?.mentions).toEqual(["agent-engineering", "agent-navigation"]);
+  });
+
+  it("uses explicit mentions instead of product-supplied defaults", async () => {
+    const engineering = {
+      id: "agent-engineering",
+      metadata: { type: "agent", handle: "engineering" },
+    };
+    const navigation = {
+      id: "agent-navigation",
+      metadata: { type: "agent", handle: "navigation" },
+    };
+    const { onSendMessage } = renderInput({
+      input: "@engineering take the order",
+      defaultMentions: ["agent-engineering", "agent-navigation"],
+      context: {
+        allParticipants: {
+          "agent-engineering": engineering,
+          "agent-navigation": navigation,
+        } as unknown as ChatContextValue["allParticipants"],
+      },
+    });
+
+    await keyDown({ key: "Enter" });
+
+    const [, options] = onSendMessage.mock.calls[0]!;
+    expect(options?.mentions).toEqual(["agent-engineering"]);
   });
 
   it("Shift+Enter does NOT send (newline)", async () => {
@@ -175,6 +214,7 @@ describe("ChatInput /model command", () => {
     const onCallMethodResult = vi.fn(async () => ({
       model: "openai-codex:gpt-5.5",
       thinkingLevel: "max",
+      fastMode: true,
       approvalLevel: 1,
       respondPolicy: "from-participants",
       respondFrom: ["user-1"],
@@ -183,9 +223,9 @@ describe("ChatInput /model command", () => {
       providers: [],
       models: [
         makeTestCatalogEntry({
-          ref: "local:lfm2.5-1.2b",
-          id: "lfm2.5-1.2b",
-          name: "LFM2.5 1.2B",
+          ref: "local:lfm2.5-2.6b",
+          id: "lfm2.5-2.6b",
+          name: "LFM2.5 2.6B",
           provider: "local",
           baseUrl: "http://127.0.0.1:43117/v1",
           auth: "loopback",
@@ -215,9 +255,10 @@ describe("ChatInput /model command", () => {
     await waitFor(() => expect(onReplaceAgent).toHaveBeenCalledTimes(1));
     expect(onCallMethodResult).toHaveBeenCalledWith("agent-1", "getAgentSettings", {});
     expect(onReplaceAgent).toHaveBeenCalledWith("agent-1", undefined, {
-      model: "local:lfm2.5-1.2b",
+      model: "local:lfm2.5-2.6b",
       handle: "ai-chat",
       thinkingLevel: "max",
+      fastMode: true,
       approvalLevel: 1,
       respondPolicy: "from-participants",
       respondFrom: ["user-1"],
@@ -244,6 +285,20 @@ describe("ChatInput send-button intent", () => {
     const options = screen.getByLabelText("Send options").closest("button");
     expect(primary?.hasAttribute("disabled")).toBe(true);
     expect(options?.hasAttribute("disabled")).toBe(false);
+  });
+
+  it("honors a product-owned readiness gate even while the channel is connected", async () => {
+    const { onSendMessage } = renderInput({ disabled: true, input: "premature order" });
+
+    expect(textarea().hasAttribute("disabled")).toBe(true);
+    expect(
+      screen
+        .getByLabelText(/^Send \(/)
+        .closest("button")
+        ?.hasAttribute("disabled")
+    ).toBe(true);
+    await keyDown({ key: "Enter" });
+    expect(onSendMessage).not.toHaveBeenCalled();
   });
 });
 

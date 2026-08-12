@@ -87,6 +87,7 @@ export interface PanelWebViewProps {
     text?: string;
     textSecondary?: string;
     primary?: string;
+    onPrimary?: string;
   };
 }
 
@@ -628,6 +629,18 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(funct
     for (const envelope of queue) injectEnvelope(envelope);
   }, [injectEnvelope]);
 
+  const reloadPanel = useCallback(() => {
+    bridgeReadyRef.current = false;
+    setHasError(false);
+    setIsLoading(true);
+    setErrorMessage("");
+    currentUrlRef.current = url;
+    // When an error view replaced the native WebView, clearing hasError mounts
+    // a fresh WebView with the current source. When it is still mounted, reload
+    // the existing document immediately.
+    webViewRef.current?.reload();
+  }, [url]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -641,10 +654,10 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(funct
       },
       goBack: () => webViewRef.current?.goBack(),
       goForward: () => webViewRef.current?.goForward(),
-      reload: () => webViewRef.current?.reload(),
+      reload: reloadPanel,
       stop: () => webViewRef.current?.stopLoading(),
     }),
-    [dispatchHostEvent, deliverEnvelope]
+    [dispatchHostEvent, deliverEnvelope, reloadPanel]
   );
 
   useEffect(() => {
@@ -967,20 +980,19 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(funct
   );
 
   const handleRetry = useCallback(() => {
-    setHasError(false);
-    setIsLoading(true);
-    setErrorMessage("");
-    currentUrlRef.current = url;
-    webViewRef.current?.reload();
-  }, [url]);
+    reloadPanel();
+  }, [reloadPanel]);
 
   const handleLoadEnd = useCallback(() => {
-    logDiagnostic("load end", { url: currentUrlRef.current });
-    smokePhase("workspace-panel-webview-loaded", {
-      panelId,
-      managed,
-      url: currentUrlRef.current,
-    });
+    const loadedUrl = currentUrlRef.current;
+    logDiagnostic("load end", { url: loadedUrl });
+    if (loadedUrl !== "about:blank") {
+      smokePhase("workspace-panel-webview-loaded", {
+        panelId,
+        managed,
+        url: loadedUrl,
+      });
+    }
     lastLoadProgressAtRef.current = Date.now();
     lastLoadProgressRef.current = 1;
     setIsLoading(false);
@@ -1096,7 +1108,9 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(funct
             ]}
             onPress={handleRetry}
           >
-            <Text style={[styles.retryText, colors?.text != null && { color: colors.text }]}>
+            <Text
+              style={[styles.retryText, colors?.onPrimary != null && { color: colors.onPrimary }]}
+            >
               Retry
             </Text>
           </Pressable>
@@ -1133,7 +1147,9 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(funct
             ]}
             onPress={() => openExternalPdf(url)}
           >
-            <Text style={[styles.retryText, colors?.text != null && { color: colors.text }]}>
+            <Text
+              style={[styles.retryText, colors?.onPrimary != null && { color: colors.onPrimary }]}
+            >
               Open PDF
             </Text>
           </Pressable>
@@ -1148,7 +1164,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(funct
         <View
           style={[
             styles.loadingOverlay,
-            colors?.background != null && { backgroundColor: colors.background + "E6" },
+            colors?.background != null && { backgroundColor: colors.background },
           ]}
         >
           <VibestudioLogo size={64} variant="symbol" style={styles.logo} />
@@ -1169,8 +1185,8 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(funct
         source={{ uri: url }}
         style={styles.webView}
         userAgent={VIBESTUDIO_USER_AGENT}
-        cacheEnabled={!managed}
-        cacheMode={managed ? "LOAD_NO_CACHE" : "LOAD_DEFAULT"}
+        cacheEnabled
+        cacheMode="LOAD_DEFAULT"
         onShouldStartLoadWithRequest={handleShouldStartLoad}
         onNavigationStateChange={handleNavigationStateChange}
         onMessage={handleMessage}
@@ -1271,10 +1287,13 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   retryButton: {
+    minHeight: 44,
     paddingHorizontal: 24,
     paddingVertical: 12,
     backgroundColor: "#7c3aed",
     borderRadius: 8,
+    alignItems: "center",
+    justifyContent: "center",
   },
   retryText: {
     color: "#e0e0e0",

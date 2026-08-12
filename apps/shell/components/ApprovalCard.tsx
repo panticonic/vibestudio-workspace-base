@@ -5,7 +5,7 @@
  * its host, which performs the actual `shellApproval.*` calls. Secret-input
  * values stay local and are only emitted on submit.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { ComponentProps, CSSProperties, KeyboardEvent, ReactNode } from "react";
 import {
   Badge,
@@ -27,7 +27,6 @@ import {
   CubeIcon,
   DragHandleDots2Icon,
   CrossCircledIcon,
-  EnterIcon,
   ExclamationTriangleIcon,
   ExternalLinkIcon,
   GearIcon,
@@ -35,6 +34,7 @@ import {
   LockClosedIcon,
   MinusIcon,
   PersonIcon,
+  ReloadIcon,
 } from "@radix-ui/react-icons";
 import type {
   ApprovalDetailFormat,
@@ -48,6 +48,7 @@ import type {
   PendingDeviceCodeApproval,
   PendingMissionReviewApproval,
 } from "@vibestudio/shared/approvals";
+import { PanelIcon } from "./PanelIcon";
 import {
   formatAccount,
   formatInjection,
@@ -68,7 +69,7 @@ import {
   parseApprovalMarkdown,
   type ApprovalMarkdownInline,
 } from "@vibestudio/shared/approvalMarkdown";
-import { DiffViewer, type DiffContentFetcher, type DiffReviewEntry } from "@workspace/ui";
+import { DiffViewer, type DiffContentFetcher, type DiffReviewEntry } from "@workspace/ui/diff";
 import {
   InstallReview,
   InstallReviewActions,
@@ -129,6 +130,13 @@ export function ApprovalCard({
   emit,
 }: ApprovalCardProps) {
   const lifecycleState = approval.lifecycle?.state ?? "ready";
+  const [lifecycleNow, setLifecycleNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (lifecycleState !== "preparing") return;
+    setLifecycleNow(Date.now());
+    const interval = window.setInterval(() => setLifecycleNow(Date.now()), 1_000);
+    return () => window.clearInterval(interval);
+  }, [lifecycleState]);
   const validationPending = lifecycleState === "preparing";
   const validationTerminal = lifecycleState === "failed" || lifecycleState === "cancelled";
   // Secret-config / credential-input values are held locally and only leave the
@@ -249,6 +257,19 @@ export function ApprovalCard({
   const attribution = getApprovalAttribution(approval);
   const accent = approvalAccent(approval);
 
+  const lifecycleActions = validationPending ? (
+    <Button variant="soft" color="gray" onClick={() => emitForApproval({ type: "minimize" })}>
+      Run in background
+    </Button>
+  ) : validationTerminal ? (
+    <Button
+      variant="soft"
+      color="gray"
+      onClick={() => emitForApproval({ type: "decide", decision: "dismiss" })}
+    >
+      Dismiss
+    </Button>
+  ) : null;
   const actions =
     approval.kind === "client-config" ? (
       <ClientConfigActions
@@ -311,7 +332,6 @@ export function ApprovalCard({
     ) : (
       <StandardApprovalActions
         approval={approval}
-        terminal={validationTerminal}
         decide={(decision) => emitForApproval({ type: "decide", decision })}
         onBlock={() => emitForApproval({ type: "decide", decision: "lock" })}
       />
@@ -392,19 +412,38 @@ export function ApprovalCard({
               <ApprovalMarkdown source={copy.summary} tone="muted" compact />
             </Box>
             {lifecycleState !== "ready" ? (
-              <Text
-                size="1"
-                color={lifecycleState === "failed" ? "red" : "gray"}
-                role="status"
-                aria-live="polite"
-              >
-                {lifecycleState === "preparing"
-                  ? "Checking builds, schemas, and authority…"
-                  : (approval.lifecycle?.diagnostics?.[0] ??
-                    (lifecycleState === "cancelled"
-                      ? "Publication was cancelled."
-                      : "Workspace validation failed."))}
-              </Text>
+              <Flex direction="column" gap="1">
+                <Flex align="center" gap="2">
+                  {lifecycleState === "preparing" ? (
+                    <ReloadIcon
+                      aria-hidden
+                      style={{ animation: "app-tree-spin 0.7s linear infinite" }}
+                    />
+                  ) : null}
+                  <Text
+                    size="1"
+                    color={lifecycleState === "failed" ? "red" : "gray"}
+                    role="status"
+                    aria-live="polite"
+                  >
+                    {lifecycleState === "preparing"
+                      ? `${approval.lifecycle?.progress?.label ?? "Checking builds, schemas, and authority"}${
+                          approval.lifecycle?.progress?.total !== undefined
+                            ? ` (${approval.lifecycle.progress.completed ?? 0} of ${approval.lifecycle.progress.total})`
+                            : ""
+                        }… ${Math.max(0, Math.floor((lifecycleNow - approval.requestedAt) / 1_000))}s elapsed`
+                      : (approval.lifecycle?.diagnostics?.[0] ??
+                        (lifecycleState === "cancelled"
+                          ? "Publication was cancelled."
+                          : "Workspace validation failed."))}
+                  </Text>
+                </Flex>
+                {lifecycleState === "preparing" && approval.lifecycle?.progress?.detail ? (
+                  <Text size="1" color="gray">
+                    {approval.lifecycle.progress.detail}
+                  </Text>
+                ) : null}
+              </Flex>
             ) : null}
 
             <Flex align="center" gap="1" wrap="wrap" style={{ minWidth: 0 }}>
@@ -482,9 +521,9 @@ export function ApprovalCard({
                 entries={diffReview}
                 fetchContent={fetchContent}
                 appearance={appearance}
-                onOpenInGadBrowser={(file, entry) =>
+                onOpenInWorkspaceHistory={(file, entry) =>
                   emitForApproval({
-                    type: "open-in-gad-browser",
+                    type: "open-in-workspace-history",
                     target: {
                       repoPath: entry.repoPath,
                       path: file.path,
@@ -494,7 +533,7 @@ export function ApprovalCard({
                       newState: entry.newState,
                       binary: file.binary,
                       tooLarge: file.tooLarge,
-                      // Ship the whole changed-file set so gad-browser can step
+                      // Ship the whole changed-file set so Workspace History can step
                       // across every file of the entry, not just the focused one.
                       files: entry.changedFiles,
                     },
@@ -617,12 +656,8 @@ export function ApprovalCard({
           review's actions live here rather than at the end of its list, because
           `Add to workspace` under fifty-three parts is a decision you have to go
           looking for. */}
-      <fieldset
-        className="approval-card-footer"
-        disabled={actionPending || validationPending}
-        aria-busy={actionPending || validationPending}
-      >
-        {approval.kind === "unit-install-review" ? (
+      <fieldset className="approval-card-footer" disabled={actionPending} aria-busy={actionPending}>
+        {!validationPending && !validationTerminal && approval.kind === "unit-install-review" ? (
           <InstallReviewActions
             approval={approval}
             selection={installSelection}
@@ -632,10 +667,10 @@ export function ApprovalCard({
             }
           />
         ) : null}
-        {actions}
-        {actionPending || validationPending ? (
+        {lifecycleActions ?? actions}
+        {actionPending ? (
           <Text size="1" color="gray" ml="2" role="status" aria-live="polite">
-            {validationPending ? "Preparing review…" : "Saving…"}
+            Saving…
           </Text>
         ) : null}
       </fieldset>
@@ -654,12 +689,12 @@ function DiffReviewSection({
   entries,
   fetchContent,
   appearance,
-  onOpenInGadBrowser,
+  onOpenInWorkspaceHistory,
 }: {
   entries: DiffReviewEntry[];
   fetchContent: DiffContentFetcher;
   appearance: "light" | "dark";
-  onOpenInGadBrowser: ComponentProps<typeof DiffViewer>["onOpenInGadBrowser"];
+  onOpenInWorkspaceHistory: ComponentProps<typeof DiffViewer>["onOpenInWorkspaceHistory"];
 }) {
   // Line totals are shown only when EVERY entry carries them — the host omits
   // insertions/deletions for any entry with a skipped (binary/oversized/
@@ -724,7 +759,7 @@ function DiffReviewSection({
               entry={entry}
               fetchContent={fetchContent}
               appearance={appearance}
-              onOpenInGadBrowser={onOpenInGadBrowser}
+              onOpenInWorkspaceHistory={onOpenInWorkspaceHistory}
             />
           </Box>
         ))}
@@ -801,6 +836,8 @@ function QueueNavigator({
   );
 }
 
+const APPROVAL_CALLER_ICON_SIZE = 14;
+
 function CallerChip({ caller, onShow }: { caller: CallerInfo; onShow: () => void }) {
   const clickable = caller.panelId !== undefined;
   const tooltip = clickable ? `Show panel — ${caller.label}` : caller.label;
@@ -824,11 +861,22 @@ function CallerChip({ caller, onShow }: { caller: CallerInfo; onShow: () => void
         }
       >
         <span className="approval-caller-chip-kind" aria-hidden="true">
-          {caller.kind === "panel" ? (
-            <EnterIcon width={11} height={11} />
-          ) : (
-            <GearIcon width={11} height={11} />
-          )}
+          <PanelIcon
+            icon={caller.icon}
+            source={caller.iconSourcePath}
+            size={APPROVAL_CALLER_ICON_SIZE}
+            fallback={
+              caller.kind === "panel"
+                ? "panel"
+                : caller.kind === "app"
+                  ? "app"
+                  : caller.kind === "extension"
+                    ? "extension"
+                    : caller.kind === "system"
+                      ? "system"
+                      : "worker"
+            }
+          />
         </span>
         <span className="approval-caller-chip-title">{caller.label}</span>
       </span>
@@ -838,20 +886,16 @@ function CallerChip({ caller, onShow }: { caller: CallerInfo; onShow: () => void
 
 function StandardApprovalActions({
   approval,
-  terminal,
   decide,
   onBlock,
 }: {
   approval: PendingCredentialApproval | PendingCapabilityApproval;
-  terminal: boolean;
   decide: (decision: ApprovalDecision) => void;
   onBlock: () => void;
 }) {
   const recommendedDecision = getRecommendedStandardDecision(approval);
   const isSevereCapability = approval.kind === "capability" && approval.severity === "severe";
-  const actions = getStandardApprovalDecisionActions(approval).filter(
-    (action) => !terminal || action.decision === "deny"
-  );
+  const actions = getStandardApprovalDecisionActions(approval);
   return (
     <Flex align="center" className="approval-actions" gap="2" wrap="wrap">
       {actions.map((action) => {
@@ -1048,7 +1092,9 @@ function MissionReviewBody({
         <summary>For developers</summary>
         <Code size="1">
           {approval.closureDigest} · {approval.charter.harness.unit}@{approval.charter.harness.ev} ·{" "}
-          {approval.charter.model.modelId}
+          {approval.charter.execution.kind === "agent"
+            ? `agent:${approval.charter.execution.target.className}`
+            : `${approval.charter.execution.target.className}.${approval.charter.execution.method}`}
         </Code>
       </details>
     </Flex>

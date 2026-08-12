@@ -1,15 +1,8 @@
 import { Box, Button, Flex, Text, Theme } from "@radix-ui/themes";
-import { ShortcutsHelp, EmptyState, type ShortcutGroup } from "@workspace/ui";
-import { useAppTheme } from "@workspace/ui/panel";
-import { useIsMobile, usePaletteCommands, usePanelTheme } from "@workspace/react";
-import {
-  rpc,
-  panel,
-  notifications,
-  runtime,
-  workspace,
-  callMain,
-} from "@workspace/runtime";
+import { ShortcutsHelp, type ShortcutGroup } from "@workspace/ui/command";
+import { EmptyState } from "@workspace/ui/feedback";
+import { useIsMobile, useHostCommands, usePanelTheme, usePanelThemeConfig } from "@workspace/react";
+import { rpc, panel, notifications, runtime, callMain } from "@workspace/runtime";
 import type { RuntimeSupervisionDescription } from "@vibestudio/service-schemas/runtime";
 import { isReviewPending } from "@vibestudio/shared/authority/reviewPending";
 
@@ -94,20 +87,20 @@ export function TerminalApp() {
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [restored, setRestored] = useState(false);
 
-  // Contribute terminal actions to the app-level command palette (Cmd/Ctrl+K).
+  // Contribute terminal actions to the owning host.
   // `runBuiltin` is a hoisted function declaration, safe to reference here.
-  const paletteCommands = useMemo(
+  const hostCommands = useMemo(
     () => [
-      { id: "palette", label: "Terminal command launcher…", section: "Terminal" },
-      { id: "newPane", label: "New pane", section: "Terminal" },
-      { id: "splitRight", label: "Split right", section: "Terminal" },
-      { id: "splitDown", label: "Split down", section: "Terminal" },
-      { id: "clear", label: "Clear scrollback", section: "Terminal" },
-      { id: "toggleFind", label: "Find in terminal", section: "Terminal" },
+      { id: "palette", label: "Terminal command launcher…", group: "Terminal" },
+      { id: "newPane", label: "New pane", group: "Terminal" },
+      { id: "splitRight", label: "Split right", group: "Terminal" },
+      { id: "splitDown", label: "Split down", group: "Terminal" },
+      { id: "clear", label: "Clear scrollback", group: "Terminal" },
+      { id: "toggleFind", label: "Find in terminal", group: "Terminal" },
     ],
     []
   );
-  usePaletteCommands(paletteCommands, (id) => {
+  useHostCommands(hostCommands, (id) => {
     if (id === "palette") setPaletteOpen(true);
     else runBuiltin(id);
   });
@@ -134,7 +127,7 @@ export function TerminalApp() {
   const lastZoomEscapeRef = useRef(0);
 
   const appearance = state.themeOverride === "auto" ? panelAppearance : state.themeOverride;
-  const appTheme = useAppTheme();
+  const appTheme = usePanelThemeConfig();
   const focusedSessionId = state.focusedSessionId;
   const focusedSession = focusedSessionId ? sessions[focusedSessionId] : undefined;
   const visibleTree: SplitNode | undefined =
@@ -1153,11 +1146,7 @@ function EmptyTerminalState(props: {
 }
 
 type ShellUnitStatus = {
-  status:
-    | RuntimeSupervisionDescription["status"]
-    | "pending-approval"
-    | "building"
-    | "available";
+  status: RuntimeSupervisionDescription["status"] | "pending-approval" | "building" | "available";
   pendingApproval?: { kind: string; submittedAt: number } | null;
 };
 

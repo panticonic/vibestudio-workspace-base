@@ -77,6 +77,8 @@ describe("subagent participant handles", () => {
           task: "Inspect the assigned package.",
           parentRef: "do:workers/agent-worker:AiChatWorker:ai-chat",
           parentChannelId: "ch-parent",
+          taskChannelId: "ch-task",
+          parentParticipantId: "do:workers/agent-worker:AiChatWorker:ai-chat",
         },
       },
     });
@@ -93,6 +95,8 @@ describe("subagent participant handles", () => {
           task: "Inspect the assigned package.",
           parentRef: "do:workers/agent-worker:AiChatWorker:ai-chat",
           parentChannelId: "ch-parent",
+          taskChannelId: "ch-task",
+          parentParticipantId: "do:workers/agent-worker:AiChatWorker:ai-chat",
         },
       },
     });
@@ -119,7 +123,9 @@ describe("subagent prompt contract", () => {
           mode: "fork",
           parentRef: "do:workers/agent-worker:AiChatWorker:ai-chat",
           parentChannelId: "ch-parent",
+          taskChannelId: "ch-task",
           parentContextId: "ctx-parent",
+          parentParticipantId: "agent:parent",
           depth: 1,
         },
       },
@@ -157,6 +163,8 @@ describe("subagent prompt contract", () => {
           task: "Inspect the assigned package and report its exports.",
           parentRef: "do:workers/agent-worker:AiChatWorker:ai-chat",
           parentChannelId: "ch-parent",
+          taskChannelId: "ch-task",
+          parentParticipantId: "do:workers/agent-worker:AiChatWorker:ai-chat",
           depth: 1,
         },
       },
@@ -176,7 +184,9 @@ describe("subagent prompt contract", () => {
       task: "Implement the assigned fixture and verify it.",
       parentRef: "parent",
       parentChannelId: "ch-parent",
+      taskChannelId: "ch-task",
       parentContextId: "ctx-parent",
+      parentParticipantId: "agent:parent",
       depth: 2,
     });
 
@@ -197,7 +207,9 @@ describe("subagent prompt contract", () => {
       task: "Review the inherited implementation for one concrete defect.",
       parentRef: "parent",
       parentChannelId: "ch-parent",
+      taskChannelId: "ch-task",
       parentContextId: "ctx-parent",
+      parentParticipantId: "agent:parent",
       depth: 2,
       mode: "fork",
     });
@@ -242,7 +254,9 @@ describe("subagent prompt contract", () => {
         task: "Audit the subagent documentation without editing files.",
         parentRef: "parent",
         parentChannelId: "ch-parent",
+        taskChannelId: "ch-task",
         parentContextId: "ctx-parent",
+        parentParticipantId: "agent:parent",
         depth: 2,
       },
       { completionMode: "supervised-process" }
@@ -260,6 +274,7 @@ describe("per-agent settings seeding from STATE_ARGS.agentConfig", () => {
         agentConfig: {
           model: "openai:gpt-5.3",
           thinkingLevel: "max",
+          fastMode: true,
           fallbackModel: "openai-codex:gpt-5.6-luna",
           fallbackThinkingLevel: "minimal",
           fallbackOn: ["usage_limit_terminal"],
@@ -277,6 +292,7 @@ describe("per-agent settings seeding from STATE_ARGS.agentConfig", () => {
     const settings = vessel.getAgentSettings();
     expect(settings.model).toBe("openai:gpt-5.3");
     expect(settings.thinkingLevel).toBe("max");
+    expect(settings.fastMode).toBe(true);
     expect(settings.approvalLevel).toBe(1);
     expect(settings).toMatchObject({
       fallbackModel: "openai-codex:gpt-5.6-luna",
@@ -317,6 +333,8 @@ describe("per-agent config invalidation spans all the agent's channels", () => {
     expect(vessel.getAgentSettings().thinkingLevel).toBe("xhigh");
     vessel.configureAgent({ thinkingLevel: "max" });
     expect(vessel.getAgentSettings().thinkingLevel).toBe("max");
+    vessel.configureAgent({ fastMode: true });
+    expect(vessel.getAgentSettings().fastMode).toBe(true);
 
     expect(dropLoop).toHaveBeenCalledWith("ch-a");
     expect(dropLoop).toHaveBeenCalledWith("ch-b");

@@ -39,9 +39,6 @@ function Centered({ children }: { children: React.ReactNode }): React.ReactEleme
 export class TerminalChatWorker extends DurableObjectBase {
   static override schemaVersion = 1;
 
-  protected override schemaProductionBaseline() {
-    return { version: 1, name: "terminal-chat-v1" } as const;
-  }
   private session: InkTerminalSession | null = null;
   private instance: Instance | null = null;
   private headless: HeadlessSession | null = null;
@@ -76,7 +73,12 @@ export class TerminalChatWorker extends DurableObjectBase {
         setRawMode: (enabled) =>
           void this.rpc
             .call(this.hostPrincipalId, HOST_METHODS.setRawMode, [this.sessionId, enabled])
-            .catch(() => {}),
+            .catch((error: unknown) =>
+              console.warn(
+                `[terminal-chat] Failed to set raw mode for session ${this.sessionId}:`,
+                error
+              )
+            ),
       },
       initialSize: args.viewport,
     });
@@ -186,7 +188,11 @@ export class TerminalChatWorker extends DurableObjectBase {
     this.vm?.dispose();
     this.instance?.unmount();
     this.session?.dispose();
-    await this.headless?.close().catch(() => {});
+    await this.headless
+      ?.close()
+      .catch((error: unknown) =>
+        console.warn(`[terminal-chat] Failed to close session ${this.sessionId}:`, error)
+      );
     this.instance = null;
     this.session = null;
     this.headless = null;
@@ -218,7 +224,14 @@ export class TerminalChatWorker extends DurableObjectBase {
   private forwardFrame(stream: "stdout" | "stderr", bytes: Uint8Array): void {
     const frame = encodeFrame(this.sessionId, stream, bytes, this.seq++);
     this.deliver = this.deliver.then(() =>
-      this.rpc.call(this.hostPrincipalId, HOST_METHODS.onFrame, [frame]).catch(() => {})
+      this.rpc
+        .call(this.hostPrincipalId, HOST_METHODS.onFrame, [frame])
+        .catch((error: unknown) =>
+          console.warn(
+            `[terminal-chat] Failed to deliver frame for session ${this.sessionId}:`,
+            error
+          )
+        )
     );
   }
 

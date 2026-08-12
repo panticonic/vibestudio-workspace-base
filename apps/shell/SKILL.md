@@ -1,12 +1,11 @@
 ---
 name: workspace-shell-app
-description: Work on the Vibestudio desktop shell app, including the Devices pairing surface and paired-device management.
+description: Develop and diagnose the trusted Electron shell in apps/shell, including panel chrome, lifecycle projections, device pairing, and desktop/mobile parity.
 ---
 
 # Workspace Shell App
 
-Use this when changing `workspace/apps/shell`, the trusted Electron shell that
-hosts desktop panel chrome and device-management UI.
+`apps/shell` hosts desktop panel chrome and device-management UI.
 
 ## Devices Surface
 
@@ -27,6 +26,16 @@ hosts desktop panel chrome and device-management UI.
   desktop filesystem.
 - Pairing URLs can arrive through the desktop protocol handler or as typed URLs;
   both carriers must feed the shared parser.
+
+## Mobile Parity
+
+- Treat desktop shell UX and `apps/mobile` as paired clients of the
+  same workspace model. Before finishing a user-facing shell change, audit the
+  mobile equivalent: title bar/AppBar, panel tree/drawer, approvals, launcher
+  and about/new flows, browser favicons, and loading/error/empty states.
+- Share canonical data and presentation rules, not renderer components. Add a
+  focused behavioral test in every affected client; explicitly state when a
+  surface has no mobile equivalent instead of silently omitting it.
 
 ## Panel Lifecycle and UI Projections
 
@@ -55,7 +64,7 @@ hosts desktop panel chrome and device-management UI.
 
 ## Verification
 
-- For shell UI changes, run focused workspace shell tests and a Playwright flow
-  where possible.
-- For pairing changes, run `pnpm test:desktop-pairing-smoke`.
-- For full composition with the Android client, run `pnpm smoke:full`.
+- Run the smallest focused shell tests and browser flow that exercise the
+  changed behavior.
+- Use the repository desktop-pairing smoke workflow for pairing changes and
+  the full mobile composition smoke only for cross-client changes.

@@ -2,7 +2,7 @@ import vm from "node:vm";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { tameRealmCodegen } from "@vibestudio/shared/evalConfinement";
 import { executeSandbox } from "./sandbox";
-import { createFallbackAsyncTracking } from "./asyncTracking";
+import type { AsyncTrackingAPI } from "./asyncTracking";
 
 describe("executeSandbox", () => {
   let originalModuleMap: unknown;
@@ -79,8 +79,19 @@ describe("executeSandbox", () => {
   });
 
   it("settles a rejected top-level result without waiting on unrelated tracked work", async () => {
-    const tracking = createFallbackAsyncTracking();
-    tracking.waitAll = () => new Promise<void>(() => undefined);
+    const context = { id: 1, promises: new Set<Promise<unknown>>(), pauseCount: 0 };
+    const tracking: AsyncTrackingAPI = {
+      start: () => context,
+      enter: () => undefined,
+      exit: () => undefined,
+      stop: () => undefined,
+      pause: () => undefined,
+      resume: () => undefined,
+      ignore: <T>(value: T) => value,
+      waitAll: () => new Promise<void>(() => undefined),
+      pending: () => 0,
+      activeContexts: () => [context.id],
+    };
     (globalThis as Record<string, unknown>)["__vibestudioAsyncTracking__"] = tracking;
 
     await expect(
@@ -529,6 +540,44 @@ return fs.readFileSync("/tmp/a");`,
     expect(loadImport).not.toHaveBeenCalled();
   });
 
+  it("tracks build-loaded refs independently in each module registry", async () => {
+    const firstModuleMap: Record<string, unknown> = {};
+    const secondModuleMap: Record<string, unknown> = {};
+    const loadImport = vi.fn(async (_specifier: string, ref: string | undefined) => ({
+      bundle: `module.exports = { label: ${JSON.stringify(ref ?? "latest")} };`,
+      format: "cjs" as const,
+    }));
+    const runWithRef = (moduleMap: Record<string, unknown>, ref: string) =>
+      executeSandbox('import { label } from "versioned-lib"; return label;', {
+        syntax: "typescript",
+        imports: { "versioned-lib": ref },
+        moduleMap,
+        require: (id) => {
+          if (id in moduleMap) return moduleMap[id];
+          throw new Error(`Module not found: ${id}`);
+        },
+        loadImport,
+      });
+
+    await expect(runWithRef(firstModuleMap, "npm:1")).resolves.toMatchObject({
+      success: true,
+      returnValue: "npm:1",
+    });
+    await expect(runWithRef(secondModuleMap, "npm:2")).resolves.toMatchObject({
+      success: true,
+      returnValue: "npm:2",
+    });
+    await expect(runWithRef(firstModuleMap, "npm:2")).resolves.toMatchObject({
+      success: true,
+      returnValue: "npm:2",
+    });
+    await expect(runWithRef(firstModuleMap, "npm:2")).resolves.toMatchObject({
+      success: true,
+      returnValue: "npm:2",
+    });
+    expect(loadImport.mock.calls.map(([, ref]) => ref)).toEqual(["npm:1", "npm:2", "npm:2"]);
+  });
+
   it("does not mask a lazy exposed-chunk failure with build fallback", async () => {
     const globals = globalThis as Record<string, unknown>;
     const loaders = globals["__vibestudioModuleLoaders__"] as Record<
@@ -665,6 +714,28 @@ return fs.readFileSync("/tmp/a");`,
         stage: "push",
         committedEventId: "event:committed",
         published: false,
+      },
+    });
+  });
+
+  it("honors a structured failure's declared cross-tool classification", async () => {
+    const result = await executeSandbox(
+      `const error = new Error("target connection closed");
+       error.errorData = {
+         code: "cdp_target_closed",
+         failureKind: "infrastructure",
+         recovery: "reacquire-page"
+       };
+       throw error;`,
+      { syntax: "typescript" }
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      failureKind: "infrastructure",
+      failureCode: "cdp_target_closed",
+      errorData: {
+        recovery: "reacquire-page",
       },
     });
   });

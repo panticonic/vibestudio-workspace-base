@@ -20,11 +20,6 @@
  * };
  * ```
  */
-// Buffer polyfill for non-Node environments
-import { Buffer } from "buffer";
-if (typeof globalThis.Buffer === "undefined") {
-  (globalThis as any).Buffer = Buffer;
-}
 import {
   createConnectionlessRpcClient,
   type ConnectionlessRpcClient,
@@ -36,18 +31,11 @@ import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient"
 import { canonicalEntityId } from "@vibestudio/shared/runtime/entitySpec";
 import { workerLogMethods } from "@vibestudio/service-schemas/workerLog";
 import type { OpenExternalOptions, OpenExternalResult } from "@vibestudio/shared/externalOpen";
-import { fs, _initFsWithRpc } from "./fs.js";
-import type { WebhookIngressClient } from "../shared/webhooks.js";
-import {
-  createDurableObjectServiceClient,
-  createWorkerdClient,
-  doTargetId,
-  type WorkerdClient,
-  type DurableObjectServiceClient,
-} from "../shared/workerd.js";
+import { _initFsWithRpc } from "./fs.js";
+import { createWorkerdClient } from "../shared/workerd.js";
 import { createNonPanelRuntimeHandle, createRuntimeParentHandle } from "../shared/handles.js";
 import { helpfulNamespace } from "../shared/helpfulNamespace.js";
-import { createGatewayFetch, type GatewayFetch } from "../shared/gatewayFetch.js";
+import { createGatewayFetch } from "../shared/gatewayFetch.js";
 import { createMainCaller } from "../shared/mainRpc.js";
 import { createPanelRuntime, type PanelRuntimeApi } from "../shared/panelRuntime.js";
 import {
@@ -115,6 +103,7 @@ export type {
 } from "../shared/extensions.js";
 export type * from "../shared/gad.js";
 export { DurableObjectBase } from "./durable-base.js";
+export { PanelDurableObjectBase } from "./panel-durable-base.js";
 export { assertExactSqlTableSchema } from "./sql-table-schema.js";
 // `@rpc` exposure decorator — mark a DO method as reachable over RPC (opt-in / default-deny).
 import { rpc as rpcDecorator } from "@vibestudio/rpc";

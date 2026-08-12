@@ -94,7 +94,6 @@ export type EventKind =
   | "invocation.cancelled"
   | "invocation.abandoned"
   | "task.started"
-  | "task.progress"
   | "task.completed"
   | "task.failed"
   | "task.cancelled"
@@ -108,6 +107,7 @@ export type EventKind =
   | "messageType.cleared"
   | "custom.started"
   | "custom.updated"
+  | "automation.instituted"
   | "memory.recalled"
   | "build.completed"
   | "external.envelope_published"
@@ -353,16 +353,22 @@ export type InvocationCompletedPayload = {
   summary?: string;
   terminalOutcome: "success";
   terminalReasonCode?: string;
+  /** Explicit recipients of this correlated outcome. */
+  to?: ParticipantSelector[];
   /**
    * Bounded loop-control disposition copied out of an opaque tool result.
    * `result` is always blob-backed and therefore must never carry fields that
    * the trajectory fold needs in order to decide what happens next.
    */
-  turnControl?: {
-    kind: "suspend";
-    reason: string;
-    summary: string;
-  };
+  turnControl?:
+    | {
+        kind: "suspend";
+        reason: string;
+        summary: string;
+      }
+    | {
+        kind: "terminate";
+      };
 };
 
 export type InvocationTerminalFailureOutcome = Exclude<InvocationOutcome, "success">;
@@ -374,6 +380,8 @@ type InvocationFailurePayloadBase<Outcome extends InvocationTerminalFailureOutco
   recoverable?: boolean;
   terminalOutcome: Outcome;
   terminalReasonCode?: string;
+  /** Explicit recipients of this correlated outcome. */
+  to?: ParticipantSelector[];
   /** Canonical machine-readable failure. Human prose is rendered from this
    * object; agents and validators branch only on its typed fields. */
   failure?: AgentToolFailure;
@@ -396,60 +404,6 @@ export type InvocationFailurePayload =
 
 export type InvocationTerminalPayload = InvocationCompletedPayload | InvocationFailurePayload;
 
-/** What a subagent progress update reports. `tool-*` kinds carry the child's
- *  own invocation lifecycle; `said` is a completed child message. */
-export type SubagentProgressKind =
-  | "turn-started"
-  | "turn-finished"
-  | "tool-started"
-  | "tool-progress"
-  | "tool-completed"
-  | "tool-failed"
-  | "tool-cancelled"
-  | "tool-abandoned"
-  | "title-changed"
-  | "said";
-
-/**
- * One structured progress update relayed from a subagent's task channel onto
- * the parent run, published as a `task.progress` payload facet. Every
- * field is inline (fold-readable); the emitter bounds `text`.
- */
-export interface SubagentProgressUpdate {
-  kind: SubagentProgressKind;
-  /** Stable address of the authoritative child event behind this inline
-   *  projection. Together with `messageSeq`, this identifies the unbounded
-   *  source in the child's transcript. */
-  sourceChannelId?: string;
-  /** Child tool name, for the `tool-*` kinds. */
-  tool?: string;
-  /**
-   * The child-side invocation this update belongs to (`causality.invocationId`
-   * on the folded event), present on every `tool-*` kind. Terminal updates
-   * carry no tool name of their own, so the parent pairs them back to their
-   * `tool-started` through this id and renders ONE consolidated call rather
-   * than two unrelated log lines.
-   */
-  callId?: string;
-  /** Bounded preview of the child call's arguments, on `tool-started`. */
-  args?: Record<string, unknown>;
-  /** True when `args` is only a partial projection of the source request. */
-  argsTruncated?: boolean;
-  /** Bounded preview of the child call's result, on `tool-completed`. */
-  result?: unknown;
-  /** True when `result` is only a partial projection of the source result. */
-  resultTruncated?: boolean;
-  /** Bounded human-readable body: say text, progress message, failure reason. */
-  text?: string;
-  /** True when `text` is only a partial projection of the source text. */
-  textTruncated?: boolean;
-  /** Child task-channel envelope seq this update was folded from. */
-  messageSeq: number;
-  /** True when the child explicitly surfaced this (`saliency: "say"`) rather
-   *  than it being derived from routine turn traffic. */
-  say?: boolean;
-}
-
 export type InvocationPayload =
   | {
       protocol: "agentic.trajectory.v1";
@@ -459,6 +413,8 @@ export type InvocationPayload =
       transport?: InvocationTransport;
       /** Durable execution ordering selected from the invoked tool's metadata. */
       executionMode?: "sequential" | "parallel";
+      /** Explicit durable recipients of the invocation start. */
+      to?: ParticipantSelector[];
       requiresApproval?: boolean;
       userVisible?: boolean;
       summary?: string;
@@ -473,6 +429,8 @@ export type InvocationPayload =
       protocol: "agentic.trajectory.v1";
       output: unknown;
       channel?: "stdout" | "stderr" | "data";
+      /** Explicit recipients of this correlated output. */
+      to?: ParticipantSelector[];
     }
   | InvocationCompletedPayload
   | InvocationFailurePayload;
@@ -485,18 +443,12 @@ export interface TaskStartedPayload {
   details?: unknown;
 }
 
-export interface TaskProgressPayload {
-  protocol: "agentic.trajectory.v1";
-  message?: string;
-  progress?: number;
-  data?: unknown;
-}
-
 export interface TaskCompletedPayload {
   protocol: "agentic.trajectory.v1";
   result?: unknown;
   summary?: string;
   terminalOutcome: "success";
+  to?: ParticipantSelector[];
 }
 
 type TaskFailurePayloadBase<Outcome extends InvocationTerminalFailureOutcome> = {
@@ -504,6 +456,7 @@ type TaskFailurePayloadBase<Outcome extends InvocationTerminalFailureOutcome> = 
   reason: string;
   terminalOutcome: Outcome;
   details?: unknown;
+  to?: ParticipantSelector[];
 };
 
 export type TaskFailedPayload = TaskFailurePayloadBase<
@@ -516,7 +469,6 @@ export type TaskAbandonedPayload = TaskFailurePayloadBase<"abandoned">;
 
 export type TaskPayload =
   | TaskStartedPayload
-  | TaskProgressPayload
   | TaskCompletedPayload
   | TaskFailedPayload
   | TaskCancelledPayload
@@ -659,6 +611,8 @@ export type UiFeedbackCategory =
 export interface UiFeedbackPayload {
   protocol: "agentic.trajectory.v1";
   target: ParticipantRef;
+  /** Explicit durable recipient; `target` remains the semantic subject. */
+  to?: ParticipantSelector[];
   category: UiFeedbackCategory;
   refs?: {
     messageId?: MessageId;
@@ -724,6 +678,7 @@ export interface TurnPayload {
   protocol: "agentic.trajectory.v1";
   summary?: string;
   reason?: TurnReasonCode;
+  metadata?: Record<string, unknown>;
 }
 
 export interface BranchPayload {
@@ -744,6 +699,10 @@ export interface BranchPayload {
  */
 export interface ChannelForkedPayload {
   protocol: "agentic.trajectory.v1";
+  /** Channel that authored this lineage fact. Fork logs inherit their parent
+   * prefix, so reducers must scope the event to this parent instead of treating
+   * inherited sibling announcements as children of the fork. */
+  parentChannelId: string;
   forkId: string;
   forkedChannelId: string;
   forkedContextId: string;
@@ -753,18 +712,22 @@ export interface ChannelForkedPayload {
   /** "edit" | "branch" | "deep-dive" | free-form. */
   reason: string;
   actor: ParticipantRef;
+  /** Child channel head immediately after fork initialization/seed append. */
+  headSeq: number;
   /** Edit-forks: the replacement (seed) message id in the child channel. */
   seededMessageId?: string;
 }
 
 export interface ChannelForkRenamedPayload {
   protocol: "agentic.trajectory.v1";
+  parentChannelId: string;
   forkId: string;
   label: string;
 }
 
 export interface ChannelForkArchivedPayload {
   protocol: "agentic.trajectory.v1";
+  parentChannelId: string;
   forkId: string;
 }
 
@@ -773,6 +736,42 @@ export interface SystemPayload {
   kind?: string;
   summary?: string;
   details?: unknown;
+}
+
+export type AutomationScheduleSnapshot =
+  | {
+      kind: "interval";
+      everyMs: number;
+      anchorAt?: number;
+      jitterMs?: number;
+      untilAt?: number;
+      maxRuns?: number;
+    }
+  | {
+      kind: "cron";
+      expression: string;
+      timezone: string;
+      untilAt?: number;
+      maxRuns?: number;
+    }
+  | null;
+
+/** Immutable, zero-fetch definition summary written when an agent creates a
+ * draft. The mission ledger remains canonical; this snapshot makes the
+ * institution event immediately useful and permanently understandable. */
+export interface AutomationDefinitionSnapshot {
+  missionId: string;
+  name: string;
+  summary: string;
+  revision: number;
+  action: "prompt" | "eval" | "method";
+  createdAt: number;
+  schedule: AutomationScheduleSnapshot;
+}
+
+export interface AutomationInstitutedPayload {
+  protocol: "agentic.trajectory.v1";
+  definition: AutomationDefinitionSnapshot;
 }
 
 export interface CompactionPayload {
@@ -823,45 +822,47 @@ export type PayloadFor<K extends EventKind> = K extends "message.received" | "me
           ? InvocationPayloadFor<K>
           : K extends `task.${string}`
             ? TaskPayload
-          : K extends `approval.${string}`
-            ? ApprovalPayload
-            : K extends "ui.feedback"
-              ? UiFeedbackPayload
-              : K extends `ui.${string}`
-                ? UiPayload
-                : K extends "messageType.registered"
-                  ? MessageTypeRegisteredPayload
-                  : K extends "messageType.cleared"
-                    ? MessageTypeClearedPayload
-                    : K extends "custom.started"
-                      ? CustomStartedPayload
-                      : K extends "custom.updated"
-                        ? CustomUpdatedPayload
-                        : K extends "external.envelope_published"
-                          ? ExternalEnvelopePublishedPayload
-                          : K extends "external.envelope_observed"
-                            ? ExternalEnvelopeObservedPayload
-                            : K extends "external.participant_observed"
-                              ? ExternalParticipantObservedPayload
-                              : K extends `branch.${string}`
-                                ? BranchPayload
-                                : K extends `turn.${string}`
-                                  ? TurnPayload
-                                  : K extends "system.compaction_recorded"
-                                    ? CompactionPayload
-                                    : K extends "system.event"
-                                      ? SystemPayload
-                                      : K extends "memory.recalled"
-                                        ? MemoryRecalledPayload
-                                        : K extends "build.completed"
-                                          ? BuildCompletedPayload
-                                          : K extends "channel.forked"
-                                            ? ChannelForkedPayload
-                                            : K extends "channel.fork_renamed"
-                                              ? ChannelForkRenamedPayload
-                                              : K extends "channel.fork_archived"
-                                                ? ChannelForkArchivedPayload
-                                                : never;
+            : K extends `approval.${string}`
+              ? ApprovalPayload
+              : K extends "ui.feedback"
+                ? UiFeedbackPayload
+                : K extends `ui.${string}`
+                  ? UiPayload
+                  : K extends "messageType.registered"
+                    ? MessageTypeRegisteredPayload
+                    : K extends "messageType.cleared"
+                      ? MessageTypeClearedPayload
+                      : K extends "custom.started"
+                        ? CustomStartedPayload
+                        : K extends "custom.updated"
+                          ? CustomUpdatedPayload
+                          : K extends "automation.instituted"
+                            ? AutomationInstitutedPayload
+                            : K extends "external.envelope_published"
+                              ? ExternalEnvelopePublishedPayload
+                              : K extends "external.envelope_observed"
+                                ? ExternalEnvelopeObservedPayload
+                                : K extends "external.participant_observed"
+                                  ? ExternalParticipantObservedPayload
+                                  : K extends `branch.${string}`
+                                    ? BranchPayload
+                                    : K extends `turn.${string}`
+                                      ? TurnPayload
+                                      : K extends "system.compaction_recorded"
+                                        ? CompactionPayload
+                                        : K extends "system.event"
+                                          ? SystemPayload
+                                          : K extends "memory.recalled"
+                                            ? MemoryRecalledPayload
+                                            : K extends "build.completed"
+                                              ? BuildCompletedPayload
+                                              : K extends "channel.forked"
+                                                ? ChannelForkedPayload
+                                                : K extends "channel.fork_renamed"
+                                                  ? ChannelForkRenamedPayload
+                                                  : K extends "channel.fork_archived"
+                                                    ? ChannelForkArchivedPayload
+                                                    : never;
 
 export interface AgenticEvent<K extends EventKind = EventKind> {
   kind: K;

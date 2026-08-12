@@ -43,11 +43,13 @@ export type {
   UnsubscribeResult,
 } from "./types.js";
 
-// File tools (workerd-clean port of pi-coding-agent's six file tools)
+// Model-facing tools for semantic authoring, discovery, verification, and eval.
 export {
   createReadTool,
+  createReadBinaryTool,
   createProvenanceTool,
   createEditTool,
+  createApplyPatchTool,
   createWriteTool,
   createMoveFileTool,
   createCopyFileTool,
@@ -67,6 +69,8 @@ export {
   createDocsSearchTool,
   createDocsOpenTool,
   createWorkspaceServiceTool,
+  createVerifyTool,
+  verifySchema,
   resolveToCwd,
   expandPath,
   DEFAULT_MAX_BYTES,
@@ -89,6 +93,7 @@ export { createWebTools } from "./web/index.js";
 export type { WebToolsDeps } from "./web/index.js";
 export type {
   ReadToolInput,
+  ReadBinaryToolInput,
   ReadToolDetails,
   ReadToolDeps,
   ProvenanceToolInput,
@@ -97,6 +102,9 @@ export type {
   ProvenanceBlockInput,
   EditToolInput,
   EditToolDetails,
+  ApplyPatchOperation,
+  ApplyPatchToolInput,
+  ApplyPatchToolDetails,
   WriteToolInput,
   WriteToolDetails,
   FileTransferToolInput,
@@ -119,6 +127,10 @@ export type {
   WorkspaceServiceToolInput,
   WorkspaceServiceToolDetails,
   WorkspaceServiceToolDeps,
+  WorkspaceReadReceipt,
+  VerifyToolInput,
+  VerifyToolDetails,
+  BuildVerificationReceipt,
   TruncationResult,
   TruncationOptions,
   LineEnding,

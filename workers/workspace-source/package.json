@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "title": "Workspace Source",
+    "icon": "./assets/icon.svg",
     "kind": "worker",
     "entry": "GadWorkspaceDO.ts",
     "durable": {

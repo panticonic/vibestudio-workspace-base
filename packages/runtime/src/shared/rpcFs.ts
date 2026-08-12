@@ -6,8 +6,7 @@
  *
  * Shared between panels and workers — no Node.js or browser-specific dependencies.
  */
-import { Buffer } from "buffer";
-import type { RpcClient } from "@vibestudio/rpc";
+import { base64ToBytes, bytesToBase64, type RpcClient } from "@vibestudio/rpc";
 import type {
   RuntimeFs,
   FileStats,
@@ -29,13 +28,12 @@ function isBinaryEnvelope(v: unknown): v is BinaryEnvelope {
   );
 }
 function encodeBinary(buf: Uint8Array): BinaryEnvelope {
-  return { __bin: true, data: Buffer.from(buf).toString("base64") };
+  return { __bin: true, data: bytesToBase64(buf) };
 }
-function decodeBinary(envelope: BinaryEnvelope): Buffer {
-  return Buffer.from(envelope.data, "base64");
+function decodeBinary(envelope: BinaryEnvelope): Uint8Array {
+  return base64ToBytes(envelope.data);
 }
 function toUint8Array(data: RuntimeBinaryData): Uint8Array {
-  if (isBinaryEnvelope(data)) return decodeBinary(data);
   if (data instanceof ArrayBuffer) return new Uint8Array(data);
   if (ArrayBuffer.isView(data)) {
     return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
@@ -107,31 +105,30 @@ export function createRpcFs(rpc: Pick<RpcClient, "call">, options: RpcFsOptions 
     const invocation = options.signal
       ? rpc.call<T>("main", `fs.${method}`, [...args], { signal: options.signal })
       : rpc.call<T>("main", `fs.${method}`, [...args]);
-    return invocation
-      .then(
-        (value) => {
-          if (options.onTelemetry) {
-            report({
-              method,
-              phase: "settled",
-              elapsedMs: Date.now() - startedAt,
-              outcome: "ok",
-            });
-          }
-          return value;
-        },
-        (error: unknown) => {
-          if (options.onTelemetry) {
-            report({
-              method,
-              phase: "settled",
-              elapsedMs: Date.now() - startedAt,
-              outcome: "error",
-            });
-          }
-          throw error;
+    return invocation.then(
+      (value) => {
+        if (options.onTelemetry) {
+          report({
+            method,
+            phase: "settled",
+            elapsedMs: Date.now() - startedAt,
+            outcome: "ok",
+          });
         }
-      );
+        return value;
+      },
+      (error: unknown) => {
+        if (options.onTelemetry) {
+          report({
+            method,
+            phase: "settled",
+            elapsedMs: Date.now() - startedAt,
+            outcome: "error",
+          });
+        }
+        throw error;
+      }
+    );
   }
   return {
     constants: FS_CONSTANTS,
@@ -143,7 +140,7 @@ export function createRpcFs(rpc: Pick<RpcClient, "call">, options: RpcFsOptions 
       await call<string | undefined>("mkdir", path, { recursive: true });
       return path;
     },
-    async readFile(path: string, encoding?: BufferEncoding): Promise<string | Buffer> {
+    async readFile(path: string, encoding?: BufferEncoding): Promise<string | Uint8Array> {
       const result = await call<string | BinaryEnvelope>("readFile", path, encoding);
       if (isBinaryEnvelope(result)) {
         return decodeBinary(result);
@@ -164,9 +161,7 @@ export function createRpcFs(rpc: Pick<RpcClient, "call">, options: RpcFsOptions 
         const entries = await call<SerializedDirent[]>("readdir", path, options);
         return entries.map(toDirent);
       }
-      return options
-        ? call<string[]>("readdir", path, options)
-        : call<string[]>("readdir", path);
+      return options ? call<string[]>("readdir", path, options) : call<string[]>("readdir", path);
     }) as RuntimeFs["readdir"],
     async stat(path: string): Promise<FileStats> {
       return toFileStats(await call<unknown>("stat", path));

@@ -16,6 +16,7 @@ function invocation(
   return {
     kind: "message" as const,
     senderId: "agent",
+    senderMetadata: { type: "agent" },
     complete: true,
     contentType: "invocation" as const,
     invocation: {
@@ -40,7 +41,13 @@ function execution(
     messages: [
       { kind: "message", senderId: "user", complete: true, content: "prompt" },
       ...calls,
-      { kind: "message", senderId: "agent", complete: true, content: final },
+      {
+        kind: "message",
+        senderId: "agent",
+        senderMetadata: { type: "agent" },
+        complete: true,
+        content: final,
+      },
     ],
   } as TestExecutionResult;
 }
@@ -168,6 +175,105 @@ describe("storage and discovery semantic validators", () => {
       "The bounded host-log sample contained 1 warning entry; overall server log statistics report 4 entries.";
     expect(test.validate(execution(final, [call]))).toEqual({ passed: true });
     expect(test.validate(execution(final))).toMatchObject({ passed: false });
+  });
+
+  it("requires a real host-log observation for the vague startup incident", () => {
+    const test = serverLogTests.find(
+      (candidate) => candidate.name === "server-log-startup-diagnosis"
+    )!;
+    const observed = invocation(
+      "eval",
+      {
+        code: `
+          const earlier = await rpc.call("main", "serverLog.tail", [10]);
+          const current = await rpc.call("main", "serverLog.query", [{ limit: 30 }]);
+          return { earlier, current };
+        `,
+      },
+      {
+        details: {
+          success: true,
+          returnValue: {
+            earlier: {
+              records: [{ seq: 11, level: "info", message: "server launching" }],
+              latestSeq: 12,
+              serverBootId: "boot:test-startup",
+            },
+            current: {
+              records: [{ seq: 40, level: "info", message: "startup complete" }],
+              latestSeq: 41,
+              serverBootId: "boot:test-startup",
+            },
+          },
+        },
+      }
+    );
+    const skill = invocation(
+      "docs_open",
+      { id: "server-logs" },
+      { details: { id: "server-logs", title: "Server logs" } }
+    );
+
+    expect(test.validation).toBe("agent-evidence");
+    expect(
+      test.validate(
+        execution(
+          "Startup completed after one slow build. Evidence: boot:test-startup at sequence 41.",
+          [skill, observed]
+        )
+      )
+    ).toEqual({ passed: true, reason: undefined });
+    expect(test.validate(execution("Everything looks fine."))).toMatchObject({ passed: false });
+    expect(
+      test.validate(
+        execution("Startup looked normal at boot:test-startup sequence 41.", [observed])
+      )
+    ).toMatchObject({ passed: false, reason: expect.stringContaining("guidance") });
+    expect(test.validate(execution("Startup looked normal.", [skill, observed]))).toMatchObject({
+      passed: false,
+      reason: expect.stringContaining("coordinates"),
+    });
+  });
+
+  it("accepts a bounded compact snapshot without requiring the raw service envelope", () => {
+    const test = serverLogTests.find(
+      (candidate) => candidate.name === "server-log-startup-diagnosis"
+    )!;
+    const skill = invocation(
+      "read",
+      { path: "skills/server-logs/SKILL.md" },
+      { text: "Use bounded server-log inspection." }
+    );
+    const observed = invocation(
+      "eval",
+      {
+        code: `
+          const tail = await rpc.call("main", "serverLog.tail", [30]);
+          return {
+            tailMeta: { serverBootId: tail.serverBootId, latestSeq: tail.latestSeq },
+            tail: tail.records.map(({ seq, level, message }) => ({ seq, level, message })),
+          };
+        `,
+      },
+      {
+        details: {
+          success: true,
+          returnValue: {
+            tailMeta: { serverBootId: "boot:compact", latestSeq: 87 },
+            tail: [{ seq: 84, level: "warn", msg: "startup was briefly slow" }],
+          },
+        },
+      }
+    );
+
+    expect(
+      test.validate(
+        execution("Startup was briefly slow in boot:compact; latest sequence 87.", [
+          skill,
+          observed,
+        ])
+      )
+    ).toEqual({ passed: true, reason: undefined });
   });
 
   it("requires an identity-joined webhook lifecycle and final cleanup", () => {

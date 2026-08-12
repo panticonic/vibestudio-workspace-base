@@ -5,7 +5,8 @@
  * directions.
  */
 
-import { assertExactSqlTableSchema, type SqlStorage } from "@workspace/runtime/worker";
+import type { SqlStorage } from "@workspace/runtime/worker/durable-base";
+import { assertExactSqlTableSchema } from "@workspace/runtime/worker/sql-table-schema";
 import type { EffectDescriptor, EffectKind } from "@workspace/agent-loop";
 
 export interface OutboxRow {
@@ -88,10 +89,18 @@ export function ensureOutboxSchema(sql: SqlStorage): void {
     `CREATE INDEX IF NOT EXISTS idx_effect_outbox_channel_effect
       ON effect_outbox(channel_id, effect_id)`
   );
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS effect_completion_evidence (
+      branch_id TEXT NOT NULL,
+      effect_id TEXT NOT NULL,
+      completed_at INTEGER NOT NULL,
+      PRIMARY KEY (branch_id, effect_id)
+    )
+  `);
 }
 
-export function maxAttempts(kind: EffectKind, mutating = false): number {
-  switch (kind) {
+export function maxAttempts(descriptor: EffectDescriptor): number {
+  switch (descriptor.kind) {
     case "prompt_artifacts":
       // Prompt/tool materialization is read-mostly and its blob writes are
       // content-addressed. Brief host-RPC transport failures must not discard
@@ -99,20 +108,23 @@ export function maxAttempts(kind: EffectKind, mutating = false): number {
       // deterministic failure still settles visibly after a bounded retry.
       return 3;
     case "model_call":
-      // A retry-classified provider failure is explicitly non-terminal. Keep
-      // the journaled request pending until it succeeds or the owning turn is
-      // cancelled; an arbitrary attempt budget turns a temporary network
-      // partition into permanent loss of an otherwise untouched turn.
+      // Reviewed provider backpressure remains pending until it succeeds or
+      // the owning turn is cancelled. Opaque transport failures are bounded
+      // by AgentLoopDriver because only the classified outcome identifies
+      // them; they must not leave an interactive turn typing forever.
       return Number.POSITIVE_INFINITY;
     case "local_tool":
-      return mutating ? 1 : 3;
+      // A settle boundary may have committed before its transport reported an
+      // error. Do not redrive it blindly; durable semantic mutations recover
+      // through command evidence, while scratch mutations have no replay key.
+      return descriptor.cancellationMode === "settle" ? 1 : 3;
     case "channel_call":
     case "http_call":
       return 5;
     case "credential_wait":
       return Number.POSITIVE_INFINITY; // deadline-only
-    case "publish_envelope":
-      return 1;
+    case "record_receipt":
+      return 3;
   }
 }
 
@@ -138,15 +150,33 @@ function mapRow(row: Record<string, unknown>): OutboxRow {
   };
 }
 
-function compareDispatchOrder(left: OutboxRow, right: OutboxRow): number {
-  const leftDescriptor = left.descriptor;
-  const rightDescriptor = right.descriptor;
+function invocationOrder(row: OutboxRow): {
+  turnId: string;
+  sequence: number;
+  executionMode: "sequential" | "parallel";
+} | null {
+  const descriptor = row.descriptor;
   if (
-    leftDescriptor.kind === "local_tool" &&
-    rightDescriptor.kind === "local_tool" &&
-    leftDescriptor.turnId === rightDescriptor.turnId
+    (descriptor.kind === "local_tool" ||
+      descriptor.kind === "channel_call" ||
+      descriptor.kind === "http_call") &&
+    typeof descriptor.invocationSeq === "number" &&
+    (descriptor.executionMode === "sequential" || descriptor.executionMode === "parallel")
   ) {
-    const sequence = leftDescriptor.invocationSeq - rightDescriptor.invocationSeq;
+    return {
+      turnId: descriptor.turnId,
+      sequence: descriptor.invocationSeq,
+      executionMode: descriptor.executionMode,
+    };
+  }
+  return null;
+}
+
+function compareDispatchOrder(left: OutboxRow, right: OutboxRow): number {
+  const leftInvocation = invocationOrder(left);
+  const rightInvocation = invocationOrder(right);
+  if (leftInvocation && rightInvocation && leftInvocation.turnId === rightInvocation.turnId) {
+    const sequence = leftInvocation.sequence - rightInvocation.sequence;
     if (sequence !== 0) return sequence;
   }
   if (left.createdAt !== right.createdAt) return left.createdAt - right.createdAt;
@@ -174,6 +204,44 @@ export function inspectEffectOutbox(sql: SqlStorage): OutboxRow[] {
 export class EffectOutbox {
   constructor(private readonly sql: SqlStorage) {
     ensureOutboxSchema(sql);
+  }
+
+  hasCompletionEvidence(branchId: string, effectId: string): boolean {
+    return (
+      this.sql
+        .exec(
+          `SELECT 1 FROM effect_completion_evidence WHERE branch_id = ? AND effect_id = ?`,
+          branchId,
+          effectId
+        )
+        .toArray().length > 0
+    );
+  }
+
+  recordCompletionEvidence(branchId: string, effectId: string, completedAt: number): void {
+    this.sql.exec(
+      `INSERT OR IGNORE INTO effect_completion_evidence (branch_id, effect_id, completed_at)
+       VALUES (?, ?, ?)`,
+      branchId,
+      effectId,
+      completedAt
+    );
+  }
+
+  pruneCompletionEvidence(branchId: string, expectedEffectIds: Set<string>): void {
+    const rows = this.sql
+      .exec(`SELECT effect_id FROM effect_completion_evidence WHERE branch_id = ?`, branchId)
+      .toArray();
+    for (const row of rows) {
+      const effectId = String(row["effect_id"]);
+      if (!expectedEffectIds.has(effectId)) {
+        this.sql.exec(
+          `DELETE FROM effect_completion_evidence WHERE branch_id = ? AND effect_id = ?`,
+          branchId,
+          effectId
+        );
+      }
+    }
   }
 
   insert(branchId: string, descriptor: EffectDescriptor, nextAttemptAt: number | null): void {
@@ -251,7 +319,7 @@ export class EffectOutbox {
     return (
       this.sql
         .exec(
-          `SELECT * FROM effect_outbox WHERE branch_id = ? AND kind != 'publish_envelope'`,
+          `SELECT * FROM effect_outbox WHERE branch_id = ? AND kind != 'record_receipt'`,
           branchId
         )
         .toArray() as Record<string, unknown>[]
@@ -316,11 +384,7 @@ export class EffectOutbox {
     return this.get(branchId, effectId);
   }
 
-  claimReady(input: {
-    workerId: string;
-    now: number;
-    limit: number;
-  }): OutboxRow[] {
+  claimReady(input: { workerId: string; now: number; limit: number }): OutboxRow[] {
     const candidates = this.due(input.now);
     const dueKeys = new Set(candidates.map((row) => `${row.branchId}\u0000${row.effectId}`));
     const unresolved = this.all();
@@ -330,23 +394,32 @@ export class EffectOutbox {
         .filter((row) => row.channelId === channelId)
         .sort(compareDispatchOrder);
       selected.push(
-        ...rows.filter(
-          (row) =>
-            (row.kind === "publish_envelope" ||
-              row.kind === "channel_call" ||
-              row.kind === "http_call") &&
-            dueKeys.has(`${row.branchId}\u0000${row.effectId}`)
-        )
+        ...rows.filter((row) => {
+          const independentlyDispatchable =
+            row.kind === "record_receipt" ||
+            ((row.kind === "channel_call" || row.kind === "http_call") &&
+              invocationOrder(row) === null);
+          return independentlyDispatchable && dueKeys.has(`${row.branchId}\u0000${row.effectId}`);
+        })
       );
       const semantic = rows.filter(
         (row) =>
-          row.kind !== "publish_envelope" && row.kind !== "channel_call" && row.kind !== "http_call"
+          row.kind !== "record_receipt" &&
+          !(
+            (row.kind === "channel_call" || row.kind === "http_call") &&
+            invocationOrder(row) === null
+          )
       );
       const first = semantic[0];
       if (!first) continue;
-      if (first.descriptor.kind === "local_tool" && first.descriptor.executionMode === "parallel") {
+      const firstInvocation = invocationOrder(first);
+      if (firstInvocation?.executionMode === "parallel") {
         for (const row of semantic) {
-          if (row.descriptor.kind !== "local_tool" || row.descriptor.executionMode !== "parallel") {
+          const invocation = invocationOrder(row);
+          if (
+            invocation?.executionMode !== "parallel" ||
+            invocation.turnId !== firstInvocation.turnId
+          ) {
             break;
           }
           if (dueKeys.has(`${row.branchId}\u0000${row.effectId}`)) selected.push(row);

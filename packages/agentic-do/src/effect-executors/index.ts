@@ -1,4 +1,9 @@
-import { CREDENTIAL_CONNECT_PAYLOAD_KIND } from "@workspace/agentic-protocol";
+import {
+  CREDENTIAL_CONNECT_PAYLOAD_KIND,
+  agentToolFailureFromUnknown,
+  createAgentToolArtifactRef,
+  renderAgentToolFailure,
+} from "@workspace/agentic-protocol";
 /**
  * Effect executors (WS1 §2.4) — the impure edge of the event-sourced harness.
  *
@@ -16,7 +21,7 @@ import type {
   HttpCallEffect,
   LocalToolEffect,
   PromptArtifactsEffect,
-  PublishEnvelopeEffect,
+  RecordReceiptEffect,
 } from "@workspace/agent-loop";
 import { modelCallExecutor } from "./model-call.js";
 import type { EffectExecutor } from "./types.js";
@@ -58,16 +63,112 @@ function turnControlFromToolResult(
   };
 }
 
+const MAX_MODEL_TOOL_RESULT_CHARS = 32_000;
+const TOOL_ARTIFACT_THRESHOLD_BYTES = 48 * 1024;
+
+function resultRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function attachFailureToResult(result: unknown, failure: ReturnType<typeof agentToolFailureFromUnknown>) {
+  const record = resultRecord(result);
+  if (!record) {
+    return {
+      protocolContent: [{ type: "text", text: renderAgentToolFailure(failure) }],
+      details: { failure, originalResult: result },
+    };
+  }
+  const details = resultRecord(record["details"]);
+  return { ...record, details: { ...(details ?? {}), failure } };
+}
+
+function windowToolText(text: string): string {
+  if (text.length <= MAX_MODEL_TOOL_RESULT_CHARS) return text;
+  const notice =
+    `\n[Tool result compacted: ${text.length - MAX_MODEL_TOOL_RESULT_CHARS} of ` +
+    `${text.length} characters are available in the attached artifact.]\n`;
+  const available = Math.max(0, MAX_MODEL_TOOL_RESULT_CHARS - notice.length);
+  const head = Math.floor(available * 0.75);
+  return `${text.slice(0, head)}${notice}${text.slice(-(available - head))}`;
+}
+
+async function artifactBackedToolResult(
+  result: unknown,
+  tool: string,
+  invocationId: string,
+  blobstore: { putText(value: string): Promise<{ digest: string; size: number }> }
+): Promise<unknown> {
+  let json: string;
+  try {
+    json = JSON.stringify(result);
+  } catch {
+    return result;
+  }
+  const record = resultRecord(result);
+  const blocks = Array.isArray(record?.["protocolContent"])
+    ? (record!["protocolContent"] as unknown[])
+    : [];
+  const textChars = blocks.reduce<number>(
+    (total, block) =>
+      total +
+      (resultRecord(block)?.["type"] === "text" &&
+      typeof resultRecord(block)?.["text"] === "string"
+        ? String(resultRecord(block)?.["text"]).length
+        : 0),
+    0
+  );
+  const bytes = new TextEncoder().encode(json).byteLength;
+  if (bytes <= TOOL_ARTIFACT_THRESHOLD_BYTES && textChars <= MAX_MODEL_TOOL_RESULT_CHARS) {
+    return result;
+  }
+  const stored = await blobstore.putText(json);
+  const artifact = createAgentToolArtifactRef({
+    digest: stored.digest,
+    byteLength: stored.size,
+    description: `Complete ${tool} result for invocation ${invocationId}`,
+  });
+  const compactBlocks = blocks.map((block) => {
+    const value = resultRecord(block);
+    return value?.["type"] === "text" && typeof value["text"] === "string"
+      ? { ...value, text: windowToolText(value["text"]) }
+      : block;
+  });
+  compactBlocks.push({
+    type: "text",
+    text:
+      `Full structured result: ${artifact.uri} (${artifact.byteLength} bytes). ` +
+      "Pass the resource object from details.artifact to read for bounded access.",
+  });
+  const details = resultRecord(record?.["details"]);
+  return {
+    ...(record ?? {}),
+    protocolContent: compactBlocks,
+    details: { ...(details ?? {}), artifact },
+  };
+}
+
 /** local_tool (§2.4.2): registry execution with the mutation-replay guard. */
 export const localToolExecutor: EffectExecutor<LocalToolEffect> = {
   kind: "local_tool",
   async execute({ descriptor, state, signal, deps, onEphemeral }) {
     // §1.4.2 retry rule: a mutating tool whose applied worktree mutation is
     // already folded synthesizes success instead of re-executing.
-    if (deps.localTools.alreadyApplied(state, descriptor.invocationId)) {
+    const replayEvidence = await deps.localTools.alreadyApplied(state, descriptor.invocationId);
+    if (replayEvidence) {
       return {
         kind: "tool",
-        result: { replayed: true, note: "mutation already applied (crash-replay guard)" },
+        result: {
+          protocolContent: [
+            {
+              type: "text",
+              text: `Recovered completed workspace mutation ${replayEvidence.commandId}; it was not executed twice.`,
+            },
+          ],
+          details: { replayed: true, evidence: replayEvidence },
+        },
+        summary: "Recovered a completed workspace mutation",
         isError: false,
       } satisfies EffectOutcome;
     }
@@ -100,24 +201,63 @@ export const localToolExecutor: EffectExecutor<LocalToolEffect> = {
         result: unknown;
         summary?: string;
         isError: boolean;
+        terminate?: boolean;
         terminalReasonCode?: string;
+        failure?: ReturnType<typeof agentToolFailureFromUnknown>;
       };
+      const failure = toolOutcome.isError
+        ? toolOutcome.failure ??
+          agentToolFailureFromUnknown(toolOutcome.result, {
+            operation: `tool.${descriptor.tool}`,
+            stage: signal.aborted ? "cancel" : "execute",
+            causal: { invocationId: descriptor.invocationId },
+            ...(signal.aborted ? { kind: "cancelled" as const } : {}),
+          })
+        : undefined;
+      const resultWithFailure = failure
+        ? attachFailureToResult(toolOutcome.result, failure)
+        : toolOutcome.result;
+      const boundedResult = await artifactBackedToolResult(
+        resultWithFailure,
+        descriptor.tool,
+        descriptor.invocationId,
+        deps.blobstore
+      );
       const turnControl = toolOutcome.isError
         ? undefined
-        : turnControlFromToolResult(toolOutcome.result);
+        : toolOutcome.terminate === true
+          ? ({ kind: "terminate" } as const)
+          : turnControlFromToolResult(toolOutcome.result);
       return {
         kind: "tool",
         ...toolOutcome,
+        result: boundedResult,
+        ...(failure
+          ? {
+              failure,
+              reason: failure.message,
+              terminalReasonCode: failure.code,
+            }
+          : {}),
         ...(turnControl ? { turnControl } : {}),
       } satisfies EffectOutcome;
     } catch (err) {
-      const terminalReasonCode = errorCode(err);
+      const failure = agentToolFailureFromUnknown(err, {
+        operation: `tool.${descriptor.tool}`,
+        stage: signal.aborted ? "cancel" : "execute",
+        causal: { invocationId: descriptor.invocationId },
+        ...(signal.aborted ? { kind: "cancelled" as const } : {}),
+      });
       return {
         kind: "tool",
-        result: err instanceof Error ? err.message : String(err),
+        result: {
+          protocolContent: [{ type: "text", text: renderAgentToolFailure(failure) }],
+          details: { failure },
+        },
         isError: true,
-        reason: err instanceof Error ? err.message : String(err),
-        ...(terminalReasonCode ? { terminalReasonCode } : {}),
+        reason: failure.message,
+        terminalReasonCode: failure.code,
+        failure,
       } satisfies EffectOutcome;
     }
   },
@@ -133,12 +273,6 @@ export const promptArtifactsExecutor: EffectExecutor<PromptArtifactsEffect> = {
     return { kind: "prompt-artifacts", patch } satisfies EffectOutcome;
   },
 };
-
-function errorCode(error: unknown): string | undefined {
-  if (!error || typeof error !== "object") return undefined;
-  const code = (error as { code?: unknown }).code;
-  return typeof code === "string" && code.length > 0 ? code : undefined;
-}
 
 /** channel_call (§2.4.3): journaled call through the channel DO; the result
  *  arrives via the channel's terminal delivery → deliverEffectOutcome. */
@@ -218,18 +352,14 @@ export const credentialWaitExecutor: EffectExecutor<CredentialWaitEffect> = {
   },
 };
 
-/** publish_envelope (§2.4.6): fire-and-forget; exempt from the reconcile. */
-export const publishExecutor: EffectExecutor<PublishEnvelopeEffect> = {
-  kind: "publish_envelope",
+/** Receipt projection update: durable and idempotent, never a channel append. */
+export const receiptExecutor: EffectExecutor<RecordReceiptEffect> = {
+  kind: "record_receipt",
   async execute({ descriptor, deps }) {
-    await deps.channel.publish({
+    await deps.channel.recordReadReceipt({
       channelId: descriptor.channelId,
-      payloadKind: descriptor.payloadKind,
-      payload: descriptor.payload,
-      // Forward the idempotency key so duplicate publishes (read acks, etc.)
-      // dedupe at the channel — one of the three duplicate guards. The port
-      // accepts it; only this executor was dropping it.
-      idempotencyKey: descriptor.idempotencyKey,
+      messageId: descriptor.messageId,
+      turnId: descriptor.turnId,
     });
     return { kind: "tool", result: null, isError: false } satisfies EffectOutcome;
   },
@@ -249,7 +379,7 @@ export function executorFor(descriptor: EffectDescriptor): EffectExecutor {
       return httpCallExecutor as EffectExecutor;
     case "credential_wait":
       return credentialWaitExecutor as EffectExecutor;
-    case "publish_envelope":
-      return publishExecutor as EffectExecutor;
+    case "record_receipt":
+      return receiptExecutor as EffectExecutor;
   }
 }

@@ -2,7 +2,7 @@ import type { ChatMessage } from "@workspace/agentic-core";
 import type { HeadlessSession, SessionSnapshot } from "@workspace/agentic-session";
 import type { HeadlessRunner } from "./runner.js";
 import type { SystemTestFailure, SystemTestJsonValue } from "./structured-error.js";
-import type { WorkspaceRepoFixtureSpec } from "./workspace-repo-fixture.js";
+import type { WorkspaceRepoCreationScope } from "./workspace-repo-fixture.js";
 import type { AgentExecutionTestPolicySpec } from "@vibestudio/shared/authority/testPolicy";
 
 export type {
@@ -10,50 +10,77 @@ export type {
   SystemTestFailure,
   SystemTestJsonValue,
 } from "./structured-error.js";
-export type {
-  WorkspaceRepoCreationScope,
-  WorkspaceRepoFixtureSpec,
-} from "./workspace-repo-fixture.js";
+export type { WorkspaceRepoCreationScope } from "./workspace-repo-fixture.js";
 
 export const CONTENT_WORKSPACE_REPO_FIXTURE = {
   kind: "content",
   section: "projects",
-} as const satisfies WorkspaceRepoFixtureSpec;
+} as const satisfies WorkspaceRepoCreationScope;
+
+export const HISTORICAL_CONTENT_WORKSPACE_REPO_FIXTURE = {
+  kind: "historical-content",
+  section: "projects",
+} as const satisfies WorkspaceRepoCreationScope;
 
 export const BUILDABLE_PACKAGE_WORKSPACE_REPO_FIXTURE = {
   kind: "buildable-package",
   section: "packages",
-} as const satisfies WorkspaceRepoFixtureSpec;
+} as const satisfies WorkspaceRepoCreationScope;
+
+export const BUILDABLE_EXTENSION_WORKSPACE_REPO_FIXTURE = {
+  kind: "buildable-extension",
+  section: "extensions",
+} as const satisfies WorkspaceRepoCreationScope;
+
+export const BUILDABLE_APP_WORKSPACE_REPO_FIXTURE = {
+  kind: "buildable-app",
+  section: "apps",
+} as const satisfies WorkspaceRepoCreationScope;
 
 export const BUILDABLE_WORKER_WORKSPACE_REPO_FIXTURE = {
   kind: "buildable-worker",
   section: "workers",
-} as const satisfies WorkspaceRepoFixtureSpec;
+} as const satisfies WorkspaceRepoCreationScope;
 
 export const BUILDABLE_REGULAR_WORKER_WORKSPACE_REPO_FIXTURE = {
   kind: "buildable-regular-worker",
   section: "workers",
-} as const satisfies WorkspaceRepoFixtureSpec;
+} as const satisfies WorkspaceRepoCreationScope;
 
 export const CREATED_PANEL_WORKSPACE_REPO_FIXTURE = {
   kind: "created-repository",
   section: "panels",
-} as const satisfies WorkspaceRepoFixtureSpec;
+} as const satisfies WorkspaceRepoCreationScope;
 
 export const CREATED_PACKAGE_WORKSPACE_REPO_FIXTURE = {
   kind: "created-repository",
   section: "packages",
-} as const satisfies WorkspaceRepoFixtureSpec;
+} as const satisfies WorkspaceRepoCreationScope;
+
+export const CREATED_SKILL_WORKSPACE_REPO_FIXTURE = {
+  kind: "created-repository",
+  section: "skills",
+} as const satisfies WorkspaceRepoCreationScope;
+
+export const CREATED_PROJECT_WORKSPACE_REPO_FIXTURE = {
+  kind: "created-repository",
+  section: "projects",
+} as const satisfies WorkspaceRepoCreationScope;
 
 export const CREATED_WORKER_WORKSPACE_REPO_FIXTURE = {
   kind: "created-repository",
   section: "workers",
-} as const satisfies WorkspaceRepoFixtureSpec;
+} as const satisfies WorkspaceRepoCreationScope;
 
 export const BUILDABLE_PANEL_WITH_DERIVED_WORKSPACE_REPO_FIXTURE = {
   kind: "buildable-panel-with-derived",
   section: "panels",
-} as const satisfies WorkspaceRepoFixtureSpec;
+} as const satisfies WorkspaceRepoCreationScope;
+
+export const OPTIMIZABLE_PANEL_WORKSPACE_REPO_FIXTURE = {
+  kind: "optimizable-panel",
+  section: "panels",
+} as const satisfies WorkspaceRepoCreationScope;
 
 export interface ToolFailureSummary {
   id?: string;
@@ -82,9 +109,28 @@ export interface ExpectedToolFailure {
   errorIncludes?: string;
 }
 
+/**
+ * Bounded index for the human review of an agentic trajectory. This is not a
+ * mechanical quality score: the transcript remains the source of truth for
+ * whether the agent was confused, wasteful, or chose an awkward product path.
+ */
+export interface AgentTrajectoryReview {
+  required: true;
+  agentReportedOutcome: "completed" | "incomplete" | "unspecified" | "conflicting";
+  invocationCount: number;
+  modelCallCount: number;
+  unexpectedToolFailureCount: number;
+  repeatedFailureOperations: string[];
+  /** Non-failing review cues. They point a human at likely wandering or
+   * friction without pretending that a mechanical threshold can judge task
+   * quality. */
+  potentialConfusionSignals: string[];
+  frequentOperations: Array<{ name: string; count: number }>;
+}
+
 export interface TestAuthorityPolicyContext {
   testName: string;
-  workspaceRepoFixture: (WorkspaceRepoFixtureSpec & { repoName: string | null }) | null;
+  workspaceRepoFixture: (WorkspaceRepoCreationScope & { repoName: string | null }) | null;
 }
 
 export type TestAuthorityPolicy =
@@ -97,6 +143,12 @@ export interface TestCase {
   name: string;
   description: string;
   category: string;
+  /**
+   * Case-specific end-to-end budget. Use this only when the user-visible
+   * operation has an intrinsically longer deadline than the catalog default.
+   * An explicit run-level timeout still takes precedence.
+   */
+  timeoutMs?: number;
   /** Natural language task prompt sent to the test agent */
   prompt: string;
   /**
@@ -130,7 +182,7 @@ export interface TestCase {
    * serialize while disjoint tests remain concurrent.
    * This keeps fixture mechanics out of the user-like prompt.
    */
-  workspaceRepoFixture?: WorkspaceRepoFixtureSpec;
+  workspaceRepoFixture?: WorkspaceRepoCreationScope;
   /**
    * Optional custom orchestration for tests that need multiple independent
    * headless agents, ordered phases, or other harness-level setup that a single
@@ -138,16 +190,18 @@ export interface TestCase {
    */
   orchestrate?: (context: TestOrchestrationContext) => Promise<TestExecutionResult>;
   /**
-   * Opt into harness validation. Agentic tasks deliberately omit this: their
-   * completion report is the outcome signal and their trajectory is the
-   * diagnostic evidence. Harness validation belongs to deterministic tests and
+   * Select validation beyond the ordinary agent completion report.
+   *
+   * `agent-evidence` keeps the natural agent-goal contract and additionally
+   * gates success on independently observed outcome facts. It must not encode
+   * one preferred tool choreography. `harness` is reserved for deterministic
    * protocol probes whose result is produced or observed by the harness itself.
    */
-  validation?: "harness";
+  validation?: "agent-evidence" | "harness";
   /**
-   * Validator for deterministic/harness protocol evidence. Existing agentic
-   * scenario assessments may remain while the catalog is migrated, but they
-   * are not pass/fail gates unless `validation` is `"harness"`.
+   * Validator for objective agent outcome evidence or deterministic harness
+   * protocol evidence. Existing agentic scenario assessments remain
+   * non-scoring unless `validation` is `"agent-evidence"`.
    */
   validate: (result: TestExecutionResult) => TestResult;
 }
@@ -156,7 +210,11 @@ export interface TestOrchestrationContext {
   runner: HeadlessRunner;
   /** Milliseconds left in this test's one agent-turn budget, or undefined when unbounded. */
   remainingTimeMs(): number | undefined;
-  sendAndWait(session: HeadlessSession, prompt: string, phase: string): Promise<void>;
+  /** Run one bounded turn and return the exact completed response that ended
+   * that phase. Orchestrated validators use this identity instead of guessing
+   * turn boundaries from transcript rows that intentionally omit local user
+   * publications. */
+  sendAndWait(session: HeadlessSession, prompt: string, phase: string): Promise<ChatMessage>;
 }
 
 export interface TestExecutionResult {
@@ -190,11 +248,13 @@ export interface TestExecutionResult {
   diagnostics?: Record<string, unknown>;
   /** Non-fatal tool-call failures observed during the turn. */
   toolFailures?: ToolFailureSummary[];
+  /** Human-review index for ordinary agent-goal trajectories. */
+  trajectoryReview?: AgentTrajectoryReview;
 }
 
 export interface ValidationFailureProvenance {
   testName: string;
-  validator: "harness" | "agent-completion-report";
+  validator: "harness" | "agent-evidence" | "agent-completion-report";
   phase: "validation";
   stack?: string;
   inputProjection: SystemTestJsonValue;

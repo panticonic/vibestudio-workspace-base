@@ -29,6 +29,7 @@ vi.mock("@workspace/tool-ui", () => ({
 
 import { useAgenticChat } from "./useAgenticChat";
 import type { ChatContextValue, ConnectionConfig } from "../types";
+import { FULL_AGENTIC_CHAT_FEATURES, type AgenticChatFeature } from "../features";
 
 function createClient(
   channelConfig: { title?: string; titleExplicit?: boolean } = {}
@@ -66,18 +67,24 @@ function createRpcCall() {
 function Probe({
   config,
   onContext,
+  features = FULL_AGENTIC_CHAT_FEATURES,
+  loadDynamicImports = true,
 }: {
   config: ConnectionConfig;
   onContext?: (value: ChatContextValue) => void;
+  features?: readonly AgenticChatFeature[];
+  loadDynamicImports?: boolean;
 }) {
   const { contextValue } = useAgenticChat({
     config,
     channelName: "chat-title-test",
     metadata: { name: "Chat Panel", type: "panel", handle: "alice" },
-    sandbox: {
-      rpc: config.rpc,
-      loadImport: vi.fn(async () => ({ bundle: "", format: "cjs" as const })),
-    },
+    ...(loadDynamicImports
+      ? {
+          importLoader: vi.fn(async () => ({ bundle: "", format: "cjs" as const })),
+        }
+      : {}),
+    features,
   });
   onContext?.(contextValue);
   return null;
@@ -156,6 +163,80 @@ describe("useAgenticChat set_title", () => {
       expect(methods).toBeDefined();
     });
     expect(methods?.["set_title"]).toBeUndefined();
+
+    unmount();
+  });
+
+  it("advertises the explicit full feature surface", async () => {
+    const client = createClient();
+    let methods: Record<string, MethodDefinition> | undefined;
+    pubsubMock.connectViaRpc.mockImplementation(
+      (options: { methods: Record<string, MethodDefinition> }) => {
+        methods = options.methods;
+        return client;
+      }
+    );
+    const config: ConnectionConfig = {
+      clientId: "panel:chat",
+      rpc: {
+        selfId: "panel:chat",
+        call: createRpcCall(),
+        stream: vi.fn(async () => new Response()),
+        on: vi.fn(() => () => undefined),
+      },
+    };
+
+    const { unmount } = render(<Probe config={config} />);
+
+    await waitFor(() => expect(methods).toBeDefined());
+    expect(Object.keys(methods ?? {})).toEqual(
+      expect.arrayContaining([
+        "feedback_form",
+        "feedback_custom",
+        "confirm",
+        "ui_prompt",
+        "inline_ui",
+        "load_action_bar",
+        "client_eval",
+      ])
+    );
+
+    unmount();
+  });
+
+  it("does not advertise feature-owned methods when no features are selected", async () => {
+    const client = createClient();
+    let methods: Record<string, MethodDefinition> | undefined;
+    pubsubMock.connectViaRpc.mockImplementation(
+      (options: { methods: Record<string, MethodDefinition> }) => {
+        methods = options.methods;
+        return client;
+      }
+    );
+    const config: ConnectionConfig = {
+      clientId: "panel:chat",
+      rpc: {
+        selfId: "panel:chat",
+        call: createRpcCall(),
+        stream: vi.fn(async () => new Response()),
+        on: vi.fn(() => () => undefined),
+      },
+    };
+
+    const { unmount } = render(<Probe config={config} features={[]} loadDynamicImports={false} />);
+
+    await waitFor(() => expect(methods).toBeDefined());
+    for (const name of [
+      "feedback_form",
+      "feedback_custom",
+      "confirm",
+      "ui_prompt",
+      "inline_ui",
+      "load_action_bar",
+      "client_eval",
+    ]) {
+      expect(methods?.[name]).toBeUndefined();
+    }
 
     unmount();
   });

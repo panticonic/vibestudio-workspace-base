@@ -36,7 +36,7 @@ export type EffectKind =
   | "channel_call"
   | "http_call"
   | "credential_wait"
-  | "publish_envelope";
+  | "record_receipt";
 
 export interface EffectDescriptorBase {
   /** deterministic (§1.5); == outbox PK. */
@@ -68,6 +68,7 @@ export interface LocalToolEffect extends EffectDescriptorBase {
   invocationSeq: number;
   /** Per-tool ordering contract captured when the invocation was journaled. */
   executionMode: "sequential" | "parallel";
+  cancellationMode: "interruptible" | "settle";
   tool: string;
   args: unknown;
 }
@@ -84,6 +85,9 @@ export interface ChannelCallEffect extends EffectDescriptorBase {
   /** approval-form / ask-user calls map their outcome to approval.resolved. */
   purpose?: "tool" | "approval-form" | "ask-user";
   approvalId?: string;
+  /** Present when this call came from a model tool invocation. */
+  invocationSeq?: number;
+  executionMode?: "sequential" | "parallel";
 }
 
 export interface HttpCallEffect extends EffectDescriptorBase {
@@ -93,6 +97,8 @@ export interface HttpCallEffect extends EffectDescriptorBase {
   targetUrl?: string;
   target?: { service: string; method: string };
   request: unknown;
+  invocationSeq: number;
+  executionMode: "sequential" | "parallel";
 }
 
 export interface CredentialWaitEffect extends EffectDescriptorBase {
@@ -112,10 +118,10 @@ export interface CredentialWaitEffect extends EffectDescriptorBase {
   expiresAt: string;
 }
 
-export interface PublishEnvelopeEffect extends EffectDescriptorBase {
-  kind: "publish_envelope";
-  payloadKind: string;
-  payload: unknown;
+export interface RecordReceiptEffect extends EffectDescriptorBase {
+  kind: "record_receipt";
+  messageId: string;
+  turnId: string;
 }
 
 export type EffectDescriptor =
@@ -125,7 +131,7 @@ export type EffectDescriptor =
   | ChannelCallEffect
   | HttpCallEffect
   | CredentialWaitEffect
-  | PublishEnvelopeEffect;
+  | RecordReceiptEffect;
 
 // ---------------------------------------------------------------------------
 // derivePendingEffects (§1.7) — the dispatch-cache derivation
@@ -161,6 +167,10 @@ export function invocationEffect(
       kind: "local_tool",
       invocationSeq: invocation.startedAtSeq,
       executionMode: invocation.executionMode,
+      cancellationMode:
+        state.config.localToolCancellationModes?.[invocation.name] === "settle"
+          ? "settle"
+          : "interruptible",
       tool: invocation.name,
       args: invocation.request,
     };
@@ -174,6 +184,8 @@ export function invocationEffect(
       target: transport.target,
       method: invocation.name,
       args: invocation.request,
+      invocationSeq: invocation.startedAtSeq,
+      executionMode: invocation.executionMode,
       ...(invocation.approvalId
         ? { purpose: "tool" as const, approvalId: invocation.approvalId }
         : {}),
@@ -185,6 +197,8 @@ export function invocationEffect(
     targetUrl: transport.targetUrl,
     idempotencyKey: transport.idempotencyKey,
     request: invocation.request,
+    invocationSeq: invocation.startedAtSeq,
+    executionMode: invocation.executionMode,
   };
 }
 
@@ -296,7 +310,30 @@ export function derivePendingEffects(state: AgentState): EffectDescriptor[] {
       a.requestedAtSeq - b.requestedAtSeq || a.triggerEnvelopeId.localeCompare(b.triggerEnvelopeId)
   )[0];
   if (nextPromptPreparation) out.push(promptArtifactsEffect(state, nextPromptPreparation));
-  if (state.inFlightModelCall) out.push(modelCallEffect(state, state.inFlightModelCall));
+  if (state.inFlightModelCall) {
+    out.push(modelCallEffect(state, state.inFlightModelCall));
+    const turnId = state.openTurn?.turnId ?? "";
+    const consumed = new Set<string>();
+    for (const entry of state.entries) {
+      if (
+        entry.seq <= state.inFlightModelCall.request.contextThroughSeq &&
+        "sourceMessageId" in entry &&
+        entry.sourceMessageId
+      ) {
+        consumed.add(entry.sourceMessageId);
+      }
+    }
+    for (const messageId of consumed) {
+      out.push({
+        effectId: `read:${messageId}:${turnId}`,
+        kind: "record_receipt",
+        channelId: state.channelId,
+        idempotencyKey: `read:${messageId}:${turnId}`,
+        messageId,
+        turnId,
+      });
+    }
+  }
   for (const invocation of Object.values(state.pendingInvocations)) {
     if (invocation.requiresApproval && invocation.approvalState !== "granted") continue; // gated
     out.push(...invocationEffects(state, invocation));
@@ -308,7 +345,7 @@ export function derivePendingEffects(state: AgentState): EffectDescriptor[] {
   for (const wait of Object.values(state.pendingCredentialWaits)) {
     out.push(credentialWaitEffect(state, wait));
   }
-  return out; // publish_envelope is best-effort and exempt (§1.4.6)
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -368,11 +405,15 @@ export type EffectOutcome =
       terminalOutcome?: "tool_error" | "infrastructure_error";
       /** Stable typed reason preserved from the tool/service boundary. */
       terminalReasonCode?: string;
-      turnControl?: {
-        kind: "suspend";
-        reason: string;
-        summary: string;
-      };
+      turnControl?:
+        | {
+            kind: "suspend";
+            reason: string;
+            summary: string;
+          }
+        | {
+            kind: "terminate";
+          };
       /** Canonical failure envelope preserved unchanged into the terminal
        * invocation event. */
       failure?: AgentToolFailure;
@@ -611,7 +652,7 @@ export function outcomeEvents(
     ];
   }
 
-  return []; // publish_envelope: fire-and-forget, no outcome events
+  return []; // record_receipt: projection update, no trajectory outcome event
 }
 
 function shouldPublishModelOutcome(request: ModelRequestDescriptor, blocks: unknown[]): boolean {

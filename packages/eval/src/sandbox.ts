@@ -185,6 +185,9 @@ function structuredFailureKind(error: unknown): SandboxFailureKind | undefined {
   const errorData = (error as { errorData?: unknown }).errorData;
   if (!errorData || typeof errorData !== "object") return undefined;
   const data = errorData as Record<string, unknown>;
+  if (data["failureKind"] === "infrastructure" || data["failureKind"] === "user-code") {
+    return data["failureKind"];
+  }
   const vcsError = data["vcsError"];
   // createProjects owns every byte of a newly generated scaffold. If its exact,
   // immediate protected push fails the build gate, that is a template/build
@@ -293,8 +296,28 @@ function getModuleMap(override?: Record<string, unknown>): Record<string, unknow
   );
 }
 
-/** Tracks bundle content last loaded per specifier to skip re-execution */
-const loadedBundleContent = new Map<string, string>();
+interface LoadedLibraryMetadata {
+  bundle: string;
+  ref: string;
+}
+
+/**
+ * Tracks build-loaded modules per registry. Entries without metadata belong to
+ * the host, so an authored import can never replace React or another exposed
+ * panel module merely because it names the same specifier.
+ */
+const loadedLibraries = new WeakMap<Record<string, unknown>, Map<string, LoadedLibraryMetadata>>();
+
+function loadedLibraryMetadata(
+  moduleMap: Record<string, unknown>,
+  specifier: string
+): LoadedLibraryMetadata | undefined {
+  return loadedLibraries.get(moduleMap)?.get(specifier);
+}
+
+function importRefKey(ref: string | undefined): string {
+  return ref === undefined || ref === "latest" ? "latest" : ref;
+}
 
 /**
  * Load a CJS library bundle into the panel's module map.
@@ -308,11 +331,18 @@ async function loadLibraryBundle(
   compileFunction: CompileFunction = defaultCompileFunction,
   freezeModuleNamespace?: <T>(value: T) => T,
   loadImport?: SandboxImportLoader,
-  confinement?: "private-global"
+  confinement?: "private-global",
+  ref?: string
 ): Promise<void> {
-  // loadedBundleContent is a per-isolate cache, but it's gated on moduleMap[specifier],
-  // so per-object maps are correct: a fresh map has no entry → the bundle re-executes.
-  if (loadedBundleContent.get(specifier) === artifact.bundle && moduleMap[specifier]) return;
+  const refKey = importRefKey(ref);
+  const existing = loadedLibraryMetadata(moduleMap, specifier);
+  if (existing?.bundle === artifact.bundle && moduleMap[specifier] !== undefined) {
+    // Two refs may resolve to byte-identical artifacts. The acquired artifact
+    // is already active, but remember the newly requested ref so future calls
+    // can still make the correct cache decision.
+    existing.ref = refKey;
+    return;
+  }
 
   const resolvedRequire =
     requireFn ??
@@ -353,7 +383,8 @@ async function loadLibraryBundle(
         compileFunction,
         freezeModuleNamespace,
         loadImport,
-        confinement
+        confinement,
+        undefined
       );
       return resolvedRequire(dependency);
     }
@@ -368,7 +399,12 @@ async function loadLibraryBundle(
   moduleMap[specifier] = freezeModuleNamespace
     ? freezeModuleNamespace(result.exports)
     : result.exports;
-  loadedBundleContent.set(specifier, artifact.bundle);
+  let registry = loadedLibraries.get(moduleMap);
+  if (!registry) {
+    registry = new Map();
+    loadedLibraries.set(moduleMap, registry);
+  }
+  registry.set(specifier, { bundle: artifact.bundle, ref: refKey });
 }
 
 /**
@@ -385,16 +421,21 @@ async function loadImports(
 ): Promise<void> {
   const moduleMap = getModuleMap(moduleMapOverride);
   for (const [specifier, refValue] of Object.entries(imports)) {
+    const ref = refValue === "latest" ? undefined : refValue;
+    const existing = loadedLibraryMetadata(moduleMap, specifier);
     // Host-provided modules (panel exposeModules: react, react/jsx-runtime,
     // @radix-ui/*, …) never go through the build service. Asking it for
     // "react" can even resolve to an unrelated workspace unit via basename
     // matching (workspace/packages/react) and build that instead.
-    if (moduleMap[specifier] || installPreloadedModuleAlias(specifier, moduleMap)) continue;
-    const loadedFromHost = await runInfrastructurePhase("package_load_failed", () =>
-      loadLazyHostModule(specifier, moduleMap, moduleMapOverride)
-    );
-    if (loadedFromHost) continue;
-    const ref = refValue === "latest" ? undefined : refValue;
+    if (moduleMap[specifier] !== undefined) {
+      if (!existing || existing.ref === importRefKey(ref)) continue;
+    } else {
+      if (installPreloadedModuleAlias(specifier, moduleMap)) continue;
+      const loadedFromHost = await runInfrastructurePhase("package_load_failed", () =>
+        loadLazyHostModule(specifier, moduleMap, moduleMapOverride)
+      );
+      if (loadedFromHost) continue;
+    }
     // Recompute externals each iteration so earlier imports are externalized
     const externals = Object.keys(moduleMap);
     // Building/acquiring the artifact is host infrastructure. Executing the
@@ -413,7 +454,8 @@ async function loadImports(
       compileFunction,
       freezeModuleNamespace,
       loadImport,
-      confinement
+      confinement,
+      ref
     );
   }
 }
@@ -496,8 +538,11 @@ function installLazyImportLoader(
   // CDP-client module, so there is no cross-owner data leak.
   globals["__vibestudioLoadImport__"] = async (specifier: string, refValue?: string) => {
     const moduleMap = getModuleMap(moduleMapOverride);
-    if (moduleMap[specifier]) return moduleMap[specifier];
     const ref = refValue === "latest" ? undefined : refValue;
+    const existing = loadedLibraryMetadata(moduleMap, specifier);
+    if (moduleMap[specifier] !== undefined && (!existing || existing.ref === importRefKey(ref))) {
+      return moduleMap[specifier];
+    }
     const artifact = await runInfrastructurePhase("package_load_failed", () =>
       loadImport(specifier, ref, Object.keys(moduleMap))
     );
@@ -508,7 +553,9 @@ function installLazyImportLoader(
       requireFn,
       compileFunction,
       undefined,
-      loadImport
+      loadImport,
+      undefined,
+      ref
     );
     return moduleMap[specifier];
   };
@@ -1558,6 +1605,11 @@ export async function executeSandbox(
     }
     throwIfAborted(signal);
     if (!validation.valid) {
+      const preload = await withAbort(preloadRequires(transformed.requires), signal);
+      if (preload.success) validation = validateRequires(transformed.requires, requireFn);
+    }
+    throwIfAborted(signal);
+    if (!validation.valid) {
       const missing = validation.missingModule!;
       if (missing.startsWith("node:")) {
         return {
@@ -1653,9 +1705,14 @@ export async function executeSandbox(
       ? await runtimeModule.journal.with(journal, runUserCode)
       : await runUserCode();
     throwIfAborted(signal);
-    const panelJournalFooter = journal
-      ? await renderPanelJournalFooter(runtimeModule, journal).catch(() => undefined)
-      : undefined;
+    let panelJournalFooter: string | undefined;
+    if (journal) {
+      try {
+        panelJournalFooter = await renderPanelJournalFooter(journal);
+      } catch (error) {
+        capture.proxy.warn("[eval] Failed to render the panel journal footer:", error);
+      }
+    }
     return {
       success: true,
       consoleOutput: formatConsoleOutput(capture.getEntries()),
@@ -1716,10 +1773,7 @@ function createRuntimeJournal(runtimeModule: any): any | null {
   return new runtimeModule.journal.Journal();
 }
 
-async function renderPanelJournalFooter(
-  runtimeModule: any,
-  journal: any
-): Promise<string | undefined> {
+async function renderPanelJournalFooter(journal: any): Promise<string | undefined> {
   const entries = Array.isArray(journal?.entries) ? journal.entries : [];
   if (entries.length === 0) return undefined;
   const operations = entries.map((entry: any) => {

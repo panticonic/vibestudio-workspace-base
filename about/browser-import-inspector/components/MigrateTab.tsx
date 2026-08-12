@@ -26,6 +26,7 @@ import {
   ChevronRightIcon,
   DownloadIcon,
   DrawingPinFilledIcon,
+  GlobeIcon,
   MagnifyingGlassIcon,
   OpenInNewWindowIcon,
   StopIcon,
@@ -42,8 +43,6 @@ import {
   browserData,
   classifyError,
   DATA_TYPES,
-  hueFor,
-  initialsFor,
   plural,
   prettyHost,
   prettyPath,
@@ -225,7 +224,8 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
                     onToggle={() =>
                       setTypes((current) => {
                         const next = new Set(current);
-                        next.has(item.key) ? next.delete(item.key) : next.add(item.key);
+                        if (next.has(item.key)) next.delete(item.key);
+                        else next.add(item.key);
                         return next;
                       })
                     }
@@ -389,11 +389,10 @@ function Stepper(props: {
           <Card
             key={step.key}
             asChild
+            data-surface-tone={active ? "selected" : undefined}
             style={{
               flex: 1,
               cursor: "pointer",
-              outline: active ? "1px solid var(--accent-a8)" : undefined,
-              background: active ? "var(--accent-a2)" : undefined,
             }}
           >
             <button type="button" onClick={() => props.onStep(step.key)} disabled={props.busy}>
@@ -465,9 +464,8 @@ function BreakdownCard(props: { breakdowns: readonly ImportCategoryBreakdown[] }
                   onClick={() =>
                     setExpanded((current) => {
                       const next = new Set(current);
-                      next.has(breakdown.dataType)
-                        ? next.delete(breakdown.dataType)
-                        : next.add(breakdown.dataType);
+                      if (next.has(breakdown.dataType)) next.delete(breakdown.dataType);
+                      else next.add(breakdown.dataType);
                       return next;
                     })
                   }
@@ -486,7 +484,9 @@ function BreakdownCard(props: { breakdowns: readonly ImportCategoryBreakdown[] }
                 <Flex direction="column" gap="1" pb="2" pl="4">
                   {breakdown.groups.map((group) => (
                     <Flex key={group.label} align="center" gap="2">
-                      {breakdown.groupedBy === "site" && <SiteMark host={group.label} />}
+                      {breakdown.groupedBy === "site" && (
+                        <SiteMark host={group.label} url={`https://${group.label}/`} />
+                      )}
                       <Text size="1" truncate style={{ flex: 1 }}>
                         {group.label}
                       </Text>
@@ -534,26 +534,23 @@ function BreakdownCard(props: { breakdowns: readonly ImportCategoryBreakdown[] }
 
 function SourceHeader(props: { selection: ImportSourceSelection }) {
   const name = props.selection.source.displayName;
-  const hue = hueFor(name);
   return (
     <Card style={{ flexShrink: 0 }}>
       <Flex gap="3" align="center">
         <Flex
           align="center"
           justify="center"
+          title={`${name} browser data`}
           style={{
             width: 44,
             height: 44,
             flexShrink: 0,
             borderRadius: "var(--radius-3)",
-            background: `linear-gradient(140deg, hsl(${hue} 70% 52%), hsl(${(hue + 40) % 360} 70% 42%))`,
-            color: "white",
-            fontWeight: 700,
-            fontSize: 17,
-            letterSpacing: "-0.02em",
+            background: "var(--accent-a3)",
+            color: "var(--accent-11)",
           }}
         >
-          {initialsFor(name)}
+          <GlobeIcon width="23" height="23" />
         </Flex>
         <Box style={{ minWidth: 0 }}>
           <Flex gap="2" align="center">
@@ -617,20 +614,16 @@ function ProgressCard(props: {
   const running = !isTerminalImportPhase(props.job.phase);
   const status = importStatusPresentation(props.job.phase);
   const title = props.mode === "preview" ? "Review" : status.heading;
+  const surfaceTone =
+    props.mode !== "import"
+      ? undefined
+      : props.job.phase === "complete"
+        ? "success"
+        : props.job.phase === "partial"
+          ? "warning"
+          : undefined;
   return (
-    <Card
-      style={{
-        flexShrink: 0,
-        background:
-          props.mode === "import"
-            ? props.job.phase === "complete"
-              ? "var(--green-a2)"
-              : props.job.phase === "partial"
-                ? "var(--amber-a2)"
-                : undefined
-            : undefined,
-      }}
-    >
+    <Card data-surface-tone={surfaceTone} style={{ flexShrink: 0 }}>
       <Flex justify="between" align="center" gap="2">
         <Flex align="center" gap="2">
           <Heading size="2">{title}</Heading>
@@ -817,7 +810,10 @@ function OpenTabs(props: { selection: ImportSourceSelection }) {
   const setMany = (ids: string[], on: boolean) =>
     setSelected((current) => {
       const next = new Set(current);
-      for (const id of ids) on ? next.add(id) : next.delete(id);
+      for (const id of ids) {
+        if (on) next.add(id);
+        else next.delete(id);
+      }
       return next;
     });
 
@@ -975,7 +971,7 @@ function OpenTabs(props: { selection: ImportSourceSelection }) {
               // Grow into the panel instead of stranding the list in a 360px
               // box with empty space below it.
               minHeight: 200,
-              maxHeight: "calc(100vh - 360px)",
+              maxHeight: "calc(100dvh - 360px)",
               overflowY: "auto",
               overscrollBehavior: "contain",
             }}
@@ -994,9 +990,8 @@ function OpenTabs(props: { selection: ImportSourceSelection }) {
                 onToggleCollapsed={() =>
                   setCollapsedWindows((current) => {
                     const next = new Set(current);
-                    next.has(window.windowId)
-                      ? next.delete(window.windowId)
-                      : next.add(window.windowId);
+                    if (next.has(window.windowId)) next.delete(window.windowId);
+                    else next.add(window.windowId);
                     return next;
                   })
                 }
@@ -1140,7 +1135,7 @@ function WindowGroup(props: {
         {props.collapsed && (
           <Flex gap="1" align="center" style={{ minWidth: 0 }}>
             {hosts.map((host) => (
-              <SiteMark key={host} host={host} />
+              <SiteMark key={host} host={host} url={`https://${host}/`} />
             ))}
             {tabs.length > hosts.length && (
               <Text size="1" color="gray">
@@ -1191,7 +1186,7 @@ function TabRow(props: {
     >
       <label>
         <Checkbox checked={props.checked} onCheckedChange={() => props.onToggle(!props.checked)} />
-        <SiteMark host={host} />
+        <SiteMark host={host} url={props.tab.url} />
         <Box style={{ minWidth: 0, flex: 1 }}>
           <Flex align="center" gap="1" style={{ minWidth: 0 }}>
             {props.tab.pinned && (
@@ -1218,9 +1213,38 @@ function TabRow(props: {
   );
 }
 
-/** Letter-mark stand-in for a favicon — deterministic colour, no network fetch. */
-function SiteMark(props: { host: string }) {
-  const hue = hueFor(props.host);
+const faviconCache = new Map<string, string | null>();
+const faviconRequests = new Map<string, Promise<string | null>>();
+
+function loadStoredFavicon(url: string): Promise<string | null> {
+  if (faviconCache.has(url)) return Promise.resolve(faviconCache.get(url) ?? null);
+  const active = faviconRequests.get(url);
+  if (active) return active;
+  const request = browserData
+    .getPageFavicon(url)
+    .then((favicon) => (favicon ? `data:${favicon.mime_type};base64,${favicon.image_data}` : null))
+    .catch(() => null)
+    .then((value) => {
+      faviconCache.set(url, value);
+      faviconRequests.delete(url);
+      return value;
+    });
+  faviconRequests.set(url, request);
+  return request;
+}
+
+/** Uses only favicon bytes already stored in the workspace; never contacts the site. */
+function SiteMark(props: { host: string; url: string }) {
+  const [src, setSrc] = useState<string | null>(() => faviconCache.get(props.url) ?? null);
+  useEffect(() => {
+    let mounted = true;
+    void loadStoredFavicon(props.url).then((value) => {
+      if (mounted) setSrc(value);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [props.url]);
   return (
     <Flex
       align="center"
@@ -1231,14 +1255,24 @@ function SiteMark(props: { host: string }) {
         height: 18,
         flexShrink: 0,
         borderRadius: "var(--radius-1)",
-        background: `hsl(${hue} 55% 45%)`,
-        color: "white",
-        fontSize: 9,
-        fontWeight: 700,
+        background: "var(--gray-a3)",
+        color: "var(--gray-10)",
         lineHeight: 1,
+        overflow: "hidden",
       }}
     >
-      {initialsFor(props.host)}
+      {src ? (
+        <img
+          src={src}
+          alt=""
+          width="18"
+          height="18"
+          style={{ display: "block", objectFit: "contain" }}
+          onError={() => setSrc(null)}
+        />
+      ) : (
+        <GlobeIcon width="13" height="13" />
+      )}
     </Flex>
   );
 }

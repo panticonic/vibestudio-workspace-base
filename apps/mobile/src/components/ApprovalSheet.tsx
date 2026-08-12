@@ -3,7 +3,6 @@ import {
   AccessibilityInfo,
   ActivityIndicator,
   Animated,
-  Dimensions,
   Easing,
   KeyboardAvoidingView,
   Modal,
@@ -15,6 +14,7 @@ import {
   Text,
   TextInput,
   View,
+  useWindowDimensions,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import ReactNativeHapticFeedback from "react-native-haptic-feedback";
@@ -89,6 +89,8 @@ import {
 } from "@vibestudio/shared/authority/unitInstallReview";
 import { useAtomValue } from "jotai";
 import { themeColorsAtom } from "../state/themeAtoms";
+import { shellClientAtom } from "../state/shellClientAtom";
+import { MobileUnitIcon, type MobileUnitIconKind } from "./MobileUnitIcon";
 import {
   hairline,
   pressedOpacity,
@@ -107,7 +109,6 @@ import {
   ChevronRight,
   ExternalLink,
   Globe,
-  LayoutPanelTop,
   Lock,
   Settings2,
   User,
@@ -231,6 +232,7 @@ export function ApprovalSheet({
   onOpenDiffFile,
 }: ApprovalSheetProps) {
   const colors = useAtomValue(themeColorsAtom);
+  const { height: viewportHeight } = useWindowDimensions();
   const [browseIndex, setBrowseIndex] = useState(0);
   useEffect(() => {
     setBrowseIndex((idx) => {
@@ -268,7 +270,7 @@ export function ApprovalSheet({
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [minimized, setMinimized] = useState(false);
-  const translateY = useRef(new Animated.Value(Dimensions.get("window").height)).current;
+  const translateY = useRef(new Animated.Value(viewportHeight)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
   const dragOffset = useRef(0);
 
@@ -463,6 +465,8 @@ export function ApprovalSheet({
                 {
                   backgroundColor: colors.surfaceRaised,
                   borderColor: colors.border,
+                  maxHeight: viewportHeight * 0.9,
+                  minHeight: viewportHeight * 0.4,
                   shadowColor: colors.shadow,
                   transform: [{ translateY }],
                 },
@@ -859,8 +863,17 @@ function CallerRow({
   onPress: () => void;
 }) {
   const colors = useAtomValue(themeColorsAtom);
-  const KindIcon =
-    caller.kind === "panel" ? LayoutPanelTop : caller.kind === "worker" ? Workflow : Settings2;
+  const shellClient = useAtomValue(shellClientAtom);
+  const iconKind: MobileUnitIconKind =
+    caller.kind === "panel"
+      ? "panel"
+      : caller.kind === "app"
+        ? "app"
+        : caller.kind === "extension"
+          ? "extension"
+          : caller.kind === "system"
+            ? "system"
+            : "worker";
   const chip = (
     <View
       style={[
@@ -868,7 +881,14 @@ function CallerRow({
         { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
       ]}
     >
-      <KindIcon size={12} color={colors.textSecondary} />
+      <MobileUnitIcon
+        icon={caller.icon}
+        source={caller.iconSourcePath}
+        kind={iconKind}
+        serverUrl={shellClient?.serverUrl ?? ""}
+        size={18}
+        color={colors.textSecondary}
+      />
       <Text numberOfLines={1} style={[styles.callerChipLabel, { color: colors.text }]}>
         {caller.label}
       </Text>
@@ -1151,6 +1171,8 @@ function ApprovalDetails({
   onToggle: () => void;
 }) {
   const colors = useAtomValue(themeColorsAtom);
+  const breadcrumbSummary = requesterBreadcrumbSummary(approval);
+  const requesterEvalSummary = evalSummary(approval);
   return (
     <View style={styles.detailsBlock}>
       <Pressable
@@ -1179,16 +1201,11 @@ function ApprovalDetails({
             secondary={approval.callerId}
             secondarySelectable
           />
-          {requesterBreadcrumbSummary(approval) ? (
-            <DetailRow
-              icon={Workflow}
-              label="Chain"
-              value={requesterBreadcrumbSummary(approval)!}
-              code
-            />
+          {breadcrumbSummary ? (
+            <DetailRow icon={Workflow} label="Chain" value={breadcrumbSummary} code />
           ) : null}
-          {evalSummary(approval) ? (
-            <DetailRow icon={Settings2} label="Eval" value={evalSummary(approval)!} code />
+          {requesterEvalSummary ? (
+            <DetailRow icon={Settings2} label="Eval" value={requesterEvalSummary} code />
           ) : null}
           {approval.requester ? (
             <DetailRow
@@ -1429,6 +1446,9 @@ const SEARCH_THRESHOLD = 12;
  * identity ships in the build rather than being asserted by a third party.
  */
 function installOriginLabel(origin: InstallReviewOrigin): string {
+  if (origin.originStatus === "multiple-template-contributors") {
+    return "Multiple template contributions";
+  }
   if (origin.originStatus === "unresolved") return "";
   if (origin.url) return origin.url;
   if (origin.isHostBuild) return origin.version ? `Vibestudio ${origin.version}` : "Vibestudio";
@@ -1630,8 +1650,15 @@ function InstallReviewDetails({
                   <Text style={[styles.installReviewGroupTitle, { color: colors.text }]}>
                     {group.title}
                   </Text>
-                  <View style={[styles.installReviewGroupBadge, { backgroundColor: colors.surfaceSunken }]}>
-                    <Text style={[styles.installReviewGroupBadgeText, { color: colors.textSecondary }]}>
+                  <View
+                    style={[
+                      styles.installReviewGroupBadge,
+                      { backgroundColor: colors.surfaceSunken },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.installReviewGroupBadgeText, { color: colors.textSecondary }]}
+                    >
                       {installPartGroupCount(group)}
                     </Text>
                   </View>
@@ -1689,11 +1716,6 @@ function InstallReviewDetails({
           ))}
         </View>
       ) : null}
-      {approval.charters?.map((charter) => (
-        <Text key={charter.name} style={[styles.helperText, { color: colors.textSecondary }]}>
-          {charter.name} — {charter.schedule}. {charter.purpose}
-        </Text>
-      ))}
     </>
   );
 }
@@ -1712,6 +1734,7 @@ function InstallReviewPartRow({
   onToggleRow: (rowKey: string, checked: boolean) => void;
 }) {
   const colors = useAtomValue(themeColorsAtom);
+  const shellClient = useAtomValue(shellClientAtom);
   const [open, setOpen] = useState(false);
   const clearable = clearableRows(part);
   const allSelected = clearable.length > 0 && clearable.every((row) => selected.has(row.key));
@@ -1733,6 +1756,22 @@ function InstallReviewPartRow({
         ) : (
           <ChevronRight size={14} color={colors.textSecondary} />
         )}
+        <MobileUnitIcon
+          icon={part.icon}
+          source={part.repoPath}
+          kind={
+            part.kind === "panel"
+              ? "panel"
+              : part.kind === "app"
+                ? "app"
+                : part.kind === "extension"
+                  ? "extension"
+                  : "worker"
+          }
+          serverUrl={shellClient?.serverUrl ?? ""}
+          size={20}
+          color={colors.textSecondary}
+        />
         <View style={styles.unitReviewSummary}>
           <Text style={[styles.detailsSummaryText, { color: colors.text }]}>
             {part.title} · {part.label}
@@ -1969,7 +2008,9 @@ function compactMobileDiffRows(rows: readonly DiffRow[]): MobileDiffDisplayRow[]
   let index = 0;
   while (index < rows.length) {
     if (keep.has(index)) {
-      result.push(rows[index]!);
+      const row = rows[index];
+      if (!row) throw new Error(`Diff row ${index} is missing`);
+      result.push(row);
       index += 1;
       continue;
     }
@@ -2870,7 +2911,16 @@ function MissionDeveloperDetails({ approval }: { approval: PendingMissionReviewA
             value={`${approval.charter.harness.unit}@${approval.charter.harness.ev}`}
             code
           />
-          <DetailRow icon={Settings2} label="Model" value={approval.charter.model.modelId} code />
+          <DetailRow
+            icon={Settings2}
+            label="Execution"
+            value={
+              approval.charter.execution.kind === "agent"
+                ? `agent:${approval.charter.execution.target.className}`
+                : `${approval.charter.execution.target.className}.${approval.charter.execution.method}`
+            }
+            code
+          />
         </View>
       ) : null}
     </View>
@@ -3202,8 +3252,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: radius.xl,
     borderTopRightRadius: radius.xl,
     borderWidth: hairline,
-    maxHeight: Dimensions.get("window").height * 0.9,
-    minHeight: Dimensions.get("window").height * 0.4,
     overflow: "hidden",
   },
   accentStripe: {
@@ -3256,9 +3304,9 @@ const styles = StyleSheet.create({
   queueButton: {
     alignItems: "center",
     borderRadius: radius.sm,
-    height: 28,
+    height: touchTarget,
     justifyContent: "center",
-    width: 28,
+    width: touchTarget,
   },
   queueLabel: {
     ...typeRamp.micro,

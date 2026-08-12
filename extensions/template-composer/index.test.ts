@@ -10,12 +10,14 @@ import { ensureTemplateOperationIntent } from "./operationRecord.js";
 import { createPinnedTemplateSourcePorts } from "./source.js";
 import { affectedRepositoryPaths, type TemplateOperationRecord } from "./staging.js";
 import {
-  bootstrapNeedsAdoption,
+  assertTemplateOperationCancellable,
   cancelTemplateOperation,
   loadTemplateCatalog,
+  integrateTemplatePublicationIntoCallerContext,
   mergeAcceptedTemplateSuggestion,
   operationReviewForTemplate,
-  resolveRepositoryConflictChoices,
+  selectedTemplateName,
+  templatePullInitiator,
 } from "./index.js";
 import { bootstrapWorkspaceSource, projectBootstrapRuntimeToSource } from "./workspace.js";
 
@@ -47,16 +49,14 @@ function inspection(): TemplateOperationInspection {
           alias: "template",
           pin: oldPin,
           parents: [],
-          fragment: { systemEpoch: 57 },
+          fragment: { systemEpoch: 58 },
           fragmentYaml: "{}\n",
-          fragmentDigest: `v1-sha256:${"d".repeat(64)}`,
           excludedSuggestions: {},
         },
       ],
       repositories: {},
       localRepoPaths: [],
-      ownershipChanges: [],
-      lock: null,
+      state: null,
       artifacts: [],
       removedArtifactPaths: [],
     },
@@ -68,15 +68,107 @@ function approvedRecord(): TemplateOperationRecord {
     version: 1,
     operationId: "pull-1",
     kind: "pull",
+    initiator: "user",
     fingerprint: inspection().plan.fingerprint,
     intent: { kind: "pull", target: oldPin },
     pins: [oldPin],
-    addedParts: [],
-    orphanedParts: [],
+    affectedParts: [],
   };
 }
 
 describe("template composer operation resumption", () => {
+  it("integrates an unambiguous publication into the invoking conversation context", async () => {
+    const call = vi.fn(async (_target: string, method: string) => {
+      if (method === "vcs.status") {
+        return {
+          mainRelation: "behind",
+          mainEventId: "event:published",
+          workingHead: { kind: "event", eventId: "event:before" },
+        };
+      }
+      if (method === "vcs.compare") {
+        return { resolution: { complete: true, concluded: false } };
+      }
+      if (method === "vcs.merge") {
+        return { resolution: { complete: true, concluded: true } };
+      }
+      throw new Error(`Unexpected ${method}`);
+    });
+    const ctx = {
+      invocation: {
+        current: () => ({
+          caller: { callerKind: "do", callerId: "eval", contextId: "ctx:onboarding" },
+        }),
+      },
+      rpc: { call },
+      log: {},
+    } as unknown as import("./context.js").ExtensionContextLike;
+
+    await expect(
+      integrateTemplatePublicationIntoCallerContext(ctx, "install-google", "event:published")
+    ).resolves.toEqual({ state: "integrated", contextId: "ctx:onboarding" });
+    expect(call).toHaveBeenCalledWith("main", "vcs.merge", {
+      commandId: expect.stringMatching(/^install-google:integrate-caller:[a-f0-9]{32}$/),
+      contextId: "ctx:onboarding",
+      expectedWorkingHead: { kind: "event", eventId: "event:before" },
+      source: { kind: "event", eventId: "event:published" },
+      intentSummary: "Bring the installed template into this conversation",
+    });
+  });
+
+  it("leaves ambiguous caller overlap to the ordinary agentic merge workflow", async () => {
+    const call = vi.fn(async (_target: string, method: string) => {
+      if (method === "vcs.status") {
+        return {
+          mainRelation: "behind",
+          mainEventId: "event:published",
+          workingHead: { kind: "application", applicationId: "application:local" },
+        };
+      }
+      if (method === "vcs.compare") {
+        return { resolution: { complete: false, concluded: false } };
+      }
+      throw new Error(`Unexpected ${method}`);
+    });
+    const ctx = {
+      invocation: {
+        current: () => ({
+          caller: { callerKind: "do", callerId: "eval", contextId: "ctx:working" },
+        }),
+      },
+      rpc: { call },
+      log: {},
+    } as unknown as import("./context.js").ExtensionContextLike;
+
+    await expect(
+      integrateTemplatePublicationIntoCallerContext(ctx, "install-google", "event:published")
+    ).resolves.toEqual({ state: "needs-merge", contextId: "ctx:working" });
+    expect(call).not.toHaveBeenCalledWith("main", "vcs.merge", expect.anything());
+  });
+
+  it("names a direct add after its selected root rather than a sorted dependency", () => {
+    const basePin = { ...oldPin, url: "git+https://example.test/base.git" };
+    const selectedPin = { ...refreshedPin, url: "git+https://example.test/google.git" };
+    expect(
+      selectedTemplateName({
+        pin: selectedPin,
+        fingerprint: `v1-sha256:${"f".repeat(64)}`,
+        roots: ["t-google"],
+        templates: [
+          { nodeId: "t-base", alias: "base", url: basePin.url, commit: basePin.commit },
+          {
+            nodeId: "t-google",
+            alias: "google-workspace",
+            url: selectedPin.url,
+            commit: selectedPin.commit,
+          },
+        ],
+        affectedParts: [],
+        excludedSuggestions: [],
+      })
+    ).toBe("google-workspace");
+  });
+
   it("discards the exact in-flight context", async () => {
     const publishCancellation = vi.fn(async () => undefined);
     const destroy = vi.fn(async () => undefined);
@@ -111,6 +203,16 @@ describe("template composer operation resumption", () => {
     expect(destroy).not.toHaveBeenCalled();
   });
 
+  it("keeps a host release migration visible instead of cancelling its exact target", () => {
+    expect(() =>
+      assertTemplateOperationCancellable({
+        ...approvedRecord(),
+        initiator: "host-release",
+      })
+    ).toThrow("cannot be cancelled");
+    expect(() => assertTemplateOperationCancellable(approvedRecord())).not.toThrow();
+  });
+
   it("does not report cancellation when publication wins the protected-main race", async () => {
     let applied = false;
     const destroy = vi.fn();
@@ -136,7 +238,7 @@ describe("template composer operation resumption", () => {
     const record = {
       ...approvedRecord(),
       intent: { kind: "pull", alias: "template", target: refreshedPin },
-      reviews: [{ repoPath: "panels/news", deltaId: "delta:news" }],
+      reviews: [{ repoPath: "panels/news", sourceDeltaId: "delta:news" }],
     };
     expect(
       operationReviewForTemplate([{ contextId: "template-composer-operation-pull", record }], {
@@ -149,7 +251,7 @@ describe("template composer operation resumption", () => {
     });
   });
 
-  it("keeps registry-independent operations usable without a cached catalog", async () => {
+  it("loads a configured verified catalog without exposing an empty-cache state", async () => {
     const client = {
       catalog: vi.fn(async () => {
         throw new TemplateRegistryUnavailableError();
@@ -157,11 +259,10 @@ describe("template composer operation resumption", () => {
       refresh: vi.fn(),
     };
 
-    await expect(loadTemplateCatalog(client)).resolves.toBeUndefined();
-    await expect(loadTemplateCatalog(client, { requireCatalog: true })).rejects.toThrow(
-      TemplateRegistryUnavailableError
-    );
-    expect(client.refresh).not.toHaveBeenCalled();
+    const refreshed = { revision: "2026-08-11" } as never;
+    client.refresh.mockResolvedValueOnce(refreshed);
+    await expect(loadTemplateCatalog(client)).resolves.toBe(refreshed);
+    expect(client.refresh).toHaveBeenCalledTimes(1);
   });
 
   it("retains exact context intent on resume", async () => {
@@ -172,10 +273,35 @@ describe("template composer operation resumption", () => {
         inspection: inspection(),
         intent: { kind: "pull", target: oldPin },
         existing: approvedRecord(),
+        initiator: "user",
+        affectedParts: [],
         persist,
       })
     ).resolves.toMatchObject({ resumed: true });
     expect(persist).not.toHaveBeenCalled();
+  });
+
+  it("derives exact host pulls only from the authenticated server caller", () => {
+    expect(
+      templatePullInitiator(
+        {
+          invocation: {
+            current: () => ({ caller: { callerKind: "server", callerId: "server" } }),
+          },
+        },
+        true
+      )
+    ).toBe("host-release");
+    expect(() =>
+      templatePullInitiator(
+        {
+          invocation: {
+            current: () => ({ caller: { callerKind: "do", callerId: "agent" } }),
+          },
+        },
+        true
+      )
+    ).toThrow("reserved for the host release handshake");
   });
 
   it("keeps every exact in-flight pin when the registry refreshes", async () => {
@@ -189,38 +315,18 @@ describe("template composer operation resumption", () => {
     expect(fallback).not.toHaveBeenCalled();
   });
 
-  it("includes reviewed same-owner updates in the affected build set", () => {
-    expect(affectedRepositoryPaths([], ["panels/news"], [])).toEqual(["panels/news"]);
-  });
-
-  it("turns keep/take/skip into explicit durable claimant decisions", () => {
-    const conflict = {
-      kind: "repository" as const,
-      repoPath: "panels/shared",
-      claimants: ["base", "news"],
-    };
-    const observation = {
-      lock: {
-        nodes: [{ nodeId: "t-base", alias: "base" }],
-        repositories: { "panels/shared": { nodeId: "t-base" } },
-      },
-    } as never;
-    expect(
-      resolveRepositoryConflictChoices([conflict], { "panels/shared": "keep" }, observation)
-    ).toEqual({ "panels/shared": "base" });
-    expect(
-      resolveRepositoryConflictChoices([conflict], { "panels/shared": "take" }, observation)
-    ).toEqual({ "panels/shared": "news" });
-    expect(
-      resolveRepositoryConflictChoices([conflict], { "panels/shared": "skip" }, observation)
-    ).toEqual({ "panels/shared": "ignore" });
+  it("includes every merged contribution in the affected build set", () => {
+    expect(affectedRepositoryPaths(["panels/news", "packages/shared"])).toEqual([
+      "packages/shared",
+      "panels/news",
+    ]);
   });
 
   it("merges accepted exact trust suggestions without replacing existing grants", () => {
     expect(
       mergeAcceptedTemplateSuggestion(
         {
-          systemEpoch: 57,
+          systemEpoch: 58,
           trust: { chromeApps: ["apps/shell"] },
         },
         "trust",
@@ -229,21 +335,9 @@ describe("template composer operation resumption", () => {
     ).toEqual({ chromeApps: ["apps/shell", "apps/integration"] });
   });
 
-  it("never resurrects a removed bootstrap root after durable adoption", () => {
-    expect(
-      bootstrapNeedsAdoption({
-        roots: [],
-        top: {
-          systemEpoch: 57,
-          templates: { use: [], bootstrapAdopted: oldPin },
-        },
-      })
-    ).toBe(false);
-  });
-
   it("preserves workspace-owned authority while a bootstrap runtime becomes composed", () => {
     const runtime = {
-      systemEpoch: 57,
+      systemEpoch: 58,
       defaultRepo: "projects/default",
       extensions: [{ source: "extensions/template-composer" }],
       providers: {
@@ -260,7 +354,7 @@ describe("template composer operation resumption", () => {
           alias: "base",
           ancestors: [],
           config: {
-            systemEpoch: 57,
+            systemEpoch: 58,
             defaultRepo: runtime.defaultRepo,
             extensions: runtime.extensions,
           },
@@ -274,7 +368,7 @@ describe("template composer operation resumption", () => {
 
   it("projects pre-adoption runtime edits over the exact bootstrap fragment", () => {
     const runtime = {
-      systemEpoch: 57,
+      systemEpoch: 58,
       defaultRepo: "projects/locally-selected",
       extensions: [{ source: "extensions/template-composer" }, { source: "extensions/local-tool" }],
       providers: { evalEngine: { source: "@workspace/eval" } },
@@ -286,7 +380,7 @@ describe("template composer operation resumption", () => {
         alias: "base",
         parents: [],
         fragment: {
-          systemEpoch: 57,
+          systemEpoch: 58,
           defaultRepo: "projects/default",
           extensions: [{ source: "extensions/template-composer" }],
         },

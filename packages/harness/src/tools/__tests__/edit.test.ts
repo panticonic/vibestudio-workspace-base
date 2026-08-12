@@ -44,15 +44,19 @@ describe("canonical edit tool", () => {
       oldText: "foo",
       newText: "bar",
     });
-    expect(result.details).toMatchObject({ diagnostic: "ambiguous", matchCount: 2 });
+    expect(result.details).toMatchObject({
+      status: "conflict",
+      conflicts: [
+        { reason: "ambiguous", matchMode: "exact", matchCount: 2, candidateLines: [1, 2] },
+      ],
+    });
     expect(vcs.lastEditInput).toBeUndefined();
   });
 
   it("uses unchanged replacement context only for matching, not authorship", async () => {
     const vcs = new StubVcs({
       files: {
-        "meta/a.ts":
-          'export const value = "baseline";\nexport const neighbor = "untouched";\n',
+        "meta/a.ts": 'export const value = "baseline";\nexport const neighbor = "untouched";\n',
       },
     });
     const tool = createEditTool(CWD, vcs, authority);
@@ -71,6 +75,35 @@ describe("canonical edit tool", () => {
     });
   });
 
+  it("uses fuzzy comparison only to locate the original span", async () => {
+    const original = "keep — dash  \nsay “hello” world\r\ntail\n";
+    const vcs = new StubVcs({ files: { "meta/a.ts": original } });
+    const tool = createEditTool(CWD, vcs, authority);
+    await tool.execute("invocation:fuzzy", {
+      path: "meta/a.ts",
+      oldText: '"hello"',
+      newText: "goodbye",
+    });
+
+    expect(vcs.read("meta/a.ts")).toBe("keep — dash  \nsay goodbye world\r\ntail\n");
+    expect(vcs.lastEditInput?.changes[0]).toMatchObject({
+      kind: "text-edit",
+      edits: [{ start: 18, end: 25, text: "goodbye" }],
+    });
+    const result = await createEditTool(
+      CWD,
+      new StubVcs({ files: { "meta/a.ts": "say “hello”\n" } }),
+      authority
+    ).execute("invocation:fuzzy-evidence", {
+      path: "meta/a.ts",
+      oldText: 'say "hello"',
+      newText: "say goodbye",
+    });
+    expect(result.details.operations[0]?.matches).toEqual([
+      { replacement: 0, mode: "normalized", line: 1 },
+    ]);
+  });
+
   it("keeps non-repository scratch edits on the scoped filesystem", async () => {
     const vcs = new StubVcs();
     const fs = new StubFs({ files: { ".tmp/note.txt": "before" } });
@@ -82,5 +115,42 @@ describe("canonical edit tool", () => {
     });
     await expect(fs.readFile(".tmp/note.txt", "utf8")).resolves.toBe("after");
     expect(result.details.storage).toBe("scratch");
+  });
+
+  it("rejects a stale read receipt without mutating and returns current evidence", async () => {
+    const vcs = new StubVcs({
+      files: { "meta/a.ts": "export const currentValue = 2;\n" },
+    });
+    const tool = createEditTool(CWD, vcs, authority);
+
+    const result = await tool.execute("invocation:stale-receipt", {
+      path: "meta/a.ts",
+      oldText: "currentValue = 1",
+      newText: "currentValue = 3",
+      receipt: {
+        protocol: "workspace-read-receipt.v1",
+        path: "meta/a.ts",
+        contentHash: "f".repeat(64),
+        byteLength: 31,
+      },
+    } as never);
+
+    expect(result.details).toMatchObject({
+      status: "conflict",
+      conflicts: [
+        {
+          reason: "content-changed",
+          currentReceipt: {
+            protocol: "workspace-read-receipt.v1",
+            path: "meta/a.ts",
+          },
+          closestCurrentExcerpts: [
+            expect.objectContaining({ text: expect.stringContaining("currentValue = 2") }),
+          ],
+          recovery: { action: "reobserve" },
+        },
+      ],
+    });
+    expect(vcs.lastEditInput).toBeUndefined();
   });
 });

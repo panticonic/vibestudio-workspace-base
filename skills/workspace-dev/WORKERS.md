@@ -1,5 +1,14 @@
 # Worker Runtime API
 
+Every worker manifest declares one semantic icon in `vibestudio.icon`. Follow
+[the shared icon guide](references/icons.md): prefer a curated Lucide object or
+truthful brand mark, then a meaningful emoji or original unit-relative artwork.
+Image icons such as `"./assets/icon.svg"` are copied into the immutable build
+and may be SVG, PNG, JPEG, WebP, AVIF, GIF, or ICO (up to 1 MiB). It is the
+worker's recognizable identity in install and capability approval prompts, so
+choose an icon for what the worker does rather than its implementation
+technology. Do not add a second icon under `vibestudio.agent`.
+
 Credentials are URL-bound and may only be used through host-mediated egress.
 
 The portable `@workspace/runtime` surface is shared by panels, workers, Durable
@@ -38,7 +47,7 @@ Generated from `runtimeSurface.worker.ts`. Use `await help()` at runtime for the
 | `browserData` | namespace | `getBrowserEnvironment`, `listImportHosts`, `listImportSources`, `previewImport`, `startImport`, `cancelImport`, `getImportJob`, `listImportJobs`, `listOpenTabs`, `openTabsAsPanels`, `getSitePreferences`, `setSiteZoom`, `getBookmarks`, `addBookmark`, `updateBookmark`, `deleteBookmark`, `moveBookmark`, `searchBookmarks`, `getHistory`, `deleteHistoryEntry`, `deleteHistoryRange`, `clearAllHistory`, `searchHistory`, `searchHistoryForAutocomplete`, `recordHistoryVisit`, `updateHistoryTitle`, `getPasswords`, `getPasswordForSite`, `addPassword`, `updatePassword`, `deletePassword`, `updatePasswordLastUsed`, `addNeverSavePassword`, `isNeverSavePassword`, `getNeverSavePasswordOrigins`, `removeNeverSavePassword`, `getFormFillSuggestions`, `addFormFillValue`, `updateFormFillValue`, `markFormFillValueUsed`, `deleteFormFillValue`, `clearFormFillValues`, `getSearchEngines`, `setDefaultEngine`, `applyCookieMutations`, `getCookieSnapshot`, `getCookiesForOrigin`, `clearCookiesForOrigin`, `clearAllCookies`, `endBrowserSession`, `getCookieSiteSummary`, `flushCookieProjection`, `getCookieProjectionDiagnostics`, `listDownloads`, `listDownloadRecords`, `upsertDownloadRecord`, `pauseDownload`, `resumeDownload`, `cancelDownload`, `openDownload`, `revealDownload`, `putPageFavicon`, `getPageFavicon`, `exportBookmarks`, `exportPasswords`, `exportCookies` | Typed access to the manifest-declared browser-data provider: detection, import, secret-free summaries, approved sensitive reads, mutation, and export. |
 | `git` | namespace | `setSharedRemote`, `removeSharedRemote`, `setUpstream`, `removeUpstream`, `detachUpstream`, `setAutoPush`, `upstreamStatus`, `pushUpstream`, `pullUpstream`, `publishRepo`, `commitMapping`, `importProject` | Typed external Git operations routed through the workspace's configured gitInterop provider. Import and pull create unpublished semantic candidates; only ordinary VCS integration and explicit publication advance protected main. Declarations carry logical credential names resolved by the host, while credential-free remotes are anonymous-first. Pull dry-runs use isolated temporary state and do not mutate managed Git, semantic state, or the remote. |
 | `vcs` | namespace | `edit`, `move`, `copy`, `merge`, `revert`, `commit`, `discard`, `importSnapshot`, `registerExternalDelta`, `supersedeExternalDelta`, `finalizeExternalDelta`, `push`, `status`, `compare`, `inspect`, `neighbors`, `history`, `blame`, `readMemory`, `resolveRepository`, `readFile`, `listDirectory`, `listFiles` | Simple semantic version control: exact event/application state, expressive edit/move/copy records, incremental local integration, whole-chain commit/discard, directly walkable provenance, and atomic external-snapshot acknowledgements containing the committed event/application/work-unit/repository/snapshot tuple. |
-| `gad` | namespace | `status`, `ensureBlob`, `listUserNotificationsForMe`, `acknowledgeUserNotification`, `putUserNotification`, `deleteUserNotification`, `getTrajectoryBranchHead`, `listTrajectoryBranches`, `listTrajectoryInvocations`, `listTrajectoryApprovals`, `listChannelEnvelopes`, `listTrajectoryEvents`, `appendChannelEnvelope`, `listMessageTypes`, `getMessageType`, `getChannelEnvelope`, `getTrajectoryForEnvelope`, `listPublishedEnvelopesForTrajectory`, `getEnvelopesForTrajectory`, `getPublishedArtifactsForTurn`, `getPrivateLineageForPublishedEnvelope`, `getDownstreamConsumers`, `readChannelEnvelopes`, `inspectChannelEnvelopes`, `listStoredValueRefs`, `inspectStorageDiagnostics`, `inspectPublicationIntegrity`, `inspectTurnState`, `inspectInvocationState`, `diagnoseInvocation`, `inspectChannelRoster`, `inspectAgentHealth`, `validateGadHashes`, `clearDirtyAfterValidation`, `checkGadIntegrity`, `rebuildTrajectoryProjections` | Typed access to the workspace's canonical Graph and Data store: parameterized SQL, trajectory/channel lineage, integrity diagnostics, provenance, and bounded channel-envelope paging. |
+| `gad` | namespace | `status`, `ensureBlob`, `listUserNotificationsForMe`, `acknowledgeUserNotification`, `putUserNotification`, `deleteUserNotification`, `getTrajectoryBranchHead`, `listTrajectoryBranches`, `listTrajectoryInvocations`, `listTrajectoryApprovals`, `listChannelEnvelopes`, `listTrajectoryEvents`, `appendChannelEnvelope`, `listMessageTypes`, `getMessageType`, `getChannelEnvelope`, `getTrajectoryForEnvelope`, `resolveTrajectoryForkPoint`, `listPublishedEnvelopesForTrajectory`, `getEnvelopesForTrajectory`, `getPublishedArtifactsForTurn`, `getPrivateLineageForPublishedEnvelope`, `getDownstreamConsumers`, `readChannelEnvelopes`, `inspectChannelEnvelopes`, `listStoredValueRefs`, `inspectStorageDiagnostics`, `inspectPublicationIntegrity`, `inspectTurnState`, `inspectInvocationState`, `diagnoseInvocation`, `inspectChannelRoster`, `inspectAgentHealth`, `validateGadHashes`, `clearDirtyAfterValidation`, `checkGadIntegrity`, `rebuildTrajectoryProjections` | Typed access to the workspace's canonical Graph and Data store: parameterized SQL, trajectory/channel lineage, integrity diagnostics, provenance, and bounded channel-envelope paging. |
 | `blobstore` | namespace | `has`, `stat`, `putText`, `getText`, `getRange`, `getRangeBytes`, `grep`, `putBase64`, `getBase64`, `putTree`, `getTree`, `listTree`, `readFileAtTree`, `diffTrees`, `materializeTree`, `delete`, `list`, `putBytes`, `getBytes`, `readText` | Per-workspace content-addressable blob store: putText/putBase64 store, getText/readText/getRange/getRangeBytes/getBase64 fetch, grep searches; returns a sha256 digest. readText is a portable alias of getText and both return string \| null. Runtime-only putBytes(Uint8Array \| ArrayBuffer) and getBytes(digest) losslessly bridge the wire's base64 representation; MIME metadata is not stored. Persist large artifacts/screenshots and return the digest. Immutable file trees: putTree/getTree store and read tree objects, listTree/readFileAtTree walk a tree hash, diffTrees compares two trees. |
 | `webhooks` | namespace | `createSubscription`, `listSubscriptions`, `revokeSubscription`, `rotateSecret` | Ergonomic owner-scoped webhook lifecycle, identical in panels, workers, DOs, and agent eval: createSubscription(request), listSubscriptions(), rotateSecret(subscriptionId, secret?), and revokeSubscription(subscriptionId). Each subscription has an explicit maxBodyBytes budget: relay defaults to its 1,500,000-byte transport ceiling, while direct defaults to the operator-configured host ceiling (16 MiB by default). Delivery events currently include rawBodyBase64, so the host ceiling also bounds that in-memory expansion. Agent eval delegates ownership and target-source checks to its host-verified owning runtime. Secrets are redacted from listings. |
 | `extensions` | namespace | `use`, `invoke`, `invokeProvider`, `on` |  |
@@ -46,9 +55,9 @@ Generated from `runtimeSurface.worker.ts`. Use `await help()` at runtime for the
 | `services` | value |  | Portable dynamic service namespace. Rich runtime clients are available by name; other services dispatch through the caller-scoped main service boundary. The same client is available in panels, workers, Durable Objects, and eval. |
 | `hosts` | value |  | Portable owner-scoped attached-host access for development sessions. |
 | `runtime` | value |  | Portable typed runtime lifecycle and supervision client for the current workspace context. |
-| `workspace` | namespace | `getInfo`, `getActive`, `getConfig`, `validateConfig`, `setInitPanels`, `setConfigField`, `applyPreparedConfig`, `getAgentsMd`, `listSkills`, `readSkill`, `sourceTree`, `ensureContextFolder`, `findUnitForPath`, `recurring`, `heartbeats`, `projects` | Workspace catalog, source tree, and unit helpers. Does not include panelTree; use runtime.panelTree for panel-tree handles. |
+| `workspace` | namespace | `getInfo`, `getActive`, `getConfig`, `validateConfig`, `setInitPanels`, `setConfigField`, `applyPreparedConfig`, `getAgentsMd`, `listSkills`, `readSkill`, `sourceTree`, `ensureContextFolder`, `findUnitForPath`, `projects` | Workspace catalog, source tree, and unit helpers. Does not include panelTree; use runtime.panelTree for panel-tree handles. |
 | `createPanelSlot` | value |  | Commit a panel and promptly return its durable handle without focusing or waiting for activation, build, or boot. Server reconciliation owns activation after commit and recovers it across transient failure or restart. Pass operationId for retry-stable identity; use handle.observe() when current lifecycle state matters. |
-| `openPanel` | value |  | Create a panel and return its handle after the exact attempt is application boot-ready, with no fixed readiness deadline. Pass options.signal for caller-owned cancellation and operationId for retry-stable identity. It defaults under the caller and focused; use parentId:null for a root or focus:false to suppress presentation. options.placement accepts "side" (default), "replace", or "split-below". The returned PanelHandle is the complete lifecycle and inspection API. Use `const page = await handle.cdp.page()` before `await page.evaluate(...)` or `await page.screenshot(...)`; page() returns a Promise, not a page proxy. For a one-call host image use `await handle.cdp.screenshot({ format: "png" })`. For host-captured logs since panel creation use `await handle.cdp.consoleHistory()` (live page console events are separate). |
+| `openPanel` | value |  | Create a panel and return its handle after the exact attempt is application boot-ready, with no fixed readiness deadline. Pass options.signal for caller-owned cancellation and operationId for retry-stable identity. It defaults under the caller and focused; use parentId:null for a root or focus:false to suppress presentation. options.placement accepts "side" (default), "side-if-room", "replace", or "split-below". The returned PanelHandle is the complete lifecycle and inspection API. Use `const session = await handle.cdp.session(); const page = session.page` for multi-step automation. The session records the immutable panel generation; after rebuild/navigation call `await session.refresh()` and use the returned session instead of replaying an uncertain action. For a one-off read, `await handle.cdp.page()` remains available and returns a Promise, not a page proxy. For a one-call host image use `await handle.cdp.screenshot({ format: "png" })`. For host-captured logs since panel creation use `await handle.cdp.consoleHistory()` (live page console events are separate). |
 | `getPanelHandle` | value |  | Alias for runtime.panelTree.get(id, kind?). |
 | `panelTree` | namespace | `self`, `get`, `rootOwners`, `roots`, `rootsForOwner`, `children`, `page`, `path`, `search`, `parent`, `navigate`, `navigateHistory` | Runtime property, not workspace.panelTree. self/get are synchronous handle factories. Use roots(input?) for the current human subject, rootOwners() then rootsForOwner(ownerUserId) for cross-owner inspection, or children(parentSlotId); each returns a bounded page with entries. page(...) is the advanced discriminated-group primitive. search(...) returns hits containing entry.node and entry.handle. Handle navigate/navigateHistory/focus/reload/rebuild return a boot-ready PanelObservation; observe is the sole live status read. |
 | `handleRpcPost` | value |  |  |
@@ -63,7 +72,7 @@ Reconnect grace does not preserve readiness, and mobile-held or failed host
 states reject immediately with structured host failures.
 
 Existing panel handles are non-owned; do not call `handle.navigate`,
-`handle.reload`, or `handle.close` unless requested. Use
+`handle.reload`, or `handle.archive` unless requested. Use
 `handle.navigate(source, opts)` or `panelTree.navigate(id, source, opts)` only
 when replacing that specific slot is the requested behavior. Clean up temporary
 panels opened by the worker.
@@ -86,6 +95,36 @@ default semantic working state. Omit `ref` to follow that context; use `ref: "ma
 to pin protected main, or another explicit immutable selector deliberately.
 
 ## Worker Lifecycle and Environment Bindings
+
+### Startup and dependency budgets
+
+Worker and Durable Object builds preserve ESM dynamic imports as modules in the
+sealed workerd module map. Use that boundary deliberately:
+
+- Keep the entry module, exported DO classes, constructors, migrations, and
+  subscription/bootstrap path limited to code required for every activation.
+- Dynamically import feature payloads at their semantic operation: model
+  provider adapters at model selection/call, HTML/PDF extraction at fetch,
+  syntax parsers at code evaluation, exporters at telemetry export, and
+  administrative/debugging code at inspection.
+- Prefer narrow package subpath exports over a broad barrel. A barrel that
+  imports tools or providers for re-export can pull their complete static
+  closure into every worker even when only one type or helper is needed. Use
+  `import type` for type-only relationships.
+- Do not make a second reduced implementation. Split the canonical package
+  into a side-effect-free kernel and feature modules. Every feature must retain
+  its normal validation, authority, error handling, and tests when loaded.
+- Verify architecture at both ends: assert that the heavy marker is absent from
+  `bundle.js` and present in a chunk, then execute the dynamic import in a real
+  workerd test. A chunk emitted by esbuild but omitted by the immutable artifact
+  store or loader is a runtime defect.
+
+Build reports and source maps answer different questions. Entry/static-closure
+bytes approximate cold parse/evaluation pressure; lazy bytes show deferred
+feature cost; total sealed bytes show storage and module-map transport cost.
+Never claim that code splitting reduced all three. Pair those measurements with
+one cold and one verified-cache activation trace as described by the
+[performance skill](../performance/SKILL.md).
 
 Discover launchable sources with `await workers.listSources()`. The result
 includes every regular and Durable Object worker, its workspace `source`, the
@@ -210,13 +249,12 @@ exact provider EV, caller-context visibility, and grant. Never use
 `workspace-service:*` in an installed-unit request or add the service to a generated
 host authority catalog.
 
-Worker packages may declare simple string overrides in top-level `overrides`.
-BuildV2 forwards those overrides, plus overrides from transitive workspace
-packages, into generated external-deps installs. Prefer package-local overrides
-for broken or missing transitive npm versions; changing an override invalidates
-the dependency cache.
+Declare worker registry dependencies and Build V2-owned override or patch
+policy according to [external dependency resolution](DEPENDENCIES.md). Never
+use top-level package-manager resolution fields in a worker package.
 
-**Durable Object-backed service** — add to `workspace/meta/vibestudio.yml`:
+**Singleton Durable Object-backed service** — when callers should resolve one
+fixed default object, add both declarations to `workspace/meta/vibestudio.yml`:
 
 ```yaml
 singletonObjects:
@@ -276,10 +314,12 @@ if (svc.kind !== "worker") throw new Error("Expected worker service");
 await gatewayFetch(`${svc.routeBasePath}/jobs`, { method: "POST", body: JSON.stringify(payload) });
 ```
 
-A `services[].durableObject` or `routes[].durableObject` referencing a DO
-class with no matching `singletonObjects` row is rejected at workspace-load
-time. Stateless service routes are live only while the canonical worker
-instance is running.
+A `routes[].durableObject` declaration requires a matching `singletonObjects`
+row because an HTTP route has no object-key input. A
+`services[].durableObject` declaration without a matching row is a factory;
+callers must pass an explicit `objectKey` to `workers.resolveService`.
+Stateless service routes are live only while the canonical worker instance is
+running.
 
 ## Durable Object-backed App Databases
 
@@ -323,7 +363,7 @@ Canonical shape:
 Minimal store:
 
 ```ts
-import { DurableObjectBase, rpc } from "@workspace/runtime/worker";
+import { DurableObjectBase, rpc } from "@workspace/runtime/worker/kernel";
 
 type TodoRow = {
   id: string;
@@ -398,9 +438,33 @@ export class TodoStore extends DurableObjectBase {
 }
 ```
 
-Declare it. A `singletonObjects` row gives the service a default object key
-(`main` below); omit the singleton only when the service is intentionally a
-factory and every caller will pass an explicit `objectKey`.
+### Keep the activation kernel small
+
+`DurableObjectBase` is the storage, RPC, and lifecycle kernel. Import it from
+`@workspace/runtime/worker/kernel` for ordinary services. Import narrow worker
+entry points when another shared package offers them; a package barrel can
+retain every exported feature in the eager worker graph even when source code
+only names one export.
+
+Use `PanelDurableObjectBase` from
+`@workspace/runtime/worker/panel-durable-base` only when the DO itself calls
+the protected panel-tree helpers (`createPanelSlot`, `openPanel`,
+`getPanelHandle`, or `panelTree`). Those facilities intentionally live outside
+the base kernel so non-panel workers do not parse and initialize panel-runtime
+code during activation.
+
+Keep expensive capability families behind literal dynamic imports. A worker
+may expose packages to eval while keeping them out of its activation bundle:
+the generated runtime preloads the exact required feature chunk before running
+otherwise-synchronous eval code. Do not recreate a synchronous registry or a
+root-barrel import to make lazy code convenient; that silently folds parsers,
+schema libraries, and runtime catalogs back into every activation.
+
+Choose the service's object identity deliberately. A `singletonObjects` row
+gives it one fixed default object key (`main` below). Use that for one
+workspace-wide coordination atom. Omit the row for a factory service and have
+every caller pass the appropriate per-project, per-account, or per-document
+`objectKey`.
 
 ```yaml
 singletonObjects:
@@ -479,94 +543,26 @@ test process and does not exercise service resolution, workerd persistence, or
 the RPC/policy boundary. Do not import `createTestDO` from agent eval or
 production panel/worker/DO code.
 
-## Durable Object Schema Migrations
+## Durable Object current schema
 
-`DurableObjectBase` owns SQLite schema lifecycle. `createTables()` declares the
-exact fresh-install shape, while retained `schemaMigrations()` definitions
-translate supported production shapes forward in one storage transaction:
+`DurableObjectBase` owns a deliberately current-only SQLite lifecycle.
+`createTables()` declares the complete fresh shape and `schemaVersion` names
+that one shape. A truly empty store is initialized atomically. Every later open
+must match the exact version and required table shape; any older, newer,
+unversioned, or drifted store is rejected unchanged with
+`DO_SCHEMA_INCOMPATIBLE`.
 
-```ts
-export class MyStoreDO extends DurableObjectBase {
-  static override schemaVersion = 2;
+This pre-release contract has no schema migration callbacks, baselines,
+ledgers, or predecessor fixtures. When a shape changes, bump `schemaVersion`
+and the coordinated `systemEpoch`, publish a fresh Base/template generation,
+and recreate disposable internal state. Export valuable user-level facts
+through the product's ordinary current interface before the cut. Never encode
+schema compatibility in application rows or add an old-format reader.
 
-  protected override schemaProductionBaseline() {
-    return { version: 1, name: "my-store-v1" } as const;
-  }
-
-  protected override schemaMigrations() {
-    return [
-      {
-        version: 2,
-        name: "add-item-archived",
-        validateSource: (sql) => {
-          const columns = sql.exec(`PRAGMA table_info(items)`).toArray();
-          if (columns.map((row) => row.name).join(",") !== "id,label") {
-            throw new Error("items does not match the captured v1 shape");
-          }
-        },
-        migrate: (sql) => {
-          sql.exec(`ALTER TABLE items ADD COLUMN archived INTEGER NOT NULL DEFAULT 0`);
-        },
-      },
-    ] as const;
-  }
-
-  protected override schemaMigrationFixtureObjectKeys(): readonly string[] {
-    return ["representative"];
-  }
-
-  protected override createTables(): void {
-    this.sql.exec(`CREATE TABLE items (
-      id TEXT PRIMARY KEY, label TEXT NOT NULL,
-      archived INTEGER NOT NULL DEFAULT 0
-    )`);
-  }
-
-  // Optional validation before this epoch is recorded as ready.
-  protected override requiredTables(): readonly string[] {
-    return ["items"];
-  }
-}
-```
-
-Every shape change bumps `schemaVersion` and adds one contiguous, permanently
-retained migration. A step at version N transforms N-1 to N. It must validate
-its exact source columns, indexes, constraints, virtual-table declarations, and
-data invariants before changing anything. Fresh databases create only the final
-shape. Existing databases run the full chain, ledger writes, mirrored downgrade
-guard, and final validation in one `transactionSync`; failures roll back intact.
-
-Each class explicitly declares its production baseline. Never invent no-op
-migrations for unknown pre-production shapes. Preserve unrelated objects and
-generic `state` keys. Capture representative fixtures before a version ships,
-and prove both upgraded and fresh schemas converge. A publication after the
-first installed version rejects a schema-version bump unless
-`schemaMigrationFixtureObjectKeys()` names at least one exact existing object.
-Those real SQLite files are retained with restrictive permissions and replayed
-in a disposable workerd facet, so choose bounded data without secrets. Capture
-briefly fences and retires the live object — concurrent calls receive a
-structured `DO_MAINTENANCE_IN_PROGRESS` refusal during the copy — so pick
-representative objects that tolerate a short publication-time pause.
-
-Schema refusals are structured service failures:
-
-- `DO_SCHEMA_INCOMPATIBLE` identifies `version-mismatch`, `shape-drift`,
-  `unversioned-database`, `future-version`, `migration-missing`, or
-  `ledger-drift`. Inspect `errorData.persistedVersion`, `targetVersion`, and
-  `safeActions`; do not encode the missing schema into application rows.
-- `DO_SCHEMA_MIGRATION_FAILED` means the declared step threw and the entire
-  transaction rolled back. Fix that migration and retry.
-
-For retained state, write a migration. Only for deliberately disposable state,
-resolve the exact target and call `workers.resetStorage(target, intent)`. The
-host automatically fences the object, verifies an out-of-tree backup, and
-returns its operation id. Use `workers.listStorageBackups(target)` and
-`workers.restoreStorageBackup(target, operationId, intent)` for recovery.
-
-Review every version bump for: a named baseline, contiguous stable migrations,
-exact source validation, representative predecessor data, unrelated-object and
-generic-state preservation, fresh/upgrade shape convergence, ledger rows, and
-rollback on an injected failure.
+`workers.resetStorage(target, intent)` remains an explicit destructive tool for
+one disposable userland object. It is not an upgrade path. The operation fences
+the exact object, verifies a backup, and returns its operation id; backup list
+and restore operate only on that same current target.
 
 ## Durable Object RPC Exposure & Authorization
 
@@ -593,7 +589,7 @@ effect literal because live docs are extracted from the exact source build
 without executing that source.
 
 ```ts
-import { DurableObjectBase, rpc } from "@workspace/runtime/worker";
+import { DurableObjectBase, rpc } from "@workspace/runtime/worker/kernel";
 
 export class MyStoreDO extends DurableObjectBase {
   protected override schemaProductionBaseline() {

@@ -13,6 +13,7 @@
 import type {
   ActionBarPayload,
   ApprovalCardPayload,
+  AutomationActivitySnapshot,
   ChatMessage,
   CustomMessageCardPayload,
   DiagnosticNotice,
@@ -43,21 +44,12 @@ import {
   summarizeMessageBlocks,
 } from "@workspace/agentic-protocol";
 import type { InvocationCardPayload } from "./invocation-card-payload.js";
-import type {
-  SubagentProgressEntry,
-  SubagentRunState,
-  TaskCardPayload,
-} from "./task-card-payload.js";
+import type { SubagentRunState, TaskCardPayload } from "./task-card-payload.js";
 
 type StoredValueRefPreview = { preview?: string };
 
 export function chatMessagesFromChannelView(state: ChannelViewState): ChatMessage[] {
   assertNoStoredValueRefs(state, "chat message projection input");
-  const closedTurnIds = new Set(
-    Object.values(state.turns)
-      .filter((turn) => turn.status === "closed")
-      .map((turn) => turn.turnId as string)
-  );
   const messages = Object.values(state.messages).flatMap((message) =>
     projectedMessageToChatMessages(
       message,
@@ -94,6 +86,10 @@ export function chatMessagesFromChannelView(state: ChannelViewState): ChatMessag
   // the agent emits a message bubble. It sorts to the bottom (by turn.updatedAt), beneath the stream.
   const turns = Object.values(state.turns).flatMap(projectedTurnToTypingMessage);
   const waitingTurns = Object.values(state.turns).flatMap(projectedWaitingTurnMessage);
+  const automationTurns = Object.values(state.turns).flatMap(projectedAutomationTurnMessage);
+  const automationInstitutions = Object.values(state.automationInstitutions ?? {}).map(
+    projectedAutomationInstitutionToChatMessage
+  );
   const silentClosedTurns = Object.values(state.turns).flatMap((turn) =>
     projectedClosedTurnWithoutResponseMessage(turn, {
       hasAssistantMessage:
@@ -168,6 +164,8 @@ export function chatMessagesFromChannelView(state: ChannelViewState): ChatMessag
     ...approvals,
     ...turns,
     ...waitingTurns,
+    ...automationTurns,
+    ...automationInstitutions,
     ...silentClosedTurns,
     ...inlineUi,
     ...custom,
@@ -185,6 +183,30 @@ export function chatMessagesFromChannelView(state: ChannelViewState): ChatMessag
       const { sortTime: _sortTime, ...rest } = message as ChatMessage & { sortTime?: number };
       return rest;
     });
+}
+
+function projectedAutomationInstitutionToChatMessage(
+  institution: import("@workspace/agentic-protocol").ProjectedAutomationInstitution
+): ChatMessage & { sortTime: number } {
+  return {
+    id: `automation:instituted:${institution.definition.missionId}`,
+    senderId: institution.actor.id,
+    content: institution.definition.name,
+    contentType: "automation",
+    kind: "system",
+    complete: true,
+    automationDefinition: {
+      snapshot: institution.definition,
+      institutedAt: institution.createdAt,
+    },
+    senderMetadata: {
+      name: institution.actor.displayName ?? institution.actor.id,
+      type: institution.actor.kind,
+      handle: institution.actor.id,
+    },
+    seq: institution.seq,
+    sortTime: Date.parse(institution.createdAt) || 0,
+  };
 }
 
 function projectedSystemNoticeToChatMessage(
@@ -294,6 +316,73 @@ function projectedTurnToTypingMessage(turn: ProjectedTurn): ChatMessage[] {
       sortTime: Date.parse(turn.updatedAt ?? turn.openedAt) || 0,
     } as ChatMessage & { sortTime: number },
   ];
+}
+
+function projectedAutomationTurnMessage(turn: ProjectedTurn): ChatMessage[] {
+  const automation = automationSnapshot(turn.metadata?.["automation"]);
+  if (!automation) return [];
+  const failed =
+    turn.status === "closed" && Boolean(turn.reason && turn.reason !== "tool_terminated");
+  return [
+    {
+      id: `automation:${automation.runId}`,
+      senderId: turn.actor.id,
+      content: automation.name,
+      contentType: "automation",
+      kind: "system",
+      complete: turn.status === "closed",
+      automation: {
+        snapshot: automation,
+        status: turn.status === "closed" ? (failed ? "failed" : "succeeded") : "running",
+        openedAt: turn.openedAt,
+        ...(turn.closedAt ? { closedAt: turn.closedAt } : {}),
+        ...(turn.summary ? { summary: turn.summary } : {}),
+        ...(turn.reason ? { reason: turn.reason } : {}),
+      },
+      senderMetadata: {
+        name: turn.actor.displayName ?? turn.actor.id,
+        type: turn.actor.kind,
+        handle: turn.actor.id,
+      },
+      sortTime: Date.parse(turn.openedAt) || 0,
+    } as ChatMessage & { sortTime: number },
+  ];
+}
+
+function automationSnapshot(value: unknown): AutomationActivitySnapshot | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const candidate = value as Partial<AutomationActivitySnapshot>;
+  if (
+    typeof candidate.missionId !== "string" ||
+    typeof candidate.runId !== "string" ||
+    typeof candidate.name !== "string" ||
+    typeof candidate.revision !== "number" ||
+    (candidate.action !== "prompt" &&
+      candidate.action !== "eval" &&
+      candidate.action !== "method") ||
+    (candidate.trigger !== "manual" && candidate.trigger !== "scheduled") ||
+    typeof candidate.startedAt !== "number" ||
+    typeof candidate.createdAt !== "number"
+  ) {
+    return null;
+  }
+  if (candidate.schedule !== null) {
+    if (typeof candidate.schedule !== "object") return null;
+    const schedule = candidate.schedule as Record<string, unknown>;
+    if (schedule["kind"] === "cron") {
+      if (typeof schedule["expression"] !== "string" || typeof schedule["timezone"] !== "string") {
+        return null;
+      }
+    } else if (schedule["kind"] !== undefined && schedule["kind"] !== "interval") {
+      return null;
+    } else if (typeof schedule["everyMs"] !== "number") {
+      return null;
+    }
+    if (schedule["untilAt"] !== undefined && typeof schedule["untilAt"] !== "number") return null;
+    if (schedule["maxRuns"] !== undefined && typeof schedule["maxRuns"] !== "number") return null;
+  }
+  if (candidate.runNumber !== undefined && typeof candidate.runNumber !== "number") return null;
+  return candidate as AutomationActivitySnapshot;
 }
 
 /**
@@ -472,6 +561,7 @@ function projectedForkToChatMessage(
         ...(fork.actor.displayName ? { displayName: fork.actor.displayName } : {}),
       },
       createdAtSeq: fork.createdAtSeq,
+      headSeq: fork.headSeq,
       archived: fork.archived,
     },
     senderMetadata: {
@@ -488,8 +578,9 @@ function projectedMessageToChatMessages(
   message: ProjectedMessage,
   intendedRecipients: string[] = []
 ): ChatMessage[] {
-  const sortTime =
-    Date.parse(message.updatedAt ?? message.completedAt ?? message.startedAt ?? "") || 0;
+  // Receipt-only updates may advance updatedAt long after replies exist. Keep
+  // transcript order anchored to the message lifecycle, not acknowledgments.
+  const sortTime = Date.parse(message.completedAt ?? message.startedAt ?? "") || 0;
   const lifecycle = lifecycleNoticeFromMessage(message);
   const senderMetadata = {
     name: message.actor.displayName ?? message.actor.id,
@@ -826,17 +917,6 @@ function subagentDetails(value: unknown): SubagentRunState | undefined {
   return record as SubagentRunState;
 }
 
-function subagentProgress(value: unknown, at: string): SubagentProgressEntry | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
-  const candidate = (value as Record<string, unknown>)["subagent"];
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return undefined;
-  const record = candidate as Record<string, unknown>;
-  if (typeof record["kind"] !== "string" || typeof record["messageSeq"] !== "number") {
-    return undefined;
-  }
-  return { ...(record as unknown as SubagentProgressEntry), at };
-}
-
 function projectedTaskToChatMessage(task: ProjectedTask): ChatMessage & { sortTime: number } {
   const subagent = task.taskType === "subagent" ? subagentDetails(task.details) : undefined;
   const status: TaskCardPayload["execution"]["status"] =
@@ -849,14 +929,6 @@ function projectedTaskToChatMessage(task: ProjectedTask): ChatMessage & { sortTi
           : task.status === "started" || task.status === "running"
             ? "running"
             : "pending";
-  const progress = task.progress.flatMap((entry) => {
-    const projected = subagentProgress(entry.data, entry.at);
-    return projected ? [projected] : [];
-  });
-  progress.sort(
-    (left, right) =>
-      left.messageSeq - right.messageSeq || Date.parse(left.at) - Date.parse(right.at)
-  );
   const payload: TaskCardPayload = {
     id: task.taskId,
     taskType: task.taskType ?? "task",
@@ -865,7 +937,6 @@ function projectedTaskToChatMessage(task: ProjectedTask): ChatMessage & { sortTi
       status,
       ...(task.terminalOutcome ? { terminalOutcome: task.terminalOutcome } : {}),
       description: task.terminalReason ?? task.summary ?? "",
-      ...(progress.length > 0 ? { progress } : {}),
       ...(task.result !== undefined ? { result: displayStoredValue(task.result) } : {}),
       isError: status === "error",
     },
@@ -1016,6 +1087,7 @@ function projectedInlineUiToChatMessage(
   const payload: InlineUiCardPayload = {
     id: inlineUi.id,
     source: inlineUi.source,
+    renderedAt: inlineUi.renderedAt,
   };
   if (inlineUi.imports !== undefined) payload.imports = inlineUi.imports;
   if (inlineUi.props !== undefined) payload.props = inlineUi.props;
@@ -1057,6 +1129,7 @@ function projectedCustomMessageToChatMessage(
     payload.by = {
       kind: custom.by.kind,
       id: custom.by.id,
+      ...(custom.by.participantId ? { participantId: custom.by.participantId } : {}),
       ...(custom.by.displayName ? { displayName: custom.by.displayName } : {}),
     };
   }

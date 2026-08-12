@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import { describe, expect, it, vi } from "vitest";
 import type { AgentTool } from "@workspace/pi-core";
-import { prepareAgentToolArguments } from "./tool-arguments.js";
+import { assertAgentToolParametersSchema, prepareAgentToolArguments } from "./tool-arguments.js";
 
 function tool(): AgentTool {
   return {
@@ -13,6 +13,15 @@ function tool(): AgentTool {
 }
 
 describe("prepareAgentToolArguments", () => {
+  it("rejects malformed schemas before they reach a model provider", () => {
+    expect(() => assertAgentToolParametersSchema("broken", { type: "wat" })).toThrow(
+      /invalid JSON Schema/u
+    );
+    expect(() => assertAgentToolParametersSchema("missing", undefined)).toThrow(
+      /JSON Schema object/u
+    );
+  });
+
   it("returns arguments that satisfy the advertised schema", () => {
     const input = { operation: "status" };
     expect(prepareAgentToolArguments(tool(), input)).toBe(input);
@@ -100,7 +109,57 @@ describe("prepareAgentToolArguments", () => {
     ).toThrow("/status: Expected 'conflict'");
   });
 
-  it("leaves plain JSON-schema tools to their own executor validation", () => {
+  it("reports the selected union branch for operations nested in an array", () => {
+    const parameters = Type.Object({
+      operations: Type.Array(
+        Type.Union([
+          Type.Object(
+            {
+              kind: Type.Literal("replace"),
+              replacements: Type.Array(Type.String()),
+            },
+            { additionalProperties: false }
+          ),
+          Type.Object(
+            {
+              kind: Type.Literal("write_binary"),
+              base64: Type.String(),
+            },
+            { additionalProperties: false }
+          ),
+        ])
+      ),
+    });
+    const selected = { ...tool(), name: "apply_patch", parameters } as AgentTool;
+
+    expect(() =>
+      prepareAgentToolArguments(selected, {
+        operations: [
+          {
+            kind: "write_binary",
+            base64: "AP8B/g==",
+            intent: "misplaced operation intent",
+          },
+        ],
+      })
+    ).toThrow("/operations/0/intent: Unexpected property");
+
+    expect(() =>
+      prepareAgentToolArguments(selected, {
+        operations: [{ kind: "chmod", mode: 0o644 }],
+      })
+    ).toThrow('/operations/0/kind: Expected one of "replace", "write_binary"');
+
+    const input = {
+      operations: [
+        { kind: "replace", replacements: ["old"] },
+        { kind: "write_binary", base64: "AP8B/g==" },
+      ],
+    };
+    expect(prepareAgentToolArguments(selected, input)).toBe(input);
+  });
+
+  it("validates plain JSON-schema tools at the same execution boundary", () => {
     const plain = {
       ...tool(),
       parameters: {
@@ -110,5 +169,7 @@ describe("prepareAgentToolArguments", () => {
       },
     } as unknown as AgentTool;
     expect(prepareAgentToolArguments(plain, { query: "history" })).toEqual({ query: "history" });
+    expect(() => prepareAgentToolArguments(plain, {})).toThrow(/query/u);
+    expect(() => prepareAgentToolArguments(plain, { query: 42 })).toThrow(/string/u);
   });
 });

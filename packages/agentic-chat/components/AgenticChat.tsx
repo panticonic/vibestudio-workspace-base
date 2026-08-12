@@ -2,8 +2,8 @@ import type { ChannelConfig } from "@workspace/pubsub";
 import { Theme } from "@radix-ui/themes";
 import { forwardRef, useEffect, useImperativeHandle } from "react";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { ChatLayout } from "./ChatLayout";
-import { ChatPaletteCommands } from "./ChatPaletteCommands";
+import { ChatLayout, type ChatLayoutProps } from "./ChatLayout";
+import { ChatHostCommands } from "./ChatPaletteCommands";
 import { ChatProvider } from "../context/ChatProvider";
 import { useAgenticChat } from "../hooks/useAgenticChat";
 import type {
@@ -11,11 +11,13 @@ import type {
   ConnectionConfig,
   AgenticChatActions,
   ToolProvider,
-  SandboxConfig,
   ForkNavHandlers,
   ChatSandboxValue,
 } from "../types";
+import type { SandboxImportLoader } from "@workspace/eval";
 import { scheduleChatCapabilityWarmup } from "../utils/chatCapabilityWarmup";
+import type { ChatMessageAreaProps } from "./ChatMessageArea";
+import type { AgenticChatFeature } from "../features";
 
 export interface AgenticChatHandle {
   /**
@@ -53,8 +55,8 @@ export interface AgenticChatProps {
   /** Panel-supplied fork navigation + review overlay handlers (fork switcher,
    *  inline fork rows, subagent review). Omit to disable the fork UI. */
   forkNav?: ForkNavHandlers;
-  /** Sandbox config — provides RPC and import loading */
-  sandbox: SandboxConfig;
+  /** Optional build-backed loader for imports used by authored UI and client evaluation. */
+  importLoader?: SandboxImportLoader;
   /** Context-relative TSX file to load into the panel-local action bar on mount */
   initialActionBarFile?: string;
   /** Props for initialActionBarFile */
@@ -69,6 +71,31 @@ export interface AgenticChatProps {
   }) => void | Promise<void>;
   /** Host approval changes can unblock the initial channel connection. */
   connectionRetrySignal?: number;
+  /**
+   * Browser-owned capabilities exposed by this chat participant. The choice is
+   * explicit and fixed for the lifetime of the mounted participant.
+   */
+  features: readonly AgenticChatFeature[];
+  /** Override ordinary transcript message rendering. */
+  renderMessage?: ChatMessageAreaProps["renderMessage"];
+  /** Override complete inline groups (thinking, invocations, typing, custom messages). */
+  renderInlineGroup?: ChatMessageAreaProps["renderInlineGroup"];
+  /** Override individual invocation rendering while retaining the stock group. */
+  renderInvocation?: ChatMessageAreaProps["renderInvocation"];
+  /** Replace, wrap, or elide the empty transcript using its complete stock renderer. */
+  renderEmptyState?: ChatMessageAreaProps["renderEmptyState"];
+  /** Replace, wrap, or elide the stock conversation header. */
+  renderHeader?: ChatLayoutProps["renderHeader"];
+  /** Replace, wrap, or elide the stock pending-delivery and outbox surfaces. */
+  renderDeliveryStatus?: ChatLayoutProps["renderDeliveryStatus"];
+  /** Replace, wrap, or elide the stock composer. */
+  renderComposer?: ChatLayoutProps["renderComposer"];
+  /** Product-specific prompt shown when the composer is empty. */
+  composerPlaceholder?: string;
+  /** Recipients used when composer text contains no explicit @mention. */
+  composerDefaultMentions?: readonly string[];
+  /** Product-owned readiness gate for the composer. */
+  composerDisabled?: boolean;
 }
 
 /**
@@ -93,16 +120,27 @@ export const AgenticChat = forwardRef<AgenticChatHandle, AgenticChatProps>(funct
     initialPrompt,
     forceInitialPrompt,
     forkNav,
-    sandbox,
+    importLoader,
     initialActionBarFile,
     initialActionBarProps,
     initialActionBarMaxHeight,
     onActionBarFileChange,
     connectionRetrySignal,
+    features: requestedFeatures,
+    renderMessage,
+    renderInlineGroup,
+    renderInvocation,
+    renderEmptyState,
+    renderHeader,
+    renderDeliveryStatus,
+    renderComposer,
+    composerPlaceholder,
+    composerDefaultMentions,
+    composerDisabled,
   },
   ref
 ) {
-  const { contextValue, inputContextValue } = useAgenticChat({
+  const { contextValue, inputContextValue, features } = useAgenticChat({
     config,
     channelName,
     channelConfig,
@@ -115,14 +153,15 @@ export const AgenticChat = forwardRef<AgenticChatHandle, AgenticChatProps>(funct
     initialPrompt,
     forceInitialPrompt,
     forkNav,
-    sandbox,
+    importLoader,
     initialActionBarFile,
     initialActionBarProps,
     initialActionBarMaxHeight,
     onActionBarFileChange,
     connectionRetrySignal,
+    features: requestedFeatures,
   });
-  useEffect(() => scheduleChatCapabilityWarmup(), []);
+  useEffect(() => scheduleChatCapabilityWarmup(features), [features]);
   useImperativeHandle(
     ref,
     () => ({
@@ -155,8 +194,20 @@ export const AgenticChat = forwardRef<AgenticChatHandle, AgenticChatProps>(funct
         }}
       >
         <ChatProvider value={contextValue} inputValue={inputContextValue}>
-          <ChatPaletteCommands />
-          <ChatLayout />
+          <ChatHostCommands />
+          <ChatLayout
+            features={features}
+            renderMessage={renderMessage}
+            renderInlineGroup={renderInlineGroup}
+            renderInvocation={renderInvocation}
+            renderEmptyState={renderEmptyState}
+            renderHeader={renderHeader}
+            renderDeliveryStatus={renderDeliveryStatus}
+            renderComposer={renderComposer}
+            composerPlaceholder={composerPlaceholder}
+            composerDefaultMentions={composerDefaultMentions}
+            composerDisabled={composerDisabled}
+          />
         </ChatProvider>
       </Theme>
     </ErrorBoundary>

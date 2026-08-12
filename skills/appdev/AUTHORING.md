@@ -24,6 +24,7 @@ Each app is a normal package with a `vibestudio.app` manifest in `package.json`:
   "type": "module",
   "vibestudio": {
     "displayName": "Foo",
+    "icon": "✨",
     "app": {
       "target": "electron",
       "renderer": "index.tsx",
@@ -37,6 +38,10 @@ Fields:
 
 - `name`: stable app principal identity. Must use `@workspace-apps/<name>`.
 - `vibestudio.displayName`: user-facing name in approval and unit surfaces.
+- `vibestudio.icon`: one identity chosen with the shared
+  [icon guide](../workspace-dev/references/icons.md), usually a curated Lucide
+  concept, truthful brand mark, semantic emoji, or repo-local image path such as
+  `./assets/icon.svg` (maximum 1 MiB). It is shown in unit lists and approvals.
 - `vibestudio.app.target`: one of `electron`, `react-native`, or `terminal`.
 - Target entry:
   - `electron`: `renderer`
@@ -165,7 +170,7 @@ Use a singleton object for one workspace-wide database, or pass an explicit
 per-account, or per-document databases. Do not expose raw SQL to app renderers;
 expose app-shaped methods and validate inputs in the DO.
 
-For the full pattern, including schema migrations and tests, read
+For the full current-schema pattern and tests, read
 [`../workspace-dev/WORKERS.md`](../workspace-dev/WORKERS.md#durable-object-backed-app-databases).
 
 ## Source And Imports
@@ -221,3 +226,46 @@ preserve `ref`, `contextId`, `stateArgs`, `name`, `focus`, and placement
 (`current`, `child`, or `root`). See
 [`../../../docs/panel-locations.md`](../../../docs/panel-locations.md) for the
 contract and security constraints.
+
+## Hosting panel-contributed commands
+
+Panel commands are a general panel-to-host contract, not a command-palette or
+chat special case. Panel authors use `useHostCommands` or the imperative
+`panel.registerHostCommands` API documented in
+[`../workspace-dev/PANEL_API.md#host-commands`](../workspace-dev/PANEL_API.md#host-commands).
+Trusted apps that host panels consume the shared wire contract:
+
+```ts
+import {
+  HOST_COMMAND_CONTRIBUTION_EVENT,
+  HOST_COMMAND_RUN_EVENT,
+  type HostCommand,
+} from "@vibestudio/shared/hostCommands";
+```
+
+Host implementations must preserve these invariants:
+
+- Route every envelope addressed to `target: "shell"` locally before any
+  server-backed panel-session path. A missing renderer may drop a local event
+  with diagnostics, but it must never turn that event into server traffic.
+- Attribute a contribution to the host-owned panel slot that delivered it;
+  never trust a panel id supplied inside event payload data.
+- Treat each contribution as the complete command set for that panel slot.
+  Replace the previous set atomically and clear it when the panel unregisters,
+  navigates, closes, or loses its runtime.
+- Present `HostCommand` metadata idiomatically. Desktop may merge it into a
+  searchable palette; mobile may use a native action row or sheet. Hosts may
+  flatten optional descriptions/groups, but must preserve stable command ids.
+- Dispatch `HOST_COMMAND_RUN_EVENT` with `{ commandId }` to the same live panel
+  slot. The panel performs the action and owns all state/availability checks.
+- Keep the registry and renderer feature-neutral. Do not add chat labels,
+  terminal callbacks, feature icons, or command-specific branching to shell
+  code. If a panel needs shared behavior across desktop and mobile, that
+  behavior belongs in a panel/package controller with separate idiomatic
+  renderers.
+
+Only event envelopes are valid for the host-local route. Reject request/response
+traffic addressed to `shell` locally rather than inventing a second RPC path.
+Tests should include an unknown future shell event and prove it remains local;
+this verifies the routing boundary independently of today's known command
+event names.

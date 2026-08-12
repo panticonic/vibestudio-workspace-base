@@ -33,6 +33,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { Dispatch, KeyboardEvent as ReactKeyboardEvent, SetStateAction } from "react";
 import { Badge, Button, Checkbox, Flex, Text, Tooltip } from "@radix-ui/themes";
+import { PanelIcon } from "./PanelIcon";
 import { ChevronDownIcon, InfoCircledIcon, LockClosedIcon } from "@radix-ui/react-icons";
 import type { PendingUnitInstallReviewApproval } from "@vibestudio/shared/approvals";
 // The resolution is the *answer* to a review, so it lives with the method that
@@ -550,20 +551,6 @@ export function InstallReview({
         </Text>
       ) : null}
 
-      {/* Unattended charters cost money and act without being opened, which is
-          exactly what a person wants to know before accepting. */}
-      {approval.charters && approval.charters.length > 0 ? (
-        <Flex direction="column" gap="1" className="install-review-charters">
-          <Text size="1" weight="medium">
-            {COPY.sections.charters}
-          </Text>
-          {approval.charters.map((charter) => (
-            <Text key={charter.name} size="1" color="gray">
-              {charter.name} — {charter.schedule}. {charter.purpose}
-            </Text>
-          ))}
-        </Flex>
-      ) : null}
     </Flex>
   );
 
@@ -769,6 +756,14 @@ function PartRow({
           onClick={onOpen}
         >
           <span className="install-review-part-head">
+            <span className="install-review-part-icon" aria-hidden="true">
+              <PanelIcon
+                icon={part.icon}
+                source={part.repoPath}
+                size={18}
+                fallback={part.kind === "panel" ? "panel" : part.kind}
+              />
+            </span>
             <Text as="span" size="2" weight="medium">
               {part.title}
             </Text>
@@ -956,6 +951,8 @@ function PartDetail({
                   says whose code this is must be the one that stands out. */}
               <OriginText text={part.origin.url} origin={part.origin} />
             </>
+          ) : part.origin.originStatus === "multiple-template-contributors" ? (
+            <> · Multiple template contributions; inspect file history for exact sources</>
           ) : (
             ""
           )}

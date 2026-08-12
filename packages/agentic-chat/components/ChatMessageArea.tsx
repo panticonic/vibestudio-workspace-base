@@ -9,19 +9,36 @@ import { MessageList } from "./MessageList";
 import { deriveActiveOutbox } from "./Outbox";
 import { SignalPills } from "./SignalPills";
 import { pendingReviewNotice } from "@vibestudio/shared/authority/reviewPending";
+import { selectAgenticChatTranscriptMessages, type ResolvedAgenticChatFeatures } from "../features";
 
 export interface ChatMessageAreaProps {
   /** Override default message card rendering */
-  renderMessage?: (...args: Parameters<NonNullable<import("./MessageList").MessageListProps["renderMessage"]>>) => ReactNode;
+  renderMessage?: (
+    ...args: Parameters<NonNullable<import("./MessageList").MessageListProps["renderMessage"]>>
+  ) => ReactNode;
   /** Override default inline group rendering */
-  renderInlineGroup?: (...args: Parameters<NonNullable<import("./MessageList").MessageListProps["renderInlineGroup"]>>) => ReactNode;
+  renderInlineGroup?: (
+    ...args: Parameters<NonNullable<import("./MessageList").MessageListProps["renderInlineGroup"]>>
+  ) => ReactNode;
+  /** Override individual invocation rendering while retaining the stock group. */
+  renderInvocation?: import("./InlineGroup").InvocationRenderer;
+  /** Replace, wrap, or elide the empty transcript using its complete stock renderer. */
+  renderEmptyState?: (defaultContent: ReactNode) => ReactNode;
+  /** Resolved browser-owned features for the stock transcript. */
+  features: ResolvedAgenticChatFeatures;
 }
 
 /**
  * Message list area with load-earlier button.
  * Reads from ChatContext and passes to MessageList.
  */
-export function ChatMessageArea({ renderMessage, renderInlineGroup }: ChatMessageAreaProps = {}) {
+export function ChatMessageArea({
+  renderMessage,
+  renderInlineGroup,
+  renderInvocation,
+  renderEmptyState,
+  features,
+}: ChatMessageAreaProps) {
   const {
     connected,
     messages,
@@ -45,11 +62,14 @@ export function ChatMessageArea({ renderMessage, renderInlineGroup }: ChatMessag
   } = useChatContext();
   const { setReplyTo } = useChatInputActions();
 
-  const mdxActions = useMemo(() => ({
-    publishMessage: async (content: string) => {
-      await chat.send(content);
-    },
-  }), [chat]);
+  const mdxActions = useMemo(
+    () => ({
+      publishMessage: async (content: string) => {
+        await chat.send(content);
+      },
+    }),
+    [chat]
+  );
 
   // Hide exactly the active-outbox set (messages live in the queue OR the
   // transcript, never both — so a fresh send doesn't flash here and then bounce
@@ -62,10 +82,15 @@ export function ChatMessageArea({ renderMessage, renderInlineGroup }: ChatMessag
   // anything here either — otherwise a transiently-pending historical message
   // would vanish from BOTH places mid-replay.
   const transcriptMessages = useMemo(() => {
-    if (!connected) return messages;
-    const hiddenIds = new Set(deriveActiveOutbox(messages, selfId, participants).map((m) => m.id));
-    return hiddenIds.size > 0 ? messages.filter((m) => !hiddenIds.has(m.id)) : messages;
-  }, [connected, messages, selfId, participants]);
+    const featureVisibleMessages = selectAgenticChatTranscriptMessages(messages, features);
+    if (!connected) return featureVisibleMessages;
+    const hiddenIds = new Set(
+      deriveActiveOutbox(featureVisibleMessages, selfId, participants).map((message) => message.id)
+    );
+    return hiddenIds.size > 0
+      ? featureVisibleMessages.filter((message) => !hiddenIds.has(message.id))
+      : featureVisibleMessages;
+  }, [connected, messages, selfId, participants, features.inlineUi]);
 
   // Empty-transcript surface. While the spawned agent is starting, show an
   // accurate status (the pre-send queue below the composer shows the spinner
@@ -74,32 +99,85 @@ export function ChatMessageArea({ renderMessage, renderInlineGroup }: ChatMessag
   // card (item 9) — gating on `connected` avoids flashing it mid-replay for an
   // existing conversation. MessageList only mounts this when there are zero
   // items, so it self-hides the moment the first message lands.
-  const emptyState = useMemo<ReactNode>(() => {
+  const defaultEmptyState = useMemo<ReactNode>(() => {
     const pending = pendingReviewNotice(connectionError?.cause ?? connectionError);
     if (pending) {
       return (
-        <Flex role="status" aria-live="polite" align="center" justify="center" gap="2" direction="column" style={{ height: "100%", padding: 16, textAlign: "center" }}>
-          <Text size="2" weight="medium">Waiting for workspace review</Text>
-          <Text color="gray" size="2">{pending.message}</Text>
+        <Flex
+          role="status"
+          aria-live="polite"
+          align="center"
+          justify="center"
+          gap="2"
+          direction="column"
+          style={{ height: "100%", padding: 16, textAlign: "center" }}
+        >
+          <Text size="2" weight="medium">
+            Waiting for workspace review
+          </Text>
+          <Text color="gray" size="2">
+            {pending.message}
+          </Text>
         </Flex>
       );
     }
     if (deferredAgent?.launching) {
       return (
-        <Flex role="status" aria-live="polite" align="center" justify="center" style={{ height: "100%" }}>
+        <Flex
+          role="status"
+          aria-live="polite"
+          align="center"
+          justify="center"
+          style={{ height: "100%" }}
+        >
           <Text color="gray" size="2">
             Preparing your agent…
           </Text>
         </Flex>
       );
     }
-    return connected ? <FirstRunCard /> : (
-      <Flex role="status" aria-live="polite" align="center" justify="center" gap="2" style={{ height: "100%" }}>
+    if (deferredAgent?.modelDiscoveryPending && deferredAgent.queued.length > 0) {
+      return (
+        <Flex
+          role="status"
+          aria-live="polite"
+          align="center"
+          justify="center"
+          gap="2"
+          style={{ height: "100%" }}
+        >
+          <Spinner size="1" />
+          <Text color="gray" size="2">
+            Preparing model settings…
+          </Text>
+        </Flex>
+      );
+    }
+    return connected ? (
+      <FirstRunCard />
+    ) : (
+      <Flex
+        role="status"
+        aria-live="polite"
+        align="center"
+        justify="center"
+        gap="2"
+        style={{ height: "100%" }}
+      >
         <Spinner size="1" />
-        <Text color="gray" size="2">Loading conversation…</Text>
+        <Text color="gray" size="2">
+          Loading conversation…
+        </Text>
       </Flex>
     );
-  }, [connectionError, deferredAgent?.launching, connected]);
+  }, [
+    connectionError,
+    deferredAgent?.launching,
+    deferredAgent?.modelDiscoveryPending,
+    deferredAgent?.queued.length,
+    connected,
+  ]);
+  const emptyState = renderEmptyState ? renderEmptyState(defaultEmptyState) : defaultEmptyState;
 
   // Before the first agent exists, the message canvas hosts the inline setup
   // (armed config) instead of an empty transcript.
@@ -136,6 +214,7 @@ export function ChatMessageArea({ renderMessage, renderInlineGroup }: ChatMessag
         mdxActions={mdxActions}
         renderMessage={renderMessage}
         renderInlineGroup={renderInlineGroup}
+        renderInvocation={renderInvocation}
       />
     </Flex>
   );

@@ -2,7 +2,7 @@ import { memo, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSetAtom } from "jotai";
 import { Cross2Icon } from "@radix-ui/react-icons";
 import { Box, Button, Card, Flex, IconButton, Spinner, Text, TextField } from "@radix-ui/themes";
-import { VibestudioLogo } from "@workspace/ui";
+import { VibestudioLogo } from "@workspace/ui/brand";
 import { useIsMobile } from "@workspace/react/responsive";
 
 import type { LazyTitleNavigationData, LazyStatusNavigationData } from "./navigationTypes";
@@ -71,6 +71,22 @@ interface PanelStackProps {
   onRegisterChromeCommand?: (handler: (command: ChromeCommand) => void) => void;
   onPaneChromeStateChange?: (state: FocusedPaneChromeState | null) => void;
   onRegisterPaneChromeCommand?: (handler: (command: PaneChromeCommand) => void) => void;
+}
+
+const DEFAULT_DESKTOP_SIDEBAR_WIDTH = 232;
+const MIN_DESKTOP_SIDEBAR_WIDTH = 200;
+const SIDEBAR_WIDTH_STORAGE_KEY = "panel-tree-sidebar-width";
+
+function readPersistedSidebarWidth(): number {
+  if (typeof window === "undefined") return DEFAULT_DESKTOP_SIDEBAR_WIDTH;
+  try {
+    const stored = Number.parseFloat(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) ?? "");
+    if (!Number.isFinite(stored)) return DEFAULT_DESKTOP_SIDEBAR_WIDTH;
+    const maxWidth = Math.max(MIN_DESKTOP_SIDEBAR_WIDTH, window.innerWidth - 200);
+    return Math.round(Math.min(maxWidth, Math.max(MIN_DESKTOP_SIDEBAR_WIDTH, stored)));
+  } catch {
+    return DEFAULT_DESKTOP_SIDEBAR_WIDTH;
+  }
 }
 
 function reportPanelCommandError(action: string, error: unknown): void {
@@ -196,7 +212,7 @@ export const PanelStack = memo(function PanelStack({
   const [findOpen, setFindOpen] = useState(false);
   const [findText, setFindText] = useState("");
   const [findResult, setFindResult] = useState({ activeMatchOrdinal: 0, matches: 0 });
-  const [sidebarWidth, setSidebarWidth] = useState<number>(260);
+  const [sidebarWidth, setSidebarWidth] = useState<number>(readPersistedSidebarWidth);
   const [isResizingSidebar, setIsResizingSidebar] = useState(false);
   const [isResizeHover, setIsResizeHover] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() =>
@@ -205,6 +221,14 @@ export const PanelStack = memo(function PanelStack({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const resizePointerIdRef = useRef<number | null>(null);
   const isMobile = useIsMobile();
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
+    } catch {
+      // A storage failure should not disable resizing for the current session.
+    }
+  }, [sidebarWidth]);
 
   // Lazy data hooks — chrome, breadcrumbs, and commands follow the focused pane.
   const { panels: rootPanels, loading: rootLoading } = useRootPanels();
@@ -380,30 +404,23 @@ export const PanelStack = memo(function PanelStack({
     )
   );
 
-  // Tree→layout drops (W5, D8): pane-handle drop shows the panel in exactly
-  // that pane; gutter drop opens it in a new column at that position.
-  const layoutRefForDrop = useRef(layout);
-  layoutRefForDrop.current = layout;
+  // Tree→viewport drops are explicit presentation commands. Full width
+  // isolates the panel; left/right place it beside the currently focused pane.
   useEffect(() => {
     const handleLayoutDrop = (event: Event) => {
       const detail = (event as CustomEvent<LayoutDropDetail>).detail;
-      if (!detail?.panelId) return;
-      const target = detail.target;
-      if (target.kind === "pane") {
-        dispatch({ type: "place-in-pane", panelId: detail.panelId, paneId: target.paneId });
-        return;
-      }
-      const column = layoutRefForDrop.current.columns.find(
-        (candidate) => candidate.id === target.columnId
-      );
-      const anchorPane = column?.panes[0];
-      if (anchorPane) {
-        dispatch({ type: "open-beside", panelId: detail.panelId, anchorPaneId: anchorPane.id });
-      }
+      const anchorPaneId = layout.focusedPaneId;
+      if (!detail?.panelId || !anchorPaneId) return;
+      dispatch({
+        type: "place-from-tree",
+        panelId: detail.panelId,
+        anchorPaneId,
+        position: detail.target.position,
+      });
     };
     window.addEventListener(LAYOUT_DROP_EVENT, handleLayoutDrop);
     return () => window.removeEventListener(LAYOUT_DROP_EVENT, handleLayoutDrop);
-  }, [dispatch]);
+  }, [dispatch, layout.focusedPaneId]);
 
   // Native focus feedback (§5.2): when a native view gains focus by a route the
   // shell didn't initiate, follow it with layout focus.
@@ -643,8 +660,8 @@ export const PanelStack = memo(function PanelStack({
       if (!containerRef.current) return;
       const rect = containerRef.current.getBoundingClientRect();
       const nextWidth = event.clientX - rect.left;
-      const maxWidth = Math.max(240, rect.width - 200);
-      const clamped = Math.min(maxWidth, Math.max(180, nextWidth));
+      const maxWidth = Math.max(MIN_DESKTOP_SIDEBAR_WIDTH, rect.width - 200);
+      const clamped = Math.min(maxWidth, Math.max(MIN_DESKTOP_SIDEBAR_WIDTH, nextWidth));
       setSidebarWidth(clamped);
     };
 
@@ -1190,15 +1207,10 @@ export const PanelStack = memo(function PanelStack({
     },
     [closePane, createChildInPane, dispatch, layout.focusedPaneId]
   );
-  // Parked columns are off-screen, so they don't count toward "is there another
-  // pane to fall back to" — only the resident ones do.
-  const visiblePaneCount = useMemo(() => {
-    const resident = new Set(residentColumnIds);
-    return layout.columns.reduce(
-      (total, column) => (resident.has(column.id) ? total + column.panes.length : total),
-      0
-    );
-  }, [layout.columns, residentColumnIds]);
+  const layoutPaneCount = useMemo(
+    () => layout.columns.reduce((total, column) => total + column.panes.length, 0),
+    [layout.columns]
+  );
   const paneChromeState = useMemo<FocusedPaneChromeState | null>(() => {
     const paneId = layout.focusedPaneId;
     const location = paneId ? findPane(layout, paneId) : null;
@@ -1213,9 +1225,9 @@ export const PanelStack = memo(function PanelStack({
           title: child.title,
         })) ?? [],
       selectedChildPanelId: focusedTreePanel?.selectedChildId ?? null,
-      visiblePaneCount,
+      layoutPaneCount,
     };
-  }, [layout, panelMap, visiblePaneCount]);
+  }, [layout, layoutPaneCount, panelMap]);
   useEffect(() => {
     onPaneChromeStateChange?.(paneChromeState);
   }, [onPaneChromeStateChange, paneChromeState]);
@@ -1365,22 +1377,39 @@ export const PanelStack = memo(function PanelStack({
             onPointerEnter={() => setIsResizeHover(true)}
             onPointerLeave={() => setIsResizeHover(false)}
             style={{
-              // A roomy, invisible grab area keeps resizing easy while the
-              // visible divider stays a slim hairline.
+              // The divider takes only its hairline in the layout: a wider
+              // element here would read as extra padding on the sidebar's
+              // right edge alone, breaking the even gutter the tree keeps on
+              // its other three sides. The roomy grab area and the hover
+              // thickening are both absolutely positioned below, so neither
+              // costs a pixel of flow.
               cursor: "col-resize",
               flexShrink: 0,
-              width: 7,
+              width: 1,
               alignSelf: "stretch",
               touchAction: "none",
-              display: "flex",
-              justifyContent: "center",
+              position: "relative",
               background: "transparent",
             }}
           >
             <Box
+              aria-hidden
               style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                left: -3,
+                right: -3,
+                cursor: "col-resize",
+              }}
+            />
+            <Box
+              style={{
+                position: "absolute",
+                top: 0,
+                bottom: 0,
+                left: 0,
                 width: isResizingSidebar || isResizeHover ? 2 : 1,
-                alignSelf: "stretch",
                 backgroundColor:
                   isResizingSidebar || isResizeHover ? "var(--accent-8)" : "var(--gray-a6)",
                 transition: "background-color 120ms ease-out, width 120ms ease-out",
@@ -1484,13 +1513,11 @@ export const PanelStack = memo(function PanelStack({
                 <ColumnRow
                   layout={layout}
                   residentColumnIds={residentColumnIds}
-                  parkedLeft={parkedLeft}
-                  parkedRight={parkedRight}
                   layoutEpoch={layoutEpoch}
                   unresponsivePanels={unresponsivePanels}
                   onDismissUnresponsive={dismissUnresponsive}
                   onFocusPane={focusPane}
-                  onFocusColumn={focusColumn}
+                  onClosePane={closePane}
                   onResizeColumns={resizeColumns}
                   onResizePanes={resizePanes}
                   onTransitionSettled={bumpLayoutEpoch}

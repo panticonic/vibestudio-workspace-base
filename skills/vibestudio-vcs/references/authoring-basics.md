@@ -19,8 +19,9 @@ Every `vcs` method accepts its documented request object directly. Do not wrap
 that object in an argument array or use `rpc.call("main", "vcs.*", ...)` when
 the runtime client is available; that lower-level transport adds no capability
 and makes argument mistakes harder to diagnose. In an ordinary chat turn,
-prefer the compact `vcs` tool (including its commit operation) plus the focused
-`write`, `edit`, `move_file`, and `copy_file` tools described by the parent skill.
+prefer the compact `vcs` tool (including its commit operation) plus `apply_patch`
+for coherent multi-file changes and the focused `write`, `edit`, `move_file`,
+and `copy_file` tools described by the parent skill.
 
 ## Discover identities before changing them
 
@@ -57,7 +58,8 @@ or adding warning prose to the file content. The visible
 tier-labeled intent, merge-arrival context, independently labeled commit
 evidence, and intent-annotated file history. It samples for coverage, orders
 surprise before routine work, collapses the reading context's own work, and
-gives the cursored continuations once. This is a projection of canonical GAD
+gives compact, complete continuations while retaining exact content identities
+and opaque service cursors inside the harness. This is a projection of canonical GAD
 facts, not a second claims store.
 
 Do not ask the model to choose a provenance level or recall keywords before
@@ -69,9 +71,13 @@ historical reads at an explicitly selected state still use `vcs.readFile`.
 
 ## Author one coherent local step
 
-Use focused `write` and `edit` tools for ordinary text work. They compile to
-the same semantic edit operation. Use `vcs.edit` when batching exact text,
-binary, repository creation, file creation, delete, or mode changes matters.
+Use `edit` for ordinary changes confined to one text file. Use `apply_patch`
+when several files must change atomically, or for a whole binary write,
+deletion, or mode change. Its exact replacement strings are preconditions, not
+fuzzy search instructions: a mismatch changes nothing and returns the current
+content hash plus bounded nearby excerpts for re-observation. Both tools compile
+to the same semantic edit operation. Use direct `vcs.edit` when repository
+creation or a lower-level stable-identity batch is required.
 The focused `edit` tool treats unchanged oldText/newText surroundings as match
 anchors: only actual differing UTF-16 ranges become authored edits, so a
 neighboring unchanged line retains its existing provenance.

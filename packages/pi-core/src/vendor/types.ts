@@ -13,7 +13,7 @@ import type {
 	Tool,
 	ToolResultMessage,
 	Usage,
-} from "@earendil-works/pi-ai";
+} from "@workspace/pi-ai";
 import type { Static, TSchema } from "typebox";
 
 /**
@@ -290,7 +290,7 @@ export interface AgentLoopConfig extends SimpleStreamOptions {
 /**
  * Thinking/reasoning level for models that support it.
  * Note: "xhigh" and "max" are only supported by selected model families. Use model
- * thinking-level metadata from @earendil-works/pi-ai to detect support for a concrete model.
+ * thinking-level metadata from @workspace/pi-ai to detect support for a concrete model.
  */
 export type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
 
@@ -358,6 +358,8 @@ export interface AgentToolResult<T> {
 	content: (TextContent | ImageContent)[];
 	/** Arbitrary structured details for logs or UI rendering. */
 	details: T;
+	/** True when execution completed authoritatively but its domain result is a failure. */
+	isError?: boolean;
 	/** Usage from the final tool execution itself, if available. Not used for main LLM context accounting. */
 	usage?: Usage;
 	/** Names of tools introduced by this result and available from this transcript point onward. */
@@ -381,7 +383,8 @@ export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T
 export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any> extends Tool<TParameters> {
 	/** Human-readable label for UI display. */
 	label: string;
-	/** Execute the tool call. Throw on failure instead of encoding errors in `content`. */
+	/** Execute the tool call. Return `isError` for an authoritative structured domain failure;
+	 * throw when execution itself cannot produce an authoritative result. */
 	execute: (
 		toolCallId: string,
 		params: Static<TParameters>,
@@ -396,6 +399,14 @@ export interface AgentTool<TParameters extends TSchema = TSchema, TDetails = any
 	 * If omitted, the default execution mode applies.
 	 */
 	executionMode?: ToolExecutionMode;
+	/**
+	 * Cancellation contract for an admitted execution.
+	 * - "interruptible" (default): the runtime may stop awaiting as soon as the parent aborts.
+	 * - "settle": abort is forwarded, but the runtime waits for the tool to report whether its
+	 *   atomic effect committed. Use this for mutation boundaries where "cancelled" must never
+	 *   conceal an already-applied change.
+	 */
+	cancellationMode?: "interruptible" | "settle";
 }
 
 /** Context snapshot passed into the low-level agent loop. */

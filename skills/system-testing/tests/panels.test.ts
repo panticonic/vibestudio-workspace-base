@@ -1,10 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { TestExecutionResult } from "../types.js";
 import { panelTests } from "./panels.js";
 
 const createPanelTest = panelTests.find((test) => test.name === "create-panel")!;
 
-describe("create-panel validation", () => {
+describe("panel system-test declarations", () => {
   it("preauthorizes inspection of the panel that the unattended test creates", () => {
     expect(createPanelTest.authorityPolicy).toEqual({
       authority: [
@@ -43,154 +42,55 @@ describe("create-panel validation", () => {
     });
   });
 
-  it("rejects a success marker when the documented panel operations did not complete", () => {
+  it("guards every scenario that can create a panel", () => {
+    for (const test of panelTests.filter((candidate) => candidate.name !== "panel-list-sources")) {
+      expect(test.orchestrate).toEqual(expect.any(Function));
+    }
+  });
+
+  it("uses the navigation case for a vague user reference instead of panel ids", () => {
+    const navigation = panelTests.find((test) => test.name === "panel-tree-navigation");
+
+    expect(navigation).toMatchObject({
+      description: "Resolve a vague browser-view reference through the panel tree",
+    });
+    expect(navigation?.prompt).toContain("that browser view");
+    expect(navigation?.prompt).not.toMatch(/\b(?:panel[- ]?id|slot[- ]?id|parent[- ]?id)\b/iu);
+    expect(navigation?.validation).toBe("agent-evidence");
+  });
+
+  it("requires independent same-panel navigation evidence", () => {
+    const navigation = panelTests.find((test) => test.name === "panel-tree-navigation")!;
+    const evidence = {
+      panelId: "seeded-browser",
+      expectedFinalUrl: "https://example.org/",
+      initialSource: "browser:https://example.com/",
+      initialUrl: "https://example.com/",
+      initialPhase: "ready",
+      initialPathIds: ["seeded-browser"],
+      finalSource: "browser:https://example.com/",
+      finalUrl: "https://example.org/",
+      finalPhase: "ready",
+      finalPathIds: ["seeded-browser"],
+      targetPreserved: true,
+      reachedExpectedDestination: true,
+    };
+
     expect(
-      createPanelTest.validate(
-        execution('const handle = await openPanel("panels/chat");', "complete")
-      )
-    ).toMatchObject({ passed: false, reason: expect.stringContaining(".cdp.page(") });
-  });
-
-  it("rejects screenshot evidence from a failed eval", () => {
-    const result = execution(
-      [
-        'const handle = await openPanel("panels/chat");',
-        "const page = await handle.cdp.page();",
-        'await handle.cdp.screenshot({ format: "png" });',
-        "await handle.cdp.consoleHistory();",
-      ].join("\n"),
-      "error"
-    );
-    expect(createPanelTest.validate(result).passed).toBe(false);
-  });
-
-  it("accepts successful open, page, screenshot, and console-history evidence", () => {
-    const result = execution(
-      [
-        'const handle = await openPanel("panels/chat");',
-        "const page = await handle.cdp.page();",
-        'await handle.cdp.screenshot({ format: "png" });',
-        "await handle.cdp.consoleHistory();",
-      ].join("\n"),
-      "complete",
-      true,
-      "PANEL_OPEN_OK handle=panel-1; visible label: Agentic Chat"
-    );
-    expect(createPanelTest.validate(result)).toEqual({ passed: true });
-  });
-
-  it("accepts diagnose as the canonical bounded host-console packet", () => {
-    const result = execution(
-      [
-        'const handle = await openPanel("panels/chat");',
-        "const page = await handle.cdp.page();",
-        'await page.screenshot({ format: "png" });',
-        "const diagnostics = await handle.diagnose();",
-        "return diagnostics.consoleHistory;",
-      ].join("\n"),
-      "complete",
-      true,
-      "PANEL_OPEN_OK handle=panel-1; visible label: Agentic Chat"
-    );
-    expect(createPanelTest.validate(result)).toEqual({ passed: true });
-  });
-
-  it("rejects image evidence without a page-specific visible fact", () => {
-    const result = execution(
-      [
-        'const handle = await openPanel("panels/chat");',
-        "const page = await handle.cdp.page();",
-        'await handle.cdp.screenshot({ format: "png" });',
-        "await handle.cdp.consoleHistory();",
-      ].join("\n"),
-      "complete",
-      true
-    );
-    expect(createPanelTest.validate(result)).toMatchObject({
-      passed: false,
-      reason: expect.stringContaining("Agentic Chat"),
-    });
-  });
-
-  it("rejects a screenshot that was never read as image content", () => {
-    const result = execution(
-      [
-        'const handle = await openPanel("panels/chat");',
-        "const page = await handle.cdp.page();",
-        'await handle.cdp.screenshot({ format: "png" });',
-        "await handle.cdp.consoleHistory();",
-      ].join("\n"),
-      "complete",
-      false,
-      "PANEL_OPEN_OK handle=panel-1; visible label: Agentic Chat"
-    );
-    expect(createPanelTest.validate(result)).toMatchObject({
-      passed: false,
-      reason: expect.stringContaining("read it as image content"),
-    });
+      navigation.validate({
+        messages: [],
+        duration: 1,
+        diagnostics: { seededPanelGoal: evidence },
+      })
+    ).toEqual({ passed: true, reason: undefined });
+    expect(
+      navigation.validate({
+        messages: [],
+        duration: 1,
+        diagnostics: {
+          seededPanelGoal: { ...evidence, finalUrl: "https://example.com/" },
+        },
+      })
+    ).toMatchObject({ passed: false });
   });
 });
-
-function execution(
-  code: string,
-  status: "complete" | "error",
-  includeImageRead = false,
-  finalContent = "PANEL_OPEN_OK handle=panel-1"
-): TestExecutionResult {
-  const messages: TestExecutionResult["messages"] = [
-    {
-      id: "prompt",
-      kind: "message",
-      senderId: "user",
-      complete: true,
-      content: "Exercise a child panel.",
-    },
-    {
-      id: "eval-card",
-      kind: "message",
-      senderId: "agent",
-      complete: true,
-      content: "",
-      contentType: "invocation",
-      invocation: {
-        id: "call-eval",
-        name: "eval",
-        status,
-        terminalOutcome: status === "complete" ? "success" : "tool_error",
-        isError: status === "error",
-        arguments: { code },
-      },
-    } as unknown as TestExecutionResult["messages"][number],
-  ];
-  if (includeImageRead) {
-    messages.push({
-      id: "read-card",
-      kind: "message",
-      senderId: "agent",
-      complete: true,
-      content: "",
-      contentType: "invocation",
-      invocation: {
-        id: "call-read",
-        name: "read",
-        status: "complete",
-        terminalOutcome: "success",
-        arguments: { target: "file:panel-capture", kind: "file" },
-        result: {
-          details: { mimeType: "image/png", size: 4096 },
-        },
-      },
-    } as unknown as TestExecutionResult["messages"][number]);
-  }
-  messages.push({
-    id: "final",
-    kind: "message",
-    senderId: "agent",
-    complete: true,
-    content: finalContent,
-  });
-  return {
-    duration: 0,
-    messages,
-  } as TestExecutionResult;
-}

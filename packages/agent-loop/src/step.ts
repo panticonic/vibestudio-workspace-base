@@ -6,7 +6,6 @@
  */
 
 import {
-  AGENTIC_EVENT_PAYLOAD_KIND,
   AGENTIC_PROTOCOL_VERSION,
   type AgenticEvent,
   type ParticipantRef,
@@ -19,7 +18,7 @@ import {
   type AppendItem,
   type EffectDescriptor,
   type ModelCallEffect,
-  type PublishEnvelopeEffect,
+  type RecordReceiptEffect,
 } from "./effects.js";
 import type { DeferredPrompt } from "./state.js";
 import { applyEvent } from "./fold.js";
@@ -145,6 +144,9 @@ function modelStartItems(
     modelSpec,
     ...(auth ? { auth } : {}),
     thinkingLevel: override?.thinkingLevel ?? config.thinkingLevel,
+    ...(config.fastMode && modelSpec.serviceTiers?.includes("priority")
+      ? { serviceTier: "priority" as const }
+      : {}),
     systemPromptHash: config.systemPromptHash,
     ...(config.immediatePrompt ? { immediatePrompt: config.immediatePrompt } : {}),
     ...(config.skillIndexHash ? { skillIndexHash: config.skillIndexHash } : {}),
@@ -211,6 +213,9 @@ function recvItem(
         : [{ type: "text", content: String(command.content ?? "") }],
       outcome: "completed",
       turnTriggerEnvelopeId: command.source.envelopeId,
+      ...(command.structuredInput !== undefined
+        ? { structuredInput: command.structuredInput }
+        : {}),
       ...(command.metadata ? { metadata: command.metadata } : {}),
       // Sender's canonical id, carried IN ADDITION to the private recv envelope
       // id so the fold can correlate read acks / edits / retracts.
@@ -270,28 +275,20 @@ function turnOpenedItem(
   };
 }
 
-/** A single `message.read` ack as a best-effort publish_envelope effect.
- *  Deterministic identity (effectId + idempotencyKey) is one of three duplicate
- *  guards (effect-outbox PK, channel-publish idempotency, monotone reducer). */
+/** A monotone read-projection update. It never appends a receipt message. */
 function readAckEffect(
   channelId: string,
   sourceMessageId: string,
   turnId: string,
-  ctx: StepContext
-): PublishEnvelopeEffect {
+  _ctx: StepContext
+): RecordReceiptEffect {
   return {
     effectId: `read:${sourceMessageId}:${turnId}`,
-    kind: "publish_envelope",
+    kind: "record_receipt",
     channelId,
     idempotencyKey: `read:${sourceMessageId}:${turnId}`,
-    payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
-    payload: {
-      kind: "message.read",
-      actor: ctx.selfRef,
-      causality: { messageId: sourceMessageId },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, turnId },
-      createdAt: ctx.now,
-    },
+    messageId: sourceMessageId,
+    turnId,
   };
 }
 
@@ -308,7 +305,7 @@ function readAckEffects(opts: {
   freshSourceMessageIds: string[];
   turnId: string;
   ctx: StepContext;
-}): PublishEnvelopeEffect[] {
+}): RecordReceiptEffect[] {
   const consumed = new Set<string>(opts.freshSourceMessageIds.filter(Boolean));
   for (const entry of opts.state.steeringQueue) {
     if (entry.seq <= opts.contextThroughSeq && entry.sourceMessageId) {
@@ -509,9 +506,11 @@ function promoteDeferredHead(state: AgentState, ctx: StepContext): StepOutput {
 }
 
 function turnClosedItem(
-  turnId: string,
+  turn: Pick<OpenTurn, "turnId" | "metadata"> | string,
   opts: { reason?: string; summary?: string } = {}
 ): AppendItem {
+  const turnId = typeof turn === "string" ? turn : turn.turnId;
+  const metadata = typeof turn === "string" ? undefined : turn.metadata;
   return {
     envelopeId: ids.turnClosed(turnId),
     payloadKind: "turn.closed",
@@ -519,6 +518,7 @@ function turnClosedItem(
       protocol: AGENTIC_PROTOCOL_VERSION,
       ...(opts.reason ? { reason: opts.reason } : {}),
       ...(opts.summary ? { summary: opts.summary } : {}),
+      ...(metadata ? { metadata } : {}),
     },
     causality: { turnId },
     publish: true,
@@ -557,6 +557,21 @@ function infrastructureFailureDiagnostic(
     causality: { messageId: messageId as never, turnId: turn.turnId },
     publish: true,
   };
+}
+
+function recoveryActionFromFailurePayload(payload: Record<string, unknown>): string | undefined {
+  const failure = payload["failure"];
+  if (!failure || typeof failure !== "object") return undefined;
+  const recovery = (failure as Record<string, unknown>)["recovery"];
+  if (!recovery || typeof recovery !== "object") return undefined;
+  const action = (recovery as Record<string, unknown>)["action"];
+  return typeof action === "string" ? action : undefined;
+}
+
+function infrastructureFailureTerminatesTurn(payload: Record<string, unknown>): boolean {
+  if (payload["terminalOutcome"] !== "infrastructure_error") return false;
+  const action = recoveryActionFromFailurePayload(payload);
+  return action === undefined || action === "stop";
 }
 
 function turnWaitingItem(
@@ -664,7 +679,7 @@ function interruptCleanupItems(state: AgentState, reason: string): AppendItem[] 
   }
   if (state.openTurn) {
     items.push(
-      turnClosedItem(state.openTurn.turnId, {
+      turnClosedItem(state.openTurn, {
         reason: reason === "forked" ? "forked" : "user_interrupted",
       })
     );
@@ -827,6 +842,21 @@ function suspendTurnFromInvocationPayload(
   };
 }
 
+/** Match the tool runtime's batch termination contract after durable folding:
+ * early termination is valid only when every finalized tool result from this
+ * model attempt requested it. Mixed batches continue through the model. */
+function completedToolBatchTerminates(state: AgentState, invocationId: string): boolean {
+  const current = [...state.entries]
+    .reverse()
+    .find((entry) => entry.kind === "tool-result" && entry.invocationId === invocationId);
+  if (current?.kind !== "tool-result" || !current.attemptId) return false;
+  const batch = state.entries.filter(
+    (entry): entry is Extract<SessionEntry, { kind: "tool-result" }> =>
+      entry.kind === "tool-result" && entry.attemptId === current.attemptId
+  );
+  return batch.length > 0 && batch.every((entry) => entry.terminate === true);
+}
+
 function hasFreshInput(state: AgentState): boolean {
   if (state.steeringQueue.length > 0) return true;
   // A parked turn resumes only for transcript input appended after its
@@ -876,7 +906,7 @@ function modelRetryLimitItems(turn: OpenTurn): AppendItem[] {
       },
       publish: true,
     },
-    turnClosedItem(turn.turnId, { reason: "model_retry_limit_exceeded" }),
+    turnClosedItem(turn, { reason: "model_retry_limit_exceeded" }),
   ];
 }
 
@@ -921,7 +951,7 @@ function nextModelCall(
 }
 
 function isUnattendedTurn(turn: OpenTurn): boolean {
-  return turn.metadata?.origin === "heartbeat" || turn.metadata?.origin === "scheduled";
+  return turn.metadata?.origin === "scheduled";
 }
 
 function fallbackNoticeItem(
@@ -1120,12 +1150,47 @@ function alreadyIngested(state: AgentState, recvEnvelopeId: string): boolean {
   return (
     state.pendingPrompt?.envelopeId === recvEnvelopeId ||
     state.steeringQueue.some((entry) => entry.envelopeId === recvEnvelopeId) ||
+    state.deferredPostTurnQueue.some((entry) => entry.envelopeId === recvEnvelopeId) ||
     state.entries.some((entry) => entry.kind === "user" && entry.envelopeId === recvEnvelopeId)
   );
 }
 
 function commandStep(state: AgentState, command: Command, ctx: StepContext): StepOutput {
   switch (command.kind) {
+    case "invoke": {
+      if (state.openTurn) {
+        throw new Error("Cannot start a direct invocation while another turn is open");
+      }
+      const turnId = ids.turnId(state.channelId, command.source.envelopeId, ctx.selfRef.id);
+      const messageId = ids.messageId(turnId, 0);
+      const invocationId = `direct:${turnId}:${command.tool}`;
+      const opened = turnOpenedItem(turnId, command.metadata);
+      const message: AppendItem = {
+        envelopeId: ids.messageTerminal(messageId),
+        payloadKind: "message.completed",
+        payload: {
+          protocol: AGENTIC_PROTOCOL_VERSION,
+          role: "assistant",
+          blocks: [
+            {
+              type: "toolCall",
+              id: invocationId,
+              name: command.tool,
+              arguments: command.args,
+            },
+          ],
+          outcome: "tool_calls_only",
+          tier: "secondary",
+        },
+        causality: { messageId: messageId as never, turnId },
+        publish: true,
+      };
+      // The ordinary message.completed cascade owns invocation.started and
+      // effect dispatch. Direct turns only bypass the model call; they do not
+      // create a second tool lifecycle.
+      return { append: [opened, message], effects: [] };
+    }
+
     case "prompt-failed": {
       const recvEnvelopeId = ids.recvUserMessage(command.channelId, command.source.envelopeId);
       if (alreadyIngested(state, recvEnvelopeId)) return EMPTY;
@@ -1155,6 +1220,7 @@ function commandStep(state: AgentState, command: Command, ctx: StepContext): Ste
               protocol: AGENTIC_PROTOCOL_VERSION,
               reason: "work_failed",
               summary: "Agent prompt infrastructure failed before model execution.",
+              ...(turnMetadata(command) ? { metadata: turnMetadata(command) } : {}),
             },
             causality: { turnId },
             publish: shouldPublishTurnLifecycle(turnMetadata(command)),
@@ -1495,7 +1561,7 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
     }
     // no tool calls
     if (state.steeringQueue.length > 0) return nextModelCall(state, 0, ctx);
-    return { append: [turnClosedItem(turn.turnId)], effects: [] };
+    return { append: [turnClosedItem(turn)], effects: [] };
   }
 
   // After-turn promotion: a closed turn drains exactly ONE deferred head into a
@@ -1528,7 +1594,7 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
       );
     }
     if (turn.failedOverToFallback && isProviderLevelFailureCode(payload["code"])) {
-      return { append: [turnClosedItem(turn.turnId, { reason: "work_failed" })], effects: [] };
+      return { append: [turnClosedItem(turn, { reason: "work_failed" })], effects: [] };
     }
     if (typeof payload["resetAt"] === "string" && payload["resetAt"].trim()) {
       return {
@@ -1542,7 +1608,7 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
       };
     }
     if (payload["recoverable"] !== true) {
-      return { append: [turnClosedItem(turn.turnId, { reason: "work_failed" })], effects: [] };
+      return { append: [turnClosedItem(turn, { reason: "work_failed" })], effects: [] };
     }
     if (!wakeGuardSatisfied(state)) return EMPTY; // guard: invocations first
     return nextModelCall(state, 0, ctx);
@@ -1561,9 +1627,37 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
     if (Object.keys(state.pendingInvocations).length > 0) return EMPTY; // not last yet
     if (Object.keys(state.pendingApprovals).length > 0) return EMPTY;
     if (Object.keys(state.pendingCredentialWaits).length > 0) return EMPTY;
+    if (turn.metadata?.completion === "after-invocation") {
+      const succeeded = kind === "invocation.completed";
+      return {
+        append: [
+          turnClosedItem(turn, {
+            ...(succeeded ? {} : { reason: "work_failed" }),
+            summary: directInvocationSummary(kind, payload),
+          }),
+        ],
+        effects: [],
+      };
+    }
     if (kind === "invocation.completed") {
       const suspension = suspendTurnFromInvocationPayload(payload);
       if (suspension) {
+        // A send-after-turn prompt may have arrived while the model was
+        // deciding to suspend. Treat the oldest ready deferred prompt exactly
+        // like input delivered to an already parked turn: promote it into the
+        // current turn and continue the model. Closing here would make a
+        // response waiter observe a response-less terminal turn before the
+        // promoted input could be synthesized.
+        const deferred = state.deferredPostTurnQueue[0];
+        if (deferred?.artifactsReady && Object.keys(state.pendingPromptPreparations).length === 0) {
+          const recv = promotedRecvItem(deferred, state.lastSeq);
+          const afterRecv = projectAppend(state, [recv], ctx.now);
+          const next = nextModelCall(afterRecv, 1, ctx, [deferred.sourceMessageId]);
+          return {
+            append: [recv, ...next.append],
+            effects: next.effects,
+          };
+        }
         return {
           append: [
             turnWaitingItem(turn.turnId, turn.waitingCount, {
@@ -1574,12 +1668,18 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
           effects: [],
         };
       }
+      if (completedToolBatchTerminates(state, String(causality["invocationId"] ?? ""))) {
+        return {
+          append: [turnClosedItem(turn, { reason: "tool_terminated" })],
+          effects: [],
+        };
+      }
     }
-    // Infrastructure cannot be repaired by another model continuation inside
-    // this turn. Wait for every sibling invocation above, then publish one
-    // deterministic, non-model diagnostic before durably closing the turn.
-    // Folded tool-result entries retain this classification so an earlier
-    // infrastructure failure is not forgotten when a sibling settles last.
+    // Origin and recoverability are independent. A typed recovery action can
+    // make an infrastructure-origin failure actionable inside this turn
+    // (repair source, reacquire a handle, reobserve, or retry). Only failures
+    // with no recovery contract or an explicit stop action terminate after
+    // every sibling invocation settles.
     const currentInvocationId = String(causality["invocationId"] ?? "");
     const priorInfrastructureFailure = [...state.entries]
       .reverse()
@@ -1587,10 +1687,11 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
         (entry) =>
           entry.seq >= turn.openedAtSeq &&
           entry.kind === "tool-result" &&
-          entry.terminalOutcome === "infrastructure_error"
+          entry.terminalOutcome === "infrastructure_error" &&
+          (entry.failureRecovery?.action === undefined || entry.failureRecovery.action === "stop")
       );
     const infrastructureFailure =
-      kind === "invocation.failed" && payload["terminalOutcome"] === "infrastructure_error"
+      kind === "invocation.failed" && infrastructureFailureTerminatesTurn(payload)
         ? {
             invocationId: currentInvocationId,
             code:
@@ -1612,7 +1713,7 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
             infrastructureFailure.invocationId,
             infrastructureFailure.code
           ),
-          turnClosedItem(turn.turnId, { reason: "work_failed" }),
+          turnClosedItem(turn, { reason: "work_failed" }),
         ],
         effects: [],
       };
@@ -1659,6 +1760,20 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
         if (state.steeringQueue.length > 0) return promoteSteersAsTurn(state, ctx);
         return promoteDeferredHead(state, ctx);
       }
+      const deferred = state.deferredPostTurnQueue[0];
+      if (
+        state.openTurn.waitingAtSeq !== undefined &&
+        !state.openTurn.interrupted &&
+        deferred?.artifactsReady &&
+        Object.keys(state.pendingPromptPreparations).length === 0 &&
+        Object.keys(state.pendingInvocations).length === 0 &&
+        wakeGuardSatisfied(state)
+      ) {
+        const recv = promotedRecvItem(deferred, state.lastSeq);
+        const afterRecv = projectAppend(state, [recv], ctx.now);
+        const next = nextModelCall(afterRecv, 1, ctx, [deferred.sourceMessageId]);
+        return { append: [recv, ...next.append], effects: next.effects };
+      }
       if (
         !state.openTurn.interrupted &&
         state.steeringQueue.length > 0 &&
@@ -1677,6 +1792,10 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
         payload["turnTriggerEnvelopeId"] ?? details["turnTriggerEnvelopeId"] ?? triggerEnvelopeId
       );
       const reason = String(payload["reason"] ?? details["reason"] ?? "prompt setup failed");
+      const metadata =
+        payload["metadata"] && typeof payload["metadata"] === "object"
+          ? (payload["metadata"] as AgentTurnMetadata)
+          : undefined;
       const turnId =
         state.openTurn?.turnId ??
         ids.turnId(state.channelId, turnTriggerEnvelopeId, ctx.selfRef.id);
@@ -1706,9 +1825,9 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
       if (state.openTurn) return { append: [diagnostic], effects: [] };
       return {
         append: [
-          turnOpenedItem(turnId, undefined, triggerEnvelopeId),
+          turnOpenedItem(turnId, metadata, triggerEnvelopeId),
           diagnostic,
-          turnClosedItem(turnId, { reason: "work_failed" }),
+          turnClosedItem({ turnId, metadata }, { reason: "work_failed" }),
         ],
         effects: [],
       };
@@ -1738,6 +1857,23 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
   return EMPTY;
 }
 
+function directInvocationSummary(kind: string, payload: Record<string, unknown>): string {
+  const value =
+    kind === "invocation.completed"
+      ? payload["result"]
+      : (payload["reason"] ?? payload["error"] ?? "Direct invocation failed");
+  let text: string;
+  if (typeof value === "string") text = value;
+  else {
+    try {
+      text = JSON.stringify(value) ?? String(value);
+    } catch {
+      text = String(value);
+    }
+  }
+  return text.length <= 24_000 ? text : `${text.slice(0, 24_000)}\n…`;
+}
+
 function effectFailedStep(
   state: AgentState,
   incoming: Extract<Incoming, { type: "effect-failed" }>,
@@ -1749,6 +1885,14 @@ function effectFailedStep(
       (candidate) => ids.promptArtifactsEffect(candidate.triggerEnvelopeId) === incoming.effectId
     );
     if (!preparation) return EMPTY;
+    const promptMetadata =
+      state.pendingPrompt?.envelopeId === preparation.triggerEnvelopeId
+        ? state.pendingPrompt.metadata
+        : (state.steeringQueue.find((entry) => entry.envelopeId === preparation.triggerEnvelopeId)
+            ?.metadata ??
+          state.deferredPostTurnQueue.find(
+            (entry) => entry.envelopeId === preparation.triggerEnvelopeId
+          )?.metadata);
     return {
       append: [
         {
@@ -1760,11 +1904,13 @@ function effectFailedStep(
             triggerEnvelopeId: preparation.triggerEnvelopeId,
             turnTriggerEnvelopeId: preparation.turnTriggerEnvelopeId,
             reason: incoming.error.message,
+            ...(promptMetadata ? { metadata: promptMetadata } : {}),
             details: {
               kind: "prompt.artifacts_failed",
               triggerEnvelopeId: preparation.triggerEnvelopeId,
               turnTriggerEnvelopeId: preparation.turnTriggerEnvelopeId,
               reason: incoming.error.message,
+              ...(promptMetadata ? { metadata: promptMetadata } : {}),
             },
           },
           publish: false,
@@ -1816,7 +1962,7 @@ function effectFailedStep(
         },
         publish: true,
       });
-      append.push(turnClosedItem(turn.turnId, { reason: "work_failed" }));
+      append.push(turnClosedItem(turn, { reason: "work_failed" }));
     }
     return { append, effects: [] };
   }
@@ -1844,19 +1990,15 @@ function effectFailedStep(
         publish: true,
       });
     }
-    if (turn) append.push(turnClosedItem(turn.turnId, { reason: "work_failed" }));
+    if (turn) append.push(turnClosedItem(turn, { reason: "work_failed" }));
     return { append, effects: [] };
   }
 
-  if (incoming.kind === "publish_envelope") {
-    // Best-effort, fire-and-forget (§1.4.6): never tracked as pending state and
-    // never re-derived, so a failed publish is simply dropped. It must NOT close
-    // the turn or emit an error diagnostic (the prior fall-through to the
-    // unmapped-effect catch-all incorrectly failed the turn on a dropped publish).
+  if (incoming.kind === "record_receipt") {
     return EMPTY;
   }
 
-  // Exhaustiveness guard: after the model_call/credential_wait/publish_envelope
+  // Exhaustiveness guard: after the model_call/credential_wait/record_receipt
   // branches above, the only remaining effect kinds are the invocation-style
   // ones, dispatched by effect-id prefix below (form: approval / inv:
   // tool-or-channel-or-http). If a new EffectKind is ever added to effects.ts
@@ -1915,7 +2057,7 @@ function effectFailedStep(
         causality: { messageId: messageId as never, turnId: turn.turnId },
         publish: true,
       });
-      append.push(turnClosedItem(turn.turnId, { reason: "work_failed" }));
+      append.push(turnClosedItem(turn, { reason: "work_failed" }));
     }
     return { append, effects: [] };
   }

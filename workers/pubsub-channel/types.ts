@@ -40,10 +40,6 @@ export const participantMetadataSchema = z
     replay: z.boolean().optional(),
     sinceId: z.number().int().nonnegative().optional(),
     replayMessageLimit: z.number().int().positive().max(MAX_CHANNEL_REPLAY_PAGE_LIMIT).optional(),
-    // Opt-in: this participant accepts host-dispatched structured delivery
-    // batches (set by agent vessels). DO participants that omit it (RPC-style
-    // clients like the eval's connectViaRpc) receive only the subscription stream.
-    receivesChannelEnvelopes: z.boolean().optional(),
   })
   .passthrough();
 
@@ -53,12 +49,13 @@ export interface SubscribeResult {
   /** Authoritative channel actor id. Human callers are canonicalized to
    * `user:<verifiedUserId>` regardless of their delivery endpoint. */
   participantId: string;
+  revision?: number;
   channelConfig?: Record<string, unknown>;
   envelope?: ChannelReplayEnvelope;
 }
 
 export type DeliveryEndpoint =
-  | { kind: "entity"; entityId: string }
+  | { kind: "entity"; entityId: string; invocation: "direct" | "mailbox" }
   | { kind: "session" };
 
 export interface VersionedApplicationConfig {
@@ -84,6 +81,7 @@ export interface ChannelRelationshipPayload {
   endpoint?: DeliveryEndpoint;
   metadata?: Record<string, unknown>;
   applicationConfig?: VersionedApplicationConfig | null;
+  detachAfterSequence?: number;
 }
 
 /** Participant info stored in the participants table. */
@@ -92,25 +90,6 @@ export interface ParticipantInfo {
   metadata: Record<string, unknown>;
   transport: "rpc" | "do";
   connectedAt: number;
-}
-
-/**
- * THE participant-capability discriminator. An "agent vessel" implements `onMethodCall` (synchronous
- * DO method dispatch) AND opts into structured batch delivery — both marked by the
- * `receivesChannelEnvelopes` flag SubscriptionManager sets at subscribe. Everything else — panels
- * (WS `rpc`) and RPC-style *connectionless DO* clients (the eval's `connectViaRpc` / HeadlessSession,
- * whose participant id is just the host DO's id) — settles method calls the RPC way: the broadcast
- * `started` event + `submitMethodResult`.
- *
- * Use THIS for any *behavioral* decision (method-call dispatch, fork-cloning,
- * structured-envelope delivery) — NOT the `transport` ("do"/"rpc") field, which only names the
- * EVENT-delivery mechanism (postToDO vs WS) and is classified purely by participant-id shape. A
- * connectionless DO client is `transport === "do"` yet is NOT an agent vessel.
- */
-export function participantIsAgentVessel(
-  metadata: Record<string, unknown> | null | undefined
-): boolean {
-  return metadata?.["receivesChannelEnvelopes"] === true;
 }
 
 /**

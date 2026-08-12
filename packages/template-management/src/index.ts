@@ -1,5 +1,4 @@
 import type {
-  TemplateAddPreparation,
   TemplateAddRequest,
   TemplateExactPin,
   TemplateInspection,
@@ -13,11 +12,26 @@ const TEMPLATE_COMPOSER = "@workspace-extensions/template-composer";
 
 export interface TemplatePendingOperation {
   operationId: string;
-  kind: "add" | "pull" | "remove" | "recompose" | "adopt-bootstrap" | "publish-authoring";
+  kind: "add" | "adopt" | "pull" | "remove" | "recompose" | "adopt-bootstrap" | "publish-authoring";
   contextId: string;
-  state: "pending" | "reviewing";
+  initiator: "user" | "host-release";
+  target?: { alias: string; ref?: string };
+  state: "pending" | "reviewing" | "repairing";
   fingerprint: string;
   review?: NonNullable<TemplateOperation["review"]>;
+  repair?: NonNullable<TemplateOperation["repair"]>;
+}
+
+export function templateOperationTitle(operation: TemplatePendingOperation): string {
+  const alias = operation.target?.alias ?? "workspace";
+  const release = operation.target?.ref?.replace(/^refs\/(?:heads|tags)\//u, "");
+  return release ? `${alias} · ${release}` : alias;
+}
+
+export function templateOperationStage(operation: TemplatePendingOperation): string {
+  if (operation.state === "repairing") return "Repair needed";
+  if (operation.state === "reviewing") return "Reviewing changes";
+  return "Ready to continue";
 }
 
 export interface TemplateManagementClient {
@@ -25,33 +39,22 @@ export interface TemplateManagementClient {
   catalog(options?: { refresh?: boolean }): Promise<TemplateCatalogSnapshot | null>;
   check(options?: { alias?: string }): Promise<Array<{ alias: string }>>;
   inspect(locator: TemplateLocator): Promise<TemplateInspection>;
-  prepareAdd(request: TemplateAddRequest): Promise<TemplateAddPreparation>;
-  add(input: {
-    commandId: string;
-    pin: TemplateExactPin;
-    choices?: Record<string, "keep" | "take" | "skip">;
-  }): Promise<TemplateOperation>;
+  add(input: { commandId: string; source: TemplateAddRequest }): Promise<TemplateOperation>;
+  adopt(input: { commandId: string; pin: TemplateExactPin }): Promise<TemplateOperation>;
   pull(input: {
     commandId: string;
     alias: string;
     toRef?: string;
-    onBuildFailure?: "discard-context" | "retain-context";
+    pin?: TemplateExactPin;
   }): Promise<TemplateOperation>;
-  remove(input: {
-    commandId: string;
-    alias: string;
-    onBuildFailure?: "discard-context" | "retain-context";
-  }): Promise<TemplateOperation>;
+  remove(input: { commandId: string; alias: string }): Promise<TemplateOperation>;
   suggest(input: {
     commandId: string;
     alias: string;
     parts?: string[];
   }): Promise<TemplateOperation>;
   operations(): Promise<TemplatePendingOperation[]>;
-  resume(input: {
-    operationId: string;
-    onBuildFailure?: "discard-context" | "retain-context";
-  }): Promise<TemplateOperation>;
+  resume(input: { operationId: string }): Promise<TemplateOperation>;
   cancel(input: { operationId: string }): Promise<{ operationId: string; state: "cancelled" }>;
   decideSuggestion(input: {
     commandId: string;
@@ -83,9 +86,8 @@ export function createTemplateManagementClient(
       >,
     inspect: (locator) =>
       invoke(TEMPLATE_COMPOSER, "inspect", [locator]) as Promise<TemplateInspection>,
-    prepareAdd: (request) =>
-      invoke(TEMPLATE_COMPOSER, "prepareAdd", [request]) as Promise<TemplateAddPreparation>,
     add: (input) => invoke(TEMPLATE_COMPOSER, "add", [input]) as Promise<TemplateOperation>,
+    adopt: (input) => invoke(TEMPLATE_COMPOSER, "adopt", [input]) as Promise<TemplateOperation>,
     pull: (input) => invoke(TEMPLATE_COMPOSER, "pull", [input]) as Promise<TemplateOperation>,
     remove: (input) => invoke(TEMPLATE_COMPOSER, "remove", [input]) as Promise<TemplateOperation>,
     suggest: (input) => invoke(TEMPLATE_COMPOSER, "suggest", [input]) as Promise<TemplateOperation>,

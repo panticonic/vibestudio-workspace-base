@@ -20,6 +20,7 @@ export const DEFAULT_HOST_MODULES: readonly string[] = [
   "@radix-ui/themes",
   "@radix-ui/react-icons",
   "@workspace/runtime",
+  "@workspace/react/responsive",
   "@vibestudio/browser-data/client",
 ];
 
@@ -47,13 +48,21 @@ export function lintRendererSource(
   ]);
   const issues: RendererLintIssue[] = [];
   for (const reference of analyzeModuleImports(code)) {
+    if (reference.kind === "type") continue;
+    const { specifier } = reference;
     if (
-      reference.kind === "type" ||
-      (reference.syntax !== "import" && reference.syntax !== "export")
+      reference.syntax === "dynamic-import" &&
+      (specifier.startsWith("./") || specifier.startsWith("../"))
     ) {
+      issues.push({
+        specifier,
+        message:
+          `Dynamic relative import "${specifier}" is not supported by file-loaded sandbox ` +
+          `renderers. Use a static relative import so the local module is bundled before render.`,
+      });
       continue;
     }
-    const { specifier } = reference;
+    if (reference.syntax !== "import" && reference.syntax !== "export") continue;
     if (specifier.startsWith("./") || specifier.startsWith("../")) continue;
     if (allowed.has(specifier)) continue;
     issues.push({

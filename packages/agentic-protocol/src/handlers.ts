@@ -177,6 +177,7 @@ export interface ProjectedTurn {
   updatedAt?: string;
   summary?: string;
   reason?: string;
+  metadata?: Record<string, unknown>;
   /** Highest envelope seq applied to this turn's status — the monotonicity guard
    *  that stops an out-of-order/replayed event from resurrecting a closed turn. */
   lastSeq?: number;
@@ -416,6 +417,10 @@ export function applyMessageEvent(
         turnId: existing.turnId ?? event.turnId,
         blocks: upsertContentBlock(existing.blocks, blockId, type, text, replace),
         status: "streaming",
+        // Signals can overtake the durable message.started envelope. Anchor a
+        // provisional stream at its first observed delta so transcript order
+        // is stable until the authoritative lifecycle event arrives.
+        startedAt: existing.startedAt ?? event.createdAt,
         updatedAt: event.createdAt,
         ...(seq !== undefined ? { lastContentSeq: seq } : {}),
       },
@@ -688,26 +693,6 @@ export function applyTaskEvent(
         status: "started",
         startedAt: existing.startedAt ?? event.createdAt,
         updatedAt: event.createdAt,
-      },
-    };
-  }
-
-  if (event.kind === "task.progress") {
-    return {
-      ...tasks,
-      [taskId]: {
-        ...existing,
-        status: "running",
-        updatedAt: event.createdAt,
-        progress: [
-          ...existing.progress,
-          {
-            at: event.createdAt,
-            message: "message" in payload ? payload.message : undefined,
-            progress: "progress" in payload ? payload.progress : undefined,
-            data: "data" in payload ? payload.data : undefined,
-          },
-        ],
       },
     };
   }

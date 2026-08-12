@@ -4,6 +4,7 @@
   "private": true,
   "vibestudio": {
     "title": "New Panel",
+    "icon": "./assets/icon.svg",
     "hiddenInLauncher": true,
     "autoArchiveWhenEmpty": true,
     "authority": {
@@ -29,6 +30,15 @@
         },
         {
           "capability": "subagents.create",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "workspace-service:browser.data",
           "resource": {
             "kind": "prefix",
             "prefix": ""
@@ -64,6 +74,15 @@
           "evidence": "intentional-broad"
         },
         {
+          "capability": "workspace.runtime-state.inspect",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
           "capability": "workspace.runtime-state.manage",
           "resource": {
             "kind": "prefix",
@@ -76,6 +95,7 @@
     }
   },
   "dependencies": {
+    "@vibestudio/shared": "workspace:*",
     "@workspace/react": "workspace:*",
     "@workspace/runtime": "workspace:*",
     "@workspace/about-shared": "workspace:*"

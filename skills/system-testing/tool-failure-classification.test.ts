@@ -42,6 +42,7 @@ describe("tool failure classification", () => {
     };
     expect(isReadOnlyInputRejection("read", failure)).toBe(true);
     expect(isReadOnlyInputRejection("write", failure)).toBe(false);
+    expect(isReadOnlyInputRejection("read", undefined, Symbol("missing"))).toBe(false);
   });
 
   it("keeps an exact-root provenance miss diagnostic-only", () => {
@@ -77,15 +78,6 @@ describe("tool failure classification", () => {
     expect(isEvalGuestCodeFailure("eval", "guest_execution_failed", "infrastructure")).toBe(false);
     expect(isEvalGuestCodeFailure("eval", "module_not_available", "user-code")).toBe(false);
     expect(isEvalGuestCodeFailure("read", "guest_execution_failed", "user-code")).toBe(false);
-  });
-
-  it("keeps typed no-effect subagent close guards diagnostic-only", () => {
-    expect(isSafeSubagentDomainRejection("close_subagent", "IntegrationIncomplete")).toBe(true);
-    expect(isSafeSubagentDomainRejection("close_subagent", "WorkingChangesPresent")).toBe(true);
-    expect(isSafeSubagentDomainRejection("close_subagent", "Unauthorized")).toBe(false);
-    expect(isSafeSubagentDomainRejection("merge_subagent", "IntegrationIncomplete")).toBe(
-      false
-    );
   });
 
   it("keeps typed ambiguous subagent inspection diagnostic-only", () => {

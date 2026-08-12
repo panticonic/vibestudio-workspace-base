@@ -8,6 +8,8 @@ export async function ensureTemplateOperationIntent(input: {
   inspection: TemplateOperationInspection;
   intent: unknown;
   existing: TemplateOperationRecord | null;
+  initiator: TemplateOperationRecord["initiator"];
+  affectedParts: string[];
   persist(record: TemplateOperationRecord): Promise<void>;
 }): Promise<{ record: TemplateOperationRecord; resumed: boolean }> {
   if (input.existing) {
@@ -21,6 +23,11 @@ export async function ensureTemplateOperationIntent(input: {
         `Template operation ${input.operationId} was reused with different normalized intent`
       );
     }
+    if (input.existing.initiator !== input.initiator) {
+      throw new Error(
+        `Template operation ${input.operationId} was reused by a different initiator`
+      );
+    }
   }
   if (input.existing) {
     return { record: input.existing, resumed: true };
@@ -29,13 +36,11 @@ export async function ensureTemplateOperationIntent(input: {
     version: 1,
     operationId: input.operationId,
     kind: input.inspection.kind,
+    initiator: input.initiator,
     fingerprint: input.inspection.plan.fingerprint,
     intent: input.intent,
     pins: input.inspection.plan.nodes.map((node) => node.pin as WorkspaceTemplatePin),
-    addedParts: Object.keys(input.inspection.plan.repositories).sort(),
-    orphanedParts: input.inspection.plan.ownershipChanges
-      .filter((change) => change.reason === "orphaned")
-      .map((change) => change.repoPath),
+    affectedParts: input.affectedParts,
   };
   await input.persist(record);
   return { record, resumed: false };

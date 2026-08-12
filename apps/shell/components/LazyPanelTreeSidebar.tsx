@@ -23,11 +23,12 @@ import {
   Cross2Icon,
   CubeIcon,
   DrawingPinFilledIcon,
+  FileMinusIcon,
   MagnifyingGlassIcon,
   PlusIcon,
 } from "@radix-ui/react-icons";
 import { Badge, Box, Button, Flex, IconButton, Text, Tooltip } from "@radix-ui/themes";
-import { VibestudioLogo } from "@workspace/ui";
+import { VibestudioLogo } from "@workspace/ui/brand";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -54,7 +55,7 @@ import {
   workspaceChooserDialogOpenAtom,
 } from "../state/appModeAtoms.js";
 import { assertPresent } from "../utils/assertPresent";
-import { BrowserFavicon } from "./BrowserFavicon";
+import { PanelIcon } from "./PanelIcon";
 import { ConnectionStatusBadge } from "./ConnectionStatusBadge";
 import { buildGuides } from "./panelTreeGuides.js";
 import { ThemeSettings } from "./ThemeSettings";
@@ -74,6 +75,8 @@ const OWNER_BAND_HEIGHT = 18;
 const ROW_PADDING_LEFT = 6;
 /** Fixed-width gutter that holds the expand caret so titles align by depth. */
 const CARET_SLOT = 14;
+/** Optical artwork size; leaves breathing room inside the dense 22px row. */
+const PANEL_ICON_SIZE = 13;
 const ACTION_BUTTON_SIZE = 18;
 const PANEL_TREE_PAGE_SIZE = 50;
 
@@ -430,7 +433,7 @@ const SortableTreeItem = memo(
         if (
           panel.childCount > 0 &&
           !window.confirm(
-            `Close “${panel.title}” and its ${panel.childCount} child panel${panel.childCount === 1 ? "" : "s"}?`
+            `Archive “${panel.title}” and its ${panel.childCount} child panel${panel.childCount === 1 ? "" : "s"}?`
           )
         ) {
           return;
@@ -543,7 +546,13 @@ const SortableTreeItem = memo(
             )}
           </Flex>
 
-          {panel.favicon ? <BrowserFavicon handle={panel.favicon} size={14} /> : null}
+          <PanelIcon
+            icon={panel.icon}
+            source={panel.source}
+            favicon={panel.favicon}
+            size={PANEL_ICON_SIZE}
+            fallback={panel.source?.startsWith("browser:") ? "browser" : "panel"}
+          />
 
           {/* Title — the focal element; brightened + weighted when selected */}
           <Text
@@ -610,7 +619,8 @@ const SortableTreeItem = memo(
                 size="1"
                 variant="ghost"
                 color="gray"
-                aria-label="Close panel"
+                aria-label="Archive panel"
+                title="Archive panel"
                 onClick={handleArchive}
                 className="app-tree-action app-tree-action-danger"
                 style={{
@@ -620,7 +630,7 @@ const SortableTreeItem = memo(
                   margin: 0,
                 }}
               >
-                <Cross2Icon width={12} height={12} />
+                <FileMinusIcon width={12} height={12} />
               </IconButton>
             </>
           )}
@@ -640,6 +650,8 @@ const SortableTreeItem = memo(
       prev.item.collapsed === next.item.collapsed &&
       prev.item.parentId === next.item.parentId &&
       prev.item.panel.title === next.item.panel.title &&
+      prev.item.panel.icon === next.item.panel.icon &&
+      prev.item.panel.source === next.item.panel.source &&
       prev.item.panel.childCount === next.item.panel.childCount &&
       prev.item.panel.buildState === next.item.panel.buildState &&
       prev.item.panel.favicon?.pageUrl === next.item.panel.favicon?.pageUrl &&
@@ -718,7 +730,7 @@ function SidebarFooter({ activeWorkspaceName, onSwitchWorkspace, onNewPanel }: S
   );
 
   return (
-    <Box px="2" py="1">
+    <Box px="1" py="1">
       <Button
         variant="soft"
         color="gray"
@@ -1249,7 +1261,7 @@ export function LazyPanelTreeSidebar({
 
   const diagnostics =
     treeLoadError || selfIdentityError ? (
-      <Flex direction="column" gap="1" mx="2" mb="1">
+      <Flex direction="column" gap="1" mx="1" mb="1">
         {treeLoadError ? (
           <Flex
             role="alert"
@@ -1333,11 +1345,15 @@ export function LazyPanelTreeSidebar({
       <Flex
         align="center"
         gap="1"
-        mx="2"
+        mx="1"
         mt="1"
         mb="1"
-        px="2"
         style={{
+          // The outer margin is the sidebar gutter (4px, matching the tree
+          // scroller's reserved lane and the footer); the inner padding is the
+          // row gutter, so the search icon lands on the same x as a row's
+          // expander and nothing steps in twice.
+          paddingInline: ROW_PADDING_LEFT,
           minHeight: 24,
           borderRadius: 5,
           background: "var(--gray-a3)",

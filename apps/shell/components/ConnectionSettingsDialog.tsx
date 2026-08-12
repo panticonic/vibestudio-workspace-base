@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Button, Dialog, Flex, Text, TextField, Callout, Box, Separator } from "@radix-ui/themes";
 import { ExclamationTriangleIcon } from "@radix-ui/react-icons";
-import { AppDialog } from "@workspace/ui";
+import { AppDialog } from "@workspace/ui/overlay";
 import {
   createConnectDeepLink,
   parseConnectLink,
@@ -190,7 +190,7 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
               <Text as="label" size="2" weight="medium">
                 Pairing link
               </Text>
-              <Button size="1" variant="soft" disabled={busy} onClick={() => void onPasteLink()}>
+              <Button size="1" variant="soft" disabled={busy} onClick={onPasteLink}>
                 Paste link
               </Button>
             </Flex>

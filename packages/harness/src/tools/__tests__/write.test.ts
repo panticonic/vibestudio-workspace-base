@@ -7,6 +7,10 @@ const CWD = "/";
 const authority = { contextId: "context:test", commandId: "command:write" };
 
 describe("canonical write tool", () => {
+  it("declares an admitted mutation as a cancellation settlement boundary", () => {
+    expect(createWriteTool(CWD, new StubVcs(), authority).cancellationMode).toBe("settle");
+  });
+
   it("creates a new repository file through a state-checked change", async () => {
     const vcs = new StubVcs();
     const tool = createWriteTool(CWD, vcs, authority);
@@ -56,16 +60,17 @@ describe("canonical write tool", () => {
       content: "same",
     });
 
-    expect(result.details).toEqual({
-      bytesWritten: 4,
-      path: "meta/out.txt",
+    expect(result.details).toMatchObject({
+      protocol: "file-mutation.v1",
+      status: "unchanged",
       storage: "vcs",
-      unchanged: true,
+      operations: [{ path: "meta/out.txt", kind: "write", status: "unchanged", bytesWritten: 4 }],
+      conflicts: [],
     });
     expect(result.content).toEqual([
       {
         type: "text",
-        text: "File meta/out.txt already has the requested content; no change was needed.",
+        text: "meta/out.txt already matches the requested state.",
       },
     ]);
     expect(vcs.read("meta/out.txt")).toBe("same");
@@ -82,6 +87,48 @@ describe("canonical write tool", () => {
     expect(vcs.lastEditInput).toBeUndefined();
   });
 
+  it("reports success when cancellation arrives after the semantic edit committed", async () => {
+    const controller = new AbortController();
+    class AbortAfterCommitVcs extends StubVcs {
+      override async edit(input: Parameters<StubVcs["edit"]>[0]) {
+        const result = await super.edit(input);
+        controller.abort(new Error("turn interrupted after commit"));
+        return result;
+      }
+    }
+    const vcs = new AbortAfterCommitVcs();
+    const tool = createWriteTool(CWD, vcs, authority);
+
+    const result = await tool.execute(
+      "invocation:post-commit-cancel",
+      { path: "meta/out.txt", content: "committed" },
+      controller.signal
+    );
+
+    expect(controller.signal.aborted).toBe(true);
+    expect(vcs.read("meta/out.txt")).toBe("committed");
+    expect(result.details).toMatchObject({
+      storage: "vcs",
+      operations: [{ bytesWritten: 9, status: "created" }],
+    });
+  });
+
+  it("rejects cancellation before mutation admission", async () => {
+    const controller = new AbortController();
+    controller.abort(new Error("cancelled before admission"));
+    const vcs = new StubVcs();
+    const tool = createWriteTool(CWD, vcs, authority);
+
+    await expect(
+      tool.execute(
+        "invocation:pre-admission-cancel",
+        { path: "meta/out.txt", content: "never" },
+        controller.signal
+      )
+    ).rejects.toThrow("Operation aborted");
+    expect(vcs.lastEditInput).toBeUndefined();
+  });
+
   it("returns a recoverable scratch suggestion for a missing managed repository", async () => {
     const vcs = new StubVcs();
     const tool = createWriteTool(CWD, vcs, authority);
@@ -91,18 +138,41 @@ describe("canonical write tool", () => {
     });
 
     expect(result.details).toMatchObject({
-      bytesWritten: 0,
-      path: "projects/temporary-note/temporary-note.md",
-      storage: "none",
-      diagnostic: "repository-not-present",
-      suggestedScratchPath: ".tmp/temporary-note.md",
+      status: "conflict",
+      storage: "vcs",
+      conflicts: [
+        {
+          path: "projects/temporary-note/temporary-note.md",
+          reason: "repository-not-present",
+          suggestedScratchPath: ".tmp/temporary-note.md",
+        },
+      ],
     });
-    expect(result.content).toEqual([
-      expect.objectContaining({
-        type: "text",
-        text: expect.stringMatching(/existing workspace repository.*\.tmp\/temporary-note\.md/),
-      }),
-    ]);
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining("No files changed"),
+    });
+    expect(vcs.lastEditInput).toBeUndefined();
+  });
+
+  it("returns a create-only conflict with the current receipt instead of overwriting", async () => {
+    const vcs = new StubVcs({ files: { "meta/out.txt": "existing" } });
+    const result = await createWriteTool(CWD, vcs, authority).execute("invocation:create-only", {
+      path: "meta/out.txt",
+      content: "replacement",
+      createOnly: true,
+    });
+
+    expect(result.details).toMatchObject({
+      status: "conflict",
+      conflicts: [
+        {
+          reason: "file-exists",
+          currentReceipt: { protocol: "workspace-read-receipt.v1", path: "meta/out.txt" },
+        },
+      ],
+    });
+    expect(vcs.read("meta/out.txt")).toBe("existing");
     expect(vcs.lastEditInput).toBeUndefined();
   });
 

@@ -43,6 +43,7 @@ function capabilityApproval(
     authorityRow: partial.authorityRow,
     operationSubstance: partial.operationSubstance,
     approvalId: partial.approvalId,
+    lifecycle: partial.lifecycle,
   };
 }
 
@@ -211,6 +212,59 @@ function renderCard(
 }
 
 describe("ApprovalCard", () => {
+  it("renders preparation as background progress without offering consent decisions", () => {
+    const { emit } = renderCard(
+      capabilityApproval({
+        approvalId: "publication-preparing",
+        title: "Preparing workspace update…",
+        lifecycle: {
+          state: "preparing",
+          progress: {
+            label: "Building and type-checking workspace projects",
+            detail: "2 finished; 4 still running in parallel.",
+            completed: 2,
+            total: 6,
+            updatedAt: Date.now(),
+          },
+        },
+      })
+    );
+
+    expect(screen.getByRole("status").textContent).toMatch(
+      /^Building and type-checking workspace projects \(2 of 6\)… \d+s elapsed$/
+    );
+    expect(screen.getByRole("status").previousElementSibling?.tagName).toBe("svg");
+    expect(screen.getByText("2 finished; 4 still running in parallel.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Allow for now" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Trust this version" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Don't allow" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Run in background" }));
+    expect(emit).toHaveBeenCalledWith({
+      type: "minimize",
+      approvalId: "publication-preparing",
+    });
+  });
+
+  it("renders failed preparation as a dismissible result, not a denial", () => {
+    const { emit } = renderCard(
+      capabilityApproval({
+        approvalId: "publication-failed",
+        title: "Update workspace repositories",
+        lifecycle: { state: "failed", diagnostics: ["packages/example.ts:1: Broken type"] },
+      })
+    );
+
+    expect(screen.getByText("packages/example.ts:1: Broken type")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Don't allow" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    expect(emit).toHaveBeenCalledWith({
+      type: "decide",
+      decision: "dismiss",
+      approvalId: "publication-failed",
+    });
+  });
+
   it("exposes a labelled, described dialog and assertive decision errors with long copy", () => {
     const title =
       "Autoriser la publication de cette très longue synthèse dans l’espace de travail partagé";
@@ -288,7 +342,6 @@ describe("ApprovalCard", () => {
           callerPrincipal: "code:news",
           sessionId: "session:news",
           taskRef: "task:nightly-briefing",
-          agentBindingId: "binding:news",
           agentName: "News",
           agentScopeEligible: true,
           reviewedClosureSubject: "-",

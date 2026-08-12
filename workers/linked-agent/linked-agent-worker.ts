@@ -26,6 +26,7 @@ import {
   type AgenticEvent,
 } from "@workspace/agentic-protocol";
 import { ids } from "@workspace/agent-loop";
+import type { ClaudeHookEvent } from "@vibestudio/shared/claudeLaunchProfile";
 import { channelTrajectoryFor } from "@vibestudio/trajectory-identity";
 import type { AgentTool } from "@workspace/pi-core";
 import {
@@ -66,41 +67,7 @@ interface LinkedBridgeStream extends LinkedAttachment {
 
 /** Hook events reported by the bridge (plan §7.4). `seq` is a per-session
  *  monotonic counter minted by the bridge; redelivery is a no-op. */
-export type LinkedHookEvent =
-  | { hook: "SessionStart"; claudeSessionId?: string; model?: string; cwd?: string }
-  | { hook: "UserPromptSubmit"; promptText: string; turnKey: string; promptId?: string }
-  | {
-      hook: "PreToolUse";
-      toolName: string;
-      toolUseId: string;
-      request?: unknown;
-      promptId?: string;
-    }
-  | {
-      hook: "PostToolUse";
-      toolUseId: string;
-      toolName?: string;
-      outputSummary?: string;
-      promptId?: string;
-    }
-  | {
-      hook: "PostToolUseFailure";
-      toolUseId: string;
-      toolName?: string;
-      error: string;
-      interrupted?: boolean;
-      promptId?: string;
-    }
-  | { hook: "Stop"; finalText?: string; turnKey: string; promptId?: string }
-  | {
-      hook: "StopFailure";
-      error: string;
-      errorDetails?: string;
-      finalText?: string;
-      turnKey: string;
-      promptId?: string;
-    }
-  | { hook: "SessionEnd"; claudeSessionId?: string; reason?: string };
+export type LinkedHookEvent = ClaudeHookEvent;
 
 interface QueueRow {
   seq: number;
@@ -314,7 +281,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   /** No in-process model loop: prompt/tool artifacts are never composed. */
   protected override async ensurePromptArtifacts(_channelId: string): Promise<void> {}
 
-  protected override getLoopTools(_channelId: string): AgentTool[] {
+  protected override async getLoopTools(_channelId: string): Promise<AgentTool[]> {
     return [];
   }
 
@@ -479,11 +446,11 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           this.bridgeStream = stream;
           const ack = encodeChannelSubscriptionRecord({ kind: "subscribed", result });
           if (enqueueChannelSubscriptionBytes(controller, ack) !== "enqueued") {
-            void this.closeBridgeStream(token, "subscription-ack-too-large");
+            void this.closeBridgeStream(token);
           }
         },
         pull: async () => this.pumpBridgeReplay(token),
-        cancel: async () => this.closeBridgeStream(token, "response-cancelled"),
+        cancel: async () => this.closeBridgeStream(token),
       },
       channelSubscriptionQueuingStrategy()
     );
@@ -492,7 +459,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       await this.refreshPresence();
     } catch (error) {
       try {
-        await this.closeBridgeStream(token, "setup-failed");
+        await this.closeBridgeStream(token);
       } catch (cleanupError) {
         throw new AggregateError(
           [error, cleanupError],
@@ -601,7 +568,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     return { ok: true, deliveryId, batchId, state: "transport-accepted" };
   }
 
-  private async closeBridgeStream(token: symbol, reason: string, failure?: unknown): Promise<void> {
+  private async closeBridgeStream(token: symbol, failure?: unknown): Promise<void> {
     const stream = this.bridgeStream;
     if (!stream || stream.token !== token) return;
     this.bridgeStream = null;
@@ -614,9 +581,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     await this.refreshPresence();
   }
 
-  private async closeCurrentBridge(reason: string): Promise<void> {
+  private async closeCurrentBridge(): Promise<void> {
     const stream = this.bridgeStream;
-    if (stream) await this.closeBridgeStream(stream.token, reason);
+    if (stream) await this.closeBridgeStream(stream.token);
   }
 
   /** Re-advertise participant metadata (attachment state) on every channel. */
@@ -851,7 +818,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       await pump;
     } catch (error) {
       try {
-        await this.closeBridgeStream(token, "replay-failed", error);
+        await this.closeBridgeStream(token, error);
       } catch (cleanupError) {
         throw new AggregateError([error, cleanupError], "linked bridge replay and cleanup failed");
       }
@@ -942,10 +909,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       }
       const bytes = encodeChannelSubscriptionRecord({ kind: "message", payload: exactPayload });
       if (enqueueChannelSubscriptionBytes(stream.controller, bytes) !== "enqueued") {
-        void this.closeBridgeStream(stream.token, "response-buffer-full");
+        void this.closeBridgeStream(stream.token);
       }
     } catch {
-      void this.closeBridgeStream(stream.token, "response-write-failed");
+      void this.closeBridgeStream(stream.token);
     }
   }
 
@@ -1017,6 +984,30 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       channelId,
       this.subscriptions.getConfig(channelId)
     );
+    const subagent = this.subagentIdentity();
+    const parentParticipantId = subagent?.parentParticipantId;
+    if (!opts.to && subagent && !parentParticipantId) {
+      throw new Error("say: subagent supervisor participant is unavailable");
+    }
+    let mentions = opts.mentions;
+    if (mentions?.length) {
+      const participants = await this.createChannelClient(channelId).getParticipants();
+      const byHandle = new Map(
+        participants.flatMap((participant) => {
+          const handle = participant.metadata["handle"];
+          return typeof handle === "string" && handle
+            ? [[handle, participant.participantId] as const]
+            : [];
+        })
+      );
+      mentions = mentions.map((handle) => {
+        const participantIdForHandle = byHandle.get(handle);
+        if (!participantIdForHandle) {
+          throw new Error(`say: unknown participant handle ${handle}`);
+        }
+        return participantIdForHandle;
+      });
+    }
     const messageId = `say:${opts.idempotencyKey ?? `linked:${Date.now()}`}`;
     await this.createChannelClient(channelId).send(participantId, messageId, opts.text, {
       saliency: "say",
@@ -1027,8 +1018,12 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         handle: descriptor.handle,
       },
       ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
-      ...(opts.mentions ? { mentions: opts.mentions } : {}),
-      ...(opts.to ? { to: opts.to } : {}),
+      ...(mentions ? { mentions } : {}),
+      ...(opts.to
+        ? { to: opts.to }
+        : parentParticipantId
+          ? { to: [{ kind: "participant" as const, participantId: parentParticipantId }] }
+          : {}),
       ...(opts.idempotencyKey ? { idempotencyKey: `say:${opts.idempotencyKey}` } : {}),
     });
     return { ok: true, messageId, channelId };
@@ -1078,7 +1073,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     if (!opts?.runId || opts.runId !== sub.runId) return { ok: true, settled: false };
     if (this.getStateValue(COMPLETED_KEY)) return { ok: true, settled: false };
     this.setStateValue(COMPLETED_KEY, "1");
-    await this.closeCurrentBridge("process-result");
+    await this.closeCurrentBridge();
     const report =
       typeof opts.report === "string" && opts.report.trim()
         ? opts.report.trim()
@@ -1092,8 +1087,8 @@ export class LinkedAgentWorker extends AgentWorkerBase {
    * failure path). If this vessel carries subagent duty and the session never
    * called `complete`, settle the parent's run as failed instead of leaving it
    * dangling as "running". Idempotent: a post-complete exit (the normal case —
-   * every headless process eventually exits) and a duplicate report both no-op;
-   * the parent's `onSubagentComplete` is additionally post-terminal-idempotent.
+   * every headless process eventually exits) and a duplicate report both no-op.
+   * The durable task event and recipient transition are independently idempotent.
    * The controller identity stamped into STATE_ARGS is the authorization; an
    * unrelated extension cannot forge a terminal exit.
    */
@@ -1114,7 +1109,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     if (opts?.runId && opts.runId !== sub.runId) return { ok: true, settled: false };
     if (this.getStateValue(COMPLETED_KEY)) return { ok: true, settled: false };
     this.setStateValue(COMPLETED_KEY, "1");
-    await this.closeCurrentBridge("process-exit");
+    await this.closeCurrentBridge();
     const exitDesc =
       typeof opts?.signal === "string" && opts.signal
         ? `signal ${opts.signal}`
@@ -2153,7 +2148,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     newChannelId: string;
     forkPointPubsubId: number;
   }): Promise<void> {
-    await this.closeCurrentBridge("channel-forked");
+    await this.closeCurrentBridge();
     this.setStateValue(COMPLETED_KEY, "");
     this.setStateValue(OPEN_TURN_KEY, "");
     this.setStateValue(SESSION_KEY, "");

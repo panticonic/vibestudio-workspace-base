@@ -14,7 +14,7 @@ import type { RuntimeFs, ThemeAppearance } from "../types.js";
 import { _applyStateArgsFromHost, _initStateArgsRuntime } from "../panel/stateArgs.js";
 import { exposeAgentApi } from "../panel/agentApi.js";
 import { createPanelBootReporter } from "../panel/bootReporter.js";
-import type { PanelEntityId, PanelSlotId } from "@vibestudio/shared/panel/ids";
+import type { PanelEntityId, PanelSlotId } from "@vibestudio/shared/panel/idValues";
 import type { PanelBootObservation } from "@vibestudio/shared/panel/observation";
 
 export interface RuntimeDeps {
@@ -49,16 +49,22 @@ export function createRuntime(deps: RuntimeDeps) {
     }),
     onError: (error, observation) => {
       console.warn("[panelRuntime] Failed to publish renderer boot evidence", {
-        phase: observation.boot.phase,
+        phase: observation.boot.observation.phase,
         error: error instanceof Error ? error.message : String(error),
       });
     },
   });
   const initialBoot = globalThis.__vibestudioPanelBoot;
-  if (initialBoot) bootReporter.publish(initialBoot);
+  if (initialBoot) {
+    shell?.reportPanelBoot?.(initialBoot);
+    bootReporter.publish(initialBoot);
+  }
   const onPanelBoot = (event: Event): void => {
     const boot = (event as CustomEvent<PanelBootObservation>).detail;
-    if (boot) bootReporter.publish(boot);
+    if (boot) {
+      shell?.reportPanelBoot?.(boot);
+      bootReporter.publish(boot);
+    }
   };
   globalThis.addEventListener?.("vibestudio:panel-boot", onPanelBoot);
 
@@ -132,9 +138,9 @@ export function createRuntime(deps: RuntimeDeps) {
     getThemeConfig: base.getThemeConfig,
     onThemeConfigChange: base.onThemeConfigChange,
 
-    registerPaletteCommands: base.registerPaletteCommands,
-    unregisterPaletteCommands: base.unregisterPaletteCommands,
-    onPaletteRun: base.onPaletteRun,
+    registerHostCommands: base.registerHostCommands,
+    unregisterHostCommands: base.unregisterHostCommands,
+    onHostCommandRun: base.onHostCommandRun,
 
     onFocus: base.onFocus,
 

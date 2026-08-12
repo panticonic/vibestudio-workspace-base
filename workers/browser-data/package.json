@@ -1,0 +1,21 @@
+{
+  "name": "@workspace-workers/browser-data",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "title": "Browser Data",
+    "kind": "worker",
+    "entry": "index.ts",
+    "durable": {
+      "classes": [{ "className": "BrowserDataDO" }]
+    },
+    "authority": { "provides": [], "requests": [] }
+  },
+  "dependencies": {
+    "@vibestudio/browser-data": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*",
+    "@workspace/runtime": "workspace:*"
+  },
+  "devDependencies": { "vitest": "^3.2.2" }
+}

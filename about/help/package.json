@@ -4,6 +4,7 @@
   "private": true,
   "vibestudio": {
     "title": "Help",
+    "icon": "./assets/icon.svg",
     "description": "Documentation and getting started",
     "hiddenInLauncher": false,
     "autoArchiveWhenEmpty": true,

@@ -97,10 +97,15 @@ try {
   if (error instanceof PanelOperationError) {
     console.error(error.failure.code, error.failure.stage);
     console.error(error.failure.message, error.failure.provenance);
+    console.error(error.errorData.recovery);
   }
   throw error;
 }
 ```
+
+`PanelOperationError.errorData.recovery` is the retry contract. Source- and
+build-correctable failures report `repair-and-rebuild`; runtime/host failures
+report `observe-and-reacquire`. Do not blindly repeat the same lifecycle call.
 
 ## Discovery and creation
 
@@ -206,7 +211,7 @@ provenance.
 
 When `contextId` is omitted, panel reservation mints a fresh context and
 atomically records it as a lifecycle child of the verified creator's context.
-The creator may inspect, automate, rebuild, or close that panel without a
+The creator may inspect, automate, rebuild, or archive that panel without a
 foreign-context approval, and destroying the creator context recursively
 retires the panel context. When an installed extension performs the creation,
 the extension remains the lifecycle deputy while the host-verified root
@@ -223,6 +228,103 @@ is part of the design.
 When parentage is implicit, the server resolves the caller's runtime lineage to
 an open tree slot. Pass `parentId: null` for an owned root or an explicit open
 slot id when that is the intended topology.
+
+## Host commands
+
+Use host commands for secondary panel actions that belong in application
+chrome. A panel contributes intent once; each application host chooses an
+idiomatic presentation. Desktop currently merges commands into its command
+palette, while mobile presents them as native panel actions. The panel must not
+render a second mobile-only header merely to expose the same actions.
+
+For React panels, prefer the declarative hook from `@workspace/react`:
+
+```tsx
+import { useMemo } from "react";
+import { useHostCommands } from "@workspace/react";
+import type { HostCommand } from "@workspace/runtime";
+
+function TaskPanel({ canRefresh }: { canRefresh: boolean }) {
+  const commands = useMemo<HostCommand[]>(
+    () => [
+      { id: "task-new", label: "New task", group: "Tasks" },
+      ...(canRefresh
+        ? [
+            {
+              id: "task-refresh",
+              label: "Refresh tasks",
+              description: "Reload from the task service",
+              group: "Tasks",
+            },
+          ]
+        : []),
+    ],
+    [canRefresh]
+  );
+
+  useHostCommands(commands, (commandId) => {
+    if (commandId === "task-new") openNewTaskDialog();
+    if (commandId === "task-refresh") void refreshTasks();
+  });
+
+  return <TaskList />;
+}
+```
+
+`HostCommand` has four fields:
+
+| Field         | Contract                                                                                                                            |
+| ------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `id`          | Required stable machine id, unique within this panel's contributed set. Keep it independent of translated or changing display copy. |
+| `label`       | Required concise action label. Describe what selection does, not where a host currently renders it.                                 |
+| `description` | Optional supporting copy. A host may shorten or omit it when space is constrained.                                                  |
+| `group`       | Optional section label. A host may group, flatten, or omit sections according to its native interaction model.                      |
+
+Registration is a complete replacement, not an append operation. Call
+`useHostCommands` exactly once per panel runtime and compose every feature's
+commands into that one array. Two hook calls can overwrite one another, and
+one hook's cleanup can clear the other hook's contribution. Express disabled
+or unavailable actions by omitting them from the current set; the contract has
+no parallel enabled-state channel.
+
+The hook re-contributes when command metadata changes, always invokes the
+latest handler, unsubscribes from selections on unmount, and clears the panel's
+contribution. Memoize state-derived command arrays so the ownership and update
+boundary stays obvious. A command-capable host is not guaranteed: headless and
+test hosts may present nothing, so essential workflows must remain operable in
+panel content or through the panel's programmable API.
+
+Non-React panel code can use the same panel-local contract imperatively:
+
+```ts
+import { panel, type HostCommand } from "@workspace/runtime";
+
+const commands: HostCommand[] = [{ id: "task-refresh", label: "Refresh tasks", group: "Tasks" }];
+const unsubscribe = panel.onHostCommandRun((commandId) => {
+  if (commandId === "task-refresh") void refreshTasks();
+});
+panel.registerHostCommands(commands);
+
+export function dispose() {
+  unsubscribe();
+  panel.unregisterHostCommands();
+}
+```
+
+This is ephemeral host-local UI state. Contributions target the owning shell
+and never become a server service, durable state, cross-panel broadcast, or
+notification. The panel owns command ids, labels, current availability, and
+the action implementation. The host owns keyboard/touch presentation,
+placement, accessibility, and routing the selected id back to that same panel.
+Do not put chat-, terminal-, or feature-specific branching in generic shell
+code. If desktop and mobile need different visual controls for the same action,
+share the panel behavior and keep only their renderers host-specific.
+
+In tests, capture the `useHostCommands` arguments, assert the current command
+set and stable ids, invoke the captured handler, and verify the panel action.
+Shell routing tests belong to the host and should prove that every
+`target: "shell"` envelope remains local and cannot fall through to a
+server-backed panel session.
 
 ## One observation model
 
@@ -352,9 +454,10 @@ compile error, or throwing entry module.
 | `focus(opts?)`                                  | Assign/present the panel and wait for ready                                                                                    |
 | `children()` / `parent()`                       | Tree relationships                                                                                                             |
 | `stateArgs.get()` / `stateArgs.set()`           | Validated host-owned application state args                                                                                    |
-| `close()` / `archive()` / `unload()`            | Explicit lifecycle/resource operations                                                                                         |
+| `archive()` / `unload()`                        | Durable subtree removal or live-runtime release                                                                                 |
 | `tree()` / `state()` / `routes()` / `setMode()` | Optional workspace `_agent` application inspection                                                                             |
-| `cdp` / `click(selector)`                       | Approval-gated CDP automation                                                                                                  |
+| `cdp.session()` / `cdp.page()`                  | Generation-fenced multi-step automation or a one-off canonical CDP page                                                        |
+| `click(selector)`                               | Approval-gated one-off CDP convenience                                                                                          |
 
 `navigate()`, `reload()`, `rebuild()`, and `focus()` return
 `Promise<PanelObservation>`, not another `PanelHandle`. Keep using the original
@@ -374,9 +477,10 @@ whose commit may already have succeeded.
 are prepared before the current history entry is replaced. A preparation
 failure does not pretend that the old attempt was replaced. The panel-tree id
 and handle remain stable, while runtime entity, build key, and CDP endpoint are
-incarnation-scoped. Create one fresh CDP page after either operation resolves;
-more generally, replace the page whenever a lifecycle result changes
-`runtimeEntityId`.
+incarnation-scoped. For multi-step automation, keep one `cdp.session()` and call
+`session.refresh()` after either operation. Continue only with the returned
+session and page; its `current`, `reconnected`, or `replaced` status explains
+whether the immutable generation changed, and it never replays an action.
 
 ## Snapshot provenance
 
@@ -464,6 +568,6 @@ and stack; locator failures add the exact rendered locator. See
 
 ## Ownership
 
-Close temporary panels in `finally`. Reuse an existing handle rather than
+Archive temporary panels in `finally`. Reuse an existing handle rather than
 opening duplicates. Leave a panel open only when the user asked to keep it or it
 is the primary deliverable being inspected.

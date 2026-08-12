@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "Vibestudio Terminal",
+    "icon": "./assets/icon.svg",
     "app": {
       "target": "terminal",
       "entry": "src/index.ts",
@@ -24,15 +25,6 @@
         },
         {
           "capability": "approvals.read",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "gated",
-          "evidence": "intentional-broad"
-        },
-        {
-          "capability": "automations.control",
           "resource": {
             "kind": "prefix",
             "prefix": ""

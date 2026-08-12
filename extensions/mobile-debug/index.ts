@@ -11,7 +11,7 @@ declare module "@vibestudio/extension" {
 }
 
 const defaultPackage = "app.vibestudio.mobile.internal";
-const defaultActivity = "app.vibestudio.mobile.MainActivity";
+const supportedAndroidAbis = new Set(["arm64-v8a", "armeabi-v7a", "x86_64", "x86"]);
 
 class MobileDebugError extends Error {
   constructor(
@@ -57,13 +57,27 @@ export async function activate(ctx: ExtensionContext) {
       if (ready.length === 0) issues.push("No ready Android device");
       if (ready.length > 1) issues.push("Multiple ready devices; pass a serial");
       if (apkPath && !fs.existsSync(apkPath)) issues.push("Internal APK has not been built");
+      let deviceAbi: string | null = null;
+      if (ready[0]) {
+        try {
+          deviceAbi = await readAndroidDeviceAbi(ready[0].serial);
+        } catch (error) {
+          issues.push(
+            `Could not determine Android device ABI: ${
+              error instanceof Error ? error.message : String(error)
+            }`
+          );
+        }
+      }
       return {
         adb,
         xcrun,
         xcodebuild,
         device: ready[0],
+        deviceAbi,
         iosSimulator: simulators.find((device) => device.state === "Booted"),
         apkSigned: !!apkPath && fs.existsSync(apkPath),
+        apkBytes: apkPath && fs.existsSync(apkPath) ? fs.statSync(apkPath).size : null,
         issues,
       };
     },
@@ -76,31 +90,54 @@ export async function activate(ctx: ExtensionContext) {
       return listIosSimulators();
     },
 
-    async buildAndroid(raw?: { variant?: "internal" | "release" }) {
+    async buildAndroid(raw?: {
+      variant?: "internal" | "release";
+      device?: string;
+      architectures?: string[];
+    }) {
       const repoRoot = requireRepoRoot(workspace.path);
       const started = Date.now();
       const variant = raw?.variant ?? "internal";
       const gradleTask = variant === "release" ? "assembleRelease" : "assembleInternal";
-      await run(path.join(repoRoot, "apps", "mobile", "android", "gradlew"), [gradleTask], {
-        cwd: path.join(repoRoot, "apps", "mobile", "android"),
-        errorCode: "EBUILD",
-      });
+      let architectures = validateAndroidArchitectures(raw?.architectures);
+      if (architectures.length === 0 && raw?.device) {
+        architectures = [await readAndroidDeviceAbi(raw.device)];
+      }
+      const apkPath =
+        variant === "release"
+          ? path.join(
+              repoRoot,
+              "apps",
+              "mobile",
+              "android",
+              "app",
+              "build",
+              "outputs",
+              "apk",
+              "release",
+              "app-release.apk"
+            )
+          : defaultApkPath(repoRoot);
+      await run(
+        path.join(repoRoot, "apps", "mobile", "android", "gradlew"),
+        [
+          gradleTask,
+          "--no-daemon",
+          "--max-workers=2",
+          "-Pkotlin.compiler.execution.strategy=in-process",
+          ...(architectures.length > 0
+            ? [`-PreactNativeArchitectures=${architectures.join(",")}`]
+            : []),
+        ],
+        {
+          cwd: path.join(repoRoot, "apps", "mobile", "android"),
+          errorCode: "EBUILD",
+        }
+      );
       return {
-        apkPath:
-          variant === "release"
-            ? path.join(
-                repoRoot,
-                "apps",
-                "mobile",
-                "android",
-                "app",
-                "build",
-                "outputs",
-                "apk",
-                "release",
-                "app-release.apk"
-              )
-            : defaultApkPath(repoRoot),
+        apkPath,
+        apkBytes: fs.statSync(apkPath).size,
+        architectures,
         durationMs: Date.now() - started,
       };
     },
@@ -238,8 +275,10 @@ export async function activate(ctx: ExtensionContext) {
       const timeoutMs = Math.min(Math.max(raw?.timeoutMs ?? 180_000, 1_000), 300_000);
       const deadline = Date.now() + timeoutMs;
       let last = workspaceReadinessFromLog("", sinceMs);
+      let readySince: number | null = null;
 
-      while (Date.now() < deadline) {
+      while (readySince !== null || Date.now() < deadline) {
+        if (readySince !== null && Date.now() - readySince >= 20_000) return last;
         const pid = await adbCapture(device.serial, ["shell", "pidof", packageName])
           .then((result) => result.stdout.trim().split(/\s+/u)[0])
           .catch(() => undefined);
@@ -260,7 +299,17 @@ export async function activate(ctx: ExtensionContext) {
             "*:S",
           ]);
           last = workspaceReadinessFromLog(logs.stdout, sinceMs);
-          if (last.issues.length > 0 || last.ready) return last;
+          if (last.issues.length > 0) return last;
+          if (last.ready) {
+            readySince ??= Date.now();
+            // Readiness markers describe completed startup work, but an ICE
+            // transition can still reject the just-finished RPC moments later.
+            // Reaching ready within the caller's deadline earns one full
+            // reconnect grace window. Do not charge that stability check to
+            // the cold-start budget or return ready=true with a timeout issue.
+          } else {
+            readySince = null;
+          }
         }
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
@@ -342,25 +391,6 @@ async function listAdbDevices(): Promise<
     });
 }
 
-function isDesktopLocalHost(host: string): boolean {
-  const lower = host.toLowerCase();
-  return (
-    lower === "localhost" ||
-    lower === "0.0.0.0" ||
-    /^127\./.test(lower) ||
-    lower === "::1" ||
-    lower === "[::1]"
-  );
-}
-
-// Loopback only — private-LAN / Tailscale / .local cleartext trust is
-// decommissioned (the data plane is WebRTC; local is loopback). 10.0.2.2 is the
-// Android emulator's host loopback alias.
-function isLoopbackOrEmulatorHost(host: string): boolean {
-  const lower = host.toLowerCase();
-  return isDesktopLocalHost(lower) || lower === "10.0.2.2";
-}
-
 function pickDevice(devices: Array<{ serial: string; state: string }>, requested?: string) {
   if (requested) {
     const match = devices.find((device) => device.serial === requested);
@@ -377,6 +407,29 @@ function pickDevice(devices: Array<{ serial: string; state: string }>, requested
   if (ready.length > 1)
     throw new MobileDebugError("ENODEVICE", "Multiple Android devices; pass a serial");
   return ready[0]!;
+}
+
+export function validateAndroidArchitectures(value: string[] | undefined): string[] {
+  if (!value) return [];
+  const unique = [...new Set(value)];
+  for (const abi of unique) {
+    if (!supportedAndroidAbis.has(abi)) {
+      throw new MobileDebugError(
+        "EABI",
+        `Unsupported Android ABI ${JSON.stringify(abi)}; expected ${[...supportedAndroidAbis].join(
+          ", "
+        )}`
+      );
+    }
+  }
+  return unique;
+}
+
+async function readAndroidDeviceAbi(device: string): Promise<string> {
+  const result = await adbCapture(device, ["shell", "getprop", "ro.product.cpu.abi"]);
+  const abi = result.stdout.trim();
+  validateAndroidArchitectures([abi]);
+  return abi;
 }
 
 function requireMac(action: string): void {

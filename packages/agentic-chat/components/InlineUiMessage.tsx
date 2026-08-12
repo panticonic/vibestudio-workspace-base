@@ -11,7 +11,7 @@ import { EventErrorBoundary } from "@workspace/tool-ui/components/EventErrorBoun
 import { SurfaceFrame } from "@workspace/tool-ui/components/SurfaceFrame";
 import { wrapChatForErrorReporting, wrapScopesForErrorReporting } from "../utils/wrapSandboxApis";
 import type { InlineUiData } from "@workspace/pubsub";
-import type { ChatSandboxValue } from "@workspace/agentic-core";
+import type { ChatSandboxValue, InlineUiCardPayload } from "@workspace/agentic-core";
 import { useChatContext } from "../context/ChatContext";
 
 // ---------------------------------------------------------------------------
@@ -88,12 +88,13 @@ export function InlineUiErrorCallout({
 // ---------------------------------------------------------------------------
 
 interface InlineUiMessageProps {
-  data: InlineUiData;
+  data: InlineUiData | InlineUiCardPayload;
   compiledComponent?: ComponentType<{
     props: Record<string, unknown>;
     chat: Record<string, unknown>;
     scope: Record<string, unknown>;
     scopes: Record<string, unknown>;
+    inlineUi?: { id: string; renderedAt?: string };
   }>;
   compilationError?: string;
 }
@@ -153,9 +154,17 @@ export function InlineUiMessage({ data, compiledComponent: CompiledComponent, co
 
   useEffect(() => scopeManager.onChange(forceUpdate), [scopeManager]);
 
-  // Reset async error when props change (same trigger as EventErrorBoundary's resetKey)
-  const resetKey = JSON.stringify(data.props);
-  useEffect(() => { setAsyncError(null); }, [resetKey]);
+  // A stable-ID render revision is a retry boundary even when its props did
+  // not change (for example, after repairing the file at the same path).
+  const resetKey = JSON.stringify({
+    props: data.props,
+    source: data.source,
+    imports: data.imports,
+    renderedAt: data.renderedAt,
+  });
+  useEffect(() => {
+    setAsyncError(null);
+  }, [resetKey]);
 
   if (asyncError) {
     return (
@@ -216,6 +225,10 @@ export function InlineUiMessage({ data, compiledComponent: CompiledComponent, co
               chat={wrappedChat as unknown as Record<string, unknown>}
               scope={scope}
               scopes={wrappedScopes as unknown as Record<string, unknown>}
+              inlineUi={{
+                id: data.id,
+                renderedAt: "renderedAt" in data ? data.renderedAt : undefined,
+              }}
             />
           </Suspense>
         </EventErrorBoundary>
@@ -234,17 +247,35 @@ export function parseInlineUiData(content: string): InlineUiData | null {
     if (typeof value !== "object" || value === null) return null;
     const record = value as Record<string, unknown>;
     if (typeof record["id"] !== "string") return null;
-    const props = typeof record["props"] === "object" && record["props"] !== null && !Array.isArray(record["props"])
-      ? record["props"] as Record<string, unknown>
-      : undefined;
+    const props =
+      typeof record["props"] === "object" &&
+      record["props"] !== null &&
+      !Array.isArray(record["props"])
+        ? (record["props"] as Record<string, unknown>)
+        : undefined;
+    const importsCandidate = record["imports"];
+    const imports =
+      typeof importsCandidate === "object" &&
+      importsCandidate !== null &&
+      !Array.isArray(importsCandidate) &&
+      Object.values(importsCandidate).every((entry) => typeof entry === "string")
+        ? (importsCandidate as Record<string, string>)
+        : undefined;
+    const renderedAt = typeof record["renderedAt"] === "string" ? record["renderedAt"] : undefined;
+    const shared = {
+      id: record["id"],
+      ...(imports ? { imports } : {}),
+      ...(props ? { props } : {}),
+      ...(renderedAt ? { renderedAt } : {}),
+    };
     const source = record["source"];
     if (typeof source === "object" && source !== null) {
       const sourceRecord = source as Record<string, unknown>;
       if (sourceRecord["type"] === "code" && typeof sourceRecord["code"] === "string") {
-        return { id: record["id"], source: { type: "code", code: sourceRecord["code"] }, props };
+        return { ...shared, source: { type: "code", code: sourceRecord["code"] } };
       }
       if (sourceRecord["type"] === "file" && typeof sourceRecord["path"] === "string") {
-        return { id: record["id"], source: { type: "file", path: sourceRecord["path"] }, props };
+        return { ...shared, source: { type: "file", path: sourceRecord["path"] } };
       }
     }
 

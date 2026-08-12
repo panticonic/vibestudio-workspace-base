@@ -10,6 +10,8 @@
 
 import {
   createTypedServiceClient,
+  type MethodSchema,
+  type ServiceMethodSchemas,
   type TypedServiceClient,
 } from "@vibestudio/shared/typedServiceClient";
 import { runtimeMethods } from "@vibestudio/service-schemas/runtime";
@@ -39,6 +41,7 @@ import {
   type RpcEnvelope,
   type RpcEvent,
   type RpcRequest,
+  type ResolvedRpcAuthority,
 } from "@vibestudio/rpc";
 import type { AuthorizationContext } from "@vibestudio/rpc";
 import {
@@ -54,14 +57,6 @@ import {
 import { createCredentialClient, type CredentialClient } from "../shared/credentials.js";
 import { createNotificationClient, type NotificationClient } from "../shared/notifications.js";
 import { _initFsWithRpc } from "./fs.js";
-import { createNonPanelRuntimeHandle } from "../shared/handles.js";
-import {
-  createPanelRuntime,
-  type CreatePanelSlotOptions,
-  type OpenPanelOptions,
-  type PanelRuntimeApi,
-  type PanelRuntimeTree,
-} from "../shared/panelRuntime.js";
 import type { AuthenticatedCaller } from "@vibestudio/rpc";
 import {
   DIRECT_AUTHORITY_ACCEPTED_AT_HEADER,
@@ -69,7 +64,18 @@ import {
   type AttestedCaller,
 } from "@vibestudio/rpc/internal";
 import type { RuntimeFs } from "../types.js";
-import type { PanelHandle } from "../core/index.js";
+import {
+  acceptResidentChannelDelivery,
+  acceptResidentChannelInvocation,
+  cancelResidentChannelInvocation,
+  inspectResidentSessions,
+  registerResidentSession,
+  type ResidentChannelDeliveryInput,
+  type ResidentChannelInvocationInput,
+  type ResidentChannelCancellationInput,
+  type ResidentSessionReceiver,
+} from "@vibestudio/shared/residentSession";
+import { bindMethodCapability, allOf, anyOf, capability } from "@vibestudio/shared/authorization";
 import {
   DURABLE_WORK_READY_HEADER,
   encodeDurableWorkReady,
@@ -79,8 +85,7 @@ import {
   dispatchWithDurableObjectSchemaGuard,
   durableObjectSchemaDescriptor,
   installDurableObjectSchema,
-  type DurableObjectSchemaBaseline,
-  type DurableObjectSchemaMigration,
+  validateDurableObjectSchemaIndexes,
 } from "@vibestudio/durable/schema";
 import { DurableWorkReadiness, InvocationContext } from "@vibestudio/durable";
 
@@ -255,7 +260,6 @@ export abstract class DurableObjectBase {
   protected _currentRpcIdempotencyKey: string | null = null;
   private _currentVerifiedCaller: AttestedCaller | null = null;
   private readonly _invocationContext = new InvocationContext<RpcInvocationContext>();
-  private _panelRuntime: PanelRuntimeApi | null = null;
   private _credentials: CredentialClient | null = null;
   private _notifications: NotificationClient | null = null;
   private _fs: RuntimeFs | null = null;
@@ -286,29 +290,85 @@ export abstract class DurableObjectBase {
 
   static schemaVersion = 1;
   static eventIntake: readonly EventIntakeRule[] = [];
+  static rpcMethods?: ServiceMethodSchemas;
 
   /** Subclasses define their SQL tables here. Called during schema init. */
   protected abstract createTables(): void;
 
-  /** Exact oldest deployed shape this build deliberately supports. */
-  protected abstract schemaProductionBaseline(): DurableObjectSchemaBaseline;
-
-  /** Retained, contiguous forward migrations after the production baseline. */
-  protected schemaMigrations(): readonly DurableObjectSchemaMigration[] {
-    return [];
-  }
-
-  /** Exact representative object keys captured and replayed by publication diagnostics. */
-  protected schemaMigrationFixtureObjectKeys(): readonly string[] {
-    return [];
-  }
-
   /** Activation-local initialization that requires the committed schema. */
   protected afterSchemaReady(): void {}
+
+  protected rpcSchemaCodeSource(_method: string, _wireMethod: MethodSchema): string | null {
+    return null;
+  }
+
+  protected rpcAuthorityDeclaration(
+    method: string,
+    wireMethod: MethodSchema | undefined
+  ): ResolvedRpcAuthority | null {
+    if (!wireMethod) return rpcMethodAuthority(this, method) ?? null;
+    const authority = wireMethod.authority;
+    const tier = wireMethod.tier;
+    const sensitivity = wireMethod.access?.sensitivity;
+    const methodCapability = wireMethod.capability;
+    if (!authority || !tier || !sensitivity || !methodCapability) {
+      throw new Error(
+        `${this.constructor.name}.${method} has an incomplete typed receiver authority declaration`
+      );
+    }
+    const effect = wireMethod.directEffect ?? {
+      kind: "host-capability" as const,
+      capability: methodCapability,
+      resource: { kind: "receiver-object" as const },
+    };
+    if (!("principals" in authority)) {
+      if (authority.additional?.length || authority.prepared) {
+        throw new Error(
+          `${this.constructor.name}.${method} uses host-service-only prepared authority`
+        );
+      }
+      return {
+        requires: bindMethodCapability(authority.requirement, methodCapability),
+        effect,
+        tier: tier.tier,
+        sensitivity,
+        ...(tier.session === "codeOnly" ? { codeOnly: true } : {}),
+      };
+    }
+    const codeSource = this.rpcSchemaCodeSource(method, wireMethod);
+    if (!codeSource || !authority.principals.includes("code")) {
+      return {
+        principals: authority.principals,
+        effect,
+        tier: tier.tier,
+        sensitivity,
+        ...(tier.session === "codeOnly" ? { codeOnly: true } : {}),
+      };
+    }
+    const unconstrained = authority.principals.filter((principal) => principal !== "code");
+    return {
+      requires: anyOf(
+        ...unconstrained.map((principal) => capability(principal, methodCapability)),
+        allOf(capability("code", methodCapability), {
+          kind: "relationship",
+          name: "code-source",
+          value: codeSource,
+        })
+      ),
+      effect,
+      tier: tier.tier,
+      sensitivity,
+      ...(tier.session === "codeOnly" ? { codeOnly: true } : {}),
+    };
+  }
 
   /** Tables that must exist before a schema version is recorded as ready. */
   protected requiredTables(): readonly string[] {
     return [];
+  }
+
+  protected schemaIndexDefinitions(): readonly string[] | undefined {
+    return undefined;
   }
 
   protected validateSchema(): void {
@@ -323,6 +383,8 @@ export abstract class DurableObjectBase {
         `${this.constructor.name} schema validation failed: missing table(s): ${missing.join(", ")}`
       );
     }
+    const indexes = this.schemaIndexDefinitions();
+    if (indexes) validateDurableObjectSchemaIndexes(this.sql, this.requiredTables(), indexes);
   }
 
   /**
@@ -370,19 +432,14 @@ export abstract class DurableObjectBase {
 
   private schemaDescriptorResponse(): Response {
     return Response.json(
-      durableObjectSchemaDescriptor(
-        {
-          className: this.constructor.name,
-          version: (this.constructor as typeof DurableObjectBase).schemaVersion,
-          storage: this.ctx.storage,
-          schemaTables: this.requiredTables(),
-          productionBaseline: this.schemaProductionBaseline(),
-          migrations: this.schemaMigrations(),
-          createSchema: () => this.createTables(),
-          validateSchema: () => this.validateSchema(),
-        },
-        this.schemaMigrationFixtureObjectKeys()
-      )
+      durableObjectSchemaDescriptor({
+        className: this.constructor.name,
+        version: (this.constructor as typeof DurableObjectBase).schemaVersion,
+        storage: this.ctx.storage,
+        schemaTables: this.requiredTables(),
+        createSchema: () => this.createTables(),
+        validateSchema: () => this.validateSchema(),
+      })
     );
   }
 
@@ -392,8 +449,6 @@ export abstract class DurableObjectBase {
       version: (this.constructor as typeof DurableObjectBase).schemaVersion,
       storage: this.ctx.storage,
       schemaTables: this.requiredTables(),
-      productionBaseline: this.schemaProductionBaseline(),
-      migrations: this.schemaMigrations(),
       createSchema: () => this.createTables(),
       validateSchema: () => this.validateSchema(),
     });
@@ -588,27 +643,6 @@ export abstract class DurableObjectBase {
     return context ? context.callerPanelId : this._currentRpcCallerPanelId;
   }
 
-  /** Get a handle to the parent (first dispatcher) */
-  protected getParent(): PanelHandle | null {
-    const callerId = this.rpcCallerId;
-    if (!callerId) return null;
-    if (this.rpcCallerKind === "panel") {
-      const panelId = this.rpcCallerPanelId ?? callerId;
-      return this.panelRuntime.fromMetadata({
-        id: panelId,
-        title: panelId,
-        source: panelId,
-        kind: "workspace",
-        parentId: null,
-        rpcTargetId: callerId,
-      });
-    }
-    if (this.rpcCallerKind === "worker" || this.rpcCallerKind === "do") {
-      return createNonPanelRuntimeHandle({ id: callerId });
-    }
-    return null;
-  }
-
   /** Correlation id of the inbound call, when the caller stamped one. */
   protected get rpcRequestId(): string | null {
     const context = this._invocationContext.current();
@@ -619,48 +653,6 @@ export abstract class DurableObjectBase {
   protected get rpcIdempotencyKey(): string | null {
     const context = this._invocationContext.current();
     return context ? context.idempotencyKey : this._currentRpcIdempotencyKey;
-  }
-
-  private get panelRuntime(): PanelRuntimeApi {
-    if (!this._panelRuntime) {
-      this._panelRuntime = createPanelRuntime({
-        rpc: this.rpc,
-        selfHandle: () =>
-          createNonPanelRuntimeHandle({
-            id: String(this.env["DO_ID"] ?? this.ctx.id.toString()),
-          }),
-        defaultOpenParentId: null,
-        requesterPanelId: () =>
-          this._currentRpcCallerKind === "panel"
-            ? (this._currentRpcCallerPanelId ?? this._currentRpcCallerId)
-            : null,
-      });
-    }
-    return this._panelRuntime;
-  }
-
-  /** Commit an executable workspace or browser panel without presenting it. */
-  protected createPanelSlot(
-    source: string,
-    options?: CreatePanelSlotOptions
-  ): Promise<PanelHandle> {
-    return this.panelRuntime.createPanelSlot(source, options);
-  }
-
-  /** Open a workspace or browser panel and wait for application readiness. */
-  protected openPanel(source: string, options?: OpenPanelOptions): Promise<PanelHandle> {
-    return this.panelRuntime.openPanel(source, options);
-  }
-
-  /** List all visible panels. */
-  /** Get a handle for a known panel slot id. */
-  protected getPanelHandle(id: string, kind?: "workspace" | "browser"): PanelHandle {
-    return this.panelRuntime.getPanelHandle(id, kind);
-  }
-
-  /** Panel tree API for Durable Objects. */
-  protected get panelTree(): PanelRuntimeTree {
-    return this.panelRuntime.panelTree;
   }
 
   /** Last value pushed via `setOwnTitle` during this activation. Used to
@@ -807,6 +799,13 @@ export abstract class DurableObjectBase {
       /* state table may not exist yet */
     }
     throw new Error("objectKey not available — no request received yet and ctx.id.name not set");
+  }
+
+  /** Concrete immutable runtime identity presented by this object on outbound RPC. */
+  protected get rpcSelfId(): string {
+    return `do:${String(this.env["WORKER_SOURCE"] ?? "")}:${String(
+      this.env["WORKER_CLASS_NAME"] ?? this.constructor.name
+    )}:${this.objectKey}`;
   }
 
   // --- Alarm (server-driven; persists across workerd/server restarts) ---
@@ -1006,6 +1005,11 @@ export abstract class DurableObjectBase {
               }
             );
           }
+          // Live module replacement may update the class schema while this
+          // activation retains its previous schemaReady cache. Lifecycle is the
+          // generation boundary, so revalidate the one current schema here.
+          this.ensureSchema();
+          this._schemaInstalled = true;
           const result =
             method === "__lifecycle/prepare"
               ? await (async () => {
@@ -1249,10 +1253,11 @@ export abstract class DurableObjectBase {
     method: string | undefined,
     args: readonly unknown[],
     caller: AttestedCaller | null,
-    authorityAcceptedAt: number
+    authorityAcceptedAt: number,
+    wireMethod?: MethodSchema
   ): DirectRpcDenial | null {
     if (!method) return null;
-    const declaration = rpcMethodAuthority(this, method) ?? null;
+    const declaration = this.rpcAuthorityDeclaration(method, wireMethod);
     const audience = this.directAuthorityAudience();
     const attestation = caller?.authorization ?? null;
     const resourceKey =
@@ -1327,15 +1332,40 @@ export abstract class DurableObjectBase {
     const rawCaller = envelope.delivery.caller;
     const caller = rawCaller && rawCaller.callerId !== "" ? (rawCaller as AttestedCaller) : null;
     const message = envelope.message as RpcRequest;
-    return this.withRpcCaller(caller, message, envelope, async () => {
-      const denial = this.inboundCallerDenial(
-        message?.method,
-        message?.args ?? [],
-        caller,
-        authorityAcceptedAt
-      );
-      if (denial) {
+    const method = message?.method;
+    const wireMethod = method
+      ? (this.constructor as typeof DurableObjectBase).rpcMethods?.[method]
+      : undefined;
+    if (wireMethod && message) {
+      const tupleItems = (wireMethod.args as unknown as { _def?: { items?: readonly unknown[] } })
+        ._def?.items;
+      const args = message.args ?? [];
+      const paddedArgs = tupleItems
+        ? [...args, ...Array(Math.max(0, tupleItems.length - args.length))]
+        : args;
+      const parsedArgs = wireMethod.args.safeParse(paddedArgs);
+      if (!parsedArgs.success) {
         return {
+          result: this.schemaDenialResponse(
+            envelope,
+            message,
+            `Invalid arguments for ${method}: ${parsedArgs.error.message}`
+          ),
+          readyQueues: [],
+        };
+      }
+      message.args = parsedArgs.data as unknown[];
+    }
+    const denial = this.inboundCallerDenial(
+      method,
+      message?.args ?? [],
+      caller,
+      authorityAcceptedAt,
+      wireMethod
+    );
+    if (denial) {
+      return {
+        result: {
           from: envelope.target,
           target: envelope.from,
           delivery: { caller: caller ?? { callerId: "", callerKind: "unknown" } },
@@ -1348,21 +1378,20 @@ export abstract class DurableObjectBase {
             errorKind: "access",
             errorData: { authorityFailure: denial.failure },
           },
-        } as RpcEnvelope;
-      }
-      const attestation = caller?.authorization;
-      if (
-        attestation &&
-        !this._directRpcNonces.consume(
-          attestation.nonce,
-          attestation.expiresAt,
-          authorityAcceptedAt
-        )
-      ) {
-        const reason =
-          `${message?.method ?? "<unknown>"}: host authority attestation nonce was replayed ` +
-          "or is outside the receiver's retention bound";
-        return {
+        } as RpcEnvelope,
+        readyQueues: [],
+      };
+    }
+    const attestation = caller?.authorization;
+    if (
+      attestation &&
+      !this._directRpcNonces.consume(attestation.nonce, attestation.expiresAt, authorityAcceptedAt)
+    ) {
+      const reason =
+        `${message?.method ?? "<unknown>"}: host authority attestation nonce was replayed ` +
+        "or is outside the receiver's retention bound";
+      return {
+        result: {
           from: envelope.target,
           target: envelope.from,
           delivery: { caller: caller ?? { callerId: "", callerKind: "unknown" } },
@@ -1377,8 +1406,11 @@ export abstract class DurableObjectBase {
               authorityFailure: directRpcInvalidAttestationFailure(reason),
             },
           },
-        } as RpcEnvelope;
-      }
+        } as RpcEnvelope,
+        readyQueues: [],
+      };
+    }
+    const dispatched = await this.withRpcCaller(caller, message, envelope, async () => {
       // Constructor-time title writes are held until the first authenticated
       // ordinary request. Lifecycle probes happen before the host commits the
       // entity row, so they must not release that write early.
@@ -1389,8 +1421,48 @@ export abstract class DurableObjectBase {
       ) {
         await this.flushPendingOwnTitle();
       }
-      return await connectionless.respond(envelope);
+      return connectionless.respond(envelope);
     });
+    const response = dispatched.result;
+    if (
+      wireMethod?.returns &&
+      response?.message.type === "response" &&
+      !("error" in response.message)
+    ) {
+      const parsedResult = wireMethod.returns.safeParse(response.message.result);
+      if (!parsedResult.success) {
+        return {
+          result: this.schemaDenialResponse(
+            envelope,
+            message,
+            `Invalid result from ${method}: ${parsedResult.error.message}`
+          ),
+          readyQueues: dispatched.readyQueues,
+        };
+      }
+      response.message.result = parsedResult.data;
+    }
+    return dispatched;
+  }
+
+  private schemaDenialResponse(
+    envelope: RpcEnvelope,
+    message: RpcRequest,
+    reason: string
+  ): RpcEnvelope {
+    return {
+      from: envelope.target,
+      target: envelope.from,
+      delivery: envelope.delivery,
+      provenance: envelope.provenance ?? [],
+      message: {
+        type: "response",
+        requestId: message.requestId,
+        error: reason,
+        errorCode: "EINVAL",
+        errorKind: "protocol",
+      },
+    };
   }
 
   private async withVerifiedCaller<T>(
@@ -1478,6 +1550,10 @@ export abstract class DurableObjectBase {
     this._durableWorkReadiness.acknowledge(queue);
   }
 
+  protected durableWorkReadinessDiagnostics() {
+    return this._durableWorkReadiness.diagnostics(this.durableWorkQueues());
+  }
+
   /** Queue capabilities are registered by the host before entity activation
    * becomes observable. Subclasses declare only queues they own locally. */
   protected durableWorkQueues(): readonly DurableWorkQueue[] {
@@ -1492,6 +1568,47 @@ export abstract class DurableObjectBase {
   })
   durableWorkCapabilities(): DurableWorkQueue[] {
     return [...this.durableWorkQueues()];
+  }
+
+  /** Finite delivery into an explicitly resident in-memory operation. The
+   * durable sender retries when no receiver is active; this method owns no
+   * stream, timer, or durable relationship state. */
+  @rpc({
+    principals: ["host"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "write",
+  })
+  async acceptChannelDelivery(input: ResidentChannelDeliveryInput): Promise<unknown> {
+    return acceptResidentChannelDelivery(this.directAuthorityAudience(), input);
+  }
+
+  @rpc({ principals: ["code"], effect: { kind: "open" }, tier: "open", sensitivity: "write" })
+  async acceptChannelInvocation(input: ResidentChannelInvocationInput): Promise<unknown> {
+    return acceptResidentChannelInvocation(this.directAuthorityAudience(), input);
+  }
+
+  @rpc({ principals: ["code"], effect: { kind: "open" }, tier: "open", sensitivity: "write" })
+  async cancelChannelInvocation(input: ResidentChannelCancellationInput): Promise<unknown> {
+    return cancelResidentChannelInvocation(this.directAuthorityAudience(), input);
+  }
+
+  /** Explicit owner-local registration capability for workspace Durable
+   * Objects that declare mailbox invocation routing. Without this hook an
+   * entity endpoint could join successfully but could never accept delivery. */
+  protected registerResidentChannelSession(
+    channelId: string,
+    receiver: ResidentSessionReceiver
+  ): () => void {
+    return registerResidentSession(this.directAuthorityAudience(), channelId, receiver);
+  }
+
+  protected residentSessionDiagnostics(): {
+    active: number;
+    receivers: Array<{ channelId: string; openedAt: number; ageMs: number }>;
+  } {
+    const receivers = inspectResidentSessions(this.directAuthorityAudience());
+    return { active: receivers.length, receivers };
   }
 
   /**
@@ -1583,7 +1700,6 @@ export abstract class DurableObjectBase {
 
   protected resetRpcClients(): void {
     this._connectionless = null;
-    this._panelRuntime = null;
     this._credentials = null;
     this._notifications = null;
     this._fs = null;
@@ -1593,6 +1709,6 @@ export abstract class DurableObjectBase {
 
   async getState(): Promise<Record<string, unknown>> {
     const state = this.sql.exec(`SELECT * FROM state`).toArray();
-    return { state };
+    return { state, residentExecution: this.residentSessionDiagnostics() };
   }
 }

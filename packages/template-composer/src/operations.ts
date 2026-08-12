@@ -1,7 +1,7 @@
 import type {
   WorkspaceCreationDescriptor,
   WorkspaceTemplateDeclaration,
-  WorkspaceTemplateLock,
+  WorkspaceTemplateState,
   WorkspaceTemplatePin,
   WorkspaceTemplatesConfig,
 } from "@vibestudio/workspace-contracts/types";
@@ -9,21 +9,9 @@ import { normalizeTemplateGitUrl } from "@vibestudio/workspace/templateCoordinat
 import {
   emptyTemplateComposition,
   resolveTemplateComposition,
-  TemplateRepoConflictError,
   type TemplateCompositionPlan,
   type TemplateSourcePorts,
 } from "./resolver.js";
-
-export interface TemplateRepositoryConflict {
-  kind: "repository";
-  repoPath: string;
-  claimants: string[];
-}
-
-export interface TemplateOperationConflictPreview {
-  inspection: TemplateOperationInspection;
-  conflicts: TemplateRepositoryConflict[];
-}
 
 export interface TemplateCatalogSelection {
   catalogId: string;
@@ -33,10 +21,9 @@ export interface TemplateCatalogSelection {
 
 export interface TemplateWorkspaceObservation {
   roots: readonly WorkspaceTemplateDeclaration[];
-  lock?: WorkspaceTemplateLock;
+  state?: WorkspaceTemplateState;
+  installedLayers?: Readonly<Record<string, string>>;
   localRepoPaths: ReadonlySet<string>;
-  externallyOwnedRepoPaths: ReadonlySet<string>;
-  conflicts?: Readonly<Record<string, string>>;
   overrides?: Readonly<Record<string, WorkspaceTemplatePin>>;
   expectedSystemEpoch: number;
 }
@@ -46,6 +33,14 @@ export interface InspectTemplateAddInput {
   /** Present only for a registry card; direct URLs have an exact discovery proof. */
   selection?: TemplateCatalogSelection;
   template: WorkspaceTemplateDeclaration;
+  workspace: TemplateWorkspaceObservation;
+  sources: TemplateSourcePorts;
+}
+
+export interface InspectTemplateAdoptInput {
+  kind: "adopt";
+  /** Exact release whose contribution history the current workspace claims. */
+  pin: WorkspaceTemplatePin;
   workspace: TemplateWorkspaceObservation;
   sources: TemplateSourcePorts;
 }
@@ -76,15 +71,16 @@ export interface InspectBootstrapAdoptionInput {
   kind: "adopt-bootstrap";
   /**
    * Read from `state/workspace-creation/v1.json`. Bootstrap imported this exact
-   * tree but intentionally produced no template declaration or lock.
+   * tree but intentionally produced no template declaration or state.
    */
   descriptor: WorkspaceCreationDescriptor;
-  workspace: Omit<TemplateWorkspaceObservation, "roots" | "lock">;
+  workspace: Omit<TemplateWorkspaceObservation, "roots" | "state">;
   sources: TemplateSourcePorts;
 }
 
 export type InspectTemplateOperationInput =
   | InspectTemplateAddInput
+  | InspectTemplateAdoptInput
   | InspectTemplatePullInput
   | InspectTemplateRemoveInput
   | InspectTemplateRecompositionInput
@@ -99,12 +95,12 @@ export interface TemplateOperationInspection {
 }
 
 function reachablePreviousUrls(
-  lock: WorkspaceTemplateLock,
+  state: WorkspaceTemplateState,
   roots: readonly WorkspaceTemplateDeclaration[]
 ): Set<string> {
-  const nodeById = new Map(lock.nodes.map((node) => [node.nodeId, node]));
+  const nodeById = new Map(state.nodes.map((node) => [node.nodeId, node]));
   const nodeByUrl = new Map(
-    lock.nodes.map((node) => [normalizeTemplateGitUrl(node.pin.url), node])
+    state.nodes.map((node) => [normalizeTemplateGitUrl(node.pin.url), node])
   );
   const pending = roots
     .map((root) => nodeByUrl.get(normalizeTemplateGitUrl(root.url))?.nodeId)
@@ -120,8 +116,9 @@ function reachablePreviousUrls(
 }
 
 /**
- * Produce the complete review payload for add, pull, ordinary recomposition,
- * or first-run bootstrap adoption. No workspace mutation occurs.
+ * Produce the complete review payload for add, lineage adoption, pull,
+ * ordinary recomposition, or first-run bootstrap adoption. No workspace
+ * mutation occurs.
  */
 export async function inspectTemplateOperation(
   input: InspectTemplateOperationInput
@@ -132,8 +129,6 @@ export async function inspectTemplateOperation(
     const plan = await resolveTemplateComposition({
       roots: [{ url: rootUrl, ...(root.credential ? { credential: root.credential } : {}) }],
       localRepoPaths: new Set(),
-      externallyOwnedRepoPaths: input.workspace.externallyOwnedRepoPaths,
-      conflicts: input.workspace.conflicts,
       expectedSystemEpoch: input.workspace.expectedSystemEpoch,
       ports: {
         acquire: input.sources.acquire,
@@ -147,16 +142,23 @@ export async function inspectTemplateOperation(
       kind: input.kind,
       plan,
       nextTemplates: {
-        use: plan.lock!.roots,
-        overrides: plan.lock!.overrides,
-        conflicts: plan.lock!.conflicts,
+        use: plan.state!.roots,
+        overrides: plan.state!.overrides,
       },
     };
   }
 
   const roots =
-    input.kind === "add"
-      ? [...input.workspace.roots, input.template]
+    input.kind === "add" || input.kind === "adopt"
+      ? [
+          ...input.workspace.roots,
+          input.kind === "add"
+            ? input.template
+            : {
+                url: input.pin.url,
+                ...(input.pin.credential ? { credential: input.pin.credential } : {}),
+              },
+        ]
       : input.kind === "remove"
         ? input.workspace.roots.filter(
             (root) =>
@@ -164,8 +166,8 @@ export async function inspectTemplateOperation(
           )
         : [...input.workspace.roots];
   const reachableUrls =
-    input.kind === "remove" && input.workspace.lock
-      ? reachablePreviousUrls(input.workspace.lock, roots)
+    input.kind === "remove" && input.workspace.state
+      ? reachablePreviousUrls(input.workspace.state, roots)
       : undefined;
   const retainedOverrides = Object.fromEntries(
     Object.entries(input.workspace.overrides ?? {}).filter(
@@ -173,19 +175,18 @@ export async function inspectTemplateOperation(
     )
   );
   const pinOverrides =
-    input.kind === "pull"
+    input.kind === "pull" || input.kind === "adopt"
       ? { ...retainedOverrides, [normalizeTemplateGitUrl(input.pin.url)]: input.pin }
       : retainedOverrides;
   const plan =
     roots.length === 0
-      ? emptyTemplateComposition(input.workspace.lock, input.workspace.localRepoPaths)
+      ? emptyTemplateComposition(input.workspace.state, input.workspace.localRepoPaths)
       : await resolveTemplateComposition({
           roots,
           pinOverrides,
-          conflicts: input.workspace.conflicts,
           localRepoPaths: input.workspace.localRepoPaths,
-          externallyOwnedRepoPaths: input.workspace.externallyOwnedRepoPaths,
-          previousLock: input.workspace.lock,
+          previousState: input.workspace.state,
+          installedLayers: input.workspace.installedLayers,
           expectedSystemEpoch: input.workspace.expectedSystemEpoch,
           ports: input.sources,
         });
@@ -193,65 +194,14 @@ export async function inspectTemplateOperation(
     kind: input.kind,
     plan,
     nextTemplates:
-      plan.lock === null
+      plan.state === null
         ? null
         : {
-            use: plan.lock.roots,
-            overrides: plan.lock.overrides,
-            conflicts: plan.lock.conflicts,
+            use: plan.state.roots,
+            overrides: plan.state.overrides,
           },
     ...(input.kind === "add" && input.selection ? { selection: input.selection } : {}),
   };
-}
-
-/**
- * Produce a complete preview even when unrelated templates claim one path.
- * Each discovered conflict is provisionally ignored only for purposes of
- * finishing the dry run; the returned inspection is never directly applied
- * while `conflicts` is non-empty.
- */
-export async function inspectTemplateOperationWithConflicts(
-  input: InspectTemplateOperationInput
-): Promise<TemplateOperationConflictPreview> {
-  if (input.kind === "adopt-bootstrap") {
-    return { inspection: await inspectTemplateOperation(input), conflicts: [] };
-  }
-  const conflicts: TemplateRepositoryConflict[] = [];
-  const provisional = { ...(input.workspace.conflicts ?? {}) };
-  for (;;) {
-    try {
-      return {
-        inspection: await inspectTemplateOperation({
-          ...input,
-          workspace: { ...input.workspace, conflicts: provisional },
-        }),
-        conflicts,
-      };
-    } catch (error) {
-      if (!(error instanceof TemplateRepoConflictError)) throw error;
-      if (provisional[error.repoPath] !== undefined) throw error;
-      conflicts.push({
-        kind: "repository",
-        repoPath: error.repoPath,
-        claimants: [...error.claimants],
-      });
-      provisional[error.repoPath] = "ignore";
-    }
-  }
-}
-
-export interface TemplateBuildFailure {
-  unit: string;
-  message: string;
-}
-
-export class TemplateBuildGateError extends Error {
-  constructor(readonly failures: readonly TemplateBuildFailure[]) {
-    super(
-      `Template composition did not build: ${failures.map((failure) => failure.unit).join(", ")}`
-    );
-    this.name = "TemplateBuildGateError";
-  }
 }
 
 /**
@@ -270,12 +220,7 @@ export interface TemplateOperationPorts {
     contextId: string,
     inspection: TemplateOperationInspection
   ): Promise<{ affectedRepoPaths: string[] }>;
-  /** Build the affected unit closure at `ctx:<contextId>`. */
-  buildAffected(
-    contextId: string,
-    affectedRepoPaths: readonly string[]
-  ): Promise<{ failures: TemplateBuildFailure[] }>;
-  /** Publish the already-reviewed context atomically to protected main. */
+  /** Publish atomically through protected main's canonical validation and review gate. */
   publish(contextId: string, expectedMainEventId: string): Promise<{ mainEventId: string }>;
   discard(contextId: string): Promise<void>;
 }
@@ -292,45 +237,22 @@ export interface PreparedTemplateOperation {
   affectedRepoPaths: string[];
 }
 
-export type TemplateOperationPreparation =
-  | { status: "ready"; prepared: PreparedTemplateOperation }
-  | {
-      status: "build-failed";
-      prepared: PreparedTemplateOperation;
-      failures: TemplateBuildFailure[];
-    };
-
-/** Stage and build while retaining the context for an agentic repair on failure. */
-async function prepareInContext(
+/** Stage the exact composition in a retained semantic context. */
+async function stageInContext(
   contextId: string,
   inspection: TemplateOperationInspection,
   ports: TemplateOperationPorts
-): Promise<TemplateOperationPreparation> {
+): Promise<PreparedTemplateOperation> {
   const staged = await ports.stageComposition(contextId, inspection);
-  const prepared = { contextId, affectedRepoPaths: staged.affectedRepoPaths };
-  const build = await ports.buildAffected(contextId, staged.affectedRepoPaths);
-  return build.failures.length === 0
-    ? { status: "ready", prepared }
-    : { status: "build-failed", prepared, failures: build.failures };
+  return { contextId, affectedRepoPaths: staged.affectedRepoPaths };
 }
 
-/** Stage and build while retaining the context for an agentic repair on failure. */
-export async function prepareTemplateOperation(
+/** Stage while retaining the context for protected publication or agentic repair. */
+export async function stageTemplateOperation(
   input: Pick<ApplyTemplateOperationInput, "operationId" | "inspection" | "ports">
-): Promise<TemplateOperationPreparation> {
+): Promise<PreparedTemplateOperation> {
   const { contextId } = await input.ports.openContext(input.operationId);
-  return prepareInContext(contextId, input.inspection, input.ports);
-}
-
-/** Re-run the gate after ordinary semantic edits repaired a retained context. */
-export async function rebuildPreparedTemplateOperation(
-  prepared: PreparedTemplateOperation,
-  ports: TemplateOperationPorts
-): Promise<TemplateOperationPreparation> {
-  const build = await ports.buildAffected(prepared.contextId, prepared.affectedRepoPaths);
-  return build.failures.length === 0
-    ? { status: "ready", prepared }
-    : { status: "build-failed", prepared, failures: build.failures };
+  return stageInContext(contextId, input.inspection, input.ports);
 }
 
 export function publishPreparedTemplateOperation(
@@ -342,9 +264,8 @@ export function publishPreparedTemplateOperation(
 }
 
 /**
- * Non-interactive convenience path. A failed build is discarded and can never
- * advance protected main. Interactive callers use `prepareTemplateOperation`,
- * repair the retained context, rebuild, then publish.
+ * Non-interactive convenience path. Protected main owns the one canonical
+ * build/typecheck/schema/authority gate; this layer only stages and publishes.
  */
 export async function applyTemplateOperation(
   input: ApplyTemplateOperationInput
@@ -352,15 +273,8 @@ export async function applyTemplateOperation(
   let contextId: string | undefined;
   try {
     ({ contextId } = await input.ports.openContext(input.operationId));
-    const preparation = await prepareInContext(contextId, input.inspection, input.ports);
-    if (preparation.status === "build-failed") {
-      throw new TemplateBuildGateError(preparation.failures);
-    }
-    return await publishPreparedTemplateOperation(
-      preparation.prepared,
-      input.expectedMainEventId,
-      input.ports
-    );
+    const prepared = await stageInContext(contextId, input.inspection, input.ports);
+    return await publishPreparedTemplateOperation(prepared, input.expectedMainEventId, input.ports);
   } catch (error) {
     if (contextId) await input.ports.discard(contextId);
     throw error;
@@ -382,15 +296,15 @@ export interface TemplateStatus {
   }>;
 }
 
-/** Status is a pure local projection of the committed declaration and lock. */
+/** Status is a pure local projection of the committed declaration and state. */
 export function templateStatus(
   roots: readonly WorkspaceTemplateDeclaration[],
-  lock: WorkspaceTemplateLock | undefined,
+  state: WorkspaceTemplateState | undefined,
   suggestionDecisions?: Readonly<
     Record<string, { digest: `v1-sha256:${string}`; decision: "accepted" | "declined" }>
   >
 ): TemplateStatus {
-  const nodes = lock?.nodes ?? [];
+  const nodes = state?.nodes ?? [];
   return {
     roots: roots.map((root) => {
       const url = normalizeTemplateGitUrl(root.url);

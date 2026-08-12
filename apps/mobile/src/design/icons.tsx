@@ -57,6 +57,7 @@ export const Workflow = icon("Workflow", "◇");
 
 // Actions
 export const Archive = icon("Archive", "▣");
+export const Command = icon("Command", "⌘");
 export const Copy = icon("Copy", "⧉");
 export const CopyPlus = icon("CopyPlus", "⧉+");
 export const ExternalLink = icon("ExternalLink", "↗");
@@ -66,6 +67,7 @@ export const PinOff = icon("PinOff", "⤓");
 export const Power = icon("Power", "⏻");
 export const Settings = icon("Settings", "⚙");
 export const Settings2 = icon("Settings2", "⚙");
+export const Share2 = icon("Share2", "↥");
 export const Unplug = icon("Unplug", "⏚");
 export const User = icon("User", "◕");
 

@@ -105,6 +105,40 @@ export interface CdpEndpoint {
   token?: string;
 }
 
+export interface PanelCdpGeneration {
+  protocol: "panel-cdp-generation.v1";
+  panelId: string;
+  attemptId: string;
+  runtimeEntityId: string;
+  buildKey: string | null;
+}
+
+export interface PanelCdpSession {
+  readonly protocol: "panel-cdp-session.v1";
+  readonly generation: PanelCdpGeneration;
+  readonly page: CdpPage;
+  /**
+   * Re-observe the durable panel attempt. The current page is retained when
+   * its generation is still active; otherwise it is closed and replaced.
+   * No browser interaction is replayed.
+   */
+  refresh(): Promise<PanelCdpSessionRefresh>;
+  close(): Promise<void>;
+}
+
+export type PanelCdpSessionRefresh =
+  | { status: "current"; session: PanelCdpSession }
+  | {
+      status: "reconnected";
+      generation: PanelCdpGeneration;
+      session: PanelCdpSession;
+    }
+  | {
+      status: "replaced";
+      previousGeneration: PanelCdpGeneration;
+      session: PanelCdpSession;
+    };
+
 export interface PanelScreenshotOptions {
   format?: "png" | "jpeg";
   quality?: number;
@@ -135,9 +169,13 @@ export type PanelDiagnosticsResult = PanelDiagnosticPacket;
 export interface CdpAutomation {
   /** The canonical @workspace/cdp-client automation page for this panel target. */
   page(): Promise<CdpPage>;
+  /** Acquire a page fenced to the panel's current immutable runtime attempt. */
+  session(): Promise<PanelCdpSession>;
   /**
    * Historical console messages captured by the Electron host from panel
-   * creation time. This is separate from live CDP console events.
+   * creation time. Returns `{ entries, errors, dropped, capacity }`, not an
+   * array; use `result.errors` or filter `result.entries`. This is separate
+   * from the live array returned by `page.consoleEvents()`.
    */
   consoleHistory(options?: PanelConsoleHistoryOptions): Promise<PanelConsoleHistoryResult>;
   getCdpEndpoint(): Promise<CdpEndpoint>;
@@ -147,7 +185,10 @@ export interface CdpAutomation {
   reload(): Promise<void>;
   stop(): Promise<void>;
   click(selector: string): Promise<void>;
-  /** One-RPC host capture, including hidden/unslotted panels. */
+  /**
+   * One-RPC host capture, including hidden/unslotted panels. Returning this
+   * exact value from eval attaches native image content without filesystem IO.
+   */
   screenshot(options?: PanelScreenshotOptions): Promise<PanelScreenshotResult>;
 }
 
@@ -273,11 +314,10 @@ export interface PanelHandle<
   parent(): PanelHandle | null;
   navigate(source: string, options?: PanelNavigateOptions): Promise<PanelObservation>;
   reload(options?: PanelWaitOptions): Promise<PanelObservation>;
-  close(): Promise<PanelLifecycleResult>;
-
   /** One bounded post-mortem packet: observation, console history, and ready document. */
   diagnose(): Promise<PanelDiagnosticsResult>;
-  archive(): Promise<void>;
+  /** Durably archive this panel and its subtree, retiring their live runtimes. */
+  archive(): Promise<PanelLifecycleResult>;
   unload(): Promise<PanelLifecycleResult>;
   /** Set this slot's display title without loading its runtime. */
   setTitle(title: string, options?: PanelSetTitleOptions): Promise<void>;
@@ -368,6 +408,7 @@ export interface WorkspaceNode {
     type: "app";
     title: string;
     description?: string;
+    icon?: string;
     hidden?: boolean;
   };
   /**

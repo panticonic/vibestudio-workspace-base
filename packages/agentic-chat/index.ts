@@ -15,7 +15,6 @@ export type {
   ToolProvider,
   ToolProviderDeps,
   ChatSandboxValue,
-  SandboxConfig,
   ChatContextValue,
   ChatInputContextValue,
   PrimaryActionIntent,
@@ -40,6 +39,15 @@ export type { ChatProviderProps } from "./context/ChatProvider";
 // --- Hooks ---
 export { useAgenticChat } from "./hooks/useAgenticChat";
 export type { UseAgenticChatOptions } from "./hooks/useAgenticChat";
+export type { UseAgenticChatResult } from "./hooks/useAgenticChat";
+export {
+  AGENTIC_CHAT_FEATURES,
+  FULL_AGENTIC_CHAT_FEATURES,
+  composeAgenticChatMethods,
+  resolveAgenticChatFeatures,
+  selectAgenticChatTranscriptMessages,
+} from "./features";
+export type { AgenticChatFeature, ResolvedAgenticChatFeatures } from "./features";
 export { useChannelSignals } from "./hooks/useChannelSignals";
 export type { ChannelSignal, UseChannelSignalsOptions } from "./hooks/useChannelSignals";
 
@@ -77,6 +85,7 @@ export type { AgenticChatHandle, AgenticChatProps } from "./components/AgenticCh
 
 // --- Layout components (composable) ---
 export { ChatLayout } from "./components/ChatLayout";
+export type { ChatLayoutProps } from "./components/ChatLayout";
 export { ChatHeader } from "./components/ChatHeader";
 export { ForkSwitcher } from "./components/ForkSwitcher";
 export { ForkTreeView } from "./components/ForkTreeView";
@@ -87,6 +96,7 @@ export { ChatMessageArea } from "./components/ChatMessageArea";
 export type { ChatMessageAreaProps } from "./components/ChatMessageArea";
 export { ChatFeedbackArea } from "./components/ChatFeedbackArea";
 export { ChatInput } from "./components/ChatInput";
+export type { ChatInputProps } from "./components/ChatInput";
 export { Outbox } from "./components/Outbox";
 export { OutboxItem } from "./components/OutboxItem";
 export type { OutboxItemProps, OutboxLane } from "./components/OutboxItem";
@@ -97,6 +107,18 @@ export type { AckBadgeProps, ReceiptState, ReceiptAggregate } from "./components
 export { ChatDirtyRepoWarnings } from "./components/ChatDirtyRepoWarnings";
 export { ChatDebugConsole } from "./components/ChatDebugConsole";
 export { ChatActionBar } from "./components/ChatActionBar";
+export {
+  AutomationActivity,
+  AutomationParametersEditor,
+  createAutomationUiClient,
+  formatAutomationInterval,
+} from "./components/AutomationActivity";
+export type {
+  AutomationActivityProps,
+  AutomationUiClient,
+  AutomationUiRpc,
+} from "./components/AutomationActivity";
+export { CronScheduleDisplay, CronScheduleEditor } from "./components/CronScheduleControls";
 
 // --- Primitive components ---
 export { MessageList } from "./components/MessageList";
@@ -104,7 +126,12 @@ export type { MessageListProps, SenderInfo } from "./components/MessageList";
 export { MessageCard } from "./components/MessageCard";
 export { MessageContent } from "./components/MessageContent";
 export { InlineGroup } from "./components/InlineGroup";
-export type { InlineItem } from "./components/InlineGroup";
+export type {
+  InlineGroupProps,
+  InlineItem,
+  InvocationRenderContext,
+  InvocationRenderer,
+} from "./components/InlineGroup";
 export { ThinkingPill, ExpandedThinking, PREVIEW_MAX_LENGTH } from "./components/ThinkingMessage";
 export { ActionPill, ExpandedAction } from "./components/ActionMessage";
 export { MethodArgumentsModal } from "./components/MethodArgumentsModal";

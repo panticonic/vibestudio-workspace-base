@@ -15,8 +15,16 @@ const mocks = vi.hoisted(() => ({
   rpc: {
     selfId: "do:vibestudio/internal:EvalDO:test-eval",
     call: vi.fn(),
+    stream: vi.fn(),
+    on: vi.fn(() => () => undefined),
+    registerResidentSession: vi.fn(() => ({
+      transport: { call: (...args: unknown[]) => mocks.rpc.call(...args) },
+      close: vi.fn(),
+    })),
   },
   gad: {},
+  openPanel: vi.fn(),
+  panelTree: {},
   blobstore: { putText: vi.fn() },
   vcs: {
     status: vi.fn(),
@@ -37,6 +45,8 @@ vi.mock("@workspace/agentic-session", () => ({
 vi.mock("@workspace/runtime", () => ({
   gad: mocks.gad,
   blobstore: mocks.blobstore,
+  openPanel: mocks.openPanel,
+  panelTree: mocks.panelTree,
   rpc: mocks.rpc,
   vcs: mocks.vcs,
 }));
@@ -49,6 +59,9 @@ describe("HeadlessRunner", () => {
   beforeEach(() => {
     mocks.createWithAgent.mockClear();
     mocks.rpc.call.mockReset();
+    mocks.rpc.stream.mockReset();
+    mocks.rpc.on.mockClear();
+    mocks.rpc.registerResidentSession.mockClear();
     for (const method of Object.values(mocks.vcs)) method.mockReset();
     mocks.blobstore.putText.mockReset();
     mocks.blobstore.putText.mockImplementation(async (text: string) => ({
@@ -215,6 +228,60 @@ describe("HeadlessRunner", () => {
     );
   });
 
+  it("injects bounded per-session RPC faults without changing lifecycle RPCs", async () => {
+    const runner = new HeadlessRunner("ctx-test");
+    mocks.rpc.call.mockResolvedValue({ claimed: true });
+    mocks.rpc.stream.mockResolvedValue(new Response());
+
+    const session = await runner.spawn({
+      rpcFaults: [
+        {
+          transport: "call",
+          method: "claimMethodCall",
+          occurrence: 1,
+          message: "transient claim failure",
+          code: "EAGAIN",
+        },
+      ],
+    });
+    const config = mocks.createWithAgent.mock.calls[0]![0] as {
+      config: {
+        rpc: {
+          call: typeof mocks.rpc.call;
+          registerResidentSession: (
+            channelId: string,
+            receiver: (payload: unknown) => void
+          ) => { transport: { call: typeof mocks.rpc.call } };
+        };
+      };
+      rpcCall: typeof mocks.rpc.call;
+    };
+
+    const resident = config.config.rpc.registerResidentSession("channel", () => undefined);
+    await expect(resident.transport.call("channel", "claimMethodCall", [])).rejects.toMatchObject({
+      message: "transient claim failure",
+      code: "EAGAIN",
+    });
+    await expect(resident.transport.call("channel", "claimMethodCall", [])).resolves.toEqual({
+      claimed: true,
+    });
+    await config.rpcCall("main", "runtime.listEntities", []);
+
+    expect(mocks.rpc.call.mock.calls.map((call) => call[1])).toEqual([
+      "claimMethodCall",
+      "runtime.listEntities",
+    ]);
+    expect(runner.rpcFaultEvidence(session as never)).toEqual([
+      expect.objectContaining({
+        transport: "call",
+        method: "claimMethodCall",
+        occurrence: 1,
+        injected: true,
+        code: "EAGAIN",
+      }),
+    ]);
+  });
+
   it("does not attach a fallback route to an explicit model override", async () => {
     const runner = new HeadlessRunner("ctx-test", { model: SYSTEM_TEST_AGENT_MODEL });
 
@@ -284,18 +351,21 @@ describe("HeadlessRunner", () => {
     };
     expect(config.extraConfig["systemPrompt"]).toBe(SYSTEM_TEST_AGENT_PROMPT);
     expect(SYSTEM_TEST_AGENT_PROMPT).toContain("closest user-facing skill");
-    expect(SYSTEM_TEST_AGENT_PROMPT).toContain("Do not inspect");
+    expect(SYSTEM_TEST_AGENT_PROMPT).toContain("must never be used to infer an answer");
     expect(SYSTEM_TEST_AGENT_PROMPT).toContain("exercise the documented path honestly");
     expect(SYSTEM_TEST_AGENT_PROMPT).toContain("most straightforward supported approach");
     expect(SYSTEM_TEST_AGENT_PROMPT).toContain("normal approval routing");
     expect(SYSTEM_TEST_AGENT_PROMPT).toContain("pregranted-only");
     expect(SYSTEM_TEST_AGENT_PROMPT).toContain("If that documented approach fails, stop");
     expect(SYSTEM_TEST_AGENT_PROMPT).toContain("When reporting a failure");
-    expect(SYSTEM_TEST_AGENT_PROMPT).toContain("Task completed.");
-    expect(SYSTEM_TEST_AGENT_PROMPT).toContain("Task not completed.");
+    expect(SYSTEM_TEST_AGENT_PROMPT).toContain(
+      "state plainly whether the user's task was completed"
+    );
+    expect(SYSTEM_TEST_AGENT_PROMPT).not.toContain("Task completed.");
     expect(SYSTEM_TEST_AGENT_PROMPT).toContain("exact error or unexpected result");
     expect(SYSTEM_TEST_AGENT_PROMPT).toContain("there is no initial visible panel ancestor");
-    expect(SYSTEM_TEST_AGENT_PROMPT).toContain("create an owned root panel explicitly");
+    expect(SYSTEM_TEST_AGENT_PROMPT).toContain("leave the tree as you found it");
+    expect(SYSTEM_TEST_AGENT_PROMPT).toContain("Never archive a panel that predated the task");
     expect(SYSTEM_TEST_AGENT_PROMPT).not.toContain("smallest relevant canonical workspace docs");
   });
 
@@ -455,6 +525,16 @@ describe("HeadlessRunner", () => {
               resource: {
                 kind: "prefix",
                 prefix: "do:workers/pubsub-channel:PubSubChannel:headless-",
+              },
+              tier: "gated",
+              decision: "once",
+            },
+            {
+              ruleId: "subagent-task-channels",
+              capability: { kind: "exact", key: "workspace-service:channel" },
+              resource: {
+                kind: "prefix",
+                prefix: "do:workers/pubsub-channel:PubSubChannel:task-",
               },
               tier: "gated",
               decision: "once",

@@ -1,5 +1,6 @@
 /**
- * Workerd-clean port of pi-coding-agent's six file tools.
+ * Workerd-clean agent tools for semantic authoring, discovery, verification,
+ * runtime operations, and capability lookup.
  *
  * Each tool is exposed as a `createXxxTool(cwd, fs[, deps])` factory that
  * returns an `AgentTool` ready to be added to an `AgentSession`'s tool list.
@@ -7,8 +8,9 @@
  * for tests and for the chat-UI preview path.
  */
 
-export { createReadTool } from "./read.js";
-export type { ReadToolInput, ReadToolDetails, ReadToolDeps } from "./read.js";
+export { createReadTool, createReadBinaryTool } from "./read.js";
+export type { ReadToolInput, ReadBinaryToolInput, ReadToolDetails, ReadToolDeps } from "./read.js";
+export type { WorkspaceReadReceipt } from "./workspace-read-receipt.js";
 
 export { createProvenanceTool } from "./provenance.js";
 export type {
@@ -22,6 +24,13 @@ export type { ProvenanceBlockInput } from "./provenance-format.js";
 
 export { createEditTool } from "./edit.js";
 export type { EditToolInput, EditToolDetails } from "./edit.js";
+
+export { createApplyPatchTool } from "./apply-patch.js";
+export type {
+  ApplyPatchOperation,
+  ApplyPatchToolInput,
+  ApplyPatchToolDetails,
+} from "./apply-patch.js";
 
 export { createWriteTool } from "./write.js";
 export type { WriteToolInput, WriteToolDetails } from "./write.js";
@@ -53,6 +62,9 @@ export type { FindToolInput, FindToolDetails } from "./find.js";
 export { createLsTool } from "./ls.js";
 export type { LsToolInput, LsToolDetails } from "./ls.js";
 
+export { createAgentFileVisibility } from "./agent-file-visibility.js";
+export type { AgentFileVisibility } from "./agent-file-visibility.js";
+
 export { createSuspendTurnTool } from "./suspend-turn.js";
 export type { SuspendTurnInput, SuspendTurnDetails } from "./suspend-turn.js";
 
@@ -75,6 +87,9 @@ export type {
   WorkspaceServiceToolDetails,
   WorkspaceServiceToolDeps,
 } from "./workspace-service.js";
+
+export { createVerifyTool, verifySchema } from "./verify.js";
+export type { VerifyToolInput, VerifyToolDetails, BuildVerificationReceipt } from "./verify.js";
 
 // Pure helpers
 export { resolveToCwd, expandPath } from "./path-utils.js";

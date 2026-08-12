@@ -5,7 +5,7 @@
  *   [Menu]  [ address pill: title + host/meta caption ]  [⋯]  [+]
  *
  * The pill is the discoverability hub: tap to edit the address, long-press for
- * panel actions, and its caption line surfaces the source/URL + repo state
+ * panel menu, and its caption line surfaces the source/URL + repo state
  * that used to hide behind the address toggle. Address mode swaps in an
  * edit row (back/forward/input/reload) plus autocomplete suggestions.
  */
@@ -16,14 +16,16 @@ import type { StyleProp, TextStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAtomValue, useSetAtom } from "jotai";
 import { themeColorsAtom } from "../state/themeAtoms";
-import { shellClientAtom } from "../state/shellClientAtom";
-import { showActionSheetAtom } from "../state/actionSheetAtoms";
+import { panelTreeRevisionAtom, shellClientAtom } from "../state/shellClientAtom";
+import { activePanelIdAtom } from "../state/navigationAtoms";
 import { pushToastAtom } from "../state/toastAtoms";
 import {
+  isBrowserPanelSource,
   splitTextByMatchRanges,
   type AddressAutocompleteItem,
   type TextMatchRange,
 } from "@vibestudio/shared/panelChrome";
+import { getCurrentSnapshot } from "@vibestudio/shared/panel/accessors";
 import { hairline, radius, spacing, touchTarget, type } from "../design/tokens";
 import {
   ArrowLeft,
@@ -31,7 +33,6 @@ import {
   Bookmark,
   Clock3,
   Globe2,
-  LayoutGrid,
   Menu,
   MoreHorizontal,
   PanelTop,
@@ -44,12 +45,15 @@ import {
   type IconComponent,
 } from "../design/icons";
 import { IconButton } from "./ui/primitives";
+import { MobilePanelIcon } from "./MobilePanelIcon";
 
 interface AppBarProps {
   /** Title to display in the address pill */
   title: string;
   /** Called when the hamburger menu button is pressed */
   onMenuPress: () => void;
+  /** Permanent tablet navigation already exposes the panel tree. */
+  showMenuButton?: boolean;
   /** Called after a new panel is created, with the new panel's ID */
   onPanelCreated?: (panelId: string) => void;
   addressBarVisible?: boolean;
@@ -72,6 +76,7 @@ interface AppBarProps {
 export function AppBar({
   title,
   onMenuPress,
+  showMenuButton = true,
   onPanelCreated,
   addressBarVisible = false,
   address = "",
@@ -92,11 +97,27 @@ export function AppBar({
   const insets = useSafeAreaInsets();
   const colors = useAtomValue(themeColorsAtom);
   const shellClient = useAtomValue(shellClientAtom);
-  const showActionSheet = useSetAtom(showActionSheetAtom);
+  const activePanelId = useAtomValue(activePanelIdAtom);
+  const panelTreeRevision = useAtomValue(panelTreeRevisionAtom);
   const pushToast = useSetAtom(pushToastAtom);
   const [addressValue, setAddressValue] = useState(address);
   const [addressFocused, setAddressFocused] = useState(false);
   const inputRef = useRef<TextInput | null>(null);
+  const activePanelIdentity = useMemo(() => {
+    if (!shellClient || !activePanelId) return null;
+    const panel = shellClient.panels.registry.getPanel(activePanelId);
+    if (!panel) return null;
+    const source = getCurrentSnapshot(panel).source;
+    return {
+      icon: panel.icon,
+      source,
+      kind: isBrowserPanelSource(source) ? ("browser" as const) : ("workspace" as const),
+    };
+  }, [activePanelId, panelTreeRevision, shellClient]);
+  const resolveBrowserFavicon = useCallback(
+    (url: string) => shellClient?.panels.getPageFaviconDataUrl(url) ?? Promise.resolve(null),
+    [shellClient]
+  );
   const visibleSuggestions = useMemo(
     () => (addressFocused ? addressSuggestions.slice(0, 8) : []),
     [addressFocused, addressSuggestions]
@@ -120,39 +141,19 @@ export function AppBar({
     return undefined;
   }, [addressBarVisible]);
 
-  const handleCreatePanel = useCallback(() => {
+  const handleCreatePanel = useCallback(async () => {
     if (!shellClient) return;
-    const createPanel = async (kind: "new" | "browser") => {
-      try {
-        const result = await shellClient.panels.createAboutPanel(kind);
-        onPanelCreated?.(result.id);
-      } catch (error) {
-        pushToast({
-          title: "Panel creation failed",
-          message: error instanceof Error ? error.message : "Could not create panel.",
-          tone: "danger",
-        });
-      }
-    };
-    showActionSheet({
-      title: "New panel",
-      items: [
-        {
-          id: "new",
-          label: "New panel",
-          description: "Pick an app or workspace unit to open",
-          icon: LayoutGrid,
-        },
-        {
-          id: "browser",
-          label: "Browser",
-          description: "Open a web page in a browser panel",
-          icon: Globe2,
-        },
-      ],
-      onSelect: (id) => void createPanel(id as "new" | "browser"),
-    });
-  }, [onPanelCreated, pushToast, shellClient, showActionSheet]);
+    try {
+      const result = await shellClient.panels.createAboutPanel("new");
+      onPanelCreated?.(result.id);
+    } catch (error) {
+      pushToast({
+        title: "Panel creation failed",
+        message: error instanceof Error ? error.message : "Could not create panel.",
+        tone: "danger",
+      });
+    }
+  }, [onPanelCreated, pushToast, shellClient]);
 
   const caption = address && address !== title ? address : "";
 
@@ -168,13 +169,23 @@ export function AppBar({
       ]}
     >
       {!addressBarVisible ? (
-        <View style={styles.content}>
-          <IconButton icon={Menu} onPress={onMenuPress} label="Open panel drawer" />
+        <View
+          style={[
+            styles.content,
+            {
+              paddingLeft: Math.max(spacing.xs, insets.left),
+              paddingRight: Math.max(spacing.xs, insets.right),
+            },
+          ]}
+        >
+          {showMenuButton ? (
+            <IconButton icon={Menu} onPress={onMenuPress} label="Open panel drawer" />
+          ) : null}
           <Pressable
             onPress={onToggleAddressBar}
             onLongPress={onShowActions}
             accessibilityRole="button"
-            accessibilityLabel="Edit address. Long-press for panel actions."
+            accessibilityLabel="Edit address. Long-press for panel menu."
             style={({ pressed }) => [
               styles.pill,
               {
@@ -183,12 +194,17 @@ export function AppBar({
               },
             ]}
           >
-            {isLoading ? (
-              <ActivityIndicator
-                size="small"
-                color={colors.textSecondary}
-                style={styles.pillSpinner}
-              />
+            {activePanelIdentity ? (
+              <View style={styles.pillIdentity}>
+                <MobilePanelIcon
+                  {...activePanelIdentity}
+                  serverUrl={shellClient?.serverUrl ?? ""}
+                  resolveBrowserFavicon={resolveBrowserFavicon}
+                  size={17}
+                  color={colors.textSecondary}
+                  testID="active-panel-icon"
+                />
+              </View>
             ) : null}
             <View style={styles.pillCopy}>
               <Text
@@ -208,12 +224,19 @@ export function AppBar({
                 </Text>
               ) : null}
             </View>
+            {isLoading ? (
+              <ActivityIndicator
+                size="small"
+                color={colors.textSecondary}
+                style={styles.pillSpinner}
+              />
+            ) : null}
           </Pressable>
           {onShowActions ? (
             <IconButton
               icon={MoreHorizontal}
               onPress={onShowActions}
-              label="Panel actions"
+              label="Panel menu"
               color={colors.textSecondary}
             />
           ) : null}
@@ -226,7 +249,15 @@ export function AppBar({
           />
         </View>
       ) : (
-        <View style={styles.content}>
+        <View
+          style={[
+            styles.content,
+            {
+              paddingLeft: Math.max(spacing.xs, insets.left),
+              paddingRight: Math.max(spacing.xs, insets.right),
+            },
+          ]}
+        >
           <IconButton
             icon={ArrowLeft}
             onPress={onBack}
@@ -304,6 +335,10 @@ export function AppBar({
               }}
               style={({ pressed }) => [
                 styles.suggestionRow,
+                {
+                  paddingLeft: Math.max(spacing.lg, insets.left),
+                  paddingRight: Math.max(spacing.lg, insets.right),
+                },
                 pressed && { backgroundColor: colors.surfaceSunken },
               ]}
               accessibilityRole="button"
@@ -382,7 +417,6 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     height: 56,
-    paddingHorizontal: spacing.xs,
     gap: spacing.xxs,
   },
   pill: {
@@ -398,6 +432,9 @@ const styles = StyleSheet.create({
     marginHorizontal: spacing.xxs,
   },
   pillSpinner: {
+    marginLeft: spacing.sm,
+  },
+  pillIdentity: {
     marginRight: spacing.sm,
   },
   pillCopy: {
@@ -435,7 +472,6 @@ const styles = StyleSheet.create({
   suggestionRow: {
     minHeight: touchTarget,
     justifyContent: "center",
-    paddingHorizontal: spacing.lg,
     paddingVertical: spacing.xs,
   },
   suggestionContent: {

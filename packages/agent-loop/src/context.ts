@@ -4,7 +4,7 @@
  * TrajectoryBackedSessionStorage — the log IS the session.
  */
 
-import type { AgentState, SessionEntry } from "./state.js";
+import type { AgentState, AssistantModelIdentity, SessionEntry } from "./state.js";
 
 export interface ModelMessage {
   role: "user" | "assistant" | "toolResult";
@@ -13,6 +13,7 @@ export interface ModelMessage {
   toolCallId?: string;
   toolName?: string;
   isError?: boolean;
+  model?: AssistantModelIdentity;
 }
 
 export function buildModelContext(
@@ -58,6 +59,16 @@ function modelMessageFromEntry(entry: SessionEntry, selfId?: string): ModelMessa
   switch (entry.kind) {
     case "user": {
       const interaction = entry.metadata?.interaction;
+      if (entry.structuredInput !== undefined) {
+        return {
+          role: "user",
+          content: {
+            message: readableUserMessage(entry.content),
+            structuredInput: entry.structuredInput,
+            ...(interaction ? { interaction } : {}),
+          },
+        };
+      }
       return {
         role: "user",
         content: interaction
@@ -79,7 +90,11 @@ function modelMessageFromEntry(entry: SessionEntry, selfId?: string): ModelMessa
           content: `[${participantLabel(author)}]: ${assistantBlocksToText(entry.blocks)}`,
         };
       }
-      return { role: "assistant", blocks: entry.blocks };
+      return {
+        role: "assistant",
+        blocks: entry.blocks,
+        ...(entry.model ? { model: entry.model } : {}),
+      };
     }
     case "tool-result":
       return {
@@ -92,4 +107,25 @@ function modelMessageFromEntry(entry: SessionEntry, selfId?: string): ModelMessa
     case "note":
       return { role: "user", content: { note: entry.text } };
   }
+}
+
+/** Extract the readable text paired with a structured prompt sidecar. */
+function readableUserMessage(content: unknown): unknown {
+  if (content && typeof content === "object" && !Array.isArray(content)) {
+    const blocks = (content as { blocks?: unknown }).blocks;
+    if (Array.isArray(blocks)) {
+      const text = blocks
+        .map((block) =>
+          block &&
+          typeof block === "object" &&
+          typeof (block as { content?: unknown }).content === "string"
+            ? (block as { content: string }).content
+            : null
+        )
+        .filter((value): value is string => value !== null)
+        .join("\n");
+      if (text) return text;
+    }
+  }
+  return content;
 }

@@ -112,37 +112,48 @@ const CURATED_CATALOG: CuratedModel[] = [
     hfRepo: FALLBACK_MODEL.hfRepo,
     quantByTier: {
       "gpu-large": "Q8_0",
-      "gpu-mid": "Q4_0",
-      "gpu-small": "Q4_0",
-      "cpu-strong": "Q4_0",
-      "cpu-min": "Q4_0",
+      "gpu-mid": "Q5_K_M",
+      "gpu-small": "Q4_K_M",
+      "cpu-strong": "Q4_K_M",
+      "cpu-min": "Q4_K_M",
     },
-    sha256ByQuant: {},
+    sha256ByQuant: {
+      Q4_K_M: "79fdf00351b46cf26f020aead28d01889886be87c55fa0eb907e6f9b00bfee14",
+      Q5_K_M: "babb80c3249e1578e47d481bf494844a83b4cbfead6fc614a6450908b0f60c65",
+      Q8_0: "36587fdf27bdfc69caf2637273679a0870ec155162161bde6fd16e8c70bdb757",
+    },
     toolsCapable: true,
-    blurb: "The bundled fallback: fast, compact, and available for one-click installation.",
+    blurb: "The local agent fallback: compact, tool-capable, and tuned for multi-step work.",
   },
   {
-    slug: "qwen3-4b",
-    displayName: "Qwen3 4B",
-    hfRepo: "Qwen/Qwen3-4B-GGUF",
+    slug: "qwen3.5-4b",
+    displayName: "Qwen3.5 4B",
+    hfRepo: "unsloth/Qwen3.5-4B-GGUF",
     quantByTier: {
       "gpu-large": "Q8_0",
       "gpu-mid": "Q5_K_M",
       "gpu-small": "Q4_K_M",
       "cpu-strong": "Q4_K_M",
     },
-    sha256ByQuant: {},
+    sha256ByQuant: {
+      Q4_K_M: "00fe7986ff5f6b463e62455821146049db6f9313603938a70800d1fb69ef11a4",
+      Q5_K_M: "8814232b85594dcd46c50e5b8b29324a7efe9e746edbe8a3d1df3d3fce7aad39",
+      Q8_0: "10cc391b403021dd11c614679d2fd92f611c3681d29e29651b717316965d61e1",
+    },
     toolsCapable: true,
-    blurb: "Official agent-capable local model with native tool calling.",
+    blurb: "Current-generation Qwen agent model for modest GPUs and strong CPUs.",
   },
   {
-    slug: "qwen3-8b",
-    displayName: "Qwen3 8B",
-    hfRepo: "Qwen/Qwen3-8B-GGUF",
+    slug: "qwen3.5-9b",
+    displayName: "Qwen3.5 9B",
+    hfRepo: "unsloth/Qwen3.5-9B-GGUF",
     quantByTier: { "gpu-large": "Q8_0", "gpu-mid": "Q4_K_M" },
-    sha256ByQuant: {},
+    sha256ByQuant: {
+      Q4_K_M: "03b74727a860a56338e042c4420bb3f04b2fec5734175f4cb9fa853daf52b7e8",
+      Q8_0: "809626574d0cb43d4becfa56169980da2bb448f2299270f7be443cb89d0a6ae4",
+    },
     toolsCapable: true,
-    blurb: "The mid-GPU sweet spot: full offload on 8 GB cards at Q4.",
+    blurb: "Higher-capacity current-generation Qwen model for GPU-backed agent work.",
   },
   {
     slug: "gpt-oss-20b",
@@ -401,8 +412,9 @@ export async function activate(ctx: Ctx) {
     try {
       const raw = await fs.readFile(path.join(rootDir, "hardware.json"), "utf8");
       return JSON.parse(raw) as HardwareProfile;
-    } catch {
-      return null;
+    } catch (error) {
+      if (isNodeErrorWithCode(error, "ENOENT")) return null;
+      throw error;
     }
   }
 
@@ -416,9 +428,13 @@ export async function activate(ctx: Ctx) {
     }
     const probed = await profiler.probe();
     profile = probed;
-    await fs
-      .writeFile(path.join(rootDir, "hardware.json"), JSON.stringify(probed, null, 2))
-      .catch(() => {});
+    try {
+      await fs.writeFile(path.join(rootDir, "hardware.json"), JSON.stringify(probed, null, 2));
+    } catch (error) {
+      log("hardware profile cache write failed", {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     return probed;
   }
 
@@ -593,7 +609,7 @@ export async function activate(ctx: Ctx) {
     }
 
     const run = (async () => {
-      const record = await library.get(slug).catch(() => null);
+      const record = await library.get(slug);
       const recentBenchmark = record?.benchmark ?? null;
       if (opts.force !== true && hasRecentBenchmark(record) && recentBenchmark) {
         return { tokensPerSec: recentBenchmark.tokensPerSec };
@@ -864,6 +880,7 @@ export async function activate(ctx: Ctx) {
           fallbackRecord?.runtimeValidation?.status !== "error",
         warm: utilityRunning,
         modelRef: FALLBACK_MODEL.ref,
+        downloadSizeBytes: FALLBACK_MODEL.downloadSizeBytes,
         reason:
           fallbackRecord?.runtimeValidation?.status === "pending"
             ? "installing"
@@ -1103,14 +1120,14 @@ export async function activate(ctx: Ctx) {
 
     async capabilities(): Promise<LocalModelsCapabilities> {
       return {
-        managementPanel: { source: "panels/local-models" },
+        managementPanel: { source: "about/local-models" },
         serverLogs: {
           utility: {
-            source: "panels/local-models",
+            source: "about/local-models",
             stateArgs: { openLog: "utility" },
           },
           main: {
-            source: "panels/local-models",
+            source: "about/local-models",
             stateArgs: { openLog: "main" },
           },
         },

@@ -1,10 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  SIZABLE_HISTORY_FIXTURE_REVISIONS,
   WorkspaceRepoFixtureLifecycle,
   type WorkspaceRepoFixturePort,
 } from "./workspace-repo-fixture.js";
 
 const BUILDABLE = { kind: "buildable-package", section: "packages" } as const;
+const BUILDABLE_EXTENSION = { kind: "buildable-extension", section: "extensions" } as const;
+const BUILDABLE_APP = { kind: "buildable-app", section: "apps" } as const;
+const OPTIMIZABLE_PANEL = { kind: "optimizable-panel", section: "panels" } as const;
 const BUILDABLE_WORKER = { kind: "buildable-worker", section: "workers" } as const;
 const CREATED_PANEL = { kind: "created-repository", section: "panels" } as const;
 const PANEL_WITH_DERIVED = {
@@ -12,6 +16,7 @@ const PANEL_WITH_DERIVED = {
   section: "panels",
 } as const;
 const CONTENT = { kind: "content", section: "projects" } as const;
+const HISTORICAL_CONTENT = { kind: "historical-content", section: "projects" } as const;
 
 function event(eventId: string) {
   return { kind: "event" as const, eventId };
@@ -80,6 +85,15 @@ function createPort() {
         contextId: input.contextId,
         eventId: "event:import",
         workUnitId: "work:import",
+        applicationId: "application:import",
+        externalSnapshot: {
+          sourceKind: input.source.kind,
+          sourceUri: input.source.kind === "git" ? input.source.url : input.source.uri,
+          snapshotRevision:
+            input.source.kind === "git" ? input.source.commit : input.source.snapshotRevision,
+          snapshotDigest: `snapshot:${"a".repeat(64)}`,
+          targetRepositoryIds: ["repository:fixture"],
+        },
         importedRepositoryIds: ["repository:fixture"],
       };
     }
@@ -359,7 +373,10 @@ function createPort() {
     }
   );
   const listFiles = vi.fn(
-    async ({ state, repositoryId }: Parameters<WorkspaceRepoFixturePort["vcs"]["listFiles"]>[0]) => {
+    async ({
+      state,
+      repositoryId,
+    }: Parameters<WorkspaceRepoFixturePort["vcs"]["listFiles"]>[0]) => {
       const isFixture = repositoryId === "repository:fixture";
       const files: Array<{ fileId: string; authoredChangeId: string }> = [];
       if (isFixture) {
@@ -719,6 +736,50 @@ describe("WorkspaceRepoFixtureLifecycle", () => {
     );
   });
 
+  it("seeds a sizable first-parent history with decisions that disappear from current text", async () => {
+    const fake = createPort();
+    const fixture = new WorkspaceRepoFixtureLifecycle(
+      fake.port,
+      "historical-memory-test",
+      "system-test-history",
+      HISTORICAL_CONTENT
+    );
+
+    const state = await fixture.prepare();
+
+    expect(state).toMatchObject({
+      repositoryId: "repository:fixture",
+      repoPath: "projects/system-test-history",
+      seedFilePaths: ["README.md", "src/retention-policy.ts"],
+    });
+    expect(fake.importSnapshot).toHaveBeenCalledTimes(SIZABLE_HISTORY_FIXTURE_REVISIONS + 1);
+    expect(fake.importSnapshot.mock.calls[6]?.[0]).toMatchObject({
+      intentSummary: expect.stringContaining("delayed regional exports can arrive through day 18"),
+      message: "Extend archive window to 21 days for regional exports arriving through day 18",
+    });
+    expect(fake.importSnapshot.mock.calls[11]?.[0]).toMatchObject({
+      intentSummary: expect.stringContaining("Retire the Harbor Lantern rollout codename"),
+      message:
+        "Retire Harbor Lantern after launch; use Retention Service in support and audit records",
+    });
+    const finalImport = fake.importSnapshot.mock.calls.at(-1)?.[0];
+    expect(finalImport).toMatchObject({
+      repositories: [
+        expect.objectContaining({
+          repositoryId: "repository:fixture",
+          repoPath: "projects/system-test-history",
+        }),
+      ],
+    });
+    const seededText = fake.putText.mock.calls.map(([text]) => text).join("\n");
+    expect(seededText).toContain('rolloutCodename = "Harbor Lantern"');
+    expect(seededText).toContain("archiveWindowDays = 21");
+    expect(seededText).toContain(`policyRevision = ${SIZABLE_HISTORY_FIXTURE_REVISIONS}`);
+
+    await fixture.cleanup(state);
+    expect(fake.destroyContext).toHaveBeenCalledWith("context:1");
+  });
+
   it("imports a buildable snapshot with exact CAS-backed file metadata", async () => {
     const fake = createPort();
     const fixture = new WorkspaceRepoFixtureLifecycle(
@@ -763,6 +824,78 @@ describe("WorkspaceRepoFixtureLifecycle", () => {
     expect(fake.destroyContext).toHaveBeenCalledTimes(1);
   });
 
+  it.each([
+    {
+      label: "extension",
+      fixture: BUILDABLE_EXTENSION,
+      repoName: "system-test-extension",
+      repoPath: "extensions/system-test-extension",
+      packageName: "@workspace-extensions/system-test-extension",
+      skillPath: "skills/extensiondev/SKILL.md",
+      expectedFiles: ["SKILL.md", "assets/icon.svg", "index.test.ts", "index.ts", "package.json"],
+    },
+    {
+      label: "app",
+      fixture: BUILDABLE_APP,
+      repoName: "system-test-app",
+      repoPath: "apps/system-test-app",
+      packageName: "@workspace-apps/system-test-app",
+      skillPath: "skills/appdev/SKILL.md",
+      expectedFiles: ["SKILL.md", "assets/icon.svg", "index.test.ts", "index.ts", "package.json"],
+    },
+  ])("seeds a buildable trusted $label with a focused failing test", async (scenario) => {
+    const fake = createPort();
+    const fixture = new WorkspaceRepoFixtureLifecycle(
+      fake.port,
+      `trusted-${scenario.label}-test`,
+      scenario.repoName,
+      scenario.fixture
+    );
+
+    const state = await fixture.prepare();
+
+    expect(state).toMatchObject({
+      repoPath: scenario.repoPath,
+      seedFilePaths: scenario.expectedFiles,
+    });
+    const seededText = fake.putText.mock.calls.map(([text]) => text).join("\n");
+    expect(seededText).toContain(`"name": "${scenario.packageName}"`);
+    expect(seededText).toContain('expect(startupLabel()).toBe("ready")');
+    expect(seededText).toMatch(/startupLabel\(\): string \{ return "(?:waiting|booting)"; \}/u);
+    expect(seededText).toContain("assets/icon.svg");
+    expect(seededText).toContain(`Read \`${scenario.skillPath}\` before changing this trusted`);
+    if (scenario.fixture.kind === "buildable-app") {
+      expect(seededText).toContain('"capability": "context.boundary"');
+      expect(seededText).toContain('"evidence": "bounded-dynamic"');
+    }
+
+    await fixture.cleanup(state);
+  });
+
+  it("seeds one behaviorally trivial panel with attributable bundle waste", async () => {
+    const fake = createPort();
+    const fixture = new WorkspaceRepoFixtureLifecycle(
+      fake.port,
+      "performance-test",
+      "system-test-performance",
+      OPTIMIZABLE_PANEL
+    );
+
+    const state = await fixture.prepare();
+
+    expect(state).toMatchObject({
+      repoPath: "panels/system-test-performance",
+      seedFilePaths: ["index.tsx", "package.json"],
+    });
+    const seededText = fake.putText.mock.calls.map(([text]) => text).join("\n");
+    expect(seededText.match(/"Ready"/gu)?.length).toBe(512);
+    expect(seededText).toContain("{statusLabels[0]}");
+    expect(seededText).toContain('"@workspace/ui": "workspace:*"');
+    expect(seededText).toContain('"@workspace/ui"');
+
+    await fixture.cleanup(state);
+  });
+
   it("seeds a worker fixture under worker discovery with a runnable Durable Object manifest", async () => {
     const fake = createPort();
     const fixture = new WorkspaceRepoFixtureLifecycle(
@@ -786,7 +919,7 @@ describe("WorkspaceRepoFixtureLifecycle", () => {
     expect(seededText).toContain('"authority": {');
     expect(seededText).toContain('"requests": []');
     expect(seededText).toContain('"className": "FixtureWorkerDO"');
-    expect(seededText).toContain('from "@workspace/runtime/worker"');
+    expect(seededText).toContain('from "@workspace/runtime/worker/kernel"');
     expect(seededText).toContain("Direct resolveDurableObject methods are runtime-intrinsic");
     expect(fake.importSnapshot).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -920,9 +1053,7 @@ describe("WorkspaceRepoFixtureLifecycle", () => {
       unexpectedPublishedRepositoriesRemoved: [
         { repositoryId: "repository:escaped", repoPath: "projects/outside-fixture" },
       ],
-      counteractedChangeIds: [
-        "change:escaped",
-      ],
+      counteractedChangeIds: ["change:escaped"],
     });
     expect(fake.createContext).toHaveBeenCalledTimes(2);
     expect(fake.revert).toHaveBeenCalledTimes(1);
@@ -1011,12 +1142,7 @@ describe("WorkspaceRepoFixtureLifecycle", () => {
     expect(fake.revert).toHaveBeenCalledWith(
       expect.objectContaining({
         expectedWorkingHead: event("event:import"),
-        changeIds: [
-          "change:file",
-          "change:source",
-          "change:package",
-          "change:repository",
-        ],
+        changeIds: ["change:file", "change:source", "change:package", "change:repository"],
       })
     );
     expect(fake.commit).toHaveBeenCalledTimes(1);

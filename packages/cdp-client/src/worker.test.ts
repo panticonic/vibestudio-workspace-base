@@ -451,9 +451,21 @@ describe("worker CDP client", () => {
     const socket = FakeWebSocket.instances[0]!;
     FakeWebSocket.dropMethods.add("Runtime.evaluate");
 
-    await expect(page.title()).rejects.toThrow(
-      "CDP command timed out after 10ms: Runtime.evaluate"
-    );
+    let failure: unknown;
+    try {
+      await page.title();
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(CdpError);
+    if (!(failure instanceof CdpError)) throw new Error("Expected a structured CdpError");
+    expect(failure.message).toContain("CDP command timed out after 10ms: Runtime.evaluate");
+    expect(failure.errorData).toEqual({
+      code: "cdp_command_timeout",
+      operation: "Runtime.evaluate",
+      failureKind: "infrastructure",
+      recovery: "inspect-panel-and-reacquire-page",
+    });
     expect(socket.closed).toBe(true);
   });
 
@@ -574,7 +586,15 @@ describe("worker CDP client", () => {
     const browser = await BrowserImpl.connect("ws://cdp");
     const page = browser.contexts()[0]!.pages()[0]!;
 
-    await page.getByRole("button", { name: "Go" }).click();
+    const outcome = await page.getByRole("button", { name: "Go" }).click();
+
+    expect(outcome).toMatchObject({
+      protocol: "cdp-interaction-outcome.v1",
+      action: "click",
+      delivery: "dispatched",
+      target: { found: true },
+      effect: { status: "not-asserted" },
+    });
 
     const probeEvaluation = FakeWebSocket.sent
       .filter((entry) => entry.method === "Runtime.evaluate")
@@ -598,6 +618,28 @@ describe("worker CDP client", () => {
       params: expect.objectContaining({
         expression: "new Promise((resolve) => setTimeout(resolve, 0))",
       }),
+    });
+  });
+
+  it("returns an observed semantic postcondition from a click", async () => {
+    installFakeWebSocket();
+    const browser = await BrowserImpl.connect("ws://cdp");
+    const page = browser.contexts()[0]!.pages()[0]!;
+    const dialog = page.getByRole("dialog", { name: "Card details" });
+
+    const outcome = await page.getByRole("button", { name: "Open card" }).click({
+      expect: { locator: dialog, state: "visible" },
+    });
+
+    expect(outcome).toMatchObject({
+      protocol: "cdp-interaction-outcome.v1",
+      action: "click",
+      delivery: "dispatched",
+      effect: {
+        status: "observed",
+        locator: 'getByRole("dialog", { name: "Card details" })',
+        state: "visible",
+      },
     });
   });
 
@@ -665,14 +707,25 @@ describe("worker CDP client", () => {
     const browser = await BrowserImpl.connect("ws://cdp");
     const page = browser.contexts()[0]!.pages()[0]!;
 
-    await expect(
-      page.evaluate(() => {
+    let failure: unknown;
+    try {
+      await page.evaluate(() => {
         throw new Error("boom-marker");
-      })
-    ).rejects.toThrow(
+      });
+    } catch (error) {
+      failure = error;
+    }
+    if (!(failure instanceof CdpError)) throw new Error("Expected a structured CdpError");
+    expect(failure.message).toBe(
       "Browser evaluation failed: ReferenceError: boom-marker is not defined\n" +
         "    at save (https://example.com/panel.js:12:7)"
     );
+    expect(failure.errorData).toEqual({
+      code: "cdp_evaluation_failed",
+      operation: "Runtime.evaluate",
+      failureKind: "user-code",
+      recovery: "correct-page-function",
+    });
   });
 
   it("captures a screenshot via Page.captureScreenshot and maps type to CDP format", async () => {
@@ -754,6 +807,12 @@ describe("worker CDP client", () => {
     expect(err).toBeInstanceOf(CdpError);
     expect((err as CdpError).message).toContain('getByTestId("missing")');
     expect((err as CdpError).locator).toBe('getByTestId("missing")');
+    expect((err as CdpError).errorData).toMatchObject({
+      code: "cdp_locator_not_actionable",
+      failureKind: "user-code",
+      recovery: "reobserve-locator",
+      locator: 'getByTestId("missing")',
+    });
   });
 
   it("reports available accessible names when a named role locator misses", async () => {

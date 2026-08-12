@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { panelFailure, PanelOperationError } from "@vibestudio/shared/panel/observation";
 
 vi.mock("@workspace/runtime", () => ({
-  callMain: vi.fn(),
+  callMain: vi.fn(async (method: string) => (method === "workspace.listSkills" ? [] : undefined)),
   openPanel: vi.fn(),
 }));
 
@@ -104,5 +104,18 @@ describe("executeOnboardingSelection", () => {
     await expect(
       executeOnboardingSelection(onboardingInteraction("connection.retired", "setup"), deps)
     ).rejects.toThrow("Unknown or retired onboarding capability");
+  });
+
+  it("hands recurring-work choices to the Automations skill", async () => {
+    await expect(
+      executeOnboardingSelection(
+        onboardingInteraction("capability.automations", "explore"),
+        dependencies()
+      )
+    ).resolves.toEqual({
+      handled: false,
+      target: { via: "conversation" },
+      ownerSkillPath: "skills/automations/SKILL.md",
+    });
   });
 });

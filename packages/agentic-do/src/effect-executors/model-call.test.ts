@@ -6,6 +6,7 @@ import {
   type InitialStateInput,
   type ModelCallEffect,
 } from "@workspace/agent-loop";
+import { transformMessages } from "@workspace/pi-ai/api/transform-messages";
 import {
   CredentialApprovalDeferredError,
   type ExecutorDeps,
@@ -20,16 +21,16 @@ const mocks = vi.hoisted(() => ({
   stream: vi.fn(),
 }));
 
-vi.mock("@earendil-works/pi-ai", () => ({
+vi.mock("@workspace/pi-ai", () => ({
   clampThinkingLevel: mocks.clampThinkingLevel,
   getModel: mocks.getModel,
 }));
 
-vi.mock("@earendil-works/pi-ai/compat", () => ({
+vi.mock("@workspace/pi-ai/compat", () => ({
   stream: mocks.stream,
 }));
 
-vi.mock("@earendil-works/pi-ai/api/openai-codex-responses", () => ({
+vi.mock("@workspace/pi-ai/api/openai-codex-responses", () => ({
   closeOpenAICodexWebSocketSessions: mocks.closeOpenAICodexWebSocketSessions,
   releaseOpenAICodexWebSocketSession: mocks.releaseOpenAICodexWebSocketSession,
 }));
@@ -73,6 +74,53 @@ describe("model-facing tool results", () => {
   });
 });
 
+describe("historical assistant model identity", () => {
+  const thinking = {
+    type: "thinking",
+    content: "reasoning that belongs to its producing model",
+    metadata: { pi: { thinkingSignature: "signed-reasoning" } },
+  };
+  const identity = {
+    provider: "anthropic",
+    api: "anthropic-messages",
+    model: "claude-sonnet-4-6",
+  };
+  const currentModel = {
+    id: identity.model,
+    provider: identity.provider,
+    api: identity.api,
+    input: ["text"],
+  } as never;
+
+  it("preserves reasoning for the same model and downgrades it for a real cross-model handoff", () => {
+    const [historical] = toPiMessages([{ role: "assistant", blocks: [thinking], model: identity }]);
+
+    expect(historical).toMatchObject(identity);
+    expect(transformMessages([historical!], currentModel)[0]).toMatchObject({
+      role: "assistant",
+      content: [
+        {
+          type: "thinking",
+          thinking: "reasoning that belongs to its producing model",
+          thinkingSignature: "signed-reasoning",
+        },
+      ],
+    });
+
+    expect(
+      transformMessages([historical!], {
+        id: "gpt-5.6-sol",
+        provider: "openai-codex",
+        api: "openai-codex-responses",
+        input: ["text"],
+      } as never)[0]
+    ).toMatchObject({
+      role: "assistant",
+      content: [{ type: "text", text: "reasoning that belongs to its producing model" }],
+    });
+  });
+});
+
 const modelSpec: AgentLoopConfig["modelSpec"] = {
   id: "model",
   name: "Test Model",
@@ -90,6 +138,7 @@ const config: AgentLoopConfig = {
   model: "test:model",
   modelSpec,
   thinkingLevel: "medium",
+  fastMode: false,
   approvalLevel: 2,
   respondPolicy: "all",
   systemPromptHash: "sys",
@@ -141,11 +190,12 @@ function deps(): ExecutorDeps {
       cancelMethodCall: async () => {},
       callMethod: async () => {},
       publish: async () => {},
+      recordReadReceipt: async () => {},
       sendSignalEvent: async () => {},
     },
     localTools: {
       run: async () => ({ result: null, isError: false }),
-      alreadyApplied: () => false,
+      alreadyApplied: async () => null,
     },
     http: {
       post: async () => ({ deferred: false, result: null, isError: false }),
@@ -243,12 +293,12 @@ describe("modelCallExecutor", () => {
     const outcome = await modelCallExecutor.execute({
       descriptor: descriptor({
         provider: "local",
-        model: "lfm2.5-1.2b",
+        model: "lfm2.5-2.6b",
         auth: "loopback",
         // Journaled placeholder port — the LIVE ensureLoaded endpoint must win.
         modelSpec: {
-          id: "lfm2.5-1.2b",
-          name: "LFM2.5 1.2B Instruct",
+          id: "lfm2.5-2.6b",
+          name: "LFM2.5 2.6B",
           api: "openai-completions",
           provider: "local",
           baseUrl: "http://127.0.0.1:0/v1",
@@ -268,15 +318,15 @@ describe("modelCallExecutor", () => {
 
     expect(outcome).toMatchObject({ kind: "model", stopReason: "completed" });
     expect(getApiKey).not.toHaveBeenCalled();
-    expect(ensureLoaded).toHaveBeenCalledWith("lfm2.5-1.2b", expect.any(AbortSignal));
+    expect(ensureLoaded).toHaveBeenCalledWith("lfm2.5-2.6b", expect.any(AbortSignal));
     expect(attempts).toMatchObject([
       {
         phase: "started",
         channelId: "channel-1",
         messageId: "msg-1",
         provider: "local",
-        model: "lfm2.5-1.2b",
-        ref: "local:lfm2.5-1.2b",
+        model: "lfm2.5-2.6b",
+        ref: "local:lfm2.5-2.6b",
         api: "openai-completions",
         baseUrl: "http://127.0.0.1:43117/v1",
         auth: "loopback",
@@ -290,7 +340,7 @@ describe("modelCallExecutor", () => {
         .map((event) => JSON.parse(String((event as { content?: unknown }).content)))
     ).toEqual([
       { message: "Starting local model…" },
-      { message: "Loading LFM2.5 1.2B Instruct… (first use may download)" },
+      { message: "Loading LFM2.5 2.6B… (first use may download)" },
     ]);
     expect(streamOptions).toMatchObject({ apiKey: "loopback-key", maxTokens: 4096 });
     // pi-ai constructs its client from model.baseUrl and IGNORES a baseUrl
@@ -320,12 +370,12 @@ describe("modelCallExecutor", () => {
     const pending = modelCallExecutor.execute({
       descriptor: descriptor({
         provider: "local",
-        model: "lfm2.5-1.2b",
+        model: "lfm2.5-2.6b",
         auth: "loopback",
         modelSpec: {
           ...descriptor().request.modelSpec,
-          id: "lfm2.5-1.2b",
-          name: "LFM2.5 1.2B Instruct",
+          id: "lfm2.5-2.6b",
+          name: "LFM2.5 2.6B",
           provider: "local",
           api: "openai-completions",
           baseUrl: "http://127.0.0.1:0/v1",
@@ -341,7 +391,7 @@ describe("modelCallExecutor", () => {
     controller.abort(new Error("durable-object activation released"));
 
     await expect(pending).rejects.toThrow("durable-object activation released");
-    expect(ensureLoaded).toHaveBeenCalledWith("lfm2.5-1.2b", controller.signal);
+    expect(ensureLoaded).toHaveBeenCalledWith("lfm2.5-2.6b", controller.signal);
   });
 
   it("does not start provider transport after cancellation during credential resolution", async () => {
@@ -382,7 +432,7 @@ describe("modelCallExecutor", () => {
     delete inputDeps.localModels;
 
     const outcome = await modelCallExecutor.execute({
-      descriptor: descriptor({ provider: "local", model: "lfm2.5-1.2b", auth: "loopback" }),
+      descriptor: descriptor({ provider: "local", model: "lfm2.5-2.6b", auth: "loopback" }),
       state: initialAgentState({ channelId: "channel-1", config }),
       signal: new AbortController().signal,
       deps: inputDeps,
@@ -463,8 +513,9 @@ describe("modelCallExecutor", () => {
     await modelCallExecutor.execute({
       descriptor: descriptor({
         provider: "openai-codex",
-        model: "gpt-5.3-codex-spark",
+        model: "gpt-5.6-sol",
         modelSpec: codexSpec as never,
+        serviceTier: "priority",
       }),
       state: initialAgentState({ channelId: "channel-1", config }),
       signal: new AbortController().signal,
@@ -486,6 +537,7 @@ describe("modelCallExecutor", () => {
     expect(observedOptions[0]).toMatchObject({
       timeoutMs: 60_000,
       streamIdleTimeoutMs: 60_000,
+      serviceTier: "priority",
     });
     expect(observedOptions[1]).toMatchObject({
       timeoutMs: 45_000,
@@ -540,6 +592,51 @@ describe("modelCallExecutor", () => {
     expect(warn).toHaveBeenCalledWith(
       "[model-call] stream failed:",
       expect.stringContaining("WebSocket idle timeout")
+    );
+  });
+
+  it("honors a configured semantic-progress deadline for every model transport", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    let returnCalled = false;
+    mocks.stream.mockImplementation(() => ({
+      [Symbol.asyncIterator]() {
+        let emittedStart = false;
+        return {
+          next: async () => {
+            if (!emittedStart) {
+              emittedStart = true;
+              return { done: false, value: { type: "start" } };
+            }
+            return await new Promise<IteratorResult<Record<string, unknown>>>(() => {});
+          },
+          return: async () => {
+            returnCalled = true;
+            return { done: true, value: undefined };
+          },
+        };
+      },
+      result: async () => ({ content: [], stopReason: "stop" }),
+    }));
+    const boundedSpec = { ...modelSpec, streamIdleTimeoutMs: 15 };
+
+    await expect(
+      modelCallExecutor.execute({
+        descriptor: descriptor({ modelSpec: boundedSpec }),
+        state: initialAgentState({ channelId: "channel-1", config }),
+        signal: new AbortController().signal,
+        deps: deps(),
+        onEphemeral: () => {},
+      })
+    ).resolves.toMatchObject({
+      kind: "retry",
+      code: "unknown_retryable",
+      reason: "Model stream made no semantic progress for 15ms",
+    });
+    expect(returnCalled).toBe(true);
+    expect(mocks.closeOpenAICodexWebSocketSessions).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "[model-call] stream failed:",
+      expect.stringContaining("ModelProgressIdleTimeoutError")
     );
   });
 
@@ -598,7 +695,7 @@ describe("modelCallExecutor", () => {
 
     await expect(
       modelCallExecutor.execute({
-        descriptor: descriptor({ turnMetadata: { origin: "heartbeat" } }),
+        descriptor: descriptor({ turnMetadata: { origin: "scheduled" } }),
         state: initialAgentState({ channelId: "channel-1", config }),
         signal: new AbortController().signal,
         deps: deps(),
@@ -805,7 +902,7 @@ describe("modelCallExecutor", () => {
     });
   });
 
-  it("appends immediate prompts after transcript messages without changing the system prompt", async () => {
+  it("keeps runtime-owned immediate instructions out of the user conversation", async () => {
     mocks.getModel.mockReturnValue({ baseUrl: "https://model.test" });
     const inputDescriptor = descriptor();
     inputDescriptor.request.contextThroughSeq = 1;
@@ -847,19 +944,9 @@ describe("modelCallExecutor", () => {
     ).resolves.toMatchObject({ kind: "model", stopReason: "completed" });
 
     expect(streamedContext).toMatchObject({
-      systemPrompt: "BASE SYSTEM",
-      messages: [
-        { role: "user", content: [{ type: "text", text: "Original request" }] },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: "## Subagent Operating Contract\nOnly `complete` ends this subagent run.",
-            },
-          ],
-        },
-      ],
+      systemPrompt:
+        "BASE SYSTEM\n\n## Subagent Operating Contract\nOnly `complete` ends this subagent run.",
+      messages: [{ role: "user", content: [{ type: "text", text: "Original request" }] }],
     });
   });
 
@@ -1384,11 +1471,11 @@ describe("modelCallExecutor", () => {
     const outcome = await modelCallExecutor.execute({
       descriptor: descriptor({
         provider: "local",
-        model: "lfm2.5-1.2b",
+        model: "lfm2.5-2.6b",
         auth: "loopback",
         modelSpec: {
           ...modelSpec,
-          id: "lfm2.5-1.2b",
+          id: "lfm2.5-2.6b",
           name: "LFM2.5",
           provider: "local",
           baseUrl: "http://127.0.0.1:43117/v1",

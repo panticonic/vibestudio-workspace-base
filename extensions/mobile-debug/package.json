@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "Mobile Debug",
+    "icon": "./assets/icon.svg",
     "entry": "index.ts",
     "sourcemap": true,
     "extension": {
@@ -153,5 +154,8 @@
       ]
     }
   },
-  "dependencies": {}
+  "dependencies": {},
+  "devDependencies": {
+    "@vibestudio/extension": "workspace:*"
+  }
 }

@@ -18,7 +18,11 @@ import {
   Link2Icon,
 } from "@radix-ui/react-icons";
 import type { ModelCatalogEntry } from "@workspace/agentic-core";
-import { LOCAL_FALLBACK_MODEL_REF, LOCAL_PROVIDER_ID } from "@workspace/model-catalog/catalog";
+import {
+  LOCAL_FALLBACK_MODEL,
+  LOCAL_FALLBACK_MODEL_REF,
+  LOCAL_PROVIDER_ID,
+} from "@workspace/model-catalog/catalog";
 import { getProviderConnectPreset } from "@workspace/model-catalog/providerConnect";
 
 type BrowserOpenMode = "internal" | "external";
@@ -55,7 +59,7 @@ function DownloadProgress({
         : "Downloading and verifying";
 
   return (
-    <Card size="2" variant="surface" className="first-agent-setup-status">
+    <Card size="2" variant="surface" data-surface-tone="selected">
       <Flex direction="column" gap="3">
         <Flex justify="between" align="center" gap="3">
           <Flex align="center" gap="2">
@@ -107,7 +111,7 @@ export function ModelSetupStatus({
 
   if (availability.state === "starting") {
     return (
-      <Card size="2" variant="surface" className="first-agent-setup-status">
+      <Card size="2" variant="surface" data-surface-tone="selected">
         <Flex align="center" gap="3">
           <Spinner />
           <Box>
@@ -166,7 +170,7 @@ export function ModelSetupStatus({
   if (local) {
     const fallback = model.ref === LOCAL_FALLBACK_MODEL_REF;
     return (
-      <Card size="2" variant="surface" className="first-agent-setup-status">
+      <Card size="2" variant="surface" data-surface-tone="selected">
         <Flex direction="column" gap="3">
           <Flex align="start" gap="3">
             <Box className="first-agent-setup-status-icon">
@@ -177,7 +181,7 @@ export function ModelSetupStatus({
                 <Heading size="3">Install {model.name}</Heading>
                 {fallback ? (
                   <Badge size="1" variant="soft" color="gray">
-                    approximately 700 MB
+                    approximately {formatBytes(LOCAL_FALLBACK_MODEL.downloadSizeBytes)}
                   </Badge>
                 ) : null}
               </Flex>
@@ -222,7 +226,7 @@ export function ModelSetupStatus({
   }
 
   return (
-    <Card size="2" variant="surface" className="first-agent-setup-status">
+    <Card size="2" variant="surface" data-surface-tone="selected">
       <Flex direction="column" gap="3">
         <Flex align="start" gap="3">
           <Box className="first-agent-setup-status-icon">

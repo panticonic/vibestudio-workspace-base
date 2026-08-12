@@ -31,7 +31,7 @@ import {
 } from "@radix-ui/react-icons";
 import { rpc } from "@workspace/runtime";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
-import { useIsMobile, usePaletteCommands } from "@workspace/react";
+import { useHostCommands, useIsMobile } from "@workspace/react";
 import { AboutThemeRoot } from "@workspace/about-shared/ui";
 
 // ---------------------------------------------------------------------------
@@ -177,10 +177,12 @@ function LogRow({
   record,
   expanded,
   onToggle,
+  isMobile,
 }: {
   record: LogRecord;
   expanded: boolean;
   onToggle: () => void;
+  isMobile: boolean;
 }) {
   const hasFields = !!record.fields && record.fields.length > 0;
   const tint =
@@ -196,6 +198,49 @@ function LogRow({
         ? "var(--amber-9)"
         : "transparent";
 
+  const metadata = (
+    <>
+      <Text
+        style={{
+          color: "var(--gray-11)",
+          flexShrink: 0,
+          fontVariantNumeric: "tabular-nums",
+        }}
+      >
+        {fmtTime(record.timestamp)}
+      </Text>
+      <Box style={{ flexShrink: 0 }}>
+        <LevelChip level={record.level} />
+      </Box>
+      {record.tag && (
+        <Text
+          style={{
+            flexShrink: 0,
+            color: "var(--accent-11)",
+            background: "var(--accent-a3)",
+            borderRadius: 4,
+            padding: "0 6px",
+            fontSize: 11,
+          }}
+        >
+          {record.tag}
+        </Text>
+      )}
+    </>
+  );
+  const message = (
+    <Text
+      style={{
+        color: "var(--gray-12)",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-word",
+        minWidth: 0,
+      }}
+    >
+      {record.message}
+    </Text>
+  );
+
   return (
     <Box
       onClick={hasFields ? onToggle : undefined}
@@ -210,7 +255,7 @@ function LogRow({
         lineHeight: 1.55,
       }}
     >
-      <Flex align="baseline" gap="2" style={{ minWidth: 0 }}>
+      <Flex align={isMobile ? "start" : "baseline"} gap="2" style={{ minWidth: 0 }}>
         <Box style={{ width: 12, flexShrink: 0, opacity: 0.5 }}>
           {hasFields ? (
             expanded ? (
@@ -220,42 +265,19 @@ function LogRow({
             )
           ) : null}
         </Box>
-        <Text
-          style={{
-            color: "var(--gray-10)",
-            flexShrink: 0,
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
-          {fmtTime(record.timestamp)}
-        </Text>
-        <Box style={{ flexShrink: 0 }}>
-          <LevelChip level={record.level} />
-        </Box>
-        {record.tag && (
-          <Text
-            style={{
-              flexShrink: 0,
-              color: "var(--accent-11)",
-              background: "var(--accent-a3)",
-              borderRadius: 4,
-              padding: "0 6px",
-              fontSize: 11,
-            }}
-          >
-            {record.tag}
-          </Text>
+        {isMobile ? (
+          <Flex direction="column" gap="1" style={{ flex: 1, minWidth: 0 }}>
+            <Flex align="center" gap="2" wrap="wrap">
+              {metadata}
+            </Flex>
+            {message}
+          </Flex>
+        ) : (
+          <>
+            {metadata}
+            {message}
+          </>
         )}
-        <Text
-          style={{
-            color: "var(--gray-12)",
-            whiteSpace: "pre-wrap",
-            wordBreak: "break-word",
-            minWidth: 0,
-          }}
-        >
-          {record.message}
-        </Text>
       </Flex>
       {hasFields && expanded && record.fields && (
         <Box
@@ -548,15 +570,14 @@ function ServerLogsPage() {
     });
   }, [scrollToBottom]);
 
-  // Palette command.
-  const paletteCommands = useMemo(
+  const hostCommands = useMemo(
     () => [
-      { id: "server-logs-follow", label: "Server Logs: toggle follow", section: "Server Logs" },
-      { id: "server-logs-clear", label: "Server Logs: clear view", section: "Server Logs" },
+      { id: "server-logs-follow", label: "Server Logs: toggle follow", group: "Server Logs" },
+      { id: "server-logs-clear", label: "Server Logs: clear view", group: "Server Logs" },
     ],
     []
   );
-  usePaletteCommands(paletteCommands, (id) => {
+  useHostCommands(hostCommands, (id) => {
     if (id === "server-logs-follow") toggleFollow();
     else if (id === "server-logs-clear") clearView();
   });
@@ -697,12 +718,7 @@ function ServerLogsPage() {
 
         <Box style={{ flex: "1 0 0" }} />
 
-        <Button
-          size="2"
-          variant={follow ? "solid" : "soft"}
-          color={follow ? "grass" : "gray"}
-          onClick={toggleFollow}
-        >
+        <Button size="2" variant="soft" color={follow ? "grass" : "gray"} onClick={toggleFollow}>
           {follow ? <PauseIcon /> : <PlayIcon />}
           {follow ? "Following" : "Follow"}
         </Button>
@@ -778,6 +794,7 @@ function ServerLogsPage() {
                 record={it.record}
                 expanded={expanded.has(it.record.seq)}
                 onToggle={() => toggleExpand(it.record.seq)}
+                isMobile={isMobile}
               />
             )
           )}

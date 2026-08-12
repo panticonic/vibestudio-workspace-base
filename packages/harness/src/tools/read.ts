@@ -9,8 +9,7 @@
  */
 import { Type, type Static } from "@sinclair/typebox";
 import type { AgentTool } from "@workspace/pi-core";
-import type { TextContent, ImageContent } from "@earendil-works/pi-ai";
-import { Buffer } from "node:buffer";
+import type { TextContent, ImageContent } from "@workspace/pi-ai";
 import type { RuntimeFs } from "./runtime-fs.js";
 import type { RpcCaller } from "@vibestudio/rpc";
 import { createExtensionProxy } from "@vibestudio/extension";
@@ -20,6 +19,22 @@ import { splitRepoPath } from "@vibestudio/shared/runtime/entitySpec";
 import type { VcsReadMemoryResult } from "@vibestudio/service-schemas/vcs";
 import { toVcsPath, toolContextId, type ToolVcs, type ToolWorkspaceContext } from "./tool-vcs.js";
 import { renderReadMemoryBlock } from "./read-memory.js";
+import type { AgentReferenceStore } from "./agent-pagination.js";
+import { putProvenanceReference } from "./provenance-reference.js";
+import type { AgentFileVisibility } from "./agent-file-visibility.js";
+import {
+  AGENT_TOOL_ARTIFACT_PROTOCOL,
+  agentToolArtifactRefSchema,
+  artifactDigestFromUri,
+  type AgentToolArtifactRef,
+} from "@workspace/agentic-protocol";
+import {
+  base64ToBytes,
+  bytesToBase64,
+  decodeUtf8,
+  encodeUtf8,
+  utf8ByteLength,
+} from "./portable-bytes.js";
 import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
@@ -27,27 +42,79 @@ import {
   truncateHead,
   type TruncationResult,
 } from "./truncate.js";
-const readLocationSchema = Type.Union([
-  Type.Object({
-    path: Type.String({ description: "Path to the file to read (relative or absolute)" }),
-  }),
-  Type.Object({
-    target: Type.String({
-      description:
-        "File resource reference to read, normally a file:<path> value returned by another tool.",
-    }),
+import {
+  canonicalReceiptPath,
+  createWorkspaceReadReceipt,
+  type WorkspaceReadReceipt,
+} from "./workspace-read-receipt.js";
+const readSchema = Type.Object(
+  {
+    path: Type.Optional(
+      Type.String({ description: "Path to the file to read (relative or absolute)" })
+    ),
+    target: Type.Optional(
+      Type.String({
+        description:
+          "File resource reference to read, normally a file:<path> value returned by another tool.",
+      })
+    ),
     kind: Type.Optional(Type.Literal("file")),
-  }),
-]);
-
-const readOptionsSchema = Type.Object({
-  offset: Type.Optional(
-    Type.Number({ description: "Line number to start reading from (1-indexed)" })
-  ),
-  limit: Type.Optional(Type.Number({ description: "Maximum number of lines to read" })),
-});
-const readSchema = Type.Intersect([readLocationSchema, readOptionsSchema]);
+    resource: Type.Optional(
+      Type.Object(
+        {
+          protocol: Type.Literal(AGENT_TOOL_ARTIFACT_PROTOCOL),
+          uri: Type.String({ pattern: "^artifact:[0-9a-f]{64}$" }),
+          digest: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+          byteLength: Type.Integer({ minimum: 0 }),
+          mediaType: Type.Literal("application/json"),
+          encoding: Type.Literal("json"),
+          description: Type.String(),
+        },
+        { additionalProperties: false }
+      )
+    ),
+    offset: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        description: "Line number to start reading from (1-indexed).",
+      })
+    ),
+    limit: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 10_000,
+        description: "Maximum number of lines to read (maximum: 10000).",
+      })
+    ),
+  },
+  { additionalProperties: false }
+);
 export type ReadToolInput = Static<typeof readSchema>;
+
+const readBinarySchema = Type.Object(
+  {
+    path: Type.Optional(
+      Type.String({ description: "Path to the binary file to read (relative or absolute)." })
+    ),
+    target: Type.Optional(
+      Type.String({
+        description:
+          "File resource reference to read, normally a file:<path> value returned by another tool.",
+      })
+    ),
+    kind: Type.Optional(Type.Literal("file")),
+    offset: Type.Optional(Type.Integer({ minimum: 0, description: "Zero-based raw byte offset." })),
+    limit: Type.Optional(
+      Type.Integer({
+        minimum: 1,
+        maximum: 1024 * 1024,
+        description: "Maximum raw bytes (default: 50 KiB; maximum: 1 MiB).",
+      })
+    ),
+  },
+  { additionalProperties: false }
+);
+export type ReadBinaryToolInput = Static<typeof readBinarySchema>;
 export interface ReadToolDetails {
   truncation?: TruncationResult;
   path?: string;
@@ -64,10 +131,21 @@ export interface ReadToolDetails {
   };
   wasResized?: boolean;
   engine?: "runtime-fs";
+  resource?: AgentToolArtifactRef;
   directory?: boolean;
   extensionFallback?: string;
   missing?: boolean;
   suggestions?: string[];
+  encoding?: "text" | "base64";
+  contentHash?: string;
+  /** Exact whole-file state that edit/apply_patch can use as an optimistic precondition. */
+  receipt?: WorkspaceReadReceipt;
+  byteRange?: {
+    start: number;
+    end: number;
+    totalBytes: number;
+    nextOffset?: number;
+  };
   displayedRange?: {
     coordinateKind: "utf16";
     start: number;
@@ -98,13 +176,43 @@ interface ReadResult {
   content: (TextContent | ImageContent)[];
   details: ReadToolDetails;
 }
+interface FsReadTextResult {
+  text: string;
+  contentHash: string;
+  totalLines: number;
+  totalBytes: number;
+  maxLines: number;
+  maxBytes: number;
+  startLine: number;
+  endLine: number;
+  start: number;
+  end: number;
+  truncated: boolean;
+  truncatedBy?: "lines" | "bytes";
+  nextOffset?: number;
+  firstLineExceedsLimit: boolean;
+}
+interface FsReadBytesResult {
+  base64: string;
+  contentHash: string;
+  totalBytes: number;
+  maxBytes: number;
+  start: number;
+  end: number;
+  truncated: boolean;
+  nextOffset?: number;
+}
 interface ImageServiceApi {
-  detectMimeType(bytes: Uint8Array): Promise<string | null>;
+  detectMimeType(bytes: BinaryEnvelope): Promise<string | null>;
   resize(
-    bytes: Uint8Array,
+    bytes: BinaryEnvelope,
     mimeType: string,
     opts: { maxWidth: number; maxHeight: number }
   ): Promise<ImageResizeResult>;
+}
+interface BinaryEnvelope {
+  __bin: true;
+  data: string;
 }
 const IMAGE_SERVICE_EXTENSION = "@workspace-extensions/image-service";
 
@@ -116,6 +224,8 @@ export interface ReadToolDeps {
     vcs: Pick<ToolVcs, "readMemory">;
     context: ToolWorkspaceContext;
   };
+  agentReferences?: AgentReferenceStore;
+  visibility?: AgentFileVisibility;
 }
 export function createReadTool(
   cwd: string,
@@ -194,7 +304,10 @@ export function createReadTool(
 
   const attachReadMemory = async (
     result: ReadResult,
-    text: string,
+    lineMappingContent: string,
+    expectedContentHash: string,
+    lineMappingStart: number,
+    lineMappingStartLine: number,
     requestedPath: string,
     signal?: AbortSignal
   ): Promise<ReadResult> => {
@@ -213,7 +326,7 @@ export function createReadTool(
       const provenance = await provenanceDeps.vcs.readMemory({
         contextId: toolContextId(provenanceDeps.context),
         path: workspacePath,
-        expectedContentHash: sha256Hex(new TextEncoder().encode(text)),
+        expectedContentHash,
         range: { start: displayed.start, end: displayed.end },
         episodeLimit: 4,
         historyLimit: 3,
@@ -227,11 +340,18 @@ export function createReadTool(
       }
       const block = renderReadMemoryBlock({
         label: workspacePath,
-        content: text,
+        content: lineMappingContent,
+        contentStart: lineMappingStart,
+        contentStartLine: lineMappingStartLine,
         readingContextId: toolContextId(provenanceDeps.context),
         startLine: displayed.startLine,
         endLine: displayed.endLine,
         result: provenance,
+        ...(deps?.agentReferences
+          ? {
+              reference: (root) => putProvenanceReference(deps.agentReferences!, root, 5),
+            }
+          : {}),
       });
       return {
         ...result,
@@ -257,9 +377,33 @@ export function createReadTool(
     name: "read",
     label: "read",
     executionMode: "parallel",
-    description: `Read the contents of a file. Supports text files and images (jpg, png, gif, webp). Images are sent as attachments. For text files, output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
+    description: `Read a file as bounded text or a native image attachment. Supply exactly one location: path, a file target returned by discovery, or an artifact resource. Text is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB; continue with offset. Image pixels—including extensionless screenshots—are returned as model-visible image content. Use read_binary only for lossless base64 byte transport, never for visual inspection.`,
     parameters: readSchema,
     execute: async (_toolCallId, input, signal, _onUpdate) => {
+      const resource =
+        "resource" in input && input.resource
+          ? agentToolArtifactRefSchema.parse(input.resource)
+          : undefined;
+      if (resource) {
+        if (!runtimeRpc) throw new Error("Reading artifact resources requires runtime RPC");
+        const digest = artifactDigestFromUri(resource.uri);
+        if (!digest || digest !== resource.digest) {
+          throw Object.assign(new Error("Artifact resource URI and digest disagree"), {
+            code: "invalid_artifact_reference",
+          });
+        }
+        const raw = await runtimeRpc.call<string | null>("main", "blobstore.getText", [digest]);
+        if (raw === null) {
+          throw Object.assign(new Error(`Artifact is no longer available: ${resource.uri}`), {
+            code: "artifact_not_found",
+          });
+        }
+        const formatted = formatTextResult(raw, resource.uri, input.offset, input.limit);
+        return {
+          ...formatted,
+          details: { ...formatted.details, resource, originalSize: resource.byteLength },
+        };
+      }
       const path = normalizeReadLocation(input);
       if (!path) {
         return {
@@ -277,47 +421,67 @@ export function createReadTool(
         throw new Error("Operation aborted");
       }
       const absolutePath = resolveToCwd(path, cwd);
+      if (deps?.visibility && (await deps.visibility.isHidden(absolutePath))) {
+        return {
+          content: [{ type: "text", text: `Path not found: ${path}` }],
+          details: { path, missing: true, suggestions: [] },
+        };
+      }
       // --- Image/text read ---------------------------------------------------------------
       // Text with a recognizable filename remains a single compact UTF-8 RPC
       // response. Runtime artifacts such as screenshots intentionally use
       // opaque extensionless temp paths, so those paths must be read as bytes
       // and magic-sniffed instead of being irreversibly decoded as UTF-8.
       const shouldSniffMedia = isLikelyImagePath(path) || hasNoFileExtension(path);
-      let raw: string | Buffer;
+      if (runtimeRpc && !shouldSniffMedia) {
+        try {
+          const bounded = await runtimeRpc.call<FsReadTextResult>(
+            "main",
+            "fs.readText",
+            [
+              absolutePath,
+              {
+                offset: offset ?? 1,
+                limit: limit ?? DEFAULT_MAX_LINES,
+                maxBytes: DEFAULT_MAX_BYTES,
+              },
+            ],
+            signal ? { signal } : undefined
+          );
+          const result = withReadReceipt(
+            formatBoundedTextResult(bounded, path),
+            path,
+            cwd,
+            bounded.contentHash,
+            bounded.totalBytes
+          );
+          return attachReadMemory(
+            result,
+            bounded.text,
+            bounded.contentHash,
+            bounded.start,
+            bounded.startLine,
+            path,
+            signal
+          );
+        } catch (err) {
+          const recovered = await recoverReadFailure(fs, path, absolutePath, signal);
+          if (recovered) return recovered;
+          if ((err as NodeJS.ErrnoException).code === "ENOENT") {
+            return missingResult(path, absolutePath);
+          }
+          throw err;
+        }
+      }
+      let raw: string | Uint8Array;
       try {
         raw = await retryTransientRuntimeFs(
           () => fs.readFile(absolutePath, shouldSniffMedia ? undefined : "utf8"),
           signal
         );
       } catch (err) {
-        // The common file path is intentionally one filesystem round trip.
-        // If it is a directory, recover with one typed listing instead of a
-        // stat + readdir + one stat per child sequence.
-        try {
-          const entries = await retryTransientRuntimeFs(
-            () => fs.readdir(absolutePath, { withFileTypes: true }),
-            signal
-          );
-          const shown = entries
-            .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
-            .sort()
-            .slice(0, 200);
-          const omitted = entries.length - shown.length;
-          return {
-            content: [
-              {
-                type: "text",
-                text:
-                  shown.join("\n") +
-                  (omitted > 0 ? `\n... ${omitted} more entries omitted` : ""),
-              },
-            ],
-            details: { path, engine: "runtime-fs", directory: true },
-          };
-        } catch {
-          // Preserve the original file-read failure below. The directory
-          // probe is only a successful alternate interpretation.
-        }
+        const recovered = await recoverReadFailure(fs, path, absolutePath, signal);
+        if (recovered) return recovered;
         if ((err as NodeJS.ErrnoException).code === "ENOENT") {
           return missingResult(path, absolutePath);
         }
@@ -328,9 +492,13 @@ export function createReadTool(
         imageService &&
         (isLikelyImagePath(path) || hasSupportedImageMagic(raw))
       ) {
-        const mimeType = await imageService.detectMimeType(raw);
+        // Extension arguments cross a JSON RPC boundary. Preserve bytes in
+        // the runtime's canonical binary envelope instead of relying on a
+        // Uint8Array's in-process prototype surviving serialization.
+        const binary = { __bin: true, data: bytesToBase64(raw) } as const;
+        const mimeType = await imageService.detectMimeType(binary);
         if (mimeType?.startsWith("image/")) {
-          const resized = await imageService.resize(raw, mimeType, {
+          const resized = await imageService.resize(binary, mimeType, {
             maxWidth: 2000,
             maxHeight: 2000,
           });
@@ -345,20 +513,34 @@ export function createReadTool(
             details: {
               path: absolutePath,
               mimeType: resized.mimeType,
-              size: Buffer.byteLength(resized.data, "base64"),
+              size: base64ToBytes(resized.data).byteLength,
               originalSize: raw.byteLength,
               originalDimensions: { width: resized.originalWidth, height: resized.originalHeight },
               dimensions: { width: resized.width, height: resized.height },
               wasResized: resized.wasResized,
+              receipt: createWorkspaceReadReceipt(
+                canonicalReceiptPath(path, cwd),
+                sha256Hex(raw),
+                raw.byteLength
+              ),
             },
           };
         }
       }
       // --- Text branch -------------------------------------------------------------------
-      const textContent = typeof raw === "string" ? raw : Buffer.from(raw).toString("utf-8");
+      const textContent = typeof raw === "string" ? raw : decodeUtf8(raw);
       return attachReadMemory(
-        formatTextResult(textContent, path, offset, limit),
+        withReadReceipt(
+          formatTextResult(textContent, path, offset, limit),
+          path,
+          cwd,
+          sha256Hex(typeof raw === "string" ? encodeUtf8(raw) : raw),
+          typeof raw === "string" ? utf8ByteLength(raw) : raw.byteLength
+        ),
         textContent,
+        sha256Hex(new TextEncoder().encode(textContent)),
+        0,
+        1,
         path,
         signal
       );
@@ -366,7 +548,175 @@ export function createReadTool(
   };
 }
 
-function normalizeReadLocation(input: { path?: unknown; target?: unknown }): string | null {
+/** Lossless bounded byte transport, deliberately separate from model-visible image reads. */
+export function createReadBinaryTool(
+  cwd: string,
+  fs: RuntimeFs,
+  deps?: Pick<ReadToolDeps, "rpc" | "visibility">
+): AgentTool<typeof readBinarySchema, ReadToolDetails> {
+  const runtimeRpc = deps?.rpc ?? null;
+  return {
+    name: "read_binary",
+    label: "read_binary",
+    executionMode: "parallel",
+    description:
+      "Read bounded raw file bytes as lossless base64 text for binary inspection or round-tripping. Supply path or a file target; offset/limit count bytes. This tool does not make image pixels visible to the model—use read for screenshots and other images.",
+    parameters: readBinarySchema,
+    execute: async (_toolCallId, input, signal) => {
+      const path = normalizeReadLocation(input);
+      if (!path) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: "No file reference was supplied. Call read_binary with path, or with a file:<path> target returned by a discovery tool.",
+            },
+          ],
+          details: { missing: true, suggestions: [] },
+        };
+      }
+      if (signal?.aborted) throw new Error("Operation aborted");
+      const absolutePath = resolveToCwd(path, cwd);
+      if (deps?.visibility && (await deps.visibility.isHidden(absolutePath))) {
+        return {
+          content: [{ type: "text", text: `Path not found: ${path}` }],
+          details: { path, missing: true, suggestions: [] },
+        };
+      }
+      try {
+        if (runtimeRpc) {
+          const bounded = await runtimeRpc.call<FsReadBytesResult>(
+            "main",
+            "fs.readBytes",
+            [
+              absolutePath,
+              {
+                offset: input.offset ?? 0,
+                limit: input.limit ?? DEFAULT_MAX_BYTES,
+              },
+            ],
+            signal ? { signal } : undefined
+          );
+          return withReadReceipt(
+            formatBoundedBytesResult(bounded, path),
+            path,
+            cwd,
+            bounded.contentHash,
+            bounded.totalBytes
+          );
+        }
+        const raw = await retryTransientRuntimeFs(() => fs.readFile(absolutePath), signal);
+        const bytes = typeof raw === "string" ? encodeUtf8(raw) : raw;
+        const start = Math.min(input.offset ?? 0, bytes.length);
+        const selected = bytes.subarray(start, start + (input.limit ?? DEFAULT_MAX_BYTES));
+        const end = start + selected.length;
+        return withReadReceipt(
+          formatBoundedBytesResult(
+            {
+              base64: bytesToBase64(selected),
+              contentHash: sha256Hex(bytes),
+              totalBytes: bytes.length,
+              maxBytes: input.limit ?? DEFAULT_MAX_BYTES,
+              start,
+              end,
+              truncated: end < bytes.length,
+              ...(end < bytes.length ? { nextOffset: end } : {}),
+            },
+            path
+          ),
+          path,
+          cwd,
+          sha256Hex(bytes),
+          bytes.length
+        );
+      } catch (error) {
+        const recovered = await recoverReadFailure(fs, path, absolutePath, signal);
+        if (recovered) return recovered;
+        if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `File not found: ${path}. Use ls/find before choosing another path.`,
+              },
+            ],
+            details: { path, missing: true, suggestions: [] },
+          };
+        }
+        throw error;
+      }
+    },
+  };
+}
+
+function withReadReceipt(
+  result: ReadResult,
+  path: string,
+  cwd: string,
+  contentHash: string,
+  byteLength: number
+): ReadResult {
+  const receipt = createWorkspaceReadReceipt(
+    canonicalReceiptPath(path, cwd),
+    contentHash,
+    byteLength
+  );
+  return {
+    ...result,
+    content: [
+      ...result.content,
+      {
+        type: "text",
+        text: `Read receipt (pass this exact object as receipt to edit, write, or the matching apply_patch operation): ${JSON.stringify(receipt)}`,
+      },
+    ],
+    details: {
+      ...result.details,
+      contentHash,
+      receipt,
+    },
+  };
+}
+
+async function recoverReadFailure(
+  fs: RuntimeFs,
+  displayPath: string,
+  absolutePath: string,
+  signal?: AbortSignal
+): Promise<ReadResult | null> {
+  // If the target is a directory, recover with one typed listing instead of a
+  // stat + readdir + one stat per child sequence. Other failures retain their
+  // original structured code; the probe never converts EACCES into ENOENT.
+  try {
+    const entries = await retryTransientRuntimeFs(
+      () => fs.readdir(absolutePath, { withFileTypes: true }),
+      signal
+    );
+    const shown = entries
+      .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
+      .sort()
+      .slice(0, 200);
+    const omitted = entries.length - shown.length;
+    return {
+      content: [
+        {
+          type: "text",
+          text: shown.join("\n") + (omitted > 0 ? `\n... ${omitted} more entries omitted` : ""),
+        },
+      ],
+      details: { path: displayPath, engine: "runtime-fs", directory: true },
+    };
+  } catch {
+    if (signal?.aborted) throw signal.reason ?? new Error("Operation aborted");
+    return null;
+  }
+}
+
+function normalizeReadLocation(input: {
+  path?: unknown;
+  target?: unknown;
+  resource?: unknown;
+}): string | null {
   const raw = typeof input.path === "string" ? input.path : input.target;
   if (typeof raw !== "string" || raw.length === 0) return null;
   // Discovery and provenance tools return stable `file:<path>` references.
@@ -428,6 +778,100 @@ function hasSupportedImageMagic(bytes: Uint8Array): boolean {
     bytes[11] === 0x50;
   return png || jpeg || gif || webp;
 }
+
+function formatBoundedTextResult(bounded: FsReadTextResult, displayPath: string): ReadResult {
+  if (bounded.startLine > bounded.totalLines) {
+    return {
+      content: [
+        {
+          type: "text",
+          text:
+            `[Offset ${bounded.startLine} is beyond end of file (${bounded.totalLines} lines total). ` +
+            `The last valid offset is ${bounded.totalLines}.]`,
+        },
+      ],
+      details: { path: displayPath, engine: "runtime-fs" },
+    };
+  }
+  const outputLines =
+    bounded.endLine >= bounded.startLine ? bounded.endLine - bounded.startLine + 1 : 0;
+  const truncation: TruncationResult = {
+    content: bounded.text,
+    truncated: bounded.truncated,
+    truncatedBy: bounded.truncatedBy ?? null,
+    totalLines: bounded.totalLines,
+    totalBytes: bounded.totalBytes,
+    outputLines,
+    outputBytes: utf8ByteLength(bounded.text),
+    lastLinePartial: false,
+    firstLineExceedsLimit: bounded.firstLineExceedsLimit,
+    maxLines: bounded.maxLines,
+    maxBytes: bounded.maxBytes,
+  };
+  if (bounded.firstLineExceedsLimit) {
+    return {
+      content: [
+        {
+          type: "text",
+          text: `[Line ${bounded.startLine} exceeds ${formatSize(bounded.maxBytes)} limit. Use offset=${bounded.nextOffset} to skip past it.]`,
+        },
+      ],
+      details: { path: displayPath, engine: "runtime-fs", truncation },
+    };
+  }
+  let text = bounded.text;
+  if (bounded.truncated) {
+    const byteNote =
+      bounded.truncatedBy === "bytes" ? ` (${formatSize(bounded.maxBytes)} limit)` : "";
+    text +=
+      `\n\n[Showing lines ${bounded.startLine}-${bounded.endLine} of ${bounded.totalLines}${byteNote}. ` +
+      `Use offset=${bounded.nextOffset} to continue.]`;
+  }
+  return {
+    content: [{ type: "text", text }],
+    details: {
+      path: displayPath,
+      engine: "runtime-fs",
+      ...(bounded.truncated ? { truncation } : {}),
+      displayedRange: {
+        coordinateKind: "utf16",
+        start: bounded.start,
+        end: bounded.end,
+        startLine: bounded.startLine,
+        endLine: bounded.endLine,
+      },
+    },
+  };
+}
+
+function formatBoundedBytesResult(bounded: FsReadBytesResult, displayPath: string): ReadResult {
+  const range = {
+    start: bounded.start,
+    end: bounded.end,
+    totalBytes: bounded.totalBytes,
+    ...(bounded.nextOffset !== undefined ? { nextOffset: bounded.nextOffset } : {}),
+  };
+  const payload = {
+    path: displayPath,
+    encoding: "base64" as const,
+    contentHash: bounded.contentHash,
+    range,
+    base64: bounded.base64,
+  };
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload) }],
+    details: {
+      path: displayPath,
+      engine: "runtime-fs",
+      encoding: "base64",
+      contentHash: bounded.contentHash,
+      size: bounded.end - bounded.start,
+      originalSize: bounded.totalBytes,
+      byteRange: range,
+    },
+  };
+}
+
 function formatTextResult(
   textContent: string,
   displayPath: string,
@@ -473,7 +917,7 @@ function formatTextResult(
   let outputText: string;
   let details: ReadToolDetails = {};
   if (truncation.firstLineExceedsLimit) {
-    const firstLineSize = formatSize(Buffer.byteLength(allLines[startLine] ?? "", "utf-8"));
+    const firstLineSize = formatSize(utf8ByteLength(allLines[startLine] ?? ""));
     outputText = `[Line ${startLineDisplay} is ${firstLineSize}, exceeds ${formatSize(DEFAULT_MAX_BYTES)} limit. Use offset=${startLineDisplay + 1} to skip past it.]`;
     details = { truncation };
   } else if (truncation.truncated) {

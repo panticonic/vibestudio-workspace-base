@@ -12,11 +12,13 @@ Creation is a durable phase. Store its receipt before doing anything else:
 ```ts
 import { createProjects } from "@workspace-skills/workspace-dev";
 
-scope.created = await createProjects([{
-  projectType: "panel",
-  name,
-  title,
-}]);
+scope.created = await createProjects([
+  {
+    projectType: "panel",
+    name,
+    title,
+  },
+]);
 scope.panelSource = scope.created[0].created; // already `panels/name`
 return scope.created;
 ```
@@ -69,25 +71,24 @@ reported kernel restart, recover the same panel with
 
 ## 4. Capture and visually read the flawed state
 
-Acquire one page for the current runtime incarnation, use native screenshot
-bytes, and return a file reference. Omit an exact `authority.requests` list for
+Acquire one generation-fenced session for the current runtime incarnation and
+return the panel handle's native screenshot result directly. Omit an exact `authority.requests` list for
 ordinary eval; if intentionally attenuating, `cdp.page()` requires the exact
 `panel.inspect` request documented in `BROWSER.md`.
 
 ```ts
-const page = await scope.panel.cdp.page();
+scope.panelSession = await scope.panel.cdp.session();
+const page = scope.panelSession.page;
 const roles = await Promise.all(
   (await page.getByRole("button").all()).map((item) => item.inspect())
 );
-const bytes = await page.screenshot({ fullPage: true });
-const path = await fs.mktemp("panel-before-ux-fix");
-await fs.writeFile(path, bytes);
-await page.close();
-return { screenshot: `file:${path}`, roles };
+console.log(roles);
+return await scope.panel.cdp.screenshot({ format: "png" });
 ```
 
-Pass the returned file reference to `read`. Do not infer the visual defect from
-source/DOM text alone, and do not convert image bytes to base64 text.
+Eval attaches this canonical screenshot result as image content. No temp file,
+filesystem write authority, or follow-up `read` call is needed. Do not infer the
+visual defect from source/DOM text alone.
 
 ## 5. Repair UX, rebuild the same panel, and reacquire the page
 
@@ -95,11 +96,17 @@ Make the separate source edit, rerun the exact-context build report, then:
 
 ```ts
 const observation = await scope.panel.rebuild();
-const page = await scope.panel.cdp.page(); // fresh after runtime replacement
+const refreshed = await scope.panelSession.refresh();
+scope.panelSession = refreshed.session;
+const page = scope.panelSession.page;
 ```
 
 `rebuild()` keeps the panel id but replaces its runtime incarnation, so an old
-page must not be reused. Building, serving, connecting, and application boot are
+page must not be reused. A generation-fenced session reports `replaced` when
+that happens and returns the page for the new immutable attempt; it never
+replays an uncertain interaction. Acquire the initial session with
+`scope.panelSession = await scope.panel.cdp.session()`. Building, serving,
+connecting, and application boot are
 distinct stages and cold builds can legitimately take time; do not impose a
 generic fixed deadline on `rebuild()` or on the surrounding eval cell. The
 runtime has no implicit readiness deadline and reports terminal boot failures

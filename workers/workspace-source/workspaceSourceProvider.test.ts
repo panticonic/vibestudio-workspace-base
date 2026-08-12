@@ -53,7 +53,7 @@ describe("WorkspaceSourceProviderV1", () => {
       __objectKey: "workspace-one",
       WORKSPACE_ID: "workspace-one",
     });
-    const bytes = new TextEncoder().encode("systemEpoch: 57\n");
+    const bytes = new TextEncoder().encode("systemEpoch: 58\n");
     const contentHash = sha256Hex(bytes);
     const repositorySnapshot = canonicalSnapshotDigest([
       {

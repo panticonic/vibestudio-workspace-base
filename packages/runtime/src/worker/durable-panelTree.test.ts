@@ -44,25 +44,6 @@ function respond(init: RequestInit | undefined, result: unknown) {
   );
 }
 
-function readyObservation(panelId: string, source = "panels/a") {
-  const entityKey = panelId.replace(/^panel:tree\//, "");
-  return {
-    panelId,
-    title: "Panel A",
-    source,
-    kind: "workspace",
-    parentId: null,
-    contextId: "ctx",
-    requestedRef: "main",
-    runtimeEntityId: `panel:nav-${entityKey}-current-entity`,
-    attemptId: `panel:nav-${entityKey}-current-entity@build-a`,
-    effectiveVersion: "ev-a",
-    buildKey: "build-a",
-    phase: "ready",
-    updatedAt: 1,
-  };
-}
-
 function workspaceDetailFor(panelId: string, source = "panels/a") {
   const entityKey = panelId.replace(/^panel:tree\//, "");
   return {
@@ -124,7 +105,7 @@ function assignedRuntimeSlot(panelId: string, runtimeEntityId: string) {
   };
 }
 
-describe("DurableObjectBase panelTree handles", () => {
+describe("PanelDurableObjectBase panelTree handles", () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
@@ -165,15 +146,12 @@ describe("DurableObjectBase panelTree handles", () => {
       return respond(init, "ok");
     }) as typeof fetch;
 
-    const [{ DurableObjectBase }, { createTestDO }] = await Promise.all([
-      import("./durable-base.js"),
+    const [{ PanelDurableObjectBase }, { createTestDO }] = await Promise.all([
+      import("./panel-durable-base.js"),
       import("./durable-test-utils.js"),
     ]);
 
-    class PanelTreeProbeDO extends DurableObjectBase {
-      protected schemaProductionBaseline() {
-        return { version: 1, name: "panel-tree-probe-v1" } as const;
-      }
+    class PanelTreeProbeDO extends PanelDurableObjectBase {
       protected createTables(): void {}
 
       @rpc({
@@ -253,15 +231,12 @@ describe("DurableObjectBase panelTree handles", () => {
       return respond(init, null);
     }) as typeof fetch;
 
-    const [{ DurableObjectBase }, { createTestDO }] = await Promise.all([
-      import("./durable-base.js"),
+    const [{ PanelDurableObjectBase }, { createTestDO }] = await Promise.all([
+      import("./panel-durable-base.js"),
       import("./durable-test-utils.js"),
     ]);
 
-    class PanelTreeProbeDO extends DurableObjectBase {
-      protected schemaProductionBaseline() {
-        return { version: 1, name: "panel-tree-probe-v1" } as const;
-      }
+    class PanelTreeProbeDO extends PanelDurableObjectBase {
       protected createTables(): void {}
 
       @rpc({
@@ -368,15 +343,12 @@ describe("DurableObjectBase panelTree handles", () => {
       return respond(init, "ok");
     }) as typeof fetch;
 
-    const [{ DurableObjectBase }, { createTestDO }] = await Promise.all([
-      import("./durable-base.js"),
+    const [{ PanelDurableObjectBase }, { createTestDO }] = await Promise.all([
+      import("./panel-durable-base.js"),
       import("./durable-test-utils.js"),
     ]);
 
-    class PanelTreeProbeDO extends DurableObjectBase {
-      protected schemaProductionBaseline() {
-        return { version: 1, name: "panel-tree-probe-v1" } as const;
-      }
+    class PanelTreeProbeDO extends PanelDurableObjectBase {
       protected createTables(): void {}
 
       @rpc({
@@ -428,7 +400,7 @@ describe("DurableObjectBase panelTree handles", () => {
     expect(calls.map(({ method }) => method)).not.toContain("panelTree.create");
   });
 
-  it("exposes openPanel/getPanelHandle aliases on DurableObjectBase", async () => {
+  it("exposes openPanel/getPanelHandle aliases on PanelDurableObjectBase", async () => {
     const calls: Array<{ targetId: string; method: string; args: unknown[] }> = [];
     globalThis.fetch = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const body = parseReq(init);
@@ -468,15 +440,12 @@ describe("DurableObjectBase panelTree handles", () => {
       return respond(init, null);
     }) as typeof fetch;
 
-    const [{ DurableObjectBase }, { createTestDO }] = await Promise.all([
-      import("./durable-base.js"),
+    const [{ PanelDurableObjectBase }, { createTestDO }] = await Promise.all([
+      import("./panel-durable-base.js"),
       import("./durable-test-utils.js"),
     ]);
 
-    class PanelAliasProbeDO extends DurableObjectBase {
-      protected schemaProductionBaseline() {
-        return { version: 1, name: "panel-alias-probe-v1" } as const;
-      }
+    class PanelAliasProbeDO extends PanelDurableObjectBase {
       protected createTables(): void {}
 
       @rpc({
@@ -552,15 +521,12 @@ describe("DurableObjectBase panelTree handles", () => {
       return respond(init, undefined);
     }) as typeof fetch;
 
-    const [{ DurableObjectBase }, { createTestDO }] = await Promise.all([
-      import("./durable-base.js"),
+    const [{ PanelDurableObjectBase }, { createTestDO }] = await Promise.all([
+      import("./panel-durable-base.js"),
       import("./durable-test-utils.js"),
     ]);
 
-    class ParentProbeDO extends DurableObjectBase {
-      protected schemaProductionBaseline() {
-        return { version: 1, name: "parent-probe-v1" } as const;
-      }
+    class ParentProbeDO extends PanelDurableObjectBase {
       protected createTables(): void {}
 
       @rpc({

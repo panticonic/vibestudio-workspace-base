@@ -1,34 +1,8 @@
-import type { Buffer } from "buffer";
+export { DEFAULT_THEME_CONFIG } from "@vibestudio/shared/theme";
+export type { ThemeConfig } from "@vibestudio/shared/theme";
+export type { HostCommand } from "@vibestudio/shared/hostCommands";
 
 export type ThemeAppearance = "light" | "dark";
-
-/** App-wide theme identity (accent/radius/scaling/surface), pushed live from
- *  the shell over the runtime bridge. Structurally identical to
- *  `@vibestudio/shared`'s ThemeConfig. */
-export interface ThemeConfig {
-  accentColor: string;
-  grayColor: string;
-  radius: "none" | "small" | "medium" | "large" | "full";
-  scaling: "90%" | "95%" | "100%" | "105%" | "110%";
-  panelBackground: "solid" | "translucent";
-}
-
-/** Default identity until the shell pushes the user's choice. */
-export const DEFAULT_THEME_CONFIG: ThemeConfig = {
-  accentColor: "violet",
-  grayColor: "mauve",
-  radius: "medium",
-  scaling: "100%",
-  panelBackground: "translucent",
-};
-
-/** A command a panel contributes to the app-level command palette. */
-export interface PaletteCommand {
-  id: string;
-  label: string;
-  hint?: string;
-  section?: string;
-}
 
 export interface FileStats {
   isFile(): boolean;
@@ -137,11 +111,11 @@ export interface RuntimeFs {
    * itself is not created — callers use the returned path for atomic writes
    * (write to tmp → rename into place). Analogous to the pattern used around
    * `os.tmpdir()` in Node tools.
-  */
+   */
   mktemp(prefix?: string): Promise<string>;
   /** Create and return a unique context-local directory under `/.tmp`. */
   mkdtemp(prefix?: string): Promise<string>;
-  readFile(path: string, encoding?: BufferEncoding): Promise<string | Buffer>;
+  readFile(path: string, encoding?: BufferEncoding): Promise<string | Uint8Array>;
   writeFile(path: string, data: string | RuntimeBinaryData): Promise<void>;
   readdir(path: string): Promise<string[]>;
   readdir(path: string, options: { withFileTypes: true }): Promise<Dirent[]>;

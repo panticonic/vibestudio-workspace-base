@@ -5,22 +5,23 @@ import {
   compareUtf16CodeUnits,
   sha256Hex,
   sha256HexSyncText,
-  sortForCanonicalJson,
   type CanonicalSnapshotDigest,
 } from "@vibestudio/content-addressing";
 import type { ExactGitSnapshot, ExactSnapshotFile } from "@vibestudio/git";
-import { normalizeWorkspaceRepoPath } from "@vibestudio/shared/runtime/entitySpec";
+import {
+  CONTAINER_SECTIONS,
+  normalizeWorkspaceRepoPath,
+} from "@vibestudio/shared/runtime/entitySpec";
 import {
   WorkspaceConfigFragmentSchema,
-  WorkspaceConfigTopLayerSchema,
   WorkspaceTemplateDeclarationSchema,
   WorkspaceTemplatePinSchema,
 } from "@vibestudio/workspace-contracts/workspaceConfigSchema";
 import type {
   WorkspaceTemplatePresentation,
   WorkspaceTemplateDeclaration,
-  WorkspaceTemplateLock,
-  WorkspaceTemplateLockNode,
+  WorkspaceTemplateState,
+  WorkspaceTemplateStateNode,
   WorkspaceTemplatePin,
 } from "@vibestudio/workspace-contracts/types";
 import {
@@ -30,28 +31,21 @@ import {
   templateAliasFromUrl,
 } from "@vibestudio/workspace/templateCoordinates";
 import {
-  assertTemplateLockIntegrityForRead,
-  normalizeTemplateLockDeclaration,
-  templateLockFingerprint,
+  canonicalTemplateYaml,
+  readTemplateManifest,
+  validateTemplateSnapshotInventory,
+  type ParsedTemplateFragment,
+} from "@vibestudio/workspace/templateManifest";
+import {
+  normalizeTemplateStateDeclaration,
   templateSuggestionDigest,
-} from "@vibestudio/workspace/templateLock";
+} from "@vibestudio/workspace/templateState";
 
 const TEMPLATE_FRAGMENT_DIR = "meta/templates";
-const TEMPLATE_LOCK_PATH = "meta/templates.lock.yml";
-const CONTAINER_SECTIONS = new Set([
-  "panels",
-  "apps",
-  "packages",
-  "workers",
-  "extensions",
-  "skills",
-  "about",
-  "templates",
-  "projects",
-]);
-
-type ParsedTopLayer = ReturnType<typeof WorkspaceConfigTopLayerSchema.parse>;
-export type TemplateManifestFragment = ReturnType<typeof WorkspaceConfigFragmentSchema.parse>;
+const TEMPLATE_STATE_PATH = "meta/templates.state.yml";
+/** Removed opportunistically; never read as an input or authority. */
+const OBSOLETE_TEMPLATE_LOCK_PATH = "meta/templates.lock.yml";
+export type TemplateManifestFragment = ParsedTemplateFragment;
 
 export class TemplateResolutionError extends Error {
   constructor(
@@ -90,50 +84,10 @@ export class TemplateCredentialConflictError extends TemplateResolutionError {
   }
 }
 
-export class TemplateRepoConflictError extends TemplateResolutionError {
-  constructor(
-    readonly repoPath: string,
-    readonly claimants: readonly string[]
-  ) {
-    super(
-      "template-repo-conflict",
-      `Unrelated templates ${claimants.join(" and ")} both provide ${repoPath}; ` +
-        `set templates.conflicts.${repoPath} to a claimant alias or ignore`
-    );
-  }
-}
-
-export class TemplateConflictResolutionError extends TemplateResolutionError {
-  constructor(
-    readonly repoPath: string,
-    readonly resolution: string,
-    readonly claimants: readonly string[]
-  ) {
-    super(
-      "template-conflict-resolution-invalid",
-      `Template conflict resolution ${JSON.stringify(resolution)} for ${repoPath} ` +
-        `does not name one of its current claimants (${claimants.join(", ") || "none"})`
-    );
-  }
-}
-
-export class TemplateExternalRepoCollisionError extends TemplateResolutionError {
-  constructor(
-    readonly repoPath: string,
-    readonly claimantAliases: readonly string[]
-  ) {
-    super(
-      "template-external-repo-collision",
-      `${repoPath} is declared as a unit-level Git upstream and is also vendored by ` +
-        `${claimantAliases.join(", ")}; exactly one source may own a repository`
-    );
-  }
-}
-
 export interface TemplateSourcePorts {
   /**
    * Resolve the registry's exact promoted coordinate. Called at most once for
-   * a URL, and never called for a URL already present in the lock or overrides.
+   * a URL, and never called for a URL already present in the state or overrides.
    */
   resolvePromoted(declaration: WorkspaceTemplateDeclaration): Promise<WorkspaceTemplatePin>;
   /** Acquire and verify one exact snapshot. Blob/CAS storage lives behind this port. */
@@ -148,7 +102,6 @@ export interface ResolvedTemplateNode {
   parents: string[];
   fragment: TemplateManifestFragment;
   fragmentYaml: string;
-  fragmentDigest: CanonicalSnapshotDigest;
   /** Sanitized self-given name and sentence, when the manifest offered any. */
   presentation?: WorkspaceTemplatePresentation;
   excludedSuggestions: {
@@ -166,11 +119,9 @@ export interface TemplateRepositoryContribution {
   files: ExactSnapshotFile[];
 }
 
-export interface TemplateOwnershipChange {
+export interface TemplateRepositoryComposition {
   repoPath: string;
-  fromNodeId: string | null;
-  toNodeId: string | null;
-  reason: "orphaned" | "transferred" | "explicit-resolution";
+  contributions: TemplateRepositoryContribution[];
 }
 
 export interface TemplateGeneratedArtifact {
@@ -186,10 +137,9 @@ export interface TemplateCompositionPlan {
   fingerprint: CanonicalSnapshotDigest;
   rootNodeIds: string[];
   nodes: ResolvedTemplateNode[];
-  repositories: Record<string, TemplateRepositoryContribution>;
+  repositories: Record<string, TemplateRepositoryComposition>;
   localRepoPaths: string[];
-  ownershipChanges: TemplateOwnershipChange[];
-  lock: WorkspaceTemplateLock | null;
+  state: WorkspaceTemplateState | null;
   artifacts: TemplateGeneratedArtifact[];
   /** Previously generated files that must be removed in this composition. */
   removedArtifactPaths: string[];
@@ -199,39 +149,32 @@ export interface ResolveTemplateCompositionInput {
   roots: readonly WorkspaceTemplateDeclaration[];
   /** Exact, deliberate source replacements keyed by normalized URL. */
   pinOverrides?: Readonly<Record<string, WorkspaceTemplatePin>>;
-  conflicts?: Readonly<Record<string, string>>;
   localRepoPaths?: ReadonlySet<string>;
-  externallyOwnedRepoPaths?: ReadonlySet<string>;
-  previousLock?: WorkspaceTemplateLock;
+  previousState?: WorkspaceTemplateState;
+  /** Current workspace layers committed beside the previous state. Unchanged
+   * nodes use these mutable layers without reacquiring their upstream sources. */
+  installedLayers?: Readonly<Record<string, string>>;
   expectedSystemEpoch: number;
   ports: TemplateSourcePorts;
 }
 
 interface MutableNode extends ResolvedTemplateNode {
-  snapshot: ExactGitSnapshot;
+  snapshot?: ExactGitSnapshot;
 }
 
 interface ParsedTemplateManifest {
   dependencies: WorkspaceTemplateDeclaration[];
   fragment: TemplateManifestFragment;
   fragmentYaml: string;
-  fragmentDigest: CanonicalSnapshotDigest;
   presentation?: WorkspaceTemplatePresentation;
   excludedSuggestions: ResolvedTemplateNode["excludedSuggestions"];
 }
 
 function canonicalYaml(value: unknown): string {
-  return YAML.stringify(sortForCanonicalJson(value), {
-    lineWidth: 0,
-    sortMapEntries: true,
-  });
+  return canonicalTemplateYaml(value);
 }
 
-function digestBytes(bytes: Uint8Array): CanonicalSnapshotDigest {
-  return `v1-sha256:${sha256Hex(bytes)}`;
-}
-
-export { templateSuggestionDigest } from "@vibestudio/workspace/templateLock";
+export { templateSuggestionDigest } from "@vibestudio/workspace/templateState";
 
 function normalizeDeclaration(value: WorkspaceTemplateDeclaration): WorkspaceTemplateDeclaration {
   const declaration = WorkspaceTemplateDeclarationSchema.parse(value);
@@ -241,50 +184,6 @@ function normalizeDeclaration(value: WorkspaceTemplateDeclaration): WorkspaceTem
 function normalizePin(value: WorkspaceTemplatePin): WorkspaceTemplatePin {
   const pin = WorkspaceTemplatePinSchema.parse(value);
   return { ...pin, url: normalizeTemplateGitUrl(pin.url) };
-}
-
-function sanitizeTemplateManifest(top: ParsedTopLayer): TemplateManifestFragment {
-  const {
-    templates: _templates,
-    disable: _disable,
-    trust: _trust,
-    providers: _providers,
-    // Self-description is presentation, not configuration: it identifies the
-    // node that asserted it and must not be inherited by whatever composes it.
-    // It travels in the lock node instead (see `presentation` below).
-    template: _template,
-    git,
-    ...accepted
-  } = top;
-  const upstreams =
-    git?.upstreams === undefined
-      ? undefined
-      : Object.fromEntries(
-          Object.entries(git.upstreams).map(([section, repositories]) => [
-            section,
-            Object.fromEntries(
-              Object.entries(repositories).map(([repo, upstream]) => {
-                const {
-                  authorEmail: _authorEmail,
-                  authorName: _authorName,
-                  ...portable
-                } = upstream;
-                return [repo, portable];
-              })
-            ),
-          ])
-        );
-  return WorkspaceConfigFragmentSchema.parse({
-    ...accepted,
-    ...(git === undefined
-      ? {}
-      : {
-          git: {
-            ...(git.remotes === undefined ? {} : { remotes: git.remotes }),
-            ...(upstreams === undefined ? {} : { upstreams }),
-          },
-        }),
-  });
 }
 
 function parseTemplateManifest(
@@ -297,36 +196,20 @@ function parseTemplateManifest(
     throw new TemplateManifestError(nodeId, `missing required ${TEMPLATE_SOURCE_MANIFEST_PATH}`);
   }
   try {
-    const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    const top = WorkspaceConfigTopLayerSchema.parse(YAML.parse(text) as unknown);
-    if (top.systemEpoch !== expectedSystemEpoch) {
-      throw new Error(
-        `systemEpoch ${top.systemEpoch} is incompatible with workspace epoch ${expectedSystemEpoch}`
-      );
-    }
-    if (top.templates?.overrides && Object.keys(top.templates.overrides).length > 0) {
-      throw new Error("template manifests cannot impose exact template overrides");
-    }
-    if (top.templates?.conflicts && Object.keys(top.templates.conflicts).length > 0) {
-      throw new Error("template manifests cannot impose repository conflict decisions");
-    }
-    if (top.templates?.registry) {
-      throw new Error("template manifests cannot replace the workspace template registry");
-    }
-    const fragment = sanitizeTemplateManifest(top);
-    const fragmentYaml = canonicalYaml(fragment);
+    const parsed = readTemplateManifest({
+      readFile: (path) => snapshot.readFile(path),
+      expectedSystemEpoch,
+    });
+    validateTemplateSnapshotInventory(
+      parsed.inventory,
+      snapshot.files.map((file) => file.path)
+    );
     return {
-      dependencies: (top.templates?.use ?? []).map(normalizeDeclaration),
-      // Already sanitized by the manifest schema; carried verbatim so the lock
-      // holds exactly what a reader may print and nothing that needs repairing.
-      ...(top.template === undefined ? {} : { presentation: top.template }),
-      fragment,
-      fragmentYaml,
-      fragmentDigest: digestBytes(new TextEncoder().encode(fragmentYaml)),
-      excludedSuggestions: {
-        ...(top.trust === undefined ? {} : { trust: top.trust }),
-        ...(top.providers === undefined ? {} : { providers: top.providers }),
-      },
+      dependencies: parsed.dependencies.map(normalizeDeclaration),
+      ...(parsed.presentation === undefined ? {} : { presentation: parsed.presentation }),
+      fragment: parsed.fragment,
+      fragmentYaml: parsed.fragmentYaml,
+      excludedSuggestions: parsed.excludedSuggestions,
     };
   } catch (error) {
     if (error instanceof TemplateManifestError) throw error;
@@ -335,6 +218,7 @@ function parseTemplateManifest(
 }
 
 function enumerateRepoFiles(node: MutableNode): Map<string, ExactSnapshotFile[]> {
+  if (!node.snapshot) return new Map();
   const repositories = new Map<string, ExactSnapshotFile[]>();
   for (const file of node.snapshot.files) {
     const parts = file.path.split("/");
@@ -369,16 +253,6 @@ function subtreeDigest(files: readonly ExactSnapshotFile[]): CanonicalSnapshotDi
       contentHash: file.contentHash,
     }))
   );
-}
-
-function fragmentUpstreamPaths(fragment: TemplateManifestFragment): string[] {
-  const paths: string[] = [];
-  for (const [section, repositories] of Object.entries(fragment.git?.upstreams ?? {})) {
-    for (const repo of Object.keys(repositories)) {
-      paths.push(normalizeWorkspaceRepoPath(`${section}/${repo}`));
-    }
-  }
-  return paths;
 }
 
 function requireNode(nodes: ReadonlyMap<string, MutableNode>, nodeId: string): MutableNode {
@@ -429,55 +303,8 @@ function topologicalNodes(nodes: ReadonlyMap<string, MutableNode>): MutableNode[
   return ordered;
 }
 
-function ancestorSets(nodes: readonly MutableNode[]): Map<string, Set<string>> {
-  const result = new Map<string, Set<string>>();
-  for (const node of nodes) {
-    const ancestors = new Set<string>();
-    for (const parent of node.parents) {
-      ancestors.add(parent);
-      for (const ancestor of result.get(parent) ?? []) ancestors.add(ancestor);
-    }
-    result.set(node.nodeId, ancestors);
-  }
-  return result;
-}
-
-function maximalClaimants(
-  claimants: readonly string[],
-  ancestors: ReadonlyMap<string, ReadonlySet<string>>
-): string[] {
-  return claimants.filter(
-    (candidate) =>
-      !claimants.some((other) => other !== candidate && ancestors.get(other)?.has(candidate))
-  );
-}
-
 function normalizedPaths(paths: ReadonlySet<string> | undefined): Set<string> {
   return new Set([...(paths ?? [])].map(normalizeWorkspaceRepoPath));
-}
-
-function previousOwnerSuccessor(
-  repoPath: string,
-  previousLock: WorkspaceTemplateLock | undefined,
-  currentNodeByUrl: ReadonlyMap<string, string>,
-  claims: ReadonlyMap<string, ReadonlyMap<string, TemplateRepositoryContribution>>
-): string | null {
-  const previousNodeId = previousLock?.repositories[repoPath]?.nodeId;
-  if (!previousNodeId) return null;
-  if (claims.get(repoPath)?.has(previousNodeId)) return previousNodeId;
-  const previousNode = previousLock?.nodes.find((node) => node.nodeId === previousNodeId);
-  if (!previousNode) return null;
-  const successor = currentNodeByUrl.get(normalizeTemplateGitUrl(previousNode.pin.url));
-  return successor && claims.get(repoPath)?.has(successor) ? successor : null;
-}
-
-function lockNodeUrl(
-  lock: WorkspaceTemplateLock | undefined,
-  nodeId: string | null
-): string | null {
-  if (!lock || !nodeId) return null;
-  const node = lock.nodes.find((candidate) => candidate.nodeId === nodeId);
-  return node ? normalizeTemplateGitUrl(node.pin.url) : null;
 }
 
 function artifact(path: string, text: string): TemplateGeneratedArtifact {
@@ -511,7 +338,9 @@ function normalizedOverrides(
 
 /**
  * Resolve and slice a complete template closure without mutating workspace
- * state. Every external effect is behind `TemplateSourcePorts`.
+ * state. Existing layers are ordinary current-workspace input; new or updated
+ * sources are acquired behind `TemplateSourcePorts` and bound to this one
+ * operation's review fingerprint.
  */
 export async function resolveTemplateComposition(
   input: ResolveTemplateCompositionInput
@@ -523,19 +352,22 @@ export async function resolveTemplateComposition(
     );
   }
 
-  const declaration = normalizeTemplateLockDeclaration({
-    use: input.roots,
+  const declaration = normalizeTemplateStateDeclaration({
+    use: [...input.roots],
     overrides: input.pinOverrides,
-    conflicts: input.conflicts,
   });
   const rootsByUrl = new Map(declaration.roots.map((root) => [root.url, root]));
   const overrides = normalizedOverrides(declaration.overrides);
   const usedOverrides = new Set<string>();
-  const previousLock = input.previousLock
-    ? assertTemplateLockIntegrityForRead(input.previousLock)
-    : undefined;
-  const lockedByUrl = new Map(
-    (previousLock?.nodes ?? []).map((node) => [normalizeTemplateGitUrl(node.pin.url), node.pin])
+  const previousState = input.previousState;
+  const installedByUrl = new Map(
+    (previousState?.nodes ?? []).map((node) => [normalizeTemplateGitUrl(node.pin.url), node.pin])
+  );
+  const installedNodeByUrl = new Map(
+    (previousState?.nodes ?? []).map((node) => [normalizeTemplateGitUrl(node.pin.url), node])
+  );
+  const installedNodeById = new Map(
+    (previousState?.nodes ?? []).map((node) => [node.nodeId, node])
   );
   const selectedPins = new Map<string, WorkspaceTemplatePin>();
   const declaredCredentials = new Map<string, string | undefined>();
@@ -563,8 +395,8 @@ export async function resolveTemplateComposition(
     if (selected) return selected;
 
     const override = overrides.get(dependency.url);
-    const locked = lockedByUrl.get(dependency.url);
-    const resolved = override ?? locked ?? (await input.ports.resolvePromoted(dependency));
+    const installed = installedByUrl.get(dependency.url);
+    const resolved = override ?? installed ?? (await input.ports.resolvePromoted(dependency));
     if (override) usedOverrides.add(dependency.url);
     const pin = normalizePin({
       ...resolved,
@@ -605,6 +437,61 @@ export async function resolveTemplateComposition(
     const alias = templateAliasFromUrl(pin.url);
     visiting.push(dependency.url);
     try {
+      const installedNode = installedNodeByUrl.get(dependency.url);
+      const installedFragmentYaml = input.installedLayers?.[nodeId];
+      if (
+        installedNode?.nodeId === nodeId &&
+        installedNode.pin.commit === pin.commit &&
+        installedNode.pin.snapshot === pin.snapshot &&
+        installedFragmentYaml !== undefined
+      ) {
+        const fragment = WorkspaceConfigFragmentSchema.parse(
+          YAML.parse(installedFragmentYaml) as unknown
+        );
+        if (fragment.systemEpoch !== input.expectedSystemEpoch) {
+          throw new TemplateResolutionError(
+            "template-installed-fragment-incompatible",
+            `Installed fragment for ${dependency.url} has systemEpoch ${fragment.systemEpoch}`
+          );
+        }
+        const node: MutableNode = {
+          nodeId,
+          alias: installedNode.alias,
+          pin,
+          parents: [],
+          fragment,
+          fragmentYaml: installedFragmentYaml,
+          ...(installedNode.presentation === undefined
+            ? {}
+            : { presentation: installedNode.presentation }),
+          excludedSuggestions: {
+            ...(installedNode.suggestions.trust === undefined
+              ? {}
+              : { trust: installedNode.suggestions.trust.value }),
+            ...(installedNode.suggestions.providers === undefined
+              ? {}
+              : { providers: installedNode.suggestions.providers.value }),
+          },
+        };
+        nodes.set(nodeId, node);
+        nodeByUrl.set(dependency.url, nodeId);
+        const parents: string[] = [];
+        for (const parentId of [...installedNode.parents].sort(compareUtf16CodeUnits)) {
+          const parent = installedNodeById.get(parentId);
+          if (!parent) continue;
+          parents.push(
+            await visit(
+              {
+                url: parent.pin.url,
+                ...(parent.pin.credential ? { credential: parent.pin.credential } : {}),
+              },
+              [...path, alias]
+            )
+          );
+        }
+        node.parents = [...new Set(parents)].sort(compareUtf16CodeUnits);
+        return nodeId;
+      }
       const snapshot = await input.ports.acquire(pin, nodeId);
       if (snapshot.commit.toLowerCase() !== pin.commit || snapshot.snapshot !== pin.snapshot) {
         throw new TemplateResolutionError(
@@ -621,7 +508,6 @@ export async function resolveTemplateComposition(
         snapshot,
         fragment: parsed.fragment,
         fragmentYaml: parsed.fragmentYaml,
-        fragmentDigest: parsed.fragmentDigest,
         ...(parsed.presentation === undefined ? {} : { presentation: parsed.presentation }),
         excludedSuggestions: parsed.excludedSuggestions,
       };
@@ -657,11 +543,27 @@ export async function resolveTemplateComposition(
   }
 
   const ordered = topologicalNodes(nodes);
-  const ancestors = ancestorSets(ordered);
   const claims = new Map<string, Map<string, TemplateRepositoryContribution>>();
-  const externalPaths = normalizedPaths(input.externallyOwnedRepoPaths);
   for (const node of ordered) {
-    for (const repoPath of fragmentUpstreamPaths(node.fragment)) externalPaths.add(repoPath);
+    if (!node.snapshot) {
+      for (const [repoPath, repository] of Object.entries(previousState?.repositories ?? {})) {
+        const previous = repository.contributions.find(
+          (contribution) => contribution.nodeId === node.nodeId
+        );
+        if (!previous) continue;
+        const repoClaims = claims.get(repoPath) ?? new Map();
+        repoClaims.set(node.nodeId, {
+          repoPath,
+          nodeId: node.nodeId,
+          alias: node.alias,
+          subdir: repoPath,
+          subtreeDigest: previous.subtreeDigest,
+          files: [],
+        });
+        claims.set(repoPath, repoClaims);
+      }
+      continue;
+    }
     for (const [repoPath, files] of enumerateRepoFiles(node)) {
       const repoClaims = claims.get(repoPath) ?? new Map();
       repoClaims.set(node.nodeId, {
@@ -675,106 +577,23 @@ export async function resolveTemplateComposition(
       claims.set(repoPath, repoClaims);
     }
   }
-  for (const repoPath of externalPaths) {
-    const repoClaims = claims.get(repoPath);
-    if (repoClaims) {
-      throw new TemplateExternalRepoCollisionError(
-        repoPath,
-        [...repoClaims.values()].map((claim) => claim.alias).sort(compareUtf16CodeUnits)
-      );
-    }
-  }
 
   const localPaths = normalizedPaths(input.localRepoPaths);
-  const currentNodeByUrl = new Map(ordered.map((node) => [node.pin.url, node.nodeId]));
-  const conflicts = Object.fromEntries(
-    Object.entries(declaration.conflicts).map(([repoPath, resolution]) => [
-      normalizeWorkspaceRepoPath(repoPath),
-      resolution,
-    ])
+  const repositories: Record<string, TemplateRepositoryComposition> = Object.fromEntries(
+    [...claims.entries()]
+      .sort(([left], [right]) => compareUtf16CodeUnits(left, right))
+      .map(([repoPath, contributions]) => [
+        repoPath,
+        { repoPath, contributions: [...contributions.values()] },
+      ])
   );
-  const repositories: Record<string, TemplateRepositoryContribution> = {};
-  const ownershipChanges: TemplateOwnershipChange[] = [];
-  const allPaths = [
-    ...new Set([
-      ...claims.keys(),
-      ...Object.keys(previousLock?.repositories ?? {}),
-      ...Object.keys(conflicts),
-    ]),
-  ].sort(compareUtf16CodeUnits);
 
-  for (const repoPath of allPaths) {
-    const pathClaims = claims.get(repoPath) ?? new Map();
-    const claimantIds = [...pathClaims.keys()].sort(compareUtf16CodeUnits);
-    const claimantAliases = claimantIds
-      .map((nodeId) => requireNode(nodes, nodeId).alias)
-      .sort(compareUtf16CodeUnits);
-    const previousNodeId = previousLock?.repositories[repoPath]?.nodeId ?? null;
-    const successor = previousOwnerSuccessor(repoPath, previousLock, currentNodeByUrl, claims);
-    const resolution = conflicts[repoPath];
-    let selected: string | null = null;
-
-    if (resolution !== undefined) {
-      if (resolution !== "ignore") {
-        selected = claimantIds.find((nodeId) => nodes.get(nodeId)?.alias === resolution) ?? null;
-        if (!selected) {
-          throw new TemplateConflictResolutionError(repoPath, resolution, claimantAliases);
-        }
-      }
-    } else if (successor) {
-      selected = successor;
-    } else if (localPaths.has(repoPath) || previousNodeId) {
-      selected = null;
-    } else if (claimantIds.length === 1) {
-      selected = claimantIds[0] ?? null;
-    } else if (claimantIds.length > 1) {
-      const maximal = maximalClaimants(claimantIds, ancestors);
-      if (maximal.length !== 1) {
-        throw new TemplateRepoConflictError(
-          repoPath,
-          maximal.map((nodeId) => requireNode(nodes, nodeId).alias).sort(compareUtf16CodeUnits)
-        );
-      }
-      selected = maximal[0] ?? null;
-    }
-
-    if (selected) {
-      const contribution = pathClaims.get(selected);
-      if (!contribution) {
-        throw new TemplateResolutionError(
-          "template-assignment-integrity",
-          `Selected template ${selected} does not contribute ${repoPath}`
-        );
-      }
-      repositories[repoPath] = contribution;
-    }
-    const previousUrl = lockNodeUrl(previousLock, previousNodeId);
-    const selectedUrl = selected ? requireNode(nodes, selected).pin.url : null;
-    const sameOwner = previousUrl !== null && selectedUrl !== null && previousUrl === selectedUrl;
-    if (previousNodeId && previousNodeId !== selected && !sameOwner) {
-      ownershipChanges.push({
-        repoPath,
-        fromNodeId: previousNodeId,
-        toNodeId: selected,
-        reason:
-          resolution !== undefined ? "explicit-resolution" : selected ? "transferred" : "orphaned",
-      });
-    } else if (!previousNodeId && resolution !== undefined && selected) {
-      ownershipChanges.push({
-        repoPath,
-        fromNodeId: null,
-        toNodeId: selected,
-        reason: "explicit-resolution",
-      });
-    }
-  }
-
-  const lockNodes: WorkspaceTemplateLockNode[] = ordered.map((node) => ({
+  const stateNodes: WorkspaceTemplateStateNode[] = ordered.map((node) => ({
     nodeId: node.nodeId,
     alias: node.alias,
     pin: node.pin,
     parents: node.parents,
-    fragmentDigest: node.fragmentDigest,
+    fragment: node.fragmentYaml,
     ...(node.presentation === undefined ? {} : { presentation: node.presentation }),
     suggestions: Object.fromEntries(
       (["trust", "providers"] as const).flatMap((section) => {
@@ -785,54 +604,46 @@ export async function resolveTemplateComposition(
       })
     ),
   }));
-  const lockRepositories = Object.fromEntries(
+  const stateRepositories = Object.fromEntries(
     Object.entries(repositories)
       .sort(([left], [right]) => compareUtf16CodeUnits(left, right))
-      .map(([repoPath, contribution]) => [
+      .map(([repoPath, composition]) => [
         repoPath,
-        { nodeId: contribution.nodeId, subtreeDigest: contribution.subtreeDigest },
+        {
+          contributions: composition.contributions.map(({ nodeId, subtreeDigest }) => ({
+            nodeId,
+            subtreeDigest,
+          })),
+        },
       ])
   );
-  const lockWithoutFingerprint: Omit<WorkspaceTemplateLock, "fingerprint"> = {
+  const state: WorkspaceTemplateState = {
     version: 1,
     roots: declaration.roots,
     overrides: declaration.overrides,
-    conflicts: declaration.conflicts,
-    nodes: lockNodes,
-    repositories: lockRepositories,
-    verification: "verified",
-  };
-  const lock: WorkspaceTemplateLock = {
-    ...lockWithoutFingerprint,
-    fingerprint: templateLockFingerprint(lockWithoutFingerprint),
+    nodes: stateNodes,
+    repositories: stateRepositories,
   };
   const fingerprint: CanonicalSnapshotDigest = `v1-sha256:${sha256HexSyncText(
     canonicalJson({
       protocol: "vibestudio-template-composition-v1",
       roots: [...new Set(rootNodeIds)].sort(compareUtf16CodeUnits),
-      lock: {
-        roots: lock.roots,
-        overrides: lock.overrides,
-        conflicts: lock.conflicts,
-        nodes: lock.nodes,
-        repositories: lock.repositories,
+      state: {
+        roots: state.roots,
+        overrides: state.overrides,
+        nodes: state.nodes,
+        repositories: state.repositories,
       },
     })
   )}`;
   const resolvedNodes: ResolvedTemplateNode[] = ordered.map(
     ({ snapshot: _snapshot, ...node }) => node
   );
-  const artifacts = [
-    ...resolvedNodes.map((node) =>
-      artifact(`${TEMPLATE_FRAGMENT_DIR}/${node.nodeId}.yml`, node.fragmentYaml)
-    ),
-    artifact(TEMPLATE_LOCK_PATH, canonicalYaml(lock)),
-  ].sort((left, right) => compareUtf16CodeUnits(left.path, right.path));
-  const currentNodeIds = new Set(resolvedNodes.map((node) => node.nodeId));
-  const removedArtifactPaths = (previousLock?.nodes ?? [])
-    .filter((node) => !currentNodeIds.has(node.nodeId))
-    .map((node) => `${TEMPLATE_FRAGMENT_DIR}/${node.nodeId}.yml`)
-    .sort(compareUtf16CodeUnits);
+  const artifacts = [artifact(TEMPLATE_STATE_PATH, canonicalYaml(state))];
+  const removedArtifactPaths = [
+    ...(previousState?.nodes ?? []).map((node) => `${TEMPLATE_FRAGMENT_DIR}/${node.nodeId}.yml`),
+    OBSOLETE_TEMPLATE_LOCK_PATH,
+  ].sort(compareUtf16CodeUnits);
 
   return {
     version: 1,
@@ -841,8 +652,7 @@ export async function resolveTemplateComposition(
     nodes: resolvedNodes,
     repositories,
     localRepoPaths: [...localPaths].sort(compareUtf16CodeUnits),
-    ownershipChanges,
-    lock,
+    state,
     artifacts,
     removedArtifactPaths,
   };
@@ -850,32 +660,24 @@ export async function resolveTemplateComposition(
 
 /** The canonical result of removing the final direct root. */
 export function emptyTemplateComposition(
-  previousLock: WorkspaceTemplateLock | null | undefined,
+  previousState: WorkspaceTemplateState | null | undefined,
   localRepoPaths: ReadonlySet<string> = new Set()
 ): TemplateCompositionPlan {
-  const checked = previousLock ? assertTemplateLockIntegrityForRead(previousLock) : null;
   return {
     version: 1,
     fingerprint: `v1-sha256:${sha256HexSyncText(
-      canonicalJson({ protocol: "vibestudio-template-composition-v1", roots: [], lock: null })
+      canonicalJson({ protocol: "vibestudio-template-composition-v1", roots: [], state: null })
     )}`,
     rootNodeIds: [],
     nodes: [],
     repositories: {},
     localRepoPaths: [...normalizedPaths(localRepoPaths)].sort(compareUtf16CodeUnits),
-    ownershipChanges: Object.entries(checked?.repositories ?? {})
-      .sort(([left], [right]) => compareUtf16CodeUnits(left, right))
-      .map(([repoPath, repository]) => ({
-        repoPath,
-        fromNodeId: repository.nodeId,
-        toNodeId: null,
-        reason: "orphaned" as const,
-      })),
-    lock: null,
+    state: null,
     artifacts: [],
     removedArtifactPaths: [
-      ...(checked?.nodes ?? []).map((node) => `${TEMPLATE_FRAGMENT_DIR}/${node.nodeId}.yml`),
-      TEMPLATE_LOCK_PATH,
+      ...(previousState?.nodes ?? []).map((node) => `${TEMPLATE_FRAGMENT_DIR}/${node.nodeId}.yml`),
+      TEMPLATE_STATE_PATH,
+      OBSOLETE_TEMPLATE_LOCK_PATH,
     ].sort(compareUtf16CodeUnits),
   };
 }

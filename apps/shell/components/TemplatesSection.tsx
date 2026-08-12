@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Box, Button, Card, Flex, Spinner, Text, TextField } from "@radix-ui/themes";
 import type { TemplateOperation, TemplateStatusRow } from "@vibestudio/service-schemas/templates";
 import {
-  TemplateAddDialog,
+  TemplateAddButton,
   useTemplateManagementController,
 } from "@workspace/template-management/react";
 import {
@@ -22,7 +22,6 @@ function message(error: unknown): string {
 }
 
 function stateLabel(row: TemplateStatusRow): string {
-  if (row.verification === "deferred") return "Available offline";
   switch (row.state) {
     case "current":
       return "Up to date";
@@ -68,7 +67,7 @@ function WorkspaceTemplateReview({
 }) {
   const compare = useCallback(
     (item: NonNullable<TemplateOperation["review"]>["items"][number], cursor?: string) =>
-      vcs.compareDelta(review.contextId, item.deltaId, cursor),
+      vcs.compareDelta(review.contextId, item.sourceDeltaId, cursor),
     [review.contextId]
   );
   const merge = useCallback<TemplateReviewPanelProps["merge"]>(
@@ -76,7 +75,7 @@ function WorkspaceTemplateReview({
       vcs.mergeDelta(
         review.contextId,
         expectedWorkingHead,
-        item.deltaId,
+        item.sourceDeltaId,
         coordinates,
         resolutions
       ),
@@ -144,7 +143,7 @@ export function TemplatesSection() {
   const resume = async (operationId: string): Promise<boolean> => {
     const result = await controller.execute({
       key: `operation:${operationId}`,
-      task: () => templates.resume({ operationId, onBuildFailure: "discard-context" }),
+      task: () => templates.resume({ operationId }),
       success: (operation) =>
         operationMessage(operation, {
           applied: "The template change is complete.",
@@ -212,12 +211,11 @@ export function TemplatesSection() {
             <Flex direction="column" gap="2">
               <Flex justify="between" align="center" gap="2">
                 <Box>
-                  <Text as="div" size="2" weight="medium">
-                    {operation.kind} template operation
-                  </Text>
-                  <Text as="div" size="1" color="gray">
-                    {operation.operationId}
-                  </Text>
+                  <Flex align="center" gap="2">
+                    <Text as="div" size="2" weight="medium">
+                      {operation.kind} template operation
+                    </Text>
+                  </Flex>
                 </Box>
                 <Flex gap="1">
                   {!operation.review ? (
@@ -227,18 +225,20 @@ export function TemplatesSection() {
                       disabled={controller.isBusy(`operation:${operation.operationId}`)}
                       onClick={() => void resume(operation.operationId)}
                     >
-                      Resume
+                      {operation.repair ? "Rebuild" : "Resume"}
                     </Button>
                   ) : null}
-                  <Button
-                    size="1"
-                    variant="soft"
-                    color="red"
-                    disabled={controller.isBusy(`operation:${operation.operationId}`)}
-                    onClick={() => void cancel(operation.operationId)}
-                  >
-                    Discard
-                  </Button>
+                  {operation.initiator !== "host-release" ? (
+                    <Button
+                      size="1"
+                      variant="soft"
+                      color="red"
+                      disabled={controller.isBusy(`operation:${operation.operationId}`)}
+                      onClick={() => void cancel(operation.operationId)}
+                    >
+                      Discard
+                    </Button>
+                  ) : null}
                 </Flex>
               </Flex>
               {operation.review ? (
@@ -248,6 +248,18 @@ export function TemplatesSection() {
                     await resume(operation.operationId);
                   }}
                 />
+              ) : null}
+              {operation.repair ? (
+                <Box>
+                  <Text as="div" size="2" color="orange">
+                    The merged result is retained for repair.
+                  </Text>
+                  {operation.repair.failures.map((failure) => (
+                    <Text key={`${failure.unit}:${failure.message}`} as="div" size="1" color="gray">
+                      {failure.unit}: {failure.message}
+                    </Text>
+                  ))}
+                </Box>
               ) : null}
             </Flex>
           </Card>
@@ -263,7 +275,8 @@ export function TemplatesSection() {
                     {direct ? row.alias : `Comes with: ${row.alias}`} template
                   </Text>
                   <Text as="div" size="1" color="gray">
-                    {version(row.ref)} · {row.ownedParts} {row.ownedParts === 1 ? "part" : "parts"}
+                    {version(row.ref)} · {row.contributedParts}{" "}
+                    {row.contributedParts === 1 ? "contribution" : "contributions"}
                   </Text>
                   {row.error ? (
                     <Text as="div" size="1" color="red">
@@ -431,7 +444,7 @@ export function TemplatesSection() {
                   {entry.description}
                 </Text>
               </Box>
-              <TemplateAddDialog
+              <TemplateAddButton
                 client={templates}
                 request={{ catalogId: entry.id }}
                 triggerLabel="Add"
@@ -470,7 +483,7 @@ export function TemplatesSection() {
             aria-label="Template address"
             style={{ flex: "1 1 220px" }}
           />
-          <TemplateAddDialog
+          <TemplateAddButton
             client={templates}
             request={{
               url: url.trim(),

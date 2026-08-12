@@ -1,12 +1,12 @@
 ---
 name: workspace-mobile-app
-description: Work on the Vibestudio workspace React Native mobile app, OTA updates, re-pair states, and mobile recovery UX.
+description: Develop and diagnose the trusted React Native app in apps/mobile, including pairing recovery, OTA activation, and mobile equivalents of shared shell behavior.
 ---
 
 # Workspace Mobile App
 
-Use this when changing `workspace/apps/mobile`, the trusted React Native app
-that is streamed to the native host after pairing.
+`apps/mobile` is the trusted React Native app streamed to the native host after
+pairing.
 
 ## Boundaries
 
@@ -36,13 +36,28 @@ that is streamed to the native host after pairing.
   current `MobileRpcClient` transport, then activate the prepared bundle.
 - Choosing Roll back changes the trusted server build first, then activates the
   selected bundle.
-- Keep `rnHostAbi` aligned with the native host. Current ABI: `rn-host-2`.
+- Keep `rnHostAbi` aligned with the native host. Read the value from
+  `apps/mobile/package.json`; `@vibestudio/mobile-webrtc` owns the matching
+  native delivery constant.
+
+## Desktop Parity
+
+- Treat `apps/shell` and this app as clients of the same workspace model. Audit
+  shared navigation, approval, identity, and lifecycle behavior in both.
+- Consume the same canonical identity and state projections. Keep native and
+  web rendering idiomatic, but never create a mobile-only fallback data path.
+- For unit identities, use `MobileUnitIcon`/`MobilePanelIcon`; relative manifest
+  images must resolve through the authenticated local asset facade, browser
+  panels must use captured favicons, SVG artwork must render through
+  `react-native-svg` rather than React Native `Image`, and fallbacks must remain
+  kind-specific.
+- Add a focused mobile behavioral test when shared shell behavior changes. A
+  desktop-only test is not evidence for the mobile client.
 
 ## Verification
 
-- Run `pnpm -C apps/mobile type-check` for native/bootstrap TS.
-- Run `pnpm -C apps/mobile test --runInBand` for the shipped shell package.
-- Run `pnpm --dir workspace test -- mobile` or focused workspace tests for this
-  app when changing workspace behavior.
-- For real-device confidence, run `pnpm smoke:full` or
-  `node scripts/cli/mobile-smoke.mjs --platform android` with an emulator.
+- Run the focused checks declared by the app package and the affected workspace
+  packages.
+- Use `extensions/mobile-debug/SKILL.md` for device or simulator verification.
+- Use the repository mobile smoke workflow only when the change crosses native
+  bootstrap, pairing, transport, or OTA boundaries.

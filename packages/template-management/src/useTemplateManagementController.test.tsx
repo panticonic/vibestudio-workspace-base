@@ -18,14 +18,13 @@ const deferredRow = {
   commit: "1".repeat(40),
   direct: true,
   state: "reviewing",
-  ownedParts: 1,
+  contributedParts: 1,
   pendingReviews: 1,
-  verification: "deferred",
   review: {
     operationId,
     contextId: "ctx:pull",
     approvalGranted: true,
-    items: [{ repoPath: "extensions/github", deltaId: "delta:github" }],
+    items: [{ repoPath: "extensions/github", sourceDeltaId: "delta:github" }],
   },
   suggestions: [],
 } satisfies TemplateStatusRow;
@@ -34,6 +33,7 @@ const attachedOperation = {
   operationId,
   kind: "pull",
   contextId: "ctx:pull",
+  initiator: "user",
   state: "reviewing",
   fingerprint: `v1-sha256:${"a".repeat(64)}`,
   review: deferredRow.review,
@@ -75,11 +75,10 @@ describe("useTemplateManagementController", () => {
   });
 
   it("renders the post-check observation and projects attached operations only on their row", async () => {
-    const verifiedRow = { ...deferredRow, verification: "verified" as const };
     const status = vi
       .fn<TemplateLifecycleClient["status"]>()
       .mockResolvedValueOnce([deferredRow])
-      .mockResolvedValueOnce([verifiedRow]);
+      .mockResolvedValueOnce([deferredRow]);
     const unattached = {
       ...attachedOperation,
       operationId: "add-news",
@@ -98,7 +97,7 @@ describe("useTemplateManagementController", () => {
     await act(async () => void (await view.result.current.refresh()));
 
     expect(status).toHaveBeenCalledTimes(2);
-    expect(view.result.current.rows[0]?.verification).toBe("verified");
+    expect(view.result.current.rows[0]?.state).toBe("reviewing");
     expect(view.result.current.operations.map((operation) => operation.operationId)).toEqual([
       "add-news",
     ]);

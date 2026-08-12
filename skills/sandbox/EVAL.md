@@ -44,9 +44,9 @@ perspective:
   if (observed.phase !== "ready") throw new Error(`Unexpected phase: ${observed.phase}`);
   if (child.parentId !== root.id) throw new Error("Panel was not created as a child");
 
-  // Close the temporary root when the whole headless workflow is done; closing
-  // it owns/cleans its descendants. Do not close an inherited user panel.
-  if (!inherited) await root.close();
+  // Archive the temporary root when the whole headless workflow is done; it
+  // owns/cleans its descendants. Do not archive an inherited user panel.
+  if (!inherited) await root.archive();
   ```
 
 - When the user points at "this panel", "the parent panel", or another visible
@@ -213,7 +213,7 @@ workspace BuildStore root set.
 ## Injected Variables
 
 These are available in eval code. `scope`, `scopes`, `db`, `ctx`, `help`, `chat`,
-and `agent` are eval-context ambient variables. `rpc`, `fs`, `services`, and
+`agent`, and `automations` are eval-context ambient variables. `rpc`, `fs`, `services`, and
 `hosts` are the same portable bindings used by panels/workers; use them
 ambiently or import them from `@workspace/runtime`.
 
@@ -229,6 +229,7 @@ ambiently or import them from `@workspace/runtime`.
 | `db`                               | Synchronous in-DO SQLite (see below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `chat`                             | The full chat API for the current channel — `publish`/`send`, custom-message cards, `registerMessageType`, `callMethod`, etc. (agent eval only; see below)                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `agent`                            | Inspect/configure THIS agent's own state — `await agent.describe()`, `await agent.setModel("provider:model")`, etc. (agent eval only; see below)                                                                                                                                                                                                                                                                                                                                                                                                             |
+| `automations`                      | Propose an inert recurring automation with trusted current-channel provenance — `await automations.propose(input)` (agent eval only; see below)                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `help()`                           | `await help()` lists services + import guidance; `await help("vcs")` returns a compact live method index; `await help("vcs.edit")` returns that method's exact schema and typed errors                                                                                                                                                                                                                                                                                                                                                                       |
 
 ```
@@ -278,6 +279,21 @@ use GAD inspectors or the channel DO's read-only `inspectAgent` method.
 > gets no `chat` — interact with the channel through `rpc`/`services` instead.
 > The `chat` handle is also available to panel-rendered components
 > (`inline_ui`, `feedback_custom`, action bars) — see [CHAT_API.md](CHAT_API.md).
+
+### automations (agent eval)
+
+`automations.propose(input)` is the agent authoring path for recurring work. It
+creates one canonical inert draft through `vibestudio.missions.v1`, then
+publishes a typed institution event as this agent in `chat.channelId` before the
+call returns. The new definition therefore appears immediately in chat as a
+zero-fetch pill that the user can open to inspect, edit, and review; it does not
+wait for a first run.
+
+The binding deliberately accepts no channel or actor identity. The owning agent
+supplies those facts after verifying this EvalDO, and the mission service remains
+the only scheduler and run-ledger owner. See
+[Automations](../automations/SKILL.md) for the charter, cron/interval schedules,
+end policies, completion responses, and supervision workflow.
 
 ### agent (agent eval)
 
@@ -414,7 +430,7 @@ per-object require, which is isolated per owner (your loaded modules never leak
 to another agent's EvalDO sharing the same isolate).
 
 Do NOT import the **ambient-only** globals (`scope`, `scopes`, `db`, `ctx`, `help`,
-`chat`) — they are injected free variables, not module exports,
+`chat`, `agent`, `automations`) — they are injected free variables, not module exports,
 and the eval engine rejects importing them.
 
 `rpc` and `fs` are the exception: they are injected ambiently (the table above)
@@ -766,7 +782,7 @@ try {
   await handle.write(new TextEncoder().encode("H"), 0, 1, 0);
   console.log({ bytesRead, text: new TextDecoder().decode(buffer) });
 } finally {
-  await handle.close();
+  await handle.archive();
   await fs.rm(path, { force: true });
 }
 ```
@@ -851,14 +867,11 @@ Durable Object schema failures are platform compatibility refusals, not guest
 JavaScript failures. Eval preserves their stable code and structured data:
 
 - `DO_SCHEMA_INCOMPATIBLE`: read `errorData.reason`, `persistedVersion`,
-  `targetVersion`, `source`, `className`, `objectKey`, and `safeActions`. Add the
-  missing retained `schemaMigrations()` step for real data and declare a
-  bounded, non-secret representative object in
-  `schemaMigrationFixtureObjectKeys()`. Protected publication captures that
-  installed SQLite shape and rejects migrations that do not converge with a
-  fresh install. Do not hide new fields in titles, labels, or unrelated rows.
-- `DO_SCHEMA_MIGRATION_FAILED`: the named migration threw; its transaction was
-  rolled back. Fix the migration before retrying.
+  `targetVersion`, `source`, `className`, `objectKey`, and `safeActions`. This
+  pre-release system admits only the exact current shape; do not add a migration
+  callback, compatibility reader, or hidden version field. Recreate disposable
+  state, or explicitly export/import valuable product data through its current
+  interface as part of the coordinated epoch cut.
 - `DO_MAINTENANCE_IN_PROGRESS`: reset, restore, or snapshot currently fences
   the exact object. Wait for that operation to finish; do not resolve another
   handle to route around the fence.

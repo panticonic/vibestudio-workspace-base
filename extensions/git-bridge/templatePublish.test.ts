@@ -87,7 +87,7 @@ function protectedSnapshot(content = "export const answer = 42;\n"): ProtectedRe
 function publicationInput(
   overrides: Partial<Parameters<TemplatePublishEngine["publish"]>[0]> = {}
 ): Parameters<TemplatePublishEngine["publish"]>[0] {
-  const manifest = "systemEpoch: 57\n";
+  const manifest = "systemEpoch: 58\n";
   return {
     operationId: "publish-news-v1",
     expectedMainEventId: "event:main",
@@ -95,7 +95,6 @@ function publicationInput(
     version: "1.0.0",
     manifest,
     manifestDigest: `v1-sha256:${sha256Hex(new TextEncoder().encode(manifest))}`,
-    validatedParents: [],
     parts: [{ repoPath: "panels/news", subdir: "panels/news" }],
     destination: {
       provider: "template-publish-test",
@@ -393,7 +392,6 @@ describe("TemplatePublishEngine", () => {
 
     expect(result.snapshot).toBe(consumer.snapshot);
     expect(consumer.files.map((file) => file.path)).toEqual([
-      "meta/template-authoring-provenance.json",
       "meta/template.yml",
       "panels/news/.npmrc",
       "panels/news/index.ts",

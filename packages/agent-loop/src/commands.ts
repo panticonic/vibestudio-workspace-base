@@ -27,6 +27,7 @@ export type Command =
        *  acks, edits and retracts all key on this. */
       sourceMessageId?: string;
       content: UserContent;
+      structuredInput?: unknown;
       senderRef: ParticipantRef;
       agentHops?: number;
       metadata?: AgentTurnMetadata;
@@ -38,6 +39,7 @@ export type Command =
       source: { envelopeId: string };
       sourceMessageId?: string;
       content: UserContent;
+      structuredInput?: unknown;
       senderRef: ParticipantRef;
       agentHops?: number;
       metadata?: AgentTurnMetadata;
@@ -50,8 +52,18 @@ export type Command =
       source: { envelopeId: string };
       sourceMessageId?: string;
       content: UserContent;
+      structuredInput?: unknown;
       senderRef: ParticipantRef;
       agentHops?: number;
+      metadata?: AgentTurnMetadata;
+    }
+  | {
+      /** Journal and execute one exact local tool call without a model request. */
+      kind: "invoke";
+      channelId: string;
+      source: { envelopeId: string };
+      tool: string;
+      args: unknown;
       metadata?: AgentTurnMetadata;
     }
   | { kind: "interrupt"; flushDeferred?: boolean }

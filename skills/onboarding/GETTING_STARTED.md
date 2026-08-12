@@ -1,21 +1,24 @@
 # Getting started
 
 The first-run chat opens directly in the transcript. The agent reads
-[SKILL.md](SKILL.md), composes the authoritative snapshot, gives a short
-welcome, and renders [SetupHub.tsx](SetupHub.tsx) inline. Onboarding does not
-install an action bar.
+[SKILL.md](SKILL.md), gives a short welcome, and renders
+[SetupHub.tsx](SetupHub.tsx) inline with the stable ID
+`onboarding-setup-overview`. The component displays its panel-scope cache and
+refreshes capability-owner state on mount. Onboarding does not install an
+action bar.
 
 ## Run the setup projection
 
-Use `client_eval` to statically import `composeOnboardingSnapshot` from
-`@workspace-skills/onboarding` and return its result. This runs the one
-composer inside the inviting chat panel, where direct owner APIs and the
-redacted Electron host topology read are both reachable.
-
-Render `{ snapshot }` with the base-owned setup hub. In a non-panel client,
+Render the base-owned setup hub by path with no leading `client_eval` and no
+snapshot props. In a non-panel client,
 summarize blocking and attention states concisely and mention that all other
 configuration is optional. A missing owner for a capability shipped in base is
 unavailable, not installable.
+
+The component loads installed capability definitions and statuses directly.
+It does not load optional templates on mount. The user must choose **Load
+optional templates** after reading the explanation that templates are reviewed
+workspace additions and discovery contacts the verified registry.
 
 ## Handle a choice
 
@@ -38,25 +41,37 @@ Owner workflows remain authoritative:
 - Browser migration uses `extensions/browser-data/SKILL.md`.
 - Enhanced search uses `skills/web-research/SKILL.md`; DuckDuckGo is already a
   healthy default.
+- Recurring worker methods, exact inline agent evals, and agent prompts use
+  `skills/automations/SKILL.md`; help shape and propose the inert draft before
+  the user reviews it in Automations.
 - Model/provider and agent-default changes use model settings.
 - Device and remote controls open the typed shell connection surface.
 - Credential inspection/revocation and agent grants open their distinct About
   pages.
 
-Onboarding does not advertise planned template extractions or offer template
-installation. The separate Templates workflow owns verified catalog refresh,
-exact selection, inspection, conflict choices, approval, and operation
-recovery. Until a template is deployed in that catalog, it does not exist as an
-installable product capability.
+For an `onboarding-template` interaction, call
+`resolveOnboardingTemplateSelection` through `client_eval`, read its returned
+Templates skill, and pass its registry-bound selection to the canonical
+reviewed `add` workflow. The onboarding card never edits the workspace directly. The
+Templates workflow owns resolution, contribution merge, approval, and
+operation recovery.
 
-After any check or workflow outcome, call the composer through `client_eval`
-again and render a new observation. A Google/GitHub check passes the selected
-ID as `verifyCapabilityId`. Do not update an old card optimistically.
+The component handles refresh and connection checks directly and caches the
+result in panel scope. After any external workflow outcome, render the setup
+hub by path with the same stable ID and no snapshot props. The update replaces
+and bumps the card; its render revision triggers a fresh owner read.
 
 ## Continue from intent
 
 Ready-now choices begin work directly. For example, a PDF choice asks for the
 document or starts an ingestion task; it never creates a PDF setup flow.
+Likewise, **Schedule recurring work** begins the Automations owner workflow: it
+chooses a deterministic method, a model-free inline eval in an existing agent,
+or an agent prompt; selects an interval or timezone-aware cron cadence plus any
+time/run/natural-completion boundary; resolves the exact target; and proposes a
+reviewable draft. The user approves it and later inspects/controls runs from
+either the shared chat-history tick inspector or the Automations panel; opening
+the panel alone does not complete the request.
 Channel and project configuration is disclosed only when the user chooses that
 channel or project goal.
 
@@ -68,3 +83,8 @@ the agent truly needs structured input for later reasoning. One setup
 selection produces one cohesive owner workflow; do not chain small feedback
 forms for access, provider, browser, or permission choices that can be shown
 together or derived from a recommended default.
+
+Template trust/provider suggestions are not structured input for agent
+reasoning. Propose them through the Templates workflow and let the protected
+workspace approval card carry the decision. Never ask for the same choice in
+`feedback_custom`, chat, inline UI, or an action bar first.

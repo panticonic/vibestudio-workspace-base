@@ -17,7 +17,7 @@ import {
   ResetIcon,
   TrashIcon,
 } from "@radix-ui/react-icons";
-import { panel, rpc, workers } from "@workspace/runtime";
+import { panel, rpc } from "@workspace/runtime";
 import { AboutPage, AboutThemeRoot, Section } from "../../packages/about-shared/ui";
 
 export interface SavedPermissionGrant {
@@ -94,48 +94,6 @@ type AuthoritySafetyStatus = {
   activeAgentCount: number;
   pendingAcquisitionCount: number;
 };
-type MissionRecord = {
-  missionId: string;
-  name: string;
-  revision: number;
-  state: "draft" | "active" | "needs-reapproval" | "paused" | "retired";
-  revisionDigest: string;
-  updatedAt: number;
-  charter: {
-    taskSpec: string;
-    trigger:
-      | { kind: "manual" }
-      | { kind: "cron"; cron: string }
-      | { kind: "event"; event: { source: string } };
-    toolExposure: {
-      services: string[];
-      evalNetwork: "none" | "declared-origins" | "unrestricted";
-      declaredOrigins: string[];
-    };
-    declaredLineageClasses: string[];
-  };
-  permissions: unknown[];
-};
-type MissionRunRecord = {
-  runId: string;
-  startedAt: number;
-  finishedAt?: number;
-  outcome?: string;
-};
-
-let missionsTargetPromise: Promise<string> | null = null;
-
-function callMissions<T>(method: string, args: unknown[]): Promise<T> {
-  missionsTargetPromise ??= workers
-    .resolveService("vibestudio.missions.v1")
-    .then((service) => {
-      if (service.kind !== "durable-object") {
-        throw new Error("The missions service must be a durable object");
-      }
-      return service.targetId;
-    });
-  return missionsTargetPromise.then((targetId) => rpc.call<T>(targetId, method, args));
-}
 type BuildUnitCatalogEntry = {
   name: string;
   kind: "panel" | "worker" | "extension" | "app";
@@ -576,123 +534,6 @@ function GrantCard({
   );
 }
 
-function MissionCard({
-  mission,
-  runs,
-  changing,
-  onAction,
-}: {
-  mission: MissionRecord;
-  runs: MissionRunRecord[];
-  changing: boolean;
-  onAction(action: "requestReview" | "pause" | "resume" | "retire"): void;
-}) {
-  const status =
-    mission.state === "needs-reapproval"
-      ? "Needs your review"
-      : mission.state === "draft"
-        ? "Draft — not running"
-        : mission.state === "active"
-          ? "Active"
-          : mission.state === "paused"
-            ? "Paused"
-            : "Retired";
-  const trigger =
-    mission.charter.trigger.kind === "manual"
-      ? "Runs when you start it"
-      : mission.charter.trigger.kind === "cron"
-        ? "Runs on its approved schedule"
-        : "Runs when its approved event happens";
-  return (
-    <Card size="3">
-      <Flex direction="column" gap="3">
-        <Flex justify="between" align="start" gap="3" wrap="wrap">
-          <div>
-            <Heading size="4">{mission.name}</Heading>
-            <Text size="2" color={mission.state === "needs-reapproval" ? "red" : "gray"}>
-              {status} · revision {mission.revision}
-            </Text>
-          </div>
-          <Flex gap="2" wrap="wrap">
-            {mission.state === "draft" || mission.state === "needs-reapproval" ? (
-              <Button disabled={changing} onClick={() => onAction("requestReview")}>
-                Review mission
-              </Button>
-            ) : null}
-            {mission.state === "active" ? (
-              <Button variant="soft" disabled={changing} onClick={() => onAction("pause")}>
-                Pause
-              </Button>
-            ) : null}
-            {mission.state === "paused" ? (
-              <Button variant="soft" disabled={changing} onClick={() => onAction("resume")}>
-                Resume
-              </Button>
-            ) : null}
-            {mission.state !== "retired" ? (
-              <Button
-                color="red"
-                variant="soft"
-                disabled={changing}
-                onClick={() => onAction("retire")}
-              >
-                Retire
-              </Button>
-            ) : null}
-          </Flex>
-        </Flex>
-        <div>
-          <Text as="div" size="1" color="gray">
-            What it will do
-          </Text>
-          <Text as="div" size="2">
-            {mission.charter.taskSpec}
-          </Text>
-        </div>
-        <Text size="2">{trigger}</Text>
-        <Flex gap="2" wrap="wrap">
-          <Badge variant="soft">{mission.permissions.length} toolkit permissions</Badge>
-          <Badge variant="soft">
-            {mission.charter.toolExposure.evalNetwork === "none"
-              ? "No network access"
-              : mission.charter.toolExposure.evalNetwork === "declared-origins"
-                ? `Can reach ${mission.charter.toolExposure.declaredOrigins.length} approved sites`
-                : "Can reach the web"}
-          </Badge>
-          <Badge variant="soft">Content: {mission.charter.declaredLineageClasses.join(", ")}</Badge>
-        </Flex>
-        <details>
-          <summary>Run timeline</summary>
-          <Flex direction="column" gap="2" mt="2">
-            {runs.length === 0 ? (
-              <Text size="2" color="gray">
-                This mission has not run yet.
-              </Text>
-            ) : (
-              runs.map((run) => (
-                <Text key={run.runId} size="2">
-                  Started {dateLabel(run.startedAt)} ·{" "}
-                  {run.finishedAt
-                    ? run.outcome === "mission-change-required"
-                      ? "Ended early: needed a permission change"
-                      : run.outcome === "permission-revoked"
-                        ? "Ended early: a permission was removed"
-                        : `Finished: ${run.outcome ?? "complete"}`
-                    : "Running"}
-                </Text>
-              ))
-            )}
-          </Flex>
-        </details>
-        <Text size="1" color="gray">
-          Actions that can’t be undone always wait for you. Like all agents, this mission can’t
-          change your safety controls.
-        </Text>
-      </Flex>
-    </Card>
-  );
-}
-
 function CatalogCard({
   unit,
   profile,
@@ -815,15 +656,14 @@ function DecisionCard({ decision }: { decision: GovernanceDecision }) {
 function PermissionsPage() {
   const [grants, setGrants] = useState<SavedPermissionGrant[]>([]);
   const [profiles, setProfiles] = useState<AgentAuthorityProfile[]>([]);
-  const [missions, setMissions] = useState<MissionRecord[]>([]);
   const [units, setUnits] = useState<BuildUnitCatalogEntry[]>([]);
   const [decisions, setDecisions] = useState<GovernanceDecision[]>([]);
-  const [missionRuns, setMissionRuns] = useState<Record<string, MissionRunRecord[]>>({});
-  const [view, setView] = useState<"catalog" | "agents" | "domains" | "missions" | "recent">(
+  const [view, setView] = useState<"catalog" | "saved" | "agents" | "domains" | "recent">(
     "catalog"
   );
   const [domain, setDomain] = useState<DomainId>("sharing");
   const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [safety, setSafety] = useState<AuthoritySafetyStatus>({
@@ -832,62 +672,31 @@ function PermissionsPage() {
     pendingAcquisitionCount: 0,
   });
   const [statusMessage, setStatusMessage] = useState("");
-
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [nextGrants, nextProfiles, nextSafety, nextMissions, nextUnits, nextDecisions] =
-        await Promise.all([
-          rpc.call<SavedPermissionGrant[]>("main", "permissions.list", []),
-          rpc.call<AgentAuthorityProfile[]>("main", "permissions.listAgentProfiles", []),
-          rpc.call<AuthoritySafetyStatus>("main", "permissions.safetyStatus", []),
-          callMissions<MissionRecord[]>("list", []),
-          rpc.call<BuildUnitCatalogEntry[]>("main", "build.listUnits", []),
-          rpc.call<GovernanceDecision[]>("main", "governance.list", [
-            { filter: { recordKind: "approval" }, limit: 100 },
-          ]),
-        ]);
+      const [nextGrants, nextProfiles, nextSafety, nextUnits, nextDecisions] = await Promise.all([
+        rpc.call<SavedPermissionGrant[]>("main", "permissions.list", []),
+        rpc.call<AgentAuthorityProfile[]>("main", "permissions.listAgentProfiles", []),
+        rpc.call<AuthoritySafetyStatus>("main", "permissions.safetyStatus", []),
+        rpc.call<BuildUnitCatalogEntry[]>("main", "build.listUnits", []),
+        rpc.call<GovernanceDecision[]>("main", "governance.list", [
+          { filter: { recordKind: "approval" }, limit: 100 },
+        ]),
+      ]);
       setGrants(nextGrants);
       setProfiles(nextProfiles);
       setSafety(nextSafety);
-      setMissions(nextMissions);
       setUnits(nextUnits);
       setDecisions(nextDecisions);
-      setMissionRuns(
-        Object.fromEntries(
-          await Promise.all(
-            nextMissions.map(async (mission) => [
-              mission.missionId,
-              await callMissions<MissionRunRecord[]>("listRuns", [mission.missionId]),
-            ])
-          )
-        )
-      );
+      setInitialized(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
   }, []);
-
-  const updateMission = useCallback(
-    async (mission: MissionRecord, action: "requestReview" | "pause" | "resume" | "retire") => {
-      setRevokingId(mission.missionId);
-      setError(null);
-      try {
-        await callMissions(action, [mission.missionId]);
-        await load();
-      } catch (err) {
-        setError(
-          `Couldn't update this mission: ${err instanceof Error ? err.message : String(err)}`
-        );
-      } finally {
-        setRevokingId(null);
-      }
-    },
-    [load]
-  );
 
   const updateProfile = useCallback(async (request: Record<string, unknown>) => {
     const id = String(request["id"] ?? request["bindingId"] ?? "profile");
@@ -1027,13 +836,13 @@ function PermissionsPage() {
               aria-label="Permission view"
               value={view}
               onValueChange={(value) =>
-                setView(value as "catalog" | "agents" | "domains" | "missions" | "recent")
+                setView(value as "catalog" | "saved" | "agents" | "domains" | "recent")
               }
             >
               <SegmentedControl.Item value="catalog">Catalog</SegmentedControl.Item>
+              <SegmentedControl.Item value="saved">Saved</SegmentedControl.Item>
               <SegmentedControl.Item value="agents">Agents</SegmentedControl.Item>
               <SegmentedControl.Item value="domains">By area</SegmentedControl.Item>
-              <SegmentedControl.Item value="missions">Missions</SegmentedControl.Item>
               <SegmentedControl.Item value="recent">Recent decisions</SegmentedControl.Item>
             </SegmentedControl.Root>
           </div>
@@ -1081,8 +890,15 @@ function PermissionsPage() {
           </Callout.Text>
         </Callout.Root>
       ) : null}
-      {loading && grants.length === 0 ? (
-        <Flex justify="center" align="center" gap="2" py="6">
+      {loading && !initialized ? (
+        <Flex
+          justify="center"
+          align="center"
+          gap="2"
+          py="6"
+          role="status"
+          aria-label="Loading permissions"
+        >
           <Spinner />
           <Text color="gray">Loading saved permissions…</Text>
         </Flex>
@@ -1137,21 +953,24 @@ function PermissionsPage() {
                 </Flex>
               );
             })}
-            {missions.length > 0 ? (
-              <Flex direction="column" gap="2">
-                <Heading size="3">Missions</Heading>
-                {missions.map((mission) => (
-                  <MissionCard
-                    key={mission.missionId}
-                    mission={mission}
-                    runs={missionRuns[mission.missionId] ?? []}
-                    changing={revokingId === mission.missionId}
-                    onAction={(action) => void updateMission(mission, action)}
-                  />
-                ))}
-              </Flex>
-            ) : null}
           </>
+        ) : view === "saved" ? (
+          grants.length > 0 ? (
+            grants.map((grant) => (
+              <GrantCard
+                key={grant.id}
+                grant={grant}
+                revoking={revokingId === grant.id}
+                onRevoke={() => void revoke(grant)}
+              />
+            ))
+          ) : (
+            <Card size="2">
+              <Text size="2" color="gray">
+                No lasting permissions have been saved.
+              </Text>
+            </Card>
+          )
         ) : view === "agents" ? (
           profiles.map((profile) => (
             <ProfileCard
@@ -1169,16 +988,6 @@ function PermissionsPage() {
             changingId={revokingId}
             onChange={(request) => void updateProfile(request)}
           />
-        ) : view === "missions" ? (
-          missions.map((mission) => (
-            <MissionCard
-              key={mission.missionId}
-              mission={mission}
-              runs={missionRuns[mission.missionId] ?? []}
-              changing={revokingId === mission.missionId}
-              onAction={(action) => void updateMission(mission, action)}
-            />
-          ))
         ) : decisions.length > 0 ? (
           decisions.map((decision) => (
             <DecisionCard key={decision.approvalId} decision={decision} />

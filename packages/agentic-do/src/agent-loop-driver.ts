@@ -16,6 +16,7 @@ import {
   ids,
   outcomeEvents,
   type AgentLoopConfig,
+  type AgentTurnMetadata,
   type AgentState,
   type AppendItem,
   type EffectDescriptor,
@@ -83,21 +84,39 @@ function assertDeferralMatchesEffect(kind: EffectKind, reason: EffectDeferral["r
       if (reason === "external-result") return;
       break;
     case "prompt_artifacts":
-    case "publish_envelope":
+    case "record_receipt":
       break;
   }
   throw new Error(`Effect ${kind} cannot defer for ${reason}`);
 }
 
+function assistantMessageText(blocks: unknown[]): string | undefined {
+  const text = blocks
+    .flatMap((raw) => {
+      if (!raw || typeof raw !== "object") return [];
+      const block = raw as Record<string, unknown>;
+      const value =
+        typeof block["content"] === "string"
+          ? block["content"]
+          : typeof block["text"] === "string"
+            ? block["text"]
+            : undefined;
+      return value ? [value] : [];
+    })
+    .join("\n")
+    .trim();
+  return text || undefined;
+}
+
 /** Typed failure code for a deferred eval whose durable run is irrecoverably
- * gone (EvalDO run row lost after an acknowledged start, or a persistent
+ * gone (EvalDO run row absent after an attempted start, or a persistent
  * infrastructure failure exhausted the retry budget). Mirrors the eval
  * schema's `runtime_generation_lost` failure code (failureKind
  * "infrastructure"). */
 export const RUNTIME_GENERATION_LOST_CODE = "runtime_generation_lost";
 
-/** Durable started-ack marker persisted inside the outbox row's descriptor. */
-type DeferredEvalDescriptorMarker = { deferredEvalStarted?: boolean };
+/** Durable start-attempt marker persisted inside the outbox row's descriptor. */
+type DeferredEvalDescriptorMarker = { deferredEvalStartAttempted?: boolean };
 
 function isDeferredEvalRow(row: OutboxRow): boolean {
   return row.descriptor.kind === "local_tool" && row.descriptor.tool === "eval";
@@ -140,6 +159,7 @@ function deferredEvalRuntimeLostOutcome(row: OutboxRow, message: string): Effect
 
 interface ActiveEffectDispatch {
   controller: AbortController;
+  settlesOnCancellation: boolean;
   branchId: string;
   effectId: string;
   channelId: string;
@@ -204,12 +224,13 @@ export interface DriverDeps {
   now(): number;
   scheduleAlarm(atMs: number): void;
   notifyWorkReady?(): void;
-  /** Live fan-out for GAD-created channel publication rows. The trajectory log
-   *  append is authoritative; this only wakes channel subscribers in-process. */
-  onHeartbeatOutcome?(input: {
+  onTurnClosed?(input: {
     channelId: string;
-    descriptor: EffectDescriptor;
-    outcome: EffectOutcome;
+    turnId: string;
+    metadata: AgentTurnMetadata;
+    reason?: string;
+    summary?: string;
+    finalMessage?: string;
   }): void | Promise<void>;
   /** Compaction trigger thresholds. The vessel sizes `triggerBytes` relative
    *  to the model context window (the deleted CompactionTrigger used ~0.8× the
@@ -373,7 +394,7 @@ function withModelProvenance(descriptor: EffectDescriptor, items: AppendItem[]):
 function isUnattendedModelRequest(descriptor: EffectDescriptor): boolean {
   if (descriptor.kind !== "model_call") return false;
   const origin = descriptor.request.turnMetadata?.origin;
-  return origin === "heartbeat" || origin === "scheduled";
+  return origin === "scheduled";
 }
 
 function ensureScheduledModelResumeSchema(sql: SqlStorage): void {
@@ -1057,6 +1078,13 @@ export class AgentLoopDriver {
   }
 
   private async runStep(loop: LoopInstance, incoming: Incoming, retries: number): Promise<void> {
+    if (
+      incoming.type === "command" &&
+      incoming.command.kind === "invoke" &&
+      (await this.ingestCommandAlreadyJournaled(loop, incoming))
+    ) {
+      return;
+    }
     let semanticIncoming = incoming;
     if (incoming.type === "event-appended" && containsStoredValueRef(incoming.envelope.payload)) {
       semanticIncoming = {
@@ -1147,6 +1175,28 @@ export class AgentLoopDriver {
       ),
     } as LogEnvelope;
     await this.runStep(loop, { type: "event-appended", envelope: semanticEnvelope }, retries);
+    if (semanticEnvelope.payloadKind === "turn.closed") {
+      const payload = semanticEnvelope.payload as Record<string, unknown>;
+      const metadata = payload["metadata"];
+      if (metadata && typeof metadata === "object" && !Array.isArray(metadata)) {
+        const turnId = String(semanticEnvelope.causality?.turnId ?? "");
+        const finalEntry = [...loop.state.entries]
+          .reverse()
+          .find(
+            (entry) => entry.kind === "assistant" && entry.messageId.startsWith(`m:${turnId}:`)
+          );
+        await this.deps.onTurnClosed?.({
+          channelId: loop.channelId,
+          turnId,
+          metadata: metadata as AgentTurnMetadata,
+          ...(typeof payload["reason"] === "string" ? { reason: payload["reason"] } : {}),
+          ...(typeof payload["summary"] === "string" ? { summary: payload["summary"] } : {}),
+          ...(finalEntry?.kind === "assistant"
+            ? { finalMessage: assistantMessageText(finalEntry.blocks) }
+            : {}),
+        });
+      }
+    }
   }
 
   private async ingestCommandAlreadyJournaled(
@@ -1154,8 +1204,23 @@ export class AgentLoopDriver {
     incoming: Incoming
   ): Promise<boolean> {
     if (incoming.type !== "command") return false;
-    if (incoming.command.kind !== "prompt" && incoming.command.kind !== "steer") return false;
-    const envelopeId = ids.recvUserMessage(loop.channelId, incoming.command.source.envelopeId);
+    if (
+      incoming.command.kind !== "prompt" &&
+      incoming.command.kind !== "steer" &&
+      incoming.command.kind !== "invoke"
+    ) {
+      return false;
+    }
+    const envelopeId =
+      incoming.command.kind === "invoke"
+        ? ids.turnOpened(
+            ids.turnId(
+              loop.channelId,
+              incoming.command.source.envelopeId,
+              this.selfRef(loop.channelId).id
+            )
+          )
+        : ids.recvUserMessage(loop.channelId, incoming.command.source.envelopeId);
     const existing = await this.deps.gad.call<LogEnvelope | null>("getLogEvent", {
       logId: loop.logId,
       head: loop.head,
@@ -1220,7 +1285,12 @@ export class AgentLoopDriver {
 
   /** §2.2 — replaces the recovery zoo. */
   async reconcile(loop: LoopInstance): Promise<void> {
-    const expected = derivePendingEffects(loop.state);
+    const derived = derivePendingEffects(loop.state);
+    const expectedIds = new Set(derived.map((effect) => effect.effectId));
+    this.outbox.pruneCompletionEvidence(loop.logId, expectedIds);
+    const expected = derived.filter(
+      (effect) => !this.outbox.hasCompletionEvidence(loop.logId, effect.effectId)
+    );
     const expectedById = new Map(expected.map((effect) => [effect.effectId, effect]));
     const rows = this.outbox.forBranch(loop.logId);
     for (const row of rows) {
@@ -1242,7 +1312,6 @@ export class AgentLoopDriver {
    * an ordinary already-consumed duplicate. */
   async channelCallMayMaterialize(channelId: string, effectId: string): Promise<boolean> {
     const loop = await this.loop(channelId);
-    if (loop.state.inFlightModelCall) return true;
     return derivePendingEffects(loop.state).some(
       (effect) => effect.effectId === effectId && effect.kind === "channel_call"
     );
@@ -1334,6 +1403,8 @@ export class AgentLoopDriver {
     });
     const active: ActiveEffectDispatch = {
       controller,
+      settlesOnCancellation:
+        row.descriptor.kind === "local_tool" && row.descriptor.cancellationMode === "settle",
       branchId: row.branchId,
       effectId: row.effectId,
       channelId: row.channelId,
@@ -1404,13 +1475,16 @@ export class AgentLoopDriver {
           if (!controller.signal.aborted) this.recordModelExecutionAttempt(event);
         },
       });
-      outcome = await awaitEffectBoundary(
-        execution,
-        controller.signal,
-        row.kind === "model_call"
-          ? ({ kind: "model", blocks: [], stopReason: "aborted" } satisfies EffectOutcome)
-          : undefined
-      );
+      outcome =
+        descriptor.kind === "local_tool" && descriptor.cancellationMode === "settle"
+          ? await execution
+          : await awaitEffectBoundary(
+              execution,
+              controller.signal,
+              row.kind === "model_call"
+                ? ({ kind: "model", blocks: [], stopReason: "aborted" } satisfies EffectOutcome)
+                : undefined
+            );
     } catch (err) {
       // Lifecycle suspension deliberately leaves the durable outbox row as-is.
       // Recording the abort as a model/tool outcome would turn process
@@ -1439,11 +1513,12 @@ export class AgentLoopDriver {
           })
         );
         if (failure.recoverable && failure.retryAfterMs !== undefined) {
-          await this.retryEffect(row, {
+          const terminal = await this.retryEffect(row, {
             reason: failure.reason,
             retryAfterMs: failure.retryAfterMs,
             code: failure.code,
           });
+          if (terminal) await this.applyOutcome(row, terminal);
           return;
         }
         if (
@@ -1498,7 +1573,7 @@ export class AgentLoopDriver {
         }
       }
       const updated = this.outbox.recordFailure(row.branchId, row.effectId, this.deps.now());
-      if (updated && updated.attempts >= maxAttempts(updated.kind)) {
+      if (updated && updated.attempts >= maxAttempts(updated.descriptor)) {
         await this.settleExhaustedEffect(updated, message);
       } else {
         this.scheduleEarliest();
@@ -1610,8 +1685,9 @@ export class AgentLoopDriver {
     let loop = await this.loopForBranch(row.branchId, row.channelId);
     if (!loop) return;
     if (outcome.kind === "retry") {
-      await this.retryEffect(row, outcome);
-      return;
+      const terminal = await this.retryEffect(row, outcome);
+      if (!terminal) return;
+      outcome = terminal;
     }
     if (outcome.kind === "model-suspended") {
       await this.suspendOnCredential(loop, row, outcome);
@@ -1667,22 +1743,15 @@ export class AgentLoopDriver {
     }
     this.kill("after-outcome-append");
     await this.cancelAskUserSiblings(row);
+    if (row.kind === "record_receipt") {
+      this.outbox.recordCompletionEvidence(row.branchId, row.effectId, this.deps.now());
+    }
     this.outbox.delete(row.branchId, row.effectId);
     this.kill("after-outbox-delete");
     for (const envelope of envelopes) {
       loop.state = applyEvent(loop.state, envelope);
     }
     this.foldCache.write(loop.state);
-    if (
-      row.descriptor.kind === "model_call" &&
-      row.descriptor.request.turnMetadata?.origin === "heartbeat"
-    ) {
-      await this.deps.onHeartbeatOutcome?.({
-        channelId: loop.channelId,
-        descriptor: row.descriptor,
-        outcome,
-      });
-    }
     for (const envelope of envelopes) {
       await this.runEventCascade(loop, envelope, APPEND_RETRIES);
     }
@@ -1741,18 +1810,40 @@ export class AgentLoopDriver {
   private async retryEffect(
     row: OutboxRow,
     outcome: { reason: string; retryAfterMs?: number; code?: string }
-  ): Promise<void> {
+  ): Promise<EffectOutcome | null> {
     const updated = this.outbox.recordFailure(
       row.branchId,
       row.effectId,
       this.deps.now(),
       outcome.retryAfterMs
     );
-    if (updated && updated.attempts >= maxAttempts(updated.kind)) {
-      await this.settleExhaustedEffect(updated, outcome.reason);
-      return;
+    // Explicit provider backpressure has its own reviewed delay/reset policy.
+    // An unclassified transport failure does not: retry it once for a transient
+    // disconnect, then settle visibly instead of leaving an interactive turn
+    // in a permanent typing state.
+    const attemptLimit =
+      outcome.code === "unknown_retryable" ? 2 : maxAttempts(updated?.descriptor ?? row.descriptor);
+    if (updated && updated.attempts >= attemptLimit) {
+      if (updated.descriptor.kind === "model_call" && outcome.code === "unknown_retryable") {
+        return {
+          kind: "model",
+          blocks: [],
+          stopReason: "error",
+          errorReason: outcome.reason,
+          recoverable: false,
+          failure: {
+            code: "unknown_retryable",
+            reason: outcome.reason,
+            recoverable: false,
+          },
+        };
+      }
+      throw new Error(
+        `retry outcome exhausted without a terminal mapping for ${updated.descriptor.kind}`
+      );
     }
     this.scheduleEarliest();
+    return null;
   }
 
   private emitEphemeral(loop: LoopInstance, emit: EphemeralEmit): void {
@@ -1937,14 +2028,15 @@ export class AgentLoopDriver {
   //
   // The outbox row IS the deferred-eval run record — one durable source of
   // truth. `effectId` is the EvalDO runId, `disposition` is the scheduling
-  // state, and the descriptor carries the monotonic `deferredEvalStarted`
-  // fact once `eval.start` was acknowledged. Transitions:
+  // state, and the descriptor carries the monotonic
+  // `deferredEvalStartAttempted` fact before crossing into EvalDO. Transitions:
   //
-  //   inserted → (dispatch, eval.start acked) started+parked
+  //   inserted → (durable dispatch fence, eval.start attempted) started+parked
   //           → settled (terminal push / eval.get backstop / redrive)
   //           |  cancel-intent (vessel table) → cancelled by EvalDO.
   //
-  // "Never re-execute a started run" is structural: once `deferredEvalStarted`
+  // "Never re-execute an attempted run" is structural: once
+  // `deferredEvalStartAttempted`
   // is durably recorded, every later dispatch of the row takes the read-only
   // eval.get recovery path (agent-vessel runDeferredEval) and a missing run
   // row settles as the typed `runtime_generation_lost` infrastructure failure
@@ -1962,26 +2054,25 @@ export class AgentLoopDriver {
       );
   }
 
-  /** Durably record that EvalDO acknowledged eval.start for this run. A
-   * missing row (row already settled, or a direct gate probe without an
-   * outbox row) is a no-op. Monotonic: never cleared while the row lives. */
-  markDeferredEvalStarted(channelId: string, effectId: string): void {
+  /** Durably fence the first eval.start attempt before crossing into EvalDO.
+   * The RPC outcome is inherently ambiguous, so this fact is monotonic and is
+   * never cleared while the outbox row lives. */
+  markDeferredEvalStartAttempted(channelId: string, effectId: string): void {
     const row = this.outbox.getForChannel(channelId, effectId);
     if (!row || !isDeferredEvalRow(row)) return;
-    if ((row.descriptor as DeferredEvalDescriptorMarker).deferredEvalStarted === true) return;
+    if ((row.descriptor as DeferredEvalDescriptorMarker).deferredEvalStartAttempted === true)
+      return;
     this.outbox.updateDescriptor(row.branchId, row.effectId, {
       ...row.descriptor,
-      deferredEvalStarted: true,
+      deferredEvalStartAttempted: true,
     } as unknown as EffectDescriptor);
   }
 
-  /** True when a previous activation durably recorded a successful
-   * eval.start for this run — the run identity is settled and it must never
-   * be started again. */
-  hasDeferredEvalStarted(channelId: string, effectId: string): boolean {
+  /** True once any eval.start attempt may have reached EvalDO. */
+  hasDeferredEvalStartAttempted(channelId: string, effectId: string): boolean {
     const row = this.outbox.getForChannel(channelId, effectId);
     if (!row || !isDeferredEvalRow(row)) return false;
-    return (row.descriptor as DeferredEvalDescriptorMarker).deferredEvalStarted === true;
+    return (row.descriptor as DeferredEvalDescriptorMarker).deferredEvalStartAttempted === true;
   }
 
   /** A workerd generation change invalidates every in-memory eval completion
@@ -2071,6 +2162,14 @@ export class AgentLoopDriver {
     }
 
     await this.withEffectAdmissionClosed(channelId, async (active) => {
+      // An admitted mutation owns its atomic boundary. Ask it to stop, then
+      // let its authoritative success/failure journal before the interrupt;
+      // otherwise the interrupt could erase the invocation while its bytes
+      // were already committed outside the agent log.
+      const settling = active.filter((entry) => entry.settlesOnCancellation);
+      for (const entry of settling) entry.controller.abort();
+      await Promise.all(settling.map((entry) => entry.settled));
+
       const pendingModel = loop.state.inFlightModelCall
         ? this.outbox.get(loop.logId, ids.modelEffect(loop.state.inFlightModelCall.messageId))
         : null;
@@ -2113,12 +2212,13 @@ export class AgentLoopDriver {
     this.closedEffectAdmission.set(channelId, (this.closedEffectAdmission.get(channelId) ?? 0) + 1);
     const active = [...this.activeDispatches].filter((entry) => entry.channelId === channelId);
     try {
-      // Retirement is stronger than a user interrupt: once requested, no
-      // admitted transport may continue while we wait to journal the marker.
-      // The inbound mutation boundary is shared with outcome commits, so
-      // either a result that was already committing lands first and is then
-      // retired, or retirement lands first and the queued result observes its
-      // outbox row gone.
+      // Settle admitted atomic mutations before retiring their invocations;
+      // interruptible transports are fenced immediately afterward. Thus a
+      // committed mutation is always journaled before the retirement marker,
+      // while non-cooperative model/network work cannot delay retirement.
+      const settling = active.filter((entry) => entry.settlesOnCancellation);
+      for (const entry of settling) entry.controller.abort();
+      await Promise.all(settling.map((entry) => entry.settled));
       for (const entry of active) entry.controller.abort();
       await this.handleIncoming(channelId, {
         type: "command",
@@ -2174,6 +2274,13 @@ export class AgentLoopDriver {
     return active.length;
   }
 
+  /** A lifecycle-released activation deliberately leaves claimed rows leased.
+   * The next host generation adopts them; the dying generation's settlement
+   * is stale rather than evidence that an executor forgot its transition. */
+  isActivationReleased(): boolean {
+    return this.activationReleased;
+  }
+
   /** Alarm-side recovery is deliberately local and bounded. It announces
    * durable rows; the host driver owns every execution. */
   async reconcileForRecovery(): Promise<void> {
@@ -2193,7 +2300,20 @@ export class AgentLoopDriver {
     const row = this.scheduledModelResumeRowsDue(this.deps.now()).find(
       (candidate) => candidate.channelId === channelId && candidate.messageId === messageId
     );
-    if (!row) throw new Error("executeScheduledResume: transition is not due");
+    if (!row) {
+      const exists = this.deps.sql
+        .exec(
+          `SELECT 1 AS present FROM scheduled_model_resumes
+           WHERE channel_id = ? AND message_id = ?`,
+          channelId,
+          messageId
+        )
+        .toArray()[0];
+      // Absence means a prior claimant completed the transition and crashed
+      // before settling its wake claim. That redrive has already succeeded.
+      if (!exists) return;
+      throw new Error("executeScheduledResume: transition is not due");
+    }
     await this.handleIncoming(row.channelId, {
       type: "command",
       command: {

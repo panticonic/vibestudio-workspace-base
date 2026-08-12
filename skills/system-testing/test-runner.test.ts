@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "@workspace/agentic-core";
-import { TestRunner, validateAgentCompletionReport } from "./test-runner.js";
+import {
+  findSystemTestImplementationInspections,
+  TestRunner,
+  validateAgentCompletionReport,
+} from "./test-runner.js";
 import type { TestExecutionResult, TestSuiteResult, TestSuiteResultEntry } from "./types.js";
 import type { HeadlessRunner } from "./runner.js";
 import { CONTENT_WORKSPACE_REPO_FIXTURE, type TestCase } from "./types.js";
@@ -127,7 +131,6 @@ describe("TestRunner", () => {
       category: "test",
       description: "timeout",
       prompt: "hang",
-      validation: "harness" as const,
       validate: () => ({ passed: true }),
     });
 
@@ -159,6 +162,16 @@ describe("TestRunner", () => {
       agentEntityId: "agent-entity-timeout",
       agentTargetId: "agent-target-timeout",
       contextId: "ctx-timeout",
+    });
+    expect(execution.trajectoryReview).toEqual({
+      required: true,
+      agentReportedOutcome: "unspecified",
+      invocationCount: 1,
+      modelCallCount: 1,
+      unexpectedToolFailureCount: 0,
+      repeatedFailureOperations: [],
+      potentialConfusionSignals: ["missing-completion-report"],
+      frequentOperations: [],
     });
   });
 
@@ -222,6 +235,7 @@ describe("TestRunner", () => {
       {
         id: "invocation-validator",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         kind: "message",
         contentType: "invocation",
         complete: true,
@@ -246,6 +260,7 @@ describe("TestRunner", () => {
       {
         id: "answer-validator",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         kind: "message",
         complete: true,
         content: "Created and opened the panel.",
@@ -428,6 +443,7 @@ describe("TestRunner", () => {
       {
         id: "invocation:call-1",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         kind: "message",
         contentType: "invocation",
         complete: true,
@@ -445,6 +461,7 @@ describe("TestRunner", () => {
       {
         id: "invocation:call-2",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         kind: "message",
         contentType: "invocation",
         complete: true,
@@ -463,6 +480,7 @@ describe("TestRunner", () => {
       {
         id: "invocation:call-3",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         kind: "message",
         contentType: "invocation",
         complete: true,
@@ -488,6 +506,7 @@ describe("TestRunner", () => {
       {
         id: "answer-1",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         kind: "message",
         complete: true,
         content: "Recovered and finished with TOOL_RECOVERY_OK.",
@@ -678,6 +697,7 @@ describe("TestRunner", () => {
     listener?.({
       id: "invocation:authority-failure",
       senderId: "agent",
+      senderMetadata: { type: "agent" },
       kind: "message",
       contentType: "invocation",
       complete: true,
@@ -719,6 +739,7 @@ describe("TestRunner", () => {
       {
         id: "answer-1",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         kind: "message",
         complete: true,
         content: "ORCHESTRATED_OK",
@@ -730,6 +751,7 @@ describe("TestRunner", () => {
       sendAndWait: vi.fn(async () => undefined),
       captureModelExecutionEvidence: vi.fn(async () => modelEvidence()),
       snapshot: vi.fn(() => ({
+        channelId: "chat-orchestrated",
         messages,
         invocations: [],
         debugEvents: [],
@@ -743,7 +765,9 @@ describe("TestRunner", () => {
     const runner = {
       modelRef: TEST_MODEL,
       spawn: vi.fn(async () => session),
-      collectDiagnostics: vi.fn(async () => ({})),
+      collectDiagnostics: vi.fn(async () => ({
+        channelDelivery: { deliveryLifecycle: { latencyHistogram: [] } },
+      })),
     } as unknown as HeadlessRunner;
     const tester = new TestRunner(runner, { testTimeoutMs: 5 });
 
@@ -759,6 +783,7 @@ describe("TestRunner", () => {
           messages: [...target.messages],
           duration: 1,
           snapshot: target.snapshot(),
+          diagnostics: { orchestratedEvidence: { recovered: true } },
         };
       },
       validation: "harness" as const,
@@ -769,10 +794,79 @@ describe("TestRunner", () => {
 
     expect(result.passed).toBe(true);
     expect(execution.messages).toEqual(messages);
+    expect(execution.diagnostics).toMatchObject({
+      orchestratedEvidence: { recovered: true },
+      channelDelivery: { deliveryLifecycle: { latencyHistogram: [] } },
+    });
+    expect(runner.collectDiagnostics).toHaveBeenCalledWith({ channelId: "chat-orchestrated" });
     expect(session.sendAndWait).toHaveBeenCalledWith(
       "phase prompt",
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
+  });
+
+  it("gates a natural agent completion on independent outcome evidence", async () => {
+    const messages = [
+      {
+        id: "prompt-agent-evidence",
+        senderId: "headless",
+        kind: "message",
+        complete: true,
+        content: "fix the visible problem",
+      },
+      {
+        id: "answer-agent-evidence",
+        senderId: "agent",
+        senderMetadata: { type: "agent" },
+        kind: "message",
+        complete: true,
+        content: "The problem is fixed.",
+      },
+    ] satisfies ChatMessage[];
+    const snapshot = {
+      channelId: "chat-agent-evidence",
+      messages,
+      invocations: [],
+      debugEvents: [],
+      cleanupErrors: [],
+      participants: {},
+      connected: true,
+      duration: 10,
+    };
+    const session = {
+      channelId: "chat-agent-evidence",
+      messages,
+      sendAndWait: vi.fn(async () => messages[1]),
+      captureModelExecutionEvidence: vi.fn(async () => modelEvidence()),
+      snapshot: vi.fn(() => snapshot),
+      close: vi.fn(async () => undefined),
+    };
+    const runner = {
+      modelRef: TEST_MODEL,
+      spawn: vi.fn(async () => session),
+      collectDiagnostics: vi.fn(async () => ({
+        channelDelivery: { deliveryLifecycle: { latencyHistogram: [] } },
+      })),
+    } as unknown as HeadlessRunner;
+    const validate = vi.fn(() => ({
+      passed: false,
+      reason: "The saved workspace still contains the original defect",
+    }));
+
+    const { result } = await new TestRunner(runner).runOne({
+      name: "agent-evidence",
+      category: "test",
+      description: "objective agent outcome",
+      prompt: "Fix the visible problem.",
+      validation: "agent-evidence",
+      validate,
+    });
+
+    expect(validate).toHaveBeenCalledOnce();
+    expect(result).toEqual({
+      passed: false,
+      reason: "The saved workspace still contains the original defect",
+    });
   });
 
   it("shares one timeout budget across every orchestrated phase", async () => {
@@ -1093,6 +1187,7 @@ describe("TestRunner", () => {
       {
         id: "answer-fixture",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         kind: "message",
         complete: true,
         content: "FIXTURE_OK",
@@ -1196,6 +1291,7 @@ describe("TestRunner", () => {
       {
         id: "answer-fallback",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         kind: "message",
         complete: true,
         content: "FALLBACK_OK",
@@ -1297,6 +1393,7 @@ describe("validateAgentCompletionReport", () => {
         {
           id: "user",
           senderId: "user",
+          senderMetadata: { type: "headless" },
           kind: "message",
           contentType: "text",
           content: "Exercise file handles.",
@@ -1305,6 +1402,7 @@ describe("validateAgentCompletionReport", () => {
         {
           id: "agent",
           senderId: "agent",
+          senderMetadata: { type: "agent" },
           kind: "message",
           contentType: "text",
           content: final,
@@ -1320,7 +1418,12 @@ describe("validateAgentCompletionReport", () => {
           "Task completed.\n\nAll requested lifecycle behavior was verified.\n\nWhat I could not verify: automatic cleanup after a process crash."
         )
       )
-    ).toEqual({ passed: true });
+    ).toMatchObject({
+      passed: true,
+      details: {
+        trajectoryReview: { required: true, agentReportedOutcome: "completed" },
+      },
+    });
   });
 
   it("accepts a summary immediately after the completed status marker", () => {
@@ -1328,7 +1431,12 @@ describe("validateAgentCompletionReport", () => {
       validateAgentCompletionReport(
         execution("Task completed. I verified a full write/read round-trip.")
       )
-    ).toEqual({ passed: true });
+    ).toMatchObject({
+      passed: true,
+      details: {
+        trajectoryReview: { required: true, agentReportedOutcome: "completed" },
+      },
+    });
   });
 
   it("accepts one terminal declaration after transport-combined progress text", () => {
@@ -1338,7 +1446,12 @@ describe("validateAgentCompletionReport", () => {
           "Comparing the read output against the write payload.\n\nTask completed.\nThe contents matched exactly."
         )
       )
-    ).toEqual({ passed: true });
+    ).toMatchObject({
+      passed: true,
+      details: {
+        trajectoryReview: { required: true, agentReportedOutcome: "completed" },
+      },
+    });
   });
 
   it("trusts an explicit incomplete status", () => {
@@ -1354,13 +1467,110 @@ describe("validateAgentCompletionReport", () => {
     });
   });
 
-  it("rejects an ambiguous report instead of guessing from prose", () => {
+  it("accepts a natural completion report without requiring marker syntax", () => {
     expect(
       validateAgentCompletionReport(execution("All requested lifecycle behavior was verified."))
-    ).toMatchObject({
-      passed: false,
-      reason: expect.stringContaining("required"),
+    ).toEqual({
+      passed: true,
+      details: {
+        trajectoryReview: expect.objectContaining({
+          required: true,
+          agentReportedOutcome: "unspecified",
+        }),
+      },
     });
+  });
+
+  it("rejects a completion report when harness-observed execution invariants failed", () => {
+    const result = execution("Task completed. The temporary panel was inspected.");
+    result.error = "Agent left temporary panels in the tree: panel-leak";
+
+    expect(validateAgentCompletionReport(result)).toEqual({
+      passed: false,
+      reason:
+        "Agent-goal execution failed: Agent left temporary panels in the tree: panel-leak",
+    });
+  });
+
+  it("rejects a completion report when harness cleanup did not finish", () => {
+    const result = execution("Task completed. The panel lifecycle was verified.");
+    result.cleanupErrors = ["archive leaked panel panel-leak: unavailable"];
+
+    expect(validateAgentCompletionReport(result)).toEqual({
+      passed: false,
+      reason:
+        "Agent-goal cleanup failed: archive leaked panel panel-leak: unavailable",
+    });
+  });
+
+  it("flags a wasteful trajectory for review without converting success into failure", () => {
+    const result = execution("The requested command completed successfully.");
+    result.snapshot = {
+      invocations: Array.from({ length: 24 }, (_, index) => ({
+        id: `read-${index}`,
+        name: "read",
+        status: "complete",
+      })),
+    } as TestExecutionResult["snapshot"];
+    result.modelExecutionEvidence = { totalCalls: 18, calls: [] };
+
+    expect(validateAgentCompletionReport(result)).toMatchObject({
+      passed: true,
+      details: {
+        trajectoryReview: {
+          potentialConfusionSignals: [
+            "high-model-call-count",
+            "high-tool-invocation-count",
+            "frequent-operation:read",
+          ],
+          frequentOperations: [{ name: "read", count: 24 }],
+        },
+      },
+    });
+  });
+
+  it("flags duplicate substantial completion reports without failing the scenario", () => {
+    const result = execution(`First complete synthesis. ${"detail ".repeat(90)}`);
+    result.messages.push({
+      ...result.messages[1]!,
+      id: "agent-second-completion",
+      content: `Second complete synthesis. ${"detail ".repeat(90)}`,
+    });
+
+    expect(validateAgentCompletionReport(result)).toMatchObject({
+      passed: true,
+      details: {
+        trajectoryReview: {
+          potentialConfusionSignals: ["multiple-substantial-completion-reports"],
+        },
+      },
+    });
+  });
+
+  it("flags repeated subagent transcript access without failing the scenario", () => {
+    const result = execution("The two design reviews were synthesized.");
+    result.snapshot = {
+      invocations: [
+        { id: "inspect-1", name: "inspect_subagent", status: "complete" },
+        { id: "read-1", name: "read_subagent", status: "complete" },
+      ],
+    } as TestExecutionResult["snapshot"];
+
+    expect(validateAgentCompletionReport(result)).toMatchObject({
+      passed: true,
+      details: {
+        trajectoryReview: {
+          potentialConfusionSignals: ["subagent-transcript-chasing"],
+        },
+      },
+    });
+  });
+
+  it("recognizes the agent when recipient delivery omits every self-authored message", () => {
+    const result = execution("The retained child result was reviewed without integration.");
+    result.messages = result.messages.slice(1);
+
+    expect(validateAgentCompletionReport(result)).toMatchObject({ passed: true });
   });
 
   it("rejects conflicting terminal declarations", () => {
@@ -1370,7 +1580,72 @@ describe("validateAgentCompletionReport", () => {
       )
     ).toMatchObject({
       passed: false,
-      reason: expect.stringContaining("more than one"),
+      reason: expect.stringContaining("conflicting"),
     });
+  });
+});
+
+describe("system-test implementation boundary", () => {
+  it("detects agent reads of harness implementation without matching ordinary workspace files", () => {
+    const execution = {
+      duration: 1,
+      messages: [
+        {
+          id: "read-fixture",
+          senderId: "agent",
+          kind: "message",
+          contentType: "invocation",
+          complete: true,
+          content: "",
+          invocation: {
+            id: "call:fixture",
+            name: "read",
+            arguments: { path: "skills/system-testing/workspace-repo-fixture.ts" },
+          },
+        },
+        {
+          id: "read-product",
+          senderId: "agent",
+          kind: "message",
+          contentType: "invocation",
+          complete: true,
+          content: "",
+          invocation: {
+            id: "call:product",
+            name: "read",
+            arguments: { path: "projects/example/src/index.ts" },
+          },
+        },
+        {
+          id: "eval-fixture",
+          senderId: "agent",
+          kind: "message",
+          contentType: "invocation",
+          complete: true,
+          content: "",
+          invocation: {
+            id: "call:eval-fixture",
+            name: "eval",
+            arguments: {
+              code: 'return fs.readFile("skills/system-testing/workspace-repo-fixture.ts")',
+            },
+          },
+        },
+      ],
+    } as unknown as TestExecutionResult;
+
+    expect(findSystemTestImplementationInspections(execution)).toEqual([
+      {
+        id: "call:fixture",
+        name: "read",
+        arguments: '{"path":"skills/system-testing/workspace-repo-fixture.ts"}',
+      },
+      {
+        id: "call:eval-fixture",
+        name: "eval",
+        arguments:
+          '{"code":"return fs.readFile(\\"skills/system-testing/workspace-repo-fixture.ts\\")"}',
+      },
+    ]);
   });
 });

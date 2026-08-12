@@ -29,6 +29,7 @@ function execution(
         id: "eval",
         kind: "message",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         complete: true,
         contentType: "invocation",
         content: "",
@@ -42,7 +43,14 @@ function execution(
           result: { details: { success: true, returnValue } },
         },
       } as unknown as TestExecutionResult["messages"][number],
-      { id: "final", kind: "message", senderId: "agent", complete: true, content: finalMessage },
+      {
+        id: "final",
+        kind: "message",
+        senderId: "agent",
+        senderMetadata: { type: "agent" },
+        complete: true,
+        content: finalMessage,
+      },
     ],
   } as TestExecutionResult;
 }
@@ -51,34 +59,42 @@ const apiTest = skillTests.find((test) => test.name === "load-api-integrations")
 
 function choiceExecution(
   finalMessage: string,
-  path?: string
+  skill?: { route: "read" | "docs"; value: string }
 ): TestExecutionResult {
   return {
     duration: 0,
     messages: [
       { id: "prompt", kind: "message", senderId: "user", complete: true, content: "prompt" },
-      ...(path
+      ...(skill
         ? [
             {
-              id: "read",
+              id: "skill-load",
               kind: "message" as const,
               senderId: "agent",
+              senderMetadata: { type: "agent" },
               complete: true,
               contentType: "invocation" as const,
               content: "",
               invocation: {
-                id: "read-call",
-                name: "read",
+                id: "skill-load-call",
+                name: skill.route === "read" ? "read" : "docs_open",
                 status: "complete",
                 terminalOutcome: "success",
                 isError: false,
-                arguments: { path },
-                result: { details: { path } },
+                arguments: skill.route === "read" ? { path: skill.value } : { id: skill.value },
+                result: { details: { value: skill.value } },
               },
             } as unknown as TestExecutionResult["messages"][number],
           ]
         : []),
-      { id: "final", kind: "message", senderId: "agent", complete: true, content: finalMessage },
+      {
+        id: "final",
+        kind: "message",
+        senderId: "agent",
+        senderMetadata: { type: "agent" },
+        complete: true,
+        content: finalMessage,
+      },
     ],
   } as TestExecutionResult;
 }
@@ -152,10 +168,22 @@ describe("skill routing system-test validators", () => {
     const test = skillTests.find((candidate) => candidate.name === "load-workspace-dev")!;
     expect(
       test.validate(
-        choiceExecution(
-          "Use the workspace panel development workflow for this change.",
-          "skills/workspace-dev/SKILL.md"
-        )
+        choiceExecution("Use the workspace panel development workflow for this change.", {
+          route: "read",
+          value: "skills/workspace-dev/SKILL.md",
+        })
+      )
+    ).toEqual({ passed: true });
+  });
+
+  it("accepts the generated docs catalog as the same canonical skill source", () => {
+    const test = skillTests.find((candidate) => candidate.name === "load-workspace-dev")!;
+    expect(
+      test.validate(
+        choiceExecution("Use the workspace panel development workflow for this change.", {
+          route: "docs",
+          value: "workspace-dev",
+        })
       )
     ).toEqual({ passed: true });
   });

@@ -4,17 +4,12 @@
   "private": true,
   "vibestudio": {
     "title": "Permissions",
+    "icon": "./assets/icon.svg",
     "description": "Review and revoke saved app and agent permissions",
     "hiddenInLauncher": false,
     "autoArchiveWhenEmpty": true,
     "authority": {
       "provides": [],
-      "serviceRequests": [
-        {
-          "protocol": "vibestudio.missions.v1",
-          "availability": "required"
-        }
-      ],
       "requests": [
         {
           "capability": "context.boundary",
@@ -41,24 +36,6 @@
             "prefix": ""
           },
           "tier": "gated",
-          "evidence": "intentional-broad"
-        },
-        {
-          "capability": "missions.pause",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "gated",
-          "evidence": "intentional-broad"
-        },
-        {
-          "capability": "missions.retire",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "critical",
           "evidence": "intentional-broad"
         },
         {
@@ -90,15 +67,6 @@
         },
         {
           "capability": "workspace-service:channel",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "gated",
-          "evidence": "intentional-broad"
-        },
-        {
-          "capability": "workspace-service:missions",
           "resource": {
             "kind": "prefix",
             "prefix": ""

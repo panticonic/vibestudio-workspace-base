@@ -18,7 +18,7 @@ import {
   SpeakerLoudIcon,
 } from "@radix-ui/react-icons";
 import { Box, DropdownMenu, Flex, IconButton, Text, TextField, Tooltip } from "@radix-ui/themes";
-import { VibestudioLogo } from "@workspace/ui";
+import { VibestudioLogo } from "@workspace/ui/brand";
 import {
   useCallback,
   useEffect,
@@ -64,6 +64,7 @@ import {
 } from "../shell/client";
 import { useNativeShellOverlay } from "../shell/useNativeShellOverlay";
 import { BrowserFavicon } from "./BrowserFavicon";
+import { PanelIcon } from "./PanelIcon";
 import type { FocusedPaneChromeState, PaneChromeCommand } from "./paneChrome";
 
 const isMac = /Mac|iPhone|iPad|iPod/i.test(
@@ -141,11 +142,10 @@ export function TitleBar({
     }
   };
 
-  // The focused pane is closable only when something else stays on screen —
-  // closing the last visible pane would leave an empty viewport. The affordance
-  // rides on that panel's own breadcrumb item rather than a detached button.
+  // The focused pane is closable only when another logical pane survives.
+  // Parked panes count: resizing the window must not change layout semantics.
   const closablePanePanelId =
-    paneChromeState && paneChromeState.visiblePaneCount > 1 ? paneChromeState.panelId : null;
+    paneChromeState && paneChromeState.layoutPaneCount > 1 ? paneChromeState.panelId : null;
   const handleClosePane = useCallback(
     () => onPaneChromeCommand?.({ type: "close-pane" }),
     [onPaneChromeCommand]
@@ -1077,12 +1077,15 @@ function buildBrowserAddressRows(
   return { rows, empty: query ? "No matching history" : "No browser history yet" };
 }
 
+const BREADCRUMB_ICON_SIZE = 14;
+
 // Shared styles for breadcrumb items
 const itemStyle: CSSProperties = {
   appRegion: "no-drag",
   WebkitAppRegion: "no-drag",
   display: "inline-flex",
   alignItems: "center",
+  gap: "6px",
   border: "1px solid transparent",
   minWidth: 0,
   maxWidth: "clamp(72px, 16vw, 180px)",
@@ -1115,6 +1118,9 @@ const groupStyle = {
 interface HoverableBreadcrumbItemProps {
   panelId: string;
   title: string;
+  icon?: string;
+  source?: string;
+  favicon?: PanelSummary["favicon"];
   isActive: boolean;
   isCurrent: boolean;
   onNavigate: () => void;
@@ -1131,6 +1137,9 @@ interface HoverableBreadcrumbItemProps {
 function HoverableBreadcrumbItem({
   panelId,
   title,
+  icon,
+  source,
+  favicon,
   isActive,
   isCurrent,
   onNavigate,
@@ -1219,6 +1228,13 @@ function HoverableBreadcrumbItem({
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
+        <PanelIcon
+          icon={icon}
+          source={source}
+          favicon={favicon}
+          size={BREADCRUMB_ICON_SIZE}
+          fallback={source?.startsWith("browser:") ? "browser" : "panel"}
+        />
         <Text
           as="span"
           size="2"
@@ -1475,6 +1491,9 @@ function BreadcrumbBar({
       key={panel.id}
       panelId={panel.id}
       title={panel.title}
+      icon={panel.icon}
+      source={panel.source}
+      favicon={panel.favicon}
       isActive={isActive}
       isCurrent={isCurrent}
       onNavigate={() => onNavigateToId?.(panel.id)}
@@ -1489,6 +1508,9 @@ function BreadcrumbBar({
       key={ancestor.id}
       panelId={ancestor.id}
       title={ancestor.title}
+      icon={ancestor.icon}
+      source={ancestor.source}
+      favicon={ancestor.favicon}
       isActive={true}
       isCurrent={false}
       onNavigate={() => onNavigateToId?.(ancestor.id)}

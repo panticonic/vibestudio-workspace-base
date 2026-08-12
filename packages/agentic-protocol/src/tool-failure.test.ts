@@ -28,6 +28,7 @@ describe("agent tool failure contract", () => {
       code: "ExternalEffectFailed",
       kind: "external-effect",
       retry: { policy: "retry-identical", commandIdPolicy: "reuse-identical" },
+      recovery: { action: "retry-identical" },
       causal: { invocationId: "inv:1", commandId: "cmd:1" },
       causes: [
         { role: "primary", code: "ExternalEffectFailed" },
@@ -35,6 +36,52 @@ describe("agent tool failure contract", () => {
       ],
     });
     expect(renderAgentToolFailure(failure)).toContain("cleanup denied");
+  });
+
+  it("normalizes authoritative tool-result failures and explicit recovery actions", () => {
+    const failure = agentToolFailureFromUnknown(
+      {
+        protocolContent: [{ type: "text", text: "panel generation is stale" }],
+        details: {
+          errorData: {
+            code: "stale_panel_generation",
+            recovery: {
+              action: "reacquire-handle",
+              instruction: "Acquire a fresh page from the rebuilt panel generation.",
+            },
+          },
+        },
+      },
+      { operation: "tool.eval", stage: "execute" }
+    );
+
+    expect(failure).toMatchObject({
+      code: "stale_panel_generation",
+      recovery: {
+        action: "reacquire-handle",
+        instruction: "Acquire a fresh page from the rebuilt panel generation.",
+      },
+    });
+  });
+
+  it("maps CDP recovery codes to portable handle recovery", () => {
+    const failure = agentToolFailureFromUnknown(
+      Object.assign(new Error("target connection closed"), {
+        code: "cdp_target_closed",
+        errorData: {
+          code: "cdp_target_closed",
+          failureKind: "infrastructure",
+          recovery: "reacquire-page",
+        },
+      }),
+      { operation: "tool.eval", stage: "execute" }
+    );
+
+    expect(failure.recovery).toEqual({
+      action: "reacquire-handle",
+      instruction:
+        "Refresh or reacquire the panel's generation-fenced CDP session. Do not reuse the cached page.",
+    });
   });
 
   it("rebinds an existing envelope to the current operation without losing details", () => {

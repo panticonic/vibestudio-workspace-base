@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import { HeadlessSession } from "./headless-session.js";
 import type { ChatMessage, ConnectionConfig } from "@workspace/agentic-core";
-import { AGENTIC_EVENT_PAYLOAD_KIND, brandId, type TurnId } from "@workspace/agentic-protocol";
+import {
+  AGENTIC_EVENT_PAYLOAD_KIND,
+  AGENTIC_PROTOCOL_VERSION,
+  brandId,
+  type TurnId,
+} from "@workspace/agentic-protocol";
 import type { MethodDefinition } from "@workspace/pubsub";
 
 function createConfig(): ConnectionConfig {
@@ -39,6 +44,54 @@ describe("HeadlessSession", () => {
     expect(snap.cleanup).toMatchObject({ phase: "idle" });
     expect(snap.cleanupErrors).toEqual([]);
     expect(snap.participants).toEqual({});
+  });
+
+  it("projects agentic events delivered by the recovery-aware connection callback", () => {
+    const session = HeadlessSession.create({ config: createConfig() });
+    (session as any)._channelId = "headless-1";
+    const actor = { kind: "agent", id: "agent-1" };
+    const turnId = brandId<TurnId>("turn-1");
+    const base = {
+      type: AGENTIC_EVENT_PAYLOAD_KIND,
+      senderId: "agent-1",
+      senderMetadata: { name: "Agent", type: "agent", handle: "agent" },
+      contentClass: "internal",
+      externalKeys: [],
+    };
+
+    (session as any).handleEvent({
+      ...base,
+      pubsubId: 1,
+      payload: {
+        kind: "message.started",
+        actor,
+        turnId,
+        causality: { messageId: "message-1" },
+        payload: { protocol: AGENTIC_PROTOCOL_VERSION, role: "assistant", blocks: [] },
+        createdAt: "2026-08-09T00:00:00.000Z",
+      },
+    });
+    (session as any).handleEvent({
+      ...base,
+      pubsubId: 2,
+      payload: {
+        kind: "message.completed",
+        actor,
+        turnId,
+        causality: { messageId: "message-1" },
+        payload: {
+          protocol: AGENTIC_PROTOCOL_VERSION,
+          role: "assistant",
+          blocks: [{ blockId: "message-1:block:0", type: "text", content: "ready" }],
+          outcome: "completed",
+        },
+        createdAt: "2026-08-09T00:00:01.000Z",
+      },
+    });
+
+    expect(session.messages).toEqual([
+      expect.objectContaining({ senderId: "agent-1", content: "ready", complete: true }),
+    ]);
   });
 
   it("snapshot exposes transcript messages, invocation diagnostics, debug events, and participants", () => {
@@ -385,7 +438,7 @@ describe("HeadlessSession", () => {
     ]);
   });
 
-  it("records isolated context cleanup failure without creating a second cleanup owner", async () => {
+  it("reports isolated context cleanup failure without creating a second cleanup owner", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const session = HeadlessSession.create({ config: createConfig() });
     const calls: Array<{ target: string; method: string }> = [];
@@ -400,7 +453,7 @@ describe("HeadlessSession", () => {
       return undefined;
     });
 
-    await session.close();
+    await expect(session.close()).rejects.toThrow(/Headless session cleanup failed in 1 phase/);
 
     expect(session.snapshot().cleanupErrors).toEqual([
       expect.objectContaining({
@@ -490,7 +543,7 @@ describe("HeadlessSession", () => {
     expect(session.snapshot().cleanupErrors).toEqual([]);
   });
 
-  it("records cleanup errors from headless agent teardown", async () => {
+  it("reports every cleanup error after attempting the full headless agent teardown", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     const session = HeadlessSession.create({
       config: createConfig(),
@@ -504,7 +557,12 @@ describe("HeadlessSession", () => {
       return undefined;
     });
 
-    await session.close();
+    const cleanupError = await session.close().catch((error: unknown) => error);
+    expect(cleanupError).toBeInstanceOf(AggregateError);
+    expect((cleanupError as AggregateError).errors).toEqual([
+      expect.objectContaining({ message: "unsubscribe failed" }),
+      expect.objectContaining({ message: "retire failed" }),
+    ]);
 
     expect(session.snapshot().cleanupErrors).toEqual([
       expect.objectContaining({ phase: "unsubscribeHeadlessAgent", message: "unsubscribe failed" }),
@@ -635,6 +693,7 @@ describe("HeadlessSession", () => {
 
       await registeredMethods["inline_ui"]!.execute(
         {
+          id: "setup-overview",
           code: "export default function App() { return null; }",
         },
         {} as never
@@ -658,11 +717,12 @@ describe("HeadlessSession", () => {
         kind: "ui.inline_rendered",
         payload: expect.objectContaining({
           uiType: "inline",
+          id: "setup-overview",
           source: { type: "code", code: "export default function App() { return null; }" },
         }),
       }),
       expect.objectContaining({
-        idempotencyKey: expect.stringContaining("synthetic-ui:inline:"),
+        idempotencyKey: expect.stringContaining("synthetic-ui:inline:setup-overview:"),
       }),
     ]);
     expect(publish.mock.calls[1]).toEqual([

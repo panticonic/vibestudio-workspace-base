@@ -52,6 +52,15 @@ export type {
   AgentToolRetryPolicy,
 } from "./tool-failure.js";
 
+export {
+  AGENT_TOOL_ARTIFACT_PROTOCOL,
+  AGENT_TOOL_ARTIFACT_URI_PREFIX,
+  agentToolArtifactRefSchema,
+  artifactDigestFromUri,
+  createAgentToolArtifactRef,
+} from "./tool-artifact.js";
+export type { AgentToolArtifactRef } from "./tool-artifact.js";
+
 export type {
   ApprovalId,
   BlockId,
@@ -74,6 +83,9 @@ export type {
   ActorRef,
   AgenticEvent,
   ApprovalPayload,
+  AutomationDefinitionSnapshot,
+  AutomationInstitutedPayload,
+  AutomationScheduleSnapshot,
   BranchPayload,
   BuildCompletedPayload,
   ChannelForkArchivedPayload,
@@ -116,15 +128,12 @@ export type {
   SandboxSourcePayload,
   SemanticParticipantKind,
   StoredAgenticEvent,
-  SubagentProgressKind,
-  SubagentProgressUpdate,
   SystemPayload,
   TaskPayload,
   TaskAbandonedPayload,
   TaskCancelledPayload,
   TaskCompletedPayload,
   TaskFailedPayload,
-  TaskProgressPayload,
   TaskStartedPayload,
   TrajectoryEvent,
   TurnPayload,
@@ -247,6 +256,7 @@ export type {
   ChannelTimelineEntry,
   ChannelViewState,
   ForkProjection,
+  ProjectedAutomationInstitution,
   ProjectedCredentialRequest,
   ProjectedCustomMessage,
   ProjectedCustomMessageUpdate,

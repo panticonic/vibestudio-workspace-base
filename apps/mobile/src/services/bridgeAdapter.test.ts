@@ -2,12 +2,13 @@ import { createBridgeAdapter } from "./bridgeAdapter";
 import type { RpcConnectionStatus, RpcEnvelope } from "@vibestudio/rpc";
 import type { WebRtcSession } from "@vibestudio/rpc/transports/webrtcClient";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
+import { HOST_COMMAND_CONTRIBUTION_EVENT } from "@vibestudio/shared/hostCommands";
 
 function createAdapter(overrides?: Partial<Parameters<typeof createBridgeAdapter>[0]>) {
   return createBridgeAdapter({
     panelManager: {} as never,
     transport: {} as never,
-    callbacks: { navigateToPanel: jest.fn() },
+    callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
     deliverToPanel: jest.fn(),
     getPanelLease: jest.fn(),
     ...overrides,
@@ -44,6 +45,22 @@ function panelRequestEnvelope(requestId: string): RpcEnvelope {
   };
 }
 
+function shellContributionEnvelope(event = HOST_COMMAND_CONTRIBUTION_EVENT): RpcEnvelope {
+  const caller = { callerId: "panel:forged", callerKind: "panel" as const };
+  return {
+    from: caller.callerId,
+    target: "shell",
+    delivery: { caller },
+    provenance: [caller],
+    message: {
+      type: "event",
+      event,
+      fromId: caller.callerId,
+      payload: { commands: [{ id: "chat-actions", label: "Conversation actions" }] },
+    },
+  };
+}
+
 function stampedPanelEnvelope(requestId: string) {
   return expect.objectContaining({
     from: "panel:runtime-a",
@@ -62,7 +79,7 @@ describe("bridgeAdapter panel init", () => {
     const adapter = createAdapter({
       panelManager: panelManager as never,
       transport: {} as never,
-      callbacks: { navigateToPanel: jest.fn() },
+      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
       getPanelInit,
     });
 
@@ -79,7 +96,7 @@ describe("bridgeAdapter panel init", () => {
     const adapter = createAdapter({
       panelManager: panelManager as never,
       transport: {} as never,
-      callbacks: { navigateToPanel: jest.fn() },
+      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
     });
 
     await expect(adapter.handle("panel:tree/panel-a", "getPanelInit", [])).resolves.toEqual({
@@ -103,6 +120,59 @@ describe("bridgeAdapter CDP routing", () => {
 });
 
 describe("bridgeAdapter panel session relay", () => {
+  it("keeps every shell envelope at the owning mobile host", async () => {
+    const deliverToShell = jest.fn();
+    const openPanelSession = jest.fn();
+    const contribution = shellContributionEnvelope();
+    const futureEvent = shellContributionEnvelope("runtime:future-shell-capability");
+    const adapter = createAdapter({
+      transport: { openPanelSession } as never,
+      callbacks: { navigateToPanel: jest.fn(), deliverToShell },
+    });
+
+    await expect(
+      adapter.handle("panel:tree/panel-a", "postEnvelope", [contribution])
+    ).resolves.toBeUndefined();
+    await expect(
+      adapter.handle("panel:tree/panel-a", "postEnvelope", [futureEvent])
+    ).resolves.toBeUndefined();
+    expect(deliverToShell).toHaveBeenNthCalledWith(1, "panel:tree/panel-a", contribution);
+    expect(deliverToShell).toHaveBeenNthCalledWith(2, "panel:tree/panel-a", futureEvent);
+    expect(openPanelSession).not.toHaveBeenCalled();
+  });
+
+  it("holds a pipe-racing envelope until the shared transport reconnects", async () => {
+    const pipeClosed = Object.assign(new Error("Not connected to server"), {
+      code: "PIPE_CLOSED",
+    });
+    const session = makePanelSession({
+      send: jest.fn().mockRejectedValueOnce(pipeClosed).mockResolvedValueOnce(undefined),
+    });
+    const waitUntilConnected = jest.fn(async () => undefined);
+    const adapter = createAdapter({
+      panelManager: {} as never,
+      transport: {
+        openPanelSession: jest.fn(async () => session),
+        waitUntilConnected,
+      } as never,
+      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
+      deliverToPanel: jest.fn(),
+      getPanelLease: jest.fn(() => ({
+        runtimeEntityId: "panel:runtime-a" as PanelEntityId,
+        connectionId: "conn-a",
+      })),
+    });
+
+    await expect(
+      adapter.handle("panel:tree/panel-a", "postEnvelope", [panelRequestEnvelope("msg-1")])
+    ).resolves.toBeUndefined();
+
+    expect(waitUntilConnected).toHaveBeenCalledWith(45_000);
+    expect(session.send).toHaveBeenCalledTimes(2);
+    expect(session.send).toHaveBeenNthCalledWith(1, stampedPanelEnvelope("msg-1"));
+    expect(session.send).toHaveBeenNthCalledWith(2, stampedPanelEnvelope("msg-1"));
+  });
+
   it("reuses a session whose transport is reconnecting but not closed", async () => {
     const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     const session = makePanelSession({
@@ -113,7 +183,7 @@ describe("bridgeAdapter panel session relay", () => {
     const adapter = createAdapter({
       panelManager: {} as never,
       transport: { openPanelSession } as never,
-      callbacks: { navigateToPanel: jest.fn() },
+      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
       deliverToPanel: jest.fn(),
       getPanelLease: jest.fn(() => ({
         runtimeEntityId: "panel:runtime-a" as PanelEntityId,
@@ -149,7 +219,7 @@ describe("bridgeAdapter panel session relay", () => {
     const adapter = createAdapter({
       panelManager: {} as never,
       transport: { openPanelSession } as never,
-      callbacks: { navigateToPanel: jest.fn() },
+      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
       deliverToPanel: jest.fn(),
       getPanelLease: jest.fn(() => ({
         runtimeEntityId: "panel:runtime-a" as PanelEntityId,
@@ -194,7 +264,7 @@ describe("bridgeAdapter panel session relay", () => {
     const adapter = createAdapter({
       panelManager: {} as never,
       transport: { openPanelSession } as never,
-      callbacks: { navigateToPanel: jest.fn() },
+      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
       deliverToPanel: jest.fn(),
       getPanelLease: jest.fn(() => lease),
     });
@@ -222,13 +292,12 @@ describe("bridgeAdapter panel session relay", () => {
   });
 
   it("closes a cached session when the panel no longer has a runtime lease", async () => {
-    const warnSpy = jest.spyOn(console, "warn").mockImplementation(() => undefined);
     let hasLease = true;
     const session = makePanelSession();
     const adapter = createAdapter({
       panelManager: {} as never,
       transport: { openPanelSession: jest.fn(async () => session) } as never,
-      callbacks: { navigateToPanel: jest.fn() },
+      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
       deliverToPanel: jest.fn(),
       getPanelLease: jest.fn(() =>
         hasLease
@@ -244,15 +313,10 @@ describe("bridgeAdapter panel session relay", () => {
     await waitFor(() => expect(session.send).toHaveBeenCalledWith(stampedPanelEnvelope("msg-1")));
 
     hasLease = false;
-    await adapter.handle("panel:tree/panel-a", "postEnvelope", [panelRequestEnvelope("msg-2")]);
-    await waitFor(() => expect(session.close).toHaveBeenCalledTimes(1));
-    await waitFor(() =>
-      expect(warnSpy).toHaveBeenCalledWith(
-        "[bridgeAdapter] postEnvelope relay failed (panel panel:tree/panel-a):",
-        expect.any(Error)
-      )
-    );
-    warnSpy.mockRestore();
+    await expect(
+      adapter.handle("panel:tree/panel-a", "postEnvelope", [panelRequestEnvelope("msg-2")])
+    ).rejects.toThrow("has no runtime lease yet");
+    expect(session.close).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -337,7 +401,7 @@ describe("bridgeAdapter upload streams", () => {
     const adapter = createAdapter({
       panelManager: {} as never,
       transport: { openPanelSession: jest.fn(async () => session) } as never,
-      callbacks: { navigateToPanel: jest.fn() },
+      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
       deliverToPanel,
       getPanelLease: jest.fn(() => ({
         runtimeEntityId: "panel:runtime-a" as PanelEntityId,

@@ -51,7 +51,7 @@ Generated from `runtimeSurface.panel.ts`. Use `await help()` at runtime for the 
 | `browserData` | namespace | `getBrowserEnvironment`, `listImportHosts`, `listImportSources`, `previewImport`, `startImport`, `cancelImport`, `getImportJob`, `listImportJobs`, `listOpenTabs`, `openTabsAsPanels`, `getSitePreferences`, `setSiteZoom`, `getBookmarks`, `addBookmark`, `updateBookmark`, `deleteBookmark`, `moveBookmark`, `searchBookmarks`, `getHistory`, `deleteHistoryEntry`, `deleteHistoryRange`, `clearAllHistory`, `searchHistory`, `searchHistoryForAutocomplete`, `recordHistoryVisit`, `updateHistoryTitle`, `getPasswords`, `getPasswordForSite`, `addPassword`, `updatePassword`, `deletePassword`, `updatePasswordLastUsed`, `addNeverSavePassword`, `isNeverSavePassword`, `getNeverSavePasswordOrigins`, `removeNeverSavePassword`, `getFormFillSuggestions`, `addFormFillValue`, `updateFormFillValue`, `markFormFillValueUsed`, `deleteFormFillValue`, `clearFormFillValues`, `getSearchEngines`, `setDefaultEngine`, `applyCookieMutations`, `getCookieSnapshot`, `getCookiesForOrigin`, `clearCookiesForOrigin`, `clearAllCookies`, `endBrowserSession`, `getCookieSiteSummary`, `flushCookieProjection`, `getCookieProjectionDiagnostics`, `listDownloads`, `listDownloadRecords`, `upsertDownloadRecord`, `pauseDownload`, `resumeDownload`, `cancelDownload`, `openDownload`, `revealDownload`, `putPageFavicon`, `getPageFavicon`, `exportBookmarks`, `exportPasswords`, `exportCookies` | Typed access to the manifest-declared browser-data provider: detection, import, secret-free summaries, approved sensitive reads, mutation, and export. |
 | `git` | namespace | `setSharedRemote`, `removeSharedRemote`, `setUpstream`, `removeUpstream`, `detachUpstream`, `setAutoPush`, `upstreamStatus`, `pushUpstream`, `pullUpstream`, `publishRepo`, `commitMapping`, `importProject` | Typed external Git operations routed through the workspace's configured gitInterop provider. Import and pull create unpublished semantic candidates; only ordinary VCS integration and explicit publication advance protected main. Declarations carry logical credential names resolved by the host, while credential-free remotes are anonymous-first. Pull dry-runs use isolated temporary state and do not mutate managed Git, semantic state, or the remote. |
 | `vcs` | namespace | `edit`, `move`, `copy`, `merge`, `revert`, `commit`, `discard`, `importSnapshot`, `registerExternalDelta`, `supersedeExternalDelta`, `finalizeExternalDelta`, `push`, `status`, `compare`, `inspect`, `neighbors`, `history`, `blame`, `readMemory`, `resolveRepository`, `readFile`, `listDirectory`, `listFiles` | Simple semantic version control: exact event/application state, expressive edit/move/copy records, incremental local integration, whole-chain commit/discard, directly walkable provenance, and atomic external-snapshot acknowledgements containing the committed event/application/work-unit/repository/snapshot tuple. |
-| `gad` | namespace | `status`, `ensureBlob`, `listUserNotificationsForMe`, `acknowledgeUserNotification`, `putUserNotification`, `deleteUserNotification`, `getTrajectoryBranchHead`, `listTrajectoryBranches`, `listTrajectoryInvocations`, `listTrajectoryApprovals`, `listChannelEnvelopes`, `listTrajectoryEvents`, `appendChannelEnvelope`, `listMessageTypes`, `getMessageType`, `getChannelEnvelope`, `getTrajectoryForEnvelope`, `listPublishedEnvelopesForTrajectory`, `getEnvelopesForTrajectory`, `getPublishedArtifactsForTurn`, `getPrivateLineageForPublishedEnvelope`, `getDownstreamConsumers`, `readChannelEnvelopes`, `inspectChannelEnvelopes`, `listStoredValueRefs`, `inspectStorageDiagnostics`, `inspectPublicationIntegrity`, `inspectTurnState`, `inspectInvocationState`, `diagnoseInvocation`, `inspectChannelRoster`, `inspectAgentHealth`, `validateGadHashes`, `clearDirtyAfterValidation`, `checkGadIntegrity`, `rebuildTrajectoryProjections` | Typed access to the workspace's canonical Graph and Data store: parameterized SQL, trajectory/channel lineage, integrity diagnostics, provenance, and bounded channel-envelope paging. |
+| `gad` | namespace | `status`, `ensureBlob`, `listUserNotificationsForMe`, `acknowledgeUserNotification`, `putUserNotification`, `deleteUserNotification`, `getTrajectoryBranchHead`, `listTrajectoryBranches`, `listTrajectoryInvocations`, `listTrajectoryApprovals`, `listChannelEnvelopes`, `listTrajectoryEvents`, `appendChannelEnvelope`, `listMessageTypes`, `getMessageType`, `getChannelEnvelope`, `getTrajectoryForEnvelope`, `resolveTrajectoryForkPoint`, `listPublishedEnvelopesForTrajectory`, `getEnvelopesForTrajectory`, `getPublishedArtifactsForTurn`, `getPrivateLineageForPublishedEnvelope`, `getDownstreamConsumers`, `readChannelEnvelopes`, `inspectChannelEnvelopes`, `listStoredValueRefs`, `inspectStorageDiagnostics`, `inspectPublicationIntegrity`, `inspectTurnState`, `inspectInvocationState`, `diagnoseInvocation`, `inspectChannelRoster`, `inspectAgentHealth`, `validateGadHashes`, `clearDirtyAfterValidation`, `checkGadIntegrity`, `rebuildTrajectoryProjections` | Typed access to the workspace's canonical Graph and Data store: parameterized SQL, trajectory/channel lineage, integrity diagnostics, provenance, and bounded channel-envelope paging. |
 | `blobstore` | namespace | `has`, `stat`, `putText`, `getText`, `getRange`, `getRangeBytes`, `grep`, `putBase64`, `getBase64`, `putTree`, `getTree`, `listTree`, `readFileAtTree`, `diffTrees`, `materializeTree`, `delete`, `list`, `putBytes`, `getBytes`, `readText` | Per-workspace content-addressable blob store: putText/putBase64 store, getText/readText/getRange/getRangeBytes/getBase64 fetch, grep searches; returns a sha256 digest. readText is a portable alias of getText and both return string \| null. Runtime-only putBytes(Uint8Array \| ArrayBuffer) and getBytes(digest) losslessly bridge the wire's base64 representation; MIME metadata is not stored. Persist large artifacts/screenshots and return the digest. Immutable file trees: putTree/getTree store and read tree objects, listTree/readFileAtTree walk a tree hash, diffTrees compares two trees. |
 | `webhooks` | namespace | `createSubscription`, `listSubscriptions`, `revokeSubscription`, `rotateSecret` | Ergonomic owner-scoped webhook lifecycle, identical in panels, workers, DOs, and agent eval: createSubscription(request), listSubscriptions(), rotateSecret(subscriptionId, secret?), and revokeSubscription(subscriptionId). Each subscription has an explicit maxBodyBytes budget: relay defaults to its 1,500,000-byte transport ceiling, while direct defaults to the operator-configured host ceiling (16 MiB by default). Delivery events currently include rawBodyBase64, so the host ceiling also bounds that in-memory expansion. Agent eval delegates ownership and target-source checks to its host-verified owning runtime. Secrets are redacted from listings. |
 | `extensions` | namespace | `use`, `invoke`, `invokeProvider`, `on` |  |
@@ -59,15 +59,15 @@ Generated from `runtimeSurface.panel.ts`. Use `await help()` at runtime for the 
 | `services` | value |  | Portable dynamic service namespace. Rich runtime clients are available by name; other services dispatch through the caller-scoped main service boundary. The same client is available in panels, workers, Durable Objects, and eval. |
 | `hosts` | value |  | Portable owner-scoped attached-host access for development sessions. |
 | `runtime` | value |  | Portable typed runtime lifecycle and supervision client for the current workspace context. |
-| `workspace` | namespace | `getInfo`, `getActive`, `getConfig`, `validateConfig`, `setInitPanels`, `setConfigField`, `applyPreparedConfig`, `getAgentsMd`, `listSkills`, `readSkill`, `sourceTree`, `ensureContextFolder`, `findUnitForPath`, `recurring`, `heartbeats`, `projects` | Workspace catalog, source tree, and unit helpers. Does not include panelTree; import top-level panelTree for panel-tree handles. |
+| `workspace` | namespace | `getInfo`, `getActive`, `getConfig`, `validateConfig`, `setInitPanels`, `setConfigField`, `applyPreparedConfig`, `getAgentsMd`, `listSkills`, `readSkill`, `sourceTree`, `ensureContextFolder`, `findUnitForPath`, `projects` | Workspace catalog, source tree, and unit helpers. Does not include panelTree; import top-level panelTree for panel-tree handles. |
 | `createPanelSlot` | value |  | Commit a panel under the caller and promptly return its durable handle without focusing or waiting for activation, build, or boot. Server reconciliation owns activation after commit and recovers it across transient failure or restart. Pass operationId for retry-stable identity across exact redelivery; source, contextId, parentId, and ref are also part of that identity. Do not combine operationId with slug. Use handle.observe() when current lifecycle state matters. |
-| `openPanel` | value |  | Create a panel and return its handle after the exact attempt is application boot-ready, with no fixed readiness deadline. Pass options.signal for caller-owned cancellation and operationId for retry-stable exact redelivery; source, contextId, parentId, and ref are also part of that identity. Do not combine operationId with slug. It defaults under the caller and focused; use parentId:null for a root or focus:false to suppress presentation. options.placement accepts "side" (default), "replace", or "split-below". The returned PanelHandle is the complete lifecycle and inspection API. Use `const page = await handle.cdp.page()` before `await page.evaluate(...)` or `await page.screenshot(...)`; page() returns a Promise, not a page proxy. For a one-call host image use `await handle.cdp.screenshot({ format: "png" })`. For host-captured logs since panel creation use `await handle.cdp.consoleHistory()` (live page console events are separate). |
+| `openPanel` | value |  | Create a panel and return its handle after the exact attempt is application boot-ready, with no fixed readiness deadline. Pass options.signal for caller-owned cancellation and operationId for retry-stable exact redelivery; source, contextId, parentId, and ref are also part of that identity. Do not combine operationId with slug. It defaults under the caller and focused; use parentId:null for a root or focus:false to suppress presentation. options.placement accepts "side" (default), "side-if-room", "replace", or "split-below". The returned PanelHandle is the complete lifecycle and inspection API. Use `const session = await handle.cdp.session(); const page = session.page` for multi-step automation. The session records the immutable panel generation; after rebuild/navigation call `await session.refresh()` and use the returned session instead of replaying an uncertain action. For a one-off read, `await handle.cdp.page()` remains available and returns a Promise, not a page proxy. For a one-call host image use `await handle.cdp.screenshot({ format: "png" })`. For host-captured logs since panel creation use `await handle.cdp.consoleHistory()` (live page console events are separate). |
 | `getPanelHandle` | value |  |  |
 | `panelTree` | namespace | `self`, `get`, `rootOwners`, `roots`, `rootsForOwner`, `children`, `page`, `path`, `search`, `parent`, `navigate`, `navigateHistory` | Top-level export, not workspace.panelTree. self/get are synchronous handle factories. Use roots(input?) for the current human subject, rootOwners() then rootsForOwner(ownerUserId) for cross-owner inspection, or children(parentSlotId); each returns a bounded page with entries. page(...) is the advanced discriminated-group primitive. search(...) returns hits containing entry.node and entry.handle. Handle navigate/navigateHistory/focus/reload/rebuild return a boot-ready PanelObservation; observe is the sole live status read. |
 | `Rpc` | value |  | RPC helpers namespace export. |
 | `z` | value |  | Zod export. |
 | `defineContract` | value |  |  |
-| `buildPanelLink` | value |  | Build a managed panel URL; options.disposition controls tree placement and options.placement supplies visual side/replace/split-below hints. |
+| `buildPanelLink` | value |  | Build a managed panel URL; options.disposition controls tree placement and options.placement supplies visual side/side-if-room/replace/split-below hints. |
 | `buildPanelDeepLink` | value |  | Build a canonical panel deep link with optional tree disposition and visual placement hints. |
 | `buildPanelShareLink` | value |  | Build a canonical panel share link with optional tree disposition and visual placement hints. |
 | `parseContextId` | value |  |  |
@@ -78,7 +78,7 @@ Generated from `runtimeSurface.panel.ts`. Use `await help()` at runtime for the 
 | `resolvePath` | value |  |  |
 | `createGatewayFetch` | value |  | Create a gateway-authenticated fetch helper from an explicit config. |
 | `FORM_FILL_TYPES` | value |  | Canonical HTML autocomplete field vocabulary recognized by browser form fill. |
-| `panel` | namespace | `entityId`, `slotId`, `parentId`, `env`, `setTitle`, `getInfo`, `focusPanel`, `getTheme`, `onThemeChange`, `onFocus`, `onConnectionError`, `onChildCreated`, `reopen`, `stateArgs` | Panel-only affordances: identity (entityId/slotId/parentId/env), semantic display title (setTitle(title, { explicit? })), introspection (getInfo/getTheme/onThemeChange/onFocus/onConnectionError), lifecycle (focusPanel/onChildCreated/reopen), and stateArgs (get/set/setForPanel). |
+| `panel` | namespace | `entityId`, `slotId`, `parentId`, `env`, `setTitle`, `getInfo`, `focusPanel`, `getTheme`, `onThemeChange`, `registerHostCommands`, `unregisterHostCommands`, `onHostCommandRun`, `onFocus`, `onConnectionError`, `onChildCreated`, `reopen`, `stateArgs` | Panel-only affordances: identity (entityId/slotId/parentId/env), semantic display title (setTitle(title, { explicit? })), introspection (getInfo/getTheme/onThemeChange/onFocus/onConnectionError), host-local command contribution (registerHostCommands/unregisterHostCommands/onHostCommandRun), lifecycle (focusPanel/onChildCreated/reopen), and stateArgs (get/set/setForPanel). |
 | `journal` | namespace | `Journal`, `with`, `current` | Panel operation journaling: journal.Journal (class), journal.with(journal, fn), journal.current(). |
 | `agentApi` | value |  |  |
 | `adblock` | namespace | `getStats`, `isActive`, `getStatsForPanel`, `isEnabledForPanel`, `setEnabledForPanel`, `resetStatsForPanel`, `getPanelUrl`, `addToWhitelist`, `removeFromWhitelist` |  |
@@ -196,11 +196,25 @@ const id = await notifications.show({
   title: "Notification test",
   message: "notification-show-marker",
 });
+
+// The host issued this opaque id. Retain it only if this runtime may dismiss
+// the notification later.
+await notifications.dismiss(id);
 ```
 
 `type` may be `info`, `success`, `warning`, `error`, or `consent`. The runtime
 client defaults an omitted `type` to `info`; notification text belongs in
-`message`.
+`message`. Notification ids are derived from the verified caller and fresh host
+entropy; callers cannot provide, reuse, or impersonate an id. Only the runtime
+that created a notification can dismiss it, and only an authenticated shell can
+report a user click.
+
+This is a transient shell-chrome surface, delivered only to live sessions for
+the caller's verified account. A returned id confirms host acceptance, not that
+a person saw the notification. Keep ordinary progress and completion in the
+conversation; use a notification only for brief attention that is useful while
+the user is connected. Notification callbacks belong to the creating runtime's
+live heap and are not a durable workflow or approval mechanism.
 
 ## Webhook Subscriptions
 
@@ -367,7 +381,7 @@ code, `panelTree` is imported directly from `@workspace/runtime`; it is not
 > panel node, so `await getParent()` returns `null`. If the workflow needs a
 > child, create an owned root first and parent the target explicitly:
 > `const root = await openPanel("about/new", { parentId: null });` then
-> `const child = await openPanel(source, { parentId: root.id });`. Close `root`
+> `const child = await openPanel(source, { parentId: root.id });`. Archive `root`
 > when done to clean the subtree. Do not throw merely because `getParent()` is
 > null, and do not use the truthiness of the compatibility `parent` handle.
 
@@ -415,10 +429,10 @@ try {
   const before = await handle.stateArgs.get();
   const afterSet = await handle.stateArgs.set({ mode: "live" });
   const after = await handle.stateArgs.get();
-  await handle.close();
+  await handle.archive();
   console.log({ before, afterSet, after });
 } finally {
-  await root.close();
+  await root.archive();
 }
 ```
 
@@ -463,7 +477,7 @@ explicitly means the current chat where the agent is responding.
 
 `openPanel()` creates a panel owned by the workflow. Handles
 from `list`/`roots`/`children`/`get` are existing panels; do not call
-`handle.navigate`, `handle.reload`, or `handle.close` unless requested. Inside
+`handle.navigate`, `handle.reload`, or `handle.archive` unless requested. Inside
 the current panel, prefer `reopen({ contextId, stateArgs })` for
 self-replacement of state/files. `contextId` does not select code provenance;
 pass an explicit `ref` on ref-capable navigation APIs when code should come from
@@ -486,7 +500,8 @@ const state = await same.stateArgs.set({ mode: "review" });
 // Use null to remove a key: await same.stateArgs.set({ mode: null });
 await same.call.someExposedMethod();
 
-const page = await same.cdp.page();
+const session = await same.cdp.session();
+const page = session.page;
 await page.title();
 page.url(); // string, synchronous like Playwright
 await same.click("button");
@@ -499,16 +514,23 @@ There is no separate handle lease/load status. `observe().phase === "ready"` is
 the sole positive readiness answer. `snapshot()` returns
 `{ panelId, attemptId, runtimeEntityId, buildKey, capturedAt, document }`.
 
-`same.cdp.page()` returns the canonical Playwright-style page driven by our
-workerd-native CDP client (`@workspace/cdp-client`). It is the single
-browser-automation surface — there is no separate compatibility tier,
-and you do not import or install any `playwright*` package. The page exposes
+`same.cdp.session()` returns a `panel-cdp-session.v1` lease containing the
+canonical Playwright-style page and its immutable attempt/runtime/build
+generation. Use `session.refresh()` after rebuild or navigation and continue
+with the returned session; the status is `current`, `reconnected`, or
+`replaced`, and no uncertain action is replayed.
+
+`same.cdp.page()` returns the same canonical Playwright-style page without a
+generation lease for one-off work. Both are driven by our workerd-native CDP
+client (`@workspace/cdp-client`). This is one browser-automation surface —
+there is no separate compatibility tier, and you do not import or install any
+`playwright*` package. The page exposes
 locators (`page.locator`, `page.getByRole`, `page.getByText`, `page.getByLabel`,
 …), auto-waiting actions (`click`, `fill`, `check`, `selectOption`, …), reads
 (`innerText`, `count`, `isVisible`, `getAttribute`, …), and page-level methods
 (`goto`, `screenshot`, `waitForSelector`, `evaluate`, …). For protocol-level
 work, `import { CdpConnection } from "@workspace/cdp-client"` and connect with
-`(await same.cdp.getCdpEndpoint())`. There is no second page-acquisition API.
+`(await same.cdp.getCdpEndpoint())`.
 
 `openPanel`/`panelTree`/`PanelHandle` are part of the portable runtime surface
 from `@workspace/runtime`; they work from server-side eval, panels, workers, and

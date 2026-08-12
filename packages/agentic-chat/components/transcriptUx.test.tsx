@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 
-import React from "react";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { PubSubClient } from "@workspace/pubsub";
@@ -60,12 +59,14 @@ describe("agent settings parsing", () => {
         {
           model: { value: "openai-codex:gpt-5.6-sol" },
           thinkingLevel: { value: "max" },
+          fastMode: { value: true },
         },
         null
       )
     ).toMatchObject({
       model: "openai-codex:gpt-5.6-sol",
       thinkingLevel: "max",
+      fastMode: true,
     });
   });
 });

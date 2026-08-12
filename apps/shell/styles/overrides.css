@@ -12,10 +12,10 @@ body,
   overflow: hidden;
   /* Pre-paint background before the Radix theme mounts — follow the system
      preference so a light-mode user never gets a dark flash. Literal because
-     nothing is themed yet; these are the default `grayColor` (mauve) steps 6
-     and 3, matching `--app-chrome-bg` below, so the first paint is already the
-     frame the user is about to see. */
-  background: #dbd8e0;
+     nothing is themed yet; this is the default `grayColor` (mauve) step 3,
+     matching `--app-chrome-bg` below in both appearances so the first paint is
+     already the frame the user is about to see. */
+  background: #f2eff3;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -28,9 +28,9 @@ body,
 
 /* ============================================================================
    Shell surfaces. These override the shared `--surface-*` tokens (defined in
-   tokens.css) but are SHELL-SCOPED: this file is loaded only by the shell
+   foundation.css) but are SHELL-SCOPED: this file is loaded only by the shell
    bundle — the main window AND the transparent approval overlay, both Radix
-   themes. Panels render in their own webContents that load tokens.css but never
+   themes. Panels render in their own webContents that load foundation.css but never
    this file, so panel surfaces keep the original tokens. Re-tinting
    `--surface-*` here (rather than swapping `grayColor`) is what keeps the
    recolour on the chrome and off the panels.
@@ -38,27 +38,22 @@ body,
    Hue rides the theme's own `grayColor` — `--gray-*`, which the app pairs with
    its violet accent as `mauve`. That keeps the frame in the brand's neutral
    family rather than a foreign one, and it follows the user's gray choice for
-   free. What made mauve read as "branded" before was never the hue but the
-   step: chrome sat at gray-2/4, so it came out as lavender-tinted near-white.
-   Several rungs down it reads as grey with a warm undertone, and the tint
-   works *for* it — a perfectly neutral grey next to these faintly magenta
-   panel surfaces picks up a green cast by simultaneous contrast.
+   free. In light mode the frame deliberately uses the same calm step as the
+   approval prompt: across a large desktop area the deeper rungs read muddy,
+   while this faint mauve still distinguishes the chrome from panel content.
 
    ONE ramp serves both the frame (titlebar, tree, pane backing — via the
    `--app-chrome-*` aliases below) and the floating surfaces (approval card and
    pill, which read `--surface-raised`/`--surface-card` directly). That is
-   deliberate: a floating card reads as a lighter shade of the same grey the
-   frame is cut from. It does mean retuning the frame moves those cards with it,
-   so check the approval overlay after changing a step here.
-
-   Light mode is a properly grey shelf, several rungs down the scale — not
-   off-white, and not dark-mode dark either. Raised surfaces stay one rung
-   lighter than the chrome base in BOTH appearances so elevation still reads.
+   deliberate: the frame and floating card share a neutral family. In light
+   mode their main surfaces meet at gray-3; the card's border and shadow,
+   rather than a second background hue, carry its elevation. Dark mode keeps
+   its existing tonal lift because that contrast remains useful there.
    ============================================================================ */
 .radix-themes:where(.light, .light-theme) {
-  --surface-chrome: var(--gray-6);
-  --surface-card: var(--gray-5);
-  --surface-raised: var(--gray-4);
+  --surface-chrome: var(--gray-3);
+  --surface-card: var(--gray-4);
+  --surface-raised: var(--gray-3);
   --surface-border: var(--gray-a7);
   /* Approval cards already carry a hairline border. Keep their light-mode lift
      compact enough for the native overlay's 16px transparent margin. */
@@ -121,12 +116,11 @@ body,
   border-radius: 0;
 }
 
-/* The tree is persistent shell chrome, not panel content. In light mode its
-   raised surface was nearly identical to pale panel pages, so keep it on the
-   slightly deeper chrome step used by the surrounding shell. */
+/* The tree is an interior shell surface, like the prompt, rather than the
+   desktop frame behind it. It therefore keeps the generic panel-card fill
+   above (`--app-chrome-bg-strong`) instead of overriding it with the deeper
+   base chrome rung. */
 .app-shell-panel-card[data-shell-panel-sidebar="true"] {
-  --card-background-color: var(--app-chrome-bg);
-  background-color: var(--app-chrome-bg);
   /* A Card's size prop buys a generous inset that suits a content card and
      wastes a navigator: sixteen pixels on each side is an eighth of a 260px
      sidebar spent on nothing, before the tree has indented anything. The rows,
@@ -135,21 +129,26 @@ body,
   --card-padding: 0;
 }
 
-/* Panel tree scroller. The slim thumb is global (tokens.css); what's specific
-   here is the reserved gutter: the virtualizer measures this element, so a
-   scrollbar that appears and disappears as rows expand would reflow the tree. */
+/* Panel tree scroller. What's specific here is the reserved gutter: the
+   virtualizer measures this element, so a scrollbar that appears and
+   disappears as rows expand would reflow the tree. */
 .panel-tree-scroll {
   /* `stable` alone reserves the lane on the inline-end side only, so the tree
-     sat 10px off the right edge and 0 off the left while the filter and footer
+     sat off the right edge and flush on the left while the filter and footer
      — which are outside this scroller — used their own margin and matched
-     neither. `both-edges` makes the reserved lane symmetric, and a narrower
-     scrollbar scoped to this scroller brings it down to the same gutter the
-     rest of the sidebar uses, so one value lines up every region. Reserving
+     neither. `both-edges` makes the reserved lane symmetric. Reserving
      (rather than overlaying) is still required: the virtualizer measures this
-     element, so a scrollbar appearing as rows expand would reflow the tree. */
+     element, so a scrollbar appearing as rows expand would reflow the tree.
+
+     That lane is the whole horizontal inset the tree pays, so it has to equal
+     the sidebar's 4px gutter or the rows come out visibly narrower than the
+     filter field and footer button. Its width is the scrollbar's width, which
+     foundation.css derives from `--scrollbar-size` — so narrowing that variable
+     here narrows the lane, no override of the scrollbar rules themselves. */
   scrollbar-gutter: stable both-edges;
-  --scrollbar-size: 8px;
-  --scrollbar-inset: 2px;
+  /* Thumb fills the lane: at 4px a transparent inset would leave nothing. */
+  --scrollbar-size: 4px;
+  --scrollbar-inset: 0px;
 }
 
 /* Radix Card paints its surface border on `::after`, so the element's
@@ -211,7 +210,7 @@ body,
   outline-offset: -1px;
 }
 
-/* (Reduced-motion handling is centralized in tokens.css — one global block
+/* (Reduced-motion handling is centralized in foundation.css — one global block
    collapses all animation/transition to instant; no per-rule overrides here.) */
 
 /* Responsive file overview panels: stack vertically on narrow viewports */
@@ -343,7 +342,7 @@ body,
 
 /* The card floats free of the window, so its scrollers sit closer to the eye
    than in-app ones — carry the shared shape at a slightly stronger tone.
-   (The slim scrollbar itself is global, in tokens.css.) */
+   (The slim scrollbar itself is global, in foundation.css.) */
 .approval-card {
   --scrollbar-thumb: color-mix(in srgb, var(--gray-10) 55%, transparent);
 }
@@ -588,6 +587,29 @@ html[data-overlay-dragging] * {
   }
 }
 
+/* Transient shell notices share the compact top-chrome band, but unlike an
+   outstanding approval they enter once and never pulse for attention. */
+.shell-notification-strip {
+  animation: shell-notification-strip-in var(--motion-base) var(--ease-decelerate);
+}
+
+@keyframes shell-notification-strip-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-notification-strip {
+    animation: none;
+  }
+}
+
 .approval-pill-icon {
   width: 26px;
   height: 26px;
@@ -644,7 +666,7 @@ html[data-overlay-dragging] * {
 }
 
 /* (Approval motion is collapsed by the centralized reduced-motion block in
-   tokens.css — no local override needed.) */
+   foundation.css — no local override needed.) */
 
 .approval-caller-chip {
   display: inline-flex;
@@ -683,6 +705,25 @@ html[data-overlay-dragging] * {
 .approval-caller-chip-kind {
   color: var(--gray-10);
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.install-review-part-icon {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  font-size: 18px;
+  line-height: 1;
+  font-family:
+    Apple Color Emoji,
+    Segoe UI Emoji,
+    Noto Color Emoji,
+    sans-serif;
 }
 
 /* Approval details: native disclosure with shell chrome styling */
@@ -1023,8 +1064,7 @@ html[data-overlay-dragging] * {
   padding-top: 6px;
 }
 
-.install-review-repairs,
-.install-review-charters {
+.install-review-repairs {
   border-top: 1px solid var(--gray-a3);
   padding-top: 8px;
 }

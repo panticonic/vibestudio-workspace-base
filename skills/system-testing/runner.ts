@@ -4,7 +4,7 @@ import {
   type SessionSnapshot,
 } from "@workspace/agentic-session";
 import type { ConnectionConfig } from "@workspace/agentic-core";
-import { blobstore, gad, rpc, vcs, workers } from "@workspace/runtime";
+import { blobstore, gad, openPanel, panelTree, rpc, vcs, workers } from "@workspace/runtime";
 import {
   SYSTEM_TEST_AGENT_MODEL,
   systemTestModelRoute,
@@ -14,7 +14,7 @@ import { systemTestFailure } from "./structured-error.js";
 import {
   WorkspaceRepoFixtureLifecycle,
   type WorkspaceRepoFixtureCleanup,
-  type WorkspaceRepoFixtureSpec,
+  type WorkspaceRepoCreationScope,
   type WorkspaceRepoFixtureState,
 } from "./workspace-repo-fixture.js";
 import type { AgentExecutionTestPolicySpec } from "@vibestudio/shared/authority/testPolicy";
@@ -22,6 +22,7 @@ import { vcsStateNodeRefSchema, type VcsStateNodeRef } from "@vibestudio/service
 import type { AttachedHostApprovalAuditEvent } from "@vibestudio/service-schemas/attachedHosts";
 import type { TestAuthorityPolicy } from "./types.js";
 import type { BlobReader } from "@workspace/agentic-protocol";
+import { createRecoveryCoordinator } from "@vibestudio/shell-core/recoveryCoordinator";
 
 // This runner is eval'd server-side (in the orchestrating agent's EvalDO), so it
 // uses the portable client surface — NOT panel-only `getStateArgs`/`slotId`.
@@ -34,9 +35,9 @@ Your job is to exercise the documented path honestly, not to make the test pass 
 
 When a task depends on Vibestudio behavior, use the relevant docs or skill files to choose the most straightforward supported approach.
 
-Treat the request like a normal user's request. Route from the Available skills index to the closest user-facing skill before doing a broad source search. Use normal approval routing for ordinary work: omit the \`authority\` field unless the task explicitly tests an attenuated or \`pregranted-only\` run. \`pregranted-only\` asserts that the required grants already exist; it is not a way to skip normal approval routing. Do not inspect \`skills/system-testing\`, its test definitions, validators, marker strings, or captured artifacts to reverse-engineer what the test expects; those are harness implementation, not product documentation.
+Treat the request like a normal user's request. Route from the Available skills index to the closest user-facing skill before doing a broad source search. Use normal approval routing for ordinary work: omit the \`authority\` field unless the task explicitly tests an attenuated or \`pregranted-only\` run. \`pregranted-only\` asserts that the required grants already exist; it is not a way to skip normal approval routing. Test-harness implementation and captured artifacts are not product evidence and must never be used to infer an answer.
 
-This session is genuinely headless: there is no initial visible panel ancestor. The panel tree still works. If a task needs an actual child panel and getParent() is null, follow the documented headless tree pattern: create an owned root panel explicitly, create the requested panel with that root's id as parentId, and close the temporary root to clean the subtree.
+This session is genuinely headless: there is no initial visible panel ancestor, but the panel tree still works. Follow the documented headless tree pattern when a task needs an actual child. Panels created for an investigation are working state owned by that investigation: unless the user asked to keep one as a deliverable, leave the tree as you found it. Never archive a panel that predated the task merely because it was visible.
 
 If that documented approach fails, stop and report what happened. Do not keep trying alternate strategies, guessing APIs, editing source, switching to shell commands, or calling raw internal services unless the test prompt explicitly asks for that fallback.
 
@@ -46,10 +47,7 @@ Use file-loaded eval for substantive multi-line or multi-file eval work. Do not 
 
 Keep evidence bounded. Report summaries, counts, ids, byte lengths, exact error messages, the final agent message, the validation reason, and the relevant tool call statuses/errors. Do not paste large raw payloads, full database rows, full channel envelopes, image data, or secrets.
 
-Every final response should be concise and contain exactly one terminal status declaration at the start of a line:
-\`Task completed.\`
-\`Task not completed.\`
-The summary may continue on that line or the next. Summarize what you verified and mention any problems or retries encountered along the way. For an incomplete task, include the concrete mismatch or error. Never just refer to files or artifacts; describe what the evidence shows.`;
+Every final response should be concise and state plainly whether the user's task was completed. Summarize what you verified and mention any problems, retries, or abandoned approaches encountered along the way. For an incomplete task, include the concrete mismatch or error. Never just refer to files or artifacts; describe what the evidence shows. The harness records the full trajectory for human review, so do not hide confusion or failed attempts behind a polished success summary.`;
 
 export type { WorkspaceRepoFixtureCleanup, WorkspaceRepoFixtureState };
 
@@ -98,6 +96,23 @@ export interface AgentVesselFaultProbe {
   aborted: true;
 }
 
+export interface SystemTestRpcFault {
+  transport: "call" | "stream";
+  method: string;
+  occurrence?: number;
+  message: string;
+  code?: string;
+}
+
+export interface SystemTestRpcFaultEvidence {
+  transport: "call" | "stream";
+  method: string;
+  occurrence: number;
+  injected: boolean;
+  message: string;
+  code?: string;
+}
+
 export interface SelfDevelopmentRepository {
   contextId: string;
   repositoryId: string;
@@ -106,7 +121,7 @@ export interface SelfDevelopmentRepository {
 }
 
 function fixturePublicationAuthority(
-  fixture: (WorkspaceRepoFixtureSpec & { repoName: string | null }) | null
+  fixture: (WorkspaceRepoCreationScope & { repoName: string | null }) | null
 ): AgentExecutionTestPolicySpec["authority"] {
   if (!fixture) return [];
   return [
@@ -154,6 +169,10 @@ function fixtureContextAuthority(
 
 export class HeadlessRunner {
   readonly validationEvidenceReader: BlobReader = blobstore;
+  /** Runtime-initialized panel opener for harness-owned scenario fixtures. */
+  readonly openPanelClient = openPanel;
+  /** Runtime-initialized panel-tree client for harness-owned invariants. */
+  readonly panelTreeClient = panelTree;
 
   private contextId: string;
   private readonly shared: {
@@ -165,11 +184,15 @@ export class HeadlessRunner {
   };
   private readonly testName: string | null;
   private readonly workspaceRepoFixture:
-    | (WorkspaceRepoFixtureSpec & { repoName: string | null })
+    | (WorkspaceRepoCreationScope & { repoName: string | null })
     | null;
   private readonly workspaceRepoFixtureLifecycle: WorkspaceRepoFixtureLifecycle | null;
   private readonly testAuthorityPolicy: AgentExecutionTestPolicySpec | null;
   private developmentTargetPromise: Promise<string> | null = null;
+  private readonly sessionRpcFaultEvidence = new WeakMap<
+    HeadlessSession,
+    SystemTestRpcFaultEvidence[]
+  >();
 
   /**
    * Model is per-agent, so each spawned headless agent is created with the
@@ -254,7 +277,7 @@ export class HeadlessRunner {
   forTest(
     testName: string,
     opts?: {
-      workspaceRepoFixture?: WorkspaceRepoFixtureSpec;
+      workspaceRepoFixture?: WorkspaceRepoCreationScope;
       authorityPolicy?: TestAuthorityPolicy;
     }
   ): HeadlessRunner {
@@ -312,6 +335,16 @@ export class HeadlessRunner {
             resource: {
               kind: "prefix",
               prefix: "do:workers/pubsub-channel:PubSubChannel:headless-",
+            },
+            tier: "gated",
+            decision: "once",
+          },
+          {
+            ruleId: "subagent-task-channels",
+            capability: { kind: "exact", key: "workspace-service:channel" },
+            resource: {
+              kind: "prefix",
+              prefix: "do:workers/pubsub-channel:PubSubChannel:task-",
             },
             tier: "gated",
             decision: "once",
@@ -408,6 +441,10 @@ export class HeadlessRunner {
      * fault-injection seam for harness resilience tests, not a product tool.
      */
     validationRetryProbeTool?: boolean;
+    /** Give the session a real recovery coordinator for reconnect probes. */
+    recoverSubscriptions?: boolean;
+    /** Harness-owned RPC failures injected before the production client sees the call. */
+    rpcFaults?: readonly SystemTestRpcFault[];
     /** Additional test-owned participant methods advertised to the agent. */
     methods?: HeadlessWithAgentConfig["methods"];
     /** Test-specific policy appended after the shared system-test prompt. */
@@ -444,10 +481,89 @@ export class HeadlessRunner {
             )} is already present in this context. It is the only repository owned by this test; ` +
             `all other repositories are outside the fixture scope.`
       : "";
+    const rpcFaultEvidence: SystemTestRpcFaultEvidence[] = [];
+    const occurrenceByOperation = new Map<string, number>();
+    const callWithFault = async <R = unknown>(
+      targetId: string,
+      method: string,
+      args: unknown[],
+      options?: { timeoutMs?: number; signal?: AbortSignal }
+    ): Promise<R> => {
+      const key = `call:${method}`;
+      const occurrence = (occurrenceByOperation.get(key) ?? 0) + 1;
+      occurrenceByOperation.set(key, occurrence);
+      const fault = opts?.rpcFaults?.find(
+        (candidate) =>
+          candidate.transport === "call" &&
+          candidate.method === method &&
+          (candidate.occurrence ?? 1) === occurrence
+      );
+      if (fault) {
+        rpcFaultEvidence.push({
+          transport: "call",
+          method,
+          occurrence,
+          injected: true,
+          message: fault.message,
+          ...(fault.code ? { code: fault.code } : {}),
+        });
+        throw Object.assign(new Error(fault.message), fault.code ? { code: fault.code } : {});
+      }
+      return rpcConfig.call<R>(targetId, method, args, options);
+    };
+    const faultingRpc: NonNullable<ConnectionConfig["rpc"]> = {
+      selfId: rpcConfig.selfId,
+      call: callWithFault,
+      stream: async (targetId, method, args, options) => {
+        const key = `stream:${method}`;
+        const occurrence = (occurrenceByOperation.get(key) ?? 0) + 1;
+        occurrenceByOperation.set(key, occurrence);
+        const fault = opts?.rpcFaults?.find(
+          (candidate) =>
+            candidate.transport === "stream" &&
+            candidate.method === method &&
+            (candidate.occurrence ?? 1) === occurrence
+        );
+        if (fault) {
+          rpcFaultEvidence.push({
+            transport: "stream",
+            method,
+            occurrence,
+            injected: true,
+            message: fault.message,
+            ...(fault.code ? { code: fault.code } : {}),
+          });
+          throw Object.assign(new Error(fault.message), fault.code ? { code: fault.code } : {});
+        }
+        return rpcConfig.stream(targetId, method, args, options);
+      },
+      on: (event, listener) => rpcConfig.on(event, listener),
+      ...(rpcConfig.registerResidentSession
+        ? {
+            registerResidentSession: (...args) => {
+              const registration = rpcConfig.registerResidentSession!(...args);
+              return {
+                transport: {
+                  call: <R = unknown>(targetId: string, method: string, callArgs: unknown[]) =>
+                    callWithFault<R>(targetId, method, callArgs),
+                },
+                close: () => registration.close(),
+                ...(registration.relationshipEnded
+                  ? { relationshipEnded: () => registration.relationshipEnded!() }
+                  : {}),
+              };
+            },
+          }
+        : {}),
+    };
+    const recoveryCoordinator = opts?.recoverSubscriptions
+      ? createRecoveryCoordinator()
+      : undefined;
     const session = await HeadlessSession.createWithAgent({
       config: {
         clientId: rpc.selfId,
-        rpc: rpcConfig,
+        rpc: faultingRpc,
+        ...(recoveryCoordinator ? { recoveryCoordinator } : {}),
       },
       rpcCall: (t: string, m: string, args: unknown[], options) =>
         rpcConfig.call(t, m, args, options),
@@ -484,6 +600,7 @@ export class HeadlessRunner {
           : {}),
       },
     });
+    this.sessionRpcFaultEvidence.set(session, rpcFaultEvidence);
     this.shared.sessions.add(session);
     this.shared.testNames.set(session, this.testName);
     const sessionPolicy: ModelPolicyState = {
@@ -497,6 +614,10 @@ export class HeadlessRunner {
     };
     this.shared.sessionPolicies.set(session, sessionPolicy);
     return session;
+  }
+
+  rpcFaultEvidence(session: HeadlessSession): readonly SystemTestRpcFaultEvidence[] {
+    return [...(this.sessionRpcFaultEvidence.get(session) ?? [])];
   }
 
   /** Non-blocking live snapshots for CLI inspection. Observation never issues
@@ -531,6 +652,21 @@ export class HeadlessRunner {
       diagnostics["durableWorkFailure"] = systemTestFailure("diagnostic:durable-work", err);
     }
     if (channelId) {
+      try {
+        const service = (await rpc.call("main", "workers.resolveService", [
+          "vibestudio.channel.v1",
+          channelId,
+        ])) as { kind?: unknown; targetId?: unknown };
+        if (service.kind !== "durable-object" || typeof service.targetId !== "string") {
+          throw new Error("channel service did not resolve to a Durable Object");
+        }
+        diagnostics["channelDelivery"] = await rpc.call(service.targetId, "getState", []);
+      } catch (err) {
+        diagnostics["channelDeliveryFailure"] = systemTestFailure(
+          "diagnostic:channel-delivery",
+          err
+        );
+      }
       try {
         diagnostics["agentHealth"] = await gad.inspectAgentHealth({
           channelId,

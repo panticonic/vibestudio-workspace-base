@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "title": "Agentic Chat",
+    "icon": "./assets/icon.svg",
     "entry": "index.tsx",
     "exposeModules": [
       "react",
@@ -13,6 +14,7 @@
       "@radix-ui/themes",
       "@radix-ui/react-icons",
       "@workspace/runtime",
+      "@workspace/react/responsive",
       "@workspace/ui"
     ],
     "authority": {
@@ -28,6 +30,15 @@
         }
       ],
       "requests": [
+        {
+          "capability": "account-providers.configure",
+          "resource": {
+            "kind": "exact",
+            "key": "account-providers.configure"
+          },
+          "tier": "gated",
+          "evidence": "exact"
+        },
         {
           "capability": "account.profile.update",
           "resource": {

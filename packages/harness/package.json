@@ -5,14 +5,19 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./agent-references": "./src/tools/agent-pagination.ts",
+    "./merge-driver": "./src/merge-driver.ts",
+    "./resource-loader": "./src/resource-loader.ts",
     "./semantic-file-resolution": "./src/semantic-file-resolution.ts",
+    "./standard-tools": "./src/standard-tools.ts",
+    "./system-prompt": "./src/system-prompt.ts",
+    "./tools/eval": "./src/tools/eval.ts",
     "./types": "./src/types.ts",
     "./web": "./src/web/index.ts",
     "./web-extract": "./src/web-extract.ts"
   },
   "dependencies": {
     "@vibestudio/content-addressing": "workspace:*",
-    "@earendil-works/pi-ai": "^0.82.0",
     "@mozilla/readability": "^0.6.0",
     "@vibestudio/extension": "workspace:*",
     "@vibestudio/rpc": "workspace:*",
@@ -20,21 +25,18 @@
     "@vibestudio/shared": "workspace:*",
     "@sinclair/typebox": "^0.27.8",
     "@workspace/pi-core": "workspace:*",
+    "@workspace/pi-ai": "workspace:*",
     "@workspace/agentic-protocol": "workspace:*",
     "diff": "^7.0.0",
     "linkedom": "^0.18.5",
+    "ignore": "7.0.5",
     "unpdf": "^1.6.2",
     "yaml": "^2.8.1"
   },
   "optionalDependencies": {
-    "re2": "1.24.0"
+    "re2": "1.24.1"
   },
-  "overrides": {
-    "@anthropic-ai/sdk": "0.97.1",
-    "@aws-sdk/client-bedrock-runtime": "3.1039.0",
-    "@mistralai/mistralai": "2.2.1"
-  },
-  "//": "re2 pinned to exact version to match patches/re2@1.24.0.patch",
+  "//": "re2 1.24.1 contains the Node >=22 compatibility fix previously carried as a host-root pnpm patch.",
   "devDependencies": {
     "@types/diff": "^7.0.0",
     "typescript": "7.0.2"

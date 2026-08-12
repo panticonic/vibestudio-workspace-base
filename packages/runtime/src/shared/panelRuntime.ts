@@ -1,4 +1,5 @@
 import type { RpcClient } from "@vibestudio/rpc";
+import type { PanelSourceUsage } from "@vibestudio/shared/panelSearchTypes";
 import type { PanelLifecycleResult, PanelPlacementHint } from "@vibestudio/shared/types";
 import type {
   PanelTreeNode,
@@ -18,7 +19,7 @@ import {
   panelIdSegmentFromName,
 } from "@vibestudio/shared/panelIdUtils";
 import { browserSourceFromHostname, generateContextId } from "@vibestudio/shared/panelFactory";
-import { validateStateArgs } from "@vibestudio/shared/stateArgsValidator";
+import { validateStateArgsAsync } from "@vibestudio/shared/asyncStateArgsValidator";
 import {
   panelFailure,
   panelFailureFromError,
@@ -47,7 +48,7 @@ import {
   type PanelHandleMetadata,
 } from "./handles.js";
 import { readPanelStateArgs, updatePanelStateArgs } from "./panelStateArgsPersistence.js";
-import { asPanelEntityId, asPanelSlotId } from "@vibestudio/shared/panel/ids";
+import { asPanelEntityId, asPanelSlotId } from "@vibestudio/shared/panel/idValues";
 import { callWorkspaceState, createRuntimeWorkspaceStateClient } from "./workspaceStateClient.js";
 import {
   commitPreparedPanelNavigation,
@@ -139,6 +140,8 @@ export interface PanelRuntimeTree {
   page(input: PanelTreePageInput): Promise<PanelRuntimeTreePage>;
   path(id: string): Promise<PanelRuntimeTreePath | null>;
   search(input: PanelTreeSearchInput): Promise<PanelRuntimeTreeSearchPage>;
+  /** Durable, workspace-wide launch frequency grouped by panel source. */
+  sourceUsage(limit?: number): Promise<PanelSourceUsage[]>;
   parent(id: string): PanelHandle | null;
   navigate(id: string, source: string, options?: PanelNavigateOptions): Promise<PanelObservation>;
   navigateHistory(
@@ -218,7 +221,7 @@ export interface CreatePanelRuntimeOptions {
       | "runtime.createEntity"
       | "runtime.reserveEntity"
       | "workspace-state.slot.create"
-      | "panel.updateTitle";
+      | "panel.index";
     durationMs: number;
     outcome: "ok" | "error";
   }) => void;
@@ -381,6 +384,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       navigate: (url) => navigatePanel(metadata.id, url).then(() => undefined),
       navigateHistory: (delta) => navigateHistory(metadata.id, delta).then(() => undefined),
       reload: () => restartPanel(metadata.id),
+      observe: () => observePanel(metadata.id),
     });
 
   const observePanel = async (id: string): Promise<PanelObservation> => {
@@ -717,7 +721,10 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     if (!external && !panelMetadata) throw new Error(`Unknown panel source: ${source}`);
     const stateArgsValidation = external
       ? { success: true as const, data: navigateOptions?.stateArgs ?? {} }
-      : validateStateArgs(navigateOptions?.stateArgs ?? {}, panelMetadata?.stateArgs as never);
+      : await validateStateArgsAsync(
+          navigateOptions?.stateArgs ?? {},
+          panelMetadata?.stateArgs as never
+        );
     if (!stateArgsValidation.success) {
       throw new Error(`Invalid stateArgs for ${source}: ${stateArgsValidation.error}`);
     }
@@ -1105,14 +1112,10 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       options.onReload?.(id);
       return result;
     },
-    close: async (id) => {
+    archive: async (id) => {
       const result = await closePanel(id);
       options.onClose?.(id);
       return result;
-    },
-    archive: async (id) => {
-      await closePanel(id);
-      options.onClose?.(id);
     },
     unload: (id) => options.rpc.call<PanelLifecycleResult>("main", "panelRuntime.unloadSlot", [id]),
     setTitle: (id, title, titleOptions) =>
@@ -1268,6 +1271,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         nextCursor: page.nextCursor,
       };
     },
+    sourceUsage(limit = 200) {
+      return callState<PanelSourceUsage[]>("panel.sourceUsage", [limit]);
+    },
     parent(id) {
       const parentId =
         options.selfId && id === options.selfId
@@ -1337,7 +1343,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         | "runtime.createEntity"
         | "runtime.reserveEntity"
         | "workspace-state.slot.create"
-        | "panel.updateTitle",
+        | "panel.index",
       operation: () => Promise<T>
     ): Promise<T> => {
       const startedAt = Date.now();
@@ -1378,7 +1384,10 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     }
     const stateArgsValidation = external
       ? { success: true as const, data: openOptions?.stateArgs ?? {} }
-      : validateStateArgs(openOptions?.stateArgs ?? {}, panelMetadata?.stateArgs as never);
+      : await validateStateArgsAsync(
+          openOptions?.stateArgs ?? {},
+          panelMetadata?.stateArgs as never
+        );
     if (!stateArgsValidation.success) {
       throw new Error(`Invalid stateArgs for ${source}: ${stateArgsValidation.error}`);
     }
@@ -1459,9 +1468,12 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         normalizePanelTitle(parsedUrl?.protocol.replace(/:$/, "")) ??
         normalizePanelTitle(source) ??
         "panel";
-      await timed("panel.updateTitle", () =>
-        callState("panel.updateTitle", [id, title, { explicit: explicitTitle !== undefined }])
+      await timed("panel.index", () =>
+        callState("panel.index", [{ id, title, path: historySource }])
       );
+      if (explicitTitle !== undefined) {
+        await callState("panel.updateTitle", [id, title, { explicit: true }]);
+      }
       const panelHandle = fromMetadata({
         id,
         title,

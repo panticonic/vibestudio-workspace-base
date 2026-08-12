@@ -5,7 +5,12 @@
  * lastSeq/lastHash advance.
  */
 
-import type { ActorRef, LogEnvelope, ParticipantRef } from "@workspace/agentic-protocol";
+import type {
+  ActorRef,
+  AgentToolFailure,
+  LogEnvelope,
+  ParticipantRef,
+} from "@workspace/agentic-protocol";
 import { participantKey, participantRefFromActor } from "@workspace/agentic-protocol";
 import type {
   AgentState,
@@ -176,6 +181,14 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       const role = payload["role"];
       const messageId = String(causality["messageId"] ?? "");
       if (role === "assistant") {
+        if (
+          !foreignAuthor &&
+          state.inFlightModelCall &&
+          state.inFlightModelCall.messageId !== messageId
+        ) {
+          return state; // stale terminal for an older attempt — fold ignores
+        }
+        const modelRequest = foreignAuthor ? undefined : state.inFlightModelCall?.request;
         const entry: SessionEntry = {
           kind: "assistant",
           seq: envelope.seq,
@@ -184,15 +197,21 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
           blocks: Array.isArray(payload["blocks"]) ? (payload["blocks"] as unknown[]) : [],
           outcome:
             typeof payload["outcome"] === "string" ? (payload["outcome"] as string) : undefined,
+          ...(modelRequest
+            ? {
+                model: {
+                  provider: modelRequest.provider,
+                  api: modelRequest.modelSpec.api,
+                  model: modelRequest.model,
+                },
+              }
+            : {}),
         };
         if (foreignAuthor) {
           return {
             ...state,
             entries: [...state.entries, entry],
           };
-        }
-        if (state.inFlightModelCall && state.inFlightModelCall.messageId !== messageId) {
-          return state; // stale terminal for an older attempt — fold ignores
         }
         return {
           ...state,
@@ -205,6 +224,7 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       }
       // user (or panel) message — row 3
       const metadata = metadataFromPayload(payload);
+      const structuredInput = payload["structuredInput"];
       const sourceMessageId = sourceMessageIdFromPayload(payload);
       const senderRef = senderRefFromPayload(payload, envelope.actor);
       const artifactsReady = payload["promptArtifactsReady"] === true;
@@ -253,6 +273,7 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
         ...(sourceMessageId ? { sourceMessageId } : {}),
         senderRef,
         content: payload,
+        ...(structuredInput !== undefined ? { structuredInput } : {}),
         ...(metadata ? { metadata } : {}),
         ...(artifactsReady ? { artifactsReady: true } : {}),
       };
@@ -420,14 +441,21 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
               kind: "tool-result",
               seq: envelope.seq,
               invocationId,
+              ...(pending.attemptId ? { attemptId: pending.attemptId } : {}),
               name: pending.name,
               result: payload["result"],
               isError: false,
+              ...(payload["turnControl"] &&
+              typeof payload["turnControl"] === "object" &&
+              (payload["turnControl"] as Record<string, unknown>)["kind"] === "terminate"
+                ? { terminate: true }
+                : {}),
             }
           : {
               kind: "tool-result",
               seq: envelope.seq,
               invocationId,
+              ...(pending.attemptId ? { attemptId: pending.attemptId } : {}),
               name: pending.name,
               result:
                 kind === "invocation.abandoned"
@@ -440,6 +468,11 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
                 : {}),
               ...(typeof payload["terminalReasonCode"] === "string"
                 ? { terminalReasonCode: payload["terminalReasonCode"] }
+                : {}),
+              ...(payload["failure"] && typeof payload["failure"] === "object"
+                ? {
+                    failureRecovery: (payload["failure"] as AgentToolFailure).recovery,
+                  }
                 : {}),
             };
       return {
@@ -537,10 +570,7 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
           },
         };
       }
-      if (
-        detailKind === "prompt.artifacts_ready" ||
-        detailKind === "prompt.artifacts_failed"
-      ) {
+      if (detailKind === "prompt.artifacts_ready" || detailKind === "prompt.artifacts_failed") {
         const triggerEnvelopeId = String(
           payload["triggerEnvelopeId"] ?? details["triggerEnvelopeId"] ?? ""
         );
@@ -552,9 +582,7 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
             ...state,
             pendingPromptPreparations,
             pendingPrompt:
-              state.pendingPrompt?.envelopeId === triggerEnvelopeId
-                ? null
-                : state.pendingPrompt,
+              state.pendingPrompt?.envelopeId === triggerEnvelopeId ? null : state.pendingPrompt,
             steeringQueue: state.steeringQueue.filter(
               (entry) => entry.envelopeId !== triggerEnvelopeId
             ),
@@ -576,14 +604,10 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
               ? { ...state.pendingPrompt, artifactsReady: true }
               : state.pendingPrompt,
           steeringQueue: state.steeringQueue.map((entry) =>
-            entry.envelopeId === triggerEnvelopeId
-              ? { ...entry, artifactsReady: true }
-              : entry
+            entry.envelopeId === triggerEnvelopeId ? { ...entry, artifactsReady: true } : entry
           ),
           deferredPostTurnQueue: state.deferredPostTurnQueue.map((entry) =>
-            entry.envelopeId === triggerEnvelopeId
-              ? { ...entry, artifactsReady: true }
-              : entry
+            entry.envelopeId === triggerEnvelopeId ? { ...entry, artifactsReady: true } : entry
           ),
         };
       }

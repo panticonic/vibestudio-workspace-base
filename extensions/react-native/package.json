@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "React Native Build Provider",
+    "icon": "⚛️",
     "entry": "index.ts",
     "sourcemap": true,
     "extension": {
@@ -49,6 +50,7 @@
     }
   },
   "dependencies": {
+    "@react-native/metro-config": "0.79.7",
     "@vibestudio/shared": "workspace:*"
   }
 }

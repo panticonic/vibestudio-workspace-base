@@ -37,6 +37,11 @@ describe("buildModelContext: multi-agent attribution", () => {
         messageId: "m2",
         senderRef: { kind: "agent", id: selfId },
         blocks: [{ type: "text", content: "my own turn" }],
+        model: {
+          provider: "anthropic",
+          api: "anthropic-messages",
+          model: "claude-sonnet-4-6",
+        },
       },
     ];
     const state: AgentState = { ...initialAgentState({ channelId: "c", config, selfId }), entries };
@@ -48,6 +53,11 @@ describe("buildModelContext: multi-agent attribution", () => {
     expect(msgs[1]).toEqual({
       role: "assistant",
       blocks: [{ type: "text", content: "my own turn" }],
+      model: {
+        provider: "anthropic",
+        api: "anthropic-messages",
+        model: "claude-sonnet-4-6",
+      },
     });
   });
 
@@ -80,6 +90,57 @@ describe("buildModelContext: multi-agent attribution", () => {
           interaction,
         },
       },
+    ]);
+  });
+
+  it("pairs a structured prompt sidecar with readable text", () => {
+    const structuredInput = {
+      kind: "channel-observation",
+      version: 1,
+      payload: { incidentId: "inc-7", severity: "high" },
+    };
+    const entries: SessionEntry[] = [
+      {
+        kind: "user",
+        seq: 1,
+        envelopeId: "e-observation",
+        content: {
+          role: "user",
+          blocks: [{ type: "text", content: "Channel observation: application.incident.v1" }],
+        },
+        structuredInput,
+      },
+    ];
+    const state: AgentState = {
+      ...initialAgentState({ channelId: "c", config, selfId: "agent:self" }),
+      entries,
+    };
+
+    expect(buildModelContext(state)).toEqual([
+      {
+        role: "user",
+        content: {
+          message: "Channel observation: application.incident.v1",
+          structuredInput,
+        },
+      },
+    ]);
+  });
+
+  it("keeps ordinary strings and block arrays unchanged", () => {
+    const blocks = [{ type: "text", content: "hello" }];
+    const entries: SessionEntry[] = [
+      { kind: "user", seq: 1, envelopeId: "e-string", content: "hello" },
+      { kind: "user", seq: 2, envelopeId: "e-blocks", content: blocks },
+    ];
+    const state: AgentState = {
+      ...initialAgentState({ channelId: "c", config, selfId: "agent:self" }),
+      entries,
+    };
+
+    expect(buildModelContext(state)).toEqual([
+      { role: "user", content: "hello" },
+      { role: "user", content: blocks },
     ]);
   });
 });

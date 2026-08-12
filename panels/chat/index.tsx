@@ -19,19 +19,23 @@ import {
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
 import { recoveryCoordinator } from "@workspace/runtime/internal/diagnostics";
-import { usePanelTheme, useStateArgs } from "@workspace/react";
+import { useStateArgs } from "@workspace/react/hooks";
+import { getVibestudioHostPlatform } from "@workspace/react/responsive";
+import { usePanelTheme, usePanelThemeConfig } from "@workspace/react/theme";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Callout, Flex, Spinner, Text, Theme } from "@radix-ui/themes";
 import { ErrorBoundary } from "@workspace/agentic-chat/error-boundary";
+import { FULL_AGENTIC_CHAT_FEATURES } from "@workspace/agentic-chat/features";
 import type {
   ConnectionConfig,
   AgenticChatActions,
   ForkNavHandlers,
   NewConversationOptions,
 } from "@workspace/agentic-chat/types";
-import { useAppTheme } from "@workspace/ui/panel";
-import "@workspace/ui/tokens.css";
-import { createPanelSandboxConfig, unsubscribeAgentFromChannel } from "@workspace/agentic-core";
+import "@workspace/ui/foundation.css";
+import "@workspace/ui/themes/vibestudio.css";
+import { unsubscribeAgentFromChannel } from "@workspace/agentic-core/agent-launch";
+import { createPanelImportLoader } from "@workspace/agentic-core/panel-import-loader";
 import type {
   AvailableAgent,
   ModelCatalog,
@@ -39,6 +43,10 @@ import type {
   ConnectProviderResult,
   ModelSetupResult,
 } from "@workspace/agentic-core";
+import {
+  ProvisionalAgentLifecycle,
+  type ProvisionalAgentIntent,
+} from "@workspace/agentic-core/provisional-agent-lifecycle";
 import { toPanelConnectRequest } from "@workspace/model-catalog/providerConnect";
 import {
   DEFAULT_AGENT_MODEL_REF,
@@ -58,27 +66,11 @@ import {
   requireChatContextId,
   sanitizeHandle,
 } from "./bootstrap.js";
-import {
-  ProvisionalAgentLifecycle,
-  createAndSubscribeAgent,
-  type ProvisionalAgentIntent,
-} from "./agentLifecycle.js";
+import { createAndSubscribeAgent, waitForPanelReview } from "./agentLifecycle.js";
 
 const AgenticChat = lazy(() =>
   import("@workspace/agentic-chat/chat").then((module) => ({ default: module.AgenticChat }))
 );
-
-function detectHostPlatform(): "mobile" | "electron" {
-  const explicitPlatform = (globalThis as { __vibestudioHostPlatform?: unknown })
-    .__vibestudioHostPlatform;
-  if (explicitPlatform === "mobile") {
-    return "mobile";
-  }
-  if (typeof navigator !== "undefined" && /\bVibestudio-Mobile\//.test(navigator.userAgent)) {
-    return "mobile";
-  }
-  return "electron";
-}
 
 /** Default DO worker source and class for the AI chat agent */
 const DEFAULT_WORKER_SOURCE = "workers/agent-worker";
@@ -87,18 +79,19 @@ const DEFAULT_HANDLE = "ai-chat";
 const CHANNEL_SERVICE_PROTOCOL = "vibestudio.channel.v1";
 const AGENT_SUBSCRIPTION_RETRY_DELAY_MS = 1_000;
 const AGENT_SUBSCRIPTION_MAX_ATTEMPTS = 60;
+const MODEL_SETTINGS_DISCOVERY_TIMEOUT_MS = 15_000;
 
 /** Response shape from workers.listSources */
 interface WorkerSourceEntry {
   name: string;
   source: string;
   title?: string;
+  icon?: string;
   classes: Array<{ className: string }>;
   /** Present iff this worker declares itself a chat agent (manifest `agent` block). */
   agent?: {
     displayName?: string;
     description?: string;
-    icon?: string;
     defaultConfig?: AgentSubscriptionConfig;
   };
 }
@@ -213,7 +206,7 @@ async function unsubscribeDOFromChannel(
 
 export default function ChatPanel() {
   const theme = usePanelTheme();
-  const appTheme = useAppTheme();
+  const appTheme = usePanelThemeConfig();
   const stateArgs = useStateArgs<ChatStateArgs>();
   const resolvedContextId = requireChatContextId(contextId);
   const initialPromptCaptured = useRef(stateArgs.initialPrompt);
@@ -234,7 +227,11 @@ export default function ChatPanel() {
   >("checking");
 
   const getProvisionalAgentLifecycle = useCallback(() => {
-    provisionalAgentLifecycleRef.current ??= new ProvisionalAgentLifecycle(rpc);
+    provisionalAgentLifecycleRef.current ??= new ProvisionalAgentLifecycle(
+      rpc,
+      undefined,
+      waitForPanelReview
+    );
     return provisionalAgentLifecycleRef.current;
   }, []);
 
@@ -276,6 +273,11 @@ export default function ChatPanel() {
         ? "selection-required"
         : "ready"
     );
+    console.info("[ChatPanel] model settings ready", {
+      defaultModel: settings.defaultModel,
+      defaultModelSource: settings.defaultModelSource,
+      defaultAvailability: defaultEntry?.availability.state ?? "missing",
+    });
   }, []);
 
   const loadModelSettings = useCallback(
@@ -287,13 +289,25 @@ export default function ChatPanel() {
         return modelSettingsRequestRef.current;
       }
 
+      const controller = new AbortController();
+      const timeout = window.setTimeout(() => {
+        controller.abort(
+          new Error(
+            `Model settings did not become ready within ${MODEL_SETTINGS_DISCOVERY_TIMEOUT_MS}ms`
+          )
+        );
+      }, MODEL_SETTINGS_DISCOVERY_TIMEOUT_MS);
       const request: Promise<ModelSettingsSnapshot> = getModelSettingsService()
-        .call<ModelSettingsSnapshot>("getSettings")
+        .callWithOptions<ModelSettingsSnapshot>("getSettings", [], {
+          signal: controller.signal,
+          timeoutMs: MODEL_SETTINGS_DISCOVERY_TIMEOUT_MS,
+        })
         .then((settings) => {
           applyModelSettings(settings);
           return settings;
         })
         .finally(() => {
+          window.clearTimeout(timeout);
           if (modelSettingsRequestRef.current === request) {
             modelSettingsRequestRef.current = null;
           }
@@ -520,17 +534,22 @@ export default function ChatPanel() {
       typeof globalConfig["thinkingLevel"] === "string"
         ? (globalConfig["thinkingLevel"] as DefaultAgentConfig["thinkingLevel"])
         : undefined;
+    const fastMode =
+      typeof globalConfig["fastMode"] === "boolean" ? globalConfig["fastMode"] : undefined;
     const approvalLevel =
       globalConfig["approvalLevel"] === 0 ||
       globalConfig["approvalLevel"] === 1 ||
       globalConfig["approvalLevel"] === 2
         ? globalConfig["approvalLevel"]
         : undefined;
-    if (!model && !thinkingLevel && approvalLevel === undefined) return workspaceDefaultAgentConfig;
+    if (!model && !thinkingLevel && fastMode === undefined && approvalLevel === undefined) {
+      return workspaceDefaultAgentConfig;
+    }
     return {
       ...(workspaceDefaultAgentConfig ?? {}),
       model: model ?? workspaceDefaultAgentConfig?.model ?? DEFAULT_AGENT_MODEL_REF,
       ...(thinkingLevel ? { thinkingLevel } : {}),
+      ...(fastMode !== undefined ? { fastMode } : {}),
       ...(approvalLevel !== undefined ? { approvalLevel } : {}),
     };
   }, [stateArgs.agentConfig, workspaceDefaultAgentConfig]);
@@ -631,30 +650,70 @@ export default function ChatPanel() {
   // service DOs (pubsub-channel, semantic control plane, fork, …).
   const [availableAgents, setAvailableAgents] = useState<AvailableAgent[]>([]);
   useEffect(() => {
-    rpc
-      .call<WorkerSourceEntry[]>("main", "workers.listSources", [])
-      .then((sources) => {
-        const agents: AvailableAgent[] = [];
-        for (const source of sources) {
-          if (!source.agent) continue;
-          for (const cls of source.classes) {
-            agents.push({
-              id: source.source,
-              className: cls.className,
-              name: source.agent.displayName ?? source.title ?? source.name,
-              description: source.agent.description,
-              icon: source.agent.icon,
-              defaultConfig: source.agent.defaultConfig,
-              proposedHandle: source.name.split("-")[0] ?? source.name,
+    let disposed = false;
+    let retryTimer: number | null = null;
+    let retryAttempt = 0;
+
+    const retry = () => {
+      if (disposed) return;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+      const delayMs = Math.min(30_000, 2_000 * 2 ** Math.min(retryAttempt, 4));
+      retryAttempt += 1;
+      retryTimer = window.setTimeout(loadAvailableAgents, delayMs);
+    };
+
+    function loadAvailableAgents() {
+      void rpc
+        .call<WorkerSourceEntry[]>("main", "workers.listSources", [])
+        .then((sources) => {
+          if (disposed) return;
+          const agents: AvailableAgent[] = [];
+          for (const source of sources) {
+            if (!source.agent) continue;
+            for (const cls of source.classes) {
+              agents.push({
+                id: source.source,
+                className: cls.className,
+                name: source.agent.displayName ?? source.title ?? source.name,
+                description: source.agent.description,
+                icon: source.icon,
+                defaultConfig: source.agent.defaultConfig,
+                proposedHandle: source.name.split("-")[0] ?? source.name,
+              });
+            }
+          }
+          setAvailableAgents(agents);
+
+          // Workspace units are admitted and built asynchronously during a
+          // cold bootstrap. An empty successful catalog is therefore a
+          // provisional snapshot, not a terminal result. Keep observing it
+          // until at least one launchable agent becomes available so queued
+          // opening prompts can drain without reloading the panel.
+          if (agents.length === 0) {
+            retry();
+          } else {
+            retryAttempt = 0;
+            console.info("[ChatPanel] agent source catalog ready", {
+              sourceCount: sources.length,
+              agentCount: agents.length,
             });
           }
-        }
-        setAvailableAgents(agents);
-      })
-      .catch((err) => {
-        console.warn("[ChatPanel] Failed to load worker sources:", err);
-      });
-  }, []);
+        })
+        .catch((err) => {
+          if (disposed) return;
+          if (!isReviewPending(err)) {
+            console.warn("[ChatPanel] Failed to load worker sources; retrying:", err);
+          }
+          retry();
+        });
+    }
+
+    loadAvailableAgents();
+    return () => {
+      disposed = true;
+      if (retryTimer !== null) window.clearTimeout(retryTimer);
+    };
+  }, [connectionRetrySignal]);
 
   // Availability (connected/startable/needs-setup) now arrives on every
   // catalog entry from the model-settings worker — one shared source for all
@@ -680,17 +739,22 @@ export default function ChatPanel() {
       .catch((err) => {
         if (disposed) return;
         if (isReviewPending(err)) {
+          console.info("[ChatPanel] model settings waiting for workspace review");
           // The review event is the fast path. This quiet reconciliation retry
           // covers a panel that mounted after the event or briefly lost its
           // event watch, without producing a retry/log storm.
-          modelSettingsRecoveryRef.current = true;
-          retryTimer = window.setTimeout(() => {
-            retryTimer = null;
-            if (!disposed) setModelSettingsRetrySignal((signal) => signal + 1);
-          }, 5_000);
-          return;
+        } else {
+          console.warn("[ChatPanel] Failed to load model settings; retrying:", err);
         }
-        console.warn("[ChatPanel] Failed to load model settings:", err);
+        // Cold workspace services and the mobile pipe can become available in
+        // either order. A failed discovery is not a terminal empty catalog:
+        // keep one bounded retry timer until the authoritative snapshot either
+        // resolves ready or exposes explicit setup.
+        modelSettingsRecoveryRef.current = true;
+        retryTimer = window.setTimeout(() => {
+          retryTimer = null;
+          if (!disposed) setModelSettingsRetrySignal((signal) => signal + 1);
+        }, 5_000);
       });
 
     return () => {
@@ -1096,7 +1160,6 @@ export default function ChatPanel() {
       onOpenLocalModels: handleOpenLocalModels,
       onAttentionRequired: (title, message) => {
         void notifications.show({
-          id: `chat-attention:${channelName ?? "pending"}`,
           type: "warning",
           title,
           message,
@@ -1131,7 +1194,7 @@ export default function ChatPanel() {
   // In-place fork switch: explicitly move the panel runtime to the fork's
   // already-created workspace branch. State args carry only the channel.
   const handleForkSwitch = useCallback(
-    (forkChannelId: string, forkContextId: string) => {
+    async (forkChannelId: string, forkContextId: string) => {
       console.info("[ChatPanel] switching to fork", {
         fromChannelId: stateArgs.channelName ?? bootstrapChannel ?? null,
         fromContextId: resolvedContextId,
@@ -1142,7 +1205,7 @@ export default function ChatPanel() {
       rehydrationCheckedRef.current = false;
       const current = panel.stateArgs.get<ChatStateArgs & { contextId?: unknown }>();
       const { contextId: _obsoleteContextId, ...panelState } = current;
-      void panel.switchContext(forkContextId, {
+      await panel.switchContext(forkContextId, {
         stateArgs: { ...panelState, channelName: forkChannelId },
       });
     },
@@ -1151,14 +1214,14 @@ export default function ChatPanel() {
 
   // Side-by-side: open the fork in a fresh chat panel (news-panel shape).
   const handleOpenForkPanel = useCallback(
-    (forkChannelId: string, forkContextId: string) => {
+    async (forkChannelId: string, forkContextId: string) => {
       console.info("[ChatPanel] opening fork panel", {
         fromChannelId: stateArgs.channelName ?? bootstrapChannel ?? null,
         fromContextId: resolvedContextId,
         forkChannelId,
         forkContextId,
       });
-      void openPanel("panels/chat", {
+      await openPanel("panels/chat", {
         focus: true,
         contextId: forkContextId,
         stateArgs: { channelName: forkChannelId },
@@ -1167,15 +1230,16 @@ export default function ChatPanel() {
     [bootstrapChannel, resolvedContextId, stateArgs.channelName]
   );
 
-  // Shell toast when a fork the user didn't initiate lands while unfocused.
+  // Hand external-fork notification policy to the shell, which owns the real
+  // panel/window focus state.
   const handleExternalFork = useCallback(
-    (fork: {
+    async (fork: {
       forkedChannelId: string;
       forkedContextId: string;
       actorName: string;
       forkPointId: number;
     }) => {
-      void notifications.show({
+      await notifications.show({
         type: "info",
         title: "Conversation forked",
         message: `${fork.actorName} forked from message ${fork.forkPointId}`,
@@ -1183,7 +1247,27 @@ export default function ChatPanel() {
           {
             label: "Switch",
             variant: "solid",
-            onClick: () => handleForkSwitch(fork.forkedChannelId, fork.forkedContextId),
+            onClick: () => {
+              void (async () => {
+                try {
+                  await handleForkSwitch(fork.forkedChannelId, fork.forkedContextId);
+                } catch (cause) {
+                  const message = cause instanceof Error ? cause.message : String(cause);
+                  try {
+                    await notifications.show({
+                      type: "error",
+                      title: "Couldn't switch conversations",
+                      message,
+                    });
+                  } catch (notificationCause) {
+                    console.error(
+                      "[ChatPanel] failed to switch from fork notification and show the error",
+                      { cause, notificationCause }
+                    );
+                  }
+                }
+              })();
+            },
           },
         ],
       });
@@ -1191,23 +1275,51 @@ export default function ChatPanel() {
     [handleForkSwitch]
   );
 
+  const readForkCursors = useCallback(
+    () => panel.stateArgs.get<ChatStateArgs>().forkCursors ?? {},
+    []
+  );
+
+  const forkCursorWriteRef = useRef<Promise<void>>(Promise.resolve());
+  const markForkRead = useCallback(async (forkChannelId: string, headSeq: number) => {
+    const write = forkCursorWriteRef.current.then(async () => {
+      const current = panel.stateArgs.get<ChatStateArgs>();
+      const prior = current.forkCursors?.[forkChannelId] ?? 0;
+      if (prior >= headSeq) return;
+      await panel.stateArgs.set({
+        forkCursors: {
+          ...(current.forkCursors ?? {}),
+          [forkChannelId]: headSeq,
+        },
+      });
+    });
+    // Keep the queue usable after a failed write while returning the original
+    // rejection to the caller so the UI can surface it.
+    forkCursorWriteRef.current = write.then(
+      () => undefined,
+      () => undefined
+    );
+    await write;
+  }, []);
+
   const forkNav: ForkNavHandlers = useMemo(
     () => ({
       switchTo: handleForkSwitch,
       openInNewPanel: handleOpenForkPanel,
+      readForkCursors,
+      markForkRead,
       onExternalFork: handleExternalFork,
     }),
-    [handleForkSwitch, handleOpenForkPanel, handleExternalFork]
+    [handleForkSwitch, handleOpenForkPanel, readForkCursors, markForkRead, handleExternalFork]
   );
 
-  // Sandbox config — provides RPC and import loading to agentic-chat.
-  const sandboxConfig = useMemo(() => createPanelSandboxConfig(rpc), []);
+  const importLoader = useMemo(() => createPanelImportLoader(rpc), []);
 
   const panelMetadata = useMemo(
     () => ({
       name: channelName ?? "Channel",
       type: "panel" as const,
-      hostPlatform: detectHostPlatform(),
+      hostPlatform: getVibestudioHostPlatform(),
     }),
     [channelName]
   );
@@ -1294,7 +1406,8 @@ export default function ChatPanel() {
           initialPrompt={initialPromptCaptured.current}
           forceInitialPrompt={stateArgs.forceInitialPrompt}
           forkNav={forkNav}
-          sandbox={sandboxConfig}
+          features={FULL_AGENTIC_CHAT_FEATURES}
+          importLoader={importLoader}
           initialActionBarFile={stateArgs.actionBarFile ?? undefined}
           initialActionBarProps={stateArgs.actionBarProps ?? undefined}
           initialActionBarMaxHeight={stateArgs.actionBarMaxHeight ?? undefined}

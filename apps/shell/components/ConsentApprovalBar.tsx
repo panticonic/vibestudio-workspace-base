@@ -38,7 +38,7 @@ import {
   type ApprovalTone,
   type BlobResult,
   type CallerInfo,
-  type GadBrowserTarget,
+  type WorkspaceHistoryTarget,
 } from "./approvalCardModel";
 import type { OverlayThemeInfo } from "../overlay/types";
 
@@ -56,9 +56,9 @@ export const APPROVAL_OVERLAY_HOST_ID = "app-approval-host";
  */
 const APPROVAL_RECONCILE_INTERVAL_MS = 5_000;
 
-/** Workspace source path of the gad-browser panel (the file-inspection surface
+/** Workspace source path of Workspace History (the file-inspection surface
  *  the diff-review escape hatch deep-links into). */
-const GAD_BROWSER_SOURCE = "panels/gad-browser";
+const WORKSPACE_HISTORY_SOURCE = "about/workspace-history";
 
 export function ConsentApprovalBar() {
   const [pendingAccess, setPendingAccess] = useState<PendingApproval[]>([]);
@@ -105,7 +105,11 @@ export function ConsentApprovalBar() {
   const [minimized, setMinimized] = useState(false);
   const [browseIndex, setBrowseIndex] = useState(0);
   const [attentionSeq, setAttentionSeq] = useState(0);
-  const [keyboardFocusRequested, setKeyboardFocusRequested] = useState(false);
+  const currentApprovalIdRef = useRef<string | null>(null);
+  const [keyboardFocusRequest, setKeyboardFocusRequest] = useState<{
+    approvalId: string;
+    sequence: number;
+  } | null>(null);
   // Diff-review (P3.5): host-served blob cache, keyed by content hash, fetched
   // lazily on the overlay surface's behalf (the surface has no RPC).
   const [blobResults, setBlobResults] = useState<Record<string, BlobResult>>({});
@@ -149,7 +153,13 @@ export function ConsentApprovalBar() {
     useCallback(() => {
       reviewingQueuedRef.current = true;
       setMinimized(false);
-      setKeyboardFocusRequested(true);
+      const approvalId = currentApprovalIdRef.current;
+      if (approvalId) {
+        setKeyboardFocusRequest((previous) => ({
+          approvalId,
+          sequence: (previous?.sequence ?? 0) + 1,
+        }));
+      }
     }, [])
   );
 
@@ -208,6 +218,7 @@ export function ConsentApprovalBar() {
     [pendingAccess]
   );
   const current = orderedPending[browseIndex] ?? orderedPending[0] ?? null;
+  currentApprovalIdRef.current = current?.approvalId ?? null;
   const queueLength = orderedPending.length;
   const canPrev = queueLength > 1 && browseIndex > 0;
   const canNext = queueLength > 1 && browseIndex < queueLength - 1;
@@ -423,10 +434,10 @@ export function ConsentApprovalBar() {
         setSubmittingApprovalIds(new Set(submittingApprovalIdsRef.current));
       });
   };
-  // Diff-review escape hatch: reuse the open gad-browser panel if one exists
+  // Diff-review escape hatch: reuse Workspace History if one exists
   // (navigate it to the new target + focus), otherwise create one. The target
   // rides along as launch state-args the panel consumes on mount/param-change.
-  const openInGadBrowser = (target: GadBrowserTarget) => {
+  const openInWorkspaceHistory = (target: WorkspaceHistoryTarget) => {
     const stateArgs = { diffTarget: target };
     void (async () => {
       try {
@@ -444,7 +455,7 @@ export function ConsentApprovalBar() {
           });
           for (const node of page.nodes) {
             const observation = await panel.observe(node.slotId);
-            if (observation.source === GAD_BROWSER_SOURCE) {
+            if (observation.source === WORKSPACE_HISTORY_SOURCE) {
               existingId = node.slotId;
               break;
             }
@@ -453,13 +464,13 @@ export function ConsentApprovalBar() {
           if (!cursor) break;
         }
         if (existingId) {
-          await panel.navigate(existingId, GAD_BROWSER_SOURCE, { stateArgs });
+          await panel.navigate(existingId, WORKSPACE_HISTORY_SOURCE, { stateArgs });
           navigateToId(existingId);
         } else {
-          await panel.createPanel(GAD_BROWSER_SOURCE, { stateArgs });
+          await panel.createPanel(WORKSPACE_HISTORY_SOURCE, { stateArgs });
         }
       } catch (err: unknown) {
-        console.error("[ConsentApprovalBar] open-in-gad-browser failed:", err);
+        console.error("[ConsentApprovalBar] open-in-workspace-history failed:", err);
       }
     })();
   };
@@ -508,14 +519,12 @@ export function ConsentApprovalBar() {
     const intent = payload as ApprovalCardIntent;
     if (!current || intent.approvalId !== current.approvalId) return;
     const continueReviewSession = () => {
-      // An approval's attention class describes how an untouched request first
-      // arrives. Once the user answers an expanded review, they are actively
-      // working through this queue: a queued successor must replace the
-      // current surface instead of disappearing into the notification pill.
-      // Set this even when the local snapshot still contains one item; the
-      // server can already be creating the successor while the pending-changed
-      // event is in flight.
-      reviewingQueuedRef.current = true;
+      // A requester may replace one review with its own queued follow-up while
+      // the decision is being recorded. Keep that continuation on the surface,
+      // including across a briefly empty queue. Do not turn an interrupt into
+      // a general queue-review session: unrelated background work must remain
+      // in the notification pill. An explicitly opened queued review already
+      // has `reviewingQueuedRef` set and therefore continues normally.
       reviewContinuationCallerIdRef.current = current.callerId;
     };
     switch (intent.type) {
@@ -561,8 +570,8 @@ export function ConsentApprovalBar() {
       case "fetch-blob":
         fetchBlob(intent.hash, intent.refresh);
         return;
-      case "open-in-gad-browser":
-        openInGadBrowser(intent.target);
+      case "open-in-workspace-history":
+        openInWorkspaceHistory(intent.target);
         return;
     }
   };
@@ -573,6 +582,12 @@ export function ConsentApprovalBar() {
     current?.kind === "client-config" ||
     current?.kind === "credential-input" ||
     current?.kind === "device-code";
+  const focusRequest =
+    current && keyboardFocusRequest?.approvalId === current.approvalId
+      ? `explicit:${current.approvalId}:${keyboardFocusRequest.sequence}`
+      : current && needsFocus
+        ? `initial:${current.approvalId}`
+        : undefined;
 
   const theme = useMemo<OverlayThemeInfo>(
     () => ({
@@ -641,7 +656,7 @@ export function ConsentApprovalBar() {
           surface: "approval-card",
           open: true,
           bounds: anchorBounds,
-          focus: needsFocus || keyboardFocusRequested,
+          focusRequest,
           theme,
           props: overlayProps,
         }
@@ -726,6 +741,10 @@ export function ConsentApprovalBar() {
         onExpand={() => {
           reviewingQueuedRef.current = true;
           reviewContinuationCallerIdRef.current = current.callerId;
+          setKeyboardFocusRequest((previous) => ({
+            approvalId: current.approvalId,
+            sequence: (previous?.sequence ?? 0) + 1,
+          }));
           setMinimized(false);
         }}
       />

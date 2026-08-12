@@ -27,6 +27,7 @@ const config: AgentLoopConfig = {
   model: "anthropic:claude-sonnet-4-6",
   modelSpec,
   thinkingLevel: "medium",
+  fastMode: false,
   approvalLevel: 2,
   respondPolicy: "all",
   systemPromptHash: "blob:sys",
@@ -144,6 +145,43 @@ describe("fold: an agent only owns turns it authored", () => {
     });
   });
 
+  it("reconstructs structured prompt input from the private trajectory event", () => {
+    const selfId = "agent:self";
+    const structuredInput = {
+      kind: "channel-observation",
+      version: 1,
+      source: { payloadKind: "application.incident.v1" },
+      payload: { incidentId: "inc-7" },
+    };
+    const persisted = envelope(
+      selfId,
+      "message.completed",
+      {
+        role: "user",
+        blocks: [{ type: "text", content: "Channel observation: application.incident.v1" }],
+        outcome: "completed",
+        turnTriggerEnvelopeId: "custom-envelope-7",
+        structuredInput,
+        senderRef: { kind: "external", id: "service:incidents" },
+      },
+      { messageId: "recv:observation-7" },
+      1
+    );
+
+    const state = applyEvent(initialAgentState({ channelId: "c", config, selfId }), persisted);
+
+    expect(state.entries[0]).toMatchObject({ kind: "user", structuredInput });
+    expect(buildModelContext(state)).toEqual([
+      {
+        role: "user",
+        content: {
+          message: "Channel observation: application.incident.v1",
+          structuredInput,
+        },
+      },
+    ]);
+  });
+
   it("rejects descriptor-less model requests instead of replaying pre-materialization events", () => {
     const selfId = "agent:self";
     const turnId = "t:c:trigger:agent:self";
@@ -211,6 +249,47 @@ describe("fold: an agent only owns turns it authored", () => {
       kind: "assistant",
       messageId: "m:foreign",
       senderRef: { id: "agent:other" },
+    });
+  });
+
+  it("folds the exact producing model identity from message.started into its completion", () => {
+    const selfId = "agent:self";
+    const modelRequest = request(1);
+    let state = initialAgentState({ channelId: "c", config, selfId });
+    state = applyEvent(state, turnOpened(selfId, "turn:model-identity", 1));
+    state = applyEvent(
+      state,
+      envelope(
+        selfId,
+        "message.started",
+        { role: "assistant", modelRequest },
+        { messageId: "m:model-identity", turnId: "turn:model-identity" },
+        2
+      )
+    );
+    state = applyEvent(
+      state,
+      envelope(
+        selfId,
+        "message.completed",
+        {
+          role: "assistant",
+          blocks: [{ type: "thinking", content: "durable reasoning" }],
+          outcome: "completed",
+        },
+        { messageId: "m:model-identity", turnId: "turn:model-identity" },
+        3
+      )
+    );
+
+    expect(state.entries.at(-1)).toMatchObject({
+      kind: "assistant",
+      messageId: "m:model-identity",
+      model: {
+        provider: modelRequest.provider,
+        api: modelRequest.modelSpec.api,
+        model: modelRequest.model,
+      },
     });
   });
 

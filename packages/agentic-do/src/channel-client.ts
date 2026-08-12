@@ -62,7 +62,7 @@ interface ResolvedService {
 }
 
 export type ChannelDeliveryEndpoint =
-  | { kind: "entity"; entityId: string }
+  | { kind: "entity"; entityId: string; invocation: "direct" | "mailbox" }
   | { kind: "session" };
 
 export interface ChannelJoinInput {
@@ -79,13 +79,13 @@ export interface ChannelJoinInput {
 export interface ChannelJoinResult {
   ok: boolean;
   participantId: string;
+  revision: number;
   channelConfig?: Record<string, unknown>;
   envelope?: ChannelReplayEnvelope;
 }
 
 export class ChannelClient {
   private targetPromise: Promise<string> | null = null;
-  private resolvedTarget: string | null = null;
   constructor(
     private rpc: RpcCaller,
     private channelId: string,
@@ -98,7 +98,6 @@ export class ChannelClient {
         if (service.kind !== "durable-object" || !service.targetId) {
           throw new Error("Channel service must resolve to a Durable Object service");
         }
-        this.resolvedTarget = service.targetId;
         return service.targetId;
       });
     return this.targetPromise;
@@ -182,6 +181,15 @@ export class ChannelClient {
   ): Promise<{ id?: number }> {
     return this.call("publish", participantId, payloadKind, payload, opts);
   }
+  async recordReadReceipt(
+    participantId: string,
+    messageId: string,
+    turnId?: string
+  ): Promise<void> {
+    await this.call("recordReceipt", participantId, messageId, "read", {
+      ...(turnId ? { turnId } : {}),
+    });
+  }
   async update(
     participantId: string,
     messageId: string,
@@ -216,6 +224,21 @@ export class ChannelClient {
   async sendSignalEvent<T>(participantId: string, contentType: string, payload: T): Promise<void> {
     await this.sendSignal(participantId, JSON.stringify(payload), contentType);
   }
+  /** Durable semantic signal. Unlike UI/model progress hints, this is appended
+   * to the canonical log and therefore survives restart and hint loss. */
+  async publishSignalFact<T>(
+    participantId: string,
+    contentType: string,
+    payload: T,
+    idempotencyKey: string
+  ): Promise<void> {
+    await this.publish(
+      participantId,
+      "signal",
+      { content: JSON.stringify(payload), contentType },
+      { idempotencyKey }
+    );
+  }
   async broadcastStoredEnvelopes(envelopeIds: string[]): Promise<{ broadcasted: number }> {
     return this.call("broadcastStoredEnvelopes", envelopeIds) as Promise<{ broadcasted: number }>;
   }
@@ -231,6 +254,10 @@ export class ChannelClient {
 
   async leave(participantId: string, revision: number): Promise<void> {
     await this.call("leave", { participantId, revision });
+  }
+
+  async relationshipState(participantId: string): Promise<{ revision: number; active: boolean }> {
+    return this.call("relationshipState", participantId);
   }
   async getParticipants(): Promise<
     Array<{

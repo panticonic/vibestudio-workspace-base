@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Badge,
   Box,
@@ -33,6 +33,7 @@ import { AgentDisconnectedMessage } from "./AgentDisconnectedMessage";
 import { CustomMessageCard } from "./CustomMessage";
 import { AckBadge } from "./AckBadge";
 import ModelCredentialRequiredCard from "./ModelCredentialRequiredCard";
+import { AutomationActivity, createAutomationUiClient } from "./AutomationActivity";
 import type {
   BrowserHandoffCaller,
   ChannelParticipantId,
@@ -140,6 +141,8 @@ export function agentConfigFromSettings(
   ) {
     config.thinkingLevel = thinkingLevel;
   }
+  const fastMode = settingValue(record["fastMode"]);
+  if (typeof fastMode === "boolean") config.fastMode = fastMode;
   const approvalLevel = settingValue(record["approvalLevel"]);
   if (approvalLevel === 0 || approvalLevel === 1 || approvalLevel === 2) {
     config.approvalLevel = approvalLevel;
@@ -203,7 +206,7 @@ export const MessageCard = React.memo(function MessageCard({
   }, [onInterrupt, msg.id, msg.senderId]);
 
   const handleCopy = useCallback(() => {
-    void onCopy(msg.id, msg.content);
+    onCopy(msg.id, msg.content);
   }, [onCopy, msg.id, msg.content]);
   const handleClearCopied = useCallback(() => {
     onClearCopied(msg.id);
@@ -226,6 +229,14 @@ export const MessageCard = React.memo(function MessageCard({
   const [longContentExpanded, setLongContentExpanded] = useState(false);
   const inputActions = useOptionalChatInputActions();
   const messageActions = useOptionalChatMessageActions();
+  const automationClient = useMemo(() => {
+    if (msg.contentType !== "automation" || !msg.automation) return null;
+    const bridge = chat["rpc"] as
+      | { call?: (target: string, method: string, args: unknown[]) => Promise<unknown> }
+      | undefined;
+    if (typeof bridge?.call !== "function") return null;
+    return createAutomationUiClient(bridge as { call: NonNullable<typeof bridge.call> });
+  }, [chat, msg.automation, msg.contentType]);
   const callMethod = chatCallMethod(chat);
   const sendFromChat = chatSend(chat);
   const providerLevelModelFailure =
@@ -349,10 +360,12 @@ export const MessageCard = React.memo(function MessageCard({
   // edit-fork (own read messages) or a steer-fork (agent messages).
   const [editMode, setEditMode] = useState<null | "outbox" | "fork">(null);
   const [editText, setEditText] = useState("");
+  const [editSubmitting, setEditSubmitting] = useState(false);
   const [forkError, setForkError] = useState<string | null>(null);
   const openEdit = useCallback(
     (mode: "outbox" | "fork") => {
       setEditText(msg.content);
+      setForkError(null);
       setEditMode(mode);
     },
     [msg.content]
@@ -367,18 +380,21 @@ export const MessageCard = React.memo(function MessageCard({
   const submitEdit = useCallback(async () => {
     const text = editText;
     const mode = editMode;
-    setEditMode(null);
     if (!text.trim()) return;
     setForkError(null);
+    setEditSubmitting(true);
     try {
       if (mode === "outbox") {
         await editPendingMessage?.(msg.id, text);
       } else if (mode === "fork") {
         await forkState?.actions.editAndForkMessage(msg, text);
       }
+      setEditMode(null);
     } catch (err) {
       console.error("[MessageCard] edit failed:", err);
       if (mode === "fork") setForkError(errorMessage(err, "Edit and fork failed"));
+    } finally {
+      setEditSubmitting(false);
     }
   }, [editText, editMode, editPendingMessage, forkState, msg]);
 
@@ -436,6 +452,22 @@ export const MessageCard = React.memo(function MessageCard({
   }
 
   // Handle system messages (e.g., agent disconnection notifications)
+  if (
+    msg.contentType === "automation" &&
+    (msg.automation || msg.automationDefinition) &&
+    automationClient
+  ) {
+    return (
+      <Box key={key} className="message-row message-row-system">
+        {msg.automation ? (
+          <AutomationActivity activity={msg.automation} client={automationClient} />
+        ) : (
+          <AutomationActivity definition={msg.automationDefinition!} client={automationClient} />
+        )}
+      </Box>
+    );
+  }
+
   if (msg.kind === "system" && msg.disconnectedAgent) {
     return (
       <Box key={key} className="message-row message-row-system">
@@ -701,6 +733,8 @@ export const MessageCard = React.memo(function MessageCard({
   return (
     <Box
       id={`message-${msg.id}`}
+      data-part="message"
+      data-message-role={isClient ? "player" : "agent"}
       data-message-tier={msg.tier ?? "primary"}
       className={classNames(
         "message-row",
@@ -925,7 +959,10 @@ export const MessageCard = React.memo(function MessageCard({
           )}
         </Flex>
       </Card>
-      <Dialog.Root open={editMode !== null} onOpenChange={(open) => !open && setEditMode(null)}>
+      <Dialog.Root
+        open={editMode !== null}
+        onOpenChange={(open) => !open && !editSubmitting && setEditMode(null)}
+      >
         <Dialog.Content maxWidth="560px">
           <Dialog.Title>
             {editMode === "outbox" ? "Edit message" : "Edit & fork from here"}
@@ -943,14 +980,19 @@ export const MessageCard = React.memo(function MessageCard({
               autoFocus
             />
           </Box>
+          {forkError && editMode === "fork" ? (
+            <Text as="p" size="1" color="red" mt="2">
+              {forkError}
+            </Text>
+          ) : null}
           <Flex justify="end" gap="2" mt="3">
             <Dialog.Close>
-              <Button variant="soft" color="gray">
+              <Button variant="soft" color="gray" disabled={editSubmitting}>
                 Cancel
               </Button>
             </Dialog.Close>
-            <Button onClick={() => void submitEdit()}>
-              {editMode === "outbox" ? "Save" : "Edit & fork"}
+            <Button disabled={editSubmitting || !editText.trim()} onClick={() => void submitEdit()}>
+              {editSubmitting ? "Working…" : editMode === "outbox" ? "Save" : "Edit & fork"}
             </Button>
           </Flex>
         </Dialog.Content>
@@ -978,7 +1020,25 @@ function ForkRow({ fork }: { fork: NonNullable<ChatMessage["fork"]> }) {
           <Button
             size="1"
             variant="ghost"
-            onClick={() => forkState?.actions.switchTo(fork.forkedChannelId, fork.forkedContextId)}
+            onClick={() => {
+              if (!forkState) return;
+              forkState.actions.clearError();
+              void (async () => {
+                try {
+                  await forkState.actions.markForkRead?.(fork.forkedChannelId, fork.headSeq);
+                } catch (cause) {
+                  forkState.actions.reportError(
+                    "Could not save the conversation read position",
+                    cause
+                  );
+                }
+                try {
+                  await forkState.actions.switchTo(fork.forkedChannelId, fork.forkedContextId);
+                } catch (cause) {
+                  forkState.actions.reportError("Could not switch conversations", cause);
+                }
+              })();
+            }}
           >
             Switch
           </Button>

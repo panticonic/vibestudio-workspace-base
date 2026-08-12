@@ -29,6 +29,8 @@ import ReactNativeHapticFeedback from "react-native-haptic-feedback";
 import type { ThemeColors } from "../state/themeAtoms";
 import { radius, spacing, type } from "../design/tokens";
 import { Archive, ChevronDown, ChevronRight, Pin } from "../design/icons";
+import { MobilePanelIcon } from "./MobilePanelIcon";
+import type { MobilePanelRowPresentation } from "../shellCore/panelForest";
 
 function triggerHaptic() {
   try {
@@ -45,19 +47,13 @@ const INDENT_PER_LEVEL = 14;
 const ARCHIVE_THRESHOLD = -120;
 const ITEM_HEIGHT = 46;
 
-export interface FlatPanelItem {
-  id: string;
-  title: string;
-  depth: number;
-  childCount: number;
-  isCollapsed: boolean;
-}
-
 interface PanelTreeItemProps {
-  item: FlatPanelItem;
+  item: MobilePanelRowPresentation;
   isActive: boolean;
   isPinned?: boolean;
   colors: ThemeColors;
+  serverUrl: string;
+  resolveBrowserFavicon: (url: string) => Promise<string | null>;
   onPress: (panelId: string) => void;
   onLongPress?: (panelId: string) => void;
   onToggleCollapse: (panelId: string, collapsed: boolean) => void;
@@ -69,6 +65,8 @@ export function PanelTreeItem({
   isActive,
   isPinned = false,
   colors,
+  serverUrl,
+  resolveBrowserFavicon,
   onPress,
   onLongPress,
   onToggleCollapse,
@@ -174,7 +172,7 @@ export function PanelTreeItem({
             <Pressable
               onPress={handleChevronPress}
               style={styles.chevronButton}
-              hitSlop={8}
+              hitSlop={10}
               accessibilityRole="button"
               accessibilityLabel={item.isCollapsed ? "Expand children" : "Collapse children"}
             >
@@ -196,6 +194,15 @@ export function PanelTreeItem({
             accessibilityRole="button"
             accessibilityLabel={`${item.title}. Long-press for actions.`}
           >
+            <MobilePanelIcon
+              icon={item.icon}
+              source={item.source}
+              kind={item.kind}
+              serverUrl={serverUrl}
+              size={18}
+              color={mutedColor}
+              resolveBrowserFavicon={resolveBrowserFavicon}
+            />
             <Text
               style={[type.body, isActive && type.bodyStrong, styles.title, { color: titleColor }]}
               numberOfLines={1}
@@ -261,12 +268,16 @@ const styles = StyleSheet.create({
   },
   titlePressable: {
     flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
     justifyContent: "center",
     marginLeft: spacing.xs,
     alignSelf: "stretch",
   },
   title: {
     lineHeight: undefined,
+    flexShrink: 1,
   },
   childCount: {
     marginLeft: spacing.sm,

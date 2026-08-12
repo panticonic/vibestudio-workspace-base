@@ -11,11 +11,13 @@ import {
   type BridgeStreamRelay,
   type RpcEnvelope,
 } from "@vibestudio/rpc";
-import type { WebRtcSession } from "@vibestudio/rpc/transports/webrtcClient";
+import { PIPE_CLOSED_CODE, type WebRtcSession } from "@vibestudio/rpc/transports/webrtcClient";
 import type { MobileRpcClient } from "./mobileTransport";
 
 export interface BridgeAdapterCallbacks {
   navigateToPanel(panelId: string): void;
+  /** Deliver an envelope to this panel's local owning shell. */
+  deliverToShell(panelId: string, envelope: RpcEnvelope): void;
 }
 
 type PanelLease = { runtimeEntityId: PanelEntityId; connectionId: string };
@@ -156,6 +158,32 @@ export function createBridgeAdapter(deps: {
     return relay;
   }
 
+  async function sendPanelEnvelope(panelId: string, envelope: RpcEnvelope): Promise<void> {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const session = await ensurePanelSession(panelId);
+        const lease = requirePanelLease(panelId);
+        await session.send(
+          stampEnvelopeCaller(envelope, {
+            callerId: lease.runtimeEntityId,
+            callerKind: "panel",
+          })
+        );
+        return;
+      } catch (error) {
+        if (attempt > 0 || (error as { code?: unknown } | null)?.code !== PIPE_CLOSED_CODE) {
+          throw error;
+        }
+        // A logical panel session survives a recoverable pipe drop and reopens
+        // with the transport. Its `isClosed()` flag is intentionally terminal-
+        // only, so rejecting immediately here strands every panel RPC that
+        // races a mobile network transition. The failed send wrote no frame;
+        // wait for the shared pipe and retry that exact envelope once.
+        await deps.transport.waitUntilConnected(45_000);
+      }
+    }
+  }
+
   return {
     closePanelSession,
     async handle(panelId: string, method: string, args: unknown[]): Promise<unknown> {
@@ -214,24 +242,20 @@ export function createBridgeAdapter(deps: {
         case "openFolderDialog":
           return null;
         case "postEnvelope": {
-          // One-way send over the panel's dedicated "panel" session; replies +
-          // events arrive via the session's onMessage → deliverToPanel.
           const [envelope] = args as [RpcEnvelope];
-          void ensurePanelSession(panelId)
-            // Return the send promise so a send rejection is caught here rather
-            // than becoming an unhandled rejection (Finding 5).
-            .then((session) => {
-              const lease = requirePanelLease(panelId);
-              return session.send(
-                stampEnvelopeCaller(envelope, {
-                  callerId: lease.runtimeEntityId,
-                  callerKind: "panel",
-                })
-              );
-            })
-            .catch((err) =>
-              console.warn(`[bridgeAdapter] postEnvelope relay failed (panel ${panelId}):`, err)
-            );
+          // `shell` is the WebView's local owning host. The target decision is
+          // independent of event names: no shell envelope may fall through to
+          // a server-backed panel session.
+          if (envelope.target === "shell") {
+            deps.callbacks.deliverToShell(panelId, envelope);
+            return;
+          }
+          // Send over the panel's dedicated "panel" session; replies + events
+          // arrive via the session's onMessage → deliverToPanel. The bridge
+          // acknowledgement is delivery backpressure: do not tell the WebView
+          // that its envelope was accepted until the session is open and the
+          // frame has actually been written.
+          await sendPanelEnvelope(panelId, envelope);
           return;
         }
         // §1.6 upload hop — a panel's streaming request body crosses the

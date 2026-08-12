@@ -9,6 +9,7 @@
   },
   "vibestudio": {
     "title": "Terminal",
+    "icon": "./assets/icon.svg",
     "entry": "index.tsx",
     "exposeModules": [
       "react",

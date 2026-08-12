@@ -87,7 +87,6 @@ import {
   type ContentEdgeRecord,
   type IntegrationDecisionRecord,
   type SemanticEffect,
-  type SemanticStateRecord,
   type SemanticVcsStore,
   type StatePredicateRecord,
   type WorkUnitRecord,
@@ -322,12 +321,6 @@ interface NetMergeComparison {
   coordinates: NetMergeCoordinate[];
   concluded: boolean;
 }
-
-type ChangePrerequisite =
-  | { kind: "endpoint"; endpoint: Row }
-  | { kind: "repository-present"; repositoryId: string }
-  | { kind: "file-path-empty"; repositoryId: string; path: string; exceptFileId: string }
-  | { kind: "repository-path-empty"; repoPath: string; exceptRepositoryId: string };
 
 const asState = (value: VcsStateNodeRef): StateNodeRef =>
   value.kind === "event"
@@ -666,39 +659,59 @@ const changeEffects = (change: Pick<ChangeRecord, "kind" | "base" | "result" | "
 
 type SemanticCursorPayload = Readonly<{
   kind: string;
-  basis: Row;
   position: Row;
 }>;
 
+const base64UrlFromBytes = (value: Uint8Array): string =>
+  base64FromBytes(value).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/u, "");
+
+const bytesFromBase64Url = (value: string): Uint8Array => {
+  if (!/^[A-Za-z0-9_-]+$/u.test(value) || value.length % 4 === 1) {
+    throw new Error("invalid base64url");
+  }
+  const padding = "=".repeat((4 - (value.length % 4)) % 4);
+  return bytesFromBase64(`${value.replaceAll("-", "+").replaceAll("_", "/")}${padding}`);
+};
+
 const semanticCursor = (kind: string, basis: Row, position: Row): string => {
-  const bytes = new TextEncoder().encode(canonicalJson({ kind, basis, position }));
-  const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  return `semantic-page-v1.${sha256Hex(bytes)}.${hex}`;
+  // The resumable position must cross the tool boundary, but the often-large
+  // typed basis need not. Bind that exact basis into the digest so a compact
+  // cursor still fails closed when either the request or token changes.
+  const payload = { kind, position } satisfies SemanticCursorPayload;
+  const payloadBytes = new TextEncoder().encode(canonicalJson(payload));
+  const digest = sha256Hex(new TextEncoder().encode(canonicalJson({ basis, ...payload })));
+  return `semantic-page-v2.${digest}.${base64UrlFromBytes(payloadBytes)}`;
 };
 
 const parseSemanticCursor = (cursor: string | undefined, kind: string, basis: Row): Row | null => {
   if (!cursor) return null;
-  const match = /^semantic-page-v1\.([0-9a-f]{64})\.([0-9a-f]+)$/u.exec(cursor);
-  if (!match || match[2]!.length % 2 !== 0) {
+  const match = /^semantic-page-v2\.([0-9a-f]{64})\.([A-Za-z0-9_-]+)$/u.exec(cursor);
+  if (!match) {
     throw new SemanticVcsError("InvalidReference", `Invalid ${kind} cursor`);
   }
   try {
-    const bytes = Uint8Array.from(match[2]!.match(/../gu) ?? [], (pair) =>
-      Number.parseInt(pair, 16)
-    );
-    if (sha256Hex(bytes) !== match[1]) throw new Error("digest mismatch");
-    const payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)) as
+    const payloadBytes = bytesFromBase64Url(match[2]!);
+    const payload = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(payloadBytes)) as
       | SemanticCursorPayload
       | undefined;
     if (
       !payload ||
       payload.kind !== kind ||
-      canonicalJson(payload.basis) !== canonicalJson(basis) ||
       !payload.position ||
       typeof payload.position !== "object"
     ) {
       throw new Error("basis mismatch");
     }
+    const canonicalPayload = base64UrlFromBytes(
+      new TextEncoder().encode(canonicalJson({ kind: payload.kind, position: payload.position }))
+    );
+    if (canonicalPayload !== match[2]) throw new Error("non-canonical payload");
+    const digest = sha256Hex(
+      new TextEncoder().encode(
+        canonicalJson({ basis, kind: payload.kind, position: payload.position })
+      )
+    );
+    if (digest !== match[1]) throw new Error("digest mismatch");
     return payload.position;
   } catch {
     throw new SemanticVcsError("InvalidReference", `${kind} cursor does not match its exact basis`);
@@ -1228,21 +1241,21 @@ export class SemanticWorkspace {
       case "push":
         return this.push(parsed as VcsPushInput, request);
       case "status":
-        return { kind: "complete", result: this.status(parsed as VcsStatusInput, request) };
+        return { kind: "complete", result: this.status(parsed as VcsStatusInput) };
       case "compare":
         return this.compare(parsed as VcsCompareInput, request);
       case "inspect":
-        return { kind: "complete", result: this.inspect(parsed as VcsInspectInput, request) };
+        return { kind: "complete", result: this.inspect(parsed as VcsInspectInput) };
       case "neighbors":
-        return { kind: "complete", result: this.neighbors(parsed as VcsNeighborsInput, request) };
+        return { kind: "complete", result: this.neighbors(parsed as VcsNeighborsInput) };
       case "history":
-        return { kind: "complete", result: this.history(parsed as VcsHistoryInput, request) };
+        return { kind: "complete", result: this.history(parsed as VcsHistoryInput) };
       case "blame":
-        return { kind: "complete", result: this.blame(parsed as VcsBlameInput, request) };
+        return { kind: "complete", result: this.blame(parsed as VcsBlameInput) };
       case "readMemory":
         return {
           kind: "complete",
-          result: this.readMemory(parsed as VcsReadMemoryInput, request),
+          result: this.readMemory(parsed as VcsReadMemoryInput),
         };
       case "resolveRepository":
         return {
@@ -1250,14 +1263,14 @@ export class SemanticWorkspace {
           result: this.resolveRepository(parsed as VcsResolveRepositoryInput),
         };
       case "readFile":
-        return this.readFile(parsed as VcsReadFileInput, request);
+        return this.readFile(parsed as VcsReadFileInput);
       case "listDirectory":
         return {
           kind: "complete",
           result: this.listDirectory(parsed as VcsListDirectoryInput),
         };
       case "listFiles":
-        return { kind: "complete", result: this.listFiles(parsed as VcsListFilesInput, request) };
+        return { kind: "complete", result: this.listFiles(parsed as VcsListFilesInput) };
     }
   }
 
@@ -2037,6 +2050,7 @@ export class SemanticWorkspace {
           contentKind: "bytes",
           byteLength: bytes.length,
           coordinateExtent: bytes.length,
+          ...(change.mode !== undefined ? { mode: change.mode } : {}),
         };
       } else {
         if (point.state.contentKind !== "text") {
@@ -2071,6 +2085,7 @@ export class SemanticWorkspace {
           contentKind: "text",
           byteLength: bytes.length,
           coordinateExtent: next.length,
+          ...(change.mode !== undefined ? { mode: change.mode } : {}),
         };
       }
       const resultEndpoint = endpointForFile(
@@ -4170,6 +4185,7 @@ export class SemanticWorkspace {
           mode: Number(endpoint["mode"]),
           ...contentDescriptorFromEndpoint(endpoint),
         });
+        if (existing?.fileStateId === result.fileStateId) return [];
       } else {
         if (existing?.presence !== "placed") return [];
         result = workspaceFileStateIdentity({
@@ -4473,7 +4489,7 @@ export class SemanticWorkspace {
     );
   }
 
-  private status(input: VcsStatusInput, request: SemanticDispatchRequest): Row {
+  private status(input: VcsStatusInput): Row {
     const context = this.deps.store.contextRequired(input.contextId);
     const chain = this.deps.store.workingChain(input.contextId, MAX_WORKING_APPLICATIONS);
     const workUnits = new Set(
@@ -4873,7 +4889,7 @@ export class SemanticWorkspace {
     };
   }
 
-  private inspect(input: VcsInspectInput, request: SemanticDispatchRequest): Row {
+  private inspect(input: VcsInspectInput): Row {
     const value = this.inspectNode(input.node as Row);
     const page = this.neighborEdges(input.node as Row, undefined, input.edgeLimit + 1);
     return {
@@ -4884,7 +4900,7 @@ export class SemanticWorkspace {
     };
   }
 
-  private neighbors(input: VcsNeighborsInput, request: SemanticDispatchRequest): Row {
+  private neighbors(input: VcsNeighborsInput): Row {
     const cursorBasis = { root: input.root };
     const edges = this.neighborEdges(input.root as Row, input.cursor, input.limit + 1);
     return {
@@ -4897,7 +4913,7 @@ export class SemanticWorkspace {
     };
   }
 
-  private history(input: VcsHistoryInput, request: SemanticDispatchRequest): Row {
+  private history(input: VcsHistoryInput): Row {
     const cursorBasis = { root: input.root, direction: input.direction };
     const entries = this.historyEntries(
       input.root as Row,
@@ -4915,7 +4931,7 @@ export class SemanticWorkspace {
     };
   }
 
-  private blame(input: VcsBlameInput, request: SemanticDispatchRequest): Row {
+  private blame(input: VcsBlameInput): Row {
     const root = this.deps.store.stateRoot(asState(input.state));
     const point = this.deps.store.facts.file(root, input.fileId);
     if (
@@ -4995,7 +5011,7 @@ export class SemanticWorkspace {
    * normalized command/trajectory/event tables hydrate the bounded context a
    * future agent needs to understand that work.
    */
-  private readMemory(input: VcsReadMemoryInput, request: SemanticDispatchRequest): Row {
+  private readMemory(input: VcsReadMemoryInput): Row {
     const context = this.deps.store.context(input.contextId);
     if (!context) {
       throw new SemanticVcsError("InvalidReference", `Unknown context ${input.contextId}`);
@@ -5034,16 +5050,13 @@ export class SemanticWorkspace {
       );
     }
 
-    const blamed = this.blame(
-      {
-        state,
-        repositoryId: repository.repositoryId,
-        fileId: point.state.fileId,
-        range: input.range,
-        limit: 500,
-      },
-      request
-    );
+    const blamed = this.blame({
+      state,
+      repositoryId: repository.repositoryId,
+      fileId: point.state.fileId,
+      range: input.range,
+      limit: 500,
+    });
     const rawSpans = Array.isArray(blamed["spans"]) ? (blamed["spans"] as Row[]) : [];
     const grouped = new Map<
       string,
@@ -5170,7 +5183,6 @@ export class SemanticWorkspace {
       ? String((incorporation["from"] as Row)["appliedChangeId"] ?? "")
       : appliedChangeId;
     const authored = this.appliedChangeMetadata(appliedChangeId);
-    const anchor = this.appliedChangeMetadata(anchorAppliedChangeId);
     const row = this.deps.sql
       .exec(
         `SELECT decision.decision_id, entry.coordinate_id, entry.resolution, entry.rationale
@@ -5329,10 +5341,7 @@ export class SemanticWorkspace {
     };
   }
 
-  private readFile(
-    input: VcsReadFileInput,
-    request: SemanticDispatchRequest
-  ): SemanticDispatchResult {
+  private readFile(input: VcsReadFileInput): SemanticDispatchResult {
     const root = this.deps.store.stateRoot(asState(input.state));
     const point =
       input.file.kind === "id"
@@ -5678,7 +5687,7 @@ export class SemanticWorkspace {
     return result;
   }
 
-  private listFiles(input: VcsListFilesInput, request: SemanticDispatchRequest): Row {
+  private listFiles(input: VcsListFilesInput): Row {
     const root = this.deps.store.stateRoot(asState(input.state));
     const repository = this.presentRepository(root, input.repositoryId);
     const cursorBasis = {
@@ -6697,40 +6706,6 @@ export class SemanticWorkspace {
       throw new SemanticVcsError("InvalidReference", `Unknown repository ${repositoryId}`);
     }
     return repository;
-  }
-
-  private filesInRepositoryState(
-    root: string,
-    repository: PresentRepositoryState
-  ): PlacedFileState[] {
-    const page = this.deps.store.facts.pageManifest(repository.fileManifestId, {
-      limit: 100_000,
-    });
-    if (page.next !== null) {
-      throw new SemanticVcsError(
-        "ScopeTooLarge",
-        `Repository ${repository.repositoryId} exceeds the exact revert bound`
-      );
-    }
-    return page.values.map(({ fileId, path }) => {
-      const observed = this.deps.store.facts.file(root, fileId)?.state;
-      const state =
-        observed?.presence === "deleted"
-          ? this.deps.store.facts.fileStateById(observed.priorFileStateId)
-          : observed;
-      if (
-        !state ||
-        state.presence !== "placed" ||
-        state.repositoryId !== repository.repositoryId ||
-        state.path !== path
-      ) {
-        throw new SemanticVcsError(
-          "IntegrityFailure",
-          `Manifest ${repository.fileManifestId} has no exact file state for ${fileId}`
-        );
-      }
-      return state;
-    });
   }
 
   private placedFile(root: string, repositoryId: string, fileId: string) {
@@ -8006,8 +7981,7 @@ export class SemanticWorkspace {
       const endpoint = endpoints.get(keyFor(coordinate.coordinate))!;
       if (endpoint["kind"] !== "file") continue;
       const repository = { kind: "repository" as const, id: String(endpoint["repositoryId"]) };
-      const repositoryEndpoint =
-        endpoints.get(keyFor(repository)) ?? targetEndpoint(repository);
+      const repositoryEndpoint = endpoints.get(keyFor(repository)) ?? targetEndpoint(repository);
       const targetRepositoryEndpoint = targetEndpoint(repository);
       if (
         targetRepositoryEndpoint["presence"] !== "present" &&
@@ -8353,34 +8327,6 @@ export class SemanticWorkspace {
     });
   }
 
-  private reachableDecisionsBySourceChange(
-    applicationIds: readonly string[]
-  ): Map<string, string[]> {
-    if (applicationIds.length === 0) return new Map();
-    const rows = this.deps.sql
-      .exec(
-        `SELECT source.change_id, decision.decision_id
-           FROM gad_integration_decisions decision
-           JOIN gad_decision_source_changes source
-             ON source.decision_id = decision.decision_id
-          WHERE decision.work_unit_id IN (
-            SELECT application.work_unit_id
-              FROM gad_work_unit_applications application
-              JOIN json_each(?) selected
-                ON application.application_id = CAST(selected.value AS TEXT)
-          )
-          ORDER BY source.change_id, decision.decision_id`,
-        canonicalJson(applicationIds)
-      )
-      .toArray() as Row[];
-    const result = new Map<string, string[]>();
-    for (const row of rows) {
-      const changeId = String(row["change_id"]);
-      result.set(changeId, [...(result.get(changeId) ?? []), String(row["decision_id"])]);
-    }
-    return result;
-  }
-
   private decisionIdsInApplications(applicationIds: readonly string[]): string[] {
     if (applicationIds.length === 0) return [];
     return (
@@ -8578,94 +8524,6 @@ export class SemanticWorkspace {
     return !!change.result && this.endpointHolds(state, change.result);
   }
 
-  private changePrerequisites(change: ChangeRecord): ChangePrerequisite[] {
-    const prerequisites: ChangePrerequisite[] = [];
-    // A copy's base names the provenance source, not a target predecessor.
-    // Every other base is the exact state the target coordinate must still have.
-    if (change.base && change.kind !== "file-copy") {
-      prerequisites.push({ kind: "endpoint", endpoint: change.base });
-    }
-    const result = change.result;
-    if (result?.["kind"] === "file" && typeof result["fileId"] === "string") {
-      const repositoryId = String(result["repositoryId"] ?? "");
-      const path = String(result["path"] ?? "");
-      if (repositoryId) {
-        prerequisites.push({ kind: "repository-present", repositoryId });
-      }
-      if (
-        path &&
-        (!change.base ||
-          change.base["kind"] !== "file" ||
-          change.base["repositoryId"] !== repositoryId ||
-          change.base["path"] !== path)
-      ) {
-        prerequisites.push({
-          kind: "file-path-empty",
-          repositoryId,
-          path,
-          exceptFileId: result["fileId"],
-        });
-      }
-    }
-    if (
-      result?.["kind"] === "repository" &&
-      typeof result["repositoryId"] === "string" &&
-      typeof result["repoPath"] === "string" &&
-      (!change.base || change.base["repoPath"] !== result["repoPath"])
-    ) {
-      prerequisites.push({
-        kind: "repository-path-empty",
-        repoPath: result["repoPath"],
-        exceptRepositoryId: result["repositoryId"],
-      });
-    }
-    return prerequisites;
-  }
-
-  private prerequisiteHolds(state: StateNodeRef, condition: ChangePrerequisite): boolean {
-    if (condition.kind === "endpoint") return this.endpointHolds(state, condition.endpoint);
-    const root = this.deps.store.stateRoot(state);
-    if (condition.kind === "repository-present") {
-      return this.deps.store.facts.member(root, condition.repositoryId)?.presence === "present";
-    }
-    if (condition.kind === "file-path-empty") {
-      const point = this.deps.store.facts.fileAtPath(root, condition.repositoryId, condition.path);
-      return !point || point.state.fileId === condition.exceptFileId;
-    }
-    const member = this.deps.store.facts.repositoryAtPath(root, condition.repoPath);
-    return !member || member.repositoryId === condition.exceptRepositoryId;
-  }
-
-  private changeEstablishes(change: ChangeRecord, condition: ChangePrerequisite): boolean {
-    if (condition.kind === "endpoint") {
-      return !!change.result && canonicalJson(change.result) === canonicalJson(condition.endpoint);
-    }
-    if (condition.kind === "repository-present") {
-      return (
-        change.result?.["kind"] === "repository" &&
-        change.result["repositoryId"] === condition.repositoryId &&
-        change.result["presence"] !== "deleted"
-      );
-    }
-    if (condition.kind === "file-path-empty") {
-      return (
-        change.base?.["kind"] === "file" &&
-        change.base["repositoryId"] === condition.repositoryId &&
-        change.base["path"] === condition.path &&
-        (change.result?.["kind"] !== "file" ||
-          change.result["repositoryId"] !== condition.repositoryId ||
-          change.result["path"] !== condition.path)
-      );
-    }
-    return (
-      change.base?.["kind"] === "repository" &&
-      change.base["repoPath"] === condition.repoPath &&
-      (change.result?.["kind"] !== "repository" ||
-        change.result["presence"] === "deleted" ||
-        change.result["repoPath"] !== condition.repoPath)
-    );
-  }
-
   private revertBlockingChangeIds(state: StateNodeRef, original: ChangeRecord): string[] {
     const changes = this.changesInApplications(this.firstParentLineage(state).applicationIds);
     const originalIndex = changes.findIndex((change) => change.changeId === original.changeId);
@@ -8712,60 +8570,6 @@ export class SemanticWorkspace {
       );
     }
     return false;
-  }
-
-  private assertChangeReachableFromEvent(changeId: string, eventId: string): void {
-    const row = this.deps.sql
-      .exec(
-        `SELECT 1 FROM gad_workspace_event_applications event_application
-          JOIN gad_applied_changes applied ON applied.application_id = event_application.application_id
-         WHERE event_application.event_id = ? AND applied.change_id = ? LIMIT 1`,
-        eventId,
-        changeId
-      )
-      .toArray();
-    if (row.length === 0) {
-      throw new SemanticVcsError(
-        "InvalidReference",
-        `Change ${changeId} is not in event ${eventId}`
-      );
-    }
-  }
-
-  private changesAtEvent(eventId: string): ChangeRecord[] {
-    if (!this.deps.store.event(eventId))
-      throw new SemanticVcsError("InvalidReference", `Unknown event ${eventId}`);
-    const rows = this.deps.sql
-      .exec(
-        `SELECT DISTINCT change_id FROM gad_applied_changes
-          WHERE application_id IN (
-            SELECT application_id FROM gad_workspace_event_applications WHERE event_id = ?
-          ) ORDER BY change_id`,
-        eventId
-      )
-      .toArray() as Row[];
-    return rows.map((row) => this.changeRequired(String(row["change_id"])));
-  }
-
-  private changesAtState(state: StateNodeRef): Set<string> {
-    if (state.kind === "event")
-      return new Set(this.changesAtEvent(state.eventId).map((value) => value.changeId));
-    const chain = readApplicationChain(
-      this.deps.sql,
-      state.applicationId,
-      MAX_WORKING_APPLICATIONS
-    );
-    return new Set(
-      (
-        this.deps.sql
-          .exec(
-            `SELECT DISTINCT change_id FROM gad_applied_changes
-            WHERE application_id IN (SELECT CAST(value AS TEXT) FROM json_each(?))`,
-            canonicalJson(chain)
-          )
-          .toArray() as Row[]
-      ).map((row) => String(row["change_id"]))
-    );
   }
 
   private publicAppliedChange(row: Row): Row {

@@ -3,11 +3,15 @@ import type { Browser, CdpPage } from "@workspace/cdp-client";
 import type {
   CdpAutomation,
   CdpEndpoint,
+  PanelCdpGeneration,
+  PanelCdpSession,
+  PanelCdpSessionRefresh,
   PanelConsoleHistoryOptions,
   PanelConsoleHistoryResult,
   PanelScreenshotOptions,
   PanelScreenshotResult,
 } from "../core/index.js";
+import type { PanelObservation } from "@vibestudio/shared/panel/observation";
 
 export type { CdpAutomation, CdpEndpoint };
 
@@ -25,6 +29,7 @@ interface CdpAutomationOptions {
   navigate?: (url: string) => Promise<void>;
   navigateHistory?: (delta: -1 | 1) => Promise<void>;
   reload?: () => Promise<void>;
+  observe?: () => Promise<PanelObservation>;
 }
 
 function isCdpClientModule(value: unknown): value is CdpClientModule {
@@ -34,80 +39,32 @@ function isCdpClientModule(value: unknown): value is CdpClientModule {
 async function loadCdpClient(
   loadModule?: (id: string) => unknown | Promise<unknown>
 ): Promise<CdpClientModule> {
-  const loadErrors: string[] = [];
-  const rememberLoadError = (source: string, error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    loadErrors.push(`${source}: ${message}`);
-  };
   if (loadModule) {
     try {
       const loaded = await loadModule(CDP_CLIENT_MODULE);
       if (isCdpClientModule(loaded)) return loaded;
       throw new Error("module does not expose BrowserImpl.connect");
     } catch (error) {
-      rememberLoadError("host module loader", error);
       // A closure-held loader is the hosted runtime's authority-bearing module
-      // path. Falling through would both hide its failure and try loaders that
-      // belong to another runtime (including forbidden Function construction
-      // in workerd).
-      throw new Error(`Unable to load ${CDP_CLIENT_MODULE} for CDP automation. ${loadErrors[0]}`, {
+      // path. Falling through would hide its failure behind another runtime.
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Unable to load ${CDP_CLIENT_MODULE} for CDP automation. ${message}`, {
         cause: error,
       });
     }
   }
-  const runtimeRequire = (globalThis as Record<string, unknown>)["__vibestudioRequire__"] as
-    | ((id: string) => unknown)
-    | undefined;
-  if (runtimeRequire) {
-    try {
-      const loaded = runtimeRequire(CDP_CLIENT_MODULE);
-      if (isCdpClientModule(loaded)) return loaded;
-    } catch (error) {
-      rememberLoadError("__vibestudioRequire__", error);
-      // Panels can lazily import npm packages via __vibestudioRequireAsync__ below.
-      // Workers only have the sync module map, so a missing map entry should
-      // fall through to the clearest environment-specific loader/error.
-    }
-  }
-  const runtimeLoadImport = (globalThis as Record<string, unknown>)["__vibestudioLoadImport__"] as
-    | ((id: string, ref?: string) => Promise<unknown>)
-    | undefined;
-  if (runtimeLoadImport) {
-    try {
-      const loaded = await runtimeLoadImport(CDP_CLIENT_MODULE, "latest");
-      if (isCdpClientModule(loaded)) return loaded;
-    } catch (error) {
-      rememberLoadError("__vibestudioLoadImport__", error);
-      // Try the panel loader next, then native dynamic import outside the hosted runtime.
-    }
-  }
-  const runtimeRequireAsync = (globalThis as Record<string, unknown>)[
-    "__vibestudioRequireAsync__"
-  ] as ((id: string) => Promise<unknown>) | undefined;
-  if (runtimeRequireAsync) {
-    try {
-      const loaded = await runtimeRequireAsync(CDP_CLIENT_MODULE);
-      if (isCdpClientModule(loaded)) return loaded;
-    } catch (error) {
-      rememberLoadError("__vibestudioRequireAsync__", error);
-      // Fall through to dynamic import for non-runtime test/node environments.
-    }
-  }
   try {
-    const dynamicImport = new Function("id", "return import(id)") as (
-      id: string
-    ) => Promise<CdpClientModule>;
-    const loaded = await dynamicImport(CDP_CLIENT_MODULE);
+    const loaded: unknown = await import("@workspace/cdp-client");
     if (isCdpClientModule(loaded)) return loaded;
+    throw new Error("module does not expose BrowserImpl.connect");
   } catch (error) {
-    rememberLoadError("dynamic import", error);
-    // Throw the clearer message below.
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      `Unable to load ${CDP_CLIENT_MODULE} for CDP automation. ${message}. ` +
+        `Call handle.cdp.page() only from contexts that expose @workspace/cdp-client.`,
+      { cause: error }
+    );
   }
-  throw new Error(
-    `Unable to load ${CDP_CLIENT_MODULE} for CDP automation. ` +
-      `Call handle.cdp.page() only from contexts that expose @workspace/cdp-client.` +
-      (loadErrors.length ? ` Load errors: ${loadErrors.join("; ")}` : "")
-  );
 }
 
 export function createCdpAutomation(
@@ -151,8 +108,104 @@ export function createCdpAutomation(
     return resolvedPage;
   };
 
+  const generationOf = (observation: PanelObservation): PanelCdpGeneration => {
+    if (observation.phase !== "ready" || !observation.runtimeEntityId) {
+      throw Object.assign(
+        new Error(
+          `Panel ${JSON.stringify(id)} is ${observation.phase}; acquire a CDP session only after it is ready.`
+        ),
+        {
+          code: "panel_cdp_generation_unavailable",
+          errorData: {
+            code: "panel_cdp_generation_unavailable",
+            panelId: id,
+            phase: observation.phase,
+            attemptId: observation.attemptId,
+            recovery: {
+              action: "reobserve",
+              instruction:
+                "Observe the panel lifecycle and acquire a session after phase becomes ready.",
+            },
+          },
+        }
+      );
+    }
+    return {
+      protocol: "panel-cdp-generation.v1",
+      panelId: id,
+      attemptId: observation.attemptId,
+      runtimeEntityId: observation.runtimeEntityId,
+      buildKey: observation.buildKey,
+    };
+  };
+
+  const sameGeneration = (left: PanelCdpGeneration, right: PanelCdpGeneration): boolean =>
+    left.panelId === right.panelId &&
+    left.attemptId === right.attemptId &&
+    left.runtimeEntityId === right.runtimeEntityId;
+
+  const acquireSession = async (): Promise<PanelCdpSession> => {
+    if (!options.observe) {
+      throw new Error(
+        "Generation-fenced CDP sessions are unavailable in this runtime; use a PanelHandle created by panelTree/openPanel."
+      );
+    }
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const before = generationOf(await options.observe());
+      const page = await connectPage();
+      const after = generationOf(await options.observe());
+      if (!sameGeneration(before, after)) {
+        await page.close();
+        continue;
+      }
+
+      let session!: PanelCdpSession;
+      session = {
+        protocol: "panel-cdp-session.v1",
+        generation: after,
+        page,
+        refresh: async (): Promise<PanelCdpSessionRefresh> => {
+          const current = generationOf(await options.observe!());
+          if (sameGeneration(session.generation, current) && !page.isClosed()) {
+            return { status: "current", session };
+          }
+          await page.close();
+          if (sameGeneration(session.generation, current)) {
+            return {
+              status: "reconnected",
+              generation: current,
+              session: await acquireSession(),
+            };
+          }
+          return {
+            status: "replaced",
+            previousGeneration: session.generation,
+            session: await acquireSession(),
+          };
+        },
+        close: () => page.close(),
+      };
+      return session;
+    }
+    throw Object.assign(
+      new Error(`Panel ${JSON.stringify(id)} changed generation during three CDP acquisitions`),
+      {
+        code: "panel_cdp_generation_churn",
+        errorData: {
+          code: "panel_cdp_generation_churn",
+          panelId: id,
+          recovery: {
+            action: "reobserve",
+            instruction: "Inspect the panel lifecycle before acquiring another CDP session.",
+          },
+        },
+      }
+    );
+  };
+
   return {
     page: connectPage,
+    session: acquireSession,
     consoleHistory: (options?: PanelConsoleHistoryOptions) => {
       return rpc.call<PanelConsoleHistoryResult>("main", "panelCdp.consoleHistory", [id, options]);
     },

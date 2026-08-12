@@ -3,11 +3,12 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
-  SafeAreaView,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "./ui/primitives";
 import { radius, spacing, type } from "../design/tokens";
 import type { StackNavigationProp } from "@react-navigation/stack";
@@ -29,7 +30,7 @@ import {
   authErrorAtom,
   pairingIdentityAtom,
 } from "../state/authAtoms";
-import { connectionStatusAtom } from "../state/connectionAtoms";
+import { connectionStatusAtom, workspaceReadinessAtom } from "../state/connectionAtoms";
 import { panelTreeRevisionAtom, shellClientAtom } from "../state/shellClientAtom";
 import { themeColorsAtom } from "../state/themeAtoms";
 import { VibestudioLogo } from "./VibestudioLogo";
@@ -54,6 +55,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
   const setAuthLoading = useSetAtom(authLoadingAtom);
   const setAuthError = useSetAtom(authErrorAtom);
   const setConnectionStatus = useSetAtom(connectionStatusAtom);
+  const setWorkspaceReadiness = useSetAtom(workspaceReadinessAtom);
   const setPairingIdentity = useSetAtom(pairingIdentityAtom);
   const setShellClient = useSetAtom(shellClientAtom);
   const setPanelTreeRevision = useSetAtom(panelTreeRevisionAtom);
@@ -121,7 +123,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
     let cancelled = false;
     let pendingClient: ShellClient | null = null;
 
-    const finishConnectedClient = (client: ShellClient, credentials: Credentials) => {
+    const finishConnectedClient = (client: ShellClient) => {
       smokePhase("workspace-connected");
 
       setShellClient(client);
@@ -138,6 +140,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
       setAuthError(null);
       setNeedsHostApproval(false);
       setConnectionAttempt(0);
+      setWorkspaceReadiness("connecting");
       setConnectionPhase("Reading saved pairing…");
       try {
         smokePhase("workspace-login-connect-start");
@@ -152,17 +155,22 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
             "No Vibestudio pairing is stored on this device. Scan a pairing QR code from a trusted desktop or terminal."
           );
         }
+        if (stored.schemaVersion !== 4) {
+          throw new Error("The saved mobile connection has not completed its required migration.");
+        }
         const credentials: Credentials = {
-          deviceId: stored.deviceId,
+          deviceId: stored.credential.deviceId,
         };
         setPairingIdentity({
           server: "Paired workspace server",
-          deviceId: stored.deviceId,
+          deviceId: stored.credential.deviceId,
         });
         setConnectionPhase("Contacting your workspace server…");
 
         const client = new ShellClient({
           credentials,
+          serverIdentity: stored.controlPairing.fp,
+          onReadinessChange: setWorkspaceReadiness,
           onStatusChange: (status) => {
             setConnectionStatus(status);
             if (status === "connected") {
@@ -172,6 +180,9 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
           },
           onTreeInvalidated: (event) => {
             setPanelTreeRevision(event.revision);
+          },
+          onPanelsChanged: () => {
+            setPanelTreeRevision((revision) => revision + 1);
           },
         });
         pendingClient = client;
@@ -199,7 +210,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
           client.dispose();
           return;
         }
-        finishConnectedClient(client, credentials);
+        finishConnectedClient(client);
         offProgress?.();
         cancelConnectionRef.current = null;
         pendingClient = null;
@@ -249,7 +260,11 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
 
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
-      <View style={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        bounces={false}
+        showsVerticalScrollIndicator={false}
+      >
         <VibestudioLogo size={156} variant="logo" style={styles.brandMark} />
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
           Opening the selected workspace
@@ -312,7 +327,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
             />
           </View>
         ) : null}
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -323,7 +338,7 @@ const styles = StyleSheet.create({
   },
   content: {
     alignItems: "center",
-    flex: 1,
+    flexGrow: 1,
     justifyContent: "center",
     padding: spacing.xl,
   },

@@ -4,7 +4,11 @@
   "description": "Headless agentic session management — shared business logic (no React)",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./agent-launch": "./src/agent-launch.ts",
+    "./provisional-agent-lifecycle": "./src/provisional-agent-lifecycle.ts",
+    "./panel-import-loader": "./src/panel-import-loader.ts",
+    "./subagent-prompt": "./src/subagent-prompt.ts"
   },
   "dependencies": {
     "@vibestudio/service-schemas": "workspace:*",
@@ -13,6 +17,10 @@
     "@workspace/agentic-protocol": "workspace:*",
     "@workspace/eval": "workspace:*",
     "@workspace/model-catalog": "workspace:*",
+    "@workspace/pi-core": "workspace:*",
     "@workspace/pubsub": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   }
 }

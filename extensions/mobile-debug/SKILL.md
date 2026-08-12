@@ -1,12 +1,9 @@
 ---
 name: mobile-debug-extension
-description: Use the mobile-debug extension to install, launch, screenshot, and tail logs for Android devices and iOS simulators.
+description: Build, install, launch, screenshot, verify, and inspect logs for Vibestudio on Android devices or emulators and iOS simulators through the mobile-debug extension.
 ---
 
 # Mobile Debug Extension
-
-Use this when an agent needs to inspect or iterate on the mobile app with a
-real device, Android emulator, or iOS simulator.
 
 ## Platform Backends
 
@@ -42,6 +39,31 @@ must not add an extension flag or alternate no-approval method.
 not embed the screenshot bytes; call `screenshot` separately only when the
 image itself is needed.
 
+## Performance receipts
+
+`doctor` reports the selected Android device ABI and current internal APK byte
+size when available. For source-build profiling, either pass a device so the
+extension selects its ABI or pass an explicit architecture list:
+
+```ts
+const devices = await extensions.invoke("mobile-debug", "listDevices", []);
+const startedAt = Date.now();
+const build = await extensions.invoke("mobile-debug", "buildAndroid", [
+  { variant: "internal", device: devices[0]?.serial },
+]);
+const ready = await extensions.invoke("mobile-debug", "verifyWorkspaceReady", [
+  { device: devices[0]?.serial, sinceMs: startedAt, timeoutMs: 180_000 },
+]);
+return { build, ready };
+```
+
+The build receipt contains `durationMs`, `architectures`, `apkPath`, and
+`apkBytes`. The canonical build is deliberately resource-bounded
+(`--no-daemon`, two Gradle workers, in-process Kotlin compilation); there is no
+separate profiling build path. A device-targeted measurement must report the
+selected ABI. An empty `architectures` array means the caller intentionally
+measured Gradle's configured default set, not a device-specific build.
+
 After a pairing or provisioning workflow, verify the workspace shell rather
 than stopping at process liveness:
 
@@ -53,27 +75,10 @@ const workspace = await extensions.invoke("mobile-debug", "verifyWorkspaceReady"
 ]);
 ```
 
-`verifyWorkspaceReady` waits for both `workspace-panels-initialized` and
-`workspace-connected`. It also fails immediately on panel activation/load
-errors, including corrupt compressed assets. `panelWebViewLoaded` is reported
-separately because an existing panel may remain intentionally held by another
-device until the user selects **Take over**. Keep the documented three-minute
-deadline for cold source workspaces: their first mobile host build can take
-longer than a minute even though subsequent launches are immediate.
-
-## Pairing Smoke Markers
-
-Watch for `[VibestudioMobileSmoke] phase=...` lines:
-
-- `embedded-pairing-start`
-- `embedded-pairing-complete`
-- `embedded-bootstrap-fetch-start`
-- `embedded-bundle-activate-start`
-- `embedded-bundle-activate-complete`
-- `workspace-panel-webview-loaded`
-
-Missing markers usually mean the failure is in pairing, bundle delivery,
-native activation, or panel materialization respectively.
+`verifyWorkspaceReady` waits for the workspace initialization and connection
+markers and fails on panel activation or load errors. Read its returned phase
+evidence and the extension source for the current marker set; do not duplicate
+marker strings or fixed cold-start timings in callers.
 
 ## Debugging A Bad Mobile Panel
 
@@ -85,10 +90,6 @@ native activation, or panel materialization respectively.
 - If the active bundle is suspect, re-pair or call native reset so the shipped
   bootstrap can recover.
 
-## Commands
-
-```bash
-node scripts/cli/mobile-smoke.mjs --platform android --avd <name>
-node scripts/cli/mobile-smoke.mjs --platform ios --simulator <name>
-pnpm smoke:full
-```
+From the source checkout, use the repository mobile smoke entry point for the
+target platform. Use the full composition smoke only when the change spans
+desktop pairing, transport, mobile activation, and panel loading.

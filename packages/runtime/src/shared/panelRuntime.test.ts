@@ -26,7 +26,7 @@ function readyHostReport() {
   };
 }
 
-function detail(slotId: string, entityId = "panel:nav-new", source = "panels/new") {
+function detail(entityId = "panel:nav-new", source = "panels/new") {
   return {
     slot: { parent_slot_id: null, current_entity_title: "New" },
     currentHistory: {
@@ -149,7 +149,7 @@ function runtimeHarness(
           } as T;
         }
         case "workspace-state.panelTree.detail":
-          return detail(String(args[0]), currentEntityId, currentSource) as T;
+          return detail(currentEntityId, currentSource) as T;
         case "panelRuntime.ensureSlot":
           ensureSlotCalls += 1;
           if (options.recoverStoppedRoute && ensureSlotCalls > 1) {
@@ -296,6 +296,7 @@ function runtimeHarness(
             else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
           })) as T;
         case "workspace-state.panel.updateTitle":
+        case "workspace-state.panel.index":
         case "runtime.retireEntity":
         case "view.focusPanel":
           return undefined as T;
@@ -350,6 +351,8 @@ function runtimeHarness(
             ],
             nextCursor: null,
           } as T;
+        case "workspace-state.panel.sourceUsage":
+          return [{ source: "panels/terminal", accessCount: 12, lastAccessedAt: 1234 }] as T;
         case "workspace-state.panelTree.path":
           return {
             revision: 17,
@@ -711,7 +714,7 @@ describe("panel runtime topology composition", () => {
     expect(onCreateSlotTiming.mock.calls.map(([event]) => event.stage)).toEqual([
       "runtime.reserveEntity",
       "workspace-state.slot.create",
-      "panel.updateTitle",
+      "panel.index",
     ]);
   });
 
@@ -763,6 +766,13 @@ describe("panel runtime topology composition", () => {
       source: "https://example.com/",
     });
     expect(call.mock.calls.map((entry) => entry[1])).not.toContain("panelRuntime.observeSlot");
+    expect(call).toHaveBeenCalledWith("main", "workspace-state.panel.index", [
+      {
+        id: expect.any(String),
+        title: "example.com",
+        path: "browser:https://example.com/",
+      },
+    ]);
   });
 
   it("reports each durable external-slot creation stage", async () => {
@@ -774,7 +784,7 @@ describe("panel runtime topology composition", () => {
     expect(onCreateSlotTiming.mock.calls.map(([event]) => event.stage)).toEqual([
       "runtime.createEntity",
       "workspace-state.slot.create",
-      "panel.updateTitle",
+      "panel.index",
     ]);
     expect(onCreateSlotTiming.mock.calls.every(([event]) => event.outcome === "ok")).toBe(true);
   });
@@ -903,6 +913,15 @@ describe("panel runtime topology composition", () => {
     expect(call).toHaveBeenCalledWith("main", "workspace-state.panelTree.page", [
       { group: { kind: "roots", ownerUserId: "usr-other" }, limit: 10 },
     ]);
+  });
+
+  it("reads bounded durable source usage through the panel tree", async () => {
+    const { runtime, call } = runtimeHarness();
+
+    await expect(runtime.panelTree.sourceUsage(25)).resolves.toEqual([
+      { source: "panels/terminal", accessCount: 12, lastAccessedAt: 1234 },
+    ]);
+    expect(call).toHaveBeenCalledWith("main", "workspace-state.panel.sourceUsage", [25]);
   });
 
   it("renames an arbitrary slot directly on the builtin topology owner", async () => {

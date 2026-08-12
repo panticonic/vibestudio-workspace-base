@@ -16,7 +16,7 @@ const source: TemplateRegistrySource = {
 const document = `
 version: 1
 revision: 2026-07-29.3
-systemEpoch: 57
+systemEpoch: 58
 entries:
   - id: news
     name: News workspace
@@ -46,7 +46,7 @@ describe("template registry client", () => {
     const registryAcquirer = acquirer();
     const client = new TemplateRegistryClient({
       source,
-      systemEpoch: 57,
+      systemEpoch: 58,
       acquirer: registryAcquirer,
       cache: new MemoryTemplateRegistryCache(),
     });
@@ -59,7 +59,7 @@ describe("template registry client", () => {
     const cache = new MemoryTemplateRegistryCache();
     const client = new TemplateRegistryClient({
       source,
-      systemEpoch: 57,
+      systemEpoch: 58,
       acquirer: registryAcquirer,
       cache,
       now: () => new Date("2026-07-29T12:00:00.000Z"),
@@ -101,14 +101,14 @@ describe("template registry client", () => {
     const cache = new MemoryTemplateRegistryCache();
     const first = new TemplateRegistryClient({
       source,
-      systemEpoch: 57,
+      systemEpoch: 58,
       acquirer: acquirer(),
       cache,
     });
     await first.refresh();
     const offline = new TemplateRegistryClient({
       source,
-      systemEpoch: 57,
+      systemEpoch: 58,
       acquirer: { discover: vi.fn(async () => Promise.reject(new Error("offline"))) },
       cache,
     });
@@ -125,7 +125,7 @@ describe("template registry client", () => {
     const cache = new MemoryTemplateRegistryCache();
     const first = new TemplateRegistryClient({
       source,
-      systemEpoch: 57,
+      systemEpoch: 58,
       acquirer: acquirer(),
       cache,
     });
@@ -134,7 +134,7 @@ describe("template registry client", () => {
     const rewrittenSnapshot = `v1-sha256:${"d".repeat(64)}`;
     const second = new TemplateRegistryClient({
       source,
-      systemEpoch: 57,
+      systemEpoch: 58,
       acquirer: {
         discover: vi.fn(async () => ({
           commit: rewrittenCommit,

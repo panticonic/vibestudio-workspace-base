@@ -9,8 +9,29 @@ vi.mock("./status.js", () => ({
   createStatusAdapters: vi.fn(() => ({})),
 }));
 
-import { composeOnboardingSnapshot, type OnboardingSnapshotDependencies } from "./snapshot.js";
+import {
+  composeOnboardingCapabilities,
+  composeOnboardingSnapshot,
+  type OnboardingSnapshotDependencies,
+} from "./snapshot.js";
 import type { CapabilityOnboardingStatusAdapter } from "./status.js";
+import { onboardingCatalog, type OnboardingCapabilityDefinition } from "./catalog.js";
+
+const googleCapability: OnboardingCapabilityDefinition = {
+  id: "connection.google-workspace",
+  title: "Google Workspace",
+  summary: "Connect Google Workspace.",
+  category: "connections",
+  role: "connection",
+  scope: "user-workspace",
+  tier: "direct",
+  ownerSkillPath: "skills/google-workspace/SKILL.md",
+  actions: { setup: { via: "owner-skill" }, check: { via: "owner-skill" } },
+  visibility: "primary",
+  setup: { statusAdapter: "google-workspace", successDescription: "Verified live." },
+};
+
+const installedCatalog = [...onboardingCatalog, googleCapability];
 
 const healthy: CapabilityOnboardingStatusAdapter = vi.fn(
   async (): ReturnType<CapabilityOnboardingStatusAdapter> => ({
@@ -24,6 +45,7 @@ function dependencies(
   adapters: Record<string, CapabilityOnboardingStatusAdapter>
 ): OnboardingSnapshotDependencies {
   return {
+    catalog: installedCatalog,
     adapters,
     readHostTopology: vi.fn(
       async (): ReturnType<NonNullable<OnboardingSnapshotDependencies["readHostTopology"]>> => ({
@@ -45,6 +67,26 @@ function dependencies(
 }
 
 describe("composeOnboardingSnapshot", () => {
+  it("composes capability definitions and owner observations without template discovery", async () => {
+    const deps = dependencies({
+      "ai-provider": healthy,
+      "google-workspace": healthy,
+      github: healthy,
+      "browser-environment": healthy,
+      "local-models": healthy,
+      "agent-defaults": healthy,
+      "web-search": healthy,
+    });
+    const overview = await composeOnboardingCapabilities({}, deps);
+
+    expect(overview.snapshot.length).toBeGreaterThan(0);
+    expect(overview.catalog).toBe(installedCatalog);
+    expect(new Set(overview.snapshot.map((entry) => entry.observedAt))).toEqual(
+      new Set(["2026-07-24T12:00:00.000Z"])
+    );
+    expect(overview).not.toHaveProperty("templates");
+  });
+
   it("preflights optional host reads instead of logging denied IPC calls", async () => {
     const callMainMock = vi.mocked(callMain);
     callMainMock.mockImplementation(async (method: string) => {

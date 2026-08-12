@@ -61,6 +61,9 @@ function modelSwitchConfigFromSettings(
   if (typeof thinkingLevel === "string" && THINKING_LEVELS.has(thinkingLevel)) {
     config.thinkingLevel = thinkingLevel as AgentSubscriptionConfig["thinkingLevel"];
   }
+  if (typeof source["fastMode"] === "boolean") {
+    config.fastMode = source["fastMode"];
+  }
   const approvalLevel = source["approvalLevel"];
   if (approvalLevel === 0 || approvalLevel === 1 || approvalLevel === 2) {
     config.approvalLevel = approvalLevel;
@@ -78,11 +81,20 @@ function modelSwitchConfigFromSettings(
 
 const MAX_IMAGE_COUNT = 10;
 
+export interface ChatInputProps {
+  /** Product-specific prompt shown when the composer is empty. */
+  placeholder?: string;
+  /** Recipients used when the message contains no explicit @mention. */
+  defaultMentions?: readonly string[];
+  /** Product-owned readiness gate in addition to channel connectivity. */
+  disabled?: boolean;
+}
+
 /**
  * Chat input area with text input, image attachment, and send button.
  * Reads from ChatContext.
  */
-export function ChatInput() {
+export function ChatInput({ placeholder, defaultMentions, disabled = false }: ChatInputProps = {}) {
   const {
     connected,
     allParticipants,
@@ -288,6 +300,7 @@ export function ChatInput() {
     async (mode: "default" | "after-turn" = "default") => {
       try {
         setSendError(null);
+        if (disabled) return;
         // A `/model …` line is a command, never a chat message. If it resolves
         // to models, switch to the top match; otherwise coach instead of
         // sending the literal text to the agent.
@@ -306,13 +319,15 @@ export function ChatInput() {
             ? getAttachmentInputsFromPendingImages(pendingImages)
             : undefined;
         const effectiveMode = mode === "after-turn" && hasOpenTurn ? "after-turn" : "default";
+        const explicitMentions = getMentionsFromInput(
+          input,
+          allParticipants,
+          selectedMentionIds,
+          accountProfiles
+        );
         await onSendMessage(attachments, {
-          mentions: getMentionsFromInput(
-            input,
-            allParticipants,
-            selectedMentionIds,
-            accountProfiles
-          ),
+          mentions:
+            explicitMentions.length > 0 ? explicitMentions : [...new Set(defaultMentions ?? [])],
           replyTo: replyTo ?? undefined,
           // After-turn delivery is a message intent in payload.metadata.
           ...(effectiveMode === "after-turn" ? { metadata: { deliverAfterTurn: true } } : {}),
@@ -339,6 +354,7 @@ export function ChatInput() {
       allParticipants,
       selectedMentionIds,
       accountProfiles,
+      defaultMentions,
       replyTo,
       mentions,
       hapticTick,
@@ -348,6 +364,7 @@ export function ChatInput() {
       modelCandidates,
       modelMenuIndex,
       switchModel,
+      disabled,
     ]
   );
 
@@ -494,7 +511,8 @@ export function ChatInput() {
     void handleSendMessage("after-turn");
   }, [handleSendMessage]);
 
-  const canSend = connected && (input.trim().length > 0 || pendingImages.length > 0);
+  const inputDisabled = disabled || !connected;
+  const canSend = !inputDisabled && (input.trim().length > 0 || pendingImages.length > 0);
 
   return (
     <>
@@ -519,7 +537,7 @@ export function ChatInput() {
             images={pendingImages}
             onImagesChange={handleImagesChange}
             onError={(error) => setSendError(error)}
-            disabled={!connected}
+            disabled={inputDisabled}
           />
         </Card>
       )}
@@ -527,6 +545,7 @@ export function ChatInput() {
       {/* Input */}
       <Card
         className="chat-surface-card chat-input-card"
+        data-part="chat-composer"
         size="1"
         variant="surface"
         style={{ flexShrink: 0 }}
@@ -584,12 +603,15 @@ export function ChatInput() {
               maxHeight: isMobile ? Math.min(120, viewportHeight * 0.22) : 180,
               resize: "none",
             }}
-            placeholder={isMobile ? "Type a message…" : "Type a message…  (⏎ send · ⇧⏎ newline)"}
+            placeholder={
+              placeholder ??
+              (isMobile ? "Type a message…" : "Type a message…  (⏎ send · ⇧⏎ newline)")
+            }
             value={input}
             onChange={(e) => handleInputChange(e.target.value)}
             onInput={handleTextAreaInput}
             onKeyDown={handleKeyDown}
-            disabled={!connected}
+            disabled={inputDisabled}
           />
           <Box className="chat-input-send-dock">
             <SendButton
@@ -597,11 +619,11 @@ export function ChatInput() {
               agentBusy={agentBusy}
               canSendAfterTurn={hasOpenTurn}
               disabled={!canSend}
-              optionsDisabled={!connected}
+              optionsDisabled={inputDisabled}
               size={sendButtonSize}
               onSend={handleSendClick}
               onSendAfterTurn={handleSendAfterTurn}
-              onAttach={connected ? toggleImageInput : undefined}
+              onAttach={inputDisabled ? undefined : toggleImageInput}
               attachmentCount={pendingImages.length}
             />
           </Box>

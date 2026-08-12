@@ -18,6 +18,7 @@ const clients = vi.hoisted(() => ({
     decideSuggestion: vi.fn(),
   },
   credentials: { requestCredentialInput: vi.fn() },
+  panel: { createPanel: vi.fn() },
   vcs: { compareDelta: vi.fn(), integrateDelta: vi.fn() },
 }));
 
@@ -31,9 +32,8 @@ const row = {
   commit: "1".repeat(40),
   direct: true,
   state: "current" as const,
-  ownedParts: 2,
+  contributedParts: 2,
   pendingReviews: 0,
-  verification: "verified" as const,
   suggestions: [],
 };
 
@@ -64,6 +64,7 @@ describe("TemplatesSection mutation refresh", () => {
       stale: false,
     });
     clients.templates.check.mockResolvedValue([]);
+    clients.panel.createPanel.mockResolvedValue({ id: "upgrade-chat" });
   });
 
   afterEach(cleanup);
@@ -72,8 +73,7 @@ describe("TemplatesSection mutation refresh", () => {
     clients.templates.pull.mockResolvedValue({
       operationId: "pull-github",
       state: "pending",
-      addedParts: [],
-      orphanedParts: [],
+      affectedParts: [],
     });
     const view = draw();
     fireEvent.click(await view.findByRole("button", { name: "Check for updates" }));
@@ -91,8 +91,7 @@ describe("TemplatesSection mutation refresh", () => {
       return {
         operationId: "remove-github",
         state: "applied",
-        addedParts: [],
-        orphanedParts: ["extensions/github"],
+        affectedParts: ["extensions/github"],
       };
     });
     const view = draw();
@@ -101,4 +100,5 @@ describe("TemplatesSection mutation refresh", () => {
     expect(await view.findByText("No committed template relationships yet.")).toBeTruthy();
     expect(clients.templates.operations).toHaveBeenCalledTimes(2);
   });
+
 });

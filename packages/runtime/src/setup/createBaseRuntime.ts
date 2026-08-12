@@ -10,8 +10,19 @@ import { createRpcClient, type EnvelopeRpcTransport } from "@vibestudio/rpc";
 import { createWorkerdClient } from "../shared/workerd.js";
 import type { GatewayConfig } from "../shared/globals.js";
 import { createMainCaller } from "../shared/mainRpc.js";
-import type { PaletteCommand, RuntimeFs, ThemeAppearance, ThemeConfig } from "../types.js";
+import type { HostCommand, RuntimeFs, ThemeAppearance, ThemeConfig } from "../types.js";
 import { DEFAULT_THEME_CONFIG } from "../types.js";
+import {
+  HOST_COMMAND_CONTRIBUTION_EVENT,
+  HOST_COMMAND_RUN_EVENT,
+} from "@vibestudio/shared/hostCommands";
+import {
+  isThemeAccentColor,
+  isThemeGrayColor,
+  isThemePanelBackground,
+  isThemeRadius,
+  isThemeScaling,
+} from "@vibestudio/shared/theme";
 
 export interface BaseRuntimeDeps {
   selfId: string;
@@ -68,15 +79,16 @@ export function createBaseRuntime(deps: BaseRuntimeDeps) {
     const config = (payload as { config?: unknown } | null)?.config;
     if (!config || typeof config !== "object") return null;
     const c = config as Record<string, unknown>;
-    if (typeof c["accentColor"] !== "string" || typeof c["grayColor"] !== "string") return null;
     return {
-      accentColor: c["accentColor"],
-      grayColor: c["grayColor"],
-      radius: (c["radius"] as ThemeConfig["radius"]) ?? DEFAULT_THEME_CONFIG.radius,
-      scaling: (c["scaling"] as ThemeConfig["scaling"]) ?? DEFAULT_THEME_CONFIG.scaling,
-      panelBackground:
-        (c["panelBackground"] as ThemeConfig["panelBackground"]) ??
-        DEFAULT_THEME_CONFIG.panelBackground,
+      accentColor: isThemeAccentColor(c["accentColor"])
+        ? c["accentColor"]
+        : DEFAULT_THEME_CONFIG.accentColor,
+      grayColor: isThemeGrayColor(c["grayColor"]) ? c["grayColor"] : DEFAULT_THEME_CONFIG.grayColor,
+      radius: isThemeRadius(c["radius"]) ? c["radius"] : DEFAULT_THEME_CONFIG.radius,
+      scaling: isThemeScaling(c["scaling"]) ? c["scaling"] : DEFAULT_THEME_CONFIG.scaling,
+      panelBackground: isThemePanelBackground(c["panelBackground"])
+        ? c["panelBackground"]
+        : DEFAULT_THEME_CONFIG.panelBackground,
     };
   };
 
@@ -135,16 +147,16 @@ export function createBaseRuntime(deps: BaseRuntimeDeps) {
     };
   };
 
-  // Command-palette dispatch is panel ↔ shell messaging. Contributions are
-  // chrome-local UI state; they never transit a host service.
-  const paletteRunCallbacks = new Set<(commandId: string) => void>();
-  const onPaletteRunEvent = (payload: unknown) => {
+  // Host-command dispatch is panel ↔ shell messaging. Contributions are
+  // host-local UI state; they never transit a server service.
+  const hostCommandRunCallbacks = new Set<(commandId: string) => void>();
+  const onHostCommandRunEvent = (payload: unknown) => {
     const commandId = (payload as { commandId?: unknown } | null)?.commandId;
     if (typeof commandId !== "string") return;
-    for (const cb of paletteRunCallbacks) cb(commandId);
+    for (const cb of hostCommandRunCallbacks) cb(commandId);
   };
-  const paletteUnsubscribers = [
-    rpc.on("runtime:palette-run", (event) => onPaletteRunEvent(event.payload)),
+  const hostCommandUnsubscribers = [
+    rpc.on(HOST_COMMAND_RUN_EVENT, (event) => onHostCommandRunEvent(event.payload)),
   ];
 
   // Wire __vibestudioShell events if available (Electron mode)
@@ -157,8 +169,8 @@ export function createBaseRuntime(deps: BaseRuntimeDeps) {
       } else if (event === "runtime:focus") {
         // Directly invoke focus callbacks; no RPC bridge roundtrip needed.
         for (const cb of focusCallbacks) cb();
-      } else if (event === "runtime:palette-run") {
-        onPaletteRunEvent(payload);
+      } else if (event === HOST_COMMAND_RUN_EVENT) {
+        onHostCommandRunEvent(payload);
       }
     });
   }
@@ -166,12 +178,16 @@ export function createBaseRuntime(deps: BaseRuntimeDeps) {
   const destroy = () => {
     for (const unsub of themeUnsubscribers) unsub();
     for (const unsub of focusUnsubscribers) unsub();
-    for (const unsub of paletteUnsubscribers) unsub();
-    void rpc.emit("shell", "runtime:palette-contribution", { commands: [] }).catch(() => {});
+    for (const unsub of hostCommandUnsubscribers) unsub();
+    void rpc
+      .emit("shell", HOST_COMMAND_CONTRIBUTION_EVENT, { commands: [] })
+      .catch((error: unknown) =>
+        console.warn("[runtime] Failed to clear host commands during teardown:", error)
+      );
     focusUnsubscribers.length = 0;
     themeListeners.clear();
     themeConfigListeners.clear();
-    paletteRunCallbacks.clear();
+    hostCommandRunCallbacks.clear();
     if (electronListenerId !== undefined && electron?.removeEventListener) {
       electron.removeEventListener(electronListenerId);
     }
@@ -221,16 +237,24 @@ export function createBaseRuntime(deps: BaseRuntimeDeps) {
       };
     },
     onFocus,
-    registerPaletteCommands: (commands: PaletteCommand[]) => {
-      void rpc.emit("shell", "runtime:palette-contribution", { commands }).catch(() => {});
+    registerHostCommands: (commands: HostCommand[]) => {
+      void rpc
+        .emit("shell", HOST_COMMAND_CONTRIBUTION_EVENT, { commands })
+        .catch((error: unknown) =>
+          console.warn("[runtime] Failed to register host commands:", error)
+        );
     },
-    unregisterPaletteCommands: () => {
-      void rpc.emit("shell", "runtime:palette-contribution", { commands: [] }).catch(() => {});
+    unregisterHostCommands: () => {
+      void rpc
+        .emit("shell", HOST_COMMAND_CONTRIBUTION_EVENT, { commands: [] })
+        .catch((error: unknown) =>
+          console.warn("[runtime] Failed to unregister host commands:", error)
+        );
     },
-    onPaletteRun: (callback: (commandId: string) => void) => {
-      paletteRunCallbacks.add(callback);
+    onHostCommandRun: (callback: (commandId: string) => void) => {
+      hostCommandRunCallbacks.add(callback);
       return () => {
-        paletteRunCallbacks.delete(callback);
+        hostCommandRunCallbacks.delete(callback);
       };
     },
     expose: (method: string, handler: (...args: any[]) => unknown | Promise<unknown>) => {

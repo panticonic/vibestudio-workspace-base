@@ -9,6 +9,29 @@ describe("composeSystemPrompt", () => {
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("documented live runtime/service APIs");
   });
 
+  it("routes ordinary managed file work through the focused authoring boundary", () => {
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "Use the focused file tools for ordinary discovery, reading, and authoring"
+    );
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "`apply_patch` when multiple files must change atomically"
+    );
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "Do not emulate managed file authoring through generic `eval`"
+    );
+  });
+
+  it("defines the evidence boundary for a completed executable-source repair", () => {
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "A managed executable-source repair is complete only after"
+    );
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("exact affected unit builds successfully");
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("`vcs` reports a clean working state");
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "Publish the committed event only when the requested workflow includes advancing protected main"
+    );
+  });
+
   it("appends Vibestudio, workspace, skills, and channel prompts by default", () => {
     const prompt = composeSystemPrompt({
       workspacePrompt: "WORKSPACE",
@@ -93,10 +116,31 @@ describe("composeSystemPrompt", () => {
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("typed `workspace_service` tool");
   });
 
+  it("treats structured UI interaction metadata as the selected stable action", () => {
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("structured `interaction` object");
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("exact selected action");
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("do not reverse-engineer component source");
+  });
+
   it("includes core conversation fork and subagent operating guidance", () => {
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("## Conversation Forks And Subagents");
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("do not conflate them");
-    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("context window cache is shared");
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("cache-compatible model transport");
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "changing provider or model does not inherit the parent's provider cache"
+    );
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      'Prefer `mode: "fresh"` when a precise task, paths, and durable workspace context are sufficient'
+    );
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "do not poll a live child with status, transcript, log, or diff reads"
+    );
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "only when that goal requires incorporating the child's work"
+    );
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "when the user explicitly asks to inspect, review, or compare child work"
+    );
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("complete({ report, outcome })");
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("packages/agentic-do/SKILL.md");
   });

@@ -20,7 +20,16 @@ interface FixtureBlobstore {
   putText(text: string): Promise<{ digest: string; size: number }>;
 }
 
-export type WorkspaceRepoSection = "projects" | "packages" | "workers" | "panels";
+export type WorkspaceRepoSection =
+  | "projects"
+  | "packages"
+  | "skills"
+  | "workers"
+  | "panels"
+  | "extensions"
+  | "apps";
+
+export const SIZABLE_HISTORY_FIXTURE_REVISIONS = 36;
 
 /**
  * A repository fixture either seeds one exact source repository, asks the task
@@ -33,14 +42,15 @@ export type WorkspaceRepoSection = "projects" | "packages" | "workers" | "panels
  */
 export type WorkspaceRepoCreationScope =
   | { kind: "content"; section: "projects" }
+  | { kind: "historical-content"; section: "projects" }
   | { kind: "buildable-package"; section: "packages" }
+  | { kind: "buildable-extension"; section: "extensions" }
+  | { kind: "buildable-app"; section: "apps" }
   | { kind: "buildable-worker"; section: "workers" }
   | { kind: "buildable-regular-worker"; section: "workers" }
+  | { kind: "optimizable-panel"; section: "panels" }
   | { kind: "created-repository"; section: WorkspaceRepoSection }
   | { kind: "buildable-panel-with-derived"; section: "panels" };
-
-/** Compatibility name used by TestCase.workspaceRepoFixture. */
-export type WorkspaceRepoFixtureSpec = WorkspaceRepoCreationScope;
 
 export interface WorkspaceRepoFixturePort {
   vcs: FixtureVcs;
@@ -68,7 +78,7 @@ type WorkspaceRepoFixtureStateBase = {
 };
 
 export type WorkspaceRepoFixtureState =
-  | (Extract<WorkspaceRepoFixtureSpec, { kind: "created-repository" }> &
+  | (Extract<WorkspaceRepoCreationScope, { kind: "created-repository" }> &
       WorkspaceRepoFixtureStateBase & {
         repoName: null;
         repositoryId: null;
@@ -77,7 +87,7 @@ export type WorkspaceRepoFixtureState =
         importWorkUnitId: null;
         importChangeIds: [];
       })
-  | (Exclude<WorkspaceRepoFixtureSpec, { kind: "created-repository" }> &
+  | (Exclude<WorkspaceRepoCreationScope, { kind: "created-repository" }> &
       WorkspaceRepoFixtureStateBase & {
         repoName: string;
         repositoryId: string;
@@ -130,7 +140,7 @@ export class WorkspaceRepoFixtureLifecycle {
     private readonly port: WorkspaceRepoFixturePort,
     private readonly testName: string,
     private readonly repoName: string | null,
-    private readonly fixture: WorkspaceRepoFixtureSpec
+    private readonly fixture: WorkspaceRepoCreationScope
   ) {}
 
   get taskContextId(): string | null {
@@ -175,16 +185,18 @@ export class WorkspaceRepoFixtureLifecycle {
       const seedFiles = repositorySeedFiles(this.repoName, this.fixture).sort((left, right) =>
         left.path < right.path ? -1 : left.path > right.path ? 1 : 0
       );
-      const files = await Promise.all(
-        seedFiles.map(async (file) => {
-          const stored = await this.port.blobstore.putText(file.content);
-          return {
-            path: file.path,
-            contentHash: stored.digest,
-            mode: 0o644,
-          };
-        })
-      );
+      const storeFiles = async (sourceFiles: Array<{ path: string; content: string }>) =>
+        Promise.all(
+          sourceFiles.map(async (file) => {
+            const stored = await this.port.blobstore.putText(file.content);
+            return {
+              path: file.path,
+              contentHash: stored.digest,
+              mode: 0o644,
+            };
+          })
+        );
+      let files = await storeFiles(seedFiles);
       const snapshotRevision = `fixture:${sha256HexSyncText(JSON.stringify({ repoPath, files }))}`;
       const importCommandId = this.command("import");
       const source = {
@@ -224,6 +236,44 @@ export class WorkspaceRepoFixtureLifecycle {
         recordedSnapshot.targetRepositoryIds[0] !== repositoryId
       ) {
         throw new Error("Fixture import did not record its exact command and source snapshot");
+      }
+
+      if (this.fixture.kind === "historical-content") {
+        let expectedWorkingHead = { kind: "event" as const, eventId: imported.eventId };
+        for (const revision of historicalContentRevisions()) {
+          const revisionFiles = revision.files.sort((left, right) =>
+            left.path < right.path ? -1 : left.path > right.path ? 1 : 0
+          );
+          files = await storeFiles(revisionFiles);
+          const revisionSource = {
+            kind: "generated" as const,
+            uri: `system-test://${this.testName}/${this.repoName}/history`,
+            snapshotRevision: `fixture:history:${String(revision.revision).padStart(2, "0")}:${sha256HexSyncText(
+              JSON.stringify({ repoPath, files })
+            )}`,
+          };
+          const next = await this.port.vcs.importSnapshot({
+            contextId,
+            commandId: this.command(`history-${String(revision.revision).padStart(2, "0")}`),
+            expectedWorkingHead,
+            intentSummary: revision.intent,
+            source: revisionSource,
+            repositories: [{ repositoryId, repoPath, files }],
+            message: revision.message,
+          });
+          if (
+            next.importedRepositoryIds.length !== 1 ||
+            next.importedRepositoryIds[0] !== repositoryId ||
+            next.externalSnapshot.snapshotRevision !== revisionSource.snapshotRevision ||
+            next.externalSnapshot.targetRepositoryIds.length !== 1 ||
+            next.externalSnapshot.targetRepositoryIds[0] !== repositoryId
+          ) {
+            throw new Error(
+              `Historical fixture revision ${revision.revision} did not preserve its exact repository and snapshot identity`
+            );
+          }
+          expectedWorkingHead = { kind: "event", eventId: next.eventId };
+        }
       }
       return {
         ...this.fixture,
@@ -864,7 +914,7 @@ export class WorkspaceRepoFixtureLifecycle {
 
 function repositorySeedFiles(
   repoName: string,
-  fixture: WorkspaceRepoFixtureSpec
+  fixture: WorkspaceRepoCreationScope
 ): Array<{ path: string; content: string }> {
   if (fixture.kind === "created-repository") return [];
   if (fixture.kind === "content") {
@@ -874,6 +924,18 @@ function repositorySeedFiles(
         content: `# ${repoName}\n\nDisposable system-test project.\n`,
       },
     ];
+  }
+  if (fixture.kind === "historical-content") {
+    return historicalPolicyFiles(0);
+  }
+  if (fixture.kind === "buildable-extension") {
+    return buildableExtensionFiles(repoName);
+  }
+  if (fixture.kind === "buildable-app") {
+    return buildableAppFiles(repoName);
+  }
+  if (fixture.kind === "optimizable-panel") {
+    return buildablePanelFiles(repoName, { repeatedStatusLabels: 512 });
   }
   if (fixture.kind === "buildable-worker") {
     return [
@@ -901,7 +963,7 @@ function repositorySeedFiles(
       {
         path: "index.ts",
         content: [
-          'import { DurableObjectBase, rpc } from "@workspace/runtime/worker";',
+          'import { DurableObjectBase, rpc } from "@workspace/runtime/worker/kernel";',
           "",
           "export class FixtureWorkerDO extends DurableObjectBase {",
           '  protected schemaProductionBaseline() { return { version: 1, name: "fixture-worker-v1" } as const; }',
@@ -968,51 +1030,7 @@ function repositorySeedFiles(
     ];
   }
   if (fixture.kind === "buildable-panel-with-derived") {
-    return [
-      {
-        path: "package.json",
-        content: `${JSON.stringify(
-          {
-            name: `@workspace-panels/${repoName}`,
-            version: "0.0.0",
-            private: true,
-            type: "module",
-            vibestudio: {
-              title: `System Test ${repoName}`,
-              entry: "index.tsx",
-              authority: {
-                requests: [
-                  {
-                    capability: "context.boundary",
-                    resource: { kind: "prefix", prefix: "context" },
-                    tier: "critical",
-                    evidence: "bounded-dynamic",
-                  },
-                ],
-                provides: [],
-              },
-              exposeModules: ["react", "react/jsx-runtime", "react/jsx-dev-runtime"],
-            },
-            dependencies: { react: "^19.0.0" },
-          },
-          null,
-          2
-        )}\n`,
-      },
-      {
-        path: "index.tsx",
-        content: [
-          'import type { CSSProperties } from "react";',
-          "",
-          'const style: CSSProperties = { minHeight: "100vh", display: "grid", placeContent: "center" };',
-          "",
-          "export default function SystemTestPanelFixture() {",
-          "  return <main style={style}>Buildable system-test panel fixture</main>;",
-          "}",
-          "",
-        ].join("\n"),
-      },
-    ];
+    return buildablePanelFiles(repoName);
   }
   return [
     {
@@ -1034,6 +1052,288 @@ function repositorySeedFiles(
       content: [
         'export const fixtureValue = "baseline";',
         'export const fixtureNeighbor = "untouched";',
+        "",
+      ].join("\n"),
+    },
+  ];
+}
+
+function buildablePanelFiles(
+  repoName: string,
+  options: { repeatedStatusLabels?: number } = {}
+): Array<{ path: string; content: string }> {
+  const repeatedStatusLabels = options.repeatedStatusLabels ?? 0;
+  const statusDeclaration = repeatedStatusLabels
+    ? `const statusLabels = [${Array.from({ length: repeatedStatusLabels }, () => '"Ready"').join(",")}];`
+    : null;
+  return [
+    {
+      path: "package.json",
+      content: `${JSON.stringify(
+        {
+          name: `@workspace-panels/${repoName}`,
+          version: "0.0.0",
+          private: true,
+          type: "module",
+          vibestudio: {
+            title: `System Test ${repoName}`,
+            entry: "index.tsx",
+            authority: {
+              requests: [
+                {
+                  capability: "context.boundary",
+                  resource: { kind: "prefix", prefix: "context" },
+                  tier: "critical",
+                  evidence: "bounded-dynamic",
+                },
+              ],
+              provides: [],
+            },
+            exposeModules: [
+              "react",
+              "react/jsx-runtime",
+              "react/jsx-dev-runtime",
+              "@workspace/ui",
+            ],
+          },
+          dependencies: { "@workspace/ui": "workspace:*", react: "^19.0.0" },
+        },
+        null,
+        2
+      )}\n`,
+    },
+    {
+      path: "index.tsx",
+      content: [
+        'import type { CSSProperties } from "react";',
+        "",
+        'const style: CSSProperties = { minHeight: "100vh", display: "grid", placeContent: "center" };',
+        ...(statusDeclaration ? [statusDeclaration, ""] : []),
+        "export default function SystemTestPanelFixture() {",
+        statusDeclaration
+          ? "  return <main style={style}>{statusLabels[0]}</main>;"
+          : "  return <main style={style}>Buildable system-test panel fixture</main>;",
+        "}",
+        "",
+      ].join("\n"),
+    },
+  ];
+}
+
+function fixtureIcon(): string {
+  return [
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">',
+    '  <path fill="currentColor" d="M5 4h14v16H5z"/>',
+    '  <path fill="#fff" d="M8 8h8v2H8zm0 4h5v2H8z"/>',
+    "</svg>",
+    "",
+  ].join("\n");
+}
+
+function buildableExtensionFiles(repoName: string): Array<{ path: string; content: string }> {
+  return [
+    {
+      path: "package.json",
+      content: `${JSON.stringify(
+        {
+          name: `@workspace-extensions/${repoName}`,
+          version: "0.0.0",
+          private: true,
+          type: "module",
+          vibestudio: {
+            displayName: `System Test ${repoName}`,
+            icon: "./assets/icon.svg",
+            entry: "index.ts",
+            extension: {
+              activationEvents: ["onInvoke"],
+              methodAuthority: { status: { effect: { kind: "open" } } },
+            },
+            authority: { requests: [], provides: [] },
+          },
+          devDependencies: { vitest: "^3.2.4" },
+        },
+        null,
+        2
+      )}\n`,
+    },
+    { path: "assets/icon.svg", content: fixtureIcon() },
+    {
+      path: "index.ts",
+      content: [
+        'export function startupLabel(): string { return "waiting"; }',
+        "",
+        "export async function activate() {",
+        "  return { status: () => ({ label: startupLabel() }) };",
+        "}",
+        "",
+      ].join("\n"),
+    },
+    {
+      path: "index.test.ts",
+      content: [
+        'import { describe, expect, it } from "vitest";',
+        'import { startupLabel } from "./index.js";',
+        "",
+        'describe("startupLabel", () => {',
+        '  it("reports readiness", () => expect(startupLabel()).toBe("ready"));',
+        "});",
+        "",
+      ].join("\n"),
+    },
+    trustedUnitSkillFile(repoName, "extension"),
+  ];
+}
+
+function buildableAppFiles(repoName: string): Array<{ path: string; content: string }> {
+  return [
+    {
+      path: "package.json",
+      content: `${JSON.stringify(
+        {
+          name: `@workspace-apps/${repoName}`,
+          version: "0.0.0",
+          private: true,
+          type: "module",
+          vibestudio: {
+            displayName: `System Test ${repoName}`,
+            icon: "./assets/icon.svg",
+            app: { target: "terminal", entry: "index.ts" },
+            authority: {
+              requests: [
+                {
+                  capability: "context.boundary",
+                  resource: { kind: "prefix", prefix: "context" },
+                  tier: "critical",
+                  evidence: "bounded-dynamic",
+                },
+              ],
+              provides: [],
+            },
+          },
+          devDependencies: { vitest: "^3.2.4" },
+        },
+        null,
+        2
+      )}\n`,
+    },
+    { path: "assets/icon.svg", content: fixtureIcon() },
+    {
+      path: "index.ts",
+      content: [
+        'export function startupLabel(): string { return "booting"; }',
+        "",
+        "console.log(startupLabel());",
+        "",
+      ].join("\n"),
+    },
+    {
+      path: "index.test.ts",
+      content: [
+        'import { describe, expect, it } from "vitest";',
+        'import { startupLabel } from "./index.js";',
+        "",
+        'describe("startupLabel", () => {',
+        '  it("reports readiness", () => expect(startupLabel()).toBe("ready"));',
+        "});",
+        "",
+      ].join("\n"),
+    },
+    trustedUnitSkillFile(repoName, "app"),
+  ];
+}
+
+function trustedUnitSkillFile(
+  repoName: string,
+  kind: "app" | "extension"
+): { path: string; content: string } {
+  const noun = kind === "app" ? "terminal app" : "status extension";
+  const skill = kind === "app" ? "appdev" : "extensiondev";
+  return {
+    path: "SKILL.md",
+    content: [
+      "---",
+      `name: ${repoName}`,
+      `description: Disposable ${noun} used to exercise trusted ${kind} editing.`,
+      "---",
+      "",
+      `# ${kind === "app" ? "Terminal app" : "Status extension"}`,
+      "",
+      `Read \`skills/${skill}/SKILL.md\` before changing this trusted ${kind} and follow its`,
+      "documented workflow. Keep the status result and its focused unit test aligned.",
+      "",
+    ].join("\n"),
+  };
+}
+
+interface HistoricalContentRevision {
+  revision: number;
+  files: Array<{ path: string; content: string }>;
+  intent: string;
+  message: string;
+}
+
+function historicalContentRevisions(): HistoricalContentRevision[] {
+  return Array.from({ length: SIZABLE_HISTORY_FIXTURE_REVISIONS }, (_, index) => {
+    const revision = index + 1;
+    if (revision === 6) {
+      return {
+        revision,
+        files: historicalPolicyFiles(revision),
+        intent:
+          "Extend the archive window from 14 to 21 days because delayed regional exports can arrive through day 18; a three-day buffer prevents premature deletion",
+        message: "Extend archive window to 21 days for regional exports arriving through day 18",
+      };
+    }
+    if (revision === 11) {
+      return {
+        revision,
+        files: historicalPolicyFiles(revision),
+        intent:
+          "Retire the Harbor Lantern rollout codename after launch so support and audit records consistently use the public Retention Service name",
+        message:
+          "Retire Harbor Lantern after launch; use Retention Service in support and audit records",
+      };
+    }
+    return {
+      revision,
+      files: historicalPolicyFiles(revision),
+      intent: `Record retention-policy audit checkpoint ${revision} without changing the approved archive window`,
+      message: `Record retention-policy audit checkpoint ${revision}`,
+    };
+  });
+}
+
+function historicalPolicyFiles(revision: number): Array<{ path: string; content: string }> {
+  const archiveWindowDays = revision < 6 ? 14 : 21;
+  const codename =
+    revision < 11
+      ? [
+          "/** Temporary internal rollout label; never expose this in product copy. */",
+          'export const rolloutCodename = "Harbor Lantern";',
+          "",
+        ]
+      : [];
+  return [
+    {
+      path: "README.md",
+      content: [
+        "# Retention Service",
+        "",
+        "A deliberately history-rich system-test project.",
+        `Audit checkpoint: ${revision}.`,
+        "",
+      ].join("\n"),
+    },
+    {
+      path: "src/retention-policy.ts",
+      content: [
+        ...codename,
+        `export const archiveWindowDays = ${archiveWindowDays};`,
+        `export const policyRevision = ${revision};`,
+        "",
+        "export function shouldArchive(ageDays: number): boolean {",
+        "  return ageDays > archiveWindowDays;",
+        "}",
         "",
       ].join("\n"),
     },

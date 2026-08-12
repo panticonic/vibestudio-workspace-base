@@ -1111,7 +1111,7 @@ export class UpstreamEngine {
       opened: false,
       ...(normalized ? { repoPath: normalized } : {}),
       openPanel: {
-        source: "panels/gad-browser",
+        source: "about/workspace-history",
         name: "Git upstreams",
         ...(normalized ? { stateArgs: { gitRepo: normalized } } : { stateArgs: { gitRepo: "" } }),
       },
@@ -1307,7 +1307,6 @@ export class UpstreamEngine {
   ): Promise<void> {
     const remote = `${upstream.remote}/${upstream.branch}`;
     await this.ctx.notifications.show({
-      id: `git-upstream:${encodeURIComponent(repo)}`,
       type: "warning",
       title: `Push to ${remote} failed`,
       message: reason,

@@ -57,6 +57,11 @@ export interface ChannelCallPort {
     payload: unknown;
     idempotencyKey?: string;
   }): Promise<void>;
+  recordReadReceipt(input: {
+    channelId: string;
+    messageId: string;
+    turnId?: string;
+  }): Promise<void>;
   sendSignalEvent(channelId: string, event: AgenticEvent): Promise<void>;
 }
 
@@ -126,6 +131,9 @@ export interface LocalToolPort {
         result: unknown;
         summary?: string;
         isError: boolean;
+        /** Preserve the tool runtime's early-termination request across the
+         * durable effect boundary. */
+        terminate?: boolean;
         terminalReasonCode?: string;
         failure?: AgentToolFailure;
       }
@@ -134,9 +142,12 @@ export interface LocalToolPort {
     // parks the leased row (deferRedrive backstop), exactly like channel_call/http_call.
     | { deferred: true; reason: "external-result" }
   >;
-  /** Mutation-replay guard (§1.4.2): true when the fold already recorded an
-   *  applied worktree mutation for this invocation. */
-  alreadyApplied(state: AgentState, invocationId: string): boolean;
+  /** Mutation-replay guard (§1.4.2). A completed semantic command is durable
+   * evidence that this invocation must be recovered, not executed again. */
+  alreadyApplied(
+    state: AgentState,
+    invocationId: string
+  ): Promise<{ commandId: string; command: unknown } | null>;
 }
 
 export interface HttpCallPort {

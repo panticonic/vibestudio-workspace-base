@@ -56,8 +56,9 @@ The chat panel hosts an AI agent that can:
   if the panel is closed)
 - **Render UI** via `inline_ui` (persistent components and self-contained
   workflows in chat), `load_action_bar` / panel `actionBarFile` (compact pinned
-  panel controls), and `feedback_custom` only when the agent needs a returned
-  decision
+  panel controls), and `feedback_custom` only when the agent needs ordinary
+  structured input for reasoning—never for trust, permission, publication, or
+  workspace-settings decisions owned by host approvals
 - **Preserve transcript state** through typed PubSub events: messages,
   invocations, inline UI, and action bars all replay from the same channel log
 - **Read/write files** in the workspace
@@ -66,8 +67,34 @@ The chat panel hosts an AI agent that can:
 - **Tune its own model defaults** — the host chat agent's provider, effort, approval, and chattiness are configurable
 - **Import browser data** — cookies, passwords, bookmarks, history
 - **Automate browsers** via Playwright-style CDP automation (`handle.cdp.page()`)
+- **Schedule recurring work** — run a reviewed worker method, exact inline eval,
+  or agent prompt on an interval or timezone-aware cron calendar, optionally
+  ending at a time, run limit, or natural completion response; inspect and
+  control every durable tick from its chat-history pill or Automations
 - **Use private eval SQLite for scratch work**, call DO-backed app databases,
   call AI models, manage workers
+
+### Automations
+
+Automations are reviewed recurring tasks. A reusable deterministic job runs as
+a method on an exact Durable Object build. A smaller exact script can run inline
+in an existing agent's channel-bound EvalDO without publishing a new worker;
+agent work can instead send a prompt through the ordinary turn loop. Both agent
+actions use either a fresh conversation for every run or one specific
+continuing conversation. Agents can prepare and edit inert drafts and control
+reviewed runs, but only the user activates a revision after reviewing the exact
+target, schedule, end policy, reach, and standing authority. Schedules can use
+elapsed intervals or five-field cron in a reviewed IANA timezone. They can end
+at a time, after a maximum number of admitted runs, or when a prompt, eval, or
+method returns an explicit natural-completion response.
+
+The **Automations** panel is both the review and supervision surface. It
+highlights active runs, completed definitions, drafts awaiting review, and
+recent failures; provides search, filters, and paged run history; shows each
+run's completion response, final message, or error; and links agent runs to
+their exact conversations. The same definition/tick inspector appears on
+first-class scheduled-activity pills in chat history, with lazy detail loading
+plus edit and stop/resume controls.
 
 ### Workers (Workerd)
 

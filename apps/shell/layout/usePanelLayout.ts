@@ -94,8 +94,8 @@ export function usePanelLayout(
   const envRef = useRef(env);
   envRef.current = env;
 
-  // Debounced per-device persistence (§3.3/§7); identity is resolved main-side,
-  // the workspaceId in the blob is informational.
+  // Debounced per-device persistence (§3.3/§7) is owned by this workspace app.
+  // The workspaceId in the blob remains an integrity check during restore.
   const persistTimerRef = useRef<number | null>(null);
   const workspaceIdRef = useRef<string>("");
   useEffect(() => {

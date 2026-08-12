@@ -6,7 +6,7 @@
 // package provides:
 // - Pi message/event type re-exports (single import surface for consumers)
 // - The signal event envelope used by transient structured channel payloads
-// - The sandbox config factory
+// - The panel import loader factory
 // - Connection management primitives
 // =============================================================================
 
@@ -23,7 +23,6 @@ export type {
   ConnectProviderResult,
   ModelSetupResult,
   ChatSandboxValue,
-  SandboxConfig,
   ToolProviderDeps,
   ToolProvider,
   NewConversationOptions,
@@ -37,6 +36,7 @@ export type {
 export type {
   AgentApprovalLevel,
   AgentConfig,
+  AgentObservationConfig,
   AgentRespondPolicy,
   AgentSettingKey,
   AgentSubscriptionConfig,
@@ -44,7 +44,11 @@ export type {
   AgentThinkingLevel,
   ChannelSubscriptionConfig,
 } from "./agent-subscription-config.js";
-export { AGENT_SETTING_KEYS, toSubscriptionConfig } from "./agent-subscription-config.js";
+export {
+  AGENT_SETTING_KEYS,
+  resolveAgentObservationConfig,
+  toSubscriptionConfig,
+} from "./agent-subscription-config.js";
 export {
   buildAgentEntityCreateSpec,
   buildAgentTaskSeedEvent,
@@ -57,6 +61,15 @@ export {
   subscribeAgentToChannel,
   unsubscribeAgentFromChannel,
 } from "./agent-launch.js";
+export {
+  ProvisionalAgentLifecycle,
+  withWorkspaceReviewRetry,
+} from "./provisional-agent-lifecycle.js";
+export type {
+  ClaimedProvisionalAgent,
+  ProvisionalAgentIntent,
+  WorkspaceReviewWaiter,
+} from "./provisional-agent-lifecycle.js";
 export type {
   AgentChannelSubscriptionInput,
   AgentChannelUnsubscriptionInput,
@@ -85,8 +98,8 @@ export { TypedEmitter } from "./emitter.js";
 export { ConnectionManager } from "./connection.js";
 export type { ConnectionStatus, ClientParticipantMetadata } from "./connection.js";
 
-// --- SandboxConfig Factories ---
-export { createPanelSandboxConfig } from "./sandbox-factory.js";
+// --- Panel dynamic import loading ---
+export { createPanelImportLoader } from "./panel-import-loader.js";
 
 // --- Signal Event Envelope (typed structured channel payloads) ---
 export { parseSignalEvent } from "./signal-event-envelope.js";
@@ -102,6 +115,9 @@ export type {
   InlineUiCardPayload,
   ActionBarPayload,
   ApprovalCardPayload,
+  AutomationActivityPayload,
+  AutomationActivitySnapshot,
+  AutomationDefinitionPayload,
   ForkRowPayload,
   CustomMessageCardPayload,
   CustomMessageDisplayMode,
@@ -132,16 +148,9 @@ export type {
 export type { CustomMessageComponentProps, MessageTypeModule } from "./custom-message-types.js";
 
 // --- Invocation card payload (derived UI shape for invocation events) ---
-export type {
-  InvocationCardPayload,
-  ToolExecutionState,
-} from "./invocation-card-payload.js";
+export type { InvocationCardPayload, ToolExecutionState } from "./invocation-card-payload.js";
 export { parseInvocationCardPayload } from "./invocation-card-payload.js";
-export type {
-  SubagentProgressEntry,
-  SubagentRunState,
-  TaskCardPayload,
-} from "./task-card-payload.js";
+export type { SubagentRunState, TaskCardPayload } from "./task-card-payload.js";
 
 // --- Shared wire-event → ChatMessage merge helpers ---
 export {

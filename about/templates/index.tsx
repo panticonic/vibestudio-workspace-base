@@ -19,9 +19,11 @@ import {
 import { vcsMethods } from "@vibestudio/service-schemas/vcs";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
 import { credentials, extensions, rpc } from "@workspace/runtime";
-import { createTemplateManagementClient } from "@workspace/template-management";
 import {
-  TemplateAddDialog,
+  createTemplateManagementClient,
+} from "@workspace/template-management";
+import {
+  TemplateAddButton,
   useTemplateManagementController,
   type TemplateManagementController,
 } from "@workspace/template-management/react";
@@ -84,7 +86,7 @@ function AboutTemplateReview({
       const status = await vcs.status({ contextId: review.contextId });
       return vcs.compare({
         target: status.workingHead,
-        source: { kind: "external-delta", deltaId: item.deltaId },
+        source: { kind: "external-delta", deltaId: item.sourceDeltaId },
         limit: 200,
         ...(cursor ? { cursor } : {}),
       });
@@ -97,7 +99,7 @@ function AboutTemplateReview({
         commandId: commandId(),
         contextId: review.contextId,
         expectedWorkingHead,
-        source: { kind: "external-delta", deltaId: item.deltaId },
+        source: { kind: "external-delta", deltaId: item.sourceDeltaId },
         coordinates,
         resolutions,
       }),
@@ -159,7 +161,7 @@ function TemplateRow({
               {presentation.label}
             </Badge>
             <Text size="1" color="gray">
-              {row.ownedParts} {row.ownedParts === 1 ? "part" : "parts"}
+              {row.contributedParts} {row.contributedParts === 1 ? "contribution" : "contributions"}
             </Text>
           </Flex>
           {/* §7.7 lists a template by version, origin, and parts. The origin
@@ -401,12 +403,11 @@ function TemplatesPage() {
                     <Flex direction="column" gap="2">
                       <Flex align="center" justify="between" gap="2" wrap="wrap">
                         <Box>
-                          <Text as="div" weight="medium">
-                            {operation.kind} template operation
-                          </Text>
-                          <Text as="div" size="1" color="gray">
-                            {operation.operationId}
-                          </Text>
+                          <Flex align="center" gap="2">
+                            <Text as="div" weight="medium">
+                              {operation.kind} template operation
+                            </Text>
+                          </Flex>
                         </Box>
                         <Flex gap="1">
                           {!operation.review ? (
@@ -419,15 +420,17 @@ function TemplatesPage() {
                               Resume
                             </Button>
                           ) : null}
-                          <Button
-                            size="1"
-                            variant="soft"
-                            color="red"
-                            disabled={controller.isBusy(`operation:${operation.operationId}`)}
-                            onClick={() => void cancel(operation.operationId)}
-                          >
-                            Cancel
-                          </Button>
+                          {operation.initiator !== "host-release" ? (
+                            <Button
+                              size="1"
+                              variant="soft"
+                              color="red"
+                              disabled={controller.isBusy(`operation:${operation.operationId}`)}
+                              onClick={() => void cancel(operation.operationId)}
+                            >
+                              Cancel
+                            </Button>
+                          ) : null}
                         </Flex>
                       </Flex>
                       {operation.review ? (
@@ -504,7 +507,7 @@ function TemplatesPage() {
                         {entry.description}
                       </Text>
                     </Box>
-                    <TemplateAddDialog
+                    <TemplateAddButton
                       client={templates}
                       request={{ catalogId: entry.id }}
                       triggerLabel="Add"
@@ -546,7 +549,7 @@ function TemplatesPage() {
                     aria-label="Logical Git credential"
                     style={{ flex: "1 1 220px" }}
                   />
-                  <TemplateAddDialog
+                  <TemplateAddButton
                     client={templates}
                     request={{
                       url: url.trim(),

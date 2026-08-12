@@ -14,6 +14,7 @@
  * presence events).
  */
 
+// oxlint-disable-next-line typescript/triple-slash-reference -- workerd.d.ts supplies runtime-only ambient WebSocket APIs.
 /// <reference path="./workerd.d.ts" />
 import {
   createDurableObjectServiceClient,
@@ -22,7 +23,7 @@ import {
   DurableObjectBase,
   type DurableObjectContext,
   type DurableObjectServiceClient,
-} from "@workspace/runtime/worker";
+} from "@workspace/runtime/worker/kernel";
 import { canonicalJson } from "@vibestudio/content-addressing";
 import type { ChannelEvent } from "@workspace/harness";
 import {
@@ -32,13 +33,15 @@ import {
 } from "@workspace/pubsub";
 import type {
   BootstrapSnapshot,
+  ChannelAgenticContext,
   ChannelInvite,
   ChannelReplayAfterRequest,
   ParticipantSnapshot,
   RpcChannelMessage,
+  ServerLogEvent,
 } from "@workspace/pubsub";
 
-const PUBSUB_CHANNEL_SCHEMA_BASELINE = 119;
+const PUBSUB_CHANNEL_SCHEMA_BASELINE = 120;
 const STRUCTURED_DELIVERY_RETRY_MS = 1_000;
 const STRUCTURED_DELIVERY_MAX_RETRY_MS = 30_000;
 import type {
@@ -57,13 +60,10 @@ import type {
 import {
   AGENTIC_EVENT_PAYLOAD_KIND,
   AGENTIC_PROTOCOL_VERSION,
-  createInitialChannelViewState,
   participantRefFromMetadata,
   publicParticipantMetadata,
-  reduceChannelView,
   type AgenticEvent,
   type AppendIdempotency,
-  type ChannelEnvelope,
   type ForkProjection,
   type InvocationOutcome,
   type LogEnvelope,
@@ -88,15 +88,15 @@ import {
   type BroadcastDeps,
   type BroadcastParticipant,
 } from "./broadcast.js";
-import {
-  ChannelDeliveryProjection,
-  CHANNEL_RELATIONSHIP_EVENT_TYPES,
-} from "./delivery-projection.js";
+import { ChannelDeliveryProjection } from "./delivery-projection.js";
 import { ChannelLog, type ChannelReplayContext } from "./log-store.js";
 import type { MessageTypeDefinition } from "@workspace/pubsub";
-import { PolicyHost, policyViewFromLogEnvelope } from "./policy-host.js";
+import { PolicyHost } from "./policy-host.js";
 import { CallTransport, type PendingCallRow } from "./calls.js";
-import type { PolicyEnvelopeView } from "@workspace/channel-policies";
+import {
+  assertDeclaredAgenticEventAudience,
+  type PolicyEnvelopeView,
+} from "@workspace/channel-policies";
 import {
   AGENT_INSPECTION_METHODS,
   AGENT_INSPECTION_RPC_METHOD,
@@ -130,7 +130,8 @@ const GAD_WORKSPACE_SERVICE_PROTOCOL = "vibestudio.gad.workspace.v1";
 /** Signal contentType for the ephemeral fork.head_changed lineage badge. */
 const FORK_HEAD_CHANGED_SIGNAL = "fork.head_changed";
 const FORK_OP_RECONCILE_MS = 5_000;
-type ChannelMaintenanceKind = "invite-index" | "call-deadline" | "fork-reconcile";
+const LINEAGE_HEAD_COALESCE_MS = 100;
+type ChannelMaintenanceKind = "invite-index" | "call-deadline" | "fork-reconcile" | "lineage-head";
 
 /** Ordered fork-op phases; a resume skips everything at or below the recorded
  * phase. `rollback-pending` remains retryable until owned context cleanup is
@@ -158,23 +159,40 @@ function doTarget(ref: DORef): string {
 /** The opening seed of an edit-/deep-dive fork. `blocks` are appended as a
  *  PRIMARY user message on the child channel by `appendSeed`. */
 interface ForkSeed {
-  author: ParticipantRef;
   blocks: MessageBlockInput[];
-  replaces?: { messageId: string; seq: number };
+  replaces?: { messageId: string };
 }
 
-/** Options for the durable `fork()` RPC. `include` scopes which forkable agents
+type ForkLocus =
+  | { kind: "head" }
+  | { kind: "after-message"; messageId: string }
+  | { kind: "before-message"; messageId: string };
+
+/** Request for the durable `fork()` RPC. `include` scopes which forkable agents
  *  are cloned (root-context entity scope → cloneContext.include); omit to clone
  *  every agent vessel in the roster. `exclude`/`replace` are REMOVED (C7). */
-interface ForkOpts {
+interface ForkRequest {
   /** Stable identity allocated once by the caller and retained by transport
    * retries. It is also the saga identity and clone target key. */
   operationId: string;
-  forkPointPubsubId: number;
+  locus: ForkLocus;
   seed?: ForkSeed;
   label?: string;
   reason: string;
   include?: string[];
+}
+
+type ResolvedForkSeed = Omit<ForkSeed, "replaces"> & {
+  author: ParticipantRef;
+  replaces?: { messageId: string; seq: number };
+};
+
+/** Fully resolved request retained in the fork journal. Numeric log positions
+ * are authority-derived once and never recomputed during crash recovery. */
+interface ForkOpts extends Omit<ForkRequest, "seed"> {
+  request: ForkRequest;
+  forkPointPubsubId: number;
+  seed?: ResolvedForkSeed;
 }
 
 /** Result of a fork — the fresh channel + context and the cloned agents, so the
@@ -203,6 +221,8 @@ type ChannelProvenance =
 /** Pending fork seed marker consumed by `appendSeed` for idempotent fork recovery. */
 interface ForkSeedMarker {
   forkId: string;
+  parentChannelId: string;
+  seed: ResolvedForkSeed;
 }
 
 /** Subset of `runtime.cloneContext`'s result the fork op consumes. */
@@ -301,11 +321,13 @@ interface ChannelDeliveryInput {
   subscriptionRevision: number;
   eventSequence: number;
   envelope: RpcChannelMessage;
+  agenticContext: ChannelAgenticContext | null;
 }
 
 interface ChannelDeliveryOutcome {
   deliveryId: string;
-  disposition: "processed" | "duplicate" | "declined";
+  disposition: "processed" | "duplicate" | "declined" | "retired";
+  recipientExecutionStartedAt?: number;
 }
 
 /** A durable channel membership record (WP7 §3) — separate from the ephemeral
@@ -336,17 +358,25 @@ interface ChannelPresenceEntry {
 export class PubSubChannel extends DurableObjectBase {
   static override schemaVersion = PUBSUB_CHANNEL_SCHEMA_BASELINE;
 
-  protected override schemaProductionBaseline() {
-    return { version: PUBSUB_CHANNEL_SCHEMA_BASELINE, name: "pubsub-channel-baseline" } as const;
-  }
   private _channelLog: ChannelLog | null = null;
   private _inviteIndex: DurableObjectServiceClient | null = null;
   private _policyHost: PolicyHost | null = null;
   private _calls: CallTransport | null = null;
   private _deliveryProjection: ChannelDeliveryProjection | null = null;
   private readonly publishDedupInFlight = new Map<string, Promise<ChannelEvent>>();
+  private readonly relationshipMutations = new Map<string, Promise<void>>();
   private broadcastParticipantCache: BroadcastParticipant[] | null = null;
   private readonly subscriptionStreams = new Map<
+    string,
+    {
+      participantId: string;
+      deliveryId: string;
+      token: symbol;
+      openedAt: number;
+      controller: ReadableStreamDefaultController<Uint8Array>;
+    }
+  >();
+  private readonly lineageSubscriptionStreams = new Map<
     string,
     {
       participantId: string;
@@ -367,8 +397,19 @@ export class PubSubChannel extends DurableObjectBase {
       /* workerd may ignore pragmas */
     }
     // Live session rows belong to routed external connections. They are never
-    // routing authority and cannot survive a fresh activation.
-    this.sql.exec(`DELETE FROM participants`);
+    // routing authority and cannot survive a fresh activation. Stamp each
+    // user's retained last-seen summary before dropping the session rows so a
+    // user connected across a restart shows "last seen at restart" instead of
+    // vanishing from presence history entirely.
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        `INSERT INTO presence_last_seen (participant_id, last_seen)
+           SELECT id, COALESCE(last_active_at, ?) FROM participants WHERE id LIKE 'user:%'
+         ON CONFLICT(participant_id) DO UPDATE SET last_seen = excluded.last_seen`,
+        Date.now()
+      );
+      this.sql.exec(`DELETE FROM participants`);
+    });
   }
 
   protected createTables(): void {
@@ -408,6 +449,34 @@ export class PubSubChannel extends DurableObjectBase {
          ON pending_calls(deadline_at) WHERE deadline_at IS NOT NULL`
     );
     this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS provider_call_claims (
+        transport_call_id TEXT PRIMARY KEY,
+        provider_id TEXT NOT NULL,
+        provider_generation_id TEXT NOT NULL,
+        claim_generation INTEGER NOT NULL CHECK (claim_generation > 0),
+        claimed_at INTEGER NOT NULL,
+        execution_started_at INTEGER
+      )
+    `);
+    const providerClaimColumns = this.sql.exec(`PRAGMA table_info(provider_call_claims)`).toArray();
+    if (!providerClaimColumns.some((column) => column["name"] === "execution_started_at")) {
+      this.sql.exec(`ALTER TABLE provider_call_claims ADD COLUMN execution_started_at INTEGER`);
+    }
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS channel_delivery_latency_histogram (
+        metric TEXT NOT NULL CHECK (metric IN (
+          'publish-to-recipient-execution',
+          'call-to-provider-execution',
+          'result-to-caller-settlement'
+        )),
+        upper_bound_ms INTEGER NOT NULL,
+        samples INTEGER NOT NULL DEFAULT 0,
+        total_ms INTEGER NOT NULL DEFAULT 0,
+        maximum_ms INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (metric, upper_bound_ms)
+      )
+    `);
+    this.sql.exec(`
       CREATE TABLE IF NOT EXISTS dedup_keys (
         key TEXT PRIMARY KEY,
         result_id INTEGER,
@@ -420,7 +489,7 @@ export class PubSubChannel extends DurableObjectBase {
       CREATE TABLE IF NOT EXISTS channel_maintenance_queue (
         item_id TEXT PRIMARY KEY,
         kind TEXT NOT NULL
-          CHECK (kind IN ('invite-index', 'call-deadline', 'fork-reconcile')),
+          CHECK (kind IN ('invite-index', 'call-deadline', 'fork-reconcile', 'lineage-head')),
         target_id TEXT NOT NULL,
         idempotency_key TEXT NOT NULL,
         attempts INTEGER NOT NULL DEFAULT 0,
@@ -467,20 +536,79 @@ export class PubSubChannel extends DurableObjectBase {
         phase TEXT NOT NULL,
         forked_channel_id TEXT,
         forked_context_id TEXT,
+        result_json TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       )
     `);
     this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_fork_ops_phase ON fork_ops(phase)`);
-    // Lineage subscribers (held on the ROOT channel of a fork tree). A
-    // signal-only roster — NO durable replay — that the head-advance hub fans
-    // `fork.head_changed` out to. Distinct from `participants` so it never
-    // pollutes the presence/roster projection.
+    // Incremental, rebuildable fork metadata projection. The unified log stays
+    // authoritative; these tables make fork locus resolution and roster reads
+    // proportional to new events / fork count instead of total conversation
+    // history. A cloned child prunes message/turn rows past its fork boundary
+    // and starts with an empty direct-child projection.
     this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS lineage_subscribers (
-        id TEXT PRIMARY KEY,
-        metadata TEXT NOT NULL,
-        created_at INTEGER NOT NULL
+      CREATE TABLE IF NOT EXISTS fork_view_cursor (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        folded_through_seq INTEGER NOT NULL
+      )
+    `);
+    this.sql.exec(
+      `INSERT OR IGNORE INTO fork_view_cursor (singleton, folded_through_seq) VALUES (1, 0)`
+    );
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS fork_message_loci (
+        message_id TEXT PRIMARY KEY,
+        first_seq INTEGER NOT NULL,
+        terminal_seq INTEGER,
+        turn_id TEXT,
+        actor_kind TEXT NOT NULL
+      )
+    `);
+    this.sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_fork_message_first ON fork_message_loci(first_seq)`
+    );
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS fork_turn_loci (
+        turn_id TEXT PRIMARY KEY,
+        opened_seq INTEGER NOT NULL
+      )
+    `);
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS fork_projection (
+        fork_id TEXT PRIMARY KEY,
+        parent_channel_id TEXT NOT NULL,
+        forked_channel_id TEXT NOT NULL UNIQUE,
+        forked_context_id TEXT NOT NULL,
+        fork_point_id INTEGER NOT NULL,
+        label TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        actor_json TEXT NOT NULL,
+        created_at_seq INTEGER NOT NULL,
+        head_seq INTEGER NOT NULL,
+        archived INTEGER NOT NULL DEFAULT 0 CHECK (archived IN (0, 1))
+      )
+    `);
+    this.sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_fork_projection_created ON fork_projection(created_at_seq)`
+    );
+    // Every fork reports its latest durable head directly to the lineage root.
+    // The single-row outbox coalesces bursts without losing the latest seq;
+    // the root's table is the durable cross-session unread authority.
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS lineage_head_outbox (
+        singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+        head_seq INTEGER NOT NULL,
+        roster_changed INTEGER NOT NULL DEFAULT 0 CHECK (roster_changed IN (0, 1)),
+        next_attempt_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
+    this.sql.exec(`
+      CREATE TABLE IF NOT EXISTS lineage_heads (
+        channel_id TEXT PRIMARY KEY,
+        head_seq INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
       )
     `);
     // Durable channel membership (WP7 §3). This is deliberately separate from
@@ -535,16 +663,30 @@ export class PubSubChannel extends DurableObjectBase {
     return [
       "participants",
       "pending_calls",
+      "provider_call_claims",
+      "channel_delivery_latency_histogram",
       "dedup_keys",
       "channel_relationships",
       "channel_delivery_mailbox",
+      "channel_delivery_event_context",
       "channel_delivery_projection_cursor",
       "channel_maintenance_queue",
       "fork_ops",
-      "lineage_subscribers",
+      "fork_view_cursor",
+      "fork_message_loci",
+      "fork_turn_loci",
+      "fork_projection",
+      "lineage_head_outbox",
+      "lineage_heads",
       "channel_members",
       "invite_index_ops",
       "presence_last_seen",
+      "channel_relationships",
+      "channel_delivery_mailbox",
+      "channel_delivery_projection_cursor",
+      "channel_delivery_context",
+      "channel_delivery_message_senders",
+      "channel_receipts",
     ];
   }
 
@@ -669,6 +811,16 @@ export class PubSubChannel extends DurableObjectBase {
         Number(row["updated_at"])
       );
     }
+    for (const row of this.sql
+      .exec(`SELECT head_seq, updated_at FROM lineage_head_outbox WHERE next_attempt_at <= ?`, now)
+      .toArray()) {
+      insert(
+        `maintenance:lineage-head:${this.objectKey}`,
+        "lineage-head",
+        this.objectKey,
+        Number(row["updated_at"])
+      );
+    }
   }
 
   private hasReadyMaintenance(now: number): boolean {
@@ -713,6 +865,21 @@ export class PubSubChannel extends DurableObjectBase {
         )
         .toArray().length > 0;
     if (callDue) return true;
+    const lineageDue =
+      this.sql
+        .exec(
+          `SELECT 1 FROM lineage_head_outbox
+            WHERE next_attempt_at <= ?
+              AND NOT EXISTS (
+                SELECT 1 FROM channel_maintenance_queue
+                 WHERE item_id = ?
+              )
+            LIMIT 1`,
+          now,
+          `maintenance:lineage-head:${this.objectKey}`
+        )
+        .toArray().length > 0;
+    if (lineageDue) return true;
     return (
       this.sql
         .exec(
@@ -794,6 +961,8 @@ export class PubSubChannel extends DurableObjectBase {
       else if (op && op["phase"] !== "done" && op["phase"] !== "rolledback") {
         await this.runForkOp(targetId);
       }
+    } else if (kind === "lineage-head") {
+      await this.flushLineageHeadOutbox();
     } else {
       throw new Error(`executeChannelMaintenanceClaim: unknown kind ${kind}`);
     }
@@ -862,24 +1031,33 @@ export class PubSubChannel extends DurableObjectBase {
       if (remaining < 1) return claims;
       const candidates = this.sql
         .exec(
-          `SELECT current.*
+          `SELECT current.*, relationship.revision AS active_relationship_revision,
+                  relationship.invocation_route AS active_invocation_route,
+                  event_context.agentic_context_json AS event_agentic_context_json
              FROM channel_delivery_mailbox AS current
+             JOIN channel_relationships AS relationship
+               ON relationship.participant_id = current.participant_id
+             LEFT JOIN channel_delivery_event_context AS event_context
+               ON event_context.event_id = current.event_id
             WHERE current.state IN ('ready', 'retrying')
               AND current.next_attempt_at <= ?
+              AND relationship.active = 1
+              AND relationship.attached = 1
               AND NOT EXISTS (
+                -- Strict head-of-line: any earlier non-terminal row blocks,
+                -- eligible or not. This guarantees at most one claim per
+                -- participant lane per pass (the host driver rejects two
+                -- simultaneous claims for one lane) and makes same-recipient
+                -- sequence ordering structural rather than an emergent
+                -- property of lane conflicts.
                 SELECT 1
                   FROM channel_delivery_mailbox AS blocker
                  WHERE blocker.participant_id = current.participant_id
                    AND blocker.event_sequence < current.event_sequence
                    AND blocker.state NOT LIKE 'terminal-%'
-                   AND (
-                     blocker.state = 'leased'
-                     OR blocker.next_attempt_at > ?
-                   )
               )
             ORDER BY current.created_at, current.participant_id, current.event_sequence
             LIMIT ?`,
-          input.now,
           input.now,
           Math.min(remaining, 1_000)
         )
@@ -889,7 +1067,10 @@ export class PubSubChannel extends DurableObjectBase {
         const deliveryId = String(row["delivery_id"]);
         const participantId = String(row["participant_id"]);
         const target = parseDOParticipantId(String(row["endpoint_entity_id"]));
-        if (!target) {
+        const directContextMissing =
+          row["active_invocation_route"] === "direct" &&
+          typeof row["event_agentic_context_json"] !== "string";
+        if (!target || directContextMissing) {
           this.sql.exec(
             `UPDATE channel_delivery_mailbox
                 SET state = 'terminal-integrity', claimed_by = NULL
@@ -899,13 +1080,16 @@ export class PubSubChannel extends DurableObjectBase {
           continue;
         }
         const generation = Number(row["claim_generation"] ?? 0) + 1;
+        const relationshipRevision = Number(row["active_relationship_revision"]);
         this.sql.exec(
           `UPDATE channel_delivery_mailbox
-              SET state = 'leased', claimed_by = ?, claim_generation = ?, last_attempt_at = ?
+              SET state = 'leased', claimed_by = ?, claim_generation = ?, last_attempt_at = ?,
+                  claimed_relationship_revision = ?
             WHERE delivery_id = ?`,
           input.workerId,
           generation,
           input.now,
+          relationshipRevision,
           deliveryId
         );
         const delivery: ChannelDeliveryInput = {
@@ -920,6 +1104,10 @@ export class PubSubChannel extends DurableObjectBase {
           subscriptionRevision: Number(row["subscription_revision"]),
           eventSequence: Number(row["event_sequence"]),
           envelope: JSON.parse(String(row["envelope_json"])) as RpcChannelMessage,
+          agenticContext:
+            row["active_invocation_route"] === "direct"
+              ? (JSON.parse(String(row["event_agentic_context_json"])) as ChannelAgenticContext)
+              : null,
         };
         claims.push({
           itemId: deliveryId,
@@ -950,7 +1138,9 @@ export class PubSubChannel extends DurableObjectBase {
   })
   settleReadyWork(
     queue: DurableWorkQueue,
-    request: SettleRequest<ChannelDeliveryOutcome | { processed: true }>
+    request: SettleRequest<
+      ChannelDeliveryOutcome | { processed: true; recipientExecutionStartedAt?: number }
+    >
   ): ClaimSettlement {
     if (queue !== "channel-delivery") return "stale";
     if (request.itemId.startsWith("maintenance:")) {
@@ -975,18 +1165,34 @@ export class PubSubChannel extends DurableObjectBase {
         return "accepted";
       });
     }
-    const outcome = request.outcome as ChannelDeliveryOutcome;
+    const acknowledged = request.outcome as
+      | ChannelDeliveryOutcome
+      | { processed: true; recipientExecutionStartedAt?: number }
+      | null;
+    const outcome: ChannelDeliveryOutcome =
+      acknowledged !== null &&
+      typeof acknowledged === "object" &&
+      "processed" in acknowledged &&
+      acknowledged.processed === true
+        ? {
+            deliveryId: request.itemId,
+            disposition: "processed",
+            ...(typeof acknowledged.recipientExecutionStartedAt === "number"
+              ? { recipientExecutionStartedAt: acknowledged.recipientExecutionStartedAt }
+              : {}),
+          }
+        : (acknowledged as ChannelDeliveryOutcome);
     if (
       !outcome ||
       outcome.deliveryId !== request.itemId ||
-      !["processed", "duplicate", "declined"].includes(outcome.disposition)
+      !["processed", "duplicate", "declined", "retired"].includes(outcome.disposition)
     ) {
       throw new Error("settleReadyWork: invalid channel delivery outcome");
     }
     return this.ctx.storage.transactionSync(() => {
       const row = this.sql
         .exec(
-          `SELECT claimed_by, claim_generation, state
+          `SELECT claimed_by, claim_generation, state, created_at, envelope_json
              FROM channel_delivery_mailbox
             WHERE delivery_id = ?`,
           request.itemId
@@ -1000,16 +1206,50 @@ export class PubSubChannel extends DurableObjectBase {
       ) {
         return String(row["state"]).startsWith("terminal-") ? "duplicate" : "stale";
       }
+      if (outcome.disposition === "declined") {
+        this.deliveryProjection.recordDeclined(request.itemId);
+      }
+      if (typeof outcome.recipientExecutionStartedAt === "number") {
+        this.recordDeliveryLatency(
+          "publish-to-recipient-execution",
+          Math.max(0, outcome.recipientExecutionStartedAt - Number(row["created_at"]))
+        );
+      }
+      if (typeof row["envelope_json"] === "string") {
+        try {
+          const envelope = JSON.parse(String(row["envelope_json"])) as {
+            event?: { payload?: { kind?: unknown } };
+          };
+          const kind = envelope.event?.payload?.kind;
+          if (
+            kind === "invocation.completed" ||
+            kind === "invocation.failed" ||
+            kind === "invocation.cancelled" ||
+            kind === "invocation.abandoned"
+          ) {
+            this.recordDeliveryLatency(
+              "result-to-caller-settlement",
+              Math.max(0, Date.now() - Number(row["created_at"]))
+            );
+          }
+        } catch {
+          // Malformed envelopes are classified by the delivery consumer. The
+          // latency observer never becomes an alternate validation path.
+        }
+      }
       this.sql.exec(
         `UPDATE channel_delivery_mailbox
-            SET state = 'terminal-completed', claimed_by = NULL, terminal_outcome_json = ?
+            SET state = ?, claimed_by = NULL,
+                envelope_json = NULL, agentic_context_json = NULL,
+                terminal_outcome_json = ?
           WHERE delivery_id = ?
             AND claimed_by = ?
             AND claim_generation = ?`,
+        outcome.disposition === "retired" ? "terminal-retired" : "terminal-completed",
         JSON.stringify(outcome),
         request.itemId,
-          request.workerId,
-          request.generation
+        request.workerId,
+        request.generation
       );
       return "accepted";
     });
@@ -1021,10 +1261,10 @@ export class PubSubChannel extends DurableObjectBase {
     tier: "open",
     sensitivity: "write",
   })
-  failReadyWork(
+  async failReadyWork(
     queue: DurableWorkQueue,
-    request: { workerId: string; itemId: string; generation: number }
-  ): { retryAt: number } | "stale" {
+    request: { workerId: string; itemId: string; generation: number; error?: unknown }
+  ): Promise<{ retryAt: number } | "stale"> {
     if (queue !== "channel-delivery") return "stale";
     if (request.itemId.startsWith("maintenance:")) {
       return this.ctx.storage.transactionSync(() => {
@@ -1067,6 +1307,80 @@ export class PubSubChannel extends DurableObjectBase {
         return { retryAt };
       });
     }
+    const errorCode =
+      request.error && typeof request.error === "object"
+        ? (request.error as { code?: unknown }).code
+        : undefined;
+    if (errorCode === "PermanentChannelDelivery") {
+      return this.ctx.storage.transactionSync(() => {
+        const updated = this.sql.exec(
+          `UPDATE channel_delivery_mailbox
+              SET state = 'terminal-integrity', claimed_by = NULL,
+                  terminal_outcome_json = ?
+            WHERE delivery_id = ? AND claimed_by = ? AND claim_generation = ? AND state = 'leased'
+            RETURNING delivery_id`,
+          JSON.stringify({ disposition: "integrity-error", error: request.error }),
+          request.itemId,
+          request.workerId,
+          request.generation
+        );
+        return updated.toArray().length > 0 ? { retryAt: Date.now() } : "stale";
+      });
+    }
+    if (errorCode === "ResidentSessionUnavailable") {
+      const claimed = this.sql
+        .exec(
+          `SELECT participant_id
+             FROM channel_delivery_mailbox
+            WHERE delivery_id = ? AND claimed_by = ? AND claim_generation = ? AND state = 'leased'`,
+          request.itemId,
+          request.workerId,
+          request.generation
+        )
+        .toArray()[0];
+      if (!claimed) return "stale";
+      const participantId = String(claimed["participant_id"]);
+      return this.withRelationshipMutation(participantId, async () => {
+        const current = this.sql
+          .exec(
+            `SELECT mailbox.event_sequence, mailbox.claimed_relationship_revision,
+                    relationship.revision AS active_relationship_revision
+               FROM channel_delivery_mailbox AS mailbox
+               LEFT JOIN channel_relationships AS relationship
+                 ON relationship.participant_id = mailbox.participant_id
+              WHERE mailbox.delivery_id = ? AND mailbox.claimed_by = ?
+                AND mailbox.claim_generation = ? AND mailbox.state = 'leased'`,
+            request.itemId,
+            request.workerId,
+            request.generation
+          )
+          .toArray()[0];
+        if (!current) return "stale" as const;
+        if (
+          Number(current["claimed_relationship_revision"]) !==
+          Number(current["active_relationship_revision"])
+        ) {
+          const now = Date.now();
+          this.sql.exec(
+            `UPDATE channel_delivery_mailbox
+                SET state = 'ready', claimed_by = NULL, next_attempt_at = ?,
+                    claimed_relationship_revision = NULL
+              WHERE delivery_id = ? AND claimed_by = ? AND claim_generation = ? AND state = 'leased'`,
+            now,
+            request.itemId,
+            request.workerId,
+            request.generation
+          );
+          this.markWorkReady("channel-delivery");
+          return { retryAt: now };
+        }
+        await this.detachParticipantUnlocked(
+          participantId,
+          Math.max(0, Number(current["event_sequence"]) - 1)
+        );
+        return { retryAt: Date.now() };
+      });
+    }
     return this.ctx.storage.transactionSync(() => {
       const row = this.sql
         .exec(
@@ -1105,6 +1419,65 @@ export class PubSubChannel extends DurableObjectBase {
       );
       return { retryAt };
     });
+  }
+
+  private async detachParticipant(
+    participantId: string,
+    detachAfterSequence?: number
+  ): Promise<void> {
+    return this.withRelationshipMutation(participantId, () =>
+      this.detachParticipantUnlocked(participantId, detachAfterSequence)
+    );
+  }
+
+  private async detachParticipantUnlocked(
+    participantId: string,
+    detachAfterSequence?: number
+  ): Promise<void> {
+    await this.deriveDeliveries();
+    const relationship = this.deliveryProjection.relationship(participantId);
+    if (!relationship?.active || !relationship.attached) return;
+    const metadata = this.getSenderMetadata(participantId) ?? {};
+    const recoveryBoundary = this.deliveryProjection.detachRecoveryBoundary(
+      participantId,
+      detachAfterSequence ?? this.deliveryProjection.cursor()
+    );
+    await this.appendDurable({
+      type: "channel.subscription.detached",
+      payload: {
+        participantId,
+        revision: relationship.revision + 1,
+        detachAfterSequence: recoveryBoundary,
+      },
+      senderId: participantId,
+      senderMetadata: metadata,
+      messageId: `channel-subscription:${participantId}:${relationship.revision + 1}`,
+      idempotency: "idempotent-by-id",
+    });
+    this.invalidateBroadcastParticipants();
+    this.broadcastPresenceSignal(participantId, "leave", metadata, "disconnect");
+  }
+
+  private async withRelationshipMutation<T>(
+    participantId: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const previous = this.relationshipMutations.get(participantId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const tail = previous.catch(() => undefined).then(() => current);
+    this.relationshipMutations.set(participantId, tail);
+    await previous.catch(() => undefined);
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.relationshipMutations.get(participantId) === tail) {
+        this.relationshipMutations.delete(participantId);
+      }
+    }
   }
 
   @rpc({
@@ -1152,23 +1525,91 @@ export class PubSubChannel extends DurableObjectBase {
     this._deliveryProjection ??= new ChannelDeliveryProjection(
       this.sql,
       (callback) => this.ctx.storage.transactionSync(callback),
-      this.objectKey
+      this.objectKey,
+      () => {
+        const value = this.getStateValue("forkPointId");
+        if (value === null) return null;
+        const boundary = Number(value);
+        return Number.isSafeInteger(boundary) && boundary >= 0 ? boundary : null;
+      }
     );
     return this._deliveryProjection;
   }
 
-  private async deriveDeliveries(): Promise<number> {
-    let inserted = 0;
+  /** Advance the delivery projection. On the happy path the just-appended
+   *  event is folded directly from memory — `channelLog.append` returns the
+   *  same hydrated construction `readEvents` would replay, so no GAD
+   *  round trip is spent re-reading an event this activation already holds.
+   *  Any gap (a prior crash left the cursor behind) falls back to bounded
+   *  replay from the committed cursor. */
+  private async deriveDeliveries(
+    appended?: ChannelEvent,
+    deliveryStartedAt?: number
+  ): Promise<number> {
+    // A later relationship fold can legitimately replace the relationship
+    // row that owns recovery. Drain that durable debt before the projection
+    // cursor is allowed to advance to any newer canonical event.
+    let inserted = await this.resumeReattachBackfills();
+    if (appended) {
+      const cursor = this.deliveryProjection.cursor();
+      if (appended.id <= cursor) {
+        if (inserted > 0) this.markWorkReady("channel-delivery");
+        return inserted;
+      }
+      if (appended.id === cursor + 1) {
+        inserted += this.deliveryProjection.fold(appended, deliveryStartedAt).inserted;
+        inserted += await this.resumeReattachBackfills();
+        if (inserted > 0) this.markWorkReady("channel-delivery");
+        return inserted;
+      }
+      // Cursor is behind by more than this event: recover through replay,
+      // which folds the appended event in sequence with everything missing.
+    }
     for (;;) {
       const events = await this.channelLog.readEvents({
         afterSeq: this.deliveryProjection.cursor(),
         limit: 500,
       });
       if (events.length === 0) break;
-      for (const event of events) inserted += this.deliveryProjection.fold(event).inserted;
+      for (const event of events) {
+        inserted += this.deliveryProjection.fold(event).inserted;
+        inserted += await this.resumeReattachBackfills();
+      }
       if (events.length < 500) break;
     }
     if (inserted > 0) this.markWorkReady("channel-delivery");
+    return inserted;
+  }
+
+  /** Resume every durable detached-range recovery. Progress is stored in the
+   * relationship row atomically with each derived mailbox item, so activation
+   * loss at any await boundary simply resumes from the last committed event. */
+  private async resumeReattachBackfills(): Promise<number> {
+    let inserted = 0;
+    for (const recovery of this.deliveryProjection.pendingReattachBackfills()) {
+      if (recovery.afterSequence >= recovery.throughSequence) {
+        this.deliveryProjection.completeEmptyReattachBackfill(recovery.participantId);
+        continue;
+      }
+      let afterSeq = recovery.afterSequence;
+      while (afterSeq < recovery.throughSequence) {
+        const events = await this.channelLog.readEvents({ afterSeq, limit: 500 });
+        const gap = events.filter((event) => event.id <= recovery.throughSequence);
+        if (gap.length === 0) {
+          throw new Error(
+            `Reattach backfill for ${recovery.participantId} cannot reach ` +
+              `${recovery.throughSequence} after ${afterSeq}`
+          );
+        }
+        for (const event of gap) {
+          inserted += this.deliveryProjection.advanceReattachBackfill(
+            event,
+            recovery.participantId
+          );
+          afterSeq = event.id;
+        }
+      }
+    }
     return inserted;
   }
 
@@ -1215,14 +1656,24 @@ export class PubSubChannel extends DurableObjectBase {
           message: channelEventToRpcSignal(event),
         });
       },
+      redeliverDurableEvent: async (participantId, eventId) => {
+        const event = await this.channelLog.getEventByEnvelopeId(eventId);
+        if (!event) return false;
+        const changed = this.deliveryProjection.redeliverEventTo(event, participantId);
+        if (changed) this.markWorkReady("channel-delivery");
+        return changed;
+      },
       participantRef: (participantId) => this.participantRef(participantId),
       getSenderMetadata: (participantId) => this.getSenderMetadata(participantId),
       participantTransport: (participantId) => {
         const session = this.sql
           .exec(`SELECT transport FROM participants WHERE id = ?`, participantId)
           .toArray()[0];
-        if (session) return session["transport"] as "rpc" | "do";
-        return this.deliveryProjection.relationship(participantId)?.endpointEntityId ? "do" : null;
+        if (session) return "external-session";
+        const relationship = this.deliveryProjection.relationship(participantId);
+        if (!relationship?.active) return null;
+        if (relationship.endpointKind !== "entity") return "resident-session";
+        return relationship.invocationRoute === "direct" ? "entity" : "resident-session";
       },
       rpcCall: (targetId, method, args) => this.rpc.call(targetId, method, args),
       waitUntil: (promise) => {
@@ -1231,8 +1682,35 @@ export class PubSubChannel extends DurableObjectBase {
       },
       getStateValue: (key) => this.getStateValue(key),
       setStateValue: (key, value) => this.setStateValue(key, value),
+      recordLatency: (metric, durationMs) => this.recordDeliveryLatency(metric, durationMs),
     });
     return this._calls;
+  }
+
+  private recordDeliveryLatency(
+    metric:
+      | "publish-to-recipient-execution"
+      | "call-to-provider-execution"
+      | "result-to-caller-settlement",
+    durationMs: number
+  ): void {
+    const bounded = Math.max(0, Math.round(durationMs));
+    const upperBound =
+      [10, 50, 100, 250, 500, 1_000, 5_000, 30_000].find((value) => bounded <= value) ??
+      2_147_483_647;
+    this.sql.exec(
+      `INSERT INTO channel_delivery_latency_histogram (
+         metric, upper_bound_ms, samples, total_ms, maximum_ms
+       ) VALUES (?, ?, 1, ?, ?)
+       ON CONFLICT(metric, upper_bound_ms) DO UPDATE SET
+         samples = samples + 1,
+         total_ms = total_ms + excluded.total_ms,
+         maximum_ms = MAX(maximum_ms, excluded.maximum_ms)`,
+      metric,
+      upperBound,
+      bounded,
+      bounded
+    );
   }
 
   /** Look up metadata from either live session presence or durable membership. */
@@ -1243,7 +1721,10 @@ export class PubSubChannel extends DurableObjectBase {
     const relationship = session
       ? null
       : this.sql
-          .exec(`SELECT metadata_json FROM channel_relationships WHERE participant_id = ?`, participantId)
+          .exec(
+            `SELECT metadata_json FROM channel_relationships WHERE participant_id = ?`,
+            participantId
+          )
           .toArray()[0];
     const raw = session?.["metadata"] ?? relationship?.["metadata_json"];
     if (typeof raw !== "string") return undefined;
@@ -1276,7 +1757,29 @@ export class PubSubChannel extends DurableObjectBase {
     /** "idempotent-by-id" is reserved for the client publish path. */
     idempotency?: AppendIdempotency;
     attachments?: StoredAttachment[];
+    /** Measurement origin only; never consulted as delivery authority. */
+    deliveryStartedAt?: number;
   }): Promise<ChannelEvent> {
+    const deliveryStartedAt = input.deliveryStartedAt ?? Date.now();
+    if (
+      input.type === AGENTIC_EVENT_PAYLOAD_KIND &&
+      input.payload &&
+      typeof input.payload === "object"
+    ) {
+      assertDeclaredAgenticEventAudience(input.payload as AgenticEvent);
+      const audience = (input.payload as { payload?: { to?: unknown } }).payload?.to;
+      if (
+        Array.isArray(audience) &&
+        audience.some(
+          (selector) =>
+            selector !== null &&
+            typeof selector === "object" &&
+            (selector as { kind?: unknown }).kind === "role"
+        )
+      ) {
+        throw new Error("Participant role selectors are not resolvable on channel append");
+      }
+    }
     const contentIntegrity = this.senderContentIntegrity();
     const payloadRecord =
       input.payload && typeof input.payload === "object" && !Array.isArray(input.payload)
@@ -1303,10 +1806,19 @@ export class PubSubChannel extends DurableObjectBase {
       ...contentIntegrity,
     });
     this.policyHost.foldAppended(this.policyViewFromChannelEvent(event));
-    await this.deriveDeliveries();
+    await this.deriveDeliveries(event, deliveryStartedAt);
     // Report the head advance up the fork lineage (debounced) so live badges on
     // the root fan out. Cheap: records a pending seq + arms the alarm.
-    this.noteLineageHeadAdvance(event.id);
+    const appendedKind =
+      input.type === AGENTIC_EVENT_PAYLOAD_KIND
+        ? (input.payload as { kind?: unknown } | null)?.kind
+        : undefined;
+    this.noteLineageHeadAdvance(
+      event.id,
+      appendedKind === "channel.forked" ||
+        appendedKind === "channel.fork_renamed" ||
+        appendedKind === "channel.fork_archived"
+    );
     return event;
   }
 
@@ -1341,7 +1853,7 @@ export class PubSubChannel extends DurableObjectBase {
     return {
       contextId: this.getStateValue("contextId") ?? undefined,
       channelConfig: this.getChannelConfig() ?? undefined,
-      snapshots: [this.rosterSnapshot()],
+      snapshots: [this.rosterSnapshot(), this.receiptSnapshot()],
     };
   }
 
@@ -1365,6 +1877,36 @@ export class PubSubChannel extends DurableObjectBase {
     return { kind: "roster-snapshot", participants, ts: Date.now() };
   }
 
+  private receiptSnapshot(): BootstrapSnapshot {
+    const events: ServerLogEvent[] = this.deliveryProjection.receiptRows().flatMap((receipt) => {
+      if (receipt.state === "declined") return [];
+      const ref = this.participantRef(receipt.participantId);
+      return [
+        {
+          id: 0,
+          messageId: `receipt:${receipt.messageId}:${receipt.participantId}:${receipt.state}`,
+          type: AGENTIC_EVENT_PAYLOAD_KIND,
+          senderId: receipt.participantId,
+          senderMetadata: ref.metadata,
+          contentClass: "internal",
+          externalKeys: [],
+          payload: {
+            kind: receipt.state === "read" ? "message.read" : "message.received",
+            actor: ref,
+            causality: { messageId: receipt.messageId },
+            payload: {
+              protocol: AGENTIC_PROTOCOL_VERSION,
+              ...(receipt.turnId ? { turnId: receipt.turnId } : {}),
+            },
+            createdAt: new Date(receipt.updatedAt).toISOString(),
+          },
+          ts: receipt.updatedAt,
+        },
+      ];
+    });
+    return { kind: "receipt-snapshot", events, ts: Date.now() };
+  }
+
   // ── Channel initialization ──────────────────────────────────────────────
 
   private initChannel(contextId: string, channelConfig?: Record<string, unknown>): void {
@@ -1378,6 +1920,7 @@ export class PubSubChannel extends DurableObjectBase {
     this.setStateValue("contextId", contextId);
     this.setStateValue("createdAt", String(Date.now()));
     if (channelConfig) this.setStateValue("config", JSON.stringify(channelConfig));
+    this.deliveryProjection.initializeChannelConfig(channelConfig ?? {});
     void this.refreshOwnTitle();
   }
 
@@ -1534,6 +2077,7 @@ export class PubSubChannel extends DurableObjectBase {
             participantId,
             deliveryId,
             token,
+            openedAt: Date.now(),
             controller,
           });
           const ack = encodeChannelSubscriptionRecord({ kind: "subscribed", result });
@@ -1579,28 +2123,19 @@ export class PubSubChannel extends DurableObjectBase {
     leaveReason?: "graceful" | "disconnect" | "replaced",
     senderRef?: number
   ): Promise<void> {
+    // Presence is a disposable presentation signal. Durable relationship facts
+    // and the roster/last-seen projections carry all semantic state; appending
+    // presence would wake every executable member for UI-only connectivity.
     const publicMetadata = publicParticipantMetadata(metadata) ?? {};
-    const payload: PresencePayload = {
-      action,
-      ref: participantRefFromMetadata(senderId, publicMetadata),
-      metadata: publicMetadata,
-      ...(leaveReason ? { leaveReason } : {}),
-    };
-
-    const event = await this.appendDurable({
-      type: "presence",
-      payload,
-      senderId,
-      senderMetadata: publicMetadata,
-    });
-    broadcast(this.broadcastDeps, event, { kind: "log", phase: "live", ref: senderRef }, senderId);
+    this.broadcastPresenceSignal(senderId, action, publicMetadata, leaveReason, senderRef);
   }
 
   private broadcastPresenceSignal(
     senderId: string,
     action: "join" | "leave" | "update",
     metadata: Record<string, unknown>,
-    leaveReason?: "graceful" | "disconnect" | "replaced"
+    leaveReason?: "graceful" | "disconnect" | "replaced",
+    senderRef?: number
   ): void {
     const payload: PresencePayload = {
       action,
@@ -1617,7 +2152,7 @@ export class PubSubChannel extends DurableObjectBase {
       metadata,
       Date.now()
     );
-    broadcast(this.broadcastDeps, event, { kind: "signal" }, senderId);
+    broadcast(this.broadcastDeps, event, { kind: "signal", ref: senderRef }, senderId);
   }
 
   private broadcastChannelSignal(
@@ -1757,6 +2292,10 @@ export class PubSubChannel extends DurableObjectBase {
     sensitivity: "write",
   })
   async join(input: ChannelJoinInput): Promise<SubscribeResult> {
+    return this.withRelationshipMutation(input.participantId, () => this.joinUnlocked(input));
+  }
+
+  private async joinUnlocked(input: ChannelJoinInput): Promise<SubscribeResult> {
     const { participantId } = input;
     this.assertParticipantCaller(participantId, "join");
     this.assertLockedMembership(participantId);
@@ -1770,8 +2309,11 @@ export class PubSubChannel extends DurableObjectBase {
         `join: invalid participant metadata at ${issue?.path.join(".") || "$"}: ${issue?.message ?? "invalid"}`
       );
     }
-    if (input.endpoint.kind !== "entity" || input.endpoint.entityId !== participantId) {
-      throw new Error("join: executable membership requires the participant's stable entity endpoint");
+    if (input.endpoint.kind !== "entity") {
+      throw new Error("join: executable participants require an entity delivery endpoint");
+    }
+    if (input.endpoint.entityId !== participantId) {
+      throw new Error("join: delivery endpoint must be owned by the stable participant entity");
     }
     const entity = parseDOParticipantId(input.endpoint.entityId);
     if (!entity) throw new Error("join: entity endpoint is not a Durable Object identity");
@@ -1786,7 +2328,8 @@ export class PubSubChannel extends DurableObjectBase {
 
     const existing = this.sql
       .exec(
-        `SELECT revision, delivery, endpoint_kind, endpoint_entity_id,
+        `SELECT revision, delivery, endpoint_kind, endpoint_entity_id, invocation_route, active,
+                attached, detached_at_sequence,
                 metadata_json, application_config_json
            FROM channel_relationships WHERE participant_id = ?`,
         participantId
@@ -1800,7 +2343,12 @@ export class PubSubChannel extends DurableObjectBase {
       metadata: input.metadata,
       applicationConfig: input.applicationConfig,
     };
-    if (existing && Number(existing["revision"]) === input.revision) {
+    if (
+      existing &&
+      Number(existing["active"]) === 1 &&
+      Number(existing["attached"]) === 1 &&
+      Number(existing["revision"]) === input.revision
+    ) {
       const retained = canonicalJson({
         participantId,
         revision: Number(existing["revision"]),
@@ -1808,6 +2356,7 @@ export class PubSubChannel extends DurableObjectBase {
         endpoint: {
           kind: String(existing["endpoint_kind"]),
           entityId: String(existing["endpoint_entity_id"]),
+          invocation: String(existing["invocation_route"]),
         },
         metadata: JSON.parse(String(existing["metadata_json"])),
         applicationConfig:
@@ -1816,15 +2365,22 @@ export class PubSubChannel extends DurableObjectBase {
             : JSON.parse(String(existing["application_config_json"])),
       });
       if (retained !== canonicalJson(payload)) {
-        throw new Error(`join: revision ${input.revision} already names different relationship data`);
+        throw new Error(
+          `join: revision ${input.revision} already names different relationship data`
+        );
       }
     } else {
       const expected = existing ? Number(existing["revision"]) + 1 : 1;
       if (input.revision !== expected) {
-        throw new Error(`join: expected relationship revision ${expected}, received ${input.revision}`);
+        throw new Error(
+          `join: expected relationship revision ${expected}, received ${input.revision}`
+        );
       }
       await this.appendDurable({
-        type: existing ? "channel.subscription.revised" : "channel.subscription.opened",
+        type:
+          existing && Number(existing["active"]) === 1
+            ? "channel.subscription.revised"
+            : "channel.subscription.opened",
         payload,
         senderId: participantId,
         senderMetadata: input.metadata,
@@ -1832,15 +2388,23 @@ export class PubSubChannel extends DurableObjectBase {
         idempotency: "idempotent-by-id",
       });
       this.invalidateBroadcastParticipants();
-      this.broadcastPresenceSignal(participantId, existing ? "update" : "join", input.metadata);
+      this.broadcastPresenceSignal(
+        participantId,
+        existing && Number(existing["active"]) === 1 ? "update" : "join",
+        input.metadata
+      );
     }
 
     const envelope = input.replay
       ? await this.channelLog.replayInitial(REPLAY_LIMIT, this.currentReplayContext())
       : undefined;
+    const rearmed = this.deliveryProjection.rearmRetryingFor(participantId);
+    await this.calls.redeliverPendingCallsTo(participantId);
+    if (rearmed > 0) this.markWorkReady("channel-delivery");
     return {
       ok: true,
       participantId,
+      revision: input.revision,
       channelConfig: this.getChannelConfig() ?? undefined,
       ...(envelope ? { envelope } : {}),
     };
@@ -1856,7 +2420,7 @@ export class PubSubChannel extends DurableObjectBase {
     this.assertParticipantCaller(input.participantId, "leave");
     await this.deriveDeliveries();
     const current = this.deliveryProjection.relationship(input.participantId);
-    if (!current) return;
+    if (!current || !current.active) return;
     if (input.revision !== current.revision + 1) {
       throw new Error(`leave: expected relationship revision ${current.revision + 1}`);
     }
@@ -1873,6 +2437,32 @@ export class PubSubChannel extends DurableObjectBase {
     this.broadcastPresenceSignal(input.participantId, "leave", metadata, "graceful");
   }
 
+  @rpc({
+    principals: ["code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "write",
+  })
+  async detach(input: { participantId: string }): Promise<void> {
+    this.assertParticipantCaller(input.participantId, "detach");
+    await this.detachParticipant(input.participantId);
+  }
+
+  @rpc({
+    principals: ["code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "read",
+  })
+  async relationshipState(participantId: string): Promise<{ revision: number; active: boolean }> {
+    this.assertParticipantCaller(participantId, "relationshipState");
+    await this.deriveDeliveries();
+    const relationship = this.deliveryProjection.relationship(participantId);
+    return relationship
+      ? { revision: relationship.revision, active: relationship.active }
+      : { revision: 0, active: false };
+  }
+
   /**
    * Subscribe a participant to this channel. Inserts the participant first,
    * then builds replay, so an initial roster snapshot includes the subscriber.
@@ -1885,8 +2475,9 @@ export class PubSubChannel extends DurableObjectBase {
   })
   async subscribe(participantId: string, metadata: Record<string, unknown>): Promise<Response> {
     const doRef = parseDOParticipantId(participantId);
-    const transport = doRef ? "do" : "rpc";
-
+    if (doRef) {
+      throw new Error("Durable Object participants must use finite join delivery");
+    }
     // ── Principal-derived human identity (WP6 §3-4) ──────────────────────
     // A human panel/shell joins as the STABLE account participant
     // `user:<userId>` (kind "user"), stamped from the host-verified caller
@@ -1994,6 +2585,15 @@ export class PubSubChannel extends DurableObjectBase {
     delete storedMetadata["replayMessageLimit"];
     delete storedMetadata["transport"];
     if (isUserParticipant) storedMetadata = scrubUserParticipantMetadata(storedMetadata);
+    // Relationships are durable public conversation facts. Retain only the
+    // bounded participant summary; executable schemas remain owned by the
+    // participant and are resolved at invocation time.
+    storedMetadata = publicParticipantMetadata(storedMetadata) ?? {};
+
+    // The streamed response is only an external transport attachment. The
+    // participant's semantic relationship is a canonical log fact and remains
+    // independently reconstructible after this response disappears.
+    await this.ensureSessionRelationship(participantId, contextId ?? "", storedMetadata);
 
     try {
       if (isUserParticipant) {
@@ -2031,7 +2631,7 @@ export class PubSubChannel extends DurableObjectBase {
                handle = excluded.handle`,
             participantId,
             JSON.stringify(storedMetadata),
-            transport === "do" ? "do" : "rpc",
+            "rpc",
             handle
           );
         });
@@ -2084,6 +2684,7 @@ export class PubSubChannel extends DurableObjectBase {
   })
   async adminUnsubscribeParticipant(participantId: string): Promise<void> {
     await this.unsubscribeParticipant(participantId, "graceful");
+    await this.endRelationship(participantId);
   }
 
   /**
@@ -2101,6 +2702,62 @@ export class PubSubChannel extends DurableObjectBase {
   async unsubscribe(participantId: string): Promise<void> {
     this.assertParticipantCaller(participantId, "unsubscribe");
     await this.unsubscribeParticipant(participantId, "graceful");
+    await this.endRelationship(participantId);
+  }
+
+  private async ensureSessionRelationship(
+    participantId: string,
+    contextId: string,
+    metadata: Record<string, unknown>
+  ): Promise<void> {
+    await this.deriveDeliveries();
+    const current = this.deliveryProjection.relationship(participantId);
+    const retained = this.sql
+      .exec(
+        `SELECT delivery, endpoint_kind, metadata_json, application_config_json, active
+           FROM channel_relationships WHERE participant_id = ?`,
+        participantId
+      )
+      .toArray()[0];
+    const desired = {
+      delivery: "all" as const,
+      endpoint: { kind: "session" as const },
+      metadata,
+      applicationConfig: null,
+    };
+    const unchanged =
+      current?.active === true &&
+      retained?.["endpoint_kind"] === "session" &&
+      retained?.["delivery"] === desired.delivery &&
+      canonicalJson(JSON.parse(String(retained?.["metadata_json"] ?? "{}"))) ===
+        canonicalJson(metadata) &&
+      retained?.["application_config_json"] === null;
+    if (unchanged) return;
+    const revision = (current?.revision ?? 0) + 1;
+    await this.appendDurable({
+      type: current ? "channel.subscription.revised" : "channel.subscription.opened",
+      payload: { participantId, revision, ...desired },
+      senderId: participantId,
+      senderMetadata: metadata,
+      messageId: `channel-subscription:${participantId}:${revision}`,
+      idempotency: "idempotent-by-id",
+    });
+    if (contextId) this.initChannel(contextId);
+  }
+
+  private async endRelationship(participantId: string): Promise<void> {
+    await this.deriveDeliveries();
+    const current = this.deliveryProjection.relationship(participantId);
+    if (!current?.active) return;
+    const revision = current.revision + 1;
+    await this.appendDurable({
+      type: "channel.subscription.ended",
+      payload: { participantId, revision },
+      senderId: participantId,
+      senderMetadata: this.getSenderMetadata(participantId) ?? {},
+      messageId: `channel-subscription:${participantId}:${revision}`,
+      idempotency: "idempotent-by-id",
+    });
   }
 
   private async unsubscribeParticipant(
@@ -2212,6 +2869,52 @@ export class PubSubChannel extends DurableObjectBase {
 
     broadcast(this.broadcastDeps, event, { kind: "log", phase: "live", ref }, participantId);
     return { id: event.id };
+  }
+
+  /** Update recipient visibility without appending another channel message.
+   * Receipts are a monotone projection and reach live external clients only
+   * as disposable presentation signals; replay reads the durable snapshot. */
+  @rpc({
+    principals: ["code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "write",
+  })
+  async recordReceipt(
+    participantId: string,
+    messageId: string,
+    state: "read",
+    opts?: { turnId?: string }
+  ): Promise<{ recorded: true }> {
+    this.assertParticipantCaller(participantId, "recordReceipt");
+    if (!messageId || state !== "read") throw new Error("recordReceipt: invalid receipt");
+    this.deliveryProjection.recordRead(messageId, participantId, opts?.turnId);
+    const ref = this.participantRef(participantId);
+    const now = Date.now();
+    broadcast(
+      this.broadcastDeps,
+      {
+        id: 0,
+        messageId: `receipt:${messageId}:${participantId}:read`,
+        type: AGENTIC_EVENT_PAYLOAD_KIND,
+        senderId: participantId,
+        senderMetadata: ref.metadata,
+        payload: {
+          kind: "message.read",
+          actor: ref,
+          causality: { messageId },
+          payload: {
+            protocol: AGENTIC_PROTOCOL_VERSION,
+            ...(opts?.turnId ? { turnId: opts.turnId } : {}),
+          },
+          createdAt: new Date(now).toISOString(),
+        },
+        ts: now,
+      },
+      { kind: "signal" },
+      participantId
+    );
+    return { recorded: true };
   }
 
   /**
@@ -2351,6 +3054,7 @@ export class PubSubChannel extends DurableObjectBase {
       const event = await this.channelLog.getEventByEnvelopeId(envelopeId);
       if (!event) continue;
       this.policyHost.foldAppended(this.policyViewFromChannelEvent(event));
+      await this.deriveDeliveries(event);
       broadcast(this.broadcastDeps, event, { kind: "log", phase: "live" }, event.senderId);
       broadcasted += 1;
     }
@@ -2475,6 +3179,39 @@ export class PubSubChannel extends DurableObjectBase {
     const stored = isUserParticipantId(participantId)
       ? scrubUserParticipantMetadata(metadata)
       : metadata;
+    await this.deriveDeliveries();
+    const relationship = this.deliveryProjection.relationship(participantId);
+    if (relationship?.active) {
+      const row = this.sql
+        .exec(
+          `SELECT delivery, endpoint_kind, endpoint_entity_id, application_config_json
+             FROM channel_relationships WHERE participant_id = ?`,
+          participantId
+        )
+        .toArray()[0]!;
+      const revision = relationship.revision + 1;
+      await this.appendDurable({
+        type: "channel.subscription.revised",
+        payload: {
+          participantId,
+          revision,
+          delivery: row["delivery"],
+          endpoint:
+            row["endpoint_kind"] === "entity"
+              ? { kind: "entity", entityId: String(row["endpoint_entity_id"]) }
+              : { kind: "session" },
+          metadata: stored,
+          applicationConfig:
+            row["application_config_json"] === null
+              ? null
+              : JSON.parse(String(row["application_config_json"])),
+        },
+        senderId: participantId,
+        senderMetadata: stored,
+        messageId: `channel-subscription:${participantId}:${revision}`,
+        idempotency: "idempotent-by-id",
+      });
+    }
     this.sql.exec(
       `UPDATE participants SET metadata = ? WHERE id = ?`,
       JSON.stringify(stored),
@@ -2543,12 +3280,16 @@ export class PubSubChannel extends DurableObjectBase {
   > {
     const rows = [
       ...this.sql
-        .exec(`SELECT id AS participant_id, metadata AS metadata_json, transport, NULL AS endpoint_entity_id FROM participants`)
+        .exec(
+          `SELECT id AS participant_id, metadata AS metadata_json, transport, NULL AS endpoint_entity_id FROM participants`
+        )
         .toArray(),
       ...this.sql
         .exec(
-          `SELECT participant_id, metadata_json, 'do' AS transport, endpoint_entity_id
-             FROM channel_relationships WHERE endpoint_kind = 'entity'`
+          `SELECT participant_id, metadata_json,
+                  CASE endpoint_kind WHEN 'entity' THEN 'do' ELSE 'session' END AS transport,
+                  endpoint_entity_id
+             FROM channel_relationships WHERE active = 1`
         )
         .toArray(),
     ];
@@ -2977,6 +3718,7 @@ export class PubSubChannel extends DurableObjectBase {
       this.setStateValue("createdAt", String(Date.now()));
       this.setStateValue("config", JSON.stringify(normalizedConfig));
     });
+    this.deliveryProjection.initializeChannelConfig(normalizedConfig);
     this.policyHost.invalidatePolicySelection();
     void this.refreshOwnTitle();
     return normalizedConfig;
@@ -3074,7 +3816,12 @@ export class PubSubChannel extends DurableObjectBase {
       "pending_calls",
       "dedup_keys",
       "fork_ops",
-      "lineage_subscribers",
+      "fork_view_cursor",
+      "fork_message_loci",
+      "fork_turn_loci",
+      "fork_projection",
+      "lineage_head_outbox",
+      "lineage_heads",
       "channel_members",
       "invite_index_ops",
       "presence_last_seen",
@@ -3345,14 +4092,26 @@ export class PubSubChannel extends DurableObjectBase {
     isError: boolean,
     opts?: {
       invocationId?: string;
+      callerId?: string;
       turnId?: string;
       terminalOutcome?: InvocationOutcome;
       terminalReasonCode?: string;
       attachments?: StoredAttachment[];
+      providerClaimGeneration?: number;
     }
   ): Promise<{ id?: number; dropped?: boolean; reason?: string; recovered?: boolean }> {
     this.assertParticipantCaller(participantId, "submitMethodResult");
     this.markParticipantActive(participantId);
+    if (
+      this.deliveryProjection.relationship(participantId)?.invocationRoute === "mailbox" &&
+      !this.calls.isCurrentProviderClaim(
+        transportCallId,
+        participantId,
+        opts?.providerClaimGeneration
+      )
+    ) {
+      return { dropped: true, reason: "superseded-provider-claim" };
+    }
     const resolution = await this.calls.resolveSubmitterForCall(
       participantId,
       transportCallId,
@@ -3376,6 +4135,7 @@ export class PubSubChannel extends DurableObjectBase {
         isError,
         {
           ...(opts?.invocationId ? { invocationId: opts.invocationId } : {}),
+          ...(opts?.callerId ? { callerId: opts.callerId } : {}),
           ...(opts?.turnId ? { turnId: opts.turnId } : {}),
           ...(opts?.terminalOutcome ? { terminalOutcome: opts.terminalOutcome } : {}),
           ...(opts?.terminalReasonCode ? { terminalReasonCode: opts.terminalReasonCode } : {}),
@@ -3414,6 +4174,7 @@ export class PubSubChannel extends DurableObjectBase {
       invocationId?: string;
       turnId?: string;
       attachments?: StoredAttachment[];
+      providerClaimGeneration?: number;
     }
   ): Promise<void> {
     this.assertParticipantCaller(participantId, "submitMethodProgress");
@@ -3424,6 +4185,16 @@ export class PubSubChannel extends DurableObjectBase {
       "submitMethodProgress"
     );
     if (resolution.kind !== "pending") {
+      return;
+    }
+    if (
+      this.deliveryProjection.relationship(participantId)?.invocationRoute === "mailbox" &&
+      !this.calls.isCurrentProviderClaim(
+        transportCallId,
+        participantId,
+        opts?.providerClaimGeneration
+      )
+    ) {
       return;
     }
     await this.calls.submitMethodProgress(transportCallId, content, {
@@ -3468,7 +4239,39 @@ export class PubSubChannel extends DurableObjectBase {
   })
   async cancelMethodCall(participantId: string, callId: string): Promise<void> {
     this.assertParticipantCaller(participantId, "cancelMethodCall");
-    await this.calls.cancelMethodCall(callId, "cancelled", participantId);
+    const pending = await this.calls.cancelMethodCall(callId, "cancelled", participantId);
+    if (pending) await this.calls.abortProviderCall(pending);
+  }
+
+  @rpc({
+    principals: ["code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "write",
+  })
+  async claimMethodCall(
+    participantId: string,
+    transportCallId: string,
+    providerGenerationId: string
+  ): Promise<{ claimed: boolean; generation?: number }> {
+    this.assertParticipantCaller(participantId, "claimMethodCall");
+    return this.calls.claimProviderCall(participantId, transportCallId, providerGenerationId);
+  }
+
+  @rpc({ principals: ["code"], effect: { kind: "open" }, tier: "open", sensitivity: "write" })
+  async markMethodCallExecutionStarted(
+    participantId: string,
+    transportCallId: string,
+    providerClaimGeneration: number
+  ): Promise<{ accepted: boolean }> {
+    this.assertParticipantCaller(participantId, "markMethodCallExecutionStarted");
+    return {
+      accepted: this.calls.markProviderCallExecutionStarted(
+        participantId,
+        transportCallId,
+        providerClaimGeneration
+      ),
+    };
   }
 
   @rpc({
@@ -3480,6 +4283,7 @@ export class PubSubChannel extends DurableObjectBase {
   async timeoutMethodCall(callId: string, reason?: string): Promise<void> {
     const pending = await this.calls.cancelMethodCall(callId, reason ?? "timed out");
     if (!pending) return;
+    await this.calls.abortProviderCall(pending);
     // Tell the target agent its call rotted — the caller already got a
     // terminal, but the agent otherwise never learns it failed to respond.
     await this.publishMethodCallFeedback(
@@ -3504,6 +4308,7 @@ export class PubSubChannel extends DurableObjectBase {
         payload: {
           protocol: AGENTIC_PROTOCOL_VERSION,
           target: this.participantRef(targetId),
+          to: [{ kind: "participant", participantId: targetId }],
           category: "method_call_failed",
           refs: { callId: transportCallId },
           error: { message: `${method}: ${message}` },
@@ -3579,6 +4384,21 @@ export class PubSubChannel extends DurableObjectBase {
     return typeof oldest === "number" ? oldest + FORK_OP_RECONCILE_MS : null;
   }
 
+  private nextLineageHeadReportAt(): number | null {
+    const value = this.sql
+      .exec(
+        `SELECT next_attempt_at FROM lineage_head_outbox
+          WHERE singleton = 1
+            AND NOT EXISTS (
+              SELECT 1 FROM channel_maintenance_queue
+               WHERE item_id = ?
+            )`,
+        `maintenance:lineage-head:${this.objectKey}`
+      )
+      .toArray()[0]?.["next_attempt_at"];
+    return typeof value === "number" ? value : null;
+  }
+
   private nextAlarmSchedule(): DoAlarmSchedule | null {
     const now = Date.now();
     const sources = [
@@ -3588,6 +4408,7 @@ export class PubSubChannel extends DurableObjectBase {
       this.nextInviteIndexSyncAt(),
       this.calls.nextCallDeadlineAt(),
       this.nextForkOpReconcileAt(),
+      this.nextLineageHeadReportAt(),
       this.nextStructuredDeliveryRecoveryAt(),
       this.nextMaintenanceRecoveryAt(),
       this.nextDurableWorkReadyEdgeAt(),
@@ -3601,6 +4422,15 @@ export class PubSubChannel extends DurableObjectBase {
 
   override async alarm(): Promise<DoAlarmSchedule | null> {
     await super.alarm();
+
+    if (this.durableWorkReadinessDiagnostics().some((entry) => entry.pending)) {
+      const spins = Number(this.getStateValue("deliveryReadyEdgeAlarmSpins") ?? 0);
+      this.setStateValue("deliveryReadyEdgeAlarmSpins", String(spins + 1));
+    }
+
+    // Heal an interrupted append-to-projection window even when no later
+    // channel traffic arrives.
+    await this.deriveDeliveries();
 
     this.advancePresenceStatuses();
     this.sql.exec(
@@ -3685,6 +4515,187 @@ export class PubSubChannel extends DurableObjectBase {
     this.setStateValue("taskRunId", args.runId);
   }
 
+  /** Fold only the agentic envelopes appended since the last local projection
+   * cursor. The GAD log remains authoritative; these rows are a rebuildable
+   * index for semantic fork loci and direct-child metadata. */
+  private async syncForkView(): Promise<void> {
+    const PAGE = 500;
+    let afterSeq = Number(
+      this.sql
+        .exec(`SELECT folded_through_seq FROM fork_view_cursor WHERE singleton = 1`)
+        .toArray()[0]?.["folded_through_seq"] ?? 0
+    );
+    for (;;) {
+      const envelopes = await this.channelLog.read({
+        afterSeq,
+        limit: PAGE,
+        payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
+      });
+      if (envelopes.length === 0) return;
+      this.ctx.storage.transactionSync(() => {
+        for (const envelope of envelopes) {
+          this.foldForkMetadataEnvelope(envelope);
+          afterSeq = envelope.seq;
+        }
+        this.sql.exec(
+          `UPDATE fork_view_cursor SET folded_through_seq = ? WHERE singleton = 1`,
+          afterSeq
+        );
+      });
+      if (envelopes.length < PAGE) return;
+    }
+  }
+
+  private foldForkMetadataEnvelope(envelope: LogEnvelope): void {
+    const event = envelope.payload as AgenticEvent | null;
+    if (!event || typeof event !== "object") return;
+    if (
+      event.kind === "message.started" ||
+      event.kind === "message.completed" ||
+      event.kind === "message.failed"
+    ) {
+      const messageId = event.causality?.messageId;
+      if (!messageId) return;
+      this.sql.exec(
+        `INSERT INTO fork_message_loci
+           (message_id, first_seq, terminal_seq, turn_id, actor_kind)
+         VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT(message_id) DO UPDATE SET
+           first_seq = MIN(first_seq, excluded.first_seq),
+           terminal_seq = COALESCE(excluded.terminal_seq, terminal_seq),
+           turn_id = COALESCE(turn_id, excluded.turn_id)`,
+        String(messageId),
+        envelope.seq,
+        event.kind === "message.completed" || event.kind === "message.failed" ? envelope.seq : null,
+        event.turnId ? String(event.turnId) : null,
+        event.actor.kind
+      );
+      return;
+    }
+    if (event.kind === "turn.opened" && event.turnId) {
+      this.sql.exec(
+        `INSERT OR IGNORE INTO fork_turn_loci (turn_id, opened_seq) VALUES (?, ?)`,
+        String(event.turnId),
+        envelope.seq
+      );
+      return;
+    }
+    if (event.kind === "channel.forked") {
+      const payload = (event as AgenticEvent<"channel.forked">).payload;
+      if (payload.parentChannelId !== this.objectKey) return;
+      this.sql.exec(
+        `INSERT INTO fork_projection
+           (fork_id, parent_channel_id, forked_channel_id, forked_context_id,
+            fork_point_id, label, reason, actor_json, created_at_seq, head_seq, archived)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+         ON CONFLICT(fork_id) DO UPDATE SET
+           parent_channel_id = excluded.parent_channel_id,
+           forked_channel_id = excluded.forked_channel_id,
+           forked_context_id = excluded.forked_context_id,
+           fork_point_id = excluded.fork_point_id,
+           label = excluded.label,
+           reason = excluded.reason,
+           actor_json = excluded.actor_json,
+           created_at_seq = excluded.created_at_seq,
+           head_seq = MAX(head_seq, excluded.head_seq)`,
+        payload.forkId,
+        payload.parentChannelId,
+        payload.forkedChannelId,
+        payload.forkedContextId,
+        payload.forkPointId,
+        payload.label,
+        payload.reason,
+        JSON.stringify(payload.actor),
+        envelope.seq,
+        payload.headSeq
+      );
+      return;
+    }
+    if (event.kind === "channel.fork_renamed") {
+      const payload = (event as AgenticEvent<"channel.fork_renamed">).payload;
+      if (payload.parentChannelId !== this.objectKey) return;
+      this.sql.exec(
+        `UPDATE fork_projection SET label = ? WHERE fork_id = ?`,
+        payload.label,
+        payload.forkId
+      );
+      return;
+    }
+    if (event.kind === "channel.fork_archived") {
+      const payload = (event as AgenticEvent<"channel.fork_archived">).payload;
+      if (payload.parentChannelId !== this.objectKey) return;
+      this.sql.exec(`UPDATE fork_projection SET archived = 1 WHERE fork_id = ?`, payload.forkId);
+    }
+  }
+
+  /** Resolve a client-facing semantic locus to one authoritative log boundary.
+   * The resolved request is what the durable saga journals and reuses. */
+  private async resolveForkRequest(request: ForkRequest): Promise<ForkOpts> {
+    await this.syncForkView();
+    let forkPointPubsubId: number;
+    let replacementSeq: number | undefined;
+    if (request.locus.kind === "head") {
+      forkPointPubsubId = await this.channelLog.headSeq();
+    } else {
+      const rows = this.sql
+        .exec(
+          `SELECT first_seq, terminal_seq, turn_id FROM fork_message_loci WHERE message_id = ?`,
+          request.locus.messageId
+        )
+        .toArray();
+      const row = rows[0];
+      if (!row) throw new Error(`fork locus message ${request.locus.messageId} was not found`);
+      const firstSeq = Number(row["first_seq"]);
+      const terminalSeq =
+        row["terminal_seq"] === null || row["terminal_seq"] === undefined
+          ? undefined
+          : Number(row["terminal_seq"]);
+      replacementSeq = terminalSeq ?? firstSeq;
+      if (request.locus.kind === "after-message") {
+        if (terminalSeq === undefined) {
+          throw new Error(`cannot fork after unfinished message ${request.locus.messageId}`);
+        }
+        forkPointPubsubId = terminalSeq;
+      } else {
+        const turnId = row["turn_id"] as string | null;
+        const opened = turnId
+          ? this.sql
+              .exec(`SELECT opened_seq FROM fork_turn_loci WHERE turn_id = ?`, turnId)
+              .toArray()[0]?.["opened_seq"]
+          : undefined;
+        forkPointPubsubId = Math.max(0, Number(opened ?? firstSeq) - 1);
+      }
+    }
+    if (request.seed?.replaces && request.locus.kind !== "before-message") {
+      throw new Error("a replacement seed requires a before-message fork locus");
+    }
+    const locusMessageId = request.locus.kind === "head" ? undefined : request.locus.messageId;
+    if (request.seed?.replaces && request.seed.replaces.messageId !== locusMessageId) {
+      throw new Error("replacement seed and fork locus must identify the same message");
+    }
+    const { seed: requestedSeed, ...requestWithoutSeed } = request;
+    let seed: ResolvedForkSeed | undefined;
+    if (requestedSeed) {
+      const { replaces, ...seedWithoutReplacement } = requestedSeed;
+      seed = replaces
+        ? {
+            ...seedWithoutReplacement,
+            author: this.participantRef(this.rpcCallerId ?? "system"),
+            replaces: { messageId: replaces.messageId, seq: replacementSeq! },
+          }
+        : {
+            ...seedWithoutReplacement,
+            author: this.participantRef(this.rpcCallerId ?? "system"),
+          };
+    }
+    return {
+      ...requestWithoutSeed,
+      request,
+      forkPointPubsubId,
+      ...(seed ? { seed } : {}),
+    };
+  }
+
   private computeProvenance(): ChannelProvenance {
     const taskParent = this.getStateValue("taskParentChannelId");
     if (taskParent) {
@@ -3739,14 +4750,15 @@ export class PubSubChannel extends DurableObjectBase {
     tier: "open",
     sensitivity: "write",
   })
-  async fork(opts: ForkOpts): Promise<ForkResult> {
-    const forkId = opts.operationId;
+  async fork(request: ForkRequest): Promise<ForkResult> {
+    const forkId = request.operationId;
     if (typeof forkId !== "string" || forkId.length < 8) {
       throw new Error("fork requires a stable operationId");
     }
     const existing = this.getForkOpRow(forkId);
     if (existing) {
-      if (String(existing["opts"]) !== JSON.stringify(opts)) {
+      const recorded = JSON.parse(String(existing["opts"])) as ForkOpts;
+      if (canonicalJson(recorded.request) !== canonicalJson(request)) {
         throw new Error(`fork operation ${forkId} was reused with different input`);
       }
       if (existing["phase"] === "rollback-pending") {
@@ -3756,8 +4768,12 @@ export class PubSubChannel extends DurableObjectBase {
       if (existing["phase"] === "rolledback") {
         throw new Error(`fork operation ${forkId} previously failed and was rolled back`);
       }
+      if (existing["phase"] === "done" && typeof existing["result_json"] === "string") {
+        return JSON.parse(existing["result_json"] as string) as ForkResult;
+      }
       return this.runForkOp(forkId);
     }
+    const opts = await this.resolveForkRequest(request);
     const now = Date.now();
     // Journal FIRST — before any host/DO call — so a crash is always recoverable.
     this.sql.exec(
@@ -3765,7 +4781,7 @@ export class PubSubChannel extends DurableObjectBase {
          VALUES (?, ?, ?, 'journaled', ?, ?)`,
       forkId,
       opts.forkPointPubsubId,
-      JSON.stringify(opts),
+      canonicalJson(opts),
       now,
       now
     );
@@ -3813,7 +4829,8 @@ export class PubSubChannel extends DurableObjectBase {
     const selfRef = await this.resolveChannelRef(this.objectKey);
     const keptAgents: Array<{ participantId: string; ref: DORef }> = [];
     for (const p of await this.getParticipants()) {
-      if (p.metadata?.["receivesChannelEnvelopes"] !== true || !p.doRef) continue;
+      const relationship = this.deliveryProjection.relationship(p.participantId);
+      if (!relationship?.active || relationship.endpointKind !== "entity" || !p.doRef) continue;
       if (includeScope && !includeScope.has(doTarget(p.doRef))) continue;
       keptAgents.push({ participantId: p.participantId, ref: p.doRef });
     }
@@ -3946,7 +4963,7 @@ export class PubSubChannel extends DurableObjectBase {
       if (opts.seed) {
         seededMessageId = `fork-seed:${forkId}`;
         if (!forkPhaseReached(phase, "seeded")) {
-          await this.rpc.call(doTarget(forkedChannelRef), "appendSeed", [{ forkId }, opts.seed]);
+          await this.rpc.call(doTarget(forkedChannelRef), "appendSeed", [{ forkId }]);
         }
       }
       if (!forkPhaseReached(phase, "seeded")) this.setForkOpPhase(forkId, "seeded");
@@ -3963,7 +4980,20 @@ export class PubSubChannel extends DurableObjectBase {
         this.setForkOpPhase(forkId, "announced");
       }
 
-      this.setForkOpPhase(forkId, "done");
+      const result: ForkResult = {
+        forkId,
+        forkedChannelId,
+        forkedContextId,
+        clonedParticipants,
+        clonedAgents,
+        ...(seededMessageId ? { seededMessageId } : {}),
+      };
+      this.sql.exec(
+        `UPDATE fork_ops SET phase = 'done', result_json = ?, updated_at = ? WHERE fork_id = ?`,
+        canonicalJson(result),
+        Date.now(),
+        forkId
+      );
       console.info("[Channel] fork op done", {
         forkId,
         sourceChannelId: this.objectKey,
@@ -3972,14 +5002,7 @@ export class PubSubChannel extends DurableObjectBase {
         seededMessageId,
         clonedParticipants,
       });
-      return {
-        forkId,
-        forkedChannelId,
-        forkedContextId,
-        clonedParticipants,
-        clonedAgents,
-        ...(seededMessageId ? { seededMessageId } : {}),
-      };
+      return result;
     } catch (err) {
       console.error("[Channel] fork op failed; rolling back", {
         forkId,
@@ -4031,9 +5054,11 @@ export class PubSubChannel extends DurableObjectBase {
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         forkId,
+        parentChannelId: this.objectKey,
         forkedChannelId: fork.forkedChannelId,
         forkedContextId: fork.forkedContextId,
         forkPointId: opts.forkPointPubsubId,
+        headSeq: opts.forkPointPubsubId + (opts.seed ? 1 : 0),
         label: opts.label ?? opts.reason,
         reason: opts.reason,
         actor,
@@ -4059,10 +5084,18 @@ export class PubSubChannel extends DurableObjectBase {
     sensitivity: "write",
   })
   async renameFork(forkId: string, label: string): Promise<void> {
+    await this.assertDirectFork(forkId);
+    const normalizedLabel = label.trim();
+    if (!normalizedLabel) throw new Error("renameFork requires a non-empty label");
     const event: AgenticEvent<"channel.fork_renamed"> = {
       kind: "channel.fork_renamed",
       actor: this.participantRef(this.rpcCallerId ?? "system"),
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, forkId, label },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        parentChannelId: this.objectKey,
+        forkId,
+        label: normalizedLabel,
+      },
       createdAt: new Date().toISOString(),
     };
     const logged = await this.appendDurable({
@@ -4085,10 +5118,11 @@ export class PubSubChannel extends DurableObjectBase {
     sensitivity: "destructive",
   })
   async archiveFork(forkId: string): Promise<void> {
+    await this.assertDirectFork(forkId);
     const event: AgenticEvent<"channel.fork_archived"> = {
       kind: "channel.fork_archived",
       actor: this.participantRef(this.rpcCallerId ?? "system"),
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, forkId },
+      payload: { protocol: AGENTIC_PROTOCOL_VERSION, parentChannelId: this.objectKey, forkId },
       createdAt: new Date().toISOString(),
     };
     const logged = await this.appendDurable({
@@ -4099,14 +5133,20 @@ export class PubSubChannel extends DurableObjectBase {
     broadcast(this.broadcastDeps, logged, { kind: "log", phase: "live" }, "system");
   }
 
+  private async assertDirectFork(forkId: string): Promise<void> {
+    await this.syncForkView();
+    const exists =
+      this.sql.exec(`SELECT 1 FROM fork_projection WHERE fork_id = ?`, forkId).toArray().length > 0;
+    if (!exists)
+      throw new Error(`fork ${forkId} is not a direct child of channel ${this.objectKey}`);
+  }
+
   /**
    * List the DIRECT-CHILD forks rooted off THIS channel — folded from this
-   * channel's OWN durable log (`channel.forked` / `channel.fork_renamed` /
-   * `channel.fork_archived` envelopes) through the SAME reducer fold the client
-   * uses, so the projection can never drift from the UI's. Archived forks are
-   * returned too (the UI filters). A pure read — no writes. The fork switcher
-   * shows SIBLING forks by reading the PARENT channel's `listForks` (WS-8
-   * deferred this for lack of a cheap getForks RPC).
+   * channel's incremental log-derived projection. It folds only envelopes
+   * newer than the local cursor, then returns O(fork count) metadata plus the
+   * current durable head. Archived forks remain available to administrative
+   * callers; active UI surfaces filter them.
    */
   @rpc({
     principals: ["host", "code"],
@@ -4114,58 +5154,45 @@ export class PubSubChannel extends DurableObjectBase {
     tier: "open",
     sensitivity: "read",
   })
-  async listForks(): Promise<{ forks: ForkProjection[] }> {
-    const PAGE = 500;
-    let view = createInitialChannelViewState();
-    let afterSeq = 0;
-    for (;;) {
-      const envelopes = await this.channelLog.read({
-        afterSeq,
-        limit: PAGE,
-        payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
-      });
-      if (envelopes.length === 0) break;
-      for (const envelope of envelopes) {
-        afterSeq = envelope.seq;
-        const kind = (envelope.payload as AgenticEvent | null)?.kind;
-        if (
-          kind === "channel.forked" ||
-          kind === "channel.fork_renamed" ||
-          kind === "channel.fork_archived"
-        ) {
-          view = reduceChannelView(view, this.forkFoldEnvelope(envelope));
-        }
+  async listForks(): Promise<{ forks: ForkProjection[]; headSeq: number }> {
+    await this.syncForkView();
+    let forks = this.sql
+      .exec(`SELECT * FROM fork_projection ORDER BY created_at_seq ASC`)
+      .toArray()
+      .map(
+        (row) =>
+          ({
+            parentChannelId: String(row["parent_channel_id"]),
+            forkId: String(row["fork_id"]),
+            forkedChannelId: String(row["forked_channel_id"]),
+            forkedContextId: String(row["forked_context_id"]),
+            forkPointId: Number(row["fork_point_id"]),
+            label: String(row["label"]),
+            reason: String(row["reason"]),
+            actor: JSON.parse(String(row["actor_json"])) as ParticipantRef,
+            createdAtSeq: Number(row["created_at_seq"]),
+            headSeq: Number(row["head_seq"]),
+            archived: Number(row["archived"]) === 1,
+          }) satisfies ForkProjection
+      );
+    const channelIds = forks.map((fork) => fork.forkedChannelId);
+    if (channelIds.length > 0) {
+      const provenance = this.computeProvenance();
+      let heads: Record<string, number>;
+      if (provenance.kind === "fork") {
+        const rootRef = await this.resolveChannelRef(provenance.rootChannelId);
+        heads = await this.rpc.call<Record<string, number>>(doTarget(rootRef), "getLineageHeads", [
+          channelIds,
+        ]);
+      } else {
+        heads = await this.getLineageHeads(channelIds);
       }
-      if (envelopes.length < PAGE) break;
+      forks = forks.map((fork) => ({
+        ...fork,
+        headSeq: Math.max(fork.headSeq, heads[fork.forkedChannelId] ?? 0),
+      }));
     }
-    return { forks: view.forks };
-  }
-
-  /** Map a durable log envelope onto the `ChannelEnvelope` shape the reducer
-   *  fold consumes (fork payloads carry no blob-spilled fields, so the
-   *  non-hydrated `read()` payload is fed directly). */
-  private forkFoldEnvelope(envelope: LogEnvelope): ChannelEnvelope {
-    const annotations = envelope.annotations ?? {};
-    const contentClass = annotations["contentClass"];
-    const externalKeys = annotations["externalKeys"];
-    if (
-      (contentClass !== "internal" && contentClass !== "external") ||
-      !Array.isArray(externalKeys) ||
-      !externalKeys.every((key) => typeof key === "string")
-    ) {
-      throw new Error("Fork fold encountered a channel envelope without content provenance");
-    }
-    return {
-      envelopeId: String(envelope.envelopeId) as ChannelEnvelope["envelopeId"],
-      channelId: this.objectKey as ChannelEnvelope["channelId"],
-      seq: envelope.seq,
-      from: envelope.actor,
-      payload: envelope.payload,
-      payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
-      contentClass,
-      externalKeys,
-      publishedAt: envelope.appendedAt,
-    };
+    return { forks, headSeq: await this.channelLog.headSeq() };
   }
 
   // ── appendSeed — fork opening message ──────────────────────────────────────
@@ -4181,22 +5208,24 @@ export class PubSubChannel extends DurableObjectBase {
     tier: "open",
     sensitivity: "write",
   })
-  async appendSeed(
-    forkOpRef: { forkId: string },
-    envelope: ForkSeed
-  ): Promise<{ messageId: string; seq: number }> {
+  async appendSeed(forkOpRef: { forkId: string }): Promise<{ messageId: string; seq: number }> {
     const forkId = forkOpRef.forkId;
     const messageId = `fork-seed:${forkId}`;
-    // Idempotent: a re-drive after the message is durable returns it — even once
-    // the pending seed marker has been consumed.
-    const existing = await this.channelLog.getEventByEnvelopeId(messageId);
-    if (existing) return { messageId, seq: existing.id };
-
     const marker = this.readForkSeedMarker();
     if (!marker || marker.forkId !== forkId) {
       throw new Error(`appendSeed: no pending fork seed for fork ${forkId} on this channel`);
     }
+    const parentRef = await this.resolveChannelRef(marker.parentChannelId);
+    const caller = this.caller;
+    if (caller?.callerKind !== "do" || caller.callerId !== doTarget(parentRef)) {
+      throw new Error("appendSeed may only be called by the recorded parent channel");
+    }
+    // Authorize before returning an idempotent result: possession of a fork id
+    // is not authority to learn or complete another parent's seed operation.
+    const existing = await this.channelLog.getEventByEnvelopeId(messageId);
+    if (existing) return { messageId, seq: existing.id };
 
+    const envelope = marker.seed;
     const author = envelope.author;
     const seedEvent: AgenticEvent<"message.completed"> = {
       kind: "message.completed",
@@ -4228,7 +5257,6 @@ export class PubSubChannel extends DurableObjectBase {
       idempotency: "idempotent-by-id",
     });
     broadcast(this.broadcastDeps, logged, { kind: "log", phase: "live" }, logged.senderId);
-    this.clearForkSeedMarker();
     return { messageId, seq: logged.id };
   }
 
@@ -4240,10 +5268,6 @@ export class PubSubChannel extends DurableObjectBase {
     } catch {
       return null;
     }
-  }
-
-  private clearForkSeedMarker(): void {
-    this.deleteStateValue("forkSeedMarker");
   }
 
   // ── Fork support ────────────────────────────────────────────────────────
@@ -4275,7 +5299,7 @@ export class PubSubChannel extends DurableObjectBase {
     forkInit?: {
       forkId: string;
       rootChannelId: string;
-      seed?: ForkSeed;
+      seed?: ResolvedForkSeed;
       homeableTargets?: string[];
     }
   ): Promise<void> {
@@ -4296,13 +5320,35 @@ export class PubSubChannel extends DurableObjectBase {
       this.setStateValue("rootChannelId", forkInit.rootChannelId);
       this.setStateValue("forkId", forkInit.forkId);
       if (forkInit.seed) {
-        this.setStateValue("forkSeedMarker", JSON.stringify({ forkId: forkInit.forkId }));
+        this.setStateValue(
+          "forkSeedMarker",
+          JSON.stringify({
+            forkId: forkInit.forkId,
+            parentChannelId,
+            seed: forkInit.seed,
+          } satisfies ForkSeedMarker)
+        );
       }
     }
     await this.channelLog.forkFrom(parentChannelId, forkPointId);
-    // The child must NOT inherit the parent's fork journal or lineage roster.
+    this.deliveryProjection.resetForFork(forkPointId);
+    // The child must NOT inherit the parent's fork journal or direct-child
+    // projection. Its semantic locus index retains only the inherited prefix.
     this.sql.exec(`DELETE FROM fork_ops`);
-    this.sql.exec(`DELETE FROM lineage_subscribers`);
+    this.sql.exec(`DELETE FROM fork_projection`);
+    this.sql.exec(`DELETE FROM lineage_head_outbox`);
+    this.sql.exec(`DELETE FROM lineage_heads`);
+    this.sql.exec(`DELETE FROM fork_message_loci WHERE first_seq > ?`, forkPointId);
+    this.sql.exec(
+      `UPDATE fork_message_loci SET terminal_seq = NULL
+       WHERE terminal_seq IS NOT NULL AND terminal_seq > ?`,
+      forkPointId
+    );
+    this.sql.exec(`DELETE FROM fork_turn_loci WHERE opened_seq > ?`, forkPointId);
+    this.sql.exec(
+      `UPDATE fork_view_cursor SET folded_through_seq = ? WHERE singleton = 1`,
+      forkPointId
+    );
     // A cloned operation was authored for the parent's object key. Membership
     // may be inherited, but its in-flight projection must never be replayed as
     // a new pending invite for the child channel.
@@ -4311,6 +5357,9 @@ export class PubSubChannel extends DurableObjectBase {
     this.sql.exec(`DELETE FROM participants`);
     this.invalidateBroadcastParticipants();
     this.sql.exec(`DELETE FROM pending_calls`);
+    this.sql.exec(`DELETE FROM provider_call_claims`);
+    this.sql.exec(`DELETE FROM channel_delivery_latency_histogram`);
+    this.deleteStateValue("deliveryReadyEdgeAlarmSpins");
     this.sql.exec(`DELETE FROM dedup_keys`);
     await this.policyHost.rebuildAfterFork();
     // Rebuild pending_calls for any started-without-terminal in the inherited
@@ -4336,12 +5385,10 @@ export class PubSubChannel extends DurableObjectBase {
 
   // ── Lineage subscriptions + fork.head_changed hub ─────────────────────────
   //
-  // A NEW signal-only subscription MODE: unlike `subscribe` (always durable
-  // replay), `subscribeLineage` registers a lightweight roster that the root of
-  // a fork tree fans ephemeral `fork.head_changed` signals to. Each channel, on
-  // a durable head advance, reports up its `forkedFrom` chain (debounced) to the
-  // root; the root fans out to its lineage subscribers. Badges reconcile from
-  // durable state on open (§H) — a missed signal is not durable.
+  // The subscription RESPONSE is the live resource. There is no durable roster
+  // of dead clients: cancellation or DO eviction releases every stream. Heads,
+  // by contrast, are durable and coalesced through each fork's outbox directly
+  // to the root, so reconnecting clients can reconcile without replaying logs.
 
   @rpc({
     principals: ["code"],
@@ -4349,25 +5396,57 @@ export class PubSubChannel extends DurableObjectBase {
     tier: "open",
     sensitivity: "write",
   })
-  async subscribeLineage(
-    participantId: string,
-    metadata: Record<string, unknown> = {}
-  ): Promise<{ ok: true }> {
+  async subscribeLineage(participantId: string): Promise<Response> {
     if (!this.isAuthorizedParticipantCaller(participantId)) {
       const caller = this.caller;
       throw new Error(
         `Participant ${participantId} cannot subscribe to lineage by caller ${caller?.callerId ?? "unknown"}`
       );
     }
-    this.sql.exec(
-      `INSERT OR REPLACE INTO lineage_subscribers (id, metadata, created_at) VALUES (?, ?, ?)`,
-      participantId,
-      JSON.stringify(metadata),
-      Date.now()
+    const deliveryId = this.caller?.callerPanelId ?? this.caller?.callerId;
+    if (!deliveryId) throw new Error("subscribeLineage requires an authenticated delivery id");
+    const key = this.subscriptionStreamKey(participantId, deliveryId);
+    const token = Symbol(key);
+    const prior = this.lineageSubscriptionStreams.get(key);
+    if (prior) {
+      this.lineageSubscriptionStreams.delete(key);
+      try {
+        prior.controller.close();
+      } catch {
+        // Already terminal.
+      }
+    }
+    const body = new ReadableStream<Uint8Array>(
+      {
+        start: (controller) => {
+          this.lineageSubscriptionStreams.set(key, {
+            participantId,
+            deliveryId,
+            token,
+            controller,
+          });
+          enqueueChannelSubscriptionBytes(
+            controller,
+            encodeChannelSubscriptionRecord({
+              kind: "subscribed",
+              result: { ok: true, rootChannelId: this.objectKey },
+            })
+          );
+        },
+        cancel: () => {
+          const current = this.lineageSubscriptionStreams.get(key);
+          if (current?.token === token) this.lineageSubscriptionStreams.delete(key);
+        },
+      },
+      channelSubscriptionQueuingStrategy()
     );
-    return { ok: true };
+    return new Response(body, {
+      headers: { "Content-Type": "application/x-ndjson", "Cache-Control": "no-store" },
+    });
   }
 
+  /** Compatibility close for cooperative clients. Stream cancellation remains
+   * the ownership boundary and also releases this exact delivery generation. */
   @rpc({
     principals: ["code"],
     effect: { kind: "open" },
@@ -4376,53 +5455,155 @@ export class PubSubChannel extends DurableObjectBase {
   })
   async unsubscribeLineage(participantId: string): Promise<void> {
     this.assertParticipantCaller(participantId, "unsubscribeLineage");
-    this.sql.exec(`DELETE FROM lineage_subscribers WHERE id = ?`, participantId);
+    const deliveryId = this.caller?.callerPanelId ?? this.caller?.callerId;
+    if (!deliveryId) return;
+    const key = this.subscriptionStreamKey(participantId, deliveryId);
+    const stream = this.lineageSubscriptionStreams.get(key);
+    if (!stream) return;
+    this.lineageSubscriptionStreams.delete(key);
+    try {
+      stream.controller.close();
+    } catch {
+      // Already terminal.
+    }
   }
 
-  /** Relay point for a head advance reported up the chain from a descendant. */
+  /** Root endpoint for a coalesced head advance reported by the exact channel. */
   @rpc({
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
   })
-  async reportLineageHead(report: { channelId: string; headSeq: number }): Promise<void> {
-    await this.relayLineageHead(report.channelId, report.headSeq);
+  async reportLineageHead(report: {
+    channelId: string;
+    headSeq: number;
+    rosterChanged?: boolean;
+  }): Promise<void> {
+    if (!Number.isSafeInteger(report.headSeq) || report.headSeq < 0) {
+      throw new Error("reportLineageHead requires a non-negative safe headSeq");
+    }
+    if (this.computeProvenance().kind === "fork") {
+      throw new Error("reportLineageHead must be sent directly to the lineage root");
+    }
+    const channelRef = await this.resolveChannelRef(report.channelId);
+    const caller = this.caller;
+    if (caller?.callerKind !== "do" || caller.callerId !== doTarget(channelRef)) {
+      throw new Error("reportLineageHead caller does not match the reported channel");
+    }
+    const reportedProvenance = await this.rpc.call<ChannelProvenance>(
+      doTarget(channelRef),
+      "getProvenance",
+      []
+    );
+    if (reportedProvenance.kind !== "fork" || reportedProvenance.rootChannelId !== this.objectKey) {
+      throw new Error("reported channel does not belong to this lineage root");
+    }
+    this.recordLineageHead(report.channelId, report.headSeq, report.rosterChanged === true);
   }
 
-  /** Fan a local durable head advance out as an event-driven best-effort signal. */
-  private noteLineageHeadAdvance(seq: number): void {
-    const relay = this.relayLineageHead(this.objectKey, seq);
-    if (this.ctx.waitUntil) this.ctx.waitUntil(relay);
-    else void relay;
+  @rpc({
+    principals: ["host", "code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "read",
+  })
+  async getLineageHeads(channelIds: string[]): Promise<Record<string, number>> {
+    if (this.computeProvenance().kind === "fork") {
+      throw new Error("getLineageHeads must be read from the lineage root");
+    }
+    const unique = [...new Set(channelIds)];
+    if (unique.length > 500) throw new Error("getLineageHeads accepts at most 500 channels");
+    const heads: Record<string, number> = {};
+    for (const channelId of unique) {
+      const value = this.sql
+        .exec(`SELECT head_seq FROM lineage_heads WHERE channel_id = ?`, channelId)
+        .toArray()[0]?.["head_seq"];
+      if (typeof value === "number") heads[channelId] = value;
+    }
+    return heads;
   }
 
-  /** Root → fan out to lineage subscribers; otherwise forward up to the parent. */
-  private async relayLineageHead(originChannelId: string, headSeq: number): Promise<void> {
+  /** Coalesce a local durable head advance; roots can publish immediately. */
+  private noteLineageHeadAdvance(seq: number, rosterChanged = false): void {
     const provenance = this.computeProvenance();
-    if (provenance.kind === "fork") {
-      try {
-        const parentRef = await this.resolveChannelRef(provenance.forkedFrom);
-        await this.rpc.call(doTarget(parentRef), "reportLineageHead", [
-          { channelId: originChannelId, headSeq },
-        ]);
-      } catch (err) {
-        console.warn(`[Channel] lineage head forward to ${provenance.forkedFrom} failed:`, err);
-      }
+    if (provenance.kind !== "fork") {
+      this.recordLineageHead(this.objectKey, seq, rosterChanged);
       return;
     }
-    this.fanoutLineageHead(originChannelId, headSeq);
+    const now = Date.now();
+    this.sql.exec(
+      `INSERT INTO lineage_head_outbox
+         (singleton, head_seq, roster_changed, next_attempt_at, updated_at)
+       VALUES (1, ?, ?, ?, ?)
+       ON CONFLICT(singleton) DO UPDATE SET
+         head_seq = MAX(head_seq, excluded.head_seq),
+         roster_changed = MAX(roster_changed, excluded.roster_changed),
+         next_attempt_at = MIN(next_attempt_at, excluded.next_attempt_at),
+         updated_at = excluded.updated_at`,
+      seq,
+      rosterChanged ? 1 : 0,
+      now + LINEAGE_HEAD_COALESCE_MS,
+      now
+    );
   }
 
-  private fanoutLineageHead(originChannelId: string, headSeq: number): void {
-    const subs = this.sql.exec(`SELECT id FROM lineage_subscribers`).toArray();
-    if (subs.length === 0) return;
+  private async flushLineageHeadOutbox(): Promise<void> {
+    const row = this.sql
+      .exec(`SELECT head_seq, roster_changed FROM lineage_head_outbox WHERE singleton = 1`)
+      .toArray()[0];
+    if (!row) return;
+    const provenance = this.computeProvenance();
+    if (provenance.kind !== "fork") {
+      this.sql.exec(`DELETE FROM lineage_head_outbox WHERE singleton = 1`);
+      return;
+    }
+    const headSeq = Number(row["head_seq"]);
+    const rosterChanged = Number(row["roster_changed"]) === 1;
+    const rootRef = await this.resolveChannelRef(provenance.rootChannelId);
+    await this.rpc.call(doTarget(rootRef), "reportLineageHead", [
+      {
+        channelId: this.objectKey,
+        headSeq,
+        ...(rosterChanged ? { rosterChanged: true } : {}),
+      },
+    ]);
+    this.sql.exec(`DELETE FROM lineage_head_outbox WHERE singleton = 1 AND head_seq <= ?`, headSeq);
+  }
+
+  private recordLineageHead(originChannelId: string, headSeq: number, rosterChanged = false): void {
+    const prior = this.sql
+      .exec(`SELECT head_seq FROM lineage_heads WHERE channel_id = ?`, originChannelId)
+      .toArray()[0]?.["head_seq"];
+    if (typeof prior === "number" && prior >= headSeq) return;
+    this.sql.exec(
+      `INSERT INTO lineage_heads (channel_id, head_seq, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT(channel_id) DO UPDATE SET
+         head_seq = MAX(head_seq, excluded.head_seq),
+         updated_at = excluded.updated_at`,
+      originChannelId,
+      headSeq,
+      Date.now()
+    );
+    this.fanoutLineageHead(originChannelId, headSeq, rosterChanged);
+  }
+
+  private fanoutLineageHead(
+    originChannelId: string,
+    headSeq: number,
+    rosterChanged: boolean
+  ): void {
+    if (this.lineageSubscriptionStreams.size === 0) return;
     const event = buildChannelEvent(
       0,
       `linsig_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       "signal",
       JSON.stringify({
-        content: JSON.stringify({ channelId: originChannelId, headSeq }),
+        content: JSON.stringify({
+          channelId: originChannelId,
+          headSeq,
+          ...(rosterChanged ? { rosterChanged: true } : {}),
+        }),
         contentType: FORK_HEAD_CHANGED_SIGNAL,
       }),
       "system",
@@ -4430,9 +5611,19 @@ export class PubSubChannel extends DurableObjectBase {
       Date.now()
     );
     const signal = channelEventToRpcSignal(event);
-    for (const row of subs) {
-      const pid = (row as Record<string, unknown>)["id"] as string;
-      void this.deliverParticipantPayload(pid, { channelId: this.objectKey, message: signal });
+    const bytes = encodeChannelSubscriptionRecord({ kind: "message", payload: signal });
+    for (const [key, stream] of [...this.lineageSubscriptionStreams]) {
+      try {
+        if (enqueueChannelSubscriptionBytes(stream.controller, bytes) === "enqueued") continue;
+      } catch {
+        // Close below.
+      }
+      this.lineageSubscriptionStreams.delete(key);
+      try {
+        stream.controller.error(new Error("Lineage subscription buffer is full"));
+      } catch {
+        // Already terminal.
+      }
     }
   }
 
@@ -4446,6 +5637,7 @@ export class PubSubChannel extends DurableObjectBase {
   })
   override async getState(): Promise<Record<string, unknown>> {
     const replay = await this.channelLog.replayInitial(1, this.currentReplayContext());
+    const headSequence = await this.channelLog.headSeq();
     const participants = this.sql.exec(`SELECT * FROM participants`).toArray();
     const pendingCalls = this.sql.exec(`SELECT * FROM pending_calls`).toArray();
     const state = this.sql.exec(`SELECT * FROM state`).toArray();
@@ -4454,6 +5646,45 @@ export class PubSubChannel extends DurableObjectBase {
       participants,
       pendingCalls,
       state,
+      delivery: this.deliveryProjection.diagnostics(headSequence),
+      deliveryLifecycle: {
+        readiness: this.durableWorkReadinessDiagnostics(),
+        readyEdgeAlarmSpins: Number(this.getStateValue("deliveryReadyEdgeAlarmSpins") ?? 0),
+        pendingCalls: pendingCalls.length,
+        providerClaims: Number(
+          this.sql.exec(`SELECT COUNT(*) AS count FROM provider_call_claims`).toArray()[0]?.[
+            "count"
+          ] ?? 0
+        ),
+        pendingCallsWithDurableTerminal: (
+          await Promise.all(
+            pendingCalls.map(async (row) =>
+              Boolean(
+                await this.channelLog.getEventByEnvelopeId(
+                  `terminal:${String(row["transport_call_id"])}`
+                )
+              )
+            )
+          )
+        ).filter(Boolean).length,
+        latencyHistogram: this.sql
+          .exec(
+            `SELECT metric, upper_bound_ms, samples, total_ms, maximum_ms
+               FROM channel_delivery_latency_histogram
+              ORDER BY metric, upper_bound_ms`
+          )
+          .toArray(),
+      },
+      liveTransport: {
+        count: this.subscriptionStreams.size,
+        streams: [...this.subscriptionStreams.values()].map((stream) => ({
+          kind: "external-session",
+          participantId: stream.participantId,
+          deliveryId: stream.deliveryId,
+          openedAt: stream.openedAt,
+          ageMs: Math.max(0, Date.now() - stream.openedAt),
+        })),
+      },
     };
   }
 }

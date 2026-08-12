@@ -19,6 +19,7 @@ import {
 import { derivePendingEffects } from "./effects.js";
 import { defaultPolicies, publishPolicyPolicy } from "./policies/index.js";
 import { ids } from "./ids.js";
+import { buildModelContext } from "./context.js";
 import type { StepPolicy } from "./step.js";
 
 const primaryModelSpec: AgentModelSpec = {
@@ -38,11 +39,13 @@ const baseConfig: AgentLoopConfig = {
   model: "anthropic:claude-sonnet-4-6",
   modelSpec: primaryModelSpec,
   thinkingLevel: "medium",
+  fastMode: false,
   approvalLevel: 2,
   respondPolicy: "all",
   systemPromptHash: "blob:system-prompt",
   activeToolNames: ["read", "write"],
   localToolExecutionModes: { read: "parallel", write: "sequential" },
+  localToolCancellationModes: { read: "interruptible", write: "settle" },
   roster: { participants: [] },
 };
 
@@ -57,10 +60,10 @@ const promptingRoster: AgentLoopConfig["roster"] = {
   ],
 };
 
-const fallbackModelRef = "local:lfm2.5-1.2b";
+const fallbackModelRef = "local:lfm2.5-2.6b";
 const fallbackModelSpec: AgentModelSpec = {
-  id: "lfm2.5-1.2b",
-  name: "LFM2.5 1.2B",
+  id: "lfm2.5-2.6b",
+  name: "LFM2.5 2.6B",
   api: "openai-completions",
   provider: "local",
   baseUrl: "http://127.0.0.1:0/v1",
@@ -143,6 +146,45 @@ const turn1 = ids.turnId("chan-1", "env-1", "agent:self");
 const msg0 = ids.messageId(turn1, 0);
 
 describe("agent-loop core lifecycle", () => {
+  it("preserves structured input from prompt command through fold and model context", () => {
+    const s = scenario();
+    const structuredInput = {
+      kind: "channel-observation",
+      version: 1,
+      source: {
+        channelId: "chan-1",
+        envelopeId: "incident-envelope-7",
+        payloadKind: "application.incident.v1",
+      },
+      payload: { incidentId: "inc-7", severity: "high" },
+    };
+
+    dispatch(s, {
+      type: "command",
+      command: {
+        kind: "prompt",
+        channelId: "chan-1",
+        source: { envelopeId: "incident-envelope-7" },
+        content: "Channel observation: application.incident.v1",
+        structuredInput,
+        senderRef: { kind: "external", id: "service:incidents" },
+      },
+    });
+
+    expect(s.log.find((row) => row.payloadKind === "message.completed")?.payload).toMatchObject({
+      role: "user",
+      structuredInput,
+    });
+    expect(s.state.entries[0]).toMatchObject({ kind: "user", structuredInput });
+    expect(buildModelContext(s.state)[0]).toEqual({
+      role: "user",
+      content: {
+        message: "Channel observation: application.incident.v1",
+        structuredInput,
+      },
+    });
+  });
+
   it("journals prompt preparation before opening a turn or admitting a model call", () => {
     const s = scenario();
     const triggerEnvelopeId = ids.recvUserMessage("chan-1", "env-1");
@@ -307,6 +349,27 @@ describe("agent-loop core lifecycle", () => {
     expect(s.state.entries.map((entry) => entry.kind)).toEqual(["user", "assistant"]);
   });
 
+  it("journals the priority service tier when fast mode is enabled for a supporting model", () => {
+    const s = scenario({
+      model: "openai-codex:gpt-5.6-sol",
+      modelSpec: {
+        ...primaryModelSpec,
+        id: "gpt-5.6-sol",
+        api: "openai-codex-responses",
+        provider: "openai-codex",
+        serviceTiers: ["priority"],
+      },
+      fallbackConfig: { fastMode: true },
+    });
+
+    prompt(s);
+
+    const started = s.log.find((row) => row.payloadKind === "message.started")!;
+    expect(
+      (started.payload as { modelRequest: Record<string, unknown> }).modelRequest
+    ).toMatchObject({ serviceTier: "priority" });
+  });
+
   it("journals roster refreshes through the ordered command path", () => {
     const s = scenario();
     const roster = {
@@ -355,6 +418,7 @@ describe("agent-loop core lifecycle", () => {
         invocationId: "tc-1",
         invocationSeq: started.seq,
         executionMode: "parallel",
+        cancellationMode: "interruptible",
       })
     );
 
@@ -451,6 +515,107 @@ describe("agent-loop core lifecycle", () => {
     expect(s.log.filter((row) => row.envelopeId.includes(":infrastructure:tc-infra"))).toHaveLength(
       1
     );
+  });
+
+  it("continues the same turn when infrastructure failure has typed recovery", () => {
+    const s = scenario();
+    prompt(s);
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [
+        { type: "toolCall", id: "tc-repair", name: "eval", arguments: { code: "create()" } },
+      ],
+      stopReason: "completed",
+    });
+
+    resolveEffect(s, ids.invocationEffect("tc-repair"), {
+      kind: "tool",
+      result: { error: "protected publication build gate failed" },
+      isError: true,
+      reason: "protected publication build gate failed",
+      terminalOutcome: "infrastructure_error",
+      terminalReasonCode: "scaffold_publication_failed",
+      failure: {
+        protocol: "agent-tool-failure.v1",
+        code: "scaffold_publication_failed",
+        kind: "infrastructure",
+        message: "protected publication build gate failed",
+        operation: "tool.eval",
+        stage: "execute",
+        retry: { policy: "none", commandIdPolicy: "not-applicable" },
+        recovery: {
+          action: "repair-source",
+          instruction: "Inspect diagnostics, repair source, and publish a new revision.",
+        },
+        causes: [
+          {
+            role: "primary",
+            code: "scaffold_publication_failed",
+            message: "protected publication build gate failed",
+          },
+        ],
+      },
+    });
+
+    expect(
+      s.log.find((row) => row.envelopeId === ids.invocationTerminal("tc-repair"))
+    ).toMatchObject({
+      payload: {
+        terminalOutcome: "infrastructure_error",
+        failure: { recovery: { action: "repair-source" } },
+      },
+    });
+    expect(s.log.some((row) => row.envelopeId.includes(":infrastructure:"))).toBe(false);
+    expect(s.state.openTurn).not.toBeNull();
+    expect(pendingEffectIds(s)).toEqual([ids.modelEffect(ids.messageId(turn1, 1))]);
+  });
+
+  it("retains typed recovery while waiting for parallel siblings", () => {
+    const s = scenario();
+    prompt(s);
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [
+        { type: "toolCall", id: "tc-repair", name: "eval", arguments: {} },
+        { type: "toolCall", id: "tc-sibling", name: "read", arguments: {} },
+      ],
+      stopReason: "completed",
+    });
+
+    resolveEffect(s, ids.invocationEffect("tc-repair"), {
+      kind: "tool",
+      result: { error: "panel generation changed" },
+      isError: true,
+      terminalOutcome: "infrastructure_error",
+      terminalReasonCode: "cdp_target_closed",
+      failure: {
+        protocol: "agent-tool-failure.v1",
+        code: "cdp_target_closed",
+        kind: "infrastructure",
+        message: "panel generation changed",
+        operation: "tool.eval",
+        stage: "execute",
+        retry: { policy: "none", commandIdPolicy: "not-applicable" },
+        recovery: {
+          action: "reacquire-handle",
+          instruction: "Acquire a page for the current panel generation.",
+        },
+        causes: [
+          { role: "primary", code: "cdp_target_closed", message: "panel generation changed" },
+        ],
+      },
+    });
+    expect(pendingEffectIds(s)).toEqual([ids.invocationEffect("tc-sibling")]);
+
+    resolveEffect(s, ids.invocationEffect("tc-sibling"), {
+      kind: "tool",
+      result: { ok: true },
+      isError: false,
+    });
+
+    expect(s.log.some((row) => row.envelopeId.includes(":infrastructure:"))).toBe(false);
+    expect(s.state.openTurn).not.toBeNull();
+    expect(pendingEffectIds(s)).toEqual([ids.modelEffect(ids.messageId(turn1, 1))]);
   });
 
   it("waits for parallel siblings before publishing an infrastructure diagnostic", () => {
@@ -660,6 +825,65 @@ describe("agent-loop core lifecycle", () => {
     expect(pendingEffectIds(s)).toEqual([ids.modelEffect(msg1)]);
   });
 
+  it("closes a turn when the finalized tool batch requests termination", () => {
+    const s = scenario();
+    prompt(s);
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [
+        {
+          type: "toolCall",
+          id: "complete-1",
+          name: "complete",
+          arguments: { report: "done" },
+        },
+      ],
+      stopReason: "completed",
+    });
+
+    resolveEffect(s, ids.invocationEffect("complete-1"), {
+      kind: "tool",
+      result: { ok: true },
+      isError: false,
+      turnControl: { kind: "terminate" },
+    });
+
+    expect(s.state.openTurn).toBeNull();
+    expect(pendingEffectIds(s)).toEqual([]);
+    expect(s.log.find((row) => row.payloadKind === "turn.closed")?.payload).toMatchObject({
+      reason: "tool_terminated",
+    });
+    expect(s.log.filter((row) => row.payloadKind === "message.started")).toHaveLength(1);
+  });
+
+  it("continues after a mixed tool batch where only one result requests termination", () => {
+    const s = scenario();
+    prompt(s);
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [
+        { type: "toolCall", id: "complete-1", name: "complete", arguments: {} },
+        { type: "toolCall", id: "other-1", name: "other", arguments: {} },
+      ],
+      stopReason: "completed",
+    });
+
+    resolveEffect(s, ids.invocationEffect("complete-1"), {
+      kind: "tool",
+      result: { ok: true },
+      isError: false,
+      turnControl: { kind: "terminate" },
+    });
+    resolveEffect(s, ids.invocationEffect("other-1"), {
+      kind: "tool",
+      result: { ok: true },
+      isError: false,
+    });
+
+    expect(s.state.openTurn).not.toBeNull();
+    expect(pendingEffectIds(s)).toEqual([ids.modelEffect(ids.messageId(turn1, 1))]);
+  });
+
   it("does not let a recovery wake resume a turn from its own suspension result", () => {
     const s = scenario();
     prompt(s);
@@ -799,10 +1023,12 @@ describe("agent-loop core lifecycle", () => {
       expect.objectContaining({
         invocationId: "tc-write-1",
         executionMode: "sequential",
+        cancellationMode: "settle",
       }),
       expect.objectContaining({
         invocationId: "tc-write-2",
         executionMode: "sequential",
+        cancellationMode: "settle",
       }),
     ]);
     expect(effects[0]!.invocationSeq).toBeLessThan(effects[1]!.invocationSeq!);
@@ -1058,9 +1284,9 @@ describe("agent-loop core lifecycle", () => {
     expect(closed.payload).toMatchObject({ reason: "model_retry_limit_exceeded" });
   });
 
-  it("auto-failover: heartbeat provider failure continues once on local fallback", () => {
+  it("auto-failover: scheduled provider failure continues once on local fallback", () => {
     const s = scenario({ fallback: true });
-    prompt(s, "env-1", "background check", { origin: "heartbeat" });
+    prompt(s, "env-1", "background check", { origin: "scheduled" });
 
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
@@ -1094,7 +1320,7 @@ describe("agent-loop core lifecycle", () => {
       .modelRequest;
     expect(request).toMatchObject({
       provider: "local",
-      model: "lfm2.5-1.2b",
+      model: "lfm2.5-2.6b",
       auth: "loopback",
       modelSpec: fallbackModelSpec,
       attemptId: ids.attemptId(msg1),
@@ -1259,7 +1485,7 @@ describe("agent-loop core lifecycle", () => {
       modelSpec: fallbackModelSpec,
       modelAuth: "loopback",
     });
-    prompt(s, "env-1", "background check", { origin: "heartbeat" });
+    prompt(s, "env-1", "background check", { origin: "scheduled" });
 
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
@@ -2248,12 +2474,10 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
   function readAcks(s: Scenario): Array<{ messageId: string; turnId?: string }> {
     return s.outputs
       .flatMap((output) => output.effects)
-      .filter((effect) => effect.kind === "publish_envelope")
+      .filter((effect) => effect.kind === "record_receipt")
       .map((effect) => {
-        const payload = (effect as { payload: Record<string, unknown> }).payload;
-        const causality = (payload["causality"] ?? {}) as Record<string, unknown>;
-        const inner = (payload["payload"] ?? {}) as Record<string, unknown>;
-        return { messageId: String(causality["messageId"]), turnId: inner["turnId"] as string };
+        const receipt = effect as { messageId: string; turnId: string };
+        return { messageId: receipt.messageId, turnId: receipt.turnId };
       });
   }
 
@@ -2361,7 +2585,170 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
         (entry) => entry.kind === "user" && entry.sourceMessageId === "subagent-terminal:run-1"
       )
     ).toBe(true);
-    expect(pendingEffectIds(s)).toEqual([ids.modelEffect(ids.messageId(turn1, 1))]);
+    expect(pendingEffectIds(s)).toEqual([
+      ids.modelEffect(ids.messageId(turn1, 1)),
+      `read:subagent-terminal:run-1:${turn1}`,
+      `read:u1:${turn1}`,
+    ]);
+  });
+
+  it("releases an after-turn message that arrives before suspension settles", () => {
+    const s = scenario();
+    promptWith(s, { envelopeId: "env-1", sourceMessageId: "u1" });
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [
+        {
+          type: "toolCall",
+          id: "suspend-1",
+          name: "suspend_turn",
+          arguments: { reason: "waiting_for_background" },
+        },
+      ],
+      stopReason: "completed",
+    });
+
+    promptWith(s, {
+      envelopeId: "env-terminal",
+      sourceMessageId: "subagent-terminal:run-1",
+      content: "Subagent run-1 completed.",
+      metadata: { deliverAfterTurn: true },
+    });
+    expect(s.state.deferredPostTurnQueue.map((entry) => entry.sourceMessageId)).toEqual([
+      "subagent-terminal:run-1",
+    ]);
+
+    resolveEffect(s, ids.invocationEffect("suspend-1"), {
+      kind: "tool",
+      result: {
+        protocolContent: [{ type: "text", text: "Turn suspended." }],
+        details: { suspendTurn: true, reason: "waiting_for_background" },
+      },
+      turnControl: {
+        kind: "suspend",
+        reason: "waiting_for_background",
+        summary: "Suspended until background work or user input arrives",
+      },
+      isError: false,
+    });
+
+    expect(s.state.deferredPostTurnQueue).toHaveLength(0);
+    expect(s.state.openTurn?.turnId).toBe(turn1);
+    expect(s.state.openTurn?.waitingAtSeq).toBeUndefined();
+    expect(
+      s.state.entries.some(
+        (entry) => entry.kind === "user" && entry.sourceMessageId === "subagent-terminal:run-1"
+      )
+    ).toBe(true);
+    expect(pendingEffectIds(s)).toEqual([
+      ids.modelEffect(ids.messageId(turn1, 1)),
+      `read:subagent-terminal:run-1:${turn1}`,
+      `read:u1:${turn1}`,
+    ]);
+    expect(
+      s.outputs
+        .flatMap((output) => output.append)
+        .some((item) => item.payloadKind === "turn.closed")
+    ).toBe(false);
+  });
+
+  it("does not lose a sibling terminal when user steering races the first terminal wake", () => {
+    const s = scenario();
+    promptWith(s, { envelopeId: "env-1", sourceMessageId: "u1" });
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [
+        {
+          type: "toolCall",
+          id: "suspend-1",
+          name: "suspend_turn",
+          arguments: { reason: "waiting_for_background" },
+        },
+      ],
+      stopReason: "completed",
+    });
+    resolveEffect(s, ids.invocationEffect("suspend-1"), {
+      kind: "tool",
+      result: {
+        protocolContent: [{ type: "text", text: "Turn suspended." }],
+        details: { suspendTurn: true, reason: "waiting_for_background" },
+      },
+      turnControl: {
+        kind: "suspend",
+        reason: "waiting_for_background",
+        summary: "Suspended until background work or user input arrives",
+      },
+      isError: false,
+    });
+
+    promptWith(s, {
+      envelopeId: "env-terminal-1",
+      sourceMessageId: "subagent-terminal:run-1",
+      content: "Subagent run-1 completed.",
+      metadata: { deliverAfterTurn: true },
+    });
+    const firstTerminalModel = ids.modelEffect(ids.messageId(turn1, 1));
+    expect(pendingEffectIds(s)).toEqual([
+      firstTerminalModel,
+      `read:subagent-terminal:run-1:${turn1}`,
+      `read:u1:${turn1}`,
+    ]);
+
+    dispatch(s, {
+      type: "command",
+      command: {
+        kind: "steer",
+        channelId: "chan-1",
+        source: { envelopeId: "env-user-wake" },
+        sourceMessageId: "u2",
+        content: "What has finished so far?",
+        senderRef: userRef,
+      },
+    });
+    promptWith(s, {
+      envelopeId: "env-terminal-2",
+      sourceMessageId: "subagent-terminal:run-2",
+      content: "Subagent run-2 completed.",
+      metadata: { deliverAfterTurn: true },
+    });
+
+    expect(s.state.steeringQueue.map((entry) => entry.sourceMessageId)).toEqual(["u2"]);
+    expect(s.state.deferredPostTurnQueue.map((entry) => entry.sourceMessageId)).toEqual([
+      "subagent-terminal:run-2",
+    ]);
+
+    resolveEffect(s, firstTerminalModel, {
+      kind: "model",
+      blocks: [{ type: "text", content: "The first child finished." }],
+      stopReason: "completed",
+    });
+    const steeredModel = ids.modelEffect(ids.messageId(turn1, 2));
+    expect(pendingEffectIds(s)).toEqual([
+      steeredModel,
+      `read:subagent-terminal:run-1:${turn1}`,
+      `read:u1:${turn1}`,
+      `read:u2:${turn1}`,
+    ]);
+    expect(s.state.deferredPostTurnQueue.map((entry) => entry.sourceMessageId)).toEqual([
+      "subagent-terminal:run-2",
+    ]);
+
+    resolveEffect(s, steeredModel, {
+      kind: "model",
+      blocks: [{ type: "text", content: "Here is the current status." }],
+      stopReason: "completed",
+    });
+
+    expect(s.state.deferredPostTurnQueue).toHaveLength(0);
+    expect(
+      s.state.entries.some(
+        (entry) => entry.kind === "user" && entry.sourceMessageId === "subagent-terminal:run-2"
+      )
+    ).toBe(true);
+    expect(readAcks(s).map((ack) => ack.messageId)).toEqual(
+      expect.arrayContaining(["subagent-terminal:run-1", "u2", "subagent-terminal:run-2"])
+    );
+    expect(pendingEffectIds(s).some((id) => id.includes("model"))).toBe(true);
   });
 
   it("does not let future-turn artifact preparation deadlock the current tool continuation", () => {

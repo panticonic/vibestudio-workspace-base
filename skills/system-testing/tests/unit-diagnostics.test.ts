@@ -6,7 +6,7 @@ import { unitDiagnosticsTests } from "./unit-diagnostics.js";
 function execution(
   code: string,
   returnValue: unknown,
-  final = "The workspace has 2 recurring jobs and 1 configured agent heartbeat."
+  final = "The workspace has 4 automations: 2 active, 1 running, and 1 failed in the last 24 hours."
 ): TestExecutionResult {
   return {
     duration: 0,
@@ -16,6 +16,7 @@ function execution(
         id: "eval",
         kind: "message",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         complete: true,
         contentType: "invocation",
         content: "",
@@ -33,6 +34,7 @@ function execution(
         id: "final",
         kind: "message",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         complete: true,
         content: final,
       },
@@ -40,52 +42,153 @@ function execution(
   } as TestExecutionResult;
 }
 
-const scheduleTest = unitDiagnosticsTests.find(
-  (candidate) => candidate.name === "schedule-surfaces-readonly"
+const automationTest = unitDiagnosticsTests.find(
+  (candidate) => candidate.name === "automation-overview-readonly"
+)!;
+const automationDraftTest = unitDiagnosticsTests.find(
+  (candidate) => candidate.name === "automation-inline-eval-draft"
 )!;
 
-describe("schedule surface system test validator", () => {
+describe("automation overview system test validator", () => {
   const readCode =
-    "const recurring = await workspace.recurring.list(); const heartbeats = await workspace.heartbeats.list(); return { recurring: recurring.length, heartbeats: heartbeats.length };";
+    "const service = await workers.resolveService('vibestudio.missions.v1'); const overview = await rpc.call(service.targetId, 'overview', [{}]); return { automations: overview.stats.total, active: overview.stats.active, running: overview.stats.running, failedLast24Hours: overview.stats.failedLast24Hours };";
 
-  it("requires both typed read-only surfaces and exact bounded counts", () => {
-    expect(scheduleTest.validate(execution(readCode, { recurring: 2, heartbeats: 1 }))).toEqual({
-      passed: true,
+  it("requires the canonical read-only surface and exact bounded counts", () => {
+    expect(
+      automationTest.validate(
+        execution(readCode, { automations: 4, active: 2, running: 1, failedLast24Hours: 1 })
+      )
+    ).toEqual({ passed: true });
+  });
+
+  it("pregrants only the canonical automation service read", () => {
+    expect(automationTest.authorityPolicy).toEqual({
+      authority: [
+        {
+          ruleId: "read-automation-overview",
+          capability: { kind: "exact", key: "workspace-service:missions" },
+          resource: {
+            kind: "prefix",
+            prefix: "do:vibestudio/internal:MissionsDO:",
+          },
+          tier: "gated",
+          decision: "once",
+        },
+      ],
     });
   });
 
-  it("rejects prose-only schedule claims", () => {
+  it("rejects prose-only automation claims", () => {
     expect(
-      scheduleTest.validate(execution("return { recurring: 2, heartbeats: 1 };", {}))
+      automationTest.validate(
+        execution("return { automations: 4, active: 2, running: 1, failedLast24Hours: 1 };", {})
+      )
     ).toMatchObject({
       passed: false,
-      reason: "Expected exactly one successful eval inspecting recurring jobs and heartbeats",
+      reason: "Expected exactly one successful eval reading the automation overview",
     });
   });
 
-  it("rejects schedule mutation attempts", () => {
+  it("rejects automation mutation attempts", () => {
     expect(
-      scheduleTest.validate(
-        execution(`${readCode}\nawait workspace.heartbeats.runNow('news');`, {
-          recurring: 2,
-          heartbeats: 1,
+      automationTest.validate(
+        execution(`${readCode}\nawait rpc.call(service.targetId, 'runNow', ['id']);`, {
+          automations: 4,
+          active: 2,
+          running: 1,
+          failedLast24Hours: 1,
         })
       )
     ).toMatchObject({
       passed: false,
-      reason: "Schedule inspection probe attempted a mutating operation",
+      reason: "Automation inspection probe attempted a mutating operation",
     });
   });
 
-  it("rejects raw or extra schedule data", () => {
+  it("rejects raw or extra automation data", () => {
     expect(
-      scheduleTest.validate(
-        execution(readCode, { recurring: 2, heartbeats: 1, jobs: [{ name: "news" }] })
+      automationTest.validate(
+        execution(readCode, {
+          automations: 4,
+          active: 2,
+          running: 1,
+          failedLast24Hours: 1,
+          definitions: [{ name: "news" }],
+        })
       )
     ).toMatchObject({
       passed: false,
-      reason:
-        "Schedule inspection eval did not return exact nonnegative recurring/heartbeat counts",
+      reason: "Automation inspection eval did not return the exact bounded overview counts",
+    });
+  });
+});
+
+describe("automation inline eval system test validator", () => {
+  const draft = {
+    name: "Daily project pulse",
+    state: "draft",
+    permissions: [],
+    charter: {
+      trigger: {
+        kind: "cron",
+        expression: "5 5 * * THU",
+        timezone: "America/New_York",
+        untilAt: Date.UTC(2027, 0, 1, 5),
+        maxRuns: 12,
+      },
+      execution: {
+        kind: "agent",
+        target: {
+          source: "workers/agent-worker",
+          className: "AiChatWorker",
+          objectKey: "daily-project-pulse",
+        },
+        action: {
+          kind: "eval",
+          code: "const status = await services.vcs.status({ contextId: ctx.contextId }); await chat.publish('project.pulse', status); return status.clean ? { protocol: 'automation-completion.v1', response: 'The project is clean.' } : status;",
+        },
+        conversation: { mode: "fresh" },
+        toolExposure: { services: ["vcs.status"], evalNetwork: "none" },
+      },
+    },
+  };
+
+  it("accepts a returned inert draft with the requested exact lightweight behavior", () => {
+    expect(
+      automationDraftTest.validate(
+        execution(
+          "return rpc.call(missions.targetId, 'proposeDraft', [input]);",
+          draft,
+          "The inert draft is waiting in Automations for your review."
+        )
+      )
+    ).toEqual({ passed: true });
+  });
+
+  it("accepts an eval result that includes the inert draft with a concise proposal summary", () => {
+    expect(
+      automationDraftTest.validate(
+        execution(
+          "return { missionId: draft.missionId, name: draft.name, draft };",
+          { missionId: "msn_daily-project-pulse", name: draft.name, draft },
+          "The inert draft is waiting in Automations for your review."
+        )
+      )
+    ).toEqual({ passed: true });
+  });
+
+  it("rejects activating the draft from the agent path", () => {
+    expect(
+      automationDraftTest.validate(
+        execution(
+          "const draft = await rpc.call(missions.targetId, 'proposeDraft', [input]); await rpc.call(missions.targetId, 'requestReview', [draft.missionId]); return draft;",
+          draft,
+          "The draft is waiting for review."
+        )
+      )
+    ).toMatchObject({
+      passed: false,
+      reason: "The automation draft scenario attempted to activate or run the automation",
     });
   });
 });
@@ -94,6 +197,29 @@ describe("workspace unit diagnostics semantic validators", () => {
   const listTest = unitDiagnosticsTests.find(
     (candidate) => candidate.name === "unit-list-inspect"
   )!;
+  const logsTest = unitDiagnosticsTests.find(
+    (candidate) => candidate.name === "unit-diagnostics-error-buffer"
+  )!;
+
+  const identity = { kind: "extension", entityId: "extension:status:1" };
+  const health = {
+    entity: {
+      identity,
+      source: "extensions/status",
+      status: "running",
+    },
+    state: "healthy",
+    summary: "ready",
+    logs: [
+      { identity, timestamp: 1, level: "info", message: "ready" },
+      { identity, timestamp: 2, level: "warn", message: "slow poll" },
+    ],
+    errors: [{ identity, timestamp: 3, level: "error", message: "old failure" }],
+    dropped: { entries: 0, errors: 0 },
+    capacity: { entries: 100, errors: 50 },
+  };
+  const healthCode =
+    "const units = await runtime.supervision.list(); const health = await runtime.supervision.health(units[0].identity, { limit: 20, errorLimit: 10 }); return health;";
 
   it("accepts natural prose backed by list and detail inspection evidence", () => {
     expect(
@@ -117,5 +243,59 @@ describe("workspace unit diagnostics semantic validators", () => {
         )
       )
     ).toMatchObject({ passed: false });
+  });
+
+  it("joins bounded log and error buffers to one exact supervised unit", () => {
+    expect(
+      logsTest.validate(
+        execution(
+          healthCode,
+          health,
+          "extensions/status has 2 recent logs and 1 entry in its separate error buffer."
+        )
+      )
+    ).toEqual({ passed: true, reason: undefined });
+  });
+
+  it("rejects prose that is not backed by a unit health packet", () => {
+    expect(
+      logsTest.validate(
+        execution(
+          healthCode,
+          { source: "extensions/status", logs: 2, errors: 1 },
+          "extensions/status has 2 logs and 1 error."
+        )
+      )
+    ).toMatchObject({ passed: false, reason: expect.stringContaining("health packet") });
+  });
+
+  it("rejects diagnostic records from a different unit identity", () => {
+    expect(
+      logsTest.validate(
+        execution(
+          healthCode,
+          {
+            ...health,
+            errors: [
+              {
+                identity: { kind: "extension", entityId: "extension:other:1" },
+                timestamp: 3,
+                level: "error",
+                message: "foreign failure",
+              },
+            ],
+          },
+          "extensions/status has 2 logs and 1 error."
+        )
+      )
+    ).toMatchObject({ passed: false, reason: expect.stringContaining("identity-consistent") });
+  });
+
+  it("rejects a report that omits one observed buffer count", () => {
+    expect(
+      logsTest.validate(
+        execution(healthCode, health, "extensions/status has 2 recent logs and looks healthy.")
+      )
+    ).toMatchObject({ passed: false, reason: expect.stringContaining("exact buffer counts") });
   });
 });

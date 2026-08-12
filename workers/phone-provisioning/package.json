@@ -1,0 +1,30 @@
+{
+  "name": "@workspace-workers/phone-provisioning",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "title": "Phone Provisioning",
+    "kind": "worker",
+    "entry": "index.ts",
+    "durable": {
+      "classes": [{ "className": "PhoneProvisioningDO" }]
+    },
+    "authority": {
+      "provides": [],
+      "requests": [
+        {
+          "capability": "connected-client.transport",
+          "resource": { "kind": "prefix", "prefix": "" },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@vibestudio/service-schemas": "workspace:*",
+    "@workspace/runtime": "workspace:*"
+  },
+  "devDependencies": { "vitest": "^3.2.2" }
+}

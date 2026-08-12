@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "Image Service",
+    "icon": "./assets/icon.svg",
     "entry": "index.ts",
     "sourcemap": true,
     "extension": {

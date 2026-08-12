@@ -9,8 +9,10 @@ import {
   Alert,
   AppState,
   Pressable,
+  useWindowDimensions,
 } from "react-native";
 import { useNavigation, DrawerActions } from "@react-navigation/native";
+import { useDrawerStatus } from "@react-navigation/drawer";
 import type { TemplateInstallResolution } from "@vibestudio/shared/authority/unitInstallReview";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { ConnectionBar } from "./ConnectionBar";
@@ -39,11 +41,18 @@ import {
 } from "../state/navigationAtoms";
 import { addWebViewEntry, sweepIdleWebViews, type WebViewEntry } from "./webViewStack";
 import { loadPinnedPanelIds, savePinnedPanelIds } from "../shellCore/pinnedPanels";
+import { resolveMobileBackAction } from "../shellCore/mobileBackNavigation";
+import { mobileNavigationLayout } from "../shellCore/mobileLayout";
+import {
+  contributedHostCommandId,
+  presentMobileHostCommands,
+} from "../shellCore/mobilePanelCommands";
+import { HOST_COMMAND_RUN_EVENT } from "@vibestudio/shared/hostCommands";
 import { PANEL_UI_IDLE_SWEEP_MS } from "@vibestudio/shared/constants";
 import { parseHostConfig } from "../services/panelUrls";
 import {
   materializeLatestMobilePanel,
-  needsMobilePanelMaterialization,
+  mobilePanelMaterializationState,
   PanelMaterializationRetryQueue,
 } from "../services/panelMaterializer";
 import { handleExternalOpen, type ExternalOpenPayload } from "../services/oauthLoopback";
@@ -51,7 +60,7 @@ import {
   handleMobileAppLifecycleEvent,
   type AppLifecyclePayload,
 } from "../services/appUpdatePrompt";
-import { copyToClipboard, openExternalUrl } from "../services/nativeCapabilities";
+import { copyToClipboard, openExternalUrl, shareText } from "../services/nativeCapabilities";
 import { resetToNativeBootstrap } from "../services/auth";
 import { clearShellCredential } from "../services/mobileCredentials";
 import {
@@ -97,6 +106,7 @@ import {
   ArrowLeft as ArrowLeftIcon,
   ArrowRight as ArrowRightIcon,
   Bell as BellIcon,
+  Command as HostCommandIcon,
   Copy as CopyIcon,
   CopyPlus as CopyPlusIcon,
   ExternalLink as ExternalLinkIcon,
@@ -106,29 +116,29 @@ import {
   PinOff as PinOffIcon,
   Power as PowerIcon,
   RefreshCw as RefreshCwIcon,
+  Share2 as ShareIcon,
   Square as SquareIcon,
   type IconComponent,
 } from "../design/icons";
 import { Button, EmptyState } from "./ui/primitives";
 
-/** Icons + one-line explanations for panel commands (discoverability). */
-const PANEL_COMMAND_PRESENTATION: Partial<
-  Record<PanelCommandId, { icon?: IconComponent; description?: string }>
-> = {
-  back: { icon: ArrowLeftIcon, description: "Go back in this panel's history" },
-  forward: { icon: ArrowRightIcon, description: "Go forward in this panel's history" },
-  "reload-panel": { icon: RefreshCwIcon, description: "Reload the panel" },
-  "reload-view": { icon: RefreshCwIcon, description: "Reload the view" },
-  "force-reload-view": { icon: RefreshCwIcon, description: "Reload, bypassing caches" },
-  "rebuild-panel": { icon: RefreshCwIcon, description: "Rebuild the panel from source" },
-  stop: { icon: SquareIcon, description: "Stop loading" },
-  "copy-address": { icon: CopyIcon, description: "Copy this panel's address" },
-  "open-external": { icon: ExternalLinkIcon, description: "Open in your device browser" },
-  duplicate: { icon: CopyPlusIcon, description: "Open another copy as a new root panel" },
-  "toggle-pin": { icon: PinIcon, description: "Pinned panels stay loaded in the background" },
-  unload: { icon: PowerIcon, description: "Free memory; reloads next time you open it" },
-  archive: { icon: ArchiveIcon, description: "Remove from the tree (recoverable on desktop)" },
-  "focus-address": { icon: Link2Icon, description: "Edit the address" },
+/** Native icon choices for renderer-neutral shared panel commands. */
+const PANEL_COMMAND_PRESENTATION: Partial<Record<PanelCommandId, { icon?: IconComponent }>> = {
+  back: { icon: ArrowLeftIcon },
+  forward: { icon: ArrowRightIcon },
+  "reload-panel": { icon: RefreshCwIcon },
+  "reload-view": { icon: RefreshCwIcon },
+  "force-reload-view": { icon: RefreshCwIcon },
+  "rebuild-panel": { icon: RefreshCwIcon },
+  stop: { icon: SquareIcon },
+  "copy-address": { icon: CopyIcon },
+  "share-address": { icon: ShareIcon },
+  "open-external": { icon: ExternalLinkIcon },
+  duplicate: { icon: CopyPlusIcon },
+  "toggle-pin": { icon: PinIcon },
+  unload: { icon: PowerIcon },
+  archive: { icon: ArchiveIcon },
+  "focus-address": { icon: Link2Icon },
 };
 
 const PANEL_MATERIALIZE_TIMEOUT_MS = 45_000;
@@ -149,6 +159,15 @@ function smokePhase(phase: string, extra?: Record<string, unknown>): void {
 
 export function MainScreen() {
   const navigation = useNavigation();
+  const drawerStatus = useDrawerStatus();
+  const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
+  const persistentNavigation =
+    mobileNavigationLayout(viewportWidth, viewportHeight).kind === "tablet";
+  useEffect(() => {
+    navigation.dispatch(
+      persistentNavigation ? DrawerActions.openDrawer() : DrawerActions.closeDrawer()
+    );
+  }, [navigation, persistentNavigation]);
   const shellClient = useAtomValue(shellClientAtom);
   const panelTreeRevision = useAtomValue(panelTreeRevisionAtom);
   const setPanelTreeRevision = useSetAtom(panelTreeRevisionAtom);
@@ -317,19 +336,26 @@ export function MainScreen() {
   useEffect(() => {
     if (!shellClient) return;
     shellClient.panels.setDeliverToPanel((panelId, envelope) => {
-      webViewRefsMap.current.get(panelId)?.deliverEnvelope(envelope);
+      const webView = webViewRefsMap.current.get(panelId);
+      if (!webView) return false;
+      webView.deliverEnvelope(envelope);
+      return true;
     });
   }, [shellClient]);
   useEffect(() => {
     if (!shellClient) return;
     return shellClient.onRecoveryComplete((kind) => {
       if (kind !== "cold-recover") return;
-      // A restarted server has discarded every panel-side RPC session. Keep
-      // external browser tabs untouched, but reload managed panels after the
-      // authoritative snapshot is recovered so they recreate their bridge
-      // sessions and fetch assets through the restored WebRTC facade.
+      // A cold recovery replaced the server process and therefore every
+      // panel-side bridge session. Reload only retained WebViews whose runtime
+      // identity is still authoritative; changed identities are rematerialized
+      // by the convergence effect below instead of loading stale URLs.
       for (const entry of webViewStackRef.current) {
-        if (entry.managed) webViewRefsMap.current.get(entry.panelId)?.reload();
+        if (!entry.managed) continue;
+        const panel = shellClient.panels.registry.getPanel(entry.panelId);
+        if (panel && mobilePanelMaterializationState(panel, entry) === "current") {
+          webViewRefsMap.current.get(entry.panelId)?.reload();
+        }
       }
     });
   }, [shellClient]);
@@ -337,6 +363,7 @@ export function MainScreen() {
     (panelId: string) => {
       webViewRefsMap.current.delete(panelId);
       webViewThemeSignaturesRef.current.delete(panelId);
+      shellClient?.hostCommands.clear(panelId);
       if (shellClient) {
         void shellClient.panels.unload(panelId).catch((error: unknown) =>
           pushToast({
@@ -349,23 +376,27 @@ export function MainScreen() {
     },
     [pushToast, shellClient]
   );
-  const handleWebViewRef = useCallback((panelId: string, handle: PanelWebViewHandle | null) => {
-    if (!handle) {
-      webViewRefsMap.current.delete(panelId);
-      webViewThemeSignaturesRef.current.delete(panelId);
-      return;
-    }
-    webViewRefsMap.current.set(panelId, handle);
-    const existingEntry = webViewStackRef.current.find((entry) => entry.panelId === panelId);
-    if (existingEntry) {
-      syncManagedWebViewThemes(
-        [existingEntry],
-        webViewRefsMap.current,
-        webViewThemeSignaturesRef.current,
-        currentThemeModeRef.current
-      );
-    }
-  }, []);
+  const handleWebViewRef = useCallback(
+    (panelId: string, handle: PanelWebViewHandle | null) => {
+      if (!handle) {
+        webViewRefsMap.current.delete(panelId);
+        webViewThemeSignaturesRef.current.delete(panelId);
+        return;
+      }
+      webViewRefsMap.current.set(panelId, handle);
+      shellClient?.panels.flushPanelDeliveries(panelId);
+      const existingEntry = webViewStackRef.current.find((entry) => entry.panelId === panelId);
+      if (existingEntry) {
+        syncManagedWebViewThemes(
+          [existingEntry],
+          webViewRefsMap.current,
+          webViewThemeSignaturesRef.current,
+          currentThemeModeRef.current
+        );
+      }
+    },
+    [shellClient]
+  );
   const hostConfig: HostConfig | null = useMemo(() => {
     if (!shellClient) return null;
     try {
@@ -579,7 +610,7 @@ export function MainScreen() {
     async (file: DiffReviewFile, entry: DiffReviewEntry) => {
       if (!shellClient) return;
       try {
-        await shellClient.panels.createRootPanel("panels/gad-browser", {
+        await shellClient.panels.createRootPanel("about/workspace-history", {
           focus: true,
           stateArgs: {
             diffTarget: {
@@ -746,9 +777,22 @@ export function MainScreen() {
     panelMaterializationRetryQueue.retainOnly(retainedPanelIds);
     for (const entry of webViewStack) {
       const panel = shellClient.panels.registry.getPanel(entry.panelId);
-      if (!panel || !needsMobilePanelMaterialization(panel, entry)) {
+      if (!panel) {
         panelMaterializationRetryQueue.cancel(entry.panelId, { resetAttempts: true });
         setLoadingPanelId((current) => (current === entry.panelId ? null : current));
+        continue;
+      }
+      const materializationState = mobilePanelMaterializationState(panel, entry);
+      if (materializationState === "current") {
+        panelMaterializationRetryQueue.cancel(entry.panelId, { resetAttempts: true });
+        setLoadingPanelId((current) => (current === entry.panelId ? null : current));
+        continue;
+      }
+      if (materializationState === "pending") {
+        // Runtime identity/build completion is published asynchronously through
+        // the shared tree. Keep polling as a bounded fallback in case that
+        // publication does not produce a local registry revision.
+        panelMaterializationRetryQueue.schedule(entry.panelId);
         continue;
       }
       if (pendingPanelLoads.current.has(entry.panelId)) {
@@ -939,12 +983,6 @@ export function MainScreen() {
       void subscribeAll()
         .then(() => approvalStateController.refresh("manual"))
         .catch(() => approvalStateController.refresh("manual"));
-      void shellClient.panels
-        .refresh()
-        .then(() => {
-          refreshTree();
-        })
-        .catch(() => refreshTree());
     });
     const unsubNavigate = shellClient.onNavigateToPanel((panelId) => {
       refreshTree();
@@ -1250,6 +1288,25 @@ export function MainScreen() {
           }
           return;
         }
+        case "share-address": {
+          const address =
+            panelId === activePanelId
+              ? activeChromeState?.editableAddress
+              : panel
+                ? getCurrentSnapshot(panel).source
+                : undefined;
+          if (address) {
+            void shareText(address, panel?.title ?? activePanelTitle ?? "Panel").catch(
+              (error: unknown) =>
+                pushToast({
+                  title: "Could not share panel",
+                  message: error instanceof Error ? error.message : "Try again.",
+                  tone: "danger",
+                })
+            );
+          }
+          return;
+        }
         case "open-external": {
           const url =
             panelId === activePanelId
@@ -1298,6 +1355,7 @@ export function MainScreen() {
       activatePanel,
       activeChromeState,
       activePanelId,
+      activePanelTitle,
       pushToast,
       refreshTree,
       shellClient,
@@ -1326,6 +1384,7 @@ export function MainScreen() {
           "rebuild-panel",
           "stop",
           "copy-address",
+          "share-address",
           "open-external",
           "duplicate",
           "toggle-pin",
@@ -1333,21 +1392,44 @@ export function MainScreen() {
           "archive",
         ]
       );
+      const contributedCommands = presentMobileHostCommands(shellClient.hostCommands.get(panelId));
       const isPinned = pinnedPanelIds.has(panelId);
       showActionSheet({
         title: panel?.title ?? "Panel",
         subtitle: chrome?.editableAddress,
-        items: commands.map((command) => {
-          const presentation = PANEL_COMMAND_PRESENTATION[command.id];
-          return {
-            id: command.id,
-            label: command.label,
-            description: presentation?.description,
-            icon: command.id === "toggle-pin" && isPinned ? PinOffIcon : presentation?.icon,
-            tone: command.id === "archive" ? ("danger" as const) : ("default" as const),
-          };
-        }),
-        onSelect: (id) => performPanelCommand(id as PanelCommandId, panelId),
+        items: [
+          ...contributedCommands.map((command) => ({
+            ...command,
+            icon: HostCommandIcon,
+          })),
+          ...commands.map((command) => {
+            const presentation = PANEL_COMMAND_PRESENTATION[command.id];
+            return {
+              id: command.id,
+              label: command.label,
+              description: command.description,
+              icon: command.id === "toggle-pin" && isPinned ? PinOffIcon : presentation?.icon,
+              tone: command.id === "archive" ? ("danger" as const) : ("default" as const),
+            };
+          }),
+        ],
+        onSelect: (id) => {
+          const commandId = contributedHostCommandId(id);
+          if (!commandId) {
+            performPanelCommand(id as PanelCommandId, panelId);
+            return;
+          }
+          const webView = webViewRefsMap.current.get(panelId);
+          if (!webView) {
+            pushToast({
+              title: "Panel command is not ready",
+              message: "Wait for the panel to finish loading, then try again.",
+              tone: "warning",
+            });
+            return;
+          }
+          webView.dispatchHostEvent(HOST_COMMAND_RUN_EVENT, { commandId });
+        },
       });
     },
     [
@@ -1356,6 +1438,7 @@ export function MainScreen() {
       addressBarVisible,
       performPanelCommand,
       pinnedPanelIds,
+      pushToast,
       shellClient,
       showActionSheet,
     ]
@@ -1689,15 +1772,23 @@ export function MainScreen() {
       observation: PanelPageObservation
     ) => {
       if (!shellClient) return;
+      const phase =
+        observation.boot.kind === "observed"
+          ? observation.boot.observation.phase
+          : "probe-unavailable";
+      // Local boot observation is the smoke's presentation evidence. Do not
+      // couple it to reportView's state mutation: after an app restart the
+      // same authoritative runtime attempt may already be terminal-ready, so
+      // replaying loading/booting/ready is correctly rejected as non-monotonic.
+      if (phase === "ready") {
+        console.log("[VibestudioMobileSmoke] phase=workspace-panel-ready");
+      }
       void shellClient.panels
         .reportView(runtimeEntityId, connectionId, observation)
         .then((result) => {
           if (result === "reported" && hostConfig?.protocol === "http") {
             console.log(`[MainScreen] Reported panel boot for ${panelId}`, {
-              phase:
-                observation.boot.kind === "observed"
-                  ? observation.boot.observation.phase
-                  : "probe-unavailable",
+              phase,
               runtimeEntityId,
               connectionId,
             });
@@ -1765,23 +1856,43 @@ export function MainScreen() {
   useEffect(() => {
     if (Platform.OS !== "android") return;
     const onBackPress = () => {
-      if (activePanelId && webViewNavigation[activePanelId]?.canGoBack) {
-        pendingHistoryIntentByPanel.current.set(
-          activePanelId,
-          requireBrowserNavigationIntent("back")
-        );
-        webViewRefsMap.current.get(activePanelId)?.goBack();
-        return true;
+      const action = resolveMobileBackAction({
+        drawerOpen: !persistentNavigation && drawerStatus === "open",
+        addressBarVisible,
+        browserCanGoBack: Boolean(activePanelId && webViewNavigation[activePanelId]?.canGoBack),
+        parentPanelId: activePanelParentId,
+      });
+      switch (action) {
+        case "close-address":
+          setAddressBarVisible(false);
+          return true;
+        case "browser-back":
+          if (!activePanelId) return false;
+          pendingHistoryIntentByPanel.current.set(
+            activePanelId,
+            requireBrowserNavigationIntent("back")
+          );
+          webViewRefsMap.current.get(activePanelId)?.goBack();
+          return true;
+        case "parent-panel":
+          if (!activePanelParentId) return false;
+          activatePanel(activePanelParentId);
+          return true;
+        case "system":
+          return false;
       }
-      if (activePanelParentId) {
-        activatePanel(activePanelParentId);
-        return true;
-      }
-      return false;
     };
     const subscription = BackHandler.addEventListener("hardwareBackPress", onBackPress);
     return () => subscription.remove();
-  }, [activePanelId, activePanelParentId, activatePanel, webViewNavigation]);
+  }, [
+    activePanelId,
+    activePanelParentId,
+    activatePanel,
+    addressBarVisible,
+    drawerStatus,
+    persistentNavigation,
+    webViewNavigation,
+  ]);
   const handleRepair = useCallback(() => {
     Alert.alert(
       "Re-pair this device?",
@@ -1898,6 +2009,7 @@ export function MainScreen() {
       <AppBar
         title={activePanelTitle}
         onMenuPress={handleMenuPress}
+        showMenuButton={!persistentNavigation}
         onPanelCreated={handlePanelCreated}
         addressBarVisible={addressBarVisible}
         address={activeChromeState?.editableAddress ?? ""}

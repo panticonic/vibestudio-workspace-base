@@ -1,5 +1,3 @@
-import * as fsp from "node:fs/promises";
-import * as path from "node:path";
 import { Buffer } from "node:buffer";
 import YAML from "yaml";
 import type {
@@ -12,14 +10,12 @@ import type {
 import {
   WorkspaceConfigSchema,
   WorkspaceConfigTopLayerSchema,
-  WorkspaceCreationDescriptorSchema,
 } from "@vibestudio/workspace-contracts/workspaceConfigSchema";
 import type {
   WorkspaceConfig,
-  WorkspaceCreationDescriptor,
-  WorkspaceTemplateLock,
+  WorkspaceTemplateState,
 } from "@vibestudio/workspace-contracts/types";
-import { assertTemplateLockIntegrityForRead } from "@vibestudio/workspace/templateLock";
+import { parseTemplateState } from "@vibestudio/workspace/templateState";
 import {
   WORKSPACE_COMPOSITION_SOURCE_PATH,
   composeWorkspaceConfig,
@@ -28,12 +24,11 @@ import {
 } from "@vibestudio/workspace/configComposition";
 import type { TemplateWorkspaceObservation } from "@workspace/template-composer";
 import type { ExtensionContextLike } from "./context.js";
-import { listSemanticRepositoryFiles, semanticRepositoryDigest } from "./semanticRepository.js";
 
 export const OBSERVATION_CONTEXT = "template-composer-observation";
 export const META_REPOSITORY = "meta";
 export const TOP_CONFIG_PATH = "vibestudio.yml";
-export const LOCK_PATH = "templates.lock.yml";
+export const STATE_PATH = "templates.state.yml";
 export const COMPOSITION_SOURCE_PATH = WORKSPACE_COMPOSITION_SOURCE_PATH.slice("meta/".length);
 
 export interface SemanticWorkspaceObservation extends TemplateWorkspaceObservation {
@@ -43,7 +38,6 @@ export interface SemanticWorkspaceObservation extends TemplateWorkspaceObservati
   runtimeTop: WorkspaceRuntimeManifest;
   top: ReturnType<typeof WorkspaceConfigTopLayerSchema.parse>;
   metaRepository: NonNullable<VcsResolveRepositoryResult>;
-  modifiedTemplateRepoPaths: ReadonlySet<string>;
 }
 
 type WorkspaceTopLayer = ReturnType<typeof WorkspaceConfigTopLayerSchema.parse>;
@@ -183,7 +177,6 @@ export async function observeWorkspace(
   const mainState = { kind: "event" as const, eventId: status.mainEventId };
   const info = await ctx.workspace.getInfo();
   if (!info.config) throw new Error("Workspace info did not expose its resolved configuration");
-  const config = info.config as WorkspaceConfig;
   const metaRepository = await ctx.rpc.call<VcsResolveRepositoryResult>(
     "main",
     "vcs.resolveRepository",
@@ -197,10 +190,11 @@ export async function observeWorkspace(
     id: info.id,
   });
   const { id: _runtimeId, ...runtimeTop } = parsedRuntime;
-  const lockFile = await readFile(ctx, mainState, metaRepository.repositoryId, LOCK_PATH);
-  const lock: WorkspaceTemplateLock | undefined = lockFile
-    ? assertTemplateLockIntegrityForRead(YAML.parse(textContent(lockFile)) as unknown)
-    : undefined;
+  const stateFile = await readFile(ctx, mainState, metaRepository.repositoryId, STATE_PATH);
+  let state: WorkspaceTemplateState | undefined;
+  if (stateFile) {
+    state = parseTemplateState(YAML.parse(textContent(stateFile)) as unknown);
+  }
   const sourceFile = await readFile(
     ctx,
     mainState,
@@ -211,35 +205,25 @@ export async function observeWorkspace(
     ? WorkspaceConfigTopLayerSchema.parse(YAML.parse(textContent(sourceFile)) as unknown)
     : undefined;
   let top: ReturnType<typeof WorkspaceConfigTopLayerSchema.parse>;
-  if (lock) {
-    if (!storedSource) {
-      throw new Error(
-        `Workspace template lock exists without ${WORKSPACE_COMPOSITION_SOURCE_PATH}`
-      );
-    }
+  const installedLayers: Record<string, string> = {};
+  if (state && storedSource) {
     const ancestors = new Map<string, Set<string>>();
     const layers = [];
-    for (const node of lock.nodes) {
+    for (const node of state.nodes) {
       const inherited = new Set<string>();
       for (const parent of node.parents) {
         inherited.add(parent);
         for (const ancestor of ancestors.get(parent) ?? []) inherited.add(ancestor);
       }
       ancestors.set(node.nodeId, inherited);
-      const fragmentFile = await readFile(
-        ctx,
-        mainState,
-        metaRepository.repositoryId,
-        `templates/${node.nodeId}.yml`
-      );
-      if (!fragmentFile) {
-        throw new Error(`Workspace is missing generated template fragment ${node.nodeId}`);
-      }
+      const layerText = node.fragment;
+      const config = parseWorkspaceConfigFragment(layerText, node.nodeId);
+      installedLayers[node.nodeId] = layerText;
       layers.push({
         nodeId: node.nodeId,
         alias: node.alias,
         ancestors: [...inherited],
-        config: parseWorkspaceConfigFragment(textContent(fragmentFile), node.nodeId),
+        config,
       });
     }
     const prior = composeWorkspaceConfig(storedSource, layers, info.id);
@@ -250,58 +234,27 @@ export async function observeWorkspace(
       })
     );
   } else {
-    const descriptor = await readBootstrapDescriptor(info.statePath);
-    const templates = storedSource?.templates ?? { use: [] };
-    top = descriptor
-      ? bootstrapWorkspaceSource(runtimeTop, templates)
-      : WorkspaceConfigTopLayerSchema.parse({ ...runtimeTop, templates });
+    if (state && !storedSource) {
+      throw new Error(`${STATE_PATH} exists without ${COMPOSITION_SOURCE_PATH}`);
+    }
+    const templates =
+      storedSource?.templates ??
+      (state ? { use: state.roots, overrides: state.overrides } : { use: [] });
+    top = storedSource ?? WorkspaceConfigTopLayerSchema.parse({ ...runtimeTop, templates });
   }
   const localRepoPaths = await repositoryPaths(ctx, mainState);
-  const modifiedTemplateRepoPaths = new Set<string>();
-  for (const repoPath of Object.keys(lock?.repositories ?? {})) {
-    localRepoPaths.delete(repoPath);
-    const repository = await ctx.rpc.call<VcsResolveRepositoryResult>(
-      "main",
-      "vcs.resolveRepository",
-      { state: mainState, repoPath }
-    );
-    const expected = lock?.repositories[repoPath];
-    if (
-      !repository ||
-      !expected ||
-      semanticRepositoryDigest(
-        await listSemanticRepositoryFiles(ctx, mainState, repository.repositoryId)
-      ) !== expected.subtreeDigest
-    ) {
-      modifiedTemplateRepoPaths.add(repoPath);
-    }
-  }
   return {
     workspaceId: info.id,
     runtimeTop,
     roots: top.templates?.use ?? [],
-    ...(lock ? { lock } : {}),
+    ...(state ? { state } : {}),
+    ...(state ? { installedLayers } : {}),
     localRepoPaths,
-    externallyOwnedRepoPaths: new Set(),
-    conflicts: top.templates?.conflicts,
     overrides: top.templates?.overrides,
     expectedSystemEpoch: top.systemEpoch,
     mainEventId: status.mainEventId,
     mainState,
     top,
     metaRepository,
-    modifiedTemplateRepoPaths,
   };
-}
-
-export async function readBootstrapDescriptor(
-  statePath: string
-): Promise<WorkspaceCreationDescriptor | null> {
-  try {
-    const text = await fsp.readFile(path.join(statePath, "workspace-creation", "v1.json"), "utf8");
-    return WorkspaceCreationDescriptorSchema.parse(JSON.parse(text) as unknown);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
 }

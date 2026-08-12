@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "title": "System Test Runner",
+    "icon": "./assets/icon.svg",
     "kind": "worker",
     "entry": "index.ts",
     "durable": {

@@ -28,6 +28,8 @@ Session knobs are method calls on the agent participant:
 
 - `setThinkingLevel({ level })` where `level` is `minimal`, `low`, `medium`, or
   `high`.
+- `setFastMode({ enabled })` requests the accelerated Codex service tier on
+  models that advertise it.
 - `setModel({ model })` where `model` is a current `provider:modelId` catalog
   entry.
 - `setApprovalLevel({ level })` where `level` is `0`, `1`, or `2`.
@@ -50,9 +52,9 @@ Examples:
 - Google Vertex flagship: `google-vertex:gemini-3.1-pro`
 
 When editing `agent-config.ts`, prefer the provider's current flagship. If you
-do not know what that is, check the provider's announcements page; pi-ai's
-catalog (`@earendil-works/pi-ai`'s `models.generated.d.ts`) is the source of
-truth for ids wired into the runtime.
+do not know what that is, check the provider's announcements page; the catalog
+exposed through `@workspace/pi-ai/providers/all` is the source of truth for ids
+wired into the runtime.
 
 The enabled thinking levels accepted by the harness are `minimal`, `low`,
 `medium`, `high`, `xhigh`, and `max`. The configuration UI only shows
@@ -96,6 +98,7 @@ participant's methods. A minimal inline UI can call:
 
 ```tsx
 await chat.callMethod(agentParticipantId, "setThinkingLevel", { level: "high" });
+await chat.callMethod(agentParticipantId, "setFastMode", { enabled: true });
 await chat.callMethod(agentParticipantId, "setApprovalLevel", { level: 1 });
 await chat.callMethod(agentParticipantId, "setRespondPolicy", {
   policy: "from-participants",
@@ -112,6 +115,7 @@ Headless/session subscribers may pass `extraConfig`:
 {
   model: "anthropic:claude-sonnet-4-6",
   thinkingLevel: "high",
+  fastMode: true,
   fallbackModel: "openai-codex:gpt-5.6-luna",
   fallbackThinkingLevel: "minimal",
   fallbackOn: ["usage_limit_terminal"],
@@ -125,7 +129,7 @@ Headless/session subscribers may pass `extraConfig`:
 
 Lookup order:
 
-- `model` and `thinkingLevel`: persisted live setting (initially seeded from
+- `model`, `thinkingLevel`, and `fastMode`: persisted live settings (initially seeded from
   the agent-creation config), then default.
 - `fallbackModel`, `fallbackThinkingLevel`, `fallbackOn`, and `fallbackScope`:
   persisted live setting seeded from agent creation. Failover activates once,

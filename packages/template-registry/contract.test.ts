@@ -19,7 +19,7 @@ function registryValue() {
   return {
     version: 1,
     revision: "2026-07-29.3",
-    systemEpoch: 57,
+    systemEpoch: 58,
     entries: [
       {
         id: "news",

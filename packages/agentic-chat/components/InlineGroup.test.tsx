@@ -10,6 +10,7 @@ import { InlineGroup, type InlineItem } from "./InlineGroup";
 const render = (ui: React.ReactElement) => rtlRender(<Theme>{ui}</Theme>);
 import { CustomMessageCard } from "./CustomMessage";
 import type { MessageTypeComponentEntry } from "../types";
+import type { InvocationCardPayload } from "@workspace/agentic-core";
 
 type CustomInlineItem = Extract<InlineItem, { type: "custom" }>;
 type ReadyMessageTypeComponentEntry = Extract<MessageTypeComponentEntry, { status: "ready" }>;
@@ -51,13 +52,55 @@ function customEntry(): ReadyMessageTypeComponentEntry {
   };
 }
 
+function invocationItem(): Extract<InlineItem, { type: "invocation" }> {
+  return {
+    type: "invocation",
+    id: "invocation-1",
+    senderId: "agent-1",
+    complete: true,
+    invocation: {
+      id: "invocation-1",
+      name: "game_action",
+      arguments: { move: "north" },
+      execution: { status: "complete", description: "Move the player", result: { ok: true } },
+    } satisfies InvocationCardPayload,
+  };
+}
+
 describe("InlineGroup custom messages", () => {
+  it("lets a host replace or elide individual invocation presentation", () => {
+    const renderInvocation = vi.fn(({ payload, expanded, onToggle }) => (
+      <button type="button" onClick={onToggle}>
+        {expanded ? "expanded" : "collapsed"} {payload.name}
+      </button>
+    ));
+    const { container } = render(
+      <InlineGroup items={[invocationItem()]} renderInvocation={renderInvocation} />
+    );
+
+    expect(screen.getByText("collapsed game_action")).toBeTruthy();
+    expect(container.querySelector('[data-testid="invocation-pill"]')).toBeNull();
+
+    fireEvent.click(screen.getByText("collapsed game_action"));
+    expect(screen.getByText("expanded game_action")).toBeTruthy();
+    expect(renderInvocation).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        expanded: true,
+        payload: expect.objectContaining({ name: "game_action" }),
+      }),
+      expect.anything()
+    );
+
+    const hidden = render(<InlineGroup items={[invocationItem()]} renderInvocation={() => null} />);
+    expect(hidden.container.querySelector('[data-invocation-name="game_action"]')).toBeNull();
+  });
+
   it("lets the host toggle custom renderers between collapsed and expanded views", () => {
     render(
       <InlineGroup
         items={[customItem()]}
         messageTypeComponents={new Map([["weather", customEntry()]])}
-      />,
+      />
     );
 
     const collapsed = screen.getByText("collapsed inline");
@@ -74,7 +117,7 @@ describe("InlineGroup custom messages", () => {
       <InlineGroup
         items={[customItem()]}
         messageTypeComponents={new Map([["weather", customEntry()]])}
-      />,
+      />
     );
 
     fireEvent.keyDown(screen.getByRole("button", { expanded: false }), { key: "Enter" });
@@ -85,7 +128,7 @@ describe("InlineGroup custom messages", () => {
       <InlineGroup
         items={[customItem()]}
         messageTypeComponents={new Map([["weather", customEntry()]])}
-      />,
+      />
     );
 
     fireEvent.keyDown(screen.getByRole("button", { expanded: false }), { key: " " });
@@ -99,13 +142,7 @@ describe("InlineGroup custom messages", () => {
       throw new Error("renderer exploded");
     };
 
-    render(
-      <CustomMessageCard
-        payload={customItem().payload}
-        entry={entry}
-        chat={{}}
-      />,
-    );
+    render(<CustomMessageCard payload={customItem().payload} entry={entry} chat={{}} />);
 
     expect(screen.getByText("Custom message error: weather")).toBeTruthy();
     expect(screen.getByText("renderer exploded")).toBeTruthy();
@@ -123,32 +160,42 @@ describe("InlineGroup custom messages", () => {
       throw new Error("renderer exploded");
     };
     const item = customItem();
-    item.payload.by = { kind: "agent", id: "weather-agent" };
+    item.payload.by = {
+      kind: "agent",
+      id: "weather-agent",
+      participantId: "do:workers/agent:WeatherAgent:weather-1",
+    };
 
-    render(
-      <CustomMessageCard
-        payload={item.payload}
-        entry={entry}
-        chat={{ publish }}
-      />,
-    );
+    render(<CustomMessageCard payload={item.payload} entry={entry} chat={{ publish }} />);
 
-    await waitFor(() => expect(publish).toHaveBeenCalledWith(
-      "agentic.trajectory.v1/event",
-      expect.objectContaining({
-        kind: "ui.feedback",
-        payload: expect.objectContaining({
-          target: expect.objectContaining({ kind: "agent", id: "weather-agent" }),
-          category: "render_failed",
-          refs: expect.objectContaining({ messageId: "custom-msg-1", typeId: "weather" }),
-          error: expect.objectContaining({ message: "renderer exploded" }),
-          occurrenceKey: "render_failed:custom-msg-1:1",
+    await waitFor(() =>
+      expect(publish).toHaveBeenCalledWith(
+        "agentic.trajectory.v1/event",
+        expect.objectContaining({
+          kind: "ui.feedback",
+          payload: expect.objectContaining({
+            target: expect.objectContaining({
+              kind: "agent",
+              id: "weather-agent",
+              participantId: "do:workers/agent:WeatherAgent:weather-1",
+            }),
+            to: [
+              {
+                kind: "participant",
+                participantId: "do:workers/agent:WeatherAgent:weather-1",
+              },
+            ],
+            category: "render_failed",
+            refs: expect.objectContaining({ messageId: "custom-msg-1", typeId: "weather" }),
+            error: expect.objectContaining({ message: "renderer exploded" }),
+            occurrenceKey: "render_failed:custom-msg-1:1",
+          }),
         }),
-      }),
-      expect.objectContaining({
-        idempotencyKey: "ui-feedback:render_failed:custom-msg-1:1",
-      }),
-    ));
+        expect.objectContaining({
+          idempotencyKey: "ui-feedback:render_failed:custom-msg-1:1",
+        })
+      )
+    );
   });
 
   it("keeps prior state when a reducer throws instead of blanking the card", () => {
@@ -158,18 +205,14 @@ describe("InlineGroup custom messages", () => {
     item.payload.lastSeq = 2;
     const entry = customEntry();
     // Render the folded state's city so we can prove the prior state survived.
-    entry.module.default = ({ state }) => <span>city: {(state as { city?: string })?.city ?? "none"}</span>;
+    entry.module.default = ({ state }) => (
+      <span>city: {(state as { city?: string })?.city ?? "none"}</span>
+    );
     entry.module.reduce = () => {
       throw new Error("reduce exploded");
     };
 
-    render(
-      <CustomMessageCard
-        payload={item.payload}
-        entry={entry}
-        chat={{}}
-      />,
-    );
+    render(<CustomMessageCard payload={item.payload} entry={entry} chat={{}} />);
 
     // No error fallback; the seed state (Berlin) is preserved, Paris dropped.
     expect(screen.queryByText("Custom message error: weather")).toBeNull();
@@ -181,10 +224,7 @@ describe("InlineGroup custom messages", () => {
     entry.module.Pill = ({ expanded }) => <span>pill {expanded ? "open" : "closed"}</span>;
 
     render(
-      <InlineGroup
-        items={[customItem()]}
-        messageTypeComponents={new Map([["weather", entry]])}
-      />,
+      <InlineGroup items={[customItem()]} messageTypeComponents={new Map([["weather", entry]])} />
     );
 
     // Collapsed bead uses Pill, not the default component.
@@ -213,7 +253,7 @@ describe("InlineGroup custom messages", () => {
       <InlineGroup
         items={[customItem()]}
         messageTypeComponents={new Map([["weather", loadingEntry]])}
-      />,
+      />
     );
 
     // The spinner pill is clickable and self-describing.
@@ -269,9 +309,7 @@ describe("InlineGroup custom messages", () => {
   });
 
   it("collapses an expanded pill back into its row", () => {
-    const items: InlineItem[] = [
-      { type: "thinking", id: "t1", content: "Alpha", complete: true },
-    ];
+    const items: InlineItem[] = [{ type: "thinking", id: "t1", content: "Alpha", complete: true }];
     render(<InlineGroup items={items} />);
 
     fireEvent.click(screen.getByLabelText("Thinking: Alpha"));
@@ -290,13 +328,7 @@ describe("InlineGroup custom messages", () => {
     const item = customItem();
     item.payload.initialState = {}; // no city -> invalid
 
-    render(
-      <CustomMessageCard
-        payload={item.payload}
-        entry={entry}
-        chat={{}}
-      />,
-    );
+    render(<CustomMessageCard payload={item.payload} entry={entry} chat={{}} />);
 
     expect(screen.getByText("Invalid weather state")).toBeTruthy();
     expect(screen.getByText("city: Required")).toBeTruthy();

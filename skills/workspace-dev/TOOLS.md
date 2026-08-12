@@ -137,7 +137,7 @@ instead of creating a separate `skills/<name>` repo.
 Examples:
 
 - `packages/data-model/SKILL.md` for package APIs, schemas, and test commands
-- `workers/gmail-agent/SKILL.md` for worker behavior, queues, and diagnostics
+- `workers/customer-agent/SKILL.md` for worker behavior, queues, and diagnostics
 - `panels/chat/SKILL.md` for panel-specific UI conventions
 - `extensions/browser-data/SKILL.md` for extension setup and operational notes
 - `projects/customer-vault/SKILL.md` for a plain content repo's structure
@@ -155,10 +155,17 @@ approval prompt instead of separate prompts for each:
 
 ```
 eval({ code: `
-  import { createProjects } from "@workspace-skills/workspace-dev";
+  import { createProjects, searchProjectCatalog } from "@workspace-skills/workspace-dev";
+  const [databaseCatalog, panelCatalog] = await Promise.all([
+    searchProjectCatalog({ resource: "icon", query: "database", limit: 5 }),
+    searchProjectCatalog({ resource: "icon", query: "panels top left", limit: 5 }),
+  ]);
+  const databaseIcon = databaseCatalog.entries[0]?.id;
+  const panelIcon = panelCatalog.entries[0]?.id;
+  if (!databaseIcon || !panelIcon) throw new Error("Required catalog icons are unavailable");
   return await createProjects([
-    { projectType: "worker", name: "task-board-store", title: "Task Board Store" },
-    { projectType: "panel", name: "task-board", title: "Task Board" },
+    { projectType: "worker", name: "task-board-store", title: "Task Board Store", icon: databaseIcon },
+    { projectType: "panel", name: "task-board", title: "Task Board", icon: panelIcon },
   ]);
 `
 })
@@ -172,6 +179,20 @@ Even for a single project, use `createProjects` with a one-element array.
 | `projectType` | string | Yes | One of: `panel`, `package`, `skill`, `project`, `worker` |
 | `name` | string | Yes | Stable kebab-case identifier matching `^[a-z][a-z0-9-]*$` |
 | `title` | string | No | Human-readable title (defaults to name) |
+| `icon` | string | No | Emoji, local relative asset, or an exact catalog entry id returned by `searchProjectCatalog({ resource: "icon", query })` |
+| `template` | string | No | Panel template name, or `agentic` for the agentic worker scaffold |
+
+Do not guess catalog names from the full upstream Lucide or Simple Icons
+libraries: the scaffold deliberately accepts a small curated set. Call
+`searchProjectCatalog({ resource: "icon", query, limit })` and choose an exact
+entry id. An invalid catalog id throws `ProjectIconError` before any VCS
+mutation, with the exact bounded query/result, suggestions, and recovery in
+`errorData`.
+
+The typed catalog result records the resource, normalized query, total count,
+bounded entries, and truncation count. Pass an entry's exact `id` directly.
+`listProjectIcons()` remains the unbounded convenience read when every icon is
+genuinely needed.
 
 For an isolated generated name, append a lowercase base-36 suffix such as
 `` `todo-list-${Date.now().toString(36)}` ``. Do not append a raw ISO timestamp:
@@ -580,35 +601,29 @@ checking a different context.
 
 #### @workspace-extensions/test-runner.run
 
-Run Vitest tests for a workspace unit from inside the workspace runtime. The
-extension infers the current eval/agent context and runs tests against that
-context folder. Test execution goes through the approval service because tests
-are code execution; the user can allow once, allow for the session, trust the
-current code version, or deny.
+Agents run Vitest tests through the first-class verification boundary. It
+materializes the exact conversation context and preserves authority, progress,
+cancellation, and bounded structured evidence. Test execution goes through the
+approval service because tests are code execution.
 
 ```
-eval({ code: `
-  const result = await services.extensions.invoke(
-    "@workspace-extensions/test-runner",
-    "run",
-    [{ target: "packages/my-lib" }],
-  ).catch((error) => ({
-    error: String(error),
-  }));
-  console.log(result);
-`
-})
+verify({ operation: "test", target: "packages/my-lib" })
 ```
 
 For a single file or test name:
 
 ```
-await services.extensions.invoke("@workspace-extensions/test-runner", "run", [{
+verify({
+  operation: "test",
   target: "packages/my-lib",
-  fileFilter: "src/index.test.ts",
-  testName: "handles empty input",
-}]);
+  file: "src/index.test.ts",
+  testName: "handles empty input"
+})
 ```
+
+A failed run or zero discovered tests is an explicit error result with its
+structured report intact. Do not replace this boundary with generic `eval`, a
+shell command, or direct `extensions.invoke` plumbing.
 
 ### Browser Data
 
@@ -636,6 +651,9 @@ are never exposed.
 
 `startImport` is source-keyed and deterministic. Repeat imports update changed
 records and add new records without duplicating canonical data.
+The runtime client always uses the manifest-selected broker: imported history
+and visits recorded by Vibestudio are rows in the same canonical BrowserDataDO.
+Do not resolve or call BrowserDataDO directly from a panel or worker.
 `openTabsAsPanels` is an action and creates panels on each call. Its default
 destination is a new workspace root containing one collection per imported
 browser window; pass `destination: "caller"` to attach it to the invoking panel.

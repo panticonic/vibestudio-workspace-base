@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { onboardingInteraction, resolveOnboardingSelection } from "./routing.js";
+import {
+  onboardingInteraction,
+  onboardingTemplateInteraction,
+  resolveOnboardingSelection,
+  resolveOnboardingTemplateSelection,
+} from "./routing.js";
 
 describe("onboarding selection routing", () => {
   it("resolves a stable capability id to its owner workflow", () => {
@@ -44,6 +49,17 @@ describe("onboarding selection routing", () => {
     );
   });
 
+  it("routes recurring-work intent to the Automations owner workflow", () => {
+    expect(
+      resolveOnboardingSelection(onboardingInteraction("capability.automations", "explore"))
+    ).toEqual(
+      expect.objectContaining({
+        ownerSkillPath: "skills/automations/SKILL.md",
+        target: { via: "conversation" },
+      })
+    );
+  });
+
   it("does not invent a template route for a base capability", () => {
     expect(() =>
       resolveOnboardingSelection({
@@ -51,5 +67,25 @@ describe("onboarding selection routing", () => {
         action: "install" as never,
       })
     ).toThrow("connection.device does not offer the install action");
+  });
+
+  it("resolves optional template choices to the canonical Templates owner and URL", () => {
+    const selection = {
+      catalogId: "news",
+      registryCommit: "a".repeat(40),
+      registrySnapshot: `v1-sha256:${"b".repeat(64)}`,
+    };
+    expect(resolveOnboardingTemplateSelection(onboardingTemplateInteraction(selection))).toEqual(
+      expect.objectContaining({
+        ownerSkillPath: "skills/templates/SKILL.md",
+        selection,
+      })
+    );
+    expect(() =>
+      resolveOnboardingTemplateSelection({
+        ...onboardingTemplateInteraction(selection),
+        targetId: "template.retired",
+      })
+    ).toThrow("Onboarding template selection metadata is invalid");
   });
 });

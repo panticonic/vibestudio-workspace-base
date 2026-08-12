@@ -29,12 +29,13 @@ export function isPreExecutionArgumentRejection(...values: unknown[]): boolean {
 export function isReadOnlyInputRejection(toolName: string, ...values: unknown[]): boolean {
   if (!new Set(["read", "ls", "grep", "find", "glob", "stat"]).has(toolName)) return false;
   return values.some((value) => {
-    let rendered: string;
+    let rendered: unknown;
     try {
       rendered = typeof value === "string" ? value : JSON.stringify(value);
     } catch {
       return false;
     }
+    if (typeof rendered !== "string") return false;
     return (
       rendered.includes('"protocol":"agent-tool-failure.v1"') &&
       rendered.includes('"kind":"invalid-input"') &&
@@ -107,18 +108,12 @@ export function isEvalGuestCodeFailure(
   );
 }
 
-const SAFE_SUBAGENT_CLOSE_REJECTIONS = new Set([
-  "IntegrationIncomplete",
-  "InvalidReference",
-  "WorkingChangesPresent",
-]);
-
 /**
  * Subagent tools expose typed no-effect domain refusals. inspect_subagent
- * reports ambiguous references before reading anything. close_subagent checks
- * lifecycle preconditions before cancellation, context teardown, or
- * subscription removal. Keep both visible without treating the guard itself as
- * a platform execution failure.
+ * reports ambiguous references before reading anything; send_to_subagent
+ * refuses terminal runs with a structured SubagentTerminal outcome naming the
+ * retained result and the real options. Keep these visible without treating
+ * the guard itself as a platform execution failure.
  */
 export function isSafeSubagentDomainRejection(
   toolName: string,
@@ -127,11 +122,7 @@ export function isSafeSubagentDomainRejection(
   if (toolName === "inspect_subagent" && terminalReasonCode === "InvalidReference") {
     return true;
   }
-  return (
-    toolName === "close_subagent" &&
-    terminalReasonCode !== undefined &&
-    SAFE_SUBAGENT_CLOSE_REJECTIONS.has(terminalReasonCode)
-  );
+  return toolName === "send_to_subagent" && terminalReasonCode === "SubagentTerminal";
 }
 
 export type BuiltInToolFailureClassification =

@@ -6,21 +6,10 @@ import {
   successfulEvalCode,
   successfulEvalReturnValues,
 } from "./_helpers.js";
-
-function records(value: unknown, found: Record<string, unknown>[] = []): Record<string, unknown>[] {
-  if (Array.isArray(value)) {
-    for (const item of value) records(item, found);
-    return found;
-  }
-  if (!value || typeof value !== "object") return found;
-  const item = value as Record<string, unknown>;
-  found.push(item);
-  for (const child of Object.values(item)) records(child, found);
-  return found;
-}
+import { walkRecords } from "./_scenario-evidence.js";
 
 function hasSecretField(value: unknown): boolean {
-  return records(value).some((item) => Object.hasOwn(item, "secret"));
+  return walkRecords([value]).some((item) => Object.hasOwn(item, "secret"));
 }
 
 function unavailableWithEvidence(result: Parameters<typeof noIncompleteInvocations>[0]) {
@@ -71,7 +60,7 @@ function lifecycleChecked(result: Parameters<typeof noIncompleteInvocations>[0])
     };
   }
   const values = successfulEvalReturnValues(result);
-  const proof = records(values).find(
+  const proof = walkRecords(values).find(
     (item) =>
       item["created"] === true &&
       item["listed"] === true &&
@@ -104,7 +93,7 @@ function listChecked(result: Parameters<typeof noIncompleteInvocations>[0]) {
   const subscriptions = values
     .flatMap((value) => {
       if (Array.isArray(value)) return [value];
-      return records(value)
+      return walkRecords([value])
         .map((item) => item["subscriptions"])
         .filter((item): item is unknown[] => Array.isArray(item));
     })
@@ -147,7 +136,7 @@ export const webhookTests: TestCase[] = [
       ],
     },
     prompt:
-      "Exercise a harmless temporary webhook subscription end to end: create it, confirm it is listed, rotate its secret, revoke it, and verify cleanup. If this deployment cannot support the test, explain the concrete blocker instead of pretending it succeeded.",
+      "Try a harmless temporary webhook subscription, confirm that it appears, and check that its secret can be rotated. If this deployment cannot support that, explain the concrete blocker.",
     validate: lifecycleChecked,
   },
   {

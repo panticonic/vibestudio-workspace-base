@@ -43,11 +43,10 @@ import type { GatewayFetch } from "./gatewayFetch.js";
 import type { PanelRuntimeApi, PanelRuntimeTree } from "./panelRuntime.js";
 import type { RuntimeFs } from "../types.js";
 import type { PanelHandle } from "../core/index.js";
-import { runtimeMethods } from "@vibestudio/service-schemas/runtime";
-import {
-  createTypedServiceClient,
-  type TypedServiceClient,
-} from "@vibestudio/shared/typedServiceClient";
+import type { runtimeMethods } from "@vibestudio/service-schemas/runtime";
+import { RUNTIME_METHOD_NAMES } from "@vibestudio/service-schemas/clients/generated/runtimeClientMethods";
+import { type TypedServiceClient } from "@vibestudio/shared/typedServiceClient";
+import { createLazyTypedServiceClient } from "@vibestudio/shared/lazyTypedServiceClient";
 
 export type RuntimeServiceClient = TypedServiceClient<typeof runtimeMethods>;
 
@@ -293,7 +292,6 @@ export function createHostedRuntime(host: RuntimeHost): WorkspaceRuntime {
     "browserData",
     createBrowserDataClient({
       callService: (service, method, args) => rpc.call("main", `${service}.${method}`, args),
-      callTarget: (targetId, method, args) => rpc.call(targetId, method, args),
     })
   );
   const gad = helpfulNamespace("gad", createGadClient(rpc));
@@ -301,8 +299,11 @@ export function createHostedRuntime(host: RuntimeHost): WorkspaceRuntime {
   const workspace = helpfulNamespace("workspace", createWorkspaceClient(rpc));
   const runtimeService = helpfulNamespace(
     "runtime",
-    createTypedServiceClient("runtime", runtimeMethods, (service, method, args) =>
-      rpc.call("main", `${service}.${method}`, args)
+    createLazyTypedServiceClient(
+      "runtime",
+      RUNTIME_METHOD_NAMES,
+      async () => (await import("@vibestudio/service-schemas/runtime")).runtimeMethods,
+      (service, method, args) => rpc.call("main", `${service}.${method}`, args)
     )
   );
   const vcs = helpfulNamespace(

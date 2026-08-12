@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "Vibestudio Remote CLI",
+    "icon": "./assets/icon.svg",
     "app": {
       "target": "terminal",
       "entry": "index.ts"
@@ -12,15 +13,6 @@
     "authority": {
       "provides": [],
       "requests": [
-        {
-          "capability": "automations.control",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "gated",
-          "evidence": "intentional-broad"
-        },
         {
           "capability": "context.boundary",
           "resource": {

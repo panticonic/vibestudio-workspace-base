@@ -11,6 +11,7 @@
 
 import type { Attachment } from "@workspace/pubsub";
 import type {
+  AutomationDefinitionSnapshot,
   LifecycleMessageReasonCode,
   MessageModelPayload,
   MessageTier,
@@ -26,6 +27,8 @@ export interface InlineUiCardPayload {
   source: SandboxSource;
   imports?: Record<string, string>;
   props?: Record<string, unknown>;
+  /** Latest render event time. Changes when a stable-ID card is refreshed. */
+  renderedAt?: string;
 }
 
 export interface ActionBarPayload {
@@ -99,7 +102,7 @@ export interface CustomMessageCardPayload {
   updates: CustomMessageUpdatePayload[];
   lastSeq: number;
   /** Card owner — the target for ui.feedback published by the renderer. */
-  by?: { kind: string; id: string; displayName?: string };
+  by?: { kind: string; id: string; participantId?: string; displayName?: string };
   /** Owner-published terminal failure; the UI renders a failed-card frame. */
   failed?: boolean;
   error?: { message: string; details?: unknown };
@@ -129,6 +132,7 @@ export interface ForkRowPayload {
   reason: string;
   actor: { kind: string; id: string; displayName?: string };
   createdAtSeq: number;
+  headSeq: number;
   archived: boolean;
 }
 
@@ -194,6 +198,51 @@ export interface DiagnosticNotice {
   retryAfterMs?: number;
 }
 
+export interface AutomationActivitySnapshot {
+  missionId: string;
+  runId: string;
+  name: string;
+  revision: number;
+  action: "prompt" | "eval" | "method";
+  trigger: "manual" | "scheduled";
+  startedAt: number;
+  createdAt: number;
+  activatedAt?: number;
+  runNumber?: number;
+  schedule:
+    | {
+        /** Missing only on historical interval snapshots written before calendar schedules. */
+        kind?: "interval";
+        everyMs: number;
+        anchorAt?: number;
+        jitterMs?: number;
+        untilAt?: number;
+        maxRuns?: number;
+      }
+    | {
+        kind: "cron";
+        expression: string;
+        timezone: string;
+        untilAt?: number;
+        maxRuns?: number;
+      }
+    | null;
+}
+
+export interface AutomationActivityPayload {
+  snapshot: AutomationActivitySnapshot;
+  status: "running" | "succeeded" | "failed" | "skipped";
+  openedAt: string;
+  closedAt?: string;
+  summary?: string;
+  reason?: string;
+}
+
+export interface AutomationDefinitionPayload {
+  snapshot: AutomationDefinitionSnapshot;
+  institutedAt: string;
+}
+
 // ===========================================================================
 // ChatMessage (derived from Pi AgentMessage for component rendering)
 // ===========================================================================
@@ -253,6 +302,10 @@ export interface ChatMessage {
   credentialRequest?: CredentialRequestCardPayload;
   lifecycle?: LifecycleNotice;
   diagnostic?: DiagnosticNotice;
+  /** First-class reviewed automation tick projected from durable turn metadata. */
+  automation?: AutomationActivityPayload;
+  /** First-class draft institution projected from a durable channel event. */
+  automationDefinition?: AutomationDefinitionPayload;
   /**
    * Per-recipient delivery state for this message, resolved against the
    * intended-recipient snapshot plus the received/read ack maps. Present when

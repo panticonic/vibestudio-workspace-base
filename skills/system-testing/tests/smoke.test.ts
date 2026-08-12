@@ -6,24 +6,36 @@ import { smokeTests } from "./smoke.js";
 function execution(
   readPath: string | null = "notes/marker.txt",
   searchRoot = ".",
-  writtenContent = "agentic-file-tools-smoke"
+  writtenContent = "agentic-file-tools-smoke",
+  writeTool: "write" | "apply_patch" = "write"
 ): TestExecutionResult {
+  const writtenPath =
+    writeTool === "apply_patch" ? "projects/default/notes/marker.txt" : "notes/marker.txt";
   const reportedPath =
-    searchRoot === "notes" || searchRoot === "notes/marker.txt"
-      ? "marker.txt"
-      : "notes/marker.txt";
+    searchRoot === "notes" || searchRoot === "notes/marker.txt" ? "marker.txt" : writtenPath;
   const invocations = [
-    {
-      id: "write",
-      name: "write",
-      status: "complete",
-      isError: false,
-      arguments: {
-        path: "notes/marker.txt",
-        content: writtenContent,
-      },
-      result: { ok: true },
-    },
+    writeTool === "write"
+      ? {
+          id: "write",
+          name: "write",
+          status: "complete",
+          isError: false,
+          arguments: {
+            path: "notes/marker.txt",
+            content: writtenContent,
+          },
+          result: { ok: true },
+        }
+      : {
+          id: "apply-patch",
+          name: "apply_patch",
+          status: "complete",
+          isError: false,
+          arguments: {
+            operations: [{ kind: "write", path: writtenPath, content: writtenContent }],
+          },
+          result: { details: { status: "applied", paths: [writtenPath] } },
+        },
     {
       id: "grep",
       name: "grep",
@@ -52,6 +64,7 @@ function execution(
       ...invocations.map((invocation) => ({
         kind: "message" as const,
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         complete: true,
         contentType: "invocation" as const,
         invocation,
@@ -59,6 +72,7 @@ function execution(
       {
         kind: "message",
         senderId: "agent",
+        senderMetadata: { type: "agent" },
         complete: true,
         content: "I found the note again and its contents matched.",
       },
@@ -72,6 +86,8 @@ describe("smoke validators", () => {
   it("accepts natural reporting backed by an exact write/search/read chain", () => {
     expect(test.prompt).not.toMatch(/finish with|FIND_OK|GREP_OK|READ_OK/i);
     expect(test.validate(execution())).toEqual({ passed: true, reason: undefined });
+    expect(test.validation).toBe("harness");
+    expect(test.workspaceRepoFixture).toEqual({ kind: "content", section: "projects" });
   });
 
   it("accepts search paths reported relative to a scoped search root", () => {
@@ -86,10 +102,16 @@ describe("smoke validators", () => {
     expect(test.validate(execution(null)).passed).toBe(true);
   });
 
+  it("accepts the current atomic patch surface joined to exact grep evidence", () => {
+    expect(
+      test.validate(execution(null, ".", "agentic-file-tools-smoke", "apply_patch")).passed
+    ).toBe(true);
+  });
+
   it("accepts a descriptive note when canonical grep evidence contains the marker", () => {
-    expect(test.validate(execution(null, ".", "prefix agentic-file-tools-smoke suffix")).passed).toBe(
-      true
-    );
+    expect(
+      test.validate(execution(null, ".", "prefix agentic-file-tools-smoke suffix")).passed
+    ).toBe(true);
   });
 
   it("rejects content search evidence that does not identify the written path", () => {
@@ -112,6 +134,7 @@ describe("smoke validators", () => {
         {
           kind: "message",
           senderId: "agent",
+          senderMetadata: { type: "agent" },
           complete: true,
           contentType: "invocation",
           invocation: {
@@ -123,7 +146,13 @@ describe("smoke validators", () => {
             result: { details: { returnValue: 120 } },
           },
         },
-        { kind: "message", senderId: "agent", complete: true, content: "The result is 120." },
+        {
+          kind: "message",
+          senderId: "agent",
+          senderMetadata: { type: "agent" },
+          complete: true,
+          content: "The result is 120.",
+        },
       ],
     } as TestExecutionResult;
 
@@ -142,6 +171,7 @@ describe("smoke validators", () => {
         {
           kind: "message",
           senderId: "agent",
+          senderMetadata: { type: "agent" },
           complete: true,
           contentType: "invocation",
           invocation: {
@@ -158,6 +188,7 @@ describe("smoke validators", () => {
         {
           kind: "message",
           senderId: "agent",
+          senderMetadata: { type: "agent" },
           complete: true,
           content: "The module exports workers and rpc at runtime.",
         },

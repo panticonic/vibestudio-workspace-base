@@ -3,6 +3,9 @@ export interface MobilePanelTreeNode {
   title: string;
   parentId: string | null;
   owner: string | null;
+  icon?: string;
+  source?: string;
+  kind?: "workspace" | "browser";
   childCount: number;
   childrenLoadedCount?: number;
   childrenHaveMore?: boolean;
@@ -41,6 +44,41 @@ export type MobilePanelForestRow =
       depth: number;
       remaining: number;
     };
+
+/**
+ * Minimal, renderer-ready projection for one panel row.
+ *
+ * `childCount` is deliberately the canonical server count, not the number of
+ * children currently resident in the bounded cache. Using `children.length`
+ * here makes an unloaded branch look like a leaf and removes the only control
+ * that can load it.
+ */
+export interface MobilePanelRowPresentation {
+  id: string;
+  title: string;
+  depth: number;
+  childCount: number;
+  isCollapsed: boolean;
+  icon?: string;
+  source?: string;
+  kind?: "workspace" | "browser";
+}
+
+export function presentMobilePanelRow(
+  row: Extract<MobilePanelForestRow, { kind: "panel" }>,
+  searching: boolean
+): MobilePanelRowPresentation {
+  return {
+    id: row.panel.id,
+    title: row.panel.title,
+    depth: searching ? 0 : row.depth,
+    childCount: searching ? 0 : row.panel.childCount,
+    isCollapsed: searching ? true : row.isCollapsed,
+    icon: row.panel.icon,
+    source: row.panel.source,
+    kind: row.panel.kind,
+  };
+}
 
 export function orderMobilePanelForest(
   groups: readonly MobilePanelTreeGroup[],

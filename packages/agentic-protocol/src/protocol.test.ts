@@ -115,6 +115,40 @@ function envelope(payload: AgenticEvent, seq = 1): ChannelEnvelope<AgenticEvent>
 }
 
 describe("@workspace/agentic-protocol schemas", () => {
+  it("validates a first-class automation institution with a friendly schedule snapshot", () => {
+    const event: AgenticEvent<"automation.instituted"> = {
+      kind: "automation.instituted",
+      actor: agent,
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        definition: {
+          missionId: "mission-weekly",
+          name: "Weekly review",
+          summary: "Review the project every Thursday.",
+          revision: 1,
+          action: "prompt",
+          createdAt: 1_700_000_000_000,
+          schedule: {
+            kind: "cron",
+            expression: "5 5 * * THU",
+            timezone: "America/New_York",
+            maxRuns: 12,
+          },
+        },
+      },
+      createdAt: "2026-07-14T00:00:00.000Z",
+    };
+
+    expect(agenticEventSchema.safeParse(event).success).toBe(true);
+    const state = reduceChannelView(createInitialChannelViewState(), envelope(event));
+    expect(state.automationInstitutions["mission-weekly"]).toMatchObject({
+      definition: event.payload.definition,
+      actor: agent,
+      createdAt: event.createdAt,
+      seq: 1,
+    });
+  });
+
   it("keeps semantic integration out of subagent lifecycle terminals", () => {
     const terminal = {
       kind: "invocation.completed",
@@ -136,6 +170,42 @@ describe("@workspace/agentic-protocol schemas", () => {
         },
       }).success
     ).toBe(false);
+  });
+
+  it("accepts explicit participant audiences on invocation responses", () => {
+    const base = {
+      actor: agent,
+      causality: { invocationId: "inv-audience" },
+      createdAt: "2026-07-14T00:00:00.000Z",
+    };
+    const to = [{ kind: "participant", participantId: "agent-1" }];
+
+    expect(
+      agenticEventSchema.safeParse({
+        ...base,
+        kind: "invocation.output",
+        payload: { protocol: AGENTIC_PROTOCOL_VERSION, output: "line", to },
+      }).success
+    ).toBe(true);
+    expect(
+      agenticEventSchema.safeParse({
+        ...base,
+        kind: "invocation.completed",
+        payload: { protocol: AGENTIC_PROTOCOL_VERSION, terminalOutcome: "success", to },
+      }).success
+    ).toBe(true);
+    expect(
+      agenticEventSchema.safeParse({
+        ...base,
+        kind: "invocation.cancelled",
+        payload: {
+          protocol: AGENTIC_PROTOCOL_VERSION,
+          terminalOutcome: "cancelled",
+          reason: "cancelled",
+          to,
+        },
+      }).success
+    ).toBe(true);
   });
 
   it("separates participant refs from runtime principal actor refs", () => {
@@ -853,6 +923,26 @@ describe("@workspace/agentic-protocol reducers", () => {
     expect(messageDisplayText(state.messages["msg-replace"]?.blocks)).toBe("hello world");
   });
 
+  it("anchors a stream that is first observed through a delta", () => {
+    const delta: AgenticEvent<"message.delta"> = {
+      kind: "message.delta",
+      actor: agent,
+      turnId: brandId<TurnId>("turn-early-delta"),
+      causality: { messageId: brandId<MessageId>("msg-early-delta") },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        blockId: brandId<BlockId>("msg-early-delta:block:0"),
+        type: "text",
+        text: "Streaming",
+      },
+      createdAt: "2026-05-20T12:00:01.000Z",
+    };
+
+    const state = reduceChannelView(createInitialChannelViewState(), envelope(delta, 1));
+
+    expect(state.messages["msg-early-delta"]?.startedAt).toBe(delta.createdAt);
+  });
+
   it("preserves message blocks and updates streamed blocks", () => {
     const started: AgenticEvent<"message.started"> = {
       kind: "message.started",
@@ -1097,17 +1187,6 @@ describe("@workspace/agentic-protocol reducers", () => {
         },
         createdAt: "2026-05-20T12:00:00.000Z",
       },
-      {
-        kind: "task.progress",
-        actor: agent,
-        causality: { taskId },
-        payload: {
-          protocol: AGENTIC_PROTOCOL_VERSION,
-          message: "reading",
-          progress: 0.5,
-        },
-        createdAt: "2026-05-20T12:00:01.000Z",
-      },
     ];
     const state = events
       .map((event, index) => envelope(event, index + 1))
@@ -1117,8 +1196,7 @@ describe("@workspace/agentic-protocol reducers", () => {
       taskId: "task-1",
       taskType: "subagent",
       title: "Repository audit",
-      status: "running",
-      progress: [{ message: "reading", progress: 0.5 }],
+      status: "started",
     });
     expect(state.invocations).toEqual({});
   });

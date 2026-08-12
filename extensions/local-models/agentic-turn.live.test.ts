@@ -7,7 +7,7 @@
  *   REAL llama-server (local-models extension, real weights) → streamed reply
  *   → publish back through the channel.
  *
- * Then switches the agent's model from local:lfm2.5-1.2b (utility server) to
+ * Then switches the agent's model from local:lfm2.5-2.6b (utility server) to
  * local:lfm2.5-350m (router/main server) and runs a second turn, proving
  * model switching across server processes.
  *
@@ -65,7 +65,7 @@ class LiveVessel extends AgentVesselBase {
     return { type: "agent", name: "LocalAgent", handle: "local" } as ParticipantDescriptor;
   }
   protected override getDefaultModel(): string {
-    return "local:lfm2.5-1.2b";
+    return "local:lfm2.5-2.6b";
   }
   protected override getDefaultRespondPolicy(): "all" {
     // Respond to every message — the test publishes plain user text with no
@@ -75,7 +75,7 @@ class LiveVessel extends AgentVesselBase {
 
   channelDelegate: ((method: string, args: unknown[]) => Promise<unknown>) | null = null;
 
-  protected override createChannelClient(channelId: string): ChannelClient {
+  protected override createChannelClient(_channelId: string): ChannelClient {
     const delegate = (method: string, args: unknown[]) => {
       if (!this.channelDelegate) throw new Error("channelDelegate not wired");
       return this.channelDelegate(method, args);
@@ -197,12 +197,6 @@ describe.runIf(RUN)("full agent turn over pubsub with real local models", () => 
       // ── the real vessel DO ─────────────────────────────────────────────
       const vessel = await createTestDO(LiveVessel, { __objectKey: "agent-live" });
 
-      const vesselAsDo = <T>(fn: () => Promise<T>): Promise<T> => {
-        vessel.instance.callerIdForTest = CHANNEL_TARGET;
-        vessel.instance.callerKindForTest = "do";
-        return fn();
-      };
-
       // Channel DO transport: GAD/blobstore ride the shared bridges. Structured
       // delivery itself is pumped below through the real claim/accept/settle
       // protocol, as the host DurableWorkDriver would do in production.
@@ -274,7 +268,7 @@ describe.runIf(RUN)("full agent turn over pubsub with real local models", () => 
           const callable = channel.instance as unknown as {
             subscribe(pid: string, metadata: Record<string, unknown>): Promise<unknown>;
           };
-          return callable.subscribe(pid, { ...metadata, receivesChannelEnvelopes: true });
+          return callable.subscribe(pid, metadata);
         }
         if (method === "unsubscribe") return { ok: true };
         if (method === "broadcastStoredEnvelopes") {
@@ -306,11 +300,11 @@ describe.runIf(RUN)("full agent turn over pubsub with real local models", () => 
       ).subscribe(USER_PID, { contextId: "ctx-live", name: "User", type: "panel" });
 
       // Agent joins through its OWN real subscription flow (vessel →
-      // channel client → real channel roster with receivesChannelEnvelopes).
+      // channel client → real channel roster).
       vessel.instance.callerIdForTest = USER_PID;
       vessel.instance.callerKindForTest = "panel";
       await vessel.instance.registerSubscriptionForTest(CHANNEL, {
-        model: "local:lfm2.5-1.2b",
+        model: "local:lfm2.5-2.6b",
         respondPolicy: "all",
         approvalLevel: 2,
       });
@@ -342,20 +336,11 @@ describe.runIf(RUN)("full agent turn over pubsub with real local models", () => 
             limit: 8,
           });
           for (const claim of channelClaims) {
-            const batch = (
-              claim.payload as {
-                batch: {
-                  rows: Array<{
-                    deliveryKey: string;
-                    channelSeq: number;
-                    envelope: Record<string, unknown>;
-                  }>;
-                };
-              }
-            ).batch;
-            envelopesDelivered += batch.rows.length;
-            deliveredEnvelopes.push(...batch.rows.map((row) => row.envelope));
-            const outcome = vessel.instance.acceptChannelBatch(batch as never);
+            const delivery = (claim.payload as { delivery: { envelope: Record<string, unknown> } })
+              .delivery;
+            envelopesDelivered += 1;
+            deliveredEnvelopes.push(delivery.envelope);
+            const outcome = await vessel.instance.acceptChannelDelivery(delivery as never);
             channel.instance.settleReadyWork("channel-delivery", {
               workerId: "live-host",
               itemId: claim.itemId,
@@ -364,7 +349,7 @@ describe.runIf(RUN)("full agent turn over pubsub with real local models", () => 
             });
           }
 
-          for (const queue of ["agent-inbox", "agent-effect"] as const) {
+          for (const queue of ["agent-wake", "agent-effect"] as const) {
             const claims = vessel.instance.claimReadyWork(queue, {
               workerId: "live-host",
               now: Date.now(),
@@ -372,8 +357,8 @@ describe.runIf(RUN)("full agent turn over pubsub with real local models", () => 
             });
             for (const claim of claims) {
               const outcome =
-                queue === "agent-inbox"
-                  ? await vessel.instance.executeInboxClaim({
+                queue === "agent-wake"
+                  ? await vessel.instance.executeWakeClaim({
                       itemId: claim.itemId,
                       generation: claim.generation,
                     })
@@ -446,7 +431,7 @@ describe.runIf(RUN)("full agent turn over pubsub with real local models", () => 
         .join("")
         .trim();
       expect(firstText.length, "empty assistant reply").toBeGreaterThan(0);
-      expect(ensureLoadedCalls).toContain("lfm2.5-1.2b");
+      expect(ensureLoadedCalls).toContain("lfm2.5-2.6b");
 
       // ── SWITCH: configure the agent onto the 350M router model ─────────
       // The direct settings write (the eval `agent.configure` path uses the

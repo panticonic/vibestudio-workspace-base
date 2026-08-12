@@ -2,6 +2,8 @@ import { AGENTIC_EVENT_PAYLOAD_KIND, CREDENTIAL_CONNECT_PAYLOAD_KIND } from "./c
 import type {
   ActorRef,
   AgenticEvent,
+  AutomationDefinitionSnapshot,
+  AutomationInstitutedPayload,
   ChannelForkArchivedPayload,
   ChannelForkRenamedPayload,
   ChannelForkedPayload,
@@ -41,6 +43,13 @@ export interface ChannelTimelineEntry {
   participantId: string;
   kind: string;
   createdAt: string;
+}
+
+export interface ProjectedAutomationInstitution {
+  definition: AutomationDefinitionSnapshot;
+  actor: ActorRef;
+  createdAt: string;
+  seq: number;
 }
 
 export interface ProjectedMessageTypeDefinition {
@@ -112,6 +121,7 @@ export interface ProjectedSystemNotice {
  * `channel.fork_archived` latch), NOT carried on the payload.
  */
 export interface ForkProjection {
+  parentChannelId: string;
   forkId: string;
   forkedChannelId: string;
   forkedContextId: string;
@@ -120,6 +130,7 @@ export interface ForkProjection {
   reason: string;
   actor: ParticipantRef;
   createdAtSeq: number;
+  headSeq: number;
   archived: boolean;
 }
 
@@ -136,6 +147,9 @@ export interface ChannelViewState {
   messageTypes: Record<string, ProjectedMessageTypeDefinition>;
   customMessages: Record<string, ProjectedCustomMessage>;
   systemNotices: Record<string, ProjectedSystemNotice>;
+  /** Durable definition events keyed by mission identity. A duplicate retry
+   * updates no scheduler state and collapses to the same history item. */
+  automationInstitutions: Record<string, ProjectedAutomationInstitution>;
   /** Direct-child forks rooted off this channel, in append (seq) order. */
   forks: ForkProjection[];
   turns: TurnMap;
@@ -163,6 +177,7 @@ export function createInitialChannelViewState(): ChannelViewState {
     messageTypes: {},
     customMessages: {},
     systemNotices: {},
+    automationInstitutions: {},
     forks: [],
     turns: {},
     intendedRecipientsByMessage: {},
@@ -438,6 +453,24 @@ export function reduceChannelView(
         },
       };
     }
+  } else if (event.kind === "automation.instituted") {
+    const payload = event.payload as AutomationInstitutedPayload;
+    const missionId = payload.definition.missionId;
+    const existing = next.automationInstitutions?.[missionId];
+    if (!existing || parsed.seq < existing.seq) {
+      next = {
+        ...next,
+        automationInstitutions: {
+          ...(next.automationInstitutions ?? {}),
+          [missionId]: {
+            definition: payload.definition,
+            actor: event.actor,
+            createdAt: event.createdAt,
+            seq: parsed.seq,
+          },
+        },
+      };
+    }
   } else if (
     event.kind === "turn.opened" ||
     event.kind === "turn.waiting" ||
@@ -453,6 +486,13 @@ export function reduceChannelView(
       const existing = existingTurn;
       const summary = "summary" in event.payload ? event.payload.summary : existing?.summary;
       const reason = "reason" in event.payload ? event.payload.reason : existing?.reason;
+      const metadata =
+        "metadata" in event.payload &&
+        event.payload.metadata &&
+        typeof event.payload.metadata === "object" &&
+        !Array.isArray(event.payload.metadata)
+          ? (event.payload.metadata as Record<string, unknown>)
+          : existing?.metadata;
       next = {
         ...next,
         turns: {
@@ -472,6 +512,7 @@ export function reduceChannelView(
             lastSeq: parsed.seq,
             ...(summary ? { summary } : {}),
             ...(reason ? { reason } : {}),
+            ...(metadata ? { metadata } : {}),
           },
         },
       };
@@ -547,12 +588,16 @@ export function reduceChannelView(
     // fork op appends by deterministic envelopeId, but a distinct replay path
     // could still re-present it); `createdAtSeq`/`archived` are synthesized here.
     const payload = event.payload as ChannelForkedPayload;
-    if (!next.forks.some((fork) => fork.forkId === payload.forkId)) {
+    if (
+      payload.parentChannelId === parsed.channelId &&
+      !next.forks.some((fork) => fork.forkId === payload.forkId)
+    ) {
       next = {
         ...next,
         forks: [
           ...next.forks,
           {
+            parentChannelId: payload.parentChannelId,
             forkId: payload.forkId,
             forkedChannelId: payload.forkedChannelId,
             forkedContextId: payload.forkedContextId,
@@ -561,6 +606,7 @@ export function reduceChannelView(
             reason: payload.reason,
             actor: payload.actor,
             createdAtSeq: parsed.seq,
+            headSeq: payload.headSeq,
             archived: false,
           },
         ],
@@ -568,6 +614,7 @@ export function reduceChannelView(
     }
   } else if (event.kind === "channel.fork_renamed") {
     const payload = event.payload as ChannelForkRenamedPayload;
+    if (payload.parentChannelId !== parsed.channelId) return next;
     next = {
       ...next,
       forks: next.forks.map((fork) =>
@@ -577,6 +624,7 @@ export function reduceChannelView(
   } else if (event.kind === "channel.fork_archived") {
     // One-way latch: archived can never flip back.
     const payload = event.payload as ChannelForkArchivedPayload;
+    if (payload.parentChannelId !== parsed.channelId) return next;
     next = {
       ...next,
       forks: next.forks.map((fork) =>

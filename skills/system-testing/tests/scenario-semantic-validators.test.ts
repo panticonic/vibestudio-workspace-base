@@ -5,9 +5,10 @@ import { evalLifecycleTests } from "./eval-lifecycle.js";
 import { extensionSurfaceTests } from "./extensions-surface.js";
 import { filesystemTests } from "./filesystem.js";
 import { multiUserTests } from "./multi-user.js";
+import { mobileTests } from "./mobile.js";
 import { workerTests } from "./workers.js";
 import { workspaceTests } from "./workspace.js";
-import { completedScenarioEvidence } from "./_scenario-evidence.js";
+import { completedScenarioEvidence, requireCodeOperations } from "./_scenario-evidence.js";
 
 interface EvalStep {
   code: string;
@@ -42,6 +43,7 @@ function execution(finalMessage: string, steps: EvalStep[]): TestExecutionResult
       id: `eval-message-${index}`,
       kind: "message",
       senderId: "agent",
+      senderMetadata: { type: "agent" },
       complete: true,
       contentType: "invocation",
       content: "",
@@ -77,6 +79,7 @@ function execution(finalMessage: string, steps: EvalStep[]): TestExecutionResult
     id: "final",
     kind: "message",
     senderId: "agent",
+    senderMetadata: { type: "agent" },
     complete: true,
     content: finalMessage,
   } as TestExecutionResult["messages"][number]);
@@ -94,6 +97,7 @@ function directExecution(finalMessage: string, steps: ToolStep[]): TestExecution
           id: `tool-${index}`,
           kind: "message",
           senderId: "agent",
+          senderMetadata: { type: "agent" },
           complete: true,
           contentType: "invocation",
           content: "",
@@ -119,12 +123,21 @@ function scenario(tests: { name: string }[], name: string) {
 }
 
 describe("scenario tool protocol semantics", () => {
+  it("recognizes quoted operation names independent of JavaScript quote style", () => {
+    expect(
+      requireCodeOperations("await rpc.call(target, 'providers', [])", [
+        ["rpc.call", '"providers"'],
+      ])
+    ).toEqual({ passed: true, reason: undefined });
+  });
+
   it("keeps pre-execution argument rejections diagnostic without calling them failed effects", () => {
     const result = execution("I corrected the call and completed the task.", []);
     result.messages.splice(1, 0, {
       id: "rejected",
       kind: "message",
       senderId: "agent",
+      senderMetadata: { type: "agent" },
       complete: true,
       contentType: "invocation",
       content: "tool failed",
@@ -139,6 +152,80 @@ describe("scenario tool protocol semantics", () => {
     } as unknown as TestExecutionResult["messages"][number]);
 
     expect(completedScenarioEvidence(result, [])).toMatchObject({ passed: true });
+  });
+});
+
+describe("mobile onboarding validator", () => {
+  it("combines identity-preserving projections of one provisioning result", () => {
+    const validator = scenario(mobileTests, "onboarding-desktop-mobile-install-android");
+    const fullWorkflow = [
+      'const service = await workers.resolveService("vibestudio.phone-provisioning.v1");',
+      'const providers = await rpc.call(service.targetId, "providers", []);',
+      'const devices = await rpc.call(service.targetId, "devices", []);',
+      'const provisioned = await rpc.call(service.targetId, "provision", []);',
+      'const ready = await extensions.invoke("mobile-debug", "verifyWorkspaceReady", []);',
+      "return { provisioned, ready };",
+    ].join("\n");
+
+    expect(
+      validator.validate(
+        execution("Android app installed, compatible, paired, and workspace ready.", [
+          {
+            code: fullWorkflow,
+            returnValue: {
+              provisioned: {
+                compatibleAppInstalled: true,
+                pairingStatus: "paired",
+                pairedDevice: { deviceId: "mobile-1", label: "Phone" },
+              },
+              ready: {
+                ready: true,
+                workspaceConnected: true,
+                panelHostReady: true,
+                issues: [],
+              },
+              result: {
+                provisioned: {
+                  platform: "android",
+                  installStatus: "installed",
+                  compatibleAppInstalled: true,
+                  pairingStatus: "paired",
+                  pairedDevice: "[Circular]",
+                },
+              },
+            },
+          },
+        ])
+      )
+    ).toMatchObject({ passed: true });
+  });
+
+  it("rejects a provider-less run even when failed attempts contain the full workflow", () => {
+    const validator = scenario(mobileTests, "onboarding-desktop-mobile-install-android");
+    const fullWorkflow = [
+      'const service = await workers.resolveService("vibestudio.phone-provisioning.v1");',
+      'const providers = await rpc.call(service.targetId, "providers", []);',
+      'const devices = await rpc.call(service.targetId, "devices", []);',
+      'const provisioned = await rpc.call(service.targetId, "provision", []);',
+      'const ready = await extensions.invoke("mobile-debug", "verifyWorkspaceReady", []);',
+      "return { devices, provisioned, ready };",
+    ].join("\n");
+
+    expect(
+      validator.validate(
+        execution("❌ Could not start provisioning because no desktop provider was available.", [
+          { code: fullWorkflow, status: "error", result: { details: { message: "No desktop provider available" } } },
+          {
+            code: [
+              'const service = await workers.resolveService("vibestudio.phone-provisioning.v1");',
+              'const providers = await rpc.call(service.targetId, "providers", []);',
+              "return { providersCount: providers.length, providers };",
+            ].join("\n"),
+            returnValue: { providersCount: 0, providers: [] },
+          },
+        ])
+      )
+    ).toMatchObject({ passed: false });
   });
 });
 
@@ -274,11 +361,6 @@ describe("eval authority lifecycle validators", () => {
 describe("filesystem semantic validators", () => {
   const cases = [
     ["read-write-text", "fs.writeFile(); fs.readFile();", { written: "alpha", read: "alpha" }],
-    [
-      "read-write-binary",
-      "fs.writeFile(); fs.readFile();",
-      { written: [1, 2, 3], read: [1, 2, 3] },
-    ],
     ["append-file", "fs.writeFile(); fs.appendFile(); fs.readFile();", "first\nsecond"],
     ["directory-ops", "fs.mkdir(); fs.readdir();", ["one.txt", "two.txt"]],
     ["file-stats", "fs.writeFile(); fs.stat();", { size: 5, mtimeMs: 123 }],
@@ -344,6 +426,49 @@ describe("filesystem semantic validators", () => {
         ])
       ).passed
     ).toBe(true);
+  });
+
+  it("accepts an atomic binary write joined to an exact bounded base64 read", () => {
+    const validator = scenario(filesystemTests, "read-write-binary");
+    const path = "projects/system-test-binary/asset.bin";
+    expect(
+      validator.validate(
+        directExecution("The exact bytes 00 ff 01 fe survived.", [
+          {
+            name: "apply_patch",
+            arguments: {
+              operations: [{ kind: "write_binary", path, base64: "AP8B/g==" }],
+            },
+            result: { details: { status: "applied", paths: [path] } },
+          },
+          {
+            name: "read",
+            arguments: { path, encoding: "base64", byteOffset: 0, byteLimit: 4 },
+            result: {
+              protocolContent: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    path,
+                    encoding: "base64",
+                    contentHash: "a".repeat(64),
+                    range: { start: 0, end: 4, totalBytes: 4 },
+                    base64: "AP8B/g==",
+                  }),
+                },
+              ],
+              details: {
+                encoding: "base64",
+                contentHash: "a".repeat(64),
+                byteRange: { start: 0, end: 4, totalBytes: 4 },
+              },
+            },
+          },
+        ])
+      ).passed
+    ).toBe(true);
+    expect(validator.validation).toBe("harness");
+    expect(validator.workspaceRepoFixture).toEqual({ kind: "content", section: "projects" });
   });
 
   it("accepts focused nested writes and a structured listing as directory evidence", () => {

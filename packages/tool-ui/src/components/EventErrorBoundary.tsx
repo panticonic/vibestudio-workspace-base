@@ -60,7 +60,13 @@ const ASYNC_EVENT_ATTRIBUTION_WINDOW_MS = 5_000;
 const registeredBoundaries = new Map<EventErrorBoundary, HTMLDivElement>();
 
 let globalListenersInstalled = false;
-let boundaryCount = 0;
+
+function activateBoundary(boundary: EventErrorBoundary): void {
+  activeBoundary = boundary;
+  queueMicrotask(() => {
+    if (activeBoundary === boundary) activeBoundary = null;
+  });
+}
 
 function installGlobalListeners() {
   if (globalListenersInstalled) return;
@@ -151,7 +157,7 @@ export class EventErrorBoundary extends Component<
 
   static getDerivedStateFromProps(
     props: EventErrorBoundaryProps,
-    state: EventErrorBoundaryState,
+    state: EventErrorBoundaryState
   ): Partial<EventErrorBoundaryState> | null {
     if (props.resetKey !== state.prevResetKey) {
       return { error: null, prevResetKey: props.resetKey };
@@ -166,7 +172,6 @@ export class EventErrorBoundary extends Component<
   // ── Lifecycle — manage the global listeners and boundary registry ────────
 
   componentDidMount(): void {
-    boundaryCount++;
     installGlobalListeners();
     if (this.containerRef.current) {
       registeredBoundaries.set(this, this.containerRef.current);
@@ -183,7 +188,6 @@ export class EventErrorBoundary extends Component<
   }
 
   componentWillUnmount(): void {
-    boundaryCount--;
     registeredBoundaries.delete(this);
     if (activeBoundary === this) activeBoundary = null;
   }
@@ -200,14 +204,11 @@ export class EventErrorBoundary extends Component<
   /** Capture-phase handler — marks this boundary as the active target and
    *  records the event target for async-rejection attribution. */
   private trackEvent = (e: SyntheticEvent): void => {
-    activeBoundary = this;
+    activateBoundary(this);
     if (e.target instanceof Element) {
       lastEventTarget = e.target;
       lastEventTime = Date.now();
     }
-    queueMicrotask(() => {
-      if (activeBoundary === this) activeBoundary = null;
-    });
   };
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -222,9 +223,9 @@ export class EventErrorBoundary extends Component<
           style={{
             padding: "12px 16px",
             borderRadius: 6,
-            background: "var(--red-3, #fee)",
-            border: "1px solid var(--red-6, #e5c5c5)",
-            color: "var(--red-11, #c33)",
+            background: "var(--intent-error-surface, var(--red-a3))",
+            border: "1px solid var(--intent-error-border, var(--red-a6))",
+            color: "var(--intent-error-text, var(--red-11))",
             fontSize: 13,
             lineHeight: 1.5,
           }}

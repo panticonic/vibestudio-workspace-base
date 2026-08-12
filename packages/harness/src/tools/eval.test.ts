@@ -44,6 +44,9 @@ describe("formatEvalResult (shared by the eval tool's execute + the agent's defe
     expect(tool.description).toContain("await help()");
     expect(tool.description).toContain('await help("workers")');
     expect(tool.description).toContain("before guessing an API or return shape");
+    expect(tool.description).toContain("handle.cdp.screenshot()");
+    expect(tool.description).toContain("page.consoleEvents()");
+    expect(tool.description).toContain("{ entries, errors, dropped, capacity }");
   });
 
   it("documents the warm notebook contract and makes a cold restart impossible to miss", () => {
@@ -226,16 +229,42 @@ describe("formatEvalResult (shared by the eval tool's execute + the agent's defe
     expect(text).toContain("[scope] keys: x, y (2 total)");
     // The untruncated result is preserved on `details` for the harness.
     expect(out.details).toBe(result);
+    expect(out.isError).toBe(false);
+  });
+
+  it("projects a canonical panel screenshot as native image content without base64 text", () => {
+    const data = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB";
+    const out = formatEvalResult({
+      success: true,
+      console: "",
+      returnValue: { data, mimeType: "image/png", width: 1280, height: 720 },
+    });
+
+    expect(textOf(out)).toContain("attached image/png image (1280×720)");
+    expect(textOf(out)).not.toContain(data);
+    expect(out.content[1]).toEqual({ type: "image", mimeType: "image/png", data });
+    expect(out.details).toMatchObject({
+      returnValue: {
+        protocol: "eval-image-result.v1",
+        attached: true,
+        mimeType: "image/png",
+        width: 1280,
+        height: 720,
+      },
+    });
+    expect(JSON.stringify(out.details)).not.toContain(data);
   });
 
   it("formats a failure: error line, no return value", () => {
-    const text = textOf(formatEvalResult({ success: false, console: "", error: "boom" }));
+    const out = formatEvalResult({ success: false, console: "", error: "boom" });
+    const text = textOf(out);
     expect(text).toContain("[eval] Error: boom");
     expect(text).not.toContain("[eval] Return value");
     expect(text).toContain("[scope] (empty)");
+    expect(out.isError).toBe(true);
   });
 
-  it("renders structured failure data and preserves it on tool details", () => {
+  it("references structured failure data once and preserves it on tool details", () => {
     const result: EvalRunResult = {
       success: false,
       console: "",
@@ -250,8 +279,8 @@ describe("formatEvalResult (shared by the eval tool's execute + the agent's defe
     const out = formatEvalResult(result);
     const text = textOf(out);
 
-    expect(text).toContain("[eval] Failure data:");
-    expect(text).toContain('"committedEventId": "event:committed"');
+    expect(text).toContain("[eval] Structured failure: scaffold_publication_failed");
+    expect(text).not.toContain('"committedEventId": "event:committed"');
     expect(out.details).toBe(result);
   });
 
@@ -267,18 +296,18 @@ describe("formatEvalResult (shared by the eval tool's execute + the agent's defe
     expect(text).not.toContain("[eval] Return value");
   });
 
-  it("windows oversized console with a recovery notice pointing at $lastConsole", () => {
+  it("windows oversized console with its stable recovery slot", () => {
     const big = "a".repeat(150_000);
     const text = textOf(formatEvalResult({ success: true, console: big }));
     expect(text.length).toBeLessThan(big.length); // truncated
     expect(text).toContain("truncated");
-    expect(text).toContain("scope.$lastConsole");
+    expect(text).toContain("scope.$lastLargeConsole");
   });
 
-  it("windows an oversized return value pointing at $lastReturn", () => {
+  it("windows an oversized return value with its stable recovery slot", () => {
     const big = "b".repeat(150_000);
     const text = textOf(formatEvalResult({ success: true, console: "", returnValue: big }));
-    expect(text).toContain("scope.$lastReturn");
+    expect(text).toContain("scope.$lastLargeReturn");
     expect(text).toContain("truncated");
   });
 

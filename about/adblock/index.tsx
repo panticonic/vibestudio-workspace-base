@@ -126,7 +126,12 @@ function ToggleRow({
           {description}
         </Text>
       </Flex>
-      <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
+      <Switch
+        aria-label={label}
+        checked={checked}
+        onCheckedChange={onCheckedChange}
+        disabled={disabled}
+      />
     </Flex>
   );
 }
@@ -333,7 +338,14 @@ function AdBlockSettingsPage() {
 
   if (loading) {
     return (
-      <Flex align="center" justify="center" gap="2" style={{ height: "100dvh" }}>
+      <Flex
+        align="center"
+        justify="center"
+        gap="2"
+        style={{ height: "100dvh" }}
+        role="status"
+        aria-label="Loading ad block settings"
+      >
         <Spinner />
         <Text>Loading ad block settings...</Text>
       </Flex>

@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "Vibestudio Shell",
+    "icon": "🖥️",
     "app": {
       "target": "electron",
       "renderer": "index.tsx",
@@ -82,15 +83,6 @@
         },
         {
           "capability": "approvals.read",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "gated",
-          "evidence": "intentional-broad"
-        },
-        {
-          "capability": "automations.control",
           "resource": {
             "kind": "prefix",
             "prefix": ""

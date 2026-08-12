@@ -1,13 +1,13 @@
 import React from "react";
-import { View, Text, StyleSheet, Pressable, SafeAreaView, ScrollView, Alert } from "react-native";
+import { View, Text, StyleSheet, Pressable, ScrollView, Alert } from "react-native";
+import { SafeAreaView } from "react-native-safe-area-context";
 import type { StackNavigationProp } from "@react-navigation/stack";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   clearShellCredential,
   loadShellCredential,
-  persistStoredShellCredential,
+  persistStoredMobileConnection,
   type MobileHubWorkspace,
-  type StoredShellCredential,
 } from "../services/mobileCredentials";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { resetToNativeBootstrap } from "../services/auth";
@@ -122,7 +122,7 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
   );
 
   const performDisconnect = async () => {
-    let previousCredential: StoredShellCredential | null;
+    let previousCredential: Awaited<ReturnType<typeof loadShellCredential>>;
     try {
       previousCredential = await loadShellCredential();
       await clearShellCredential();
@@ -139,7 +139,7 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
       if (!reset.reloading) throw new Error("The native host did not start the pairing reload.");
     } catch (error) {
       try {
-        if (previousCredential) await persistStoredShellCredential(previousCredential);
+        if (previousCredential) await persistStoredMobileConnection(previousCredential);
       } catch (rollbackError) {
         Alert.alert(
           "Disconnect needs attention",
@@ -210,6 +210,7 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.content}
+        automaticallyAdjustKeyboardInsets
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.headerRow}>

@@ -156,9 +156,9 @@ describe("chatMessagesFromChannelView", () => {
       payload: {
         ...textPayload("msg-model", "assistant", "done"),
         model: {
-          ref: "local:lfm2.5-1.2b",
+          ref: "local:lfm2.5-2.6b",
           provider: "local",
-          displayName: "LFM2.5 1.2B Instruct",
+          displayName: "LFM2.5 2.6B",
         },
       },
       createdAt: "2026-05-20T12:00:00.000Z",
@@ -169,9 +169,9 @@ describe("chatMessagesFromChannelView", () => {
     expect(chatMessagesFromChannelView(state)[0]).toMatchObject({
       id: "msg-model",
       model: {
-        ref: "local:lfm2.5-1.2b",
+        ref: "local:lfm2.5-2.6b",
         provider: "local",
-        displayName: "LFM2.5 1.2B Instruct",
+        displayName: "LFM2.5 2.6B",
       },
     });
   });
@@ -196,10 +196,12 @@ describe("chatMessagesFromChannelView", () => {
       actor: agent,
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
+        parentChannelId: "channel-1",
         forkId: "fork-1",
         forkedChannelId: "fork-1",
         forkedContextId: "ctx-fork",
         forkPointId: 10,
+        headSeq: 10,
         label: "Fork",
         reason: "fork",
         actor: agent,
@@ -217,6 +219,29 @@ describe("chatMessagesFromChannelView", () => {
       "fork:fork-1",
       "msg-2",
     ]);
+  });
+
+  it("does not project an inherited parent fork announcement as a child fork", () => {
+    const inherited: AgenticEvent<"channel.forked"> = {
+      kind: "channel.forked",
+      actor: agent,
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        parentChannelId: "parent-channel",
+        forkId: "sibling-fork",
+        forkedChannelId: "sibling-channel",
+        forkedContextId: "sibling-context",
+        forkPointId: 8,
+        headSeq: 8,
+        label: "Sibling",
+        reason: "fork",
+        actor: agent,
+      },
+      createdAt: "2026-05-20T12:00:03.000Z",
+    };
+    const state = reduceChannelView(createInitialChannelViewState(), envelope(inherited, 9));
+    expect(state.forks).toEqual([]);
+    expect(chatMessagesFromChannelView(state)).toEqual([]);
   });
 
   it("recovers docs_open name + args from a catalog-entry result when the tool name is lost", () => {
@@ -1872,97 +1897,6 @@ describe("chatMessagesFromChannelView", () => {
     });
   });
 
-  it("projects subagent progress updates as a structured timestamped feed with running status", () => {
-    const started: AgenticEvent<"task.started"> = {
-      kind: "task.started",
-      actor: agent,
-      causality: { taskId: brandId<TaskId>("inv-subagent") },
-      payload: {
-        protocol: AGENTIC_PROTOCOL_VERSION,
-        taskType: "subagent",
-        title: "background audit",
-        details: {
-          subagent: {
-            runId: "inv-subagent",
-            mode: "fresh",
-            taskChannelId: "task-inv-subagent",
-            contextId: "ctx-inv-subagent",
-            label: "background audit",
-          },
-        },
-      },
-      createdAt: "2026-05-20T12:00:01.000Z",
-    };
-    const progressEvents: Array<AgenticEvent<"task.progress">> = [
-      {
-        kind: "task.progress",
-        actor: agent,
-        causality: { taskId: brandId<TaskId>("inv-subagent") },
-        payload: {
-          protocol: AGENTIC_PROTOCOL_VERSION,
-          data: { subagent: { kind: "turn-started", messageSeq: 41 } },
-        },
-        createdAt: "2026-05-20T12:00:02.000Z",
-      },
-      {
-        kind: "task.progress",
-        actor: agent,
-        causality: { taskId: brandId<TaskId>("inv-subagent") },
-        payload: {
-          protocol: AGENTIC_PROTOCOL_VERSION,
-          data: { subagent: { kind: "tool-started", tool: "Read", messageSeq: 42 } },
-        },
-        createdAt: "2026-05-20T12:00:03.000Z",
-      },
-      {
-        kind: "task.progress",
-        actor: agent,
-        causality: { taskId: brandId<TaskId>("inv-subagent") },
-        payload: {
-          protocol: AGENTIC_PROTOCOL_VERSION,
-          data: {
-            subagent: {
-              kind: "said",
-              text: "Found three issues so far.",
-              messageSeq: 43,
-              say: true,
-            },
-          },
-        },
-        createdAt: "2026-05-20T12:00:04.000Z",
-      },
-    ];
-
-    // Parent relays may arrive out of order when the child executes calls in
-    // parallel; the task card restores authoritative child-channel order.
-    const state = [started, progressEvents[1]!, progressEvents[0]!, progressEvents[2]!]
-      .map((event, index) => envelope(event, index + 1))
-      .reduce(reduceChannelView, createInitialChannelViewState());
-
-    expect(chatMessagesFromChannelView(state)[0]).toMatchObject({
-      contentType: "task",
-      complete: false,
-      task: {
-        id: "inv-subagent",
-        subagent: { runId: "inv-subagent", label: "background audit" },
-        execution: {
-          status: "running",
-          progress: [
-            { kind: "turn-started", messageSeq: 41, at: "2026-05-20T12:00:02.000Z" },
-            { kind: "tool-started", tool: "Read", messageSeq: 42, at: "2026-05-20T12:00:03.000Z" },
-            {
-              kind: "said",
-              text: "Found three issues so far.",
-              messageSeq: 43,
-              say: true,
-              at: "2026-05-20T12:00:04.000Z",
-            },
-          ],
-        },
-      },
-    });
-  });
-
   it("preserves provider method names and streamed output across cross-participant invocation events", () => {
     const provider = { kind: "panel" as const, id: "provider-1", displayName: "Provider" };
     const started: AgenticEvent<"invocation.started"> = {
@@ -2230,6 +2164,105 @@ describe("chatMessagesFromChannelView", () => {
     ).toBe(false);
   });
 
+  it("projects scheduled automation provenance into a durable inspectable history row", () => {
+    const automation = {
+      missionId: "mission-daily",
+      runId: "run-42",
+      name: "Daily check",
+      revision: 3,
+      action: "eval" as const,
+      trigger: "scheduled" as const,
+      startedAt: Date.parse("2026-05-20T12:00:00.000Z"),
+      createdAt: Date.parse("2026-05-01T09:00:00.000Z"),
+      activatedAt: Date.parse("2026-05-02T09:00:00.000Z"),
+      runNumber: 7,
+      schedule: {
+        kind: "cron" as const,
+        expression: "5 5 * * THU",
+        timezone: "America/New_York",
+        untilAt: Date.parse("2027-01-01T05:00:00.000Z"),
+        maxRuns: 12,
+      },
+    };
+    const opened: AgenticEvent<"turn.opened"> = {
+      kind: "turn.opened",
+      actor: agent,
+      turnId: brandId<TurnId>("turn-automation"),
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        metadata: { origin: "scheduled", automation },
+      },
+      createdAt: "2026-05-20T12:00:00.000Z",
+    };
+    const closed: AgenticEvent<"turn.closed"> = {
+      kind: "turn.closed",
+      actor: agent,
+      turnId: brandId<TurnId>("turn-automation"),
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        summary: "42 checks passed",
+        metadata: { origin: "scheduled", automation },
+      },
+      createdAt: "2026-05-20T12:00:03.000Z",
+    };
+
+    const state = [opened, closed]
+      .map((event, index) => envelope(event, index + 1))
+      .reduce(reduceChannelView, createInitialChannelViewState());
+
+    expect(chatMessagesFromChannelView(state)).toContainEqual(
+      expect.objectContaining({
+        id: "automation:run-42",
+        contentType: "automation",
+        automation: {
+          snapshot: automation,
+          status: "succeeded",
+          openedAt: "2026-05-20T12:00:00.000Z",
+          closedAt: "2026-05-20T12:00:03.000Z",
+          summary: "42 checks passed",
+        },
+      })
+    );
+  });
+
+  it("projects an automation draft at institution time before any run exists", () => {
+    const instituted: AgenticEvent<"automation.instituted"> = {
+      kind: "automation.instituted",
+      actor: agent,
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        definition: {
+          missionId: "mission-weekly",
+          name: "Weekly review",
+          summary: "Review the project every Thursday.",
+          revision: 1,
+          action: "prompt",
+          createdAt: Date.parse("2026-05-20T12:00:00.000Z"),
+          schedule: {
+            kind: "cron",
+            expression: "5 5 * * THU",
+            timezone: "America/New_York",
+          },
+        },
+      },
+      createdAt: "2026-05-20T12:00:00.000Z",
+    };
+    const state = reduceChannelView(createInitialChannelViewState(), envelope(instituted, 7));
+
+    expect(chatMessagesFromChannelView(state)).toContainEqual(
+      expect.objectContaining({
+        id: "automation:instituted:mission-weekly",
+        seq: 7,
+        contentType: "automation",
+        complete: true,
+        automationDefinition: {
+          snapshot: instituted.payload.definition,
+          institutedAt: instituted.createdAt,
+        },
+      })
+    );
+  });
+
   it("orders open turn typing by the latest event in that turn", () => {
     const opened: AgenticEvent<"turn.opened"> = {
       kind: "turn.opened",
@@ -2371,6 +2404,45 @@ describe("chatMessagesFromChannelView", () => {
         props: { step: "connect" },
       },
     });
+  });
+
+  it("replaces a stable inline UI id and sorts it by the latest render", () => {
+    const first: AgenticEvent<"ui.inline_rendered"> = {
+      kind: "ui.inline_rendered",
+      actor: agent,
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        uiType: "inline",
+        id: "setup-overview",
+        source: { type: "file", path: "skills/onboarding/SetupHub.tsx" },
+        props: { revision: 1 },
+      },
+      createdAt: "2026-05-20T12:00:01.000Z",
+    };
+    const middle: AgenticEvent<"message.completed"> = {
+      kind: "message.completed",
+      actor: agent,
+      causality: { messageId: brandId<MessageId>("between") },
+      payload: textPayload("between", "assistant", "Refresh setup"),
+      createdAt: "2026-05-20T12:00:02.000Z",
+    };
+    const updated: AgenticEvent<"ui.inline_rendered"> = {
+      ...first,
+      payload: { ...first.payload, props: { revision: 2 } },
+      createdAt: "2026-05-20T12:00:03.000Z",
+    };
+
+    const state = [first, middle, updated]
+      .map((event, index) => envelope(event, index + 1))
+      .reduce(reduceChannelView, createInitialChannelViewState());
+    const messages = chatMessagesFromChannelView(state);
+
+    expect(messages.map((message) => message.id)).toEqual([
+      "between",
+      "inline-ui:participant-agent-1:setup-overview",
+    ]);
+    expect(messages[1]?.inlineUi?.props).toEqual({ revision: 2 });
+    expect(messages[1]?.inlineUi?.renderedAt).toBe("2026-05-20T12:00:03.000Z");
   });
 
   it("projects typed approval events into approval chat messages", () => {

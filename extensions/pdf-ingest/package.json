@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "PDF Ingest",
+    "icon": "./assets/icon.svg",
     "entry": "index.ts",
     "sourcemap": true,
     "extension": {
@@ -60,5 +61,8 @@
     "@tesseract.js-data/eng": "^1.0.0",
     "pdfjs-dist": "^6.1.200",
     "tesseract.js": "^7.0.0"
+  },
+  "devDependencies": {
+    "@vibestudio/extension": "workspace:*"
   }
 }

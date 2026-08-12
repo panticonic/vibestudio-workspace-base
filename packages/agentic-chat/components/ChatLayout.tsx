@@ -10,7 +10,29 @@ import { Outbox } from "./Outbox";
 import { PendingDeliveryQueue } from "./PendingDeliveryQueue";
 import { ChatInput } from "./ChatInput";
 import { ChatDebugConsole } from "./ChatDebugConsole";
+import type { ChatMessageAreaProps } from "./ChatMessageArea";
+import type { ResolvedAgenticChatFeatures } from "../features";
 import "../styles.css";
+
+export interface ChatLayoutProps extends Pick<
+  ChatMessageAreaProps,
+  "renderMessage" | "renderInlineGroup" | "renderInvocation" | "renderEmptyState"
+> {
+  /** Resolved browser-owned capabilities to mount in the stock layout. */
+  features: ResolvedAgenticChatFeatures;
+  /** Product-specific prompt shown when the composer is empty. */
+  composerPlaceholder?: string;
+  /** Recipients used when composer text contains no explicit @mention. */
+  composerDefaultMentions?: readonly string[];
+  /** Product-owned readiness gate for the composer. */
+  composerDisabled?: boolean;
+  /** Replace, wrap, or elide the stock conversation header. */
+  renderHeader?: (defaultContent: React.ReactNode) => React.ReactNode;
+  /** Replace, wrap, or elide the stock pending-delivery and outbox surfaces. */
+  renderDeliveryStatus?: (defaultContent: React.ReactNode) => React.ReactNode;
+  /** Replace, wrap, or elide the stock composer. */
+  renderComposer?: (defaultContent: React.ReactNode) => React.ReactNode;
+}
 
 /**
  * Default full chat layout — drop-in replacement for the old ChatPhase.
@@ -26,16 +48,43 @@ import "../styles.css";
  * ```tsx
  * <ChatProvider value={chatState}>
  *   <MyCustomHeader />
- *   <ChatMessageArea />
+ *   <ChatMessageArea features={features} />
  *   <ChatInput />
  * </ChatProvider>
  * ```
  */
-export const ChatLayout = React.memo(function ChatLayout() {
+export const ChatLayout = React.memo(function ChatLayout({
+  renderMessage,
+  renderInlineGroup,
+  renderInvocation,
+  renderEmptyState,
+  features,
+  composerPlaceholder,
+  composerDefaultMentions,
+  composerDisabled,
+  renderHeader,
+  renderDeliveryStatus,
+  renderComposer,
+}: ChatLayoutProps) {
+  const defaultHeader = <ChatHeader />;
+  const defaultDeliveryStatus = (
+    <>
+      <PendingDeliveryQueue />
+      <Outbox />
+    </>
+  );
+  const defaultComposer = (
+    <ChatInput
+      placeholder={composerPlaceholder}
+      defaultMentions={composerDefaultMentions}
+      disabled={composerDisabled}
+    />
+  );
   return (
     <>
       <Flex
         className="agentic-chat-root"
+        data-part="chat-root"
         direction="column"
         style={{
           height: "100%",
@@ -43,20 +92,25 @@ export const ChatLayout = React.memo(function ChatLayout() {
           width: "100%",
           boxSizing: "border-box",
           overflow: "hidden",
-          gap: "var(--chat-root-gap)",
+          gap: "var(--agentic-root-gap)",
           padding:
-            "max(var(--chat-root-padding), env(safe-area-inset-top, 0)) max(var(--chat-root-padding), env(safe-area-inset-right, 0)) max(var(--chat-root-padding), env(safe-area-inset-bottom, 0)) max(var(--chat-root-padding), env(safe-area-inset-left, 0))",
+            "max(var(--agentic-root-padding), env(safe-area-inset-top, 0)) max(var(--agentic-root-padding), env(safe-area-inset-right, 0)) max(var(--agentic-root-padding), env(safe-area-inset-bottom, 0)) max(var(--agentic-root-padding), env(safe-area-inset-left, 0))",
         }}
       >
-        <ChatHeader />
+        {renderHeader ? renderHeader(defaultHeader) : defaultHeader}
         <ChatConnectionErrorBanner />
         <ChatDirtyRepoWarnings />
-        <LazyChatActionBar />
-        <ChatMessageArea />
-        <LazyChatFeedbackArea />
-        <PendingDeliveryQueue />
-        <Outbox />
-        <ChatInput />
+        {features.actionBar ? <LazyChatActionBar /> : null}
+        <ChatMessageArea
+          renderMessage={renderMessage}
+          renderInlineGroup={renderInlineGroup}
+          renderInvocation={renderInvocation}
+          renderEmptyState={renderEmptyState}
+          features={features}
+        />
+        {features.feedback ? <LazyChatFeedbackArea /> : null}
+        {renderDeliveryStatus ? renderDeliveryStatus(defaultDeliveryStatus) : defaultDeliveryStatus}
+        {renderComposer ? renderComposer(defaultComposer) : defaultComposer}
       </Flex>
       <ChatDebugConsole />
     </>

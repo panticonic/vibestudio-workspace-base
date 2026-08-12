@@ -38,6 +38,7 @@ const config: AgentLoopConfig = {
     maxTokens: 64_000,
   },
   thinkingLevel: "medium",
+  fastMode: false,
   approvalLevel: 2,
   respondPolicy: "all",
   systemPromptHash: "blob:sys",
@@ -45,10 +46,10 @@ const config: AgentLoopConfig = {
   roster: { participants: [] },
 };
 
-const fallbackModelRef = "local:lfm2.5-1.2b";
+const fallbackModelRef = "local:lfm2.5-2.6b";
 const fallbackModelSpec: NonNullable<AgentLoopConfig["fallbackModelSpec"]> = {
-  id: "lfm2.5-1.2b",
-  name: "LFM2.5 1.2B Instruct",
+  id: "lfm2.5-2.6b",
+  name: "LFM2.5 2.6B",
   api: "openai-completions",
   provider: "local",
   baseUrl: "http://127.0.0.1:0/v1",
@@ -83,12 +84,14 @@ async function makeHarness(opts: {
   gadFault?: (method: string) => Error | null;
   onGadCall?: (method: string) => void;
   channelPublish?: ChannelCallPort["publish"];
+  onTurnClosed?: NonNullable<DriverDeps["onTurnClosed"]>;
 }) {
   const gad = opts.gad ?? (await createTestDO(GadWorkspaceDO, { __objectKey: "gad" }));
   const driverHost =
     opts.driverSql ?? (await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" }));
   const ephemerals: EphemeralEmit[] = [];
   const channelPublishes: Array<Parameters<ChannelCallPort["publish"]>[0]> = [];
+  const readReceipts: Array<Parameters<ChannelCallPort["recordReadReceipt"]>[0]> = [];
   const channelCalls: Array<Parameters<ChannelCallPort["callMethod"]>[0]> = [];
   const cancelledChannelCalls: Array<{ channelId: string; transportCallId: string }> = [];
   const alarms: number[] = [];
@@ -144,6 +147,9 @@ async function makeHarness(opts: {
           channelPublishes.push(input);
           await opts.channelPublish?.(input);
         },
+        recordReadReceipt: async (input: Parameters<ChannelCallPort["recordReadReceipt"]>[0]) => {
+          readReceipts.push(input);
+        },
         sendSignalEvent: async () => {},
       },
       credentials: {
@@ -158,6 +164,7 @@ async function makeHarness(opts: {
     onEphemeral: (emit) => ephemerals.push(emit),
     now: () => (now += 7),
     scheduleAlarm: (at) => alarms.push(at),
+    ...(opts.onTurnClosed ? { onTurnClosed: opts.onTurnClosed } : {}),
     executorOverride: (descriptor) => {
       const override = opts.executorOverride?.(descriptor);
       if (override) return override;
@@ -176,6 +183,7 @@ async function makeHarness(opts: {
     ephemerals,
     alarms,
     channelPublishes,
+    readReceipts,
     channelCalls,
     cancelledChannelCalls,
     setNow,
@@ -201,6 +209,35 @@ function promptIncoming(envelopeId = "env-1", content = "hello", metadata?: Agen
       content,
       senderRef: { kind: "user" as const, id: "panel:user", participantId: "panel:user" },
       ...(metadata ? { metadata } : {}),
+    },
+  };
+}
+
+function observationIncoming(
+  envelopeId = "observation-env-1",
+  payloadKind = "application.incident.v1"
+) {
+  const structuredInput = {
+    kind: "channel-observation" as const,
+    version: 1 as const,
+    source: {
+      channelId: CHANNEL,
+      envelopeId,
+      payloadKind,
+      timestamp: 1_786_400_000_000,
+      sender: { kind: "external" as const, id: "app:incident-feed" },
+    },
+    payload: { incidentId: envelopeId },
+  };
+  return {
+    type: "command" as const,
+    command: {
+      kind: "prompt" as const,
+      channelId: CHANNEL,
+      source: { envelopeId },
+      content: `Channel observation: ${payloadKind}`,
+      structuredInput,
+      senderRef: structuredInput.source.sender,
     },
   };
 }
@@ -270,6 +307,222 @@ function deferred<T>() {
 }
 
 describe("AgentLoopDriver", () => {
+  it("journals a model-free automation eval as one visible invocation and closes from its result", async () => {
+    const closed: Parameters<NonNullable<DriverDeps["onTurnClosed"]>>[0][] = [];
+    const observed: EffectDescriptor[] = [];
+    const harness = await makeHarness({
+      script: {
+        model: [],
+        tool: [{ kind: "tool", result: "eval completed", isError: false }],
+      },
+      onTurnClosed: (input) => {
+        closed.push(input);
+      },
+      executorOverride: (descriptor) => {
+        observed.push(descriptor);
+        return null;
+      },
+    });
+
+    await harness.driver.handleIncoming(CHANNEL, {
+      type: "command",
+      command: {
+        kind: "invoke",
+        channelId: CHANNEL,
+        source: { envelopeId: "automation:run-eval" },
+        tool: "eval",
+        args: { code: "return 42", authority: { approvals: "pregranted-only" } },
+        metadata: {
+          origin: "scheduled",
+          completion: "after-invocation",
+          automation: {
+            missionId: "mission-eval",
+            runId: "run-eval",
+            name: "Daily check",
+            revision: 1,
+            action: "eval",
+            trigger: "scheduled",
+            startedAt: 10,
+            createdAt: 1,
+            schedule: { everyMs: 86_400_000 },
+          },
+        },
+      },
+    });
+    await settle(harness.driver);
+
+    expect(observed.map((descriptor) => descriptor.kind)).toEqual(["local_tool"]);
+    expect(observed[0]).toMatchObject({
+      kind: "local_tool",
+      tool: "eval",
+      args: { code: "return 42", authority: { approvals: "pregranted-only" } },
+    });
+    expect(await logKinds(harness.gad)).toEqual([
+      "turn.opened",
+      "message.completed",
+      "invocation.started",
+      "invocation.completed",
+      "turn.closed",
+    ]);
+    expect(closed).toEqual([
+      expect.objectContaining({
+        summary: "eval completed",
+        metadata: expect.objectContaining({
+          automation: expect.objectContaining({ runId: "run-eval", action: "eval" }),
+        }),
+      }),
+    ]);
+  });
+
+  it("reports only the exact automation turn's final assistant message", async () => {
+    const closed: Parameters<NonNullable<DriverDeps["onTurnClosed"]>>[0][] = [];
+    let attempt = 0;
+    const harness = await makeHarness({
+      script: { model: [], tool: [] },
+      onTurnClosed: (input) => {
+        closed.push(input);
+      },
+      executorOverride: (descriptor) => {
+        if (descriptor.kind !== "model_call") return null;
+        return {
+          kind: "model_call",
+          async execute() {
+            attempt += 1;
+            if (attempt === 1) return textReply("first run complete");
+            throw new Error(rawInvalidToolSchemaError());
+          },
+        } satisfies EffectExecutor;
+      },
+    });
+
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("automation-one", "first", {
+        origin: "scheduled",
+        automation: {
+          missionId: "mission-one",
+          runId: "run-one",
+          name: "One",
+          revision: 1,
+          action: "prompt",
+          trigger: "scheduled",
+          startedAt: 1,
+          createdAt: 1,
+          schedule: { everyMs: 60_000 },
+        },
+      })
+    );
+    await settle(harness.driver);
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("automation-two", "second", {
+        origin: "scheduled",
+        automation: {
+          missionId: "mission-two",
+          runId: "run-two",
+          name: "Two",
+          revision: 1,
+          action: "prompt",
+          trigger: "scheduled",
+          startedAt: 2,
+          createdAt: 1,
+          schedule: { everyMs: 60_000 },
+        },
+      })
+    );
+    await settle(harness.driver);
+
+    expect(closed).toEqual([
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          automation: expect.objectContaining({ runId: "run-one" }),
+        }),
+        finalMessage: "first run complete",
+      }),
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          automation: expect.objectContaining({ runId: "run-two" }),
+        }),
+        reason: "work_failed",
+      }),
+    ]);
+    expect(closed[1]).not.toHaveProperty("finalMessage");
+  });
+
+  it("deduplicates a replayed structured observation by source envelope", async () => {
+    const harness = await makeHarness({ script: { model: [textReply("done")], tool: [] } });
+    const incoming = observationIncoming("observation-replayed");
+
+    await harness.driver.handleIncoming(CHANNEL, incoming);
+    await harness.driver.handleIncoming(CHANNEL, incoming);
+    await settle(harness.driver);
+
+    expect((await logKinds(harness.gad)).filter((kind) => kind === "turn.opened")).toHaveLength(1);
+    const userRows = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
+      harness.gad,
+      `SELECT payload_ref_json FROM log_events WHERE log_id = ? AND payload_kind = 'message.completed' ORDER BY seq`,
+      [LOG_ID]
+    ).rows.filter((row) => JSON.parse(row.payload_ref_json).role === "user");
+    expect(userRows).toHaveLength(1);
+    expect(JSON.parse(userRows[0]!.payload_ref_json)).toMatchObject({
+      structuredInput: incoming.command.structuredInput,
+    });
+  });
+
+  it("admits different observation envelopes as different inputs", async () => {
+    const harness = await makeHarness({
+      script: { model: [textReply("first"), textReply("second")], tool: [] },
+    });
+
+    await harness.driver.handleIncoming(CHANNEL, observationIncoming("observation-a"));
+    await settle(harness.driver);
+    await harness.driver.handleIncoming(CHANNEL, observationIncoming("observation-b"));
+    await settle(harness.driver);
+
+    expect((await logKinds(harness.gad)).filter((kind) => kind === "turn.opened")).toHaveLength(2);
+    expect(
+      (await harness.driver.loop(CHANNEL)).state.entries.filter((entry) => entry.kind === "user")
+    ).toHaveLength(2);
+  });
+
+  it("uses the existing steering queue for an observation during an open turn", async () => {
+    const harness = await makeHarness({ script: { model: [], tool: [] } });
+
+    await harness.driver.handleIncoming(CHANNEL, observationIncoming("observation-open-a"));
+    const preparation = harness.driver.outbox.all()[0];
+    expect(preparation).toMatchObject({ kind: "prompt_artifacts" });
+    await harness.driver.applyOutcome(preparation!, { kind: "prompt-artifacts", patch: {} });
+    const originalTurnId = (await harness.driver.loop(CHANNEL)).state.openTurn?.turnId;
+
+    await harness.driver.handleIncoming(CHANNEL, observationIncoming("observation-open-b"));
+
+    const state = (await harness.driver.loop(CHANNEL)).state;
+    expect(state.openTurn?.turnId).toBe(originalTurnId);
+    expect(state.steeringQueue).toHaveLength(1);
+    expect(state.steeringQueue[0]?.turnTriggerEnvelopeId).toBe("observation-open-b");
+    expect((await logKinds(harness.gad)).filter((kind) => kind === "turn.opened")).toHaveLength(1);
+  });
+
+  it("can retry the same observation after failure before prompt admission", async () => {
+    let failAdmission = true;
+    const harness = await makeHarness({
+      script: { model: [], tool: [] },
+      gadFault: (method) =>
+        failAdmission && method === "appendLogEvent" ? new Error("trajectory unavailable") : null,
+    });
+    const incoming = observationIncoming("observation-retry");
+
+    await expect(harness.driver.handleIncoming(CHANNEL, incoming)).rejects.toThrow(
+      "trajectory unavailable"
+    );
+    failAdmission = false;
+    await expect(harness.driver.handleIncoming(CHANNEL, incoming)).resolves.toBeUndefined();
+
+    expect(
+      (await harness.driver.loop(CHANNEL)).state.entries.filter((entry) => entry.kind === "user")
+    ).toHaveLength(1);
+  });
+
   it("records distinct provider attempts even when a retry reuses the message id", async () => {
     const harness = await makeHarness({ script: { model: [], tool: [] } });
     const record = (
@@ -384,16 +637,9 @@ describe("AgentLoopDriver", () => {
     });
     const alarm = harness.driver.dispatchReadyEffectsForTest();
     await started.promise;
-    const reads = harness.channelPublishes.filter(
-      (p) => (p.payload as { kind?: string } | undefined)?.kind === "message.read"
+    expect(harness.readReceipts).toContainEqual(
+      expect.objectContaining({ channelId: CHANNEL, messageId: "u1" })
     );
-    expect(
-      reads.some(
-        (r) =>
-          (r.payload as { causality?: { messageId?: string } } | undefined)?.causality
-            ?.messageId === "u1"
-      )
-    ).toBe(true);
     hung.resolve(textReply("done"));
     await alarm;
   });
@@ -487,6 +733,86 @@ describe("AgentLoopDriver", () => {
     });
     await Promise.resolve();
     expect(await logKinds(harness.gad)).toEqual(kindsAfterInterrupt);
+    expect(harness.driver.outbox.all()).toEqual([]);
+  });
+
+  it("settles an admitted mutation before journaling a user interrupt", async () => {
+    const started = deferred<void>();
+    let committed = false;
+    const mutationConfig: AgentLoopConfig = {
+      ...config,
+      activeToolNames: ["write"],
+      localToolExecutionModes: { write: "sequential" },
+      localToolCancellationModes: { write: "settle" },
+    };
+    const harness = await makeHarness({
+      config: mutationConfig,
+      script: {
+        model: [
+          {
+            kind: "model",
+            blocks: [
+              {
+                type: "toolCall",
+                id: "write-1",
+                name: "write",
+                arguments: { path: "meta/out.txt", content: "value" },
+              },
+            ],
+            stopReason: "completed",
+          },
+        ],
+        tool: [],
+      },
+      executorOverride: (descriptor) =>
+        descriptor.kind === "local_tool"
+          ? ({
+              kind: "local_tool",
+              execute: ({ signal }) => {
+                started.resolve();
+                return new Promise<EffectOutcome>((resolve) => {
+                  signal.addEventListener(
+                    "abort",
+                    () => {
+                      // Models the tool's atomic RPC returning success after
+                      // the parent cancellation raced with its commit.
+                      committed = true;
+                      resolve({
+                        kind: "tool",
+                        result: {
+                          protocolContent: [{ type: "text", text: "write committed" }],
+                          details: { committed: true },
+                        },
+                        isError: false,
+                      });
+                    },
+                    { once: true }
+                  );
+                });
+              },
+            } as EffectExecutor)
+          : null,
+    });
+    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-settle-mutation"));
+    const dispatch = harness.driver.dispatchReadyEffectsForTest();
+    await started.promise;
+
+    await harness.driver.interruptChannel(CHANNEL);
+    await dispatch;
+
+    expect(committed).toBe(true);
+    const rows = harness.gad.sql
+      .exec(
+        `SELECT payload_kind FROM log_events
+         WHERE log_id = ? AND payload_kind IN ('invocation.completed', 'system.event')
+         ORDER BY seq`,
+        LOG_ID
+      )
+      .toArray();
+    const terminalKinds = rows.map((row) => row["payload_kind"]);
+    expect(terminalKinds.lastIndexOf("invocation.completed")).toBeLessThan(
+      terminalKinds.lastIndexOf("system.event")
+    );
     expect(harness.driver.outbox.all()).toEqual([]);
   });
 
@@ -608,7 +934,7 @@ describe("AgentLoopDriver", () => {
         descriptor.kind === "model_call"
           ? ({
               kind: "model_call",
-              execute: ({ signal }) => ensureLoaded("lfm2.5-1.2b", signal),
+              execute: ({ signal }) => ensureLoaded("lfm2.5-2.6b", signal),
             } as EffectExecutor)
           : null,
     });
@@ -629,7 +955,7 @@ describe("AgentLoopDriver", () => {
 
     await harness.driver.dispatchReadyEffectsForTest();
     expect(executions).toBe(1);
-    expect(ensureLoaded).toHaveBeenCalledWith("lfm2.5-1.2b", expect.any(AbortSignal));
+    expect(ensureLoaded).toHaveBeenCalledWith("lfm2.5-2.6b", expect.any(AbortSignal));
   });
 
   it("does not let a non-cooperative executor hold lifecycle release or journal a late result", async () => {
@@ -988,6 +1314,7 @@ describe("AgentLoopDriver", () => {
       turnId: `turn:${channelId}`,
       invocationSeq: 1,
       executionMode: "parallel",
+      cancellationMode: "interruptible",
       tool: "read",
       args: {},
     });
@@ -1017,6 +1344,7 @@ describe("AgentLoopDriver", () => {
       turnId: "turn:restart",
       invocationSeq: tool === "eval" ? 1 : 2,
       executionMode: "parallel",
+      cancellationMode: "interruptible",
       tool,
       args: {},
     });
@@ -1066,6 +1394,7 @@ describe("AgentLoopDriver", () => {
       turnId: "turn:ordered-wave",
       invocationSeq,
       executionMode,
+      cancellationMode: "interruptible",
       tool,
       args: {},
     });
@@ -1169,7 +1498,7 @@ describe("AgentLoopDriver", () => {
     );
   });
 
-  it("keeps an early channel terminal retryable until its effect materializes", async () => {
+  it("keeps only the matching channel terminal retryable until its effect materializes", async () => {
     const invocationId = "tc-fast-channel";
     const effectId = ids.invocationEffect(invocationId);
     const started = deferred<void>();
@@ -1209,7 +1538,9 @@ describe("AgentLoopDriver", () => {
     await harness.driver.handleIncoming(CHANNEL, promptIncoming());
     const modelDispatch = harness.driver.dispatchReadyEffectsForTest();
     await started.promise;
-    expect(await harness.driver.channelCallMayMaterialize(CHANNEL, effectId)).toBe(true);
+    // An unrelated in-flight model call is not evidence that this particular
+    // invocation can materialize.
+    expect(await harness.driver.channelCallMayMaterialize(CHANNEL, effectId)).toBe(false);
 
     firstModel.resolve({
       kind: "model",
@@ -1307,9 +1638,9 @@ describe("AgentLoopDriver", () => {
           ? ({
               kind: "local_tool",
               async execute() {
-                if (!driver.hasDeferredEvalStarted(CHANNEL, effectId)) {
+                if (!driver.hasDeferredEvalStartAttempted(CHANNEL, effectId)) {
                   evalStarts += 1;
-                  driver.markDeferredEvalStarted(CHANNEL, effectId);
+                  driver.markDeferredEvalStartAttempted(CHANNEL, effectId);
                   return { deferred: true, reason: "external-result" };
                 }
                 canonicalReads += 1;
@@ -1713,13 +2044,13 @@ describe("AgentLoopDriver", () => {
 
     await harness.driver.handleIncoming(
       CHANNEL,
-      promptIncoming("env-heartbeat", "background check", { origin: "heartbeat" })
+      promptIncoming("env-scheduled", "background check", { origin: "scheduled" })
     );
     await settle(harness.driver, 8);
 
     expect(modelDispatches).toEqual([
       { provider: "anthropic", model: "claude-sonnet-4-6", auth: undefined },
-      { provider: "local", model: "lfm2.5-1.2b", auth: "loopback" },
+      { provider: "local", model: "lfm2.5-2.6b", auth: "loopback" },
     ]);
     expect(harness.channelPublishes).not.toContainEqual(
       expect.objectContaining({ payloadKind: CREDENTIAL_CONNECT_PAYLOAD_KIND })
@@ -1737,7 +2068,7 @@ describe("AgentLoopDriver", () => {
     );
     expect(JSON.parse(starts.rows.at(-1)!.payload_ref_json).modelRequest).toMatchObject({
       provider: "local",
-      model: "lfm2.5-1.2b",
+      model: "lfm2.5-2.6b",
       auth: "loopback",
       modelSpec: fallbackModelSpec,
     });
@@ -2314,7 +2645,7 @@ describe("AgentLoopDriver", () => {
     ]);
   });
 
-  it("keeps retry-classified model work durable across an extended network outage", async () => {
+  it("recovers from one transient unclassified model transport failure", async () => {
     let attempts = 0;
     const harness = await makeHarness({
       script: { model: [], tool: [] },
@@ -2324,7 +2655,7 @@ describe("AgentLoopDriver", () => {
               kind: "model_call",
               async execute() {
                 attempts += 1;
-                return attempts <= 4
+                return attempts === 1
                   ? {
                       kind: "retry",
                       reason: "fetch failed",
@@ -2338,12 +2669,12 @@ describe("AgentLoopDriver", () => {
     });
 
     await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-network-outage"));
-    for (let attempt = 0; attempt < 5; attempt += 1) {
+    for (let attempt = 0; attempt < 2; attempt += 1) {
       harness.setNow((attempt + 1) * 10_000);
       await harness.driver.dispatchReadyEffectsForTest();
     }
 
-    expect(attempts).toBe(5);
+    expect(attempts).toBe(2);
     expect(harness.driver.outbox.all()).toEqual([]);
     expect(await logKinds(harness.gad)).toEqual([
       "message.completed",
@@ -2352,6 +2683,47 @@ describe("AgentLoopDriver", () => {
       "message.completed",
       "turn.closed",
     ]);
+  });
+
+  it("terminalizes a persistent unclassified model transport failure after one retry", async () => {
+    let attempts = 0;
+    const harness = await makeHarness({
+      script: { model: [], tool: [] },
+      executorOverride: (descriptor) =>
+        descriptor.kind === "model_call"
+          ? ({
+              kind: "model_call",
+              async execute() {
+                attempts += 1;
+                return {
+                  kind: "retry",
+                  reason: "model stream made no semantic progress",
+                  retryAfterMs: 1_000,
+                  code: "unknown_retryable",
+                };
+              },
+            } satisfies EffectExecutor)
+          : null,
+    });
+
+    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-network-stalled"));
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      harness.setNow((attempt + 1) * 10_000);
+      await harness.driver.dispatchReadyEffectsForTest();
+    }
+
+    expect(attempts).toBe(2);
+    expect(harness.driver.outbox.all()).toEqual([]);
+    expect(await logKinds(harness.gad)).toEqual([
+      "message.completed",
+      "turn.opened",
+      "message.started",
+      "message.failed",
+      "turn.closed",
+    ]);
+    const loop = await harness.driver.loop(CHANNEL);
+    expect(loop.state.openTurn).toBeNull();
+    expect(loop.state.inFlightModelCall).toBeNull();
   });
 
   it("does not mark a locally running model call failed when wake arrives during credential approval", async () => {

@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "Typecheck Service",
+    "icon": "./assets/icon.svg",
     "entry": "index.ts",
     "sourcemap": true,
     "extension": {
@@ -57,6 +58,7 @@
   "dependencies": {
     "@vibestudio/env-paths": "workspace:*",
     "@vibestudio/shared": "workspace:*",
-    "@vibestudio/typecheck": "workspace:*"
+    "@vibestudio/typecheck": "workspace:*",
+    "@vibestudio/workspace-contracts": "workspace:*"
   }
 }

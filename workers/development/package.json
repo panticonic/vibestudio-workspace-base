@@ -1,0 +1,62 @@
+{
+  "name": "@workspace-workers/development",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "vibestudio": {
+    "title": "System Development",
+    "kind": "worker",
+    "entry": "index.ts",
+    "durable": {
+      "classes": [{ "className": "DevelopmentDO" }]
+    },
+    "authority": {
+      "provides": [],
+      "requests": [
+        {
+          "capability": "development.native.execute",
+          "resource": { "kind": "prefix", "prefix": "" },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "context.semantic.fork",
+          "resource": { "kind": "prefix", "prefix": "" },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "context.semantic.drop",
+          "resource": { "kind": "prefix", "prefix": "" },
+          "tier": "critical",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "development.native.session.retire",
+          "resource": { "kind": "prefix", "prefix": "" },
+          "tier": "critical",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "development.native.build.retire",
+          "resource": { "kind": "prefix", "prefix": "" },
+          "tier": "critical",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "workspace-service:gad.workspace",
+          "resource": { "kind": "prefix", "prefix": "" },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@vibestudio/content-addressing": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*",
+    "@workspace/runtime": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": { "vitest": "^3.2.2" }
+}

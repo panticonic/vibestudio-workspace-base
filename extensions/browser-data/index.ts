@@ -10,7 +10,6 @@ import {
   RemoteBrowserImportProvider,
   type BrowserCookieInput,
   type BrowserEnvironmentIdentity,
-  type BrowserImportDataType,
   type BrowserImportSelection,
   type BrowserImportStore,
   type ImportBatch,
@@ -63,7 +62,7 @@ interface ExtensionContextLike {
     ): Promise<Response>;
   };
   workers: {
-    resolveService(protocol: string): Promise<ResolvedBuiltinService>;
+    resolveService(protocol: string, objectKey?: string): Promise<ResolvedBuiltinService>;
   };
   invocation: InvocationLike;
   log: {
@@ -79,7 +78,83 @@ interface ExtensionContextLike {
 }
 
 const BROWSER_DATA_PROTOCOL = "vibestudio.browser-data.v1";
+const BROWSER_VAULT_PROTOCOL = "vibestudio.browser-vault.v1";
 const TRUSTED_CALLER_KINDS = new Set(["shell", "server"]);
+const BROWSER_DATA_STORE_METHODS = [
+  "getSitePreferences",
+  "setSiteZoom",
+  "getBookmarks",
+  "addBookmark",
+  "updateBookmark",
+  "deleteBookmark",
+  "moveBookmark",
+  "searchBookmarks",
+  "getHistory",
+  "deleteHistoryEntry",
+  "deleteHistoryRange",
+  "clearAllHistory",
+  "searchHistory",
+  "searchHistoryForAutocomplete",
+  "recordHistoryVisit",
+  "updateHistoryTitle",
+  "getPasswords",
+  "getPasswordForSite",
+  "addPassword",
+  "updatePassword",
+  "deletePassword",
+  "updateLastUsed",
+  "addNeverSave",
+  "isNeverSave",
+  "getNeverSaveOrigins",
+  "removeNeverSave",
+  "getFormFillSuggestions",
+  "addFormFillValue",
+  "updateFormFillValue",
+  "markFormFillValueUsed",
+  "deleteFormFillValue",
+  "clearFormFillValues",
+  "getSearchEngines",
+  "setDefaultEngine",
+  "applyCookieMutations",
+  "getCookieSnapshot",
+  "getCookiesForOrigin",
+  "clearCookiesForOrigin",
+  "clearAllCookies",
+  "endBrowserSession",
+  "getCookieSiteSummary",
+  "listDownloadRecords",
+  "upsertDownloadRecord",
+  "putPageFavicon",
+  "getPageFavicon",
+] as const;
+const BROWSER_VAULT_STORE_METHODS = new Set<string>([
+  "getPasswords",
+  "getPasswordForSite",
+  "addPassword",
+  "updatePassword",
+  "deletePassword",
+  "updateLastUsed",
+  "addNeverSave",
+  "isNeverSave",
+  "getNeverSaveOrigins",
+  "removeNeverSave",
+  "getFormFillSuggestions",
+  "addFormFillValue",
+  "updateFormFillValue",
+  "markFormFillValueUsed",
+  "deleteFormFillValue",
+  "clearFormFillValues",
+  "applyCookieMutations",
+  "getCookieSnapshot",
+  "getCookiesForOrigin",
+  "clearCookiesForOrigin",
+  "clearAllCookies",
+  "endBrowserSession",
+  "getCookieSiteSummary",
+  "addCookiesBatch",
+  "addPasswordsBatch",
+  "addFormFillBatch",
+]);
 
 function collectionOrchestrationRpc(ctx: ExtensionContextLike): CollectionOrchestrationRpc {
   return {
@@ -97,9 +172,9 @@ export async function activate(ctx: ExtensionContextLike) {
 
   const resolvedStores = new Map<
     string,
-    Promise<{ identity: BrowserEnvironmentIdentity; targetId: string }>
+    Promise<{ identity: BrowserEnvironmentIdentity; dataTargetId: string; vaultTargetId: string }>
   >();
-  const targetByEnvironment = new Map<string, string>();
+  const targetsByEnvironment = new Map<string, { dataTargetId: string; vaultTargetId: string }>();
   const unregisterServerHosts = new Map<string, () => void>();
   const desktopHosts = new Map<string, { hostId: string; unregister: () => void }>();
   const hostLabels = new Map<string, string>();
@@ -108,7 +183,8 @@ export async function activate(ctx: ExtensionContextLike) {
 
   const currentIdentity = async (): Promise<{
     identity: BrowserEnvironmentIdentity;
-    targetId: string;
+    dataTargetId: string;
+    vaultTargetId: string;
   }> => {
     const invocation = ctx.invocation.current();
     const userId = invocation?.caller.userId?.trim();
@@ -121,13 +197,16 @@ export async function activate(ctx: ExtensionContextLike) {
     const cacheKey = `${workspaceId}\x00${userId}`;
     let pending = resolvedStores.get(cacheKey);
     if (!pending) {
-      pending = ctx.workers
-        .resolveService(BROWSER_DATA_PROTOCOL)
-        .then((target) => {
-          if (target.kind !== "durable-object") {
+      pending = Promise.all([
+        ctx.workers.resolveService(BROWSER_DATA_PROTOCOL, `browser:${userId}`),
+        ctx.workers.resolveService(BROWSER_VAULT_PROTOCOL),
+      ])
+        .then(([dataTarget, vaultTarget]) => {
+          if (dataTarget.kind !== "durable-object" || vaultTarget.kind !== "durable-object") {
             throw new Error("browser.data did not resolve to a Durable Object");
           }
-          const environmentKey = target.objectKey ?? target.targetId.split(":").at(-1) ?? "";
+          const environmentKey =
+            vaultTarget.objectKey ?? vaultTarget.targetId.split(":").at(-1) ?? "";
           if (!environmentKey) {
             throw new Error("Server did not derive a browser environment key");
           }
@@ -136,8 +215,12 @@ export async function activate(ctx: ExtensionContextLike) {
             ownerUserId: userId,
             environmentKey,
           };
-          targetByEnvironment.set(environmentKey, target.targetId);
-          return { identity, targetId: target.targetId };
+          const targets = {
+            dataTargetId: dataTarget.targetId,
+            vaultTargetId: vaultTarget.targetId,
+          };
+          targetsByEnvironment.set(environmentKey, targets);
+          return { identity, ...targets };
         })
         .catch((error: unknown) => {
           resolvedStores.delete(cacheKey);
@@ -157,8 +240,11 @@ export async function activate(ctx: ExtensionContextLike) {
     method: string,
     ...args: unknown[]
   ): Promise<T> => {
-    const targetId = targetByEnvironment.get(identity.environmentKey);
-    if (!targetId) throw new Error("Browser environment target is not resolved");
+    const targets = targetsByEnvironment.get(identity.environmentKey);
+    if (!targets) throw new Error("Browser environment target is not resolved");
+    const targetId = BROWSER_VAULT_STORE_METHODS.has(method)
+      ? targets.vaultTargetId
+      : targets.dataTargetId;
     return ctx.rpc
       .call<T>(targetId, method, ...args)
       .then((result) => {
@@ -283,6 +369,16 @@ export async function activate(ctx: ExtensionContextLike) {
     const { identity } = await currentIdentity();
     return callStoreForIdentity<T>(identity, method, ...args);
   };
+  const storeMethods = Object.fromEntries(
+    BROWSER_DATA_STORE_METHODS.map((method) => [
+      method,
+      guarded(method, (...args: unknown[]) => callStore(method, ...args)),
+    ])
+  ) as {
+    [Method in (typeof BROWSER_DATA_STORE_METHODS)[number]]: (
+      ...args: unknown[]
+    ) => Promise<unknown>;
+  };
   const browserData = {
     getBrowserEnvironment: guarded("getBrowserEnvironment", async () => {
       const invocation = ctx.invocation.current();
@@ -384,6 +480,11 @@ export async function activate(ctx: ExtensionContextLike) {
         sourceName,
       });
     }),
+
+    // One broker owns both imported and Vibestudio-native browser data. The
+    // Durable Object's receiver contract admits this extension's code source,
+    // while callers retain their verified user/workspace identity here.
+    ...storeMethods,
 
     exportBookmarks: guarded("exportBookmarks", async (format: "html" | "json" | "chrome-json") =>
       exportBookmarks(format, await callStore<Array<Record<string, unknown>>>("getAllBookmarks"))
@@ -592,7 +693,7 @@ async function openTabsAsPanels(
 
   const archiveEmptyContainer = async (id: string, title: string) => {
     try {
-      await panelRuntime.getPanelHandle(id).close();
+      await panelRuntime.getPanelHandle(id).archive();
     } catch (error) {
       skipped.push({
         url: "(collection)",

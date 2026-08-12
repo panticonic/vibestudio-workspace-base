@@ -33,19 +33,20 @@ import { activePanelIdAtom, pinnedPanelIdsAtom } from "../state/navigationAtoms"
 import { pushToastAtom } from "../state/toastAtoms";
 import { showActionSheetAtom, type ActionSheetItem } from "../state/actionSheetAtoms";
 import { savePinnedPanelIds } from "../shellCore/pinnedPanels";
-import { PanelTreeItem, type FlatPanelItem } from "./PanelTreeItem";
+import { PanelTreeItem } from "./PanelTreeItem";
 import { VibestudioLogo } from "./VibestudioLogo";
 import { isBrowserPanelSource } from "@vibestudio/shared/panelChrome";
-import { type PanelCommandId } from "@vibestudio/shared/panelCommands";
-import { copyToClipboard, openExternalUrl } from "../services/nativeCapabilities";
+import { getPanelCommandDefinitions, type PanelCommandId } from "@vibestudio/shared/panelCommands";
+import { copyToClipboard, openExternalUrl, shareText } from "../services/nativeCapabilities";
 import {
   buildMobilePanelForestRows,
+  presentMobilePanelRow,
   type MobilePanelTreeGroup,
   type MobilePanelTreeNode,
   type MobilePanelForestRow,
 } from "../shellCore/panelForest";
 import { useVisibleAccountProfiles } from "../hooks/useVisibleAccountProfiles";
-import { hairline, radius, spacing, type } from "../design/tokens";
+import { hairline, radius, spacing, touchTarget, type } from "../design/tokens";
 import {
   Archive,
   Copy,
@@ -55,6 +56,7 @@ import {
   PinOff,
   Search,
   Settings,
+  Share2,
   X,
   type IconComponent,
 } from "../design/icons";
@@ -64,15 +66,14 @@ interface PanelDrawerProps {
   onSelectPanel: (panelId: string) => void;
 }
 
-/** Icons + short explanations for the shared panel commands (discoverability). */
-const COMMAND_PRESENTATION: Partial<
-  Record<PanelCommandId, { icon: IconComponent; description: string }>
-> = {
-  "copy-address": { icon: Copy, description: "Copy this panel's address" },
-  "open-external": { icon: ExternalLink, description: "Open in your device browser" },
-  duplicate: { icon: CopyPlus, description: "Open another copy as a new root panel" },
-  "toggle-pin": { icon: Pin, description: "Pinned panels stay loaded in the background" },
-  archive: { icon: Archive, description: "Remove from the tree (recoverable on desktop)" },
+/** Native icon choices for renderer-neutral shared panel commands. */
+const COMMAND_PRESENTATION: Partial<Record<PanelCommandId, { icon: IconComponent }>> = {
+  "copy-address": { icon: Copy },
+  "share-address": { icon: Share2 },
+  "open-external": { icon: ExternalLink },
+  duplicate: { icon: CopyPlus },
+  "toggle-pin": { icon: Pin },
+  archive: { icon: Archive },
 };
 
 function findPanelById(panels: MobilePanelTreeNode[], panelId: string): MobilePanelTreeNode | null {
@@ -122,6 +123,9 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         title: node.title,
         parentId: node.parentSlotId,
         owner: node.ownerUserId,
+        icon: node.icon,
+        source: node.source,
+        kind: node.kind,
         childCount: node.childCount,
         childrenLoadedCount: childGroup?.loadedCount ?? 0,
         childrenHaveMore: childGroup?.nextCursor !== null && childGroup !== null,
@@ -205,6 +209,9 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
                     : node.title,
                 parentId: node.parentSlotId,
                 owner: node.ownerUserId,
+                icon: node.icon,
+                source: node.source,
+                kind: node.kind,
                 childCount: node.childCount,
                 children: [],
               }))
@@ -245,6 +252,9 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
                 : node.title,
             parentId: node.parentSlotId,
             owner: node.ownerUserId,
+            icon: node.icon,
+            source: node.source,
+            kind: node.kind,
             childCount: node.childCount,
             children: [],
           }))
@@ -346,18 +356,19 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
   );
 
   const handleArchive = useCallback(
-    (panelId: string) => {
+    async (panelId: string) => {
       if (!shellClient) return;
-      void shellClient.panels
-        .archive(panelId)
-        .then(() => shellClient.panels.refresh())
-        .catch((error: unknown) =>
-          pushToast({
-            title: "Could not archive panel",
-            message: error instanceof Error ? error.message : "Try again.",
-            tone: "danger",
-          })
-        );
+      try {
+        await shellClient.panels.archive(panelId);
+        await shellClient.panels.refresh();
+      } catch (error) {
+        pushToast({
+          title: "Could not archive panel",
+          message: error instanceof Error ? error.message : "Try again.",
+          tone: "danger",
+        });
+        throw error;
+      }
     },
     [pushToast, shellClient]
   );
@@ -393,6 +404,18 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
               tone: "success",
             });
           });
+          return;
+        case "share-address":
+          void shellClient.panels
+            .observe(panelId)
+            .then((observation) => shareText(observation.source, observation.title || "Panel"))
+            .catch((error: unknown) =>
+              pushToast({
+                title: "Could not share panel",
+                message: error instanceof Error ? error.message : "Try again.",
+                tone: "danger",
+              })
+            );
           return;
         case "open-external":
           void shellClient.panels.observe(panelId).then((observation) => {
@@ -437,19 +460,26 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
       const panel = findPanelById(panelRoots, panelId);
       if (!panel) return;
       const isPinned = pinnedPanelIds.has(panelId);
-      const commands: Array<{ id: PanelCommandId; label: string }> = [
-        { id: "copy-address", label: "Copy address" },
-        { id: "open-external", label: "Open externally" },
-        { id: "duplicate", label: "Duplicate" },
-        { id: "toggle-pin", label: isPinned ? "Unpin" : "Pin" },
-        { id: "archive", label: "Archive" },
+      const commandIds: PanelCommandId[] = [
+        "copy-address",
+        "share-address",
+        ...(isBrowserPanelSource(panel.source ?? "") ? (["open-external"] as const) : []),
+        "duplicate",
+        "toggle-pin",
+        "archive",
       ];
+      const definitions = getPanelCommandDefinitions({ isPinned });
+      const commands = commandIds.map((id) => {
+        const definition = definitions.find((candidate) => candidate.id === id);
+        if (!definition) throw new Error(`Missing panel command definition: ${id}`);
+        return definition;
+      });
       const items: ActionSheetItem[] = commands.map((command) => {
         const presentation = COMMAND_PRESENTATION[command.id];
         return {
           id: command.id,
           label: command.label,
-          description: presentation?.description,
+          description: command.description,
           icon: command.id === "toggle-pin" && isPinned ? PinOff : presentation?.icon,
           tone: command.id === "archive" ? "danger" : "default",
         };
@@ -466,6 +496,11 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
   const handleSettingsPress = useCallback(() => {
     navigation.getParent()?.navigate("Settings" as never);
   }, [navigation]);
+
+  const resolveBrowserFavicon = useCallback(
+    (url: string) => shellClient?.panels.getPageFaviconDataUrl(url) ?? Promise.resolve(null),
+    [shellClient]
+  );
 
   const renderItem = useCallback(
     ({ item }: { item: MobilePanelForestRow }) => {
@@ -498,19 +533,15 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
           </Pressable>
         );
       }
-      const panelItem: FlatPanelItem = {
-        id: item.panel.id,
-        title: item.panel.title,
-        depth: trimmedQuery ? 0 : item.depth,
-        childCount: trimmedQuery ? 0 : item.panel.children.length,
-        isCollapsed: item.isCollapsed,
-      };
+      const panelItem = presentMobilePanelRow(item, Boolean(trimmedQuery));
       return (
         <PanelTreeItem
           item={panelItem}
           isActive={panelItem.id === activePanelId}
           isPinned={pinnedPanelIds.has(panelItem.id)}
           colors={colors}
+          serverUrl={shellClient?.serverUrl ?? ""}
+          resolveBrowserFavicon={resolveBrowserFavicon}
           onPress={handlePanelPress}
           onLongPress={handlePanelLongPress}
           onToggleCollapse={handleToggleCollapse}
@@ -528,6 +559,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
       handleArchive,
       handleLoadMore,
       loadingGroupKey,
+      resolveBrowserFavicon,
       trimmedQuery,
     ]
   );
@@ -610,7 +642,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
           <Text style={[type.caption, styles.emptyText, { color: colors.textSecondary }]}>
             {trimmedQuery
               ? "Try a different search, or clear it to see the full tree."
-              : "Tap + to choose a panel, or tap the address pill and enter a website or panel source."}
+              : "Tap + to open New Panel, or tap the address pill and enter a website or panel source."}
           </Text>
         </View>
       ) : (
@@ -715,7 +747,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     borderWidth: hairline,
     paddingHorizontal: spacing.md,
-    height: 38,
+    height: touchTarget,
   },
   searchInput: {
     flex: 1,
@@ -726,7 +758,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   loadMore: {
-    minHeight: 42,
+    minHeight: touchTarget,
     justifyContent: "center",
     paddingRight: spacing.lg,
   },

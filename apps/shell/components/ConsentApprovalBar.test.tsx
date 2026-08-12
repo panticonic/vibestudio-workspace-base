@@ -34,7 +34,10 @@ const shellClient = vi.hoisted(() => ({
     Promise.resolve({ revision: 1, nodes: [], nextCursor: null })
   ),
   observe: vi.fn((slotId: string) =>
-    Promise.resolve({ slotId, source: slotId === "gadb" ? "panels/gad-browser" : "panels/chat" })
+    Promise.resolve({
+      slotId,
+      source: slotId === "gadb" ? "about/workspace-history" : "panels/chat",
+    })
   ),
   navigate: vi.fn(() => Promise.resolve(null)),
   createPanel: vi.fn(() => Promise.resolve(null)),
@@ -158,6 +161,7 @@ function capabilityApproval(
     resource: partial.resource,
     details: partial.details,
     diffReview: partial.diffReview,
+    lifecycle: partial.lifecycle,
     approvalId: partial.approvalId,
   };
 }
@@ -360,6 +364,21 @@ describe("ConsentApprovalBar coordinator", () => {
     await waitFor(() => expect(overlay.options?.props?.approval?.approvalId).toBe("queued"));
   });
 
+  it("keeps publication preparation non-blocking until its review is ready", async () => {
+    shellClient.listPending.mockResolvedValueOnce([
+      capabilityApproval({
+        approvalId: "preparing",
+        title: "Preparing workspace update…",
+        attention: "queue",
+        lifecycle: { state: "preparing" },
+      }),
+    ]);
+    mountBar();
+
+    await screen.findByRole("button", { name: "Review approval: Preparing workspace update…" });
+    expect(overlay.options).toBeNull();
+  });
+
   it("shows an interrupting approval ahead of earlier queued attention", async () => {
     shellClient.listPending.mockResolvedValueOnce([
       capabilityApproval({ approvalId: "queued", title: "Queued", attention: "queue" }),
@@ -374,8 +393,18 @@ describe("ConsentApprovalBar coordinator", () => {
   it("keeps an active review open when the next approval was queued", async () => {
     shellClient.resolve.mockImplementation(() => new Promise(() => undefined));
     shellClient.listPending.mockResolvedValueOnce([
-      capabilityApproval({ approvalId: "queued", title: "Queued", attention: "queue" }),
-      capabilityApproval({ approvalId: "interrupt", title: "Interrupt", attention: "interrupt" }),
+      capabilityApproval({
+        approvalId: "queued",
+        title: "Queued",
+        callerId: "extension:publisher",
+        attention: "queue",
+      }),
+      capabilityApproval({
+        approvalId: "interrupt",
+        title: "Interrupt",
+        callerId: "extension:publisher",
+        attention: "interrupt",
+      }),
     ]);
     mountBar();
     await waitFor(() => {
@@ -389,6 +418,34 @@ describe("ConsentApprovalBar coordinator", () => {
       expect(overlay.options?.props?.approval?.approvalId).toBe("queued");
     });
     expect(screen.queryByRole("button", { name: "Review approval: Queued" })).toBeNull();
+  });
+
+  it("minimizes queued preparation from a different requester after an interrupt resolves", async () => {
+    shellClient.resolve.mockImplementation(() => new Promise(() => undefined));
+    shellClient.listPending.mockResolvedValueOnce([
+      capabilityApproval({
+        approvalId: "preparing-template",
+        title: "Update meta main",
+        callerId: "@workspace-extensions/template-composer",
+        attention: "queue",
+        lifecycle: { state: "preparing" },
+      }),
+      capabilityApproval({
+        approvalId: "conversation-permission",
+        title: "Join this conversation",
+        callerId: "do:workers/pubsub-channel:chat",
+        attention: "interrupt",
+      }),
+    ]);
+    mountBar();
+    await waitFor(() => {
+      expect(overlay.options?.props?.approval?.approvalId).toBe("conversation-permission");
+    });
+
+    emit({ type: "decide", decision: "once", approvalId: "conversation-permission" });
+
+    await screen.findByRole("button", { name: "Review approval: Update meta main" });
+    expect(overlay.options).toBeNull();
   });
 
   it("resolves and removes an approval on a decide intent", async () => {
@@ -517,27 +574,27 @@ describe("ConsentApprovalBar coordinator", () => {
     newState: "state:b",
   };
 
-  it("creates a gad-browser panel with the target on an open-in-gad-browser intent", async () => {
+  it("creates Workspace History with the target on an inspection intent", async () => {
     shellClient.getTreePage.mockResolvedValueOnce({ revision: 1, nodes: [], nextCursor: null });
     shellClient.listPending.mockResolvedValueOnce([diffApproval("d1")]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
 
     emit({
-      type: "open-in-gad-browser",
+      type: "open-in-workspace-history",
       target: gadTarget,
       approvalId: "d1",
     } as unknown as ApprovalCardIntent);
 
     await waitFor(() => {
-      expect(shellClient.createPanel).toHaveBeenCalledWith("panels/gad-browser", {
+      expect(shellClient.createPanel).toHaveBeenCalledWith("about/workspace-history", {
         stateArgs: { diffTarget: gadTarget },
       });
     });
     expect(shellClient.navigate).not.toHaveBeenCalled();
   });
 
-  it("reuses and focuses an existing gad-browser panel instead of creating one", async () => {
+  it("reuses and focuses an existing Workspace History panel instead of creating one", async () => {
     shellClient.getTreePage.mockResolvedValueOnce({
       revision: 1,
       nodes: [{ slotId: "other" }, { slotId: "gadb" }],
@@ -548,13 +605,13 @@ describe("ConsentApprovalBar coordinator", () => {
     await waitFor(() => expect(overlay.options?.open).toBe(true));
 
     emit({
-      type: "open-in-gad-browser",
+      type: "open-in-workspace-history",
       target: gadTarget,
       approvalId: "d1",
     } as unknown as ApprovalCardIntent);
 
     await waitFor(() => {
-      expect(shellClient.navigate).toHaveBeenCalledWith("gadb", "panels/gad-browser", {
+      expect(shellClient.navigate).toHaveBeenCalledWith("gadb", "about/workspace-history", {
         stateArgs: { diffTarget: gadTarget },
       });
       expect(shellClient.navigateToId).toHaveBeenCalledWith("gadb");
@@ -562,14 +619,14 @@ describe("ConsentApprovalBar coordinator", () => {
     expect(shellClient.createPanel).not.toHaveBeenCalled();
   });
 
-  it("does not navigate another owner's gad-browser panel", async () => {
+  it("does not navigate another owner's Workspace History panel", async () => {
     shellClient.getTreePage.mockResolvedValueOnce({ revision: 1, nodes: [], nextCursor: null });
     shellClient.listPending.mockResolvedValueOnce([diffApproval("d1")]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
 
     emit({
-      type: "open-in-gad-browser",
+      type: "open-in-workspace-history",
       target: gadTarget,
       approvalId: "d1",
     } as unknown as ApprovalCardIntent);

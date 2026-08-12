@@ -146,7 +146,7 @@ export interface FormRendererProps {
   /**
    * Optional callback for form submission (used by buttonGroup with submitOnSelect)
    */
-  onSubmit?: () => void;
+  onSubmit?: (values?: Record<string, FieldValue>) => void;
   /**
    * Size of form controls
    * @default "2"
@@ -244,9 +244,9 @@ export function FormRenderer({
         {...clickProps}
       />
     ) : null;
-    const queueSubmitOnSelect = (value: string) => {
+    const submitOnSelect = (value: string) => {
       if (field.submitOnSelect && onSubmit && value !== FREE_TEXT_CHOICE_VALUE) {
-        setTimeout(onSubmit, 0);
+        onSubmit({ ...effectiveValues, [field.key]: value });
       }
     };
     const renderMultiSelectBulkActions = (selected: string[]) => {
@@ -384,7 +384,7 @@ export function FormRenderer({
               disabled={!isEnabled}
               onValueChange={(value) => {
                 onChange(field.key, value);
-                queueSubmitOnSelect(value);
+                submitOnSelect(value);
               }}
             >
               <Select.Trigger placeholder="Select..." />
@@ -464,7 +464,7 @@ export function FormRenderer({
                 isEnabled
                   ? (value) => {
                       onChange(field.key, value);
-                      queueSubmitOnSelect(value);
+                      submitOnSelect(value);
                     }
                   : undefined
               }
@@ -500,7 +500,7 @@ export function FormRenderer({
                 isEnabled
                   ? (value) => {
                       onChange(field.key, value);
-                      queueSubmitOnSelect(value);
+                      submitOnSelect(value);
                     }
                   : undefined
               }
@@ -513,9 +513,8 @@ export function FormRenderer({
                       key={option.value}
                       size="1"
                       asChild
+                      data-surface-tone={selected ? "selected" : undefined}
                       style={{
-                        borderColor: selected ? "var(--accent-8)" : undefined,
-                        background: selected ? "var(--accent-a3)" : undefined,
                         opacity: isEnabled ? 1 : 0.6,
                       }}
                     >
@@ -559,7 +558,7 @@ export function FormRenderer({
                 isEnabled
                   ? (value) => {
                       onChange(field.key, value);
-                      queueSubmitOnSelect(value);
+                      submitOnSelect(value);
                     }
                   : undefined
               }
@@ -625,8 +624,7 @@ export function FormRenderer({
                   onClick={() => {
                     onChange(field.key, btn.value);
                     if (field.submitOnSelect && onSubmit && btn.value !== FREE_TEXT_CHOICE_VALUE) {
-                      // Use setTimeout to ensure state update is processed first
-                      setTimeout(onSubmit, 0);
+                      onSubmit({ ...effectiveValues, [field.key]: btn.value });
                     }
                   }}
                 >

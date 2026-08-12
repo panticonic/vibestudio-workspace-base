@@ -11,6 +11,7 @@ import type { ParticipantDescriptor } from "@workspace/harness";
 import type { ChannelReplayEnvelope } from "@workspace/pubsub";
 import type { DOIdentity } from "./identity.js";
 import type { ChannelClient } from "./channel-client.js";
+import { canonicalJson } from "@vibestudio/content-addressing";
 
 export interface RecoveredChannelSubscription {
   channelId: string;
@@ -24,6 +25,7 @@ interface StoredSubscription {
   revision: number;
   participantId: string;
   config?: unknown;
+  relationshipJson: string;
 }
 
 export class SubscriptionManager {
@@ -41,6 +43,7 @@ export class SubscriptionManager {
         revision INTEGER NOT NULL CHECK (revision > 0),
         subscribed_at INTEGER NOT NULL,
         config TEXT,
+        relationship_json TEXT NOT NULL,
         participant_id TEXT NOT NULL
       )
     `);
@@ -61,6 +64,10 @@ export class SubscriptionManager {
     config?: unknown;
     descriptor: ParticipantDescriptor;
     replay?: boolean;
+    /** Delivery interest for this membership. "all" (default) creates mailbox
+     * work for every committed event; "addressed" only for events whose
+     * audience names this participant — a supervisor's task-channel stance. */
+    delivery?: "all" | "addressed";
   }): Promise<{
     ok: boolean;
     participantId: string;
@@ -69,7 +76,6 @@ export class SubscriptionManager {
   }> {
     const participantId = this.buildParticipantId();
     const current = this.getStored(opts.channelId);
-    const revision = current?.revision ?? 1;
     const metadata: Record<string, unknown> = {
       name: opts.descriptor.name,
       type: opts.descriptor.type,
@@ -78,26 +84,59 @@ export class SubscriptionManager {
       ...(opts.descriptor.methods?.length ? { methods: opts.descriptor.methods } : {}),
     };
     const config = opts.config && typeof opts.config === "object" ? opts.config : null;
-    const result = await this.channelFactory(opts.channelId).join({
-      participantId,
-      revision,
+    const relationship = {
       contextId: opts.contextId,
       metadata,
-      delivery: "all",
-      endpoint: { kind: "entity", entityId: participantId },
-      applicationConfig: config === null ? null : { version: 1, value: config },
-      replay: opts.replay !== false,
-    });
+      delivery: opts.delivery ?? ("all" as const),
+      endpoint: {
+        kind: "entity" as const,
+        entityId: participantId,
+        invocation: "direct" as const,
+      },
+      applicationConfig: config === null ? null : { version: 1 as const, value: config },
+    };
+    const relationshipJson = canonicalJson(relationship);
+    const channel = this.channelFactory(opts.channelId);
+    const remote = current ? null : await channel.relationshipState(participantId);
+    let revision = current
+      ? current.relationshipJson === relationshipJson
+        ? current.revision
+        : current.revision + 1
+      : (remote?.revision ?? 0) + 1;
+    let result;
+    try {
+      result = await channel.join({
+        participantId,
+        revision,
+        ...relationship,
+        replay: opts.replay !== false,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/relationship revision|already names different relationship data/.test(message)) {
+        throw error;
+      }
+      const authoritative = await channel.relationshipState(participantId);
+      revision = authoritative.revision + 1;
+      result = await channel.join({
+        participantId,
+        revision,
+        ...relationship,
+        replay: opts.replay !== false,
+      });
+    }
+    revision = result.revision;
 
     this.sql.exec(
       `INSERT OR REPLACE INTO subscriptions
-         (channel_id, context_id, revision, subscribed_at, config, participant_id)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (channel_id, context_id, revision, subscribed_at, config, relationship_json, participant_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       opts.channelId,
       opts.contextId,
       revision,
       Date.now(),
       config === null ? null : JSON.stringify(config),
+      relationshipJson,
       participantId
     );
     return result;
@@ -106,7 +145,18 @@ export class SubscriptionManager {
   async unsubscribeFromChannel(channelId: string): Promise<void> {
     const stored = this.getStored(channelId);
     if (!stored) return;
-    await this.channelFactory(channelId).leave(stored.participantId, stored.revision + 1);
+    const channel = this.channelFactory(channelId);
+    try {
+      await channel.leave(stored.participantId, stored.revision + 1);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (!/relationship revision/.test(message)) throw error;
+      const authoritative = await channel.relationshipState(stored.participantId);
+      if (authoritative.active) {
+        await channel.leave(stored.participantId, authoritative.revision + 1);
+      }
+    }
+    this.deleteSubscription(channelId);
   }
 
   getParticipantId(channelId: string): string | null {
@@ -125,27 +175,20 @@ export class SubscriptionManager {
     return parsed && typeof parsed === "object" ? (parsed as ChannelSubscriptionConfig) : null;
   }
 
-  patchConfig(channelId: string, patch: Record<string, unknown>): ChannelSubscriptionConfig {
-    const current = this.getConfig(channelId) ?? {};
-    if (!this.getParticipantId(channelId)) throw new Error(`No subscription for channel ${channelId}`);
-    const next: Record<string, unknown> = { ...current, ...patch };
-    this.sql.exec(`UPDATE subscriptions SET config = ? WHERE channel_id = ?`, JSON.stringify(next), channelId);
-    return next as ChannelSubscriptionConfig;
-  }
-
   listAll(): Array<{ channelId: string; participantId: string | null }> {
     return this.listStored().map(({ channelId, participantId }) => ({ channelId, participantId }));
   }
 
   listStored(): StoredSubscription[] {
     return this.sql
-      .exec(`SELECT channel_id, context_id, revision, config, participant_id FROM subscriptions ORDER BY channel_id`)
+      .exec(`SELECT channel_id, context_id, revision, config, relationship_json, participant_id FROM subscriptions ORDER BY channel_id`)
       .toArray()
       .map((row) => ({
         channelId: String(row["channel_id"]),
         contextId: String(row["context_id"]),
         revision: Number(row["revision"]),
         participantId: String(row["participant_id"]),
+        relationshipJson: String(row["relationship_json"]),
         ...(typeof row["config"] === "string" ? { config: JSON.parse(String(row["config"])) as unknown } : {}),
       }));
   }
@@ -176,7 +219,7 @@ export class SubscriptionManager {
 
   private getStored(channelId: string): StoredSubscription | null {
     const row = this.sql
-      .exec(`SELECT channel_id, context_id, revision, config, participant_id FROM subscriptions WHERE channel_id = ?`, channelId)
+      .exec(`SELECT channel_id, context_id, revision, config, relationship_json, participant_id FROM subscriptions WHERE channel_id = ?`, channelId)
       .toArray()[0];
     if (!row) return null;
     return {
@@ -184,6 +227,7 @@ export class SubscriptionManager {
       contextId: String(row["context_id"]),
       revision: Number(row["revision"]),
       participantId: String(row["participant_id"]),
+      relationshipJson: String(row["relationship_json"]),
       ...(typeof row["config"] === "string" ? { config: JSON.parse(String(row["config"])) as unknown } : {}),
     };
   }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  composeOnboardingCatalog,
   onboardingCatalog,
   validateOnboardingCatalog,
   type OnboardingCapabilityDefinition,
@@ -46,6 +47,7 @@ describe("onboarding catalog", () => {
   it("describes only capabilities shipped in the base workspace", () => {
     expect(JSON.stringify(onboardingCatalog)).not.toContain('"via":"template"');
     expect(JSON.stringify(onboardingCatalog)).not.toContain('"install"');
+    expect(onboardingCatalog.some((entry) => entry.id === "contextual.news")).toBe(false);
   });
 
   it("uses the concise browser import label", () => {
@@ -59,6 +61,77 @@ describe("onboarding catalog", () => {
       (entry) => entry.id === "configuration.local-models"
     );
     expect(localModels?.ownerSkillPath).toBeUndefined();
-    expect(localModels?.actions?.setup).toEqual({ via: "panel", path: "panels/local-models" });
+    expect(localModels?.actions?.setup).toEqual({ via: "panel", path: "about/local-models" });
+  });
+
+  it("offers recurring work as a ready capability owned by Automations", () => {
+    expect(onboardingCatalog.find((entry) => entry.id === "capability.automations")).toEqual(
+      expect.objectContaining({
+        title: "Schedule recurring work",
+        role: "ready-capability",
+        ownerSkillPath: "skills/automations/SKILL.md",
+        actions: { explore: { via: "conversation" } },
+      })
+    );
+  });
+
+  it("composes and validates declarations from installed owner skills", () => {
+    const catalog = composeOnboardingCatalog([
+      {
+        skillPath: "skills/example/SKILL.md",
+        onboarding: {
+          capabilities: [
+            {
+              id: "connection.example",
+              title: "Example",
+              summary: "Connect Example.",
+              category: "connections",
+              role: "connection",
+              scope: "user-workspace",
+              tier: "direct",
+              visibility: "primary",
+              actions: { setup: { via: "owner-skill" } },
+              setup: {
+                successDescription: "A live check succeeds.",
+                status: {
+                  kind: "credential-connection",
+                  providerId: "example",
+                },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    expect(catalog.find((entry) => entry.id === "connection.example")).toEqual(
+      expect.objectContaining({
+        ownerSkillPath: "skills/example/SKILL.md",
+        setup: expect.objectContaining({
+          observer: { kind: "credential-connection", providerId: "example" },
+        }),
+      })
+    );
+    expect(() =>
+      composeOnboardingCatalog([
+        {
+          skillPath: "skills/collision/SKILL.md",
+          onboarding: {
+            capabilities: [
+              {
+                id: "connection.github",
+                title: "Collision",
+                summary: "Collision",
+                category: "connections",
+                role: "contextual-setup",
+                scope: "workspace",
+                tier: "direct",
+                visibility: "contextual",
+              },
+            ],
+          },
+        },
+      ])
+    ).toThrow("Duplicate onboarding capability id");
   });
 });

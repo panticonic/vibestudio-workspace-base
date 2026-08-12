@@ -9,7 +9,7 @@
  * instance memory: they die if the DO hibernates or restarts, which is fine
  * for test-scoped use — callers reopen on "unknown session" errors.
  */
-import { DurableObjectBase, rpc } from "@workspace/runtime/worker";
+import { DurableObjectBase, rpc } from "@workspace/runtime/worker/kernel";
 import { CdpConnection } from "@workspace/cdp-client";
 import {
   cpuProfileRef,
@@ -39,9 +39,6 @@ const SESSION_IDLE_LIMIT_MS = 10 * 60_000;
 export class TestkitDriverDO extends DurableObjectBase {
   static override schemaVersion = 1;
 
-  protected override schemaProductionBaseline() {
-    return { version: 1, name: "testkit-driver-v1" } as const;
-  }
   private readonly sessions = new Map<string, DriverSession>();
   private sessionCounter = 0;
 

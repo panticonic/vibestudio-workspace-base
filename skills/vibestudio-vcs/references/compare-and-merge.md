@@ -9,7 +9,7 @@ applications—compare the local view. The tool resolves working head as source
 and protected main as target, so a status or history preflight adds no value:
 
 ```js
-vcs({ operation: "compare", view: "local" })
+vcs({ operation: "compare", view: "local" });
 ```
 
 Compare is read-only and does not accept `intent`; use intent on authoring or
@@ -20,11 +20,11 @@ For a read-only preview of committed work arriving from another context, name
 that exact incoming event as the source:
 
 ```js
-vcs({ operation: "compare", sourceEventId: "event:source", limit: 500 })
+vcs({ operation: "compare", source: "event:source", limit: 500 });
 ```
 
 The source is always the state whose changes are under review. Do not pass main
-as `sourceEventId` to ask what changed locally; that reverses the comparison and
+as `source` to ask what changed locally; that reverses the comparison and
 may correctly produce an empty result. Both forms return the same coordinate,
 intent, attribution, and resolution model. Only committed incoming events can
 be merged; local applications are already present and can be committed or
@@ -73,21 +73,41 @@ For the agent-facing tool, direct merge is the normal happy path: it derives the
 ```js
 vcs({
   operation: "merge",
-  sourceEventId: "event:source",
+  source: "event:source",
   intent: "Bring the reviewed source behavior into this context",
 });
 ```
 
-For direct service callers, the source is `{ kind: "event", eventId }` or `{ kind: "external-delta", deltaId }`. The compact tool exposes `sourceEventId` and maps it to the event source.
+For direct service callers, the source is `{ kind: "event", eventId }` or
+`{ kind: "external-delta", deltaId }`. The compact tool exposes either exact
+identity or a returned semantic `@ref` through its single `source` field.
+
+For an external delta returned by another workspace operation, use the same
+compact tool with that operation's retained context and exact delta identity:
+
+```js
+vcs({
+  operation: "merge",
+  contextId: "the-retained-context-id",
+  source: "external-delta:the-external-delta-id",
+  intent: "Integrate the reviewed contribution",
+});
+```
+
+`source` accepts one event, external-delta, or semantic `@ref`. The optional
+`contextId` selects an existing retained workspace context; omitting it keeps
+the current task context.
 
 Always inspect the merge result's model-visible `composed` entries. Each item names the coordinate and both resolved intents; the full packet also remains in structured details. Hunk-composed content is a new authored merge change with exact mapped content lineage to both parents.
 
 The result is discriminated by `status`. `working` carries mutation identities;
 `unchanged` honestly carries none. Both carry final global `resolution`,
 `counts`, `intents`, `intentsTruncated`, a bounded conflict-only page, and
-`nextConflictCursor`. Continue that cursor only with `compare` using the same
-target, source, and `statusFilter: "conflict"`; filtered and unfiltered cursors
-are intentionally not interchangeable.
+an optional structured continuation. Continue it only with agent-facing
+`compare` using the advertised compact `ref` alone; the durable ref
+preserves the exact source, target, conflict filter, and service cursor
+internally. Filtered and unfiltered page streams are intentionally not
+interchangeable.
 
 ## Resolve a coordinate
 
@@ -101,7 +121,7 @@ Resolutions apply to the whole unresolved coordinate; aspects are diagnosis, not
 ```js
 vcs({
   operation: "merge",
-  sourceEventId: "event:source",
+  source: "event:source",
   resolutions: [
     {
       coordinate: { kind: "file", id: "file:config" },

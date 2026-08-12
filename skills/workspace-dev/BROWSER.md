@@ -11,7 +11,8 @@ them as disposable web pages.
 import { openPanel, openExternal } from "@workspace/runtime";
 
 const handle = await openPanel("https://example.com", { focus: true });
-const page = await handle.cdp.page();
+let session = await handle.cdp.session();
+let page = session.page;
 
 await page.goto("https://example.com");
 await page.getByRole("button", { name: "Sign in" }).click();
@@ -55,12 +56,18 @@ non-settling behavior. A supplied `requests` array is exhaustive, so do not
 guess capability names. Omit it unless intentional attenuation is part of the
 task.
 
-`handle.cdp.page()` returns the canonical Playwright-style page driven by our
-workerd-native CDP client (`@workspace/cdp-client`). It is the single
-browser-automation surface; there is no second browser client or compatibility
-tier to choose. Do not import or install any `playwright*` package;
-load the page through `handle.cdp.page()` and do not import `@workspace/cdp-client`
-directly for ordinary page work.
+`handle.cdp.session()` returns a generation-fenced lease around the canonical
+Playwright-style page driven by our workerd-native CDP client
+(`@workspace/cdp-client`). The session records the immutable `attemptId`,
+`runtimeEntityId`, and `buildKey` that own the page. Use it for multi-step
+automation or any workflow that may rebuild or navigate the panel.
+
+`handle.cdp.page()` returns the same canonical Playwright-style page without a
+generation lease. It is appropriate for a one-off read or action when no panel
+lifecycle operation can race the call. These are two ownership levels over one
+browser-automation surface, not separate clients or compatibility tiers. Do
+not import or install any `playwright*` package, and do not import
+`@workspace/cdp-client` directly for ordinary page work.
 
 Navigation belongs to browser panels. On a workspace app panel, `page.goto()`,
 `page.reload()`, `page.goBack()`, `page.goForward()`, and their `handle.cdp`
@@ -80,8 +87,11 @@ needed.
 `PanelHandle` owns the target; `CdpPage` owns one automation connection to that
 target. The boundary is exact:
 
-- `await handle.cdp.page()` creates one authenticated CDP connection to the
-  handle's current panel target.
+- `await handle.cdp.session()` creates one authenticated CDP connection fenced
+  to the handle's current immutable panel generation. `session.page` owns the
+  automation connection and `session.generation` records its provenance.
+- `await handle.cdp.page()` creates the same connection without a generation
+  lease for one-off work.
 - `await page.close()` disconnects only that automation client. It does not
   close, unload, navigate, or otherwise mutate the panel.
 - Eval is a notebook kernel, not an invocation sandbox. A page stored in
@@ -92,23 +102,25 @@ target. The boundary is exact:
   or other class instance cannot be reconstructed after kernel restart; retain
   stable identity alongside it and reacquire only after `[kernel] Restarted`
   reports that exact live value as lost.
-- `await handle.close()` closes an owned panel and therefore invalidates page
+- `await handle.archive()` removes an owned panel subtree and therefore invalidates page
   clients connected to that target.
 - A handle obtained from `panelTree` is non-owned unless the current workflow
   created it. Disconnecting your `page` is safe; closing the handle is not.
 - Browser `page.goto()` navigation keeps the same CDP target and page
   connection. Workspace-panel `handle.navigate()` and `handle.rebuild()`
-  replace the runtime incarnation: the old page reports the replacement close
-  reason, and callers must acquire one fresh `await handle.cdp.page()` from the
-  same handle. More generally, if a lifecycle result has a different
-  `runtimeEntityId`, replace the page.
+  replace the runtime incarnation. After either operation, call
+  `const refreshed = await session.refresh()` and continue with
+  `session = refreshed.session; page = session.page`. A `replaced` result
+  includes the prior generation; `reconnected` means the connection died while
+  the generation remained current. Refresh never replays the interrupted
+  browser action.
 
 Use bounded `panelTree.roots`/`panelTree.children`/`panelTree.search` or
 addressed `panelTree.get` for existing panels. Use `rootOwners()` and
 `rootsForOwner(ownerUserId)` when explicitly inspecting another ownership
 band. Existing handles
 are non-owned: do not call `handle.navigate`, `handle.reload`, or
-`handle.close` on them unless requested. Do not call `handle.cdp.navigate(url)`
+`handle.archive` on them unless requested. Do not call `handle.cdp.navigate(url)`
 or `page.goto(url)` on the current chat panel, a parent chat panel, or another
 workspace panel unless the requested task is to replace that exact panel. Open a
 browser panel for arbitrary URLs, login flows, scraping, and browser navigation.
@@ -116,16 +128,16 @@ browser panel for arbitrary URLs, login flows, scraping, and browser navigation.
 ```ts
 // Later, when an owned temporary panel is no longer needed:
 await scope.page?.close();
-await scope.browser?.close();
+await scope.browser?.archive();
 delete scope.browser;
 delete scope.page;
 ```
 
-Reuse one handle per workflow and one CDP page per runtime incarnation.
+Reuse one handle and one generation-fenced session per multi-step workflow.
 Repeated `openPanel()` calls without the same `operationId` create distinct panels, and repeated
-`handle.cdp.page()` calls within an unchanged incarnation create duplicate CDP
-connections. After an incarnation replacement, reacquiring through the same
-handle is required; there is no second page-acquisition API.
+`handle.cdp.session()` or `handle.cdp.page()` calls within an unchanged
+incarnation create duplicate CDP connections. After a possible replacement,
+refresh the existing session and use the returned session.
 
 ## Where it runs
 
@@ -138,14 +150,18 @@ can create or acquire a panel handle directly before driving CDP automation.
 
 ## Page surface
 
-`handle.cdp.page()` returns the canonical Playwright-style page. Actions
+`session.page` (or a one-off `handle.cdp.page()`) is the canonical
+Playwright-style page. Actions
 auto-wait for the element to be visible/stable/enabled before acting and
-resolve after their browser event turn, so a following action observes
-framework state committed by the previous one. Do not add sleeps between
-`fill()`, `press()`, `click()`, or other sequential actions.
+return a `cdp-interaction-outcome.v1` receipt after the browser event is
+delivered. Delivery is not proof that application state changed. Pass a
+locator postcondition when the effect matters; the receipt then reports the
+observed semantic condition. Do not add sleeps between `fill()`, `press()`,
+`click()`, or other sequential actions.
 
 ```ts
-const page = await handle.cdp.page();
+const session = await handle.cdp.session();
+const page = session.page;
 
 // Discover the live accessibility contract before choosing named locators.
 const buttons = await page.getByRole("button").all();
@@ -172,7 +188,13 @@ page.locator(".row").last();
 const rows = await page.locator(".row").all();
 
 // Actions (auto-wait)
-await page.getByRole("button", { name: "Save" }).click();
+const saved = await page.getByRole("button", { name: "Save" }).click({
+  expect: {
+    locator: page.getByText("All changes saved", { exact: true }),
+    state: "visible",
+  },
+});
+// saved.effect.status === "observed" and saved.effect.state === "visible"
 await page.locator(".item").dblclick();
 await page.locator(".item").hover();
 await page.getByLabel("Email").fill("user@example.com");
@@ -223,6 +245,12 @@ role locator misses, `CdpError` reports the available names for that role.
 If the accessible name exists under another role, the error reports those
 role/name pairs as well; use the rendered role rather than guessing from text.
 
+Automation failures are structured as `CdpError.errorData` with `code`,
+`operation`, `failureKind`, and `recovery`. A locator miss directs the caller to
+re-observe current roles/names. A command timeout or closed target directs the
+caller to inspect panel diagnostics and acquire a fresh page from the stable
+panel handle; the old page connection is no longer reusable.
+
 Controls repeated for collection items must have item-specific accessible
 names. Treat repeated `"Mark task as completed"` buttons as an accessibility
 defect and repair the app to expose names such as
@@ -262,8 +290,18 @@ await page.locator('input[name="email"]').fill("user@example.com");
 ```
 
 `page.screenshot()` returns `Uint8Array` and has no filesystem `path` option.
-Persist a screenshot for visual inspection with an opaque context-local temp
-path, then pass the returned file reference directly to the `read` tool:
+When a panel handle is available, prefer the one-call host capture and return
+its exact result from eval; eval attaches it as native image content and the
+operation remains read-only:
+
+```ts
+return await handle.cdp.screenshot({ format: "png" });
+```
+
+For a standalone CDP page with no panel handle, persist its byte screenshot for
+visual inspection with an opaque context-local temp path, then pass the returned
+file reference directly to `read`. Creating that temp file is a write, so do not
+attenuate the eval cell to `authority.effects: "read-only"`:
 
 ```ts
 const bytes = await page.screenshot({ fullPage: true });
@@ -392,7 +430,7 @@ panel, call `observe()` and require `phase === "ready"` before custom RPC or
 | `handle.cdp.goBack()` / `goForward()`              | Browser-panel Chromium history                                                    |
 | `handle.cdp.reload()`                              | Browser-panel Chromium page reload                                                |
 | `handle.cdp.stop()`                                | Stop loading                                                                      |
-| `handle.close()`                                   | Close the panel                                                                   |
+| `handle.archive()`                                 | Archive the panel and its subtree                                                 |
 
 Opening panels, CDP, and structural operations prompt on first use per requester
 entity and target panel/root. Privileged shell/about targets use a severe
