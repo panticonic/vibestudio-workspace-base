@@ -114,4 +114,105 @@ describe("workspace presentation composition", () => {
       ).rejects.toThrow(/Workspace panel options/u);
     },
   );
+
+  it("keeps topology usable after an icon metadata failure and observes a later icon edit", async () => {
+    let metadataRead = 0;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const call = vi.fn(async (target: string, method: string) => {
+      if (target === "main" && method === "workers.resolveService") {
+        return { kind: "durable-object", targetId: "do:presentation" };
+      }
+      if (target === "main" && method === "workspace-state.panelTree.page") {
+        return {
+          revision: metadataRead + 1,
+          group: { kind: "roots", ownerUserId: "user-1" },
+          nodes: [
+            {
+              slotId: "panel:chat",
+              parentSlotId: null,
+              ownerUserId: "user-1",
+              createdAt: 1,
+              childCount: 0,
+              source: "panels/chat",
+            },
+          ],
+          nextCursor: null,
+        };
+      }
+      if (target === "main" && method === "build.getPanelMetadata") {
+        metadataRead += 1;
+        if (metadataRead === 1) throw new Error("build is restarting");
+        return { icon: "./assets/edited-icon.svg" };
+      }
+      if (target === "do:presentation" && method === "titlesForSlots") {
+        return { "panel:chat": "Agentic Chat" };
+      }
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    const client = createWorkspacePresentationClient({ call } as never);
+    const input = {
+      group: { kind: "roots" as const, ownerUserId: "user-1" },
+      limit: 10,
+    };
+
+    await expect(client.page(input)).resolves.toMatchObject({
+      nodes: [{ slotId: "panel:chat", title: "Agentic Chat" }],
+    });
+    await expect(client.page(input)).resolves.toMatchObject({
+      nodes: [
+        {
+          slotId: "panel:chat",
+          title: "Agentic Chat",
+          icon: "./assets/edited-icon.svg",
+        },
+      ],
+    });
+
+    expect(metadataRead).toBe(2);
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+
+  it("deduplicates icon metadata reads only within one bounded page", async () => {
+    const call = vi.fn(async (target: string, method: string) => {
+      if (target === "main" && method === "workers.resolveService") {
+        return { kind: "durable-object", targetId: "do:presentation" };
+      }
+      if (target === "main" && method === "workspace-state.panelTree.page") {
+        return {
+          revision: 1,
+          group: { kind: "roots", ownerUserId: "user-1" },
+          nodes: ["one", "two"].map((suffix) => ({
+            slotId: `panel:${suffix}`,
+            parentSlotId: null,
+            ownerUserId: "user-1",
+            createdAt: 1,
+            childCount: 0,
+            source: "panels/chat",
+          })),
+          nextCursor: null,
+        };
+      }
+      if (target === "main" && method === "build.getPanelMetadata") {
+        return { icon: "./assets/icon.svg" };
+      }
+      if (target === "do:presentation" && method === "titlesForSlots") {
+        return {};
+      }
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    const client = createWorkspacePresentationClient({ call } as never);
+
+    await client.page({
+      group: { kind: "roots", ownerUserId: "user-1" },
+      limit: 10,
+    });
+
+    expect(
+      call.mock.calls.filter(
+        ([target, method]) =>
+          target === "main" && method === "build.getPanelMetadata",
+      ),
+    ).toHaveLength(1);
+  });
 });
