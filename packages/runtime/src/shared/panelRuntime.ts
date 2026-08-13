@@ -1,6 +1,9 @@
 import type { RpcClient } from "@vibestudio/rpc";
 import type { PanelSourceUsage } from "@vibestudio/shared/panelSearchTypes";
-import type { PanelLifecycleResult, PanelPlacementHint } from "@vibestudio/shared/types";
+import type {
+  PanelLifecycleResult,
+  PanelPlacementHint,
+} from "@vibestudio/shared/types";
 import type {
   PanelTreeNode,
   PanelTreePage,
@@ -11,14 +14,20 @@ import type {
   PanelTreeSearchInput,
   PanelTreeSearchPage,
 } from "@vibestudio/shared/panel/treeIndex";
-import { isBrowserPanelSource, isOpenPanelBrowserUrl } from "@vibestudio/shared/panelChrome";
+import {
+  isBrowserPanelSource,
+  isOpenPanelBrowserUrl,
+} from "@vibestudio/shared/panelChrome";
 import { normalizePanelTitle } from "@vibestudio/shared/panel/title";
 import {
   computePanelId,
   derivePanelOperationIdentity,
   panelIdSegmentFromName,
 } from "@vibestudio/shared/panelIdUtils";
-import { browserSourceFromHostname, generateContextId } from "@vibestudio/shared/panelFactory";
+import {
+  browserSourceFromHostname,
+  generateContextId,
+} from "@vibestudio/shared/panelFactory";
 import { validateStateArgsAsync } from "@vibestudio/shared/asyncStateArgsValidator";
 import {
   panelFailure,
@@ -40,16 +49,28 @@ import type {
   PanelWaitOptions,
 } from "../core/index.js";
 import type { RuntimeCodePanelEntityCreateSpec } from "@vibestudio/shared/runtime/entitySpec";
-import { createCdpAutomation, type CdpAutomation } from "../panel/cdpAutomation.js";
+import {
+  createCdpAutomation,
+  type CdpAutomation,
+} from "../panel/cdpAutomation.js";
 import {
   createNonPanelRuntimeHandle,
   createPanelHandle,
   type PanelHandleHostOps,
   type PanelHandleMetadata,
 } from "./handles.js";
-import { readPanelStateArgs, updatePanelStateArgs } from "./panelStateArgsPersistence.js";
-import { asPanelEntityId, asPanelSlotId } from "@vibestudio/shared/panel/idValues";
-import { callWorkspaceState, createRuntimeWorkspaceStateClient } from "./workspaceStateClient.js";
+import {
+  readPanelStateArgs,
+  updatePanelStateArgs,
+} from "./panelStateArgsPersistence.js";
+import {
+  asPanelEntityId,
+  asPanelSlotId,
+} from "@vibestudio/shared/panel/idValues";
+import {
+  callWorkspaceState,
+  createRuntimeWorkspaceStateClient,
+} from "./workspaceStateClient.js";
 import { createWorkspacePresentationClient } from "./workspacePresentation.js";
 import {
   commitPreparedPanelNavigation,
@@ -72,7 +93,8 @@ interface PanelRuntimeMetadataResult {
 }
 
 interface WorkspacePanelDetail {
-  slot: { parent_slot_id: string | null; current_entity_title?: string | null };
+  slot: { parent_slot_id: string | null };
+  presentation: { title: string; icon?: string };
   currentHistory: {
     source: string;
     context_id: string;
@@ -131,24 +153,33 @@ export interface OpenPanelOptions extends CreatePanelSlotOptions {
 export interface PanelRuntimeTree {
   self(): PanelHandle;
   get(id: string, kind?: "workspace" | "browser"): PanelHandle;
-  rootOwners(input?: PanelTreePageWindow): Promise<PanelRuntimeTreeRootOwnerPage>;
+  rootOwners(
+    input?: PanelTreePageWindow,
+  ): Promise<PanelRuntimeTreeRootOwnerPage>;
   roots(input?: PanelTreePageWindow): Promise<PanelRuntimeTreePage>;
   rootsForOwner(
     ownerUserId: string | null,
-    input?: PanelTreePageWindow
+    input?: PanelTreePageWindow,
   ): Promise<PanelRuntimeTreePage>;
-  children(parentSlotId: string, input?: PanelTreePageWindow): Promise<PanelRuntimeTreePage>;
+  children(
+    parentSlotId: string,
+    input?: PanelTreePageWindow,
+  ): Promise<PanelRuntimeTreePage>;
   page(input: PanelTreePageInput): Promise<PanelRuntimeTreePage>;
   path(id: string): Promise<PanelRuntimeTreePath | null>;
   search(input: PanelTreeSearchInput): Promise<PanelRuntimeTreeSearchPage>;
   /** Durable, workspace-wide launch frequency grouped by panel source. */
   sourceUsage(limit?: number): Promise<PanelSourceUsage[]>;
   parent(id: string): PanelHandle | null;
-  navigate(id: string, source: string, options?: PanelNavigateOptions): Promise<PanelObservation>;
+  navigate(
+    id: string,
+    source: string,
+    options?: PanelNavigateOptions,
+  ): Promise<PanelObservation>;
   navigateHistory(
     id: string,
     delta: -1 | 1,
-    options?: PanelWaitOptions
+    options?: PanelWaitOptions,
   ): Promise<PanelObservation | null>;
 }
 
@@ -188,7 +219,10 @@ export interface PanelRuntimeTreeSearchPage {
 export interface PanelRuntimeApi {
   panelTree: PanelRuntimeTree;
   /** Commit a durable, unloaded slot without waiting for runtime activation. */
-  createPanelSlot(source: string, options?: CreatePanelSlotOptions): Promise<PanelHandle>;
+  createPanelSlot(
+    source: string,
+    options?: CreatePanelSlotOptions,
+  ): Promise<PanelHandle>;
   /** Create, present, and wait for the selected runtime attempt to become ready. */
   openPanel(source: string, options?: OpenPanelOptions): Promise<PanelHandle>;
   getPanelHandle(id: string, kind?: "workspace" | "browser"): PanelHandle;
@@ -210,7 +244,11 @@ export interface CreatePanelRuntimeOptions {
   /** Closure-held resolver for hosted runtimes that do not publish module globals. */
   loadModule?: (id: string) => unknown | Promise<unknown>;
   initialMetadata?: PanelHandleMetadata[];
-  onOpen?: (entry: { source: string; id: string; kind: "workspace" | "browser" }) => void;
+  onOpen?: (entry: {
+    source: string;
+    id: string;
+    kind: "workspace" | "browser";
+  }) => void;
   onReload?: (id: string) => void;
   onClose?: (id: string) => void;
   onStateArgsSet?: (id: string) => void;
@@ -228,7 +266,9 @@ export interface CreatePanelRuntimeOptions {
   }) => void;
 }
 
-export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRuntimeApi {
+export function createPanelRuntime(
+  options: CreatePanelRuntimeOptions,
+): PanelRuntimeApi {
   const metadataCache = new Map<string, PanelHandleMetadata>();
   const callState = <T>(method: string, args: unknown[]): Promise<T> =>
     callWorkspaceState<T>(options.rpc, method, args);
@@ -236,22 +276,29 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
   const presentation = createWorkspacePresentationClient(options.rpc);
   const navigationClients: PanelNavigationTransactionClients = {
     runtime: {
-      retireEntity: (id) => options.rpc.call("main", "runtime.retireEntity", [{ id }]),
+      retireEntity: (id) =>
+        options.rpc.call("main", "runtime.retireEntity", [{ id }]),
     },
     workspaceState: {
-      commitPreparedNavigation: (input) => workspaceState.commitPreparedNavigation(input),
+      commitPreparedNavigation: (input) =>
+        workspaceState.commitPreparedNavigation(input),
     },
   };
-  const reportNavigationCleanup = (result: PanelNavigationCommitResult): void => {
+  const reportNavigationCleanup = (
+    result: PanelNavigationCommitResult,
+  ): void => {
     if (result.retirement.status !== "failed") return;
     const error = result.retirement.error;
     console.warn(
       `[panel.navigate] Runtime ${result.previousEntityId} was displaced but could not be retired: ${
         error instanceof Error ? error.message : String(error)
-      }`
+      }`,
     );
   };
-  const callPanelState = async <T>(method: string, args: unknown[]): Promise<T> => {
+  const callPanelState = async <T>(
+    method: string,
+    args: unknown[],
+  ): Promise<T> => {
     try {
       const read = {
         rootGroups: () => presentation.rootGroups(args[0] as never),
@@ -261,7 +308,8 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         detail: () => presentation.detail(String(args[0])),
         search: () => presentation.searchTree(args[0] as never),
       }[method];
-      if (!read) throw new Error(`Unknown workspace-state panel read: ${method}`);
+      if (!read)
+        throw new Error(`Unknown workspace-state panel read: ${method}`);
       return (await read()) as T;
     } catch (error) {
       rethrowPanelOperationError(error);
@@ -270,14 +318,19 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
   const callView = <T>(method: string, args: unknown[]): Promise<T> =>
     options.rpc.call<T>("main", `view.${method}`, args);
   const ensurePanelMaterialized = async (id: string): Promise<PanelAttempt> => {
-    const detail = await callPanelState<WorkspacePanelDetail | null>("detail", [id]);
+    const detail = await callPanelState<WorkspacePanelDetail | null>("detail", [
+      id,
+    ]);
     if (!detail) throw new Error(`Unknown panel slot: ${id}`);
     const result = await options.rpc.call<EnsurePanelSlotResult>(
       "main",
       "panelRuntime.ensureSlot",
-      [id, detail.entity.id]
+      [id, detail.entity.id],
     );
-    if ((result.status === "assigned" || result.status === "already-held") && result.attempt) {
+    if (
+      (result.status === "assigned" || result.status === "already-held") &&
+      result.attempt
+    ) {
       return result.attempt;
     }
     const holder = result.lease?.holderLabel;
@@ -297,28 +350,35 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
           contextId: detail.currentHistory.context_id,
           requestedRef:
             (detail.currentHistory.options
-              ? (JSON.parse(detail.currentHistory.options) as { ref?: string }).ref
+              ? (JSON.parse(detail.currentHistory.options) as { ref?: string })
+                  .ref
               : undefined) ?? "latest",
           effectiveVersion: detail.entity.source.effectiveVersion,
           buildKey: detail.entity.activeBuildKey ?? null,
         },
         details: { ensureStatus: result.status },
-      })
+      }),
     );
   };
   const getStateArgs = <T = Record<string, unknown>>(id: string): Promise<T> =>
     readPanelStateArgs<T>(options.rpc, id);
-  const readMetadata = async (id: string): Promise<PanelRuntimeMetadataResult | null> => {
-    const detail = await callPanelState<WorkspacePanelDetail | null>("detail", [id]);
+  const readMetadata = async (
+    id: string,
+  ): Promise<PanelRuntimeMetadataResult | null> => {
+    const detail = await callPanelState<WorkspacePanelDetail | null>("detail", [
+      id,
+    ]);
     if (!detail) return null;
     const storedOptions = detail.currentHistory.options
       ? (JSON.parse(detail.currentHistory.options) as { ref?: string })
       : {};
     return {
       id,
-      title: detail.slot.current_entity_title ?? id,
+      title: detail.presentation.title,
       source: detail.currentHistory.source,
-      kind: isBrowserPanelSource(detail.currentHistory.source) ? "browser" : "workspace",
+      kind: isBrowserPanelSource(detail.currentHistory.source)
+        ? "browser"
+        : "workspace",
       parentId: detail.slot.parent_slot_id,
       runtimeEntityId: detail.entity.id,
       contextId: detail.currentHistory.context_id,
@@ -338,7 +398,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     return typeof value === "function" ? value() : (value ?? null);
   };
 
-  const rememberMetadata = (metadata: PanelHandleMetadata): PanelHandleMetadata => {
+  const rememberMetadata = (
+    metadata: PanelHandleMetadata,
+  ): PanelHandleMetadata => {
     const next = { ...(metadataCache.get(metadata.id) ?? {}), ...metadata };
     metadataCache.set(metadata.id, next);
     return next;
@@ -346,7 +408,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
 
   const metadataForId = (
     id: string,
-    overrides: Partial<PanelHandleMetadata> = {}
+    overrides: Partial<PanelHandleMetadata> = {},
   ): PanelHandleMetadata => {
     const cached = metadataCache.get(id);
     const kind = overrides.kind ?? cached?.kind ?? "workspace";
@@ -363,7 +425,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
 
   const metadataFromResult = (
     id: string,
-    meta: PanelRuntimeMetadataResult
+    meta: PanelRuntimeMetadataResult,
   ): PanelHandleMetadata => ({
     id,
     title: meta.title,
@@ -384,24 +446,30 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       requesterPanelId: requesterPanelId(),
       loadModule: options.loadModule,
       navigate: (url) => navigatePanel(metadata.id, url).then(() => undefined),
-      navigateHistory: (delta) => navigateHistory(metadata.id, delta).then(() => undefined),
+      navigateHistory: (delta) =>
+        navigateHistory(metadata.id, delta).then(() => undefined),
       reload: () => restartPanel(metadata.id),
       observe: () => observePanel(metadata.id),
     });
 
   const observePanel = async (id: string): Promise<PanelObservation> => {
-    const detail = await callPanelState<WorkspacePanelDetail | null>("detail", [id]);
+    const detail = await callPanelState<WorkspacePanelDetail | null>("detail", [
+      id,
+    ]);
     if (!detail) throw new Error(`Unknown panel slot: ${id}`);
     const runtime = await options.rpc.call<PanelSlotObservation>(
       "main",
       "panelRuntime.observeSlot",
-      [id]
+      [id],
     );
     const storedOptions = detail.currentHistory.options
       ? (JSON.parse(detail.currentHistory.options) as { ref?: string })
       : {};
     const source = detail.currentHistory.source;
-    const attempt = runtime.attempt?.runtimeEntityId === detail.entity.id ? runtime.attempt : null;
+    const attempt =
+      runtime.attempt?.runtimeEntityId === detail.entity.id
+        ? runtime.attempt
+        : null;
     const phase = attempt?.phase ?? ("pending" as const);
     const updatedAt = attempt?.updatedAt ?? Date.now();
     const requestedRef = storedOptions.ref ?? "latest";
@@ -430,15 +498,19 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
             occurredAt: updatedAt,
             details: {
               attemptFailureStage: attempt.failure.stage,
-              ...(attempt.failure.stack ? { stack: attempt.failure.stack } : {}),
-              ...(attempt.failure.detail ? { detail: attempt.failure.detail } : {}),
+              ...(attempt.failure.stack
+                ? { stack: attempt.failure.stack }
+                : {}),
+              ...(attempt.failure.detail
+                ? { detail: attempt.failure.detail }
+                : {}),
               ...(attempt.failure.diagnostics ?? {}),
             },
           }
         : undefined;
     const observation: PanelObservation = {
       panelId: id,
-      title: detail.slot.current_entity_title ?? id,
+      title: detail.presentation.title,
       source,
       kind: isBrowserPanelSource(source) ? "browser" : "workspace",
       parentId: detail.slot.parent_slot_id,
@@ -473,8 +545,12 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
                       kind: "observed" as const,
                       observation: {
                         phase,
-                        ...(failure?.message ? { message: failure.message } : {}),
-                        ...(attempt?.failure?.stack ? { stack: attempt.failure.stack } : {}),
+                        ...(failure?.message
+                          ? { message: failure.message }
+                          : {}),
+                        ...(attempt?.failure?.stack
+                          ? { stack: attempt.failure.stack }
+                          : {}),
                       },
                     }
                   : { kind: "unavailable" as const },
@@ -502,7 +578,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
   const waitUntilReady = async (
     initial: PanelObservation,
     signal?: AbortSignal,
-    exactAttempt?: PanelAttempt
+    exactAttempt?: PanelAttempt,
   ): Promise<PanelObservation> => {
     let attemptRef: PanelAttemptRef = exactAttempt
       ? { epoch: exactAttempt.epoch, attemptId: exactAttempt.attemptId }
@@ -528,7 +604,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
             reason: "unknown-attempt",
             attemptRef,
           },
-        })
+        }),
       );
     const stoppedFailure = (attempt: PanelAttempt): PanelOperationError =>
       new PanelOperationError(
@@ -551,7 +627,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
             reason: "stopped",
             ...(attempt.stopReason ? { stopReason: attempt.stopReason } : {}),
           },
-        })
+        }),
       );
     if (!exactAttempt && initial.phase === "ready") return initial;
     // The exact-attempt contract: a waiter is resolved by its own attempt's
@@ -569,12 +645,15 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
           const lifecycle = await options.rpc.call<PanelSlotObservation>(
             "main",
             "panelRuntime.observeSlot",
-            [initial.panelId]
+            [initial.panelId],
           );
           // Slot followers express active demand. If the durable lifecycle has
           // no live attempt, re-enter canonical materialization instead of
           // waiting for an event that nobody is now responsible for creating.
-          if (!lifecycle.attempt || lifecycle.attempt.attemptId === abandonedAttemptId) {
+          if (
+            !lifecycle.attempt ||
+            lifecycle.attempt.attemptId === abandonedAttemptId
+          ) {
             attempt = await ensurePanelMaterialized(initial.panelId);
             attemptRef = { epoch: attempt.epoch, attemptId: attempt.attemptId };
             continue;
@@ -585,16 +664,24 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
           const snapshot = await options.rpc.call<AwaitPanelAttemptResult>(
             "main",
             "panelRuntime.getAttempt",
-            [attemptRef]
+            [attemptRef],
           );
-          if (snapshot.kind === "unknown-attempt") throw unknownAttemptFailure();
+          if (snapshot.kind === "unknown-attempt")
+            throw unknownAttemptFailure();
           attempt = snapshot.attempt;
         }
       }
       if (attempt.phase === "ready") {
-        if (initial.phase === "ready" && initial.attemptId === attempt.attemptId) return initial;
+        if (
+          initial.phase === "ready" &&
+          initial.attemptId === attempt.attemptId
+        )
+          return initial;
         const observed = await observePanel(initial.panelId);
-        if (observed.attemptId === attempt.attemptId && observed.phase === "ready") {
+        if (
+          observed.attemptId === attempt.attemptId &&
+          observed.phase === "ready"
+        ) {
           return observed;
         }
         if (followSlot) {
@@ -625,7 +712,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
           panelFailure({
             code: attempt.failure?.code ?? "unknown_failure",
             stage: attempt.failure?.stage === "build" ? "build" : "boot",
-            message: attempt.failure?.message ?? `Panel ${initial.panelId} boot failed`,
+            message:
+              attempt.failure?.message ??
+              `Panel ${initial.panelId} boot failed`,
             provenance: {
               panelId: initial.panelId,
               runtimeEntityId: attempt.runtimeEntityId,
@@ -637,11 +726,17 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
               buildKey: attempt.buildKey ?? initial.buildKey,
             },
             details: {
-              ...(attempt.failure?.stage ? { attemptFailureStage: attempt.failure.stage } : {}),
-              ...(attempt.failure?.stack ? { stack: attempt.failure.stack } : {}),
-              ...(attempt.failure?.detail ? { detail: attempt.failure.detail } : {}),
+              ...(attempt.failure?.stage
+                ? { attemptFailureStage: attempt.failure.stage }
+                : {}),
+              ...(attempt.failure?.stack
+                ? { stack: attempt.failure.stack }
+                : {}),
+              ...(attempt.failure?.detail
+                ? { detail: attempt.failure.detail }
+                : {}),
             },
-          })
+          }),
         );
       }
       if (attempt.phase === "stopped") {
@@ -658,7 +753,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         [attemptRef, attempt.revision],
         {
           signal,
-        }
+        },
       );
       if (result.kind === "unknown-attempt") {
         if (followSlot) {
@@ -684,11 +779,13 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       for (const item of page.items) {
         removed.push(item.slotId);
         if (item.entityId) {
-          await options.rpc.call("main", "runtime.retireEntity", [{ id: item.entityId }]);
+          await options.rpc.call("main", "runtime.retireEntity", [
+            { id: item.entityId },
+          ]);
         }
       }
       await workspaceState.acknowledgeCloseCleanup(
-        page.items.map((item) => asPanelSlotId(item.slotId))
+        page.items.map((item) => asPanelSlotId(item.slotId)),
       );
       if (!page.nextCursor) break;
     }
@@ -708,9 +805,12 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     id: string,
     source: string,
     navigateOptions?: PanelNavigateOptions,
-    historyMode: "append" | "replace" = "append"
+    historyMode: "append" | "replace" = "append",
   ): Promise<PanelObservation> => {
-    const current = await callPanelState<WorkspacePanelDetail | null>("detail", [id]);
+    const current = await callPanelState<WorkspacePanelDetail | null>(
+      "detail",
+      [id],
+    );
     if (!current) throw new Error(`Unknown panel slot: ${id}`);
     const external = isOpenPanelBrowserUrl(source);
     const panelMetadata = external
@@ -723,15 +823,18 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
           navigateOptions?.ref ??
             `ctx:${navigateOptions?.contextId ?? current.currentHistory.context_id}`,
         ]);
-    if (!external && !panelMetadata) throw new Error(`Unknown panel source: ${source}`);
+    if (!external && !panelMetadata)
+      throw new Error(`Unknown panel source: ${source}`);
     const stateArgsValidation = external
       ? { success: true as const, data: navigateOptions?.stateArgs ?? {} }
       : await validateStateArgsAsync(
           navigateOptions?.stateArgs ?? {},
-          panelMetadata?.stateArgs as never
+          panelMetadata?.stateArgs as never,
         );
     if (!stateArgsValidation.success) {
-      throw new Error(`Invalid stateArgs for ${source}: ${stateArgsValidation.error}`);
+      throw new Error(
+        `Invalid stateArgs for ${source}: ${stateArgsValidation.error}`,
+      );
     }
     const stateArgs = stateArgsValidation.data as Record<string, unknown>;
     const storedOptions = current.currentHistory.options
@@ -741,7 +844,8 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         })
       : {};
     const nextEnv = navigateOptions?.env ?? storedOptions.env;
-    const contextId = navigateOptions?.contextId ?? current.currentHistory.context_id;
+    const contextId =
+      navigateOptions?.contextId ?? current.currentHistory.context_id;
     const entryKey = `nav-${crypto.randomUUID()}`;
     const historySource = external ? `browser:${source}` : source;
     const entitySpec = {
@@ -757,9 +861,11 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       contextId,
       stateArgs,
     };
-    const next = await options.rpc.call<RuntimePanelEntity>("main", "runtime.createEntity", [
-      entitySpec,
-    ]);
+    const next = await options.rpc.call<RuntimePanelEntity>(
+      "main",
+      "runtime.createEntity",
+      [entitySpec],
+    );
     const transition = await commitPreparedPanelNavigation(navigationClients, {
       slotId: asPanelSlotId(id),
       expectedCurrentEntityId: asPanelEntityId(current.entity.id),
@@ -782,8 +888,10 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     const title =
       normalizePanelTitle(
         external
-          ? new URL(source).hostname || new URL(source).protocol.replace(/:$/, "") || "browser"
-          : (panelMetadata?.title ?? source)
+          ? new URL(source).hostname ||
+              new URL(source).protocol.replace(/:$/, "") ||
+              "browser"
+          : (panelMetadata?.title ?? source),
       ) ?? "panel";
     await presentation.syncSlot(id);
     await presentation.updatePanelTitle(id, title, { explicit: false });
@@ -806,9 +914,12 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
   const navigateHistory = async (
     id: string,
     delta: -1 | 1,
-    waitOptions?: PanelWaitOptions
+    waitOptions?: PanelWaitOptions,
   ): Promise<PanelObservation | null> => {
-    const current = await callPanelState<WorkspacePanelDetail | null>("detail", [id]);
+    const current = await callPanelState<WorkspacePanelDetail | null>(
+      "detail",
+      [id],
+    );
     if (!current) throw new Error(`Unknown panel slot: ${id}`);
     const target = await callState<{
       entry_key: string;
@@ -820,7 +931,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     } | null>("slot.historyRelative", [id, delta]);
     if (!target) return null;
     const external = target.source.startsWith("browser:");
-    const source = external ? target.source.slice("browser:".length) : target.source;
+    const source = external
+      ? target.source.slice("browser:".length)
+      : target.source;
     const storedOptions = target.options
       ? (JSON.parse(target.options) as {
           ref?: string;
@@ -839,11 +952,17 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       contextId: target.context_id,
       stateArgs: target.state_args ? JSON.parse(target.state_args) : {},
     };
-    const next = await options.rpc.call<RuntimePanelEntity>("main", "runtime.createEntity", [spec]);
+    const next = await options.rpc.call<RuntimePanelEntity>(
+      "main",
+      "runtime.createEntity",
+      [spec],
+    );
     if (next.id !== target.entity_id) {
-      await options.rpc.call("main", "runtime.retireEntity", [{ id: next.id }]).catch(() => {});
+      await options.rpc
+        .call("main", "runtime.retireEntity", [{ id: next.id }])
+        .catch(() => {});
       throw new Error(
-        `History entry ${target.entry_key} resolved to ${next.id}, expected ${target.entity_id}`
+        `History entry ${target.entry_key} resolved to ${next.id}, expected ${target.entity_id}`,
       );
     }
     const transition = await commitPreparedPanelNavigation(navigationClients, {
@@ -858,7 +977,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
   };
 
   const restartPanel = async (id: string): Promise<void> => {
-    const detail = await callPanelState<WorkspacePanelDetail | null>("detail", [id]);
+    const detail = await callPanelState<WorkspacePanelDetail | null>("detail", [
+      id,
+    ]);
     if (!detail) throw new Error(`Unknown panel slot: ${id}`);
     await ensurePanelMaterialized(id);
     await options.rpc.call("main", "runtime.supervision.restart", [
@@ -868,9 +989,11 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
 
   const rebuildPanel = async (
     id: string,
-    waitOptions?: PanelWaitOptions
+    waitOptions?: PanelWaitOptions,
   ): Promise<PanelObservation> => {
-    const detail = await callPanelState<WorkspacePanelDetail | null>("detail", [id]);
+    const detail = await callPanelState<WorkspacePanelDetail | null>("detail", [
+      id,
+    ]);
     if (!detail) throw new Error(`Unknown panel slot: ${id}`);
     const storedOptions = detail.currentHistory.options
       ? (JSON.parse(detail.currentHistory.options) as {
@@ -893,7 +1016,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         ...(storedOptions.env ? { env: storedOptions.env } : {}),
         ...(waitOptions?.signal ? { signal: waitOptions.signal } : {}),
       },
-      "replace"
+      "replace",
     );
   };
 
@@ -901,7 +1024,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     id: string,
     observation: PanelObservation,
     error: unknown,
-    details: Record<string, unknown>
+    details: Record<string, unknown>,
   ): PanelOperationError =>
     new PanelOperationError(
       panelFailure({
@@ -920,18 +1043,21 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         },
         details,
       }),
-      error
+      error,
     );
 
   const waitUntilRoutable = async (
     observation: PanelObservation,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<PanelObservation> => {
-    if (observation.phase === "ready" && observation.host?.reachable === true) return observation;
+    if (observation.phase === "ready" && observation.host?.reachable === true)
+      return observation;
     let watchedAttemptId = observation.attemptId;
-    let slot = await options.rpc.call<PanelSlotObservation>("main", "panelRuntime.observeSlot", [
-      observation.panelId,
-    ]);
+    let slot = await options.rpc.call<PanelSlotObservation>(
+      "main",
+      "panelRuntime.observeSlot",
+      [observation.panelId],
+    );
     for (;;) {
       signal?.throwIfAborted();
       if (!slot.attempt || slot.attempt.phase === "stopped") {
@@ -942,29 +1068,40 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         const readied = await waitUntilReady(
           await observePanel(observation.panelId),
           signal,
-          replacement
+          replacement,
         );
         watchedAttemptId = readied.attemptId;
-        slot = await options.rpc.call<PanelSlotObservation>("main", "panelRuntime.observeSlot", [
-          observation.panelId,
-        ]);
+        slot = await options.rpc.call<PanelSlotObservation>(
+          "main",
+          "panelRuntime.observeSlot",
+          [observation.panelId],
+        );
         continue;
       }
       if (slot.attempt.phase === "failed") {
         // Preserve the coordinator's typed terminal evidence; awaiting slot
         // churn here would hide the failure and can never create that churn.
-        await waitUntilReady(await observePanel(observation.panelId), signal, slot.attempt);
+        await waitUntilReady(
+          await observePanel(observation.panelId),
+          signal,
+          slot.attempt,
+        );
       }
       if (slot.attempt && slot.attempt.attemptId !== watchedAttemptId) {
         // The slot advanced past the attempt we were routing to. Wait for the
         // replacement to become ready, then re-enter this loop: readiness
         // alone is not routability, so the reachability check must re-run for
         // the replacement too.
-        const readied = await waitUntilReady(await observePanel(observation.panelId), signal);
+        const readied = await waitUntilReady(
+          await observePanel(observation.panelId),
+          signal,
+        );
         watchedAttemptId = readied.attemptId;
-        slot = await options.rpc.call<PanelSlotObservation>("main", "panelRuntime.observeSlot", [
-          observation.panelId,
-        ]);
+        slot = await options.rpc.call<PanelSlotObservation>(
+          "main",
+          "panelRuntime.observeSlot",
+          [observation.panelId],
+        );
         continue;
       }
       if (slot.attempt?.phase === "ready" && slot.route.reachable) {
@@ -974,7 +1111,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         "main",
         "panelRuntime.awaitSlot",
         [observation.panelId, slot.version],
-        { signal }
+        { signal },
       );
     }
   };
@@ -988,26 +1125,44 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     id: string,
     method: string,
     args: unknown[],
-    waitOptions?: PanelWaitOptions
-  ): Promise<{ observation: PanelObservation; runtimeEntityId: string; result: T }> => {
+    waitOptions?: PanelWaitOptions,
+  ): Promise<{
+    observation: PanelObservation;
+    runtimeEntityId: string;
+    result: T;
+  }> => {
     await ensurePanelMaterialized(id);
-    let observation = await waitUntilReady(await observePanel(id), waitOptions?.signal);
+    let observation = await waitUntilReady(
+      await observePanel(id),
+      waitOptions?.signal,
+    );
     observation = await waitUntilRoutable(observation, waitOptions?.signal);
-    if (!observation.runtimeEntityId) throw new Error(`Panel ${id} has no runtime entity`);
+    if (!observation.runtimeEntityId)
+      throw new Error(`Panel ${id} has no runtime entity`);
     const expectedRuntimeEntityId = observation.runtimeEntityId;
     try {
       return {
         observation,
         runtimeEntityId: expectedRuntimeEntityId,
-        result: (await options.rpc.call(expectedRuntimeEntityId, method, args)) as T,
+        result: (await options.rpc.call(
+          expectedRuntimeEntityId,
+          method,
+          args,
+        )) as T,
       };
     } catch (error) {
       const errorCode = rpcErrorCode(error);
-      if (errorCode !== "TARGET_NOT_REACHABLE" && errorCode !== "RECONNECT_GRACE_EXPIRED") {
+      if (
+        errorCode !== "TARGET_NOT_REACHABLE" &&
+        errorCode !== "RECONNECT_GRACE_EXPIRED"
+      ) {
         throw error;
       }
       const current = await observePanel(id);
-      if (!current.runtimeEntityId || current.runtimeEntityId === expectedRuntimeEntityId) {
+      if (
+        !current.runtimeEntityId ||
+        current.runtimeEntityId === expectedRuntimeEntityId
+      ) {
         throw panelAgentRouteFailure(id, current, error, {
           agentMethod: method,
           routeFailureCode: errorCode,
@@ -1023,12 +1178,17 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       observation = await waitUntilReady(current, waitOptions?.signal);
       observation = await waitUntilRoutable(observation, waitOptions?.signal);
       const replacementRuntimeEntityId = observation.runtimeEntityId;
-      if (!replacementRuntimeEntityId) throw new Error(`Panel ${id} has no runtime entity`);
+      if (!replacementRuntimeEntityId)
+        throw new Error(`Panel ${id} has no runtime entity`);
       try {
         return {
           observation,
           runtimeEntityId: replacementRuntimeEntityId,
-          result: (await options.rpc.call(replacementRuntimeEntityId, method, args)) as T,
+          result: (await options.rpc.call(
+            replacementRuntimeEntityId,
+            method,
+            args,
+          )) as T,
         };
       } catch (replacementError) {
         throw panelAgentRouteFailure(id, observation, replacementError, {
@@ -1043,7 +1203,11 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     }
   };
 
-  const callPanelAgent = async (id: string, method: string, args: unknown[]): Promise<unknown> => {
+  const callPanelAgent = async (
+    id: string,
+    method: string,
+    args: unknown[],
+  ): Promise<unknown> => {
     const allowed = new Set([
       "_agent.snapshot",
       "_agent.tree",
@@ -1051,13 +1215,14 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       "_agent.routes",
       "_agent.setMode",
     ]);
-    if (!allowed.has(method)) throw new Error(`Unknown panel agent method: ${method}`);
+    if (!allowed.has(method))
+      throw new Error(`Unknown panel agent method: ${method}`);
     return (await invokeReadyPanelAgent(id, method, args)).result;
   };
 
   const snapshotPanel = async (
     id: string,
-    waitOptions?: PanelWaitOptions
+    waitOptions?: PanelWaitOptions,
   ): Promise<PanelSnapshotObservation> => {
     const {
       observation,
@@ -1087,7 +1252,10 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         errors: never[];
         dropped: { entries: number; errors: number };
         capacity: { entries: number; errors: number };
-      }>("main", "panelCdp.consoleHistory", [id, { limit: 200, errorLimit: 100 }]);
+      }>("main", "panelCdp.consoleHistory", [
+        id,
+        { limit: 200, errorLimit: 100 },
+      ]);
       consoleHistory = {
         available: true,
         ...history,
@@ -1104,17 +1272,23 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
   const ops: PanelHandleHostOps = {
     refresh: async (id) => {
       const meta = await readMetadata(id);
-      return meta ? rememberMetadata(metadataFromResult(id, meta)) : metadataForId(id);
+      return meta
+        ? rememberMetadata(metadataFromResult(id, meta))
+        : metadataForId(id);
     },
     observe: observePanel,
     diagnose: diagnosePanel,
     parent: (id, parentId) => {
-      const resolvedParentId = parentId ?? metadataCache.get(id)?.parentId ?? null;
+      const resolvedParentId =
+        parentId ?? metadataCache.get(id)?.parentId ?? null;
       return resolvedParentId ? panelTree.get(resolvedParentId) : null;
     },
     reload: async (id, waitOptions) => {
       await restartPanel(id);
-      const result = await waitUntilReady(await observePanel(id), waitOptions?.signal);
+      const result = await waitUntilReady(
+        await observePanel(id),
+        waitOptions?.signal,
+      );
       options.onReload?.(id);
       return result;
     },
@@ -1123,7 +1297,12 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       options.onClose?.(id);
       return result;
     },
-    unload: (id) => options.rpc.call<PanelLifecycleResult>("main", "panelRuntime.unloadSlot", [id]),
+    unload: (id) =>
+      options.rpc.call<PanelLifecycleResult>(
+        "main",
+        "panelRuntime.unloadSlot",
+        [id],
+      ),
     setTitle: (id, title, titleOptions) =>
       presentation
         .updatePanelTitle(id, normalizePanelTitle(title) ?? "", titleOptions)
@@ -1135,7 +1314,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       workspaceState.moveSlot(
         asPanelSlotId(id),
         newParentId === null ? null : asPanelSlotId(newParentId),
-        placement
+        placement,
       ),
     takeOver: async (id) => {
       await options.rpc.call("main", "panelRuntime.takeOverSlot", [id]);
@@ -1150,7 +1329,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     focus: async (id, focusOptions) => {
       const anchorPanelId = focusOptions?.anchorPanelId ?? requesterPanelId();
       const resolved: PanelFocusOptions = {
-        ...(focusOptions?.placement ? { placement: focusOptions.placement } : {}),
+        ...(focusOptions?.placement
+          ? { placement: focusOptions.placement }
+          : {}),
         ...(anchorPanelId ? { anchorPanelId } : {}),
       };
       if (options.focusPanel) await options.focusPanel(id, resolved);
@@ -1195,12 +1376,16 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     }),
   });
 
-  const readPage = async (input: PanelTreePageInput): Promise<PanelRuntimeTreePage> => {
+  const readPage = async (
+    input: PanelTreePageInput,
+  ): Promise<PanelRuntimeTreePage> => {
     const page = await callPanelState<PanelTreePage>("page", [input]);
     return hydratePage(page);
   };
 
-  const readCurrentRoots = async (input: PanelTreePageWindow): Promise<PanelRuntimeTreePage> => {
+  const readCurrentRoots = async (
+    input: PanelTreePageWindow,
+  ): Promise<PanelRuntimeTreePage> => {
     const page = await callPanelState<PanelTreePage>("rootsForCaller", [input]);
     return hydratePage(page);
   };
@@ -1218,7 +1403,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     self() {
       if (options.selfHandle) return options.selfHandle();
       if (!options.selfId) {
-        throw new Error("panelTree.self() is not available before runtime init");
+        throw new Error(
+          "panelTree.self() is not available before runtime init",
+        );
       }
       return createPanelHandle({
         rpc: options.rpc,
@@ -1244,7 +1431,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       return fromMetadata(metadata);
     },
     async rootOwners(input = {}) {
-      const page = await callPanelState<PanelTreeRootGroupPage>("rootGroups", [input]);
+      const page = await callPanelState<PanelTreeRootGroupPage>("rootGroups", [
+        input,
+      ]);
       return {
         revision: page.revision,
         owners: page.groups,
@@ -1265,7 +1454,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     },
     async path(id) {
       const path = await callPanelState<PanelTreePath | null>("path", [id]);
-      return path ? { revision: path.revision, entries: path.nodes.map(hydrateNode) } : null;
+      return path
+        ? { revision: path.revision, entries: path.nodes.map(hydrateNode) }
+        : null;
     },
     async search(input) {
       const page = await callPanelState<PanelTreeSearchPage>("search", [input]);
@@ -1299,16 +1490,20 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
 
   const commitPanelSlot = async (
     source: string,
-    openOptions?: CreatePanelSlotOptions
+    openOptions?: CreatePanelSlotOptions,
   ): Promise<{
     panelHandle: PanelHandle;
     activationSpec?: RuntimeCodePanelEntityCreateSpec;
   }> => {
     if (openOptions?.slug && openOptions.operationId) {
-      throw new Error("Panel creation accepts either slug or operationId, not both");
+      throw new Error(
+        "Panel creation accepts either slug or operationId, not both",
+      );
     }
     const parentId =
-      openOptions?.parentId !== undefined ? openOptions.parentId : defaultOpenParentId();
+      openOptions?.parentId !== undefined
+        ? openOptions.parentId
+        : defaultOpenParentId();
     const external = isOpenPanelBrowserUrl(source);
     const execution = external
       ? ({ surface: "external", url: source } as const)
@@ -1320,7 +1515,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     const parsedUrl = external ? new URL(source) : null;
     const identitySource = parsedUrl
       ? browserSourceFromHostname(
-          parsedUrl.hostname || parsedUrl.protocol.replace(/:$/, "") || "browser"
+          parsedUrl.hostname ||
+            parsedUrl.protocol.replace(/:$/, "") ||
+            "browser",
         )
       : source;
     const requestedContextId = openOptions?.contextId?.trim() || undefined;
@@ -1344,7 +1541,8 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
           : {}),
       isRoot: parentId == null,
     });
-    const entryKey = operationIdentity?.entryKey ?? `nav-${crypto.randomUUID()}`;
+    const entryKey =
+      operationIdentity?.entryKey ?? `nav-${crypto.randomUUID()}`;
     const panelKind = external ? ("browser" as const) : ("workspace" as const);
     const timed = async <T>(
       stage:
@@ -1352,7 +1550,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         | "runtime.reserveEntity"
         | "workspace-state.slot.create"
         | "workspace.presentation.indexPanel",
-      operation: () => Promise<T>
+      operation: () => Promise<T>,
     ): Promise<T> => {
       const startedAt = Date.now();
       try {
@@ -1376,7 +1574,8 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         throw error;
       }
     };
-    const contextId = requestedContextId ?? (external ? generateContextId(id) : undefined);
+    const contextId =
+      requestedContextId ?? (external ? generateContextId(id) : undefined);
     const panelMetadata = external
       ? null
       : await options.rpc.call<{
@@ -1394,10 +1593,12 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       ? { success: true as const, data: openOptions?.stateArgs ?? {} }
       : await validateStateArgsAsync(
           openOptions?.stateArgs ?? {},
-          panelMetadata?.stateArgs as never
+          panelMetadata?.stateArgs as never,
         );
     if (!stateArgsValidation.success) {
-      throw new Error(`Invalid stateArgs for ${source}: ${stateArgsValidation.error}`);
+      throw new Error(
+        `Invalid stateArgs for ${source}: ${stateArgsValidation.error}`,
+      );
     }
     const stateArgs = stateArgsValidation.data as Record<string, unknown>;
     const entitySpec = {
@@ -1411,8 +1612,16 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       external ? "runtime.createEntity" : "runtime.reserveEntity",
       () =>
         external
-          ? options.rpc.call<RuntimePanelEntity>("main", "runtime.createEntity", [entitySpec])
-          : options.rpc.call<RuntimePanelEntity>("main", "runtime.reserveEntity", [entitySpec])
+          ? options.rpc.call<RuntimePanelEntity>(
+              "main",
+              "runtime.createEntity",
+              [entitySpec],
+            )
+          : options.rpc.call<RuntimePanelEntity>(
+              "main",
+              "runtime.reserveEntity",
+              [entitySpec],
+            ),
     );
     const historySource = external ? `browser:${source}` : source;
     let slotCommitted = false;
@@ -1438,7 +1647,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
           },
           details: { slotCommitted: true },
         }),
-        error
+        error,
       );
     };
     try {
@@ -1454,10 +1663,12 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
             stateArgs,
             options: {
               ...(openOptions?.ref ? { ref: openOptions.ref } : {}),
-              ...(openOptions?.placement ? { placement: openOptions.placement } : {}),
+              ...(openOptions?.placement
+                ? { placement: openOptions.placement }
+                : {}),
             },
           },
-        })
+        }),
       );
       await presentation.syncSlot(id);
       slotCommitted = true;
@@ -1478,7 +1689,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         normalizePanelTitle(source) ??
         "panel";
       await timed("workspace.presentation.indexPanel", () =>
-        presentation.indexPanel({ id, title, path: historySource })
+        presentation.indexPanel({ id, title, path: historySource }),
       );
       if (explicitTitle !== undefined) {
         await presentation.updatePanelTitle(id, title, { explicit: true });
@@ -1497,7 +1708,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       options.onOpen?.({ source, id: panelHandle.id, kind: panelHandle.kind });
       return {
         panelHandle,
-        ...(!external ? { activationSpec: entitySpec as RuntimeCodePanelEntityCreateSpec } : {}),
+        ...(!external
+          ? { activationSpec: entitySpec as RuntimeCodePanelEntityCreateSpec }
+          : {}),
       };
     } catch (error) {
       return rethrowCommittedFailure(error);
@@ -1506,12 +1719,13 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
 
   const createPanelSlot = async (
     source: string,
-    openOptions?: CreatePanelSlotOptions
-  ): Promise<PanelHandle> => (await commitPanelSlot(source, openOptions)).panelHandle;
+    openOptions?: CreatePanelSlotOptions,
+  ): Promise<PanelHandle> =>
+    (await commitPanelSlot(source, openOptions)).panelHandle;
 
   const openPanel = async (
     source: string,
-    openOptions?: OpenPanelOptions
+    openOptions?: OpenPanelOptions,
   ): Promise<PanelHandle> => {
     const committed = await commitPanelSlot(source, openOptions);
     const panelHandle = committed.panelHandle;
@@ -1524,18 +1738,23 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       // Materialization follows activation because connection grants require
       // the panel principal registered by that transition.
       if (committed.activationSpec) {
-        await options.rpc.call<RuntimePanelEntity>("main", "runtime.activateReservedEntity", [
-          committed.activationSpec,
-        ]);
+        await options.rpc.call<RuntimePanelEntity>(
+          "main",
+          "runtime.activateReservedEntity",
+          [committed.activationSpec],
+        );
       }
       let committedAttempt: PanelAttempt | undefined;
       if (openOptions?.focus !== false) {
         const anchorPanelId = requesterPanelId();
         const focusOptions: PanelFocusOptions = {
-          ...(openOptions?.placement ? { placement: openOptions.placement } : {}),
+          ...(openOptions?.placement
+            ? { placement: openOptions.placement }
+            : {}),
           ...(anchorPanelId ? { anchorPanelId } : {}),
         };
-        if (options.focusPanel) await options.focusPanel(panelHandle.id, focusOptions);
+        if (options.focusPanel)
+          await options.focusPanel(panelHandle.id, focusOptions);
         else committedAttempt = await ensurePanelMaterialized(panelHandle.id);
       } else {
         committedAttempt = await ensurePanelMaterialized(panelHandle.id);
@@ -1543,7 +1762,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       observation = await waitUntilReady(
         await observePanel(panelHandle.id),
         openOptions?.signal,
-        committedAttempt
+        committedAttempt,
       );
     } catch (error) {
       if (error instanceof PanelOperationError) throw error;
@@ -1559,12 +1778,19 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
           }`,
           provenance: {
             panelId: panelHandle.id,
-            runtimeEntityId: observation?.runtimeEntityId ?? committedMetadata?.rpcTargetId,
-            ...(observation?.attemptId ? { attemptId: observation.attemptId } : {}),
+            runtimeEntityId:
+              observation?.runtimeEntityId ?? committedMetadata?.rpcTargetId,
+            ...(observation?.attemptId
+              ? { attemptId: observation.attemptId }
+              : {}),
             source: observation?.source ?? panelHandle.source,
-            contextId: observation?.contextId ?? committedMetadata?.contextId ?? "",
-            requestedRef: observation?.requestedRef ?? committedMetadata?.ref ?? "latest",
-            effectiveVersion: observation?.effectiveVersion ?? committedMetadata?.effectiveVersion,
+            contextId:
+              observation?.contextId ?? committedMetadata?.contextId ?? "",
+            requestedRef:
+              observation?.requestedRef ?? committedMetadata?.ref ?? "latest",
+            effectiveVersion:
+              observation?.effectiveVersion ??
+              committedMetadata?.effectiveVersion,
             buildKey: observation?.buildKey ?? committedMetadata?.buildKey,
           },
           details: {
@@ -1572,7 +1798,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
             ...(observation ? { lastPhase: observation.phase } : {}),
           },
         }),
-        error
+        error,
       );
     }
     const readyMetadata = await readMetadata(panelHandle.id);

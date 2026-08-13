@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { VcsStateNodeRef } from "@vibestudio/service-schemas/vcs";
+import type { WorkspaceTemplateState } from "@vibestudio/workspace-contracts/types";
 import { semanticRepositoryDigest } from "./semanticRepository.js";
 import { acquireTemplateSnapshot } from "./source.js";
 
@@ -38,6 +39,13 @@ const OLD_ONE = "1".repeat(64);
 const OLD_TWO = "2".repeat(64);
 const NEW_ONE = "3".repeat(64);
 const NEW_TWO = "4".repeat(64);
+const EMPTY_TEMPLATE_STATE: WorkspaceTemplateState = {
+  version: 1,
+  roots: [],
+  overrides: {},
+  nodes: [],
+  repositories: {},
+};
 
 describe("template composer staging", () => {
   it("observes a missing operation without creating its context", async () => {
@@ -47,30 +55,50 @@ describe("template composer staging", () => {
     });
 
     await expect(
-      readTemplateOperationRecord({ rpc: { call } } as never, "operation-missing")
+      readTemplateOperationRecord(
+        { rpc: { call } } as never,
+        "operation-missing",
+      ),
     ).resolves.toBeNull();
-    expect(call).not.toHaveBeenCalledWith("main", "runtime.createContext", expect.anything());
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "runtime.createContext",
+      expect.anything(),
+    );
   });
 
   it("reads a durable cancellation from the exact protected-main event", async () => {
-    const call = vi.fn(async (_target: string, method: string, input: Record<string, unknown>) => {
-      if (method === "vcs.resolveRepository") {
-        expect(input["state"]).toEqual({ kind: "event", eventId: "event:cancelled" });
-        return { repositoryId: "repository:meta", repoPath: "meta" };
-      }
-      if (method === "vcs.readFile") {
-        return {
-          content: {
-            kind: "text",
-            text: `${JSON.stringify({ version: 1, operationId: "pull-1" })}\n`,
-          },
-        };
-      }
-      throw new Error(`unexpected RPC ${method}`);
-    });
+    const call = vi.fn(
+      async (
+        _target: string,
+        method: string,
+        input: Record<string, unknown>,
+      ) => {
+        if (method === "vcs.resolveRepository") {
+          expect(input["state"]).toEqual({
+            kind: "event",
+            eventId: "event:cancelled",
+          });
+          return { repositoryId: "repository:meta", repoPath: "meta" };
+        }
+        if (method === "vcs.readFile") {
+          return {
+            content: {
+              kind: "text",
+              text: `${JSON.stringify({ version: 1, operationId: "pull-1" })}\n`,
+            },
+          };
+        }
+        throw new Error(`unexpected RPC ${method}`);
+      },
+    );
 
     await expect(
-      isTemplateOperationCancelled({ rpc: { call } } as never, "event:cancelled", "pull-1")
+      isTemplateOperationCancelled(
+        { rpc: { call } } as never,
+        "event:cancelled",
+        "pull-1",
+      ),
     ).resolves.toBe(true);
   });
 
@@ -107,9 +135,12 @@ describe("template composer staging", () => {
       "vcs.edit",
       expect.objectContaining({
         changes: [
-          expect.objectContaining({ kind: "file-create", path: "template-operations/record.json" }),
+          expect.objectContaining({
+            kind: "file-create",
+            path: "template-operations/record.json",
+          }),
         ],
-      })
+      }),
     );
   });
 
@@ -127,14 +158,18 @@ describe("template composer staging", () => {
     };
     const call = vi.fn(async (_target: string, method: string) => {
       if (method === "runtime.createContext") return {};
-      if (method === "vcs.status") return { committed: BASE, workingHead: BASE, clean: true };
+      if (method === "vcs.status")
+        return { committed: BASE, workingHead: BASE, clean: true };
       if (method === "vcs.resolveRepository") {
         return { repositoryId: "repository:meta", repoPath: "meta" };
       }
       if (method === "vcs.readFile") {
         return {
           fileId: "file:record",
-          content: { kind: "text", text: `${JSON.stringify(record, null, 2)}\n` },
+          content: {
+            kind: "text",
+            text: `${JSON.stringify(record, null, 2)}\n`,
+          },
         };
       }
       throw new Error(`unexpected RPC ${method}`);
@@ -142,8 +177,16 @@ describe("template composer staging", () => {
 
     await updateTemplateOperationRecord({ rpc: { call } } as never, record);
 
-    expect(call).not.toHaveBeenCalledWith("main", "vcs.edit", expect.anything());
-    expect(call).not.toHaveBeenCalledWith("main", "vcs.commit", expect.anything());
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "vcs.edit",
+      expect.anything(),
+    );
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "vcs.commit",
+      expect.anything(),
+    );
   });
 
   it("removes temporary repair state before publishing the repaired context", async () => {
@@ -178,13 +221,20 @@ describe("template composer staging", () => {
       "main",
       "vcs.edit",
       expect.objectContaining({
-        changes: [expect.objectContaining({ kind: "file-delete", fileId: "file:record" })],
-      })
+        changes: [
+          expect.objectContaining({
+            kind: "file-delete",
+            fileId: "file:record",
+          }),
+        ],
+      }),
     );
     expect(call).toHaveBeenCalledWith(
       "main",
       "vcs.commit",
-      expect.objectContaining({ message: expect.stringMatching(/^template-composer-intent:v1:/u) })
+      expect.objectContaining({
+        message: expect.stringMatching(/^template-composer-intent:v1:/u),
+      }),
     );
   });
 
@@ -202,9 +252,13 @@ describe("template composer staging", () => {
       }
       throw new Error(`unexpected RPC ${method}`);
     });
-    const ports = createTemplateOperationPorts({ rpc: { call } } as never, "/state", {
-      localRepoPaths: [],
-    } as never);
+    const ports = createTemplateOperationPorts(
+      { rpc: { call } } as never,
+      "/state",
+      {
+        localRepoPaths: [],
+      } as never,
+    );
 
     await expect(ports.openContext("pull-news")).rejects.toMatchObject({
       name: "TemplateOperationMainAdvanced",
@@ -241,15 +295,21 @@ describe("template composer staging", () => {
       {
         state: { repositories: { "packages/runtime": {} } },
       } as never,
-      record
+      record,
     );
 
     await expect(
       ports.stageComposition("template-composer-operation-add-news", {
         plan: { repositories: { "panels/news": {} } },
-      } as never)
-    ).resolves.toEqual({ affectedRepoPaths: ["packages/runtime", "panels/news"] });
-    expect(call).not.toHaveBeenCalledWith("main", "vcs.registerExternalDelta", expect.anything());
+      } as never),
+    ).resolves.toEqual({
+      affectedRepoPaths: ["packages/runtime", "panels/news"],
+    });
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "vcs.registerExternalDelta",
+      expect.anything(),
+    );
   });
 
   it("returns an actionable stale-main error when main advances before publication", async () => {
@@ -265,17 +325,27 @@ describe("template composer staging", () => {
       }
       throw new Error(`unexpected RPC ${method}`);
     });
-    const ports = createTemplateOperationPorts({ rpc: { call } } as never, "/state", {
-      localRepoPaths: [],
-    } as never);
+    const ports = createTemplateOperationPorts(
+      { rpc: { call } } as never,
+      "/state",
+      {
+        localRepoPaths: [],
+      } as never,
+    );
 
-    await expect(ports.publish("operation-context", "event:old-main")).rejects.toMatchObject({
+    await expect(
+      ports.publish("operation-context", "event:old-main"),
+    ).rejects.toMatchObject({
       name: "TemplateOperationMainAdvanced",
       contextId: "operation-context",
       mainEventId: "event:new-main",
       relation: "diverged",
     } satisfies Partial<TemplateOperationMainAdvanced>);
-    expect(call).not.toHaveBeenCalledWith("main", "vcs.push", expect.anything());
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "vcs.push",
+      expect.anything(),
+    );
   });
 
   it("records adopted lineage metadata without replaying repository contributions", async () => {
@@ -296,12 +366,16 @@ describe("template composer staging", () => {
       if (method === "vcs.edit") return {};
       throw new Error(`unexpected RPC ${method}`);
     });
-    const ports = createTemplateOperationPorts({ rpc: { call } } as never, "/state", {
-      workspaceId: "workspace-1",
-      top: { systemEpoch: 58, templates: { use: [] } },
-      runtimeTop: { systemEpoch: 58 },
-      localRepoPaths: new Set(["packages/runtime"]),
-    } as never);
+    const ports = createTemplateOperationPorts(
+      { rpc: { call } } as never,
+      "/state",
+      {
+        workspaceId: "workspace-1",
+        top: { systemEpoch: 59, templates: { use: [] } },
+        runtimeTop: { systemEpoch: 59 },
+        localRepoPaths: new Set(["packages/runtime"]),
+      } as never,
+    );
     const pin = {
       url: "git+https://example.test/base.git",
       ref: "refs/tags/v1",
@@ -320,7 +394,7 @@ describe("template composer staging", () => {
             alias: "base",
             pin,
             parents: [],
-            fragment: { systemEpoch: 58 },
+            fragment: { systemEpoch: 59 },
           },
         ],
         repositories: {
@@ -340,46 +414,82 @@ describe("template composer staging", () => {
     expect(call).toHaveBeenCalledWith(
       "main",
       "vcs.edit",
-      expect.objectContaining({ intentSummary: "Update generated template composition metadata" })
+      expect.objectContaining({
+        intentSummary: "Update generated template composition metadata",
+      }),
     );
-    expect(call).not.toHaveBeenCalledWith("main", "vcs.registerExternalDelta", expect.anything());
-    expect(call).not.toHaveBeenCalledWith("main", "vcs.importSnapshot", expect.anything());
-    expect(call).not.toHaveBeenCalledWith("main", "vcs.merge", expect.anything());
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "vcs.registerExternalDelta",
+      expect.anything(),
+    );
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "vcs.importSnapshot",
+      expect.anything(),
+    );
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "vcs.merge",
+      expect.anything(),
+    );
   });
 
   it("surfaces an overlapping contribution as an ordinary VCS review delta", async () => {
     let imported = false;
     let reviewComplete = false;
-    const importedBasis = { kind: "event", eventId: "event-import-runtime" } as const;
-    const call = vi.fn(async (_target: string, method: string, input: Record<string, unknown>) => {
-      if (method === "vcs.status") {
-        return { committed: BASE, workingHead: BASE, clean: true };
-      }
-      if (method === "vcs.resolveRepository") {
-        return imported
-          ? { repositoryId: "repository:runtime", repoPath: "packages/runtime" }
-          : null;
-      }
-      if (method === "vcs.importSnapshot") {
-        imported = true;
-        return {
-          eventId: "event-import-runtime",
-          importedRepositoryIds: ["repository:runtime"],
-        };
-      }
-      if (method === "vcs.registerExternalDelta") return { deltaId: "delta:overlay" };
-      if (method === "vcs.compare") {
-        return { resolution: { complete: reviewComplete, concluded: reviewComplete } };
-      }
-      if (method === "vcs.finalizeExternalDelta") return {};
-      throw new Error(`unexpected RPC ${method}: ${JSON.stringify(input)}`);
-    });
+    const importedBasis = {
+      kind: "event",
+      eventId: "event-import-runtime",
+    } as const;
+    const call = vi.fn(
+      async (
+        _target: string,
+        method: string,
+        input: Record<string, unknown>,
+      ) => {
+        if (method === "vcs.status") {
+          return { committed: BASE, workingHead: BASE, clean: true };
+        }
+        if (method === "vcs.resolveRepository") {
+          return imported
+            ? {
+                repositoryId: "repository:runtime",
+                repoPath: "packages/runtime",
+              }
+            : null;
+        }
+        if (method === "vcs.importSnapshot") {
+          imported = true;
+          return {
+            eventId: "event-import-runtime",
+            importedRepositoryIds: ["repository:runtime"],
+          };
+        }
+        if (method === "vcs.registerExternalDelta")
+          return { deltaId: "delta:overlay" };
+        if (method === "vcs.compare") {
+          return {
+            resolution: { complete: reviewComplete, concluded: reviewComplete },
+          };
+        }
+        if (method === "vcs.finalizeExternalDelta") return {};
+        throw new Error(`unexpected RPC ${method}: ${JSON.stringify(input)}`);
+      },
+    );
     const contribution = (nodeId: string, alias: string, digit: string) => ({
       nodeId,
       alias,
       subdir: "packages/runtime",
       subtreeDigest: `v1-sha256:${digit.repeat(64)}`,
-      files: [{ path: "index.ts", contentHash: digit.repeat(64), size: 1, mode: 0o644 }],
+      files: [
+        {
+          path: "index.ts",
+          contentHash: digit.repeat(64),
+          size: 1,
+          mode: 0o644,
+        },
+      ],
     });
     const plan = {
       nodes: [
@@ -419,8 +529,8 @@ describe("template composer staging", () => {
         "/state",
         "operation-overlay",
         plan as never,
-        undefined
-      )
+        EMPTY_TEMPLATE_STATE,
+      ),
     ).rejects.toMatchObject({
       name: "TemplateReviewRequired",
       contextId: "operation-overlay",
@@ -435,12 +545,16 @@ describe("template composer staging", () => {
         expectedWorkingHead: importedBasis,
         oldFiles: [],
         newFiles: [expect.objectContaining({ path: "index.ts" })],
-      })
+      }),
     );
-    expect(call).not.toHaveBeenCalledWith("main", "vcs.finalizeExternalDelta", expect.anything());
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "vcs.finalizeExternalDelta",
+      expect.anything(),
+    );
 
     const registrations = call.mock.calls.filter(
-      ([, method]) => method === "vcs.registerExternalDelta"
+      ([, method]) => method === "vcs.registerExternalDelta",
     );
     reviewComplete = true;
     await expect(
@@ -449,20 +563,24 @@ describe("template composer staging", () => {
         "/state",
         "operation-overlay",
         plan as never,
-        undefined,
+        EMPTY_TEMPLATE_STATE,
         {
-          reviews: [{ repoPath: "packages/runtime", sourceDeltaId: "delta:overlay" }],
+          reviews: [
+            { repoPath: "packages/runtime", sourceDeltaId: "delta:overlay" },
+          ],
           deltaBasis: importedBasis,
-        } as never
-      )
+        } as never,
+      ),
     ).resolves.toEqual(["packages/runtime"]);
-    expect(call.mock.calls.filter(([, method]) => method === "vcs.registerExternalDelta")).toEqual(
-      registrations
-    );
+    expect(
+      call.mock.calls.filter(
+        ([, method]) => method === "vcs.registerExternalDelta",
+      ),
+    ).toEqual(registrations);
     expect(call).toHaveBeenCalledWith(
       "main",
       "vcs.finalizeExternalDelta",
-      expect.objectContaining({ deltaId: "delta:overlay" })
+      expect.objectContaining({ deltaId: "delta:overlay" }),
     );
   });
 
@@ -472,20 +590,26 @@ describe("template composer staging", () => {
       eventId: "event-review-one",
     };
     let clean = false;
-    const call = vi.fn(async (_target: string, method: string, input: Record<string, unknown>) => {
-      if (method === "vcs.status") {
-        return { committed: BASE, workingHead, clean };
-      }
-      if (method === "vcs.compare") {
-        return { resolution: { complete: true, concluded: true } };
-      }
-      if (method === "vcs.commit") {
-        clean = true;
-        return {};
-      }
-      if (method === "vcs.finalizeExternalDelta") return {};
-      throw new Error(`unexpected RPC ${method}: ${JSON.stringify(input)}`);
-    });
+    const call = vi.fn(
+      async (
+        _target: string,
+        method: string,
+        input: Record<string, unknown>,
+      ) => {
+        if (method === "vcs.status") {
+          return { committed: BASE, workingHead, clean };
+        }
+        if (method === "vcs.compare") {
+          return { resolution: { complete: true, concluded: true } };
+        }
+        if (method === "vcs.commit") {
+          clean = true;
+          return {};
+        }
+        if (method === "vcs.finalizeExternalDelta") return {};
+        throw new Error(`unexpected RPC ${method}: ${JSON.stringify(input)}`);
+      },
+    );
     const plan = { repositories: {} } as never;
     const record = (repoPath: string, sourceDeltaId: string) =>
       ({
@@ -498,8 +622,8 @@ describe("template composer staging", () => {
       "/state",
       "operation-multi-review",
       plan,
-      undefined,
-      record("packages/one", "delta:one")
+      EMPTY_TEMPLATE_STATE,
+      record("packages/one", "delta:one"),
     );
     workingHead = { kind: "event", eventId: "event-review-two" };
     clean = false;
@@ -508,8 +632,8 @@ describe("template composer staging", () => {
       "/state",
       "operation-multi-review",
       plan,
-      undefined,
-      record("packages/two", "delta:two")
+      EMPTY_TEMPLATE_STATE,
+      record("packages/two", "delta:two"),
     );
 
     const commitIds = call.mock.calls
@@ -518,28 +642,41 @@ describe("template composer staging", () => {
     expect(commitIds).toHaveLength(2);
     expect(new Set(commitIds).size).toBe(2);
     expect(commitIds).toEqual([
-      expect.stringMatching(/^operation-multi-review:commit-reviewed-deltas:[a-f0-9]{64}$/),
-      expect.stringMatching(/^operation-multi-review:commit-reviewed-deltas:[a-f0-9]{64}$/),
+      expect.stringMatching(
+        /^operation-multi-review:commit-reviewed-deltas:[a-f0-9]{64}$/,
+      ),
+      expect.stringMatching(
+        /^operation-multi-review:commit-reviewed-deltas:[a-f0-9]{64}$/,
+      ),
     ]);
   });
 
   it("seeds an absent repository from acquired files instead of ledger-only lineage", async () => {
     vi.mocked(acquireTemplateSnapshot).mockClear();
     let imported = false;
-    const call = vi.fn(async (_target: string, method: string, input: Record<string, unknown>) => {
-      if (method === "vcs.status") return { committed: BASE, workingHead: BASE, clean: true };
-      if (method === "vcs.resolveRepository") {
-        return imported ? { repositoryId: "repository:one", repoPath: "panels/one" } : null;
-      }
-      if (method === "vcs.importSnapshot") {
-        imported = true;
-        return {
-          eventId: "event-import-one",
-          importedRepositoryIds: ["repository:one"],
-        };
-      }
-      throw new Error(`unexpected RPC ${method}: ${JSON.stringify(input)}`);
-    });
+    const call = vi.fn(
+      async (
+        _target: string,
+        method: string,
+        input: Record<string, unknown>,
+      ) => {
+        if (method === "vcs.status")
+          return { committed: BASE, workingHead: BASE, clean: true };
+        if (method === "vcs.resolveRepository") {
+          return imported
+            ? { repositoryId: "repository:one", repoPath: "panels/one" }
+            : null;
+        }
+        if (method === "vcs.importSnapshot") {
+          imported = true;
+          return {
+            eventId: "event-import-one",
+            importedRepositoryIds: ["repository:one"],
+          };
+        }
+        throw new Error(`unexpected RPC ${method}: ${JSON.stringify(input)}`);
+      },
+    );
     const basePin = {
       url: "git+https://example.test/base.git",
       ref: "refs/tags/v1",
@@ -587,7 +724,14 @@ describe("template composer staging", () => {
               alias: "feature",
               subdir: "panels/one",
               subtreeDigest: featureDigest,
-              files: [{ path: "feature.ts", contentHash: NEW_ONE, size: 1, mode: 0o644 }],
+              files: [
+                {
+                  path: "feature.ts",
+                  contentHash: NEW_ONE,
+                  size: 1,
+                  mode: 0o644,
+                },
+              ],
             },
           ],
         },
@@ -600,8 +744,8 @@ describe("template composer staging", () => {
         "/state",
         "operation-ledger-seed",
         plan as never,
-        previous as never
-      )
+        previous as never,
+      ),
     ).resolves.toEqual(["panels/one"]);
     expect(call).toHaveBeenCalledWith(
       "main",
@@ -614,29 +758,42 @@ describe("template composer staging", () => {
             files: [expect.objectContaining({ path: "feature.ts" })],
           },
         ],
-      })
+      }),
     );
-    expect(call).not.toHaveBeenCalledWith("main", "vcs.registerExternalDelta", expect.anything());
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "vcs.registerExternalDelta",
+      expect.anything(),
+    );
     expect(acquireTemplateSnapshot).not.toHaveBeenCalled();
   });
 
   it("does not acquire or replay unchanged lineage when a new template restores a deleted repository", async () => {
     vi.mocked(acquireTemplateSnapshot).mockClear();
     let imported = false;
-    const call = vi.fn(async (_target: string, method: string, input: Record<string, unknown>) => {
-      if (method === "vcs.status") return { committed: BASE, workingHead: BASE, clean: true };
-      if (method === "vcs.resolveRepository") {
-        return imported ? { repositoryId: "repository:gmail", repoPath: "packages/gmail" } : null;
-      }
-      if (method === "vcs.importSnapshot") {
-        imported = true;
-        return {
-          eventId: "event-import-gmail",
-          importedRepositoryIds: ["repository:gmail"],
-        };
-      }
-      throw new Error(`unexpected RPC ${method}: ${JSON.stringify(input)}`);
-    });
+    const call = vi.fn(
+      async (
+        _target: string,
+        method: string,
+        input: Record<string, unknown>,
+      ) => {
+        if (method === "vcs.status")
+          return { committed: BASE, workingHead: BASE, clean: true };
+        if (method === "vcs.resolveRepository") {
+          return imported
+            ? { repositoryId: "repository:gmail", repoPath: "packages/gmail" }
+            : null;
+        }
+        if (method === "vcs.importSnapshot") {
+          imported = true;
+          return {
+            eventId: "event-import-gmail",
+            importedRepositoryIds: ["repository:gmail"],
+          };
+        }
+        throw new Error(`unexpected RPC ${method}: ${JSON.stringify(input)}`);
+      },
+    );
     const basePin = {
       url: "git+https://example.test/base.git",
       ref: "refs/heads/main",
@@ -677,14 +834,28 @@ describe("template composer staging", () => {
               alias: "base",
               subdir: "packages/gmail",
               subtreeDigest: baseDigest,
-              files: [{ path: "legacy.ts", contentHash: OLD_ONE, size: 1, mode: 0o644 }],
+              files: [
+                {
+                  path: "legacy.ts",
+                  contentHash: OLD_ONE,
+                  size: 1,
+                  mode: 0o644,
+                },
+              ],
             },
             {
               nodeId: "t-google",
               alias: "google-workspace",
               subdir: "packages/gmail",
               subtreeDigest: googleDigest,
-              files: [{ path: "index.ts", contentHash: NEW_ONE, size: 1, mode: 0o644 }],
+              files: [
+                {
+                  path: "index.ts",
+                  contentHash: NEW_ONE,
+                  size: 1,
+                  mode: 0o644,
+                },
+              ],
             },
           ],
         },
@@ -697,21 +868,22 @@ describe("template composer staging", () => {
         "/state",
         "operation-google",
         plan as never,
-        previous as never
-      )
+        previous as never,
+      ),
     ).resolves.toEqual(["packages/gmail"]);
     expect(call).toHaveBeenCalledWith(
       "main",
       "vcs.importSnapshot",
       expect.objectContaining({
-        intentSummary: "Import packages/gmail contribution from google-workspace",
+        intentSummary:
+          "Import packages/gmail contribution from google-workspace",
         repositories: [
           {
             repoPath: "packages/gmail",
             files: [expect.objectContaining({ path: "index.ts" })],
           },
         ],
-      })
+      }),
     );
     expect(acquireTemplateSnapshot).not.toHaveBeenCalled();
   });
@@ -722,52 +894,59 @@ describe("template composer staging", () => {
     let integrationStarted = false;
     let workingHead: VcsStateNodeRef = BASE;
     let clean = true;
-    const call = vi.fn(async (_target: string, method: string, ...args: unknown[]) => {
-      const input = args[0] as Record<string, unknown>;
-      if (method === "vcs.status") {
-        return {
-          committed: BASE,
-          workingHead,
-          clean,
-        };
-      }
-      if (method === "vcs.resolveRepository") {
-        return {
-          repositoryId: `repository-${input["repoPath"]}`,
-          repoPath: input["repoPath"],
-        };
-      }
-      if (method === "vcs.registerExternalDelta") {
-        if (integrationStarted) {
-          throw new Error("registered a delta after reconciliation changed the working head");
+    const call = vi.fn(
+      async (_target: string, method: string, ...args: unknown[]) => {
+        const input = args[0] as Record<string, unknown>;
+        if (method === "vcs.status") {
+          return {
+            committed: BASE,
+            workingHead,
+            clean,
+          };
         }
-        const repoPath = String(input["repoPath"]);
-        registrations.push(repoPath);
-        return { deltaId: `delta-${repoPath}-${registrations.length}` };
-      }
-      if (method === "vcs.compare") {
-        return {
-          resolution: {
-            complete: true,
-            remainingCoordinateCount: 0,
-            concluded: integrationStarted,
-          },
-        };
-      }
-      if (method === "vcs.merge") {
-        integrationStarted = true;
-        clean = false;
-        workingHead = { kind: "application", applicationId: "application-integrated" } as const;
-        return { status: "working", workingHead };
-      }
-      if (method === "vcs.commit") {
-        clean = true;
-        workingHead = { kind: "event", eventId: "event-integrated" } as const;
-        return { event: workingHead };
-      }
-      if (method === "vcs.finalizeExternalDelta") return {};
-      throw new Error(`unexpected RPC ${method}`);
-    });
+        if (method === "vcs.resolveRepository") {
+          return {
+            repositoryId: `repository-${input["repoPath"]}`,
+            repoPath: input["repoPath"],
+          };
+        }
+        if (method === "vcs.registerExternalDelta") {
+          if (integrationStarted) {
+            throw new Error(
+              "registered a delta after reconciliation changed the working head",
+            );
+          }
+          const repoPath = String(input["repoPath"]);
+          registrations.push(repoPath);
+          return { deltaId: `delta-${repoPath}-${registrations.length}` };
+        }
+        if (method === "vcs.compare") {
+          return {
+            resolution: {
+              complete: true,
+              remainingCoordinateCount: 0,
+              concluded: integrationStarted,
+            },
+          };
+        }
+        if (method === "vcs.merge") {
+          integrationStarted = true;
+          clean = false;
+          workingHead = {
+            kind: "application",
+            applicationId: "application-integrated",
+          } as const;
+          return { status: "working", workingHead };
+        }
+        if (method === "vcs.commit") {
+          clean = true;
+          workingHead = { kind: "event", eventId: "event-integrated" } as const;
+          return { event: workingHead };
+        }
+        if (method === "vcs.finalizeExternalDelta") return {};
+        throw new Error(`unexpected RPC ${method}`);
+      },
+    );
     const oldOneDigest = semanticRepositoryDigest([
       { path: "index.ts", contentHash: OLD_ONE, mode: 0o644, byteLength: 1 },
     ]);
@@ -854,12 +1033,14 @@ describe("template composer staging", () => {
         "/state",
         "operation-1",
         plan as never,
-        previous as never
-      )
+        previous as never,
+      ),
     ).resolves.toEqual(["panels/one", "panels/two"]);
     expect(registrations).toEqual(["panels/one", "panels/one", "panels/two"]);
     expect(integrationStarted).toBe(true);
     expect(acquireTemplateSnapshot).toHaveBeenCalledTimes(1);
-    expect(call.mock.calls.filter(([, method]) => method === "vcs.status")).toHaveLength(2);
+    expect(
+      call.mock.calls.filter(([, method]) => method === "vcs.status"),
+    ).toHaveLength(2);
   });
 });

@@ -90,7 +90,6 @@ function createRpcCall() {
         };
       }
       case "workspace-state.slot.create":
-      case "workspace-state.panel.updateTitle":
       case "workspace-state.slot.updateCurrentStateArgs":
       case "panelTree.focus":
         return undefined;
@@ -173,11 +172,6 @@ function createRpcCall() {
               : panelId.includes("parent")
                 ? null
                 : "panel:tree/panel-parent",
-            current_entity_title: created
-              ? "Created"
-              : panelId.includes("parent")
-                ? "Parent"
-                : "Panel",
           },
           currentHistory: {
             source: created
@@ -595,7 +589,7 @@ describe("PanelHandle", () => {
     expect(listener).not.toHaveBeenCalled();
 
     resolveMetadata({
-      slot: { parent_slot_id: null, current_entity_title: "Events" },
+      slot: { parent_slot_id: null },
       currentHistory: {
         source: "panels/events",
         context_id: "ctx-events",

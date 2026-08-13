@@ -122,9 +122,6 @@ function createRpcCall() {
       case "runtime.activateReservedEntity":
         return runtimeEntity;
       case "workspace-state.slot.create":
-      case "workspace-state.panel.updateTitle":
-        if (method === "workspace-state.panel.updateTitle")
-          createdTitle = String(args[1]);
         return undefined;
       case "panelRuntime.ensureSlot":
         return {
@@ -138,7 +135,6 @@ function createRpcCall() {
             slot: {
               slot_id: "spectrolite",
               parent_slot_id: null,
-              current_entity_title: "Spectrolite",
             },
             entity: {
               id: "panel:nav-spectrolite-entity",
@@ -160,7 +156,6 @@ function createRpcCall() {
           slot: {
             slot_id: "debug-chat",
             parent_slot_id: "panel:tree/spectrolite",
-            current_entity_title: createdTitle,
           },
           entity: {
             id: runtimeEntity.id,

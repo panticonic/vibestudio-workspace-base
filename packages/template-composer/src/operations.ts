@@ -1,5 +1,4 @@
 import type {
-  WorkspaceCreationDescriptor,
   WorkspaceTemplateDeclaration,
   WorkspaceTemplateState,
   WorkspaceTemplatePin,
@@ -7,7 +6,6 @@ import type {
 } from "@vibestudio/workspace-contracts/types";
 import { normalizeTemplateGitUrl } from "@vibestudio/workspace/templateCoordinates";
 import {
-  emptyTemplateComposition,
   resolveTemplateComposition,
   type TemplateCompositionPlan,
   type TemplateSourcePorts,
@@ -21,8 +19,8 @@ export interface TemplateCatalogSelection {
 
 export interface TemplateWorkspaceObservation {
   roots: readonly WorkspaceTemplateDeclaration[];
-  state?: WorkspaceTemplateState;
-  installedLayers?: Readonly<Record<string, string>>;
+  state: WorkspaceTemplateState;
+  installedLayers: Readonly<Record<string, string>>;
   localRepoPaths: ReadonlySet<string>;
   overrides?: Readonly<Record<string, WorkspaceTemplatePin>>;
   expectedSystemEpoch: number;
@@ -67,40 +65,28 @@ export interface InspectTemplateRecompositionInput {
   sources: TemplateSourcePorts;
 }
 
-export interface InspectBootstrapAdoptionInput {
-  kind: "adopt-bootstrap";
-  /**
-   * Read from `state/workspace-creation/v1.json`. Bootstrap imported this exact
-   * tree but intentionally produced no template declaration or state.
-   */
-  descriptor: WorkspaceCreationDescriptor;
-  workspace: Omit<TemplateWorkspaceObservation, "roots" | "state">;
-  sources: TemplateSourcePorts;
-}
-
 export type InspectTemplateOperationInput =
   | InspectTemplateAddInput
   | InspectTemplateAdoptInput
   | InspectTemplatePullInput
   | InspectTemplateRemoveInput
-  | InspectTemplateRecompositionInput
-  | InspectBootstrapAdoptionInput;
+  | InspectTemplateRecompositionInput;
 
 export interface TemplateOperationInspection {
   kind: InspectTemplateOperationInput["kind"];
   plan: TemplateCompositionPlan;
-  /** Complete next top-layer `templates` value; null removes the final relationship. */
-  nextTemplates: WorkspaceTemplatesConfig | null;
+  /** Complete next top-layer `templates` value. */
+  nextTemplates: WorkspaceTemplatesConfig;
   selection?: TemplateCatalogSelection;
 }
 
 function reachablePreviousUrls(
   state: WorkspaceTemplateState,
-  roots: readonly WorkspaceTemplateDeclaration[]
+  roots: readonly WorkspaceTemplateDeclaration[],
 ): Set<string> {
   const nodeById = new Map(state.nodes.map((node) => [node.nodeId, node]));
   const nodeByUrl = new Map(
-    state.nodes.map((node) => [normalizeTemplateGitUrl(node.pin.url), node])
+    state.nodes.map((node) => [normalizeTemplateGitUrl(node.pin.url), node]),
   );
   const pending = roots
     .map((root) => nodeByUrl.get(normalizeTemplateGitUrl(root.url))?.nodeId)
@@ -117,37 +103,11 @@ function reachablePreviousUrls(
 
 /**
  * Produce the complete review payload for add, lineage adoption, pull,
- * ordinary recomposition, or first-run bootstrap adoption. No workspace
- * mutation occurs.
+ * or ordinary recomposition. No workspace mutation occurs.
  */
 export async function inspectTemplateOperation(
-  input: InspectTemplateOperationInput
+  input: InspectTemplateOperationInput,
 ): Promise<TemplateOperationInspection> {
-  if (input.kind === "adopt-bootstrap") {
-    const root = input.descriptor.rootTemplate;
-    const rootUrl = normalizeTemplateGitUrl(root.url);
-    const plan = await resolveTemplateComposition({
-      roots: [{ url: rootUrl, ...(root.credential ? { credential: root.credential } : {}) }],
-      localRepoPaths: new Set(),
-      expectedSystemEpoch: input.workspace.expectedSystemEpoch,
-      ports: {
-        acquire: input.sources.acquire,
-        resolvePromoted: async (declaration) =>
-          normalizeTemplateGitUrl(declaration.url) === rootUrl
-            ? root
-            : input.sources.resolvePromoted(declaration),
-      },
-    });
-    return {
-      kind: input.kind,
-      plan,
-      nextTemplates: {
-        use: plan.state!.roots,
-        overrides: plan.state!.overrides,
-      },
-    };
-  }
-
   const roots =
     input.kind === "add" || input.kind === "adopt"
       ? [
@@ -156,51 +116,57 @@ export async function inspectTemplateOperation(
             ? input.template
             : {
                 url: input.pin.url,
-                ...(input.pin.credential ? { credential: input.pin.credential } : {}),
+                ...(input.pin.credential
+                  ? { credential: input.pin.credential }
+                  : {}),
               },
         ]
       : input.kind === "remove"
         ? input.workspace.roots.filter(
             (root) =>
-              normalizeTemplateGitUrl(root.url) !== normalizeTemplateGitUrl(input.templateUrl)
+              normalizeTemplateGitUrl(root.url) !==
+              normalizeTemplateGitUrl(input.templateUrl),
           )
         : [...input.workspace.roots];
+  if (roots.length === 0) {
+    throw new Error("A workspace must retain at least one template root");
+  }
   const reachableUrls =
     input.kind === "remove" && input.workspace.state
       ? reachablePreviousUrls(input.workspace.state, roots)
       : undefined;
   const retainedOverrides = Object.fromEntries(
     Object.entries(input.workspace.overrides ?? {}).filter(
-      ([url]) => !reachableUrls || reachableUrls.has(normalizeTemplateGitUrl(url))
-    )
+      ([url]) =>
+        !reachableUrls || reachableUrls.has(normalizeTemplateGitUrl(url)),
+    ),
   );
   const pinOverrides =
     input.kind === "pull" || input.kind === "adopt"
-      ? { ...retainedOverrides, [normalizeTemplateGitUrl(input.pin.url)]: input.pin }
+      ? {
+          ...retainedOverrides,
+          [normalizeTemplateGitUrl(input.pin.url)]: input.pin,
+        }
       : retainedOverrides;
-  const plan =
-    roots.length === 0
-      ? emptyTemplateComposition(input.workspace.state, input.workspace.localRepoPaths)
-      : await resolveTemplateComposition({
-          roots,
-          pinOverrides,
-          localRepoPaths: input.workspace.localRepoPaths,
-          previousState: input.workspace.state,
-          installedLayers: input.workspace.installedLayers,
-          expectedSystemEpoch: input.workspace.expectedSystemEpoch,
-          ports: input.sources,
-        });
+  const plan = await resolveTemplateComposition({
+    roots,
+    pinOverrides,
+    localRepoPaths: input.workspace.localRepoPaths,
+    previousState: input.workspace.state,
+    installedLayers: input.workspace.installedLayers,
+    expectedSystemEpoch: input.workspace.expectedSystemEpoch,
+    ports: input.sources,
+  });
   return {
     kind: input.kind,
     plan,
-    nextTemplates:
-      plan.state === null
-        ? null
-        : {
-            use: plan.state.roots,
-            overrides: plan.state.overrides,
-          },
-    ...(input.kind === "add" && input.selection ? { selection: input.selection } : {}),
+    nextTemplates: {
+      use: plan.state.roots,
+      overrides: plan.state.overrides,
+    },
+    ...(input.kind === "add" && input.selection
+      ? { selection: input.selection }
+      : {}),
   };
 }
 
@@ -218,10 +184,13 @@ export interface TemplateOperationPorts {
    */
   stageComposition(
     contextId: string,
-    inspection: TemplateOperationInspection
+    inspection: TemplateOperationInspection,
   ): Promise<{ affectedRepoPaths: string[] }>;
   /** Publish atomically through protected main's canonical validation and review gate. */
-  publish(contextId: string, expectedMainEventId: string): Promise<{ mainEventId: string }>;
+  publish(
+    contextId: string,
+    expectedMainEventId: string,
+  ): Promise<{ mainEventId: string }>;
   discard(contextId: string): Promise<void>;
 }
 
@@ -241,7 +210,7 @@ export interface PreparedTemplateOperation {
 async function stageInContext(
   contextId: string,
   inspection: TemplateOperationInspection,
-  ports: TemplateOperationPorts
+  ports: TemplateOperationPorts,
 ): Promise<PreparedTemplateOperation> {
   const staged = await ports.stageComposition(contextId, inspection);
   return { contextId, affectedRepoPaths: staged.affectedRepoPaths };
@@ -249,7 +218,10 @@ async function stageInContext(
 
 /** Stage while retaining the context for protected publication or agentic repair. */
 export async function stageTemplateOperation(
-  input: Pick<ApplyTemplateOperationInput, "operationId" | "inspection" | "ports">
+  input: Pick<
+    ApplyTemplateOperationInput,
+    "operationId" | "inspection" | "ports"
+  >,
 ): Promise<PreparedTemplateOperation> {
   const { contextId } = await input.ports.openContext(input.operationId);
   return stageInContext(contextId, input.inspection, input.ports);
@@ -258,7 +230,7 @@ export async function stageTemplateOperation(
 export function publishPreparedTemplateOperation(
   prepared: PreparedTemplateOperation,
   expectedMainEventId: string,
-  ports: TemplateOperationPorts
+  ports: TemplateOperationPorts,
 ): Promise<{ mainEventId: string }> {
   return ports.publish(prepared.contextId, expectedMainEventId);
 }
@@ -268,13 +240,21 @@ export function publishPreparedTemplateOperation(
  * build/typecheck/schema/authority gate; this layer only stages and publishes.
  */
 export async function applyTemplateOperation(
-  input: ApplyTemplateOperationInput
+  input: ApplyTemplateOperationInput,
 ): Promise<{ mainEventId: string }> {
   let contextId: string | undefined;
   try {
     ({ contextId } = await input.ports.openContext(input.operationId));
-    const prepared = await stageInContext(contextId, input.inspection, input.ports);
-    return await publishPreparedTemplateOperation(prepared, input.expectedMainEventId, input.ports);
+    const prepared = await stageInContext(
+      contextId,
+      input.inspection,
+      input.ports,
+    );
+    return await publishPreparedTemplateOperation(
+      prepared,
+      input.expectedMainEventId,
+      input.ports,
+    );
   } catch (error) {
     if (contextId) await input.ports.discard(contextId);
     throw error;
@@ -301,14 +281,19 @@ export function templateStatus(
   roots: readonly WorkspaceTemplateDeclaration[],
   state: WorkspaceTemplateState | undefined,
   suggestionDecisions?: Readonly<
-    Record<string, { digest: `v1-sha256:${string}`; decision: "accepted" | "declined" }>
-  >
+    Record<
+      string,
+      { digest: `v1-sha256:${string}`; decision: "accepted" | "declined" }
+    >
+  >,
 ): TemplateStatus {
   const nodes = state?.nodes ?? [];
   return {
     roots: roots.map((root) => {
       const url = normalizeTemplateGitUrl(root.url);
-      const node = nodes.find((candidate) => normalizeTemplateGitUrl(candidate.pin.url) === url);
+      const node = nodes.find(
+        (candidate) => normalizeTemplateGitUrl(candidate.pin.url) === url,
+      );
       return {
         url,
         nodeId: node?.nodeId ?? null,
@@ -322,12 +307,13 @@ export function templateStatus(
           const evidence = node.suggestions[section];
           if (
             !evidence ||
-            suggestionDecisions?.[`${node.nodeId}:${section}`]?.digest === evidence.digest
+            suggestionDecisions?.[`${node.nodeId}:${section}`]?.digest ===
+              evidence.digest
           ) {
             return [];
           }
           return [[section, evidence.value]];
-        })
+        }),
       );
       return Object.keys(unresolved).length > 0
         ? [{ nodeId: node.nodeId, alias: node.alias, ...unresolved }]

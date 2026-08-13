@@ -10,14 +10,16 @@ import {
   normalizeTemplateGitUrl,
   templateAliasFromUrl,
 } from "@vibestudio/workspace/templateCoordinates";
-import { resolveTemplateComposition, type TemplateSourcePorts } from "./resolver.js";
+import {
+  resolveTemplateComposition,
+  type TemplateSourcePorts,
+} from "./resolver.js";
 import { inspectTemplateOperation } from "./operations.js";
 
-const epoch = 58;
+const epoch = 59;
 const baseUrl = "https://github.com/vibestudio/workspace-base.git";
 const newsUrl = "https://github.com/vibestudio/template-news.git";
 const browserUrl = "https://github.com/vibestudio/template-browser.git";
-
 function pin(url: string, digit: string): WorkspaceTemplatePin {
   return {
     url,
@@ -41,7 +43,7 @@ function snapshot(
   dependencies: readonly WorkspaceTemplateDeclaration[],
   repoPath: string,
   presentation?: { name?: string; description?: string },
-  extraFiles: ReadonlyArray<{ path: string; text: string }> = []
+  extraFiles: ReadonlyArray<{ path: string; text: string }> = [],
 ): ExactGitSnapshot {
   const manifest = new TextEncoder().encode(
     [
@@ -66,13 +68,17 @@ function snapshot(
             "  use:",
             ...dependencies.flatMap((dependency) => [
               `    - url: ${dependency.url}`,
-              ...(dependency.credential ? [`      credential: ${dependency.credential}`] : []),
+              ...(dependency.credential
+                ? [`      credential: ${dependency.credential}`]
+                : []),
             ]),
           ]),
       "",
-    ].join("\n")
+    ].join("\n"),
   );
-  const source = new TextEncoder().encode(`export const source = ${JSON.stringify(repoPath)};\n`);
+  const source = new TextEncoder().encode(
+    `export const source = ${JSON.stringify(repoPath)};\n`,
+  );
   const encodedExtraFiles = extraFiles.map(({ path, text }) => ({
     path,
     bytes: new TextEncoder().encode(text),
@@ -97,18 +103,22 @@ function snapshot(
 
 function ports(
   pins: readonly WorkspaceTemplatePin[],
-  snapshots: ReadonlyMap<string, ExactGitSnapshot>
+  snapshots: ReadonlyMap<string, ExactGitSnapshot>,
 ): TemplateSourcePorts & {
   resolvePromoted: ReturnType<typeof vi.fn>;
   acquire: ReturnType<typeof vi.fn>;
 } {
-  const byUrl = new Map(pins.map((value) => [normalizeTemplateGitUrl(value.url), value]));
+  const byUrl = new Map(
+    pins.map((value) => [normalizeTemplateGitUrl(value.url), value]),
+  );
   return {
-    resolvePromoted: vi.fn(async (declaration: WorkspaceTemplateDeclaration) => {
-      const exact = byUrl.get(normalizeTemplateGitUrl(declaration.url));
-      if (!exact) throw new Error(`No promoted pin for ${declaration.url}`);
-      return exact;
-    }),
+    resolvePromoted: vi.fn(
+      async (declaration: WorkspaceTemplateDeclaration) => {
+        const exact = byUrl.get(normalizeTemplateGitUrl(declaration.url));
+        if (!exact) throw new Error(`No promoted pin for ${declaration.url}`);
+        return exact;
+      },
+    ),
     acquire: vi.fn(async (exact: WorkspaceTemplatePin) => {
       const value = snapshots.get(normalizeTemplateGitUrl(exact.url));
       if (!value) throw new Error(`No snapshot for ${exact.url}`);
@@ -123,7 +133,7 @@ describe("D1 template declarations", () => {
       WorkspaceConfigTopLayerSchema.parse({
         systemEpoch: epoch,
         templates: { use: [{ url: baseUrl, credential: "github-main" }] },
-      }).templates?.use
+      }).templates?.use,
     ).toEqual([{ url: baseUrl, credential: "github-main" }]);
 
     expect(() =>
@@ -139,7 +149,7 @@ describe("D1 template declarations", () => {
             },
           ],
         },
-      })
+      }),
     ).toThrow();
   });
 });
@@ -150,8 +160,14 @@ describe("resolveTemplateComposition", () => {
     const news = pin(newsUrl, "b");
     const browser = pin(browserUrl, "c");
     const snapshots = new Map([
-      [normalizeTemplateGitUrl(baseUrl), snapshot(base, [], "packages/runtime")],
-      [normalizeTemplateGitUrl(newsUrl), snapshot(news, [{ url: baseUrl }], "panels/news")],
+      [
+        normalizeTemplateGitUrl(baseUrl),
+        snapshot(base, [], "packages/runtime"),
+      ],
+      [
+        normalizeTemplateGitUrl(newsUrl),
+        snapshot(news, [{ url: baseUrl }], "panels/news"),
+      ],
       [
         normalizeTemplateGitUrl(browserUrl),
         snapshot(browser, [{ url: baseUrl }], "panels/browser"),
@@ -165,27 +181,42 @@ describe("resolveTemplateComposition", () => {
     });
     expect(initialPorts.resolvePromoted).toHaveBeenCalledTimes(2);
 
-    const removed = await inspectTemplateOperation({
-      kind: "remove",
-      templateUrl: newsUrl,
-      workspace: {
+    const installedLayers = Object.fromEntries(
+      initial.nodes.map((node) => [node.nodeId, node.fragmentYaml]),
+    );
+
+    await expect(
+      inspectTemplateOperation({
+        kind: "remove",
+        templateUrl: newsUrl,
+        workspace: {
+          roots: [{ url: newsUrl }],
+          state: initial.state,
+          installedLayers,
+          localRepoPaths: new Set(["packages/runtime", "panels/news"]),
+          expectedSystemEpoch: epoch,
+        },
+        sources: ports([], snapshots),
+      }),
+    ).rejects.toThrow("retain at least one template root");
+
+    await expect(
+      resolveTemplateComposition({
         roots: [{ url: newsUrl }],
-        state: initial.state!,
+        previousState: initial.state,
+        installedLayers: {},
         localRepoPaths: new Set(["packages/runtime", "panels/news"]),
         expectedSystemEpoch: epoch,
-      },
-      sources: ports([], snapshots),
-    });
-    expect(removed.plan.state).toBeNull();
-    expect(removed.plan.removedArtifactPaths).toContain("meta/templates.state.yml");
-    expect(removed.plan.removedArtifactPaths).toContain("meta/templates.lock.yml");
-    expect(removed.plan.repositories).toEqual({});
+        ports: ports([], snapshots),
+      }),
+    ).rejects.toMatchObject({ code: "template-installed-fragment-missing" });
 
-    const installedLayers = Object.fromEntries(
-      initial.nodes.map((node) => [node.nodeId, node.fragmentYaml])
+    expect(initial.removedArtifactPaths).toEqual([]);
+    expect(initial.removedArtifactPaths).not.toEqual(
+      expect.arrayContaining(["meta/templates.lock.yml"]),
     );
     const installedBase = initial.nodes.find(
-      (node) => node.pin.url === normalizeTemplateGitUrl(baseUrl)
+      (node) => node.pin.url === normalizeTemplateGitUrl(baseUrl),
     )!;
     installedLayers[installedBase.nodeId] =
       `${installedBase.fragmentYaml}defaultRepo: packages/local\n`;
@@ -206,17 +237,22 @@ describe("resolveTemplateComposition", () => {
     expect(addPorts.acquire).toHaveBeenCalledTimes(1);
     expect(addPorts.acquire).toHaveBeenCalledWith(
       expect.objectContaining({ url: normalizeTemplateGitUrl(browserUrl) }),
-      expect.any(String)
+      expect.any(String),
     );
     expect(
-      added.nodes.find((node) => node.pin.url === normalizeTemplateGitUrl(baseUrl))?.pin.commit
+      added.nodes.find(
+        (node) => node.pin.url === normalizeTemplateGitUrl(baseUrl),
+      )?.pin.commit,
     ).toBe(base.commit);
     expect(
-      added.nodes.find((node) => node.pin.url === normalizeTemplateGitUrl(baseUrl))?.fragment
-        .defaultRepo
+      added.nodes.find(
+        (node) => node.pin.url === normalizeTemplateGitUrl(baseUrl),
+      )?.fragment.defaultRepo,
     ).toBe("packages/local");
     expect(
-      added.nodes.find((node) => node.pin.url === normalizeTemplateGitUrl(newsUrl))?.pin.commit
+      added.nodes.find(
+        (node) => node.pin.url === normalizeTemplateGitUrl(newsUrl),
+      )?.pin.commit,
     ).toBe(news.commit);
   });
 
@@ -238,7 +274,7 @@ describe("resolveTemplateComposition", () => {
               description: "Read and discuss personalized news briefings.",
             }),
           ],
-        ])
+        ]),
       ),
     });
 
@@ -258,18 +294,28 @@ describe("resolveTemplateComposition", () => {
       ports: ports(
         [base, news],
         new Map([
-          [normalizeTemplateGitUrl(baseUrl), snapshot(base, [], "packages/runtime")],
-          [normalizeTemplateGitUrl(newsUrl), snapshot(news, [], "packages/runtime")],
-        ])
+          [
+            normalizeTemplateGitUrl(baseUrl),
+            snapshot(base, [], "packages/runtime"),
+          ],
+          [
+            normalizeTemplateGitUrl(newsUrl),
+            snapshot(news, [], "packages/runtime"),
+          ],
+        ]),
       ),
     });
 
-    expect(plan.repositories["packages/runtime"]!.contributions).toHaveLength(2);
+    expect(plan.repositories["packages/runtime"]!.contributions).toHaveLength(
+      2,
+    );
     expect(plan.state!.repositories["packages/runtime"]!.contributions).toEqual(
-      plan.repositories["packages/runtime"]!.contributions.map(({ nodeId, subtreeDigest }) => ({
-        nodeId,
-        subtreeDigest,
-      }))
+      plan.repositories["packages/runtime"]!.contributions.map(
+        ({ nodeId, subtreeDigest }) => ({
+          nodeId,
+          subtreeDigest,
+        }),
+      ),
     );
   });
 
@@ -290,7 +336,7 @@ describe("resolveTemplateComposition", () => {
               description: "x".repeat(201),
             }),
           ],
-        ])
+        ]),
       ),
     });
 
@@ -302,8 +348,14 @@ describe("resolveTemplateComposition", () => {
     const base = pin(baseUrl, "a");
     const news = pin(newsUrl, "b");
     const snapshots = new Map([
-      [normalizeTemplateGitUrl(baseUrl), snapshot(base, [], "packages/runtime")],
-      [normalizeTemplateGitUrl(newsUrl), snapshot(news, [{ url: baseUrl }], "panels/news")],
+      [
+        normalizeTemplateGitUrl(baseUrl),
+        snapshot(base, [], "packages/runtime"),
+      ],
+      [
+        normalizeTemplateGitUrl(newsUrl),
+        snapshot(news, [{ url: baseUrl }], "panels/news"),
+      ],
     ]);
     const plan = await resolveTemplateComposition({
       roots: [{ url: baseUrl }, { url: newsUrl }],
@@ -323,8 +375,14 @@ describe("resolveTemplateComposition", () => {
     const newsV1 = pin(newsUrl, "b");
     const newsV2 = pin(newsUrl, "d");
     const initialSnapshots = new Map([
-      [normalizeTemplateGitUrl(baseUrl), snapshot(base, [], "packages/runtime")],
-      [normalizeTemplateGitUrl(newsUrl), snapshot(newsV1, [{ url: baseUrl }], "panels/news")],
+      [
+        normalizeTemplateGitUrl(baseUrl),
+        snapshot(base, [], "packages/runtime"),
+      ],
+      [
+        normalizeTemplateGitUrl(newsUrl),
+        snapshot(newsV1, [{ url: baseUrl }], "panels/news"),
+      ],
     ]);
     const initial = await resolveTemplateComposition({
       roots: [{ url: newsUrl }],
@@ -334,23 +392,31 @@ describe("resolveTemplateComposition", () => {
     const updatedSnapshots = new Map(initialSnapshots);
     updatedSnapshots.set(
       normalizeTemplateGitUrl(newsUrl),
-      snapshot(newsV2, [{ url: baseUrl }], "panels/news")
+      snapshot(newsV2, [{ url: baseUrl }], "panels/news"),
     );
     const noNetwork = ports([], updatedSnapshots);
+    const installedLayers = Object.fromEntries(
+      initial.nodes.map((node) => [node.nodeId, node.fragmentYaml]),
+    );
     const updated = await resolveTemplateComposition({
       roots: [{ url: newsUrl }],
       pinOverrides: { [newsUrl]: newsV2 },
-      previousState: initial.state!,
+      previousState: initial.state,
+      installedLayers,
       expectedSystemEpoch: epoch,
       ports: noNetwork,
     });
 
     expect(noNetwork.resolvePromoted).not.toHaveBeenCalled();
     expect(
-      updated.nodes.find((node) => node.pin.url === normalizeTemplateGitUrl(newsUrl))?.pin
+      updated.nodes.find(
+        (node) => node.pin.url === normalizeTemplateGitUrl(newsUrl),
+      )?.pin,
     ).toMatchObject({ commit: newsV2.commit });
     expect(
-      updated.nodes.find((node) => node.pin.url === normalizeTemplateGitUrl(baseUrl))?.pin
+      updated.nodes.find(
+        (node) => node.pin.url === normalizeTemplateGitUrl(baseUrl),
+      )?.pin,
     ).toMatchObject({ commit: base.commit });
   });
 });

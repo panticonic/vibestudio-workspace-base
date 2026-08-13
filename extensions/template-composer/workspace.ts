@@ -11,10 +11,7 @@ import {
   WorkspaceConfigSchema,
   WorkspaceConfigTopLayerSchema,
 } from "@vibestudio/workspace-contracts/workspaceConfigSchema";
-import type {
-  WorkspaceConfig,
-  WorkspaceTemplateState,
-} from "@vibestudio/workspace-contracts/types";
+import type { WorkspaceConfig } from "@vibestudio/workspace-contracts/types";
 import { parseTemplateState } from "@vibestudio/workspace/templateState";
 import {
   WORKSPACE_COMPOSITION_SOURCE_PATH,
@@ -29,7 +26,9 @@ export const OBSERVATION_CONTEXT = "template-composer-observation";
 export const META_REPOSITORY = "meta";
 export const TOP_CONFIG_PATH = "vibestudio.yml";
 export const STATE_PATH = "templates.state.yml";
-export const COMPOSITION_SOURCE_PATH = WORKSPACE_COMPOSITION_SOURCE_PATH.slice("meta/".length);
+export const COMPOSITION_SOURCE_PATH = WORKSPACE_COMPOSITION_SOURCE_PATH.slice(
+  "meta/".length,
+);
 
 export interface SemanticWorkspaceObservation extends TemplateWorkspaceObservation {
   workspaceId: string;
@@ -50,24 +49,30 @@ type WorkspaceRuntimeManifest = Omit<WorkspaceConfig, "id">;
  */
 export function bootstrapWorkspaceSource(
   runtimeTop: WorkspaceRuntimeManifest,
-  templates: WorkspaceTopLayer["templates"] = { use: [] }
+  templates: WorkspaceTopLayer["templates"] = { use: [] },
 ): WorkspaceTopLayer {
   const authoredUpstreams = Object.fromEntries(
-    Object.entries(runtimeTop.git?.upstreams ?? {}).flatMap(([section, repositories]) => {
-      const authored = Object.fromEntries(
-        Object.entries(repositories).filter(
-          ([, upstream]) => upstream.authorName !== undefined || upstream.authorEmail !== undefined
-        )
-      );
-      return Object.keys(authored).length > 0 ? [[section, authored]] : [];
-    })
+    Object.entries(runtimeTop.git?.upstreams ?? {}).flatMap(
+      ([section, repositories]) => {
+        const authored = Object.fromEntries(
+          Object.entries(repositories).filter(
+            ([, upstream]) =>
+              upstream.authorName !== undefined ||
+              upstream.authorEmail !== undefined,
+          ),
+        );
+        return Object.keys(authored).length > 0 ? [[section, authored]] : [];
+      },
+    ),
   );
   return WorkspaceConfigTopLayerSchema.parse({
     systemEpoch: runtimeTop.systemEpoch,
     templates,
     ...(runtimeTop.providers ? { providers: runtimeTop.providers } : {}),
     ...(runtimeTop.trust ? { trust: runtimeTop.trust } : {}),
-    ...(Object.keys(authoredUpstreams).length > 0 ? { git: { upstreams: authoredUpstreams } } : {}),
+    ...(Object.keys(authoredUpstreams).length > 0
+      ? { git: { upstreams: authoredUpstreams } }
+      : {}),
   });
 }
 
@@ -80,7 +85,7 @@ export function projectBootstrapRuntimeToSource(
     fragment: Parameters<typeof composeWorkspaceConfig>[1][number]["config"];
   }[],
   workspaceId: string,
-  templates: WorkspaceTopLayer["templates"] = { use: [] }
+  templates: WorkspaceTopLayer["templates"] = { use: [] },
 ): WorkspaceTopLayer {
   const source = bootstrapWorkspaceSource(runtimeTop, templates);
   const ancestors = new Map<string, Set<string>>();
@@ -88,7 +93,8 @@ export function projectBootstrapRuntimeToSource(
     const inherited = new Set<string>();
     for (const parent of node.parents) {
       inherited.add(parent);
-      for (const ancestor of ancestors.get(parent) ?? []) inherited.add(ancestor);
+      for (const ancestor of ancestors.get(parent) ?? [])
+        inherited.add(ancestor);
     }
     ancestors.set(node.nodeId, inherited);
     return {
@@ -103,7 +109,7 @@ export function projectBootstrapRuntimeToSource(
     projectWorkspaceConfigMutationToTop(source, expected, {
       ...runtimeTop,
       id: workspaceId,
-    })
+    }),
   );
 }
 
@@ -117,7 +123,7 @@ async function readFile(
   ctx: ExtensionContextLike,
   state: VcsStateNodeRef,
   repositoryId: string,
-  relativePath: string
+  relativePath: string,
 ): Promise<VcsReadFileResult> {
   return ctx.rpc.call("main", "vcs.readFile", {
     state,
@@ -129,17 +135,21 @@ async function readFile(
 async function listDirectory(
   ctx: ExtensionContextLike,
   state: VcsStateNodeRef,
-  directory: string
+  directory: string,
 ): Promise<NonNullable<VcsListDirectoryResult>["entries"]> {
   const entries: NonNullable<VcsListDirectoryResult>["entries"] = [];
   let cursor: string | undefined;
   do {
-    const page = await ctx.rpc.call<VcsListDirectoryResult>("main", "vcs.listDirectory", {
-      state,
-      path: directory,
-      ...(cursor ? { cursor } : {}),
-      limit: 500,
-    });
+    const page = await ctx.rpc.call<VcsListDirectoryResult>(
+      "main",
+      "vcs.listDirectory",
+      {
+        state,
+        path: directory,
+        ...(cursor ? { cursor } : {}),
+        limit: 500,
+      },
+    );
     if (!page) break;
     entries.push(...page.entries);
     cursor = page.nextCursor ?? undefined;
@@ -149,7 +159,7 @@ async function listDirectory(
 
 async function repositoryPaths(
   ctx: ExtensionContextLike,
-  state: VcsStateNodeRef
+  state: VcsStateNodeRef,
 ): Promise<Set<string>> {
   const result = new Set<string>();
   const roots = await listDirectory(ctx, state, "");
@@ -163,12 +173,16 @@ async function repositoryPaths(
   return result;
 }
 
-async function ensureObservationContext(ctx: ExtensionContextLike): Promise<void> {
-  await ctx.rpc.call("main", "runtime.createContext", { contextId: OBSERVATION_CONTEXT });
+async function ensureObservationContext(
+  ctx: ExtensionContextLike,
+): Promise<void> {
+  await ctx.rpc.call("main", "runtime.createContext", {
+    contextId: OBSERVATION_CONTEXT,
+  });
 }
 
 export async function observeWorkspace(
-  ctx: ExtensionContextLike
+  ctx: ExtensionContextLike,
 ): Promise<SemanticWorkspaceObservation> {
   await ensureObservationContext(ctx);
   const status = await ctx.rpc.call<VcsStatusResult>("main", "vcs.status", {
@@ -176,79 +190,92 @@ export async function observeWorkspace(
   });
   const mainState = { kind: "event" as const, eventId: status.mainEventId };
   const info = await ctx.workspace.getInfo();
-  if (!info.config) throw new Error("Workspace info did not expose its resolved configuration");
+  if (!info.config)
+    throw new Error("Workspace info did not expose its resolved configuration");
   const metaRepository = await ctx.rpc.call<VcsResolveRepositoryResult>(
     "main",
     "vcs.resolveRepository",
-    { state: mainState, repoPath: META_REPOSITORY }
+    { state: mainState, repoPath: META_REPOSITORY },
   );
-  if (!metaRepository) throw new Error("Workspace has no semantic meta repository");
-  const topFile = await readFile(ctx, mainState, metaRepository.repositoryId, TOP_CONFIG_PATH);
-  if (!topFile) throw new Error(`Workspace has no ${META_REPOSITORY}/${TOP_CONFIG_PATH}`);
+  if (!metaRepository)
+    throw new Error("Workspace has no semantic meta repository");
+  const topFile = await readFile(
+    ctx,
+    mainState,
+    metaRepository.repositoryId,
+    TOP_CONFIG_PATH,
+  );
+  if (!topFile)
+    throw new Error(`Workspace has no ${META_REPOSITORY}/${TOP_CONFIG_PATH}`);
   const parsedRuntime = WorkspaceConfigSchema.parse({
     ...(YAML.parse(textContent(topFile)) as object),
     id: info.id,
   });
   const { id: _runtimeId, ...runtimeTop } = parsedRuntime;
-  const stateFile = await readFile(ctx, mainState, metaRepository.repositoryId, STATE_PATH);
-  let state: WorkspaceTemplateState | undefined;
-  if (stateFile) {
-    state = parseTemplateState(YAML.parse(textContent(stateFile)) as unknown);
-  }
+  const stateFile = await readFile(
+    ctx,
+    mainState,
+    metaRepository.repositoryId,
+    STATE_PATH,
+  );
+  const state = stateFile
+    ? parseTemplateState(YAML.parse(textContent(stateFile)) as unknown)
+    : undefined;
   const sourceFile = await readFile(
     ctx,
     mainState,
     metaRepository.repositoryId,
-    COMPOSITION_SOURCE_PATH
+    COMPOSITION_SOURCE_PATH,
   );
   const storedSource = sourceFile
-    ? WorkspaceConfigTopLayerSchema.parse(YAML.parse(textContent(sourceFile)) as unknown)
+    ? WorkspaceConfigTopLayerSchema.parse(
+        YAML.parse(textContent(sourceFile)) as unknown,
+      )
     : undefined;
-  let top: ReturnType<typeof WorkspaceConfigTopLayerSchema.parse>;
-  const installedLayers: Record<string, string> = {};
-  if (state && storedSource) {
-    const ancestors = new Map<string, Set<string>>();
-    const layers = [];
-    for (const node of state.nodes) {
-      const inherited = new Set<string>();
-      for (const parent of node.parents) {
-        inherited.add(parent);
-        for (const ancestor of ancestors.get(parent) ?? []) inherited.add(ancestor);
-      }
-      ancestors.set(node.nodeId, inherited);
-      const layerText = node.fragment;
-      const config = parseWorkspaceConfigFragment(layerText, node.nodeId);
-      installedLayers[node.nodeId] = layerText;
-      layers.push({
-        nodeId: node.nodeId,
-        alias: node.alias,
-        ancestors: [...inherited],
-        config,
-      });
-    }
-    const prior = composeWorkspaceConfig(storedSource, layers, info.id);
-    top = WorkspaceConfigTopLayerSchema.parse(
-      projectWorkspaceConfigMutationToTop(storedSource, prior, {
-        ...runtimeTop,
-        id: info.id,
-      })
+  if (!state || !storedSource) {
+    const missing = [
+      ...(storedSource ? [] : [COMPOSITION_SOURCE_PATH]),
+      ...(state ? [] : [STATE_PATH]),
+    ];
+    throw new Error(
+      `Workspace is missing complete template state: ${missing.join(", ")}`,
     );
-  } else {
-    if (state && !storedSource) {
-      throw new Error(`${STATE_PATH} exists without ${COMPOSITION_SOURCE_PATH}`);
-    }
-    const templates =
-      storedSource?.templates ??
-      (state ? { use: state.roots, overrides: state.overrides } : { use: [] });
-    top = storedSource ?? WorkspaceConfigTopLayerSchema.parse({ ...runtimeTop, templates });
   }
+  const installedLayers: Record<string, string> = {};
+  const ancestors = new Map<string, Set<string>>();
+  const layers = [];
+  for (const node of state.nodes) {
+    const inherited = new Set<string>();
+    for (const parent of node.parents) {
+      inherited.add(parent);
+      for (const ancestor of ancestors.get(parent) ?? [])
+        inherited.add(ancestor);
+    }
+    ancestors.set(node.nodeId, inherited);
+    const layerText = node.fragment;
+    const config = parseWorkspaceConfigFragment(layerText, node.nodeId);
+    installedLayers[node.nodeId] = layerText;
+    layers.push({
+      nodeId: node.nodeId,
+      alias: node.alias,
+      ancestors: [...inherited],
+      config,
+    });
+  }
+  const prior = composeWorkspaceConfig(storedSource, layers, info.id);
+  const top = WorkspaceConfigTopLayerSchema.parse(
+    projectWorkspaceConfigMutationToTop(storedSource, prior, {
+      ...runtimeTop,
+      id: info.id,
+    }),
+  );
   const localRepoPaths = await repositoryPaths(ctx, mainState);
   return {
     workspaceId: info.id,
     runtimeTop,
     roots: top.templates?.use ?? [],
-    ...(state ? { state } : {}),
-    ...(state ? { installedLayers } : {}),
+    state,
+    installedLayers,
     localRepoPaths,
     overrides: top.templates?.overrides,
     expectedSystemEpoch: top.systemEpoch,

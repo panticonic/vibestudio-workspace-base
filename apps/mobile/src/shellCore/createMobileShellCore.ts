@@ -9,7 +9,10 @@ export function createMobileShellCore(deps: {
   workspaceId: string;
   serverUrl: string;
   transport: MobileRpcClient;
-  onPresentationUpdated?: (update: { revision: number; panelIds: string[] }) => void;
+  onPresentationUpdated?: (update: {
+    revision: number;
+    panelIds: string[];
+  }) => void;
 }) {
   const registry = new PanelRegistry({
     onPresentationUpdated: deps.onPresentationUpdated,
@@ -21,8 +24,8 @@ export function createMobileShellCore(deps: {
   const presentation = createWorkspacePresentationClient(deps.transport);
   const { panelManager } = createShellCore({
     registry,
-    call: (service, method, args) => deps.transport.call("main", `${service}.${method}`, args),
-    presentation: presentation.searchIndex,
+    call: (service, method, args) =>
+      deps.transport.call("main", `${service}.${method}`, args),
     workspaceState: presentation.workspaceState,
     viewState: createMobileLocalViewStateStore(deps.workspaceId),
     workspacePath: "",

@@ -60,7 +60,9 @@ function diskTree(root: string): GitCommitTreeEntry[] {
   return entries;
 }
 
-function protectedSnapshot(content = "export const answer = 42;\n"): ProtectedRepositorySnapshot {
+function protectedSnapshot(
+  content = "export const answer = 42;\n",
+): ProtectedRepositorySnapshot {
   const source = [
     ["index.ts", content],
     [".npmrc", "registry=https://registry.example.test\n"],
@@ -85,9 +87,9 @@ function protectedSnapshot(content = "export const answer = 42;\n"): ProtectedRe
 }
 
 function publicationInput(
-  overrides: Partial<Parameters<TemplatePublishEngine["publish"]>[0]> = {}
+  overrides: Partial<Parameters<TemplatePublishEngine["publish"]>[0]> = {},
 ): Parameters<TemplatePublishEngine["publish"]>[0] {
-  const manifest = "systemEpoch: 58\n";
+  const manifest = "systemEpoch: 59\n";
   return {
     operationId: "publish-news-v1",
     expectedMainEventId: "event:main",
@@ -117,11 +119,18 @@ function testContext(root: string) {
     },
     credentials: { gitHttp: vi.fn(() => ({})) },
     rpc: {
-      call: vi.fn(async <T>(_target: string, method: string, encoded: string): Promise<T> => {
-        if (method !== "blobstore.putBase64") throw new Error(`unexpected RPC ${method}`);
-        const bytes = Buffer.from(encoded, "base64");
-        return { digest: sha256Hex(bytes), size: bytes.byteLength } as T;
-      }),
+      call: vi.fn(
+        async <T>(
+          _target: string,
+          method: string,
+          encoded: string,
+        ): Promise<T> => {
+          if (method !== "blobstore.putBase64")
+            throw new Error(`unexpected RPC ${method}`);
+          const bytes = Buffer.from(encoded, "base64");
+          return { digest: sha256Hex(bytes), size: bytes.byteLength } as T;
+        },
+      ),
     },
   };
 }
@@ -155,8 +164,8 @@ beforeEach(() => {
     webUrl: "https://example.test/acme/news-template",
     created: state.main === null && state.tags.size === 0,
   }));
-  vi.spyOn(GitClient.prototype, "getRemoteDefaultBranch").mockImplementation(async () =>
-    state.main === null ? null : "main"
+  vi.spyOn(GitClient.prototype, "getRemoteDefaultBranch").mockImplementation(
+    async () => (state.main === null ? null : "main"),
   );
   vi.spyOn(GitClient.prototype, "init").mockResolvedValue();
   vi.spyOn(GitClient.prototype, "clone").mockImplementation(async ({ dir }) => {
@@ -164,67 +173,78 @@ beforeEach(() => {
     checkoutTags.set(dir, new Map(state.tags));
   });
   vi.spyOn(GitClient.prototype, "addAll").mockResolvedValue();
-  vi.spyOn(GitClient.prototype, "commit").mockImplementation(async ({ dir, message, author }) => {
-    const commit = nextCommit.toString(16).padStart(40, "0");
-    nextCommit += 1;
-    checkoutHeads.set(dir, commit);
-    state.trees.set(commit, diskTree(dir));
-    state.history.unshift({
-      oid: commit,
-      message,
-      author: {
-        ...(author ?? { name: "Vibestudio", email: "vibestudio@local" }),
-        timestamp: 1,
-      },
-      parentOids: state.main ? [state.main] : [],
-    });
-    return commit;
-  });
-  vi.spyOn(GitClient.prototype, "resolveCommit").mockImplementation(async (dir, ref) => {
-    if (ref === "refs/heads/main") return checkoutHeads.get(dir) ?? state.main;
-    if (ref.startsWith("refs/tags/")) {
-      return (
-        checkoutTags.get(dir)?.get(ref.slice("refs/tags/".length)) ??
-        state.tags.get(ref.slice("refs/tags/".length)) ??
-        null
-      );
-    }
-    return /^[0-9a-f]{40}$/u.test(ref) ? ref : null;
-  });
+  vi.spyOn(GitClient.prototype, "commit").mockImplementation(
+    async ({ dir, message, author }) => {
+      const commit = nextCommit.toString(16).padStart(40, "0");
+      nextCommit += 1;
+      checkoutHeads.set(dir, commit);
+      state.trees.set(commit, diskTree(dir));
+      state.history.unshift({
+        oid: commit,
+        message,
+        author: {
+          ...(author ?? { name: "Vibestudio", email: "vibestudio@local" }),
+          timestamp: 1,
+        },
+        parentOids: state.main ? [state.main] : [],
+      });
+      return commit;
+    },
+  );
+  vi.spyOn(GitClient.prototype, "resolveCommit").mockImplementation(
+    async (dir, ref) => {
+      if (ref === "refs/heads/main")
+        return checkoutHeads.get(dir) ?? state.main;
+      if (ref.startsWith("refs/tags/")) {
+        return (
+          checkoutTags.get(dir)?.get(ref.slice("refs/tags/".length)) ??
+          state.tags.get(ref.slice("refs/tags/".length)) ??
+          null
+        );
+      }
+      return /^[0-9a-f]{40}$/u.test(ref) ? ref : null;
+    },
+  );
   vi.spyOn(GitClient.prototype, "getCurrentCommit").mockImplementation(
-    async (dir) => checkoutHeads.get(dir) ?? null
+    async (dir) => checkoutHeads.get(dir) ?? null,
   );
   vi.spyOn(GitClient.prototype, "statusMatrix").mockResolvedValue([]);
-  vi.spyOn(GitClient.prototype, "log").mockImplementation(async () => [...state.history]);
+  vi.spyOn(GitClient.prototype, "log").mockImplementation(async () => [
+    ...state.history,
+  ]);
   vi.spyOn(GitClient.prototype, "readCommitTree").mockImplementation(
-    async (_dir, commit) => state.trees.get(commit) ?? []
+    async (_dir, commit) => state.trees.get(commit) ?? [],
   );
-  vi.spyOn(GitClient.prototype, "createTag").mockImplementation(async (dir, tag, commit) => {
-    const tags = checkoutTags.get(dir) ?? new Map<string, string>();
-    if (tags.has(tag)) throw new Error(`tag ${tag} already exists`);
-    tags.set(tag, commit);
-    checkoutTags.set(dir, tags);
-  });
-  vi.spyOn(GitClient.prototype, "push").mockImplementation(async ({ dir, ref, remoteRef }) => {
-    if (remoteRef === "refs/heads/main") {
-      if (state.rejectMain) throw new Error("non-fast-forward");
-      state.main = checkoutHeads.get(dir) ?? null;
-      return;
-    }
-    if (remoteRef?.startsWith("refs/tags/")) {
-      if (state.rejectNextTag) {
-        state.rejectNextTag = false;
-        throw new Error("connection lost");
+  vi.spyOn(GitClient.prototype, "createTag").mockImplementation(
+    async (dir, tag, commit) => {
+      const tags = checkoutTags.get(dir) ?? new Map<string, string>();
+      if (tags.has(tag)) throw new Error(`tag ${tag} already exists`);
+      tags.set(tag, commit);
+      checkoutTags.set(dir, tags);
+    },
+  );
+  vi.spyOn(GitClient.prototype, "push").mockImplementation(
+    async ({ dir, ref, remoteRef }) => {
+      if (remoteRef === "refs/heads/main") {
+        if (state.rejectMain) throw new Error("non-fast-forward");
+        state.main = checkoutHeads.get(dir) ?? null;
+        return;
       }
-      const tag = remoteRef.slice("refs/tags/".length);
-      const commit = checkoutTags.get(dir)?.get(ref ?? tag);
-      if (!commit) throw new Error(`missing local tag ${tag}`);
-      if (state.tags.has(tag) && state.tags.get(tag) !== commit) {
-        throw new Error(`tag ${tag} rejected`);
+      if (remoteRef?.startsWith("refs/tags/")) {
+        if (state.rejectNextTag) {
+          state.rejectNextTag = false;
+          throw new Error("connection lost");
+        }
+        const tag = remoteRef.slice("refs/tags/".length);
+        const commit = checkoutTags.get(dir)?.get(ref ?? tag);
+        if (!commit) throw new Error(`missing local tag ${tag}`);
+        if (state.tags.has(tag) && state.tags.get(tag) !== commit) {
+          throw new Error(`tag ${tag} rejected`);
+        }
+        state.tags.set(tag, commit);
       }
-      state.tags.set(tag, commit);
-    }
-  });
+    },
+  );
 });
 
 afterEach(() => {
@@ -238,11 +258,14 @@ function engine(snapshot = protectedSnapshot()) {
   roots.push(root);
   const bridge = {
     readProtectedRepositories: vi.fn(async (repoPaths: string[]) =>
-      repoPaths.map((repoPath) => ({ ...snapshot, repoPath }))
+      repoPaths.map((repoPath) => ({ ...snapshot, repoPath })),
     ),
   };
   return {
-    engine: new TemplatePublishEngine(testContext(root) as never, bridge as never),
+    engine: new TemplatePublishEngine(
+      testContext(root) as never,
+      bridge as never,
+    ),
     bridge,
     root,
   };
@@ -263,10 +286,12 @@ describe("TemplatePublishEngine", () => {
     const fixture = engine();
     const result = await fixture.engine.publish(publicationInput());
 
-    expect(fixture.bridge.readProtectedRepositories).toHaveBeenCalledExactlyOnceWith(
+    expect(
+      fixture.bridge.readProtectedRepositories,
+    ).toHaveBeenCalledExactlyOnceWith(
       ["panels/news"],
       "event:main",
-      "publish-news-v1"
+      "publish-news-v1",
     );
     expect(GitClient.prototype.init).toHaveBeenCalledOnce();
     expect(GitClient.prototype.clone).not.toHaveBeenCalled();
@@ -286,12 +311,21 @@ describe("TemplatePublishEngine", () => {
       parentOids: [],
     });
 
-    const result = await engine(protectedSnapshot("export const answer = 43;\n")).engine.publish(
-      publicationInput({ operationId: "publish-news-v1.0.1", version: "1.0.1" })
+    const result = await engine(
+      protectedSnapshot("export const answer = 43;\n"),
+    ).engine.publish(
+      publicationInput({
+        operationId: "publish-news-v1.0.1",
+        version: "1.0.1",
+      }),
     );
 
     expect(GitClient.prototype.clone).toHaveBeenCalledWith(
-      expect.objectContaining({ ref: "main", singleBranch: false, fullHistory: true })
+      expect.objectContaining({
+        ref: "main",
+        singleBranch: false,
+        fullHistory: true,
+      }),
     );
     expect(state.history[0]?.parentOids).toEqual([old]);
     expect(state.tags.get("v1.0.0")).toBe(old);
@@ -301,18 +335,23 @@ describe("TemplatePublishEngine", () => {
   it("recovers a retry after main was pushed but the immutable tag was not", async () => {
     const { engine: publisher } = engine();
     state.rejectNextTag = true;
-    await expect(publisher.publish(publicationInput())).rejects.toThrow("connection lost");
+    await expect(publisher.publish(publicationInput())).rejects.toThrow(
+      "connection lost",
+    );
     const publishedMain = state.main;
     expect(publishedMain).not.toBeNull();
     expect(state.tags.has("v1.0.0")).toBe(false);
 
-    const pushesBeforeRetry = vi.mocked(GitClient.prototype.push).mock.calls.length;
+    const pushesBeforeRetry = vi.mocked(GitClient.prototype.push).mock.calls
+      .length;
     const result = await publisher.publish(publicationInput());
 
     expect(result.commit).toBe(publishedMain);
     expect(state.tags.get("v1.0.0")).toBe(publishedMain);
     expect(GitClient.prototype.commit).toHaveBeenCalledOnce();
-    expect(vi.mocked(GitClient.prototype.push).mock.calls.slice(pushesBeforeRetry)).toEqual([
+    expect(
+      vi.mocked(GitClient.prototype.push).mock.calls.slice(pushesBeforeRetry),
+    ).toEqual([
       [
         expect.objectContaining({
           ref: "v1.0.0",
@@ -347,7 +386,7 @@ describe("TemplatePublishEngine", () => {
     });
 
     await expect(engine().engine.publish(publicationInput())).rejects.toThrow(
-      "Immutable template tag v1.0.0 already exists"
+      "Immutable template tag v1.0.0 already exists",
     );
     expect(GitClient.prototype.commit).not.toHaveBeenCalled();
     expect(GitClient.prototype.push).not.toHaveBeenCalled();
@@ -357,21 +396,23 @@ describe("TemplatePublishEngine", () => {
     const { engine: publisher } = engine();
     await publisher.publish(publicationInput());
 
-    await expect(publisher.publish(publicationInput({ version: "1.0.1" }))).rejects.toThrow(
-      "already used for a different template publication"
-    );
+    await expect(
+      publisher.publish(publicationInput({ version: "1.0.1" })),
+    ).rejects.toThrow("already used for a different template publication");
     expect(GitClient.prototype.commit).toHaveBeenCalledOnce();
   });
 
   it("does not create or push a tag after a non-fast-forward main rejection", async () => {
     state.rejectMain = true;
-    await expect(engine().engine.publish(publicationInput())).rejects.toThrow("non-fast-forward");
+    await expect(engine().engine.publish(publicationInput())).rejects.toThrow(
+      "non-fast-forward",
+    );
 
     expect(GitClient.prototype.createTag).not.toHaveBeenCalled();
     expect(
       vi
         .mocked(GitClient.prototype.push)
-        .mock.calls.some(([call]) => call.remoteRef === "refs/tags/v1.0.0")
+        .mock.calls.some(([call]) => call.remoteRef === "refs/tags/v1.0.0"),
     ).toBe(false);
   });
 
@@ -385,7 +426,10 @@ describe("TemplatePublishEngine", () => {
       commit: result.commit,
       label: "template consumer",
       sink: {
-        put: async (bytes) => ({ digest: sha256Hex(bytes), size: bytes.byteLength }),
+        put: async (bytes) => ({
+          digest: sha256Hex(bytes),
+          size: bytes.byteLength,
+        }),
       },
       reservedPaths: "exclude",
     });
@@ -396,8 +440,8 @@ describe("TemplatePublishEngine", () => {
       "panels/news/.npmrc",
       "panels/news/index.ts",
     ]);
-    expect(state.trees.get(result.commit)?.map((entry) => entry.path)).toContain(
-      "panels/news/.npmrc"
-    );
+    expect(
+      state.trees.get(result.commit)?.map((entry) => entry.path),
+    ).toContain("panels/news/.npmrc");
   });
 });

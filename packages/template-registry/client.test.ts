@@ -16,7 +16,7 @@ const source: TemplateRegistrySource = {
 const document = `
 version: 1
 revision: 2026-07-29.3
-systemEpoch: 58
+systemEpoch: 59
 entries:
   - id: news
     name: News workspace
@@ -46,11 +46,13 @@ describe("template registry client", () => {
     const registryAcquirer = acquirer();
     const client = new TemplateRegistryClient({
       source,
-      systemEpoch: 58,
+      systemEpoch: 59,
       acquirer: registryAcquirer,
       cache: new MemoryTemplateRegistryCache(),
     });
-    await expect(client.catalog()).rejects.toThrow(TemplateRegistryUnavailableError);
+    await expect(client.catalog()).rejects.toThrow(
+      TemplateRegistryUnavailableError,
+    );
     expect(registryAcquirer.discover).not.toHaveBeenCalled();
   });
 
@@ -59,7 +61,7 @@ describe("template registry client", () => {
     const cache = new MemoryTemplateRegistryCache();
     const client = new TemplateRegistryClient({
       source,
-      systemEpoch: 58,
+      systemEpoch: 59,
       acquirer: registryAcquirer,
       cache,
       now: () => new Date("2026-07-29T12:00:00.000Z"),
@@ -71,29 +73,35 @@ describe("template registry client", () => {
         source: "verified",
         stale: false,
         verifiedAt: "2026-07-29T12:00:00.000Z",
-      })
+      }),
     );
     await expect(client.catalog()).resolves.toEqual(
-      expect.objectContaining({ revision: "2026-07-29.3", source: "cache", stale: true })
+      expect.objectContaining({
+        revision: "2026-07-29.3",
+        source: "cache",
+        stale: true,
+      }),
     );
     await expect(
       client.resolve({
         catalogId: "news",
         registryCommit: "f".repeat(40),
         registrySnapshot: snapshot,
-      })
+      }),
     ).rejects.toThrow("catalog changed");
     await expect(
       client.resolve({
         catalogId: "news",
         registryCommit: commit,
         registrySnapshot: snapshot,
-      })
+      }),
     ).resolves.toEqual(
       expect.objectContaining({
         catalogId: "news",
-        promoted: expect.objectContaining({ commit: "fedcba9876543210fedcba9876543210fedcba98" }),
-      })
+        promoted: expect.objectContaining({
+          commit: "fedcba9876543210fedcba9876543210fedcba98",
+        }),
+      }),
     );
   });
 
@@ -101,15 +109,17 @@ describe("template registry client", () => {
     const cache = new MemoryTemplateRegistryCache();
     const first = new TemplateRegistryClient({
       source,
-      systemEpoch: 58,
+      systemEpoch: 59,
       acquirer: acquirer(),
       cache,
     });
     await first.refresh();
     const offline = new TemplateRegistryClient({
       source,
-      systemEpoch: 58,
-      acquirer: { discover: vi.fn(async () => Promise.reject(new Error("offline"))) },
+      systemEpoch: 59,
+      acquirer: {
+        discover: vi.fn(async () => Promise.reject(new Error("offline"))),
+      },
       cache,
     });
     await expect(offline.refresh()).resolves.toEqual(
@@ -117,7 +127,7 @@ describe("template registry client", () => {
         source: "cache",
         stale: true,
         refreshError: "offline",
-      })
+      }),
     );
   });
 
@@ -125,7 +135,7 @@ describe("template registry client", () => {
     const cache = new MemoryTemplateRegistryCache();
     const first = new TemplateRegistryClient({
       source,
-      systemEpoch: 58,
+      systemEpoch: 59,
       acquirer: acquirer(),
       cache,
     });
@@ -134,7 +144,7 @@ describe("template registry client", () => {
     const rewrittenSnapshot = `v1-sha256:${"d".repeat(64)}`;
     const second = new TemplateRegistryClient({
       source,
-      systemEpoch: 58,
+      systemEpoch: 59,
       acquirer: {
         discover: vi.fn(async () => ({
           commit: rewrittenCommit,
@@ -151,7 +161,7 @@ describe("template registry client", () => {
         catalogId: "news",
         registryCommit: shown.coordinates.commit,
         registrySnapshot: shown.coordinates.snapshot,
-      })
+      }),
     ).rejects.toThrow("catalog changed");
   });
 });

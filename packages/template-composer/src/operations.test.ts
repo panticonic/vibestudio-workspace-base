@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import type { TemplateCompositionPlan } from "./resolver.js";
 import type { WorkspaceTemplateState } from "@vibestudio/workspace-contracts/types";
 import {
+  canonicalTemplateNodeId,
+  templateAliasFromUrl,
+} from "@vibestudio/workspace/templateCoordinates";
+import {
   applyTemplateOperation,
   inspectTemplateOperation,
   publishPreparedTemplateOperation,
@@ -15,6 +19,41 @@ const exactRoot = {
   commit: "a".repeat(40),
   snapshot: `v1-sha256:${"a".repeat(64)}` as const,
 };
+
+const currentRoot = {
+  url: "https://github.com/vibestudio/current-root.git",
+  ref: "refs/tags/v1.0.0",
+  commit: "c".repeat(40),
+  snapshot: `v1-sha256:${"c".repeat(64)}` as const,
+};
+
+function currentWorkspace() {
+  const nodeId = canonicalTemplateNodeId(currentRoot.url, currentRoot.commit);
+  const fragment = "systemEpoch: 59\n";
+  const state: WorkspaceTemplateState = {
+    version: 1,
+    roots: [{ url: currentRoot.url }],
+    overrides: {},
+    nodes: [
+      {
+        nodeId,
+        alias: templateAliasFromUrl(currentRoot.url),
+        pin: currentRoot,
+        parents: [],
+        fragment,
+        suggestions: {},
+      },
+    ],
+    repositories: {},
+  };
+  return {
+    roots: state.roots,
+    state,
+    installedLayers: { [nodeId]: fragment },
+    localRepoPaths: new Set<string>(),
+    expectedSystemEpoch: 59,
+  };
+}
 
 describe("template operations", () => {
   it("projects exact unresolved suggestions from the local state only", () => {
@@ -33,7 +72,9 @@ describe("template operations", () => {
       ],
     } as unknown as WorkspaceTemplateState;
 
-    expect(templateStatus([{ url: exactRoot.url }], state).excludedSuggestions).toEqual([
+    expect(
+      templateStatus([{ url: exactRoot.url }], state).excludedSuggestions,
+    ).toEqual([
       {
         nodeId: "t-base",
         alias: "base",
@@ -43,83 +84,21 @@ describe("template operations", () => {
     expect(
       templateStatus([{ url: exactRoot.url }], state, {
         "t-base:trust": { digest, decision: "declined" },
-      }).excludedSuggestions
+      }).excludedSuggestions,
     ).toEqual([]);
   });
 
-  it("represents a workspace with no selected templates as an empty composition", async () => {
-    const inspection = await inspectTemplateOperation({
-      kind: "recompose",
-      workspace: {
-        roots: [],
-        localRepoPaths: new Set(["panels/chat"]),
-        expectedSystemEpoch: 58,
-      },
-      sources: {
-        resolvePromoted: vi.fn(),
-        acquire: vi.fn(),
-      },
-    });
-
-    expect(inspection).toMatchObject({
-      kind: "recompose",
-      nextTemplates: null,
-      plan: {
-        rootNodeIds: [],
-        nodes: [],
-        repositories: {},
-        localRepoPaths: ["panels/chat"],
-        state: null,
-      },
-    });
-  });
-
-  it("adopts the bootstrap descriptor exact pin without resolving the root from a registry", async () => {
-    const resolvePromoted = vi.fn(async () => {
-      throw new Error("registry should not resolve the bootstrap root");
-    });
-    const manifest = new TextEncoder().encode(
-      "systemEpoch: 58\ntemplate:\n  repositories: [packages/runtime]\n  files: []\ntrust:\n  chromeApps:\n    - apps/base\n"
-    );
-    const inspection = await inspectTemplateOperation({
-      kind: "adopt-bootstrap",
-      descriptor: { version: 1, workspaceId: "example", rootTemplate: exactRoot },
-      workspace: {
-        localRepoPaths: new Set(["packages/runtime"]),
-        expectedSystemEpoch: 58,
-      },
-      sources: {
-        resolvePromoted,
-        acquire: async (pin) => ({
-          commit: pin.commit,
-          snapshot: pin.snapshot,
-          files: [
-            {
-              path: "meta/template.yml",
-              contentHash: "a".repeat(64),
-              size: manifest.byteLength,
-              mode: 0o644,
-            },
-            {
-              path: "packages/runtime/index.ts",
-              contentHash: "b".repeat(64),
-              size: 1,
-              mode: 0o644,
-            },
-          ],
-          readFile: (path) => (path === "meta/template.yml" ? manifest : null),
-        }),
-      },
-    });
-
-    expect(resolvePromoted).not.toHaveBeenCalled();
-    expect(inspection.plan.state?.roots).toEqual([
-      { url: "git+https://github.com/vibestudio/workspace-base.git" },
-    ]);
-    expect(inspection.plan.state?.nodes[0]?.suggestions.trust).toMatchObject({
-      value: { chromeApps: ["apps/base"] },
-    });
-    expect(inspection.plan.repositories["packages/runtime"]).toBeDefined();
+  it("rejects a composition with no template root", async () => {
+    await expect(
+      inspectTemplateOperation({
+        kind: "recompose",
+        workspace: { ...currentWorkspace(), roots: [] },
+        sources: {
+          resolvePromoted: vi.fn(),
+          acquire: vi.fn(),
+        },
+      }),
+    ).rejects.toThrow("retain at least one template root");
   });
 
   it("adopts an exact ordinary release without resolving its root from a registry", async () => {
@@ -127,16 +106,12 @@ describe("template operations", () => {
       throw new Error("registry should not resolve the adopted root");
     });
     const manifest = new TextEncoder().encode(
-      "systemEpoch: 58\ntemplate:\n  repositories: [packages/runtime]\n  files: []\n"
+      "systemEpoch: 59\ntemplate:\n  repositories: [packages/runtime]\n  files: []\n",
     );
     const inspection = await inspectTemplateOperation({
       kind: "adopt",
       pin: exactRoot,
-      workspace: {
-        roots: [],
-        localRepoPaths: new Set(["packages/runtime"]),
-        expectedSystemEpoch: 58,
-      },
+      workspace: currentWorkspace(),
       sources: {
         resolvePromoted,
         acquire: async (pin) => ({
@@ -164,6 +139,7 @@ describe("template operations", () => {
     expect(resolvePromoted).not.toHaveBeenCalled();
     expect(inspection.kind).toBe("adopt");
     expect(inspection.nextTemplates?.use).toEqual([
+      { url: "git+https://github.com/vibestudio/current-root.git" },
       { url: "git+https://github.com/vibestudio/workspace-base.git" },
     ]);
     expect(inspection.plan.repositories["packages/runtime"]).toBeDefined();
@@ -178,17 +154,24 @@ describe("template operations", () => {
       applyTemplateOperation({
         operationId: "op-1",
         expectedMainEventId: "event-1",
-        inspection: { kind: "add", plan, nextTemplates: null },
+        inspection: { kind: "add", plan, nextTemplates: { use: [] } },
         ports: {
-          openContext: async () => ({ contextId: "template-composer-operation-op-1" }),
-          stageComposition: async () => ({ affectedRepoPaths: ["panels/news"] }),
+          openContext: async () => ({
+            contextId: "template-composer-operation-op-1",
+          }),
+          stageComposition: async () => ({
+            affectedRepoPaths: ["panels/news"],
+          }),
           publish,
           discard,
         },
-      })
+      }),
     ).resolves.toEqual({ mainEventId: "event-2" });
 
-    expect(publish).toHaveBeenCalledWith("template-composer-operation-op-1", "event-1");
+    expect(publish).toHaveBeenCalledWith(
+      "template-composer-operation-op-1",
+      "event-1",
+    );
     expect(discard).not.toHaveBeenCalled();
   });
 
@@ -196,7 +179,9 @@ describe("template operations", () => {
     const discard = vi.fn();
     const publish = vi.fn(async () => ({ mainEventId: "event-2" }));
     const ports = {
-      openContext: async () => ({ contextId: "template-composer-operation-op-2" }),
+      openContext: async () => ({
+        contextId: "template-composer-operation-op-2",
+      }),
       stageComposition: async () => ({ affectedRepoPaths: ["panels/news"] }),
       publish,
       discard,
@@ -204,7 +189,7 @@ describe("template operations", () => {
     const inspection = {
       kind: "add" as const,
       plan: { repositories: {} } as TemplateCompositionPlan,
-      nextTemplates: null,
+      nextTemplates: { use: [] },
     };
 
     const prepared = await stageTemplateOperation({
@@ -214,6 +199,9 @@ describe("template operations", () => {
     });
     expect(discard).not.toHaveBeenCalled();
     await publishPreparedTemplateOperation(prepared, "event-1", ports);
-    expect(publish).toHaveBeenCalledWith("template-composer-operation-op-2", "event-1");
+    expect(publish).toHaveBeenCalledWith(
+      "template-composer-operation-op-2",
+      "event-1",
+    );
   });
 });

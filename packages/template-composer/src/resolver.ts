@@ -41,16 +41,13 @@ import {
   templateSuggestionDigest,
 } from "@vibestudio/workspace/templateState";
 
-const TEMPLATE_FRAGMENT_DIR = "meta/templates";
 const TEMPLATE_STATE_PATH = "meta/templates.state.yml";
-/** Removed opportunistically; never read as an input or authority. */
-const OBSOLETE_TEMPLATE_LOCK_PATH = "meta/templates.lock.yml";
 export type TemplateManifestFragment = ParsedTemplateFragment;
 
 export class TemplateResolutionError extends Error {
   constructor(
     readonly code: string,
-    message: string
+    message: string,
   ) {
     super(message);
     this.name = new.target.name;
@@ -59,27 +56,33 @@ export class TemplateResolutionError extends Error {
 
 export class TemplateCycleError extends TemplateResolutionError {
   constructor(readonly aliases: readonly string[]) {
-    super("template-cycle", `Template dependency cycle: ${aliases.join(" -> ")}`);
+    super(
+      "template-cycle",
+      `Template dependency cycle: ${aliases.join(" -> ")}`,
+    );
   }
 }
 
 export class TemplateManifestError extends TemplateResolutionError {
   constructor(
     readonly nodeId: string,
-    message: string
+    message: string,
   ) {
-    super("template-manifest-invalid", `Invalid manifest for template ${nodeId}: ${message}`);
+    super(
+      "template-manifest-invalid",
+      `Invalid manifest for template ${nodeId}: ${message}`,
+    );
   }
 }
 
 export class TemplateCredentialConflictError extends TemplateResolutionError {
   constructor(
     readonly url: string,
-    readonly credentials: readonly string[]
+    readonly credentials: readonly string[],
   ) {
     super(
       "template-credential-conflict",
-      `Template ${url} is declared with incompatible logical credentials: ${credentials.join(", ")}`
+      `Template ${url} is declared with incompatible logical credentials: ${credentials.join(", ")}`,
     );
   }
 }
@@ -89,7 +92,9 @@ export interface TemplateSourcePorts {
    * Resolve the registry's exact promoted coordinate. Called at most once for
    * a URL, and never called for a URL already present in the state or overrides.
    */
-  resolvePromoted(declaration: WorkspaceTemplateDeclaration): Promise<WorkspaceTemplatePin>;
+  resolvePromoted(
+    declaration: WorkspaceTemplateDeclaration,
+  ): Promise<WorkspaceTemplatePin>;
   /** Acquire and verify one exact snapshot. Blob/CAS storage lives behind this port. */
   acquire(pin: WorkspaceTemplatePin, nodeId: string): Promise<ExactGitSnapshot>;
 }
@@ -139,24 +144,32 @@ export interface TemplateCompositionPlan {
   nodes: ResolvedTemplateNode[];
   repositories: Record<string, TemplateRepositoryComposition>;
   localRepoPaths: string[];
-  state: WorkspaceTemplateState | null;
+  state: WorkspaceTemplateState;
   artifacts: TemplateGeneratedArtifact[];
   /** Previously generated files that must be removed in this composition. */
   removedArtifactPaths: string[];
 }
 
-export interface ResolveTemplateCompositionInput {
+interface ResolveTemplateCompositionInputBase {
   roots: readonly WorkspaceTemplateDeclaration[];
   /** Exact, deliberate source replacements keyed by normalized URL. */
   pinOverrides?: Readonly<Record<string, WorkspaceTemplatePin>>;
   localRepoPaths?: ReadonlySet<string>;
-  previousState?: WorkspaceTemplateState;
-  /** Current workspace layers committed beside the previous state. Unchanged
-   * nodes use these mutable layers without reacquiring their upstream sources. */
-  installedLayers?: Readonly<Record<string, string>>;
   expectedSystemEpoch: number;
   ports: TemplateSourcePorts;
 }
+
+/** A fresh composition has no installed lineage. Once installed, node state
+ * and its inline layers are one indivisible observation contract. */
+export type ResolveTemplateCompositionInput =
+  ResolveTemplateCompositionInputBase &
+    (
+      | { previousState?: never; installedLayers?: never }
+      | {
+          previousState: WorkspaceTemplateState;
+          installedLayers: Readonly<Record<string, string>>;
+        }
+    );
 
 interface MutableNode extends ResolvedTemplateNode {
   snapshot?: ExactGitSnapshot;
@@ -176,7 +189,9 @@ function canonicalYaml(value: unknown): string {
 
 export { templateSuggestionDigest } from "@vibestudio/workspace/templateState";
 
-function normalizeDeclaration(value: WorkspaceTemplateDeclaration): WorkspaceTemplateDeclaration {
+function normalizeDeclaration(
+  value: WorkspaceTemplateDeclaration,
+): WorkspaceTemplateDeclaration {
   const declaration = WorkspaceTemplateDeclarationSchema.parse(value);
   return { ...declaration, url: normalizeTemplateGitUrl(declaration.url) };
 }
@@ -189,11 +204,14 @@ function normalizePin(value: WorkspaceTemplatePin): WorkspaceTemplatePin {
 function parseTemplateManifest(
   nodeId: string,
   snapshot: ExactGitSnapshot,
-  expectedSystemEpoch: number
+  expectedSystemEpoch: number,
 ): ParsedTemplateManifest {
   const bytes = snapshot.readFile(TEMPLATE_SOURCE_MANIFEST_PATH);
   if (!bytes) {
-    throw new TemplateManifestError(nodeId, `missing required ${TEMPLATE_SOURCE_MANIFEST_PATH}`);
+    throw new TemplateManifestError(
+      nodeId,
+      `missing required ${TEMPLATE_SOURCE_MANIFEST_PATH}`,
+    );
   }
   try {
     const parsed = readTemplateManifest({
@@ -202,22 +220,29 @@ function parseTemplateManifest(
     });
     validateTemplateSnapshotInventory(
       parsed.inventory,
-      snapshot.files.map((file) => file.path)
+      snapshot.files.map((file) => file.path),
     );
     return {
       dependencies: parsed.dependencies.map(normalizeDeclaration),
-      ...(parsed.presentation === undefined ? {} : { presentation: parsed.presentation }),
+      ...(parsed.presentation === undefined
+        ? {}
+        : { presentation: parsed.presentation }),
       fragment: parsed.fragment,
       fragmentYaml: parsed.fragmentYaml,
       excludedSuggestions: parsed.excludedSuggestions,
     };
   } catch (error) {
     if (error instanceof TemplateManifestError) throw error;
-    throw new TemplateManifestError(nodeId, error instanceof Error ? error.message : String(error));
+    throw new TemplateManifestError(
+      nodeId,
+      error instanceof Error ? error.message : String(error),
+    );
   }
 }
 
-function enumerateRepoFiles(node: MutableNode): Map<string, ExactSnapshotFile[]> {
+function enumerateRepoFiles(
+  node: MutableNode,
+): Map<string, ExactSnapshotFile[]> {
   if (!node.snapshot) return new Map();
   const repositories = new Map<string, ExactSnapshotFile[]>();
   for (const file of node.snapshot.files) {
@@ -228,7 +253,7 @@ function enumerateRepoFiles(node: MutableNode): Map<string, ExactSnapshotFile[]>
       throw new TemplateManifestError(
         node.nodeId,
         `${file.path} sits at the root of container section ${section}; ` +
-          `template units must live under ${section}/<name>/`
+          `template units must live under ${section}/<name>/`,
       );
     }
     const unit = parts[1];
@@ -244,29 +269,36 @@ function enumerateRepoFiles(node: MutableNode): Map<string, ExactSnapshotFile[]>
   return repositories;
 }
 
-function subtreeDigest(files: readonly ExactSnapshotFile[]): CanonicalSnapshotDigest {
+function subtreeDigest(
+  files: readonly ExactSnapshotFile[],
+): CanonicalSnapshotDigest {
   return canonicalSnapshotDigest(
     files.map((file) => ({
       path: file.path,
       mode: file.mode === 0o755 ? 0o100755 : 0o100644,
       size: file.size,
       contentHash: file.contentHash,
-    }))
+    })),
   );
 }
 
-function requireNode(nodes: ReadonlyMap<string, MutableNode>, nodeId: string): MutableNode {
+function requireNode(
+  nodes: ReadonlyMap<string, MutableNode>,
+  nodeId: string,
+): MutableNode {
   const node = nodes.get(nodeId);
   if (!node) {
     throw new TemplateResolutionError(
       "template-graph-integrity",
-      `Resolved template graph is missing node ${nodeId}`
+      `Resolved template graph is missing node ${nodeId}`,
     );
   }
   return node;
 }
 
-function topologicalNodes(nodes: ReadonlyMap<string, MutableNode>): MutableNode[] {
+function topologicalNodes(
+  nodes: ReadonlyMap<string, MutableNode>,
+): MutableNode[] {
   const remainingParents = new Map<string, Set<string>>();
   const children = new Map<string, Set<string>>();
   for (const node of nodes.values()) {
@@ -297,7 +329,7 @@ function topologicalNodes(nodes: ReadonlyMap<string, MutableNode>): MutableNode[
   if (ordered.length !== nodes.size) {
     throw new TemplateResolutionError(
       "template-cycle",
-      "Template graph is cyclic and cannot be topologically ordered"
+      "Template graph is cyclic and cannot be topologically ordered",
     );
   }
   return ordered;
@@ -319,7 +351,7 @@ function artifact(path: string, text: string): TemplateGeneratedArtifact {
 }
 
 function normalizedOverrides(
-  overrides: Readonly<Record<string, WorkspaceTemplatePin>> | undefined
+  overrides: Readonly<Record<string, WorkspaceTemplatePin>> | undefined,
 ): Map<string, WorkspaceTemplatePin> {
   const result = new Map<string, WorkspaceTemplatePin>();
   for (const [declaredUrl, value] of Object.entries(overrides ?? {})) {
@@ -328,7 +360,7 @@ function normalizedOverrides(
     if (pin.url !== url) {
       throw new TemplateResolutionError(
         "template-override-invalid",
-        `Template override key ${declaredUrl} does not match pin URL ${value.url}`
+        `Template override key ${declaredUrl} does not match pin URL ${value.url}`,
       );
     }
     result.set(url, pin);
@@ -343,12 +375,12 @@ function normalizedOverrides(
  * operation's review fingerprint.
  */
 export async function resolveTemplateComposition(
-  input: ResolveTemplateCompositionInput
+  input: ResolveTemplateCompositionInput,
 ): Promise<TemplateCompositionPlan> {
   if (input.roots.length === 0) {
     throw new TemplateResolutionError(
       "template-root-missing",
-      "Template composition requires at least one URL root"
+      "Template composition requires at least one URL root",
     );
   }
 
@@ -361,13 +393,19 @@ export async function resolveTemplateComposition(
   const usedOverrides = new Set<string>();
   const previousState = input.previousState;
   const installedByUrl = new Map(
-    (previousState?.nodes ?? []).map((node) => [normalizeTemplateGitUrl(node.pin.url), node.pin])
+    (previousState?.nodes ?? []).map((node) => [
+      normalizeTemplateGitUrl(node.pin.url),
+      node.pin,
+    ]),
   );
   const installedNodeByUrl = new Map(
-    (previousState?.nodes ?? []).map((node) => [normalizeTemplateGitUrl(node.pin.url), node])
+    (previousState?.nodes ?? []).map((node) => [
+      normalizeTemplateGitUrl(node.pin.url),
+      node,
+    ]),
   );
   const installedNodeById = new Map(
-    (previousState?.nodes ?? []).map((node) => [node.nodeId, node])
+    (previousState?.nodes ?? []).map((node) => [node.nodeId, node]),
   );
   const selectedPins = new Map<string, WorkspaceTemplatePin>();
   const declaredCredentials = new Map<string, string | undefined>();
@@ -375,7 +413,9 @@ export async function resolveTemplateComposition(
   const nodeByUrl = new Map<string, string>();
   const visiting: string[] = [];
 
-  const selectPin = async (raw: WorkspaceTemplateDeclaration): Promise<WorkspaceTemplatePin> => {
+  const selectPin = async (
+    raw: WorkspaceTemplateDeclaration,
+  ): Promise<WorkspaceTemplatePin> => {
     const dependency = normalizeDeclaration(raw);
     const root = rootsByUrl.get(dependency.url);
     const requestedCredential = root?.credential ?? dependency.credential;
@@ -384,9 +424,10 @@ export async function resolveTemplateComposition(
       if (priorCredential !== requestedCredential) {
         throw new TemplateCredentialConflictError(
           dependency.url,
-          [priorCredential ?? "<anonymous>", requestedCredential ?? "<anonymous>"].sort(
-            compareUtf16CodeUnits
-          )
+          [
+            priorCredential ?? "<anonymous>",
+            requestedCredential ?? "<anonymous>",
+          ].sort(compareUtf16CodeUnits),
         );
       }
     }
@@ -396,7 +437,8 @@ export async function resolveTemplateComposition(
 
     const override = overrides.get(dependency.url);
     const installed = installedByUrl.get(dependency.url);
-    const resolved = override ?? installed ?? (await input.ports.resolvePromoted(dependency));
+    const resolved =
+      override ?? installed ?? (await input.ports.resolvePromoted(dependency));
     if (override) usedOverrides.add(dependency.url);
     const pin = normalizePin({
       ...resolved,
@@ -408,7 +450,7 @@ export async function resolveTemplateComposition(
     if (normalizeTemplateGitUrl(resolved.url) !== dependency.url) {
       throw new TemplateResolutionError(
         "template-resolution-coordinate-mismatch",
-        `Exact resolution for ${dependency.url} returned coordinates for ${resolved.url}`
+        `Exact resolution for ${dependency.url} returned coordinates for ${resolved.url}`,
       );
     }
     selectedPins.set(dependency.url, pin);
@@ -417,13 +459,13 @@ export async function resolveTemplateComposition(
 
   const visit = async (
     raw: WorkspaceTemplateDeclaration,
-    path: readonly string[]
+    path: readonly string[],
   ): Promise<string> => {
     const dependency = normalizeDeclaration(raw);
     const cycleAt = visiting.indexOf(dependency.url);
     if (cycleAt >= 0) {
       throw new TemplateCycleError(
-        [...visiting.slice(cycleAt), dependency.url].map(templateAliasFromUrl)
+        [...visiting.slice(cycleAt), dependency.url].map(templateAliasFromUrl),
       );
     }
     const existingId = nodeByUrl.get(dependency.url);
@@ -439,19 +481,24 @@ export async function resolveTemplateComposition(
     try {
       const installedNode = installedNodeByUrl.get(dependency.url);
       const installedFragmentYaml = input.installedLayers?.[nodeId];
-      if (
+      const unchangedInstalledNode =
         installedNode?.nodeId === nodeId &&
         installedNode.pin.commit === pin.commit &&
-        installedNode.pin.snapshot === pin.snapshot &&
-        installedFragmentYaml !== undefined
-      ) {
+        installedNode.pin.snapshot === pin.snapshot;
+      if (unchangedInstalledNode && installedFragmentYaml === undefined) {
+        throw new TemplateResolutionError(
+          "template-installed-fragment-missing",
+          `Installed template ${dependency.url} is missing its inline fragment`,
+        );
+      }
+      if (unchangedInstalledNode && installedFragmentYaml !== undefined) {
         const fragment = WorkspaceConfigFragmentSchema.parse(
-          YAML.parse(installedFragmentYaml) as unknown
+          YAML.parse(installedFragmentYaml) as unknown,
         );
         if (fragment.systemEpoch !== input.expectedSystemEpoch) {
           throw new TemplateResolutionError(
             "template-installed-fragment-incompatible",
-            `Installed fragment for ${dependency.url} has systemEpoch ${fragment.systemEpoch}`
+            `Installed fragment for ${dependency.url} has systemEpoch ${fragment.systemEpoch}`,
           );
         }
         const node: MutableNode = {
@@ -476,30 +523,41 @@ export async function resolveTemplateComposition(
         nodes.set(nodeId, node);
         nodeByUrl.set(dependency.url, nodeId);
         const parents: string[] = [];
-        for (const parentId of [...installedNode.parents].sort(compareUtf16CodeUnits)) {
+        for (const parentId of [...installedNode.parents].sort(
+          compareUtf16CodeUnits,
+        )) {
           const parent = installedNodeById.get(parentId);
           if (!parent) continue;
           parents.push(
             await visit(
               {
                 url: parent.pin.url,
-                ...(parent.pin.credential ? { credential: parent.pin.credential } : {}),
+                ...(parent.pin.credential
+                  ? { credential: parent.pin.credential }
+                  : {}),
               },
-              [...path, alias]
-            )
+              [...path, alias],
+            ),
           );
         }
         node.parents = [...new Set(parents)].sort(compareUtf16CodeUnits);
         return nodeId;
       }
       const snapshot = await input.ports.acquire(pin, nodeId);
-      if (snapshot.commit.toLowerCase() !== pin.commit || snapshot.snapshot !== pin.snapshot) {
+      if (
+        snapshot.commit.toLowerCase() !== pin.commit ||
+        snapshot.snapshot !== pin.snapshot
+      ) {
         throw new TemplateResolutionError(
           "template-snapshot-integrity",
-          `Acquirer returned coordinates that do not match exact pin for ${pin.url}`
+          `Acquirer returned coordinates that do not match exact pin for ${pin.url}`,
         );
       }
-      const parsed = parseTemplateManifest(nodeId, snapshot, input.expectedSystemEpoch);
+      const parsed = parseTemplateManifest(
+        nodeId,
+        snapshot,
+        input.expectedSystemEpoch,
+      );
       const node: MutableNode = {
         nodeId,
         alias,
@@ -508,14 +566,16 @@ export async function resolveTemplateComposition(
         snapshot,
         fragment: parsed.fragment,
         fragmentYaml: parsed.fragmentYaml,
-        ...(parsed.presentation === undefined ? {} : { presentation: parsed.presentation }),
+        ...(parsed.presentation === undefined
+          ? {}
+          : { presentation: parsed.presentation }),
         excludedSuggestions: parsed.excludedSuggestions,
       };
       nodes.set(nodeId, node);
       nodeByUrl.set(dependency.url, nodeId);
       const parents: string[] = [];
       const dependencies = [...parsed.dependencies].sort((left, right) =>
-        compareUtf16CodeUnits(left.url, right.url)
+        compareUtf16CodeUnits(left.url, right.url),
       );
       for (const parent of dependencies) {
         parents.push(await visit(parent, [...path, alias]));
@@ -537,7 +597,7 @@ export async function resolveTemplateComposition(
     if (!usedOverrides.has(url)) {
       throw new TemplateResolutionError(
         "template-override-unused",
-        `Template override for ${url} is not reachable from the selected roots`
+        `Template override for ${url} is not reachable from the selected roots`,
       );
     }
   }
@@ -546,9 +606,11 @@ export async function resolveTemplateComposition(
   const claims = new Map<string, Map<string, TemplateRepositoryContribution>>();
   for (const node of ordered) {
     if (!node.snapshot) {
-      for (const [repoPath, repository] of Object.entries(previousState?.repositories ?? {})) {
+      for (const [repoPath, repository] of Object.entries(
+        previousState?.repositories ?? {},
+      )) {
         const previous = repository.contributions.find(
-          (contribution) => contribution.nodeId === node.nodeId
+          (contribution) => contribution.nodeId === node.nodeId,
         );
         if (!previous) continue;
         const repoClaims = claims.get(repoPath) ?? new Map();
@@ -579,14 +641,15 @@ export async function resolveTemplateComposition(
   }
 
   const localPaths = normalizedPaths(input.localRepoPaths);
-  const repositories: Record<string, TemplateRepositoryComposition> = Object.fromEntries(
-    [...claims.entries()]
-      .sort(([left], [right]) => compareUtf16CodeUnits(left, right))
-      .map(([repoPath, contributions]) => [
-        repoPath,
-        { repoPath, contributions: [...contributions.values()] },
-      ])
-  );
+  const repositories: Record<string, TemplateRepositoryComposition> =
+    Object.fromEntries(
+      [...claims.entries()]
+        .sort(([left], [right]) => compareUtf16CodeUnits(left, right))
+        .map(([repoPath, contributions]) => [
+          repoPath,
+          { repoPath, contributions: [...contributions.values()] },
+        ]),
+    );
 
   const stateNodes: WorkspaceTemplateStateNode[] = ordered.map((node) => ({
     nodeId: node.nodeId,
@@ -594,14 +657,24 @@ export async function resolveTemplateComposition(
     pin: node.pin,
     parents: node.parents,
     fragment: node.fragmentYaml,
-    ...(node.presentation === undefined ? {} : { presentation: node.presentation }),
+    ...(node.presentation === undefined
+      ? {}
+      : { presentation: node.presentation }),
     suggestions: Object.fromEntries(
       (["trust", "providers"] as const).flatMap((section) => {
         const value = node.excludedSuggestions[section];
         return value === undefined
           ? []
-          : [[section, { digest: templateSuggestionDigest(node.nodeId, section, value), value }]];
-      })
+          : [
+              [
+                section,
+                {
+                  digest: templateSuggestionDigest(node.nodeId, section, value),
+                  value,
+                },
+              ],
+            ];
+      }),
     ),
   }));
   const stateRepositories = Object.fromEntries(
@@ -610,12 +683,14 @@ export async function resolveTemplateComposition(
       .map(([repoPath, composition]) => [
         repoPath,
         {
-          contributions: composition.contributions.map(({ nodeId, subtreeDigest }) => ({
-            nodeId,
-            subtreeDigest,
-          })),
+          contributions: composition.contributions.map(
+            ({ nodeId, subtreeDigest }) => ({
+              nodeId,
+              subtreeDigest,
+            }),
+          ),
         },
-      ])
+      ]),
   );
   const state: WorkspaceTemplateState = {
     version: 1,
@@ -634,17 +709,12 @@ export async function resolveTemplateComposition(
         nodes: state.nodes,
         repositories: state.repositories,
       },
-    })
+    }),
   )}`;
   const resolvedNodes: ResolvedTemplateNode[] = ordered.map(
-    ({ snapshot: _snapshot, ...node }) => node
+    ({ snapshot: _snapshot, ...node }) => node,
   );
   const artifacts = [artifact(TEMPLATE_STATE_PATH, canonicalYaml(state))];
-  const removedArtifactPaths = [
-    ...(previousState?.nodes ?? []).map((node) => `${TEMPLATE_FRAGMENT_DIR}/${node.nodeId}.yml`),
-    OBSOLETE_TEMPLATE_LOCK_PATH,
-  ].sort(compareUtf16CodeUnits);
-
   return {
     version: 1,
     fingerprint,
@@ -654,30 +724,6 @@ export async function resolveTemplateComposition(
     localRepoPaths: [...localPaths].sort(compareUtf16CodeUnits),
     state,
     artifacts,
-    removedArtifactPaths,
-  };
-}
-
-/** The canonical result of removing the final direct root. */
-export function emptyTemplateComposition(
-  previousState: WorkspaceTemplateState | null | undefined,
-  localRepoPaths: ReadonlySet<string> = new Set()
-): TemplateCompositionPlan {
-  return {
-    version: 1,
-    fingerprint: `v1-sha256:${sha256HexSyncText(
-      canonicalJson({ protocol: "vibestudio-template-composition-v1", roots: [], state: null })
-    )}`,
-    rootNodeIds: [],
-    nodes: [],
-    repositories: {},
-    localRepoPaths: [...normalizedPaths(localRepoPaths)].sort(compareUtf16CodeUnits),
-    state: null,
-    artifacts: [],
-    removedArtifactPaths: [
-      ...(previousState?.nodes ?? []).map((node) => `${TEMPLATE_FRAGMENT_DIR}/${node.nodeId}.yml`),
-      TEMPLATE_STATE_PATH,
-      OBSOLETE_TEMPLATE_LOCK_PATH,
-    ].sort(compareUtf16CodeUnits),
+    removedArtifactPaths: [],
   };
 }

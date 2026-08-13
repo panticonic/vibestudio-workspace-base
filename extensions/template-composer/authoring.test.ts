@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import YAML from "yaml";
 import type { WorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
-import { inspectTemplateAuthoring, listTemplateAuthoringParts } from "./authoring.js";
+import {
+  inspectTemplateAuthoring,
+  listTemplateAuthoringParts,
+} from "./authoring.js";
 
 function packageFile(value: unknown) {
   return value === undefined
@@ -21,7 +24,11 @@ function pin(name: string, commitCharacter: string): WorkspaceTemplatePin {
 function context(packages: Record<string, unknown>) {
   return {
     rpc: {
-      async call(_target: string, method: string, input: Record<string, unknown>) {
+      async call(
+        _target: string,
+        method: string,
+        input: Record<string, unknown>,
+      ) {
         if (method === "vcs.resolveRepository") {
           return { repositoryId: `repo:${String(input["repoPath"])}` };
         }
@@ -48,7 +55,10 @@ describe("template authoring inspection", () => {
       },
       "packages/shared": { name: "@workspace/shared" },
       // This is read from protected main, not reacquired from base's old pin.
-      "packages/base-runtime": { name: "@workspace/base-runtime", version: "locally-edited" },
+      "packages/base-runtime": {
+        name: "@workspace/base-runtime",
+        version: "locally-edited",
+      },
     };
     const plan = await inspectTemplateAuthoring(
       context(packages) as never,
@@ -58,12 +68,14 @@ describe("template authoring inspection", () => {
           nodes: [{ nodeId: "t-base", alias: "base", pin: base, parents: [] }],
           repositories: {
             "packages/base-runtime": {
-              contributions: [{ nodeId: "t-base", subtreeDigest: base.snapshot }],
+              contributions: [
+                { nodeId: "t-base", subtreeDigest: base.snapshot },
+              ],
             },
           },
         },
         runtimeTop: {
-          systemEpoch: 58,
+          systemEpoch: 59,
           extensions: [{ source: "extensions/demo" }],
         },
         mainEventId: "event:main",
@@ -74,7 +86,7 @@ describe("template authoring inspection", () => {
         description: "A focused demo",
         parts: ["extensions/demo"],
         dependencies: [{ url: base.url }],
-      }
+      },
     );
 
     expect(plan.requiredParts).toEqual(["packages/shared"]);
@@ -99,13 +111,19 @@ describe("template authoring inspection", () => {
         }) as never,
         {
           localRepoPaths: new Set(["extensions/demo"]),
-          runtimeTop: { systemEpoch: 58 },
+          runtimeTop: { systemEpoch: 59 },
           mainEventId: "event:main",
           mainState: { kind: "event", eventId: "event:main" },
         } as never,
-        { name: "Demo", description: "A focused demo", parts: ["extensions/demo"] }
-      )
-    ).rejects.toThrow("extensions/demo depends on missing workspace package @workspace/missing");
+        {
+          name: "Demo",
+          description: "A focused demo",
+          parts: ["extensions/demo"],
+        },
+      ),
+    ).rejects.toThrow(
+      "extensions/demo depends on missing workspace package @workspace/missing",
+    );
   });
 
   it("inherits the installed dependency closure without publishing its repositories", async () => {
@@ -122,18 +140,27 @@ describe("template authoring inspection", () => {
         state: {
           nodes: [
             { nodeId: "t-base", alias: "base", pin: base, parents: [] },
-            { nodeId: "t-feature", alias: "feature", pin: feature, parents: ["t-base"] },
+            {
+              nodeId: "t-feature",
+              alias: "feature",
+              pin: feature,
+              parents: ["t-base"],
+            },
           ],
           repositories: {
             "packages/base-runtime": {
-              contributions: [{ nodeId: "t-base", subtreeDigest: base.snapshot }],
+              contributions: [
+                { nodeId: "t-base", subtreeDigest: base.snapshot },
+              ],
             },
             "packages/feature-runtime": {
-              contributions: [{ nodeId: "t-feature", subtreeDigest: feature.snapshot }],
+              contributions: [
+                { nodeId: "t-feature", subtreeDigest: feature.snapshot },
+              ],
             },
           },
         },
-        runtimeTop: { systemEpoch: 58 },
+        runtimeTop: { systemEpoch: 59 },
         mainEventId: "event:main",
         mainState: { kind: "event", eventId: "event:main" },
       } as never,
@@ -142,12 +169,17 @@ describe("template authoring inspection", () => {
         description: "A focused demo",
         parts: ["extensions/demo"],
         dependencies: [{ url: feature.url }],
-      }
+      },
     );
 
-    expect(plan.dependencyParts).toEqual(["packages/base-runtime", "packages/feature-runtime"]);
+    expect(plan.dependencyParts).toEqual([
+      "packages/base-runtime",
+      "packages/feature-runtime",
+    ]);
     expect(plan.overlapParts).toEqual([]);
-    expect(YAML.parse(plan.manifest).templates.use).toEqual([{ url: feature.url }]);
+    expect(YAML.parse(plan.manifest).templates.use).toEqual([
+      { url: feature.url },
+    ]);
   });
 
   it("keeps dependencies semantic and allows explicit overlap", async () => {
@@ -162,26 +194,34 @@ describe("template authoring inspection", () => {
           },
         },
       },
-      runtimeTop: { systemEpoch: 58 },
+      runtimeTop: { systemEpoch: 59 },
       mainEventId: "event:main",
       mainState: { kind: "event", eventId: "event:main" },
     };
-    const overlapping = await inspectTemplateAuthoring(context({}) as never, observation as never, {
-      name: "Duplicate",
-      description: "An intentional overlay",
-      parts: ["packages/base-runtime"],
-      dependencies: [{ url: base.url }],
-    });
+    const overlapping = await inspectTemplateAuthoring(
+      context({}) as never,
+      observation as never,
+      {
+        name: "Duplicate",
+        description: "An intentional overlay",
+        parts: ["packages/base-runtime"],
+        dependencies: [{ url: base.url }],
+      },
+    );
     expect(overlapping.includedParts).toEqual(["packages/base-runtime"]);
     expect(overlapping.dependencyParts).toEqual(["packages/base-runtime"]);
     expect(overlapping.overlapParts).toEqual(["packages/base-runtime"]);
 
-    const unavailable = await inspectTemplateAuthoring(context({}) as never, observation as never, {
-      name: "Missing",
-      description: "A dependency resolved only when composed",
-      parts: ["packages/base-runtime"],
-      dependencies: [{ url: "git+https://example.test/other.git" }],
-    });
+    const unavailable = await inspectTemplateAuthoring(
+      context({}) as never,
+      observation as never,
+      {
+        name: "Missing",
+        description: "A dependency resolved only when composed",
+        parts: ["packages/base-runtime"],
+        dependencies: [{ url: "git+https://example.test/other.git" }],
+      },
+    );
     expect(unavailable.dependencyParts).toEqual([]);
     expect(unavailable.overlapParts).toEqual([]);
     expect(unavailable.request.dependencies).toEqual([
@@ -199,12 +239,14 @@ describe("template authoring inspection", () => {
           nodes: [{ nodeId: "t-base", alias: "base", pin: base }],
           repositories: {
             "packages/base-runtime": {
-              contributions: [{ nodeId: "t-base", subtreeDigest: base.snapshot }],
+              contributions: [
+                { nodeId: "t-base", subtreeDigest: base.snapshot },
+              ],
             },
           },
         },
         mainState: { kind: "event", eventId: "event:main" },
-      } as never
+      } as never,
     );
 
     expect(parts).toEqual([

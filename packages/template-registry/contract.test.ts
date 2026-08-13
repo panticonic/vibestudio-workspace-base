@@ -19,7 +19,7 @@ function registryValue() {
   return {
     version: 1,
     revision: "2026-07-29.3",
-    systemEpoch: 58,
+    systemEpoch: 59,
     entries: [
       {
         id: "news",
@@ -49,10 +49,14 @@ describe("template registry contract", () => {
     expect(
       resolveTemplateRegistrySelection(
         registry,
-        { catalogId: "news", registryCommit: commit, registrySnapshot: snapshot },
+        {
+          catalogId: "news",
+          registryCommit: commit,
+          registrySnapshot: snapshot,
+        },
         coordinates,
-        58
-      )
+        59,
+      ),
     ).toEqual({
       catalogId: "news",
       registryCommit: commit,
@@ -73,23 +77,29 @@ describe("template registry contract", () => {
           registryCommit: "f".repeat(40),
           registrySnapshot: snapshot,
         },
-        coordinates
-      )
+        coordinates,
+      ),
     ).toThrow(TemplateRegistrySelectionError);
     expect(() =>
       resolveTemplateRegistrySelection(
         registry,
-        { catalogId: "news", registryCommit: commit, registrySnapshot: snapshot },
+        {
+          catalogId: "news",
+          registryCommit: commit,
+          registrySnapshot: snapshot,
+        },
         coordinates,
-        57
-      )
+        57,
+      ),
     ).toThrow(TemplateRegistryEpochError);
   });
 
   it("rejects duplicate identities and moving or malformed coordinates", () => {
     const duplicate = registryValue();
     duplicate.entries.push({ ...duplicate.entries[0]! });
-    expect(() => parseTemplateRegistry(duplicate)).toThrow("Duplicate template registry id");
+    expect(() => parseTemplateRegistry(duplicate)).toThrow(
+      "Duplicate template registry id",
+    );
 
     expect(() =>
       parseTemplateRegistry({
@@ -100,7 +110,7 @@ describe("template registry contract", () => {
             promoted: { ref: "main", commit: "abc", snapshot: "sha256:abc" },
           },
         ],
-      })
+      }),
     ).toThrow("canonical branch or tag ref");
   });
 });

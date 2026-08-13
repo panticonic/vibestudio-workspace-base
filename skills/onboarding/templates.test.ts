@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
-import { composeOptionalTemplateSnapshot, loadOptionalTemplateSnapshot } from "./templates.js";
+import {
+  composeOptionalTemplateSnapshot,
+  loadOptionalTemplateSnapshot,
+} from "./templates.js";
 
 const runtime = vi.hoisted(() => ({ invoke: vi.fn() }));
 
@@ -18,7 +21,7 @@ function catalog() {
   return {
     version: 1,
     revision: "2026-08-10.1",
-    systemEpoch: 58,
+    systemEpoch: 59,
     coordinates,
     source: "verified",
     stale: false,
@@ -67,7 +70,7 @@ describe("optional onboarding templates", () => {
     expect(runtime.invoke).toHaveBeenCalledWith(
       "@workspace-extensions/template-composer",
       "catalog",
-      [{ refresh: true }]
+      [{ refresh: true }],
     );
     expect(snapshot).toEqual([
       expect.objectContaining({ id: "template.examples", state: "available" }),
@@ -83,12 +86,14 @@ describe("optional onboarding templates", () => {
       throw new Error(`unexpected method ${method}`);
     });
 
-    const snapshot = await loadOptionalTemplateSnapshot({ refreshCatalog: false });
+    const snapshot = await loadOptionalTemplateSnapshot({
+      refreshCatalog: false,
+    });
 
     expect(runtime.invoke).toHaveBeenCalledWith(
       "@workspace-extensions/template-composer",
       "catalog",
-      []
+      [],
     );
     expect(snapshot).toEqual([
       expect.objectContaining({ id: "template.examples", state: "installed" }),
@@ -96,7 +101,9 @@ describe("optional onboarding templates", () => {
   });
 
   it("projects recommended registry entries and their installed state", async () => {
-    const status = vi.fn(async () => [{ url: "git+https://example.test/examples.git" }] as never);
+    const status = vi.fn(
+      async () => [{ url: "git+https://example.test/examples.git" }] as never,
+    );
     const readCatalog = vi.fn(async () => catalog());
 
     const snapshot = await composeOptionalTemplateSnapshot({
@@ -139,7 +146,7 @@ describe("optional onboarding templates", () => {
         catalog: vi.fn(async () => {
           throw new Error("registry unavailable");
         }),
-      })
+      }),
     ).resolves.toEqual([]);
   });
 
@@ -149,7 +156,7 @@ describe("optional onboarding templates", () => {
         catalog: vi.fn(async () => {
           throw new Error("registry unavailable");
         }),
-      })
+      }),
     ).rejects.toThrow("registry unavailable");
   });
 });

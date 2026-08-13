@@ -8,7 +8,10 @@ import type {
 } from "@workspace/template-composer";
 import { ensureTemplateOperationIntent } from "./operationRecord.js";
 import { createPinnedTemplateSourcePorts } from "./source.js";
-import { affectedRepositoryPaths, type TemplateOperationRecord } from "./staging.js";
+import {
+  affectedRepositoryPaths,
+  type TemplateOperationRecord,
+} from "./staging.js";
 import {
   assertTemplateOperationCancellable,
   cancelTemplateOperation,
@@ -19,7 +22,10 @@ import {
   selectedTemplateName,
   templatePullInitiator,
 } from "./index.js";
-import { bootstrapWorkspaceSource, projectBootstrapRuntimeToSource } from "./workspace.js";
+import {
+  bootstrapWorkspaceSource,
+  projectBootstrapRuntimeToSource,
+} from "./workspace.js";
 
 const oldPin: WorkspaceTemplatePin = {
   url: "git+https://example.test/template.git",
@@ -36,9 +42,25 @@ const refreshedPin: WorkspaceTemplatePin = {
 };
 
 function inspection(): TemplateOperationInspection {
+  const state = {
+    version: 1 as const,
+    roots: [{ url: oldPin.url }],
+    overrides: {},
+    nodes: [
+      {
+        nodeId: "t-old",
+        alias: "template",
+        pin: oldPin,
+        parents: [],
+        fragment: "systemEpoch: 59\n",
+        suggestions: {},
+      },
+    ],
+    repositories: {},
+  };
   return {
     kind: "pull",
-    nextTemplates: null,
+    nextTemplates: { use: state.roots },
     plan: {
       version: 1,
       fingerprint: `v1-sha256:${"c".repeat(64)}`,
@@ -49,14 +71,14 @@ function inspection(): TemplateOperationInspection {
           alias: "template",
           pin: oldPin,
           parents: [],
-          fragment: { systemEpoch: 58 },
+          fragment: { systemEpoch: 59 },
           fragmentYaml: "{}\n",
           excludedSuggestions: {},
         },
       ],
       repositories: {},
       localRepoPaths: [],
-      state: null,
+      state,
       artifacts: [],
       removedArtifactPaths: [],
     },
@@ -97,7 +119,11 @@ describe("template composer operation resumption", () => {
     const ctx = {
       invocation: {
         current: () => ({
-          caller: { callerKind: "do", callerId: "eval", contextId: "ctx:onboarding" },
+          caller: {
+            callerKind: "do",
+            callerId: "eval",
+            contextId: "ctx:onboarding",
+          },
         }),
       },
       rpc: { call },
@@ -105,10 +131,16 @@ describe("template composer operation resumption", () => {
     } as unknown as import("./context.js").ExtensionContextLike;
 
     await expect(
-      integrateTemplatePublicationIntoCallerContext(ctx, "install-google", "event:published")
+      integrateTemplatePublicationIntoCallerContext(
+        ctx,
+        "install-google",
+        "event:published",
+      ),
     ).resolves.toEqual({ state: "integrated", contextId: "ctx:onboarding" });
     expect(call).toHaveBeenCalledWith("main", "vcs.merge", {
-      commandId: expect.stringMatching(/^install-google:integrate-caller:[a-f0-9]{32}$/),
+      commandId: expect.stringMatching(
+        /^install-google:integrate-caller:[a-f0-9]{32}$/,
+      ),
       contextId: "ctx:onboarding",
       expectedWorkingHead: { kind: "event", eventId: "event:before" },
       source: { kind: "event", eventId: "event:published" },
@@ -122,7 +154,10 @@ describe("template composer operation resumption", () => {
         return {
           mainRelation: "behind",
           mainEventId: "event:published",
-          workingHead: { kind: "application", applicationId: "application:local" },
+          workingHead: {
+            kind: "application",
+            applicationId: "application:local",
+          },
         };
       }
       if (method === "vcs.compare") {
@@ -133,7 +168,11 @@ describe("template composer operation resumption", () => {
     const ctx = {
       invocation: {
         current: () => ({
-          caller: { callerKind: "do", callerId: "eval", contextId: "ctx:working" },
+          caller: {
+            callerKind: "do",
+            callerId: "eval",
+            contextId: "ctx:working",
+          },
         }),
       },
       rpc: { call },
@@ -141,21 +180,37 @@ describe("template composer operation resumption", () => {
     } as unknown as import("./context.js").ExtensionContextLike;
 
     await expect(
-      integrateTemplatePublicationIntoCallerContext(ctx, "install-google", "event:published")
+      integrateTemplatePublicationIntoCallerContext(
+        ctx,
+        "install-google",
+        "event:published",
+      ),
     ).resolves.toEqual({ state: "needs-merge", contextId: "ctx:working" });
-    expect(call).not.toHaveBeenCalledWith("main", "vcs.merge", expect.anything());
+    expect(call).not.toHaveBeenCalledWith(
+      "main",
+      "vcs.merge",
+      expect.anything(),
+    );
   });
 
   it("names a direct add after its selected root rather than a sorted dependency", () => {
     const basePin = { ...oldPin, url: "git+https://example.test/base.git" };
-    const selectedPin = { ...refreshedPin, url: "git+https://example.test/google.git" };
+    const selectedPin = {
+      ...refreshedPin,
+      url: "git+https://example.test/google.git",
+    };
     expect(
       selectedTemplateName({
         pin: selectedPin,
         fingerprint: `v1-sha256:${"f".repeat(64)}`,
         roots: ["t-google"],
         templates: [
-          { nodeId: "t-base", alias: "base", url: basePin.url, commit: basePin.commit },
+          {
+            nodeId: "t-base",
+            alias: "base",
+            url: basePin.url,
+            commit: basePin.commit,
+          },
           {
             nodeId: "t-google",
             alias: "google-workspace",
@@ -165,7 +220,7 @@ describe("template composer operation resumption", () => {
         ],
         affectedParts: [],
         excludedSuggestions: [],
-      })
+      }),
     ).toBe("google-workspace");
   });
 
@@ -182,7 +237,7 @@ describe("template composer operation resumption", () => {
         }),
         publishCancellation,
         destroy,
-      })
+      }),
     ).resolves.toEqual({ operationId: "pull-1", state: "cancelled" });
     expect(publishCancellation).toHaveBeenCalledWith("event-main");
     expect(destroy).toHaveBeenCalledWith("template-composer-operation-exact");
@@ -197,7 +252,7 @@ describe("template composer operation resumption", () => {
         findContext: async () => null,
         publishCancellation,
         destroy,
-      })
+      }),
     ).resolves.toEqual({ operationId: "pull-1", state: "cancelled" });
     expect(publishCancellation).not.toHaveBeenCalled();
     expect(destroy).not.toHaveBeenCalled();
@@ -208,9 +263,11 @@ describe("template composer operation resumption", () => {
       assertTemplateOperationCancellable({
         ...approvedRecord(),
         initiator: "host-release",
-      })
+      }),
     ).toThrow("cannot be cancelled");
-    expect(() => assertTemplateOperationCancellable(approvedRecord())).not.toThrow();
+    expect(() =>
+      assertTemplateOperationCancellable(approvedRecord()),
+    ).not.toThrow();
   });
 
   it("does not report cancellation when publication wins the protected-main race", async () => {
@@ -229,7 +286,7 @@ describe("template composer operation resumption", () => {
           throw new Error("Protected main changed");
         },
         destroy,
-      })
+      }),
     ).rejects.toThrow("already applied");
     expect(destroy).not.toHaveBeenCalled();
   });
@@ -241,10 +298,13 @@ describe("template composer operation resumption", () => {
       reviews: [{ repoPath: "panels/news", sourceDeltaId: "delta:news" }],
     };
     expect(
-      operationReviewForTemplate([{ contextId: "template-composer-operation-pull", record }], {
-        alias: "template",
-        pin: oldPin,
-      })
+      operationReviewForTemplate(
+        [{ contextId: "template-composer-operation-pull", record }],
+        {
+          alias: "template",
+          pin: oldPin,
+        },
+      ),
     ).toEqual({
       contextId: "template-composer-operation-pull",
       record,
@@ -276,7 +336,7 @@ describe("template composer operation resumption", () => {
         initiator: "user",
         affectedParts: [],
         persist,
-      })
+      }),
     ).resolves.toMatchObject({ resumed: true });
     expect(persist).not.toHaveBeenCalled();
   });
@@ -286,21 +346,25 @@ describe("template composer operation resumption", () => {
       templatePullInitiator(
         {
           invocation: {
-            current: () => ({ caller: { callerKind: "server", callerId: "server" } }),
+            current: () => ({
+              caller: { callerKind: "server", callerId: "server" },
+            }),
           },
         },
-        true
-      )
+        true,
+      ),
     ).toBe("host-release");
     expect(() =>
       templatePullInitiator(
         {
           invocation: {
-            current: () => ({ caller: { callerKind: "do", callerId: "agent" } }),
+            current: () => ({
+              caller: { callerKind: "do", callerId: "agent" },
+            }),
           },
         },
-        true
-      )
+        true,
+      ),
     ).toThrow("reserved for the host release handshake");
   });
 
@@ -311,33 +375,34 @@ describe("template composer operation resumption", () => {
       acquire: vi.fn(),
     };
     const pinned = createPinnedTemplateSourcePorts(base, approvedRecord().pins);
-    await expect(pinned.resolvePromoted({ url: oldPin.url })).resolves.toEqual(oldPin);
+    await expect(pinned.resolvePromoted({ url: oldPin.url })).resolves.toEqual(
+      oldPin,
+    );
     expect(fallback).not.toHaveBeenCalled();
   });
 
   it("includes every merged contribution in the affected build set", () => {
-    expect(affectedRepositoryPaths(["panels/news", "packages/shared"])).toEqual([
-      "packages/shared",
-      "panels/news",
-    ]);
+    expect(affectedRepositoryPaths(["panels/news", "packages/shared"])).toEqual(
+      ["packages/shared", "panels/news"],
+    );
   });
 
   it("merges accepted exact trust suggestions without replacing existing grants", () => {
     expect(
       mergeAcceptedTemplateSuggestion(
         {
-          systemEpoch: 58,
+          systemEpoch: 59,
           trust: { chromeApps: ["apps/shell"] },
         },
         "trust",
-        { chromeApps: ["apps/integration"] }
-      ).trust
+        { chromeApps: ["apps/integration"] },
+      ).trust,
     ).toEqual({ chromeApps: ["apps/shell", "apps/integration"] });
   });
 
   it("preserves workspace-owned authority while a bootstrap runtime becomes composed", () => {
     const runtime = {
-      systemEpoch: 58,
+      systemEpoch: 59,
       defaultRepo: "projects/default",
       extensions: [{ source: "extensions/template-composer" }],
       providers: {
@@ -354,13 +419,13 @@ describe("template composer operation resumption", () => {
           alias: "base",
           ancestors: [],
           config: {
-            systemEpoch: 58,
+            systemEpoch: 59,
             defaultRepo: runtime.defaultRepo,
             extensions: runtime.extensions,
           },
         },
       ],
-      "workspace-1"
+      "workspace-1",
     );
     const { id: _id, ...flattened } = composed;
     expect(flattened).toEqual(runtime);
@@ -368,9 +433,12 @@ describe("template composer operation resumption", () => {
 
   it("projects pre-adoption runtime edits over the exact bootstrap fragment", () => {
     const runtime = {
-      systemEpoch: 58,
+      systemEpoch: 59,
       defaultRepo: "projects/locally-selected",
-      extensions: [{ source: "extensions/template-composer" }, { source: "extensions/local-tool" }],
+      extensions: [
+        { source: "extensions/template-composer" },
+        { source: "extensions/local-tool" },
+      ],
       providers: { evalEngine: { source: "@workspace/eval" } },
       trust: { chromeApps: ["apps/shell"] },
     };
@@ -380,17 +448,21 @@ describe("template composer operation resumption", () => {
         alias: "base",
         parents: [],
         fragment: {
-          systemEpoch: 58,
+          systemEpoch: 59,
           defaultRepo: "projects/default",
           extensions: [{ source: "extensions/template-composer" }],
         },
       },
     ];
-    const source = projectBootstrapRuntimeToSource(runtime, nodes, "workspace-1");
+    const source = projectBootstrapRuntimeToSource(
+      runtime,
+      nodes,
+      "workspace-1",
+    );
     const composed = composeWorkspaceConfig(
       source,
       [{ ...nodes[0]!, ancestors: [], config: nodes[0]!.fragment }],
-      "workspace-1"
+      "workspace-1",
     );
     const { id: _id, ...flattened } = composed;
     expect(flattened).toEqual(runtime);

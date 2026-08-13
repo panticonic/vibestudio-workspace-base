@@ -28,7 +28,8 @@ function readyHostReport() {
 
 function detail(entityId = "panel:nav-new", source = "panels/new") {
   return {
-    slot: { parent_slot_id: null, current_entity_title: "New" },
+    slot: { parent_slot_id: null },
+    presentation: { title: "New" },
     currentHistory: {
       source,
       context_id: "ctx:test",
@@ -60,7 +61,7 @@ function runtimeHarness(
     onCreateSlotTiming?: NonNullable<
       Parameters<typeof createPanelRuntime>[0]["onCreateSlotTiming"]
     >;
-  } = {}
+  } = {},
 ) {
   let currentSlotId = "panel:tree/new";
   let currentEntityId = "panel:nav-new";
@@ -75,7 +76,7 @@ function runtimeHarness(
       _target: string,
       method: string,
       args: unknown[],
-      callOptions?: { signal?: AbortSignal }
+      callOptions?: { signal?: AbortSignal },
     ): Promise<T> => {
       if (method.startsWith("_agent.")) {
         agentCalls += 1;
@@ -122,8 +123,8 @@ function runtimeHarness(
           };
           return Object.fromEntries(
             (args[0] as string[]).flatMap((slotId) =>
-              known[slotId] ? [[slotId, known[slotId]]] : []
-            )
+              known[slotId] ? [[slotId, known[slotId]]] : [],
+            ),
           ) as T;
         }
         case "bindSlot":
@@ -134,7 +135,13 @@ function runtimeHarness(
         case "removeSlots":
           return undefined as T;
         case "sourceUsage":
-          return [{ source: "panels/terminal", accessCount: 12, lastAccessedAt: 1234 }] as T;
+          return [
+            {
+              source: "panels/terminal",
+              accessCount: 12,
+              lastAccessedAt: 1234,
+            },
+          ] as T;
         case "search":
           return { results: [], nextCursor: null } as T;
         case "runtime.reserveEntity":
@@ -154,7 +161,9 @@ function runtimeHarness(
         case "runtime.createEntity": {
           const spec = args[0] as { key: string; contextId?: string };
           currentEntityId =
-            method === "runtime.createEntity" ? `panel:${spec.key}` : currentEntityId;
+            method === "runtime.createEntity"
+              ? `panel:${spec.key}`
+              : currentEntityId;
           return {
             id: currentEntityId,
             contextId: spec.contextId ?? "ctx:test",
@@ -195,11 +204,16 @@ function runtimeHarness(
             currentEntityId = "panel:nav-replacement";
           }
           return {
-            status: options.hostAvailable === false ? "unavailable" : "assigned",
+            status:
+              options.hostAvailable === false ? "unavailable" : "assigned",
             lease:
               options.hostAvailable === false
                 ? null
-                : { holderLabel: "Headless", platform: "headless", supportsCdp: true },
+                : {
+                    holderLabel: "Headless",
+                    platform: "headless",
+                    supportsCdp: true,
+                  },
             attempt: {
               epoch: "test",
               attemptId: `attempt:${currentEntityId}`,
@@ -250,7 +264,9 @@ function runtimeHarness(
               version: { epoch: "test", counter: observeSlotCalls },
               attempt: {
                 epoch: "test",
-                attemptId: replacement ? "attempt:panel:nav-replacement" : "attempt:panel:nav-new",
+                attemptId: replacement
+                  ? "attempt:panel:nav-replacement"
+                  : "attempt:panel:nav-new",
                 slotId: currentSlotId,
                 runtimeEntityId: currentEntityId,
                 phase: observeSlotCalls === 2 ? "stopped" : "ready",
@@ -282,7 +298,10 @@ function runtimeHarness(
                     attemptId: `attempt:${currentEntityId}`,
                     slotId: currentSlotId,
                     runtimeEntityId: currentEntityId,
-                    phase: options.browserUrl === "about:blank" ? "pending" : "ready",
+                    phase:
+                      options.browserUrl === "about:blank"
+                        ? "pending"
+                        : "ready",
                     revision: 1,
                     reporter: "host",
                     updatedAt: 1,
@@ -332,10 +351,11 @@ function runtimeHarness(
           return (await new Promise((_, reject) => {
             const signal = callOptions?.signal;
             if (signal?.aborted) reject(signal.reason);
-            else signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+            else
+              signal?.addEventListener("abort", () => reject(signal.reason), {
+                once: true,
+              });
           })) as T;
-        case "workspace-state.panel.updateTitle":
-        case "workspace-state.panel.index":
         case "runtime.retireEntity":
         case "view.focusPanel":
           return undefined as T;
@@ -358,9 +378,7 @@ function runtimeHarness(
             nodes: [
               {
                 slotId: "browser",
-                title: "Example",
                 source: "browser:https://example.com/",
-                kind: "browser",
                 parentSlotId: input.group.parentSlotId,
                 ownerUserId: null,
                 contextId: "ctx:browser",
@@ -378,9 +396,7 @@ function runtimeHarness(
             nodes: [
               {
                 slotId: "current-root",
-                title: "Current root",
                 source: "panels/current",
-                kind: "workspace",
                 parentSlotId: null,
                 ownerUserId: "usr-current",
                 contextId: "ctx:current",
@@ -390,17 +406,13 @@ function runtimeHarness(
             ],
             nextCursor: null,
           } as T;
-        case "workspace-state.panel.sourceUsage":
-          return [{ source: "panels/terminal", accessCount: 12, lastAccessedAt: 1234 }] as T;
         case "workspace-state.panelTree.path":
           return {
             revision: 17,
             nodes: [
               {
                 slotId: "root",
-                title: "Research",
                 source: "about/collection",
-                kind: "workspace",
                 parentSlotId: null,
                 ownerUserId: null,
                 contextId: "ctx:root",
@@ -410,9 +422,11 @@ function runtimeHarness(
             ],
           } as T;
         default:
-          throw new Error(`Unexpected RPC method: ${method} for ${currentSlotId}`);
+          throw new Error(
+            `Unexpected RPC method: ${method} for ${currentSlotId}`,
+          );
       }
-    }
+    },
   );
   return {
     call,
@@ -427,7 +441,9 @@ function runtimeHarness(
 
 function runtimeFocusHarness() {
   const harness = runtimeHarness();
-  const focusPanel = vi.fn(async (_id: string, _options?: unknown): Promise<void> => {});
+  const focusPanel = vi.fn(
+    async (_id: string, _options?: unknown): Promise<void> => {},
+  );
   return {
     call: harness.call,
     focusPanel,
@@ -445,7 +461,7 @@ describe("panel runtime topology composition", () => {
     const { runtime, call } = runtimeHarness();
 
     await expect(
-      runtime.openPanel("panels/new", { slug: "new", focus: false })
+      runtime.openPanel("panels/new", { slug: "new", focus: false }),
     ).resolves.toMatchObject({
       id: "panel:tree/new",
       source: "panels/new",
@@ -458,7 +474,7 @@ describe("panel runtime topology composition", () => {
         "workspace-state.slot.create",
         "runtime.activateReservedEntity",
         "panelRuntime.observeSlot",
-      ])
+      ]),
     );
     expect(methods).not.toContain("panelTree.create");
     expect(methods).not.toContain("panelTree.observe");
@@ -467,7 +483,9 @@ describe("panel runtime topology composition", () => {
   it("reports an unassigned presentation as explicit pending state", async () => {
     const { runtime } = runtimeHarness({ hostAvailable: false });
 
-    await expect(runtime.getPanelHandle("panel:tree/new").observe()).resolves.toMatchObject({
+    await expect(
+      runtime.getPanelHandle("panel:tree/new").observe(),
+    ).resolves.toMatchObject({
       phase: "pending",
       runtimeEntityId: "panel:nav-new",
     });
@@ -477,17 +495,19 @@ describe("panel runtime topology composition", () => {
     const { runtime } = runtimeHarness({ hostAvailable: false });
 
     await expect(
-      runtime.openPanel("panels/new", { slug: "new", focus: false })
+      runtime.openPanel("panels/new", { slug: "new", focus: false }),
     ).rejects.toMatchObject({
       failure: { code: "host_unavailable", stage: "host" },
     });
   });
 
   it("identifies the committed panel when readiness observation fails", async () => {
-    const { runtime } = runtimeHarness({ observeError: new Error("invalid observation") });
+    const { runtime } = runtimeHarness({
+      observeError: new Error("invalid observation"),
+    });
 
     await expect(
-      runtime.openPanel("panels/new", { slug: "new", focus: false })
+      runtime.openPanel("panels/new", { slug: "new", focus: false }),
     ).rejects.toMatchObject({
       code: "PANEL_OPERATION_FAILED",
       failure: {
@@ -506,25 +526,35 @@ describe("panel runtime topology composition", () => {
   it("focuses an opened panel through one readiness observation", async () => {
     const { runtime, focusPanel, call } = runtimeFocusHarness();
 
-    await expect(runtime.openPanel("panels/new", { slug: "new" })).resolves.toMatchObject({
+    await expect(
+      runtime.openPanel("panels/new", { slug: "new" }),
+    ).resolves.toMatchObject({
       id: "panel:tree/new",
     });
 
     expect(focusPanel).toHaveBeenCalledOnce();
     expect(focusPanel).toHaveBeenCalledWith("panel:tree/new", {});
-    expect(call.mock.calls.filter((entry) => entry[1] === "panelRuntime.observeSlot")).toHaveLength(
-      1
-    );
+    expect(
+      call.mock.calls.filter(
+        (entry) => entry[1] === "panelRuntime.observeSlot",
+      ),
+    ).toHaveLength(1);
   });
 
   it("returns a committed slot receipt without observing application readiness", async () => {
-    const { runtime, call } = runtimeHarness({ observeError: new Error("invalid observation") });
+    const { runtime, call } = runtimeHarness({
+      observeError: new Error("invalid observation"),
+    });
 
-    await expect(runtime.createPanelSlot("panels/new", { slug: "new" })).resolves.toMatchObject({
+    await expect(
+      runtime.createPanelSlot("panels/new", { slug: "new" }),
+    ).resolves.toMatchObject({
       id: "panel:tree/new",
       source: "panels/new",
     });
-    expect(call.mock.calls.map((entry) => entry[1])).not.toContain("panelRuntime.observeSlot");
+    expect(call.mock.calls.map((entry) => entry[1])).not.toContain(
+      "panelRuntime.observeSlot",
+    );
   });
 
   it("reuses the exact slot and entity identity for one logical open operation", async () => {
@@ -576,7 +606,9 @@ describe("panel runtime topology composition", () => {
       ref: "feature",
     });
 
-    expect(new Set([first.id, otherSource.id, otherContext.id, otherRef.id]).size).toBe(4);
+    expect(
+      new Set([first.id, otherSource.id, otherContext.id, otherRef.id]).size,
+    ).toBe(4);
     const keys = call.mock.calls
       .filter((entry) => entry[1] === "runtime.reserveEntity")
       .map((entry) => (entry[2][0] as { key: string }).key);
@@ -586,7 +618,10 @@ describe("panel runtime topology composition", () => {
   it("rejects competing stable identity mechanisms", async () => {
     const { runtime } = runtimeHarness();
     await expect(
-      runtime.createPanelSlot("panels/new", { slug: "stable", operationId: "invocation:stable" })
+      runtime.createPanelSlot("panels/new", {
+        slug: "stable",
+        operationId: "invocation:stable",
+      }),
     ).rejects.toThrow(/either slug or operationId/);
   });
 
@@ -596,9 +631,13 @@ describe("panel runtime topology composition", () => {
     });
 
     await expect(
-      runtime.createPanelSlot("panels/new", { operationId: "invocation:ambiguous" })
+      runtime.createPanelSlot("panels/new", {
+        operationId: "invocation:ambiguous",
+      }),
     ).rejects.toThrow(/transport closed after dispatch/);
-    expect(call.mock.calls.map((entry) => entry[1])).not.toContain("runtime.retireEntity");
+    expect(call.mock.calls.map((entry) => entry[1])).not.toContain(
+      "runtime.retireEntity",
+    );
   });
 
   it("waits on lifecycle state without a fixed readiness deadline and supports explicit cancellation", async () => {
@@ -615,10 +654,13 @@ describe("panel runtime topology composition", () => {
   });
 
   it("surfaces a stale exact attempt as a typed infrastructure failure", async () => {
-    const { runtime } = runtimeHarness({ alwaysLoading: true, unknownAttempt: true });
+    const { runtime } = runtimeHarness({
+      alwaysLoading: true,
+      unknownAttempt: true,
+    });
 
     await expect(
-      runtime.openPanel("panels/new", { slug: "new", focus: false })
+      runtime.openPanel("panels/new", { slug: "new", focus: false }),
     ).rejects.toMatchObject({
       code: "PANEL_OPERATION_FAILED",
       failure: {
@@ -642,44 +684,71 @@ describe("panel runtime topology composition", () => {
     });
 
     await vi.waitFor(() => {
-      expect(call.mock.calls.some((entry) => entry[1] === "panelRuntime.awaitAttempt")).toBe(true);
+      expect(
+        call.mock.calls.some(
+          (entry) => entry[1] === "panelRuntime.awaitAttempt",
+        ),
+      ).toBe(true);
     });
     controller.abort(new Error("observation complete"));
     await expect(opening).rejects.toThrow(/observation complete/);
-    expect(call.mock.calls.filter((entry) => entry[1] === "panelRuntime.observeSlot")).toHaveLength(
-      1
-    );
     expect(
-      call.mock.calls.filter((entry) => entry[1] === "panelRuntime.awaitAttempt")
+      call.mock.calls.filter(
+        (entry) => entry[1] === "panelRuntime.observeSlot",
+      ),
+    ).toHaveLength(1);
+    expect(
+      call.mock.calls.filter(
+        (entry) => entry[1] === "panelRuntime.awaitAttempt",
+      ),
     ).toHaveLength(1);
   });
 
   it("threads explicit cancellation through every readiness-waiting handle operation", async () => {
     const operations = [
-      (runtime: ReturnType<typeof runtimeHarness>["runtime"], signal: AbortSignal) =>
-        runtime.getPanelHandle("panel:tree/new").focus({ signal }),
-      (runtime: ReturnType<typeof runtimeHarness>["runtime"], signal: AbortSignal) =>
-        runtime.getPanelHandle("panel:tree/new").reload({ signal }),
-      (runtime: ReturnType<typeof runtimeHarness>["runtime"], signal: AbortSignal) =>
-        runtime.getPanelHandle("panel:tree/new").snapshot({ signal }),
-      (runtime: ReturnType<typeof runtimeHarness>["runtime"], signal: AbortSignal) =>
-        runtime.getPanelHandle("panel:tree/new").navigate("panels/next", { signal }),
-      (runtime: ReturnType<typeof runtimeHarness>["runtime"], signal: AbortSignal) =>
-        runtime.getPanelHandle("panel:tree/new").rebuild({ signal }),
+      (
+        runtime: ReturnType<typeof runtimeHarness>["runtime"],
+        signal: AbortSignal,
+      ) => runtime.getPanelHandle("panel:tree/new").focus({ signal }),
+      (
+        runtime: ReturnType<typeof runtimeHarness>["runtime"],
+        signal: AbortSignal,
+      ) => runtime.getPanelHandle("panel:tree/new").reload({ signal }),
+      (
+        runtime: ReturnType<typeof runtimeHarness>["runtime"],
+        signal: AbortSignal,
+      ) => runtime.getPanelHandle("panel:tree/new").snapshot({ signal }),
+      (
+        runtime: ReturnType<typeof runtimeHarness>["runtime"],
+        signal: AbortSignal,
+      ) =>
+        runtime
+          .getPanelHandle("panel:tree/new")
+          .navigate("panels/next", { signal }),
+      (
+        runtime: ReturnType<typeof runtimeHarness>["runtime"],
+        signal: AbortSignal,
+      ) => runtime.getPanelHandle("panel:tree/new").rebuild({ signal }),
     ];
 
     for (const operation of operations) {
       const { runtime } = runtimeHarness({ alwaysLoading: true });
       const controller = new AbortController();
       controller.abort(new Error("caller stopped waiting"));
-      await expect(operation(runtime, controller.signal)).rejects.toThrow(/caller stopped waiting/);
+      await expect(operation(runtime, controller.signal)).rejects.toThrow(
+        /caller stopped waiting/,
+      );
     }
   });
 
   it("resolves one proven slot replacement between readiness and snapshot invocation", async () => {
-    const { runtime, call } = runtimeHarness({ replaceEntityOnAgentFailure: true });
+    const { runtime, call } = runtimeHarness({
+      replaceEntityOnAgentFailure: true,
+    });
 
-    await expect(runtime.getPanelHandle("panel:tree/new").snapshot()).resolves.toMatchObject({
+    await expect(
+      runtime.getPanelHandle("panel:tree/new").snapshot(),
+    ).resolves.toMatchObject({
       panelId: "panel:tree/new",
       runtimeEntityId: "panel:nav-replacement",
       document: { text: "snapshot:panel:nav-replacement" },
@@ -694,20 +763,24 @@ describe("panel runtime topology composition", () => {
   it("actively rematerializes a durable slot when its ready route stops", async () => {
     const { runtime, call } = runtimeHarness({ recoverStoppedRoute: true });
 
-    await expect(runtime.getPanelHandle("panel:tree/new").snapshot()).resolves.toMatchObject({
+    await expect(
+      runtime.getPanelHandle("panel:tree/new").snapshot(),
+    ).resolves.toMatchObject({
       panelId: "panel:tree/new",
       runtimeEntityId: "panel:nav-replacement",
       document: { text: "snapshot:panel:nav-replacement" },
     });
-    expect(call.mock.calls.filter((entry) => entry[1] === "panelRuntime.ensureSlot")).toHaveLength(
-      2
-    );
+    expect(
+      call.mock.calls.filter((entry) => entry[1] === "panelRuntime.ensureSlot"),
+    ).toHaveLength(2);
   });
 
   it("returns structured lifecycle evidence when the same ready runtime route is absent", async () => {
     const { runtime, call } = runtimeHarness({ disconnectAgentTarget: true });
 
-    await expect(runtime.getPanelHandle("panel:tree/new").snapshot()).rejects.toMatchObject({
+    await expect(
+      runtime.getPanelHandle("panel:tree/new").snapshot(),
+    ).rejects.toMatchObject({
       code: "PANEL_OPERATION_FAILED",
       failure: {
         code: "host_unavailable",
@@ -725,17 +798,25 @@ describe("panel runtime topology composition", () => {
         },
       },
     });
-    expect(call.mock.calls.filter((entry) => entry[1] === "_agent.snapshot")).toHaveLength(1);
+    expect(
+      call.mock.calls.filter((entry) => entry[1] === "_agent.snapshot"),
+    ).toHaveLength(1);
   });
 
   it("applies the same proven replacement rule to ordinary panel agent calls", async () => {
-    const { runtime, call } = runtimeHarness({ replaceEntityOnAgentFailure: true });
+    const { runtime, call } = runtimeHarness({
+      replaceEntityOnAgentFailure: true,
+    });
 
-    await expect(runtime.getPanelHandle("panel:tree/new").tree()).resolves.toEqual({
+    await expect(
+      runtime.getPanelHandle("panel:tree/new").tree(),
+    ).resolves.toEqual({
       target: "panel:nav-replacement",
     });
     expect(
-      call.mock.calls.filter((entry) => entry[1] === "_agent.tree").map((entry) => entry[0])
+      call.mock.calls
+        .filter((entry) => entry[1] === "_agent.tree")
+        .map((entry) => entry[0]),
     ).toEqual(["panel:nav-new", "panel:nav-replacement"]);
   });
 
@@ -747,20 +828,26 @@ describe("panel runtime topology composition", () => {
 
     const methods = call.mock.calls.map((entry) => entry[1]);
     expect(methods.indexOf("runtime.reserveEntity")).toBeLessThan(
-      methods.indexOf("workspace-state.slot.create")
+      methods.indexOf("workspace-state.slot.create"),
     );
     expect(methods).not.toContain("runtime.activateReservedEntity");
-    expect(onCreateSlotTiming.mock.calls.map(([event]) => event.stage)).toEqual([
-      "runtime.reserveEntity",
-      "workspace-state.slot.create",
-      "workspace.presentation.indexPanel",
-    ]);
+    expect(onCreateSlotTiming.mock.calls.map(([event]) => event.stage)).toEqual(
+      [
+        "runtime.reserveEntity",
+        "workspace-state.slot.create",
+        "workspace.presentation.indexPanel",
+      ],
+    );
   });
 
   it("does not make background activation failure part of the slot receipt", async () => {
-    const { runtime, call } = runtimeHarness({ activateError: new Error("build unavailable") });
+    const { runtime, call } = runtimeHarness({
+      activateError: new Error("build unavailable"),
+    });
 
-    await expect(runtime.createPanelSlot("panels/new", { slug: "new" })).resolves.toMatchObject({
+    await expect(
+      runtime.createPanelSlot("panels/new", { slug: "new" }),
+    ).resolves.toMatchObject({
       id: "panel:tree/new",
       kind: "workspace",
     });
@@ -771,9 +858,13 @@ describe("panel runtime topology composition", () => {
   });
 
   it("joins activation for boot-ready open and preserves the committed slot on failure", async () => {
-    const { runtime, call } = runtimeHarness({ activateError: new Error("build unavailable") });
+    const { runtime, call } = runtimeHarness({
+      activateError: new Error("build unavailable"),
+    });
 
-    await expect(runtime.openPanel("panels/new", { slug: "new" })).rejects.toMatchObject({
+    await expect(
+      runtime.openPanel("panels/new", { slug: "new" }),
+    ).rejects.toMatchObject({
       code: "PANEL_OPERATION_FAILED",
       failure: {
         stage: "runtime",
@@ -793,31 +884,37 @@ describe("panel runtime topology composition", () => {
 
     const methods = call.mock.calls.map((entry) => entry[1]);
     expect(methods.indexOf("runtime.activateReservedEntity")).toBeLessThan(
-      methods.indexOf("panelRuntime.ensureSlot")
+      methods.indexOf("panelRuntime.ensureSlot"),
     );
   });
 
   it("creates a deferred external browser slot without waiting for navigation", async () => {
-    const { runtime, call } = runtimeHarness({ observeError: new Error("navigation pending") });
+    const { runtime, call } = runtimeHarness({
+      observeError: new Error("navigation pending"),
+    });
 
-    await expect(runtime.createPanelSlot("https://example.com/")).resolves.toMatchObject({
+    await expect(
+      runtime.createPanelSlot("https://example.com/"),
+    ).resolves.toMatchObject({
       kind: "browser",
       source: "https://example.com/",
     });
-    expect(call.mock.calls.map((entry) => entry[1])).not.toContain("panelRuntime.observeSlot");
+    expect(call.mock.calls.map((entry) => entry[1])).not.toContain(
+      "panelRuntime.observeSlot",
+    );
     expect(call).toHaveBeenCalledWith(
       "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
       "indexPanel",
       [
-      {
-        id: expect.any(String),
-        source: "browser:https://example.com/",
-        title: "example.com",
-        path: "browser:https://example.com/",
-      },
+        {
+          id: expect.any(String),
+          source: "browser:https://example.com/",
+          title: "example.com",
+          path: "browser:https://example.com/",
+        },
         expect.any(String),
         undefined,
-      ]
+      ],
     );
   });
 
@@ -827,18 +924,24 @@ describe("panel runtime topology composition", () => {
 
     await runtime.createPanelSlot("https://example.com/");
 
-    expect(onCreateSlotTiming.mock.calls.map(([event]) => event.stage)).toEqual([
-      "runtime.createEntity",
-      "workspace-state.slot.create",
-      "workspace.presentation.indexPanel",
-    ]);
-    expect(onCreateSlotTiming.mock.calls.every(([event]) => event.outcome === "ok")).toBe(true);
+    expect(onCreateSlotTiming.mock.calls.map(([event]) => event.stage)).toEqual(
+      [
+        "runtime.createEntity",
+        "workspace-state.slot.create",
+        "workspace.presentation.indexPanel",
+      ],
+    );
+    expect(
+      onCreateSlotTiming.mock.calls.every(([event]) => event.outcome === "ok"),
+    ).toBe(true);
   });
 
   it("treats a loaded external browser document as ready without managed boot", async () => {
     const { runtime } = runtimeHarness({ browserReady: true });
 
-    const handle = await runtime.openPanel("data:text/html,<p>ready</p>", { focus: false });
+    const handle = await runtime.openPanel("data:text/html,<p>ready</p>", {
+      focus: false,
+    });
 
     expect(handle.kind).toBe("browser");
     await expect(handle.observe()).resolves.toMatchObject({
@@ -852,9 +955,14 @@ describe("panel runtime topology composition", () => {
   });
 
   it("does not treat a pre-navigation browser view as ready", async () => {
-    const { runtime } = runtimeHarness({ browserReady: true, browserUrl: "about:blank" });
+    const { runtime } = runtimeHarness({
+      browserReady: true,
+      browserUrl: "about:blank",
+    });
 
-    await expect(runtime.getPanelHandle("panel:tree/new").observe()).resolves.toMatchObject({
+    await expect(
+      runtime.getPanelHandle("panel:tree/new").observe(),
+    ).resolves.toMatchObject({
       kind: "browser",
       phase: "pending",
       host: { view: { url: "about:blank", loading: false } },
@@ -868,7 +976,9 @@ describe("panel runtime topology composition", () => {
       browserUrl: "https://example.com/login",
     });
 
-    await expect(runtime.getPanelHandle("panel:tree/new").observe()).resolves.toMatchObject({
+    await expect(
+      runtime.getPanelHandle("panel:tree/new").observe(),
+    ).resolves.toMatchObject({
       kind: "browser",
       phase: "ready",
       host: { view: { url: "https://example.com/login", loading: false } },
@@ -878,12 +988,18 @@ describe("panel runtime topology composition", () => {
   it("does not route server-side focus through the desktop-only view service", async () => {
     const { runtime, call } = runtimeHarness();
 
-    await expect(runtime.getPanelHandle("panel:tree/new").focus()).resolves.toMatchObject({
+    await expect(
+      runtime.getPanelHandle("panel:tree/new").focus(),
+    ).resolves.toMatchObject({
       phase: "ready",
       host: { view: { url: "http://panel.test/" } },
     });
-    expect(call.mock.calls.map((entry) => entry[1])).not.toContain("view.focusPanel");
-    expect(call.mock.calls.map((entry) => entry[1])).toContain("panelRuntime.ensureSlot");
+    expect(call.mock.calls.map((entry) => entry[1])).not.toContain(
+      "view.focusPanel",
+    );
+    expect(call.mock.calls.map((entry) => entry[1])).toContain(
+      "panelRuntime.ensureSlot",
+    );
   });
 
   it("re-materializes a panel after an explicit unload", async () => {
@@ -894,15 +1010,17 @@ describe("panel runtime topology composition", () => {
     await handle.unload();
     await handle.focus();
 
-    expect(call.mock.calls.filter((entry) => entry[1] === "panelRuntime.ensureSlot")).toHaveLength(
-      2
-    );
+    expect(
+      call.mock.calls.filter((entry) => entry[1] === "panelRuntime.ensureSlot"),
+    ).toHaveLength(2);
   });
 
   it("delegates focus to a native presentation host when one is available", async () => {
     const { runtime, focusPanel } = runtimeFocusHarness();
 
-    await runtime.getPanelHandle("panel:tree/new").focus({ anchorPanelId: "panel:tree/root" });
+    await runtime
+      .getPanelHandle("panel:tree/new")
+      .focus({ anchorPanelId: "panel:tree/root" });
     expect(focusPanel).toHaveBeenCalledWith("panel:tree/new", {
       anchorPanelId: "panel:tree/root",
     });
@@ -914,7 +1032,7 @@ describe("panel runtime topology composition", () => {
     await expect(
       runtime.panelTree.get("panel:tree/new").navigate("panels/next", {
         contextId: "ctx:test",
-      })
+      }),
     ).resolves.toMatchObject({ panelId: "panel:tree/new", phase: "ready" });
 
     const methods = call.mock.calls.map((entry) => entry[1]);
@@ -922,7 +1040,7 @@ describe("panel runtime topology composition", () => {
       expect.arrayContaining([
         "runtime.createEntity",
         "workspace-state.slot.commitPreparedNavigation",
-      ])
+      ]),
     );
     expect(methods).not.toContain("panelTree.navigate");
   });
@@ -936,9 +1054,13 @@ describe("panel runtime topology composition", () => {
     });
     expect(page).toMatchObject({
       revision: 17,
-      entries: [{ handle: { id: "browser", kind: "browser", parentId: "group" } }],
+      entries: [
+        { handle: { id: "browser", kind: "browser", parentId: "group" } },
+      ],
     });
-    await expect(runtime.panelTree.path("panel:tree/root")).resolves.toMatchObject({
+    await expect(
+      runtime.panelTree.path("panel:tree/root"),
+    ).resolves.toMatchObject({
       revision: 17,
       entries: [{ handle: { id: "root" } }],
     });
@@ -947,18 +1069,24 @@ describe("panel runtime topology composition", () => {
   it("reads the current caller's roots without exposing an ownership key", async () => {
     const { runtime, call } = runtimeHarness();
 
-    await expect(runtime.panelTree.roots({ limit: 25 })).resolves.toMatchObject({
-      group: { kind: "roots", ownerUserId: "usr-current" },
-      entries: [{ handle: { id: "current-root" } }],
-    });
-    expect(call).toHaveBeenCalledWith("main", "workspace-state.panelTree.rootsForCaller", [
-      { limit: 25 },
-    ]);
+    await expect(runtime.panelTree.roots({ limit: 25 })).resolves.toMatchObject(
+      {
+        group: { kind: "roots", ownerUserId: "usr-current" },
+        entries: [{ handle: { id: "current-root" } }],
+      },
+    );
+    expect(call).toHaveBeenCalledWith(
+      "main",
+      "workspace-state.panelTree.rootsForCaller",
+      [{ limit: 25 }],
+    );
 
     await runtime.panelTree.rootsForOwner("usr-other", { limit: 10 });
-    expect(call).toHaveBeenCalledWith("main", "workspace-state.panelTree.page", [
-      { group: { kind: "roots", ownerUserId: "usr-other" }, limit: 10 },
-    ]);
+    expect(call).toHaveBeenCalledWith(
+      "main",
+      "workspace-state.panelTree.page",
+      [{ group: { kind: "roots", ownerUserId: "usr-other" }, limit: 10 }],
+    );
   });
 
   it("reads bounded durable source usage through the panel tree", async () => {
@@ -970,7 +1098,7 @@ describe("panel runtime topology composition", () => {
     expect(call).toHaveBeenCalledWith(
       "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
       "sourceUsage",
-      [25]
+      [25],
     );
   });
 
@@ -983,7 +1111,12 @@ describe("panel runtime topology composition", () => {
     expect(call).toHaveBeenCalledWith(
       "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
       "updatePanelTitle",
-      ["panel:tree/browser", "panel:nav-new", "Support inbox", { explicit: true }]
+      [
+        "panel:tree/browser",
+        "panel:nav-new",
+        "Support inbox",
+        { explicit: true },
+      ],
     );
     expect(handle.title).toBe("Support inbox");
   });

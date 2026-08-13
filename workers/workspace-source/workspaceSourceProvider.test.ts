@@ -1,6 +1,9 @@
 // Builtin semantic-authority tests.
 import { describe, expect, it } from "vitest";
-import { canonicalSnapshotDigest, sha256Hex } from "@vibestudio/content-addressing";
+import {
+  canonicalSnapshotDigest,
+  sha256Hex,
+} from "@vibestudio/content-addressing";
 import { createTestDO } from "@vibestudio/durable/test-utils";
 import type {
   InitializeExactWorkspaceSnapshotInput,
@@ -9,19 +12,24 @@ import type {
 import { GadWorkspaceDO } from "./index.js";
 
 function effectReceipt(
-  inspection: Extract<WorkspaceSourceInitializationInspection, { state: "initializing" }>,
-  bytes: Uint8Array
+  inspection: Extract<
+    WorkspaceSourceInitializationInspection,
+    { state: "initializing" }
+  >,
+  bytes: Uint8Array,
 ): Record<string, unknown> {
   const effect = inspection.pendingEffect;
   if (!effect) throw new Error("fixture expected a pending effect");
   if (effect.kind === "observe-content") {
     return {
-      files: (effect.payload["files"] as Array<{ contentHash: string }>).map((file) => ({
-        contentHash: file.contentHash,
-        contentKind: "text",
-        byteLength: bytes.byteLength,
-        coordinateExtent: new TextDecoder().decode(bytes).length,
-      })),
+      files: (effect.payload["files"] as Array<{ contentHash: string }>).map(
+        (file) => ({
+          contentHash: file.contentHash,
+          contentKind: "text",
+          byteLength: bytes.byteLength,
+          coordinateExtent: new TextDecoder().decode(bytes).length,
+        }),
+      ),
     };
   }
   if (effect.kind === "materialize-context") {
@@ -53,7 +61,7 @@ describe("WorkspaceSourceProviderV1", () => {
       __objectKey: "workspace-one",
       WORKSPACE_ID: "workspace-one",
     });
-    const bytes = new TextEncoder().encode("systemEpoch: 58\n");
+    const bytes = new TextEncoder().encode("systemEpoch: 59\n");
     const contentHash = sha256Hex(bytes);
     const repositorySnapshot = canonicalSnapshotDigest([
       {
@@ -81,10 +89,16 @@ describe("WorkspaceSourceProviderV1", () => {
       ],
     };
 
-    let inspection = await instance.workspaceSourceInitializeExactSnapshot(input);
-    for (let step = 0; inspection.state === "initializing" && step < 10; step += 1) {
+    let inspection =
+      await instance.workspaceSourceInitializeExactSnapshot(input);
+    for (
+      let step = 0;
+      inspection.state === "initializing" && step < 10;
+      step += 1
+    ) {
       if (!inspection.pendingEffect) {
-        inspection = await instance.workspaceSourceInitializeExactSnapshot(input);
+        inspection =
+          await instance.workspaceSourceInitializeExactSnapshot(input);
         continue;
       }
       const effect = inspection.pendingEffect;
@@ -94,8 +108,12 @@ describe("WorkspaceSourceProviderV1", () => {
           effectId: effect.effectId,
           payloadDigest: effect.payloadDigest,
           receipt: effectReceipt(
-            { state: "initializing", commandId: input.commandId, pendingEffect: effect },
-            bytes
+            {
+              state: "initializing",
+              commandId: input.commandId,
+              pendingEffect: effect,
+            },
+            bytes,
           ),
         },
       });
@@ -111,13 +129,15 @@ describe("WorkspaceSourceProviderV1", () => {
         initializedStateHash: expect.stringMatching(/^state:[0-9a-f]{64}$/u),
       },
     });
-    await expect(instance.workspaceSourceInitializeExactSnapshot(input)).resolves.toEqual(
-      inspection
-    );
+    await expect(
+      instance.workspaceSourceInitializeExactSnapshot(input),
+    ).resolves.toEqual(inspection);
     expect(instance.workspaceSourceInspectInitialization()).toEqual(inspection);
     expect(instance.workspaceSourceCurrent()).toEqual({
       stateHash:
-        inspection.state === "ready" ? inspection.receipt.initializedStateHash : "unreachable",
+        inspection.state === "ready"
+          ? inspection.receipt.initializedStateHash
+          : "unreachable",
     });
     expect(instance.workspaceSourceHealth()).toEqual({
       ok: true,
@@ -152,7 +172,7 @@ describe("WorkspaceSourceProviderV1", () => {
       instance.workspaceSourceInitializeExactSnapshot({
         ...base,
         pin: { ...base.pin, commit: "7".repeat(40) },
-      })
+      }),
     ).rejects.toThrow(/command initialize:two was reused/u);
   });
 });

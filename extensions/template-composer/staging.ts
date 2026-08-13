@@ -24,7 +24,6 @@ import { mapConcurrent } from "./concurrency.js";
 import { acquireTemplateSnapshot } from "./source.js";
 import { semanticRepositoryDigest } from "./semanticRepository.js";
 import {
-  STATE_PATH,
   COMPOSITION_SOURCE_PATH,
   META_REPOSITORY,
   TOP_CONFIG_PATH,
@@ -40,7 +39,7 @@ export class TemplateReviewRequired extends Error {
   constructor(
     readonly contextId: string,
     readonly items: readonly TemplateReviewItem[],
-    readonly deltaBasis: VcsStateNodeRef
+    readonly deltaBasis: VcsStateNodeRef,
   ) {
     super(`Template changes require review in ${contextId}`);
     this.name = "TemplateReviewRequired";
@@ -51,10 +50,10 @@ export class TemplateOperationMainAdvanced extends Error {
   constructor(
     readonly contextId: string,
     readonly mainEventId: string,
-    readonly relation: "behind" | "diverged"
+    readonly relation: "behind" | "diverged",
   ) {
     super(
-      `Protected main advanced while template operation ${contextId} was in progress; merge event ${mainEventId} into that context and resume`
+      `Protected main advanced while template operation ${contextId} was in progress; merge event ${mainEventId} into that context and resume`,
     );
     this.name = "TemplateOperationMainAdvanced";
   }
@@ -87,7 +86,7 @@ export interface TemplateOperationRecord {
 
 export function affectedRepositoryPaths(
   merged: readonly string[],
-  metadataAffected: readonly string[] = []
+  metadataAffected: readonly string[] = [],
 ): string[] {
   return [...new Set([...merged, ...metadataAffected])].sort();
 }
@@ -95,7 +94,7 @@ export function affectedRepositoryPaths(
 function operationContextId(operationId: string): string {
   return `${OPERATION_CONTEXT_PREFIX}${sha256HexSyncText(operationId).slice(
     0,
-    OPERATION_CONTEXT_DIGEST_LENGTH
+    OPERATION_CONTEXT_DIGEST_LENGTH,
   )}`;
 }
 
@@ -115,33 +114,54 @@ function text(file: NonNullable<VcsReadFileResult>): string {
 
 async function operationIntentFileExists(
   ctx: ExtensionContextLike,
-  contextId: string
+  contextId: string,
 ): Promise<boolean> {
   const current = await status(ctx, contextId);
-  const meta = await resolveRepository(ctx, current.workingHead, META_REPOSITORY);
+  const meta = await resolveRepository(
+    ctx,
+    current.workingHead,
+    META_REPOSITORY,
+  );
   if (!meta) return false;
   return Boolean(
-    await readFile(ctx, current.workingHead, meta.repositoryId, operationRecordPath())
+    await readFile(
+      ctx,
+      current.workingHead,
+      meta.repositoryId,
+      operationRecordPath(),
+    ),
   );
 }
 
-async function status(ctx: ExtensionContextLike, contextId: string): Promise<VcsStatusResult> {
+async function status(
+  ctx: ExtensionContextLike,
+  contextId: string,
+): Promise<VcsStatusResult> {
   return ctx.rpc.call("main", "vcs.status", { contextId });
 }
 
 async function resolveRepository(
   ctx: ExtensionContextLike,
   state: VcsStateNodeRef,
-  repoPath: string
+  repoPath: string,
 ): Promise<VcsResolveRepositoryResult> {
   return ctx.rpc.call("main", "vcs.resolveRepository", { state, repoPath });
 }
 
-function parseOperationMessage(message: unknown): TemplateOperationRecord | null {
-  if (typeof message !== "string" || !message.startsWith(OPERATION_MESSAGE_PREFIX)) return null;
+function parseOperationMessage(
+  message: unknown,
+): TemplateOperationRecord | null {
+  if (
+    typeof message !== "string" ||
+    !message.startsWith(OPERATION_MESSAGE_PREFIX)
+  )
+    return null;
   try {
     return JSON.parse(
-      Buffer.from(message.slice(OPERATION_MESSAGE_PREFIX.length), "base64url").toString("utf8")
+      Buffer.from(
+        message.slice(OPERATION_MESSAGE_PREFIX.length),
+        "base64url",
+      ).toString("utf8"),
     ) as TemplateOperationRecord;
   } catch {
     return null;
@@ -150,7 +170,7 @@ function parseOperationMessage(message: unknown): TemplateOperationRecord | null
 
 export async function ensureTemplateOperationContext(
   ctx: ExtensionContextLike,
-  operationId: string
+  operationId: string,
 ): Promise<string> {
   const contextId = operationContextId(operationId);
   await ctx.rpc.call("main", "runtime.createContext", { contextId });
@@ -159,12 +179,16 @@ export async function ensureTemplateOperationContext(
 
 export async function readTemplateOperationRecord(
   ctx: ExtensionContextLike,
-  operationId: string
+  operationId: string,
 ): Promise<TemplateOperationRecord | null> {
   const contextId = operationContextId(operationId);
-  const listed = await ctx.rpc.call<{ contexts: string[] }>("main", "runtime.listContexts", {
-    prefix: contextId,
-  });
+  const listed = await ctx.rpc.call<{ contexts: string[] }>(
+    "main",
+    "runtime.listContexts",
+    {
+      prefix: contextId,
+    },
+  );
   if (!listed.contexts.includes(contextId)) return null;
   const record = await readTemplateOperationRecordInContext(ctx, contextId);
   return record?.operationId === operationId ? record : null;
@@ -172,12 +196,21 @@ export async function readTemplateOperationRecord(
 
 export async function readTemplateOperationRecordInContext(
   ctx: ExtensionContextLike,
-  contextId: string
+  contextId: string,
 ): Promise<TemplateOperationRecord | null> {
   const current = await status(ctx, contextId);
-  const meta = await resolveRepository(ctx, current.workingHead, META_REPOSITORY);
+  const meta = await resolveRepository(
+    ctx,
+    current.workingHead,
+    META_REPOSITORY,
+  );
   if (meta) {
-    const file = await readFile(ctx, current.workingHead, meta.repositoryId, operationRecordPath());
+    const file = await readFile(
+      ctx,
+      current.workingHead,
+      meta.repositoryId,
+      operationRecordPath(),
+    );
     if (file) {
       const record = JSON.parse(text(file)) as TemplateOperationRecord;
       if (operationContextId(record.operationId) === contextId) return record;
@@ -203,7 +236,8 @@ export async function readTemplateOperationRecordInContext(
         edgeLimit: 1,
       });
       const record = parseOperationMessage(inspected.node.value?.message);
-      if (record && operationContextId(record.operationId) === contextId) return record;
+      if (record && operationContextId(record.operationId) === contextId)
+        return record;
     }
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
@@ -213,15 +247,23 @@ export async function readTemplateOperationRecordInContext(
 export async function isTemplateOperationCancelled(
   ctx: ExtensionContextLike,
   mainEventId: string,
-  operationId: string
+  operationId: string,
 ): Promise<boolean> {
   const state = { kind: "event" as const, eventId: mainEventId };
   const meta = await resolveRepository(ctx, state, META_REPOSITORY);
   if (!meta) return false;
-  const file = await readFile(ctx, state, meta.repositoryId, cancellationRecordPath(operationId));
+  const file = await readFile(
+    ctx,
+    state,
+    meta.repositoryId,
+    cancellationRecordPath(operationId),
+  );
   if (!file) return false;
   try {
-    const record = JSON.parse(text(file)) as { version?: unknown; operationId?: unknown };
+    const record = JSON.parse(text(file)) as {
+      version?: unknown;
+      operationId?: unknown;
+    };
     if (record.version !== 1 || record.operationId !== operationId) {
       throw new Error("does not match its content-addressed command identity");
     }
@@ -230,22 +272,32 @@ export async function isTemplateOperationCancelled(
     throw new Error(
       `Template cancellation record for ${operationId} is invalid: ${
         error instanceof Error ? error.message : String(error)
-      }`
+      }`,
     );
   }
 }
 
 export async function writeTemplateOperationRecord(
   ctx: ExtensionContextLike,
-  record: TemplateOperationRecord
+  record: TemplateOperationRecord,
 ): Promise<void> {
-  const contextId = await ensureTemplateOperationContext(ctx, record.operationId);
+  const contextId = await ensureTemplateOperationContext(
+    ctx,
+    record.operationId,
+  );
   const current = await status(ctx, contextId);
   if (!current.clean) {
-    throw new Error(`Template operation ${record.operationId} has uncommitted work before review`);
+    throw new Error(
+      `Template operation ${record.operationId} has uncommitted work before review`,
+    );
   }
-  const meta = await resolveRepository(ctx, current.workingHead, META_REPOSITORY);
-  if (!meta) throw new Error("Template operation context has no meta repository");
+  const meta = await resolveRepository(
+    ctx,
+    current.workingHead,
+    META_REPOSITORY,
+  );
+  if (!meta)
+    throw new Error("Template operation context has no meta repository");
   const content = `${JSON.stringify(record, null, 2)}\n`;
   await ctx.rpc.call("main", "vcs.edit", {
     commandId: `${contextId}:record-intent`,
@@ -263,7 +315,9 @@ export async function writeTemplateOperationRecord(
     ],
   });
   const edited = await status(ctx, contextId);
-  const encoded = Buffer.from(JSON.stringify(record), "utf8").toString("base64url");
+  const encoded = Buffer.from(JSON.stringify(record), "utf8").toString(
+    "base64url",
+  );
   await ctx.rpc.call("main", "vcs.commit", {
     commandId: `${contextId}:commit-intent`,
     contextId,
@@ -275,16 +329,31 @@ export async function writeTemplateOperationRecord(
 
 export async function updateTemplateOperationRecord(
   ctx: ExtensionContextLike,
-  record: TemplateOperationRecord
+  record: TemplateOperationRecord,
 ): Promise<void> {
-  const contextId = await ensureTemplateOperationContext(ctx, record.operationId);
+  const contextId = await ensureTemplateOperationContext(
+    ctx,
+    record.operationId,
+  );
   let current = await status(ctx, contextId);
   if (!current.clean) {
-    throw new Error(`Cannot update template operation ${record.operationId} with pending work`);
+    throw new Error(
+      `Cannot update template operation ${record.operationId} with pending work`,
+    );
   }
-  const meta = await resolveRepository(ctx, current.workingHead, META_REPOSITORY);
-  if (!meta) throw new Error("Template operation context has no meta repository");
-  const file = await readFile(ctx, current.workingHead, meta.repositoryId, operationRecordPath());
+  const meta = await resolveRepository(
+    ctx,
+    current.workingHead,
+    META_REPOSITORY,
+  );
+  if (!meta)
+    throw new Error("Template operation context has no meta repository");
+  const file = await readFile(
+    ctx,
+    current.workingHead,
+    meta.repositoryId,
+    operationRecordPath(),
+  );
   const content = `${JSON.stringify(record, null, 2)}\n`;
   if (file && text(file) === content) return;
   const recordDigest = sha256HexSyncText(JSON.stringify(record)).slice(0, 16);
@@ -318,9 +387,10 @@ export async function updateTemplateOperationRecord(
     contextId,
     expectedWorkingHead: current.workingHead,
     intentSummary: "Commit resumable template VCS review handles",
-    message: `${OPERATION_MESSAGE_PREFIX}${Buffer.from(JSON.stringify(record), "utf8").toString(
-      "base64url"
-    )}`,
+    message: `${OPERATION_MESSAGE_PREFIX}${Buffer.from(
+      JSON.stringify(record),
+      "utf8",
+    ).toString("base64url")}`,
   });
 }
 
@@ -329,27 +399,46 @@ export async function updateTemplateOperationRecord(
  * so an interrupted approval-gated push never strands the prepared context. */
 export async function clearTemplateOperationRecordFile(
   ctx: ExtensionContextLike,
-  record: TemplateOperationRecord
+  record: TemplateOperationRecord,
 ): Promise<void> {
   const operationId = record.operationId;
   const contextId = await ensureTemplateOperationContext(ctx, operationId);
   let current = await status(ctx, contextId);
   if (!current.clean) {
-    throw new Error(`Cannot finalize template operation ${operationId} with pending work`);
+    throw new Error(
+      `Cannot finalize template operation ${operationId} with pending work`,
+    );
   }
-  const meta = await resolveRepository(ctx, current.workingHead, META_REPOSITORY);
-  if (!meta) throw new Error("Template operation context has no meta repository");
-  const file = await readFile(ctx, current.workingHead, meta.repositoryId, operationRecordPath());
+  const meta = await resolveRepository(
+    ctx,
+    current.workingHead,
+    META_REPOSITORY,
+  );
+  if (!meta)
+    throw new Error("Template operation context has no meta repository");
+  const file = await readFile(
+    ctx,
+    current.workingHead,
+    meta.repositoryId,
+    operationRecordPath(),
+  );
   if (!file) return;
   const clearDigest = sha256HexSyncText(
-    JSON.stringify({ workingHead: current.workingHead, fileId: file.fileId })
+    JSON.stringify({ workingHead: current.workingHead, fileId: file.fileId }),
   ).slice(0, 16);
   await ctx.rpc.call("main", "vcs.edit", {
     commandId: `${contextId}:clear-operation-record:${clearDigest}`,
     contextId,
     expectedWorkingHead: current.workingHead,
-    intentSummary: "Remove context-local template recovery state before publication",
-    changes: [{ kind: "file-delete", repositoryId: meta.repositoryId, fileId: file.fileId }],
+    intentSummary:
+      "Remove context-local template recovery state before publication",
+    changes: [
+      {
+        kind: "file-delete",
+        repositoryId: meta.repositoryId,
+        fileId: file.fileId,
+      },
+    ],
   });
   current = await status(ctx, contextId);
   await ctx.rpc.call("main", "vcs.commit", {
@@ -357,9 +446,10 @@ export async function clearTemplateOperationRecordFile(
     contextId,
     expectedWorkingHead: current.workingHead,
     intentSummary: "Finalize repaired template operation",
-    message: `${OPERATION_MESSAGE_PREFIX}${Buffer.from(JSON.stringify(record), "utf8").toString(
-      "base64url"
-    )}`,
+    message: `${OPERATION_MESSAGE_PREFIX}${Buffer.from(
+      JSON.stringify(record),
+      "utf8",
+    ).toString("base64url")}`,
   });
 }
 
@@ -367,7 +457,7 @@ async function readFile(
   ctx: ExtensionContextLike,
   state: VcsStateNodeRef,
   repositoryId: string,
-  filePath: string
+  filePath: string,
 ): Promise<VcsReadFileResult> {
   return ctx.rpc.call("main", "vcs.readFile", {
     state,
@@ -376,7 +466,10 @@ async function readFile(
   });
 }
 
-function pinForContribution(plan: TemplateCompositionPlan, nodeId: string): WorkspaceTemplatePin {
+function pinForContribution(
+  plan: TemplateCompositionPlan,
+  nodeId: string,
+): WorkspaceTemplatePin {
   const node = plan.nodes.find((candidate) => candidate.nodeId === nodeId);
   if (!node) throw new Error(`Template plan is missing node ${nodeId}`);
   return node.pin;
@@ -389,7 +482,7 @@ function subtreeFiles(
     size: number;
     mode: 0o644 | 0o755;
   }[],
-  repoPath: string
+  repoPath: string,
 ) {
   const prefix = `${repoPath}/`;
   return files
@@ -430,7 +523,7 @@ function gitContributionSource(side: ContributionSide) {
 
 function nextContributionSides(
   plan: TemplateCompositionPlan,
-  repoPath: string
+  repoPath: string,
 ): Map<string, ContributionSide> {
   return new Map(
     (plan.repositories[repoPath]?.contributions ?? []).map((contribution) => {
@@ -450,17 +543,20 @@ function nextContributionSides(
           })),
         },
       ];
-    })
+    }),
   );
 }
 
 function previousContributionSides(
   previous: NonNullable<SemanticWorkspaceObservation["state"]>,
-  repoPath: string
+  repoPath: string,
 ): Map<string, PreviousContributionSide> {
   const result = new Map<string, PreviousContributionSide>();
-  for (const contribution of previous.repositories[repoPath]?.contributions ?? []) {
-    const node = previous.nodes.find((candidate) => candidate.nodeId === contribution.nodeId);
+  for (const contribution of previous.repositories[repoPath]?.contributions ??
+    []) {
+    const node = previous.nodes.find(
+      (candidate) => candidate.nodeId === contribution.nodeId,
+    );
     if (!node) continue;
     result.set(normalizeTemplateGitUrl(node.pin.url), {
       nodeId: node.nodeId,
@@ -477,17 +573,21 @@ async function materializePreviousContribution(
   ctx: ExtensionContextLike,
   statePath: string,
   side: PreviousContributionSide,
-  acquire: typeof acquireTemplateSnapshot
+  acquire: typeof acquireTemplateSnapshot,
 ): Promise<ContributionSide> {
   const snapshot = await acquire(ctx, statePath, side.pin, side.nodeId);
   const files = subtreeFiles(snapshot.files, side.subdir);
   const subtreeDigest = semanticRepositoryDigest(
-    files.map((file) => ({ ...file, byteLength: file.size }))
+    files.map((file) => ({ ...file, byteLength: file.size })),
   );
   return {
     ...side,
     subtreeDigest,
-    files: files.map(({ path, contentHash, mode }) => ({ path, contentHash, mode })),
+    files: files.map(({ path, contentHash, mode }) => ({
+      path,
+      contentHash,
+      mode,
+    })),
   };
 }
 
@@ -497,36 +597,47 @@ export async function mergeTemplateContributions(
   contextId: string,
   plan: TemplateCompositionPlan,
   previous: SemanticWorkspaceObservation["state"],
-  record?: TemplateOperationRecord
+  record?: TemplateOperationRecord,
 ): Promise<string[]> {
   const items: TemplateReviewItem[] = [];
   const changed: string[] = [];
   const completedDeltas: Array<{ repoPath: string; deltaId: string }> = [];
   const registeredDeltas: Array<{ repoPath: string; deltaId: string }> = [];
-  const previousSnapshots = new Map<string, ReturnType<typeof acquireTemplateSnapshot>>();
+  const previousSnapshots = new Map<
+    string,
+    ReturnType<typeof acquireTemplateSnapshot>
+  >();
   const acquirePrevious: typeof acquireTemplateSnapshot = (
     operationCtx,
     operationStatePath,
     pin,
-    nodeId
+    nodeId,
   ) => {
     let snapshot = previousSnapshots.get(nodeId);
     if (!snapshot) {
-      snapshot = acquireTemplateSnapshot(operationCtx, operationStatePath, pin, nodeId);
+      snapshot = acquireTemplateSnapshot(
+        operationCtx,
+        operationStatePath,
+        pin,
+        nodeId,
+      );
       previousSnapshots.set(nodeId, snapshot);
     }
     return snapshot;
   };
   let deltaBasis = record?.deltaBasis;
   const repoPaths = [
-    ...new Set([...Object.keys(previous?.repositories ?? {}), ...Object.keys(plan.repositories)]),
+    ...new Set([
+      ...Object.keys(previous?.repositories ?? {}),
+      ...Object.keys(plan.repositories),
+    ]),
   ].sort();
   if (record?.reviews?.length) {
     registeredDeltas.push(
       ...record.reviews.map(({ repoPath, sourceDeltaId }) => ({
         repoPath,
         deltaId: sourceDeltaId,
-      }))
+      })),
     );
   } else {
     const initial = await status(ctx, contextId);
@@ -536,8 +647,11 @@ export async function mergeTemplateContributions(
         repoPaths,
         REPOSITORY_READ_CONCURRENCY,
         async (repoPath) =>
-          [repoPath, await resolveRepository(ctx, initial.workingHead, repoPath)] as const
-      )
+          [
+            repoPath,
+            await resolveRepository(ctx, initial.workingHead, repoPath),
+          ] as const,
+      ),
     );
     const staging = repoPaths.map((repoPath) => {
       const next = nextContributionSides(plan, repoPath);
@@ -590,16 +704,20 @@ export async function mergeTemplateContributions(
               source: gitContributionSource(first),
               repositories: [{ repoPath: item.repoPath, files: first.files }],
               message: `Import ${item.repoPath} contribution from ${first.alias}`,
-            }
+            },
           );
           const repositoryId = imported.importedRepositoryIds[0];
           if (!repositoryId) {
             throw new Error(
-              `Template import did not return a repository identity for ${item.repoPath}`
+              `Template import did not return a repository identity for ${item.repoPath}`,
             );
           }
           stagingHead = { kind: "event", eventId: imported.eventId };
-          item.repository = { state: stagingHead, repositoryId, repoPath: item.repoPath };
+          item.repository = {
+            state: stagingHead,
+            repositoryId,
+            repoPath: item.repoPath,
+          };
           item.next.delete(url);
           // The imported snapshot is already the complete next side for this
           // contribution. Do not subsequently apply its old→new delta to itself.
@@ -616,27 +734,37 @@ export async function mergeTemplateContributions(
         const previousSide = prior.get(url);
         const newSide = next.get(url);
         const oldSide = previousSide
-          ? await materializePreviousContribution(ctx, statePath, previousSide, acquirePrevious)
+          ? await materializePreviousContribution(
+              ctx,
+              statePath,
+              previousSide,
+              acquirePrevious,
+            )
           : undefined;
         if (!oldSide && !newSide) continue;
         const identity = oldSide?.nodeId ?? newSide!.nodeId;
-        const action = oldSide && newSide ? "Update" : newSide ? "Add" : "Remove";
-        const delta = await ctx.rpc.call<{ deltaId: string }>("main", "vcs.registerExternalDelta", {
-          commandId: `${contextId}:delta:${repoPath}:${identity}`,
-          contextId,
-          expectedWorkingHead: deltaBasis,
-          intentSummary: `${action} ${repoPath} contribution from ${newSide?.alias ?? oldSide!.alias}`,
-          repositoryId: repository.repositoryId,
-          repoPath,
-          oldSource: oldSide
-            ? gitContributionSource(oldSide)
-            : emptyContributionSource(identity, repoPath),
-          newSource: newSide
-            ? gitContributionSource(newSide)
-            : emptyContributionSource(identity, repoPath),
-          oldFiles: oldSide?.files ?? [],
-          newFiles: newSide?.files ?? [],
-        });
+        const action =
+          oldSide && newSide ? "Update" : newSide ? "Add" : "Remove";
+        const delta = await ctx.rpc.call<{ deltaId: string }>(
+          "main",
+          "vcs.registerExternalDelta",
+          {
+            commandId: `${contextId}:delta:${repoPath}:${identity}`,
+            contextId,
+            expectedWorkingHead: deltaBasis,
+            intentSummary: `${action} ${repoPath} contribution from ${newSide?.alias ?? oldSide!.alias}`,
+            repositoryId: repository.repositoryId,
+            repoPath,
+            oldSource: oldSide
+              ? gitContributionSource(oldSide)
+              : emptyContributionSource(identity, repoPath),
+            newSource: newSide
+              ? gitContributionSource(newSide)
+              : emptyContributionSource(identity, repoPath),
+            oldFiles: oldSide?.files ?? [],
+            newFiles: newSide?.files ?? [],
+          },
+        );
         // Keep each contribution as its own semantic delta. That preserves
         // source attribution and lets review explain the exact overlapping
         // contribution without requiring additional workspace-state reads.
@@ -659,7 +787,8 @@ export async function mergeTemplateContributions(
         contextId,
         expectedWorkingHead: current.workingHead,
         source: { kind: "external-delta", deltaId },
-        intentSummary: "Conclude a convergent template update so its source remains in ancestry",
+        intentSummary:
+          "Conclude a convergent template update so its source remains in ancestry",
       });
       current = {
         ...current,
@@ -679,15 +808,19 @@ export async function mergeTemplateContributions(
       JSON.stringify({
         workingHead: current.workingHead,
         deltas: completedDeltas.map(({ deltaId }) => deltaId).sort(),
-      })
+      }),
     );
-    const committed = await ctx.rpc.call<VcsCommitResult>("main", "vcs.commit", {
-      commandId: `${contextId}:commit-reviewed-deltas:${reviewCommitDigest}`,
-      contextId,
-      expectedWorkingHead: current.workingHead,
-      intentSummary: "Commit reviewed template repository updates",
-      message: "Apply reviewed template repository updates",
-    });
+    const committed = await ctx.rpc.call<VcsCommitResult>(
+      "main",
+      "vcs.commit",
+      {
+        commandId: `${contextId}:commit-reviewed-deltas:${reviewCommitDigest}`,
+        contextId,
+        expectedWorkingHead: current.workingHead,
+        intentSummary: "Commit reviewed template repository updates",
+        message: "Apply reviewed template repository updates",
+      },
+    );
     current = { ...current, clean: true, workingHead: committed.event };
   }
   for (const completed of completedDeltas) {
@@ -707,20 +840,23 @@ export async function mergeTemplateContributions(
 
 function nextWorkspaceSource(
   observation: SemanticWorkspaceObservation,
-  inspection: TemplateOperationInspection
+  inspection: TemplateOperationInspection,
 ): SemanticWorkspaceObservation["top"] {
   const registry = observation.top.templates?.registry;
   const relationships = inspection.nextTemplates;
   const templates = {
     use: relationships?.use ?? [],
-    ...(relationships?.overrides && Object.keys(relationships.overrides).length > 0
+    ...(relationships?.overrides &&
+    Object.keys(relationships.overrides).length > 0
       ? { overrides: relationships.overrides }
       : {}),
     ...(registry ? { registry } : {}),
-    ...((relationships?.suggestionDecisions ?? observation.top.templates?.suggestionDecisions)
+    ...((relationships?.suggestionDecisions ??
+    observation.top.templates?.suggestionDecisions)
       ? {
           suggestionDecisions:
-            relationships?.suggestionDecisions ?? observation.top.templates?.suggestionDecisions,
+            relationships?.suggestionDecisions ??
+            observation.top.templates?.suggestionDecisions,
         }
       : {}),
   };
@@ -730,14 +866,15 @@ function nextWorkspaceSource(
 function flattenedRuntimeYaml(
   observation: SemanticWorkspaceObservation,
   inspection: TemplateOperationInspection,
-  source: SemanticWorkspaceObservation["top"]
+  source: SemanticWorkspaceObservation["top"],
 ): string {
   const ancestors = new Map<string, Set<string>>();
   const layers = inspection.plan.nodes.map((node) => {
     const inherited = new Set<string>();
     for (const parent of node.parents) {
       inherited.add(parent);
-      for (const ancestor of ancestors.get(parent) ?? []) inherited.add(ancestor);
+      for (const ancestor of ancestors.get(parent) ?? [])
+        inherited.add(ancestor);
     }
     ancestors.set(node.nodeId, inherited);
     return {
@@ -747,7 +884,11 @@ function flattenedRuntimeYaml(
       config: node.fragment,
     };
   });
-  const { id: _id, ...runtime } = composeWorkspaceConfig(source, layers, observation.workspaceId);
+  const { id: _id, ...runtime } = composeWorkspaceConfig(
+    source,
+    layers,
+    observation.workspaceId,
+  );
   return YAML.stringify(runtime, { lineWidth: 0 });
 }
 
@@ -755,7 +896,7 @@ async function stageMeta(
   ctx: ExtensionContextLike,
   contextId: string,
   observation: SemanticWorkspaceObservation,
-  inspection: TemplateOperationInspection
+  inspection: TemplateOperationInspection,
 ): Promise<void> {
   let current = await status(ctx, contextId);
   if (!current.clean) {
@@ -767,31 +908,50 @@ async function stageMeta(
     });
     current = await status(ctx, contextId);
   }
-  const meta = await resolveRepository(ctx, current.workingHead, META_REPOSITORY);
-  if (!meta) throw new Error("Template composition requires the meta repository");
+  const meta = await resolveRepository(
+    ctx,
+    current.workingHead,
+    META_REPOSITORY,
+  );
+  if (!meta)
+    throw new Error("Template composition requires the meta repository");
   const desired = new Map<string, string>();
   const source = nextWorkspaceSource(observation, inspection);
-  desired.set(COMPOSITION_SOURCE_PATH, YAML.stringify(source, { lineWidth: 0 }));
-  desired.set(TOP_CONFIG_PATH, flattenedRuntimeYaml(observation, inspection, source));
+  desired.set(
+    COMPOSITION_SOURCE_PATH,
+    YAML.stringify(source, { lineWidth: 0 }),
+  );
+  desired.set(
+    TOP_CONFIG_PATH,
+    flattenedRuntimeYaml(observation, inspection, source),
+  );
   for (const artifact of inspection.plan.artifacts) {
     if (!artifact.path.startsWith("meta/")) {
-      throw new Error(`Generated template artifact is outside meta: ${artifact.path}`);
+      throw new Error(
+        `Generated template artifact is outside meta: ${artifact.path}`,
+      );
     }
     desired.set(
       artifact.path.slice("meta/".length),
-      new TextDecoder("utf8", { fatal: true }).decode(artifact.bytes)
+      new TextDecoder("utf8", { fatal: true }).decode(artifact.bytes),
     );
   }
   const removals = new Set(
     inspection.plan.removedArtifactPaths.map((artifactPath) =>
-      artifactPath.startsWith("meta/") ? artifactPath.slice("meta/".length) : artifactPath
-    )
+      artifactPath.startsWith("meta/")
+        ? artifactPath.slice("meta/".length)
+        : artifactPath,
+    ),
   );
-  if (inspection.plan.state === null) removals.add(STATE_PATH);
   removals.add(operationRecordPath());
   const changes: unknown[] = [];
   for (const [filePath, desiredText] of desired) {
-    const existing = await readFile(ctx, current.workingHead, meta.repositoryId, filePath);
+    const existing = await readFile(
+      ctx,
+      current.workingHead,
+      meta.repositoryId,
+      filePath,
+    );
     if (!existing) {
       changes.push({
         kind: "file-create",
@@ -811,7 +971,12 @@ async function stageMeta(
   }
   for (const filePath of removals) {
     if (desired.has(filePath)) continue;
-    const existing = await readFile(ctx, current.workingHead, meta.repositoryId, filePath);
+    const existing = await readFile(
+      ctx,
+      current.workingHead,
+      meta.repositoryId,
+      filePath,
+    );
     if (existing) {
       changes.push({
         kind: "file-delete",
@@ -845,18 +1010,21 @@ export function createTemplateOperationPorts(
   ctx: ExtensionContextLike,
   statePath: string,
   observation: SemanticWorkspaceObservation,
-  record?: TemplateOperationRecord
+  record?: TemplateOperationRecord,
 ): TemplateOperationPorts {
   return {
     async openContext(operationId) {
       const contextId = operationContextId(operationId);
       await ctx.rpc.call("main", "runtime.createContext", { contextId });
       const current = await status(ctx, contextId);
-      if (current.mainRelation === "behind" || current.mainRelation === "diverged") {
+      if (
+        current.mainRelation === "behind" ||
+        current.mainRelation === "diverged"
+      ) {
         throw new TemplateOperationMainAdvanced(
           contextId,
           current.mainEventId,
-          current.mainRelation
+          current.mainRelation,
         );
       }
       return { contextId };
@@ -891,7 +1059,7 @@ export function createTemplateOperationPorts(
               contextId,
               inspection.plan,
               observation.state,
-              record
+              record,
             );
       await stageMeta(ctx, contextId, observation, inspection);
       return {
@@ -900,32 +1068,44 @@ export function createTemplateOperationPorts(
     },
     async publish(contextId, expectedMainEventId) {
       const current = await status(ctx, contextId);
-      if (current.mainRelation === "behind" || current.mainRelation === "diverged") {
+      if (
+        current.mainRelation === "behind" ||
+        current.mainRelation === "diverged"
+      ) {
         throw new TemplateOperationMainAdvanced(
           contextId,
           current.mainEventId,
-          current.mainRelation
+          current.mainRelation,
         );
       }
       if (!current.clean || current.committed.kind !== "event") {
-        throw new Error(`Template operation context ${contextId} is not committed`);
+        throw new Error(
+          `Template operation context ${contextId} is not committed`,
+        );
       }
       const publishDigest = sha256HexSyncText(
         JSON.stringify({
           committedEventId: current.committed.eventId,
           mainEventId: expectedMainEventId,
-        })
+        }),
       );
-      const result = await ctx.rpc.call<{ mainEventId: string }>("main", "vcs.push", {
-        commandId: `${contextId}:publish:${publishDigest}`,
-        contextId,
-        expectedCommittedEventId: current.committed.eventId,
-        expectedMainEventId,
-      });
+      const result = await ctx.rpc.call<{ mainEventId: string }>(
+        "main",
+        "vcs.push",
+        {
+          commandId: `${contextId}:publish:${publishDigest}`,
+          contextId,
+          expectedCommittedEventId: current.committed.eventId,
+          expectedMainEventId,
+        },
+      );
       return { mainEventId: result.mainEventId };
     },
     async discard(contextId) {
-      await ctx.rpc.call("main", "runtime.destroyContext", { contextId, recursive: false });
+      await ctx.rpc.call("main", "runtime.destroyContext", {
+        contextId,
+        recursive: false,
+      });
     },
   };
 }
@@ -935,12 +1115,14 @@ export async function publishTemplateSuggestionTopLayer(
   operationId: string,
   observation: SemanticWorkspaceObservation,
   top: SemanticWorkspaceObservation["top"],
-  inspection: TemplateOperationInspection
+  inspection: TemplateOperationInspection,
 ): Promise<string> {
   const contextId = await ensureTemplateOperationContext(ctx, operationId);
   let current = await status(ctx, contextId);
   if (current.mainRelation !== "at") {
-    throw new Error(`Template suggestion ${operationId} was based on a different protected main`);
+    throw new Error(
+      `Template suggestion ${operationId} was based on a different protected main`,
+    );
   }
   await stageMeta(ctx, contextId, { ...observation, top }, inspection);
   current = await status(ctx, contextId);
@@ -948,14 +1130,18 @@ export async function publishTemplateSuggestionTopLayer(
     JSON.stringify({
       committedEventId: current.committed.eventId,
       mainEventId: observation.mainEventId,
-    })
+    }),
   );
-  const result = await ctx.rpc.call<{ mainEventId: string }>("main", "vcs.push", {
-    commandId: `${contextId}:publish-suggestion:${publishDigest}`,
-    contextId,
-    expectedCommittedEventId: current.committed.eventId,
-    expectedMainEventId: observation.mainEventId,
-  });
+  const result = await ctx.rpc.call<{ mainEventId: string }>(
+    "main",
+    "vcs.push",
+    {
+      commandId: `${contextId}:publish-suggestion:${publishDigest}`,
+      contextId,
+      expectedCommittedEventId: current.committed.eventId,
+      expectedMainEventId: observation.mainEventId,
+    },
+  );
   return result.mainEventId;
 }
 
@@ -968,21 +1154,31 @@ export async function publishTemplateSuggestionTopLayer(
 export async function publishTemplateOperationCancellation(
   ctx: ExtensionContextLike,
   operationId: string,
-  expectedMainEventId: string
+  expectedMainEventId: string,
 ): Promise<string> {
   const contextId = `template-composer-cancellation-${sha256HexSyncText(
-    `${operationId}\0${expectedMainEventId}`
+    `${operationId}\0${expectedMainEventId}`,
   ).slice(0, OPERATION_CONTEXT_DIGEST_LENGTH)}`;
   const markerPath = cancellationRecordPath(operationId);
   await ctx.rpc.call("main", "runtime.createContext", { contextId });
   let current = await status(ctx, contextId);
-  if (current.mainRelation !== "at" || current.mainEventId !== expectedMainEventId) {
+  if (
+    current.mainRelation !== "at" ||
+    current.mainEventId !== expectedMainEventId
+  ) {
     throw new Error(
-      `Protected main changed before template operation ${operationId} could be cancelled`
+      `Protected main changed before template operation ${operationId} could be cancelled`,
     );
   }
-  const meta = await resolveRepository(ctx, current.workingHead, META_REPOSITORY);
-  if (!meta) throw new Error("Template operation cancellation requires the meta repository");
+  const meta = await resolveRepository(
+    ctx,
+    current.workingHead,
+    META_REPOSITORY,
+  );
+  if (!meta)
+    throw new Error(
+      "Template operation cancellation requires the meta repository",
+    );
   if (await readFile(ctx, current.workingHead, meta.repositoryId, markerPath)) {
     return current.mainEventId;
   }
@@ -1014,19 +1210,25 @@ export async function publishTemplateOperationCancellation(
   });
   current = await status(ctx, contextId);
   if (!current.clean || current.committed.kind !== "event") {
-    throw new Error(`Template cancellation context ${contextId} is not committed`);
+    throw new Error(
+      `Template cancellation context ${contextId} is not committed`,
+    );
   }
   const publishDigest = sha256HexSyncText(
     JSON.stringify({
       committedEventId: current.committed.eventId,
       mainEventId: expectedMainEventId,
-    })
+    }),
   );
-  const result = await ctx.rpc.call<{ mainEventId: string }>("main", "vcs.push", {
-    commandId: `${contextId}:publish:${publishDigest}`,
-    contextId,
-    expectedCommittedEventId: current.committed.eventId,
-    expectedMainEventId,
-  });
+  const result = await ctx.rpc.call<{ mainEventId: string }>(
+    "main",
+    "vcs.push",
+    {
+      commandId: `${contextId}:publish:${publishDigest}`,
+      contextId,
+      expectedCommittedEventId: current.committed.eventId,
+      expectedMainEventId,
+    },
+  );
   return result.mainEventId;
 }
