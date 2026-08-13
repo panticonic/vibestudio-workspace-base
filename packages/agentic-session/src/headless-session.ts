@@ -174,6 +174,8 @@ export interface HeadlessWithAgentConfig extends HeadlessSessionConfig {
   includeValidationRetryProbeMethod?: boolean;
 }
 
+const HEADLESS_LIFECYCLE_RPC_TIMEOUT_MS = 30_000;
+
 export interface HeadlessWaitOptions {
   debounce?: number;
   timeoutMs?: number;
@@ -779,14 +781,17 @@ export class HeadlessSession {
    * Unlike creation config or live settings, this reads journaled
    * message.started/message.completed descriptors and usage.
    */
-  async captureModelExecutionEvidence(): Promise<unknown> {
+  async captureModelExecutionEvidence(options?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<unknown> {
     const targetId = this._agentTargetId;
     if (!targetId) throw new Error("No subscribed agent is available for model execution evidence");
     const channelId = this._channelId;
     if (!channelId) throw new Error("No channel is available for model execution evidence");
     try {
       const evidence = this._agentRpcCall
-        ? await this._agentRpcCall(targetId, "getModelExecutionEvidence", [channelId])
+        ? await this._agentRpcCall(targetId, "getModelExecutionEvidence", [channelId], options)
         : await this.callMethod(targetId, "getModelExecutionEvidence", {});
       this._modelExecutionEvidence = evidence;
       this._modelExecutionEvidenceError = undefined;
@@ -857,20 +862,28 @@ export class HeadlessSession {
     const ownsContext = this._ownsAgentContext;
     const channelId = this._channelId;
     const rpcCall = this._agentRpcCall;
+    const lifecycleRpcCall = rpcCall
+      ? (target: string, method: string, args: unknown[]) =>
+          rpcCall(target, method, args, { timeoutMs: HEADLESS_LIFECYCLE_RPC_TIMEOUT_MS })
+      : null;
 
     const unsubscribe = async () => {
-      if (!targetId || !channelId || !rpcCall) return;
-      await unsubscribeHeadlessAgent({ rpcCall, targetId, channelId }).catch((err) => {
+      if (!targetId || !channelId || !lifecycleRpcCall) return;
+      await unsubscribeHeadlessAgent({
+        rpcCall: lifecycleRpcCall,
+        targetId,
+        channelId,
+      }).catch((err) => {
         this.recordCleanupError("unsubscribeHeadlessAgent", err);
       });
     };
     const cleanupRemote = async () => {
-      if (!rpcCall) return;
+      if (!lifecycleRpcCall) return;
       // A context minted for this launch is the lifecycle unit. Destroying it
       // recursively retires the root and descendants, so it has one owner and
       // no entity-level fallback path.
       if (ownsContext && contextId) {
-        await destroyHeadlessAgentContext({ rpcCall, contextId }).catch((err) => {
+        await destroyHeadlessAgentContext({ rpcCall: lifecycleRpcCall, contextId }).catch((err) => {
           this.recordCleanupError("destroyHeadlessAgentContext", err);
         });
         return;
@@ -879,7 +892,7 @@ export class HeadlessSession {
       // In a caller-owned context, the session owns only its entity after the
       // subscription has been closed. Retirement observes the terminal result.
       if (!entityId) return;
-      await retireHeadlessAgent({ rpcCall, entityId }).catch((err) => {
+      await retireHeadlessAgent({ rpcCall: lifecycleRpcCall, entityId }).catch((err) => {
         this.recordCleanupError("retireHeadlessAgent", err);
       });
     };
@@ -895,7 +908,9 @@ export class HeadlessSession {
     // a queued continuation to begin just as the owning context was retired.
     if (targetId && this._client && this._modelExecutionEvidence === undefined) {
       this.setCleanupPhase("capturing-model-evidence", options?.onPhase);
-      await this.captureModelExecutionEvidence().catch((error) => {
+      await this.captureModelExecutionEvidence({
+        timeoutMs: HEADLESS_LIFECYCLE_RPC_TIMEOUT_MS,
+      }).catch((error) => {
         this.recordCleanupError("captureModelExecutionEvidence", error);
       });
     }

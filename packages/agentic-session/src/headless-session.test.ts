@@ -530,16 +530,31 @@ describe("HeadlessSession", () => {
     (session as any)._agentContextId = "ctx-owned";
     (session as any)._ownsAgentContext = true;
     (session as any)._channelId = "ch-owned";
-    (session as any)._agentRpcCall = vi.fn(
+    const rpcCall = vi.fn(
       async (_target: string, method: string, _args: unknown[]) => {
         calls.push(method);
         return undefined;
       }
     );
+    (session as any)._agentRpcCall = rpcCall;
 
     await expect(session.close()).resolves.toBeUndefined();
 
     expect(calls).toEqual(["unsubscribeChannel", "runtime.destroyContext"]);
+    expect(rpcCall).toHaveBeenNthCalledWith(
+      1,
+      "do:workers/agent-worker:AiChatWorker:obj-owned",
+      "unsubscribeChannel",
+      ["ch-owned"],
+      { timeoutMs: 30_000 }
+    );
+    expect(rpcCall).toHaveBeenNthCalledWith(
+      2,
+      "main",
+      "runtime.destroyContext",
+      [{ contextId: "ctx-owned", recursive: true }],
+      { timeoutMs: 30_000 }
+    );
     expect(session.snapshot().cleanupErrors).toEqual([]);
   });
 
