@@ -538,6 +538,39 @@ return fs.readFileSync("/tmp/a");`,
     });
   });
 
+  it("keeps a conflicting retained module execution caller-correctable", async () => {
+    const result = await executeSandbox(
+      'import { answer } from "@workspace/example"; return answer;',
+      {
+        syntax: "typescript",
+        imports: { "@workspace/example": "workspace:packages/example/src/index.ts" },
+        loadImport: async () => {
+          throw Object.assign(new Error("Module is retained at another execution"), {
+            errorKind: "application",
+            code: "eval_module_execution_conflict",
+            errorData: {
+              code: "eval_module_execution_conflict",
+              moduleSpecifier: "@workspace/example",
+              failureKind: "user-code",
+            },
+          });
+        },
+      }
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: "Module is retained at another execution",
+      failureKind: "user-code",
+      failureCode: "eval_module_execution_conflict",
+      errorData: {
+        code: "eval_module_execution_conflict",
+        moduleSpecifier: "@workspace/example",
+        failureKind: "user-code",
+      },
+    });
+  });
+
   it("loads a lazy panel-exposed module before workspace build fallback", async () => {
     const globals = globalThis as Record<string, unknown>;
     const moduleMap = globals["__vibestudioModuleMap__"] as Record<string, unknown>;

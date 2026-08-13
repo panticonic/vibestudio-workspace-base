@@ -154,6 +154,7 @@ const CORRECTABLE_IMPORT_FAILURE_CODES = new Set([
   "invalid_package_specifier",
   "invalid_package_version",
   "invalid_build_ref",
+  "eval_module_execution_conflict",
   "unsupported_package",
   "package_not_found",
   "package_manifest_missing",
