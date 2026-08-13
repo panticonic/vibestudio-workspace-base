@@ -30,7 +30,10 @@ import type {
 import { panel } from "../client.js";
 import { useShellEvent } from "../useShellEvent.js";
 import { useDirectShellEvent } from "../useDirectShellEvent.js";
-import { pinMutationSeqAtom, pinnedPanelIdsAtom } from "../../state/appModeAtoms.js";
+import {
+  pinMutationSeqAtom,
+  pinnedPanelIdsAtom,
+} from "../../state/appModeAtoms.js";
 import { useCurrentAccountProfile } from "./useAccountProfiles.js";
 
 export type { DescendantSiblingGroup, PanelAncestor, PanelSummary };
@@ -87,7 +90,7 @@ export function flattenTree(
   collapsedIds: Set<string>,
   parentId: string | null = null,
   depth = 0,
-  result: FlattenedPanel[] = []
+  result: FlattenedPanel[] = [],
 ): FlattenedPanel[] {
   panels.forEach((panel, index) => {
     const collapsed = collapsedIds.has(panel.id);
@@ -107,7 +110,8 @@ export function flattenTree(
       },
       collapsed,
     });
-    if (!collapsed) flattenTree(panel.children, collapsedIds, panel.id, depth + 1, result);
+    if (!collapsed)
+      flattenTree(panel.children, collapsedIds, panel.id, depth + 1, result);
   });
   return result;
 }
@@ -115,7 +119,7 @@ export function flattenTree(
 export function findParentAtDepth(
   items: FlattenedPanel[],
   fromIndex: number,
-  targetDepth: number
+  targetDepth: number,
 ): string | null {
   if (targetDepth === 0) return null;
   for (let index = fromIndex - 1; index >= 0; index--) {
@@ -131,25 +135,34 @@ export function getProjection(
   activeId: string,
   overId: string,
   dragOffset: number,
-  indentationWidth: number
+  indentationWidth: number,
 ): { depth: number; parentId: string | null } {
   const activeIndex = items.findIndex((item) => item.id === activeId);
   const overIndex = items.findIndex((item) => item.id === overId);
   if (activeIndex < 0 || overIndex < 0) return { depth: 0, parentId: null };
   const active = items[activeIndex]!;
-  const previous = activeIndex < overIndex ? items[overIndex] : items[Math.max(0, overIndex - 1)];
-  const next = activeIndex < overIndex ? items[overIndex + 1] : items[overIndex];
+  const previous =
+    activeIndex < overIndex
+      ? items[overIndex]
+      : items[Math.max(0, overIndex - 1)];
+  const next =
+    activeIndex < overIndex ? items[overIndex + 1] : items[overIndex];
   const desired = active.depth + Math.round(dragOffset / indentationWidth);
   const maxDepth = previous ? previous.depth + 1 : 0;
   const minDepth = next?.depth ?? 0;
   const depth = Math.max(minDepth, Math.min(desired, maxDepth));
   if (depth === 0) return { depth, parentId: null };
-  if (previous && depth > previous.depth) return { depth, parentId: previous.id };
-  if (previous && depth === previous.depth) return { depth, parentId: previous.parentId };
+  if (previous && depth > previous.depth)
+    return { depth, parentId: previous.id };
+  if (previous && depth === previous.depth)
+    return { depth, parentId: previous.parentId };
   return { depth, parentId: findParentAtDepth(items, overIndex + 1, depth) };
 }
 
-export function removeChildrenOf(items: FlattenedPanel[], ids: string[]): FlattenedPanel[] {
+export function removeChildrenOf(
+  items: FlattenedPanel[],
+  ids: string[],
+): FlattenedPanel[] {
   const excluded = new Set(ids);
   return items.filter((item) => {
     if (item.parentId && excluded.has(item.parentId)) {
@@ -190,7 +203,10 @@ const PanelTreeContext = createContext<PanelTreeContextValue | null>(null);
 
 function usePanelTreeContext(): PanelTreeContextValue {
   const value = useContext(PanelTreeContext);
-  if (!value) throw new Error("usePanelTreeContext must be used within a PanelTreeProvider");
+  if (!value)
+    throw new Error(
+      "usePanelTreeContext must be used within a PanelTreeProvider",
+    );
   return value;
 }
 
@@ -203,7 +219,7 @@ function nodeTree(
   cache: PanelTreeCache,
   seen: Set<string>,
   localSelectedChildren: ReadonlyMap<string, string | null>,
-  presentations: ReadonlyMap<string, FullPanel>
+  presentations: ReadonlyMap<string, FullPanel>,
 ): PanelTreeViewNode {
   if (seen.has(node.slotId)) {
     throw new Error(`Panel tree cycle detected at ${node.slotId}`);
@@ -226,11 +242,12 @@ function nodeTree(
     ...(source ? { source } : {}),
     ...(favicon ? { favicon } : {}),
     children: children.map((child) =>
-      nodeTree(child, cache, nextSeen, localSelectedChildren, presentations)
+      nodeTree(child, cache, nextSeen, localSelectedChildren, presentations),
     ),
     childrenLoaded: cachedChildren !== null,
     childrenLoadedCount: cachedChildren?.loadedCount ?? 0,
-    childrenHasMore: cachedChildren?.nextCursor !== null && cachedChildren !== null,
+    childrenHasMore:
+      cachedChildren?.nextCursor !== null && cachedChildren !== null,
     selectedChildId: localSelectedChildren.has(node.slotId)
       ? (localSelectedChildren.get(node.slotId) ?? null)
       : (children[0]?.slotId ?? null),
@@ -243,18 +260,22 @@ function faviconForPresentation(
     | (Pick<FullPanel, "navigation"> & {
         snapshot?: Pick<PanelSnapshot, "source">;
       })
-    | undefined
+    | undefined,
 ): PanelNavigationState["favicon"] | undefined {
   if (!presentation) return undefined;
   if (presentation.navigation?.favicon) return presentation.navigation.favicon;
   const source = presentation.snapshot?.source;
   if (!source) return undefined;
   if (!source.startsWith("browser:")) return undefined;
-  const pageUrl = presentation.navigation?.url ?? source.slice("browser:".length);
+  const pageUrl =
+    presentation.navigation?.url ?? source.slice("browser:".length);
   return pageUrl ? { pageUrl, updatedAt: 0 } : undefined;
 }
 
-function hasSameTreePresentation(current: FullPanel | undefined, next: FullPanel): boolean {
+function hasSameTreePresentation(
+  current: FullPanel | undefined,
+  next: FullPanel,
+): boolean {
   const currentFavicon = faviconForPresentation(current);
   const nextFavicon = faviconForPresentation(next);
   return (
@@ -272,10 +293,12 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
   const [treeLoadError, setTreeLoadError] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [localSelectedChildren, setLocalSelectedChildren] = useState<Map<string, string | null>>(
-    () => new Map()
+  const [localSelectedChildren, setLocalSelectedChildren] = useState<
+    Map<string, string | null>
+  >(() => new Map());
+  const [presentations, setPresentations] = useState<Map<string, FullPanel>>(
+    () => new Map(),
   );
-  const [presentations, setPresentations] = useState<Map<string, FullPanel>>(() => new Map());
   const refreshingRef = useRef(false);
   const refreshSequenceRef = useRef(0);
   const presentationRevisionRef = useRef(0);
@@ -292,11 +315,14 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
       path: (slotId) => panel.getTreePath(slotId),
       search: (input) => panel.searchTree(input),
     },
-    { pageSize: 50, maxGroups: 64, maxNodes: 2_000, maxPaths: 128 }
+    { pageSize: 50, maxGroups: 64, maxNodes: 2_000, maxPaths: 128 },
   );
   const cache = cacheRef.current;
 
-  useEffect(() => cache.subscribe(() => rerender((value) => value + 1)), [cache]);
+  useEffect(
+    () => cache.subscribe(() => rerender((value) => value + 1)),
+    [cache],
+  );
 
   const mergePresentations = useCallback((nextPresentations: FullPanel[]) => {
     if (nextPresentations.length === 0) return;
@@ -307,7 +333,8 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         // selection-only update still belongs in localSelectedChildren below,
         // but must not erase or invalidate an existing visual projection.
         if (!presentation.snapshot) continue;
-        if (hasSameTreePresentation(current.get(presentation.id), presentation)) continue;
+        if (hasSameTreePresentation(current.get(presentation.id), presentation))
+          continue;
         next ??= new Map(current);
         next.set(presentation.id, presentation);
       }
@@ -317,7 +344,10 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
       let next: Map<string, string | null> | null = null;
       for (const presentation of nextPresentations) {
         const selectedChildId = presentation.selectedChildId ?? null;
-        if (current.has(presentation.id) && current.get(presentation.id) === selectedChildId) {
+        if (
+          current.has(presentation.id) &&
+          current.get(presentation.id) === selectedChildId
+        ) {
           continue;
         }
         next ??= new Map(current);
@@ -330,9 +360,11 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
   const hydratePresentations = useCallback(
     async (nodes: readonly PanelTreeNode[]) => {
       if (nodes.length === 0) return;
-      mergePresentations(await panel.getPresentations(nodes.map((node) => node.slotId)));
+      mergePresentations(
+        await panel.getPresentations(nodes.map((node) => node.slotId)),
+      );
     },
-    [mergePresentations]
+    [mergePresentations],
   );
 
   const reconcilePins = useCallback(async () => {
@@ -351,26 +383,33 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
       refreshingRef.current = true;
       setRefreshing(true);
       try {
-        const rootPage = options.refreshRootGroups ? await cache.loadRootGroups(true) : null;
+        const rootPage = options.refreshRootGroups
+          ? await cache.loadRootGroups(true)
+          : null;
         const groups = new Map<string, PanelTreeGroup>();
         for (const group of options.groups) {
           groups.set(panelTreeGroupKey(group), group);
         }
         if (rootPage) {
           for (const owner of rootPage.groups) {
-            const group = { kind: "roots" as const, ownerUserId: owner.ownerUserId };
+            const group = {
+              kind: "roots" as const,
+              ownerUserId: owner.ownerUserId,
+            };
             groups.set(panelTreeGroupKey(group), group);
           }
         }
         const loaded = await Promise.all(
-          [...groups.values()].map((group) => cache.loadFirst(group))
+          [...groups.values()].map((group) => cache.loadFirst(group)),
         );
         await hydratePresentations(loaded.flatMap((group) => group.nodes));
         if (options.reconcilePinState) await reconcilePins();
         setTreeLoadError(null);
         setInitialized(true);
       } catch (error) {
-        setTreeLoadError(error instanceof Error ? error.message : String(error));
+        setTreeLoadError(
+          error instanceof Error ? error.message : String(error),
+        );
         setInitialized(true);
       } finally {
         if (refreshSequenceRef.current === sequence) {
@@ -379,7 +418,7 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [cache, hydratePresentations, reconcilePins]
+    [cache, hydratePresentations, reconcilePins],
   );
 
   const refreshTree = useCallback(
@@ -389,7 +428,7 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         refreshRootGroups: true,
         reconcilePinState: true,
       }),
-    [refreshTreeGroups]
+    [refreshTreeGroups],
   );
 
   useEffect(() => {
@@ -409,7 +448,10 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         const rootGroupsChanged =
           event.reset || event.groups.some((group) => group.kind === "roots");
         const groups = rootGroupsChanged
-          ? [...invalidatedGroups, ...event.groups.filter((group) => group.kind === "roots")]
+          ? [
+              ...invalidatedGroups,
+              ...event.groups.filter((group) => group.kind === "roots"),
+            ]
           : invalidatedGroups;
         void refreshTreeGroups({
           groups,
@@ -417,37 +459,62 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
           reconcilePinState: event.reset || event.removedSlotIds.length > 0,
         });
       },
-      [cache, refreshTreeGroups]
-    )
+      [cache, refreshTreeGroups],
+    ),
+  );
+  const refreshChangedPresentations = useCallback(
+    (event: { panelIds: string[] }, revision?: number) => {
+      if (revision !== undefined) {
+        if (revision <= presentationRevisionRef.current) return;
+        presentationRevisionRef.current = revision;
+        for (const panelId of event.panelIds) {
+          presentationRevisionByPanelRef.current.set(panelId, revision);
+        }
+      }
+      void panel
+        .getPresentations(event.panelIds)
+        .then((presentations) => {
+          if (revision === undefined) {
+            mergePresentations(presentations);
+            return;
+          }
+          // A later event only supersedes the same panel. Discarding this
+          // whole batch when an unrelated panel changes loses an edge and
+          // can leave that panel's presentation stale until a focus switch.
+          mergePresentations(
+            presentations.filter(
+              (presentation) =>
+                presentationRevisionByPanelRef.current.get(presentation.id) ===
+                revision,
+            ),
+          );
+        })
+        .catch((error: unknown) =>
+          console.warn(
+            "[PanelTree] Failed to refresh changed presentations:",
+            error,
+          ),
+        );
+    },
+    [mergePresentations],
   );
   useDirectShellEvent(
     "panel-presentation-changed",
     useCallback(
       (event) => {
-        if (event.revision <= presentationRevisionRef.current) return;
-        presentationRevisionRef.current = event.revision;
-        for (const panelId of event.panelIds) {
-          presentationRevisionByPanelRef.current.set(panelId, event.revision);
-        }
-        void panel
-          .getPresentations(event.panelIds)
-          .then((presentations) => {
-            // A later event only supersedes the same panel. Discarding this
-            // whole batch when an unrelated panel changes loses an edge and
-            // can leave that panel's presentation stale until a focus switch.
-            mergePresentations(
-              presentations.filter(
-                (presentation) =>
-                  presentationRevisionByPanelRef.current.get(presentation.id) === event.revision
-              )
-            );
-          })
-          .catch((error: unknown) =>
-            console.warn("[PanelTree] Failed to refresh changed presentations:", error)
-          );
+        refreshChangedPresentations(event, event.revision);
       },
-      [mergePresentations]
-    )
+      [refreshChangedPresentations],
+    ),
+  );
+  useShellEvent(
+    "panel-presentation-changed",
+    useCallback(
+      (event) => {
+        refreshChangedPresentations(event);
+      },
+      [refreshChangedPresentations],
+    ),
   );
 
   const loadChildren = useCallback(
@@ -458,7 +525,7 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
       });
       await hydratePresentations(loaded.nodes);
     },
-    [cache, hydratePresentations]
+    [cache, hydratePresentations],
   );
   const loadSelectionPath = useCallback(
     async (panelId: string, maxDepth: number) => {
@@ -475,7 +542,10 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
           parentSlotId: currentId as PanelSlotId,
         };
         let page = await cache.loadFirst(group);
-        while (!page.nodes.some((node) => node.slotId === selectedChildId) && page.nextCursor) {
+        while (
+          !page.nodes.some((node) => node.slotId === selectedChildId) &&
+          page.nextCursor
+        ) {
           page = await cache.loadMore(group);
         }
         if (!page.nodes.some((node) => node.slotId === selectedChildId)) break;
@@ -489,29 +559,32 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         return next;
       });
     },
-    [cache]
+    [cache],
   );
   const loadMore = useCallback(
     async (group: PanelTreeGroup) => {
       const loaded = await cache.loadMore(group);
       await hydratePresentations(loaded.nodes);
     },
-    [cache, hydratePresentations]
+    [cache, hydratePresentations],
   );
   const loadMoreRootGroups = useCallback(async () => {
     const groups = await cache.loadRootGroups(false);
     const loaded = await Promise.all(
       groups.groups.map((owner) => {
-        const group = { kind: "roots" as const, ownerUserId: owner.ownerUserId };
+        const group = {
+          kind: "roots" as const,
+          ownerUserId: owner.ownerUserId,
+        };
         return cache.getGroup(group) ?? cache.loadFirst(group);
-      })
+      }),
     );
     await hydratePresentations(loaded.flatMap((group) => group.nodes));
   }, [cache, hydratePresentations]);
   const search = useCallback(
     (query: string, cursor?: string) =>
       cache.search({ query, ...(cursor ? { cursor } : {}), limit: 50 }),
-    [cache]
+    [cache],
   );
 
   const treeRevision = cache.getRevision();
@@ -527,7 +600,10 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
   const ownerGroups = useMemo(
     () =>
       orderedGroups.map((owner) => {
-        const group = { kind: "roots" as const, ownerUserId: owner.ownerUserId };
+        const group = {
+          kind: "roots" as const,
+          ownerUserId: owner.ownerUserId,
+        };
         const cached = cache.getGroup(group);
         return {
           owner: owner.ownerUserId ?? "",
@@ -535,11 +611,24 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
           rootLoadedCount: cached?.loadedCount ?? 0,
           rootsHaveMore: cached !== null && cached.nextCursor !== null,
           rootPanels: (cached?.nodes ?? []).map((node) =>
-            nodeTree(node, cache, new Set(), localSelectedChildren, presentations)
+            nodeTree(
+              node,
+              cache,
+              new Set(),
+              localSelectedChildren,
+              presentations,
+            ),
           ),
         };
       }),
-    [cache, cacheVersion, localSelectedChildren, orderedGroups, presentations, treeRevision]
+    [
+      cache,
+      cacheVersion,
+      localSelectedChildren,
+      orderedGroups,
+      presentations,
+      treeRevision,
+    ],
   );
   useEffect(() => {
     const retained: PanelTreeGroup[] = orderedGroups.map((owner) => ({
@@ -557,7 +646,7 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
   }, [cache, orderedGroups, ownerGroups]);
   const allRootPanels = useMemo(
     () => ownerGroups.flatMap((group) => group.rootPanels),
-    [ownerGroups]
+    [ownerGroups],
   );
   const { panelMap, parentMap } = useMemo(() => {
     const panels = new Map<string, PanelTreeViewNode>();
@@ -590,7 +679,11 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
     hasMoreRootGroups: cache.getRootGroups().nextCursor !== null,
     search,
   };
-  return <PanelTreeContext.Provider value={value}>{children}</PanelTreeContext.Provider>;
+  return (
+    <PanelTreeContext.Provider value={value}>
+      {children}
+    </PanelTreeContext.Provider>
+  );
 }
 
 function summary(node: PanelTreeViewNode, position: number): PanelSummary {
@@ -623,14 +716,18 @@ export function useFullPanel(panelId: string | null): {
   const appliedRequestRef = useRef(0);
   const appliedHostViewRevisionRef = useRef(0);
   const applyPresentation = useCallback(
-    (presentation: Awaited<ReturnType<typeof panel.getPresentation>>, request: number) => {
+    (
+      presentation: Awaited<ReturnType<typeof panel.getPresentation>>,
+      request: number,
+    ) => {
       if (!presentation || presentation.id !== panelId) return;
       // Event-driven and initial reads can overlap. Request start order is not
       // presentation order: an earlier request can finish its durable refresh
       // after a later one and therefore carry the newer native view. Order
       // primarily by the host's monotonic view revision, using request order
       // only to break ties between projections of the same native view.
-      if (presentation.hostViewRevision < appliedHostViewRevisionRef.current) return;
+      if (presentation.hostViewRevision < appliedHostViewRevisionRef.current)
+        return;
       if (
         presentation.hostViewRevision === appliedHostViewRevisionRef.current &&
         request < appliedRequestRef.current
@@ -660,7 +757,7 @@ export function useFullPanel(panelId: string | null): {
       });
       setLoading(false);
     },
-    [panelId]
+    [panelId],
   );
   const refreshPresentation = useCallback(() => {
     if (!panelId) return;
@@ -669,7 +766,10 @@ export function useFullPanel(panelId: string | null): {
       .getPresentation(panelId)
       .then((presentation) => applyPresentation(presentation, request))
       .catch((error: unknown) =>
-        console.warn(`[PanelTree] Failed to refresh presentation ${panelId}:`, error)
+        console.warn(
+          `[PanelTree] Failed to refresh presentation ${panelId}:`,
+          error,
+        ),
       );
   }, [applyPresentation, panelId]);
   useDirectShellEvent(
@@ -679,8 +779,18 @@ export function useFullPanel(panelId: string | null): {
         if (!panelId || !event.panelIds.includes(panelId)) return;
         refreshPresentation();
       },
-      [panelId, refreshPresentation]
-    )
+      [panelId, refreshPresentation],
+    ),
+  );
+  useShellEvent(
+    "panel-presentation-changed",
+    useCallback(
+      (event) => {
+        if (!panelId || !event.panelIds.includes(panelId)) return;
+        refreshPresentation();
+      },
+      [panelId, refreshPresentation],
+    ),
   );
   useShellEvent(
     "panel-tree-invalidated",
@@ -693,8 +803,8 @@ export function useFullPanel(panelId: string | null): {
         // or lease event raced ahead of local registry hydration.
         refreshPresentation();
       },
-      [panelId, refreshPresentation]
-    )
+      [panelId, refreshPresentation],
+    ),
   );
   useEffect(() => {
     let cancelled = false;
@@ -711,7 +821,10 @@ export function useFullPanel(panelId: string | null): {
         if (!cancelled) applyPresentation(presentation, request);
       })
       .catch((error: unknown) => {
-        console.warn(`[PanelTree] Failed to load presentation ${panelId}:`, error);
+        console.warn(
+          `[PanelTree] Failed to load presentation ${panelId}:`,
+          error,
+        );
         if (!cancelled) setLoading(false);
       });
     return () => {
@@ -733,12 +846,15 @@ export function useSiblings(panelId: string | null): {
   siblings: PanelSummary[];
   loading: boolean;
 } {
-  const { panelMap, parentMap, allRootPanels, loadChildren, initialized } = usePanelTreeContext();
+  const { panelMap, parentMap, allRootPanels, loadChildren, initialized } =
+    usePanelTreeContext();
   const parentId = panelId ? (parentMap.get(panelId) ?? null) : null;
   useEffect(() => {
     if (parentId) void loadChildren(parentId);
   }, [loadChildren, parentId]);
-  const siblings = parentId ? (panelMap.get(parentId)?.children ?? []) : allRootPanels;
+  const siblings = parentId
+    ? (panelMap.get(parentId)?.children ?? [])
+    : allRootPanels;
   return { siblings: siblings.map(summary), loading: !initialized };
 }
 
@@ -761,8 +877,12 @@ export function useAncestors(panelId: string | null): {
       .then(async (path) => {
         if (cancelled) return;
         const nodes = path?.nodes.slice(0, -1) ?? [];
-        const presentations = await panel.getPresentations(nodes.map((node) => node.slotId));
-        const presentationsById = new Map(presentations.map((entry) => [entry.id, entry]));
+        const presentations = await panel.getPresentations(
+          nodes.map((node) => node.slotId),
+        );
+        const presentationsById = new Map(
+          presentations.map((entry) => [entry.id, entry]),
+        );
         if (cancelled) return;
         setAncestors(
           nodes.map((node, index) => {
@@ -779,7 +899,7 @@ export function useAncestors(panelId: string | null): {
               ...(favicon ? { favicon } : {}),
               depth: nodes.length - index,
             };
-          })
+          }),
         );
       })
       .finally(() => {
@@ -796,7 +916,7 @@ export const DEFAULT_DESCENDANT_DEPTH = 3;
 
 export function useDescendantSiblingGroups(
   panelId: string | null,
-  maxDepth = DEFAULT_DESCENDANT_DEPTH
+  maxDepth = DEFAULT_DESCENDANT_DEPTH,
 ): { groups: DescendantSiblingGroup[]; loading: boolean } {
   const { panelMap, initialized, loadSelectionPath } = usePanelTreeContext();
   const selectionPathKey = (() => {
@@ -804,21 +924,30 @@ export function useDescendantSiblingGroups(
     let node = panelId ? panelMap.get(panelId) : undefined;
     for (let depth = 0; node && depth < maxDepth; depth++) {
       path.push(node.id, node.selectedChildId);
-      node = node.selectedChildId ? panelMap.get(node.selectedChildId) : undefined;
+      node = node.selectedChildId
+        ? panelMap.get(node.selectedChildId)
+        : undefined;
     }
     return path.join("\0");
   })();
   useEffect(() => {
     if (panelId) {
       void loadSelectionPath(panelId, maxDepth).catch((error: unknown) =>
-        console.warn(`[PanelTree] Failed to load selection path ${panelId}:`, error)
+        console.warn(
+          `[PanelTree] Failed to load selection path ${panelId}:`,
+          error,
+        ),
       );
     }
   }, [loadSelectionPath, maxDepth, panelId, selectionPathKey]);
 
   const groups: DescendantSiblingGroup[] = [];
   let current = panelId ? panelMap.get(panelId) : undefined;
-  for (let depth = 1; current && depth <= maxDepth && current.children.length > 0; depth++) {
+  for (
+    let depth = 1;
+    current && depth <= maxDepth && current.children.length > 0;
+    depth++
+  ) {
     const selectedId = current.selectedChildId;
     if (!selectedId) break;
     groups.push({

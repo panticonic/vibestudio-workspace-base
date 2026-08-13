@@ -121,16 +121,15 @@ export function createWorkspacePresentationClient(
     rpc,
     WORKSPACE_PRESENTATION_SERVICE,
   );
-  const loadIconForSource = async (
+  type PanelMetadata = { title?: string; icon?: string };
+  const loadMetadataForSource = async (
     source: string | undefined,
-  ): Promise<string | undefined> => {
-    if (!source || source.startsWith("browser:")) return undefined;
+  ): Promise<PanelMetadata> => {
+    if (!source || source.startsWith("browser:")) return {};
     try {
       return await rpc
-        .call<{
-          icon?: string;
-        } | null>("main", "build.getPanelMetadata", [source])
-        .then((metadata) => metadata?.icon);
+        .call<PanelMetadata | null>("main", "build.getPanelMetadata", [source])
+        .then((metadata) => metadata ?? {});
     } catch (error) {
       // An icon is decoration, not an admission dependency for the panel tree.
       // Metadata is intentionally read afresh on the next composition so a
@@ -139,7 +138,7 @@ export function createWorkspacePresentationClient(
         `[workspace-presentation] Unable to load icon metadata for ${source}:`,
         error,
       );
-      return undefined;
+      return {};
     }
   };
 
@@ -151,23 +150,45 @@ export function createWorkspacePresentationClient(
     // workspace rebuild may change metadata without changing the source path,
     // so retaining these promises beyond the observation would make the shell
     // stale (or permanently poison retries after one rejected read).
-    const iconsBySource = new Map<string, Promise<string | undefined>>();
-    const iconForSource = (source: string | undefined) => {
-      if (!source) return Promise.resolve(undefined);
-      let pending = iconsBySource.get(source);
+    const metadataBySource = new Map<string, Promise<PanelMetadata>>();
+    const metadataForSource = (source: string | undefined): Promise<PanelMetadata> => {
+      if (!source) return Promise.resolve<PanelMetadata>({});
+      let pending = metadataBySource.get(source);
       if (!pending) {
-        pending = loadIconForSource(source);
-        iconsBySource.set(source, pending);
+        pending = loadMetadataForSource(source);
+        metadataBySource.set(source, pending);
       }
       return pending;
     };
+    const metadata: PanelMetadata[] = await Promise.all(
+      nodes.map((node) => metadataForSource(node.source)),
+    );
+    // Host and mobile creation commit semantic slots independently from this
+    // Base-owned projection. Repair the projection from the bounded current
+    // observation before reading it; the DO preserves newer runtime titles.
+    await Promise.all(
+      nodes.map((node, index) => {
+        if (!node.source || !node.runtimeEntityId) return Promise.resolve(null);
+        const declaredTitle = metadata[index]?.title?.trim() || node.source;
+        return owner.call(
+          "indexPanel",
+          {
+            id: node.slotId,
+            title: declaredTitle,
+            path: node.source,
+            source: node.source,
+          },
+          node.runtimeEntityId,
+        );
+      }),
+    );
     const titles = await owner.call<Record<string, string>>(
       "titlesForSlots",
       nodes.map((node) => node.slotId),
     );
     return Promise.all(
-      nodes.map(async (node) => {
-        const icon = await iconForSource(node.source);
+      nodes.map(async (node, index) => {
+        const icon = metadata[index]?.icon;
         const { options, ...topology } = node;
         const presentation = currentPresentationOptions(options);
         return {
@@ -206,7 +227,9 @@ export function createWorkspacePresentationClient(
     if (!value) return null;
     const [titles, icon] = await Promise.all([
       owner.call<Record<string, string>>("titlesForSlots", [slotId]),
-      loadIconForSource(value.currentHistory.source),
+      loadMetadataForSource(value.currentHistory.source).then(
+        (metadata) => metadata.icon,
+      ),
     ]);
     return {
       ...value,

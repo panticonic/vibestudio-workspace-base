@@ -53,10 +53,10 @@ describe("onboarding browser-data component chain", () => {
         stream: vi.fn(async () => new Response()),
       },
       workers: {
-        resolveService: vi.fn(async () => ({
+        resolveService: vi.fn(async (_protocol: string, objectKey?: string) => ({
           kind: "durable-object" as const,
           targetId: "do:workers/browser-data:BrowserDataDO:browser:user-1",
-          objectKey: "browser:user-1",
+          objectKey,
         })),
       },
       invocation: {

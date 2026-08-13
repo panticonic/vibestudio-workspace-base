@@ -21,9 +21,11 @@ describe("WorkspacePresentationDO", () => {
   it("exposes exactly the Base-owned presentation contract", async () => {
     const { instance, db } = createPresentation();
     const productMethods = [...rpcExposedMethodNames(instance)].filter(
-      (method) => !DURABLE_OBJECT_FRAMEWORK_RPC_METHODS.has(method)
+      (method) => !DURABLE_OBJECT_FRAMEWORK_RPC_METHODS.has(method),
     );
-    expect(productMethods.sort()).toEqual(Object.keys(workspacePresentationMethods).sort());
+    expect(productMethods.sort()).toEqual(
+      Object.keys(workspacePresentationMethods).sort(),
+    );
     db.close();
   });
 
@@ -32,7 +34,9 @@ describe("WorkspacePresentationDO", () => {
     const authority = instance as unknown as {
       rpcAuthorityDeclaration(method: string, schema: MethodSchema): unknown;
     };
-    for (const [method, schema] of Object.entries(workspacePresentationMethods)) {
+    for (const [method, schema] of Object.entries(
+      workspacePresentationMethods,
+    )) {
       expect(authority.rpcAuthorityDeclaration(method, schema)).toMatchObject({
         effect: { kind: "open" },
       });
@@ -44,11 +48,15 @@ describe("WorkspacePresentationDO", () => {
     const { instance, db } = createPresentation();
     instance.bindSlot("slot-1", "entity-1", "panels/chat");
     instance.updatePanelTitle("slot-1", "entity-1", "Support inbox");
-    expect(instance.titlesForSlots(["slot-1"])).toEqual({ "slot-1": "Support inbox" });
+    expect(instance.titlesForSlots(["slot-1"])).toEqual({
+      "slot-1": "Support inbox",
+    });
 
     instance.setEntityTitle("entity-2", "Calendar");
     instance.bindSlot("slot-1", "entity-2", "panels/calendar");
-    expect(instance.titlesForSlots(["slot-1"])).toEqual({ "slot-1": "Calendar" });
+    expect(instance.titlesForSlots(["slot-1"])).toEqual({
+      "slot-1": "Calendar",
+    });
     expect(instance.listEntityTitles()).toEqual([
       { id: "entity-1", title: "Support inbox", explicit: false },
       { id: "entity-2", title: "Calendar", explicit: false },
@@ -66,13 +74,17 @@ describe("WorkspacePresentationDO", () => {
         path: "panels/chat",
         tags: ["mail"],
       },
-      "entity-1"
+      "entity-1",
     );
     instance.incrementAccess("slot-1");
     instance.rebuildIndex();
 
     expect(instance.search("support").results).toEqual([
-      expect.objectContaining({ id: "slot-1", title: "Support inbox", accessCount: 1 }),
+      expect.objectContaining({
+        id: "slot-1",
+        title: "Support inbox",
+        accessCount: 1,
+      }),
     ]);
     expect(instance.sourceUsage()).toEqual([
       expect.objectContaining({ source: "panels/chat", accessCount: 1 }),
@@ -86,11 +98,32 @@ describe("WorkspacePresentationDO", () => {
   it("owns explicit-title precedence without a host-side hook", () => {
     const { instance, db } = createPresentation();
     instance.bindSlot("slot-1", "entity-1", "panels/chat");
-    instance.updatePanelTitle("slot-1", "entity-1", "Pinned", { explicit: true });
+    instance.updatePanelTitle("slot-1", "entity-1", "Pinned", {
+      explicit: true,
+    });
     instance.updatePanelTitle("slot-1", "entity-1", "Inferred");
 
     expect(instance.isEntityTitleExplicit("entity-1")).toBe(true);
     expect(instance.titlesForSlots(["slot-1"])).toEqual({ "slot-1": "Pinned" });
+    db.close();
+  });
+
+  it("preserves a newer runtime title when observation repairs the slot index", () => {
+    const { instance, db } = createPresentation();
+    instance.setEntityTitle("entity-1", "Current conversation");
+    instance.indexPanel(
+      {
+        id: "slot-1",
+        source: "panels/chat",
+        title: "Agentic Chat",
+        path: "panels/chat",
+      },
+      "entity-1",
+    );
+
+    expect(instance.titlesForSlots(["slot-1"])).toEqual({
+      "slot-1": "Current conversation",
+    });
     db.close();
   });
 });
@@ -98,7 +131,11 @@ describe("WorkspacePresentationDO", () => {
 function sqliteContext(db: DatabaseSync): DurableObjectContext {
   const sql = {
     exec(query: string, ...bindings: unknown[]): SqlResult {
-      if (bindings.length === 0 && /^\s*CREATE\b/i.test(query) && query.includes(";")) {
+      if (
+        bindings.length === 0 &&
+        /^\s*CREATE\b/i.test(query) &&
+        query.includes(";")
+      ) {
         db.exec(query);
         return {
           toArray: () => [],
@@ -109,20 +146,25 @@ function sqliteContext(db: DatabaseSync): DurableObjectContext {
       }
       const statement = db.prepare(query);
       const rows =
-        /^\s*(?:SELECT|PRAGMA|WITH|EXPLAIN)\b/i.test(query) || /\bRETURNING\b/i.test(query)
+        /^\s*(?:SELECT|PRAGMA|WITH|EXPLAIN)\b/i.test(query) ||
+        /\bRETURNING\b/i.test(query)
           ? (statement.all(...(bindings as [])) as Record<string, unknown>[])
           : (statement.run(...(bindings as [])), []);
       return {
         toArray: () => rows,
         one: () => {
-          if (rows.length !== 1) throw new Error(`Expected one row, received ${rows.length}`);
+          if (rows.length !== 1)
+            throw new Error(`Expected one row, received ${rows.length}`);
           return rows[0]!;
         },
       };
     },
   };
   return {
-    id: { toString: () => "workspace-presentation-test", name: "workspace-presentation-test" },
+    id: {
+      toString: () => "workspace-presentation-test",
+      name: "workspace-presentation-test",
+    },
     storage: {
       sql,
       setAlarm() {},

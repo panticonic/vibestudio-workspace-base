@@ -215,4 +215,68 @@ describe("workspace presentation composition", () => {
       ),
     ).toHaveLength(1);
   });
+
+  it("repairs a host-created slot in the Base presentation owner before reading it", async () => {
+    const calls: Array<{ method: string; args: unknown[] }> = [];
+    const call = vi.fn(
+      async (target: string, method: string, args: unknown[]) => {
+        if (target === "main" && method === "workers.resolveService") {
+          return { kind: "durable-object", targetId: "do:presentation" };
+        }
+        if (target === "main" && method === "workspace-state.panelTree.page") {
+          return {
+            revision: 1,
+            group: { kind: "roots", ownerUserId: "user-1" },
+            nodes: [
+              {
+                slotId: "panel:chat",
+                parentSlotId: null,
+                ownerUserId: "user-1",
+                createdAt: 1,
+                childCount: 0,
+                source: "panels/chat",
+                runtimeEntityId: "panel:nav-chat",
+              },
+            ],
+            nextCursor: null,
+          };
+        }
+        if (target === "main" && method === "build.getPanelMetadata") {
+          return { title: "Agentic Chat", icon: "./assets/icon.svg" };
+        }
+        if (target === "do:presentation") {
+          calls.push({ method, args });
+          if (method === "indexPanel") return "panel:nav-chat";
+          if (method === "titlesForSlots")
+            return { "panel:chat": "Agentic Chat" };
+        }
+        throw new Error(`Unexpected RPC ${target}.${method}`);
+      },
+    );
+
+    const client = createWorkspacePresentationClient({ call } as never);
+    await expect(
+      client.page({
+        group: { kind: "roots", ownerUserId: "user-1" },
+        limit: 10,
+      }),
+    ).resolves.toMatchObject({
+      nodes: [{ title: "Agentic Chat", icon: "./assets/icon.svg" }],
+    });
+    expect(calls).toEqual([
+      {
+        method: "indexPanel",
+        args: [
+          {
+            id: "panel:chat",
+            title: "Agentic Chat",
+            path: "panels/chat",
+            source: "panels/chat",
+          },
+          "panel:nav-chat",
+        ],
+      },
+      { method: "titlesForSlots", args: [["panel:chat"]] },
+    ]);
+  });
 });

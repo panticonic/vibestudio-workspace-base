@@ -499,6 +499,29 @@ class MobilePanels implements PanelHost {
       });
   }
 
+  refreshPresentations(panelIds: readonly string[]): void {
+    const panelManager = this.panelManager;
+    if (!panelManager) return;
+    const resident = panelIds.filter((panelId) =>
+      Boolean(this.registry.getPanel(panelId)),
+    );
+    if (resident.length === 0) return;
+    void Promise.all(
+      resident.map((panelId) =>
+        panelManager.refreshPanel(asPanelSlotId(panelId)),
+      ),
+    )
+      .then(() => this.deps.onPanelsChanged?.())
+      .catch((error: unknown) => {
+        console.warn(
+          "[MobilePanels] Failed to refresh changed panel presentations",
+          {
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+      });
+  }
+
   handleExecutionActivated(
     activation: EventPayloads["panel:executionActivated"],
   ): void {
@@ -1085,7 +1108,8 @@ export class ShellClient {
     clear(panelId: string): void;
   };
   private navigationListeners = new Set<(panelId: string) => void>();
-  private readonly browserPrivacyPresentation = new BrowserPrivacyPresentationState();
+  private readonly browserPrivacyPresentation =
+    new BrowserPrivacyPresentationState();
 
   /** Listen to an event addressed directly to this authenticated mobile session. */
   onDirectEvent<E extends EventName>(
@@ -1112,7 +1136,7 @@ export class ShellClient {
     // signaling room (no server URL, no native WS grant) — see mobileTransport.ts.
     this.transport = new MobileRpcClient({});
     this.transport.expose("mobileBrowserPrivacyPresentation.open", ({ args }) =>
-      this.browserPrivacyPresentation.accept(args[0])
+      this.browserPrivacyPresentation.accept(args[0]),
     );
     this.hostCommands = {
       get: (panelId) => this.hostCommandRegistry.get(panelId),
@@ -1219,6 +1243,9 @@ export class ShellClient {
     });
     this.events.on("panel-tree-invalidated", (event) => {
       this.panels.invalidateTree(event as PanelTreeInvalidation);
+    });
+    this.events.on("panel-presentation-changed", (event) => {
+      this.panels.refreshPresentations(event.panelIds);
     });
     this.events.on("panel:executionActivated", (event) => {
       this.panels.handleExecutionActivated(
@@ -1402,6 +1429,7 @@ export class ShellClient {
       if (this.disposed) return;
       await this.events.subscribe("panel:runtimeLeaseChanged");
       await this.events.subscribe("panel-tree-invalidated");
+      await this.events.subscribe("panel-presentation-changed");
       await this.events.subscribe("panel:executionActivated");
       await drainWorkspaceMutationQueue(this);
       this.registerPanelRecoveryHandlers();
@@ -1497,7 +1525,9 @@ export class ShellClient {
       this.navigationListeners.delete(listener);
     };
   }
-  onOpenBrowserPrivacy(listener: (section: MobileBrowserPrivacySection) => void): () => void {
+  onOpenBrowserPrivacy(
+    listener: (section: MobileBrowserPrivacySection) => void,
+  ): () => void {
     return this.browserPrivacyPresentation.subscribe(listener);
   }
   onRecoveryComplete(listener: (kind: RecoveryKind) => void): () => void {

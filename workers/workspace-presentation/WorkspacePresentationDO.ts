@@ -100,14 +100,15 @@ export class WorkspacePresentationDO extends DurableObjectBase {
       entityId,
       source,
       title ?? "",
-      Date.now()
+      Date.now(),
     );
   }
 
   @schemaRpc()
   removeSlots(slotIds: string[]): void {
     this.ctx.storage.transactionSync(() => {
-      for (const slotId of slotIds) this.sql.exec(`DELETE FROM panels WHERE slot_id = ?`, slotId);
+      for (const slotId of slotIds)
+        this.sql.exec(`DELETE FROM panels WHERE slot_id = ?`, slotId);
     });
   }
 
@@ -115,14 +116,17 @@ export class WorkspacePresentationDO extends DurableObjectBase {
   indexPanel(
     input: IndexablePanel & { source: string },
     entityId: string | null,
-    options?: { explicit?: boolean }
+    options?: { explicit?: boolean },
   ): string | null {
     const now = Date.now();
     const existingTitle = entityId ? this.entityTitle(entityId) : null;
-    const title =
-      entityId && this.isEntityTitleExplicit(entityId) && !options?.explicit
-        ? existingTitle
-        : (normalizePanelTitle(input.title) ?? existingTitle);
+    const requestedTitle = normalizePanelTitle(input.title);
+    // Re-observing a slot may repair a missing presentation row, but must not
+    // replace a newer runtime title with its manifest default. Explicit human
+    // edits remain authoritative.
+    const title = options?.explicit
+      ? requestedTitle
+      : (existingTitle ?? requestedTitle);
     this.sql.exec(
       `INSERT INTO panels(
          slot_id, entity_id, source, searchable_title, searchable_path,
@@ -144,10 +148,12 @@ export class WorkspacePresentationDO extends DurableObjectBase {
       title ?? "",
       input.path ?? null,
       input.manifestDescription ?? null,
-      input.manifestDependencies ? JSON.stringify(input.manifestDependencies) : null,
+      input.manifestDependencies
+        ? JSON.stringify(input.manifestDependencies)
+        : null,
       input.tags ? JSON.stringify(input.tags) : null,
       input.keywords ? JSON.stringify(input.keywords) : null,
-      now
+      now,
     );
     if (entityId && title) this.setEntityTitle(entityId, title, options);
     return entityId;
@@ -158,16 +164,17 @@ export class WorkspacePresentationDO extends DurableObjectBase {
     slotId: string,
     entityId: string,
     title: string,
-    options?: { explicit?: boolean }
+    options?: { explicit?: boolean },
   ): string {
-    if (this.isEntityTitleExplicit(entityId) && !options?.explicit) return entityId;
+    if (this.isEntityTitleExplicit(entityId) && !options?.explicit)
+      return entityId;
     this.setEntityTitle(entityId, title, options);
     this.sql.exec(
       `UPDATE panels SET entity_id = ?, searchable_title = ?, last_indexed_at = ? WHERE slot_id = ?`,
       entityId,
       normalizePanelTitle(title) ?? "",
       Date.now(),
-      slotId
+      slotId,
     );
     return entityId;
   }
@@ -176,12 +183,15 @@ export class WorkspacePresentationDO extends DurableObjectBase {
   setEntityTitle(
     entityId: string,
     title: string | null,
-    options?: { explicit?: boolean }
+    options?: { explicit?: boolean },
   ): void {
     const normalized = normalizePanelTitle(title);
     this.ctx.storage.transactionSync(() => {
       if (normalized === undefined) {
-        this.sql.exec(`DELETE FROM entity_titles WHERE entity_id = ?`, entityId);
+        this.sql.exec(
+          `DELETE FROM entity_titles WHERE entity_id = ?`,
+          entityId,
+        );
         this.deleteStateValue(this.explicitTitleKey(entityId));
         return;
       }
@@ -190,22 +200,25 @@ export class WorkspacePresentationDO extends DurableObjectBase {
         `INSERT INTO entity_titles(entity_id, title) VALUES (?, ?)
          ON CONFLICT(entity_id) DO UPDATE SET title = excluded.title`,
         entityId,
-        normalized
+        normalized,
       );
       this.sql.exec(
         `UPDATE panels SET searchable_title = ?, last_indexed_at = ? WHERE entity_id = ?`,
         normalized,
         Date.now(),
-        entityId
+        entityId,
       );
-      if (options?.explicit) this.setStateValue(this.explicitTitleKey(entityId), "1");
+      if (options?.explicit)
+        this.setStateValue(this.explicitTitleKey(entityId), "1");
     });
   }
 
   @schemaRpc()
   listEntityTitles(): Array<{ id: string; title: string; explicit: boolean }> {
     return this.sql
-      .exec(`SELECT entity_id AS id, title FROM entity_titles ORDER BY entity_id`)
+      .exec(
+        `SELECT entity_id AS id, title FROM entity_titles ORDER BY entity_id`,
+      )
       .toArray()
       .map((row) => ({
         id: String(row["id"]),
@@ -228,7 +241,7 @@ export class WorkspacePresentationDO extends DurableObjectBase {
           `SELECT COALESCE(t.title, p.searchable_title) AS title
              FROM panels p LEFT JOIN entity_titles t ON t.entity_id = p.entity_id
             WHERE p.slot_id = ?`,
-          slotId
+          slotId,
         )
         .toArray()[0];
       if (typeof row?.["title"] === "string" && row["title"] !== "") {
@@ -241,7 +254,10 @@ export class WorkspacePresentationDO extends DurableObjectBase {
   @schemaRpc()
   incrementAccess(slotId: string): void {
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec(`UPDATE panels SET access_count = access_count + 1 WHERE slot_id = ?`, slotId);
+      this.sql.exec(
+        `UPDATE panels SET access_count = access_count + 1 WHERE slot_id = ?`,
+        slotId,
+      );
       const source = this.sql
         .exec(`SELECT source FROM panels WHERE slot_id = ?`, slotId)
         .toArray()[0]?.["source"];
@@ -252,7 +268,7 @@ export class WorkspacePresentationDO extends DurableObjectBase {
            access_count = source_usage.access_count + 1,
            last_accessed_at = excluded.last_accessed_at`,
         source,
-        Date.now()
+        Date.now(),
       );
     });
   }
@@ -263,7 +279,7 @@ export class WorkspacePresentationDO extends DurableObjectBase {
       .exec(
         `SELECT source, access_count, last_accessed_at FROM source_usage
          ORDER BY access_count DESC, last_accessed_at DESC, source ASC LIMIT ?`,
-        Math.max(1, Math.min(200, limit))
+        Math.max(1, Math.min(200, limit)),
       )
       .toArray()
       .map((row) => ({
@@ -277,7 +293,7 @@ export class WorkspacePresentationDO extends DurableObjectBase {
   search(
     query: string,
     limit = 50,
-    cursor?: string
+    cursor?: string,
   ): { results: PanelSearchResult[]; nextCursor: string | null } {
     const safeQuery = this.sanitizeSearchQuery(query);
     const boundedLimit = Math.max(1, Math.min(200, limit));
@@ -299,9 +315,14 @@ export class WorkspacePresentationDO extends DurableObjectBase {
         parsed?.[0] ?? 0,
         parsed?.[0] ?? 0,
         parsed?.[1] ?? "",
-        boundedLimit + 1
+        boundedLimit + 1,
       )
-      .toArray() as Array<{ id: string; title: string; access_count: number; relevance: number }>;
+      .toArray() as Array<{
+      id: string;
+      title: string;
+      access_count: number;
+      relevance: number;
+    }>;
     const hasMore = rows.length > boundedLimit;
     const visible = hasMore ? rows.slice(0, boundedLimit) : rows;
     const last = visible.at(-1);
@@ -312,7 +333,8 @@ export class WorkspacePresentationDO extends DurableObjectBase {
         relevance: row.relevance,
         accessCount: row.access_count,
       })),
-      nextCursor: hasMore && last ? JSON.stringify([last.relevance, last.id]) : null,
+      nextCursor:
+        hasMore && last ? JSON.stringify([last.relevance, last.id]) : null,
     };
   }
 
