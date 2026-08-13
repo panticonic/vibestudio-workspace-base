@@ -504,7 +504,7 @@ Core routing:
 | ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Orient in a context          | `vcs.status()` uses the runtime's bound semantic context and returns committed event, working head, main relation, and local counts                                                  |
 | Compare committed work       | `vcs.compare` from an exact target state to one source event                                                                                                                         |
-| Account for incoming changes | `vcs.merge` over stable coordinates; review intents/composed results and resolve conflicts with `theirs`, `ours`, or `current` |
+| Account for incoming changes | `vcs.merge` over stable coordinates; review intents/composed results and resolve conflicts with `theirs`, `ours`, or `current`                                                       |
 | Commit coherent context work | `vcs.commit` consumes the complete local application chain                                                                                                                           |
 | Publish committed work       | `vcs.push` gates the affected build/typecheck closure, then advances protected main to one exact committed event                                                                     |
 | Read or list managed files   | `vcs.readFile` and `vcs.listFiles` at an event/application state                                                                                                                     |
@@ -633,17 +633,16 @@ import { browserData } from "@workspace/runtime";
 
 Core method groups:
 
-| Methods                                                                                                                  | Purpose                                                      |
-| ------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------ |
-| `listImportHosts`, `listImportSources`, `previewImport`, `startImport`, `cancelImport`, `getImportJob`, `listImportJobs` | Discover opaque browser sources and manage import jobs       |
-| `listOpenTabs`, `openTabsAsPanels`                                                                                       | Preview source tabs and open selected HTTP(S) tabs as panels |
-| `getBookmarks`, `addBookmark`, `updateBookmark`, `deleteBookmark`, `moveBookmark`, `searchBookmarks`                     | Manage bookmarks                                             |
-| `getHistory`, `searchHistory`, `deleteHistoryEntry`, `deleteHistoryRange`, `clearAllHistory`                             | Manage browsing history                                      |
-| `listPasswordSummaries`, `getPasswordForSite`, password mutation methods                                                  | Manage saved credentials; decrypt only exact-origin reads     |
-| `getFormFillSuggestions` and form-fill mutation methods                                                                  | Manage structured non-payment form-fill values               |
-| `listCookieOrigins`, `getCookiesForOrigin`, `applyCookieMutations`, site/all clear methods                               | Read cookie metadata and exact-origin values; mutate the jar |
-| `getSitePreferences`, `setSiteZoom`, download and favicon methods                                                        | Manage browser chrome state                                  |
-| `exportBookmarks`, `exportPasswords`, `exportCookies`                                                                    | Export supported data                                        |
+| Methods                                                                                                                  | Purpose                                                                      |
+| ------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `listImportHosts`, `listImportSources`, `previewImport`, `startImport`, `cancelImport`, `getImportJob`, `listImportJobs` | Discover sources and manage non-sensitive import jobs                        |
+| `previewSensitiveImport`, `startSensitiveImport`, `observeSensitiveImport`, `cancelSensitiveImport`                      | Review aggregate counts and control one durable sealed protected-data import |
+| `openBrowserPrivacyManager`                                                                                              | Open the host-owned protected-data manager; returns no vault rows            |
+| `listOpenTabs`, `openTabsAsPanels`                                                                                       | Preview source tabs and open selected HTTP(S) tabs as panels                 |
+| `getBookmarks`, `addBookmark`, `updateBookmark`, `deleteBookmark`, `moveBookmark`, `searchBookmarks`                     | Manage bookmarks                                                             |
+| `getHistory`, `searchHistory`, `deleteHistoryEntry`, `deleteHistoryRange`, `clearAllHistory`                             | Manage browsing history                                                      |
+| `getSitePreferences`, `setSiteZoom`, download and favicon methods                                                        | Manage browser chrome state                                                  |
+| `exportBookmarks`                                                                                                        | Export bookmarks                                                             |
 
 Use `await help("browserData")` for the complete live surface. Site permissions
 are approval records, not browser-data records, and imported profiles and paths
@@ -685,7 +684,7 @@ eval({ code: `
   const job = await browserData.startImport({
     hostId: host.hostId,
     sourceId: chrome.sourceId,
-    dataTypes: ["bookmarks", "history", "cookies"],
+    dataTypes: ["bookmarks", "history"],
   });
   console.log("Import job:", job.jobId, job.phase);
 `

@@ -23,6 +23,6 @@
     "@workspace/pubsub": "workspace:*"
   },
   "devDependencies": {
-    "vitest": "^3.2.2"
+    "vitest": "3.2.7"
   }
 }

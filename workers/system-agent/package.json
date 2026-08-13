@@ -124,9 +124,9 @@
     "@workspace/pi-core": "workspace:*",
     "@workspace/pubsub": "workspace:*",
     "@workspace/runtime": "workspace:*",
-    "zod": "^3.24.0"
+    "zod": "3.25.76"
   },
   "devDependencies": {
-    "vitest": "^3.2.2"
+    "vitest": "3.2.7"
   }
 }

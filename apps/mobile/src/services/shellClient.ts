@@ -64,6 +64,12 @@ import { credentialsMethods } from "@vibestudio/service-schemas/credentials";
 import { pushMethods } from "@vibestudio/service-schemas/push";
 import { workspaceMethods } from "@vibestudio/service-schemas/workspace";
 import { hubControlMethods } from "@vibestudio/service-schemas/hubControl";
+import { shellBrowserPrivacyMethods } from "@vibestudio/service-schemas/shellBrowserPrivacy";
+import {
+  BrowserPrivacyPresentationState,
+  type MobileBrowserPrivacySection,
+} from "./browserPrivacyPresentation";
+export type { MobileBrowserPrivacySection } from "./browserPrivacyPresentation";
 import {
   createDurableObjectServiceClient,
   createGadServiceClient,
@@ -146,6 +152,15 @@ function createPanelRuntimeClient(transport: MobileRpcClient) {
   return createTypedServiceClient(
     "panelRuntime",
     panelRuntimeMethods,
+    (service, method, args) =>
+      transport.call("main", `${service}.${method}`, args),
+  );
+}
+
+function createShellBrowserPrivacyClient(transport: MobileRpcClient) {
+  return createTypedServiceClient(
+    "shellBrowserPrivacy",
+    shellBrowserPrivacyMethods,
     (service, method, args) =>
       transport.call("main", `${service}.${method}`, args),
   );
@@ -1031,6 +1046,7 @@ export class ShellClient {
   readonly credentialService: CredentialsClient;
   readonly push: PushClient;
   readonly hostLaunch: HostLaunchClient;
+  readonly browserPrivacy: ReturnType<typeof createShellBrowserPrivacyClient>;
   readonly recovery: RecoveryCoordinator;
   readonly userNotifications: {
     list(): Promise<UserNotification[]>;
@@ -1069,6 +1085,7 @@ export class ShellClient {
     clear(panelId: string): void;
   };
   private navigationListeners = new Set<(panelId: string) => void>();
+  private readonly browserPrivacyPresentation = new BrowserPrivacyPresentationState();
 
   /** Listen to an event addressed directly to this authenticated mobile session. */
   onDirectEvent<E extends EventName>(
@@ -1094,6 +1111,9 @@ export class ShellClient {
     // Remote is WebRTC: the client re-pairs to the stored shell credential's
     // signaling room (no server URL, no native WS grant) — see mobileTransport.ts.
     this.transport = new MobileRpcClient({});
+    this.transport.expose("mobileBrowserPrivacyPresentation.open", ({ args }) =>
+      this.browserPrivacyPresentation.accept(args[0])
+    );
     this.hostCommands = {
       get: (panelId) => this.hostCommandRegistry.get(panelId),
       clear: (panelId) => this.hostCommandRegistry.clear(panelId),
@@ -1191,6 +1211,7 @@ export class ShellClient {
     this.hostLaunch = new HostLaunchClient((service, method, args) =>
       this.transport.call("main", `${service}.${method}`, args),
     );
+    this.browserPrivacy = createShellBrowserPrivacyClient(this.transport);
     this.events.on("panel:runtimeLeaseChanged", (event) => {
       this.panels.handleRuntimeLeaseChanged(
         event as PanelRuntimeLeaseChangedEvent,
@@ -1476,6 +1497,9 @@ export class ShellClient {
       this.navigationListeners.delete(listener);
     };
   }
+  onOpenBrowserPrivacy(listener: (section: MobileBrowserPrivacySection) => void): () => void {
+    return this.browserPrivacyPresentation.subscribe(listener);
+  }
   onRecoveryComplete(listener: (kind: RecoveryKind) => void): () => void {
     this.recoveryCompleteListeners.add(listener);
     return () => {
@@ -1516,6 +1540,7 @@ export class ShellClient {
     for (const unsubscribe of this.panelRecoveryUnsubs ?? []) unsubscribe();
     this.panelRecoveryUnsubs = null;
     this.recoveryCompleteListeners.clear();
+    this.browserPrivacyPresentation.clear();
     void (async () => {
       await this.panelRuntime
         .unregisterClient(this.credentials.deviceId)

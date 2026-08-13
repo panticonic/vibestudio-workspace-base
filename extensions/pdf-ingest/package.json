@@ -57,10 +57,10 @@
     }
   },
   "dependencies": {
-    "@napi-rs/canvas": "^1.0.2",
-    "@tesseract.js-data/eng": "^1.0.0",
-    "pdfjs-dist": "^6.1.200",
-    "tesseract.js": "^7.0.0"
+    "@napi-rs/canvas": "1.0.5",
+    "@tesseract.js-data/eng": "1.0.0",
+    "pdfjs-dist": "6.2.108",
+    "tesseract.js": "7.0.0"
   },
   "devDependencies": {
     "@vibestudio/extension": "workspace:*"

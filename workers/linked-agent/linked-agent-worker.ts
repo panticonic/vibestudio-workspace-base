@@ -38,11 +38,8 @@ import {
 
 const COMPLETED_KEY = "linked:completed";
 const PRIMARY_CHANNEL_KEY = "linked:primaryChannelId";
-const LEGACY_ACK_SEQ_KEY = "linked:ackSeq";
-const LEGACY_PROCESSED_SEQ_KEY = "linked:processedSeq";
 const OPEN_TURN_KEY = "linked:openTurn";
 const SESSION_KEY = "linked:session";
-const DELIVERY_SCHEMA_KEY = "linked:deliverySchema";
 const BRIDGE_REPLAY_PAGE_SIZE = 64;
 const TERMINAL_RECEIPT_LIMIT = 256;
 const SUPERSEDED_ATTEMPT_LIMIT = 4;
@@ -104,7 +101,8 @@ interface HookIngestOptions {
 const TEXT_BOUND = 8_000;
 
 function bounded(text: unknown, max = TEXT_BOUND): string {
-  const value = typeof text === "string" ? text : text == null ? "" : String(text);
+  const value =
+    typeof text === "string" ? text : text == null ? "" : String(text);
   return value.length > max ? `${value.slice(0, max)}…` : value;
 }
 
@@ -116,7 +114,9 @@ function sealedContentClass(event: ChannelEvent): "internal" | "external" {
     !externalKeys.every((key) => typeof key === "string") ||
     (contentClass === "internal" && externalKeys.length > 0)
   ) {
-    throw new Error("linked-agent input is missing valid durable content provenance");
+    throw new Error(
+      "linked-agent input is missing valid durable content provenance",
+    );
   }
   return contentClass;
 }
@@ -126,7 +126,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   private bridgeStream: LinkedBridgeStream | null = null;
   private readonly hookApplications = new Map<
     string,
-    { eventJson: string; promise: Promise<{ ok: boolean; duplicate?: boolean }> }
+    {
+      eventJson: string;
+      promise: Promise<{ ok: boolean; duplicate?: boolean }>;
+    }
   >();
 
   constructor(ctx: DurableObjectContext, env: unknown) {
@@ -144,9 +147,6 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         terminal_turn_id TEXT
       )
     `);
-    this.ensureQueueColumn("terminal_outcome", "TEXT");
-    this.ensureQueueColumn("terminal_at", "INTEGER");
-    this.ensureQueueColumn("terminal_turn_id", "TEXT");
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS linked_delivery_attempts (
         delivery_id TEXT PRIMARY KEY,
@@ -173,9 +173,6 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         created_at INTEGER NOT NULL
       )
     `);
-    this.ensureBatchColumn("opened_at", "INTEGER");
-    this.ensureBatchColumn("opened_published_at", "INTEGER");
-    this.ensureBatchColumn("terminal_published_at", "INTEGER");
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS linked_bridge_sessions (
         session_id TEXT PRIMARY KEY,
@@ -194,98 +191,77 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         PRIMARY KEY (session_id, seq)
       )
     `);
-    this.ensureHookColumn("event_json", "TEXT");
-    this.ensureHookColumn("created_at", "INTEGER NOT NULL DEFAULT 0");
-    this.ensureHookColumn("applied_at", "INTEGER");
-    this.migrateLegacyDeliveryState();
-  }
-
-  private ensureQueueColumn(name: string, declaration: string): void {
-    const present = this.sql
-      .exec(`PRAGMA table_info(linked_bridge_queue)`)
-      .toArray()
-      .some((row) => String(row["name"]) === name);
-    if (!present)
-      this.sql.exec(`ALTER TABLE linked_bridge_queue ADD COLUMN ${name} ${declaration}`);
-  }
-
-  private ensureHookColumn(name: string, declaration: string): void {
-    const present = this.sql
-      .exec(`PRAGMA table_info(linked_hook_seqs)`)
-      .toArray()
-      .some((row) => String(row["name"]) === name);
-    if (!present) this.sql.exec(`ALTER TABLE linked_hook_seqs ADD COLUMN ${name} ${declaration}`);
-  }
-
-  private ensureBatchColumn(name: string, declaration: string): void {
-    const present = this.sql
-      .exec(`PRAGMA table_info(linked_delivery_batches)`)
-      .toArray()
-      .some((row) => String(row["name"]) === name);
-    if (!present) {
-      this.sql.exec(`ALTER TABLE linked_delivery_batches ADD COLUMN ${name} ${declaration}`);
-    }
-  }
-
-  /**
-   * Legacy cursors cannot prove which individual rows reached Claude or a turn
-   * boundary. Deleted rows are irrecoverable; every row that still exists is
-   * therefore intentionally replayable after this one-way migration.
-   */
-  private migrateLegacyDeliveryState(): void {
-    if (this.getStateValue(DELIVERY_SCHEMA_KEY) === "2") return;
-    this.setStateValue(LEGACY_ACK_SEQ_KEY, "");
-    this.setStateValue(LEGACY_PROCESSED_SEQ_KEY, "");
-    this.setStateValue(OPEN_TURN_KEY, "");
-    this.sql.exec(
-      `UPDATE linked_bridge_queue
-       SET terminal_outcome = NULL, terminal_at = NULL, terminal_turn_id = NULL`
-    );
-    this.sql.exec(`DELETE FROM linked_hook_seqs`);
-    this.setStateValue(DELIVERY_SCHEMA_KEY, "2");
   }
 
   // ── Identity & participant surface ─────────────────────────────────────────
 
   protected override getParticipantInfo(
     _channelId: string,
-    config?: unknown
+    config?: unknown,
   ): ParticipantDescriptor {
-    const cfg = (config && typeof config === "object" ? config : {}) as Record<string, unknown>;
+    const cfg = (config && typeof config === "object" ? config : {}) as Record<
+      string,
+      unknown
+    >;
     const attachment = this.attachment();
     return {
-      handle: typeof cfg["handle"] === "string" && cfg["handle"] ? cfg["handle"] : "claude-code",
-      name: typeof cfg["name"] === "string" && cfg["name"] ? cfg["name"] : "Claude Code",
+      handle:
+        typeof cfg["handle"] === "string" && cfg["handle"]
+          ? cfg["handle"]
+          : "claude-code",
+      name:
+        typeof cfg["name"] === "string" && cfg["name"]
+          ? cfg["name"]
+          : "Claude Code",
       type: "agent",
       metadata: {
         linkedAgent: true,
-        agentKind: typeof cfg["agentKind"] === "string" ? cfg["agentKind"] : "claude-code",
+        agentKind:
+          typeof cfg["agentKind"] === "string"
+            ? cfg["agentKind"]
+            : "claude-code",
         linkedAttachment: attachment ? "attached" : "detached",
       },
       methods: [
         {
           name: "prompt",
-          description: "Send a prompt to the linked session (queued to its next turn boundary)",
+          description:
+            "Send a prompt to the linked session (queued to its next turn boundary)",
           parameters: {
             type: "object",
-            properties: { text: { type: "string", description: "Prompt text" } },
+            properties: {
+              text: { type: "string", description: "Prompt text" },
+            },
             required: ["text"],
           },
         },
-        { name: "interrupt", description: "Interrupt the linked session's current turn" },
-        { name: "status", description: "Attachment and session status of the linked agent" },
+        {
+          name: "interrupt",
+          description: "Interrupt the linked session's current turn",
+        },
+        {
+          name: "status",
+          description: "Attachment and session status of the linked agent",
+        },
       ],
     };
   }
 
   /** No in-process model loop: prompt/tool artifacts are never composed. */
-  protected override async ensurePromptArtifacts(_channelId: string): Promise<void> {}
+  protected override async ensurePromptArtifacts(
+    _channelId: string,
+  ): Promise<void> {}
 
-  protected override async getLoopTools(_channelId: string): Promise<AgentTool[]> {
+  protected override async getLoopTools(
+    _channelId: string,
+  ): Promise<AgentTool[]> {
     return [];
   }
 
-  protected override async shouldRespond(channelId: string, event: ChannelEvent): Promise<boolean> {
+  protected override async shouldRespond(
+    channelId: string,
+    event: ChannelEvent,
+  ): Promise<boolean> {
     if (sealedContentClass(event) === "external") return false;
     return super.shouldRespond(channelId, event);
   }
@@ -325,12 +301,16 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     // Host/ops path (tests, server-driven teardown) is trusted as-is.
     if (kind === "server") return callerId;
     if (kind !== "agent") {
-      throw new Error(`${method}: caller kind "${kind ?? "unattributed"}" is not a linked bridge`);
+      throw new Error(
+        `${method}: caller kind "${kind ?? "unattributed"}" is not a linked bridge`,
+      );
     }
-    const entityId = callerId.startsWith("agent:") ? callerId.slice("agent:".length) : "";
+    const entityId = callerId.startsWith("agent:")
+      ? callerId.slice("agent:".length)
+      : "";
     if (!entityId || entityId !== this.expectedEntityId()) {
       throw new Error(
-        `${method}: agent credential for "${entityId || callerId}" does not own this vessel`
+        `${method}: agent credential for "${entityId || callerId}" does not own this vessel`,
       );
     }
     return callerId;
@@ -350,7 +330,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     }
     if (callerId !== expected) {
       throw new Error(
-        `${method}: caller "${callerId || "unattributed"}" is not controller "${expected}"`
+        `${method}: caller "${callerId || "unattributed"}" is not controller "${expected}"`,
       );
     }
     return callerId;
@@ -373,7 +353,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     }
     await this.recoverPendingHookApplications();
     const existingSession = this.sql
-      .exec(`SELECT ended_at FROM linked_bridge_sessions WHERE session_id = ?`, bridgeSessionId)
+      .exec(
+        `SELECT ended_at FROM linked_bridge_sessions WHERE session_id = ?`,
+        bridgeSessionId,
+      )
       .toArray()[0];
     if (existingSession?.["ended_at"] != null) {
       throw new Error("openBridge cannot resume an ended bridge session");
@@ -384,7 +367,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          (session_id, last_hook_seq, ended_at, created_at)
        VALUES (?, 0, NULL, ?)`,
       bridgeSessionId,
-      now
+      now,
     );
     await this.supersedeForeignSession(bridgeSessionId, now);
     this.sql.exec(
@@ -392,7 +375,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
        SET superseded_at = ?
        WHERE bridge_session_id = ? AND accepted_at IS NULL AND superseded_at IS NULL`,
       now,
-      bridgeSessionId
+      bridgeSessionId,
     );
     const attachmentGeneration = crypto.randomUUID();
     const primaryChannelId = this.primaryChannelId();
@@ -444,7 +427,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
             replayPump: null,
           };
           this.bridgeStream = stream;
-          const ack = encodeChannelSubscriptionRecord({ kind: "subscribed", result });
+          const ack = encodeChannelSubscriptionRecord({
+            kind: "subscribed",
+            result,
+          });
           if (enqueueChannelSubscriptionBytes(controller, ack) !== "enqueued") {
             void this.closeBridgeStream(token);
           }
@@ -452,7 +438,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         pull: async () => this.pumpBridgeReplay(token),
         cancel: async () => this.closeBridgeStream(token),
       },
-      channelSubscriptionQueuingStrategy()
+      channelSubscriptionQueuingStrategy(),
     );
 
     try {
@@ -463,7 +449,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       } catch (cleanupError) {
         throw new AggregateError(
           [error, cleanupError],
-          "linked bridge setup and attachment cleanup failed"
+          "linked bridge setup and attachment cleanup failed",
         );
       }
       throw error;
@@ -506,7 +492,12 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     ) {
       throw new Error("acceptDelivery rejected a stale bridge attachment");
     }
-    if (!deliveryId || !batchId || deliveryId.length > 128 || batchId.length > 128) {
+    if (
+      !deliveryId ||
+      !batchId ||
+      deliveryId.length > 128 ||
+      batchId.length > 128
+    ) {
       throw new Error("acceptDelivery requires bounded deliveryId and batchId");
     }
     const now = Date.now();
@@ -517,7 +508,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          FROM linked_delivery_attempts a
          JOIN linked_bridge_queue q ON q.seq = a.seq
          WHERE a.delivery_id = ?`,
-        deliveryId
+        deliveryId,
       )
       .toArray()[0];
     if (
@@ -527,11 +518,15 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       attempt["superseded_at"] != null ||
       attempt["terminal_at"] != null
     ) {
-      throw new Error("acceptDelivery rejected an unknown or terminal delivery attempt");
+      throw new Error(
+        "acceptDelivery rejected an unknown or terminal delivery attempt",
+      );
     }
     if (attempt["accepted_at"] != null) {
       if (String(attempt["batch_id"]) !== batchId) {
-        throw new Error("acceptDelivery cannot move an accepted delivery to another batch");
+        throw new Error(
+          "acceptDelivery cannot move an accepted delivery to another batch",
+        );
       }
       return { ok: true, deliveryId, batchId, state: "transport-accepted" };
     }
@@ -542,12 +537,12 @@ export class LinkedAgentWorker extends AgentWorkerBase {
        VALUES (?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?)`,
       batchId,
       bridgeSessionId,
-      now
+      now,
     );
     const batch = this.sql
       .exec(
         `SELECT bridge_session_id, terminal_at FROM linked_delivery_batches WHERE batch_id = ?`,
-        batchId
+        batchId,
       )
       .toArray()[0];
     if (
@@ -563,12 +558,15 @@ export class LinkedAgentWorker extends AgentWorkerBase {
        WHERE delivery_id = ? AND accepted_at IS NULL AND superseded_at IS NULL`,
       now,
       batchId,
-      deliveryId
+      deliveryId,
     );
     return { ok: true, deliveryId, batchId, state: "transport-accepted" };
   }
 
-  private async closeBridgeStream(token: symbol, failure?: unknown): Promise<void> {
+  private async closeBridgeStream(
+    token: symbol,
+    failure?: unknown,
+  ): Promise<void> {
     const stream = this.bridgeStream;
     if (!stream || stream.token !== token) return;
     this.bridgeStream = null;
@@ -595,13 +593,16 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           channelId,
           contextId: this.subscriptions.getContextId(channelId),
           config: config ?? undefined,
-          descriptor: this.getEffectiveParticipantInfo(channelId, config ?? undefined),
+          descriptor: this.getEffectiveParticipantInfo(
+            channelId,
+            config ?? undefined,
+          ),
           replay: false,
         });
       } catch (err) {
         console.warn(
           `[LinkedAgent] presence refresh failed for ${channelId}:`,
-          err instanceof Error ? err.message : err
+          err instanceof Error ? err.message : err,
         );
       }
     }
@@ -617,7 +618,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     return first;
   }
 
-  private queueRowsForSessionAfter(bridgeSessionId: string, seq: number): QueueRow[] {
+  private queueRowsForSessionAfter(
+    bridgeSessionId: string,
+    seq: number,
+  ): QueueRow[] {
     return this.sql
       .exec(
         `SELECT q.seq, q.kind, q.channel_id, q.payload
@@ -636,7 +640,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          LIMIT ?`,
         seq,
         bridgeSessionId,
-        BRIDGE_REPLAY_PAGE_SIZE
+        BRIDGE_REPLAY_PAGE_SIZE,
       )
       .toArray()
       .map((row) => ({
@@ -649,7 +653,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
 
   private queuePendingCount(): number {
     const row = this.sql
-      .exec(`SELECT COUNT(*) AS count FROM linked_bridge_queue WHERE terminal_at IS NULL`)
+      .exec(
+        `SELECT COUNT(*) AS count FROM linked_bridge_queue WHERE terminal_at IS NULL`,
+      )
       .toArray()[0];
     return Number(row?.["count"] ?? 0);
   }
@@ -668,7 +674,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
                AND a.accepted_at IS NOT NULL
                AND a.superseded_at IS NULL
            )`,
-        bridgeSessionId
+        bridgeSessionId,
       )
       .toArray()[0];
     return Number(row?.["count"] ?? 0);
@@ -680,7 +686,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         `SELECT seq, kind, channel_id, payload
          FROM linked_bridge_queue
          WHERE seq = ? AND terminal_at IS NULL`,
-        seq
+        seq,
       )
       .toArray()[0];
     return row
@@ -688,12 +694,18 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           seq: Number(row["seq"]),
           kind: String(row["kind"]),
           channelId: String(row["channel_id"]),
-          payload: JSON.parse(String(row["payload"])) as Record<string, unknown>,
+          payload: JSON.parse(String(row["payload"])) as Record<
+            string,
+            unknown
+          >,
         }
       : null;
   }
 
-  private ensureDeliveryAttempt(row: QueueRow, stream: LinkedBridgeStream): DeliveryAttempt {
+  private ensureDeliveryAttempt(
+    row: QueueRow,
+    stream: LinkedBridgeStream,
+  ): DeliveryAttempt {
     const existing = this.sql
       .exec(
         `SELECT delivery_id, seq, bridge_session_id, attachment_generation
@@ -701,7 +713,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          WHERE seq = ? AND bridge_session_id = ? AND attachment_generation = ?`,
         row.seq,
         stream.bridgeSessionId,
-        stream.attachmentGeneration
+        stream.attachmentGeneration,
       )
       .toArray()[0];
     if (existing) {
@@ -727,7 +739,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       delivery.seq,
       delivery.bridgeSessionId,
       delivery.attachmentGeneration,
-      Date.now()
+      Date.now(),
     );
     this.compactSupersededAttempts(row.seq);
     return delivery;
@@ -744,24 +756,27 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          LIMIT -1 OFFSET ?
        )`,
       seq,
-      SUPERSEDED_ATTEMPT_LIMIT
+      SUPERSEDED_ATTEMPT_LIMIT,
     );
     this.sql.exec(
       `DELETE FROM linked_delivery_batches
        WHERE outcome = 'abandoned'
          AND batch_id NOT IN (
            SELECT batch_id FROM linked_delivery_attempts WHERE batch_id IS NOT NULL
-         )`
+         )`,
     );
   }
 
-  private async supersedeForeignSession(bridgeSessionId: string, now: number): Promise<void> {
+  private async supersedeForeignSession(
+    bridgeSessionId: string,
+    now: number,
+  ): Promise<void> {
     this.sql.exec(
       `UPDATE linked_bridge_sessions
        SET ended_at = COALESCE(ended_at, ?)
        WHERE session_id <> ?`,
       now,
-      bridgeSessionId
+      bridgeSessionId,
     );
     const foreignBatches = this.sql
       .exec(
@@ -770,7 +785,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          WHERE bridge_session_id <> ?
            AND batch_id IS NOT NULL
            AND superseded_at IS NULL`,
-        bridgeSessionId
+        bridgeSessionId,
       )
       .toArray()
       .map((row) => String(row["batch_id"]));
@@ -779,7 +794,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
        SET superseded_at = ?
        WHERE bridge_session_id <> ? AND superseded_at IS NULL`,
       now,
-      bridgeSessionId
+      bridgeSessionId,
     );
     for (const batchId of foreignBatches) {
       this.sql.exec(
@@ -788,11 +803,13 @@ export class LinkedAgentWorker extends AgentWorkerBase {
              terminal_at = COALESCE(terminal_at, ?)
          WHERE batch_id = ?`,
         now,
-        batchId
+        batchId,
       );
     }
     for (const row of this.sql
-      .exec(`SELECT DISTINCT seq FROM linked_delivery_attempts WHERE superseded_at IS NOT NULL`)
+      .exec(
+        `SELECT DISTINCT seq FROM linked_delivery_attempts WHERE superseded_at IS NOT NULL`,
+      )
       .toArray()) {
       this.compactSupersededAttempts(Number(row["seq"]));
     }
@@ -803,7 +820,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       open.bridgeSessionId &&
       open.bridgeSessionId !== bridgeSessionId
     ) {
-      await this.closeOpenTurn("linked session replaced before a terminal hook");
+      await this.closeOpenTurn(
+        "linked session replaced before a terminal hook",
+      );
     }
   }
 
@@ -820,7 +839,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       try {
         await this.closeBridgeStream(token, error);
       } catch (cleanupError) {
-        throw new AggregateError([error, cleanupError], "linked bridge replay and cleanup failed");
+        throw new AggregateError(
+          [error, cleanupError],
+          "linked bridge replay and cleanup failed",
+        );
       }
       throw error;
     } finally {
@@ -831,7 +853,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   /** Fill only currently available response capacity, reading durable rows one page at a time. */
   private async runBridgeReplay(stream: LinkedBridgeStream): Promise<void> {
     while (this.bridgeStream === stream && stream.replayPending) {
-      const rows = this.queueRowsForSessionAfter(stream.bridgeSessionId, stream.replayCursor);
+      const rows = this.queueRowsForSessionAfter(
+        stream.bridgeSessionId,
+        stream.replayCursor,
+      );
       if (rows.length === 0) {
         stream.replayPending = false;
         return;
@@ -844,16 +869,23 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           payload: this.queueEventPayload(row, delivery),
         });
         if (bytes.byteLength > CHANNEL_SUBSCRIPTION_BUFFER_BYTES) {
-          throw new Error("Linked bridge replay record exceeds the response buffer limit");
+          throw new Error(
+            "Linked bridge replay record exceeds the response buffer limit",
+          );
         }
         const capacity = stream.controller.desiredSize;
         if (capacity === null) return;
         if (bytes.byteLength > capacity) return;
 
-        const outcome = enqueueChannelSubscriptionBytes(stream.controller, bytes);
+        const outcome = enqueueChannelSubscriptionBytes(
+          stream.controller,
+          bytes,
+        );
         if (outcome === "backpressured") return;
         if (outcome !== "enqueued") {
-          throw new Error(`Linked bridge replay record cannot be delivered: ${outcome}`);
+          throw new Error(
+            `Linked bridge replay record cannot be delivered: ${outcome}`,
+          );
         }
         stream.replayCursor = row.seq;
       }
@@ -864,7 +896,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     kind: "message" | "prompt",
     channelId: string,
     dedupeKey: string,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
   ): number | null {
     this.sql.exec(
       `INSERT OR IGNORE INTO linked_bridge_queue (dedupe_key, kind, channel_id, payload, created_at)
@@ -873,15 +905,21 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       kind,
       channelId,
       JSON.stringify(payload),
-      Date.now()
+      Date.now(),
     );
     const row = this.sql
-      .exec(`SELECT seq FROM linked_bridge_queue WHERE dedupe_key = ?`, dedupeKey)
+      .exec(
+        `SELECT seq FROM linked_bridge_queue WHERE dedupe_key = ?`,
+        dedupeKey,
+      )
       .toArray()[0];
     return row ? Number(row["seq"]) : null;
   }
 
-  private queueEventPayload(row: QueueRow, delivery: DeliveryAttempt): Record<string, unknown> {
+  private queueEventPayload(
+    row: QueueRow,
+    delivery: DeliveryAttempt,
+  ): Record<string, unknown> {
     return {
       kind: row.kind,
       seq: row.seq,
@@ -899,16 +937,29 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     const stream = this.bridgeStream;
     if (!stream) return;
     const seq = payload["seq"];
-    if (stream.replayPending && typeof seq === "number" && seq > stream.replayCursor) return;
+    if (
+      stream.replayPending &&
+      typeof seq === "number" &&
+      seq > stream.replayCursor
+    )
+      return;
     try {
       let exactPayload = payload;
       if (typeof seq === "number") {
         const row = this.queueRow(seq);
         if (!row) return;
-        exactPayload = this.queueEventPayload(row, this.ensureDeliveryAttempt(row, stream));
+        exactPayload = this.queueEventPayload(
+          row,
+          this.ensureDeliveryAttempt(row, stream),
+        );
       }
-      const bytes = encodeChannelSubscriptionRecord({ kind: "message", payload: exactPayload });
-      if (enqueueChannelSubscriptionBytes(stream.controller, bytes) !== "enqueued") {
+      const bytes = encodeChannelSubscriptionRecord({
+        kind: "message",
+        payload: exactPayload,
+      });
+      if (
+        enqueueChannelSubscriptionBytes(stream.controller, bytes) !== "enqueued"
+      ) {
         void this.closeBridgeStream(stream.token);
       }
     } catch {
@@ -921,7 +972,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   protected override async dispatchApprovedInput(
     channelId: string,
     event: ChannelEvent,
-    sourceMessageId: string | undefined
+    sourceMessageId: string | undefined,
   ): Promise<void> {
     // The subagent task seed is delivered out-of-band as the headless launch
     // prompt (`claude -p <task>`); relaying it here would hand the session its
@@ -930,11 +981,13 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     if (event.messageId.startsWith("subagent-seed:")) return;
     if (!sourceMessageId) {
       throw new Error(
-        `linked input ${event.messageId} has no canonical source message identity; refusing an unwalkable turn`
+        `linked input ${event.messageId} has no canonical source message identity; refusing an unwalkable turn`,
       );
     }
     const agentic = event.payload as AgenticEvent | null;
-    const senderMetadata = (event as { senderMetadata?: Record<string, unknown> }).senderMetadata;
+    const senderMetadata = (
+      event as { senderMetadata?: Record<string, unknown> }
+    ).senderMetadata;
     const payload = (agentic?.payload ?? {}) as { mentions?: string[] };
     const content = this.turnContent(channelId, event);
     const meta: Record<string, unknown> = {
@@ -942,16 +995,25 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       seq: event.id,
       from: event.senderId,
       from_handle:
-        typeof senderMetadata?.["handle"] === "string" ? senderMetadata["handle"] : undefined,
+        typeof senderMetadata?.["handle"] === "string"
+          ? senderMetadata["handle"]
+          : undefined,
       kind: "message.completed",
       turn_id: (agentic as { turnId?: string } | null)?.turnId,
-      ...(Array.isArray(payload.mentions) ? { mentions: payload.mentions } : {}),
+      ...(Array.isArray(payload.mentions)
+        ? { mentions: payload.mentions }
+        : {}),
     };
-    const seq = this.enqueueForBridge("message", channelId, `msg:${channelId}:${event.messageId}`, {
-      content,
-      triggerMessageId: sourceMessageId,
-      meta,
-    });
+    const seq = this.enqueueForBridge(
+      "message",
+      channelId,
+      `msg:${channelId}:${event.messageId}`,
+      {
+        content,
+        triggerMessageId: sourceMessageId,
+        meta,
+      },
+    );
     if (seq !== null) {
       this.emitToBridge({ kind: "message", seq, channelId, content, meta });
     }
@@ -967,22 +1029,28 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   })
   async say(opts: {
     text: string;
-    to?: Array<{ kind: "all" | "role" | "participant"; role?: string; participantId?: string }>;
+    to?: Array<{
+      kind: "all" | "role" | "participant";
+      role?: string;
+      participantId?: string;
+    }>;
     mentions?: string[];
     replyTo?: string;
     idempotencyKey?: string;
   }): Promise<{ ok: boolean; messageId: string; channelId: string }> {
     this.requireBridgeCaller("say");
     const channelId = this.primaryChannelId();
-    if (!channelId) throw new Error("say: linked agent has no channel subscription");
+    if (!channelId)
+      throw new Error("say: linked agent has no channel subscription");
     if (typeof opts?.text !== "string" || opts.text.trim().length === 0) {
       throw new Error("say requires non-empty text");
     }
     const participantId = this.subscriptions.getParticipantId(channelId);
-    if (!participantId) throw new Error("say: not subscribed to the primary channel");
+    if (!participantId)
+      throw new Error("say: not subscribed to the primary channel");
     const descriptor = this.getEffectiveParticipantInfo(
       channelId,
-      this.subscriptions.getConfig(channelId)
+      this.subscriptions.getConfig(channelId),
     );
     const subagent = this.subagentIdentity();
     const parentParticipantId = subagent?.parentParticipantId;
@@ -991,14 +1059,15 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     }
     let mentions = opts.mentions;
     if (mentions?.length) {
-      const participants = await this.createChannelClient(channelId).getParticipants();
+      const participants =
+        await this.createChannelClient(channelId).getParticipants();
       const byHandle = new Map(
         participants.flatMap((participant) => {
           const handle = participant.metadata["handle"];
           return typeof handle === "string" && handle
             ? [[handle, participant.participantId] as const]
             : [];
-        })
+        }),
       );
       mentions = mentions.map((handle) => {
         const participantIdForHandle = byHandle.get(handle);
@@ -1009,23 +1078,37 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       });
     }
     const messageId = `say:${opts.idempotencyKey ?? `linked:${Date.now()}`}`;
-    await this.createChannelClient(channelId).send(participantId, messageId, opts.text, {
-      saliency: "say",
-      senderMetadata: {
-        ...descriptor.metadata,
-        name: descriptor.name,
-        type: descriptor.type,
-        handle: descriptor.handle,
-      },
-      ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
-      ...(mentions ? { mentions } : {}),
-      ...(opts.to
-        ? { to: opts.to }
-        : parentParticipantId
-          ? { to: [{ kind: "participant" as const, participantId: parentParticipantId }] }
+    await this.createChannelClient(channelId).send(
+      participantId,
+      messageId,
+      opts.text,
+      {
+        saliency: "say",
+        senderMetadata: {
+          ...descriptor.metadata,
+          name: descriptor.name,
+          type: descriptor.type,
+          handle: descriptor.handle,
+        },
+        ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
+        ...(mentions ? { mentions } : {}),
+        ...(opts.to
+          ? { to: opts.to }
+          : parentParticipantId
+            ? {
+                to: [
+                  {
+                    kind: "participant" as const,
+                    participantId: parentParticipantId,
+                  },
+                ],
+              }
+            : {}),
+        ...(opts.idempotencyKey
+          ? { idempotencyKey: `say:${opts.idempotencyKey}` }
           : {}),
-      ...(opts.idempotencyKey ? { idempotencyKey: `say:${opts.idempotencyKey}` } : {}),
-    });
+      },
+    );
     return { ok: true, messageId, channelId };
   }
 
@@ -1042,7 +1125,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     this.requireBridgeCaller("completeFromBridge");
     await this.completeAsSubagent(
       typeof opts?.report === "string" ? opts.report : "",
-      opts?.outcome === "failed" ? "failed" : "success"
+      opts?.outcome === "failed" ? "failed" : "success",
     );
     // Remembered so a process-exit report after a real complete is a no-op
     // (belt on top of the parent-side post-terminal idempotency).
@@ -1070,7 +1153,8 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     this.requireExternalControllerCaller("reportExternalResult");
     const sub = this.subagentIdentity();
     if (!sub) return { ok: true, settled: false };
-    if (!opts?.runId || opts.runId !== sub.runId) return { ok: true, settled: false };
+    if (!opts?.runId || opts.runId !== sub.runId)
+      return { ok: true, settled: false };
     if (this.getStateValue(COMPLETED_KEY)) return { ok: true, settled: false };
     this.setStateValue(COMPLETED_KEY, "1");
     await this.closeCurrentBridge();
@@ -1078,7 +1162,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       typeof opts.report === "string" && opts.report.trim()
         ? opts.report.trim()
         : `External agent completed with exit code ${opts.code ?? "unknown"} and no report.`;
-    await this.completeAsSubagent(report, opts.outcome === "failed" ? "failed" : "success");
+    await this.completeAsSubagent(
+      report,
+      opts.outcome === "failed" ? "failed" : "success",
+    );
     return { ok: true, settled: true };
   }
 
@@ -1106,7 +1193,8 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     this.requireExternalControllerCaller("reportExternalExit");
     const sub = this.subagentIdentity();
     if (!sub) return { ok: true, settled: false };
-    if (opts?.runId && opts.runId !== sub.runId) return { ok: true, settled: false };
+    if (opts?.runId && opts.runId !== sub.runId)
+      return { ok: true, settled: false };
     if (this.getStateValue(COMPLETED_KEY)) return { ok: true, settled: false };
     this.setStateValue(COMPLETED_KEY, "1");
     await this.closeCurrentBridge();
@@ -1118,7 +1206,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       `Claude Code session exited (${exitDesc}) without calling complete. ` +
         "Settled as failed; inspect the task channel transcript and the child " +
         "context for partial work.",
-      "failed"
+      "failed",
     );
     return { ok: true, settled: true };
   }
@@ -1168,7 +1256,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
              JOIN linked_delivery_batches b ON b.batch_id = a.batch_id
              WHERE a.seq = q.seq AND b.terminal_published_at IS NOT NULL
            ) THEN 1 ELSE 0 END) AS terminal_count
-         FROM linked_bridge_queue q`
+         FROM linked_bridge_queue q`,
       )
       .toArray()[0];
     const open = this.openTurn();
@@ -1178,7 +1266,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       pendingCount: this.queuePendingCount(),
       queuedCount: Number(counts?.["queued_count"] ?? 0),
       acceptedCount: Number(counts?.["accepted_count"] ?? 0),
-      terminalPendingPublicationCount: Number(counts?.["terminal_pending_count"] ?? 0),
+      terminalPendingPublicationCount: Number(
+        counts?.["terminal_pending_count"] ?? 0,
+      ),
       terminalReceiptCount: Number(counts?.["terminal_count"] ?? 0),
       activeBatchId: open?.source === "channel" ? (open.batchId ?? null) : null,
       primaryChannelId: this.primaryChannelId(),
@@ -1214,7 +1304,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       .exec(
         `SELECT seq, terminal_outcome, terminal_at, terminal_turn_id
          FROM linked_bridge_queue WHERE dedupe_key = ?`,
-        dedupeKey
+        dedupeKey,
       )
       .toArray()[0];
     if (!row) return { found: false };
@@ -1226,7 +1316,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
            JOIN linked_delivery_batches b ON b.batch_id = a.batch_id
            WHERE a.seq = ? AND b.terminal_at IS NOT NULL
            ORDER BY b.terminal_at DESC LIMIT 1`,
-          Number(row["seq"])
+          Number(row["seq"]),
         )
         .toArray()[0];
       return {
@@ -1235,7 +1325,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           publication?.["terminal_published_at"] == null
             ? "terminal-pending-publication"
             : "terminal",
-        turnId: row["terminal_turn_id"] == null ? null : String(row["terminal_turn_id"]),
+        turnId:
+          row["terminal_turn_id"] == null
+            ? null
+            : String(row["terminal_turn_id"]),
         outcome: String(row["terminal_outcome"]) as DeliveryOutcome,
         terminalAt: Number(row["terminal_at"]),
       };
@@ -1246,7 +1339,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          FROM linked_delivery_attempts
          WHERE seq = ? AND superseded_at IS NULL
          ORDER BY offered_at DESC LIMIT 1`,
-        Number(row["seq"])
+        Number(row["seq"]),
       )
       .toArray()[0];
     if (!attempt) return { found: true, state: "queued", batchId: null };
@@ -1262,7 +1355,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   protected override async handleStandardAgentMethodCall(
     channelId: string,
     methodName: string,
-    args: unknown
+    args: unknown,
   ): Promise<{ result: unknown; isError?: boolean } | null> {
     switch (methodName) {
       case "prompt": {
@@ -1271,13 +1364,16 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           return { result: { error: "prompt requires text" }, isError: true };
         }
         if (!this.attachment()) {
-          return { result: { error: "agent offline: no attached session" }, isError: true };
+          return {
+            result: { error: "agent offline: no attached session" },
+            isError: true,
+          };
         }
         const seq = this.enqueueForBridge(
           "prompt",
           channelId,
           `prompt:${channelId}:${this.rpcRequestId ?? `${Date.now()}`}`,
-          { content: text, meta: { from: this.rpcCallerId ?? "channel" } }
+          { content: text, meta: { from: this.rpcCallerId ?? "channel" } },
         );
         if (seq !== null) {
           this.emitToBridge({
@@ -1292,7 +1388,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       }
       case "interrupt": {
         if (!this.attachment()) {
-          return { result: { error: "agent offline: no attached session" }, isError: true };
+          return {
+            result: { error: "agent offline: no attached session" },
+            isError: true,
+          };
         }
         this.emitToBridge({ kind: "interrupt" });
         return { result: { interrupted: true } };
@@ -1314,28 +1413,44 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     tier: "open",
     sensitivity: "write",
   })
-  async ingestHookEvent(opts: HookIngestOptions): Promise<{ ok: boolean; duplicate?: boolean }> {
+  async ingestHookEvent(
+    opts: HookIngestOptions,
+  ): Promise<{ ok: boolean; duplicate?: boolean }> {
     this.requireBridgeCaller("ingestHookEvent");
     const sessionId = String(opts?.bridgeSessionId ?? "");
     const seq = Number(opts?.seq);
-    if (!sessionId || sessionId.length > 128 || !Number.isInteger(seq) || seq < 1) {
+    if (
+      !sessionId ||
+      sessionId.length > 128 ||
+      !Number.isInteger(seq) ||
+      seq < 1
+    ) {
       throw new Error(
-        "ingestHookEvent requires a bounded bridgeSessionId and positive integer seq"
+        "ingestHookEvent requires a bounded bridgeSessionId and positive integer seq",
       );
     }
     const batchId = opts?.batchId == null ? null : String(opts.batchId);
     const interruptedBatchId =
       opts?.interruptedBatchId == null ? null : String(opts.interruptedBatchId);
-    if ((batchId?.length ?? 0) > 128 || (interruptedBatchId?.length ?? 0) > 128) {
+    if (
+      (batchId?.length ?? 0) > 128 ||
+      (interruptedBatchId?.length ?? 0) > 128
+    ) {
       throw new Error("ingestHookEvent batch identities must be bounded");
     }
-    const eventJson = JSON.stringify({ batchId, interruptedBatchId, event: opts.event });
+    const eventJson = JSON.stringify({
+      batchId,
+      interruptedBatchId,
+      event: opts.event,
+    });
     await this.recoverPendingHookApplications(sessionId, seq);
     const applicationKey = `${sessionId}:${seq}`;
     const active = this.hookApplications.get(applicationKey);
     if (active) {
       if (active.eventJson !== eventJson) {
-        throw new Error("ingestHookEvent rejected concurrent same-sequence payload drift");
+        throw new Error(
+          "ingestHookEvent rejected concurrent same-sequence payload drift",
+        );
       }
       await active.promise;
       return { ok: true, duplicate: true };
@@ -1353,7 +1468,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
 
   private async ingestHookEventOwned(
     opts: HookIngestOptions,
-    eventJson: string
+    eventJson: string,
   ): Promise<{ ok: boolean; duplicate?: boolean }> {
     const sessionId = String(opts.bridgeSessionId);
     const seq = Number(opts.seq);
@@ -1364,7 +1479,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       .exec(
         `SELECT event_json, applied_at FROM linked_hook_seqs WHERE session_id = ? AND seq = ?`,
         sessionId,
-        seq
+        seq,
       )
       .toArray()[0];
     if (existing) {
@@ -1379,12 +1494,12 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          (session_id, last_hook_seq, ended_at, created_at)
        VALUES (?, 0, NULL, ?)`,
       sessionId,
-      now
+      now,
     );
     const session = this.sql
       .exec(
         `SELECT last_hook_seq, ended_at FROM linked_bridge_sessions WHERE session_id = ?`,
-        sessionId
+        sessionId,
       )
       .toArray()[0];
     if (!session || session["ended_at"] != null) {
@@ -1392,7 +1507,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     }
     const lastSeq = Number(session["last_hook_seq"] ?? 0);
     if (!existing && seq !== lastSeq + 1) {
-      throw new Error(`ingestHookEvent expected sequence ${lastSeq + 1}, received ${seq}`);
+      throw new Error(
+        `ingestHookEvent expected sequence ${lastSeq + 1}, received ${seq}`,
+      );
     }
     if (!existing) {
       this.sql.exec(
@@ -1401,7 +1518,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         sessionId,
         seq,
         eventJson,
-        now
+        now,
       );
     }
 
@@ -1421,18 +1538,18 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       `UPDATE linked_hook_seqs SET applied_at = ? WHERE session_id = ? AND seq = ?`,
       appliedAt,
       sessionId,
-      seq
+      seq,
     );
     this.sql.exec(
       `UPDATE linked_bridge_sessions SET last_hook_seq = ? WHERE session_id = ?`,
       seq,
-      sessionId
+      sessionId,
     );
     if (opts.event.hook === "SessionEnd") {
       this.sql.exec(
         `UPDATE linked_bridge_sessions SET ended_at = ? WHERE session_id = ?`,
         appliedAt,
-        sessionId
+        sessionId,
       );
     }
     this.compactHookReceipts(sessionId);
@@ -1448,7 +1565,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
    */
   private async recoverPendingHookApplications(
     onlySessionId?: string,
-    beforeSeq?: number
+    beforeSeq?: number,
   ): Promise<void> {
     for (;;) {
       const conditions = ["applied_at IS NULL"];
@@ -1468,7 +1585,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
            WHERE ${conditions.join(" AND ")}
            ORDER BY created_at, session_id, seq
            LIMIT 1`,
-          ...bindings
+          ...bindings,
         )
         .toArray()[0];
       if (!row) return;
@@ -1479,7 +1596,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       const active = this.hookApplications.get(applicationKey);
       if (active) {
         if (active.eventJson !== eventJson) {
-          throw new Error("durable hook continuation drifted from its live application");
+          throw new Error(
+            "durable hook continuation drifted from its live application",
+          );
         }
         await active.promise;
         continue;
@@ -1493,7 +1612,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         bridgeSessionId,
         seq,
         ...(parsed.batchId ? { batchId: parsed.batchId } : {}),
-        ...(parsed.interruptedBatchId ? { interruptedBatchId: parsed.interruptedBatchId } : {}),
+        ...(parsed.interruptedBatchId
+          ? { interruptedBatchId: parsed.interruptedBatchId }
+          : {}),
         event: parsed.event,
       };
       const promise = this.ingestHookEventOwned(opts, eventJson);
@@ -1529,11 +1650,15 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       case "SessionStart": {
         this.setStateValue(
           SESSION_KEY,
-          JSON.stringify({ sessionId, model: event.model, cwd: event.cwd })
+          JSON.stringify({ sessionId, model: event.model, cwd: event.cwd }),
         );
         await this.appendTrajectory(channelId, [
           {
-            envelopeId: ids.systemEvent(`linked:${sessionId}`, "session-start", Math.round(seq)),
+            envelopeId: ids.systemEvent(
+              `linked:${sessionId}`,
+              "session-start",
+              Math.round(seq),
+            ),
             payloadKind: "system.event",
             payload: {
               protocol: AGENTIC_PROTOCOL_VERSION,
@@ -1548,7 +1673,12 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       }
       case "UserPromptSubmit": {
         if (interruptedBatchId) {
-          await this.terminalizeBatch(channelId, sessionId, interruptedBatchId, "interrupted");
+          await this.terminalizeBatch(
+            channelId,
+            sessionId,
+            interruptedBatchId,
+            "interrupted",
+          );
         }
         const turnId = this.turnIdFor(channelId, sessionId, event.turnKey);
         const existing = this.openTurn();
@@ -1562,7 +1692,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
             turnId,
             turnKey: event.turnKey,
             source: "local",
-          } satisfies OpenLinkedTurn)
+          } satisfies OpenLinkedTurn),
         );
         const messageId = `lm:${turnId}:user`;
         await this.appendTrajectory(channelId, [
@@ -1591,7 +1721,8 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         break;
       }
       case "PreToolUse": {
-        if (batchId) await this.activateBatch(channelId, sessionId, batchId, batchId);
+        if (batchId)
+          await this.activateBatch(channelId, sessionId, batchId, batchId);
         const invocationId = `linv:${sessionId}:${event.toolUseId}`;
         await this.appendTrajectory(channelId, [
           {
@@ -1602,7 +1733,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
               name: event.toolName,
               invocationType: "tool",
               userVisible: true,
-              ...(event.request !== undefined ? { request: event.request } : {}),
+              ...(event.request !== undefined
+                ? { request: event.request }
+                : {}),
             },
             causality: { invocationId, ...this.openTurnCausality() },
             publish: true,
@@ -1611,14 +1744,17 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         break;
       }
       case "PostToolUse": {
-        if (batchId) await this.activateBatch(channelId, sessionId, batchId, batchId);
+        if (batchId)
+          await this.activateBatch(channelId, sessionId, batchId, batchId);
         const invocationId = `linv:${sessionId}:${event.toolUseId}`;
         await this.appendTrajectory(channelId, [
           {
             envelopeId: ids.invocationTerminal(invocationId),
             payloadKind: "invocation.completed",
             payload: invocationCompletedPayload({
-              ...(event.outputSummary ? { summary: bounded(event.outputSummary, 2_000) } : {}),
+              ...(event.outputSummary
+                ? { summary: bounded(event.outputSummary, 2_000) }
+                : {}),
             }),
             causality: { invocationId, ...this.openTurnCausality() },
             publish: true,
@@ -1627,22 +1763,27 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         break;
       }
       case "PostToolUseFailure": {
-        if (batchId) await this.activateBatch(channelId, sessionId, batchId, batchId);
+        if (batchId)
+          await this.activateBatch(channelId, sessionId, batchId, batchId);
         const invocationId = `linv:${sessionId}:${event.toolUseId}`;
         await this.appendTrajectory(channelId, [
           {
             envelopeId: ids.invocationTerminal(invocationId),
             payloadKind: "invocation.failed",
-            payload: invocationFailedPayload("tool_error", bounded(event.error, 2_000), {
-              failure: agentToolFailureFromUnknown(
-                { message: event.error },
-                {
-                  operation: event.toolName ?? "external-tool",
-                  stage: "external-tool",
-                  causal: { invocationId },
-                }
-              ),
-            }),
+            payload: invocationFailedPayload(
+              "tool_error",
+              bounded(event.error, 2_000),
+              {
+                failure: agentToolFailureFromUnknown(
+                  { message: event.error },
+                  {
+                    operation: event.toolName ?? "external-tool",
+                    stage: "external-tool",
+                    causal: { invocationId },
+                  },
+                ),
+              },
+            ),
             causality: { invocationId, ...this.openTurnCausality() },
             publish: true,
           },
@@ -1652,17 +1793,25 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       case "Stop": {
         const open = batchId
           ? (this.terminalTurnForBatch(batchId, sessionId) ??
-            (await this.activateBatch(channelId, sessionId, batchId, event.turnKey)))
+            (await this.activateBatch(
+              channelId,
+              sessionId,
+              batchId,
+              event.turnKey,
+            )))
           : this.openTurn();
         if (!open) {
           throw new Error(
-            `linked Stop ${event.turnKey} has no captured prompt or received message; refusing to invent turn causality`
+            `linked Stop ${event.turnKey} has no captured prompt or received message; refusing to invent turn causality`,
           );
         }
         const turnId = open.turnId;
         const messageId = `lm:${turnId}:final`;
         const items: TrajectoryItem[] = [];
-        if (typeof event.finalText === "string" && event.finalText.trim().length > 0) {
+        if (
+          typeof event.finalText === "string" &&
+          event.finalText.trim().length > 0
+        ) {
           // Mirrored final assistant message (plan §7.5): visible in trajectory
           // and cards, tier "secondary" and no say-saliency — not spoken INTO the
           // conversation; respond policies keep it from waking other agents.
@@ -1694,7 +1843,8 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           causality: { turnId },
           publish: true,
         });
-        if (batchId) this.prepareBatchTerminal(batchId, sessionId, turnId, "completed");
+        if (batchId)
+          this.prepareBatchTerminal(batchId, sessionId, turnId, "completed");
         this.setStateValue(OPEN_TURN_KEY, "");
         await this.appendTrajectory(channelId, items);
         if (batchId) this.finishBatchTerminalPublication(batchId, sessionId);
@@ -1703,10 +1853,16 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       case "StopFailure": {
         const open = batchId
           ? (this.terminalTurnForBatch(batchId, sessionId) ??
-            (await this.activateBatch(channelId, sessionId, batchId, event.turnKey)))
+            (await this.activateBatch(
+              channelId,
+              sessionId,
+              batchId,
+              event.turnKey,
+            )))
           : this.openTurn();
         if (!open) throw new Error("linked StopFailure has no active turn");
-        if (batchId) this.prepareBatchTerminal(batchId, sessionId, open.turnId, "failed");
+        if (batchId)
+          this.prepareBatchTerminal(batchId, sessionId, open.turnId, "failed");
         this.setStateValue(OPEN_TURN_KEY, "");
         await this.appendTrajectory(channelId, [
           {
@@ -1714,7 +1870,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
             payloadKind: "turn.closed",
             payload: {
               protocol: AGENTIC_PROTOCOL_VERSION,
-              reason: bounded(`Claude API failure: ${event.errorDetails ?? event.error}`, 512),
+              reason: bounded(
+                `Claude API failure: ${event.errorDetails ?? event.error}`,
+                512,
+              ),
             },
             causality: { turnId: open.turnId },
             publish: true,
@@ -1730,7 +1889,11 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         }
         await this.appendTrajectory(channelId, [
           {
-            envelopeId: ids.systemEvent(`linked:${sessionId}`, "session-end", Math.round(seq)),
+            envelopeId: ids.systemEvent(
+              `linked:${sessionId}`,
+              "session-end",
+              Math.round(seq),
+            ),
             payloadKind: "system.event",
             payload: {
               protocol: AGENTIC_PROTOCOL_VERSION,
@@ -1741,22 +1904,32 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           },
         ]);
         if (open?.bridgeSessionId === sessionId) {
-          await this.closeOpenTurn("linked session ended before a terminal hook");
+          await this.closeOpenTurn(
+            "linked session ended before a terminal hook",
+          );
         }
         break;
       }
     }
   }
 
-  private turnIdFor(channelId: string, sessionId: string, turnKey: string): string {
-    return ids.turnId(channelId, `hook:${sessionId}:${turnKey}`, this.participantId());
+  private turnIdFor(
+    channelId: string,
+    sessionId: string,
+    turnKey: string,
+  ): string {
+    return ids.turnId(
+      channelId,
+      `hook:${sessionId}:${turnKey}`,
+      this.participantId(),
+    );
   }
 
   private async activateBatch(
     channelId: string,
     bridgeSessionId: string,
     batchId: string,
-    turnKey: string
+    turnKey: string,
   ): Promise<OpenLinkedTurn> {
     const open = this.openTurn();
     if (open) {
@@ -1767,13 +1940,15 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           open.batchId === batchId
         )
       )
-        throw new Error("linked channel batch cannot replace another active turn");
+        throw new Error(
+          "linked channel batch cannot replace another active turn",
+        );
     }
     const batch = this.sql
       .exec(
         `SELECT bridge_session_id, turn_id, opened_published_at, terminal_at
          FROM linked_delivery_batches WHERE batch_id = ?`,
-        batchId
+        batchId,
       )
       .toArray()[0];
     if (
@@ -1781,7 +1956,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       String(batch["bridge_session_id"]) !== bridgeSessionId ||
       batch["terminal_at"] != null
     ) {
-      throw new Error("linked hook references a foreign or terminal delivery batch");
+      throw new Error(
+        "linked hook references a foreign or terminal delivery batch",
+      );
     }
     const first = this.sql
       .exec(
@@ -1796,10 +1973,11 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          ORDER BY q.seq
          LIMIT 1`,
         batchId,
-        bridgeSessionId
+        bridgeSessionId,
       )
       .toArray()[0];
-    if (!first) throw new Error("linked hook batch has no accepted delivery members");
+    if (!first)
+      throw new Error("linked hook batch has no accepted delivery members");
     const row: QueueRow = {
       seq: Number(first["seq"]),
       kind: String(first["kind"]),
@@ -1807,7 +1985,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       payload: JSON.parse(String(first["payload"])) as Record<string, unknown>,
     };
     if (row.channelId !== channelId) {
-      throw new Error("linked hook batch channel drifted from the vessel primary channel");
+      throw new Error(
+        "linked hook batch channel drifted from the vessel primary channel",
+      );
     }
     const turnId =
       open?.turnId ??
@@ -1815,14 +1995,16 @@ export class LinkedAgentWorker extends AgentWorkerBase {
         ? ids.turnId(
             channelId,
             `bridge:${bridgeSessionId}:${batchId}:${turnKey}`,
-            this.participantId()
+            this.participantId(),
           )
         : String(batch["turn_id"]));
     const items: TrajectoryItem[] = [];
     if (row.kind === "message") {
       const triggerMessageId = row.payload["triggerMessageId"];
       if (typeof triggerMessageId !== "string" || !triggerMessageId) {
-        throw new Error(`linked queue row ${row.seq} has no canonical trigger message identity`);
+        throw new Error(
+          `linked queue row ${row.seq} has no canonical trigger message identity`,
+        );
       }
       items.push(this.triggeredTurnOpenedItem(turnId, triggerMessageId));
     } else {
@@ -1835,7 +2017,9 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           payload: {
             protocol: AGENTIC_PROTOCOL_VERSION,
             role: "user",
-            blocks: [{ blockId: `${messageId}:block:0`, type: "text", content }],
+            blocks: [
+              { blockId: `${messageId}:block:0`, type: "text", content },
+            ],
             outcome: "completed",
             tier: "primary",
             metadata: { source: "channel-command" },
@@ -1843,7 +2027,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
           causality: { turnId, messageId },
           publish: true,
         },
-        this.triggeredTurnOpenedItem(turnId, messageId)
+        this.triggeredTurnOpenedItem(turnId, messageId),
       );
     }
     this.sql.exec(
@@ -1853,7 +2037,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       turnId,
       Date.now(),
       batchId,
-      bridgeSessionId
+      bridgeSessionId,
     );
     const active: OpenLinkedTurn = {
       turnId,
@@ -1871,7 +2055,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
        WHERE batch_id = ? AND bridge_session_id = ?`,
       Date.now(),
       batchId,
-      bridgeSessionId
+      bridgeSessionId,
     );
     return active;
   }
@@ -1880,16 +2064,19 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     channelId: string,
     bridgeSessionId: string,
     batchId: string,
-    outcome: DeliveryOutcome
+    outcome: DeliveryOutcome,
   ): Promise<void> {
-    const open = this.terminalTurnForBatch(batchId, bridgeSessionId) ?? this.openTurn();
+    const open =
+      this.terminalTurnForBatch(batchId, bridgeSessionId) ?? this.openTurn();
     if (
       !open ||
       open.source !== "channel" ||
       open.bridgeSessionId !== bridgeSessionId ||
       open.batchId !== batchId
     ) {
-      throw new Error("linked terminal receipt does not own the active delivery batch");
+      throw new Error(
+        "linked terminal receipt does not own the active delivery batch",
+      );
     }
     this.prepareBatchTerminal(batchId, bridgeSessionId, open.turnId, outcome);
     this.setStateValue(OPEN_TURN_KEY, "");
@@ -1909,21 +2096,26 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     batchId: string,
     bridgeSessionId: string,
     turnId: string,
-    outcome: DeliveryOutcome
+    outcome: DeliveryOutcome,
   ): void {
     const now = Date.now();
     const batch = this.sql
       .exec(
         `SELECT bridge_session_id, turn_id, outcome, terminal_at
          FROM linked_delivery_batches WHERE batch_id = ?`,
-        batchId
+        batchId,
       )
       .toArray()[0];
     if (!batch || String(batch["bridge_session_id"]) !== bridgeSessionId) {
-      throw new Error("linked terminal receipt references a foreign delivery batch");
+      throw new Error(
+        "linked terminal receipt references a foreign delivery batch",
+      );
     }
     if (batch["terminal_at"] != null) {
-      if (String(batch["outcome"]) !== outcome || String(batch["turn_id"]) !== turnId) {
+      if (
+        String(batch["outcome"]) !== outcome ||
+        String(batch["turn_id"]) !== turnId
+      ) {
         throw new Error("linked terminal receipt drifted after persistence");
       }
       return;
@@ -1935,7 +2127,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       turnId,
       outcome,
       now,
-      batchId
+      batchId,
     );
     this.sql.exec(
       `UPDATE linked_bridge_queue
@@ -1951,11 +2143,14 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       now,
       turnId,
       batchId,
-      bridgeSessionId
+      bridgeSessionId,
     );
   }
 
-  private finishBatchTerminalPublication(batchId: string, bridgeSessionId: string): void {
+  private finishBatchTerminalPublication(
+    batchId: string,
+    bridgeSessionId: string,
+  ): void {
     const publishedAt = Date.now();
     this.sql.exec(
       `UPDATE linked_delivery_batches
@@ -1963,7 +2158,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
        WHERE batch_id = ? AND bridge_session_id = ? AND terminal_at IS NOT NULL`,
       publishedAt,
       batchId,
-      bridgeSessionId
+      bridgeSessionId,
     );
     this.sql.exec(
       `UPDATE linked_bridge_queue SET payload = '{}'
@@ -1972,21 +2167,25 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          WHERE batch_id = ? AND bridge_session_id = ?
        )`,
       batchId,
-      bridgeSessionId
+      bridgeSessionId,
     );
     this.compactTerminalReceipts();
   }
 
-  private terminalTurnForBatch(batchId: string, bridgeSessionId: string): OpenLinkedTurn | null {
+  private terminalTurnForBatch(
+    batchId: string,
+    bridgeSessionId: string,
+  ): OpenLinkedTurn | null {
     const batch = this.sql
       .exec(
         `SELECT turn_id, terminal_at FROM linked_delivery_batches
          WHERE batch_id = ? AND bridge_session_id = ?`,
         batchId,
-        bridgeSessionId
+        bridgeSessionId,
       )
       .toArray()[0];
-    if (!batch || batch["terminal_at"] == null || batch["turn_id"] == null) return null;
+    if (!batch || batch["terminal_at"] == null || batch["turn_id"] == null)
+      return null;
     return {
       turnId: String(batch["turn_id"]),
       turnKey: batchId,
@@ -1996,14 +2195,18 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     };
   }
 
-  private abandonBatch(batchId: string, bridgeSessionId: string, at: number): void {
+  private abandonBatch(
+    batchId: string,
+    bridgeSessionId: string,
+    at: number,
+  ): void {
     this.sql.exec(
       `UPDATE linked_delivery_attempts
        SET superseded_at = COALESCE(superseded_at, ?)
        WHERE batch_id = ? AND bridge_session_id = ?`,
       at,
       batchId,
-      bridgeSessionId
+      bridgeSessionId,
     );
     this.sql.exec(
       `UPDATE linked_delivery_batches
@@ -2011,7 +2214,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
        WHERE batch_id = ? AND bridge_session_id = ?`,
       at,
       batchId,
-      bridgeSessionId
+      bridgeSessionId,
     );
   }
 
@@ -2031,7 +2234,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
            )
          ORDER BY terminal_at DESC, seq DESC
          LIMIT -1 OFFSET ?`,
-        TERMINAL_RECEIPT_LIMIT
+        TERMINAL_RECEIPT_LIMIT,
       )
       .toArray()
       .map((row) => Number(row["seq"]));
@@ -2044,7 +2247,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
        WHERE terminal_published_at IS NOT NULL
          AND batch_id NOT IN (
            SELECT batch_id FROM linked_delivery_attempts WHERE batch_id IS NOT NULL
-         )`
+         )`,
     );
   }
 
@@ -2059,7 +2262,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
        )`,
       sessionId,
       sessionId,
-      HOOK_RECEIPT_LIMIT
+      HOOK_RECEIPT_LIMIT,
     );
     const expiredSessions = this.sql
       .exec(
@@ -2067,13 +2270,19 @@ export class LinkedAgentWorker extends AgentWorkerBase {
          WHERE ended_at IS NOT NULL
          ORDER BY ended_at DESC
          LIMIT -1 OFFSET ?`,
-        ENDED_HOOK_SESSION_LIMIT
+        ENDED_HOOK_SESSION_LIMIT,
       )
       .toArray()
       .map((row) => String(row["session_id"]));
     for (const expired of expiredSessions) {
-      this.sql.exec(`DELETE FROM linked_hook_seqs WHERE session_id = ?`, expired);
-      this.sql.exec(`DELETE FROM linked_bridge_sessions WHERE session_id = ?`, expired);
+      this.sql.exec(
+        `DELETE FROM linked_hook_seqs WHERE session_id = ?`,
+        expired,
+      );
+      this.sql.exec(
+        `DELETE FROM linked_bridge_sessions WHERE session_id = ?`,
+        expired,
+      );
     }
   }
 
@@ -2092,7 +2301,10 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     return open ? { turnId: open.turnId } : {};
   }
 
-  private triggeredTurnOpenedItem(turnId: string, triggerMessageId: string): TrajectoryItem {
+  private triggeredTurnOpenedItem(
+    turnId: string,
+    triggerMessageId: string,
+  ): TrajectoryItem {
     return {
       envelopeId: ids.turnOpened(turnId),
       payloadKind: "turn.opened",
@@ -2112,14 +2324,20 @@ export class LinkedAgentWorker extends AgentWorkerBase {
       {
         envelopeId: ids.turnClosed(open.turnId),
         payloadKind: "turn.closed",
-        payload: { protocol: AGENTIC_PROTOCOL_VERSION, reason: bounded(reason, 512) },
+        payload: {
+          protocol: AGENTIC_PROTOCOL_VERSION,
+          reason: bounded(reason, 512),
+        },
         causality: { turnId: open.turnId },
         publish: true,
       },
     ]);
   }
 
-  private async appendTrajectory(channelId: string, items: TrajectoryItem[]): Promise<void> {
+  private async appendTrajectory(
+    channelId: string,
+    items: TrajectoryItem[],
+  ): Promise<void> {
     if (items.length === 0) return;
     const { logId, head } = channelTrajectoryFor(channelId);
     const selfRef = this.selfRef(channelId);

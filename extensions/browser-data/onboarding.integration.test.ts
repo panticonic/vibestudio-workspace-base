@@ -53,16 +53,10 @@ describe("onboarding browser-data component chain", () => {
         stream: vi.fn(async () => new Response()),
       },
       workers: {
-        resolveService: vi.fn(async (protocol: string) => ({
+        resolveService: vi.fn(async () => ({
           kind: "durable-object" as const,
-          targetId:
-            protocol === "vibestudio.browser-data.v1"
-              ? "do:workers/browser-data:BrowserDataDO:browser:user-1"
-              : "do:vibestudio/internal:BrowserVaultDO:environment-key",
-          objectKey:
-            protocol === "vibestudio.browser-data.v1"
-              ? "browser:user-1"
-              : "environment-key",
+          targetId: "do:workers/browser-data:BrowserDataDO:browser:user-1",
+          objectKey: "browser:user-1",
         })),
       },
       invocation: {

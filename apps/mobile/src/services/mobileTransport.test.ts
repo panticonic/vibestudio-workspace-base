@@ -56,6 +56,7 @@ const storedCredential: StoredRoutedMobileConnection = {
 function makeRpc(overrides: Partial<RpcClient> = {}): RpcClient {
   return {
     selfId: `shell:${DEVICE_ID}`,
+    expose: jest.fn(),
     call: jest.fn(),
     emit: jest.fn(),
     on: jest.fn(() => jest.fn()),
@@ -122,6 +123,43 @@ describe("MobileRpcClient WebRTC transport", () => {
     expect(client.status).toBe("connected");
     await expect(client.call("main", "demo.hello", ["world"])).resolves.toEqual({ ok: true });
     expect(rpc.call).toHaveBeenCalledWith("main", "demo.hello", ["world"], undefined);
+  });
+
+  it("exposes shell presentation handlers before connect and reattaches them after reconnect", async () => {
+    const firstRpc = makeRpc();
+    const secondRpc = makeRpc();
+    const firstConnection = makeConnection({ rpc: firstRpc });
+    const secondConnection = makeConnection({ rpc: secondRpc });
+    mockReconnectMobileSession
+      .mockResolvedValueOnce(firstConnection)
+      .mockResolvedValueOnce(secondConnection);
+    const client = new MobileRpcClient({});
+    const handler = jest.fn(async () => undefined);
+
+    client.expose("mobileBrowserPrivacyPresentation.open", handler);
+    expect(firstRpc.expose).not.toHaveBeenCalled();
+
+    await client.connectAndWait();
+    expect(firstRpc.expose).toHaveBeenCalledWith(
+      "mobileBrowserPrivacyPresentation.open",
+      handler
+    );
+
+    await client.close();
+    await client.connectAndWait();
+    expect(secondRpc.expose).toHaveBeenCalledWith(
+      "mobileBrowserPrivacyPresentation.open",
+      handler
+    );
+  });
+
+  it("rejects duplicate exposed shell methods instead of replacing live authority", () => {
+    const client = new MobileRpcClient({});
+    client.expose("mobileBrowserPrivacyPresentation.open", async () => undefined);
+
+    expect(() =>
+      client.expose("mobileBrowserPrivacyPresentation.open", async () => undefined)
+    ).toThrow('Mobile RPC method "mobileBrowserPrivacyPresentation.open" is already exposed');
   });
 
   it("routes only hubControl calls over the retained stable hub pipe", async () => {

@@ -226,9 +226,6 @@ singletonObjects:
   - source: workers/workspace-source
     className: GadWorkspaceDO
     key: workspace
-  - source: workers/browser-data
-    className: BrowserDataDO
-    key: workspace-browser-data
   - source: workers/workspace-presentation
     className: WorkspacePresentationDO
     key: workspace-presentation

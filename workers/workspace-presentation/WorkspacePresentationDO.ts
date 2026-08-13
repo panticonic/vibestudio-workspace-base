@@ -19,10 +19,6 @@ export class WorkspacePresentationDO extends DurableObjectBase {
     super(ctx, env);
   }
 
-  protected override rpcSchemaCodeSource(): string | null {
-    return "workers/workspace-presentation";
-  }
-
   protected createTables(): void {
     this.sql.exec(`
       CREATE TABLE entity_titles (

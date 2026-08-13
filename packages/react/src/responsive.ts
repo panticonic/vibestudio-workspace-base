@@ -13,22 +13,20 @@ export type VibestudioHostPlatform = "mobile" | "electron";
 
 export function resolveVibestudioHostPlatform(
   explicitPlatform: unknown,
-  userAgent: string
 ): VibestudioHostPlatform {
   if (explicitPlatform === "mobile") return "mobile";
-  if (/\bVibestudio-Mobile\//.test(userAgent)) return "mobile";
   return "electron";
 }
 
 /**
  * Resolve the trusted shell that owns this panel's outer chrome. The native
- * mobile WebView injects an explicit value before userland executes; the user
- * agent fallback preserves compatibility with older native hosts.
+ * mobile WebView injects an explicit value before userland executes. Absence is
+ * the desktop/headless contract; user-agent strings carry no authority.
  */
 export function getVibestudioHostPlatform(): VibestudioHostPlatform {
   return resolveVibestudioHostPlatform(
-    (globalThis as { __vibestudioHostPlatform?: unknown }).__vibestudioHostPlatform,
-    typeof navigator === "undefined" ? "" : navigator.userAgent
+    (globalThis as { __vibestudioHostPlatform?: unknown })
+      .__vibestudioHostPlatform,
   );
 }
 
@@ -54,7 +52,11 @@ function getMobileServerSnapshot(): boolean {
 
 /** True when viewport width < 768px. For behavior branching, not layout. */
 export function useIsMobile(): boolean {
-  return useSyncExternalStore(subscribeMobile, getMobileSnapshot, getMobileServerSnapshot);
+  return useSyncExternalStore(
+    subscribeMobile,
+    getMobileSnapshot,
+    getMobileServerSnapshot,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -79,7 +81,11 @@ function getTouchServerSnapshot(): boolean {
 
 /** True when primary pointer is coarse (touch). For hover-vs-always-visible decisions. */
 export function useTouchDevice(): boolean {
-  return useSyncExternalStore(subscribeTouch, getTouchSnapshot, getTouchServerSnapshot);
+  return useSyncExternalStore(
+    subscribeTouch,
+    getTouchSnapshot,
+    getTouchServerSnapshot,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -113,6 +119,6 @@ export function useViewportHeight(): number {
   return useSyncExternalStore(
     subscribeViewportHeight,
     getViewportHeightSnapshot,
-    getViewportHeightServerSnapshot
+    getViewportHeightServerSnapshot,
   );
 }

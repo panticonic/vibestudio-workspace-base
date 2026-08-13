@@ -62,13 +62,6 @@ export const mobileTests: TestCase[] = [
           tier: "gated",
           decision: "once",
         },
-        {
-          ruleId: "onboarding-desktop-connected-client-transport",
-          capability: { kind: "exact", key: "connected-client.transport" },
-          resource: { kind: "exact", key: "connected-client.transport" },
-          tier: "gated",
-          decision: "once",
-        },
       ],
     },
     prompt: [

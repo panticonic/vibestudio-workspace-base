@@ -25,9 +25,14 @@
           "tier": "gated",
           "sensitivity": "write",
           "resourceType": "mission",
-          "presentation": { "domain": "automation", "verb": "manage" },
+          "presentation": {
+            "domain": "automation",
+            "verb": "manage"
+          },
           "notability": "headline",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         },
         {
           "name": "missions.run",
@@ -36,9 +41,14 @@
           "tier": "gated",
           "sensitivity": "write",
           "resourceType": "mission",
-          "presentation": { "domain": "automation", "verb": "act" },
+          "presentation": {
+            "domain": "automation",
+            "verb": "act"
+          },
           "notability": "headline",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         },
         {
           "name": "missions.pause",
@@ -47,9 +57,14 @@
           "tier": "gated",
           "sensitivity": "write",
           "resourceType": "mission",
-          "presentation": { "domain": "automation", "verb": "manage" },
+          "presentation": {
+            "domain": "automation",
+            "verb": "manage"
+          },
           "notability": "headline",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         },
         {
           "name": "missions.retire",
@@ -58,9 +73,14 @@
           "tier": "critical",
           "sensitivity": "destructive",
           "resourceType": "mission",
-          "presentation": { "domain": "automation", "verb": "manage" },
+          "presentation": {
+            "domain": "automation",
+            "verb": "manage"
+          },
           "notability": "headline",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         }
       ],
       "requests": [
@@ -111,6 +131,6 @@
   "devDependencies": {
     "@vibestudio/durable": "workspace:*",
     "@vibestudio/rpc": "workspace:*",
-    "vitest": "^3.2.2"
+    "vitest": "3.2.7"
   }
 }

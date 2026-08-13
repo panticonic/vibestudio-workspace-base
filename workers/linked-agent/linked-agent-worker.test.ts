@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { createTestDO } from "@workspace/runtime/worker/test-utils";
-import { AGENTIC_EVENT_PAYLOAD_KIND, AGENTIC_PROTOCOL_VERSION } from "@workspace/agentic-protocol";
+import {
+  AGENTIC_EVENT_PAYLOAD_KIND,
+  AGENTIC_PROTOCOL_VERSION,
+} from "@workspace/agentic-protocol";
 import { readChannelSubscriptionRecords } from "@workspace/pubsub";
 
 import { LinkedAgentWorker } from "./linked-agent-worker.js";
@@ -11,7 +14,10 @@ const OBJECT_KEY = ENTITY; // vessel is keyed by the entity it serves
 
 describe("linked-agent worker entry", () => {
   it("exports only workerd handler/class values at runtime", () => {
-    expect(Object.keys(workerEntry).sort()).toEqual(["LinkedAgentWorker", "default"]);
+    expect(Object.keys(workerEntry).sort()).toEqual([
+      "LinkedAgentWorker",
+      "default",
+    ]);
   });
 });
 
@@ -21,7 +27,8 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
   testCallerId: string | null = `agent:${ENTITY}`;
   testCallerKind: string | null = "agent";
 
-  readonly gadCalls: Array<{ method: string; args: Record<string, unknown> }> = [];
+  readonly gadCalls: Array<{ method: string; args: Record<string, unknown> }> =
+    [];
   readonly published: Array<{ event: unknown }> = [];
   readonly signals: Array<{ event: unknown }> = [];
   failLogAppend = false;
@@ -36,28 +43,32 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
     return this.testCallerKind;
   }
 
-  readonly rpcCall = vi.fn(async (target: string, method: string, args: unknown[]) => {
-    if (target === "main" && method === "vcs.status") {
-      const contextId = String(
-        (args[0] as { contextId?: unknown } | undefined)?.contextId ?? "ctx-1"
-      );
-      return {
-        contextId,
-        clean: true,
-        committed: { kind: "event", eventId: "child-source-event" },
-        workingHead: { kind: "event", eventId: "child-source-event" },
-        mainEventId: "main-source-event",
-        mainRelation: "ahead",
-        workingCounts: { applications: 0, workUnits: 0, changes: 0 },
-        integrating: [],
-      };
-    }
-    if (target === "main" && method === "contextIntegrity.ingest") {
-      return { class: "internal", latchEpoch: 0, externalKeys: [] };
-    }
-    if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
-    throw new Error(`unexpected rpc ${target}.${method}`);
-  });
+  readonly rpcCall = vi.fn(
+    async (target: string, method: string, args: unknown[]) => {
+      if (target === "main" && method === "vcs.status") {
+        const contextId = String(
+          (args[0] as { contextId?: unknown } | undefined)?.contextId ??
+            "ctx-1",
+        );
+        return {
+          contextId,
+          clean: true,
+          committed: { kind: "event", eventId: "child-source-event" },
+          workingHead: { kind: "event", eventId: "child-source-event" },
+          mainEventId: "main-source-event",
+          mainRelation: "ahead",
+          workingCounts: { applications: 0, workUnits: 0, changes: 0 },
+          integrating: [],
+        };
+      }
+      if (target === "main" && method === "contextIntegrity.ingest") {
+        return { class: "internal", latchEpoch: 0, externalKeys: [] };
+      }
+      if (target === "main" && method.startsWith("workspace-state.alarm"))
+        return undefined;
+      throw new Error(`unexpected rpc ${target}.${method}`);
+    },
+  );
 
   protected override get rpc(): never {
     return {
@@ -65,12 +76,21 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
     } as never;
   }
 
-  protected override async callGad<T>(method: string, ...args: unknown[]): Promise<T> {
-    this.gadCalls.push({ method, args: (args[0] ?? {}) as Record<string, unknown> });
+  protected override async callGad<T>(
+    method: string,
+    ...args: unknown[]
+  ): Promise<T> {
+    this.gadCalls.push({
+      method,
+      args: (args[0] ?? {}) as Record<string, unknown>,
+    });
     if (method === "appendLogEvent") {
       await this.appendBarrier;
-      if (this.failLogAppend) throw new Error("simulated replay append failure");
-      const input = (args[0] ?? {}) as { events?: Array<{ envelopeId: string }> };
+      if (this.failLogAppend)
+        throw new Error("simulated replay append failure");
+      const input = (args[0] ?? {}) as {
+        events?: Array<{ envelopeId: string }>;
+      };
       return {
         envelopes: (input.events ?? []).map((event, index) => ({
           envelopeId: event.envelopeId,
@@ -105,7 +125,11 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
         this.published.push({ event });
         return { id: this.published.length };
       },
-      sendSignalEvent: async (_participantId: string, _payloadKind: string, event: unknown) => {
+      sendSignalEvent: async (
+        _participantId: string,
+        _payloadKind: string,
+        event: unknown,
+      ) => {
         this.signals.push({ event });
       },
       send: async () => undefined,
@@ -138,7 +162,7 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
       Date.now(),
       null,
       JSON.stringify({ test: true }),
-      participantId
+      participantId,
     );
   }
 
@@ -151,23 +175,33 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
   }
 
   queueRows(): Array<Record<string, unknown>> {
-    return this.sql.exec(`SELECT * FROM linked_bridge_queue ORDER BY seq`).toArray();
+    return this.sql
+      .exec(`SELECT * FROM linked_bridge_queue ORDER BY seq`)
+      .toArray();
   }
 
   attemptRows(): Array<Record<string, unknown>> {
-    return this.sql.exec(`SELECT * FROM linked_delivery_attempts ORDER BY offered_at`).toArray();
+    return this.sql
+      .exec(`SELECT * FROM linked_delivery_attempts ORDER BY offered_at`)
+      .toArray();
   }
 
   batchRows(): Array<Record<string, unknown>> {
-    return this.sql.exec(`SELECT * FROM linked_delivery_batches ORDER BY created_at`).toArray();
+    return this.sql
+      .exec(`SELECT * FROM linked_delivery_batches ORDER BY created_at`)
+      .toArray();
   }
 
   hookRows(): Array<Record<string, unknown>> {
-    return this.sql.exec(`SELECT * FROM linked_hook_seqs ORDER BY session_id, seq`).toArray();
+    return this.sql
+      .exec(`SELECT * FROM linked_hook_seqs ORDER BY session_id, seq`)
+      .toArray();
   }
 
   bridgeSessionRows(): Array<Record<string, unknown>> {
-    return this.sql.exec(`SELECT * FROM linked_bridge_sessions ORDER BY created_at`).toArray();
+    return this.sql
+      .exec(`SELECT * FROM linked_bridge_sessions ORDER BY created_at`)
+      .toArray();
   }
 
   terminalIntentRows(): Array<Record<string, unknown>> {
@@ -176,20 +210,9 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
         `SELECT wake_id, channel_id, wake_kind, payload_json, disposition
            FROM agent_wake_queue
           WHERE wake_kind = 'subagent-terminal-publish'
-          ORDER BY created_at`
+          ORDER BY created_at`,
       )
       .toArray();
-  }
-
-  migrateLegacyForTest(): void {
-    this.setStateValue("linked:deliverySchema", "");
-    this.setStateValue("linked:ackSeq", "8");
-    this.setStateValue("linked:processedSeq", "7");
-    (this as unknown as { migrateLegacyDeliveryState(): void }).migrateLegacyDeliveryState();
-  }
-
-  legacyCursorForTest(key: string): string | null {
-    return this.getStateValue(key);
   }
 
   seedTerminalReceiptsForTest(count: number): void {
@@ -205,9 +228,9 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
             `terminal:${index}`,
             index,
             index,
-            `turn-${index}`
+            `turn-${index}`,
           )
-          .toArray()[0]?.["seq"]
+          .toArray()[0]?.["seq"],
       );
       this.sql.exec(
         `INSERT INTO linked_delivery_batches
@@ -220,7 +243,7 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
         index,
         index,
         index,
-        index
+        index,
       );
       this.sql.exec(
         `INSERT INTO linked_delivery_attempts
@@ -231,10 +254,12 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
         seq,
         index,
         index,
-        `receipt-batch-${index}`
+        `receipt-batch-${index}`,
       );
     }
-    (this as unknown as { compactTerminalReceipts(): void }).compactTerminalReceipts();
+    (
+      this as unknown as { compactTerminalReceipts(): void }
+    ).compactTerminalReceipts();
   }
 
   seedBridgeQueue(count: number, contentBytes: number): void {
@@ -244,8 +269,12 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
         `INSERT INTO linked_bridge_queue (dedupe_key, kind, channel_id, payload, created_at)
          VALUES (?, 'message', 'ch-1', ?, ?)`,
         `seed:${index}`,
-        JSON.stringify({ content, triggerMessageId: `message-${index}`, meta: {} }),
-        Date.now()
+        JSON.stringify({
+          content,
+          triggerMessageId: `message-${index}`,
+          meta: {},
+        }),
+        Date.now(),
       );
     }
   }
@@ -253,25 +282,30 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
   bridgeDesiredSize(): number | null | undefined {
     return (
       this as unknown as {
-        bridgeStream: { controller: ReadableStreamDefaultController<Uint8Array> } | null;
+        bridgeStream: {
+          controller: ReadableStreamDefaultController<Uint8Array>;
+        } | null;
       }
     ).bridgeStream?.controller.desiredSize;
   }
 
   async processSubscriptionReplayEventForTest(
     channelId: string,
-    event: ReturnType<typeof completedMessageEvent>
+    event: ReturnType<typeof completedMessageEvent>,
   ): Promise<void> {
     await (
       this as unknown as {
-        processSubscriptionReplayEvent(channelId: string, event: unknown): Promise<void>;
+        processSubscriptionReplayEvent(
+          channelId: string,
+          event: unknown,
+        ): Promise<void>;
       }
     ).processSubscriptionReplayEvent(channelId, event);
   }
 
   async deliverDurableChannelEventForTest(
     channelId: string,
-    event: ReturnType<typeof completedMessageEvent>
+    event: ReturnType<typeof completedMessageEvent>,
   ): Promise<void> {
     this.ensureIdentity();
     try {
@@ -312,7 +346,8 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
     } catch (error) {
       if (
         !(error instanceof Error) ||
-        error.message !== "markWorkReady requires an active Durable Object request"
+        error.message !==
+          "markWorkReady requires an active Durable Object request"
       ) {
         throw error;
       }
@@ -347,10 +382,13 @@ type TestBridge = {
 async function openTestBridge(
   worker: TestableLinkedAgentWorker,
   sessionInfo: Record<string, unknown> = {},
-  bridgeSessionId = "bridge-session-1"
+  bridgeSessionId = "bridge-session-1",
 ): Promise<TestBridge> {
   const response = await worker.openBridge({ bridgeSessionId, sessionInfo });
-  const records = readChannelSubscriptionRecords<BridgeAck, Record<string, unknown>>(response);
+  const records = readChannelSubscriptionRecords<
+    BridgeAck,
+    Record<string, unknown>
+  >(response);
   const first = await records.next();
   if (first.done || first.value.kind !== "subscribed") {
     throw new Error("linked bridge did not start with its subscription ACK");
@@ -362,7 +400,7 @@ async function acceptBridgePayload(
   worker: TestableLinkedAgentWorker,
   bridge: TestBridge,
   payload: Record<string, unknown>,
-  batchId: string
+  batchId: string,
 ): Promise<void> {
   await worker.acceptDelivery({
     bridgeSessionId: bridge.ack.bridgeSessionId,
@@ -372,7 +410,9 @@ async function acceptBridgePayload(
   });
 }
 
-async function nextBridgePayload(bridge: TestBridge): Promise<Record<string, unknown>> {
+async function nextBridgePayload(
+  bridge: TestBridge,
+): Promise<Record<string, unknown>> {
   const next = await bridge.records.next();
   if (next.done || next.value.kind !== "message") {
     throw new Error("linked bridge closed before its next payload");
@@ -465,20 +505,28 @@ describe("LinkedAgentWorker", () => {
   it("rejects bridge opening from a foreign agent credential", async () => {
     const worker = await makeWorker();
     worker.testCallerId = "agent:someone-else";
-    await expect(worker.openBridge({ bridgeSessionId: "foreign-1" })).rejects.toThrow(
-      /does not own this vessel/
-    );
+    await expect(
+      worker.openBridge({ bridgeSessionId: "foreign-1" }),
+    ).rejects.toThrow(/does not own this vessel/);
     worker.testCallerKind = "panel";
     worker.testCallerId = "panel:x";
-    await expect(worker.openBridge({ bridgeSessionId: "foreign-2" })).rejects.toThrow(
-      /not a linked bridge/
-    );
+    await expect(
+      worker.openBridge({ bridgeSessionId: "foreign-2" }),
+    ).rejects.toThrow(/not a linked bridge/);
   });
 
   it("replaces the complete bridge generation without letting old cancellation detach the new one", async () => {
     const worker = await makeWorker();
-    const first = await openTestBridge(worker, { bridge: "bridge-1" }, "same-process");
-    const second = await openTestBridge(worker, { bridge: "bridge-2" }, "same-process");
+    const first = await openTestBridge(
+      worker,
+      { bridge: "bridge-1" },
+      "same-process",
+    );
+    const second = await openTestBridge(
+      worker,
+      { bridge: "bridge-2" },
+      "same-process",
+    );
 
     await first.records.return();
     expect(await worker.linkedStatus()).toMatchObject({
@@ -499,8 +547,10 @@ describe("LinkedAgentWorker", () => {
         messageId: "m-1",
         senderId: "panel:alice",
         text: "hello agent",
-        to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-      }) as never
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as never,
     );
     expect(worker.queueRows()).toHaveLength(1);
 
@@ -512,7 +562,9 @@ describe("LinkedAgentWorker", () => {
     expect(meta["from_handle"]).toBe("alice");
     expect(meta["channel_id"]).toBe("ch-1");
     expect(
-      worker.appendedEvents().filter((event) => event["payloadKind"] === "turn.opened")
+      worker
+        .appendedEvents()
+        .filter((event) => event["payloadKind"] === "turn.opened"),
     ).toHaveLength(0);
 
     await acceptBridgePayload(worker, bridge, replayed, "batch-1");
@@ -520,7 +572,12 @@ describe("LinkedAgentWorker", () => {
       bridgeSessionId: bridge.ack.bridgeSessionId,
       seq: 1,
       batchId: "batch-1",
-      event: { hook: "Stop", finalText: "done", turnKey: "turn-1", turnSource: "channel" },
+      event: {
+        hook: "Stop",
+        finalText: "done",
+        turnKey: "turn-1",
+        turnSource: "channel",
+      },
     });
     expect(worker.queueRows()).toHaveLength(1);
     expect(worker.queueRows()[0]).toMatchObject({
@@ -528,19 +585,6 @@ describe("LinkedAgentWorker", () => {
       terminal_outcome: "completed",
     });
     expect((await worker.linkedStatus()).pendingCount).toBe(0);
-  });
-
-  it("migrates legacy watermarks by replaying every surviving row", async () => {
-    const worker = await makeWorker();
-    worker.seedBridgeQueue(2, 8);
-    worker.migrateLegacyForTest();
-    expect(worker.legacyCursorForTest("linked:ackSeq")).toBe("");
-    expect(worker.legacyCursorForTest("linked:processedSeq")).toBe("");
-
-    const bridge = await openTestBridge(worker, {}, "post-migration-session");
-    expect(bridge.ack.pendingCount).toBe(2);
-    expect((await nextBridgePayload(bridge))["content"]).toBe("xxxxxxxx");
-    expect((await nextBridgePayload(bridge))["content"]).toBe("xxxxxxxx");
   });
 
   it("binds transport acceptance to one attachment and replays only into a new process session", async () => {
@@ -552,8 +596,10 @@ describe("LinkedAgentWorker", () => {
         messageId: "m-recovery",
         senderId: "panel:alice",
         text: "recover me",
-        to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-      }) as never
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as never,
     );
     const first = await openTestBridge(worker, {}, "live-process-session");
     const payload = await nextBridgePayload(first);
@@ -564,7 +610,7 @@ describe("LinkedAgentWorker", () => {
         attachmentGeneration: "stale-generation",
         deliveryId: String(payload["deliveryId"]),
         batchId: "batch-recovery",
-      })
+      }),
     ).rejects.toThrow(/stale bridge attachment/);
 
     const recovered = await openTestBridge(worker, {}, "live-process-session");
@@ -579,7 +625,11 @@ describe("LinkedAgentWorker", () => {
     const worker = await makeWorker();
     worker.seedBridgeQueue(1, 8);
     for (let index = 0; index < 7; index += 1) {
-      const bridge = await openTestBridge(worker, {}, `attempt-session-${index}`);
+      const bridge = await openTestBridge(
+        worker,
+        {},
+        `attempt-session-${index}`,
+      );
       await nextBridgePayload(bridge);
     }
     expect(worker.attemptRows().length).toBeLessThanOrEqual(5);
@@ -597,9 +647,11 @@ describe("LinkedAgentWorker", () => {
         event: { hook: "SessionEnd" },
       });
     }
-    expect(worker.bridgeSessionRows().filter((row) => row["ended_at"] != null)).toHaveLength(8);
     expect(
-      new Set(worker.hookRows().map((row) => String(row["session_id"]))).size
+      worker.bridgeSessionRows().filter((row) => row["ended_at"] != null),
+    ).toHaveLength(8);
+    expect(
+      new Set(worker.hookRows().map((row) => String(row["session_id"]))).size,
     ).toBeLessThanOrEqual(8);
   });
 
@@ -617,8 +669,10 @@ describe("LinkedAgentWorker", () => {
           messageId,
           senderId: "panel:alice",
           text: messageId,
-          to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-        }) as never
+          to: [
+            { kind: "participant", participantId: worker.selfParticipantId() },
+          ],
+        }) as never,
       );
     }
     const first = await nextBridgePayload(bridge);
@@ -644,8 +698,10 @@ describe("LinkedAgentWorker", () => {
         messageId: "m-busy-next",
         senderId: "panel:alice",
         text: "next",
-        to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-      }) as never
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as never,
     );
     const third = await nextBridgePayload(bridge);
     await acceptBridgePayload(worker, bridge, third, "batch-busy-2");
@@ -657,7 +713,9 @@ describe("LinkedAgentWorker", () => {
     });
 
     const rows = worker.queueRows();
-    expect(rows.filter((row) => row["terminal_outcome"] === "completed")).toHaveLength(2);
+    expect(
+      rows.filter((row) => row["terminal_outcome"] === "completed"),
+    ).toHaveLength(2);
     expect(rows.filter((row) => row["terminal_at"] == null)).toHaveLength(1);
     expect((await worker.linkedStatus()).pendingCount).toBe(1);
   });
@@ -686,7 +744,9 @@ describe("LinkedAgentWorker", () => {
       failure = error;
     }
     expect(failure).toEqual(
-      expect.objectContaining({ message: expect.stringMatching(/exceeds the response buffer/) })
+      expect.objectContaining({
+        message: expect.stringMatching(/exceeds the response buffer/),
+      }),
     );
     expect(await worker.linkedStatus()).toMatchObject({ attached: false });
     expect(worker.queueRows()).toHaveLength(1);
@@ -696,8 +756,12 @@ describe("LinkedAgentWorker", () => {
     const worker = await makeWorker();
     worker.seedBridgeQueue(96, 16_000);
 
-    const response = await worker.openBridge({ bridgeSessionId: "backlog-session" });
-    await vi.waitFor(() => expect(worker.bridgeDesiredSize()).toBeLessThanOrEqual(1_024 * 1_024));
+    const response = await worker.openBridge({
+      bridgeSessionId: "backlog-session",
+    });
+    await vi.waitFor(() =>
+      expect(worker.bridgeDesiredSize()).toBeLessThanOrEqual(1_024 * 1_024),
+    );
     expect(worker.bridgeDesiredSize()).toBeGreaterThanOrEqual(0);
 
     let messages = 0;
@@ -721,7 +785,7 @@ describe("LinkedAgentWorker", () => {
         messageId: "m-2",
         senderId: "panel:alice",
         text: "not for you",
-      }) as never
+      }) as never,
     );
     expect(worker.queueRows()).toHaveLength(0);
   });
@@ -737,8 +801,10 @@ describe("LinkedAgentWorker", () => {
         messageId: "subagent-seed:run-1",
         senderId: "do:parent",
         text: "the task",
-        to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-      }) as never
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as never,
     );
     expect(worker.queueRows()).toHaveLength(0);
   });
@@ -753,12 +819,18 @@ describe("LinkedAgentWorker", () => {
         id: 12,
         messageId: "m-webhook",
         senderId: "panel:alice",
-        senderMetadata: { handle: "alice", type: "panel", displayName: "Alice" },
+        senderMetadata: {
+          handle: "alice",
+          type: "panel",
+          displayName: "Alice",
+        },
         text: "run this from the webhook",
-        to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
         contentClass: "external",
         externalKeys: ["web:example.test"],
-      }) as never
+      }) as never,
     );
 
     expect(worker.queueRows()).toHaveLength(0);
@@ -770,7 +842,11 @@ describe("LinkedAgentWorker", () => {
       id: 13,
       messageId: "m-internal-forged-display",
       senderId: "panel:alice",
-      senderMetadata: { handle: "feed", type: "external", source: "webhook-ingress" },
+      senderMetadata: {
+        handle: "feed",
+        type: "external",
+        source: "webhook-ingress",
+      },
       text: "ordinary internal input",
       to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
       annotations: { metadata: { ingress: "webhook-ingress" } },
@@ -793,23 +869,31 @@ describe("LinkedAgentWorker", () => {
     ["unknown class", { contentClass: "untrusted", externalKeys: [] }],
     ["missing keys", { contentClass: "internal", externalKeys: undefined }],
     ["non-string key", { contentClass: "external", externalKeys: [7] }],
-    ["internal lineage", { contentClass: "internal", externalKeys: ["web:example.test"] }],
-  ])("rejects %s provenance instead of guessing from payload metadata", async (_label, patch) => {
-    const worker = await makeWorker();
-    const event = completedMessageEvent({
-      id: 14,
-      messageId: "m-malformed-provenance",
-      senderId: "panel:alice",
-      text: "do not classify me heuristically",
-      to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-    }) as Record<string, unknown>;
-    Object.assign(event, patch);
+    [
+      "internal lineage",
+      { contentClass: "internal", externalKeys: ["web:example.test"] },
+    ],
+  ])(
+    "rejects %s provenance instead of guessing from payload metadata",
+    async (_label, patch) => {
+      const worker = await makeWorker();
+      const event = completedMessageEvent({
+        id: 14,
+        messageId: "m-malformed-provenance",
+        senderId: "panel:alice",
+        text: "do not classify me heuristically",
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as Record<string, unknown>;
+      Object.assign(event, patch);
 
-    await expect(worker.processChannelEvent("ch-1", event as never)).rejects.toThrow(
-      /missing valid durable content provenance/
-    );
-    expect(worker.queueRows()).toHaveLength(0);
-  });
+      await expect(
+        worker.processChannelEvent("ch-1", event as never),
+      ).rejects.toThrow(/missing valid durable content provenance/);
+      expect(worker.queueRows()).toHaveLength(0);
+    },
+  );
 
   it("preserves the same sealed provenance through live and subscription-replay admission", async () => {
     const liveWorker = await makeWorker();
@@ -820,7 +904,9 @@ describe("LinkedAgentWorker", () => {
       senderId: "panel:alice",
       senderMetadata: { handle: "feed", source: "webhook-ingress" },
       text: "sealed internal message",
-      to: [{ kind: "participant", participantId: liveWorker.selfParticipantId() }],
+      to: [
+        { kind: "participant", participantId: liveWorker.selfParticipantId() },
+      ],
       contentClass: "internal",
       externalKeys: [],
     });
@@ -829,7 +915,9 @@ describe("LinkedAgentWorker", () => {
 
     expect(liveWorker.queueRows()).toHaveLength(1);
     expect(replayWorker.queueRows()).toHaveLength(1);
-    expect(replayWorker.queueRows()[0]?.["payload"]).toBe(liveWorker.queueRows()[0]?.["payload"]);
+    expect(replayWorker.queueRows()[0]?.["payload"]).toBe(
+      liveWorker.queueRows()[0]?.["payload"],
+    );
   });
 
   it("refuses addressed input without a canonical source message identity", async () => {
@@ -843,9 +931,9 @@ describe("LinkedAgentWorker", () => {
     });
     delete (input.payload as { causality?: unknown }).causality;
 
-    await expect(worker.processChannelEvent("ch-1", input as never)).rejects.toThrow(
-      /no canonical source message identity/
-    );
+    await expect(
+      worker.processChannelEvent("ch-1", input as never),
+    ).rejects.toThrow(/no canonical source message identity/);
     expect(worker.queueRows()).toHaveLength(0);
   });
 
@@ -861,8 +949,10 @@ describe("LinkedAgentWorker", () => {
         messageId: "m-channel-turn",
         senderId: "panel:alice",
         text: "please inspect this",
-        to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-      }) as never
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as never,
     );
 
     const pushed = await nextBridgePayload(bridge);
@@ -893,7 +983,9 @@ describe("LinkedAgentWorker", () => {
     const invocation = worker
       .appendedEvents()
       .find((event) => event["payloadKind"] === "invocation.started")!;
-    expect((invocation["causality"] as Record<string, unknown>)["turnId"]).toBe(turnId);
+    expect((invocation["causality"] as Record<string, unknown>)["turnId"]).toBe(
+      turnId,
+    );
 
     await worker.ingestHookEvent({
       bridgeSessionId: bridge.ack.bridgeSessionId,
@@ -909,8 +1001,12 @@ describe("LinkedAgentWorker", () => {
 
     const kinds = worker.appendedEvents().map((event) => event["payloadKind"]);
     expect(kinds.filter((kind) => kind === "turn.opened")).toHaveLength(1);
-    const closed = worker.appendedEvents().find((event) => event["payloadKind"] === "turn.closed")!;
-    expect((closed["causality"] as Record<string, unknown>)["turnId"]).toBe(turnId);
+    const closed = worker
+      .appendedEvents()
+      .find((event) => event["payloadKind"] === "turn.closed")!;
+    expect((closed["causality"] as Record<string, unknown>)["turnId"]).toBe(
+      turnId,
+    );
   });
 
   it("does not fabricate a terminal turn when its response is cancelled", async () => {
@@ -923,8 +1019,10 @@ describe("LinkedAgentWorker", () => {
         messageId: "m-detach-turn",
         senderId: "panel:alice",
         text: "start this",
-        to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-      }) as never
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as never,
     );
     const pushed = await nextBridgePayload(bridge);
     await acceptBridgePayload(worker, bridge, pushed, "batch-detach");
@@ -955,18 +1053,26 @@ describe("LinkedAgentWorker", () => {
     const prompt = {
       bridgeSessionId: "bridge-session-1",
       seq: 1,
-      event: { hook: "UserPromptSubmit", promptText: "fix the bug", turnKey: "turn-9" } as const,
+      event: {
+        hook: "UserPromptSubmit",
+        promptText: "fix the bug",
+        turnKey: "turn-9",
+      } as const,
     };
     await worker.ingestHookEvent(prompt);
-    const appended = worker.gadCalls.filter((call) => call.method === "appendLogEvent");
+    const appended = worker.gadCalls.filter(
+      (call) => call.method === "appendLogEvent",
+    );
     expect(appended).toHaveLength(1);
-    const events = appended[0]!.args["events"] as Array<Record<string, unknown>>;
+    const events = appended[0]!.args["events"] as Array<
+      Record<string, unknown>
+    >;
     expect(events.map((event) => event["payloadKind"])).toEqual([
       "message.completed",
       "turn.opened",
     ]);
     const promptMessageId = String(
-      (events[0]!["causality"] as Record<string, unknown>)["messageId"]
+      (events[0]!["causality"] as Record<string, unknown>)["messageId"],
     );
     const turnCausality = events[1]!["causality"] as Record<string, unknown>;
     expect(turnCausality["messageId"]).toBe(promptMessageId);
@@ -976,7 +1082,9 @@ describe("LinkedAgentWorker", () => {
     // Redelivery of the same hook seq is a no-op.
     const duplicate = await worker.ingestHookEvent(prompt);
     expect(duplicate.duplicate).toBe(true);
-    expect(worker.gadCalls.filter((call) => call.method === "appendLogEvent")).toHaveLength(1);
+    expect(
+      worker.gadCalls.filter((call) => call.method === "appendLogEvent"),
+    ).toHaveLength(1);
 
     // Tool lifecycle + Stop close the turn with the mirrored final message.
     await worker.ingestHookEvent({
@@ -1014,8 +1122,8 @@ describe("LinkedAgentWorker", () => {
       .filter((call) => call.method === "appendLogEvent")
       .flatMap((call) =>
         (call.args["events"] as Array<Record<string, unknown>>).map((event) =>
-          String(event["payloadKind"])
-        )
+          String(event["payloadKind"]),
+        ),
       );
     expect(kinds).toEqual([
       "message.completed",
@@ -1028,15 +1136,19 @@ describe("LinkedAgentWorker", () => {
     const invocation = worker
       .appendedEvents()
       .find((event) => event["payloadKind"] === "invocation.started")!;
-    expect((invocation["payload"] as Record<string, unknown>)["request"]).toEqual({
+    expect(
+      (invocation["payload"] as Record<string, unknown>)["request"],
+    ).toEqual({
       command: "ls",
       timeout: 1_000,
     });
     // Mirrored final message is secondary-tier, never say-salient.
-    const stopAppend = worker.gadCalls.filter((call) => call.method === "appendLogEvent").at(-1)!;
-    const finalMessage = (stopAppend.args["events"] as Array<Record<string, unknown>>).find(
-      (event) => event["payloadKind"] === "message.completed"
-    )!;
+    const stopAppend = worker.gadCalls
+      .filter((call) => call.method === "appendLogEvent")
+      .at(-1)!;
+    const finalMessage = (
+      stopAppend.args["events"] as Array<Record<string, unknown>>
+    ).find((event) => event["payloadKind"] === "message.completed")!;
     const payload = finalMessage["payload"] as Record<string, unknown>;
     expect(payload["tier"]).toBe("secondary");
     expect(payload["saliency"]).toBeUndefined();
@@ -1054,14 +1166,14 @@ describe("LinkedAgentWorker", () => {
         bridgeSessionId: "hook-order-session",
         seq: 3,
         event: { hook: "SessionEnd" },
-      })
+      }),
     ).rejects.toThrow(/expected sequence 2/);
     await expect(
       worker.ingestHookEvent({
         bridgeSessionId: "hook-order-session",
         seq: 1,
         event: { hook: "SessionStart", model: "Sonnet" },
-      })
+      }),
     ).rejects.toThrow(/payload drift/);
   });
 
@@ -1096,8 +1208,10 @@ describe("LinkedAgentWorker", () => {
         messageId: "m-failure",
         senderId: "panel:alice",
         text: "fail exactly",
-        to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-      }) as never
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as never,
     );
     const payload = await nextBridgePayload(bridge);
     await acceptBridgePayload(worker, bridge, payload, "batch-failure");
@@ -1136,10 +1250,13 @@ describe("LinkedAgentWorker", () => {
         turnSource: "channel",
       },
     });
-    expect(worker.appendedEvents().map((event) => event["payloadKind"])).toContain(
-      "invocation.failed"
-    );
-    expect(worker.queueRows()[0]).toMatchObject({ terminal_outcome: "failed", payload: "{}" });
+    expect(
+      worker.appendedEvents().map((event) => event["payloadKind"]),
+    ).toContain("invocation.failed");
+    expect(worker.queueRows()[0]).toMatchObject({
+      terminal_outcome: "failed",
+      payload: "{}",
+    });
   });
 
   it("redrives a persisted terminal transition before the next hook after publication fails", async () => {
@@ -1152,8 +1269,10 @@ describe("LinkedAgentWorker", () => {
         messageId: "m-terminal-replay",
         senderId: "panel:alice",
         text: "finish durably",
-        to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-      }) as never
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as never,
     );
     const payload = await nextBridgePayload(bridge);
     await acceptBridgePayload(worker, bridge, payload, "batch-terminal-replay");
@@ -1180,8 +1299,12 @@ describe("LinkedAgentWorker", () => {
         turnSource: "channel",
       } as const,
     };
-    await expect(worker.ingestHookEvent(terminal)).rejects.toThrow(/simulated replay/);
-    expect(worker.queueRows()[0]).toMatchObject({ terminal_outcome: "completed" });
+    await expect(worker.ingestHookEvent(terminal)).rejects.toThrow(
+      /simulated replay/,
+    );
+    expect(worker.queueRows()[0]).toMatchObject({
+      terminal_outcome: "completed",
+    });
     expect(worker.queueRows()[0]?.["payload"]).not.toBe("{}");
 
     worker.failLogAppend = false;
@@ -1190,7 +1313,7 @@ describe("LinkedAgentWorker", () => {
         bridgeSessionId: bridge.ack.bridgeSessionId,
         seq: 3,
         event: { hook: "SessionEnd" },
-      })
+      }),
     ).resolves.toEqual({ ok: true });
     expect(worker.queueRows()[0]?.["payload"]).toBe("{}");
     const terminalIds = worker.gadCalls
@@ -1208,20 +1331,31 @@ describe("LinkedAgentWorker", () => {
     worker.testCallerKind = "server";
     worker.testCallerId = "main";
     // Detached: prompt/interrupt error cleanly.
-    const offline = await worker.onMethodCall("ch-1", "tc-1", "prompt", { text: "hi" });
+    const offline = await worker.onMethodCall("ch-1", "tc-1", "prompt", {
+      text: "hi",
+    });
     expect(offline.isError).toBe(true);
-    expect(String((offline.result as { error: string }).error)).toMatch(/offline/);
+    expect(String((offline.result as { error: string }).error)).toMatch(
+      /offline/,
+    );
 
     const bridge = await openTestBridge(worker);
-    const queued = await worker.onMethodCall("ch-1", "tc-2", "prompt", { text: "hi" });
+    const queued = await worker.onMethodCall("ch-1", "tc-2", "prompt", {
+      text: "hi",
+    });
     expect(queued.isError).toBeUndefined();
-    expect(await nextBridgePayload(bridge)).toMatchObject({ kind: "prompt", content: "hi" });
+    expect(await nextBridgePayload(bridge)).toMatchObject({
+      kind: "prompt",
+      content: "hi",
+    });
 
     const status = await worker.onMethodCall("ch-1", "tc-3", "status", {});
     expect((status.result as { attached: boolean }).attached).toBe(true);
 
     // Pi-loop standard methods are pruned on the linked vessel.
-    const unknown = await worker.onMethodCall("ch-1", "tc-4", "setModel", { model: "x:y" });
+    const unknown = await worker.onMethodCall("ch-1", "tc-4", "setModel", {
+      model: "x:y",
+    });
     expect(unknown.isError).toBe(true);
   });
 
@@ -1235,8 +1369,10 @@ describe("LinkedAgentWorker", () => {
         messageId: "m-3",
         senderId: "panel:alice",
         text: "queued",
-        to: [{ kind: "participant", participantId: worker.selfParticipantId() }],
-      }) as never
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as never,
     );
     expect(worker.queueRows()).toHaveLength(1);
 
@@ -1248,7 +1384,11 @@ describe("LinkedAgentWorker", () => {
           forkPointPubsubId: number;
         }): Promise<void>;
       }
-    ).onChannelForked({ oldChannelId: "ch-1", newChannelId: "ch-2", forkPointPubsubId: 5 });
+    ).onChannelForked({
+      oldChannelId: "ch-1",
+      newChannelId: "ch-2",
+      forkPointPubsubId: 5,
+    });
 
     expect((await worker.linkedStatus()).attached).toBe(false);
     expect(worker.queueRows()).toHaveLength(0);
@@ -1259,20 +1399,32 @@ describe("LinkedAgentWorker", () => {
     worker.testCallerKind = "extension";
     worker.testCallerId = "@workspace-extensions/claude-code";
 
-    const result = await worker.reportExternalExit({ runId: "run-9", code: 1, signal: null });
+    const result = await worker.reportExternalExit({
+      runId: "run-9",
+      code: 1,
+      signal: null,
+    });
     expect(result).toEqual({ ok: true, settled: true });
     expect(worker.terminalIntentRows()).toHaveLength(1);
-    expect(JSON.parse(String(worker.terminalIntentRows()[0]!["payload_json"]))).toMatchObject({
+    expect(
+      JSON.parse(String(worker.terminalIntentRows()[0]!["payload_json"])),
+    ).toMatchObject({
       runId: "run-9",
       taskChannelId: "ch-1",
       parentRef: "do:parent-vessel",
       outcome: "failed",
       sourceEventId: "child-source-event",
     });
-    expect(String(worker.terminalIntentRows()[0]!["payload_json"])).toContain("exit code 1");
+    expect(String(worker.terminalIntentRows()[0]!["payload_json"])).toContain(
+      "exit code 1",
+    );
 
     // A duplicate report no-ops.
-    const again = await worker.reportExternalExit({ runId: "run-9", code: 1, signal: null });
+    const again = await worker.reportExternalExit({
+      runId: "run-9",
+      code: 1,
+      signal: null,
+    });
     expect(again).toEqual({ ok: true, settled: false });
     expect(worker.terminalIntentRows()).toHaveLength(1);
   });
@@ -1288,9 +1440,11 @@ describe("LinkedAgentWorker", () => {
         code: 0,
         outcome: "success",
         report: "audit complete",
-      })
+      }),
     ).toEqual({ ok: true, settled: true });
-    expect(JSON.parse(String(worker.terminalIntentRows()[0]!["payload_json"]))).toMatchObject({
+    expect(
+      JSON.parse(String(worker.terminalIntentRows()[0]!["payload_json"])),
+    ).toMatchObject({
       runId: "run-9",
       outcome: "completed",
       report: "audit complete",
@@ -1301,14 +1455,18 @@ describe("LinkedAgentWorker", () => {
         code: 0,
         outcome: "success",
         report: "duplicate",
-      })
+      }),
     ).toEqual({ ok: true, settled: false });
 
     const foreign = await makeWorker(SUBAGENT_STATE_ARGS);
     foreign.testCallerKind = "extension";
     foreign.testCallerId = "@workspace-extensions/not-the-controller";
     await expect(
-      foreign.reportExternalResult({ runId: "run-9", outcome: "success", report: "forged" })
+      foreign.reportExternalResult({
+        runId: "run-9",
+        outcome: "success",
+        report: "forged",
+      }),
     ).rejects.toThrow(/is not controller/);
     expect(foreign.terminalIntentRows()).toHaveLength(0);
   });
@@ -1321,7 +1479,10 @@ describe("LinkedAgentWorker", () => {
 
     worker.testCallerKind = "extension";
     worker.testCallerId = "@workspace-extensions/claude-code";
-    const afterComplete = await worker.reportExternalExit({ runId: "run-9", code: 0 });
+    const afterComplete = await worker.reportExternalExit({
+      runId: "run-9",
+      code: 0,
+    });
     expect(afterComplete).toEqual({ ok: true, settled: false });
     expect(worker.terminalIntentRows()).toHaveLength(1);
 
@@ -1329,7 +1490,9 @@ describe("LinkedAgentWorker", () => {
     const other = await makeWorker(SUBAGENT_STATE_ARGS);
     other.testCallerKind = "extension";
     other.testCallerId = "@workspace-extensions/claude-code";
-    expect(await other.reportExternalExit({ runId: "run-OTHER", code: 1 })).toEqual({
+    expect(
+      await other.reportExternalExit({ runId: "run-OTHER", code: 1 }),
+    ).toEqual({
       ok: true,
       settled: false,
     });

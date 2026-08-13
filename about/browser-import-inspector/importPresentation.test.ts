@@ -1,4 +1,11 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("@workspace/runtime", () => ({
+  panel: {
+    stateArgs: { get: () => ({}), set: () => undefined },
+  },
+  browserData: {},
+}));
 import type { ImportJobSnapshot } from "@vibestudio/browser-data/client";
 import {
   categoryProgressPresentation,
@@ -8,11 +15,31 @@ import {
   isTerminalImportPhase,
   shouldShowImportOptions,
 } from "./importPresentation";
+import { mergeImportPreviews, sensitiveStatusAsJob } from "./components/MigrateTab";
+
+const desktopSelection = {
+  host: {
+    hostId: "desktop-1",
+    displayName: "This device",
+    platform: "linux" as const,
+    location: "desktop" as const,
+    connected: true,
+  },
+  source: {
+    sourceId: "chrome-default",
+    browser: "chrome" as const,
+    displayName: "Chrome",
+    status: "readable" as const,
+    localDataSetCount: 1,
+    supportedDataTypes: ["bookmarks" as const, "passwords" as const],
+    warnings: [],
+  },
+};
 
 type CategoryProgress = ImportJobSnapshot["progress"][number];
 
 const progress = (overrides: Partial<CategoryProgress> = {}): CategoryProgress => ({
-  dataType: "formFill",
+  dataType: "bookmarks",
   itemsProcessed: 0,
   totalItems: 0,
   stored: 0,
@@ -108,5 +135,113 @@ describe("import state presentation", () => {
   it("keeps the data step checked even while it remains selected", () => {
     expect(isMigrationStepComplete("data", true)).toBe(true);
     expect(isMigrationStepComplete("tabs", true)).toBe(false);
+  });
+});
+
+describe("sealed sensitive import presentation", () => {
+  it("supports a protected-only aggregate review without inventing plaintext samples", () => {
+    const merged = mergeImportPreviews(
+      null,
+      {
+        dataTypes: [
+          {
+            dataType: "passwords",
+            itemsProcessed: 4,
+            totalItems: 4,
+            stored: 0,
+            skipped: 0,
+            errors: 0,
+          },
+        ],
+        warnings: [],
+        breakdowns: [
+          {
+            dataType: "passwords",
+            groupedBy: "site",
+            total: 4,
+            groups: [{ label: "example.com", count: 4 }],
+            otherGroups: 0,
+            otherItems: 0,
+          },
+        ],
+        openTabCount: 0,
+        localDataSetCount: 1,
+      },
+      desktopSelection
+    );
+
+    expect(merged.job.requestedDataTypes).toEqual(["passwords"]);
+    expect(merged.job.progress).toEqual([
+      expect.objectContaining({ dataType: "passwords", itemsProcessed: 4 }),
+    ]);
+    expect(merged.breakdowns).toEqual([
+      expect.objectContaining({ dataType: "passwords", total: 4 }),
+    ]);
+  });
+
+  it("projects durable running, cancelled, and complete statuses through the same progress card", () => {
+    const request = {
+      hostId: "desktop-1",
+      sourceId: "chrome-default",
+      dataTypes: ["passwords" as const],
+      operationId: "sensitive-1",
+    };
+    const count = {
+      dataType: "passwords" as const,
+      read: 4,
+      stored: 3,
+      skipped: 1,
+      errors: 0,
+    };
+
+    expect(
+      sensitiveStatusAsJob(
+        { operationId: "sensitive-1", state: "running", counts: [count] },
+        request,
+        desktopSelection
+      )
+    ).toMatchObject({
+      jobId: "sensitive-1",
+      phase: "copying",
+      resumable: true,
+      progress: [{ itemsProcessed: 4, stored: 3, skipped: 1 }],
+    });
+    expect(
+      sensitiveStatusAsJob(
+        { operationId: "sensitive-1", state: "cancelled", counts: [count] },
+        request,
+        desktopSelection
+      ).phase
+    ).toBe("cancelled");
+    expect(
+      sensitiveStatusAsJob(
+        { operationId: "sensitive-1", state: "complete", counts: [count] },
+        request,
+        desktopSelection
+      ).phase
+    ).toBe("complete");
+    expect(
+      sensitiveStatusAsJob(
+        {
+          operationId: "sensitive-1",
+          state: "failed",
+          counts: [count],
+          error: "vault write failed",
+        },
+        request,
+        desktopSelection
+      )
+    ).toMatchObject({
+      phase: "failed",
+      error: "vault write failed",
+      progress: [
+        {
+          dataType: "passwords",
+          itemsProcessed: 4,
+          stored: 3,
+          skipped: 1,
+        },
+      ],
+    });
   });
 });

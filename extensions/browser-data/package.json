@@ -45,15 +45,6 @@
           "evidence": "bounded-dynamic"
         },
         {
-          "capability": "service:browserEnvironment.flushCookieProjection",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "gated",
-          "evidence": "intentional-broad"
-        },
-        {
           "capability": "service:browserEnvironment.getImportHost",
           "resource": {
             "kind": "prefix",
@@ -138,7 +129,12 @@
             "listImportHosts",
             "listImportSources",
             "previewImport",
+            "previewSensitiveImport",
             "startImport",
+            "startSensitiveImport",
+            "observeSensitiveImport",
+            "cancelSensitiveImport",
+            "openBrowserPrivacyManager",
             "cancelImport",
             "resumeImport",
             "getImportJob",
@@ -161,38 +157,13 @@
             "searchHistoryForAutocomplete",
             "recordHistoryVisit",
             "updateHistoryTitle",
-            "listPasswordSummaries",
-            "getPasswordForSite",
-            "addPassword",
-            "updatePassword",
-            "deletePassword",
-            "updateLastUsed",
-            "addNeverSave",
-            "isNeverSave",
-            "getNeverSaveOrigins",
-            "removeNeverSave",
-            "getFormFillSuggestions",
-            "addFormFillValue",
-            "updateFormFillValue",
-            "markFormFillValueUsed",
-            "deleteFormFillValue",
-            "clearFormFillValues",
             "getSearchEngines",
             "setDefaultEngine",
-            "applyCookieMutations",
-            "listCookieOrigins",
-            "getCookiesForOrigin",
-            "clearCookiesForOrigin",
-            "clearAllCookies",
-            "endBrowserSession",
-            "getCookieSiteSummary",
             "listDownloadRecords",
             "upsertDownloadRecord",
             "putPageFavicon",
             "getPageFavicon",
-            "exportBookmarks",
-            "exportPasswords",
-            "exportCookies"
+            "exportBookmarks"
           ]
         }
       },

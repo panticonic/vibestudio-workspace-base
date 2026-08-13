@@ -37,7 +37,6 @@ import {
   buildPanelLink,
   panel,
   panelTree,
-  FORM_FILL_TYPES,
   type CredentialAccessGrantSummary,
   type CredentialAccessSubjectSummary,
   type ManagedCredentialSummary,
@@ -48,15 +47,6 @@ type CredentialStatus = {
   label: string;
   color: "green" | "amber" | "red";
   icon: "active" | "warning" | "revoked";
-};
-
-type BrowserPasswordSummary = { id: number; origin: string; username: string };
-type FormFillSummary = {
-  id: number;
-  fieldName: string;
-  type: string | null;
-  value: string;
-  displayLabel: string | null;
 };
 
 function credentialStatus(credential: ManagedCredentialSummary): CredentialStatus {
@@ -466,6 +456,7 @@ function CredentialSection({
 
 function CredentialsPage() {
   const isMobile = useIsMobile();
+  const [browserManagerError, setBrowserManagerError] = useState<string | null>(null);
   const [items, setItems] = useState<ManagedCredentialSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -476,51 +467,25 @@ function CredentialsPage() {
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [showRevoked, setShowRevoked] = useState(false);
   const [revokeError, setRevokeError] = useState<string | null>(null);
-  const [browserPasswords, setBrowserPasswords] = useState<BrowserPasswordSummary[]>([]);
-  const [neverSaveOrigins, setNeverSaveOrigins] = useState<string[]>([]);
-  const [formFillValues, setFormFillValues] = useState<FormFillSummary[]>([]);
-
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const managed = await credentials.inspectStoredCredentials();
       setItems(managed);
-      const [savedPasswords, neverSave, savedFormFill] = await Promise.allSettled([
-        browserData.listPasswordSummaries().then((rows) =>
-          rows.map((row) => ({
-            id: row.id,
-            origin: row.origin_url,
-            username: row.username,
-          }))
-        ),
-        browserData.getNeverSavePasswordOrigins(),
-        Promise.all(
-          FORM_FILL_TYPES.map((type) => browserData.getFormFillSuggestions({ type, limit: 100 }))
-        ).then((groups) => {
-          const unique = new Map<number, FormFillSummary>();
-          for (const row of groups.flat()) unique.set(row.id, row);
-          return [...unique.values()].sort((a, b) =>
-            (a.type ?? a.fieldName).localeCompare(b.type ?? b.fieldName)
-          );
-        }),
-      ]);
-      if (savedPasswords.status === "fulfilled") setBrowserPasswords(savedPasswords.value);
-      if (neverSave.status === "fulfilled") setNeverSaveOrigins(neverSave.value);
-      if (savedFormFill.status === "fulfilled") setFormFillValues(savedFormFill.value);
-      const browserErrors = [savedPasswords, neverSave, savedFormFill]
-        .filter((result): result is PromiseRejectedResult => result.status === "rejected")
-        .map((result) =>
-          result.reason instanceof Error ? result.reason.message : String(result.reason)
-        );
-      setError(
-        browserErrors.length > 0
-          ? `Managed credentials loaded, but browser password settings could not be loaded: ${browserErrors.join("; ")}`
-          : null
-      );
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const openBrowserManager = useCallback(async (section: "credentials" | "formFill") => {
+    setBrowserManagerError(null);
+    try {
+      await browserData.openBrowserPrivacyManager(section);
+    } catch (err) {
+      setBrowserManagerError(err instanceof Error ? err.message : String(err));
     }
   }, []);
 
@@ -591,68 +556,6 @@ function CredentialsPage() {
     }
   }, [load, pendingRevoke]);
 
-  const deleteBrowserPassword = useCallback(async (entry: BrowserPasswordSummary) => {
-    if (!window.confirm(`Delete the saved password for ${entry.username} on ${entry.origin}?`))
-      return;
-    try {
-      await browserData.deletePassword(entry.id);
-      setBrowserPasswords((current) => current.filter((item) => item.id !== entry.id));
-    } catch (err) {
-      setError(
-        `Couldn't delete saved password: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }, []);
-
-  const allowPasswordSavesAgain = useCallback(async (origin: string) => {
-    try {
-      await browserData.removeNeverSavePassword(origin);
-      setNeverSaveOrigins((current) => current.filter((item) => item !== origin));
-    } catch (err) {
-      setError(
-        `Couldn't update password-save preference: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }, []);
-
-  const editFormFillValue = useCallback(async (entry: FormFillSummary) => {
-    const value = window.prompt(`Edit ${entry.displayLabel || entry.type}`, entry.value);
-    if (value === null || !value.trim() || value === entry.value) return;
-    try {
-      await browserData.updateFormFillValue(entry.id, { value: value.trim() });
-      setFormFillValues((current) =>
-        current.map((item) => (item.id === entry.id ? { ...item, value: value.trim() } : item))
-      );
-    } catch (err) {
-      setError(
-        `Couldn't edit form-fill value: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }, []);
-
-  const deleteFormFillValue = useCallback(async (entry: FormFillSummary) => {
-    if (!window.confirm(`Delete “${entry.value}” from form fill?`)) return;
-    try {
-      await browserData.deleteFormFillValue(entry.id);
-      setFormFillValues((current) => current.filter((item) => item.id !== entry.id));
-    } catch (err) {
-      setError(
-        `Couldn't delete form-fill value: ${err instanceof Error ? err.message : String(err)}`
-      );
-    }
-  }, []);
-
-  const clearFormFillValues = useCallback(async () => {
-    if (!window.confirm("Clear every saved form-fill value? Saved passwords are not affected."))
-      return;
-    try {
-      await browserData.clearFormFillValues();
-      setFormFillValues([]);
-    } catch (err) {
-      setError(`Couldn't clear form fill: ${err instanceof Error ? err.message : String(err)}`);
-    }
-  }, []);
-
   return (
     <>
       <AboutPage
@@ -673,6 +576,34 @@ function CredentialsPage() {
           </Tooltip>
         }
       >
+        <Section title="Browser passwords & form fill">
+          <Flex direction="column" gap="3">
+            <Text size="2" color="gray">
+              Review, edit, or delete protected browser data in Vibestudio's trusted privacy
+              manager. Protected values are never returned to this hosted panel or its extensions.
+            </Text>
+            <Flex gap="2" wrap="wrap">
+              <Button
+                variant="soft"
+                onClick={() => void openBrowserManager("credentials")}
+              >
+                <LockClosedIcon /> Manage browser passwords
+              </Button>
+              <Button
+                variant="soft"
+                onClick={() => void openBrowserManager("formFill")}
+              >
+                <IdCardIcon /> Manage form fill
+              </Button>
+            </Flex>
+            {browserManagerError && (
+              <Text size="1" color="red" role="alert">
+                {browserManagerError}
+              </Text>
+            )}
+          </Flex>
+        </Section>
+
         <Section>
           <Flex direction="column" gap="4">
             <Grid columns={{ initial: "1", sm: "3" }} gap="3">
@@ -755,114 +686,6 @@ function CredentialsPage() {
             </Text>
           </Section>
         )}
-
-        <Section title="Browser passwords">
-          <Flex direction="column" gap="3">
-            {browserPasswords.length === 0 ? (
-              <Text size="2" color="gray">
-                No browser passwords are saved.
-              </Text>
-            ) : (
-              browserPasswords.map((entry) => (
-                <Flex key={entry.id} justify="between" align="center" gap="3">
-                  <Box style={{ minWidth: 0 }}>
-                    <Text size="2" weight="medium">
-                      {entry.username || "Unnamed account"}
-                    </Text>
-                    <Text size="1" color="gray" as="div" style={{ wordBreak: "break-word" }}>
-                      {entry.origin}
-                    </Text>
-                  </Box>
-                  <Button
-                    size="1"
-                    color="red"
-                    variant="soft"
-                    onClick={() => void deleteBrowserPassword(entry)}
-                  >
-                    <TrashIcon /> Delete
-                  </Button>
-                </Flex>
-              ))
-            )}
-          </Flex>
-        </Section>
-
-        <Section title="Form fill">
-          <Flex direction="column" gap="3">
-            <Flex justify="between" align="center" gap="3">
-              <Text size="2" color="gray">
-                Personal values are suggested only after you focus a matching field.
-              </Text>
-              {formFillValues.length > 0 ? (
-                <Button
-                  size="1"
-                  color="red"
-                  variant="soft"
-                  onClick={() => void clearFormFillValues()}
-                >
-                  Clear all
-                </Button>
-              ) : null}
-            </Flex>
-            {formFillValues.length === 0 ? (
-              <Text size="2" color="gray">
-                No form-fill values are saved.
-              </Text>
-            ) : (
-              formFillValues.map((entry) => (
-                <Flex key={entry.id} justify="between" align="center" gap="3">
-                  <Box style={{ minWidth: 0 }}>
-                    <Text size="2" weight="medium" style={{ wordBreak: "break-word" }}>
-                      {entry.value}
-                    </Text>
-                    <Text size="1" color="gray" as="div">
-                      {entry.displayLabel ||
-                        (entry.type ?? entry.fieldName).replaceAll("-", " ").replaceAll("_", " ")}
-                    </Text>
-                  </Box>
-                  <Flex gap="2">
-                    <Button size="1" variant="soft" onClick={() => void editFormFillValue(entry)}>
-                      Edit
-                    </Button>
-                    <Button
-                      size="1"
-                      color="red"
-                      variant="soft"
-                      onClick={() => void deleteFormFillValue(entry)}
-                    >
-                      <TrashIcon /> Delete
-                    </Button>
-                  </Flex>
-                </Flex>
-              ))
-            )}
-          </Flex>
-        </Section>
-
-        <Section title="Sites that never ask to save passwords">
-          <Flex direction="column" gap="3">
-            {neverSaveOrigins.length === 0 ? (
-              <Text size="2" color="gray">
-                No sites are blocked from showing save prompts.
-              </Text>
-            ) : (
-              neverSaveOrigins.map((origin) => (
-                <Flex key={origin} justify="between" align="center" gap="3">
-                  <Text size="2" style={{ wordBreak: "break-word" }}>
-                    {origin}
-                  </Text>
-                  <Button
-                    size="1"
-                    variant="soft"
-                    onClick={() => void allowPasswordSavesAgain(origin)}
-                  >
-                    Ask again
-                  </Button>
-                </Flex>
-              ))
-            )}
-          </Flex>
-        </Section>
       </AboutPage>
 
       <AlertDialog.Root

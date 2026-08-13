@@ -2,9 +2,9 @@
  * Type-check helper methods used by the typecheck service extension.
  *
  * Runs TypeScript's language service (via @vibestudio/typecheck) directly
- * against the disk. No external type fetching, no install-on-demand, no
- * callbacks — workspace packages resolve through the workspace context map
- * and everything else flows through standard `node_modules` walking.
+ * against the disk. Workspace packages resolve through the workspace context
+ * map; exact external declarations are installed into the owned dependency
+ * cache with the host's explicitly supplied application root.
  *
  * Internal method keys:
  *   - typecheck.check          — diagnostics for a file or whole project
@@ -137,7 +137,11 @@ async function ensureExternalDeps(deps: Record<string, string>): Promise<string>
   );
 
   try {
-    await runNpmInstall(tmpDir);
+    const appRoot = process.env["VIBESTUDIO_APP_ROOT"]?.trim();
+    if (!appRoot) {
+      throw new Error("Typecheck dependency installation requires VIBESTUDIO_APP_ROOT");
+    }
+    await runNpmInstall(tmpDir, { appRoot });
     fsSync.writeFileSync(path.join(tmpDir, ".ready"), new Date().toISOString());
     try {
       fsSync.renameSync(tmpDir, cacheDir);

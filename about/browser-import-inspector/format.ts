@@ -17,15 +17,23 @@ interface ErrnoLike {
   message?: string;
 }
 
-export function classifyError(err: unknown): { status: "denied" | "error"; message: string } {
+export function classifyError(err: unknown): {
+  status: "denied" | "error";
+  message: string;
+} {
   const e = err as ErrnoLike;
   const message = e?.message ?? String(err);
   const denied =
-    e?.code === "EACCES" || /denied by user/i.test(message) || /\bEACCES\b/.test(message);
+    e?.code === "EACCES" ||
+    /denied by user/i.test(message) ||
+    /\bEACCES\b/.test(message);
   return { status: denied ? "denied" : "error", message };
 }
 
-export function relativeTime(ms: number | null | undefined, now: number): string {
+export function relativeTime(
+  ms: number | null | undefined,
+  now: number,
+): string {
   if (!ms) return "never";
   const delta = now - ms;
   if (delta < 0) return "just now";
@@ -47,14 +55,38 @@ export function mask(value: string, revealed: boolean): string {
   return "•".repeat(Math.min(12, Math.max(4, value.length)));
 }
 
-export const DATA_TYPES: ReadonlyArray<{ key: string; label: string; hint: string }> = [
+export const DATA_TYPES: ReadonlyArray<{
+  key: string;
+  label: string;
+  hint: string;
+}> = [
   { key: "bookmarks", label: "Bookmarks", hint: "Folders and saved links" },
   { key: "history", label: "History", hint: "Visited pages and visit counts" },
-  { key: "cookies", label: "Cookies", hint: "Keeps you signed in to sites" },
-  { key: "passwords", label: "Passwords", hint: "Saved logins, stored encrypted" },
-  { key: "formFill", label: "Form fill", hint: "Addresses and autofill entries" },
-  { key: "searchEngines", label: "Search engines", hint: "Keyword shortcuts and defaults" },
-  { key: "favicons", label: "Favicons", hint: "Site icons for bookmarks and history" },
+  {
+    key: "cookies",
+    label: "Cookies",
+    hint: "Imported directly into the protected host vault",
+  },
+  {
+    key: "passwords",
+    label: "Passwords",
+    hint: "Imported directly into the protected host vault",
+  },
+  {
+    key: "formFill",
+    label: "Form fill",
+    hint: "Imported directly into the protected host vault",
+  },
+  {
+    key: "searchEngines",
+    label: "Search engines",
+    hint: "Keyword shortcuts and defaults",
+  },
+  {
+    key: "favicons",
+    label: "Favicons",
+    hint: "Site icons for bookmarks and history",
+  },
 ];
 
 /**
@@ -83,6 +115,10 @@ export function prettyPath(url: string): string {
 }
 
 /** "3 tabs" / "1 tab" — small enough to inline, common enough to share. */
-export function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+export function plural(
+  count: number,
+  singular: string,
+  pluralForm = `${singular}s`,
+): string {
   return `${count} ${count === 1 ? singular : pluralForm}`;
 }

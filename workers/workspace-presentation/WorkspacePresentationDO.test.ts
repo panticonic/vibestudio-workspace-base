@@ -7,6 +7,7 @@ import {
 } from "@vibestudio/durable";
 import { rpcExposedMethodNames } from "@vibestudio/rpc";
 import { workspacePresentationMethods } from "@vibestudio/service-schemas/workspacePresentation";
+import type { MethodSchema } from "@vibestudio/shared/typedServiceClient";
 import { WorkspacePresentationDO } from "./WorkspacePresentationDO.js";
 
 const createPresentation = () => {
@@ -23,6 +24,19 @@ describe("WorkspacePresentationDO", () => {
       (method) => !DURABLE_OBJECT_FRAMEWORK_RPC_METHODS.has(method)
     );
     expect(productMethods.sort()).toEqual(Object.keys(workspacePresentationMethods).sort());
+    db.close();
+  });
+
+  it("resolves every open presentation method without a fictitious source capability", () => {
+    const { instance, db } = createPresentation();
+    const authority = instance as unknown as {
+      rpcAuthorityDeclaration(method: string, schema: MethodSchema): unknown;
+    };
+    for (const [method, schema] of Object.entries(workspacePresentationMethods)) {
+      expect(authority.rpcAuthorityDeclaration(method, schema)).toMatchObject({
+        effect: { kind: "open" },
+      });
+    }
     db.close();
   });
 

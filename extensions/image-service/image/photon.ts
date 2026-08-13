@@ -4,116 +4,16 @@
  * Ported literally from @mariozechner/pi-coding-agent/src/utils/photon.ts.
  *
  * This module provides a unified interface to @silvia-odwyer/photon-node that
- * runs server-side (Node.js). The photon-node CJS entry uses
- * `fs.readFileSync(__dirname + '/photon_rs_bg.wasm')` which works in plain
- * Node.js but bakes absolute paths into bundled binaries. The patch below
- * redirects missing wasm reads to fallback locations next to the executable
- * or in cwd, mirroring pi-coding-agent's logic so we keep behaviour parity
- * for the headless server build.
+ * runs server-side (Node.js). Photon owns and resolves its WASM asset from its
+ * installed package; the extension does not search executable or process roots.
  *
  * NOTE: this file is server-only. workerd cannot import it.
  */
-import { createRequire } from "module";
-import * as path from "path";
-import { fileURLToPath, pathToFileURL } from "url";
-
-// This module is bundled as both ESM (standalone server) and CJS (Electron
-// utility process). build.mjs injects __filename into the ESM bundle, while
-// CJS provides it natively. Avoid spelling import.meta here: esbuild warns
-// whenever import.meta appears in CJS output, even behind typeof guards.
-declare const __filename: string | undefined;
-const requireFromUrl: string =
-  typeof __filename !== "undefined" && __filename
-    ? pathToFileURL(__filename).href
-    : pathToFileURL(process.cwd() + "/").href;
-
-const require = createRequire(requireFromUrl);
-const fs = require("fs") as typeof import("fs");
-
-const WASM_FILENAME = "photon_rs_bg.wasm";
-
 // Lazy-loaded photon module
 let photonModule: typeof import("@silvia-odwyer/photon-node") | null = null;
 let loadPromise: Promise<
   typeof import("@silvia-odwyer/photon-node") | null
 > | null = null;
-
-function pathOrNull(file: unknown): string | null {
-  if (typeof file === "string") {
-    return file;
-  }
-  if (file instanceof URL) {
-    return fileURLToPath(file);
-  }
-  return null;
-}
-
-function getFallbackWasmPaths(): string[] {
-  const execDir = path.dirname(process.execPath);
-  return [
-    path.join(execDir, WASM_FILENAME),
-    path.join(execDir, "photon", WASM_FILENAME),
-    path.join(process.cwd(), WASM_FILENAME),
-  ];
-}
-
-function patchPhotonWasmRead(): () => void {
-  const originalReadFileSync = fs.readFileSync.bind(
-    fs,
-  ) as typeof fs.readFileSync;
-  const fallbackPaths = getFallbackWasmPaths();
-  const mutableFs = fs as { readFileSync: typeof fs.readFileSync };
-
-  const patchedReadFileSync = ((
-    ...args: Parameters<typeof fs.readFileSync>
-  ) => {
-    const [file, options] = args;
-    const resolvedPath = pathOrNull(file);
-    if (resolvedPath?.endsWith(WASM_FILENAME)) {
-      try {
-        return originalReadFileSync(...args);
-      } catch (error) {
-        const err = error as NodeJS.ErrnoException;
-        if (err?.code && err.code !== "ENOENT") {
-          throw error;
-        }
-        for (const fallbackPath of fallbackPaths) {
-          if (!fs.existsSync(fallbackPath)) {
-            continue;
-          }
-          if (options === undefined) {
-            return originalReadFileSync(fallbackPath);
-          }
-          return originalReadFileSync(fallbackPath, options);
-        }
-        throw error;
-      }
-    }
-    return originalReadFileSync(...args);
-  }) as typeof fs.readFileSync;
-
-  try {
-    mutableFs.readFileSync = patchedReadFileSync;
-  } catch {
-    Object.defineProperty(fs, "readFileSync", {
-      value: patchedReadFileSync,
-      writable: true,
-      configurable: true,
-    });
-  }
-
-  return () => {
-    try {
-      mutableFs.readFileSync = originalReadFileSync;
-    } catch {
-      Object.defineProperty(fs, "readFileSync", {
-        value: originalReadFileSync,
-        writable: true,
-        configurable: true,
-      });
-    }
-  };
-}
 
 /**
  * Load the photon module asynchronously.
@@ -129,7 +29,6 @@ export async function loadPhoton(): Promise<
     return loadPromise;
   }
   loadPromise = (async () => {
-    const restoreReadFileSync = patchPhotonWasmRead();
     try {
       const imported = await import("@silvia-odwyer/photon-node");
       const moduleNamespace = imported as unknown as {
@@ -140,8 +39,6 @@ export async function loadPhoton(): Promise<
     } catch {
       photonModule = null;
       return photonModule;
-    } finally {
-      restoreReadFileSync();
     }
   })();
   return loadPromise;

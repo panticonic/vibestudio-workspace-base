@@ -25,9 +25,14 @@
           "tier": "gated",
           "sensitivity": "read",
           "resourceType": "mobile-device",
-          "presentation": { "domain": "people", "verb": "see" },
+          "presentation": {
+            "domain": "people",
+            "verb": "see"
+          },
           "notability": "everyday",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         },
         {
           "name": "mobile.provision",
@@ -36,24 +41,24 @@
           "tier": "gated",
           "sensitivity": "admin",
           "resourceType": "mobile-device",
-          "presentation": { "domain": "people", "verb": "manage" },
+          "presentation": {
+            "domain": "people",
+            "verb": "manage"
+          },
           "notability": "headline",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         }
       ],
-      "requests": [
-        {
-          "capability": "connected-client.transport",
-          "resource": { "kind": "prefix", "prefix": "" },
-          "tier": "gated",
-          "evidence": "intentional-broad"
-        }
-      ]
+      "requests": []
     }
   },
   "dependencies": {
     "@vibestudio/service-schemas": "workspace:*",
     "@workspace/runtime": "workspace:*"
   },
-  "devDependencies": { "vitest": "^3.2.2" }
+  "devDependencies": {
+    "vitest": "3.2.7"
+  }
 }

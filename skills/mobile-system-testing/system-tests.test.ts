@@ -110,14 +110,7 @@ describe("mobile system-test declarations", () => {
         }),
       ]),
     );
-    expect(policy.authority).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          capability: { kind: "exact", key: "connected-client.transport" },
-          resource: { kind: "exact", key: "connected-client.transport" },
-        }),
-      ]),
-    );
+    expect(policy.authority).toHaveLength(3);
   });
 
   it("requires extension-backed installation and rendering evidence", () => {

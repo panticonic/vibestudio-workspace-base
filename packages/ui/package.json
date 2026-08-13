@@ -16,13 +16,13 @@
     "./themes/vibestudio.css": "./src/themes/vibestudio.css"
   },
   "dependencies": {
-    "@radix-ui/react-icons": "^1.3.2",
-    "@radix-ui/themes": "^3.2.1",
+    "@radix-ui/react-icons": "1.3.2",
+    "@radix-ui/themes": "3.3.0",
     "@vibestudio/shared": "workspace:*",
-    "lucide-react": "^1.27.0",
-    "shiki": "^3.23.0"
+    "lucide-react": "1.31.0",
+    "shiki": "3.23.0"
   },
   "peerDependencies": {
-    "react": "^19.0.0"
+    "react": "19.0.0"
   }
 }

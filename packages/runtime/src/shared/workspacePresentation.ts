@@ -29,6 +29,85 @@ import {
 
 export const WORKSPACE_PRESENTATION_SERVICE = "workspace.presentation";
 
+const PLACEMENT_DISPOSITIONS = new Set<
+  NonNullable<PanelTreePlacementHint["disposition"]>
+>(["side", "side-if-room", "replace", "split-below"]);
+
+function currentPresentationOptions(serialized: string | null | undefined): {
+  placement?: PanelTreePlacementHint;
+  ref?: string | null;
+} {
+  if (serialized == null || serialized === "") return {};
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(serialized) as unknown;
+  } catch (error) {
+    throw new Error("Workspace panel options are not valid current JSON", {
+      cause: error,
+    });
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error("Workspace panel options must be a current JSON object");
+  }
+  const value = parsed as Record<string, unknown>;
+  const result: { placement?: PanelTreePlacementHint; ref?: string | null } =
+    {};
+  if (Object.hasOwn(value, "ref")) {
+    if (typeof value["ref"] !== "string" && value["ref"] !== null) {
+      throw new Error("Workspace panel options.ref must be a string or null");
+    }
+    result.ref = value["ref"] as string | null;
+  }
+  if (!Object.hasOwn(value, "placement")) return result;
+  const rawPlacement = value["placement"];
+  if (
+    typeof rawPlacement !== "object" ||
+    rawPlacement === null ||
+    Array.isArray(rawPlacement)
+  ) {
+    throw new Error("Workspace panel options.placement must be an object");
+  }
+  const placementValue = rawPlacement as Record<string, unknown>;
+  const unknownPlacementKey = Object.keys(placementValue).find(
+    (key) =>
+      key !== "disposition" && key !== "preferredWidth" && key !== "minWidth",
+  );
+  if (unknownPlacementKey) {
+    throw new Error(
+      `Workspace panel options.placement has unknown key ${unknownPlacementKey}`,
+    );
+  }
+  const placement: PanelTreePlacementHint = {};
+  if (Object.hasOwn(placementValue, "disposition")) {
+    const disposition = placementValue["disposition"];
+    if (
+      typeof disposition !== "string" ||
+      !PLACEMENT_DISPOSITIONS.has(
+        disposition as NonNullable<PanelTreePlacementHint["disposition"]>,
+      )
+    ) {
+      throw new Error(
+        "Workspace panel options.placement.disposition is invalid",
+      );
+    }
+    placement.disposition = disposition as NonNullable<
+      PanelTreePlacementHint["disposition"]
+    >;
+  }
+  for (const key of ["preferredWidth", "minWidth"] as const) {
+    if (!Object.hasOwn(placementValue, key)) continue;
+    const width = placementValue[key];
+    if (typeof width !== "number" || !Number.isFinite(width) || width <= 0) {
+      throw new Error(
+        `Workspace panel options.placement.${key} must be a positive number`,
+      );
+    }
+    placement[key] = width;
+  }
+  result.placement = placement;
+  return result;
+}
+
 /**
  * Base's sole composition boundary for workspace panel presentation.
  * `workspace-state` contributes bounded topology/identity facts; the Base DO
@@ -61,52 +140,6 @@ export function createWorkspacePresentationClient(
     return pending;
   };
 
-  const presentationOptions = (
-    serialized: string | null | undefined,
-  ): { placement?: PanelTreePlacementHint; ref?: string } => {
-    if (!serialized) return {};
-    try {
-      const value = JSON.parse(serialized) as Record<string, unknown>;
-      const rawPlacement =
-        value["placement"] && typeof value["placement"] === "object"
-          ? (value["placement"] as Record<string, unknown>)
-          : null;
-      const disposition =
-        rawPlacement?.["disposition"] === "side" ||
-        rawPlacement?.["disposition"] === "side-if-room" ||
-        rawPlacement?.["disposition"] === "replace" ||
-        rawPlacement?.["disposition"] === "split-below"
-          ? rawPlacement["disposition"]
-          : undefined;
-      const preferredWidth =
-        typeof rawPlacement?.["preferredWidth"] === "number" &&
-        Number.isFinite(rawPlacement["preferredWidth"]) &&
-        rawPlacement["preferredWidth"] > 0
-          ? rawPlacement["preferredWidth"]
-          : undefined;
-      const minWidth =
-        typeof rawPlacement?.["minWidth"] === "number" &&
-        Number.isFinite(rawPlacement["minWidth"]) &&
-        rawPlacement["minWidth"] > 0
-          ? rawPlacement["minWidth"]
-          : undefined;
-      const placement: PanelTreePlacementHint | undefined =
-        disposition || preferredWidth !== undefined || minWidth !== undefined
-          ? {
-              ...(disposition ? { disposition } : {}),
-              ...(preferredWidth !== undefined ? { preferredWidth } : {}),
-              ...(minWidth !== undefined ? { minWidth } : {}),
-            }
-          : undefined;
-      return {
-        ...(placement ? { placement } : {}),
-        ...(typeof value["ref"] === "string" ? { ref: value["ref"] } : {}),
-      };
-    } catch {
-      return {};
-    }
-  };
-
   const presentNodes = async (
     nodes: WorkspacePanelTreeNode[],
   ): Promise<PanelTreeNode[]> => {
@@ -119,7 +152,7 @@ export function createWorkspacePresentationClient(
       nodes.map(async (node) => {
         const icon = await iconForSource(node.source);
         const { options, ...topology } = node;
-        const presentation = presentationOptions(options);
+        const presentation = currentPresentationOptions(options);
         return {
           ...topology,
           title: titles[node.slotId] ?? node.slotId,

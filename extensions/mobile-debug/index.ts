@@ -11,12 +11,17 @@ declare module "@vibestudio/extension" {
 }
 
 const defaultPackage = "app.vibestudio.mobile.internal";
-const supportedAndroidAbis = new Set(["arm64-v8a", "armeabi-v7a", "x86_64", "x86"]);
+const supportedAndroidAbis = new Set([
+  "arm64-v8a",
+  "armeabi-v7a",
+  "x86_64",
+  "x86",
+]);
 
 class MobileDebugError extends Error {
   constructor(
     public readonly code: string,
-    message: string
+    message: string,
   ) {
     super(message);
     this.name = "MobileDebugError";
@@ -26,46 +31,63 @@ class MobileDebugError extends Error {
 
 export async function activate(ctx: ExtensionContext) {
   const workspace = await ctx.workspace.getInfo();
-  if (!tryResolveRepoRoot(workspace.path)) {
+  if (!path.isAbsolute(workspace.path)) {
+    throw new MobileDebugError(
+      "EBUILD",
+      "Workspace source root must be absolute",
+    );
+  }
+  const sourceRoot = path.normalize(workspace.path);
+  if (!isMobileSourceRoot(sourceRoot)) {
     ctx.health.degraded({
       summary: "Mobile debug activated without a Vibestudio repo root",
-      reasons: ["Build and install helpers require a checkout containing apps/mobile/android."],
+      reasons: [
+        "Build and install helpers require a checkout containing apps/mobile/android.",
+      ],
     });
   }
   return {
     async doctor() {
-      const adb = await hasCommand("adb");
-      const xcrun = await hasCommand("xcrun");
-      const xcodebuild = await hasCommand("xcodebuild");
-      const devices = adb ? await listAdbDevices() : [];
-      const simulators = xcrun ? await listIosSimulators().catch(() => []) : [];
+      const adb = await hasCommand(sourceRoot, "adb");
+      const xcrun = await hasCommand(sourceRoot, "xcrun");
+      const xcodebuild = await hasCommand(sourceRoot, "xcodebuild");
+      const devices = adb ? await listAdbDevices(sourceRoot) : [];
+      const simulators = xcrun
+        ? await listIosSimulators(sourceRoot).catch(() => [])
+        : [];
       const ready = devices.filter((device) => device.state === "device");
-      const repoRoot = tryResolveRepoRoot(workspace.path);
+      const repoRoot = isMobileSourceRoot(sourceRoot) ? sourceRoot : null;
       const apkPath = repoRoot ? defaultApkPath(repoRoot) : null;
       const issues: string[] = [];
       if (!repoRoot)
-        issues.push("Could not locate Vibestudio repo root containing apps/mobile/android");
+        issues.push(
+          "Could not locate Vibestudio repo root containing apps/mobile/android",
+        );
       if (!adb) issues.push("adb is not on PATH");
       if (process.platform === "darwin") {
         if (!xcrun) issues.push("xcrun is not on PATH");
         if (!xcodebuild) issues.push("xcodebuild is not on PATH");
-        if (simulators.filter((device) => device.state === "Booted").length === 0)
+        if (
+          simulators.filter((device) => device.state === "Booted").length === 0
+        )
           issues.push("No booted iOS simulator");
       }
       if (devices.some((device) => device.state === "unauthorized"))
         issues.push("Accept the Android USB debugging prompt");
       if (ready.length === 0) issues.push("No ready Android device");
-      if (ready.length > 1) issues.push("Multiple ready devices; pass a serial");
-      if (apkPath && !fs.existsSync(apkPath)) issues.push("Internal APK has not been built");
+      if (ready.length > 1)
+        issues.push("Multiple ready devices; pass a serial");
+      if (apkPath && !fs.existsSync(apkPath))
+        issues.push("Internal APK has not been built");
       let deviceAbi: string | null = null;
       if (ready[0]) {
         try {
-          deviceAbi = await readAndroidDeviceAbi(ready[0].serial);
+          deviceAbi = await readAndroidDeviceAbi(sourceRoot, ready[0].serial);
         } catch (error) {
           issues.push(
             `Could not determine Android device ABI: ${
               error instanceof Error ? error.message : String(error)
-            }`
+            }`,
           );
         }
       }
@@ -77,17 +99,18 @@ export async function activate(ctx: ExtensionContext) {
         deviceAbi,
         iosSimulator: simulators.find((device) => device.state === "Booted"),
         apkSigned: !!apkPath && fs.existsSync(apkPath),
-        apkBytes: apkPath && fs.existsSync(apkPath) ? fs.statSync(apkPath).size : null,
+        apkBytes:
+          apkPath && fs.existsSync(apkPath) ? fs.statSync(apkPath).size : null,
         issues,
       };
     },
 
     async listDevices() {
-      return listAdbDevices();
+      return listAdbDevices(sourceRoot);
     },
 
     async listIosSimulators() {
-      return listIosSimulators();
+      return listIosSimulators(sourceRoot);
     },
 
     async buildAndroid(raw?: {
@@ -95,13 +118,14 @@ export async function activate(ctx: ExtensionContext) {
       device?: string;
       architectures?: string[];
     }) {
-      const repoRoot = requireRepoRoot(workspace.path);
+      const repoRoot = requireMobileSourceRoot(sourceRoot);
       const started = Date.now();
       const variant = raw?.variant ?? "internal";
-      const gradleTask = variant === "release" ? "assembleRelease" : "assembleInternal";
+      const gradleTask =
+        variant === "release" ? "assembleRelease" : "assembleInternal";
       let architectures = validateAndroidArchitectures(raw?.architectures);
       if (architectures.length === 0 && raw?.device) {
-        architectures = [await readAndroidDeviceAbi(raw.device)];
+        architectures = [await readAndroidDeviceAbi(sourceRoot, raw.device)];
       }
       const apkPath =
         variant === "release"
@@ -115,7 +139,7 @@ export async function activate(ctx: ExtensionContext) {
               "outputs",
               "apk",
               "release",
-              "app-release.apk"
+              "app-release.apk",
             )
           : defaultApkPath(repoRoot);
       await run(
@@ -132,7 +156,7 @@ export async function activate(ctx: ExtensionContext) {
         {
           cwd: path.join(repoRoot, "apps", "mobile", "android"),
           errorCode: "EBUILD",
-        }
+        },
       );
       return {
         apkPath,
@@ -142,8 +166,12 @@ export async function activate(ctx: ExtensionContext) {
       };
     },
 
-    async installAndroid(raw?: { device?: string; resetApp?: boolean; launch?: boolean }) {
-      const repoRoot = requireRepoRoot(workspace.path);
+    async installAndroid(raw?: {
+      device?: string;
+      resetApp?: boolean;
+      launch?: boolean;
+    }) {
+      const repoRoot = requireMobileSourceRoot(sourceRoot);
       const args = [
         "--from-source",
         "--package",
@@ -153,7 +181,12 @@ export async function activate(ctx: ExtensionContext) {
         raw?.device ? "--device" : null,
         raw?.device ?? null,
       ].filter((value): value is string => !!value);
-      const script = path.join(repoRoot, "scripts", "cli", "mobile-install.mjs");
+      const script = path.join(
+        repoRoot,
+        "scripts",
+        "cli",
+        "mobile-install.mjs",
+      );
       await run(process.execPath, [script, ...args], { cwd: repoRoot });
       return { packageName: defaultPackage };
     },
@@ -164,8 +197,13 @@ export async function activate(ctx: ExtensionContext) {
       configuration?: "Debug" | "Release" | "Internal";
       launch?: boolean;
     }) {
-      const repoRoot = requireRepoRoot(workspace.path);
-      const script = path.join(repoRoot, "scripts", "cli", "mobile-install.mjs");
+      const repoRoot = requireMobileSourceRoot(sourceRoot);
+      const script = path.join(
+        repoRoot,
+        "scripts",
+        "cli",
+        "mobile-install.mjs",
+      );
       const args = [
         "--platform",
         "ios",
@@ -176,30 +214,52 @@ export async function activate(ctx: ExtensionContext) {
         raw?.configuration ?? "Debug",
         raw?.launch ? "--launch" : null,
       ].filter((value): value is string => !!value);
-      await run(process.execPath, [script, ...args], { cwd: repoRoot, errorCode: "EBUILD" });
-      return { bundleId: process.env["VIBESTUDIO_IOS_BUNDLE_ID"] ?? "app.vibestudio.mobile" };
+      await run(process.execPath, [script, ...args], {
+        cwd: repoRoot,
+        errorCode: "EBUILD",
+      });
+      return {
+        bundleId:
+          process.env["VIBESTUDIO_IOS_BUNDLE_ID"] ?? "app.vibestudio.mobile",
+      };
     },
 
     async launchAndroid(raw?: { device?: string; packageName?: string }) {
-      await adb(raw?.device, ["shell", "monkey", "-p", raw?.packageName ?? defaultPackage, "1"]);
+      await adb(sourceRoot, raw?.device, [
+        "shell",
+        "monkey",
+        "-p",
+        raw?.packageName ?? defaultPackage,
+        "1",
+      ]);
     },
 
     async launchIos(raw?: { device?: string; bundleId?: string }) {
       requireMac("launch iOS apps");
       const bundleId =
-        raw?.bundleId ?? process.env["VIBESTUDIO_IOS_BUNDLE_ID"] ?? "app.vibestudio.mobile";
+        raw?.bundleId ??
+        process.env["VIBESTUDIO_IOS_BUNDLE_ID"] ??
+        "app.vibestudio.mobile";
       if (raw?.device) {
         await run(
           "xcrun",
-          ["devicectl", "device", "process", "launch", "--device", raw.device, bundleId],
+          [
+            "devicectl",
+            "device",
+            "process",
+            "launch",
+            "--device",
+            raw.device,
+            bundleId,
+          ],
           {
-            cwd: process.cwd(),
+            cwd: sourceRoot,
             errorCode: "EIOS",
-          }
+          },
         );
       } else {
         await run("xcrun", ["simctl", "launch", "booted", bundleId], {
-          cwd: process.cwd(),
+          cwd: sourceRoot,
           errorCode: "EIOS",
         });
       }
@@ -207,48 +267,76 @@ export async function activate(ctx: ExtensionContext) {
 
     async clearAndroidApp(raw?: { device?: string; packageName?: string }) {
       const packageName = raw?.packageName ?? defaultPackage;
-      await adb(raw?.device, ["shell", "pm", "clear", packageName]);
+      await adb(sourceRoot, raw?.device, ["shell", "pm", "clear", packageName]);
     },
 
     async adbReverse(raw: { device?: string; ports: Array<[number, number]> }) {
       for (const [devicePort, hostPort] of raw.ports) {
-        await adb(raw.device, ["reverse", `tcp:${devicePort}`, `tcp:${hostPort}`]);
+        await adb(sourceRoot, raw.device, [
+          "reverse",
+          `tcp:${devicePort}`,
+          `tcp:${hostPort}`,
+        ]);
       }
     },
 
     async screenshot(raw?: { device?: string }) {
-      const result = await adbCapture(raw?.device, ["exec-out", "screencap", "-p"]);
-      return { pngBase64: Buffer.from(result.stdout, "binary").toString("base64") };
+      const result = await adbCapture(sourceRoot, raw?.device, [
+        "exec-out",
+        "screencap",
+        "-p",
+      ]);
+      return {
+        pngBase64: Buffer.from(result.stdout, "binary").toString("base64"),
+      };
     },
 
     async screenshotIos(raw?: { device?: string }) {
       requireMac("capture iOS screenshots");
       const args = ["simctl", "io", raw?.device ?? "booted", "screenshot", "-"];
       const result = await runCapture("xcrun", args, {
-        cwd: process.cwd(),
+        cwd: sourceRoot,
         encoding: "binary",
         errorCode: "EIOS",
       });
-      if (result.exitCode !== 0) throw new MobileDebugError("EIOS", result.stderr || result.stdout);
-      return { pngBase64: Buffer.from(result.stdout, "binary").toString("base64") };
+      if (result.exitCode !== 0)
+        throw new MobileDebugError("EIOS", result.stderr || result.stdout);
+      return {
+        pngBase64: Buffer.from(result.stdout, "binary").toString("base64"),
+      };
     },
 
     async verify(raw?: { device?: string; packageName?: string }) {
-      const devices = await listAdbDevices();
+      const devices = await listAdbDevices(sourceRoot);
       const device = pickDevice(devices, raw?.device);
       const packageName = raw?.packageName ?? defaultPackage;
-      const packageInstalled = await adbExitOk(device.serial, ["shell", "pm", "path", packageName]);
-      const issues: string[] = packageInstalled ? [] : [`${packageName} is not installed`];
+      const packageInstalled = await adbExitOk(sourceRoot, device.serial, [
+        "shell",
+        "pm",
+        "path",
+        packageName,
+      ]);
+      const issues: string[] = packageInstalled
+        ? []
+        : [`${packageName} is not installed`];
       const rendering = packageInstalled
-        ? await adbExitOk(device.serial, ["shell", "pidof", packageName])
+        ? await adbExitOk(sourceRoot, device.serial, [
+            "shell",
+            "pidof",
+            packageName,
+          ])
         : false;
       let screenshot: Awaited<ReturnType<typeof adbCapture>> | null = null;
       if (rendering) {
         try {
-          screenshot = await adbCapture(device.serial, ["exec-out", "screencap", "-p"]);
+          screenshot = await adbCapture(sourceRoot, device.serial, [
+            "exec-out",
+            "screencap",
+            "-p",
+          ]);
         } catch (error) {
           issues.push(
-            `Screenshot failed: ${error instanceof Error ? error.message : String(error)}`
+            `Screenshot failed: ${error instanceof Error ? error.message : String(error)}`,
           );
         }
       }
@@ -257,7 +345,9 @@ export async function activate(ctx: ExtensionContext) {
         bundleActive: rendering,
         rendering,
         screenshotCaptured: screenshot !== null,
-        screenshotBytes: screenshot ? Buffer.byteLength(screenshot.stdout, "binary") : 0,
+        screenshotBytes: screenshot
+          ? Buffer.byteLength(screenshot.stdout, "binary")
+          : 0,
         issues,
       };
     },
@@ -268,18 +358,26 @@ export async function activate(ctx: ExtensionContext) {
       sinceMs?: number;
       timeoutMs?: number;
     }) {
-      const devices = await listAdbDevices();
+      const devices = await listAdbDevices(sourceRoot);
       const device = pickDevice(devices, raw?.device);
       const packageName = raw?.packageName ?? defaultPackage;
       const sinceMs = raw?.sinceMs ?? Date.now() - 300_000;
-      const timeoutMs = Math.min(Math.max(raw?.timeoutMs ?? 180_000, 1_000), 300_000);
+      const timeoutMs = Math.min(
+        Math.max(raw?.timeoutMs ?? 180_000, 1_000),
+        300_000,
+      );
       const deadline = Date.now() + timeoutMs;
       let last = workspaceReadinessFromLog("", sinceMs);
       let readySince: number | null = null;
 
       while (readySince !== null || Date.now() < deadline) {
-        if (readySince !== null && Date.now() - readySince >= 20_000) return last;
-        const pid = await adbCapture(device.serial, ["shell", "pidof", packageName])
+        if (readySince !== null && Date.now() - readySince >= 20_000)
+          return last;
+        const pid = await adbCapture(sourceRoot, device.serial, [
+          "shell",
+          "pidof",
+          packageName,
+        ])
           .then((result) => result.stdout.trim().split(/\s+/u)[0])
           .catch(() => undefined);
         if (!pid) {
@@ -288,7 +386,7 @@ export async function activate(ctx: ExtensionContext) {
             issues: [`${packageName} is not rendering`],
           };
         } else {
-          const logs = await adbCapture(device.serial, [
+          const logs = await adbCapture(sourceRoot, device.serial, [
             "logcat",
             "-d",
             `--pid=${pid}`,
@@ -319,21 +417,25 @@ export async function activate(ctx: ExtensionContext) {
         issues:
           last.issues.length > 0
             ? last.issues
-            : ["The mobile workspace did not become ready before the verification timeout"],
+            : [
+                "The mobile workspace did not become ready before the verification timeout",
+              ],
       };
     },
 
     logcat(raw?: { device?: string; packageName?: string; filter?: string }) {
-      const args = raw?.packageName ? ["shell", "pidof", raw.packageName] : null;
+      const args = raw?.packageName
+        ? ["shell", "pidof", raw.packageName]
+        : null;
       const streamArgs = raw?.filter
         ? ["logcat", "-v", "time", raw.filter]
         : ["logcat", "-v", "time"];
-      return streamAdb(raw?.device, args, streamArgs);
+      return streamAdb(sourceRoot, raw?.device, args, streamArgs);
     },
 
     logsIos(raw?: { device?: string; predicate?: string }) {
       requireMac("stream iOS simulator logs");
-      return streamProcess("xcrun", [
+      return streamProcess(sourceRoot, "xcrun", [
         "simctl",
         "spawn",
         raw?.device ?? "booted",
@@ -347,7 +449,11 @@ export async function activate(ctx: ExtensionContext) {
     },
 
     async shell(raw: { device?: string; command: string; args?: string[] }) {
-      return streamProcess("adb", adbArgs(raw.device, ["shell", raw.command, ...(raw.args ?? [])]));
+      return streamProcess(
+        sourceRoot,
+        "adb",
+        adbArgs(raw.device, ["shell", raw.command, ...(raw.args ?? [])]),
+      );
     },
   };
 }
@@ -360,11 +466,15 @@ export function workspaceReadinessFromLog(log: string, sinceMs = 0) {
       return !timestamp || Number(timestamp) * 1000 >= sinceMs;
     })
     .join("\n");
-  const panelHostReady = relevant.includes("phase=workspace-panels-initialized");
+  const panelHostReady = relevant.includes(
+    "phase=workspace-panels-initialized",
+  );
   const workspaceConnected = relevant.includes("phase=workspace-connected");
-  const panelWebViewLoaded = relevant.includes("phase=workspace-panel-webview-loaded");
+  const panelWebViewLoaded = relevant.includes(
+    "phase=workspace-panel-webview-loaded",
+  );
   const failure = relevant.match(
-    /invalid distance code|phase=workspace-(?:login-error|panel-webview-error|panel-webview-http-error|panel-activate-failed)[^\r\n]*/iu
+    /invalid distance code|phase=workspace-(?:login-error|panel-webview-error|panel-webview-http-error|panel-activate-failed)[^\r\n]*/iu,
   )?.[0];
   return {
     ready: panelHostReady && workspaceConnected && !failure,
@@ -374,10 +484,16 @@ export function workspaceReadinessFromLog(log: string, sinceMs = 0) {
     issues: failure ? [failure] : [],
   };
 }
-async function listAdbDevices(): Promise<
-  Array<{ serial: string; state: "device" | "unauthorized" | "offline"; model?: string }>
+async function listAdbDevices(
+  sourceRoot: string,
+): Promise<
+  Array<{
+    serial: string;
+    state: "device" | "unauthorized" | "offline";
+    model?: string;
+  }>
 > {
-  const result = await adbCapture(undefined, ["devices", "-l"]);
+  const result = await adbCapture(sourceRoot, undefined, ["devices", "-l"]);
   return result.stdout
     .split(/\r?\n/)
     .slice(1)
@@ -386,47 +502,76 @@ async function listAdbDevices(): Promise<
     .map((line) => {
       const [serial, stateRaw] = line.split(/\s+/, 2);
       const model = line.match(/\bmodel:([^\s]+)/)?.[1];
-      const state = stateRaw === "device" || stateRaw === "unauthorized" ? stateRaw : "offline";
+      const state =
+        stateRaw === "device" || stateRaw === "unauthorized"
+          ? stateRaw
+          : "offline";
       return { serial: serial!, state, ...(model ? { model } : {}) };
     });
 }
 
-function pickDevice(devices: Array<{ serial: string; state: string }>, requested?: string) {
+function pickDevice(
+  devices: Array<{ serial: string; state: string }>,
+  requested?: string,
+) {
   if (requested) {
     const match = devices.find((device) => device.serial === requested);
-    if (!match) throw new MobileDebugError("ENODEVICE", `adb does not see ${requested}`);
+    if (!match)
+      throw new MobileDebugError("ENODEVICE", `adb does not see ${requested}`);
     if (match.state !== "device")
-      throw new MobileDebugError("EUNAUTHORIZED", `${requested} is ${match.state}`);
+      throw new MobileDebugError(
+        "EUNAUTHORIZED",
+        `${requested} is ${match.state}`,
+      );
     return match;
   }
   const ready = devices.filter((device) => device.state === "device");
-  if (ready.length === 0 && devices.some((device) => device.state === "unauthorized")) {
-    throw new MobileDebugError("EUNAUTHORIZED", "Accept the Android USB debugging prompt");
+  if (
+    ready.length === 0 &&
+    devices.some((device) => device.state === "unauthorized")
+  ) {
+    throw new MobileDebugError(
+      "EUNAUTHORIZED",
+      "Accept the Android USB debugging prompt",
+    );
   }
-  if (ready.length === 0) throw new MobileDebugError("ENODEVICE", "No ready Android device");
+  if (ready.length === 0)
+    throw new MobileDebugError("ENODEVICE", "No ready Android device");
   if (ready.length > 1)
-    throw new MobileDebugError("ENODEVICE", "Multiple Android devices; pass a serial");
+    throw new MobileDebugError(
+      "ENODEVICE",
+      "Multiple Android devices; pass a serial",
+    );
   return ready[0]!;
 }
 
-export function validateAndroidArchitectures(value: string[] | undefined): string[] {
+export function validateAndroidArchitectures(
+  value: string[] | undefined,
+): string[] {
   if (!value) return [];
   const unique = [...new Set(value)];
   for (const abi of unique) {
     if (!supportedAndroidAbis.has(abi)) {
       throw new MobileDebugError(
         "EABI",
-        `Unsupported Android ABI ${JSON.stringify(abi)}; expected ${[...supportedAndroidAbis].join(
-          ", "
-        )}`
+        `Unsupported Android ABI ${JSON.stringify(abi)}; expected ${[
+          ...supportedAndroidAbis,
+        ].join(", ")}`,
       );
     }
   }
   return unique;
 }
 
-async function readAndroidDeviceAbi(device: string): Promise<string> {
-  const result = await adbCapture(device, ["shell", "getprop", "ro.product.cpu.abi"]);
+async function readAndroidDeviceAbi(
+  sourceRoot: string,
+  device: string,
+): Promise<string> {
+  const result = await adbCapture(sourceRoot, device, [
+    "shell",
+    "getprop",
+    "ro.product.cpu.abi",
+  ]);
   const abi = result.stdout.trim();
   validateAndroidArchitectures([abi]);
   return abi;
@@ -434,29 +579,54 @@ async function readAndroidDeviceAbi(device: string): Promise<string> {
 
 function requireMac(action: string): void {
   if (process.platform !== "darwin") {
-    throw new MobileDebugError("EIOS_PLATFORM", `${action} requires macOS with Xcode`);
+    throw new MobileDebugError(
+      "EIOS_PLATFORM",
+      `${action} requires macOS with Xcode`,
+    );
   }
 }
 
-async function listIosSimulators(): Promise<
+async function listIosSimulators(
+  sourceRoot: string,
+): Promise<
   Array<{ udid: string; name: string; state: string; runtime: string }>
 > {
   requireMac("list iOS simulators");
-  const result = await runCapture("xcrun", ["simctl", "list", "devices", "--json"], {
-    cwd: process.cwd(),
-    errorCode: "EIOS",
-  });
+  const result = await runCapture(
+    "xcrun",
+    ["simctl", "list", "devices", "--json"],
+    {
+      cwd: sourceRoot,
+      errorCode: "EIOS",
+    },
+  );
   if (result.exitCode !== 0) {
-    throw new MobileDebugError("EIOS", result.stderr || result.stdout || "simctl list failed");
+    throw new MobileDebugError(
+      "EIOS",
+      result.stderr || result.stdout || "simctl list failed",
+    );
   }
   const parsed = JSON.parse(result.stdout) as {
-    devices?: Record<string, Array<{ udid?: string; name?: string; state?: string }>>;
+    devices?: Record<
+      string,
+      Array<{ udid?: string; name?: string; state?: string }>
+    >;
   };
-  const out: Array<{ udid: string; name: string; state: string; runtime: string }> = [];
+  const out: Array<{
+    udid: string;
+    name: string;
+    state: string;
+    runtime: string;
+  }> = [];
   for (const [runtime, devices] of Object.entries(parsed.devices ?? {})) {
     for (const device of devices) {
       if (!device.udid || !device.name || !device.state) continue;
-      out.push({ udid: device.udid, name: device.name, state: device.state, runtime });
+      out.push({
+        udid: device.udid,
+        name: device.name,
+        state: device.state,
+        runtime,
+      });
     }
   }
   return out;
@@ -466,31 +636,52 @@ function adbArgs(device: string | undefined, args: string[]): string[] {
   return device ? ["-s", device, ...args] : args;
 }
 
-async function adb(device: string | undefined, args: string[]) {
-  await run("adb", adbArgs(device, args), { cwd: process.cwd() });
+async function adb(
+  sourceRoot: string,
+  device: string | undefined,
+  args: string[],
+) {
+  await run("adb", adbArgs(device, args), { cwd: sourceRoot });
 }
 
-async function adbExitOk(device: string | undefined, args: string[]): Promise<boolean> {
+async function adbExitOk(
+  sourceRoot: string,
+  device: string | undefined,
+  args: string[],
+): Promise<boolean> {
   const result = await runCapture("adb", adbArgs(device, args), {
-    cwd: process.cwd(),
+    cwd: sourceRoot,
     reject: false,
   });
   return result.exitCode === 0;
 }
 
-async function adbCapture(device: string | undefined, args: string[]) {
+async function adbCapture(
+  sourceRoot: string,
+  device: string | undefined,
+  args: string[],
+) {
   const result = await runCapture("adb", adbArgs(device, args), {
-    cwd: process.cwd(),
+    cwd: sourceRoot,
     encoding: "binary",
   });
   if (result.exitCode !== 0)
-    throw new MobileDebugError("EADB", result.stderr || result.stdout || "adb failed");
+    throw new MobileDebugError(
+      "EADB",
+      result.stderr || result.stdout || "adb failed",
+    );
   return result;
 }
 
-async function hasCommand(command: string): Promise<boolean> {
+async function hasCommand(
+  sourceRoot: string,
+  command: string,
+): Promise<boolean> {
   try {
-    const result = await runCapture(command, ["version"], { cwd: process.cwd(), reject: false });
+    const result = await runCapture(command, ["version"], {
+      cwd: sourceRoot,
+      reject: false,
+    });
     return result.exitCode === 0;
   } catch {
     return false;
@@ -500,16 +691,27 @@ async function hasCommand(command: string): Promise<boolean> {
 function run(
   command: string,
   args: string[],
-  opts: { cwd: string; errorCode?: string }
+  opts: { cwd: string; errorCode?: string },
 ): Promise<void> {
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { cwd: opts.cwd, env: process.env, stdio: "ignore" });
+    const child = spawn(command, args, {
+      cwd: opts.cwd,
+      env: process.env,
+      stdio: "ignore",
+    });
     const errorCode = opts.errorCode ?? "EADB";
-    child.on("error", (error) => reject(new MobileDebugError(errorCode, error.message)));
+    child.on("error", (error) =>
+      reject(new MobileDebugError(errorCode, error.message)),
+    );
     child.on("exit", (code) =>
       code === 0
         ? resolve()
-        : reject(new MobileDebugError(errorCode, `${command} ${args.join(" ")} exited ${code}`))
+        : reject(
+            new MobileDebugError(
+              errorCode,
+              `${command} ${args.join(" ")} exited ${code}`,
+            ),
+          ),
     );
   });
 }
@@ -517,7 +719,12 @@ function run(
 function runCapture(
   command: string,
   args: string[],
-  opts: { cwd: string; reject?: boolean; encoding?: BufferEncoding; errorCode?: string }
+  opts: {
+    cwd: string;
+    reject?: boolean;
+    encoding?: BufferEncoding;
+    errorCode?: string;
+  },
 ): Promise<{ exitCode: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
@@ -530,7 +737,9 @@ function runCapture(
     const stderr: Buffer[] = [];
     child.stdout?.on("data", (chunk) => stdout.push(Buffer.from(chunk)));
     child.stderr?.on("data", (chunk) => stderr.push(Buffer.from(chunk)));
-    child.on("error", (error) => reject(new MobileDebugError(errorCode, error.message)));
+    child.on("error", (error) =>
+      reject(new MobileDebugError(errorCode, error.message)),
+    );
     child.on("exit", (code) => {
       const result = {
         exitCode: code,
@@ -540,25 +749,31 @@ function runCapture(
       if (code === 0 || opts.reject === false) resolve(result);
       else
         reject(
-          new MobileDebugError(errorCode, result.stderr || result.stdout || `${command} failed`)
+          new MobileDebugError(
+            errorCode,
+            result.stderr || result.stdout || `${command} failed`,
+          ),
         );
     });
   });
 }
 
 function streamAdb(
+  sourceRoot: string,
   device: string | undefined,
   pidProbeArgs: string[] | null,
-  streamArgs: string[]
+  streamArgs: string[],
 ): Response {
-  if (!pidProbeArgs) return streamProcess("adb", adbArgs(device, streamArgs));
-  return streamAdbAfterPidProbe(device, pidProbeArgs, streamArgs);
+  if (!pidProbeArgs)
+    return streamProcess(sourceRoot, "adb", adbArgs(device, streamArgs));
+  return streamAdbAfterPidProbe(sourceRoot, device, pidProbeArgs, streamArgs);
 }
 
 function streamAdbAfterPidProbe(
+  sourceRoot: string,
   device: string | undefined,
   pidProbeArgs: string[],
-  streamArgs: string[]
+  streamArgs: string[],
 ): Response {
   const encoder = new TextEncoder();
   let child: ReturnType<typeof spawn> | null = null;
@@ -566,6 +781,7 @@ function streamAdbAfterPidProbe(
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
       const probe = spawn("adb", adbArgs(device, pidProbeArgs), {
+        cwd: sourceRoot,
         env: process.env,
         stdio: ["ignore", "pipe", "pipe"],
       });
@@ -580,20 +796,24 @@ function streamAdbAfterPidProbe(
         const pid = firstPid(Buffer.concat(stdout).toString("utf8"));
         if (code !== 0 || !pid) {
           const message =
-            Buffer.concat(stderr).toString("utf8").trim() || "package process is not running";
+            Buffer.concat(stderr).toString("utf8").trim() ||
+            "package process is not running";
           controller.enqueue(encoder.encode(`${message}\n`));
           controller.close();
           return;
         }
         const scopedArgs = pidScopedLogcatArgs(streamArgs, pid);
         const streamChild = spawn("adb", adbArgs(device, scopedArgs), {
+          cwd: sourceRoot,
           env: process.env,
           stdio: ["ignore", "pipe", "pipe"],
         });
         child = streamChild;
-        streamChild.stdout?.on("data", (chunk) => controller.enqueue(Buffer.from(chunk)));
+        streamChild.stdout?.on("data", (chunk) =>
+          controller.enqueue(Buffer.from(chunk)),
+        );
         streamChild.stderr?.on("data", (chunk) =>
-          controller.enqueue(encoder.encode(String(chunk)))
+          controller.enqueue(encoder.encode(String(chunk))),
         );
         streamChild.on("error", (err) => controller.error(err));
         streamChild.on("exit", () => controller.close());
@@ -604,10 +824,15 @@ function streamAdbAfterPidProbe(
       child?.kill("SIGTERM");
     },
   });
-  return new Response(stream, { headers: { "content-type": "application/octet-stream" } });
+  return new Response(stream, {
+    headers: { "content-type": "application/octet-stream" },
+  });
 }
 
-export function pidScopedLogcatArgs(streamArgs: string[], pid: string): string[] {
+export function pidScopedLogcatArgs(
+  streamArgs: string[],
+  pid: string,
+): string[] {
   if (streamArgs[0] !== "logcat") return streamArgs;
   return ["logcat", `--pid=${pid}`, ...streamArgs.slice(1)];
 }
@@ -616,13 +841,25 @@ function firstPid(raw: string): string | null {
   return raw.split(/\s+/).find((part) => /^\d+$/.test(part)) ?? null;
 }
 
-function streamProcess(command: string, args: string[]): Response {
+function streamProcess(
+  sourceRoot: string,
+  command: string,
+  args: string[],
+): Response {
   const encoder = new TextEncoder();
-  const child = spawn(command, args, { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(command, args, {
+    cwd: sourceRoot,
+    env: process.env,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      child.stdout?.on("data", (chunk) => controller.enqueue(Buffer.from(chunk)));
-      child.stderr?.on("data", (chunk) => controller.enqueue(encoder.encode(String(chunk))));
+      child.stdout?.on("data", (chunk) =>
+        controller.enqueue(Buffer.from(chunk)),
+      );
+      child.stderr?.on("data", (chunk) =>
+        controller.enqueue(encoder.encode(String(chunk))),
+      );
       child.on("error", (err) => controller.error(err));
       child.on("exit", () => controller.close());
     },
@@ -630,27 +867,23 @@ function streamProcess(command: string, args: string[]): Response {
       child.kill("SIGTERM");
     },
   });
-  return new Response(stream, { headers: { "content-type": "application/octet-stream" } });
+  return new Response(stream, {
+    headers: { "content-type": "application/octet-stream" },
+  });
 }
 
-function requireRepoRoot(workspacePath: string): string {
-  const repoRoot = tryResolveRepoRoot(workspacePath);
-  if (!repoRoot) throw new MobileDebugError("EBUILD", "Could not locate Vibestudio repo root");
-  return repoRoot;
-}
-
-function tryResolveRepoRoot(workspacePath: string): string | null {
-  let current = process.env["VIBESTUDIO_REPO_ROOT"] ?? process.cwd();
-  for (const start of [current, workspacePath]) {
-    current = path.resolve(start);
-    while (true) {
-      if (fs.existsSync(path.join(current, "apps", "mobile", "android"))) return current;
-      const parent = path.dirname(current);
-      if (parent === current) break;
-      current = parent;
-    }
+function requireMobileSourceRoot(sourceRoot: string): string {
+  if (!isMobileSourceRoot(sourceRoot)) {
+    throw new MobileDebugError(
+      "EBUILD",
+      `Workspace source root does not contain apps/mobile/android: ${sourceRoot}`,
+    );
   }
-  return null;
+  return sourceRoot;
+}
+
+function isMobileSourceRoot(sourceRoot: string): boolean {
+  return fs.existsSync(path.join(sourceRoot, "apps", "mobile", "android"));
 }
 
 function defaultApkPath(repoRoot: string): string {
@@ -664,6 +897,6 @@ function defaultApkPath(repoRoot: string): string {
     "outputs",
     "apk",
     "internal",
-    "app-internal.apk"
+    "app-internal.apk",
   );
 }

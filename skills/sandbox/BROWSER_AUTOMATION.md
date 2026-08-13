@@ -213,7 +213,10 @@ only include messages after the client connects. For "something already went
 wrong in this panel" debugging, use the host-captured history:
 
 ```ts
-const history = await handle.cdp.consoleHistory({ limit: 200, errorLimit: 100 });
+const history = await handle.cdp.consoleHistory({
+  limit: 200,
+  errorLimit: 100,
+});
 console.log(history.errors.map((entry) => entry.message));
 console.log(history.dropped); // visible overflow counts, not silent truncation
 ```
@@ -421,7 +424,12 @@ await fs.writeFile(
   path,
   Uint8Array.from(atob(shot.data), (character) => character.charCodeAt(0))
 );
-return { path, mimeType: shot.mimeType, width: shot.width, height: shot.height };
+return {
+  path,
+  mimeType: shot.mimeType,
+  width: shot.width,
+  height: shot.height,
+};
 ```
 
 Then use `read({ path: "scratch/panel-before.png" })`. A snapshot, DOM query,
@@ -495,7 +503,7 @@ The handle also has direct navigation methods (no page object needed):
 | `handle.cdp.goForward()`                           | Navigate forward                                                           |
 | `handle.cdp.reload()`                              | Reload page                                                                |
 | `handle.cdp.stop()`                                | Stop loading                                                               |
-| `handle.archive()`                                 | Archive browser panel and its subtree                                       |
+| `handle.archive()`                                 | Archive browser panel and its subtree                                      |
 
 ## Examples
 
@@ -558,15 +566,21 @@ if (host) {
   const sources = await browserData.listImportSources(host.hostId);
   const chrome = sources.find((source) => source.browser === "chrome");
   if (!chrome) throw new Error("Chrome is not available on the selected host");
-  await browserData.startImport({
+  const operationId = crypto.randomUUID();
+  let status = await browserData.startSensitiveImport({
     hostId: host.hostId,
     sourceId: chrome.sourceId,
     dataTypes: ["cookies"],
+    operationId,
   });
-  console.log("Cookies imported into the canonical browser environment");
+  while (status.state === "running") {
+    status = await browserData.observeSensitiveImport(operationId);
+  }
+  if (status.state !== "complete") throw new Error(status.error ?? status.state);
+  console.log("Cookies imported through the sealed host operation", status.counts);
 }
 
-// Re-running startImport for the same host/source is deterministic.
+// Reuse operationId for a transport retry of the same exact request.
 
 // Step 2: Open browser — now has imported cookies
 const browser = await openPanel("https://github.com");
@@ -651,7 +665,7 @@ export default function BrowserController({ props, chat }) {
   `waitUntil: "networkidle"` semantics.
 - **Use `page.waitForSelector()` or `locator.waitFor()` before interacting** — ensures elements exist before clicking/filling.
 - **Wait on the page condition you need** — prefer explicit page state checks over wall-clock limits.
-- **Imported cookies are auto-synced** — if you imported browser data via the browser-import skill, browser panels will have those cookies available automatically.
+- **Protected imports stay sealed** — cookie, password, and form-fill plaintext is read and stored entirely by the host; Base receives aggregate counts only.
 - **Connection lifetime follows the runtime incarnation** — browser
   `page.goto()` navigation keeps the same page connection. Workspace-panel
   `handle.navigate()` and `handle.rebuild()` replace the runtime, so refresh the

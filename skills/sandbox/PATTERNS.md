@@ -142,7 +142,10 @@ imports), or avoid the dependency by embedding the small bit of logic directly.
 ```ts
 // Component lives in a file whose nearest package.json lists "lodash";
 // the panel resolves the import when it compiles the file.
-inline_ui({ path: ".vibestudio/ui/shuffler.tsx", props: { items: ["Apple", "Banana", "Cherry"] } });
+inline_ui({
+  path: ".vibestudio/ui/shuffler.tsx",
+  props: { items: ["Apple", "Banana", "Cherry"] },
+});
 ```
 
 ```tsx
@@ -176,7 +179,10 @@ possible:
 ```ts
 eval({ path: ".vibestudio/eval/audit.ts" });
 inline_ui({ path: ".vibestudio/ui/audit-panel.tsx", props: { runId } });
-feedback_custom({ path: ".vibestudio/ui/confirm-audit.tsx", title: "Confirm audit" });
+feedback_custom({
+  path: ".vibestudio/ui/confirm-audit.tsx",
+  title: "Confirm audit",
+});
 ```
 
 ## Call an API with a URL-bound credential
@@ -196,7 +202,11 @@ import { credentials } from "@workspace/runtime";
 const credential = await credentials.store({
   label: "Notion",
   audience: [{ url: "https://api.notion.com", match: "origin" }],
-  injection: { type: "header", name: "authorization", valueTemplate: "Bearer {token}" },
+  injection: {
+    type: "header",
+    name: "authorization",
+    valueTemplate: "Bearer {token}",
+  },
   material: { type: "bearer-token", token },
 });
 
@@ -236,14 +246,14 @@ or other host-mediated operations. Those APIs already acquire their own host
 capabilities. See the [capabilities skill](../capabilities/SKILL.md) for complete
 receiver-object and opaque-handle examples.
 
-## Browser data (cookies/passwords/bookmarks/history/tabs)
+## Browser data (bookmarks/history/protected import/tabs)
 
 `browserData` from `@workspace/runtime` is a **panel/component runtime**
 capability: it invokes the manifest-selected `browserData` provider namespace,
 whose broker extension preserves the verified caller and is the only code
 source admitted by the canonical BrowserDataDO. Panel code must not resolve or
-call that DO directly. Imported records and Vibestudio-native visits share this
-one provider and one store. Server-side eval (caller kind `server`) cannot use
+call that DO directly. Non-sensitive imported records and Vibestudio-native
+visits share this one provider and one store. Server-side eval (caller kind `server`) cannot use
 the desktop import operations — run browser-import work from panel code or an
 `inline_ui`/`feedback_custom` component:
 
@@ -259,7 +269,7 @@ if (host) {
   const job = await browserData.startImport({
     hostId: host.hostId,
     sourceId: chrome.sourceId,
-    dataTypes: ["cookies", "bookmarks", "history"],
+    dataTypes: ["bookmarks", "history"],
   });
   console.log("Import job:", job.jobId, job.phase);
 
@@ -285,68 +295,6 @@ intentionally not idempotent; it creates panels each time it is called. By
 default it creates a new source-browser root with one nested collection per
 window. Pass `destination: "caller"` to attach the hierarchy to the calling
 panel, or `groupBy: "none"` to place every tab directly under the chosen anchor.
-
-## Interactive Cookie Manager (Inline UI)
-
-```
-inline_ui({
-  code: `
-import { useState, useEffect } from "react";
-import { Button, Flex, Text, Table, TextField } from "@radix-ui/themes";
-import { browserData } from "@workspace/runtime";
-
-export default function CookieManager({ props, chat }) {
-  const [cookies, setCookies] = useState([]);
-  const [filter, setFilter] = useState("");
-
-  const load = () => browserData.getCookiesForOrigin(location.origin).then((cookies) =>
-    setCookies(filter
-      ? cookies.filter(cookie => cookie.domain.includes(filter))
-      : cookies)
-  );
-  useEffect(() => { load(); }, [filter]);
-
-  const clearOrigin = async (origin) => {
-    await browserData.clearCookiesForOrigin(origin);
-    load();
-  };
-
-  return (
-    <Flex direction="column" gap="2">
-      <Flex gap="2" align="center">
-        <TextField.Root placeholder="Filter by domain..." value={filter} onChange={e => setFilter(e.target.value)} style={{ flex: 1 }} />
-      </Flex>
-      <Text size="1" color="gray">{cookies.length} cookies</Text>
-      <Table.Root size="1">
-        <Table.Header>
-          <Table.Row>
-            <Table.ColumnHeaderCell>Domain</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Name</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell>Expires</Table.ColumnHeaderCell>
-            <Table.ColumnHeaderCell />
-          </Table.Row>
-        </Table.Header>
-        <Table.Body>
-          {cookies.slice(0, 50).map(c => (
-            <Table.Row key={[c.name, c.domain, c.path, c.partitionKey || ""].join("|")}>
-              <Table.Cell><Text size="1">{c.domain}</Text></Table.Cell>
-              <Table.Cell><Text size="1">{c.name}</Text></Table.Cell>
-              <Table.Cell><Text size="1" color="gray">{c.expirationDate ? new Date(c.expirationDate * 1000).toLocaleDateString() : "session"}</Text></Table.Cell>
-              <Table.Cell>
-                <Button size="1" variant="ghost" color="red" onClick={() => clearOrigin((c.secure ? "https://" : "http://") + c.domain.replace(/^\\./, ""))}>
-                  Clear site
-                </Button>
-              </Table.Cell>
-            </Table.Row>
-          ))}
-        </Table.Body>
-      </Table.Root>
-    </Flex>
-  );
-}`,
-  props: {}
-})
-```
 
 ## Query a DO-backed App Database and Show Results
 
@@ -454,11 +402,14 @@ if (host) {
   const sources = await browserData.listImportSources(host.hostId);
   const chrome = sources.find((source) => source.browser === "chrome");
   if (!chrome) throw new Error("Chrome is not available on the selected host");
-  await browserData.startImport({
+  const operationId = crypto.randomUUID();
+  const status = await browserData.startSensitiveImport({
     hostId: host.hostId,
     sourceId: chrome.sourceId,
     dataTypes: ["cookies"],
+    operationId,
   });
-  // BrowserDataDO is authoritative; Electron reconciles its cookie projection.
+  // Poll observeSensitiveImport(operationId) while status.state is "running".
+  // Plaintext stays inside the host; only aggregate status returns here.
 }
 ```

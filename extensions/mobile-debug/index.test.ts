@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -11,12 +11,28 @@ import {
 } from "./index.js";
 
 describe("@workspace-extensions/mobile-debug", () => {
+  it("rejects a relative workspace source root instead of resolving it from cwd", async () => {
+    const ctx = {
+      workspace: {
+        getInfo: async () => ({
+          id: "ws",
+          name: "ws",
+          path: "relative-workspace",
+          contextProjectionsPath: ".context-projections/v5",
+        }),
+      },
+    } as unknown as ExtensionContext;
+
+    await expect(activate(ctx)).rejects.toMatchObject({ code: "EBUILD" });
+  });
+
   it("validates and deduplicates target Android architectures", () => {
-    expect(validateAndroidArchitectures(["arm64-v8a", "arm64-v8a", "x86_64"])).toEqual([
-      "arm64-v8a",
-      "x86_64",
-    ]);
-    expect(() => validateAndroidArchitectures(["mips"])).toThrow(/Unsupported Android ABI/u);
+    expect(
+      validateAndroidArchitectures(["arm64-v8a", "arm64-v8a", "x86_64"]),
+    ).toEqual(["arm64-v8a", "x86_64"]);
+    expect(() => validateAndroidArchitectures(["mips"])).toThrow(
+      /Unsupported Android ABI/u,
+    );
   });
 
   it("adds an adb logcat pid filter after resolving a package pid", () => {
@@ -26,20 +42,22 @@ describe("@workspace-extensions/mobile-debug", () => {
       "-v",
       "time",
     ]);
-    expect(pidScopedLogcatArgs(["logcat", "-v", "time", "Vibestudio:D"], "1234")).toEqual([
-      "logcat",
-      "--pid=1234",
-      "-v",
-      "time",
-      "Vibestudio:D",
-    ]);
+    expect(
+      pidScopedLogcatArgs(["logcat", "-v", "time", "Vibestudio:D"], "1234"),
+    ).toEqual(["logcat", "--pid=1234", "-v", "time", "Vibestudio:D"]);
   });
 
-  it("activates without a repo root and reports missing repo-dependent capabilities", async () => {
+  it("uses only the explicit workspace source root for repo-dependent capabilities", async () => {
     const root = await mkdtemp(join(tmpdir(), "vibestudio-mobile-debug-test-"));
+    const ambientRoot = await mkdtemp(
+      join(tmpdir(), "vibestudio-mobile-debug-ambient-"),
+    );
+    await mkdir(join(ambientRoot, "apps", "mobile", "android"), {
+      recursive: true,
+    });
     const previousRepoRoot = process.env["VIBESTUDIO_REPO_ROOT"];
     const previousPath = process.env["PATH"];
-    process.env["VIBESTUDIO_REPO_ROOT"] = root;
+    process.env["VIBESTUDIO_REPO_ROOT"] = ambientRoot;
     process.env["PATH"] = "";
     const degraded = vi.fn();
     try {
@@ -52,7 +70,12 @@ describe("@workspace-extensions/mobile-debug", () => {
             contextProjectionsPath: join(root, ".context-projections", "v5"),
           }),
         },
-        health: { degraded, healthy: vi.fn(), unhealthy: vi.fn(), report: vi.fn() },
+        health: {
+          degraded,
+          healthy: vi.fn(),
+          unhealthy: vi.fn(),
+          report: vi.fn(),
+        },
       } as unknown as ExtensionContext;
 
       const api = await activate(ctx);
@@ -60,9 +83,11 @@ describe("@workspace-extensions/mobile-debug", () => {
       expect(degraded).toHaveBeenCalledWith(
         expect.objectContaining({
           summary: "Mobile debug activated without a Vibestudio repo root",
-        })
+        }),
       );
-      await expect(api.buildAndroid()).rejects.toMatchObject({ code: "EBUILD" });
+      await expect(api.buildAndroid()).rejects.toMatchObject({
+        code: "EBUILD",
+      });
       await expect(api.doctor()).resolves.toMatchObject({
         adb: false,
         apkSigned: false,
@@ -72,7 +97,8 @@ describe("@workspace-extensions/mobile-debug", () => {
         ]),
       });
     } finally {
-      if (previousRepoRoot === undefined) delete process.env["VIBESTUDIO_REPO_ROOT"];
+      if (previousRepoRoot === undefined)
+        delete process.env["VIBESTUDIO_REPO_ROOT"];
       else process.env["VIBESTUDIO_REPO_ROOT"] = previousRepoRoot;
       if (previousPath === undefined) delete process.env["PATH"];
       else process.env["PATH"] = previousPath;
@@ -80,7 +106,9 @@ describe("@workspace-extensions/mobile-debug", () => {
   });
 
   it("returns bounded verification evidence instead of embedding screenshot bytes", async () => {
-    const root = await mkdtemp(join(tmpdir(), "vibestudio-mobile-debug-verify-"));
+    const root = await mkdtemp(
+      join(tmpdir(), "vibestudio-mobile-debug-verify-"),
+    );
     const adbPath = join(root, "adb");
     await writeFile(
       adbPath,
@@ -93,7 +121,7 @@ describe("@workspace-extensions/mobile-debug", () => {
         'if [ "$1" = "-s" ]; then shift 2; fi',
         'if [ "$1" = "exec-out" ]; then printf "fake-png"; fi',
         "exit 0",
-      ].join("\n")
+      ].join("\n"),
     );
     await chmod(adbPath, 0o755);
 
@@ -109,7 +137,12 @@ describe("@workspace-extensions/mobile-debug", () => {
             contextProjectionsPath: join(root, ".context-projections", "v5"),
           }),
         },
-        health: { degraded: vi.fn(), healthy: vi.fn(), unhealthy: vi.fn(), report: vi.fn() },
+        health: {
+          degraded: vi.fn(),
+          healthy: vi.fn(),
+          unhealthy: vi.fn(),
+          report: vi.fn(),
+        },
       } as unknown as ExtensionContext;
 
       const api = await activate(ctx);
@@ -137,8 +170,8 @@ describe("@workspace-extensions/mobile-debug", () => {
           "1785258000.100 ReactNativeJS phase=workspace-panels-initialized",
           "1785258000.200 ReactNativeJS phase=workspace-connected",
         ].join("\n"),
-        1785258000000
-      )
+        1785258000000,
+      ),
     ).toEqual({
       ready: true,
       workspaceConnected: true,
@@ -154,8 +187,8 @@ describe("@workspace-extensions/mobile-debug", () => {
           "1785258000.200 ReactNativeJS phase=workspace-connected",
           "1785258000.300 chromium invalid distance code",
         ].join("\n"),
-        1785258000000
-      )
+        1785258000000,
+      ),
     ).toMatchObject({
       ready: false,
       issues: ["invalid distance code"],

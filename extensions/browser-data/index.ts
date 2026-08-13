@@ -1,26 +1,33 @@
 import {
   exportChromiumBookmarks,
-  exportCsvPasswords,
   exportNetscapeBookmarks,
-  exportNetscapeCookies,
   LocalBrowserImportProvider,
 } from "@vibestudio/browser-import";
 import {
+  BROWSER_ENVIRONMENT_KEY_VERSION,
   BrowserImportCoordinator,
   RemoteBrowserImportProvider,
-  type BrowserCookieInput,
   type BrowserEnvironmentIdentity,
+  type BrowserImportDataType,
   type BrowserImportSelection,
+  type BrowserImportSource,
   type BrowserImportStore,
   type ImportBatch,
   type ImportedBookmark,
-  type ImportedCookie,
-  type ImportedPassword,
   type ImportJobSnapshot,
   type ImportHostSummary,
   type OpenTabsAsPanelsRequest,
   type OpenTabsAsPanelsResult,
+  browserEnvironmentKeyMaterial,
 } from "@vibestudio/browser-data";
+import { createHash } from "node:crypto";
+import type {
+  BrowserPrivacySection,
+  SensitiveBrowserImportDataType,
+  SensitiveBrowserImportRequest,
+  SensitiveBrowserImportSelection,
+  SensitiveBrowserImportStatus,
+} from "@vibestudio/browser-data/client";
 import {
   createCollectionSession,
   launchCollectionTask,
@@ -78,8 +85,18 @@ interface ExtensionContextLike {
 }
 
 const BROWSER_DATA_PROTOCOL = "vibestudio.browser-data.v1";
-const BROWSER_VAULT_PROTOCOL = "vibestudio.browser-vault.v1";
 const TRUSTED_CALLER_KINDS = new Set(["shell", "server"]);
+const NON_SENSITIVE_IMPORT_DATA_TYPES = new Set<BrowserImportDataType>([
+  "bookmarks",
+  "history",
+  "searchEngines",
+  "favicons",
+]);
+const SENSITIVE_IMPORT_DATA_TYPES = new Set<SensitiveBrowserImportDataType>([
+  "cookies",
+  "passwords",
+  "formFill",
+]);
 const BROWSER_DATA_STORE_METHODS = [
   "getSitePreferences",
   "setSiteZoom",
@@ -97,64 +114,13 @@ const BROWSER_DATA_STORE_METHODS = [
   "searchHistoryForAutocomplete",
   "recordHistoryVisit",
   "updateHistoryTitle",
-  "listPasswordSummaries",
-  "getPasswordForSite",
-  "addPassword",
-  "updatePassword",
-  "deletePassword",
-  "updateLastUsed",
-  "addNeverSave",
-  "isNeverSave",
-  "getNeverSaveOrigins",
-  "removeNeverSave",
-  "getFormFillSuggestions",
-  "addFormFillValue",
-  "updateFormFillValue",
-  "markFormFillValueUsed",
-  "deleteFormFillValue",
-  "clearFormFillValues",
   "getSearchEngines",
   "setDefaultEngine",
-  "applyCookieMutations",
-  "listCookieOrigins",
-  "getCookiesForOrigin",
-  "clearCookiesForOrigin",
-  "clearAllCookies",
-  "endBrowserSession",
-  "getCookieSiteSummary",
   "listDownloadRecords",
   "upsertDownloadRecord",
   "putPageFavicon",
   "getPageFavicon",
 ] as const;
-const BROWSER_VAULT_STORE_METHODS = new Set<string>([
-  "listPasswordSummaries",
-  "getPasswordForSite",
-  "addPassword",
-  "updatePassword",
-  "deletePassword",
-  "updateLastUsed",
-  "addNeverSave",
-  "isNeverSave",
-  "getNeverSaveOrigins",
-  "removeNeverSave",
-  "getFormFillSuggestions",
-  "addFormFillValue",
-  "updateFormFillValue",
-  "markFormFillValueUsed",
-  "deleteFormFillValue",
-  "clearFormFillValues",
-  "applyCookieMutations",
-  "listCookieOrigins",
-  "getCookiesForOrigin",
-  "clearCookiesForOrigin",
-  "clearAllCookies",
-  "endBrowserSession",
-  "getCookieSiteSummary",
-  "addCookiesBatch",
-  "addPasswordsBatch",
-  "addFormFillBatch",
-]);
 
 function collectionOrchestrationRpc(ctx: ExtensionContextLike): CollectionOrchestrationRpc {
   return {
@@ -172,9 +138,9 @@ export async function activate(ctx: ExtensionContextLike) {
 
   const resolvedStores = new Map<
     string,
-    Promise<{ identity: BrowserEnvironmentIdentity; dataTargetId: string; vaultTargetId: string }>
+    Promise<{ identity: BrowserEnvironmentIdentity; dataTargetId: string }>
   >();
-  const targetsByEnvironment = new Map<string, { dataTargetId: string; vaultTargetId: string }>();
+  const targetsByEnvironment = new Map<string, string>();
   const unregisterServerHosts = new Map<string, () => void>();
   const desktopHosts = new Map<string, { hostId: string; unregister: () => void }>();
   const hostLabels = new Map<string, string>();
@@ -184,7 +150,6 @@ export async function activate(ctx: ExtensionContextLike) {
   const currentIdentity = async (): Promise<{
     identity: BrowserEnvironmentIdentity;
     dataTargetId: string;
-    vaultTargetId: string;
   }> => {
     const invocation = ctx.invocation.current();
     const userId = invocation?.caller.userId?.trim();
@@ -197,30 +162,26 @@ export async function activate(ctx: ExtensionContextLike) {
     const cacheKey = `${workspaceId}\x00${userId}`;
     let pending = resolvedStores.get(cacheKey);
     if (!pending) {
-      pending = Promise.all([
-        ctx.workers.resolveService(BROWSER_DATA_PROTOCOL, `browser:${userId}`),
-        ctx.workers.resolveService(BROWSER_VAULT_PROTOCOL),
-      ])
-        .then(([dataTarget, vaultTarget]) => {
-          if (dataTarget.kind !== "durable-object" || vaultTarget.kind !== "durable-object") {
+      const normalized = browserEnvironmentKeyMaterial(workspaceId, userId);
+      const environmentKey = `${BROWSER_ENVIRONMENT_KEY_VERSION}_${createHash("sha256")
+        .update(normalized.material)
+        .digest("base64url")}`;
+      pending = ctx.workers
+        .resolveService(BROWSER_DATA_PROTOCOL, environmentKey)
+        .then((dataTarget) => {
+          if (dataTarget.kind !== "durable-object") {
             throw new Error("browser.data did not resolve to a Durable Object");
           }
-          const environmentKey =
-            vaultTarget.objectKey ?? vaultTarget.targetId.split(":").at(-1) ?? "";
-          if (!environmentKey) {
-            throw new Error("Server did not derive a browser environment key");
+          if (dataTarget.objectKey !== environmentKey) {
+            throw new Error("Server resolved a different browser environment key");
           }
           const identity = {
-            workspaceId,
-            ownerUserId: userId,
+            workspaceId: normalized.workspaceId,
+            ownerUserId: normalized.ownerUserId,
             environmentKey,
           };
-          const targets = {
-            dataTargetId: dataTarget.targetId,
-            vaultTargetId: vaultTarget.targetId,
-          };
-          targetsByEnvironment.set(environmentKey, targets);
-          return { identity, ...targets };
+          targetsByEnvironment.set(environmentKey, dataTarget.targetId);
+          return { identity, dataTargetId: dataTarget.targetId };
         })
         .catch((error: unknown) => {
           resolvedStores.delete(cacheKey);
@@ -240,11 +201,8 @@ export async function activate(ctx: ExtensionContextLike) {
     method: string,
     ...args: unknown[]
   ): Promise<T> => {
-    const targets = targetsByEnvironment.get(identity.environmentKey);
-    if (!targets) throw new Error("Browser environment target is not resolved");
-    const targetId = BROWSER_VAULT_STORE_METHODS.has(method)
-      ? targets.vaultTargetId
-      : targets.dataTargetId;
+    const targetId = targetsByEnvironment.get(identity.environmentKey);
+    if (!targetId) throw new Error("Browser environment target is not resolved");
     return ctx.rpc
       .call<T>(targetId, method, ...args)
       .then((result) => {
@@ -262,6 +220,7 @@ export async function activate(ctx: ExtensionContextLike) {
 
   const store: BrowserImportStore = {
     async storeBatch(identity, batch) {
+      assertNonSensitiveImportDataType(batch.dataType);
       await storeImportBatch(batch, (method, ...args) =>
         callStoreForIdentity(identity, method, ...args)
       );
@@ -273,10 +232,6 @@ export async function activate(ctx: ExtensionContextLike) {
         itemCount: batch.items.length,
       });
       ctx.emit("data-changed", { dataType: batch.dataType });
-    },
-    async reconcileImport(identity, dataTypes) {
-      if (!dataTypes.includes("cookies") || !desktopHosts.has(identity.environmentKey)) return;
-      await ctx.rpc.call("main", "browserEnvironment.flushCookieProjection", []);
     },
     persistJob(identity, job) {
       return callStoreForIdentity(identity, "upsertImportJob", {
@@ -403,17 +358,40 @@ export async function activate(ctx: ExtensionContextLike) {
         hostId,
         ctx.invocation.signal?.() ?? undefined
       );
-      for (const source of sources) sourceBrowsers.set(source.sourceId, source.browser);
-      return sources;
+      const host = coordinator.listHosts(identity).find((candidate) => candidate.hostId === hostId);
+      const availableSources = sources.map((source) =>
+        withAvailableSensitiveImportPath(source, host?.location === "desktop")
+      );
+      for (const source of availableSources) {
+        sourceBrowsers.set(source.sourceId, source.browser);
+      }
+      return availableSources;
     }),
     previewImport: guarded("previewImport", async (selection: BrowserImportSelection) => {
       const { identity } = await currentIdentity();
       await ensureImportHosts(identity);
+      assertNonSensitiveImportSelection(selection);
       return coordinator.preview(identity, selection, ctx.invocation.signal?.() ?? undefined);
     }),
+    previewSensitiveImport: guarded(
+      "previewSensitiveImport",
+      async (request: SensitiveBrowserImportSelection) => {
+        const { identity } = await currentIdentity();
+        const host = await ensureDesktopHost(identity);
+        assertSelectedDesktopHost(host, request.hostId);
+        assertSensitiveImportSelection(request);
+        return ctx.rpc.call(
+          "main",
+          "browserEnvironment.previewSensitiveImport",
+          request.sourceId,
+          request.dataTypes
+        );
+      }
+    ),
     startImport: guarded("startImport", async (selection: BrowserImportSelection) => {
       const { identity } = await currentIdentity();
       await ensureImportHosts(identity);
+      assertNonSensitiveImportSelection(selection);
       const started = coordinator.start(identity, selection);
       void coordinator.waitForJob(identity, started.jobId).then((completed) => {
         reportImportHealth(ctx, completed);
@@ -421,6 +399,47 @@ export async function activate(ctx: ExtensionContextLike) {
       });
       return started;
     }),
+    startSensitiveImport: guarded(
+      "startSensitiveImport",
+      async (request: SensitiveBrowserImportRequest): Promise<SensitiveBrowserImportStatus> => {
+        const { identity } = await currentIdentity();
+        const host = await ensureDesktopHost(identity);
+        assertSelectedDesktopHost(host, request.hostId);
+        assertSensitiveImportRequest(request);
+        return ctx.rpc.call<SensitiveBrowserImportStatus>(
+          "main",
+          "browserEnvironment.startSensitiveImport",
+          request.sourceId,
+          request.dataTypes,
+          request.operationId
+        );
+      }
+    ),
+    observeSensitiveImport: guarded(
+      "observeSensitiveImport",
+      async (operationId: string): Promise<SensitiveBrowserImportStatus> => {
+        const { identity } = await currentIdentity();
+        await ensureDesktopHost(identity);
+        assertSensitiveImportOperationId(operationId);
+        return ctx.rpc.call("main", "browserEnvironment.observeSensitiveImport", operationId);
+      }
+    ),
+    cancelSensitiveImport: guarded(
+      "cancelSensitiveImport",
+      async (operationId: string): Promise<SensitiveBrowserImportStatus> => {
+        const { identity } = await currentIdentity();
+        await ensureDesktopHost(identity);
+        assertSensitiveImportOperationId(operationId);
+        return ctx.rpc.call("main", "browserEnvironment.cancelSensitiveImport", operationId);
+      }
+    ),
+    openBrowserPrivacyManager: guarded(
+      "openBrowserPrivacyManager",
+      async (section?: BrowserPrivacySection): Promise<void> => {
+        await currentIdentity();
+        await ctx.rpc.call("main", "browserPrivacyPresentation.open", section);
+      }
+    ),
     cancelImport: guarded("cancelImport", async (jobId: string) => {
       const { identity } = await currentIdentity();
       coordinator.cancel(identity, jobId);
@@ -428,6 +447,11 @@ export async function activate(ctx: ExtensionContextLike) {
     resumeImport: guarded("resumeImport", async (jobId: string) => {
       const { identity } = await currentIdentity();
       await ensureImportHosts(identity);
+      const existing =
+        coordinator.getJob(identity, jobId) ??
+        (await callStore<ImportJobSnapshot | null>("getImportJob", jobId));
+      if (!existing) throw new Error(`Browser import job was not found: ${jobId}`);
+      assertNonSensitiveImportDataTypes(existing.requestedDataTypes);
       const resumed = await coordinator.resume(identity, jobId);
       void coordinator.waitForJob(identity, resumed.jobId).then((completed) => {
         reportImportHealth(ctx, completed);
@@ -481,51 +505,17 @@ export async function activate(ctx: ExtensionContextLike) {
       });
     }),
 
-    // One broker owns both imported and Vibestudio-native browser data. The
-    // Durable Object's receiver contract admits this extension's code source,
-    // while callers retain their verified user/workspace identity here.
+    // The Base broker owns only non-sensitive browser product records. Protected
+    // browser material remains behind host-native effects and never enters this
+    // provider or its Durable Object.
     ...storeMethods,
 
     exportBookmarks: guarded("exportBookmarks", async (format: "html" | "json" | "chrome-json") =>
       exportBookmarks(format, await callStore<Array<Record<string, unknown>>>("getAllBookmarks"))
     ),
-    exportPasswords: guarded(
-      "exportPasswords",
-      async (format: "csv-chrome" | "csv-firefox" | "json") =>
-        exportPasswords(format, await exportRowsForPasswordOrigins(callStore))
-    ),
-    exportCookies: guarded("exportCookies", async (format: "json" | "netscape-txt") => {
-      return exportCookies(format, await exportRowsForCookieOrigins(callStore));
-    }),
   };
 
   return { providerContracts: { browserData } };
-}
-
-async function exportRowsForPasswordOrigins(
-  callStore: <T>(method: string, ...args: unknown[]) => Promise<T>
-): Promise<Array<Record<string, unknown>>> {
-  const summaries = await callStore<Array<{ origin_url: string }>>("listPasswordSummaries");
-  return (
-    await Promise.all(
-      [...new Set(summaries.map((row) => row.origin_url))].map((origin) =>
-        callStore<Array<Record<string, unknown>>>("getPasswordForSite", origin)
-      )
-    )
-  ).flat();
-}
-
-async function exportRowsForCookieOrigins(
-  callStore: <T>(method: string, ...args: unknown[]) => Promise<T>
-): Promise<Array<Record<string, unknown>>> {
-  const { origins } = await callStore<{ origins: string[] }>("listCookieOrigins");
-  return (
-    await Promise.all(
-      origins.map((origin) =>
-        callStore<Array<Record<string, unknown>>>("getCookiesForOrigin", origin)
-      )
-    )
-  ).flat();
 }
 
 async function storeImportBatch(
@@ -540,24 +530,74 @@ async function storeImportBatch(
     case "history":
       await callStore("addHistoryBatch", batch.items, source);
       return;
-    case "cookies":
-      await callStore("addCookiesBatch", {
-        jobId: batch.jobId,
-        batchIndex: batch.batchIndex,
-        cookies: batch.items as BrowserCookieInput[],
-      });
-      return;
-    case "passwords":
-      await callStore("addPasswordsBatch", batch.items, source);
-      return;
-    case "formFill":
-      await callStore("addFormFillBatch", batch.items, source);
-      return;
     case "searchEngines":
       await callStore("addSearchEnginesBatch", batch.items, source);
       return;
     case "favicons":
       await callStore("addFaviconsBatch", batch.items);
+  }
+}
+
+function assertNonSensitiveImportSelection(selection: BrowserImportSelection): void {
+  assertNonSensitiveImportDataTypes(selection.dataTypes);
+}
+
+function withAvailableSensitiveImportPath(
+  source: BrowserImportSource,
+  allowSensitive: boolean
+): BrowserImportSource {
+  if (allowSensitive) return source;
+  return {
+    ...source,
+    supportedDataTypes: source.supportedDataTypes.filter(
+      (dataType) => !SENSITIVE_IMPORT_DATA_TYPES.has(dataType as SensitiveBrowserImportDataType)
+    ),
+  };
+}
+
+function assertNonSensitiveImportDataTypes(dataTypes: readonly BrowserImportDataType[]): void {
+  if (dataTypes.length === 0) throw new Error("At least one browser data type is required");
+  for (const dataType of dataTypes) assertNonSensitiveImportDataType(dataType);
+}
+
+function assertNonSensitiveImportDataType(dataType: BrowserImportDataType): void {
+  if (!NON_SENSITIVE_IMPORT_DATA_TYPES.has(dataType)) {
+    throw Object.assign(
+      new Error(`Sensitive browser data must be imported by the host: ${dataType}`),
+      { code: "EUNSUPPORTED" }
+    );
+  }
+}
+
+function assertSensitiveImportRequest(request: SensitiveBrowserImportRequest): void {
+  assertSensitiveImportOperationId(request.operationId);
+  assertSensitiveImportSelection(request);
+}
+
+function assertSensitiveImportSelection(request: SensitiveBrowserImportSelection): void {
+  if (
+    request.dataTypes.length === 0 ||
+    new Set(request.dataTypes).size !== request.dataTypes.length
+  ) {
+    throw new Error("Sensitive browser import data types must be non-empty and unique");
+  }
+  for (const dataType of request.dataTypes) {
+    if (!SENSITIVE_IMPORT_DATA_TYPES.has(dataType)) {
+      throw new Error(`Unsupported sensitive browser import data type: ${dataType}`);
+    }
+  }
+}
+
+function assertSensitiveImportOperationId(operationId: string): void {
+  if (!operationId.trim()) throw new Error("Sensitive import operation id is required");
+}
+
+function assertSelectedDesktopHost(
+  host: ImportHostSummary | null,
+  requestedHostId: string
+): asserts host is ImportHostSummary {
+  if (!host || host.hostId !== requestedHostId) {
+    throw new Error("Sensitive browser operations require the selected attached desktop host");
   }
 }
 
@@ -578,7 +618,11 @@ async function openTabsAsPanels(
   }
 ): Promise<OpenTabsAsPanelsResult> {
   const importStartedAt = Date.now();
-  const slotTimings: Array<{ stage: string; durationMs: number; outcome: string }> = [];
+  const slotTimings: Array<{
+    stage: string;
+    durationMs: number;
+    outcome: string;
+  }> = [];
   const panelRuntime = createPanelRuntime({
     rpc: {
       call: async <T>(target: string, method: string, args: unknown[]): Promise<T> =>
@@ -609,7 +653,10 @@ async function openTabsAsPanels(
   const openable: OpenableTab[] = [];
   for (const tab of tabs) {
     if (!/^https?:\/\//i.test(tab.url)) {
-      skipped.push({ url: tab.url, reason: "unsupported browser-panel URL scheme" });
+      skipped.push({
+        url: tab.url,
+        reason: "unsupported browser-panel URL scheme",
+      });
       continue;
     }
     openable.push(tab);
@@ -773,7 +820,11 @@ async function openTabsAsPanels(
           title,
           ...(orchestrationContextId ? { contextId: orchestrationContextId } : {}),
         });
-        panels.push({ id: created.id, title: created.title ?? title, url: tab.url });
+        panels.push({
+          id: created.id,
+          title: created.title ?? title,
+          url: tab.url,
+        });
         if (collection) collection.panelsOpened += 1;
         if (root) root.panelsOpened += 1;
       } catch (error) {
@@ -878,58 +929,6 @@ function exportBookmarks(
   if (format === "html") return exportNetscapeBookmarks(bookmarks);
   if (format === "chrome-json") return exportChromiumBookmarks(bookmarks);
   return JSON.stringify(bookmarks, null, 2);
-}
-
-function exportPasswords(
-  format: "csv-chrome" | "csv-firefox" | "json",
-  rows: Array<Record<string, unknown>>
-): string {
-  const passwords: ImportedPassword[] = rows.map((row) => ({
-    url: String(row["origin_url"] ?? ""),
-    username: String(row["username"] ?? ""),
-    password: String(row["password"] ?? ""),
-    actionUrl: row["action_url"] ? String(row["action_url"]) : undefined,
-    realm: row["realm"] ? String(row["realm"]) : undefined,
-  }));
-  if (format === "csv-chrome") return exportCsvPasswords(passwords, "chrome");
-  if (format === "csv-firefox") return exportCsvPasswords(passwords, "firefox");
-  return JSON.stringify(passwords, null, 2);
-}
-
-function exportCookies(
-  format: "json" | "netscape-txt",
-  rows: Array<Record<string, unknown>>
-): string {
-  const cookies: ImportedCookie[] = rows.map((row) => {
-    const partitionKey = row["partitionKey"];
-    return {
-      name: String(row["name"] ?? ""),
-      valueStatus: "available",
-      value: String(row["value"] ?? ""),
-      domain: String(row["domain"] ?? ""),
-      hostOnly: Boolean(row["hostOnly"]),
-      path: String(row["path"] ?? "/"),
-      ...(partitionKey && typeof partitionKey === "object"
-        ? {
-            partitionKey: partitionKey as NonNullable<ImportedCookie["partitionKey"]>,
-          }
-        : {}),
-      expirationDate: row["expirationDate"] == null ? undefined : Number(row["expirationDate"]),
-      secure: Boolean(row["secure"]),
-      httpOnly: Boolean(row["httpOnly"]),
-      sameSite: String(row["sameSite"] ?? "unspecified") as ImportedCookie["sameSite"],
-      sourceScheme: String(row["sourceScheme"] ?? "unset") as ImportedCookie["sourceScheme"],
-      sourcePort: Number(row["sourcePort"] ?? -1),
-    };
-  });
-  if (format === "netscape-txt" && cookies.some((cookie) => cookie.partitionKey)) {
-    throw new Error(
-      "Netscape cookie files cannot represent partition keys; use JSON export instead"
-    );
-  }
-  return format === "netscape-txt"
-    ? exportNetscapeCookies(cookies)
-    : JSON.stringify(cookies, null, 2);
 }
 
 function reportImportHealth(ctx: ExtensionContextLike, job: ImportJobSnapshot): void {

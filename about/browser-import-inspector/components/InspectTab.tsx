@@ -1,107 +1,42 @@
+import { Badge, Button, Card, Flex, Heading, Spinner, Table, Text } from "@radix-ui/themes";
+import { LockClosedIcon } from "@radix-ui/react-icons";
 import { useState } from "react";
-import {
-  Badge,
-  Button,
-  Callout,
-  Card,
-  Flex,
-  Heading,
-  Spinner,
-  Table,
-  Text,
-  TextField,
-} from "@radix-ui/themes";
-import type {
-  StoredHistory,
-  StoredPasswordSummary,
-} from "@vibestudio/browser-data/client";
+import type { StoredHistory } from "@vibestudio/browser-data/client";
 import { browserData, relativeTime, useAsync } from "../useBrowserData";
 
 export function InspectTab(props: { now: number }) {
-  return (
-    <Flex direction="column" gap="4" p="4" style={{ overflowY: "auto", height: "100%" }}>
-      <SiteData />
-      <PasswordList />
-      <HistoryList now={props.now} />
-    </Flex>
-  );
-}
-
-function SiteData() {
-  const [input, setInput] = useState("");
-  const [origin, setOrigin] = useState("");
-  const summary = useAsync(
-    () =>
-      origin
-        ? browserData.getCookieSiteSummary(origin)
-        : Promise.resolve({ origin: "", cookieCount: 0, revision: 0 }),
-    [origin]
-  );
-  const clear = async () => {
-    await browserData.clearCookiesForOrigin(origin);
-    summary.reload();
+  const [managerError, setManagerError] = useState<string | null>(null);
+  const openManager = async () => {
+    setManagerError(null);
+    try {
+      await browserData.openBrowserPrivacyManager("inspect");
+    } catch (error) {
+      setManagerError(error instanceof Error ? error.message : String(error));
+    }
   };
   return (
-    <Card>
-      <Heading size="2" mb="2">Site data</Heading>
-      <form
-        onSubmit={(event) => {
-          event.preventDefault();
-          try {
-            setOrigin(new URL(input.includes("://") ? input : `https://${input}`).origin);
-          } catch {
-            setOrigin("");
-          }
-        }}
-      >
-        <Flex gap="2">
-          <TextField.Root
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="example.com"
-            style={{ flex: 1 }}
-          />
-          <Button type="submit" variant="soft">Inspect</Button>
-        </Flex>
-      </form>
-      {summary.state.status === "loading" && <Spinner size="1" />}
-      {summary.state.error && <Callout.Root color="red" mt="2"><Callout.Text>{summary.state.error}</Callout.Text></Callout.Root>}
-      {origin && summary.state.data && (
-        <Flex justify="between" align="center" mt="3">
-          <Text size="2">
-            {summary.state.data.cookieCount} {summary.state.data.cookieCount === 1 ? "cookie" : "cookies"}
-          </Text>
-          <Button size="1" color="red" variant="soft" disabled={summary.state.data.cookieCount === 0} onClick={clear}>
-            Clear site data
+    <Flex direction="column" gap="4" p="4" style={{ overflowY: "auto", height: "100%" }}>
+      <Card>
+        <Flex justify="between" align="center" gap="3" wrap="wrap">
+          <div>
+            <Heading size="2">Site data & saved passwords</Heading>
+            <Text size="1" color="gray">
+              Inspect current-site cookie and password counts in Vibestudio's trusted privacy
+              manager.
+            </Text>
+          </div>
+          <Button variant="soft" onClick={() => void openManager()}>
+            <LockClosedIcon /> Inspect protected data
           </Button>
         </Flex>
-      )}
-    </Card>
-  );
-}
-
-function PasswordList() {
-  const passwords = useAsync<StoredPasswordSummary[]>(
-    () => browserData.listPasswordSummaries(),
-    []
-  );
-  return (
-    <Card>
-      <Heading size="2" mb="2">Saved passwords</Heading>
-      {passwords.state.status === "loading" && <Spinner size="1" />}
-      {passwords.state.error && <Text color="red" size="1">{passwords.state.error}</Text>}
-      <Flex direction="column" gap="1">
-        {passwords.state.data?.map((password) => (
-          <Flex key={password.id} justify="between" gap="2">
-            <Text size="2">{password.origin_url}</Text>
-            <Text size="2" color="gray">{password.username}</Text>
-          </Flex>
-        ))}
-      </Flex>
-      {passwords.state.status === "ready" && passwords.state.data?.length === 0 && (
-        <Text size="1" color="gray">No saved passwords.</Text>
-      )}
-    </Card>
+        {managerError && (
+          <Text size="1" color="red" as="div" mt="2" role="alert">
+            {managerError}
+          </Text>
+        )}
+      </Card>
+      <HistoryList now={props.now} />
+    </Flex>
   );
 }
 
@@ -109,9 +44,15 @@ function HistoryList(props: { now: number }) {
   const history = useAsync<StoredHistory[]>(() => browserData.getHistory({ limit: 100 }), []);
   return (
     <Card>
-      <Heading size="2" mb="2">Recent history</Heading>
+      <Heading size="2" mb="2">
+        Recent history
+      </Heading>
       {history.state.status === "loading" && <Spinner size="1" />}
-      {history.state.error && <Text color="red" size="1">{history.state.error}</Text>}
+      {history.state.error && (
+        <Text color="red" size="1">
+          {history.state.error}
+        </Text>
+      )}
       <Table.Root size="1">
         <Table.Header>
           <Table.Row>
@@ -124,9 +65,13 @@ function HistoryList(props: { now: number }) {
           {history.state.data?.map((entry) => (
             <Table.Row key={entry.id}>
               <Table.RowHeaderCell>
-                <Text truncate style={{ maxWidth: 440 }}>{entry.title || entry.url}</Text>
+                <Text truncate style={{ maxWidth: 440 }}>
+                  {entry.title || entry.url}
+                </Text>
               </Table.RowHeaderCell>
-              <Table.Cell><Badge color="gray">{entry.visit_count}</Badge></Table.Cell>
+              <Table.Cell>
+                <Badge color="gray">{entry.visit_count}</Badge>
+              </Table.Cell>
               <Table.Cell>{relativeTime(entry.last_visit, props.now)}</Table.Cell>
             </Table.Row>
           ))}

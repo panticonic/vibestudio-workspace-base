@@ -30,7 +30,9 @@
             "verb": "manage"
           },
           "notability": "everyday",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         },
         {
           "name": "browser-data.delete",
@@ -44,7 +46,9 @@
             "verb": "manage"
           },
           "notability": "headline",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         }
       ],
       "requests": []
@@ -58,6 +62,6 @@
   "devDependencies": {
     "@vibestudio/durable": "workspace:*",
     "@vibestudio/rpc": "workspace:*",
-    "vitest": "^3.2.2"
+    "vitest": "3.2.7"
   }
 }

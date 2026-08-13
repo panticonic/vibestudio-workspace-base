@@ -12,6 +12,7 @@
 import type {
   RpcCallOptions,
   RpcClient,
+  RpcContextHandler,
   RpcConnectionStatus,
   RpcEventContext,
   RpcStreamOptions,
@@ -49,7 +50,7 @@ export function createMobileRpcClient(config: MobileRpcClientConfig = {}): Mobil
 
 export class MobileRpcClient implements Pick<
   RpcClient,
-  "selfId" | "call" | "emit" | "on" | "stream" | "streamReadable"
+  "selfId" | "expose" | "call" | "emit" | "on" | "stream" | "streamReadable"
 > {
   private config: MobileRpcClientConfig;
   private connection: WebRtcConnection | null = null;
@@ -73,6 +74,7 @@ export class MobileRpcClient implements Pick<
   private readonly recoveryListeners = new Map<RecoveryKind, Set<() => void | Promise<void>>>();
   private readonly eventSubscriptions = new Map<string, Set<(event: RpcEventContext) => void>>();
   private readonly activeEventUnsubs = new Map<string, () => void>();
+  private readonly exposedHandlers = new Map<string, RpcContextHandler<any, any>>();
 
   constructor(config: MobileRpcClientConfig) {
     this.config = config;
@@ -188,6 +190,17 @@ export class MobileRpcClient implements Pick<
     const selected = method.startsWith("hubControl.") ? this.controlRpc : workspaceRpc;
     if (!selected) throw new Error("Stable hub control connection not established");
     return selected.call<T>(targetId, method, args, options);
+  }
+
+  expose<TArgs extends unknown[], TReturn>(
+    method: string,
+    handler: RpcContextHandler<TArgs, TReturn>
+  ): void {
+    if (this.exposedHandlers.has(method)) {
+      throw new Error(`Mobile RPC method "${method}" is already exposed`);
+    }
+    this.exposedHandlers.set(method, handler);
+    this.rpc?.expose(method, handler);
   }
 
   async stream(
@@ -335,6 +348,9 @@ export class MobileRpcClient implements Pick<
         new Error("Mobile session did not retain its stable hub control pipe"),
         "Invalid mobile session"
       );
+    }
+    for (const [method, handler] of this.exposedHandlers) {
+      this.rpc.expose(method, handler);
     }
     // The session reports keepalive/ICE state (hardened in Part A); surface it as
     // the client's connection status so the UI + the recovery hook react to drops.

@@ -44,7 +44,7 @@ Generated from `runtimeSurface.worker.ts`. Use `await help()` at runtime for the
 | `openExternal` | callable |  | Call `await openExternal(url, options?)` from `@workspace/runtime` in server-side eval, panel/client eval, worker, or Durable Object code to open the system browser. The call itself owns the approval prompt and resumes after the user decides. |
 | `workers` | namespace | `listSources`, `create`, `list`, `destroy`, `resetStorage`, `listStorageBackups`, `restoreStorageBackup`, `listServices`, `resolveService`, `resolveDurableObject`, `durableObjectService` | Worker discovery, lifecycle, and manifest-declared service resolution. Use create/list/destroy for regular worker instances; listSources() returns every launchable source with its real manifest entry point and Durable Object classes. |
 | `credentials` | namespace | `store`, `connect`, `configureClient`, `requestCredentialInput`, `getClientConfigStatus`, `deleteClientConfig`, `listStoredCredentials`, `summarizeStoredCredentials`, `inspectStoredCredentials`, `revokeCredential`, `resolveCredential`, `fetch`, `hookForUrl`, `gitHttp`, `forAudience` | Typed credential lifecycle and credentialed network access. Use store(input) to persist a URL-bound credential, fetch(url, init?, { credentialId? }?) for credentialed HTTP and a standard Response, hookForUrl(url, { credentialId? }?) for a bound fetch function, gitHttp({ credentialId?, gitIntent? }) for smart-HTTP, and forAudience(descriptor) for a credential-bound handle. The underlying RPC transport is internal. |
-| `browserData` | namespace | `getBrowserEnvironment`, `listImportHosts`, `listImportSources`, `previewImport`, `startImport`, `cancelImport`, `getImportJob`, `listImportJobs`, `listOpenTabs`, `openTabsAsPanels`, `getSitePreferences`, `setSiteZoom`, `getBookmarks`, `addBookmark`, `updateBookmark`, `deleteBookmark`, `moveBookmark`, `searchBookmarks`, `getHistory`, `deleteHistoryEntry`, `deleteHistoryRange`, `clearAllHistory`, `searchHistory`, `searchHistoryForAutocomplete`, `recordHistoryVisit`, `updateHistoryTitle`, `listPasswordSummaries`, `getPasswordForSite`, `addPassword`, `updatePassword`, `deletePassword`, `updatePasswordLastUsed`, `addNeverSavePassword`, `isNeverSavePassword`, `getNeverSavePasswordOrigins`, `removeNeverSavePassword`, `getFormFillSuggestions`, `addFormFillValue`, `updateFormFillValue`, `markFormFillValueUsed`, `deleteFormFillValue`, `clearFormFillValues`, `getSearchEngines`, `setDefaultEngine`, `applyCookieMutations`, `listCookieOrigins`, `getCookiesForOrigin`, `clearCookiesForOrigin`, `clearAllCookies`, `endBrowserSession`, `getCookieSiteSummary`, `flushCookieProjection`, `getCookieProjectionDiagnostics`, `listDownloads`, `listDownloadRecords`, `upsertDownloadRecord`, `pauseDownload`, `resumeDownload`, `cancelDownload`, `openDownload`, `revealDownload`, `putPageFavicon`, `getPageFavicon`, `exportBookmarks`, `exportPasswords`, `exportCookies` | Typed access to the manifest-declared browser-data provider: detection, import, secret-free summaries, approved sensitive reads, mutation, and export. |
+| `browserData` | namespace | `getBrowserEnvironment`, `listImportHosts`, `listImportSources`, `previewImport`, `startImport`, `startSensitiveImport`, `cancelImport`, `getImportJob`, `listImportJobs`, `listOpenTabs`, `openTabsAsPanels`, `getSitePreferences`, `setSiteZoom`, `getBookmarks`, `addBookmark`, `updateBookmark`, `deleteBookmark`, `moveBookmark`, `searchBookmarks`, `getHistory`, `deleteHistoryEntry`, `deleteHistoryRange`, `clearAllHistory`, `searchHistory`, `searchHistoryForAutocomplete`, `recordHistoryVisit`, `updateHistoryTitle`, `getSearchEngines`, `setDefaultEngine`, `listDownloads`, `listDownloadRecords`, `upsertDownloadRecord`, `pauseDownload`, `resumeDownload`, `cancelDownload`, `openDownload`, `revealDownload`, `putPageFavicon`, `getPageFavicon`, `exportBookmarks` | Typed access to the manifest-declared browser-data provider: detection, import, secret-free summaries, approved sensitive reads, mutation, and export. |
 | `git` | namespace | `setSharedRemote`, `removeSharedRemote`, `setUpstream`, `removeUpstream`, `detachUpstream`, `setAutoPush`, `upstreamStatus`, `pushUpstream`, `pullUpstream`, `publishRepo`, `commitMapping`, `importProject` | Typed external Git operations routed through the workspace's configured gitInterop provider. Import and pull create unpublished semantic candidates; only ordinary VCS integration and explicit publication advance protected main. Declarations carry logical credential names resolved by the host, while credential-free remotes are anonymous-first. Pull dry-runs use isolated temporary state and do not mutate managed Git, semantic state, or the remote. |
 | `vcs` | namespace | `edit`, `move`, `copy`, `merge`, `revert`, `commit`, `discard`, `importSnapshot`, `registerExternalDelta`, `supersedeExternalDelta`, `finalizeExternalDelta`, `push`, `status`, `compare`, `inspect`, `neighbors`, `history`, `blame`, `readMemory`, `resolveRepository`, `readFile`, `listDirectory`, `listFiles` | Simple semantic version control: exact event/application state, expressive edit/move/copy records, incremental local integration, whole-chain commit/discard, directly walkable provenance, and atomic external-snapshot acknowledgements containing the committed event/application/work-unit/repository/snapshot tuple. |
 | `gad` | namespace | `status`, `ensureBlob`, `listUserNotificationsForMe`, `acknowledgeUserNotification`, `putUserNotification`, `deleteUserNotification`, `getTrajectoryBranchHead`, `listTrajectoryBranches`, `listTrajectoryInvocations`, `listTrajectoryApprovals`, `listChannelEnvelopes`, `listTrajectoryEvents`, `appendChannelEnvelope`, `listMessageTypes`, `getMessageType`, `getChannelEnvelope`, `getTrajectoryForEnvelope`, `resolveTrajectoryForkPoint`, `listPublishedEnvelopesForTrajectory`, `getEnvelopesForTrajectory`, `getPublishedArtifactsForTurn`, `getPrivateLineageForPublishedEnvelope`, `getDownstreamConsumers`, `readChannelEnvelopes`, `inspectChannelEnvelopes`, `listStoredValueRefs`, `inspectStorageDiagnostics`, `inspectPublicationIntegrity`, `inspectTurnState`, `inspectInvocationState`, `diagnoseInvocation`, `inspectChannelRoster`, `inspectAgentHealth`, `validateGadHashes`, `clearDirtyAfterValidation`, `checkGadIntegrity`, `rebuildTrajectoryProjections` | Typed access to the workspace's canonical Graph and Data store: parameterized SQL, trajectory/channel lineage, integrity diagnostics, provenance, and bounded channel-envelope paging. |
@@ -311,7 +311,10 @@ Resolve and fetch it:
 ```ts
 const svc = await workers.resolveService("example.my-api.v1");
 if (svc.kind !== "worker") throw new Error("Expected worker service");
-await gatewayFetch(`${svc.routeBasePath}/jobs`, { method: "POST", body: JSON.stringify(payload) });
+await gatewayFetch(`${svc.routeBasePath}/jobs`, {
+  method: "POST",
+  body: JSON.stringify(payload),
+});
 ```
 
 A `routes[].durableObject` declaration requires a matching `singletonObjects`
@@ -400,7 +403,9 @@ export class TodoStore extends DurableObjectBase {
     tier: "open",
     sensitivity: "write",
   })
-  upsertTodo(input: { id?: string; title: string; done?: boolean }): { id: string } {
+  upsertTodo(input: { id?: string; title: string; done?: boolean }): {
+    id: string;
+  } {
     this.ensureReady();
     const id = input.id ?? crypto.randomUUID();
     this.sql.exec(
@@ -424,7 +429,12 @@ export class TodoStore extends DurableObjectBase {
     tier: "open",
     sensitivity: "read",
   })
-  listTodos(): Array<{ id: string; title: string; done: boolean; updatedAt: string }> {
+  listTodos(): Array<{
+    id: string;
+    title: string;
+    done: boolean;
+    updatedAt: string;
+  }> {
     this.ensureReady();
     return (
       this.sql.exec(`SELECT * FROM todos ORDER BY updated_at DESC`).toArray() as TodoRow[]

@@ -14,8 +14,16 @@ export function writeProjectedMetroConfig(input: BuildProviderInput, tempDir: st
   }
   const app = appManifest(input);
   const policy = readNativeModulePolicy(input.sourcePath, app["nativeModulePolicy"]);
-  const projectedRequire = createRequire(path.join(nodeModulesPath, "package.json"));
-  const metroConfigPackage = projectedRequire.resolve("@react-native/metro-config");
+  // Metro is the build provider's tool, not an application runtime dependency.
+  // Resolve it from this extension's exact dependency environment so a mobile
+  // app does not have to duplicate the provider's implementation dependency.
+  const providerRequire = createRequire(import.meta.url);
+  const metroConfigPackage = providerRequire.resolve("@react-native/metro-config");
+  const providerNodeModulesPath = path.resolve(
+    path.dirname(providerRequire.resolve("@react-native/metro-config/package.json")),
+    "..",
+    ".."
+  );
   const configPath = path.join(tempDir, "metro.config.cjs");
   const data = JSON.stringify({
     sourcePath: input.sourcePath,
@@ -23,6 +31,7 @@ export function writeProjectedMetroConfig(input: BuildProviderInput, tempDir: st
     modules: input.dependencyProjection.modules,
     policy,
     metroConfigPackage,
+    providerNodeModulesPath,
   });
   fs.writeFileSync(configPath, metroConfigSource(data));
   return configPath;
@@ -66,7 +75,6 @@ const path = require("node:path");
 const data = ${data};
 const { getDefaultConfig, mergeConfig } = require(data.metroConfigPackage);
 const normalize = (value) => path.resolve(value).replace(/\\\\/g, "/");
-const moduleNames = Object.keys(data.modules).sort((left, right) => right.length - left.length);
 const allowedByModule = new Map(
   Object.entries(data.policy.blockedImports).map(([moduleName, importers]) => [
     moduleName,
@@ -97,8 +105,6 @@ const guardNativeImport = (moduleName, originModulePath) => {
       'Importer: ' + (origin || "unknown") + '. Use the Vibestudio platform-owned wrapper for this native surface.',
   );
 };
-const projectedPackage = (moduleName) =>
-  moduleNames.find((name) => moduleName === name || moduleName.startsWith(name + "/"));
 const polyfills = {
   path: require.resolve("path-browserify", { paths: [data.nodeModulesPath] }),
   crypto: path.join(data.sourcePath, "src/polyfills/crypto.js"),
@@ -111,10 +117,13 @@ const config = {
   watchFolders: [...new Set([
     data.sourcePath,
     data.nodeModulesPath,
+    data.providerNodeModulesPath,
     ...Object.values(data.modules),
   ])].filter((candidate) => fs.existsSync(candidate)),
   resolver: {
-    nodeModulesPaths: [data.nodeModulesPath],
+    // Application dependencies remain authoritative. Metro's own dependency
+    // closure is a fallback only for build-tool runtime modules.
+    nodeModulesPaths: [data.nodeModulesPath, data.providerNodeModulesPath],
     extraNodeModules: data.modules,
     resolveRequest(context, moduleName, platform) {
       guardNativeImport(moduleName, context.originModulePath);
@@ -140,24 +149,6 @@ const config = {
             "react-native-screens/lib/commonjs/index.js",
           ),
         };
-      }
-      const packageName = projectedPackage(moduleName);
-      if (packageName) {
-        const packageRoot = data.modules[packageName];
-        const rawSubpath = moduleName.slice(packageName.length);
-        const subpath = rawSubpath.startsWith("/") ? rawSubpath.slice(1) : rawSubpath;
-        const sourceRoot = path.join(packageRoot, "src");
-        if (fs.existsSync(sourceRoot)) {
-          const sourceTarget = subpath
-            ? path.join(sourceRoot, subpath)
-            : path.join(sourceRoot, "index.ts");
-          return context.resolveRequest(context, sourceTarget, platform);
-        }
-        return context.resolveRequest(
-          context,
-          subpath ? path.join(packageRoot, subpath) : packageRoot,
-          platform,
-        );
       }
       if (
         moduleName.endsWith(".js") &&

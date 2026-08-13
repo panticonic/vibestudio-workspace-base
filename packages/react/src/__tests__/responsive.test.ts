@@ -95,20 +95,20 @@ afterEach(() => {
 
 describe("Vibestudio host platform", () => {
   it("prefers the native host's explicit platform", () => {
-    expect(resolveVibestudioHostPlatform("mobile", "desktop browser")).toBe("mobile");
-  });
-
-  it("supports native hosts that predate the explicit bridge value", () => {
-    expect(resolveVibestudioHostPlatform(undefined, "Vibestudio-Mobile/3 Android")).toBe("mobile");
+    expect(resolveVibestudioHostPlatform("mobile")).toBe("mobile");
   });
 
   it("defaults ordinary hosted panels to electron chrome", () => {
-    expect(resolveVibestudioHostPlatform(undefined, "Mozilla/5.0")).toBe("electron");
+    expect(resolveVibestudioHostPlatform(undefined)).toBe("electron");
+  });
+
+  it("does not derive chrome ownership from a mobile-looking user agent", () => {
+    vi.stubGlobal("navigator", { userAgent: "Vibestudio-Mobile/3 Android" });
+    expect(getVibestudioHostPlatform()).toBe("electron");
   });
 
   it("reads the bridge-injected value used by live mobile WebViews", () => {
     Object.assign(globalThis, { __vibestudioHostPlatform: "mobile" });
-    vi.stubGlobal("navigator", { userAgent: "Mozilla/5.0" });
     expect(getVibestudioHostPlatform()).toBe("mobile");
   });
 });
@@ -198,7 +198,10 @@ describe("useViewportHeight", () => {
 
   it("falls back to window.innerHeight when visualViewport is absent", () => {
     vi.stubGlobal("visualViewport", undefined);
-    Object.defineProperty(window, "innerHeight", { value: 900, writable: true });
+    Object.defineProperty(window, "innerHeight", {
+      value: 900,
+      writable: true,
+    });
 
     const { result } = renderHook(() => useViewportHeight());
     expect(result.current).toBe(900);

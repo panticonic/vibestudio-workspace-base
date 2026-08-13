@@ -77,12 +77,12 @@
     "@vibestudio/shell-core": "workspace:*",
     "@vibestudio/shared": "workspace:*",
     "@workspace/terminal-host-protocol": "workspace:*",
-    "@xterm/headless": "^5.5.0",
-    "ink": "^6.0.0",
-    "react": "^19.0.0",
-    "ws": "^8.21.1"
+    "@xterm/headless": "5.5.0",
+    "ink": "6.8.0",
+    "react": "19.0.0",
+    "ws": "8.21.1"
   },
   "devDependencies": {
-    "vitest": "^3.2.4"
+    "vitest": "3.2.7"
   }
 }

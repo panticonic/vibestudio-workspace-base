@@ -5,9 +5,9 @@
  * address bar.
  *
  * Layout: a left rail of detected browsers/profiles + a three-tab work area
- * (Migrate / Inspect / Debug). Sensitive reads and all modifying effects route
- * through the approval-gated browser-data extension; the dense views render from
- * secret-free aggregates so the dashboard loads without prompts.
+ * (Migrate / Inspect / Debug). Sensitive imports use one sealed host effect and
+ * return aggregate counts only; protected values are never exposed to this
+ * panel or the Base coordinator.
  */
 import { useEffect, useState } from "react";
 import { Box, Flex, Tabs, Text, Theme } from "@radix-ui/themes";
@@ -16,7 +16,10 @@ import "@workspace/ui/foundation.css";
 import "@workspace/ui/themes/vibestudio.css";
 import { panel } from "@workspace/runtime";
 import { useIsMobile, usePanelTheme, useStateArgs } from "@workspace/react";
-import { ImportSourceRail, type ImportSourceSelection } from "./components/ImportSourceRail";
+import {
+  ImportSourceRail,
+  type ImportSourceSelection,
+} from "./components/ImportSourceRail";
 import { MigrateTab } from "./components/MigrateTab";
 import { InspectTab } from "./components/InspectTab";
 import { DebugTab } from "./components/DebugTab";
@@ -39,7 +42,9 @@ export default function BrowserImportInspector() {
   const isMobile = useIsMobile();
   const stateArgs = useStateArgs<InspectorStateArgs>();
   const now = useNow();
-  const [selection, setSelection] = useState<ImportSourceSelection | null>(null);
+  const [selection, setSelection] = useState<ImportSourceSelection | null>(
+    null,
+  );
   const [tab, setTab] = useState<string>(stateArgs.activeTab ?? "migrate");
 
   const changeTab = (value: string) => {
@@ -49,7 +54,10 @@ export default function BrowserImportInspector() {
 
   return (
     <Theme appearance={theme} accentColor="iris" radius="medium">
-      <Flex direction={isMobile ? "column" : "row"} style={{ height: "100dvh", width: "100%" }}>
+      <Flex
+        direction={isMobile ? "column" : "row"}
+        style={{ height: "100dvh", width: "100%" }}
+      >
         <ImportSourceRail selected={selection} onSelect={setSelection} />
         <Box
           style={{

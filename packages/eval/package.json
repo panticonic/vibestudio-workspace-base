@@ -14,14 +14,14 @@
   "dependencies": {
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/shared": "workspace:*",
-    "acorn": "^8.17.0",
-    "sucrase": "^3.35.0"
+    "acorn": "8.18.0",
+    "sucrase": "3.35.1"
   },
   "peerDependencies": {
-    "react": "^19.0.0"
+    "react": "19.0.0"
   },
   "devDependencies": {
     "typescript": "7.0.2",
-    "vitest": "^3.2.4"
+    "vitest": "3.2.7"
   }
 }

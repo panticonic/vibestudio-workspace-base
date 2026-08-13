@@ -32,12 +32,17 @@ import {
   StopIcon,
 } from "@radix-ui/react-icons";
 import type {
-  BrowserImportSelection,
   ImportCategoryBreakdown,
   ImportedBrowserOpenTab,
   ImportJobSnapshot,
+  NonSensitiveBrowserImportDataType,
+  NonSensitiveBrowserImportSelection,
   OpenTabsPanelDestination,
+  SensitiveBrowserImportDataType,
+  SensitiveBrowserImportRequest,
+  SensitiveBrowserImportStatus,
 } from "@vibestudio/browser-data/client";
+import { panel } from "@workspace/runtime";
 import type { ImportSourceSelection } from "./ImportSourceRail";
 import {
   browserData,
@@ -57,34 +62,67 @@ import {
   isTerminalImportPhase,
   shouldShowImportOptions,
 } from "../importPresentation";
+import {
+  cancelSelectedImports,
+  observeSensitiveCheckpoint,
+  previewSelectedImports,
+  startSelectedImports,
+  type SensitiveImportCheckpoint,
+} from "../importWorkflow";
 
 /** Transient RPC hiccups are common; a persistent failure is not. */
 const POLL_FAILURES_BEFORE_GIVING_UP = 3;
 
 /** Above this many tabs the window groups start collapsed. */
 const AUTO_COLLAPSE_TABS = 25;
+const SENSITIVE_DATA_TYPES = new Set<string>(["cookies", "passwords", "formFill"]);
+const SENSITIVE_DATA_TYPE_ORDER: SensitiveBrowserImportDataType[] = [
+  "cookies",
+  "passwords",
+  "formFill",
+];
 
 export function MigrateTab(props: { selection: ImportSourceSelection; now: number }) {
   const selectionKey = `${props.selection.host.hostId}\0${props.selection.source.sourceId}`;
   const supported = props.selection.source.supportedDataTypes;
-  const selectableTypes = useMemo(
-    () => DATA_TYPES.filter((item) => supported.includes(item.key as never)),
-    [supported]
+  const available = useMemo(
+    () =>
+      supported.filter(
+        (dataType) =>
+          props.selection.host.location === "desktop" || !SENSITIVE_DATA_TYPES.has(dataType)
+      ),
+    [props.selection.host.location, supported]
   );
-  const [types, setTypes] = useState<Set<string>>(() => new Set(supported));
+  const selectableTypes = useMemo(
+    () => DATA_TYPES.filter((item) => available.includes(item.key as never)),
+    [available]
+  );
+  const [types, setTypes] = useState<Set<string>>(() => new Set(available));
   const [preview, setPreview] = useState<Awaited<
     ReturnType<typeof browserData.previewImport>
   > | null>(null);
   const [job, setJob] = useState<ImportJobSnapshot | null>(null);
+  const [sensitiveStatus, setSensitiveStatus] = useState<SensitiveBrowserImportStatus | null>(
+    () => {
+      const checkpoint = readSensitiveImportCheckpoint();
+      return checkpointMatchesSelection(checkpoint, props.selection)
+        ? (checkpoint?.status ?? null)
+        : null;
+    }
+  );
   const [busy, setBusy] = useState<"preview" | "import" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("data");
   const [reimporting, setReimporting] = useState(false);
 
   useEffect(() => {
-    setTypes(new Set(supported));
+    setTypes(new Set(available));
     setPreview(null);
     setJob(null);
+    const checkpoint = readSensitiveImportCheckpoint();
+    setSensitiveStatus(
+      checkpointMatchesSelection(checkpoint, props.selection) ? (checkpoint?.status ?? null) : null
+    );
     setError(null);
     setBusy(null);
     setStep("data");
@@ -116,17 +154,60 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
     return () => clearInterval(timer);
   }, [job?.jobId, job?.phase]);
 
-  const request = (): BrowserImportSelection => ({
+  useEffect(() => {
+    if (!sensitiveStatus || sensitiveStatus.state !== "running") return;
+    let consecutiveFailures = 0;
+    let timer: ReturnType<typeof setInterval>;
+    const observe = () => {
+      void observeSensitiveCheckpoint(browserData, sensitiveCheckpointStore)
+        .then((status) => {
+          consecutiveFailures = 0;
+          if (status) setSensitiveStatus(status);
+        })
+        .catch((cause) => {
+          consecutiveFailures += 1;
+          if (consecutiveFailures < POLL_FAILURES_BEFORE_GIVING_UP) return;
+          clearInterval(timer);
+          setError(
+            `Lost contact with the protected import while it was running: ${classifyError(cause).message}`
+          );
+        });
+    };
+    observe();
+    timer = setInterval(observe, 500);
+    return () => clearInterval(timer);
+  }, [sensitiveStatus?.operationId, sensitiveStatus?.state]);
+
+  const publicDataTypes = (): NonSensitiveBrowserImportDataType[] =>
+    [...types].filter(
+      (dataType) => !SENSITIVE_DATA_TYPES.has(dataType)
+    ) as NonSensitiveBrowserImportDataType[];
+  const sensitiveDataTypes = (): SensitiveBrowserImportDataType[] =>
+    SENSITIVE_DATA_TYPE_ORDER.filter((dataType) => types.has(dataType));
+  const publicRequest = (): NonSensitiveBrowserImportSelection => ({
     hostId: props.selection.host.hostId,
     sourceId: props.selection.source.sourceId,
-    dataTypes: [...types] as BrowserImportSelection["dataTypes"],
+    dataTypes: publicDataTypes(),
   });
 
   const runPreview = async () => {
     setBusy("preview");
     setError(null);
     try {
-      setPreview(await browserData.previewImport(request()));
+      const request = publicRequest();
+      const sensitive = sensitiveDataTypes();
+      const { publicPreview, sensitivePreview } = await previewSelectedImports(
+        browserData,
+        request.dataTypes.length > 0 ? request : null,
+        sensitive.length > 0
+          ? {
+              hostId: props.selection.host.hostId,
+              sourceId: props.selection.source.sourceId,
+              dataTypes: sensitive,
+            }
+          : null
+      );
+      setPreview(mergeImportPreviews(publicPreview, sensitivePreview, props.selection));
     } catch (cause) {
       setError(classifyError(cause).message);
     } finally {
@@ -138,8 +219,26 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
     setBusy("import");
     setError(null);
     try {
-      const next = await browserData.startImport(request());
-      setJob(next);
+      const publicRequestValue = publicRequest();
+      const sensitive = sensitiveDataTypes();
+      const result = await startSelectedImports(
+        browserData,
+        sensitiveCheckpointStore,
+        publicRequestValue.dataTypes.length > 0 ? publicRequestValue : null,
+        sensitive.length > 0
+          ? {
+              hostId: props.selection.host.hostId,
+              sourceId: props.selection.source.sourceId,
+              dataTypes: sensitive,
+            }
+          : null,
+        () => crypto.randomUUID()
+      );
+      setJob(result.job);
+      setSensitiveStatus(result.sensitiveStatus);
+      if (result.errors.length > 0) {
+        throw new Error(result.errors.map((cause) => classifyError(cause).message).join("; "));
+      }
       setPreview(null);
       setReimporting(false);
     } catch (cause) {
@@ -150,10 +249,38 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
   };
 
   const cancel = async () => {
-    if (!job) return;
-    await browserData.cancelImport(job.jobId);
-    const next = await browserData.getImportJob(job.jobId);
-    if (next) setJob(next);
+    setError(null);
+    try {
+      const result = await cancelSelectedImports(
+        browserData,
+        sensitiveCheckpointStore,
+        job,
+        sensitiveStatus
+      );
+      setJob(result.job);
+      setSensitiveStatus(result.sensitiveStatus);
+      if (result.errors.length > 0) {
+        throw new Error(result.errors.map((cause) => classifyError(cause).message).join("; "));
+      }
+    } catch (cause) {
+      setError(classifyError(cause).message);
+    }
+  };
+
+  const retrySensitiveImport = async () => {
+    const checkpoint = readSensitiveImportCheckpoint();
+    if (!checkpoint || checkpoint.status.state !== "running") return;
+    setBusy("import");
+    setError(null);
+    try {
+      const status = await browserData.startSensitiveImport(checkpoint.request);
+      writeSensitiveImportCheckpoint({ request: checkpoint.request, status });
+      setSensitiveStatus(status);
+    } catch (cause) {
+      setError(classifyError(cause).message);
+    } finally {
+      setBusy(null);
+    }
   };
 
   const allSelected = types.size === selectableTypes.length && selectableTypes.length > 0;
@@ -170,10 +297,22 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
       entry.hostId === props.selection.host.hostId &&
       (entry.phase === "complete" || entry.phase === "partial")
   );
-  const imported = (job !== null && isSuccessfulImportPhase(job.phase)) || importedBefore;
-  const running = job !== null && !isTerminalImportPhase(job.phase);
-  const hasCurrentResult = job !== null && isSuccessfulImportPhase(job.phase);
-  const showImportOptions = shouldShowImportOptions(job?.phase ?? null, reimporting);
+  const imported =
+    (job !== null && isSuccessfulImportPhase(job.phase)) ||
+    sensitiveStatus?.state === "complete" ||
+    importedBefore;
+  const running =
+    (job !== null && !isTerminalImportPhase(job.phase)) || sensitiveStatus?.state === "running";
+  const hasCurrentResult =
+    (job !== null && isSuccessfulImportPhase(job.phase)) || sensitiveStatus?.state === "complete";
+  const showImportOptions =
+    sensitiveStatus !== null &&
+    sensitiveStatus.state !== "failed" &&
+    sensitiveStatus.state !== "cancelled" &&
+    !reimporting &&
+    (!job || isSuccessfulImportPhase(job.phase))
+      ? false
+      : shouldShowImportOptions(job?.phase ?? null, reimporting);
 
   return (
     <Flex direction="column" gap="4" p="4" style={{ overflowY: "auto", height: "100%" }}>
@@ -258,9 +397,32 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
           )}
           {showImportOptions && preview && <BreakdownCard breakdowns={preview.breakdowns} />}
           {job && <ProgressCard mode="import" job={job} />}
+          {sensitiveStatus && (
+            <ProgressCard
+              mode="import"
+              job={sensitiveStatusAsJob(
+                sensitiveStatus,
+                readSensitiveImportCheckpoint()?.request,
+                props.selection
+              )}
+              detail="Protected data stayed inside the trusted host; this panel receives aggregate counts only."
+            />
+          )}
           {!showImportOptions && error && (
             <Callout.Root color="red">
-              <Callout.Text>{error}</Callout.Text>
+              <Flex justify="between" align="center" gap="3" wrap="wrap">
+                <Callout.Text>{error}</Callout.Text>
+                {sensitiveStatus?.state === "running" && (
+                  <Button
+                    size="1"
+                    variant="soft"
+                    disabled={busy !== null}
+                    onClick={() => void retrySensitiveImport()}
+                  >
+                    Retry protected import
+                  </Button>
+                )}
+              </Flex>
             </Callout.Root>
           )}
           <ImportHistory now={props.now} jobs={history.state.data ?? []} />
@@ -272,6 +434,7 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
             choosing={showImportOptions}
             canReturnToResult={hasCurrentResult && reimporting}
             selectedCount={types.size}
+            reviewable={types.size > 0}
             allSelected={allSelected}
             onReview={runPreview}
             onImport={startImport}
@@ -292,6 +455,128 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
   );
 }
 
+function readSensitiveImportCheckpoint(): SensitiveImportCheckpoint | null {
+  const value = panel.stateArgs.get()["sensitiveImport"];
+  if (!value || typeof value !== "object") return null;
+  const checkpoint = value as Partial<SensitiveImportCheckpoint>;
+  const request = checkpoint.request;
+  const status = checkpoint.status;
+  if (
+    !request ||
+    typeof request.hostId !== "string" ||
+    typeof request.sourceId !== "string" ||
+    typeof request.operationId !== "string" ||
+    !Array.isArray(request.dataTypes) ||
+    !status ||
+    status.operationId !== request.operationId ||
+    !["running", "complete", "cancelled", "failed"].includes(status.state)
+  ) {
+    return null;
+  }
+  return checkpoint as SensitiveImportCheckpoint;
+}
+
+function writeSensitiveImportCheckpoint(checkpoint: SensitiveImportCheckpoint): void {
+  panel.stateArgs.set({
+    ...panel.stateArgs.get(),
+    sensitiveImport: checkpoint,
+  });
+}
+
+const sensitiveCheckpointStore = {
+  read: readSensitiveImportCheckpoint,
+  write: writeSensitiveImportCheckpoint,
+};
+
+export function mergeImportPreviews(
+  publicPreview: Awaited<ReturnType<typeof browserData.previewImport>> | null,
+  sensitivePreview: Awaited<ReturnType<typeof browserData.previewSensitiveImport>> | null,
+  selection: ImportSourceSelection
+): Awaited<ReturnType<typeof browserData.previewImport>> {
+  if (!publicPreview && !sensitivePreview) {
+    throw new Error("Select at least one browser data category to review.");
+  }
+  const now = Date.now();
+  const job: ImportJobSnapshot = publicPreview?.job ?? {
+    jobId: `protected-review:${selection.source.sourceId}`,
+    hostId: selection.host.hostId,
+    hostLabel: selection.host.displayName,
+    sourceId: selection.source.sourceId,
+    browser: selection.source.browser,
+    phase: "complete",
+    requestedDataTypes: [],
+    startedAt: now,
+    updatedAt: now,
+    finishedAt: now,
+    progress: [],
+    warnings: [],
+    resumable: false,
+  };
+  return {
+    job: {
+      ...job,
+      requestedDataTypes: [
+        ...(publicPreview?.job.requestedDataTypes ?? []),
+        ...(sensitivePreview?.dataTypes.map((progress) => progress.dataType) ?? []),
+      ],
+      progress: [...(publicPreview?.job.progress ?? []), ...(sensitivePreview?.dataTypes ?? [])],
+      warnings: [...(publicPreview?.job.warnings ?? []), ...(sensitivePreview?.warnings ?? [])],
+    },
+    breakdowns: [...(publicPreview?.breakdowns ?? []), ...(sensitivePreview?.breakdowns ?? [])],
+    openTabCount: Math.max(publicPreview?.openTabCount ?? 0, sensitivePreview?.openTabCount ?? 0),
+    localDataSetCount: Math.max(
+      publicPreview?.localDataSetCount ?? 0,
+      sensitivePreview?.localDataSetCount ?? 0
+    ),
+  };
+}
+
+export function sensitiveStatusAsJob(
+  status: SensitiveBrowserImportStatus,
+  request: SensitiveBrowserImportRequest | undefined,
+  selection: ImportSourceSelection
+): ImportJobSnapshot {
+  const now = Date.now();
+  const phase =
+    status.state === "running"
+      ? "copying"
+      : status.state === "complete"
+        ? "complete"
+        : status.state === "cancelled"
+          ? "cancelled"
+          : "failed";
+  return {
+    jobId: status.operationId,
+    hostId: selection.host.hostId,
+    hostLabel: selection.host.displayName,
+    sourceId: selection.source.sourceId,
+    browser: selection.source.browser,
+    phase,
+    requestedDataTypes: request?.dataTypes ?? status.counts.map((count) => count.dataType),
+    startedAt: now,
+    updatedAt: now,
+    finishedAt: status.state === "running" ? undefined : now,
+    progress: status.counts.map((count) => ({
+      ...count,
+      itemsProcessed: count.read,
+    })),
+    warnings: [],
+    error: status.error,
+    resumable: status.state === "running",
+  };
+}
+
+function checkpointMatchesSelection(
+  checkpoint: SensitiveImportCheckpoint | null,
+  selection: ImportSourceSelection
+): boolean {
+  return Boolean(
+    checkpoint &&
+    checkpoint.request.hostId === selection.host.hostId &&
+    checkpoint.request.sourceId === selection.source.sourceId
+  );
+}
+
 type Step = "data" | "tabs";
 
 /**
@@ -307,6 +592,7 @@ function DataStepFooter(props: {
   choosing: boolean;
   canReturnToResult: boolean;
   selectedCount: number;
+  reviewable: boolean;
   allSelected: boolean;
   onReview: () => void;
   onImport: () => void;
@@ -323,7 +609,7 @@ function DataStepFooter(props: {
   return (
     <Flex justify="between" align="center" gap="2" wrap="wrap" style={{ flexShrink: 0 }}>
       {props.choosing ? (
-        <Button variant="ghost" disabled={blocked} onClick={props.onReview}>
+        <Button variant="ghost" disabled={blocked || !props.reviewable} onClick={props.onReview}>
           {props.busy === "preview" ? <Spinner size="1" /> : <MagnifyingGlassIcon />} Review without
           importing
         </Button>
@@ -376,9 +662,13 @@ function Stepper(props: {
     {
       key: "data",
       label: "Browser data",
-      hint: "Cookies, passwords, history — copied into Vibestudio",
+      hint: "Public records copied; protected data sealed by the host",
     },
-    { key: "tabs", label: "Open tabs", hint: "Opened as panels; nothing is copied" },
+    {
+      key: "tabs",
+      label: "Open tabs",
+      hint: "Opened as panels; nothing is copied",
+    },
   ];
   return (
     <Flex gap="2" style={{ flexShrink: 0 }}>
@@ -747,7 +1037,10 @@ function OpenTabs(props: { selection: ImportSourceSelection }) {
   const [busy, setBusy] = useState(false);
   const [groupIntoCollections, setGroupIntoCollections] = useState(true);
   const [destination, setDestination] = useState<OpenTabsPanelDestination>("new-root");
-  const [message, setMessage] = useState<{ tone: "green" | "red"; text: string } | null>(null);
+  const [message, setMessage] = useState<{
+    tone: "green" | "red";
+    text: string;
+  } | null>(null);
 
   const [autoCollapsedKey, setAutoCollapsedKey] = useState<string | null>(null);
 

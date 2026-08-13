@@ -103,7 +103,7 @@
     "TemplateRegistryContribution": "{ operationId, outcome: pushed|already-at-remote|nothing-to-suggest, registryUrl, baseCommit, branch, headCommit, revision, entry }",
     "TemplateInspection": "{ pin: { url, credential?, ref, commit, snapshot }, fingerprint, roots, templates, affectedParts, excludedSuggestions: [{ alias, section, value }] }",
     "TemplateSuggestionDecision": "{ operationId, state: accepted|declined, section, publicationEventId? }",
-    "ResumableTemplateOperation": "{ operationId, kind: add|adopt|pull|remove|recompose|adopt-bootstrap|publish-authoring, contextId, initiator: user|host-release, target?: { alias, ref? }, state: pending|reviewing|repairing, fingerprint, review?, repair? }",
+    "ResumableTemplateOperation": "{ operationId, kind: add|adopt|pull|remove|recompose|publish-authoring, contextId, initiator: user|host-release, target?: { alias, ref? }, state: pending|reviewing|repairing, fingerprint, review?, repair? }",
     "TemplateCatalogSnapshot": "{ version: 1, revision, systemEpoch, entries: [{ id, name, description, tags, recommended, url, promoted: { ref, commit, snapshot } }], source: verified|cache, stale, verifiedAt, refreshError? }"
   },
   "invariants": [

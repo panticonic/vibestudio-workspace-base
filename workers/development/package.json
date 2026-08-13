@@ -25,9 +25,14 @@
           "tier": "critical",
           "sensitivity": "destructive",
           "resourceType": "development-workspace",
-          "presentation": { "domain": "files", "verb": "act" },
+          "presentation": {
+            "domain": "files",
+            "verb": "act"
+          },
           "notability": "headline",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         },
         {
           "name": "development.sessions.cleanup.retry",
@@ -36,9 +41,14 @@
           "tier": "critical",
           "sensitivity": "destructive",
           "resourceType": "development-workspace",
-          "presentation": { "domain": "files", "verb": "act" },
+          "presentation": {
+            "domain": "files",
+            "verb": "act"
+          },
           "notability": "headline",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         },
         {
           "name": "development.runs.force-retire",
@@ -47,9 +57,14 @@
           "tier": "critical",
           "sensitivity": "destructive",
           "resourceType": "development-run",
-          "presentation": { "domain": "computer", "verb": "manage" },
+          "presentation": {
+            "domain": "computer",
+            "verb": "manage"
+          },
           "notability": "headline",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         },
         {
           "name": "development.sessions.force-retire",
@@ -58,9 +73,14 @@
           "tier": "critical",
           "sensitivity": "destructive",
           "resourceType": "development-workspace",
-          "presentation": { "domain": "files", "verb": "manage" },
+          "presentation": {
+            "domain": "files",
+            "verb": "manage"
+          },
           "notability": "headline",
-          "grantScopes": ["once"]
+          "grantScopes": [
+            "once"
+          ]
         }
       ],
       "requests": [
@@ -126,11 +146,11 @@
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/shared": "workspace:*",
     "@workspace/runtime": "workspace:*",
-    "zod": "^3.24.1"
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@vibestudio/durable": "workspace:*",
     "@vibestudio/rpc": "workspace:*",
-    "vitest": "^3.2.2"
+    "vitest": "3.2.7"
   }
 }

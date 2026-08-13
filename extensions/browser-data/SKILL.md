@@ -1,6 +1,6 @@
 ---
 name: browser-environment
-description: Import, inspect, and update the user's canonical browser data through the browser-data extension. Use for bookmarks, history, cookies, passwords, form fill, search engines, favicons, downloads, or installed-browser import.
+description: Import and manage non-sensitive browser records, open browser tabs as panels, and launch sealed host imports for protected browser data.
 ---
 
 # Browser Environment
@@ -27,10 +27,20 @@ has a complete user-approved selection:
 
 1. `listImportHosts()`
 2. `listImportSources(hostId)`
-3. `previewImport({ hostId, sourceId, dataTypes })`
-4. `startImport({ hostId, sourceId, dataTypes })`
-5. Poll `getImportJob(jobId)`; use `cancelImport(jobId)` when requested.
-6. Optionally call `listOpenTabs(hostId, sourceId)` and
+3. `previewImport({ hostId, sourceId, dataTypes })` for bookmarks, history,
+   search engines, and favicons only.
+4. `startImport({ hostId, sourceId, dataTypes })` for those non-sensitive categories.
+5. For cookies, passwords, or form fill, call
+   `previewSensitiveImport({ hostId, sourceId, dataTypes })` for aggregate
+   review counts, then call
+   `startSensitiveImport({ hostId, sourceId, dataTypes, operationId })` once.
+   Mint `operationId` before invocation and reuse it only for transport retries
+   of the same exact request. Poll `observeSensitiveImport(operationId)` and use
+   `cancelSensitiveImport(operationId)` when requested. Start owns the one
+   user-facing import gate; preview, observe, and cancel do not add gates. The
+   host returns aggregate status; plaintext never enters Base.
+6. Poll `getImportJob(jobId)` for non-sensitive jobs; use `cancelImport(jobId)` when requested.
+7. Optionally call `listOpenTabs(hostId, sourceId)` and
    `openTabsAsPanels(...)`. It defaults to a new workspace root with nested
    source-window collections; use `destination: "caller"` only when the user
    wants the hierarchy attached to the invoking panel. The imported recursive
@@ -44,7 +54,7 @@ the trusted provider and are never presented to userland. The preview schema
 is the source of truth for supported categories; do not infer unsupported
 settings, extensions, or site permissions.
 
-Imports commit bounded idempotent batches. A cancelled or interrupted job keeps
+Non-sensitive imports commit bounded idempotent batches. A cancelled or interrupted job keeps
 committed batches; starting the same source again continues through the
 coordinator's deterministic batch identities. Preview returns counts, masked
 samples, and warnings only.
@@ -52,16 +62,14 @@ samples, and warnings only.
 ## Runtime data
 
 - Use bookmark/history methods for normal reads, writes, search, and deletion.
-- Cookie writes go to the canonical mutation API. Electron cookies are only a
-  projection; use `flushCookieProjection` before an immediate post-login read.
-- Use `getFormFillSuggestions({ type, fieldName, prefix })`. Standard HTML
-  autocomplete types share semantically equivalent values; browser-native
-  field names preserve and match site-specific form history exactly.
 - Use `putPageFavicon` and `getPageFavicon` for byte-validated, page-associated
   browser icons. PNG, JPEG, GIF, WebP, ICO, SVG, BMP, and AVIF are supported.
 - Site permissions are managed by the browser-permission approval service, not
   by browser data and never imported.
 
-Sensitive reads, exports, import discovery, and mutations are approval-gated
-for userland callers. Raw secrets, local files, and decrypted import batches
-must never be rendered in a panel or logged.
+Browser passwords, form-fill values, and cookies have no Base read, CRUD, or
+export API. Their import is a sealed host effect whose receipt contains counts
+only. `openBrowserPrivacyManager(section)` hands an intentional user action to
+the host-owned manager and returns no protected data. Raw secrets, local files,
+and decrypted import batches must never be rendered, logged, or forwarded
+through the Base coordinator.

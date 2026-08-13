@@ -1218,7 +1218,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(funct
           }
         }}
         javaScriptEnabled
-        webviewDebuggingEnabled
+        webviewDebuggingEnabled={__DEV__}
         domStorageEnabled
         mixedContentMode="never"
         allowsInlineMediaPlayback

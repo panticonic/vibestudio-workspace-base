@@ -20,6 +20,7 @@ import { AppBar } from "./AppBar";
 import { LoadedPanelWebView } from "./LoadedPanelWebView";
 import { syncManagedWebViewThemes } from "./webViewThemes";
 import { ApprovalSheet } from "./ApprovalSheet";
+import { BrowserPrivacyManager } from "./BrowserPrivacyManager";
 import { Toast } from "./Toast";
 import { VibestudioLogo } from "./VibestudioLogo";
 import { useAppLifecycle } from "../hooks/useAppLifecycle";
@@ -95,6 +96,7 @@ import type {
   DiffReviewFile,
   PendingApproval,
 } from "@vibestudio/shared/approvals";
+import type { MobileBrowserPrivacySection } from "../services/shellClient";
 import {
   channelInviteFromNotification,
   type UserNotification,
@@ -237,7 +239,15 @@ export function MainScreen() {
   const [panelLoadErrors, setPanelLoadErrors] = useState<Record<string, string>>({});
   const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
   const [userNotifications, setUserNotifications] = useState<UserNotification[]>([]);
+  const [browserPrivacySection, setBrowserPrivacySection] =
+    useState<MobileBrowserPrivacySection | null>(null);
   const userNotificationRefreshSeq = useRef(0);
+
+  useEffect(() => {
+    setBrowserPrivacySection(null);
+    if (!shellClient) return;
+    return shellClient.onOpenBrowserPrivacy(setBrowserPrivacySection);
+  }, [shellClient]);
   const pendingApprovalsRefreshSeq = useRef(0);
   const pendingApprovalsSignatureRef = useRef("");
   const approvalStateControllerRef = useRef<ApprovalStateController | null>(null);
@@ -2168,6 +2178,13 @@ export function MainScreen() {
         onFetchDiffContent={fetchApprovalDiffContent}
         onOpenDiffFile={openApprovalDiffFile}
       />
+      {shellClient && browserPrivacySection !== null ? (
+        <BrowserPrivacyManager
+          initialSection={browserPrivacySection}
+          client={shellClient.browserPrivacy}
+          onClose={() => setBrowserPrivacySection(null)}
+        />
+      ) : null}
       <Toast />
     </View>
   );

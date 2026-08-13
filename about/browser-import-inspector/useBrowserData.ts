@@ -2,11 +2,12 @@
  * Data-access helpers for the Browser Migration & State panel.
  *
  * Every call goes through the `@workspace-extensions/browser-data` extension.
- * Tier-1 view methods (counts/domains/readiness) resolve without a prompt;
- * Tier-2/3 methods (reveal values, imports, deletes) trigger the approval
- * overlay and may come back denied (EACCES) or uncallable (ENOCALLER). The
- * `useAsync` hook normalizes those into explicit `denied`/`error` states so the
- * UI can render an inline "approval required" affordance instead of crashing.
+ * Public browser records use the installed provider. Sensitive review returns
+ * aggregates only, and one explicit start-import intent owns its user-facing
+ * gate; observing and cancelling that durable operation are not separately
+ * gated. Protected records are rendered and changed only in the host-owned
+ * privacy manager. `useAsync` normalizes denied and unavailable calls so the UI
+ * stays legible instead of crashing.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { browserData } from "@workspace/runtime";

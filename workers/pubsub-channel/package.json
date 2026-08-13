@@ -162,11 +162,11 @@
     "@workspace/pubsub": "workspace:*",
     "@workspace/harness": "workspace:*",
     "@workspace/channel-policies": "workspace:*",
-    "zod": "^3.24.1"
+    "zod": "3.25.76"
   },
   "devDependencies": {
     "@workspace-workers/workspace-source": "workspace:*",
     "@panticonic/builtin": "workspace:*",
-    "vitest": "^3.2.2"
+    "vitest": "3.2.7"
   }
 }
