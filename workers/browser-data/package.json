@@ -17,7 +17,36 @@
       ]
     },
     "authority": {
-      "provides": [],
+      "provides": [
+        {
+          "name": "browser-data.write",
+          "title": "Change browser data",
+          "action": "change persistent browser data",
+          "tier": "gated",
+          "sensitivity": "write",
+          "resourceType": "browser-data",
+          "presentation": {
+            "domain": "web",
+            "verb": "manage"
+          },
+          "notability": "everyday",
+          "grantScopes": ["once"]
+        },
+        {
+          "name": "browser-data.delete",
+          "title": "Delete browser data",
+          "action": "delete persistent browser data",
+          "tier": "gated",
+          "sensitivity": "destructive",
+          "resourceType": "browser-data",
+          "presentation": {
+            "domain": "web",
+            "verb": "manage"
+          },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        }
+      ],
       "requests": []
     }
   },

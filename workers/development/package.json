@@ -17,7 +17,63 @@
       ]
     },
     "authority": {
-      "provides": [],
+      "provides": [
+        {
+          "name": "development.sessions.destroy",
+          "title": "Destroy a development workspace",
+          "action": "permanently destroy a development workspace",
+          "tier": "critical",
+          "sensitivity": "destructive",
+          "resourceType": "development-workspace",
+          "presentation": { "domain": "files", "verb": "act" },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        },
+        {
+          "name": "development.sessions.cleanup.retry",
+          "title": "Retry development-workspace cleanup",
+          "action": "retry permanent cleanup of a development workspace",
+          "tier": "critical",
+          "sensitivity": "destructive",
+          "resourceType": "development-workspace",
+          "presentation": { "domain": "files", "verb": "act" },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        },
+        {
+          "name": "development.native.execute",
+          "title": "Exchange a template checkout",
+          "action": "compare or exchange an exact template checkout",
+          "tier": "gated",
+          "sensitivity": "read",
+          "resourceType": "template-checkout",
+          "presentation": { "domain": "automation", "verb": "act" },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        },
+        {
+          "name": "development.runs.force-retire",
+          "title": "Abandon development-build recovery",
+          "action": "permanently abandon recovery of a development build",
+          "tier": "critical",
+          "sensitivity": "destructive",
+          "resourceType": "development-run",
+          "presentation": { "domain": "computer", "verb": "manage" },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        },
+        {
+          "name": "development.sessions.force-retire",
+          "title": "Abandon development-workspace recovery",
+          "action": "permanently abandon recovery of a development workspace",
+          "tier": "critical",
+          "sensitivity": "destructive",
+          "resourceType": "development-workspace",
+          "presentation": { "domain": "files", "verb": "manage" },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        }
+      ],
       "requests": [
         {
           "capability": "development.native.execute",

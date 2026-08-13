@@ -17,7 +17,30 @@
       ]
     },
     "authority": {
-      "provides": [],
+      "provides": [
+        {
+          "name": "mobile.devices.read",
+          "title": "View available mobile devices",
+          "action": "view available mobile devices",
+          "tier": "gated",
+          "sensitivity": "read",
+          "resourceType": "mobile-device",
+          "presentation": { "domain": "people", "verb": "see" },
+          "notability": "everyday",
+          "grantScopes": ["once"]
+        },
+        {
+          "name": "mobile.provision",
+          "title": "Install and pair a mobile device",
+          "action": "install and pair a mobile device",
+          "tier": "gated",
+          "sensitivity": "admin",
+          "resourceType": "mobile-device",
+          "presentation": { "domain": "people", "verb": "manage" },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        }
+      ],
       "requests": [
         {
           "capability": "connected-client.transport",

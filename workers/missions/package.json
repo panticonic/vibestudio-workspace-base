@@ -17,7 +17,52 @@
       ]
     },
     "authority": {
-      "provides": [],
+      "provides": [
+        {
+          "name": "missions.edit",
+          "title": "Change an automation",
+          "action": "create or change an automation draft",
+          "tier": "gated",
+          "sensitivity": "write",
+          "resourceType": "mission",
+          "presentation": { "domain": "automation", "verb": "manage" },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        },
+        {
+          "name": "missions.run",
+          "title": "Run an automation",
+          "action": "run an already reviewed automation",
+          "tier": "gated",
+          "sensitivity": "write",
+          "resourceType": "mission",
+          "presentation": { "domain": "automation", "verb": "act" },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        },
+        {
+          "name": "missions.pause",
+          "title": "Pause an automation",
+          "action": "pause or resume an automation",
+          "tier": "gated",
+          "sensitivity": "write",
+          "resourceType": "mission",
+          "presentation": { "domain": "automation", "verb": "manage" },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        },
+        {
+          "name": "missions.retire",
+          "title": "Remove an automation",
+          "action": "permanently remove an automation",
+          "tier": "critical",
+          "sensitivity": "destructive",
+          "resourceType": "mission",
+          "presentation": { "domain": "automation", "verb": "manage" },
+          "notability": "headline",
+          "grantScopes": ["once"]
+        }
+      ],
       "requests": [
         {
           "capability": "reviewed-closure.activate",
