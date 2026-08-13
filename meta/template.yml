@@ -52,6 +52,7 @@ template:
     - packages/harness
     - packages/integrations
     - packages/model-catalog
+    - packages/omnibox-core
     - packages/pi-ai
     - packages/pi-core
     - packages/pubsub
