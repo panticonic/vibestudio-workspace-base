@@ -9,7 +9,10 @@ import { lintRendererSource } from "@workspace/agentic-core";
 import SetupHub from "./SetupHub.js";
 import type { SetupCapabilitySnapshot } from "./snapshot.js";
 import type { OptionalTemplateSnapshot } from "./templates.js";
-import { onboardingCatalog, type OnboardingCapabilityDefinition } from "./catalog.js";
+import {
+  onboardingCatalog,
+  type OnboardingCapabilityDefinition,
+} from "./catalog.js";
 
 const loaders = vi.hoisted(() => ({
   capabilities: vi.fn(),
@@ -111,13 +114,15 @@ function setupScope(
     catalog?: readonly OnboardingCapabilityDefinition[];
     snapshot?: SetupCapabilitySnapshot[];
     templates?: OptionalTemplateSnapshot[];
-  } = {}
+  } = {},
 ): Record<string, unknown> {
   return {
     onboardingSetupOverview: {
       catalog: options.catalog ?? catalog,
       snapshot: options.snapshot ?? snapshots,
-      ...(options.templates ? { templates: options.templates, templatesLoaded: true } : {}),
+      ...(options.templates
+        ? { templates: options.templates, templatesLoaded: true }
+        : {}),
     },
   };
 }
@@ -139,11 +144,13 @@ describe("SetupHub", () => {
     const view = render(
       <Theme>
         <SetupHub scope={setupScope()} chat={{ send: vi.fn() }} />
-      </Theme>
+      </Theme>,
     );
     expect(view.getByText("Google Workspace")).toBeTruthy();
     expect(view.getByRole("button", { name: "Ingest PDFs" })).toBeTruthy();
-    expect(view.getByRole("button", { name: "Schedule recurring work" })).toBeTruthy();
+    expect(
+      view.getByRole("button", { name: "Schedule recurring work" }),
+    ).toBeTruthy();
     expect(view.queryByText(/PDF.*Not configured/i)).toBeNull();
     expect(view.getByText(/not unfinished setup/i)).toBeTruthy();
     await waitFor(() => expect(view.getByText("Refresh")).toBeTruthy());
@@ -154,10 +161,12 @@ describe("SetupHub", () => {
     const view = render(
       <Theme>
         <SetupHub scope={setupScope()} chat={{ send }} />
-      </Theme>
+      </Theme>,
     );
 
-    fireEvent.click(view.getByRole("button", { name: "Schedule recurring work" }));
+    fireEvent.click(
+      view.getByRole("button", { name: "Schedule recurring work" }),
+    );
 
     await waitFor(() =>
       expect(send).toHaveBeenCalledWith("Explore Schedule recurring work", {
@@ -169,7 +178,7 @@ describe("SetupHub", () => {
             targetId: "capability.automations",
           },
         },
-      })
+      }),
     );
   });
 
@@ -186,11 +195,17 @@ describe("SetupHub", () => {
         observedAt,
       },
     ];
-    loaders.capabilities.mockResolvedValue({ catalog, snapshot: unavailableMobile });
+    loaders.capabilities.mockResolvedValue({
+      catalog,
+      snapshot: unavailableMobile,
+    });
     const view = render(
       <Theme>
-        <SetupHub scope={setupScope({ snapshot: unavailableMobile })} chat={{ send: vi.fn() }} />
-      </Theme>
+        <SetupHub
+          scope={setupScope({ snapshot: unavailableMobile })}
+          chat={{ send: vi.fn() }}
+        />
+      </Theme>,
     );
 
     expect(view.getByText("Unavailable")).toBeTruthy();
@@ -203,10 +218,12 @@ describe("SetupHub", () => {
     const view = render(
       <Theme>
         <SetupHub scope={setupScope()} chat={{ send }} />
-      </Theme>
+      </Theme>,
     );
 
-    const check = view.getByRole("button", { name: "Check connection" }) as HTMLButtonElement;
+    const check = view.getByRole("button", {
+      name: "Check connection",
+    }) as HTMLButtonElement;
     await waitFor(() => expect(check.disabled).toBe(false));
     loaders.capabilities.mockClear();
     fireEvent.click(check);
@@ -214,7 +231,7 @@ describe("SetupHub", () => {
     await waitFor(() =>
       expect(loaders.capabilities).toHaveBeenCalledWith({
         verifyCapabilityId: "connection.google-workspace",
-      })
+      }),
     );
     expect(send).not.toHaveBeenCalled();
     expect(view.getByText("Connected · not checked")).toBeTruthy();
@@ -233,7 +250,7 @@ describe("SetupHub", () => {
           scopes={{ save }}
           inlineUi={{ id: "onboarding-setup-overview", renderedAt: "first" }}
         />
-      </Theme>
+      </Theme>,
     );
 
     await waitFor(() => expect(loaders.capabilities).toHaveBeenCalledTimes(1));
@@ -245,7 +262,7 @@ describe("SetupHub", () => {
           scopes={{ save }}
           inlineUi={{ id: "onboarding-setup-overview", renderedAt: "second" }}
         />
-      </Theme>
+      </Theme>,
     );
     await waitFor(() => expect(loaders.capabilities).toHaveBeenCalledTimes(2));
     expect(save).toHaveBeenCalled();
@@ -254,7 +271,7 @@ describe("SetupHub", () => {
   it("refreshes installed owners and cached template status after an external add", async () => {
     const baseCatalog = onboardingCatalog;
     const baseSnapshots = snapshots.filter(
-      (snapshot) => snapshot.id !== "connection.google-workspace"
+      (snapshot) => snapshot.id !== "connection.google-workspace",
     );
     const googleTemplate: OptionalTemplateSnapshot = {
       id: "template.google-workspace",
@@ -284,9 +301,12 @@ describe("SetupHub", () => {
         <SetupHub
           chat={{ send: vi.fn() }}
           scope={scope}
-          inlineUi={{ id: "onboarding-setup-overview", renderedAt: "before-install" }}
+          inlineUi={{
+            id: "onboarding-setup-overview",
+            renderedAt: "before-install",
+          }}
         />
-      </Theme>
+      </Theme>,
     );
 
     await waitFor(() => expect(loaders.templates).toHaveBeenCalledTimes(1));
@@ -295,13 +315,18 @@ describe("SetupHub", () => {
         <SetupHub
           chat={{ send: vi.fn() }}
           scope={scope}
-          inlineUi={{ id: "onboarding-setup-overview", renderedAt: "after-install" }}
+          inlineUi={{
+            id: "onboarding-setup-overview",
+            renderedAt: "after-install",
+          }}
         />
-      </Theme>
+      </Theme>,
     );
 
     await waitFor(() => expect(loaders.templates).toHaveBeenCalledTimes(2));
-    expect(loaders.templates).toHaveBeenLastCalledWith({ refreshCatalog: false });
+    expect(loaders.templates).toHaveBeenLastCalledWith({
+      refreshCatalog: false,
+    });
     expect(view.getByText("Installed")).toBeTruthy();
     expect(view.getByRole("button", { name: "Check connection" })).toBeTruthy();
   });
@@ -310,36 +335,76 @@ describe("SetupHub", () => {
     const view = render(
       <Theme>
         <SetupHub scope={setupScope()} chat={{ send: vi.fn() }} />
-      </Theme>
+      </Theme>,
     );
 
     expect(view.getByText(/reviewed bundles of panels, skills/i)).toBeTruthy();
-    expect(view.getByText(/contacts Vibestudio's verified template registry/i)).toBeTruthy();
+    expect(
+      view.getByText(/contacts Vibestudio's verified template registry/i),
+    ).toBeTruthy();
     expect(loaders.templates).not.toHaveBeenCalled();
 
-    fireEvent.click(view.getByRole("button", { name: "Load optional templates" }));
+    fireEvent.click(
+      view.getByRole("button", { name: "Load optional templates" }),
+    );
     await waitFor(() => expect(loaders.templates).toHaveBeenCalledOnce());
     expect(view.getByText("Examples")).toBeTruthy();
   });
 
+  it("shows the concrete optional-template failure", async () => {
+    loaders.templates.mockRejectedValueOnce(
+      new Error(
+        "Template registry system epoch 58 does not match workspace system epoch 59; a workspace-source upgrade is required",
+      ),
+    );
+    const view = render(
+      <Theme>
+        <SetupHub scope={setupScope()} chat={{ send: vi.fn() }} />
+      </Theme>,
+    );
+
+    fireEvent.click(
+      view.getByRole("button", { name: "Load optional templates" }),
+    );
+
+    expect(
+      await view.findByText(
+        /registry system epoch 58 does not match workspace system epoch 59/i,
+      ),
+    ).toBeTruthy();
+  });
+
   it("animates refresh icons while setup and template data are loading", async () => {
-    const capabilityLoad = deferred<{ catalog: typeof catalog; snapshot: typeof snapshots }>();
+    const capabilityLoad = deferred<{
+      catalog: typeof catalog;
+      snapshot: typeof snapshots;
+    }>();
     const templateLoad = deferred<OptionalTemplateSnapshot[]>();
     loaders.capabilities.mockReturnValue(capabilityLoad.promise);
     loaders.templates.mockReturnValue(templateLoad.promise);
     const view = render(
       <Theme>
         <SetupHub scope={setupScope()} chat={{ send: vi.fn() }} />
-      </Theme>
+      </Theme>,
     );
 
-    const refresh = view.getByRole("button", { name: "Refresh setup overview" });
+    const refresh = view.getByRole("button", {
+      name: "Refresh setup overview",
+    });
     await waitFor(() => expect(refresh.textContent).toContain("Refreshing…"));
-    expect(refresh.querySelector("svg")?.style.animation).toBe("spin 0.8s linear infinite");
+    expect(refresh.querySelector("svg")?.style.animation).toBe(
+      "spin 0.8s linear infinite",
+    );
 
-    fireEvent.click(view.getByRole("button", { name: "Load optional templates" }));
-    const loadTemplates = view.getByRole("button", { name: "Loading templates…" });
-    expect(loadTemplates.querySelector("svg")?.style.animation).toBe("spin 0.8s linear infinite");
+    fireEvent.click(
+      view.getByRole("button", { name: "Load optional templates" }),
+    );
+    const loadTemplates = view.getByRole("button", {
+      name: "Loading templates…",
+    });
+    expect(loadTemplates.querySelector("svg")?.style.animation).toBe(
+      "spin 0.8s linear infinite",
+    );
 
     await act(async () => {
       capabilityLoad.resolve({ catalog, snapshot: snapshots });
@@ -353,13 +418,15 @@ describe("SetupHub", () => {
     const view = render(
       <Theme>
         <SetupHub scope={setupScope({ templates })} chat={{ send }} />
-      </Theme>
+      </Theme>,
     );
 
     expect(view.getByText("Optional templates")).toBeTruthy();
     expect(view.getByText("Installed")).toBeTruthy();
     expect(view.getByText("Unknown")).toBeTruthy();
-    expect(view.getAllByRole("button", { name: "Review & add" })).toHaveLength(1);
+    expect(view.getAllByRole("button", { name: "Review & add" })).toHaveLength(
+      1,
+    );
 
     fireEvent.click(view.getByRole("button", { name: "Review & add" }));
     await waitFor(() =>
@@ -373,7 +440,7 @@ describe("SetupHub", () => {
             ...selection,
           },
         },
-      })
+      }),
     );
   });
 });
