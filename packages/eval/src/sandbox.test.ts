@@ -507,6 +507,37 @@ return fs.readFileSync("/tmp/a");`,
     });
   });
 
+  it("keeps an invalid workspace build selector caller-correctable", async () => {
+    const result = await executeSandbox(
+      'import { answer } from "@workspace/example"; return answer;',
+      {
+        syntax: "typescript",
+        imports: { "@workspace/example": "./packages/example/src/index.ts" },
+        loadImport: async () => {
+          throw Object.assign(new Error("Invalid build ref"), {
+            errorKind: "application",
+            code: "invalid_build_ref",
+            errorData: {
+              code: "invalid_build_ref",
+              ref: "./packages/example/src/index.ts",
+            },
+          });
+        },
+      }
+    );
+
+    expect(result).toMatchObject({
+      success: false,
+      error: "Invalid build ref",
+      failureKind: "user-code",
+      failureCode: "invalid_build_ref",
+      errorData: {
+        code: "invalid_build_ref",
+        ref: "./packages/example/src/index.ts",
+      },
+    });
+  });
+
   it("loads a lazy panel-exposed module before workspace build fallback", async () => {
     const globals = globalThis as Record<string, unknown>;
     const moduleMap = globals["__vibestudioModuleMap__"] as Record<string, unknown>;
