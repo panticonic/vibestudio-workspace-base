@@ -41,17 +41,6 @@
           "grantScopes": ["once"]
         },
         {
-          "name": "development.native.execute",
-          "title": "Exchange a template checkout",
-          "action": "compare or exchange an exact template checkout",
-          "tier": "gated",
-          "sensitivity": "read",
-          "resourceType": "template-checkout",
-          "presentation": { "domain": "automation", "verb": "act" },
-          "notability": "headline",
-          "grantScopes": ["once"]
-        },
-        {
           "name": "development.runs.force-retire",
           "title": "Abandon development-build recovery",
           "action": "permanently abandon recovery of a development build",
