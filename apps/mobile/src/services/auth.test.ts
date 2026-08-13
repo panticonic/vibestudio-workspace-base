@@ -5,7 +5,7 @@ import {
   resetToNativeBootstrap,
 } from "./auth";
 
-const nativeHost = NativeModules.VibestudioMobileHost as {
+const nativeHost = NativeModules["VibestudioMobileHost"] as {
   resetToNativeBootstrap: jest.Mock;
   activatePreparedAppBundle: jest.Mock;
 };

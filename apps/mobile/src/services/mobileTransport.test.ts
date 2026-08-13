@@ -53,7 +53,10 @@ const storedCredential: StoredRoutedMobileConnection = {
   pairedAt: 123,
 };
 
-function makeRpc(overrides: Partial<RpcClient> = {}): RpcClient {
+// Overrides are test doubles, not RpcClients: `call` and `stream` are generic
+// in their result, which no jest.fn can satisfy. Key names stay checked so a
+// typo is still an error, and the result is cast once, below.
+function makeRpc(overrides: Partial<Record<keyof RpcClient, unknown>> = {}): RpcClient {
   return {
     selfId: `shell:${DEVICE_ID}`,
     expose: jest.fn(),

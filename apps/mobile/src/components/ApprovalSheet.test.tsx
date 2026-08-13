@@ -110,7 +110,7 @@ const missionReview: PendingApproval = {
       },
       declaredLineageClasses: ["none"],
     },
-    trigger: { kind: "cron", cron: "0 8 * * 1-5" },
+    trigger: { kind: "cron", expression: "0 8 * * 1-5", timezone: "Europe/Berlin" },
   },
   charterChanges: [],
 };

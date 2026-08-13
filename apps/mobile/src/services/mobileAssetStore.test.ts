@@ -26,14 +26,38 @@ const rawAsset = {
 const asset: MobileStoredAsset = { handle: rawAsset.handle, size: 3, metadata };
 
 function fakeNative(): jest.Mocked<NativeMobileAssetStoreHost> {
+  // Each double declares the signature it stands in for; an implementation
+  // taking no arguments does not satisfy jest.Mocked and hides argument drift.
+  type Host = NativeMobileAssetStoreHost;
   return {
-    assetStoreLookup: jest.fn(async () => null),
-    assetStoreOpenWrite: jest.fn(async () => "write-one"),
-    assetStoreAppend: jest.fn(async () => undefined),
-    assetStoreCommit: jest.fn(async () => rawAsset),
-    assetStoreAbort: jest.fn(async () => undefined),
-    assetStoreTrim: jest.fn(async () => undefined),
-    assetStoreClear: jest.fn(async () => undefined),
+    assetStoreLookup: jest.fn<
+      ReturnType<Host["assetStoreLookup"]>,
+      Parameters<Host["assetStoreLookup"]>
+    >(async () => null),
+    assetStoreOpenWrite: jest.fn<
+      ReturnType<Host["assetStoreOpenWrite"]>,
+      Parameters<Host["assetStoreOpenWrite"]>
+    >(async () => "write-one"),
+    assetStoreAppend: jest.fn<
+      ReturnType<Host["assetStoreAppend"]>,
+      Parameters<Host["assetStoreAppend"]>
+    >(async () => undefined),
+    assetStoreCommit: jest.fn<
+      ReturnType<Host["assetStoreCommit"]>,
+      Parameters<Host["assetStoreCommit"]>
+    >(async () => rawAsset),
+    assetStoreAbort: jest.fn<
+      ReturnType<Host["assetStoreAbort"]>,
+      Parameters<Host["assetStoreAbort"]>
+    >(async () => undefined),
+    assetStoreTrim: jest.fn<
+      ReturnType<Host["assetStoreTrim"]>,
+      Parameters<Host["assetStoreTrim"]>
+    >(async () => undefined),
+    assetStoreClear: jest.fn<
+      ReturnType<Host["assetStoreClear"]>,
+      Parameters<Host["assetStoreClear"]>
+    >(async () => undefined),
   };
 }
 

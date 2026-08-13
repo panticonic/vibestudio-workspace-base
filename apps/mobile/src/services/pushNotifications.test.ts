@@ -109,7 +109,7 @@ function createShellClient(
 ): MockShellClient {
   const transport = {
     status,
-    call: jest.fn(async (_target: string, method: string) => {
+    call: jest.fn(async (_target: string, method: string, _args: unknown[] = []) => {
       if (method === "shellApproval.listPending") {
         return [{ approvalId: "approval-1" }];
       }
@@ -139,7 +139,7 @@ function createShellClient(
 
 beforeEach(() => {
   setApprovedAppCapabilities(["notifications", "keychain"]);
-  (NativeModules.VibestudioMobileHost as { firebaseConfigured?: boolean }).firebaseConfigured =
+  (NativeModules["VibestudioMobileHost"] as { firebaseConfigured?: boolean }).firebaseConfigured =
     true;
   jest.clearAllMocks();
   mockStorage.clear();
@@ -160,7 +160,7 @@ afterAll(() => {
 
 describe("pushNotifications", () => {
   it("skips Firebase messaging setup when the native app has no Firebase config", async () => {
-    (NativeModules.VibestudioMobileHost as { firebaseConfigured?: boolean }).firebaseConfigured =
+    (NativeModules["VibestudioMobileHost"] as { firebaseConfigured?: boolean }).firebaseConfigured =
       false;
     const shellClient = createShellClient();
 

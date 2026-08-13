@@ -45,7 +45,7 @@ const loadCredentialMock = loadShellCredential as jest.MockedFunction<typeof loa
 const persistCredentialMock = persistStoredMobileConnection as jest.MockedFunction<
   typeof persistStoredMobileConnection
 >;
-const nativeHost = NativeModules.VibestudioMobileHost as {
+const nativeHost = NativeModules["VibestudioMobileHost"] as {
   resetToNativeBootstrap: jest.Mock;
 };
 

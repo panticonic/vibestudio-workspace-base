@@ -30,10 +30,8 @@ const SECTIONS: readonly { id: MobileBrowserPrivacySection; label: string }[] = 
 type Client = ShellClient["browserPrivacy"];
 type PasswordPage = Awaited<ReturnType<Client["listPasswordSummariesPage"]>>;
 type PasswordSummary = PasswordPage["items"][number];
-type NeverSavePage = Awaited<ReturnType<Client["getNeverSaveOriginsPage"]>>;
 type FormFillPage = Awaited<ReturnType<Client["listFormFillValuesPage"]>>;
 type FormFillValue = FormFillPage["items"][number];
-type CookieOriginPage = Awaited<ReturnType<Client["listCookieOriginsPage"]>>;
 
 export interface BrowserPrivacyManagerProps {
   initialSection: MobileBrowserPrivacySection;
