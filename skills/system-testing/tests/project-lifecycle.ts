@@ -618,6 +618,90 @@ function completeTodoRuntimeVerificationIndex(
   return -1;
 }
 
+function hasCleanPanelBuild(call: InvocationCardPayloadLike, expectedSource: string): boolean {
+  if (
+    call.name === "verify" &&
+    call.arguments?.["operation"] === "build" &&
+    call.arguments?.["target"] === expectedSource &&
+    call.execution?.status === "complete" &&
+    call.execution.isError !== true
+  ) {
+    const receipt = details(call)?.["receipt"];
+    const unit = isRecord(receipt) ? receipt["unit"] : null;
+    if (
+      isRecord(receipt) &&
+      receipt["protocol"] === "build-verification-receipt.v1" &&
+      receipt["status"] === "ok" &&
+      receipt["target"] === expectedSource &&
+      isRecord(unit) &&
+      unit["repoPath"] === expectedSource
+    ) {
+      return true;
+    }
+  }
+  return (
+    compilerCheckSummary(call, expectedSource)?.["errorCount"] === 0 ||
+    successfulPanelBuildSummary(call, expectedSource)?.["errorCount"] === 0
+  );
+}
+
+function validateTaskManagementApp(result: TestExecutionResult) {
+  const base = completedScenarioEvidence(result);
+  if (!base.passed) return base;
+  const calls = base.evidence.calls;
+
+  let creationIndex = -1;
+  let source = "";
+  for (const [index, call] of calls.entries()) {
+    if (call.name !== "eval") continue;
+    const created = returnedRecords(call).find((record) => createdProject(record, "panels"));
+    if (created && typeof created["created"] === "string") {
+      creationIndex = index;
+      source = created["created"];
+      break;
+    }
+  }
+  if (creationIndex < 0) {
+    return {
+      passed: false,
+      reason: "No completed eval returned the published task-management panel identity",
+    };
+  }
+
+  const cleanBuildIndex = calls.findIndex(
+    (call, index) => index > creationIndex && hasCleanPanelBuild(call, source)
+  );
+  if (cleanBuildIndex < 0) {
+    return {
+      passed: false,
+      reason: "The task-management panel never produced a clean exact build receipt",
+    };
+  }
+
+  const runtimeIndex = completeTodoRuntimeVerificationIndex(calls, cleanBuildIndex);
+  if (runtimeIndex < 0) {
+    return {
+      passed: false,
+      reason:
+        "The clean panel was not launched, reloaded, exercised through add/complete/filter/delete flows, captured, and checked for console errors",
+    };
+  }
+
+  const final = findLastAgentMessage(result);
+  if (
+    !/task|project/iu.test(final) ||
+    !/build|compil|type.?check/iu.test(final) ||
+    !/launch|open|running|live/iu.test(final) ||
+    !/debug|verif|test/iu.test(final)
+  ) {
+    return {
+      passed: false,
+      reason: "The final response did not report the built, launched, and debugged app evidence",
+    };
+  }
+  return { passed: true, reason: undefined };
+}
+
 function validateTodoDebugLoop(result: TestExecutionResult) {
   const base = completedScenarioEvidence(result);
   if (!base.passed) return base;
@@ -840,6 +924,18 @@ export const projectLifecycleTests: TestCase[] = [
     prompt:
       "Create an isolated package project, make one follow-up change, and commit that change.",
     validate: validateProjectCommit,
+  },
+  {
+    name: "task-management-build-launch-debug",
+    description: "Build, launch, and debug a full-featured task-management app",
+    category: "project-lifecycle",
+    timeoutMs: 45 * 60_000,
+    workspaceRepoFixture: CREATED_PANEL_WORKSPACE_REPO_FIXTURE,
+    authorityPolicy: panelControlAuthorityPolicy("inspect-task-management-panel"),
+    resources: [PANEL_AUTOMATION_RESOURCE],
+    prompt: "Build me a full-featured task management app, then launch and debug it.",
+    validation: "agent-evidence",
+    validate: validateTaskManagementApp,
   },
   {
     name: "panel-todo-debug-polish",

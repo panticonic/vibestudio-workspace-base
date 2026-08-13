@@ -104,6 +104,57 @@ describe("project lifecycle prompts", () => {
       kind: "created-repository",
       section: "panels",
     });
+    expect(fixtureFor("task-management-build-launch-debug")).toEqual({
+      kind: "created-repository",
+      section: "panels",
+    });
+  });
+
+  it("keeps the task-management app request natural while independently validating the result", () => {
+    const test = projectLifecycleTests.find(
+      ({ name }) => name === "task-management-build-launch-debug"
+    )!;
+
+    expect(test.prompt).toBe(
+      "Build me a full-featured task management app, then launch and debug it."
+    );
+    expect(test.timeoutMs).toBe(45 * 60_000);
+    expect(test.validation).toBe("agent-evidence");
+    expect(test.authorityPolicy).toEqual({
+      authority: [
+        {
+          ruleId: "manage-panel-state",
+          capability: { kind: "exact", key: "workspace.runtime-state.manage" },
+          resource: { kind: "exact", key: "workspace.runtime-state.manage" },
+          tier: "gated",
+          decision: "once",
+        },
+        {
+          ruleId: "manage-panel-context-boundary",
+          capability: { kind: "exact", key: "context.boundary" },
+          resource: { kind: "prefix", prefix: "context/" },
+          tier: "gated",
+          decision: "once",
+        },
+        {
+          ruleId: "use-testkit-driver",
+          capability: { kind: "exact", key: "workspace-service:testkit-driver" },
+          resource: {
+            kind: "exact",
+            key: "do:workers/testkit-driver:TestkitDriverDO:workspace-testkit-driver",
+          },
+          tier: "gated",
+          decision: "once",
+        },
+        {
+          ruleId: "inspect-task-management-panel",
+          capability: { kind: "exact", key: "panel.inspect" },
+          resource: { kind: "exact", key: "panel.inspect" },
+          tier: "gated",
+          decision: "once",
+        },
+      ],
+    });
   });
 
   it("accepts a published generated worker scaffold", () => {
