@@ -129,6 +129,8 @@
     "@workspace/pi-core": "workspace:*",
     "@workspace-workers/agent-worker": "workspace:*",
     "@workspace-workers/silent-agent-worker": "workspace:*",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
     "zod": "3.25.76"
   },
   "devDependencies": {
