@@ -5,7 +5,7 @@ describe("startVisibleAccountProfileRefresh", () => {
     const resolveAccountProfiles = jest.fn(async () => ({
       alice: { userId: "alice", handle: "alice", displayName: "Alice" },
     }));
-    const apply = jest.fn();
+    const apply = jest.fn<void, [Map<string, { displayName?: string }>]>();
     let tick: (() => void) | null = null;
     const scheduler = {
       setInterval: jest.fn((callback: () => void, _delayMs: number) => {
@@ -44,7 +44,7 @@ describe("startVisibleAccountProfileRefresh", () => {
           finish = resolve;
         })
     );
-    const apply = jest.fn();
+    const apply = jest.fn<void, [Map<string, { displayName?: string }>]>();
     const scheduler = {
       setInterval: jest.fn(() => 7 as unknown as ReturnType<typeof setInterval>),
       clearInterval: jest.fn(),

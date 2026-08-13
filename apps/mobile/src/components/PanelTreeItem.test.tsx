@@ -8,7 +8,9 @@ import { themeColorsAtom } from "../state/themeAtoms";
 jest.mock("react-native-gesture-handler", () => {
   const React = require("react");
   const { View } = require("react-native");
-  const chain = {
+  // Self-referential builder: each call returns the same chain, so the type
+  // cannot be inferred from its own initializer.
+  const chain: Record<string, (...args: unknown[]) => unknown> = {
     activeOffsetX: jest.fn(() => chain),
     failOffsetY: jest.fn(() => chain),
     onUpdate: jest.fn(() => chain),

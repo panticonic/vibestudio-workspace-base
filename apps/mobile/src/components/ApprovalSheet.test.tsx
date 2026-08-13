@@ -6,6 +6,7 @@ import { authorityRow } from "@vibestudio/shared/authority/authorityRows";
 import type {
   InstallReviewPart,
   InstallReviewRow,
+  TemplateInstallResolution,
 } from "@vibestudio/shared/authority/unitInstallReview";
 
 const base = {
@@ -422,8 +423,8 @@ describe("ApprovalSheet", () => {
       ["old-hash", "one\ntwo\nthree\nfour\nfive\nold value\nseven\neight\nnine\nten"],
       ["new-hash", "one\ntwo\nthree\nfour\nfive\nnew value\nseven\neight\nnine\nten"],
     ]);
-    const onFetchDiffContent = jest.fn(async (_approvalId: string, hash: string) =>
-      content.get(hash)
+    const onFetchDiffContent = jest.fn(
+      async (_approvalId: string, hash: string) => content.get(hash) ?? null
     );
     const onOpenDiffFile = jest.fn(async () => undefined);
     const { getByTestId, getByText } = renderSheet(diffApproval, {
@@ -596,7 +597,9 @@ describe("ApprovalSheet", () => {
         notableRows: index === 0 ? [headlineRow("chat")] : [],
       })
     );
-    const onResolveInstallReview = jest.fn(async () => undefined);
+    const onResolveInstallReview = jest.fn(
+      async (_approvalId: string, _resolution: TemplateInstallResolution) => undefined
+    );
     const { getByTestId, getByText, queryByTestId } = renderSheet(
       { ...installReview, parts },
       { onResolveInstallReview }
@@ -987,7 +990,9 @@ describe("ApprovalSheet", () => {
   });
 
   it("shows every part in plain language, with a checkbox only for what it can grant", async () => {
-    const onResolveInstallReview = jest.fn(async () => undefined);
+    const onResolveInstallReview = jest.fn(
+      async (_approvalId: string, _resolution: TemplateInstallResolution) => undefined
+    );
     const { getByText, getByTestId, queryByLabelText } = renderSheet(installReview, {
       onResolveInstallReview,
     });

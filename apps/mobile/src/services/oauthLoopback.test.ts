@@ -13,7 +13,7 @@ const mockStop = jest.fn(async () => undefined);
 const mockAuthSessionStart = jest.fn(async () => ({
   url: "vibestudio://oauth/callback/openai-codex?code=code-1&state=state-1",
 }));
-const mockCall = jest.fn(async () => undefined);
+const mockCall = jest.fn(async (_target: string, _method: string, _args: unknown[] = []) => undefined);
 
 function createShellClient() {
   return {

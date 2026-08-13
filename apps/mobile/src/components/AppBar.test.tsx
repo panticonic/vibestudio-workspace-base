@@ -11,8 +11,8 @@ jest.mock("@vibestudio/shared/panelChrome", () => ({
   browserUrlFromPanelSource: (source: string) =>
     source.startsWith("browser:") ? source.slice("browser:".length) : null,
   splitTextByMatchRanges: (text: string, ranges?: Array<{ start: number; end: number }>) => {
-    if (!ranges?.length) return [{ text, highlighted: false }];
-    const [range] = ranges;
+    const range = ranges?.[0];
+    if (!range) return [{ text, highlighted: false }];
     return [
       { text: text.slice(0, range.start), highlighted: false },
       { text: text.slice(range.start, range.end), highlighted: true },
