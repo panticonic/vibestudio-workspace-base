@@ -2,6 +2,15 @@ import * as fs from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("onboarding skill template handoff", () => {
+  it("pins the React renderer and its DOM peer to one exact version", () => {
+    const manifest = JSON.parse(
+      fs.readFileSync(new URL("package.json", import.meta.url), "utf8")
+    ) as { dependencies?: Record<string, string> };
+
+    expect(manifest.dependencies?.["react"]).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(manifest.dependencies?.["react-dom"]).toBe(manifest.dependencies?.["react"]);
+  });
+
   it("routes selected registry outcomes through Templates", () => {
     const skill = fs
       .readFileSync(new URL("SKILL.md", import.meta.url), "utf8")
