@@ -91,6 +91,8 @@ function createRpcCall() {
       }
       case "workspace-state.slot.create":
       case "workspace-state.slot.updateCurrentStateArgs":
+      case "workspace-state.panel.index":
+      case "workspace-state.panel.updateTitle":
       case "panelTree.focus":
         return undefined;
       case "panelRuntime.ensureSlot":
@@ -167,6 +169,11 @@ function createRpcCall() {
         const created = panelId.includes("panels~example");
         return {
           slot: {
+            current_entity_title: created
+              ? "Created"
+              : panelId.includes("parent")
+                ? "Parent"
+                : "Panel",
             parent_slot_id: created
               ? null
               : panelId.includes("parent")
@@ -589,7 +596,7 @@ describe("PanelHandle", () => {
     expect(listener).not.toHaveBeenCalled();
 
     resolveMetadata({
-      slot: { parent_slot_id: null },
+      slot: { parent_slot_id: null, current_entity_title: "Events" },
       currentHistory: {
         source: "panels/events",
         context_id: "ctx-events",
@@ -612,18 +619,9 @@ describe("PanelHandle", () => {
       payload: { ok: true },
     });
 
-    expect(rpcCall).toHaveBeenCalledTimes(4);
-    expect(rpcCall).toHaveBeenCalledWith("main", "workers.resolveService", [
-      "workspace.presentation",
-      null,
-    ]);
-    expect(rpcCall).toHaveBeenCalledWith("main", "build.getPanelMetadata", [
-      "panels/events",
-    ]);
-    expect(rpcCall).toHaveBeenCalledWith(
-      "do:workspace-presentation",
-      "titlesForSlots",
-      [["panel:tree/arbitrary-events"]],
+    expect(rpcCall).toHaveBeenCalledTimes(1);
+    expect(rpcCall.mock.calls.map((entry) => entry[1])).not.toContain(
+      "workers.resolveService",
     );
     expect(listener).toHaveBeenCalledTimes(1);
     expect(listener).toHaveBeenCalledWith({ ok: true });

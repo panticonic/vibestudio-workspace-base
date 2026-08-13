@@ -87,7 +87,7 @@ function respondToWorkspacePresentation(
 function workspaceDetailFor(panelId: string, source = "panels/a") {
   const entityKey = panelId.replace(/^panel:tree\//, "");
   return {
-    slot: { parent_slot_id: null },
+    slot: { parent_slot_id: null, current_entity_title: "Panel A" },
     currentHistory: {
       source,
       context_id: "ctx",
@@ -232,7 +232,10 @@ describe("worker panelTree handles", () => {
         }
         if (body.method === "workspace-state.panelTree.detail") {
           return respond(init, {
-            slot: { parent_slot_id: "root" },
+            slot: {
+              parent_slot_id: "root",
+              current_entity_title: "Panel A",
+            },
             currentHistory: {
               source: "panels/a",
               context_id: "ctx",
@@ -272,24 +275,6 @@ describe("worker panelTree handles", () => {
         targetId: "main",
         method: "workspace-state.panelTree.detail",
         args: ["panel:tree/slot-a"],
-      },
-      {
-        type: "call",
-        targetId: "main",
-        method: "workers.resolveService",
-        args: ["workspace.presentation", null],
-      },
-      {
-        type: "call",
-        targetId: "main",
-        method: "build.getPanelMetadata",
-        args: ["panels/a"],
-      },
-      {
-        type: "call",
-        targetId: "main",
-        method: "titlesForSlots",
-        args: [["panel:tree/slot-a"]],
       },
       {
         type: "call",
@@ -348,9 +333,6 @@ describe("worker panelTree handles", () => {
 
     expect(calls.map(({ method }) => method)).toEqual([
       "workspace-state.panelTree.detail",
-      "workers.resolveService",
-      "build.getPanelMetadata",
-      "titlesForSlots",
       "panelRuntime.observeSlot",
     ]);
   });

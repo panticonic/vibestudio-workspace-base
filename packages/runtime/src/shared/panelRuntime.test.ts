@@ -28,8 +28,7 @@ function readyHostReport() {
 
 function detail(entityId = "panel:nav-new", source = "panels/new") {
   return {
-    slot: { parent_slot_id: null },
-    presentation: { title: "New" },
+    slot: { parent_slot_id: null, current_entity_title: "New" },
     currentHistory: {
       source,
       context_id: "ctx:test",
@@ -104,37 +103,10 @@ function runtimeHarness(
           return { target: _target } as T;
         case "build.getPanelMetadata":
           return { title: "New" } as T;
-        case "workers.resolveService":
-          return {
-            kind: "durable-object",
-            origin: "workspace",
-            source: "workers/workspace-presentation",
-            className: "WorkspacePresentationDO",
-            objectKey: "workspace-presentation",
-            targetId:
-              "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
-          } as T;
-        case "titlesForSlots": {
-          const known: Record<string, string> = {
-            browser: "Example",
-            "current-root": "Current root",
-            root: "Research",
-            [currentSlotId]: "New",
-          };
-          return Object.fromEntries(
-            (args[0] as string[]).flatMap((slotId) =>
-              known[slotId] ? [[slotId, known[slotId]]] : [],
-            ),
-          ) as T;
-        }
-        case "bindSlot":
-        case "indexPanel":
-        case "updatePanelTitle":
-        case "incrementAccess":
-        case "rebuildIndex":
-        case "removeSlots":
+        case "workspace-state.panel.index":
+        case "workspace-state.panel.updateTitle":
           return undefined as T;
-        case "sourceUsage":
+        case "workspace-state.panel.sourceUsage":
           return [
             {
               source: "panels/terminal",
@@ -142,7 +114,7 @@ function runtimeHarness(
               lastAccessedAt: 1234,
             },
           ] as T;
-        case "search":
+        case "workspace-state.panelTree.search":
           return { results: [], nextCursor: null } as T;
         case "runtime.reserveEntity":
           return {
@@ -378,6 +350,8 @@ function runtimeHarness(
             nodes: [
               {
                 slotId: "browser",
+                title: "Example",
+                kind: "browser",
                 source: "browser:https://example.com/",
                 parentSlotId: input.group.parentSlotId,
                 ownerUserId: null,
@@ -396,6 +370,8 @@ function runtimeHarness(
             nodes: [
               {
                 slotId: "current-root",
+                title: "Current root",
+                kind: "workspace",
                 source: "panels/current",
                 parentSlotId: null,
                 ownerUserId: "usr-current",
@@ -412,6 +388,8 @@ function runtimeHarness(
             nodes: [
               {
                 slotId: "root",
+                title: "Research",
+                kind: "workspace",
                 source: "about/collection",
                 parentSlotId: null,
                 ownerUserId: null,
@@ -832,11 +810,7 @@ describe("panel runtime topology composition", () => {
     );
     expect(methods).not.toContain("runtime.activateReservedEntity");
     expect(onCreateSlotTiming.mock.calls.map(([event]) => event.stage)).toEqual(
-      [
-        "runtime.reserveEntity",
-        "workspace-state.slot.create",
-        "workspace.presentation.indexPanel",
-      ],
+      ["runtime.reserveEntity", "workspace-state.slot.create", "panel.index"],
     );
   });
 
@@ -902,19 +876,15 @@ describe("panel runtime topology composition", () => {
     expect(call.mock.calls.map((entry) => entry[1])).not.toContain(
       "panelRuntime.observeSlot",
     );
-    expect(call).toHaveBeenCalledWith(
-      "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
-      "indexPanel",
-      [
-        {
-          id: expect.any(String),
-          source: "browser:https://example.com/",
-          title: "example.com",
-          path: "browser:https://example.com/",
-        },
-        expect.any(String),
-        undefined,
-      ],
+    expect(call).toHaveBeenCalledWith("main", "workspace-state.panel.index", [
+      {
+        id: expect.any(String),
+        title: "example.com",
+        path: "browser:https://example.com/",
+      },
+    ]);
+    expect(call.mock.calls.map((entry) => entry[1])).not.toContain(
+      "workers.resolveService",
     );
   });
 
@@ -925,11 +895,7 @@ describe("panel runtime topology composition", () => {
     await runtime.createPanelSlot("https://example.com/");
 
     expect(onCreateSlotTiming.mock.calls.map(([event]) => event.stage)).toEqual(
-      [
-        "runtime.createEntity",
-        "workspace-state.slot.create",
-        "workspace.presentation.indexPanel",
-      ],
+      ["runtime.createEntity", "workspace-state.slot.create", "panel.index"],
     );
     expect(
       onCreateSlotTiming.mock.calls.every(([event]) => event.outcome === "ok"),
@@ -1096,8 +1062,8 @@ describe("panel runtime topology composition", () => {
       { source: "panels/terminal", accessCount: 12, lastAccessedAt: 1234 },
     ]);
     expect(call).toHaveBeenCalledWith(
-      "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
-      "sourceUsage",
+      "main",
+      "workspace-state.panel.sourceUsage",
       [25],
     );
   });
@@ -1109,14 +1075,9 @@ describe("panel runtime topology composition", () => {
     await handle.setTitle("Support inbox", { explicit: true });
 
     expect(call).toHaveBeenCalledWith(
-      "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
-      "updatePanelTitle",
-      [
-        "panel:tree/browser",
-        "panel:nav-new",
-        "Support inbox",
-        { explicit: true },
-      ],
+      "main",
+      "workspace-state.panel.updateTitle",
+      ["panel:tree/browser", "Support inbox", { explicit: true }],
     );
     expect(handle.title).toBe("Support inbox");
   });
