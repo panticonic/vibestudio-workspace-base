@@ -8,11 +8,15 @@ import {
 
 const storage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 
-// A structurally-valid v2 pairing link (scheme carrier).
+// A structurally-valid v2 pairing link (scheme carrier). `exp` is required —
+// pairing links expire — and is kept relative to now so the fixture cannot
+// start failing on a fixed date.
+const LINK_EXPIRY = Date.now() + 10 * 60 * 1000;
 const VALID_LINK =
   "vibestudio://connect?room=room-1234-5678&fp=" +
   "a".repeat(64) +
-  "&code=abcdefghijklmnopqrstuvwxyzABCDEF&sig=wss%3A%2F%2Fsignal.example%2F&v=2&ice=all";
+  "&code=abcdefghijklmnopqrstuvwxyzABCDEF&sig=wss%3A%2F%2Fsignal.example%2F&v=2&ice=all" +
+  `&exp=${LINK_EXPIRY}`;
 
 describe("connectLink", () => {
   beforeEach(() => {

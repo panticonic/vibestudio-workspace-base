@@ -92,18 +92,24 @@ const missionReview: PendingApproval = {
   networkSummary: "No network access",
   lineageSummary: "Workspace content",
   charter: {
-    taskSpec: "Prepare a morning briefing.",
+    summary: "Prepare a morning briefing.",
     harness: { unit: "workers/briefing", ev: "ev-harness-123" },
-    skills: [],
-    toolExposure: {
-      services: [],
-      userlandServices: [],
-      workspaceServiceDiscovery: "bound",
-      evalNetwork: "none",
-      declaredOrigins: [],
+    execution: {
+      kind: "agent",
+      // validateMissionCharter requires the execution target's source to equal
+      // the harness unit.
+      target: { source: "workers/briefing", className: "BriefingDO", objectKey: "briefing" },
+      action: { kind: "prompt", text: "Prepare a morning briefing." },
+      conversation: { mode: "fresh" },
+      toolExposure: {
+        services: [],
+        userlandServices: [],
+        workspaceServiceDiscovery: "bound",
+        evalNetwork: "none",
+        declaredOrigins: [],
+      },
+      declaredLineageClasses: ["none"],
     },
-    model: { modelId: "openai/gpt-mobile-review", params: {} },
-    declaredLineageClasses: ["none"],
     trigger: { kind: "cron", cron: "0 8 * * 1-5" },
   },
   charterChanges: [],
@@ -455,13 +461,13 @@ describe("ApprovalSheet", () => {
     expect(getByText("calendar-primary read calendar/events")).toBeTruthy();
   });
 
-  it("discloses the exact mission closure, harness, and model", () => {
+  it("discloses the exact mission closure, harness, and execution", () => {
     const { getByTestId, getByText, queryByText } = renderSheet(missionReview);
     expect(queryByText("closure-abc123")).toBeNull();
     fireEvent.press(getByTestId("mission-developer-details"));
     expect(getByText("closure-abc123")).toBeTruthy();
     expect(getByText("workers/briefing@ev-harness-123")).toBeTruthy();
-    expect(getByText("openai/gpt-mobile-review")).toBeTruthy();
+    expect(getByText("agent:BriefingDO")).toBeTruthy();
   });
 
   it("puts what is worth knowing above the everyday fold", () => {
@@ -804,7 +810,7 @@ describe("ApprovalSheet", () => {
 
     expect(getByText("Connect once")).toBeTruthy();
     expect(getByText("Connect for now")).toBeTruthy();
-    expect(getByText("Trust this version")).toBeTruthy();
+    expect(getByText("Remember for this version")).toBeTruthy();
     expect(queryByTestId("approval-action-task")).toBeNull();
     expect(queryByTestId("approval-action-agent")).toBeNull();
   });
@@ -1039,7 +1045,7 @@ describe("ApprovalSheet", () => {
       ])
     );
     expect(getByTestId("approval-action-version").props.accessibilityLabel).toContain(
-      "Trust this version"
+      "Remember for this version"
     );
     expect(getByTestId("approval-action-version").props.style).toEqual(
       expect.arrayContaining([
