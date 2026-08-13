@@ -11,7 +11,8 @@
     "durable": {
       "classes": [
         {
-          "className": "WorkspacePresentationDO"
+          "className": "WorkspacePresentationDO",
+          "rpcSchema": "vibestudio.workspace-presentation.v1"
         }
       ]
     },

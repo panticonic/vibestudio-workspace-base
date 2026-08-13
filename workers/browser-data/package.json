@@ -11,7 +11,8 @@
     "durable": {
       "classes": [
         {
-          "className": "BrowserDataDO"
+          "className": "BrowserDataDO",
+          "rpcSchema": "vibestudio.browser-data.v1"
         }
       ]
     },

@@ -9,7 +9,12 @@
     "kind": "worker",
     "entry": "index.ts",
     "durable": {
-      "classes": [{ "className": "PhoneProvisioningDO" }]
+      "classes": [
+        {
+          "className": "PhoneProvisioningDO",
+          "rpcSchema": "vibestudio.phone-provisioning.v1"
+        }
+      ]
     },
     "authority": {
       "provides": [],

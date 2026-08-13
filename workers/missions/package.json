@@ -11,7 +11,8 @@
     "durable": {
       "classes": [
         {
-          "className": "MissionsDO"
+          "className": "MissionsDO",
+          "rpcSchema": "vibestudio.missions.v1"
         }
       ]
     },

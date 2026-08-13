@@ -11,7 +11,8 @@
     "durable": {
       "classes": [
         {
-          "className": "DevelopmentDO"
+          "className": "DevelopmentDO",
+          "rpcSchema": "vibestudio.development.v1"
         }
       ]
     },
