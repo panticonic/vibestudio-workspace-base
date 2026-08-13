@@ -31,11 +31,20 @@ function isComplete(call: InvocationCardPayloadLike): boolean {
 }
 
 function failure(call: InvocationCardPayloadLike, code: string): Record<string, unknown> | null {
-  return (
-    records(call).find(
-      (record) => record["protocol"] === "agent-tool-failure.v1" && record["code"] === code
-    ) ?? null
+  const protocolFailure = records(call).find(
+    (record) => record["protocol"] === "agent-tool-failure.v1" && record["code"] === code
   );
+  if (protocolFailure) return protocolFailure;
+
+  const result = call.execution?.result;
+  const details =
+    isRecord(result) && isRecord(result["details"])
+      ? result["details"]
+      : null;
+  const errorData = details && isRecord(details["errorData"]) ? details["errorData"] : null;
+  const failureCode =
+    call.execution?.failureCode ?? call.failureCode ?? details?.["failureCode"];
+  return failureCode === code && errorData?.["code"] === code ? errorData : null;
 }
 
 function createdPublishedPanel(call: InvocationCardPayloadLike): boolean {

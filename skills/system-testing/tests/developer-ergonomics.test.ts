@@ -138,6 +138,39 @@ describe("developer ergonomics scenarios", () => {
     });
   });
 
+  it("accepts the eval transport's direct typed error data", () => {
+    const recoverable = call(
+      "recoverable-infrastructure",
+      "eval",
+      { code: "throw recoverable;" },
+      {
+        success: false,
+        failureCode: "recoverable_infrastructure_probe",
+        failureKind: "infrastructure",
+        errorData: {
+          code: "recoverable_infrastructure_probe",
+          failureKind: "infrastructure",
+          recovery: { action: "reobserve", instruction: "Continue this same turn." },
+        },
+      },
+      true
+    );
+    Object.assign(recoverable.invocation.execution, {
+      terminalOutcome: "infrastructure_error",
+      failureCode: "recoverable_infrastructure_probe",
+      failureKind: "infrastructure",
+    });
+
+    const result = execution([recoverable]);
+    const final = result.messages.at(-1) as { content?: string };
+    final.content = "RECOVERED_IN_SAME_TURN";
+
+    expect(scenario("recoverable-infrastructure-failure-continues-turn").validate(result)).toEqual({
+      passed: true,
+      reason: undefined,
+    });
+  });
+
   it("accepts typed invalid-icon correction followed by bounded discovery and creation", () => {
     const catalog = {
       protocol: "workspace-dev-catalog.v1",
