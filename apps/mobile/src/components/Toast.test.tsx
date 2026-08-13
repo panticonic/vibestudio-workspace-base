@@ -1,4 +1,3 @@
-import React from "react";
 import { act, fireEvent, render } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import { Toast } from "./Toast";

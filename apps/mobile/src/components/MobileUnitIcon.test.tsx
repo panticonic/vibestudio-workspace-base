@@ -1,4 +1,3 @@
-import React from "react";
 import { Image } from "react-native";
 import { fireEvent, render } from "@testing-library/react-native";
 import { SvgUri } from "react-native-svg";

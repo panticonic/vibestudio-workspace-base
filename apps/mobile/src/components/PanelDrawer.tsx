@@ -12,7 +12,7 @@
  * Long-press opens the themed action sheet with per-command descriptions.
  */
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   View,
   Text,

@@ -1,4 +1,3 @@
-import React from "react";
 import { Alert } from "react-native";
 import { act, fireEvent, render } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";

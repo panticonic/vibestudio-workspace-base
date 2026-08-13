@@ -1,4 +1,3 @@
-import React from "react";
 import { Image, StyleSheet, View } from "react-native";
 import type { ImageStyle, StyleProp, ViewStyle } from "react-native";
 import { useAtomValue } from "jotai";

@@ -1,4 +1,4 @@
-import React, { memo, useCallback } from "react";
+import { memo, useCallback } from "react";
 import { StyleSheet, View } from "react-native";
 import type { WebViewNavigation } from "react-native-webview/lib/WebViewTypes";
 import type { ThemeColors } from "../state/themeAtoms";

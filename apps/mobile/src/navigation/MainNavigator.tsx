@@ -6,7 +6,7 @@
  * the AppBar + panel content (WebViews will be wired by Agent F).
  */
 
-import React, { useCallback } from "react";
+import { useCallback } from "react";
 import { useWindowDimensions } from "react-native";
 import { createDrawerNavigator } from "@react-navigation/drawer";
 import { useAtomValue, useSetAtom } from "jotai";

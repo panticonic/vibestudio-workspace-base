@@ -3,7 +3,7 @@
  * hand-rolling buttons/rows/badges with divergent metrics.
  */
 
-import React, { type ReactNode } from "react";
+import { type ReactNode } from "react";
 import {
   ActivityIndicator,
   Pressable,

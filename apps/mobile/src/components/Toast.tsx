@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import { useEffect } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useAtomValue, useSetAtom } from "jotai";
 import { dismissToastAtom, toastQueueAtom, type ToastTone } from "../state/toastAtoms";

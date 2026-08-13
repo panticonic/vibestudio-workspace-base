@@ -4,7 +4,7 @@
  * Import icons from here instead of re-rolling the try/require dance.
  */
 
-import React, { type ComponentType } from "react";
+import { type ComponentType } from "react";
 import { Text } from "react-native";
 
 declare const require: (id: string) => unknown;

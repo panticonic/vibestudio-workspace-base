@@ -1,4 +1,3 @@
-import React from "react";
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import { SvgUri } from "react-native-svg";

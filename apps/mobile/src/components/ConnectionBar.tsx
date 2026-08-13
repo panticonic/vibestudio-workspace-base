@@ -9,7 +9,7 @@
  * - Disconnected: red, stays visible (server unreachable)
  */
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, Animated, Pressable, Alert } from "react-native";
 import { useAtomValue } from "jotai";
 import {

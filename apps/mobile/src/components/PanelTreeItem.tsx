@@ -10,7 +10,7 @@
  * - Swipe-to-archive gesture (swipe left reveals "Archive" action)
  */
 
-import React, { useCallback } from "react";
+import { useCallback } from "react";
 import { View, Text, StyleSheet, Pressable } from "react-native";
 import {
   Gesture,

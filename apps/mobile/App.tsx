@@ -3,7 +3,7 @@
 // panel-tree swipe gestures depend on it.
 import "react-native-gesture-handler";
 import "./src/setupGlobals";
-import React, { useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 import { AppRegistry, Appearance, Linking, StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";

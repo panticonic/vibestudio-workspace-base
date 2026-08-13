@@ -1,4 +1,3 @@
-import React from "react";
 import { render } from "@testing-library/react-native";
 import { LoadedPanelWebView, type LoadedPanelWebViewProps } from "./LoadedPanelWebView";
 import type { ThemeColors } from "../state/themeAtoms";

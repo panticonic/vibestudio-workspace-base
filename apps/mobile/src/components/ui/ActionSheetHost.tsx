@@ -7,7 +7,7 @@
  * colors, safe-area padding. Tap backdrop / drag down / Cancel to dismiss.
  */
 
-import React, { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import {
   Animated,
   Easing,
