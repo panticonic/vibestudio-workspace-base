@@ -84,6 +84,28 @@ describe("agent tool failure contract", () => {
     });
   });
 
+  it("maps committed panel recovery into a non-terminal agent action", () => {
+    const failure = agentToolFailureFromUnknown(
+      Object.assign(new Error("panel presentation failed after commit"), {
+        code: "PANEL_OPERATION_FAILED",
+        errorData: {
+          code: "unknown_failure",
+          failureKind: "infrastructure",
+          recovery: {
+            sameInputRetry: "reobserve-first",
+            nextAction: "observe-and-reacquire",
+          },
+        },
+      }),
+      { operation: "tool.eval", stage: "execute", kind: "infrastructure" }
+    );
+
+    expect(failure.recovery).toEqual({
+      action: "reacquire-handle",
+      instruction: "Observe the committed panel, then reacquire its current handle before continuing.",
+    });
+  });
+
   it("rebinds an existing envelope to the current operation without losing details", () => {
     const original = agentToolFailureFromUnknown(
       Object.assign(new Error("bad input"), { code: "InvalidReference" }),

@@ -201,6 +201,7 @@ function recoveryFor(
   const explicitAction = nonempty(explicit?.["action"]);
   const explicitInstruction =
     nonempty(explicit?.["instruction"]) ?? nonempty(data?.["remediation"]);
+  const panelNextAction = nonempty(explicit?.["nextAction"]);
   if (
     explicitAction &&
     AGENT_TOOL_RECOVERY_ACTIONS.includes(
@@ -210,6 +211,19 @@ function recoveryFor(
     return {
       action: explicitAction as NonNullable<AgentToolFailure["recovery"]>["action"],
       instruction: explicitInstruction ?? "Follow the typed recovery action before retrying.",
+    };
+  }
+  if (panelNextAction === "observe-and-reacquire") {
+    return {
+      action: "reacquire-handle",
+      instruction:
+        "Observe the committed panel, then reacquire its current handle before continuing.",
+    };
+  }
+  if (panelNextAction === "repair-and-rebuild") {
+    return {
+      action: "repair-source",
+      instruction: "Repair the panel source from its diagnostics, rebuild it, then continue.",
     };
   }
   if (legacyRecovery?.includes("reacquire-page")) {
