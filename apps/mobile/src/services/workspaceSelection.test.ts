@@ -13,18 +13,22 @@ import {
 jest.mock("@vibestudio/mobile-webrtc", () => ({
   loadShellCredential: jest.fn(),
   persistStoredMobileConnection: jest.fn(),
-  createPairedMobileConnection: (
-    credential: { deviceId: string; refreshToken: string },
-    controlPairing: Record<string, unknown>,
-    selectedWorkspaceId: string,
-    pairedAt: number
+  // Switching re-targets the stored connection: same credential and control
+  // reach, new workspace, and the previous workspace's reach is dropped.
+  selectMobileConnectionWorkspace: (
+    connection: {
+      credential: { deviceId: string; refreshToken: string };
+      controlPairing: Record<string, unknown>;
+      pairedAt: number;
+    },
+    selectedWorkspaceId: string
   ) => ({
     schemaVersion: 4,
     phase: "paired",
-    credential,
-    controlPairing,
+    credential: connection.credential,
+    controlPairing: connection.controlPairing,
     selectedWorkspaceId,
-    pairedAt,
+    pairedAt: connection.pairedAt,
   }),
   createRoutedMobileConnection: (
     paired: Record<string, unknown>,

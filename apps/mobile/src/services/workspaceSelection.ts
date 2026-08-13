@@ -1,5 +1,5 @@
 import {
-  createPairedMobileConnection,
+  selectMobileConnectionWorkspace,
   createRoutedMobileConnection,
   loadShellCredential,
   persistStoredMobileConnection,
@@ -63,12 +63,9 @@ export async function selectMobileWorkspace(
   const baseline = initialStored;
   let selectionWriteAttempted = false;
   try {
-    const paired = createPairedMobileConnection(
-      baseline.credential,
-      baseline.controlPairing,
-      workspaceId,
-      baseline.pairedAt
-    );
+    // Switching keeps this device's existing pairing; only the target
+    // workspace changes, so nobody has to rescan a pairing code.
+    const paired = selectMobileConnectionWorkspace(baseline, workspaceId);
     selectionWriteAttempted = true;
     await dependencies.persistCredential(paired);
     const route = await dependencies.control.routeWorkspace({ workspaceId });
