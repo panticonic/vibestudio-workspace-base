@@ -1,3 +1,4 @@
+import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import type { RpcClient, RpcConnectionStatus, RpcEventContext } from "@vibestudio/rpc";
 import type { RecoveryKind } from "@vibestudio/rpc/protocol/recoveryCoordinator";
 import type { ReconnectProgress, WebRtcSession } from "@vibestudio/rpc/transports/webrtcClient";
@@ -86,7 +87,11 @@ function makeSession(overrides: Partial<WebRtcSession> = {}): WebRtcSession {
   } as unknown as WebRtcSession;
 }
 
-function makeConnection(overrides: Partial<WebRtcConnection> = {}): WebRtcConnection {
+// Overrides are doubles, so they are accepted by key name and the assembled
+// connection is cast once — the same contract as makeRpc above.
+function makeConnection(
+  overrides: Partial<Record<keyof WebRtcConnection, unknown>> = {}
+): WebRtcConnection {
   const session = overrides.session ?? makeSession();
   return {
     callerId: `shell:${DEVICE_ID}`,
@@ -101,7 +106,7 @@ function makeConnection(overrides: Partial<WebRtcConnection> = {}): WebRtcConnec
       } as unknown as WebRtcConnection["transport"]),
     close: jest.fn(async () => undefined),
     ...overrides,
-  };
+  } as unknown as WebRtcConnection;
 }
 
 describe("MobileRpcClient WebRTC transport", () => {
@@ -298,7 +303,7 @@ describe("MobileRpcClient WebRTC transport", () => {
     mockReconnectMobileSession.mockResolvedValue(makeConnection({ rpc, transport }));
     const client = new MobileRpcClient({});
 
-    await expect(client.openPanelSession("panel:runtime-1", "panel-conn-1")).resolves.toBe(
+    await expect(client.openPanelSession("panel:runtime-1" as PanelEntityId, "panel-conn-1")).resolves.toBe(
       panelSession
     );
 

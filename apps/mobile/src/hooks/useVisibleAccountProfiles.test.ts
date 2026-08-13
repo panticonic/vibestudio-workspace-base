@@ -6,10 +6,12 @@ describe("startVisibleAccountProfileRefresh", () => {
       alice: { userId: "alice", handle: "alice", displayName: "Alice" },
     }));
     const apply = jest.fn<void, [Map<string, { displayName?: string }>]>();
-    let tick: (() => void) | null = null;
+    // Assigned from inside the scheduler callback, which control-flow
+    // analysis cannot see, so the annotation has to carry the call signature.
+    const captured: { tick: (() => void) | null } = { tick: null };
     const scheduler = {
       setInterval: jest.fn((callback: () => void, _delayMs: number) => {
-        tick = callback;
+        captured.tick = callback;
         return 7 as unknown as ReturnType<typeof setInterval>;
       }),
       clearInterval: jest.fn(),
@@ -27,7 +29,7 @@ describe("startVisibleAccountProfileRefresh", () => {
     expect(apply.mock.calls[0]?.[0].get("alice")?.displayName).toBe("Alice");
     expect(scheduler.setInterval).toHaveBeenCalledWith(expect.any(Function), 30_000);
 
-    tick?.();
+    captured.tick?.();
     await Promise.resolve();
     await Promise.resolve();
     expect(resolveAccountProfiles).toHaveBeenCalledTimes(2);
@@ -37,11 +39,15 @@ describe("startVisibleAccountProfileRefresh", () => {
   });
 
   it("does not apply a refresh that finishes after the drawer closes", async () => {
-    let finish: ((profiles: Record<string, never>) => void) | null = null;
+    // Assigned inside the promise executor, which control-flow analysis cannot
+    // see, so the capture has to survive narrowing.
+    const captured: { finish: ((profiles: Record<string, never>) => void) | null } = {
+      finish: null,
+    };
     const resolveAccountProfiles = jest.fn(
       () =>
         new Promise<Record<string, never>>((resolve) => {
-          finish = resolve;
+          captured.finish = resolve;
         })
     );
     const apply = jest.fn<void, [Map<string, { displayName?: string }>]>();
@@ -57,7 +63,7 @@ describe("startVisibleAccountProfileRefresh", () => {
       scheduler
     );
     stop();
-    finish?.({});
+    captured.finish?.({});
     await Promise.resolve();
     await Promise.resolve();
 

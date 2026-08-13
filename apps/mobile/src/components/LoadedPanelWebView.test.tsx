@@ -65,6 +65,7 @@ function props(overrides: Partial<LoadedPanelWebViewProps> = {}): LoadedPanelWeb
     onNavigationStateChange: jest.fn(),
     onTitleChange: jest.fn(),
     onBridgeCall: jest.fn(async () => null),
+    onBootObservation: jest.fn(),
     onUnmount: jest.fn(),
     ...overrides,
   };

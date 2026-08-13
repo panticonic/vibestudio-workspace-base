@@ -902,6 +902,7 @@ describe("ApprovalSheet", () => {
         onResolve={jest.fn()}
         onSubmitClientConfig={jest.fn()}
         onSubmitCredentialInput={jest.fn()}
+        onResolveInstallReview={jest.fn()}
         onSubmitSecretInput={jest.fn()}
         onResolveMissionReview={jest.fn()}
       />
@@ -1083,6 +1084,7 @@ describe("ApprovalSheet", () => {
         onResolve={jest.fn()}
         onSubmitClientConfig={jest.fn()}
         onSubmitCredentialInput={jest.fn()}
+        onResolveInstallReview={jest.fn()}
         onSubmitSecretInput={jest.fn()}
         onResolveMissionReview={jest.fn()}
       />
