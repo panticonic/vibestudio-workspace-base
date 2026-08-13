@@ -10,17 +10,17 @@ development](../extensiondev/SKILL.md) for trusted Node services.
 
 ## Read by task
 
-| Task | Reference |
-| --- | --- |
-| Development loop | [WORKFLOW.md](WORKFLOW.md) |
-| External dependencies, overrides, and patches | [DEPENDENCIES.md](DEPENDENCIES.md) |
-| Build, inspect, polish a panel | [PANEL_DEBUG_LOOP.md](PANEL_DEBUG_LOOP.md) |
-| Panel lifecycle, observation, failure diagnosis, host commands | [PANEL_API.md](PANEL_API.md) |
-| Workers, DOs, service-backed data, agent workers | [WORKERS.md](WORKERS.md) |
-| Typed parent-child contracts | [RPC.md](RPC.md) |
-| CDP/browser automation | [BROWSER.md](BROWSER.md) |
-| Agent tool recipes | [TOOLS.md](TOOLS.md) |
-| Icons and unit identity | [references/icons.md](references/icons.md) |
+| Task                                                           | Reference                                  |
+| -------------------------------------------------------------- | ------------------------------------------ |
+| Development loop                                               | [WORKFLOW.md](WORKFLOW.md)                 |
+| External dependencies, overrides, and patches                  | [DEPENDENCIES.md](DEPENDENCIES.md)         |
+| Build, inspect, polish a panel                                 | [PANEL_DEBUG_LOOP.md](PANEL_DEBUG_LOOP.md) |
+| Panel lifecycle, observation, failure diagnosis, host commands | [PANEL_API.md](PANEL_API.md)               |
+| Workers, DOs, service-backed data, agent workers               | [WORKERS.md](WORKERS.md)                   |
+| Typed parent-child contracts                                   | [RPC.md](RPC.md)                           |
+| CDP/browser automation                                         | [BROWSER.md](BROWSER.md)                   |
+| Agent tool recipes                                             | [TOOLS.md](TOOLS.md)                       |
+| Icons and unit identity                                        | [references/icons.md](references/icons.md) |
 
 Also read [capabilities](../capabilities/SKILL.md) before adding authority,
 [performance](../performance/SKILL.md) before changing startup cost, and
@@ -94,19 +94,38 @@ part of the product. Keep UI projection methods out of the domain API.
 Use `createProjects` for one coherent publication of related units:
 
 ```ts
-import { createProjects, searchProjectCatalog } from "@workspace-skills/workspace-dev";
+import {
+  createProjects,
+  searchProjectCatalog,
+} from "@workspace-skills/workspace-dev";
 
 const [databaseCatalog, panelCatalog] = await Promise.all([
   searchProjectCatalog({ resource: "icon", query: "database", limit: 5 }),
-  searchProjectCatalog({ resource: "icon", query: "panels top left", limit: 5 }),
+  searchProjectCatalog({
+    resource: "icon",
+    query: "panels top left",
+    limit: 5,
+  }),
 ]);
 const databaseIcon = databaseCatalog.entries[0]?.id;
 const panelIcon = panelCatalog.entries[0]?.id;
-if (!databaseIcon || !panelIcon) throw new Error("Required catalog icons are unavailable");
+if (!databaseIcon || !panelIcon)
+  throw new Error("Required catalog icons are unavailable");
 
 scope.created = await createProjects([
-  { projectType: "worker", name: "task-board-store", title: "Task Board Store", icon: databaseIcon },
-  { projectType: "panel", name: "task-board", title: "Task Board", icon: panelIcon },
+  {
+    projectType: "worker",
+    name: "task-board-store",
+    title: "Task Board Store",
+    icon: databaseIcon,
+    template: "durable-service",
+  },
+  {
+    projectType: "panel",
+    name: "task-board",
+    title: "Task Board",
+    icon: panelIcon,
+  },
 ]);
 return scope.created;
 ```

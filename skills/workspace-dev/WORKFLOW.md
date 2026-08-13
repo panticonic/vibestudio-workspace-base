@@ -79,7 +79,12 @@ Before scaffolding, decide on persistence and agent integration:
 import { createProjects } from "@workspace-skills/workspace-dev";
 
 scope.created = await createProjects([
-  { projectType: "worker", name: "my-store", title: "My Store" },
+  {
+    projectType: "worker",
+    name: "my-store",
+    title: "My Store",
+    template: "durable-service",
+  },
   { projectType: "panel", name: "my-app", title: "My App" },
 ]);
 // Each entry's `.created` is the full canonical source: "workers/my-store", "panels/my-app".
@@ -174,7 +179,8 @@ const committed = await vcs.commit({
   contextId: ctx.contextId,
   expectedWorkingHead: latestWorkingHead,
   message: "Implement the panel behavior",
-  intentSummary: "Preserve the reviewed interaction contract as one deployable milestone",
+  intentSummary:
+    "Preserve the reviewed interaction contract as one deployable milestone",
 });
 ```
 
@@ -272,7 +278,7 @@ console.log(
   observed.requestedRef,
   observed.runtimeEntityId,
   observed.buildKey,
-  observed.phase
+  observed.phase,
 );
 ```
 

@@ -19,7 +19,8 @@ function addDir(p: string): void {
   const normalized = normalize(p);
   if (!normalized) return;
   const parts = normalized.split("/");
-  for (let i = 1; i <= parts.length; i++) mocks.dirs.add(parts.slice(0, i).join("/"));
+  for (let i = 1; i <= parts.length; i++)
+    mocks.dirs.add(parts.slice(0, i).join("/"));
 }
 
 function addFile(p: string, content: string | Uint8Array): void {
@@ -44,7 +45,7 @@ vi.mock("@workspace/runtime", () => ({
     },
     async readdir(
       p: string,
-      opts?: { withFileTypes?: boolean }
+      opts?: { withFileTypes?: boolean },
     ): Promise<string[] | Array<{ name: string; isDirectory(): boolean }>> {
       const normalized = normalize(p);
       const prefix = normalized ? `${normalized}/` : "";
@@ -62,14 +63,19 @@ vi.mock("@workspace/runtime", () => ({
         names.set(name!, tail.length > 0 || mocks.dirs.has(`${prefix}${name}`));
       }
       if (opts?.withFileTypes) {
-        return [...names].map(([name, isDir]) => ({ name, isDirectory: () => isDir }));
+        return [...names].map(([name, isDir]) => ({
+          name,
+          isDirectory: () => isDir,
+        }));
       }
       return [...names.keys()];
     },
     async readFile(p: string, encoding?: string): Promise<string | Uint8Array> {
       const content = mocks.files.get(normalize(p));
-      if (content === undefined) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-      if (encoding && content instanceof Uint8Array) return new TextDecoder().decode(content);
+      if (content === undefined)
+        throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+      if (encoding && content instanceof Uint8Array)
+        return new TextDecoder().decode(content);
       return content;
     },
     async mkdir(p: string): Promise<void> {
@@ -105,7 +111,9 @@ function resetRuntimeMocks(): void {
         repoPath: string;
         files: Array<{
           path: string;
-          content: { kind: "text"; text: string } | { kind: "bytes"; base64: string };
+          content:
+            | { kind: "text"; text: string }
+            | { kind: "bytes"; base64: string };
         }>;
       }>;
     }) => {
@@ -115,16 +123,23 @@ function resetRuntimeMocks(): void {
             `${change.repoPath}/${file.path}`,
             file.content.kind === "text"
               ? file.content.text
-              : Uint8Array.from(atob(file.content.base64), (character) => character.charCodeAt(0))
+              : Uint8Array.from(atob(file.content.base64), (character) =>
+                  character.charCodeAt(0),
+                ),
           );
         }
       }
       return {
-        workingHead: { kind: "application", applicationId: "application:created" },
+        workingHead: {
+          kind: "application",
+          applicationId: "application:created",
+        },
       };
-    }
+    },
   );
-  mocks.commit.mockResolvedValue({ event: { kind: "event", eventId: "event:committed" } });
+  mocks.commit.mockResolvedValue({
+    event: { kind: "event", eventId: "event:committed" },
+  });
   mocks.push.mockResolvedValue({
     contextId: "ctx:test",
     eventId: "event:committed",
@@ -140,11 +155,13 @@ describe("createProjects", () => {
   it("scaffolds a plain project as a content repo under projects/", async () => {
     const { createProjects } = await import("./create-project.js");
 
-    const [result] = await createProjects([{
-      projectType: "project",
-      name: "scratch-notes",
-      title: "Scratch Notes",
-    }]);
+    const [result] = await createProjects([
+      {
+        projectType: "project",
+        name: "scratch-notes",
+        title: "Scratch Notes",
+      },
+    ]);
 
     expect(result).toMatchObject({
       created: "projects/scratch-notes",
@@ -165,48 +182,58 @@ describe("createProjects", () => {
       },
     });
     expect(mocks.files.get("projects/scratch-notes/README.md")).toBe(
-      "# Scratch Notes\n\nPlain workspace project.\n"
+      "# Scratch Notes\n\nPlain workspace project.\n",
     );
     expect(mocks.files.has("projects/scratch-notes/package.json")).toBe(false);
     expect(mocks.commit).toHaveBeenCalledWith(
       expect.objectContaining({
-        expectedWorkingHead: { kind: "application", applicationId: "application:created" },
-      })
+        expectedWorkingHead: {
+          kind: "application",
+          applicationId: "application:created",
+        },
+      }),
     );
     expect(mocks.edit).toHaveBeenCalledWith(
       expect.objectContaining({
-        expectedWorkingHead: { kind: "application", applicationId: "application:working" },
+        expectedWorkingHead: {
+          kind: "application",
+          applicationId: "application:working",
+        },
         changes: [
           expect.objectContaining({
             kind: "repository-create",
             repoPath: "projects/scratch-notes",
           }),
         ],
-      })
+      }),
     );
     expect(mocks.push).toHaveBeenCalledWith(
       expect.objectContaining({
         expectedCommittedEventId: "event:committed",
         expectedMainEventId: "event:main",
-      })
+      }),
     );
   });
 
   it("rejects removed agent scaffolding", async () => {
     const { createProjects } = await import("./create-project.js");
 
-    await expect(createProjects([{ projectType: "agent", name: "helper" }])).rejects.toThrow(
-      /panel, package, skill, project, worker/
-    );
+    await expect(
+      createProjects([{ projectType: "agent", name: "helper" }]),
+    ).rejects.toThrow(/panel, package, skill, project, worker/);
     expect(mocks.commit).not.toHaveBeenCalled();
   });
 
   it("declares the generated panel entry explicitly", async () => {
     const { createProjects } = await import("./create-project.js");
 
-    await createProjects([{ projectType: "panel", name: "hello", title: "Hello" }]);
+    await createProjects([
+      { projectType: "panel", name: "hello", title: "Hello" },
+    ]);
 
-    expect(JSON.parse(mocks.files.get("panels/hello/package.json") as string)).toMatchObject({
+    expect(
+      JSON.parse(mocks.files.get("panels/hello/package.json") as string),
+    ).toMatchObject({
       vibestudio: {
         title: "Hello",
         entry: "index.tsx",
@@ -221,10 +248,7 @@ describe("createProjects", () => {
           ],
           provides: [],
         },
-        exposeModules: expect.arrayContaining([
-          "react",
-          "react/jsx-runtime",
-        ]),
+        exposeModules: expect.arrayContaining(["react", "react/jsx-runtime"]),
       },
     });
   });
@@ -232,25 +256,35 @@ describe("createProjects", () => {
   it("materializes a curated Lucide identity without adding an icon runtime", async () => {
     addFile(
       "skills/workspace-dev/assets/icons/lucide/messages-square.svg",
-      '<svg stroke="currentColor"><path d="M1 1" /></svg>'
+      '<svg stroke="currentColor"><path d="M1 1" /></svg>',
     );
     const { createProjects } = await import("./create-project.js");
 
     await createProjects([
-      { projectType: "panel", name: "inbox", title: "Inbox", icon: "lucide:messages-square" },
+      {
+        projectType: "panel",
+        name: "inbox",
+        title: "Inbox",
+        icon: "lucide:messages-square",
+      },
     ]);
 
-    expect(JSON.parse(mocks.files.get("panels/inbox/package.json") as string)).toMatchObject({
+    expect(
+      JSON.parse(mocks.files.get("panels/inbox/package.json") as string),
+    ).toMatchObject({
       vibestudio: { icon: "./assets/icon.svg" },
     });
     expect(mocks.files.get("panels/inbox/assets/icon.svg")).toBe(
-      '<svg stroke="#8B5CF6"><path d="M1 1" /></svg>'
+      '<svg stroke="#8B5CF6"><path d="M1 1" /></svg>',
     );
   });
 
   it("discovers the exact curated icon catalog instead of requiring guessed names", async () => {
     addFile("skills/workspace-dev/assets/icons/lucide/database.svg", "<svg />");
-    addFile("skills/workspace-dev/assets/icons/lucide/messages-square.svg", "<svg />");
+    addFile(
+      "skills/workspace-dev/assets/icons/lucide/messages-square.svg",
+      "<svg />",
+    );
     for (const name of [
       "claude",
       "git",
@@ -261,9 +295,13 @@ describe("createProjects", () => {
       "svelte",
       "typescript",
     ]) {
-      addFile(`skills/workspace-dev/assets/icons/brands/${name}.svg`, "<svg />");
+      addFile(
+        `skills/workspace-dev/assets/icons/brands/${name}.svg`,
+        "<svg />",
+      );
     }
-    const { listProjectIcons, searchProjectCatalog } = await import("./create-project.js");
+    const { listProjectIcons, searchProjectCatalog } =
+      await import("./create-project.js");
 
     await expect(listProjectIcons()).resolves.toEqual([
       "brand:claude",
@@ -278,27 +316,36 @@ describe("createProjects", () => {
       "lucide:messages-square",
     ]);
     await expect(
-      searchProjectCatalog({ resource: "icon", query: "message square", limit: 1 })
+      searchProjectCatalog({
+        resource: "icon",
+        query: "message square",
+        limit: 1,
+      }),
     ).resolves.toMatchObject({
       protocol: "workspace-dev-catalog.v1",
       resource: "icon",
       query: "message square",
       total: 10,
-      entries: [{ resource: "icon", id: "lucide:messages-square", family: "lucide" }],
+      entries: [
+        { resource: "icon", id: "lucide:messages-square", family: "lucide" },
+      ],
       truncated: 9,
     });
   });
 
   it("returns a structured catalog repair plan before creating an unknown icon", async () => {
     addFile("skills/workspace-dev/assets/icons/lucide/database.svg", "<svg />");
-    const { createProjects, ProjectIconError } = await import("./create-project.js");
+    const { createProjects, ProjectIconError } =
+      await import("./create-project.js");
 
     const failure = await createProjects([
       { projectType: "panel", name: "board", icon: "lucide:columns-3" },
     ]).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(ProjectIconError);
-    expect((failure as InstanceType<typeof ProjectIconError>).errorData).toEqual({
+    expect(
+      (failure as InstanceType<typeof ProjectIconError>).errorData,
+    ).toEqual({
       code: "project_icon_invalid",
       icon: "lucide:columns-3",
       kind: "lucide",
@@ -335,54 +382,98 @@ describe("createProjects", () => {
   });
 
   it("keeps the built-in default panel deterministic without consulting template files", async () => {
-    addFile("templates/default/template.json", JSON.stringify({ framework: "svelte" }));
+    addFile(
+      "templates/default/template.json",
+      JSON.stringify({ framework: "svelte" }),
+    );
     const { createProjects } = await import("./create-project.js");
 
-    await createProjects([{ projectType: "panel", name: "default-panel", title: "Default Panel" }]);
+    await createProjects([
+      { projectType: "panel", name: "default-panel", title: "Default Panel" },
+    ]);
 
     expect(mocks.files.has("panels/default-panel/index.tsx")).toBe(true);
     expect(mocks.files.has("panels/default-panel/App.svelte")).toBe(false);
   });
 
   it("generates every executable template with a publication-valid authority contract", async () => {
-    addFile("templates/svelte/template.json", JSON.stringify({ framework: "svelte" }));
+    addFile(
+      "templates/svelte/template.json",
+      JSON.stringify({ framework: "svelte" }),
+    );
     const { createProjects } = await import("./create-project.js");
 
-    await createProjects([{ projectType: "panel", name: "react-panel", title: "React Panel" }]);
-    await createProjects([{
-      projectType: "panel",
-      name: "svelte-panel",
-      title: "Svelte Panel",
-      template: "svelte",
-    }]);
-    await createProjects([{ projectType: "worker", name: "plain-worker", title: "Plain Worker" }]);
-    await createProjects([{
-      projectType: "worker",
-      name: "agent-worker",
-      title: "Agent Worker",
-      template: "agentic",
-    }]);
+    await createProjects([
+      { projectType: "panel", name: "react-panel", title: "React Panel" },
+    ]);
+    await createProjects([
+      {
+        projectType: "panel",
+        name: "svelte-panel",
+        title: "Svelte Panel",
+        template: "svelte",
+      },
+    ]);
+    await createProjects([
+      { projectType: "worker", name: "plain-worker", title: "Plain Worker" },
+    ]);
+    await createProjects([
+      {
+        projectType: "worker",
+        name: "durable-worker",
+        title: "Durable Worker",
+        template: "durable-service",
+      },
+    ]);
+    await createProjects([
+      {
+        projectType: "worker",
+        name: "agent-worker",
+        title: "Agent Worker",
+        template: "agentic",
+      },
+    ]);
 
     for (const [path, packageName] of [
       ["panels/react-panel/package.json", "@workspace-panels/react-panel"],
       ["panels/svelte-panel/package.json", "@workspace-panels/svelte-panel"],
       ["workers/plain-worker/package.json", "@workspace-workers/plain-worker"],
+      [
+        "workers/durable-worker/package.json",
+        "@workspace-workers/durable-worker",
+      ],
       ["workers/agent-worker/package.json", "@workspace-workers/agent-worker"],
     ] as const) {
       const source = mocks.files.get(path);
       expect(typeof source).toBe("string");
-      expect(authorityReviewFromPackageJson(source as string, packageName).requests).toEqual([
-        expect.objectContaining({ capability: "context.boundary" }),
-      ]);
+      expect(
+        authorityReviewFromPackageJson(source as string, packageName).requests,
+      ).toEqual([expect.objectContaining({ capability: "context.boundary" })]);
     }
+    const durableManifest = JSON.parse(
+      mocks.files.get("workers/durable-worker/package.json") as string,
+    );
+    expect(durableManifest.vibestudio.durable.classes).toEqual([
+      { className: "DurableWorker" },
+    ]);
+    expect(durableManifest.vibestudio.durable.classes[0]).not.toHaveProperty(
+      "rpcSchema",
+    );
+    expect(mocks.files.get("workers/durable-worker/index.ts")).toContain(
+      'from "@workspace/runtime/worker/kernel"',
+    );
   });
 
   it("keeps the default panel at baseline authority instead of exposing the runtime umbrella", async () => {
     const { createProjects } = await import("./create-project.js");
 
-    await createProjects([{ projectType: "panel", name: "minimal", title: "Minimal" }]);
+    await createProjects([
+      { projectType: "panel", name: "minimal", title: "Minimal" },
+    ]);
 
-    const manifest = JSON.parse(mocks.files.get("panels/minimal/package.json") as string);
+    const manifest = JSON.parse(
+      mocks.files.get("panels/minimal/package.json") as string,
+    );
     expect(manifest.dependencies).toEqual({ react: "^19.0.0" });
     expect(manifest.vibestudio.exposeModules).toEqual([
       "react",
@@ -390,18 +481,20 @@ describe("createProjects", () => {
       "react/jsx-dev-runtime",
     ]);
     expect(mocks.files.get("panels/minimal/index.tsx")).not.toMatch(
-      /@workspace\/(?:runtime|react|ui)/u
+      /@workspace\/(?:runtime|react|ui)/u,
     );
   });
 
   it("rejects names and titles that would produce invalid generated source", async () => {
     const { createProjects } = await import("./create-project.js");
 
-    await expect(createProjects([{ projectType: "panel", name: "Bad Name" }])).rejects.toThrow(
-      /Project name/
-    );
     await expect(
-      createProjects([{ projectType: "panel", name: "valid-name", title: 'Broken " title' }])
+      createProjects([{ projectType: "panel", name: "Bad Name" }]),
+    ).rejects.toThrow(/Project name/);
+    await expect(
+      createProjects([
+        { projectType: "panel", name: "valid-name", title: 'Broken " title' },
+      ]),
     ).rejects.toThrow(/Project title/);
     expect(mocks.commit).not.toHaveBeenCalled();
   });
@@ -414,15 +507,18 @@ describe("createProjects", () => {
           operation: "vcs.push",
           authorityFailure: { reasonCode: "missing-grant" },
         },
-      })
+      }),
     );
-    const { createProjects, ScaffoldPublicationError } = await import("./create-project.js");
+    const { createProjects, ScaffoldPublicationError } =
+      await import("./create-project.js");
 
-    const failure = await createProjects([{ projectType: "panel", name: "broken" }]).catch(
-      (error: unknown) => error
-    );
+    const failure = await createProjects([
+      { projectType: "panel", name: "broken" },
+    ]).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ScaffoldPublicationError);
-    expect((failure as InstanceType<typeof ScaffoldPublicationError>).errorData).toMatchObject({
+    expect(
+      (failure as InstanceType<typeof ScaffoldPublicationError>).errorData,
+    ).toMatchObject({
       code: "scaffold_publication_failed",
       stage: "push",
       created: "panels/broken",
@@ -455,17 +551,27 @@ describe("createProjects", () => {
   it("recovers an uncertain publication by replaying the exact push command and receipt", async () => {
     mocks.push.mockRejectedValueOnce(
       Object.assign(new Error("Host response was lost"), {
-        errorData: { code: "ExternalEffectFailed", effectId: "effect:uncertain" },
-      })
+        errorData: {
+          code: "ExternalEffectFailed",
+          effectId: "effect:uncertain",
+        },
+      }),
     );
-    const { createProjects, recoverProjectPublication, ScaffoldPublicationError } =
-      await import("./create-project.js");
-    const failure = await createProjects([{
-      projectType: "panel",
-      name: "recoverable",
-    }]).catch((error: unknown) => error);
+    const {
+      createProjects,
+      recoverProjectPublication,
+      ScaffoldPublicationError,
+    } = await import("./create-project.js");
+    const failure = await createProjects([
+      {
+        projectType: "panel",
+        name: "recoverable",
+      },
+    ]).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ScaffoldPublicationError);
-    const typedFailure = failure as InstanceType<typeof ScaffoldPublicationError>;
+    const typedFailure = failure as InstanceType<
+      typeof ScaffoldPublicationError
+    >;
     const originalRequest = typedFailure.errorData.publicationRequest;
     mocks.status.mockResolvedValueOnce({
       contextId: "ctx:test",
@@ -495,14 +601,21 @@ describe("createProjects", () => {
     mocks.push.mockRejectedValueOnce(
       Object.assign(new Error("Main advanced"), {
         errorData: { code: "RevisionChanged" },
-      })
+      }),
     );
-    const { createProjects, recoverProjectPublication, ScaffoldPublicationError } =
-      await import("./create-project.js");
-    const failure = (await createProjects([{
-      projectType: "panel",
-      name: "reobserved",
-    }]).catch((error: unknown) => error)) as InstanceType<typeof ScaffoldPublicationError>;
+    const {
+      createProjects,
+      recoverProjectPublication,
+      ScaffoldPublicationError,
+    } = await import("./create-project.js");
+    const failure = (await createProjects([
+      {
+        projectType: "panel",
+        name: "reobserved",
+      },
+    ]).catch((error: unknown) => error)) as InstanceType<
+      typeof ScaffoldPublicationError
+    >;
     mocks.status.mockResolvedValueOnce({
       contextId: "ctx:test",
       committed: { kind: "event", eventId: "event:committed" },
@@ -520,9 +633,13 @@ describe("createProjects", () => {
     expect(recoveredRequest).toMatchObject({
       expectedCommittedEventId: "event:committed",
       expectedMainEventId: "event:new-main",
-      commandId: expect.stringContaining("workspace-dev:recover-publication:ctx:test:"),
+      commandId: expect.stringContaining(
+        "workspace-dev:recover-publication:ctx:test:",
+      ),
     });
-    expect(recoveredRequest.commandId).not.toBe(failure.errorData.publicationRequest.commandId);
+    expect(recoveredRequest.commandId).not.toBe(
+      failure.errorData.publicationRequest.commandId,
+    );
   });
 
   it("refuses to retry a source-invalid scaffold commit", async () => {
@@ -532,16 +649,25 @@ describe("createProjects", () => {
           code: "BuildGateFailed",
           diagnostics: [{ source: "tsc", message: "index.tsx is invalid" }],
         },
-      })
+      }),
     );
-    const { createProjects, recoverProjectPublication, ScaffoldPublicationError } =
-      await import("./create-project.js");
-    const failure = (await createProjects([{
-      projectType: "panel",
-      name: "source-invalid",
-    }]).catch((error: unknown) => error)) as InstanceType<typeof ScaffoldPublicationError>;
+    const {
+      createProjects,
+      recoverProjectPublication,
+      ScaffoldPublicationError,
+    } = await import("./create-project.js");
+    const failure = (await createProjects([
+      {
+        projectType: "panel",
+        name: "source-invalid",
+      },
+    ]).catch((error: unknown) => error)) as InstanceType<
+      typeof ScaffoldPublicationError
+    >;
 
-    expect(failure.errorData.retry.commandIdPolicy).toBe("repair-source-and-recommit");
+    expect(failure.errorData.retry.commandIdPolicy).toBe(
+      "repair-source-and-recommit",
+    );
     expect(failure.errorData.recovery).toEqual({
       action: "repair-source",
       instruction: expect.stringContaining("repair the committed source"),
@@ -561,14 +687,19 @@ describe("createProjects", () => {
     mocks.push.mockRejectedValueOnce(
       Object.assign(new Error("Main advanced"), {
         errorData: { code: "RevisionChanged" },
-      })
+      }),
     );
-    const { createProjects, recoverProjectPublication, ScaffoldPublicationRecoveryError } =
-      await import("./create-project.js");
-    const failure = await createProjects([{
-      projectType: "panel",
-      name: "changed",
-    }]).catch((error: unknown) => error);
+    const {
+      createProjects,
+      recoverProjectPublication,
+      ScaffoldPublicationRecoveryError,
+    } = await import("./create-project.js");
+    const failure = await createProjects([
+      {
+        projectType: "panel",
+        name: "changed",
+      },
+    ]).catch((error: unknown) => error);
     mocks.status.mockResolvedValueOnce({
       contextId: "ctx:test",
       committed: { kind: "event", eventId: "event:committed" },
@@ -581,7 +712,9 @@ describe("createProjects", () => {
     });
 
     await expect(
-      recoverProjectPublication(failure as Parameters<typeof recoverProjectPublication>[0])
+      recoverProjectPublication(
+        failure as Parameters<typeof recoverProjectPublication>[0],
+      ),
     ).rejects.toMatchObject({
       constructor: ScaffoldPublicationRecoveryError,
       errorData: {
@@ -606,17 +739,22 @@ describe("createProjects", () => {
       ScaffoldPublicationError,
       ScaffoldPublicationRecoveryError,
     } = await import("./create-project.js");
-    const failure = await createProjects([{
-      projectType: "panel",
-      name: "invalid-receipt",
-    }]).catch((error: unknown) => error);
+    const failure = await createProjects([
+      {
+        projectType: "panel",
+        name: "invalid-receipt",
+      },
+    ]).catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(ScaffoldPublicationError);
     expect(
-      (failure as InstanceType<typeof ScaffoldPublicationError>).errorData.retry.commandIdPolicy
+      (failure as InstanceType<typeof ScaffoldPublicationError>).errorData.retry
+        .commandIdPolicy,
     ).toBe("stop-integrity-investigation");
     await expect(
-      recoverProjectPublication(failure as Parameters<typeof recoverProjectPublication>[0])
+      recoverProjectPublication(
+        failure as Parameters<typeof recoverProjectPublication>[0],
+      ),
     ).rejects.toBeInstanceOf(ScaffoldPublicationRecoveryError);
     expect(mocks.push).toHaveBeenCalledTimes(1);
     expect(mocks.status).toHaveBeenCalledTimes(1);
@@ -638,7 +776,7 @@ describe("createProjects", () => {
           }),
           "index.tsx": "export default function Invalid() { return null; }\n",
         },
-      })
+      }),
     ).toThrow(/authority/);
     expect(mocks.edit).not.toHaveBeenCalled();
   });
@@ -647,12 +785,14 @@ describe("createProjects", () => {
     const { createProjects } = await import("./create-project.js");
 
     await expect(
-      createProjects([{
-        projectType: "panel",
-        name: "todo-2026-07-24T20:30:00.000Z",
-      }])
+      createProjects([
+        {
+          projectType: "panel",
+          name: "todo-2026-07-24T20:30:00.000Z",
+        },
+      ]),
     ).rejects.toThrow(
-      /Project name "todo-2026-07-24T20:30:00\.000Z" is invalid.*Date\.now\(\)\.toString\(36\).*Raw ISO timestamps/u
+      /Project name "todo-2026-07-24T20:30:00\.000Z" is invalid.*Date\.now\(\)\.toString\(36\).*Raw ISO timestamps/u,
     );
     expect(mocks.edit).not.toHaveBeenCalled();
   });
@@ -669,22 +809,28 @@ describe("forkProject", () => {
         private: true,
         type: "module",
         exports: { ".": "./index.ts" },
-      })
+      }),
     );
     addFile("packages/source/index.ts", "export const source = true;\n");
     mocks.push.mockRejectedValueOnce(
       Object.assign(new Error("Main advanced"), {
-        errorData: { code: "RevisionChanged", actual: { kind: "event", eventId: "event:new" } },
-      })
+        errorData: {
+          code: "RevisionChanged",
+          actual: { kind: "event", eventId: "event:new" },
+        },
+      }),
     );
-    const { forkProject, ScaffoldPublicationError } = await import("./create-project.js");
+    const { forkProject, ScaffoldPublicationError } =
+      await import("./create-project.js");
 
     const failure = await forkProject({
       from: "packages/source",
       to: "packages/new",
     }).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(ScaffoldPublicationError);
-    expect((failure as InstanceType<typeof ScaffoldPublicationError>).errorData).toMatchObject({
+    expect(
+      (failure as InstanceType<typeof ScaffoldPublicationError>).errorData,
+    ).toMatchObject({
       created: "packages/new",
       committedEventId: "event:committed",
       published: false,
@@ -698,7 +844,10 @@ describe("forkProject", () => {
     addFile("workers/source/.gad/CHECKOUT.json", "{}");
     addFile("workers/source/.env", "SECRET=yes\n");
     addFile("workers/source/debug.log", "debug\n");
-    addFile("workers/source/node_modules/pkg/index.js", "module.exports = {}\n");
+    addFile(
+      "workers/source/node_modules/pkg/index.js",
+      "module.exports = {}\n",
+    );
     addFile(
       "workers/source/package.json",
       JSON.stringify({
@@ -710,11 +859,11 @@ describe("forkProject", () => {
           authority: { requests: [], provides: [] },
           durable: { classes: [{ className: "SourceWorker" }] },
         },
-      })
+      }),
     );
     addFile(
       "workers/source/source-worker.ts",
-      'export class SourceWorker { readonly source = "workers/source"; }\n'
+      'export class SourceWorker { readonly source = "workers/source"; }\n',
     );
     addFile("workers/source/icon.png", new Uint8Array([1, 2, 3]));
 
@@ -735,7 +884,9 @@ describe("forkProject", () => {
     expect(mocks.commit).toHaveBeenCalledTimes(1);
     expect(mocks.push).toHaveBeenCalledTimes(1);
     // The repository lifecycle transition seeded the projected files.
-    expect(JSON.parse(mocks.files.get("workers/new/package.json") as string)).toMatchObject({
+    expect(
+      JSON.parse(mocks.files.get("workers/new/package.json") as string),
+    ).toMatchObject({
       name: "@workspace-workers/new",
       vibestudio: {
         title: "New Worker",
@@ -743,8 +894,12 @@ describe("forkProject", () => {
         durable: { classes: [{ className: "NewWorker" }] },
       },
     });
-    expect(mocks.files.get("workers/new/new-worker.ts")).toContain("class NewWorker");
-    expect(mocks.files.get("workers/new/new-worker.ts")).toContain("workers/new");
+    expect(mocks.files.get("workers/new/new-worker.ts")).toContain(
+      "class NewWorker",
+    );
+    expect(mocks.files.get("workers/new/new-worker.ts")).toContain(
+      "workers/new",
+    );
     expect(mocks.files.get("workers/new/icon.png")).toBeInstanceOf(Uint8Array);
     expect(result.files).not.toContain(".gad/CHECKOUT.json");
     expect(result.files).not.toContain(".env");
@@ -753,7 +908,9 @@ describe("forkProject", () => {
     expect(mocks.files.has("workers/new/.gad/CHECKOUT.json")).toBe(false);
     expect(mocks.files.has("workers/new/.env")).toBe(false);
     expect(mocks.files.has("workers/new/debug.log")).toBe(false);
-    expect(mocks.files.has("workers/new/node_modules/pkg/index.js")).toBe(false);
+    expect(mocks.files.has("workers/new/node_modules/pkg/index.js")).toBe(
+      false,
+    );
   });
 
   it("does not textually rewrite a structurally rewritten worker manifest", async () => {
@@ -769,11 +926,11 @@ describe("forkProject", () => {
           authority: { requests: [], provides: [] },
           durable: { classes: [{ className: "SourceWorker" }] },
         },
-      })
+      }),
     );
     addFile(
       "workers/source/source-worker.ts",
-      'export class SourceWorker { readonly source = "workers/source"; }\n'
+      'export class SourceWorker { readonly source = "workers/source"; }\n',
     );
 
     const { forkProject } = await import("./create-project.js");
@@ -783,7 +940,9 @@ describe("forkProject", () => {
       title: "Source Copy",
     });
 
-    expect(JSON.parse(mocks.files.get("workers/source-copy/package.json") as string)).toMatchObject({
+    expect(
+      JSON.parse(mocks.files.get("workers/source-copy/package.json") as string),
+    ).toMatchObject({
       name: "@workspace-workers/source-copy",
       vibestudio: {
         title: "Source Copy",
@@ -791,13 +950,15 @@ describe("forkProject", () => {
         durable: { classes: [{ className: "SourceCopyWorker" }] },
       },
     });
-    expect(mocks.files.has("workers/source-copy/source-copy-worker.ts")).toBe(true);
-    expect(mocks.files.get("workers/source-copy/source-copy-worker.ts")).toContain(
-      "class SourceCopyWorker"
+    expect(mocks.files.has("workers/source-copy/source-copy-worker.ts")).toBe(
+      true,
     );
-    expect(mocks.files.get("workers/source-copy/source-copy-worker.ts")).toContain(
-      "workers/source-copy"
-    );
+    expect(
+      mocks.files.get("workers/source-copy/source-copy-worker.ts"),
+    ).toContain("class SourceCopyWorker");
+    expect(
+      mocks.files.get("workers/source-copy/source-copy-worker.ts"),
+    ).toContain("workers/source-copy");
   });
 
   it("rejects an invalid fork identity before repository mutation", async () => {
@@ -808,7 +969,7 @@ describe("forkProject", () => {
         private: true,
         type: "module",
         exports: { ".": "./index.ts" },
-      })
+      }),
     );
     addFile("packages/source/index.ts", "export {};\n");
     const { forkProject } = await import("./create-project.js");
@@ -818,7 +979,7 @@ describe("forkProject", () => {
         from: "packages/source",
         to: "packages/new",
         title: "unsafe\nfrontmatter",
-      })
+      }),
     ).rejects.toThrow(/Project title/);
     expect(mocks.edit).not.toHaveBeenCalled();
   });

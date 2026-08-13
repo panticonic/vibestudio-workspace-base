@@ -181,7 +181,10 @@ export default {
     const runtime = createWorkerRuntime(env);
     if (exposedForWorker !== env.WORKER_ID) {
       runtime.rpc.expose("observeConfiguredValue", () => ({
-        value: typeof env["NON_SECRET_PROBE"] === "string" ? env["NON_SECRET_PROBE"] : null,
+        value:
+          typeof env["NON_SECRET_PROBE"] === "string"
+            ? env["NON_SECRET_PROBE"]
+            : null,
       }));
       exposedForWorker = env.WORKER_ID;
     }
@@ -196,7 +199,7 @@ export default {
 const observed = await rpc.call<{ value: string | null }>(
   handle.targetId,
   "observeConfiguredValue",
-  []
+  [],
 );
 if (observed.value !== "configured") throw new Error("Worker env mismatch");
 ```
@@ -369,7 +372,7 @@ eval({
   code: `
   import { createProjects } from "@workspace-skills/workspace-dev";
   scope.created = await createProjects([
-    { projectType: "worker", name: "todo-store", title: "Todo Store" },
+    { projectType: "worker", name: "todo-store", title: "Todo Store", template: "durable-service" },
     { projectType: "panel", name: "todo-app", title: "Todo App" },
   ]);
   return scope.created;
@@ -447,7 +450,7 @@ export class TodoStore extends DurableObjectBase {
       id,
       input.title,
       input.done ? 1 : 0,
-      new Date().toISOString()
+      new Date().toISOString(),
     );
     return { id };
   }
@@ -466,7 +469,9 @@ export class TodoStore extends DurableObjectBase {
   }> {
     this.ensureReady();
     return (
-      this.sql.exec(`SELECT * FROM todos ORDER BY updated_at DESC`).toArray() as TodoRow[]
+      this.sql
+        .exec(`SELECT * FROM todos ORDER BY updated_at DESC`)
+        .toArray() as TodoRow[]
     ).map((row) => ({
       id: row.id,
       title: row.title,
@@ -476,6 +481,12 @@ export class TodoStore extends DurableObjectBase {
   }
 }
 ```
+
+Application-defined protocols are declared in `meta/vibestudio.yml`; do not
+add `vibestudio.durable.classes[].rpcSchema` for them. `rpcSchema` selects one
+of the small host-owned, reviewed schemas built into the host and an arbitrary
+application protocol name will fail the build as unknown. The `durable-service`
+scaffold deliberately declares only `{ className }`.
 
 ### Keep the activation kernel small
 
@@ -538,7 +549,10 @@ const todos = await rpc.call(svc.targetId, "listTodos", []);
 For a partitioned store, use the optional second argument:
 
 ```ts
-const projectStore = await workers.resolveService("example.todos.v1", projectId);
+const projectStore = await workers.resolveService(
+  "example.todos.v1",
+  projectId,
+);
 ```
 
 That resolves `do:<source>:<className>:<projectId>` and creates or activates a
@@ -810,7 +824,10 @@ debug method for another channel, resolve that channel's DO and use its
 read-only inspection path:
 
 ```ts
-const channel = await workers.resolveService("vibestudio.channel.v1", targetChannelId);
+const channel = await workers.resolveService(
+  "vibestudio.channel.v1",
+  targetChannelId,
+);
 const debug = await rpc.call(channel.targetId, "inspectAgent", [
   agentParticipantId,
   "getDebugState",
@@ -832,8 +849,12 @@ workerd supervision, routing, RPC dispatch, gateway reconnects, idle exit, or
 startup/shutdown.
 
 ```ts
-const recent = await rpc.call("main", "serverLog.query", [{ level: "warn", limit: 100 }]);
-const build = await rpc.call("main", "serverLog.query", [{ tag: "BuildV2", limit: 100 }]);
+const recent = await rpc.call("main", "serverLog.query", [
+  { level: "warn", limit: 100 },
+]);
+const build = await rpc.call("main", "serverLog.query", [
+  { tag: "BuildV2", limit: 100 },
+]);
 ```
 
 For live following, open `about/server-logs` or subscribe to

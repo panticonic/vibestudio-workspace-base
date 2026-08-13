@@ -164,7 +164,7 @@ eval({ code: `
   const panelIcon = panelCatalog.entries[0]?.id;
   if (!databaseIcon || !panelIcon) throw new Error("Required catalog icons are unavailable");
   return await createProjects([
-    { projectType: "worker", name: "task-board-store", title: "Task Board Store", icon: databaseIcon },
+    { projectType: "worker", name: "task-board-store", title: "Task Board Store", icon: databaseIcon, template: "durable-service" },
     { projectType: "panel", name: "task-board", title: "Task Board", icon: panelIcon },
   ]);
 `
@@ -180,7 +180,7 @@ Even for a single project, use `createProjects` with a one-element array.
 | `name` | string | Yes | Stable kebab-case identifier matching `^[a-z][a-z0-9-]*$` |
 | `title` | string | No | Human-readable title (defaults to name) |
 | `icon` | string | No | Emoji, local relative asset, or an exact catalog entry id returned by `searchProjectCatalog({ resource: "icon", query })` |
-| `template` | string | No | Panel template name, or `agentic` for the agentic worker scaffold |
+| `template` | string | No | Panel template name; for workers use `durable-service` for an app database, `agentic` for an agent, or omit it for a stateless HTTP worker |
 
 Do not guess catalog names from the full upstream Lucide or Simple Icons
 libraries: the scaffold deliberately accepts a small curated set. Call
@@ -400,15 +400,19 @@ stdout/stderr belongs in one structured result. Prefer argv mode
 (`shell: false`) so arguments are not reinterpreted by `/bin/sh`:
 
 ```ts
-const result = await services.extensions.invoke("@workspace-extensions/shell", "exec", [
-  {
-    command: "/usr/bin/printf",
-    args: ["hello from argv mode"],
-    shell: false,
-    timeoutMs: 5_000,
-    maxOutputBytes: 64 * 1024,
-  },
-]);
+const result = await services.extensions.invoke(
+  "@workspace-extensions/shell",
+  "exec",
+  [
+    {
+      command: "/usr/bin/printf",
+      args: ["hello from argv mode"],
+      shell: false,
+      timeoutMs: 5_000,
+      maxOutputBytes: 64 * 1024,
+    },
+  ],
+);
 return result;
 ```
 
@@ -736,7 +740,11 @@ import { openPanel } from "@workspace/runtime";
 // otherwise main. It does not infer ctx:<contextId> from the panel context.
 const handle = await openPanel("panels/my-app");
 const observation = await handle.rebuild();
-console.log(observation.phase, observation.effectiveVersion, observation.buildKey);
+console.log(
+  observation.phase,
+  observation.effectiveVersion,
+  observation.buildKey,
+);
 ```
 
 When iterating on an already-open panel after code changes, keep its live handle

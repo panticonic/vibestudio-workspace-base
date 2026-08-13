@@ -57,7 +57,7 @@ export class ScaffoldPublicationError extends Error {
     super(
       `Project ${errorData.created} was committed as ${errorData.committedEventId} ` +
         `but protected publication failed: ${errorData.vcsError.message}`,
-      { cause }
+      { cause },
     );
     this.name = "ScaffoldPublicationError";
     this.errorData = errorData;
@@ -78,11 +78,14 @@ export interface ScaffoldPublicationRecoveryFailureData {
 export class ScaffoldPublicationRecoveryError extends Error {
   readonly errorData: ScaffoldPublicationRecoveryFailureData;
 
-  constructor(errorData: ScaffoldPublicationRecoveryFailureData, cause?: unknown) {
+  constructor(
+    errorData: ScaffoldPublicationRecoveryFailureData,
+    cause?: unknown,
+  ) {
     super(
       `Cannot recover publication for ${errorData.created} at ${errorData.stage}: ` +
         errorData.cause.message,
-      cause === undefined ? undefined : { cause }
+      cause === undefined ? undefined : { cause },
     );
     this.name = "ScaffoldPublicationRecoveryError";
     this.errorData = errorData;
@@ -113,7 +116,7 @@ function errorDetail(error: unknown): {
 
 function publicationFailureRecovery(
   detail: ReturnType<typeof errorDetail>,
-  contextId: string
+  contextId: string,
 ): Pick<ScaffoldPublicationFailureData, "retry" | "recovery"> {
   const commandIdPolicy =
     detail.code === "ExternalEffectFailed"
@@ -148,7 +151,7 @@ function publicationFromReceipt(
     effectId: string;
     appliedAt: string;
   },
-  committedEventId: string
+  committedEventId: string,
 ): ProjectPublication {
   if (
     !receipt ||
@@ -158,7 +161,9 @@ function publicationFromReceipt(
     !receipt.appliedAt
   ) {
     throw Object.assign(
-      new Error("vcs.push returned a receipt that does not prove the recorded commit"),
+      new Error(
+        "vcs.push returned a receipt that does not prove the recorded commit",
+      ),
       {
         code: "IntegrityFailure",
         errorData: {
@@ -166,7 +171,7 @@ function publicationFromReceipt(
           expectedCommittedEventId: committedEventId,
           receipt,
         },
-      }
+      },
     );
   }
   return {
@@ -180,9 +185,10 @@ function publicationFromReceipt(
 }
 
 function publicationFailureData(
-  input: ScaffoldPublicationFailureData | ScaffoldPublicationError
+  input: ScaffoldPublicationFailureData | ScaffoldPublicationError,
 ): ScaffoldPublicationFailureData {
-  const data = input instanceof ScaffoldPublicationError ? input.errorData : input;
+  const data =
+    input instanceof ScaffoldPublicationError ? input.errorData : input;
   if (
     !data ||
     data.code !== "scaffold_publication_failed" ||
@@ -203,7 +209,10 @@ function publicationFailureData(
         expectedMainEventId: "unknown",
         commandId: "unknown",
       },
-      cause: { code: "InvalidReceipt", message: "The scaffold failure receipt is malformed" },
+      cause: {
+        code: "InvalidReceipt",
+        message: "The scaffold failure receipt is malformed",
+      },
       retry: { operation: "recoverProjectPublication", safeToRerun: false },
     });
   }
@@ -215,7 +224,7 @@ function publicationFailureData(
  * did not return a success receipt. This never recreates files or commits.
  */
 export async function recoverProjectPublication(
-  input: ScaffoldPublicationFailureData | ScaffoldPublicationError
+  input: ScaffoldPublicationFailureData | ScaffoldPublicationError,
 ): Promise<ProjectPublication> {
   const failure = publicationFailureData(input);
   if (failure.retry.commandIdPolicy === "stop-integrity-investigation") {
@@ -227,7 +236,8 @@ export async function recoverProjectPublication(
       publicationRequest: failure.publicationRequest,
       cause: {
         code: "IntegrityFailure",
-        message: "The original publication receipt was invalid; automatic recovery is unsafe",
+        message:
+          "The original publication receipt was invalid; automatic recovery is unsafe",
         errorData: failure.vcsError.errorData,
       },
       retry: { operation: "recoverProjectPublication", safeToRerun: false },
@@ -263,7 +273,7 @@ export async function recoverProjectPublication(
         cause: errorDetail(error),
         retry: { operation: "recoverProjectPublication", safeToRerun: true },
       },
-      error
+      error,
     );
   }
   const exactCommit =
@@ -288,7 +298,9 @@ export async function recoverProjectPublication(
     });
   }
 
-  const uncertain = failure.retry.commandIdPolicy === "reuse-identical-only-if-outcome-uncertain";
+  const uncertain =
+    failure.retry.commandIdPolicy ===
+    "reuse-identical-only-if-outcome-uncertain";
   const request = uncertain
     ? failure.publicationRequest
     : {
@@ -298,7 +310,10 @@ export async function recoverProjectPublication(
         commandId: `workspace-dev:recover-publication:${contextId}:${crypto.randomUUID()}`,
       };
   try {
-    return publicationFromReceipt(await vcs.push(request), failure.committedEventId);
+    return publicationFromReceipt(
+      await vcs.push(request),
+      failure.committedEventId,
+    );
   } catch (error) {
     throw new ScaffoldPublicationRecoveryError(
       {
@@ -309,9 +324,12 @@ export async function recoverProjectPublication(
         publicationRequest: request,
         observedStatus: status,
         cause: errorDetail(error),
-        retry: { operation: "recoverProjectPublication", safeToRerun: uncertain },
+        retry: {
+          operation: "recoverProjectPublication",
+          safeToRerun: uncertain,
+        },
       },
-      error
+      error,
     );
   }
 }
@@ -328,7 +346,7 @@ export async function recoverProjectPublication(
 async function writeProjectFiles(
   dir: string,
   files: Record<string, string | Uint8Array>,
-  message: string
+  message: string,
 ): Promise<ProjectPublication> {
   const root = dir.replace(/^\/+/, "").replace(/\/+$/, "");
   const command = (operation: string) =>
@@ -388,7 +406,7 @@ async function writeProjectFiles(
         vcsError: detail,
         ...publicationFailureRecovery(detail, contextId),
       },
-      error
+      error,
     );
   }
 }
@@ -480,7 +498,7 @@ export class ProjectIconError extends Error {
   constructor(errorData: ProjectIconFailureData) {
     super(
       `Unknown curated ${errorData.kind} icon: ${errorData.name || "(empty)"}. ` +
-        "Use the bounded catalog result in errorData.catalog or call searchProjectCatalog()."
+        "Use the bounded catalog result in errorData.catalog or call searchProjectCatalog().",
     );
     this.name = "ProjectIconError";
     this.errorData = errorData;
@@ -519,11 +537,14 @@ async function catalogNames(kind: "lucide" | "brand"): Promise<string[]> {
     .sort((left, right) => left.localeCompare(right));
   if (kind === "brand") {
     const metadata = Object.keys(BRAND_ICON_COLORS).sort((left, right) =>
-      left.localeCompare(right)
+      left.localeCompare(right),
     );
-    if (names.length !== metadata.length || names.some((name, index) => name !== metadata[index])) {
+    if (
+      names.length !== metadata.length ||
+      names.some((name, index) => name !== metadata[index])
+    ) {
       throw new Error(
-        "The curated brand icon assets and color metadata disagree; repair the workspace-dev catalog"
+        "The curated brand icon assets and color metadata disagree; repair the workspace-dev catalog",
       );
     }
   }
@@ -532,25 +553,32 @@ async function catalogNames(kind: "lucide" | "brand"): Promise<string[]> {
 
 /** Return the exact icon ids accepted by {@link createProjects}. */
 export async function listProjectIcons(): Promise<ProjectIconCatalog> {
-  return (await searchProjectCatalog({ resource: "icon" })).entries.map((entry) => entry.id);
+  return (await searchProjectCatalog({ resource: "icon" })).entries.map(
+    (entry) => entry.id,
+  );
 }
 
 /** Bounded discovery for curated project resources accepted by scaffolding. */
 export async function searchProjectCatalog(
-  query: ProjectCatalogQuery
+  query: ProjectCatalogQuery,
 ): Promise<ProjectCatalogResult> {
   const families: Array<"lucide" | "brand"> = query.families?.length
     ? [...new Set(query.families)]
     : ["lucide", "brand"];
   const entries = (
     await Promise.all(
-      families.map(async (family) => catalogEntries(family, await catalogNames(family)))
+      families.map(async (family) =>
+        catalogEntries(family, await catalogNames(family)),
+      ),
     )
   ).flat();
   return filterProjectCatalog(entries, query.query, query.limit);
 }
 
-function catalogEntries(family: "lucide" | "brand", names: string[]): ProjectCatalogEntry[] {
+function catalogEntries(
+  family: "lucide" | "brand",
+  names: string[],
+): ProjectCatalogEntry[] {
   return names.map((name) => ({
     resource: "icon",
     id: `${family}:${name}`,
@@ -562,12 +590,12 @@ function catalogEntries(family: "lucide" | "brand", names: string[]): ProjectCat
 function filterProjectCatalog(
   entries: ProjectCatalogEntry[],
   query: string | undefined,
-  requestedLimit: number | undefined
+  requestedLimit: number | undefined,
 ): ProjectCatalogResult {
   const normalizedQuery = query?.trim().toLowerCase() ?? "";
   const limit = Math.max(
     1,
-    Math.min(requestedLimit ?? (normalizedQuery ? 12 : entries.length), 500)
+    Math.min(requestedLimit ?? (normalizedQuery ? 12 : entries.length), 500),
   );
   const ranked = entries
     .map((entry) => ({
@@ -575,12 +603,16 @@ function filterProjectCatalog(
       score: normalizedQuery
         ? entry.id === normalizedQuery || entry.name === normalizedQuery
           ? -1_000
-          : entry.id.includes(normalizedQuery) || entry.name.includes(normalizedQuery)
+          : entry.id.includes(normalizedQuery) ||
+              entry.name.includes(normalizedQuery)
             ? -500 + Math.abs(entry.name.length - normalizedQuery.length)
             : editDistance(normalizedQuery, entry.name)
         : 0,
     }))
-    .sort((left, right) => left.score - right.score || left.entry.id.localeCompare(right.entry.id));
+    .sort(
+      (left, right) =>
+        left.score - right.score || left.entry.id.localeCompare(right.entry.id),
+    );
   const selected = ranked.slice(0, limit).map(({ entry }) => entry);
   return {
     protocol: "workspace-dev-catalog.v1",
@@ -593,14 +625,18 @@ function filterProjectCatalog(
 }
 
 function editDistance(left: string, right: string): number {
-  const previous = Array.from({ length: right.length + 1 }, (_, index) => index);
+  const previous = Array.from(
+    { length: right.length + 1 },
+    (_, index) => index,
+  );
   for (let leftIndex = 1; leftIndex <= left.length; leftIndex += 1) {
     const current = [leftIndex];
     for (let rightIndex = 1; rightIndex <= right.length; rightIndex += 1) {
       current[rightIndex] = Math.min(
         (current[rightIndex - 1] ?? 0) + 1,
         (previous[rightIndex] ?? 0) + 1,
-        (previous[rightIndex - 1] ?? 0) + (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1)
+        (previous[rightIndex - 1] ?? 0) +
+          (left[leftIndex - 1] === right[rightIndex - 1] ? 0 : 1),
       );
     }
     previous.splice(0, previous.length, ...current);
@@ -612,12 +648,13 @@ function invalidProjectIcon(
   icon: string,
   kind: "lucide" | "brand",
   name: string,
-  available: string[]
+  available: string[],
 ): ProjectIconError {
   const suggestions = [...available]
     .sort(
       (left, right) =>
-        editDistance(name, left) - editDistance(name, right) || left.localeCompare(right)
+        editDistance(name, left) - editDistance(name, right) ||
+        left.localeCompare(right),
     )
     .slice(0, 5)
     .map((candidate) => `${kind}:${candidate}`);
@@ -634,7 +671,11 @@ function invalidProjectIcon(
     name,
     suggestions,
     catalogQuery,
-    catalog: filterProjectCatalog(catalogEntries(kind, available), name, catalogQuery.limit),
+    catalog: filterProjectCatalog(
+      catalogEntries(kind, available),
+      name,
+      catalogQuery.limit,
+    ),
     recovery: {
       action: "correct-request",
       instruction:
@@ -645,9 +686,12 @@ function invalidProjectIcon(
 
 async function materializeCatalogIcon(
   icon: string | undefined,
-  files: Record<string, string>
+  files: Record<string, string>,
 ): Promise<string | undefined> {
-  const declaredKind = /^(lucide|brand):/u.exec(icon ?? "")?.[1] as "lucide" | "brand" | undefined;
+  const declaredKind = /^(lucide|brand):/u.exec(icon ?? "")?.[1] as
+    | "lucide"
+    | "brand"
+    | undefined;
   if (!declaredKind) return icon;
   const match = /^(lucide|brand):([a-z0-9-]+)$/u.exec(icon ?? "");
   const kind = declaredKind;
@@ -658,7 +702,8 @@ async function materializeCatalogIcon(
   }
   const library = kind === "brand" ? "brands" : "lucide";
   const brandColor = BRAND_ICON_COLORS[name];
-  if (kind === "brand" && !brandColor) throw new Error(`Missing brand color metadata: ${name}`);
+  if (kind === "brand" && !brandColor)
+    throw new Error(`Missing brand color metadata: ${name}`);
   const source = `skills/workspace-dev/assets/icons/${library}/${name}.svg`;
   let svg = (await fs.readFile(source, "utf-8")) as string;
   svg =
@@ -669,7 +714,9 @@ async function materializeCatalogIcon(
   return "./assets/icon.svg";
 }
 
-async function resolveProject(params: CreateProjectParams): Promise<ResolvedProject> {
+async function resolveProject(
+  params: CreateProjectParams,
+): Promise<ResolvedProject> {
   const { projectType, name, title = name, icon, template } = params;
 
   assertProjectIdentity(name, title);
@@ -677,7 +724,7 @@ async function resolveProject(params: CreateProjectParams): Promise<ResolvedProj
   const typeDir = TYPE_DIRS[projectType as ProjectType];
   if (!typeDir)
     throw new Error(
-      `Unknown project type: ${projectType}. Must be one of: ${SUPPORTED_PROJECT_TYPES}`
+      `Unknown project type: ${projectType}. Must be one of: ${SUPPORTED_PROJECT_TYPES}`,
     );
 
   const canonicalProjectType = projectType as ProjectType;
@@ -701,18 +748,18 @@ async function resolveProject(params: CreateProjectParams): Promise<ResolvedProj
         const templateConfigPath = `templates/${panelTemplate}/template.json`;
         if (!(await fs.exists(templateConfigPath))) {
           throw new Error(
-            `Template "${panelTemplate}" not found. Check workspace/templates/ for available templates.`
+            `Template "${panelTemplate}" not found. Check workspace/templates/ for available templates.`,
           );
         }
         const templateConfig = JSON.parse(
-          (await fs.readFile(templateConfigPath, "utf-8")) as string
+          (await fs.readFile(templateConfigPath, "utf-8")) as string,
         );
         if (templateConfig.framework) panelFramework = templateConfig.framework;
       }
 
       if (panelFramework !== "react" && panelFramework !== "svelte") {
         throw new Error(
-          `Panel framework "${panelFramework}" is not supported; choose the default React or Svelte template.`
+          `Panel framework "${panelFramework}" is not supported; choose the default React or Svelte template.`,
         );
       }
 
@@ -779,7 +826,11 @@ async function resolveProject(params: CreateProjectParams): Promise<ResolvedProj
           icon: manifestIcon,
           entry: "index.tsx",
           ...(panelTemplate !== "default" ? { template: panelTemplate } : {}),
-          exposeModules: ["react", "react/jsx-runtime", "react/jsx-dev-runtime"],
+          exposeModules: [
+            "react",
+            "react/jsx-runtime",
+            "react/jsx-dev-runtime",
+          ],
           dependencies: {
             react: "^19.0.0",
           },
@@ -891,11 +942,13 @@ function ${toPascalCase(name)}Content() {
           },
         });
 
-        files["index.ts"] = `export { ${className} } from "./${workerFileName}.js";
+        files["index.ts"] =
+          `export { ${className} } from "./${workerFileName}.js";
 export default { fetch(_req: Request) { return new Response("${name} DO service"); } };
 `;
 
-        files[`${workerFileName}.ts`] = `import { AgentWorkerBase } from "@workspace/agentic-do";
+        files[`${workerFileName}.ts`] =
+          `import { AgentWorkerBase } from "@workspace/agentic-do";
 import type { ParticipantDescriptor } from "@workspace/harness";
 
 /**
@@ -937,7 +990,8 @@ export class ${className} extends AgentWorkerBase {
 }
 `;
 
-        files[`${workerFileName}.test.ts`] = `import { describe, it, expect } from "vitest";
+        files[`${workerFileName}.test.ts`] =
+          `import { describe, it, expect } from "vitest";
 import type { ChannelEvent } from "@workspace/harness";
 import { createTestDO } from "@workspace/runtime/worker";
 import { ${className} } from "./${workerFileName}.js";
@@ -969,7 +1023,99 @@ describe("${className}", () => {
   });
 });
 `;
-      } else {
+      } else if (template === "durable-service") {
+        const className = toPascalCase(name);
+        files["package.json"] = serializeProjectManifest({
+          projectType: "worker",
+          name,
+          title,
+          icon: manifestIcon,
+          entry: "index.ts",
+          template,
+          durableClasses: [className],
+          dependencies: { "@workspace/runtime": "workspace:*" },
+        });
+        files["index.ts"] =
+          `import { DurableObjectBase, rpc } from "@workspace/runtime/worker/kernel";
+
+type RecordRow = {
+  id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export class ${className} extends DurableObjectBase {
+  static override schemaVersion = 1;
+
+  protected override schemaProductionBaseline() {
+    return { version: 1, name: "${name}-v1" } as const;
+  }
+
+  protected override createTables(): void {
+    this.sql.exec(\`
+      CREATE TABLE records (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      )
+    \`);
+  }
+
+  protected override requiredTables(): readonly string[] {
+    return ["records"];
+  }
+
+  @rpc({
+    principals: ["user", "code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "write",
+  })
+  upsertRecord(input: { id?: string; title: string }): { id: string } {
+    this.ensureReady();
+    const id = input.id ?? crypto.randomUUID();
+    const now = new Date().toISOString();
+    this.sql.exec(
+      \`INSERT INTO records (id, title, created_at, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(id) DO UPDATE SET title = excluded.title, updated_at = excluded.updated_at\`,
+      id,
+      input.title,
+      now,
+      now
+    );
+    return { id };
+  }
+
+  @rpc({
+    principals: ["user", "code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "read",
+  })
+  listRecords(): Array<{ id: string; title: string; createdAt: string; updatedAt: string }> {
+    this.ensureReady();
+    const rows = this.sql
+      .exec(\`SELECT id, title, created_at, updated_at FROM records ORDER BY updated_at DESC\`)
+      .toArray() as RecordRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  }
+}
+
+export default {
+  fetch() {
+    return new Response("${title} durable service");
+  },
+};
+`;
+      } else if (template === undefined) {
         // Default stateless worker template
         files["package.json"] = serializeProjectManifest({
           projectType: "worker",
@@ -979,7 +1125,8 @@ describe("${className}", () => {
           entry: "index.ts",
           dependencies: { "@workspace/runtime": "workspace:*" },
         });
-        files["index.ts"] = `import { createWorkerRuntime } from "@workspace/runtime/worker";
+        files["index.ts"] =
+          `import { createWorkerRuntime } from "@workspace/runtime/worker";
 import type { WorkerEnv, ExecutionContext } from "@workspace/runtime/worker";
 
 export default {
@@ -989,6 +1136,10 @@ export default {
   },
 };
 `;
+      } else {
+        throw new Error(
+          `Unknown worker template ${JSON.stringify(template)}. Use "durable-service", "agentic", or omit it for a stateless worker.`,
+        );
       }
       break;
   }
@@ -999,7 +1150,14 @@ export default {
     files,
   });
 
-  return { projectType: canonicalProjectType, projectPath, name, title, files, preflight };
+  return {
+    projectType: canonicalProjectType,
+    projectPath,
+    name,
+    title,
+    files,
+    preflight,
+  };
 }
 
 /**
@@ -1018,7 +1176,8 @@ export async function createProjects(projects: CreateProjectParams[]): Promise<
     publication: ProjectPublication;
   }>
 > {
-  if (projects.length === 0) throw new Error("createProjects requires at least one project");
+  if (projects.length === 0)
+    throw new Error("createProjects requires at least one project");
 
   const resolved = await Promise.all(projects.map(resolveProject));
 
@@ -1027,7 +1186,9 @@ export async function createProjects(projects: CreateProjectParams[]): Promise<
     repoPath: string;
     files: Array<{
       path: string;
-      content: { kind: "text"; text: string } | { kind: "bytes"; base64: string };
+      content:
+        | { kind: "text"; text: string }
+        | { kind: "bytes"; base64: string };
       mode: number;
     }>;
   }> = resolved.map((project) => ({
@@ -1040,7 +1201,10 @@ export async function createProjects(projects: CreateProjectParams[]): Promise<
         content:
           typeof content === "string"
             ? { kind: "text" as const, text: content }
-            : { kind: "bytes" as const, base64: bytesToBase64(content as unknown as Uint8Array) },
+            : {
+                kind: "bytes" as const,
+                base64: bytesToBase64(content as unknown as Uint8Array),
+              },
         mode: 0o644,
       })),
   }));
@@ -1075,7 +1239,10 @@ export async function createProjects(projects: CreateProjectParams[]): Promise<
   };
   try {
     const published = await vcs.push(publicationRequest);
-    const publication = publicationFromReceipt(published, committed.event.eventId);
+    const publication = publicationFromReceipt(
+      published,
+      committed.event.eventId,
+    );
     return resolved.map((project) => ({
       created: project.projectPath,
       files: Object.keys(project.files),
@@ -1090,7 +1257,9 @@ export async function createProjects(projects: CreateProjectParams[]): Promise<
         stage: "push",
         created: resolved.map((p) => p.projectPath).join(", "),
         files: resolved
-          .flatMap((p) => Object.keys(p.files).map((f) => `${p.projectPath}/${f}`))
+          .flatMap((p) =>
+            Object.keys(p.files).map((f) => `${p.projectPath}/${f}`),
+          )
           .sort(),
         committedEventId: committed.event.eventId,
         published: false,
@@ -1098,7 +1267,7 @@ export async function createProjects(projects: CreateProjectParams[]): Promise<
         vcsError: detail,
         ...publicationFailureRecovery(detail, contextId),
       },
-      error
+      error,
     );
   }
 }
@@ -1186,7 +1355,12 @@ export interface ForkProjectResult {
 
 function rewriteEnabled(
   options: ForkProjectOptions,
-  key: "packageName" | "title" | "reactComponentNames" | "workerClassNames" | "tests"
+  key:
+    | "packageName"
+    | "title"
+    | "reactComponentNames"
+    | "workerClassNames"
+    | "tests",
 ): boolean {
   if (options.rewrite === false) return false;
   if (typeof options.rewrite === "object" && key in options.rewrite)
@@ -1200,9 +1374,9 @@ function projectNameFromPath(p: string): string {
 
 function projectTypeFromPath(p: string): ProjectType | null {
   return (
-    (Object.entries(TYPE_DIRS).find(([, dir]) => p === dir || p.startsWith(`${dir}/`))?.[0] as
-      | ProjectType
-      | undefined) ?? null
+    (Object.entries(TYPE_DIRS).find(
+      ([, dir]) => p === dir || p.startsWith(`${dir}/`),
+    )?.[0] as ProjectType | undefined) ?? null
   );
 }
 
@@ -1210,9 +1384,10 @@ function rewriteRelPath(
   rel: string,
   oldName: string,
   newName: string,
-  projectType: string | null
+  projectType: string | null,
 ): string {
-  if (projectType === "worker" && rel.includes(oldName)) return rel.split(oldName).join(newName);
+  if (projectType === "worker" && rel.includes(oldName))
+    return rel.split(oldName).join(newName);
   return rel;
 }
 
@@ -1220,13 +1395,19 @@ async function listFilesRecursive(dir: string, prefix = ""): Promise<string[]> {
   const out: string[] = [];
   const entries = (await fs.readdir(prefix ? `${dir}/${prefix}` : dir, {
     withFileTypes: true,
-  })) as Array<{ name: string; _isDirectory?: boolean; isDirectory?: () => boolean }>;
+  })) as Array<{
+    name: string;
+    _isDirectory?: boolean;
+    isDirectory?: () => boolean;
+  }>;
   for (const entry of entries) {
     if (COPY_SKIP_DIRS.has(entry.name)) continue;
     if (shouldSkipCopiedFile(entry.name)) continue;
     const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
     const isDir =
-      typeof entry.isDirectory === "function" ? entry.isDirectory() : entry._isDirectory;
+      typeof entry.isDirectory === "function"
+        ? entry.isDirectory()
+        : entry._isDirectory;
     if (isDir) out.push(...(await listFilesRecursive(dir, rel)));
     else out.push(rel);
   }
@@ -1235,8 +1416,9 @@ async function listFilesRecursive(dir: string, prefix = ""): Promise<string[]> {
 
 function isProbablyTextFile(file: string): boolean {
   return (
-    /\.(tsx?|jsx?|json|md|mdx|svelte|css|scss|html|ya?ml|toml|txt)$/i.test(file) ||
-    !file.includes(".")
+    /\.(tsx?|jsx?|json|md|mdx|svelte|css|scss|html|ya?ml|toml|txt)$/i.test(
+      file,
+    ) || !file.includes(".")
   );
 }
 
@@ -1244,11 +1426,14 @@ async function readText(path: string): Promise<string> {
   return (await fs.readFile(path, "utf-8")) as string;
 }
 
-export async function forkProject(options: ForkProjectOptions): Promise<ForkProjectResult> {
+export async function forkProject(
+  options: ForkProjectOptions,
+): Promise<ForkProjectResult> {
   const from = options.from.replace(/^\/+|\/+$/g, "");
   const to = options.to.replace(/^\/+|\/+$/g, "");
   if (!from || !to) throw new Error("forkProject requires from and to paths");
-  if (!(await fs.exists(from))) throw new Error(`Source project does not exist: ${from}`);
+  if (!(await fs.exists(from)))
+    throw new Error(`Source project does not exist: ${from}`);
   if (await fs.exists(to)) throw new Error(`Destination already exists: ${to}`);
 
   const fromType = projectTypeFromPath(from);
@@ -1259,16 +1444,16 @@ export async function forkProject(options: ForkProjectOptions): Promise<ForkProj
   const rewrites: Array<{ file: string; description: string }> = [];
   if (!fromType || !toType)
     warnings.push(
-      "Could not infer project type from one or both paths; only generic rewrites will run."
+      "Could not infer project type from one or both paths; only generic rewrites will run.",
     );
   if (fromType && toType && fromType !== toType && !explicitType) {
     throw new Error(
-      `Fork crosses project types (${fromType} -> ${toType}); pass projectType to opt into this.`
+      `Fork crosses project types (${fromType} -> ${toType}); pass projectType to opt into this.`,
     );
   }
   if (explicitType && toType && explicitType !== toType) {
     throw new Error(
-      `Destination path ${to} is a ${toType}, not requested projectType ${explicitType}`
+      `Destination path ${to} is a ${toType}, not requested projectType ${explicitType}`,
     );
   }
 
@@ -1279,14 +1464,19 @@ export async function forkProject(options: ForkProjectOptions): Promise<ForkProj
   const files = await listFilesRecursive(from);
   const createdFiles: string[] = [];
   const planned: Record<string, string | Uint8Array> = {};
-  const effectiveClassMap: Record<string, string> = { ...(options.classMap ?? {}) };
+  const effectiveClassMap: Record<string, string> = {
+    ...(options.classMap ?? {}),
+  };
   const binaryFiles: string[] = [];
 
   for (const rel of files) {
     const srcPath = `${from}/${rel}`;
     const destRel = rewriteRelPath(rel, oldName, newName, effectiveType);
     if (destRel !== rel) {
-      rewrites.push({ file: rel, description: `Renamed forked file path to ${destRel}` });
+      rewrites.push({
+        file: rel,
+        description: `Renamed forked file path to ${destRel}`,
+      });
     }
     createdFiles.push(destRel);
     if (!isProbablyTextFile(rel)) {
@@ -1300,7 +1490,9 @@ export async function forkProject(options: ForkProjectOptions): Promise<ForkProj
       try {
         const pkg = JSON.parse(content);
         if (rewriteEnabled(options, "packageName")) {
-          const scope = effectiveType ? PACKAGE_SCOPES[effectiveType] : undefined;
+          const scope = effectiveType
+            ? PACKAGE_SCOPES[effectiveType]
+            : undefined;
           if (scope) pkg.name = `${scope}/${newName}`;
           rewrites.push({ file: rel, description: "Updated package name" });
         }
@@ -1313,16 +1505,26 @@ export async function forkProject(options: ForkProjectOptions): Promise<ForkProj
           typeof pkg.vibestudio.entry === "string" &&
           pkg.vibestudio.entry.includes(oldName)
         ) {
-          pkg.vibestudio.entry = pkg.vibestudio.entry.split(oldName).join(newName);
-          rewrites.push({ file: rel, description: "Updated vibestudio entry path" });
+          pkg.vibestudio.entry = pkg.vibestudio.entry
+            .split(oldName)
+            .join(newName);
+          rewrites.push({
+            file: rel,
+            description: "Updated vibestudio entry path",
+          });
         }
-        if (effectiveType === "worker" && rewriteEnabled(options, "workerClassNames")) {
+        if (
+          effectiveType === "worker" &&
+          rewriteEnabled(options, "workerClassNames")
+        ) {
           const classes = pkg.vibestudio?.durable?.classes;
           if (Array.isArray(classes)) {
             if (classes.length === 1) {
               const oldClass = classes[0]?.className;
               if (oldClass) {
-                const nextClass = effectiveClassMap[oldClass] ?? `${toPascalCase(newName)}Worker`;
+                const nextClass =
+                  effectiveClassMap[oldClass] ??
+                  `${toPascalCase(newName)}Worker`;
                 effectiveClassMap[oldClass] = nextClass;
                 classes[0].className = nextClass;
                 rewrites.push({
@@ -1331,26 +1533,28 @@ export async function forkProject(options: ForkProjectOptions): Promise<ForkProj
                 });
               } else {
                 warnings.push(
-                  "Worker durable class metadata is missing className; no class rewrite was applied."
+                  "Worker durable class metadata is missing className; no class rewrite was applied.",
                 );
               }
             } else if (classes.length > 1) {
               const unmapped = classes.filter(
-                (c: { className?: string }) => c.className && !effectiveClassMap[c.className]
+                (c: { className?: string }) =>
+                  c.className && !effectiveClassMap[c.className],
               );
               if (unmapped.length > 0)
                 warnings.push(
-                  "Worker has multiple durable classes; provide classMap for complete safe renaming."
+                  "Worker has multiple durable classes; provide classMap for complete safe renaming.",
                 );
               for (const c of classes)
-                if (effectiveClassMap[c.className]) c.className = effectiveClassMap[c.className];
+                if (effectiveClassMap[c.className])
+                  c.className = effectiveClassMap[c.className];
             }
           }
         }
         content = JSON.stringify(pkg, null, 2) + "\n";
       } catch (err) {
         warnings.push(
-          `Could not parse package.json: ${err instanceof Error ? err.message : String(err)}`
+          `Could not parse package.json: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -1358,7 +1562,10 @@ export async function forkProject(options: ForkProjectOptions): Promise<ForkProj
     if (effectiveType === "skill" && rel === "SKILL.md") {
       content = content.replace(/^name:\s*.+$/m, `name: ${newName}`);
       if (options.title)
-        content = content.replace(/^description:\s*.+$/m, `description: ${newTitle}`);
+        content = content.replace(
+          /^description:\s*.+$/m,
+          `description: ${newTitle}`,
+        );
       rewrites.push({ file: rel, description: "Updated skill frontmatter" });
     }
 
@@ -1393,12 +1600,14 @@ export async function forkProject(options: ForkProjectOptions): Promise<ForkProj
   }
 
   if (binaryFiles.length > 0) {
-    warnings.push(`Binary files will be copied unchanged: ${binaryFiles.join(", ")}`);
+    warnings.push(
+      `Binary files will be copied unchanged: ${binaryFiles.join(", ")}`,
+    );
   }
 
   if (!effectiveType) {
     throw new Error(
-      "Fork destination must identify a canonical project type so the planned repository can be preflighted"
+      "Fork destination must identify a canonical project type so the planned repository can be preflighted",
     );
   }
   const preflight = preflightProjectFiles({
@@ -1412,10 +1621,12 @@ export async function forkProject(options: ForkProjectOptions): Promise<ForkProj
       const meta = await readText("meta/vibestudio.yml");
       if (
         meta.includes(from) ||
-        Object.keys(effectiveClassMap).some((oldClass) => meta.includes(oldClass))
+        Object.keys(effectiveClassMap).some((oldClass) =>
+          meta.includes(oldClass),
+        )
       ) {
         warnings.push(
-          "Workspace meta/vibestudio.yml references the source project or worker classes; review global config before launching the fork."
+          "Workspace meta/vibestudio.yml references the source project or worker classes; review global config before launching the fork.",
         );
       }
     }
@@ -1438,8 +1649,13 @@ export async function forkProject(options: ForkProjectOptions): Promise<ForkProj
   }
 
   const initialFiles: Record<string, string | Uint8Array> = {};
-  for (const [rel, content] of Object.entries(planned)) initialFiles[rel] = content;
-  const publication = await writeProjectFiles(to, initialFiles, `Fork ${from} -> ${to}`);
+  for (const [rel, content] of Object.entries(planned))
+    initialFiles[rel] = content;
+  const publication = await writeProjectFiles(
+    to,
+    initialFiles,
+    `Fork ${from} -> ${to}`,
+  );
   return {
     source: from,
     created: to,
