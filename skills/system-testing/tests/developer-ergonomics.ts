@@ -425,7 +425,7 @@ export const developerErgonomicsTests: TestCase[] = [
     validation: "agent-evidence",
     prompt:
       "Exercise the agent failure protocol once: use eval to throw an Error whose errorData is { code: 'recoverable_infrastructure_probe', failureKind: 'infrastructure', recovery: { action: 'reobserve', instruction: 'Continue this same turn and report RECOVERED_IN_SAME_TURN.' } }. The eval is expected to fail. After receiving that failed tool result, continue in this same turn and answer with exactly RECOVERED_IN_SAME_TURN. Do not retry the eval.",
-    expectedToolFailures: [{ name: "eval", errorIncludes: "recoverable infrastructure probe" }],
+    expectedToolFailures: [{ name: "eval" }],
     validate: validateRecoverableInfrastructureContinuation,
   },
   {

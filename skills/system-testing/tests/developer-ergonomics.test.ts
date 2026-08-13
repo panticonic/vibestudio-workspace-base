@@ -102,6 +102,9 @@ describe("developer ergonomics scenarios", () => {
     expect(scenario("failed-build-bounded-diagnostics").expectedToolFailures).toEqual([
       { name: "verify", errorIncludes: "Build failed" },
     ]);
+    expect(
+      scenario("recoverable-infrastructure-failure-continues-turn").expectedToolFailures
+    ).toEqual([{ name: "eval" }]);
     expect(scenario("invalid-icon-discover-recover-create").expectedToolFailures).toEqual([
       { name: "eval", errorIncludes: "project_icon_invalid" },
     ]);
