@@ -23,6 +23,12 @@
     },
     "authority": {
       "provides": [],
+      "serviceRequests": [
+        {
+          "protocol": "vibestudio.missions.v1",
+          "availability": "required"
+        }
+      ],
       "requests": [
         {
           "capability": "context.boundary",
@@ -43,40 +49,13 @@
           "evidence": "intentional-broad"
         },
         {
-          "capability": "missions.edit",
+          "capability": "userland:workers/missions/missions.pause#*",
           "resource": {
-            "kind": "prefix",
-            "prefix": ""
+            "kind": "exact",
+            "key": "mission:do:workers/missions:MissionsDO:workspace-missions"
           },
           "tier": "gated",
-          "evidence": "intentional-broad"
-        },
-        {
-          "capability": "missions.pause",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "gated",
-          "evidence": "intentional-broad"
-        },
-        {
-          "capability": "missions.retire",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "critical",
-          "evidence": "intentional-broad"
-        },
-        {
-          "capability": "missions.run",
-          "resource": {
-            "kind": "prefix",
-            "prefix": ""
-          },
-          "tier": "gated",
-          "evidence": "intentional-broad"
+          "evidence": "bounded-dynamic"
         },
         {
           "capability": "subagents.create",
@@ -99,11 +78,11 @@
         {
           "capability": "workspace-service:missions",
           "resource": {
-            "kind": "prefix",
-            "prefix": ""
+            "kind": "exact",
+            "key": "do:workers/missions:MissionsDO:workspace-missions"
           },
           "tier": "gated",
-          "evidence": "intentional-broad"
+          "evidence": "exact"
         },
         {
           "capability": "workspace-service:models",

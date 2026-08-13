@@ -24,6 +24,12 @@
     ],
     "authority": {
       "provides": [],
+      "serviceRequests": [
+        {
+          "protocol": "vibestudio.phone-provisioning.v1",
+          "availability": "required"
+        }
+      ],
       "requests": [
         {
           "capability": "accounts.connect",
@@ -93,24 +99,6 @@
           "resource": {
             "kind": "exact",
             "key": "local-models"
-          },
-          "tier": "gated",
-          "evidence": "exact"
-        },
-        {
-          "capability": "mobile.devices.read",
-          "resource": {
-            "kind": "exact",
-            "key": "mobile.devices.read"
-          },
-          "tier": "gated",
-          "evidence": "exact"
-        },
-        {
-          "capability": "mobile.provision",
-          "resource": {
-            "kind": "exact",
-            "key": "mobile.provision"
           },
           "tier": "gated",
           "evidence": "exact"

@@ -9,27 +9,33 @@ interface AuthorityRequest {
 }
 
 describe("agent-worker authority manifest", () => {
-  it("declares the complete phone onboarding workflow with exact resources", () => {
+  it("depends on the workspace-owned phone provisioning protocol", () => {
     const manifest = JSON.parse(
-      readFileSync(new URL("./package.json", import.meta.url), "utf8")
+      readFileSync(new URL("./package.json", import.meta.url), "utf8"),
     ) as {
-      vibestudio: { authority: { requests: AuthorityRequest[] } };
+      vibestudio: {
+        authority: {
+          requests: AuthorityRequest[];
+          serviceRequests: Array<{ protocol: string; availability: string }>;
+        };
+      };
     };
-    const requests = manifest.vibestudio.authority.requests;
-
-    for (const capability of ["mobile.devices.read", "mobile.provision"]) {
-      expect(requests).toContainEqual({
-        capability,
-        resource: { kind: "exact", key: capability },
-        tier: "gated",
-        evidence: "exact",
-      });
-    }
+    expect(manifest.vibestudio.authority.serviceRequests).toContainEqual({
+      protocol: "vibestudio.phone-provisioning.v1",
+      availability: "required",
+    });
+    expect(
+      manifest.vibestudio.authority.requests.map(
+        ({ capability }) => capability,
+      ),
+    ).not.toEqual(
+      expect.arrayContaining(["mobile.devices.read", "mobile.provision"]),
+    );
   });
 
   it("declares the internal workspace-state transport used by public panel helpers", () => {
     const manifest = JSON.parse(
-      readFileSync(new URL("./package.json", import.meta.url), "utf8")
+      readFileSync(new URL("./package.json", import.meta.url), "utf8"),
     ) as {
       vibestudio: { authority: { requests: AuthorityRequest[] } };
     };
@@ -43,7 +49,7 @@ describe("agent-worker authority manifest", () => {
 
   it("declares the provider-bound test capability used by first-class verification", () => {
     const manifest = JSON.parse(
-      readFileSync(new URL("./package.json", import.meta.url), "utf8")
+      readFileSync(new URL("./package.json", import.meta.url), "utf8"),
     ) as {
       vibestudio: { authority: { requests: AuthorityRequest[] } };
     };

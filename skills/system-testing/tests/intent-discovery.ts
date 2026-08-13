@@ -23,20 +23,26 @@ const phoneDiscoveryAuthority = {
   authority: [
     {
       ruleId: "vague-phone-service-discovery",
-      capability: { kind: "exact" as const, key: "workspace-service:phone.provisioning" },
+      capability: {
+        kind: "exact" as const,
+        key: "workspace-service:phone.provisioning",
+      },
       resource: {
-        kind: "prefix" as const,
-        prefix: "do:vibestudio/internal:PhoneProvisioningDO:",
+        kind: "exact" as const,
+        key: "do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
       },
       tier: "gated" as const,
       decision: "once" as const,
     },
     {
       ruleId: "vague-phone-device-discovery",
-      capability: { kind: "exact" as const, key: "mobile.devices.read" },
-      resource: {
+      capability: {
         kind: "prefix" as const,
-        prefix: "do:vibestudio/internal:PhoneProvisioningDO:",
+        prefix: "userland:workers/phone-provisioning/mobile.devices.read#",
+      },
+      resource: {
+        kind: "exact" as const,
+        key: "phone:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
       },
       tier: "gated" as const,
       decision: "once" as const,

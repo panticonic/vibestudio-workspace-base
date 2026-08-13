@@ -14,28 +14,36 @@ describe("BrowserDataDO schema", () => {
     const db = new DatabaseSync(":memory:");
     const instance = createBrowserDataDO(db);
     const productMethods = [...rpcExposedMethodNames(instance)].filter(
-      (method) => !DURABLE_OBJECT_FRAMEWORK_RPC_METHODS.has(method)
+      (method) => !DURABLE_OBJECT_FRAMEWORK_RPC_METHODS.has(method),
     );
-    expect(productMethods.sort()).toEqual(Object.keys(browserProductMethods).sort());
+    expect(productMethods.sort()).toEqual(
+      Object.keys(browserProductMethods).sort(),
+    );
   });
 
   it("creates the one canonical pre-release schema directly", () => {
     const db = new DatabaseSync(":memory:");
     createBrowserDataDO(db);
 
-    expect(db.prepare(`SELECT singleton, version FROM _vibestudio_schema`).get()).toEqual({
+    expect(
+      db.prepare(`SELECT singleton, version FROM _vibestudio_schema`).get(),
+    ).toEqual({
       singleton: 1,
       version: 1,
     });
-    expect(db.prepare(`SELECT 1 FROM state WHERE key = 'schema_version'`).get()).toBeUndefined();
+    expect(
+      db.prepare(`SELECT 1 FROM state WHERE key = 'schema_version'`).get(),
+    ).toBeUndefined();
     expect(
       db
         .prepare(`PRAGMA table_info(page_favicons)`)
         .all()
-        .map((column) => column["name"])
+        .map((column) => column["name"]),
     ).toContain("image_data");
     expect(
-      db.prepare(`SELECT name FROM sqlite_master WHERE name = 'passwords'`).get()
+      db
+        .prepare(`SELECT name FROM sqlite_master WHERE name = 'passwords'`)
+        .get(),
     ).toBeUndefined();
     db.close();
   });
@@ -46,13 +54,13 @@ describe("BrowserDataDO schema", () => {
       BROWSER_DATA_BROKER_SOURCE: "extensions/browser-data",
     });
     const resolve = (
-      method: keyof typeof browserProductMethods
+      method: keyof typeof browserProductMethods,
     ): import("@vibestudio/rpc").ResolvedRpcAuthority | null =>
       (
         instance as unknown as {
           rpcAuthorityDeclaration(
             name: string,
-            schema: (typeof browserProductMethods)[keyof typeof browserProductMethods]
+            schema: (typeof browserProductMethods)[keyof typeof browserProductMethods],
           ): import("@vibestudio/rpc").ResolvedRpcAuthority | null;
         }
       ).rpcAuthorityDeclaration(method, browserProductMethods[method]!);
@@ -60,12 +68,16 @@ describe("BrowserDataDO schema", () => {
     expect(resolve("listDownloadRecords")).toMatchObject({
       tier: "open",
       sensitivity: "read",
-      effect: { kind: "host-capability", capability: "browser-data.read" },
+      effect: { kind: "open" },
     });
     expect(resolve("clearAllHistory")).toMatchObject({
       tier: "gated",
       sensitivity: "destructive",
-      effect: { kind: "host-capability", capability: "browser-data.delete" },
+      effect: {
+        kind: "userland-capability",
+        capability: "browser-data.delete",
+        resource: { kind: "receiver-object" },
+      },
     });
     expect(resolve("getHistory")).toMatchObject({
       requires: {
@@ -119,7 +131,7 @@ describe("BrowserDataDO canonical history", () => {
           lastVisitTime: 200,
         },
       ],
-      { sourceId: "chromium-profile" }
+      { sourceId: "chromium-profile" },
     );
 
     expect(store.getHistory({ limit: 10 })).toEqual([
@@ -217,13 +229,16 @@ describe("BrowserDataDO native favicon formats", () => {
         data: ico.toString("base64"),
         mimeType: "image/png",
         updatedAt: 123,
-      })
+      }),
     ).toThrow(/bytes are image\/x-icon, not image\/png/);
     db.close();
   });
 });
 
-function createBrowserDataDO(db: DatabaseSync, env: Record<string, unknown> = {}): BrowserDataDO {
+function createBrowserDataDO(
+  db: DatabaseSync,
+  env: Record<string, unknown> = {},
+): BrowserDataDO {
   const instance = new BrowserDataDO(sqliteContext(db), env);
   (instance as unknown as { ensureReady(): void }).ensureReady();
   return instance;
@@ -234,13 +249,15 @@ function sqliteContext(db: DatabaseSync): DurableObjectContext {
     exec(query: string, ...bindings: unknown[]): SqlResult {
       const statement = db.prepare(query);
       const rows =
-        /^\s*(?:SELECT|PRAGMA|WITH|EXPLAIN)\b/i.test(query) || /\bRETURNING\b/i.test(query)
+        /^\s*(?:SELECT|PRAGMA|WITH|EXPLAIN)\b/i.test(query) ||
+        /\bRETURNING\b/i.test(query)
           ? (statement.all(...(bindings as [])) as Record<string, unknown>[])
           : (statement.run(...(bindings as [])), []);
       return {
         toArray: () => rows,
         one: () => {
-          if (rows.length !== 1) throw new Error(`Expected one row, received ${rows.length}`);
+          if (rows.length !== 1)
+            throw new Error(`Expected one row, received ${rows.length}`);
           return rows[0]!;
         },
       };

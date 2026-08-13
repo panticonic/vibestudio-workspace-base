@@ -18,28 +18,19 @@
       ],
       "requests": [
         {
-          "capability": "browser-data.delete",
+          "capability": "userland:workers/browser-data/browser-data.delete#*",
           "resource": {
             "kind": "prefix",
-            "prefix": "do:vibestudio/internal:BrowserDataDO:"
+            "prefix": "browser-data:do:workers/browser-data:BrowserDataDO:"
           },
           "tier": "gated",
           "evidence": "bounded-dynamic"
         },
         {
-          "capability": "browser-data.read",
+          "capability": "userland:workers/browser-data/browser-data.write#*",
           "resource": {
             "kind": "prefix",
-            "prefix": "do:vibestudio/internal:BrowserDataDO:"
-          },
-          "tier": "gated",
-          "evidence": "bounded-dynamic"
-        },
-        {
-          "capability": "browser-data.write",
-          "resource": {
-            "kind": "prefix",
-            "prefix": "do:vibestudio/internal:BrowserDataDO:"
+            "prefix": "browser-data:do:workers/browser-data:BrowserDataDO:"
           },
           "tier": "gated",
           "evidence": "bounded-dynamic"
@@ -84,10 +75,10 @@
           "capability": "workspace-service:browser.data",
           "resource": {
             "kind": "prefix",
-            "prefix": ""
+            "prefix": "do:workers/browser-data:BrowserDataDO:"
           },
           "tier": "gated",
-          "evidence": "intentional-broad"
+          "evidence": "bounded-dynamic"
         },
         {
           "capability": "workspace-service:channel",

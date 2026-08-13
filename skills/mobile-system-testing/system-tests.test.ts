@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import type { TestExecutionResult } from "@workspace-skills/system-testing";
 import { mobileTests } from "./system-tests.js";
 
-const installAndroid = mobileTests.find((test) => test.name === "mobile-extension-install-android");
+const installAndroid = mobileTests.find(
+  (test) => test.name === "mobile-extension-install-android",
+);
 const provisionAndroid = mobileTests.find(
-  (test) => test.name === "onboarding-desktop-mobile-install-android"
+  (test) => test.name === "onboarding-desktop-mobile-install-android",
 );
 
 if (!installAndroid || !provisionAndroid) {
@@ -74,30 +76,47 @@ describe("mobile system-test declarations", () => {
     expect(typeof policy).toBe("object");
     if (!policy || typeof policy === "function")
       throw new Error("expected static authority policy");
-    for (const capability of [
-      "workspace-service:phone.provisioning",
-      "mobile.devices.read",
-      "mobile.provision",
-    ]) {
-      expect(policy.authority).toEqual(
-        expect.arrayContaining([
-          expect.objectContaining({
-            capability: { kind: "exact", key: capability },
-            resource: {
-              kind: "prefix",
-              prefix: "do:vibestudio/internal:PhoneProvisioningDO:",
-            },
-          }),
-        ])
-      );
-    }
+    expect(policy.authority).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          capability: {
+            kind: "exact",
+            key: "workspace-service:phone.provisioning",
+          },
+          resource: {
+            kind: "exact",
+            key: "do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
+          },
+        }),
+        expect.objectContaining({
+          capability: {
+            kind: "prefix",
+            prefix: "userland:workers/phone-provisioning/mobile.devices.read#",
+          },
+          resource: {
+            kind: "exact",
+            key: "phone:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
+          },
+        }),
+        expect.objectContaining({
+          capability: {
+            kind: "prefix",
+            prefix: "userland:workers/phone-provisioning/mobile.provision#",
+          },
+          resource: {
+            kind: "exact",
+            key: "phone:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
+          },
+        }),
+      ]),
+    );
     expect(policy.authority).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           capability: { kind: "exact", key: "connected-client.transport" },
           resource: { kind: "exact", key: "connected-client.transport" },
         }),
-      ])
+      ]),
     );
   });
 

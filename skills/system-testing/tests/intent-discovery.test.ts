@@ -26,7 +26,10 @@ describe("vague intent discovery scenarios", () => {
       throw new Error("Expected a static authority policy");
     expect(policy.authority.map((rule) => rule.capability)).toEqual([
       { kind: "exact", key: "workspace-service:phone.provisioning" },
-      { kind: "exact", key: "mobile.devices.read" },
+      {
+        kind: "prefix",
+        prefix: "userland:workers/phone-provisioning/mobile.devices.read#",
+      },
       { kind: "exact", key: "connected-client.transport" },
     ]);
   });

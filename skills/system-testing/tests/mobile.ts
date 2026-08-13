@@ -25,30 +25,39 @@ export const mobileTests: TestCase[] = [
       authority: [
         {
           ruleId: "onboarding-desktop-phone-service",
-          capability: { kind: "exact", key: "workspace-service:phone.provisioning" },
+          capability: {
+            kind: "exact",
+            key: "workspace-service:phone.provisioning",
+          },
           resource: {
-            kind: "prefix",
-            prefix: "do:vibestudio/internal:PhoneProvisioningDO:",
+            kind: "exact",
+            key: "do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
           },
           tier: "gated",
           decision: "once",
         },
         {
           ruleId: "onboarding-desktop-mobile-discovery",
-          capability: { kind: "exact", key: "mobile.devices.read" },
-          resource: {
+          capability: {
             kind: "prefix",
-            prefix: "do:vibestudio/internal:PhoneProvisioningDO:",
+            prefix: "userland:workers/phone-provisioning/mobile.devices.read#",
+          },
+          resource: {
+            kind: "exact",
+            key: "phone:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
           },
           tier: "gated",
           decision: "once",
         },
         {
           ruleId: "onboarding-desktop-mobile-provision",
-          capability: { kind: "exact", key: "mobile.provision" },
-          resource: {
+          capability: {
             kind: "prefix",
-            prefix: "do:vibestudio/internal:PhoneProvisioningDO:",
+            prefix: "userland:workers/phone-provisioning/mobile.provision#",
+          },
+          resource: {
+            kind: "exact",
+            key: "phone:do:workers/phone-provisioning:PhoneProvisioningDO:workspace-phone-provisioning",
           },
           tier: "gated",
           decision: "once",
@@ -86,10 +95,16 @@ export const mobileTests: TestCase[] = [
 
       const records = walkRecords(base.evidence.evalValues);
       const installCompleted = records.some((record) =>
-        ["installed", "already-compatible"].includes(String(record["installStatus"]))
+        ["installed", "already-compatible"].includes(
+          String(record["installStatus"]),
+        ),
       );
-      const compatibleAfter = records.some((record) => record["compatibleAppInstalled"] === true);
-      const pairingCompleted = records.some((record) => record["pairingStatus"] === "paired");
+      const compatibleAfter = records.some(
+        (record) => record["compatibleAppInstalled"] === true,
+      );
+      const pairingCompleted = records.some(
+        (record) => record["pairingStatus"] === "paired",
+      );
       // The eval serializer preserves object identity with `[Circular]`. An
       // agent may return both a concise top-level provisioning summary (where
       // pairedDevice remains expanded) and the complete raw result nested
@@ -97,11 +112,14 @@ export const mobileTests: TestCase[] = [
       // those as one evidence set instead of requiring every fact on the same
       // projected record.
       const pairedAndroid = records.some(
-        (record) => record["pairingStatus"] === "paired" && record["platform"] === "android"
+        (record) =>
+          record["pairingStatus"] === "paired" &&
+          record["platform"] === "android",
       );
       const pairedDeviceObserved = records.some(
         (record) =>
-          typeof record["pairedDevice"] === "object" && record["pairedDevice"] !== null
+          typeof record["pairedDevice"] === "object" &&
+          record["pairedDevice"] !== null,
       );
       const workspaceReady = records.some(
         (record) =>
@@ -109,7 +127,7 @@ export const mobileTests: TestCase[] = [
           record["workspaceConnected"] === true &&
           record["panelHostReady"] === true &&
           Array.isArray(record["issues"]) &&
-          record["issues"].length === 0
+          record["issues"].length === 0,
       );
       if (
         !installCompleted ||
@@ -135,7 +153,8 @@ export const mobileTests: TestCase[] = [
         ? { passed: true }
         : {
             passed: false,
-            reason: "Final response omitted provider/device/install/pairing/readiness evidence",
+            reason:
+              "Final response omitted provider/device/install/pairing/readiness evidence",
           };
     },
   },
@@ -178,14 +197,14 @@ export const mobileTests: TestCase[] = [
 
       const records = walkRecords(base.evidence.evalValues);
       const installedPackage = records.some(
-        (record) => record["packageName"] === "app.vibestudio.mobile.internal"
+        (record) => record["packageName"] === "app.vibestudio.mobile.internal",
       );
       const verified = records.some(
         (record) =>
           record["installed"] === true &&
           record["rendering"] === true &&
           Array.isArray(record["issues"]) &&
-          record["issues"].length === 0
+          record["issues"].length === 0,
       );
       if (!installedPackage || !verified) {
         return {

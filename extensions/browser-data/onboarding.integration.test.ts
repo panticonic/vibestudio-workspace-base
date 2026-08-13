@@ -11,7 +11,10 @@ vi.mock("@workspace/runtime", () => ({
   openPanel: vi.fn(),
 }));
 
-import { createBrowserDataClient, type ImportJobSnapshot } from "@vibestudio/browser-data";
+import {
+  createBrowserDataClient,
+  type ImportJobSnapshot,
+} from "@vibestudio/browser-data";
 import { activate } from "./index.js";
 import { onboardingCatalog } from "../../skills/onboarding/catalog.js";
 import { composeOnboardingSnapshot } from "../../skills/onboarding/snapshot.js";
@@ -38,7 +41,7 @@ const completedImport: ImportJobSnapshot = {
 describe("onboarding browser-data component chain", () => {
   it("composes browser status through main and the activated provider with a stub store", async () => {
     const storeCall = vi.fn(async (_target: string, method: string) =>
-      method === "listImportJobs" ? [completedImport] : []
+      method === "listImportJobs" ? [completedImport] : [],
     );
     const extension = await activate({
       rpc: {
@@ -50,10 +53,16 @@ describe("onboarding browser-data component chain", () => {
         stream: vi.fn(async () => new Response()),
       },
       workers: {
-        resolveService: vi.fn(async () => ({
+        resolveService: vi.fn(async (protocol: string) => ({
           kind: "durable-object" as const,
-          targetId: "do:vibestudio/internal:BrowserDataDO:environment-key",
-          objectKey: "environment-key",
+          targetId:
+            protocol === "vibestudio.browser-data.v1"
+              ? "do:workers/browser-data:BrowserDataDO:browser:user-1"
+              : "do:vibestudio/internal:BrowserVaultDO:environment-key",
+          objectKey:
+            protocol === "vibestudio.browser-data.v1"
+              ? "browser:user-1"
+              : "environment-key",
         })),
       },
       invocation: {
@@ -76,16 +85,25 @@ describe("onboarding browser-data component chain", () => {
       (...args: unknown[]) => Promise<unknown>
     >;
     const routeCall = vi.fn(
-      async (target: string, method: string, args: unknown[]): Promise<unknown> => {
+      async (
+        target: string,
+        method: string,
+        args: unknown[],
+      ): Promise<unknown> => {
         expect(target).toBe("main");
         expect(method).toBe("extensions.invokeProvider");
-        const [namespace, providerMethod, providerArgs] = args as [string, string, unknown[]];
+        const [namespace, providerMethod, providerArgs] = args as [
+          string,
+          string,
+          unknown[],
+        ];
         expect(namespace).toBe("browserData");
         return provider[providerMethod]!(...providerArgs);
-      }
+      },
     );
     const browserData = createBrowserDataClient({
-      callService: (service, method, args) => routeCall("main", `${service}.${method}`, args),
+      callService: (service, method, args) =>
+        routeCall("main", `${service}.${method}`, args),
     });
     const statusDeps = {
       google: vi.fn(),
@@ -96,7 +114,8 @@ describe("onboarding browser-data component chain", () => {
       browserImportJobs: () => browserData.listImportJobs(),
       activeSearchProvider: vi.fn(),
     } as unknown as OnboardingStatusDependencies;
-    const browserAdapter = createStatusAdapters(statusDeps)["browser-environment"]!;
+    const browserAdapter =
+      createStatusAdapters(statusDeps)["browser-environment"]!;
     const ready: CapabilityOnboardingStatusAdapter = async () => ({
       state: "configured",
       summary: "Ready.",
@@ -131,24 +150,26 @@ describe("onboarding browser-data component chain", () => {
           },
         }),
         now: () => new Date("2026-07-25T12:00:00.000Z"),
-      }
+      },
     );
 
-    expect(snapshot.find((entry) => entry.id === "migration.browser-environment")).toEqual(
+    expect(
+      snapshot.find((entry) => entry.id === "migration.browser-environment"),
+    ).toEqual(
       expect.objectContaining({
         state: "configured",
         summary: "1 browser import completed.",
         rawStage: "complete",
-      })
+      }),
     );
-    expect(routeCall).toHaveBeenCalledWith("main", "extensions.invokeProvider", [
-      "browserData",
-      "listImportJobs",
-      [],
-    ]);
+    expect(routeCall).toHaveBeenCalledWith(
+      "main",
+      "extensions.invokeProvider",
+      ["browserData", "listImportJobs", []],
+    );
     expect(storeCall).toHaveBeenCalledWith(
-      "do:vibestudio/internal:BrowserDataDO:environment-key",
-      "listImportJobs"
+      "do:workers/browser-data:BrowserDataDO:browser:user-1",
+      "listImportJobs",
     );
   });
 });
