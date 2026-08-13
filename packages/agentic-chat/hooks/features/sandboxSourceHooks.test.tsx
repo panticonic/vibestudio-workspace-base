@@ -180,6 +180,53 @@ describe("sandbox source hooks", () => {
     expect(loadCalls).toEqual([{ specifier: "label-lib", ref: "npm:2" }]);
   });
 
+  it("keeps authored console output on the compiled inline UI entry", async () => {
+    const states: InlineUiState[] = [];
+    const messages = [
+      makeMessage({
+        id: "diagnostic-ui",
+        source: {
+          type: "code",
+          code: `
+            console.info("module initialized");
+            export default function App() {
+              console.warn("component rendered");
+              return "ready";
+            }
+          `,
+        },
+      }),
+    ];
+
+    function Harness() {
+      const state = useInlineUi({ messages });
+      useEffect(() => {
+        states.push(state);
+      }, [state]);
+      const Component =
+        state.inlineUiComponents.get("diagnostic-ui")?.Component;
+      return Component ? (
+        <Component props={{}} chat={{}} scope={{}} scopes={{}} />
+      ) : null;
+    }
+
+    const view = render(<Harness />);
+
+    await waitFor(() => expect(view.getByText("ready")).toBeTruthy());
+    await waitFor(() => {
+      const consoleEntries = states
+        .at(-1)
+        ?.inlineUiComponents.get("diagnostic-ui")
+        ?.runtime?.console.getEntries();
+      expect(
+        consoleEntries?.map((entry) => [entry.level, entry.args[0]]),
+      ).toEqual([
+        ["info", "module initialized"],
+        ["warn", "component rendered"],
+      ]);
+    });
+  });
+
   it("reloads an inline_ui import when a stable card changes its declared ref", async () => {
     const code = `import { label } from "label-lib"; export default function App() { return label; }`;
     const loadCalls: Array<{ specifier: string; ref: string | undefined }> = [];

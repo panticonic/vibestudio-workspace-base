@@ -19,7 +19,10 @@ import {
   Cross2Icon,
   DotsHorizontalIcon,
 } from "@radix-ui/react-icons";
-import { CONTENT_TYPE_INLINE_UI, isClientParticipantType } from "@workspace/pubsub";
+import {
+  CONTENT_TYPE_INLINE_UI,
+  isClientParticipantType,
+} from "@workspace/pubsub";
 import { LOCAL_FALLBACK_MODEL_REF } from "@workspace/model-catalog/catalog";
 import type { AgentSubscriptionConfig } from "@workspace/agentic-core";
 import type { Participant } from "@workspace/pubsub";
@@ -33,7 +36,10 @@ import { AgentDisconnectedMessage } from "./AgentDisconnectedMessage";
 import { CustomMessageCard } from "./CustomMessage";
 import { AckBadge } from "./AckBadge";
 import ModelCredentialRequiredCard from "./ModelCredentialRequiredCard";
-import { AutomationActivity, createAutomationUiClient } from "./AutomationActivity";
+import {
+  AutomationActivity,
+  createAutomationUiClient,
+} from "./AutomationActivity";
 import type {
   BrowserHandoffCaller,
   ChannelParticipantId,
@@ -71,7 +77,9 @@ interface MessageCardProps {
   mdxActions?: MdxActionHandlers;
 }
 
-function classNames(...values: Array<string | false | null | undefined>): string {
+function classNames(
+  ...values: Array<string | false | null | undefined>
+): string {
   return values.filter(Boolean).join(" ");
 }
 
@@ -83,7 +91,7 @@ type ChatCallMethod = (
   participantId: string,
   method: string,
   args: unknown,
-  options?: { timeoutMs?: number; signal?: AbortSignal }
+  options?: { timeoutMs?: number; signal?: AbortSignal },
 ) => Promise<unknown>;
 
 const PROVIDER_LEVEL_FAILURE_CODES = new Set([
@@ -97,11 +105,13 @@ const PROVIDER_LEVEL_FAILURE_CODES = new Set([
 ]);
 
 function chatCallMethod(chat: Record<string, unknown>): ChatCallMethod | null {
-  return typeof chat["callMethod"] === "function" ? (chat["callMethod"] as ChatCallMethod) : null;
+  return typeof chat["callMethod"] === "function"
+    ? (chat["callMethod"] as ChatCallMethod)
+    : null;
 }
 
 function chatSend(
-  chat: Record<string, unknown>
+  chat: Record<string, unknown>,
 ): ((content: string, opts?: unknown) => Promise<unknown>) | null {
   return typeof chat["send"] === "function"
     ? (chat["send"] as (content: string, opts?: unknown) => Promise<unknown>)
@@ -123,7 +133,7 @@ function modelRefFromSettings(value: unknown): string | null {
 
 export function agentConfigFromSettings(
   value: unknown,
-  fallbackModel: string | null | undefined
+  fallbackModel: string | null | undefined,
 ): AgentSubscriptionConfig {
   const config: AgentSubscriptionConfig = {};
   const model = modelRefFromSettings(value) ?? fallbackModel;
@@ -159,7 +169,9 @@ export function agentConfigFromSettings(
   }
   const respondFromValue = settingValue(record["respondFrom"]);
   if (Array.isArray(respondFromValue)) {
-    const respondFrom = respondFromValue.filter((item): item is string => typeof item === "string");
+    const respondFrom = respondFromValue.filter(
+      (item): item is string => typeof item === "string",
+    );
     if (respondFrom.length > 0) config.respondFrom = respondFrom;
   }
   return config;
@@ -223,19 +235,27 @@ export const MessageCard = React.memo(function MessageCard({
   const [cleanStartState, setCleanStartState] = useState<
     "idle" | "starting" | "started" | "failed"
   >("idle");
-  const [currentAgentModelRef, setCurrentAgentModelRef] = useState<string | null | undefined>(
-    undefined
-  );
+  const [currentAgentModelRef, setCurrentAgentModelRef] = useState<
+    string | null | undefined
+  >(undefined);
   const [longContentExpanded, setLongContentExpanded] = useState(false);
   const inputActions = useOptionalChatInputActions();
   const messageActions = useOptionalChatMessageActions();
   const automationClient = useMemo(() => {
     if (msg.contentType !== "automation" || !msg.automation) return null;
     const bridge = chat["rpc"] as
-      | { call?: (target: string, method: string, args: unknown[]) => Promise<unknown> }
+      | {
+          call?: (
+            target: string,
+            method: string,
+            args: unknown[],
+          ) => Promise<unknown>;
+        }
       | undefined;
     if (typeof bridge?.call !== "function") return null;
-    return createAutomationUiClient(bridge as { call: NonNullable<typeof bridge.call> });
+    return createAutomationUiClient(
+      bridge as { call: NonNullable<typeof bridge.call> },
+    );
   }, [chat, msg.automation, msg.contentType]);
   const callMethod = chatCallMethod(chat);
   const sendFromChat = chatSend(chat);
@@ -247,9 +267,11 @@ export const MessageCard = React.memo(function MessageCard({
     msg.contentType === "diagnostic" &&
     msg.diagnostic?.code === "message_failed" &&
     msg.diagnostic.failureCode === "context_overflow_terminal";
-  const shouldInspectCurrentAgentModel = providerLevelModelFailure || localContextOverflowFailure;
+  const shouldInspectCurrentAgentModel =
+    providerLevelModelFailure || localContextOverflowFailure;
   const currentAgentModelIsLocal =
-    typeof currentAgentModelRef === "string" && currentAgentModelRef.startsWith("local:");
+    typeof currentAgentModelRef === "string" &&
+    currentAgentModelRef.startsWith("local:");
   const currentAgentModelKnown = currentAgentModelRef !== undefined;
   const canRetryWithLocal =
     providerLevelModelFailure &&
@@ -285,11 +307,17 @@ export const MessageCard = React.memo(function MessageCard({
     if (!callMethod) return;
     setRetryLocalState("switching");
     try {
-      const currentModel = await callMethod(msg.senderId, "getAgentSettings", {})
+      const currentModel = await callMethod(
+        msg.senderId,
+        "getAgentSettings",
+        {},
+      )
         .then(modelRefFromSettings)
         .catch(() => currentAgentModelRef ?? null);
       if (!currentModel?.startsWith("local:")) {
-        await callMethod(msg.senderId, "setModel", { model: LOCAL_FALLBACK_MODEL_REF });
+        await callMethod(msg.senderId, "setModel", {
+          model: LOCAL_FALLBACK_MODEL_REF,
+        });
         setCurrentAgentModelRef(LOCAL_FALLBACK_MODEL_REF);
         if (selfId) {
           void callMethod(selfId, "persist_agent_model", {
@@ -311,15 +339,27 @@ export const MessageCard = React.memo(function MessageCard({
       console.warn("[MessageCard] Retry with local model failed:", err);
       setRetryLocalState("failed");
     }
-  }, [callMethod, currentAgentModelRef, inputActions, msg.senderId, selfId, sendFromChat]);
+  }, [
+    callMethod,
+    currentAgentModelRef,
+    inputActions,
+    msg.senderId,
+    selfId,
+    sendFromChat,
+  ]);
 
   const handleStartCleanLocalChat = useCallback(async () => {
     const onNewConversation = messageActions?.onNewConversation;
     if (!onNewConversation || !callMethod) return;
     setCleanStartState("starting");
     try {
-      const settings = await callMethod(msg.senderId, "getAgentSettings", {}).catch(() => null);
-      const model = modelRefFromSettings(settings) ?? currentAgentModelRef ?? null;
+      const settings = await callMethod(
+        msg.senderId,
+        "getAgentSettings",
+        {},
+      ).catch(() => null);
+      const model =
+        modelRefFromSettings(settings) ?? currentAgentModelRef ?? null;
       await onNewConversation({
         agentConfig: agentConfigFromSettings(settings, model),
       });
@@ -328,7 +368,12 @@ export const MessageCard = React.memo(function MessageCard({
       console.warn("[MessageCard] Clean local chat launch failed:", err);
       setCleanStartState("failed");
     }
-  }, [callMethod, currentAgentModelRef, messageActions?.onNewConversation, msg.senderId]);
+  }, [
+    callMethod,
+    currentAgentModelRef,
+    messageActions?.onNewConversation,
+    msg.senderId,
+  ]);
 
   const handleScheduleResumeAtReset = useCallback(async () => {
     const diagnostic = msg.diagnostic;
@@ -368,7 +413,7 @@ export const MessageCard = React.memo(function MessageCard({
       setForkError(null);
       setEditMode(mode);
     },
-    [msg.content]
+    [msg.content],
   );
   const forkFromHere = useCallback(() => {
     setForkError(null);
@@ -392,7 +437,8 @@ export const MessageCard = React.memo(function MessageCard({
       setEditMode(null);
     } catch (err) {
       console.error("[MessageCard] edit failed:", err);
-      if (mode === "fork") setForkError(errorMessage(err, "Edit and fork failed"));
+      if (mode === "fork")
+        setForkError(errorMessage(err, "Edit and fork failed"));
     } finally {
       setEditSubmitting(false);
     }
@@ -404,11 +450,17 @@ export const MessageCard = React.memo(function MessageCard({
     if (data) {
       const compiled = inlineUiComponents?.get(data.id);
       return (
-        <Box key={key} className="message-row message-row-agent message-row-inline-ui">
+        <Box
+          key={key}
+          className="message-row message-row-agent message-row-inline-ui"
+        >
           <InlineUiMessage
             data={data}
+            messageId={msg.id}
             compiledComponent={compiled?.Component}
             compilationError={compiled?.error}
+            compilationErrorStack={compiled?.errorStack}
+            runtime={compiled?.runtime}
           />
         </Box>
       );
@@ -425,9 +477,13 @@ export const MessageCard = React.memo(function MessageCard({
           props={{
             ...(request.connectSpec as Record<string, unknown>),
             providerId: request.providerId,
-            ...(request.modelBaseUrl ? { modelBaseUrl: request.modelBaseUrl } : {}),
+            ...(request.modelBaseUrl
+              ? { modelBaseUrl: request.modelBaseUrl }
+              : {}),
             ...(request.reason ? { reason: request.reason } : {}),
-            ...(request.failureCode ? { failureCode: request.failureCode } : {}),
+            ...(request.failureCode
+              ? { failureCode: request.failureCode }
+              : {}),
             agentParticipantId: request.agentParticipantId,
             ...(selfId ? { modelPersistenceParticipantId: selfId } : {}),
             ...(browserHandoffCaller
@@ -442,7 +498,7 @@ export const MessageCard = React.memo(function MessageCard({
               callMethod: (
                 participantId: string,
                 method: string,
-                args: unknown
+                args: unknown,
               ) => Promise<unknown>;
             }
           }
@@ -460,9 +516,15 @@ export const MessageCard = React.memo(function MessageCard({
     return (
       <Box key={key} className="message-row message-row-system">
         {msg.automation ? (
-          <AutomationActivity activity={msg.automation} client={automationClient} />
+          <AutomationActivity
+            activity={msg.automation}
+            client={automationClient}
+          />
         ) : (
-          <AutomationActivity definition={msg.automationDefinition!} client={automationClient} />
+          <AutomationActivity
+            definition={msg.automationDefinition!}
+            client={automationClient}
+          />
         )}
       </Box>
     );
@@ -562,7 +624,8 @@ export const MessageCard = React.memo(function MessageCard({
                     variant="soft"
                     color={resumeScheduleState === "failed" ? "red" : "blue"}
                     disabled={
-                      resumeScheduleState === "scheduling" || resumeScheduleState === "scheduled"
+                      resumeScheduleState === "scheduling" ||
+                      resumeScheduleState === "scheduled"
                     }
                     onClick={handleScheduleResumeAtReset}
                     title="Resume this turn when the provider limit resets"
@@ -611,7 +674,10 @@ export const MessageCard = React.memo(function MessageCard({
                     size="1"
                     variant="soft"
                     color={cleanStartState === "failed" ? "red" : "blue"}
-                    disabled={cleanStartState === "starting" || cleanStartState === "started"}
+                    disabled={
+                      cleanStartState === "starting" ||
+                      cleanStartState === "started"
+                    }
                     onClick={handleStartCleanLocalChat}
                     title="Open a new chat with this local model and no previous transcript"
                   >
@@ -636,7 +702,11 @@ export const MessageCard = React.memo(function MessageCard({
   if (msg.contentType === "approval" && msg.approval) {
     const approval = msg.approval;
     const color =
-      approval.status === "granted" ? "green" : approval.status === "denied" ? "red" : "amber";
+      approval.status === "granted"
+        ? "green"
+        : approval.status === "denied"
+          ? "red"
+          : "amber";
     const title =
       approval.status === "granted"
         ? "Approved"
@@ -699,13 +769,16 @@ export const MessageCard = React.memo(function MessageCard({
   const isSelfAuthored = Boolean(selfId && msg.senderId === selfId);
   const isEdited = msg.revision !== undefined || msg.editedAt !== undefined;
   // Show a delivery badge for the user's own non-retracted real messages.
-  const showAckBadge = isSelfAuthored && !msg.retracted && !hasError && Boolean(msg.receipts);
+  const showAckBadge =
+    isSelfAuthored && !msg.retracted && !hasError && Boolean(msg.receipts);
   // An unread own message keeps the in-place outbox edit; a READ own message or
   // an agent message can only be forked (the `message.edited` reducer drops
   // edits once a recipient has read the message).
-  const isUnreadOutbox = isSelfAuthored && (!msg.receipts || msg.receipts.aggregate === "pending");
+  const isUnreadOutbox =
+    isSelfAuthored && (!msg.receipts || msg.receipts.aggregate === "pending");
   // Fork/edit menu available only once the message has a durable seq (fork point).
-  const canFork = Boolean(forkState) && msg.seq !== undefined && !isStreaming && !msg.pending;
+  const canFork =
+    Boolean(forkState) && msg.seq !== undefined && !isStreaming && !msg.pending;
   const showForkMenu = canFork && msg.kind === "message";
 
   // A retracted message collapses to a slim tombstone — no content, actions,
@@ -714,7 +787,10 @@ export const MessageCard = React.memo(function MessageCard({
     return (
       <Box
         id={`message-${msg.id}`}
-        className={classNames("message-row", isClient ? "message-row-client" : "message-row-agent")}
+        className={classNames(
+          "message-row",
+          isClient ? "message-row-client" : "message-row-agent",
+        )}
       >
         <Card className="message-card message-card-tombstone">
           <Flex align="center" gap="2">
@@ -739,7 +815,7 @@ export const MessageCard = React.memo(function MessageCard({
       className={classNames(
         "message-row",
         isClient ? "message-row-client" : "message-row-agent",
-        isSecondary && "message-row-tier2"
+        isSecondary && "message-row-tier2",
       )}
     >
       <Card
@@ -747,7 +823,7 @@ export const MessageCard = React.memo(function MessageCard({
           "message-card",
           isClient && "message-card-client",
           hasError && "message-card-error",
-          isSecondary && "message-card-tier2"
+          isSecondary && "message-card-tier2",
         )}
       >
         <Flex className="message-card-body" direction="column" gap="2">
@@ -862,7 +938,9 @@ export const MessageCard = React.memo(function MessageCard({
                     </IconButton>
                   </DropdownMenu.Trigger>
                   <DropdownMenu.Content align="end">
-                    <DropdownMenu.Item onSelect={forkFromHere}>Fork from here</DropdownMenu.Item>
+                    <DropdownMenu.Item onSelect={forkFromHere}>
+                      Fork from here
+                    </DropdownMenu.Item>
                     {isUnreadOutbox ? (
                       <DropdownMenu.Item onSelect={() => openEdit("outbox")}>
                         Edit
@@ -917,11 +995,14 @@ export const MessageCard = React.memo(function MessageCard({
               <Box
                 className="message-content"
                 style={
-                  !isStreaming && msg.content.length > 6_000 && !longContentExpanded
+                  !isStreaming &&
+                  msg.content.length > 6_000 &&
+                  !longContentExpanded
                     ? {
                         maxHeight: "28rem",
                         overflow: "hidden",
-                        maskImage: "linear-gradient(to bottom, black 85%, transparent)",
+                        maskImage:
+                          "linear-gradient(to bottom, black 85%, transparent)",
                       }
                     : undefined
                 }
@@ -937,7 +1018,9 @@ export const MessageCard = React.memo(function MessageCard({
                   size="1"
                   variant="ghost"
                   color="gray"
-                  onClick={() => setLongContentExpanded((expanded) => !expanded)}
+                  onClick={() =>
+                    setLongContentExpanded((expanded) => !expanded)
+                  }
                 >
                   {longContentExpanded ? "Show less" : "Show full message"}
                 </Button>
@@ -991,8 +1074,15 @@ export const MessageCard = React.memo(function MessageCard({
                 Cancel
               </Button>
             </Dialog.Close>
-            <Button disabled={editSubmitting || !editText.trim()} onClick={() => void submitEdit()}>
-              {editSubmitting ? "Working…" : editMode === "outbox" ? "Save" : "Edit & fork"}
+            <Button
+              disabled={editSubmitting || !editText.trim()}
+              onClick={() => void submitEdit()}
+            >
+              {editSubmitting
+                ? "Working…"
+                : editMode === "outbox"
+                  ? "Save"
+                  : "Edit & fork"}
             </Button>
           </Flex>
         </Dialog.Content>
@@ -1025,17 +1115,26 @@ function ForkRow({ fork }: { fork: NonNullable<ChatMessage["fork"]> }) {
               forkState.actions.clearError();
               void (async () => {
                 try {
-                  await forkState.actions.markForkRead?.(fork.forkedChannelId, fork.headSeq);
+                  await forkState.actions.markForkRead?.(
+                    fork.forkedChannelId,
+                    fork.headSeq,
+                  );
                 } catch (cause) {
                   forkState.actions.reportError(
                     "Could not save the conversation read position",
-                    cause
+                    cause,
                   );
                 }
                 try {
-                  await forkState.actions.switchTo(fork.forkedChannelId, fork.forkedContextId);
+                  await forkState.actions.switchTo(
+                    fork.forkedChannelId,
+                    fork.forkedContextId,
+                  );
                 } catch (cause) {
-                  forkState.actions.reportError("Could not switch conversations", cause);
+                  forkState.actions.reportError(
+                    "Could not switch conversations",
+                    cause,
+                  );
                 }
               })();
             }}

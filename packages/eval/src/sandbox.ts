@@ -32,9 +32,16 @@ import {
   type ExternalRequireContext,
   type LoadSourceFile,
 } from "./sourceFiles.js";
-import { createConsoleCapture, formatConsoleEntry, formatConsoleOutput } from "./consoleCapture.js";
+import {
+  createConsoleCapture,
+  formatConsoleEntry,
+  formatConsoleOutput,
+} from "./consoleCapture.js";
 import { getAsyncTracking } from "./asyncTracking.js";
-import { assertNoPreInjectedImports, assertNamedExportsExist } from "./importValidation.js";
+import {
+  assertNoPreInjectedImports,
+  assertNamedExportsExist,
+} from "./importValidation.js";
 import { instrumentDeadlineCheckpoints } from "./deadline.js";
 
 // =============================================================================
@@ -42,7 +49,11 @@ import { instrumentDeadlineCheckpoints } from "./deadline.js";
 // =============================================================================
 
 export interface SandboxImportLoader {
-  (specifier: string, ref: string | undefined, externals: string[]): Promise<LibraryModuleArtifact>;
+  (
+    specifier: string,
+    ref: string | undefined,
+    externals: string[],
+  ): Promise<LibraryModuleArtifact>;
   /** Optional build-backed probe supplied by Vibestudio hosts. */
   resolveWorkspaceImport?: (specifier: string) => Promise<boolean>;
 }
@@ -185,7 +196,10 @@ function structuredFailureKind(error: unknown): SandboxFailureKind | undefined {
   const errorData = (error as { errorData?: unknown }).errorData;
   if (!errorData || typeof errorData !== "object") return undefined;
   const data = errorData as Record<string, unknown>;
-  if (data["failureKind"] === "infrastructure" || data["failureKind"] === "user-code") {
+  if (
+    data["failureKind"] === "infrastructure" ||
+    data["failureKind"] === "user-code"
+  ) {
     return data["failureKind"];
   }
   const vcsError = data["vcsError"];
@@ -227,7 +241,8 @@ function structuredFailureKind(error: unknown): SandboxFailureKind | undefined {
     (acquisition as Record<string, unknown>)["pending"] === false &&
     authorityFailure &&
     typeof authorityFailure === "object" &&
-    (authorityFailure as Record<string, unknown>)["reasonCode"] === "approval-required"
+    (authorityFailure as Record<string, unknown>)["reasonCode"] ===
+      "approval-required"
   ) {
     return "infrastructure";
   }
@@ -237,14 +252,15 @@ function structuredFailureKind(error: unknown): SandboxFailureKind | undefined {
 async function runInfrastructurePhase<T>(
   code: string,
   operation: () => Promise<T>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
 ): Promise<T> {
   try {
     return await operation();
   } catch (error) {
     if (signal?.aborted) throw error;
     const structuredCode = structuredFailureCode(error);
-    if (structuredCode && CORRECTABLE_IMPORT_FAILURE_CODES.has(structuredCode)) throw error;
+    if (structuredCode && CORRECTABLE_IMPORT_FAILURE_CODES.has(structuredCode))
+      throw error;
     if (error instanceof SandboxInfrastructureError) throw error;
     throw new SandboxInfrastructureError(code, error);
   }
@@ -260,9 +276,13 @@ export interface CompileResult<T> {
   error?: string;
   /** Developer-facing stack for the source-loading/compilation boundary. */
   errorStack?: string;
+  /** Runtime diagnostics scoped to this compiled component instance. */
+  runtime?: { console: ReturnType<typeof createConsoleCapture> };
 }
 
-export interface CompileModuleResult<T extends Record<string, unknown> = Record<string, unknown>> {
+export interface CompileModuleResult<
+  T extends Record<string, unknown> = Record<string, unknown>,
+> {
   success: boolean;
   module?: T;
   cacheKey?: string;
@@ -280,19 +300,21 @@ export interface CompileComponentOptions {
   sourceFiles?: Record<string, string>;
   /** Source-file loader for resolving relative imports. */
   loadSourceFile?: LoadSourceFile;
+  /** Capture the component's lexical console with this retained-entry capacity. */
+  consoleCapacity?: number;
 }
 
 // =============================================================================
 // Module Map Helpers
 // =============================================================================
 
-function getModuleMap(override?: Record<string, unknown>): Record<string, unknown> {
+function getModuleMap(
+  override?: Record<string, unknown>,
+): Record<string, unknown> {
   return (
     override ??
-    (((globalThis as Record<string, unknown>)["__vibestudioModuleMap__"] ??= {}) as Record<
-      string,
-      unknown
-    >)
+    (((globalThis as Record<string, unknown>)["__vibestudioModuleMap__"] ??=
+      {}) as Record<string, unknown>)
   );
 }
 
@@ -306,11 +328,14 @@ interface LoadedLibraryMetadata {
  * the host, so an authored import can never replace React or another exposed
  * panel module merely because it names the same specifier.
  */
-const loadedLibraries = new WeakMap<Record<string, unknown>, Map<string, LoadedLibraryMetadata>>();
+const loadedLibraries = new WeakMap<
+  Record<string, unknown>,
+  Map<string, LoadedLibraryMetadata>
+>();
 
 function loadedLibraryMetadata(
   moduleMap: Record<string, unknown>,
-  specifier: string
+  specifier: string,
 ): LoadedLibraryMetadata | undefined {
   return loadedLibraries.get(moduleMap)?.get(specifier);
 }
@@ -332,11 +357,14 @@ async function loadLibraryBundle(
   freezeModuleNamespace?: <T>(value: T) => T,
   loadImport?: SandboxImportLoader,
   confinement?: "private-global",
-  ref?: string
+  ref?: string,
 ): Promise<void> {
   const refKey = importRefKey(ref);
   const existing = loadedLibraryMetadata(moduleMap, specifier);
-  if (existing?.bundle === artifact.bundle && moduleMap[specifier] !== undefined) {
+  if (
+    existing?.bundle === artifact.bundle &&
+    moduleMap[specifier] !== undefined
+  ) {
     // Two refs may resolve to byte-identical artifacts. The acquired artifact
     // is already active, but remember the newly requested ref so future calls
     // can still make the correct cache decision.
@@ -372,8 +400,9 @@ async function loadLibraryBundle(
       ) {
         throw originalError;
       }
-      const dependencyArtifact = await runInfrastructurePhase("package_load_failed", () =>
-        loadImport(dependency, undefined, Object.keys(moduleMap))
+      const dependencyArtifact = await runInfrastructurePhase(
+        "package_load_failed",
+        () => loadImport(dependency, undefined, Object.keys(moduleMap)),
       );
       await loadLibraryBundle(
         dependency,
@@ -384,7 +413,7 @@ async function loadLibraryBundle(
         freezeModuleNamespace,
         loadImport,
         confinement,
-        undefined
+        undefined,
       );
       return resolvedRequire(dependency);
     }
@@ -417,7 +446,7 @@ async function loadImports(
   requireFn?: (id: string) => unknown,
   compileFunction?: CompileFunction,
   freezeModuleNamespace?: <T>(value: T) => T,
-  confinement?: "private-global"
+  confinement?: "private-global",
 ): Promise<void> {
   const moduleMap = getModuleMap(moduleMapOverride);
   for (const [specifier, refValue] of Object.entries(imports)) {
@@ -431,8 +460,9 @@ async function loadImports(
       if (!existing || existing.ref === importRefKey(ref)) continue;
     } else {
       if (installPreloadedModuleAlias(specifier, moduleMap)) continue;
-      const loadedFromHost = await runInfrastructurePhase("package_load_failed", () =>
-        loadLazyHostModule(specifier, moduleMap, moduleMapOverride)
+      const loadedFromHost = await runInfrastructurePhase(
+        "package_load_failed",
+        () => loadLazyHostModule(specifier, moduleMap, moduleMapOverride),
       );
       if (loadedFromHost) continue;
     }
@@ -444,7 +474,7 @@ async function loadImports(
     // be corrected by the agent instead of terminating the whole turn as an
     // infrastructure outage.
     const artifact = await runInfrastructurePhase("package_load_failed", () =>
-      loadImport(specifier, ref, externals)
+      loadImport(specifier, ref, externals),
     );
     await loadLibraryBundle(
       specifier,
@@ -455,7 +485,7 @@ async function loadImports(
       freezeModuleNamespace,
       loadImport,
       confinement,
-      ref
+      ref,
     );
   }
 }
@@ -476,7 +506,7 @@ async function loadImports(
 async function loadLazyHostModule(
   specifier: string,
   moduleMap: Record<string, unknown>,
-  moduleMapOverride?: Record<string, unknown>
+  moduleMapOverride?: Record<string, unknown>,
 ): Promise<boolean> {
   // executeSandbox resolves the ambient map up front and passes that same
   // object through its helpers. Treat only a genuinely private map as a
@@ -490,12 +520,15 @@ async function loadLazyHostModule(
     !!loaders &&
     typeof loaders === "object" &&
     typeof (loaders as Record<string, unknown>)[specifier] === "function";
-  const hasNativeImport = nativeSpecifiers instanceof Set && nativeSpecifiers.has(specifier);
+  const hasNativeImport =
+    nativeSpecifiers instanceof Set && nativeSpecifiers.has(specifier);
   if (!hasGeneratedLoader && !hasNativeImport) return false;
 
   const asyncRequire = getAsyncRequire();
   if (!asyncRequire) {
-    throw new Error(`Lazy host module ${specifier} has no async module runtime`);
+    throw new Error(
+      `Lazy host module ${specifier} has no async module runtime`,
+    );
   }
   const loaded = await asyncRequire(specifier);
   if (moduleMap[specifier] === undefined) moduleMap[specifier] = loaded;
@@ -504,7 +537,7 @@ async function loadLazyHostModule(
 
 function installPreloadedModuleAlias(
   specifier: string,
-  moduleMap: Record<string, unknown>
+  moduleMap: Record<string, unknown>,
 ): boolean {
   const candidates: string[] = [];
   const flatScoped = specifier.match(/^@workspace-([^/]+)$/u);
@@ -524,7 +557,7 @@ function installLazyImportLoader(
   loadImport: SandboxOptions["loadImport"] | undefined,
   moduleMapOverride?: Record<string, unknown>,
   requireFn?: (id: string) => unknown,
-  compileFunction?: CompileFunction
+  compileFunction?: CompileFunction,
 ): (() => void) | null {
   if (!loadImport) return null;
   const globals = globalThis as Record<string, unknown>;
@@ -536,15 +569,21 @@ function installLazyImportLoader(
   // (`cdpAutomation.ts`). The closure captures this run's moduleMap/requireFn; the shared slot
   // means two concurrent cross-object runs could clobber it, but it only loads the stateless
   // CDP-client module, so there is no cross-owner data leak.
-  globals["__vibestudioLoadImport__"] = async (specifier: string, refValue?: string) => {
+  globals["__vibestudioLoadImport__"] = async (
+    specifier: string,
+    refValue?: string,
+  ) => {
     const moduleMap = getModuleMap(moduleMapOverride);
     const ref = refValue === "latest" ? undefined : refValue;
     const existing = loadedLibraryMetadata(moduleMap, specifier);
-    if (moduleMap[specifier] !== undefined && (!existing || existing.ref === importRefKey(ref))) {
+    if (
+      moduleMap[specifier] !== undefined &&
+      (!existing || existing.ref === importRefKey(ref))
+    ) {
       return moduleMap[specifier];
     }
     const artifact = await runInfrastructurePhase("package_load_failed", () =>
-      loadImport(specifier, ref, Object.keys(moduleMap))
+      loadImport(specifier, ref, Object.keys(moduleMap)),
     );
     await loadLibraryBundle(
       specifier,
@@ -555,7 +594,7 @@ function installLazyImportLoader(
       undefined,
       loadImport,
       undefined,
-      ref
+      ref,
     );
     return moduleMap[specifier];
   };
@@ -572,7 +611,7 @@ async function inferSandboxImports(
     importerPath?: string;
     loadSourceFile?: LoadSourceFile;
     explicitImports?: Record<string, string>;
-  }
+  },
 ): Promise<Record<string, string>> {
   const inferred = await inferImportsFromPackageJson(missing, context);
   if (!loadImport.resolveWorkspaceImport) return inferred;
@@ -586,13 +625,13 @@ async function inferSandboxImports(
     (specifier) =>
       inferred[specifier] === undefined &&
       !specifier.startsWith("node:") &&
-      !specifier.startsWith("cloudflare:")
+      !specifier.startsWith("cloudflare:"),
   );
   const resolutions = await Promise.all(
     unresolved.map(async (specifier) => ({
       specifier,
       resolved: await loadImport.resolveWorkspaceImport!(specifier),
-    }))
+    })),
   );
   for (const { specifier, resolved } of resolutions) {
     if (resolved) inferred[specifier] = "latest";
@@ -613,21 +652,28 @@ async function ensureRequires(
     freezeModuleNamespace?: <T>(value: T) => T;
     confinement?: "private-global";
   } = {},
-  context?: ExternalRequireContext
+  context?: ExternalRequireContext,
 ): Promise<void> {
   if (requires.length === 0) return;
   const requireFn = options.require ?? getDefaultRequire();
-  if (!requireFn) throw new Error("__vibestudioRequire__ not available. Build may be outdated.");
+  if (!requireFn)
+    throw new Error(
+      "__vibestudioRequire__ not available. Build may be outdated.",
+    );
 
   let validation = validateRequires(requires, requireFn);
   if (!validation.valid && options.loadImport) {
     const moduleMap = getModuleMap(options.moduleMap);
     const missing = requires.filter((r) => !moduleMap[r]);
-    const inferredImports = await inferSandboxImports(missing, options.loadImport, {
-      importerPath: context?.importerPath ?? options.sourcePath,
-      loadSourceFile: options.loadSourceFile,
-      explicitImports: options.imports,
-    });
+    const inferredImports = await inferSandboxImports(
+      missing,
+      options.loadImport,
+      {
+        importerPath: context?.importerPath ?? options.sourcePath,
+        loadSourceFile: options.loadSourceFile,
+        explicitImports: options.imports,
+      },
+    );
 
     if (Object.keys(inferredImports).length > 0) {
       await loadImports(
@@ -637,7 +683,7 @@ async function ensureRequires(
         options.require,
         options.compileFunction,
         options.freezeModuleNamespace,
-        options.confinement
+        options.confinement,
       );
       validation = validateRequires(requires, requireFn);
     }
@@ -650,18 +696,25 @@ async function ensureRequires(
   }
 
   if (!validation.valid) {
-    const missingModules = requires.filter((r) => !getModuleMap(options.moduleMap)[r]);
-    const missingDeclarations = await getMissingPackageDeclarations(missingModules, {
-      importerPath: context?.importerPath ?? options.sourcePath,
-      loadSourceFile: options.loadSourceFile,
-      explicitImports: options.imports,
-    });
+    const missingModules = requires.filter(
+      (r) => !getModuleMap(options.moduleMap)[r],
+    );
+    const missingDeclarations = await getMissingPackageDeclarations(
+      missingModules,
+      {
+        importerPath: context?.importerPath ?? options.sourcePath,
+        loadSourceFile: options.loadSourceFile,
+        explicitImports: options.imports,
+      },
+    );
     if (missingDeclarations.length > 0) {
       throw new Error(
-        `Package import not declared for file-loaded source: ${missingDeclarations.join("; ")}. Add it to package.json dependencies or pass the imports parameter.`
+        `Package import not declared for file-loaded source: ${missingDeclarations.join("; ")}. Add it to package.json dependencies or pass the imports parameter.`,
       );
     }
-    throw new Error(validation.error ?? `Module "${validation.missingModule}" not available`);
+    throw new Error(
+      validation.error ?? `Module "${validation.missingModule}" not available`,
+    );
   }
 }
 
@@ -678,8 +731,14 @@ function safeSerialize(value: unknown, maxDepth = 10): unknown {
 
   function serialize(val: unknown, depth: number): unknown {
     if (val === null || val === undefined) return val;
-    if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") return val;
-    if (typeof val === "function") return `[Function: ${val.name || "anonymous"}]`;
+    if (
+      typeof val === "string" ||
+      typeof val === "number" ||
+      typeof val === "boolean"
+    )
+      return val;
+    if (typeof val === "function")
+      return `[Function: ${val.name || "anonymous"}]`;
     if (typeof val === "symbol") return val.toString();
     if (typeof val === "bigint") return val.toString();
     if (typeof val !== "object") return String(val);
@@ -688,17 +747,29 @@ function safeSerialize(value: unknown, maxDepth = 10): unknown {
     seen.add(val);
     if (val instanceof Date) return val.toISOString();
     if (val instanceof RegExp) return val.toString();
-    if (val instanceof Error) return { name: val.name, message: val.message, stack: val.stack };
+    if (val instanceof Error)
+      return { name: val.name, message: val.message, stack: val.stack };
     if (val instanceof Map)
-      return { __type: "Map", entries: serialize(Array.from(val.entries()), depth + 1) };
+      return {
+        __type: "Map",
+        entries: serialize(Array.from(val.entries()), depth + 1),
+      };
     if (val instanceof Set)
-      return { __type: "Set", values: serialize(Array.from(val.values()), depth + 1) };
-    if (ArrayBuffer.isView(val) || val instanceof ArrayBuffer) return `[${val.constructor.name}]`;
-    if (Array.isArray(val)) return val.map((item) => serialize(item, depth + 1));
+      return {
+        __type: "Set",
+        values: serialize(Array.from(val.values()), depth + 1),
+      };
+    if (ArrayBuffer.isView(val) || val instanceof ArrayBuffer)
+      return `[${val.constructor.name}]`;
+    if (Array.isArray(val))
+      return val.map((item) => serialize(item, depth + 1));
     const result: Record<string, unknown> = {};
     for (const key of Object.keys(val)) {
       try {
-        result[key] = serialize((val as Record<string, unknown>)[key], depth + 1);
+        result[key] = serialize(
+          (val as Record<string, unknown>)[key],
+          depth + 1,
+        );
       } catch {
         result[key] = "[Unserializable]";
       }
@@ -740,7 +811,10 @@ function returnTrailingExpression(code: string): string {
     return code;
   }
   const statement = program.body.at(-1);
-  const expression = statement?.type === "ExpressionStatement" ? statement.expression : undefined;
+  const expression =
+    statement?.type === "ExpressionStatement"
+      ? statement.expression
+      : undefined;
   if (!statement || !expression) return code;
   return (
     code.slice(0, statement.start) +
@@ -833,7 +907,10 @@ function repairEscapedWhitespaceOutsideLiterals(code: string): string {
     else if (char === "/" && regexCanStartAfter(previousSignificant)) {
       mode = "regex";
       regexClass = false;
-    } else if (char === "\\" && (next === "n" || next === "r" || next === "t")) {
+    } else if (
+      char === "\\" &&
+      (next === "n" || next === "r" || next === "t")
+    ) {
       if (next === "r" && code[index + 2] === "\\" && code[index + 3] === "n") {
         output += "\n";
         index += 3;
@@ -964,22 +1041,29 @@ function returnTrailingObjectLiteral(code: string): string {
     if (!/\s/u.test(char)) previousSignificant = char;
   }
 
-  if (candidate < 0 || parens !== 0 || brackets !== 0 || braces !== 0) return code;
+  if (candidate < 0 || parens !== 0 || brackets !== 0 || braces !== 0)
+    return code;
   const prefix = code.slice(0, candidate);
   if (prefix.trim() && !prefix.trimEnd().endsWith(";")) return code;
   const suffix = code.slice(candidate).trim().replace(/;\s*$/u, "");
-  if (!suffix.startsWith("{") || !suffix.endsWith("}") || !/[:,]/u.test(suffix)) return code;
+  if (!suffix.startsWith("{") || !suffix.endsWith("}") || !/[:,]/u.test(suffix))
+    return code;
   return `${prefix}return (${suffix});`;
 }
 
-function normalizeAgentEvalCode(code: string, repairMissingCallParens = false): string {
+function normalizeAgentEvalCode(
+  code: string,
+  repairMissingCallParens = false,
+): string {
   const portableCode = repairEscapedWhitespaceOutsideLiterals(
-    liftPortableNodeFsSyncCalls(repairLeakedJsonEnvelopeSuffix(code))
+    liftPortableNodeFsSyncCalls(repairLeakedJsonEnvelopeSuffix(code)),
   );
   return returnTrailingObjectLiteral(
     awaitTrailingAsyncIife(
-      repairMissingCallParens ? repairMissingCallParensBeforeSemicolon(portableCode) : portableCode
-    )
+      repairMissingCallParens
+        ? repairMissingCallParensBeforeSemicolon(portableCode)
+        : portableCode,
+    ),
   );
 }
 
@@ -1032,12 +1116,25 @@ function liftPortableNodeFsSyncCalls(code: string): string {
   // methods explicitly, as it would against any promise-backed filesystem.
   const nestedFunctionRanges = findNestedFunctionBodyRanges(code);
   const aliasPattern = [...aliases].map(escapeRegExp).join("|");
-  const methodPattern = Object.keys(PORTABLE_FS_SYNC_METHODS).map(escapeRegExp).join("|");
-  const call = new RegExp(`\\b(${aliasPattern})\\s*\\.\\s*(${methodPattern})\\s*\\(`, "gu");
-  return code.replace(call, (source, alias: string, syncName: string, offset: number) => {
-    if (nestedFunctionRanges.some(([start, end]) => offset >= start && offset < end)) return source;
-    return `await ${alias}.${PORTABLE_FS_SYNC_METHODS[syncName]}(`;
-  });
+  const methodPattern = Object.keys(PORTABLE_FS_SYNC_METHODS)
+    .map(escapeRegExp)
+    .join("|");
+  const call = new RegExp(
+    `\\b(${aliasPattern})\\s*\\.\\s*(${methodPattern})\\s*\\(`,
+    "gu",
+  );
+  return code.replace(
+    call,
+    (source, alias: string, syncName: string, offset: number) => {
+      if (
+        nestedFunctionRanges.some(
+          ([start, end]) => offset >= start && offset < end,
+        )
+      )
+        return source;
+      return `await ${alias}.${PORTABLE_FS_SYNC_METHODS[syncName]}(`;
+    },
+  );
 }
 
 function escapeRegExp(value: string): string {
@@ -1051,7 +1148,9 @@ function escapeRegExp(value: string): string {
 function findNestedFunctionBodyRanges(code: string): Array<[number, number]> {
   const starts = [
     ...code.matchAll(/\b(?:async\s+)?function\b[^{}]*\{/gu),
-    ...code.matchAll(/(?:\([^()]*\)|[A-Za-z_$][\w$]*)\s*(?::[^={};]+)?=>\s*\{/gu),
+    ...code.matchAll(
+      /(?:\([^()]*\)|[A-Za-z_$][\w$]*)\s*(?::[^={};]+)?=>\s*\{/gu,
+    ),
   ]
     .map((match) => (match.index ?? 0) + match[0].lastIndexOf("{"))
     .sort((a, b) => a - b);
@@ -1077,7 +1176,13 @@ function findExpressionArrowRanges(code: string): Array<[number, number]> {
     let parens = 0;
     let brackets = 0;
     let braces = 0;
-    let mode: "code" | "single" | "double" | "template" | "line-comment" | "block-comment" = "code";
+    let mode:
+      | "code"
+      | "single"
+      | "double"
+      | "template"
+      | "line-comment"
+      | "block-comment" = "code";
     let escaped = false;
     let end = code.length;
     for (let index = start; index < code.length; index++) {
@@ -1156,7 +1261,13 @@ function findExpressionArrowRanges(code: string): Array<[number, number]> {
 
 function findBalancedBraceEnd(code: string, start: number): number | null {
   let depth = 0;
-  let mode: "code" | "single" | "double" | "template" | "line-comment" | "block-comment" = "code";
+  let mode:
+    | "code"
+    | "single"
+    | "double"
+    | "template"
+    | "line-comment"
+    | "block-comment" = "code";
   let escaped = false;
   for (let index = start; index < code.length; index++) {
     const char = code[index]!;
@@ -1218,7 +1329,8 @@ function repairMissingCallParensBeforeSemicolon(code: string): string {
       const semicolon = line.match(/^(.*);(\s*(?:\/\/.*)?)$/u);
       if (!semicolon) return line;
       const body = semicolon[1]!;
-      if (/^\s*(?:for|while|if|switch|catch|with)\s*\(/u.test(body)) return line;
+      if (/^\s*(?:for|while|if|switch|catch|with)\s*\(/u.test(body))
+        return line;
       if (!/[\w$.)\]]\s*\(/u.test(body)) return line;
 
       let mode: "code" | "single" | "double" | "template" = "code";
@@ -1249,7 +1361,8 @@ function repairMissingCallParensBeforeSemicolon(code: string): string {
         else if (char === "[") brackets++;
         else if (char === "]") brackets--;
       }
-      if (parens < 1 || parens > 3 || braces !== 0 || brackets !== 0) return line;
+      if (parens < 1 || parens > 3 || braces !== 0 || brackets !== 0)
+        return line;
       return `${body}${")".repeat(parens)};${semicolon[2] ?? ""}`;
     })
     .join("\n");
@@ -1259,7 +1372,13 @@ function repairMissingCallParensBeforeSemicolon(code: string): string {
   // above. Track delimiters across code state and close only a top-level
   // statement whose braces/brackets are balanced. The repaired program still
   // has to pass the real compiler before it can execute.
-  type Mode = "code" | "single" | "double" | "template" | "line-comment" | "block-comment";
+  type Mode =
+    | "code"
+    | "single"
+    | "double"
+    | "template"
+    | "line-comment"
+    | "block-comment";
   let mode: Mode = "code";
   let escaped = false;
   let parens = 0;
@@ -1328,7 +1447,9 @@ function repairMissingCallParensBeforeSemicolon(code: string): string {
       parens <= 3 &&
       braces === 0 &&
       brackets === 0 &&
-      !/^\s*(?:for|while|if|switch|catch|with)\s*\(/u.test(lineRepaired.slice(lineStart, index))
+      !/^\s*(?:for|while|if|switch|catch|with)\s*\(/u.test(
+        lineRepaired.slice(lineStart, index),
+      )
     ) {
       output += ")".repeat(parens);
       parens = 0;
@@ -1346,7 +1467,10 @@ function isPromise(value: unknown): value is Promise<unknown> {
 function createAbortError(signal: AbortSignal): Error {
   const reason = signal.reason;
   if (reason instanceof Error) return reason;
-  const message = typeof reason === "string" && reason.length > 0 ? reason : "Eval interrupted";
+  const message =
+    typeof reason === "string" && reason.length > 0
+      ? reason
+      : "Eval interrupted";
   const error = new Error(message);
   error.name = "AbortError";
   return error;
@@ -1374,7 +1498,7 @@ function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
       (error) => {
         signal.removeEventListener("abort", onAbort);
         reject(error);
-      }
+      },
     );
   });
 }
@@ -1398,7 +1522,7 @@ function withAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
  */
 export async function executeSandbox(
   code: string,
-  options: SandboxOptions = {}
+  options: SandboxOptions = {},
 ): Promise<SandboxResult> {
   const { syntax = "tsx", bindings = {} } = options;
   const { signal } = options;
@@ -1458,14 +1582,16 @@ export async function executeSandbox(
         options.loadImport,
         moduleMap,
         requireFn,
-        options.compileFunction
+        options.compileFunction,
       );
     }
 
     // Load on-demand imports
     if (options.imports && Object.keys(options.imports).length > 0) {
       if (!options.loadImport) {
-        throw new Error("loadImport callback required when imports are specified");
+        throw new Error(
+          "loadImport callback required when imports are specified",
+        );
       }
       await withAbort(
         loadImports(
@@ -1475,9 +1601,9 @@ export async function executeSandbox(
           requireFn,
           options.compileFunction,
           options.freezeModuleNamespace,
-          options.confinement
+          options.confinement,
         ),
-        signal
+        signal,
       );
     }
 
@@ -1510,15 +1636,18 @@ export async function executeSandbox(
                 freezeModuleNamespace: options.freezeModuleNamespace,
                 confinement: options.confinement,
               },
-              context
-            )
+              context,
+            ),
         ),
-        signal
+        signal,
       );
     const prepareAndTransform = async (source: string) => {
       const prepared = await prepare(source);
       throwIfAborted(signal);
-      const transformed = await withAbort(transformCode(prepared.code, { syntax }), signal);
+      const transformed = await withAbort(
+        transformCode(prepared.code, { syntax }),
+        signal,
+      );
       return { prepared, transformed };
     };
     let built: Awaited<ReturnType<typeof prepareAndTransform>>;
@@ -1550,7 +1679,8 @@ export async function executeSandbox(
       let active = true;
       const { atMs, timeoutMs } = options.deadline;
       const checkpoint = () => {
-        if (active && now() >= atMs) throw new Error(`eval timed out after ${timeoutMs}ms`);
+        if (active && now() >= atMs)
+          throw new Error(`eval timed out after ${timeoutMs}ms`);
       };
       executionBindings = {
         ...bindings,
@@ -1583,11 +1713,13 @@ export async function executeSandbox(
           loadSourceFile: options.loadSourceFile,
           explicitImports: options.imports,
         }),
-        signal
+        signal,
       );
       if (Object.keys(autoImports).length > 0) {
         throwIfAborted(signal);
-        options.onConsole?.(`[eval] Auto-loading: ${Object.keys(autoImports).join(", ")}...`);
+        options.onConsole?.(
+          `[eval] Auto-loading: ${Object.keys(autoImports).join(", ")}...`,
+        );
         await withAbort(
           loadImports(
             autoImports,
@@ -1596,17 +1728,21 @@ export async function executeSandbox(
             requireFn,
             options.compileFunction,
             options.freezeModuleNamespace,
-            options.confinement
+            options.confinement,
           ),
-          signal
+          signal,
         );
         validation = validateRequires(transformed.requires, requireFn);
       }
     }
     throwIfAborted(signal);
     if (!validation.valid) {
-      const preload = await withAbort(preloadRequires(transformed.requires), signal);
-      if (preload.success) validation = validateRequires(transformed.requires, requireFn);
+      const preload = await withAbort(
+        preloadRequires(transformed.requires),
+        signal,
+      );
+      if (preload.success)
+        validation = validateRequires(transformed.requires, requireFn);
     }
     throwIfAborted(signal);
     if (!validation.valid) {
@@ -1626,8 +1762,10 @@ export async function executeSandbox(
       const suggestedImports = Object.fromEntries(
         missingModules.map((m) => [
           m,
-          m.startsWith("@workspace") || m.startsWith("@vibestudio/") ? "latest" : "npm:latest",
-        ])
+          m.startsWith("@workspace") || m.startsWith("@vibestudio/")
+            ? "latest"
+            : "npm:latest",
+        ]),
       );
       const missingDeclarations = await withAbort(
         getMissingPackageDeclarations(missingModules, {
@@ -1635,7 +1773,7 @@ export async function executeSandbox(
           loadSourceFile: options.loadSourceFile,
           explicitImports: options.imports,
         }),
-        signal
+        signal,
       );
       const packageHint =
         missingDeclarations.length > 0
@@ -1652,7 +1790,10 @@ export async function executeSandbox(
 
     // (#2) Now that workspace modules are loaded, fail loudly on imports of
     // names they do not export (instead of a silent `undefined`).
-    assertNamedExportsExist(normalizedCode, (specifier) => moduleMap[specifier]);
+    assertNamedExportsExist(
+      normalizedCode,
+      (specifier) => moduleMap[specifier],
+    );
 
     // Enter tracking context
     if (tracking && trackingContext) {
@@ -1696,7 +1837,9 @@ export async function executeSandbox(
       }
       throwIfAborted(signal);
       return {
-        safeReturnValue: safeSerialize(returnValue ?? result.exports["default"]),
+        safeReturnValue: safeSerialize(
+          returnValue ?? result.exports["default"],
+        ),
         exports: result.exports,
       };
     };
@@ -1710,7 +1853,10 @@ export async function executeSandbox(
       try {
         panelJournalFooter = await renderPanelJournalFooter(journal);
       } catch (error) {
-        capture.proxy.warn("[eval] Failed to render the panel journal footer:", error);
+        capture.proxy.warn(
+          "[eval] Failed to render the panel journal footer:",
+          error,
+        );
       }
     }
     return {
@@ -1755,7 +1901,9 @@ export async function executeSandbox(
   }
 }
 
-function tryRequireRuntimeModule(requireFn: (id: string) => unknown): any | null {
+function tryRequireRuntimeModule(
+  requireFn: (id: string) => unknown,
+): any | null {
   try {
     return requireFn("@workspace/runtime") as any;
   } catch {
@@ -1773,7 +1921,9 @@ function createRuntimeJournal(runtimeModule: any): any | null {
   return new runtimeModule.journal.Journal();
 }
 
-async function renderPanelJournalFooter(journal: any): Promise<string | undefined> {
+async function renderPanelJournalFooter(
+  journal: any,
+): Promise<string | undefined> {
   const entries = Array.isArray(journal?.entries) ? journal.entries : [];
   if (entries.length === 0) return undefined;
   const operations = entries.map((entry: any) => {
@@ -1790,7 +1940,10 @@ async function renderPanelJournalFooter(journal: any): Promise<string | undefine
         return String(entry.type ?? "panel operation");
     }
   });
-  return ["[panel] Operations:", ...operations.map((line: string) => `- ${line}`)].join("\n");
+  return [
+    "[panel] Operations:",
+    ...operations.map((line: string) => `- ${line}`),
+  ].join("\n");
 }
 
 // =============================================================================
@@ -1805,14 +1958,25 @@ async function renderPanelJournalFooter(journal: any): Promise<string | undefine
  * The when-to-compile decision is made by the caller; callers store the result
  * in their own state (React useState / Map) to avoid recompilation on re-render.
  */
-export async function compileComponent<T = ComponentType<Record<string, unknown>>>(
+export async function compileComponent<
+  T = ComponentType<Record<string, unknown>>,
+>(
   code: string,
-  options: CompileComponentOptions = {}
+  options: CompileComponentOptions = {},
 ): Promise<CompileResult<T>> {
+  // When requested, the compiled component closes over this injected console
+  // for its complete render/event lifecycle. Callers choose the bound because
+  // only callers which present the diagnostic should retain it.
+  const consoleCapture =
+    options.consoleCapacity !== undefined
+      ? createConsoleCapture({ capacity: options.consoleCapacity })
+      : undefined;
   try {
     if (options.imports && Object.keys(options.imports).length > 0) {
       if (!options.loadImport) {
-        throw new Error("loadImport callback required when imports are specified");
+        throw new Error(
+          "loadImport callback required when imports are specified",
+        );
       }
       await loadImports(options.imports, options.loadImport);
     }
@@ -1834,30 +1998,41 @@ export async function compileComponent<T = ComponentType<Record<string, unknown>
             sourcePath: options.sourcePath,
             imports: options.imports,
           },
-          context
-        )
+          context,
+        ),
     );
 
     const transformed = await transformCode(prepared.code, { syntax: "tsx" });
 
     await ensureRequires(
-      transformed.requires.filter((specifier) => !prepared.localModuleIds.has(specifier)),
+      transformed.requires.filter(
+        (specifier) => !prepared.localModuleIds.has(specifier),
+      ),
       {
         loadImport: options.loadImport,
         loadSourceFile: options.loadSourceFile,
         sourcePath: options.sourcePath,
         imports: options.imports,
-      }
+      },
     );
 
     const cacheKey = transformed.code;
-    const Component = executeDefault<T>(cacheKey);
-    return { success: true, Component, cacheKey };
+    const Component = executeDefault<T>(
+      cacheKey,
+      consoleCapture ? { console: consoleCapture.proxy } : {},
+    );
+    return {
+      success: true,
+      Component,
+      cacheKey,
+      ...(consoleCapture ? { runtime: { console: consoleCapture } } : {}),
+    };
   } catch (err) {
     return {
       success: false,
       error: err instanceof Error ? err.message : String(err),
       ...(err instanceof Error && err.stack ? { errorStack: err.stack } : {}),
+      ...(consoleCapture ? { runtime: { console: consoleCapture } } : {}),
     };
   }
 }
@@ -1869,14 +2044,18 @@ export async function compileComponent<T = ComponentType<Record<string, unknown>
  * addition to their default component, so callers need the full module rather
  * than just the default export.
  */
-export async function compileModule<T extends Record<string, unknown> = Record<string, unknown>>(
+export async function compileModule<
+  T extends Record<string, unknown> = Record<string, unknown>,
+>(
   code: string,
-  options: CompileComponentOptions = {}
+  options: CompileComponentOptions = {},
 ): Promise<CompileModuleResult<T>> {
   try {
     if (options.imports && Object.keys(options.imports).length > 0) {
       if (!options.loadImport) {
-        throw new Error("loadImport callback required when imports are specified");
+        throw new Error(
+          "loadImport callback required when imports are specified",
+        );
       }
       await loadImports(options.imports, options.loadImport);
     }
@@ -1898,20 +2077,22 @@ export async function compileModule<T extends Record<string, unknown> = Record<s
             sourcePath: options.sourcePath,
             imports: options.imports,
           },
-          context
-        )
+          context,
+        ),
     );
 
     const transformed = await transformCode(prepared.code, { syntax: "tsx" });
 
     await ensureRequires(
-      transformed.requires.filter((specifier) => !prepared.localModuleIds.has(specifier)),
+      transformed.requires.filter(
+        (specifier) => !prepared.localModuleIds.has(specifier),
+      ),
       {
         loadImport: options.loadImport,
         loadSourceFile: options.loadSourceFile,
         sourcePath: options.sourcePath,
         imports: options.imports,
-      }
+      },
     );
 
     const cacheKey = transformed.code;

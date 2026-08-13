@@ -25,20 +25,32 @@ type InlineUiDescriptor =
   | NonNullable<ChatMessage["inlineUi"]>
   | NonNullable<ReturnType<typeof parseInlineUiData>>;
 
-function canonicalImports(imports: Record<string, string> | undefined): [string, string][] {
-  return Object.entries(imports ?? {}).sort(([left], [right]) => left.localeCompare(right));
+function canonicalImports(
+  imports: Record<string, string> | undefined,
+): [string, string][] {
+  return Object.entries(imports ?? {}).sort(([left], [right]) =>
+    left.localeCompare(right),
+  );
 }
 
 function renderRevisionKey(data: InlineUiDescriptor): string {
-  return JSON.stringify([data.source, canonicalImports(data.imports), data.renderedAt ?? null]);
+  return JSON.stringify([
+    data.source,
+    canonicalImports(data.imports),
+    data.renderedAt ?? null,
+  ]);
 }
 
 function compiledSourceKey(
   sourceCode: string,
   sourcePath: string | undefined,
-  imports: Record<string, string> | undefined
+  imports: Record<string, string> | undefined,
 ): string {
-  return JSON.stringify([sourcePath ?? null, canonicalImports(imports), sourceCode]);
+  return JSON.stringify([
+    sourcePath ?? null,
+    canonicalImports(imports),
+    sourceCode,
+  ]);
 }
 
 export function useInlineUi({
@@ -46,9 +58,9 @@ export function useInlineUi({
   loadSourceFile,
   loadImport,
 }: UseInlineUiOptions): InlineUiState {
-  const [inlineUiComponents, setInlineUiComponents] = useState<Map<string, InlineUiComponentEntry>>(
-    new Map()
-  );
+  const [inlineUiComponents, setInlineUiComponents] = useState<
+    Map<string, InlineUiComponentEntry>
+  >(new Map());
   const entriesRef = useRef(inlineUiComponents);
   const observedRevisionsRef = useRef(new Map<string, string>());
   const compiledSourcesRef = useRef(new Map<string, string>());
@@ -83,42 +95,66 @@ export function useInlineUi({
     const isCurrent = (id: string, revision: string) =>
       mountedRef.current && observedRevisionsRef.current.get(id) === revision;
 
-    const compileInlineUi = async (data: InlineUiDescriptor, revision: string) => {
+    const compileInlineUi = async (
+      data: InlineUiDescriptor,
+      revision: string,
+    ) => {
       if (!isCurrent(data.id, revision)) return;
       try {
         const sourceCode =
-          data.source.type === "file" ? await loadSourceFile?.(data.source.path) : data.source.code;
-        if (!sourceCode) throw new Error(`Unable to load inline UI source for ${data.id}`);
+          data.source.type === "file"
+            ? await loadSourceFile?.(data.source.path)
+            : data.source.code;
+        if (!sourceCode)
+          throw new Error(`Unable to load inline UI source for ${data.id}`);
         if (!isCurrent(data.id, revision)) return;
 
-        const sourcePath = data.source.type === "file" ? data.source.path : undefined;
-        const sourceKey = compiledSourceKey(sourceCode, sourcePath, data.imports);
+        const sourcePath =
+          data.source.type === "file" ? data.source.path : undefined;
+        const sourceKey = compiledSourceKey(
+          sourceCode,
+          sourcePath,
+          data.imports,
+        );
         const existing = entriesRef.current.get(data.id);
-        if (existing?.Component && compiledSourcesRef.current.get(data.id) === sourceKey) return;
+        if (
+          existing?.Component &&
+          compiledSourcesRef.current.get(data.id) === sourceKey
+        )
+          return;
 
         publishEntry(data.id, { cacheKey: sourceKey });
         const { compileComponent } = await import("@workspace/eval/sandbox");
-        const result = await compileComponent<NonNullable<InlineUiComponentEntry["Component"]>>(
-          sourceCode,
-          {
-            imports: data.imports,
-            sourcePath,
-            loadSourceFile,
-            loadImport,
-          }
-        );
+        const result = await compileComponent<
+          NonNullable<InlineUiComponentEntry["Component"]>
+        >(sourceCode, {
+          imports: data.imports,
+          sourcePath,
+          loadSourceFile,
+          loadImport,
+          consoleCapacity: 100,
+        });
         if (!isCurrent(data.id, revision)) return;
         if (result.success) {
           compiledSourcesRef.current.set(data.id, sourceKey);
-          publishEntry(data.id, { Component: result.Component!, cacheKey: result.cacheKey! });
+          publishEntry(data.id, {
+            Component: result.Component!,
+            cacheKey: result.cacheKey!,
+            runtime: result.runtime,
+          });
         } else {
           compiledSourcesRef.current.delete(data.id);
           console.error(
             `[InlineUiMessage] Component "${data.id}" compilation failed` +
               (data.source.type === "file" ? ` (${data.source.path})` : ""),
-            result.errorStack ?? result.error
+            result.errorStack ?? result.error,
           );
-          publishEntry(data.id, { cacheKey: sourceKey, error: result.error });
+          publishEntry(data.id, {
+            cacheKey: sourceKey,
+            error: result.error,
+            errorStack: result.errorStack,
+            runtime: result.runtime,
+          });
         }
       } catch (err) {
         if (!isCurrent(data.id, revision)) return;
@@ -126,11 +162,14 @@ export function useInlineUi({
         console.error(
           `[InlineUiMessage] Component "${data.id}" source loading failed` +
             (data.source.type === "file" ? ` (${data.source.path})` : ""),
-          err
+          err,
         );
         publishEntry(data.id, {
           cacheKey: revision,
           error: err instanceof Error ? err.message : String(err),
+          ...(err instanceof Error && err.stack
+            ? { errorStack: err.stack }
+            : {}),
         });
       }
     };
@@ -139,7 +178,8 @@ export function useInlineUi({
       // Compilation mutates the shared sandbox module registry. Serialize
       // revisions of one stable card so a slow superseded build cannot finish
       // last and restore an older package version behind the current UI.
-      const previous = compilationQueuesRef.current.get(data.id) ?? Promise.resolve();
+      const previous =
+        compilationQueuesRef.current.get(data.id) ?? Promise.resolve();
       const next = previous.then(() => compileInlineUi(data, revision));
       compilationQueuesRef.current.set(data.id, next);
       void next.finally(() => {

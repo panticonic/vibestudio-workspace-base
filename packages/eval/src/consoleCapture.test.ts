@@ -115,7 +115,9 @@ describe("createConsoleCapture", () => {
       capture.proxy.log("test");
 
       const entries = capture.getEntries();
-      expect(entries[0]!.timestamp).toBe(new Date("2024-01-01T12:00:00Z").getTime());
+      expect(entries[0]!.timestamp).toBe(
+        new Date("2024-01-01T12:00:00Z").getTime(),
+      );
     });
   });
 
@@ -309,5 +311,22 @@ describe("formatConsoleOutput", () => {
 
     const output = formatConsoleOutput(entries);
     expect(output).toBe("normal\n[WARN] warning\n[ERROR] error");
+  });
+});
+
+describe("bounded console capture", () => {
+  it("retains the newest entries and reports how many older entries were dropped", () => {
+    const capture = createConsoleCapture({ capacity: 2 });
+
+    capture.proxy.log("first");
+    capture.proxy.warn("second");
+    capture.proxy.error("third");
+
+    expect(capture.capacity).toBe(2);
+    expect(capture.getDroppedCount()).toBe(1);
+    expect(capture.getEntries().map(formatConsoleEntry)).toEqual([
+      "[WARN] second",
+      "[ERROR] third",
+    ]);
   });
 });
