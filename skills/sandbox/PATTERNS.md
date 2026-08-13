@@ -299,7 +299,7 @@ export default function CookieManager({ props, chat }) {
   const [cookies, setCookies] = useState([]);
   const [filter, setFilter] = useState("");
 
-  const load = () => browserData.getCookieSnapshot().then(({ cookies }) =>
+  const load = () => browserData.getCookiesForOrigin(location.origin).then((cookies) =>
     setCookies(filter
       ? cookies.filter(cookie => cookie.domain.includes(filter))
       : cookies)

@@ -7,7 +7,7 @@ import {
   workspaceChooserDialogOpenAtom,
   shellOverlayActiveAtom,
 } from "../state/appModeAtoms";
-import { nativeSlotRendererInstanceId, view } from "../shell/client";
+import { connectNativePanelAdapter, view } from "../shell/client";
 import { useShellEvent } from "../shell/useShellEvent";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { ConnectionSettingsDialog } from "./ConnectionSettingsDialog";
@@ -24,14 +24,19 @@ export default function MainMode() {
   const workspaceChooserOpen = useAtomValue(workspaceChooserDialogOpenAtom);
   const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
   const connectionSettingsOpen = useAtomValue(connectionSettingsDialogOpenAtom);
-  const setConnectionSettingsOpen = useSetAtom(connectionSettingsDialogOpenAtom);
+  const setConnectionSettingsOpen = useSetAtom(
+    connectionSettingsDialogOpenAtom
+  );
   const shellOverlayActive = useAtomValue(shellOverlayActiveAtom);
 
   // Mounted here, not next to the badge that opens it: the badge lives in the
   // panel tree, which breadcrumb mode unmounts, but this event arrives in both.
   useShellEvent(
     "open-connection-settings",
-    useCallback(() => setConnectionSettingsOpen(true), [setConnectionSettingsOpen])
+    useCallback(
+      () => setConnectionSettingsOpen(true),
+      [setConnectionSettingsOpen]
+    )
   );
 
   // Register shell overlays — hides panel views so dialogs aren't obscured
@@ -41,32 +46,23 @@ export default function MainMode() {
   useEffect(() => {
     void view
       .setShellOverlay(shellOverlayActive)
-      .catch((error: unknown) => console.warn("[MainMode] Shell overlay sync failed:", error));
+      .catch((error: unknown) =>
+        console.warn("[MainMode] Shell overlay sync failed:", error)
+      );
   }, [shellOverlayActive]);
 
   useEffect(() => {
-    void view
-      .setHostedShellReady({ ready: true, rendererInstanceId: nativeSlotRendererInstanceId })
-      .catch((err: unknown) => console.warn("[MainMode] Hosted shell ready failed:", err));
-    const markNotReady = () => {
-      void view
-        .setHostedShellReady({ ready: false, rendererInstanceId: nativeSlotRendererInstanceId })
-        .catch((error: unknown) =>
-          console.warn("[MainMode] Failed to release hosted shell readiness:", error)
-        );
-    };
-    window.addEventListener("pagehide", markNotReady);
-    window.addEventListener("beforeunload", markNotReady);
-    return () => {
-      window.removeEventListener("pagehide", markNotReady);
-      window.removeEventListener("beforeunload", markNotReady);
-    };
+    void connectNativePanelAdapter().catch((err: unknown) =>
+      console.warn("[MainMode] Panel host connection failed:", err)
+    );
   }, []);
 
   useEffect(() => {
     const bridge = (
       globalThis as {
-        __vibestudioApp?: { setChromeInteractiveFocus?: (active: boolean) => void };
+        __vibestudioApp?: {
+          setChromeInteractiveFocus?: (active: boolean) => void;
+        };
       }
     ).__vibestudioApp;
     const isInteractive = (target: EventTarget | null) =>

@@ -154,7 +154,27 @@ function makeContext(callerKind: string | null = "shell", callerId = "shell") {
       if (method === "addBookmarksBatch") return 1;
       if (method === "addBookmark") return 42;
       if (method === "getBookmarks") return [{ id: 1, title: "Example" }];
-      if (method === "getPasswords") return [{ id: 7, origin_url: "https://example.com" }];
+      if (method === "listPasswordSummaries") {
+        return [{ id: 7, origin_url: "https://example.com" }];
+      }
+      if (method === "getPasswordForSite") {
+        return [
+          {
+            id: 7,
+            origin_url: "https://example.com",
+            username: "ada",
+            password: "secret",
+            action_url: "https://example.com/login",
+            realm: "",
+          },
+        ];
+      }
+      if (method === "listCookieOrigins") {
+        return { revision: 1, origins: ["https://example.com"] };
+      }
+      if (method === "getCookiesForOrigin") {
+        return [{ name: "sid", value: "secret", domain: "example.com", path: "/" }];
+      }
       if (method === "workers.resolveService") {
         return { kind: "durable-object", targetId: workspaceStateTarget };
       }
@@ -340,7 +360,13 @@ describe("@workspace-extensions/browser-data", () => {
     const methods = Object.keys(activated.providerContracts.browserData);
     expect(methods).toEqual(manifest.vibestudio.extension.providerContracts.browserData.methods);
     expect(methods).not.toEqual(
-      expect.arrayContaining(["detectBrowsers", "getProfileImportState", "getAutofillSuggestions"])
+      expect.arrayContaining([
+        "detectBrowsers",
+        "getProfileImportState",
+        "getAutofillSuggestions",
+        "getPasswords",
+        "getCookieSnapshot",
+      ])
     );
   });
 
@@ -375,6 +401,27 @@ describe("@workspace-extensions/browser-data", () => {
       "do:workers/browser-data:BrowserDataDO:browser:user-1",
       "getHistory",
       { limit: 60 }
+    );
+  });
+
+  it("builds deliberate exports from exact-origin reads without reopening bulk vault RPC", async () => {
+    const { ctx, rpcCall } = makeContext("panel");
+    const api = (await activate(ctx as never)).providerContracts.browserData;
+
+    await expect(api.exportPasswords("json")).resolves.toContain("ada");
+    await expect(api.exportCookies("json")).resolves.toContain("sid");
+    expect(rpcCall).toHaveBeenCalledWith(
+      "do:vibestudio/internal:BrowserVaultDO:environment-key",
+      "getPasswordForSite",
+      "https://example.com"
+    );
+    expect(rpcCall).toHaveBeenCalledWith(
+      "do:vibestudio/internal:BrowserVaultDO:environment-key",
+      "getCookiesForOrigin",
+      "https://example.com"
+    );
+    expect(rpcCall.mock.calls.map((call) => call[1])).not.toEqual(
+      expect.arrayContaining(["getPasswords", "getCookieSnapshot"])
     );
   });
 

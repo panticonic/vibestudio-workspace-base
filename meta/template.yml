@@ -124,6 +124,11 @@ template:
     - tsconfig.integration.json
     - tsconfig.integration.mobile.json
     - tsconfig.json
+templates:
+  use: []
+  registry:
+    url: git+https://github.com/panticonic/vibestudio-template-registry.git
+    ref: refs/heads/main
 systemEpoch: 58
 defaultRepo: projects/default
 defaultAgentConfig:
@@ -244,7 +249,8 @@ services:
     name: channel
     title: Conversations
     action: send and receive messages in your conversations
-    description: Access your workspace's conversations, including sending messages
+    description:
+      Access your workspace's conversations, including sending messages
       and reading replies.
     notability: everyday
     presentation:

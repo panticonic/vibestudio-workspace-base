@@ -32,6 +32,7 @@
     "./worker/test-utils": "./src/worker/durable-test-utils.ts",
     "./panel/credentials": "./src/panel/credentials.ts",
     "./workerd-client": "./src/shared/workerd.ts",
+    "./workspace-presentation": "./src/shared/workspacePresentation.ts",
     "./internal/diagnostics": "./src/internal/diagnostics.ts"
   },
   "dependencies": {

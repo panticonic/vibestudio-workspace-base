@@ -13,7 +13,7 @@ import {
 } from "@radix-ui/themes";
 import type {
   StoredHistory,
-  StoredPassword,
+  StoredPasswordSummary,
 } from "@vibestudio/browser-data/client";
 import { browserData, relativeTime, useAsync } from "../useBrowserData";
 
@@ -81,7 +81,10 @@ function SiteData() {
 }
 
 function PasswordList() {
-  const passwords = useAsync<StoredPassword[]>(() => browserData.getPasswords(), []);
+  const passwords = useAsync<StoredPasswordSummary[]>(
+    () => browserData.listPasswordSummaries(),
+    []
+  );
   return (
     <Card>
       <Heading size="2" mb="2">Saved passwords</Heading>

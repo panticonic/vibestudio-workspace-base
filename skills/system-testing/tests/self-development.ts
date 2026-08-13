@@ -3,14 +3,7 @@ import { walkRecords } from "./_scenario-evidence.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
 const GENERATION = /^[a-f0-9]{32}$/u;
-const TERMINAL_RUN_STATES = new Set([
-  "ready",
-  "succeeded",
-  "stopped",
-  "failed",
-  "cancelled",
-  "requires-repair",
-]);
+const TERMINAL_RUN_STATES = new Set(["ready", "succeeded", "stopped", "failed", "cancelled", "requires-repair"]);
 
 interface HarnessOperation {
   service: "development" | "vcs" | "attachedHosts";
@@ -26,40 +19,63 @@ interface SelfDevelopmentReceipt {
 }
 
 function object(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : null;
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
 }
 
 function validDigest(value: unknown): value is string {
   return typeof value === "string" && SHA256.test(value);
 }
 
+function validPairSnapshot(snapshot: Record<string, unknown> | null): boolean {
+  const pair = object(snapshot?.["pair"]);
+  const host = object(pair?.["host"]);
+  const base = object(pair?.["base"]);
+  return Boolean(
+    validDigest(snapshot?.["snapshotDigest"]) &&
+    validDigest(pair?.["pairDigest"]) &&
+    ["host-only", "base-only", "combined"].includes(String(pair?.["kind"])) &&
+    typeof host?.["repositoryId"] === "string" &&
+    validDigest(host?.["materializedTreeDigest"]) &&
+    typeof base?.["repositoryId"] === "string" &&
+    validDigest(base?.["materializedTreeDigest"])
+  );
+}
+
 function captured(
   result: TestExecutionResult,
   scenario: string
 ):
-  | { passed: true; receipt: SelfDevelopmentReceipt; rows: Record<string, unknown>[] }
+  | {
+      passed: true;
+      receipt: SelfDevelopmentReceipt;
+      rows: Record<string, unknown>[];
+    }
   | { passed: false; reason: string } {
   const value = result.diagnostics?.["selfDevelopment"];
   if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return { passed: false, reason: "Harness did not capture self-development RPC evidence" };
+    return {
+      passed: false,
+      reason: "Harness did not capture self-development RPC evidence"
+    };
   }
   const receipt = value as unknown as SelfDevelopmentReceipt;
   if (receipt.source !== "system-test-harness" || receipt.scenario !== scenario) {
-    return { passed: false, reason: "Harness evidence is not bound to this exact scenario" };
+    return {
+      passed: false,
+      reason: "Harness evidence is not bound to this exact scenario"
+    };
   }
   if (!receipt.prerequisite.available) {
     return {
       passed: false,
-      reason: `Self-development prerequisite unavailable: ${receipt.prerequisite.reason ?? "unknown"}`,
+      reason: `Self-development prerequisite unavailable: ${receipt.prerequisite.reason ?? "unknown"}`
     };
   }
   if (result.error) return { passed: false, reason: result.error };
   return {
     passed: true,
     receipt,
-    rows: walkRecords(receipt.operations.map(({ result: operationResult }) => operationResult)),
+    rows: walkRecords(receipt.operations.map(({ result: operationResult }) => operationResult))
   };
 }
 
@@ -68,8 +84,7 @@ function validateCurrentClient(result: TestExecutionResult) {
   if (!checked.passed) return checked;
   const run = checked.rows.find(
     (row) =>
-      object(row["target"])?.["kind"] === "client-device" &&
-      (row["state"] === "ready" || row["state"] === "succeeded")
+      object(row["target"])?.["kind"] === "client-device" && (row["state"] === "ready" || row["state"] === "succeeded")
   );
   const client = object(run?.["client"]);
   const snapshot = object(run?.["snapshot"]);
@@ -83,11 +98,11 @@ function validateCurrentClient(result: TestExecutionResult) {
     typeof client["attestedAt"] === "number" &&
     validDigest(client["executionDigest"]) &&
     artifact?.["executionDigest"] === client["executionDigest"] &&
-    validDigest(snapshot?.["snapshotDigest"])
+    validPairSnapshot(snapshot)
     ? { passed: true, reason: undefined }
     : {
         passed: false,
-        reason: "Host-captured calls contain no ready current-host client attestation",
+        reason: "Host-captured calls contain no ready current-host client attestation"
       };
 }
 
@@ -96,8 +111,7 @@ function validateIsolatedHost(result: TestExecutionResult) {
   if (!checked.passed) return checked;
   const run = checked.rows.find(
     (row) =>
-      object(row["target"])?.["kind"] === "isolated-host" &&
-      (row["state"] === "ready" || row["state"] === "succeeded")
+      object(row["target"])?.["kind"] === "isolated-host" && (row["state"] === "ready" || row["state"] === "succeeded")
   );
   const instance = object(run?.["instance"]);
   const route = object(run?.["attachedHost"]);
@@ -117,16 +131,14 @@ function validateIsolatedHost(result: TestExecutionResult) {
     ? { passed: true, reason: undefined }
     : {
         passed: false,
-        reason: "Host-captured calls contain no same-generation ready instance and route",
+        reason: "Host-captured calls contain no same-generation ready instance and route"
       };
 }
 
 function validateDirtySemanticState(result: TestExecutionResult) {
   const checked = captured(result, "self-development-dirty-semantic-state");
   if (!checked.passed) return checked;
-  const edit = checked.receipt.operations.find(
-    ({ service, method }) => service === "vcs" && method === "edit"
-  );
+  const edit = checked.receipt.operations.find(({ service, method }) => service === "vcs" && method === "edit");
   const session = checked.rows.find(
     (row) => object(object(row["basis"])?.["parentWorkingHead"])?.["kind"] === "application"
   );
@@ -139,20 +151,16 @@ function validateDirtySemanticState(result: TestExecutionResult) {
       object(row["target"])?.["kind"] === "build-only"
   );
   const snapshot = object(run?.["snapshot"]);
-  const source = object(snapshot?.["repositoryState"]);
+  const pair = object(snapshot?.["pair"]);
+  const host = object(pair?.["host"]);
+  const source = object(host?.["repositoryState"]);
   const artifact = object(run?.["artifact"]);
   const artifactSource = object(artifact?.["sourceState"]);
   const artifactState = object(artifactSource?.["state"]);
-  const contentRoots = Array.isArray(artifactSource?.["contentRoots"])
-    ? artifactSource["contentRoots"]
-    : [];
+  const contentRoots = Array.isArray(artifactSource?.["contentRoots"]) ? artifactSource["contentRoots"] : [];
   const exactContentRoot = contentRoots.some((candidate) => {
     const root = object(candidate);
-    return (
-      root &&
-      root["repoPath"] === snapshot?.["repoPath"] &&
-      root["stateHash"] === snapshot?.["contentRoot"]
-    );
+    return root && root["repoPath"] === host?.["repoPath"] && root["stateHash"] === host?.["contentRoot"];
   });
   return edit &&
     session &&
@@ -161,9 +169,9 @@ function validateDirtySemanticState(result: TestExecutionResult) {
     object(edit.result)?.["applicationId"] === parent["applicationId"] &&
     source?.["kind"] === "application" &&
     source["applicationId"] === parent["applicationId"] &&
-    validDigest(snapshot?.["snapshotDigest"]) &&
-    typeof snapshot["contentRoot"] === "string" &&
-    /^state:[a-f0-9]{64}$/u.test(snapshot["contentRoot"]) &&
+    validPairSnapshot(snapshot) &&
+    typeof host?.["contentRoot"] === "string" &&
+    /^state:[a-f0-9]{64}$/u.test(host["contentRoot"]) &&
     artifactSource?.["kind"] === "workspace" &&
     artifactState?.["kind"] === "application" &&
     artifactState["applicationId"] === parent["applicationId"] &&
@@ -174,7 +182,7 @@ function validateDirtySemanticState(result: TestExecutionResult) {
     : {
         passed: false,
         reason:
-          "No successful exact build artifact is joined to the harness-authored dirty application and source closure",
+          "No successful exact build artifact is joined to the harness-authored dirty application and source closure"
       };
 }
 
@@ -186,8 +194,7 @@ function validateNativeCheckpoint(result: TestExecutionResult) {
   );
   const tools = Array.isArray(availability?.result) ? availability.result : [];
   const session = checked.rows.find(
-    (row) =>
-      row["mode"] === "native-tool" && object(object(row["native"])?.["lastCheckpoint"]) !== null
+    (row) => row["mode"] === "native-tool" && object(object(row["native"])?.["lastCheckpoint"]) !== null
   );
   const native = object(session?.["native"]);
   const checkpoint = object(native?.["lastCheckpoint"]);
@@ -209,7 +216,7 @@ function validateNativeCheckpoint(result: TestExecutionResult) {
     ? { passed: true, reason: undefined }
     : {
         passed: false,
-        reason: "No available reviewed native executor produced an exact imported checkpoint",
+        reason: "No available reviewed native executor produced an exact imported checkpoint"
       };
 }
 
@@ -217,8 +224,7 @@ function validateBuildFailureRecovery(result: TestExecutionResult) {
   const checked = captured(result, "self-development-build-failure-recovery");
   if (!checked.passed) return checked;
   const armedOperation = checked.receipt.operations.find(
-    ({ service, method }) =>
-      service === "development" && method === "faultFailBuildAfterSnapshotRetained"
+    ({ service, method }) => service === "development" && method === "faultFailBuildAfterSnapshotRetained"
   );
   const armed = object(armedOperation?.result);
   const failed = checked.rows.find(
@@ -231,9 +237,7 @@ function validateBuildFailureRecovery(result: TestExecutionResult) {
   );
   const recovered = checked.rows.find(
     (row) =>
-      row["runId"] === failed?.["runId"] &&
-      row["state"] === "succeeded" &&
-      row["commitPoint"] === "artifacts-verified"
+      row["runId"] === failed?.["runId"] && row["state"] === "succeeded" && row["commitPoint"] === "artifacts-verified"
   );
   const retry = checked.receipt.operations.find(
     ({ service, method }) => service === "development" && method === "retry"
@@ -242,9 +246,7 @@ function validateBuildFailureRecovery(result: TestExecutionResult) {
     ({ service, method }) => service === "development" && method === "events"
   );
   const diagnostic = walkRecords([eventPage?.result]).find(
-    (row) =>
-      row["kind"] === "diagnostic" &&
-      object(row["payload"])?.["code"] === "ESYSTEMTEST_INJECTED_BUILD"
+    (row) => row["kind"] === "diagnostic" && object(row["payload"])?.["code"] === "ESYSTEMTEST_INJECTED_BUILD"
   );
   const diagnosticPayload = object(diagnostic?.["payload"]);
   const failedSnapshot = object(failed?.["snapshot"]);
@@ -257,24 +259,22 @@ function validateBuildFailureRecovery(result: TestExecutionResult) {
     failed &&
     retry &&
     recovered &&
-    validDigest(failedSnapshot?.["snapshotDigest"]) &&
-    recoveredSnapshot?.["snapshotDigest"] === failedSnapshot["snapshotDigest"] &&
+    validPairSnapshot(failedSnapshot) &&
+    validPairSnapshot(recoveredSnapshot) &&
+    recoveredSnapshot?.["snapshotDigest"] === failedSnapshot?.["snapshotDigest"] &&
     diagnosticPayload?.["faultId"] === armed["faultId"] &&
     diagnosticPayload["phase"] === armed["phase"]
     ? { passed: true, reason: undefined }
     : {
         passed: false,
-        reason:
-          "Host-captured calls do not bind one consumed retained-snapshot fault to an exact same-run retry",
+        reason: "Host-captured calls do not bind one consumed retained-snapshot fault to an exact same-run retry"
       };
 }
 
 function validateChildEval(result: TestExecutionResult) {
   const checked = captured(result, "self-development-child-eval");
   if (!checked.passed) return checked;
-  const attachedRun = checked.rows.find(
-    (row) => object(row["attachedHost"])?.["state"] === "ready"
-  );
+  const attachedRun = checked.rows.find((row) => object(row["attachedHost"])?.["state"] === "ready");
   const route = object(attachedRun?.["attachedHost"]);
   const instance = object(attachedRun?.["instance"]);
   const started = checked.receipt.operations.find(
@@ -304,17 +304,14 @@ function validateChildEval(result: TestExecutionResult) {
     ? { passed: true, reason: undefined }
     : {
         passed: false,
-        reason:
-          "Ordinary attached-host eval result is not joined to its exact run, route, generation, and eval id",
+        reason: "Ordinary attached-host eval result is not joined to its exact run, route, generation, and eval id"
       };
 }
 
 function validateChildApproval(result: TestExecutionResult) {
   const checked = captured(result, "self-development-child-approval");
   if (!checked.passed) return checked;
-  const attachedRun = checked.rows.find(
-    (row) => object(row["attachedHost"])?.["state"] === "ready"
-  );
+  const attachedRun = checked.rows.find((row) => object(row["attachedHost"])?.["state"] === "ready");
   const route = object(attachedRun?.["attachedHost"]);
   const invocation = checked.receipt.operations.find(
     ({ service, method }) => service === "attachedHosts" && method === "permissions.list"
@@ -350,7 +347,7 @@ function validateChildApproval(result: TestExecutionResult) {
     : {
         passed: false,
         reason:
-          "No unique canonical child approval receipt joins the ordinary invocation to its exact run, route, and generation",
+          "No unique canonical child approval receipt joins the ordinary invocation to its exact run, route, and generation"
       };
 }
 
@@ -358,16 +355,12 @@ function validateOwnedCleanup(result: TestExecutionResult) {
   const checked = captured(result, "self-development-owned-cleanup");
   if (!checked.passed) return checked;
   const terminal = checked.rows.find(
-    (row) =>
-      ["stopped", "cancelled"].includes(String(row["state"])) &&
-      object(row["instance"])?.["state"] === "stopped"
+    (row) => ["stopped", "cancelled"].includes(String(row["state"])) && object(row["instance"])?.["state"] === "stopped"
   );
   const instance = object(terminal?.["instance"]);
   const client = object(terminal?.["client"]);
   const route = object(terminal?.["attachedHost"]);
-  const session = checked.rows.find(
-    (row) => row["sessionId"] === terminal?.["sessionId"] && row["state"] === "closed"
-  );
+  const session = checked.rows.find((row) => row["sessionId"] === terminal?.["sessionId"] && row["state"] === "closed");
   return terminal &&
     session &&
     typeof instance?.["stoppedAt"] === "number" &&
@@ -377,7 +370,7 @@ function validateOwnedCleanup(result: TestExecutionResult) {
     ? { passed: true, reason: undefined }
     : {
         passed: false,
-        reason: "Captured cleanup lacks typed terminal outcomes for every owned effect",
+        reason: "Captured cleanup lacks typed terminal outcomes for every owned effect"
       };
 }
 
@@ -409,7 +402,7 @@ async function orchestrate(
     scenario,
     source: "system-test-harness",
     operations: [],
-    prerequisite: { available: true, reason: null },
+    prerequisite: { available: true, reason: null }
   };
   let error: string | undefined;
   try {
@@ -421,7 +414,7 @@ async function orchestrate(
     messages: [],
     duration: Date.now() - startedAt,
     diagnostics: { selfDevelopment: receipt },
-    ...(error ? { error } : {}),
+    ...(error ? { error } : {})
   };
 }
 
@@ -432,26 +425,23 @@ async function repositoryAndRecipe(
 ) {
   const repository = await context.runner.resolveSelfDevelopmentRepository();
   operation(receipt, "vcs", "resolveRepository", repository);
-  const recipes =
-    await context.runner.callSelfDevelopment<Record<string, unknown>[]>("listRecipes");
+  const baseRepository = await context.runner.resolveSelfDevelopmentBaseRepository();
+  operation(receipt, "vcs", "resolveRepository", baseRepository);
+  const recipes = await context.runner.callSelfDevelopment<Record<string, unknown>[]>("listRecipes");
   operation(receipt, "development", "listRecipes", recipes);
   const recipe = recipes.find((candidate) => object(candidate["target"])?.["kind"] === targetKind);
   if (!recipe || typeof recipe["recipeId"] !== "string") {
     unavailable(receipt, `no reviewed ${targetKind} recipe is provisioned`);
     return null;
   }
-  return { repository, recipe };
+  return { repository, baseRepository, recipe };
 }
 
-async function openSemantic(
-  context: TestOrchestrationContext,
-  receipt: SelfDevelopmentReceipt,
-  repositoryId: string
-) {
+async function openSemantic(context: TestOrchestrationContext, receipt: SelfDevelopmentReceipt, repositoryId: string) {
   const opened = await context.runner.callSelfDevelopment<Record<string, unknown>>("openSession", {
     repositoryId,
     mode: "semantic",
-    idempotencyKey: `system-test-open-${crypto.randomUUID()}`,
+    idempotencyKey: `system-test-open-${crypto.randomUUID()}`
   });
   operation(receipt, "development", "openSession", opened);
   if (opened["kind"] !== "opened") {
@@ -476,7 +466,7 @@ async function waitForRun(
   let latest: Record<string, unknown> | null = null;
   while (Date.now() < deadline) {
     latest = await context.runner.callSelfDevelopment<Record<string, unknown> | null>("get", {
-      runId,
+      runId
     });
     if (!latest) throw new Error(`development run ${runId} disappeared during ${phase}`);
     if (TERMINAL_RUN_STATES.has(String(latest["state"]))) {
@@ -493,6 +483,11 @@ async function startRun(
   receipt: SelfDevelopmentReceipt,
   sessionId: string,
   recipe: Record<string, unknown>,
+  pair: {
+    kind: "host-only" | "base-only" | "combined";
+    hostRepositoryId: string;
+    baseRepositoryId: string;
+  },
   target: Record<string, unknown>
 ) {
   const runId = `system-test-development-${crypto.randomUUID()}`;
@@ -500,7 +495,8 @@ async function startRun(
     sessionId,
     runId,
     recipeId: recipe["recipeId"],
-    target,
+    pair,
+    target
   });
   operation(receipt, "development", "start", started);
   return waitForRun(context, receipt, runId, "build/start");
@@ -516,7 +512,7 @@ async function stopAndClose(
   if (!run) {
     const page = await context.runner.callSelfDevelopment<Record<string, unknown>>("list", {
       sessionId,
-      limit: 200,
+      limit: 200
     });
     operation(receipt, "development", "list", page);
     const runs = Array.isArray(page["runs"]) ? page["runs"] : [];
@@ -526,27 +522,23 @@ async function stopAndClose(
         .find(
           (candidate) =>
             candidate &&
-            !["stopped", "failed", "cancelled", "requires-repair", "succeeded"].includes(
-              String(candidate["state"])
-            )
+            !["stopped", "failed", "cancelled", "requires-repair", "succeeded"].includes(String(candidate["state"]))
         ) ?? null;
   }
   const runId = run?.["runId"];
   if (
     typeof runId === "string" &&
-    !["stopped", "failed", "cancelled", "requires-repair", "succeeded"].includes(
-      String(run?.["state"])
-    )
+    !["stopped", "failed", "cancelled", "requires-repair", "succeeded"].includes(String(run?.["state"]))
   ) {
     const stopped = await context.runner.callSelfDevelopment("stop", {
       runId,
-      idempotencyKey: `system-test-stop-${crypto.randomUUID()}`,
+      idempotencyKey: `system-test-stop-${crypto.randomUUID()}`
     });
     operation(receipt, "development", "stop", stopped);
   }
   const closed = await context.runner.callSelfDevelopment("closeSession", {
     sessionId,
-    idempotencyKey: `system-test-close-${crypto.randomUUID()}`,
+    idempotencyKey: `system-test-close-${crypto.randomUUID()}`
   });
   operation(receipt, "development", "closeSession", closed);
 }
@@ -561,11 +553,22 @@ async function currentClient(context: TestOrchestrationContext) {
     if (!session) return;
     let run: Record<string, unknown> | null = null;
     try {
-      run = await startRun(context, receipt, String(session["sessionId"]), setup.recipe, {
-        kind: "client-device",
-        client: "electron",
-        executorId: executor.executorId,
-      });
+      run = await startRun(
+        context,
+        receipt,
+        String(session["sessionId"]),
+        setup.recipe,
+        {
+          kind: "host-only",
+          hostRepositoryId: setup.repository.repositoryId,
+          baseRepositoryId: setup.baseRepository.repositoryId
+        },
+        {
+          kind: "client-device",
+          client: "electron",
+          executorId: executor.executorId
+        }
+      );
       if (run["state"] === "failed" && /executor|provider|electron/iu.test(JSON.stringify(run))) {
         unavailable(receipt, "current-host Electron client executor is not provisioned and ready");
       }
@@ -578,11 +581,7 @@ async function currentClient(context: TestOrchestrationContext) {
 async function isolatedHost(
   scenario: string,
   context: TestOrchestrationContext,
-  action?: (
-    receipt: SelfDevelopmentReceipt,
-    run: Record<string, unknown>,
-    attachedSessionId: string
-  ) => Promise<void>,
+  action?: (receipt: SelfDevelopmentReceipt, run: Record<string, unknown>, attachedSessionId: string) => Promise<void>,
   includeClient = false
 ) {
   return orchestrate(scenario, context, async (receipt) => {
@@ -594,11 +593,22 @@ async function isolatedHost(
     if (!session) return;
     let run: Record<string, unknown> | null = null;
     try {
-      run = await startRun(context, receipt, String(session["sessionId"]), setup.recipe, {
-        kind: "isolated-host",
-        includeClient,
-        ...(executor ? { executorId: executor.executorId } : {}),
-      });
+      run = await startRun(
+        context,
+        receipt,
+        String(session["sessionId"]),
+        setup.recipe,
+        {
+          kind: "host-only",
+          hostRepositoryId: setup.repository.repositoryId,
+          baseRepositoryId: setup.baseRepository.repositoryId
+        },
+        {
+          kind: "isolated-host",
+          includeClient,
+          ...(executor ? { executorId: executor.executorId } : {})
+        }
+      );
       const route = object(run["attachedHost"]);
       if (run["state"] !== "ready" || route?.["state"] !== "ready") {
         if (/executor|provider|electron/iu.test(JSON.stringify(run))) {
@@ -620,8 +630,7 @@ async function selectClientExecutor(
   context: TestOrchestrationContext,
   receipt: SelfDevelopmentReceipt
 ): Promise<{ executorId: string } | null> {
-  const executors =
-    await context.runner.callSelfDevelopment<Record<string, unknown>[]>("listClientExecutors");
+  const executors = await context.runner.callSelfDevelopment<Record<string, unknown>[]>("listClientExecutors");
   operation(receipt, "development", "listClientExecutors", executors);
   const selected = executors.find((candidate) => candidate["current"] === true) ?? executors[0];
   if (!selected || typeof selected["executorId"] !== "string") {
@@ -636,19 +645,25 @@ async function dirtySemanticState(context: TestOrchestrationContext) {
     const setup = await repositoryAndRecipe(context, receipt, "build-only");
     if (!setup) return;
     const editCommand = `system-test-dirty-${crypto.randomUUID()}`;
-    const edited = await context.runner.createSelfDevelopmentDirtyMarker(
-      setup.repository,
-      editCommand
-    );
+    const edited = await context.runner.createSelfDevelopmentDirtyMarker(setup.repository, editCommand);
     operation(receipt, "vcs", "edit", edited);
     let session: Record<string, unknown> | null = null;
     let run: Record<string, unknown> | null = null;
     try {
       session = await openSemantic(context, receipt, setup.repository.repositoryId);
       if (!session) return;
-      run = await startRun(context, receipt, String(session["sessionId"]), setup.recipe, {
-        kind: "build-only",
-      });
+      run = await startRun(
+        context,
+        receipt,
+        String(session["sessionId"]),
+        setup.recipe,
+        {
+          kind: "host-only",
+          hostRepositoryId: setup.repository.repositoryId,
+          baseRepositoryId: setup.baseRepository.repositoryId
+        },
+        { kind: "build-only" }
+      );
     } finally {
       if (session) {
         await stopAndClose(context, receipt, run, String(session["sessionId"]));
@@ -670,28 +685,21 @@ async function nativeCheckpoint(context: TestOrchestrationContext) {
   return orchestrate("self-development-native-checkpoint", context, async (receipt) => {
     const repository = await context.runner.resolveSelfDevelopmentRepository();
     operation(receipt, "vcs", "resolveRepository", repository);
-    const tools =
-      await context.runner.callSelfDevelopment<Record<string, unknown>[]>("listNativeTools");
+    const tools = await context.runner.callSelfDevelopment<Record<string, unknown>[]>("listNativeTools");
     operation(receipt, "development", "listNativeTools", tools);
     const tool = tools.find(
       (candidate) => candidate["available"] === true && candidate["interactiveTerminal"] === true
     );
     if (!tool || typeof tool["toolId"] !== "string") {
-      unavailable(
-        receipt,
-        `no reviewed interactive native executor is available: ${JSON.stringify(tools)}`
-      );
+      unavailable(receipt, `no reviewed interactive native executor is available: ${JSON.stringify(tools)}`);
       return;
     }
-    const opened = await context.runner.callSelfDevelopment<Record<string, unknown>>(
-      "openSession",
-      {
-        repositoryId: repository.repositoryId,
-        mode: "native-tool",
-        nativeTool: tool["toolId"],
-        idempotencyKey: `system-test-native-open-${crypto.randomUUID()}`,
-      }
-    );
+    const opened = await context.runner.callSelfDevelopment<Record<string, unknown>>("openSession", {
+      repositoryId: repository.repositoryId,
+      mode: "native-tool",
+      nativeTool: tool["toolId"],
+      idempotencyKey: `system-test-native-open-${crypto.randomUUID()}`
+    });
     operation(receipt, "development", "openSession", opened);
     const session = object(opened["session"]);
     if (opened["kind"] !== "opened" || !session) return;
@@ -700,15 +708,18 @@ async function nativeCheckpoint(context: TestOrchestrationContext) {
       await context.runner.callSelfDevelopment("writeNativeTerminal", {
         sessionId,
         writeId: `system-test-native-write-${crypto.randomUUID()}`,
-        data: "Create a new file named .vibestudio-system-test/native-checkpoint.txt containing exactly native checkpoint probe, then stop and wait. Do not commit or publish it.\n",
+        data: "Create a new file named .vibestudio-system-test/native-checkpoint.txt containing exactly native checkpoint probe, then stop and wait. Do not commit or publish it.\n"
       });
-      operation(receipt, "development", "writeNativeTerminal", { sessionId, accepted: true });
+      operation(receipt, "development", "writeNativeTerminal", {
+        sessionId,
+        accepted: true
+      });
       const deadline = Date.now() + Math.min(context.remainingTimeMs() ?? 120_000, 120_000);
       let inspected: Record<string, unknown> | null = null;
       while (Date.now() < deadline) {
         inspected = await context.runner.callSelfDevelopment("inspectNative", {
           sessionId,
-          assessPendingChanges: true,
+          assessPendingChanges: true
         });
         if (object(inspected?.["native"])?.["pendingChanges"] === "present") break;
         await new Promise((resolve) => setTimeout(resolve, 500));
@@ -719,18 +730,18 @@ async function nativeCheckpoint(context: TestOrchestrationContext) {
       }
       const checkpointed = await context.runner.callSelfDevelopment("checkpoint", {
         sessionId,
-        idempotencyKey: `system-test-native-checkpoint-${crypto.randomUUID()}`,
+        idempotencyKey: `system-test-native-checkpoint-${crypto.randomUUID()}`
       });
       operation(receipt, "development", "checkpoint", checkpointed);
     } finally {
       const stopped = await context.runner.callSelfDevelopment("stopNativeTool", {
         sessionId,
-        idempotencyKey: `system-test-native-stop-${crypto.randomUUID()}`,
+        idempotencyKey: `system-test-native-stop-${crypto.randomUUID()}`
       });
       operation(receipt, "development", "stopNativeTool", stopped);
       const closed = await context.runner.callSelfDevelopment("closeSession", {
         sessionId,
-        idempotencyKey: `system-test-native-close-${crypto.randomUUID()}`,
+        idempotencyKey: `system-test-native-close-${crypto.randomUUID()}`
       });
       operation(receipt, "development", "closeSession", closed);
     }
@@ -747,20 +758,22 @@ async function buildFailureRecovery(context: TestOrchestrationContext) {
     const runId = `system-test-development-recovery-${crypto.randomUUID()}`;
     let latest: Record<string, unknown> | null = null;
     try {
-      const armed = await context.runner.callSelfDevelopment(
-        "faultFailBuildAfterSnapshotRetained",
-        {
-          sessionId,
-          runId,
-          phase: "after-snapshot-retained",
-        }
-      );
+      const armed = await context.runner.callSelfDevelopment("faultFailBuildAfterSnapshotRetained", {
+        sessionId,
+        runId,
+        phase: "after-snapshot-retained"
+      });
       operation(receipt, "development", "faultFailBuildAfterSnapshotRetained", armed);
       const started = await context.runner.callSelfDevelopment("start", {
         sessionId,
         runId,
         recipeId: setup.recipe["recipeId"],
-        target: { kind: "build-only" },
+        pair: {
+          kind: "host-only",
+          hostRepositoryId: setup.repository.repositoryId,
+          baseRepositoryId: setup.baseRepository.repositoryId
+        },
+        target: { kind: "build-only" }
       });
       operation(receipt, "development", "start", started);
       latest = await waitForRun(context, receipt, runId, "injected build failure");
@@ -770,12 +783,12 @@ async function buildFailureRecovery(context: TestOrchestrationContext) {
       const events = await context.runner.callSelfDevelopment("events", {
         runId,
         after: 0,
-        limit: 200,
+        limit: 200
       });
       operation(receipt, "development", "events", events);
       const retried = await context.runner.callSelfDevelopment("retry", {
         runId,
-        idempotencyKey: `system-test-development-retry-${crypto.randomUUID()}`,
+        idempotencyKey: `system-test-development-retry-${crypto.randomUUID()}`
       });
       operation(receipt, "development", "retry", retried);
       latest = await waitForRun(context, receipt, runId, "same-run retry");
@@ -786,78 +799,53 @@ async function buildFailureRecovery(context: TestOrchestrationContext) {
 }
 
 async function childEval(context: TestOrchestrationContext) {
-  return isolatedHost(
-    "self-development-child-eval",
-    context,
-    async (receipt, run, attachedSessionId) => {
-      const runId = `system-test-child-eval-${crypto.randomUUID()}`;
-      const scopeKey = `system-test-child-eval-${crypto.randomUUID()}`;
-      const started = await context.runner.callAttachedDevelopmentHost<{ runId: string }>(
-        attachedSessionId,
-        "eval",
-        "start",
-        [
-          {
-            scope: { key: scopeKey, lifecycle: "finite" },
-            runId,
-            source: { kind: "inline", code: "return 42;" },
-          },
-        ]
-      );
-      operation(receipt, "attachedHosts", "eval.start", started);
-      const deadline = Date.now() + Math.min(context.remainingTimeMs() ?? 30_000, 30_000);
-      let terminal: Record<string, unknown> | null = null;
-      while (Date.now() < deadline) {
-        terminal = await context.runner.callAttachedDevelopmentHost(
-          attachedSessionId,
-          "eval",
-          "get",
-          [{ scopeKey, runId }]
-        );
-        if (terminal?.["status"] === "done" || terminal?.["status"] === "cancelled") break;
-        await new Promise((resolve) => setTimeout(resolve, 100));
+  return isolatedHost("self-development-child-eval", context, async (receipt, run, attachedSessionId) => {
+    const runId = `system-test-child-eval-${crypto.randomUUID()}`;
+    const scopeKey = `system-test-child-eval-${crypto.randomUUID()}`;
+    const started = await context.runner.callAttachedDevelopmentHost<{
+      runId: string;
+    }>(attachedSessionId, "eval", "start", [
+      {
+        scope: { key: scopeKey, lifecycle: "finite" },
+        runId,
+        source: { kind: "inline", code: "return 42;" }
       }
-      operation(receipt, "attachedHosts", "eval.get", {
-        developmentRunId: run["runId"],
-        attachedHostSessionId: attachedSessionId,
-        evalRunId: runId,
-        evalSnapshot: terminal,
-      });
+    ]);
+    operation(receipt, "attachedHosts", "eval.start", started);
+    const deadline = Date.now() + Math.min(context.remainingTimeMs() ?? 30_000, 30_000);
+    let terminal: Record<string, unknown> | null = null;
+    while (Date.now() < deadline) {
+      terminal = await context.runner.callAttachedDevelopmentHost(attachedSessionId, "eval", "get", [
+        { scopeKey, runId }
+      ]);
+      if (terminal?.["status"] === "done" || terminal?.["status"] === "cancelled") break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
     }
-  );
+    operation(receipt, "attachedHosts", "eval.get", {
+      developmentRunId: run["runId"],
+      attachedHostSessionId: attachedSessionId,
+      evalRunId: runId,
+      evalSnapshot: terminal
+    });
+  });
 }
 
 async function childApproval(context: TestOrchestrationContext) {
-  return isolatedHost(
-    "self-development-child-approval",
-    context,
-    async (receipt, run, attachedSessionId) => {
-      const before = await context.runner.listAttachedDevelopmentHostApprovalAudit(
-        attachedSessionId,
-        { limit: 100 }
-      );
-      operation(receipt, "attachedHosts", "listApprovalAudit.before", before);
-      if (before.events.length !== 0) {
-        throw new Error("A newly attached route already contains approval audit events");
-      }
-      const permissions = await context.runner.callAttachedDevelopmentHost(
-        attachedSessionId,
-        "permissions",
-        "list",
-        []
-      );
-      operation(receipt, "attachedHosts", "permissions.list", {
-        developmentRunId: run["runId"],
-        attachedHostSessionId: attachedSessionId,
-        permissions,
-      });
-      const after = await context.runner.listAttachedDevelopmentHostApprovalAudit(
-        attachedSessionId,
-        { limit: 100 }
-      );
-      operation(receipt, "attachedHosts", "listApprovalAudit.after", after);
+  return isolatedHost("self-development-child-approval", context, async (receipt, run, attachedSessionId) => {
+    const before = await context.runner.listAttachedDevelopmentHostApprovalAudit(attachedSessionId, { limit: 100 });
+    operation(receipt, "attachedHosts", "listApprovalAudit.before", before);
+    if (before.events.length !== 0) {
+      throw new Error("A newly attached route already contains approval audit events");
     }
-  );
+    const permissions = await context.runner.callAttachedDevelopmentHost(attachedSessionId, "permissions", "list", []);
+    operation(receipt, "attachedHosts", "permissions.list", {
+      developmentRunId: run["runId"],
+      attachedHostSessionId: attachedSessionId,
+      permissions
+    });
+    const after = await context.runner.listAttachedDevelopmentHostApprovalAudit(attachedSessionId, { limit: 100 });
+    operation(receipt, "attachedHosts", "listApprovalAudit.after", after);
+  });
 }
 
 async function ownedCleanup(context: TestOrchestrationContext) {
@@ -871,9 +859,9 @@ const DEVELOPMENT_AUTHORITY = {
       capability: { kind: "exact" as const, key: "development.native.execute" },
       resource: { kind: "exact" as const, key: "development.native.execute" },
       tier: "gated" as const,
-      decision: "once" as const,
-    },
-  ],
+      decision: "once" as const
+    }
+  ]
 };
 
 const HARNESS_PROMPT =
@@ -890,7 +878,7 @@ export const selfDevelopmentTests: TestCase[] = [
     prompt: HARNESS_PROMPT,
     validation: "harness",
     orchestrate: currentClient,
-    validate: validateCurrentClient,
+    validate: validateCurrentClient
   },
   {
     name: "self-development-isolated-host",
@@ -901,7 +889,7 @@ export const selfDevelopmentTests: TestCase[] = [
     prompt: HARNESS_PROMPT,
     validation: "harness",
     orchestrate: (context) => isolatedHost("self-development-isolated-host", context),
-    validate: validateIsolatedHost,
+    validate: validateIsolatedHost
   },
   {
     name: "self-development-dirty-semantic-state",
@@ -912,7 +900,7 @@ export const selfDevelopmentTests: TestCase[] = [
     prompt: HARNESS_PROMPT,
     validation: "harness",
     orchestrate: dirtySemanticState,
-    validate: validateDirtySemanticState,
+    validate: validateDirtySemanticState
   },
   {
     name: "self-development-native-checkpoint",
@@ -923,7 +911,7 @@ export const selfDevelopmentTests: TestCase[] = [
     prompt: HARNESS_PROMPT,
     validation: "harness",
     orchestrate: nativeCheckpoint,
-    validate: validateNativeCheckpoint,
+    validate: validateNativeCheckpoint
   },
   {
     name: "self-development-build-failure-recovery",
@@ -934,7 +922,7 @@ export const selfDevelopmentTests: TestCase[] = [
     prompt: HARNESS_PROMPT,
     validation: "harness",
     orchestrate: buildFailureRecovery,
-    validate: validateBuildFailureRecovery,
+    validate: validateBuildFailureRecovery
   },
   {
     name: "self-development-child-eval",
@@ -945,7 +933,7 @@ export const selfDevelopmentTests: TestCase[] = [
     prompt: HARNESS_PROMPT,
     validation: "harness",
     orchestrate: childEval,
-    validate: validateChildEval,
+    validate: validateChildEval
   },
   {
     name: "self-development-child-approval",
@@ -959,15 +947,15 @@ export const selfDevelopmentTests: TestCase[] = [
           capability: { kind: "exact" as const, key: "permissions.read" },
           resource: { kind: "exact" as const, key: "permissions.read" },
           tier: "gated" as const,
-          decision: "once" as const,
-        },
-      ],
+          decision: "once" as const
+        }
+      ]
     },
     resources: SHARED_RESOURCE,
     prompt: HARNESS_PROMPT,
     validation: "harness",
     orchestrate: childApproval,
-    validate: validateChildApproval,
+    validate: validateChildApproval
   },
   {
     name: "self-development-owned-cleanup",
@@ -978,6 +966,6 @@ export const selfDevelopmentTests: TestCase[] = [
     prompt: HARNESS_PROMPT,
     validation: "harness",
     orchestrate: ownedCleanup,
-    validate: validateOwnedCleanup,
-  },
+    validate: validateOwnedCleanup
+  }
 ];

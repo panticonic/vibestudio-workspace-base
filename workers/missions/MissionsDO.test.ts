@@ -17,6 +17,16 @@ class IdempotentProposalMissionsDO extends MissionsDO {
   }
 }
 
+class IdentityMissionsDO extends MissionsDO {
+  identityForTest() {
+    return {
+      source: this.env["WORKER_SOURCE"],
+      className: this.env["WORKER_CLASS_NAME"],
+      objectKey: this.env["__objectKey"],
+    };
+  }
+}
+
 const charter = (): MissionCharter => ({
   summary: "Prepare a daily summary",
   harness: { unit: "workers/summary", ev: "a".repeat(64) },
@@ -56,13 +66,26 @@ const methodCharter = (resultLimit?: number): MissionCharter => ({
 
 async function missions() {
   return createTestDO(MissionsDO, {
-    WORKER_SOURCE: "vibestudio/internal",
+    WORKER_SOURCE: "workers/missions",
     WORKER_CLASS_NAME: "MissionsDO",
-    __objectKey: "workspace",
+    __objectKey: "workspace-missions",
   });
 }
 
 describe("MissionsDO", () => {
+  it("runs under its installed Base provider identity", async () => {
+    const { instance } = await createTestDO(IdentityMissionsDO, {
+      WORKER_SOURCE: "workers/missions",
+      WORKER_CLASS_NAME: "MissionsDO",
+      __objectKey: "workspace-missions",
+    });
+    expect(instance.identityForTest()).toEqual({
+      source: "workers/missions",
+      className: "MissionsDO",
+      objectKey: "workspace-missions",
+    });
+  });
+
   it("exposes exactly the typed builtin contract", async () => {
     const { instance } = await missions();
     const productMethods = [...rpcExposedMethodNames(instance)].filter(

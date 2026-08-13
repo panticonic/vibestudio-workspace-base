@@ -64,7 +64,7 @@ function runtimeHarness(
 ) {
   let currentSlotId = "panel:tree/new";
   let currentEntityId = "panel:nav-new";
-  const currentSource = options.browserReady
+  let currentSource = options.browserReady
     ? (options.browserSource ?? "browser:data:text/html,<p>ready</p>")
     : "panels/new";
   let agentCalls = 0;
@@ -103,6 +103,40 @@ function runtimeHarness(
           return { target: _target } as T;
         case "build.getPanelMetadata":
           return { title: "New" } as T;
+        case "workers.resolveService":
+          return {
+            kind: "durable-object",
+            origin: "workspace",
+            source: "workers/workspace-presentation",
+            className: "WorkspacePresentationDO",
+            objectKey: "workspace-presentation",
+            targetId:
+              "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
+          } as T;
+        case "titlesForSlots": {
+          const known: Record<string, string> = {
+            browser: "Example",
+            "current-root": "Current root",
+            root: "Research",
+            [currentSlotId]: "New",
+          };
+          return Object.fromEntries(
+            (args[0] as string[]).flatMap((slotId) =>
+              known[slotId] ? [[slotId, known[slotId]]] : []
+            )
+          ) as T;
+        }
+        case "bindSlot":
+        case "indexPanel":
+        case "updatePanelTitle":
+        case "incrementAccess":
+        case "rebuildIndex":
+        case "removeSlots":
+          return undefined as T;
+        case "sourceUsage":
+          return [{ source: "panels/terminal", accessCount: 12, lastAccessedAt: 1234 }] as T;
+        case "search":
+          return { results: [], nextCursor: null } as T;
         case "runtime.reserveEntity":
           return {
             id: currentEntityId,
@@ -130,7 +164,12 @@ function runtimeHarness(
         }
         case "workspace-state.slot.create": {
           if (options.slotCreateError) throw options.slotCreateError;
-          currentSlotId = (args[0] as { slotId: string }).slotId;
+          const input = args[0] as {
+            slotId: string;
+            initialEntry?: { source: string };
+          };
+          currentSlotId = input.slotId;
+          if (input.initialEntry) currentSource = input.initialEntry.source;
           return undefined as T;
         }
         case "workspace-state.slot.commitPreparedNavigation": {
@@ -714,7 +753,7 @@ describe("panel runtime topology composition", () => {
     expect(onCreateSlotTiming.mock.calls.map(([event]) => event.stage)).toEqual([
       "runtime.reserveEntity",
       "workspace-state.slot.create",
-      "panel.index",
+      "workspace.presentation.indexPanel",
     ]);
   });
 
@@ -766,13 +805,20 @@ describe("panel runtime topology composition", () => {
       source: "https://example.com/",
     });
     expect(call.mock.calls.map((entry) => entry[1])).not.toContain("panelRuntime.observeSlot");
-    expect(call).toHaveBeenCalledWith("main", "workspace-state.panel.index", [
+    expect(call).toHaveBeenCalledWith(
+      "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
+      "indexPanel",
+      [
       {
         id: expect.any(String),
+        source: "browser:https://example.com/",
         title: "example.com",
         path: "browser:https://example.com/",
       },
-    ]);
+        expect.any(String),
+        undefined,
+      ]
+    );
   });
 
   it("reports each durable external-slot creation stage", async () => {
@@ -784,7 +830,7 @@ describe("panel runtime topology composition", () => {
     expect(onCreateSlotTiming.mock.calls.map(([event]) => event.stage)).toEqual([
       "runtime.createEntity",
       "workspace-state.slot.create",
-      "panel.index",
+      "workspace.presentation.indexPanel",
     ]);
     expect(onCreateSlotTiming.mock.calls.every(([event]) => event.outcome === "ok")).toBe(true);
   });
@@ -921,7 +967,11 @@ describe("panel runtime topology composition", () => {
     await expect(runtime.panelTree.sourceUsage(25)).resolves.toEqual([
       { source: "panels/terminal", accessCount: 12, lastAccessedAt: 1234 },
     ]);
-    expect(call).toHaveBeenCalledWith("main", "workspace-state.panel.sourceUsage", [25]);
+    expect(call).toHaveBeenCalledWith(
+      "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
+      "sourceUsage",
+      [25]
+    );
   });
 
   it("renames an arbitrary slot directly on the builtin topology owner", async () => {
@@ -930,11 +980,11 @@ describe("panel runtime topology composition", () => {
 
     await handle.setTitle("Support inbox", { explicit: true });
 
-    expect(call).toHaveBeenCalledWith("main", "workspace-state.panel.updateTitle", [
-      "panel:tree/browser",
-      "Support inbox",
-      { explicit: true },
-    ]);
+    expect(call).toHaveBeenCalledWith(
+      "do:workers/workspace-presentation:WorkspacePresentationDO:workspace-presentation",
+      "updatePanelTitle",
+      ["panel:tree/browser", "panel:nav-new", "Support inbox", { explicit: true }]
+    );
     expect(handle.title).toBe("Support inbox");
   });
 });

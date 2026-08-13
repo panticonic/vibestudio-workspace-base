@@ -639,9 +639,9 @@ Core method groups:
 | `listOpenTabs`, `openTabsAsPanels`                                                                                       | Preview source tabs and open selected HTTP(S) tabs as panels |
 | `getBookmarks`, `addBookmark`, `updateBookmark`, `deleteBookmark`, `moveBookmark`, `searchBookmarks`                     | Manage bookmarks                                             |
 | `getHistory`, `searchHistory`, `deleteHistoryEntry`, `deleteHistoryRange`, `clearAllHistory`                             | Manage browsing history                                      |
-| `getPasswords`, `getPasswordForSite`, password mutation methods                                                          | Manage saved credentials                                     |
+| `listPasswordSummaries`, `getPasswordForSite`, password mutation methods                                                  | Manage saved credentials; decrypt only exact-origin reads     |
 | `getFormFillSuggestions` and form-fill mutation methods                                                                  | Manage structured non-payment form-fill values               |
-| `getCookieSnapshot`, `getCookiesForOrigin`, `applyCookieMutations`, site/all clear methods                               | Read and mutate the canonical cookie jar                     |
+| `listCookieOrigins`, `getCookiesForOrigin`, `applyCookieMutations`, site/all clear methods                               | Read cookie metadata and exact-origin values; mutate the jar |
 | `getSitePreferences`, `setSiteZoom`, download and favicon methods                                                        | Manage browser chrome state                                  |
 | `exportBookmarks`, `exportPasswords`, `exportCookies`                                                                    | Export supported data                                        |
 

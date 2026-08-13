@@ -3,6 +3,7 @@ import { createShellCore } from "@vibestudio/shell-core/createShellCore";
 import type { MobileRpcClient } from "../services/mobileTransport";
 import { parseHostConfig } from "../services/panelUrls";
 import { createMobileLocalViewStateStore } from "./localViewState";
+import { createWorkspacePresentationClient } from "@workspace/runtime/workspace-presentation";
 
 export function createMobileShellCore(deps: {
   workspaceId: string;
@@ -17,9 +18,12 @@ export function createMobileShellCore(deps: {
   const hostWithPort = `${host.host}${host.port ? `:${host.port}` : ""}`;
   const serverUrl = `${host.protocol}://${hostWithPort}${host.basePath}`;
 
+  const presentation = createWorkspacePresentationClient(deps.transport);
   const { panelManager } = createShellCore({
     registry,
     call: (service, method, args) => deps.transport.call("main", `${service}.${method}`, args),
+    presentation: presentation.searchIndex,
+    workspaceState: presentation.workspaceState,
     viewState: createMobileLocalViewStateStore(deps.workspaceId),
     workspacePath: "",
     allowMissingManifests: true,

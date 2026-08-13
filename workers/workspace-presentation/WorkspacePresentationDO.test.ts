@@ -36,8 +36,8 @@ describe("WorkspacePresentationDO", () => {
     instance.bindSlot("slot-1", "entity-2", "panels/calendar");
     expect(instance.titlesForSlots(["slot-1"])).toEqual({ "slot-1": "Calendar" });
     expect(instance.listEntityTitles()).toEqual([
-      { id: "entity-1", title: "Support inbox" },
-      { id: "entity-2", title: "Calendar" },
+      { id: "entity-1", title: "Support inbox", explicit: false },
+      { id: "entity-2", title: "Calendar", explicit: false },
     ]);
     db.close();
   });
@@ -66,6 +66,17 @@ describe("WorkspacePresentationDO", () => {
 
     instance.removeSlots(["slot-1"]);
     expect(instance.search("support").results).toEqual([]);
+    db.close();
+  });
+
+  it("owns explicit-title precedence without a host-side hook", () => {
+    const { instance, db } = createPresentation();
+    instance.bindSlot("slot-1", "entity-1", "panels/chat");
+    instance.updatePanelTitle("slot-1", "entity-1", "Pinned", { explicit: true });
+    instance.updatePanelTitle("slot-1", "entity-1", "Inferred");
+
+    expect(instance.isEntityTitleExplicit("entity-1")).toBe(true);
+    expect(instance.titlesForSlots(["slot-1"])).toEqual({ "slot-1": "Pinned" });
     db.close();
   });
 });

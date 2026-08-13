@@ -9,7 +9,7 @@ async function development() {
   return createTestDO(DevelopmentDO, {
     WORKER_SOURCE: "vibestudio/internal",
     WORKER_CLASS_NAME: "DevelopmentDO",
-    __objectKey: "workspace",
+    __objectKey: "workspace"
   });
 }
 
@@ -32,7 +32,7 @@ describe("DevelopmentDO", () => {
     });
     Object.defineProperty(instance, "rpc", {
       value: { call: rpcCall },
-      configurable: true,
+      configurable: true
     });
 
     const recipes = await callAs(
@@ -44,8 +44,8 @@ describe("DevelopmentDO", () => {
         expect.objectContaining({
           recipeId: "vibestudio-monorepo-build-v1",
           platform: "linux",
-          arch: "x64",
-        }),
+          arch: "x64"
+        })
       ])
     );
     expect(rpcCall).toHaveBeenCalledWith("main", "developmentNative.describeHost", []);
@@ -66,14 +66,14 @@ describe("DevelopmentDO", () => {
           {
             ownerRuntimeId: "panel:development",
             parentContextId: "context:parent",
-            targetContextId: expect.stringMatching(/^ctx-development-/),
-          },
+            targetContextId: expect.stringMatching(/^ctx-development-/)
+          }
         ]);
         return {
           contextId: "context:child",
           parentContextId: "context:parent",
           parentWorkingHead: parentHead,
-          childBaseState: childHead,
+          childBaseState: childHead
         };
       }
       if (target === workspaceSource && method === "vcsStatus") {
@@ -81,8 +81,8 @@ describe("DevelopmentDO", () => {
         return {
           kind: "complete",
           result: {
-            workingHead: request.input.contextId === "context:parent" ? parentHead : childHead,
-          },
+            workingHead: request.input.contextId === "context:parent" ? parentHead : childHead
+          }
         };
       }
       if (target === workspaceSource && method === "vcsInspect") {
@@ -91,16 +91,54 @@ describe("DevelopmentDO", () => {
           result: {
             node: {
               kind: "repository",
-              value: { kind: "present", repoPath: "projects/vibestudio" },
-            },
+              value: { kind: "present", repoPath: "projects/vibestudio" }
+            }
+          }
+        };
+      }
+      if (target === "main" && method === "developmentNative.prepareTemplateExchange") {
+        return {
+          intentDigest: "a".repeat(64),
+          plan: {
+            format: "vibestudio-template-exchange-plan/1",
+            direction: "export",
+            workspace: "/owned/semantic",
+            checkout: "/checkouts/base",
+            source: "/owned/semantic",
+            target: "/checkouts/base",
+            manifestDigest: "c".repeat(64),
+            baselineDigest: null,
+            projection: ["meta/template.yml"],
+            paths: [],
+            conflicts: [],
+            untouched: [],
+            operationId: "b".repeat(64)
+          }
+        };
+      }
+      if (target === "main" && method === "developmentNative.applyTemplateExchange") {
+        return {
+          direction: "export",
+          exchange: {
+            format: "vibestudio-template-exchange-receipt/1",
+            operationId: "b".repeat(64),
+            direction: "export",
+            manifestDigest: "c".repeat(64),
+            baselineBefore: null,
+            baselineAfter: "d".repeat(64),
+            written: [],
+            deleted: [],
+            preserved: [],
+            completedAt: new Date(0).toISOString()
           },
+          imported: null
         };
       }
       throw new Error(`Unexpected ${method}`);
     });
     Object.defineProperty(instance, "rpc", {
       value: { call: rpcCall },
-      configurable: true,
+      configurable: true
     });
 
     const opened = await callAs(
@@ -109,7 +147,7 @@ describe("DevelopmentDO", () => {
       {
         repositoryId: "repository:vibestudio",
         mode: "semantic",
-        idempotencyKey: "open:self-development",
+        idempotencyKey: "open:self-development"
       }
     );
 
@@ -119,9 +157,9 @@ describe("DevelopmentDO", () => {
         contextId: "context:child",
         repository: {
           repositoryId: "repository:vibestudio",
-          repoPath: "projects/vibestudio",
-        },
-      },
+          repoPath: "projects/vibestudio"
+        }
+      }
     });
     const semanticCalls = rpcCall.mock.calls.filter(
       ([target, method]) => target === workspaceSource && String(method).startsWith("vcs")
@@ -133,10 +171,38 @@ describe("DevelopmentDO", () => {
           input: expect.any(Object),
           ingress: {
             causalParent: null,
-            contextIntegrity: { class: "internal", externalKeys: [] },
-          },
-        }),
+            contextIntegrity: { class: "internal", externalKeys: [] }
+          }
+        })
       ]);
     }
+    const sessionId = (opened as { kind: "opened"; session: { sessionId: string } }).session.sessionId;
+    await callAs({ callerId: "panel:development", callerKind: "panel", userId: "alice" }, "planTemplateExchange", {
+      sessionId,
+      direction: "export",
+      checkout: "/checkouts/base",
+      idempotencyKey: "exchange:one"
+    });
+    await callAs({ callerId: "panel:development", callerKind: "panel", userId: "alice" }, "applyTemplateExchange", {
+      sessionId,
+      operationId: "b".repeat(64),
+      intentDigest: "a".repeat(64),
+      checkout: "/checkouts/base"
+    });
+    expect(rpcCall).toHaveBeenCalledWith("main", "developmentNative.prepareTemplateExchange", [
+      expect.objectContaining({
+        contextId: "context:child",
+        repositoryId: "repository:vibestudio",
+        expectedWorkingHead: childHead,
+        checkout: "/checkouts/base"
+      })
+    ]);
+    expect(rpcCall).toHaveBeenCalledWith("main", "developmentNative.applyTemplateExchange", [
+      {
+        operationId: "b".repeat(64),
+        intentDigest: "a".repeat(64),
+        checkout: "/checkouts/base"
+      }
+    ]);
   });
 });

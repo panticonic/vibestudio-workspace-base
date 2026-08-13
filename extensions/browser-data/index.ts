@@ -97,7 +97,7 @@ const BROWSER_DATA_STORE_METHODS = [
   "searchHistoryForAutocomplete",
   "recordHistoryVisit",
   "updateHistoryTitle",
-  "getPasswords",
+  "listPasswordSummaries",
   "getPasswordForSite",
   "addPassword",
   "updatePassword",
@@ -116,7 +116,7 @@ const BROWSER_DATA_STORE_METHODS = [
   "getSearchEngines",
   "setDefaultEngine",
   "applyCookieMutations",
-  "getCookieSnapshot",
+  "listCookieOrigins",
   "getCookiesForOrigin",
   "clearCookiesForOrigin",
   "clearAllCookies",
@@ -128,7 +128,7 @@ const BROWSER_DATA_STORE_METHODS = [
   "getPageFavicon",
 ] as const;
 const BROWSER_VAULT_STORE_METHODS = new Set<string>([
-  "getPasswords",
+  "listPasswordSummaries",
   "getPasswordForSite",
   "addPassword",
   "updatePassword",
@@ -145,7 +145,7 @@ const BROWSER_VAULT_STORE_METHODS = new Set<string>([
   "deleteFormFillValue",
   "clearFormFillValues",
   "applyCookieMutations",
-  "getCookieSnapshot",
+  "listCookieOrigins",
   "getCookiesForOrigin",
   "clearCookiesForOrigin",
   "clearAllCookies",
@@ -492,17 +492,40 @@ export async function activate(ctx: ExtensionContextLike) {
     exportPasswords: guarded(
       "exportPasswords",
       async (format: "csv-chrome" | "csv-firefox" | "json") =>
-        exportPasswords(format, await callStore<Array<Record<string, unknown>>>("getPasswords"))
+        exportPasswords(format, await exportRowsForPasswordOrigins(callStore))
     ),
     exportCookies: guarded("exportCookies", async (format: "json" | "netscape-txt") => {
-      const snapshot = await callStore<{
-        cookies: Array<Record<string, unknown>>;
-      }>("getCookieSnapshot", {});
-      return exportCookies(format, snapshot.cookies);
+      return exportCookies(format, await exportRowsForCookieOrigins(callStore));
     }),
   };
 
   return { providerContracts: { browserData } };
+}
+
+async function exportRowsForPasswordOrigins(
+  callStore: <T>(method: string, ...args: unknown[]) => Promise<T>
+): Promise<Array<Record<string, unknown>>> {
+  const summaries = await callStore<Array<{ origin_url: string }>>("listPasswordSummaries");
+  return (
+    await Promise.all(
+      [...new Set(summaries.map((row) => row.origin_url))].map((origin) =>
+        callStore<Array<Record<string, unknown>>>("getPasswordForSite", origin)
+      )
+    )
+  ).flat();
+}
+
+async function exportRowsForCookieOrigins(
+  callStore: <T>(method: string, ...args: unknown[]) => Promise<T>
+): Promise<Array<Record<string, unknown>>> {
+  const { origins } = await callStore<{ origins: string[] }>("listCookieOrigins");
+  return (
+    await Promise.all(
+      origins.map((origin) =>
+        callStore<Array<Record<string, unknown>>>("getCookiesForOrigin", origin)
+      )
+    )
+  ).flat();
 }
 
 async function storeImportBatch(
@@ -623,7 +646,11 @@ async function openTabsAsPanels(
     const observation = await panel.observe();
     return {
       id: panel.id,
-      title: panel.title ?? title,
+      // This operation just authored the product title; the raw topology
+      // handle may still expose its identity until workspace.presentation has
+      // indexed the new slot. Keep the authored fact instead of reading a
+      // presentation projection back through the topology channel.
+      title,
       contextId: observation.contextId,
     };
   };

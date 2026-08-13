@@ -102,12 +102,29 @@ function createRpcCall() {
         return { title: "Agentic Chat", stateArgs: undefined };
       case "workers.resolveService":
         return { kind: "durable-object", targetId: "do:workspace-state" };
+      case "titlesForSlots":
+        return Object.fromEntries(
+          (args[0] as string[]).map((slotId) => [
+            slotId,
+            slotId === "panel:tree/spectrolite" ? "Spectrolite" : createdTitle,
+          ]),
+        );
+      case "bindSlot":
+      case "indexPanel":
+      case "incrementAccess":
+      case "rebuildIndex":
+      case "removeSlots":
+        return undefined;
+      case "updatePanelTitle":
+        createdTitle = String(args[2]);
+        return undefined;
       case "runtime.reserveEntity":
       case "runtime.activateReservedEntity":
         return runtimeEntity;
       case "workspace-state.slot.create":
       case "workspace-state.panel.updateTitle":
-        if (method === "workspace-state.panel.updateTitle") createdTitle = String(args[1]);
+        if (method === "workspace-state.panel.updateTitle")
+          createdTitle = String(args[1]);
         return undefined;
       case "panelRuntime.ensureSlot":
         return {
@@ -193,7 +210,8 @@ describe("panel error diagnostic chat launcher", () => {
   it("opens a child chat with a redacted agent debugging prompt", async () => {
     const rpcCall = createRpcCall();
     const { _initPanelHandleBridge } = await import("./handle.js");
-    const { openPanelErrorDiagnosticChat } = await import("./errorDebugChat.js");
+    const { openPanelErrorDiagnosticChat } =
+      await import("./errorDebugChat.js");
     _initPanelHandleBridge({ call: rpcCall, on: vi.fn() } as never, {
       selfId: "panel:tree/spectrolite",
       selfRpcTargetId: "panel:nav-spectrolite-entity",
@@ -209,17 +227,22 @@ describe("panel error diagnostic chat launcher", () => {
         userAgent: "vitest",
         timestamp: "2026-06-15T00:00:00.000Z",
       },
-      { slotId: "panel:tree/spectrolite", contextId: "ctx-fallback" }
+      { slotId: "panel:tree/spectrolite", contextId: "ctx-fallback" },
     );
 
-    expect(result).toMatchObject({ panelId: expect.any(String), title: "Panel error debug" });
+    expect(result).toMatchObject({
+      panelId: expect.any(String),
+      title: "Panel error debug",
+    });
     expect(rpcCall).toHaveBeenCalledWith("main", "runtime.reserveEntity", [
       expect.objectContaining({
         kind: "panel",
         execution: { surface: "code", source: "panels/chat" },
         contextId: "ctx-vault",
         stateArgs: expect.objectContaining({
-          initialPrompt: expect.stringContaining("Maximum update depth exceeded"),
+          initialPrompt: expect.stringContaining(
+            "Maximum update depth exceeded",
+          ),
         }),
       }),
     ]);

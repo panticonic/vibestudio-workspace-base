@@ -1,20 +1,17 @@
 import { createHash } from "node:crypto";
-import {
-  DurableObjectBase,
-  schemaRpc,
-  type DurableObjectContext,
-} from "@workspace/runtime/worker/kernel";
+import { DurableObjectBase, schemaRpc, type DurableObjectContext } from "@workspace/runtime/worker/kernel";
 import {
   developmentBuiltinMethods,
   developmentRunSchema,
   developmentSessionSchema,
+  type DevelopmentPairSelection,
   type DevelopmentRun,
-  type DevelopmentSession,
+  type DevelopmentSession
 } from "@vibestudio/service-schemas/development";
 import type {
   nativeDevelopmentSessionReceiptSchema,
   nativeDevelopmentTerminalSnapshotSchema,
-  preparedNativeBuildSchema,
+  preparedNativeBuildSchema
 } from "@vibestudio/service-schemas/developmentNative";
 import type { VcsInspectResult, VcsStatusResult } from "@vibestudio/service-schemas/vcs";
 import { canonicalJson } from "@vibestudio/content-addressing";
@@ -27,12 +24,7 @@ type TerminalSnapshot = z.infer<typeof nativeDevelopmentTerminalSnapshotSchema>;
 type PreparedBuild = z.infer<typeof preparedNativeBuildSchema>;
 
 const WORKSPACE_SOURCE_PROTOCOL = "vibestudio.workspace-source.v1";
-const TERMINAL_RUN_STATES = new Set<DevelopmentRun["state"]>([
-  "succeeded",
-  "stopped",
-  "failed",
-  "cancelled",
-]);
+const TERMINAL_RUN_STATES = new Set<DevelopmentRun["state"]>(["succeeded", "stopped", "failed", "cancelled"]);
 
 export class DevelopmentDO extends DurableObjectBase {
   static override rpcMethods = developmentBuiltinMethods;
@@ -40,9 +32,7 @@ export class DevelopmentDO extends DurableObjectBase {
 
   constructor(ctx: DurableObjectContext, env: unknown) {
     super(ctx, env);
-    this.store = new DevelopmentStore(this.sql, (operation) =>
-      this.ctx.storage.transactionSync(operation)
-    );
+    this.store = new DevelopmentStore(this.sql, (operation) => this.ctx.storage.transactionSync(operation));
   }
 
   protected createTables(): void {
@@ -55,7 +45,7 @@ export class DevelopmentDO extends DurableObjectBase {
       "development_runs",
       "development_run_events",
       "development_mutation_intents",
-      "development_test_faults",
+      "development_test_faults"
     ];
   }
 
@@ -64,7 +54,7 @@ export class DevelopmentDO extends DurableObjectBase {
       `CREATE UNIQUE INDEX development_session_open_intent
        ON development_sessions(owner_runtime_id,COALESCE(owner_user_id,''),idempotency_key)`,
       `CREATE INDEX development_runs_owner
-       ON development_runs(owner_user_id,owner_runtime_id,created_at DESC,run_id ASC)`,
+       ON development_runs(owner_user_id,owner_runtime_id,created_at DESC,run_id ASC)`
     ];
   }
 
@@ -95,9 +85,7 @@ export class DevelopmentDO extends DurableObjectBase {
       }
       return { kind: "opened", session: existing };
     }
-    const parentContextId = await this.rpc.call<string | null>("main", "runtime.resolveContext", [
-      owner.runtimeId,
-    ]);
+    const parentContextId = await this.rpc.call<string | null>("main", "runtime.resolveContext", [owner.runtimeId]);
     if (!parentContextId) throw coded("ENOENT", "Development caller has no semantic context");
     const parentRepository = await this.resolveRepository(parentContextId, input.repositoryId);
     if (!parentRepository) {
@@ -105,14 +93,11 @@ export class DevelopmentDO extends DurableObjectBase {
         kind: "repository-not-adopted",
         repositoryId: input.repositoryId,
         contextId: parentContextId,
-        adoptionAction: "gitInterop.importProject",
+        adoptionAction: "gitInterop.importProject"
       };
     }
     const sessionId = developmentSessionId(this.ownerKey(), input.idempotencyKey);
-    const targetContextId = `ctx-development-${createHash("sha256")
-      .update(sessionId)
-      .digest("hex")
-      .slice(0, 32)}`;
+    const targetContextId = `ctx-development-${createHash("sha256").update(sessionId).digest("hex").slice(0, 32)}`;
     const context = await this.rpc.call<{
       contextId: string;
       parentContextId: string;
@@ -122,18 +107,13 @@ export class DevelopmentDO extends DurableObjectBase {
       {
         ownerRuntimeId: owner.runtimeId,
         parentContextId,
-        targetContextId,
-      },
+        targetContextId
+      }
     ]);
     const childRepository = await this.resolveRepository(context.contextId, input.repositoryId);
     if (!childRepository || childRepository.repoPath !== parentRepository.repoPath) {
-      await this.rpc.call("main", "runtime.dropSemanticContext", [
-        { contextId: context.contextId },
-      ]);
-      throw coded(
-        "EIDENTITYDRIFT",
-        "Repository identity changed while forking development context"
-      );
+      await this.rpc.call("main", "runtime.dropSemanticContext", [{ contextId: context.contextId }]);
+      throw coded("EIDENTITYDRIFT", "Repository identity changed while forking development context");
     }
     const at = Date.now();
     let session = developmentSessionSchema.parse({
@@ -145,25 +125,25 @@ export class DevelopmentDO extends DurableObjectBase {
       native: null,
       repository: {
         repositoryId: input.repositoryId,
-        repoPath: childRepository.repoPath,
+        repoPath: childRepository.repoPath
       },
       contextId: context.contextId,
       parentContextId: context.parentContextId,
       basis: {
         parentWorkingHead: context.parentWorkingHead,
-        childBaseState: context.childBaseState,
+        childBaseState: context.childBaseState
       },
       owner: {
         runtimeId: owner.runtimeId,
         runtimeKind: this.runtimeKind(),
-        userId: owner.userId,
+        userId: owner.userId
       },
       contextEffect: "owned",
       repairAttention: null,
       createdAt: at,
       updatedAt: at,
       primaryDiagnostic: null,
-      cleanupDiagnostics: [],
+      cleanupDiagnostics: []
     });
     this.store.putSession(session);
     try {
@@ -175,8 +155,8 @@ export class DevelopmentDO extends DurableObjectBase {
             repositoryId: input.repositoryId,
             childWorkingHead: context.childBaseState,
             toolId: input.nativeTool!,
-            idempotencyKey: input.idempotencyKey,
-          },
+            idempotencyKey: input.idempotencyKey
+          }
         ]);
         session = this.updateNative(session, native);
       } else {
@@ -189,7 +169,7 @@ export class DevelopmentDO extends DurableObjectBase {
         state: "requires-repair",
         primaryDiagnostic: diagnostic,
         cleanupDiagnostics: [diagnostic],
-        repairAttention: "actionable",
+        repairAttention: "actionable"
       });
       return { kind: "opened", session };
     }
@@ -211,50 +191,43 @@ export class DevelopmentDO extends DurableObjectBase {
       ? ordered.filter(
           (session) =>
             session.createdAt < input.cursor!.createdAt ||
-            (session.createdAt === input.cursor!.createdAt &&
-              session.sessionId > input.cursor!.sessionId)
+            (session.createdAt === input.cursor!.createdAt && session.sessionId > input.cursor!.sessionId)
         )
       : ordered;
     const sessions = remaining.slice(0, limit);
     const last = sessions.at(-1);
     return {
       sessions,
-      nextCursor:
-        remaining.length > limit && last
-          ? { createdAt: last.createdAt, sessionId: last.sessionId }
-          : null,
+      nextCursor: remaining.length > limit && last ? { createdAt: last.createdAt, sessionId: last.sessionId } : null
     };
   }
 
   @schemaRpc()
-  async closeSession(input: {
-    sessionId: string;
-    idempotencyKey: string;
-  }): Promise<DevelopmentSession> {
+  async closeSession(input: { sessionId: string; idempotencyKey: string }): Promise<DevelopmentSession> {
     const session = this.requireSession(input.sessionId);
     this.requireNoActiveRuns(session.sessionId);
     if (session.mode === "native-tool") {
       const native = await this.rpc.call<NativeReceipt>("main", "developmentNative.stopTool", [
-        { sessionId: session.sessionId },
+        { sessionId: session.sessionId }
       ]);
       this.updateNative(session, native);
     }
-    const closing = this.store.beginClose({ ...input, disposition: "retain-context" });
+    const closing = this.store.beginClose({
+      ...input,
+      disposition: "retain-context"
+    });
     if (closing.state === "closed") return closing;
     return this.store.updateSession(session.sessionId, {
       state: "closed",
       contextEffect: "retained",
       primaryDiagnostic: null,
       cleanupDiagnostics: [],
-      repairAttention: null,
+      repairAttention: null
     });
   }
 
   @schemaRpc()
-  async destroySession(input: {
-    sessionId: string;
-    idempotencyKey: string;
-  }): Promise<DevelopmentSession> {
+  async destroySession(input: { sessionId: string; idempotencyKey: string }): Promise<DevelopmentSession> {
     const session = this.requireSession(input.sessionId);
     this.requireNoActiveRuns(session.sessionId);
     this.store.beginClose({ ...input, disposition: "destroy-context" });
@@ -262,10 +235,7 @@ export class DevelopmentDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  async retrySessionCleanup(input: {
-    sessionId: string;
-    idempotencyKey: string;
-  }): Promise<DevelopmentSession> {
+  async retrySessionCleanup(input: { sessionId: string; idempotencyKey: string }): Promise<DevelopmentSession> {
     const session = this.requireSession(input.sessionId);
     this.store.recordSessionRepairIntent({ ...input, action: "retry" });
     this.requireNoActiveRuns(session.sessionId);
@@ -274,15 +244,12 @@ export class DevelopmentDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  async keepSessionRepair(input: {
-    sessionId: string;
-    idempotencyKey: string;
-  }): Promise<DevelopmentSession> {
+  async keepSessionRepair(input: { sessionId: string; idempotencyKey: string }): Promise<DevelopmentSession> {
     const session = this.requireSession(input.sessionId);
     this.store.recordSessionRepairIntent({ ...input, action: "keep" });
     if (session.mode === "native-tool") {
       const native = await this.rpc.call<NativeReceipt>("main", "developmentNative.keepTool", [
-        { sessionId: session.sessionId },
+        { sessionId: session.sessionId }
       ]);
       return this.updateNative(session, native);
     }
@@ -292,10 +259,7 @@ export class DevelopmentDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  async forceRetireSession(input: {
-    sessionId: string;
-    idempotencyKey: string;
-  }): Promise<DevelopmentSession> {
+  async forceRetireSession(input: { sessionId: string; idempotencyKey: string }): Promise<DevelopmentSession> {
     const session = this.requireSession(input.sessionId);
     this.store.recordSessionRepairIntent({ ...input, action: "force-retire" });
     this.requireNoActiveRuns(session.sessionId);
@@ -304,11 +268,7 @@ export class DevelopmentDO extends DurableObjectBase {
 
   @schemaRpc()
   async listRecipes(): Promise<ReturnType<typeof developmentRecipes>> {
-    const host = await this.rpc.call<{ platform: string; arch: string }>(
-      "main",
-      "developmentNative.describeHost",
-      []
-    );
+    const host = await this.rpc.call<{ platform: string; arch: string }>("main", "developmentNative.describeHost", []);
     return developmentRecipes(host.platform, host.arch);
   }
 
@@ -339,10 +299,51 @@ export class DevelopmentDO extends DurableObjectBase {
         return {
           ...tool,
           executorId: tool.executorId ?? null,
-          unavailableReason: tool.unavailableReason ?? null,
+          unavailableReason: tool.unavailableReason ?? null
         };
       })
     );
+  }
+
+  @schemaRpc()
+  async planTemplateExchange(input: {
+    sessionId: string;
+    direction: "export" | "import";
+    checkout: string;
+    idempotencyKey: string;
+  }) {
+    const session = this.requireSession(input.sessionId);
+    if (session.state !== "ready") throw coded("ESTATE", "Development session is not ready");
+    const repository = await this.resolveRepository(session.contextId, session.repository.repositoryId);
+    if (!repository) throw coded("ENOENT", "Development template repository is absent");
+    return this.rpc.call("main", "developmentNative.prepareTemplateExchange", [
+      {
+        direction: input.direction,
+        checkout: input.checkout,
+        contextId: session.contextId,
+        repositoryId: session.repository.repositoryId,
+        expectedWorkingHead: repository.sourceState,
+        idempotencyKey: input.idempotencyKey
+      }
+    ]);
+  }
+
+  @schemaRpc()
+  async applyTemplateExchange(input: {
+    sessionId: string;
+    operationId: string;
+    intentDigest: string;
+    checkout: string;
+  }) {
+    const session = this.requireSession(input.sessionId);
+    if (session.state !== "ready") throw coded("ESTATE", "Development session is not ready");
+    return this.rpc.call("main", "developmentNative.applyTemplateExchange", [
+      {
+        operationId: input.operationId,
+        intentDigest: input.intentDigest,
+        checkout: input.checkout
+      }
+    ]);
   }
 
   @schemaRpc()
@@ -350,6 +351,7 @@ export class DevelopmentDO extends DurableObjectBase {
     sessionId: string;
     runId: string;
     recipeId: string;
+    pair: DevelopmentPairSelection;
     target: DevelopmentRun["target"];
   }): Promise<DevelopmentRun> {
     const session = this.requireSession(input.sessionId);
@@ -359,15 +361,19 @@ export class DevelopmentDO extends DurableObjectBase {
       this.assertRunIntent(existing, input);
       return this.reconcileRun(existing);
     }
-    const recipe = (await this.listRecipes()).find(
-      (candidate) => candidate.recipeId === input.recipeId
-    );
+    const recipe = (await this.listRecipes()).find((candidate) => candidate.recipeId === input.recipeId);
     if (!recipe) throw coded("ENOENT", `Unknown reviewed recipe ${input.recipeId}`);
     if (!recipeMatchesTarget(recipe.target, input.target)) {
       throw coded("EIDEMPOTENCYDRIFT", "Selected target does not match the reviewed recipe");
     }
     const plan = await this.rpc.call<PreparedBuild>("main", "developmentNative.prepareBuild", [
-      { session, runId: input.runId, recipe, target: input.target },
+      {
+        session,
+        runId: input.runId,
+        recipe,
+        pair: input.pair,
+        target: input.target
+      }
     ]);
     const at = Date.now();
     let run = developmentRunSchema.parse({
@@ -391,7 +397,7 @@ export class DevelopmentDO extends DurableObjectBase {
       repair: null,
       createdAt: at,
       updatedAt: at,
-      terminalAt: null,
+      terminalAt: null
     });
     run = this.store.putRun(run, plan, this.startIntentDigest(input));
     const injectedFault = this.store.consumeSnapshotFault(run.runId);
@@ -399,7 +405,7 @@ export class DevelopmentDO extends DurableObjectBase {
       const diagnostic = {
         code: "ESYSTEMTEST_INJECTED_BUILD",
         message: `System-test injected build failure ${injectedFault} after the retained exact snapshot`,
-        at: Date.now(),
+        at: Date.now()
       };
       return this.store.transitionRun({
         runId: run.runId,
@@ -415,10 +421,10 @@ export class DevelopmentDO extends DurableObjectBase {
           knownEffects: {
             executionRoot: "absent",
             process: "absent",
-            artifact: "absent",
-          },
+            artifact: "absent"
+          }
         },
-        message: diagnostic.message,
+        message: diagnostic.message
       });
     }
     await this.rpc.call("main", "developmentNative.beginBuild", [{ run }]);
@@ -426,16 +432,12 @@ export class DevelopmentDO extends DurableObjectBase {
       runId: run.runId,
       expected: ["accepted"],
       state: "materializing",
-      message: "Exact native build started",
+      message: "Exact native build started"
     });
   }
 
   @schemaRpc()
-  faultFailBuildAfterSnapshotRetained(input: {
-    sessionId: string;
-    runId: string;
-    phase: "after-snapshot-retained";
-  }): {
+  faultFailBuildAfterSnapshotRetained(input: { sessionId: string; runId: string; phase: "after-snapshot-retained" }): {
     faultId: string;
     runId: string;
     phase: "after-snapshot-retained";
@@ -448,7 +450,7 @@ export class DevelopmentDO extends DurableObjectBase {
     }
     return this.store.armSnapshotFault({
       runId: input.runId,
-      sessionId: session.sessionId,
+      sessionId: session.sessionId
     });
   }
 
@@ -473,7 +475,7 @@ export class DevelopmentDO extends DurableObjectBase {
         .listRuns({
           owner: this.owner(),
           ...(input?.sessionId ? { sessionId: input.sessionId } : {}),
-          ...(input?.state ? { state: input.state } : {}),
+          ...(input?.state ? { state: input.state } : {})
         })
         .map((run) => this.reconcileRun(run))
     );
@@ -489,8 +491,7 @@ export class DevelopmentDO extends DurableObjectBase {
     const last = runs.at(-1);
     return {
       runs,
-      nextCursor:
-        after.length > limit && last ? { createdAt: last.createdAt, runId: last.runId } : null,
+      nextCursor: after.length > limit && last ? { createdAt: last.createdAt, runId: last.runId } : null
     };
   }
 
@@ -512,11 +513,11 @@ export class DevelopmentDO extends DurableObjectBase {
       runId: run.runId,
       operation: "stop",
       idempotencyKey: input.idempotencyKey,
-      intent: { runId: run.runId },
+      intent: { runId: run.runId }
     });
     if (TERMINAL_RUN_STATES.has(run.state) || run.state === "requires-repair") return run;
     await this.rpc.call("main", "developmentNative.stopBuild", [
-      { runId: run.runId, snapshotDigest: run.snapshot.snapshotDigest },
+      { runId: run.runId, snapshotDigest: run.snapshot.snapshotDigest }
     ]);
     run = this.store.transitionRun({
       runId: run.runId,
@@ -524,7 +525,7 @@ export class DevelopmentDO extends DurableObjectBase {
       state: "stopped",
       terminal: true,
       hostReadiness: run.target.kind === "isolated-host" ? "stopped" : run.hostReadiness,
-      message: "Exact native build stopped",
+      message: "Exact native build stopped"
     });
     return run;
   }
@@ -536,19 +537,29 @@ export class DevelopmentDO extends DurableObjectBase {
       runId: run.runId,
       operation: "repair",
       idempotencyKey: input.idempotencyKey,
-      intent: { runId: run.runId, action: "retry" },
+      intent: { runId: run.runId, action: "retry" }
     });
     if (!run.repair?.retryable) throw coded("ENOTRECOVERABLE", "Run cannot be retried");
     const session = this.requireSession(run.sessionId);
     await this.rpc.call("main", "developmentNative.prepareBuild", [
-      { session, runId: run.runId, recipe: run.recipe, target: run.target },
+      {
+        session,
+        runId: run.runId,
+        recipe: run.recipe,
+        pair: {
+          kind: run.snapshot.pair.kind,
+          hostRepositoryId: run.snapshot.pair.host.repositoryId,
+          baseRepositoryId: run.snapshot.pair.base.repositoryId
+        },
+        target: run.target
+      }
     ]);
     run = this.store.transitionRun({
       runId: run.runId,
       expected: [run.state],
       state: "materializing",
       repair: null,
-      message: "Retrying the retained exact snapshot",
+      message: "Retrying the retained exact snapshot"
     });
     await this.rpc.call("main", "developmentNative.beginBuild", [{ run }]);
     return run;
@@ -561,7 +572,7 @@ export class DevelopmentDO extends DurableObjectBase {
       runId: run.runId,
       operation: "repair",
       idempotencyKey: input.idempotencyKey,
-      intent: { runId: run.runId, action: "keep" },
+      intent: { runId: run.runId, action: "keep" }
     });
     if (!run.repair) return run;
     return this.store.transitionRun({
@@ -569,7 +580,7 @@ export class DevelopmentDO extends DurableObjectBase {
       expected: [run.state],
       state: run.state,
       repair: { ...run.repair, attention: "kept" },
-      message: "Repair record kept",
+      message: "Repair record kept"
     });
   }
 
@@ -580,7 +591,7 @@ export class DevelopmentDO extends DurableObjectBase {
       runId: run.runId,
       operation: "repair",
       idempotencyKey: input.idempotencyKey,
-      intent: { runId: run.runId, action: "force-retire" },
+      intent: { runId: run.runId, action: "force-retire" }
     });
     if (run.repair?.knownEffects.process === "unknown") {
       return this.store.transitionRun({
@@ -588,7 +599,7 @@ export class DevelopmentDO extends DurableObjectBase {
         expected: [run.state],
         state: "requires-repair",
         repair: { ...run.repair, attention: "kept" },
-        message: "Retirement refused because process ownership is unknown",
+        message: "Retirement refused because process ownership is unknown"
       });
     }
     await this.rpc.call("main", "developmentNative.retireBuild", [{ run }]);
@@ -599,83 +610,57 @@ export class DevelopmentDO extends DurableObjectBase {
       artifact: null,
       repair: null,
       terminal: true,
-      message: "Exact native build root retired",
+      message: "Exact native build root retired"
     });
   }
 
   @schemaRpc()
-  async checkpoint(input: {
-    sessionId: string;
-    idempotencyKey: string;
-  }): Promise<DevelopmentSession> {
+  async checkpoint(input: { sessionId: string; idempotencyKey: string }): Promise<DevelopmentSession> {
     const session = this.requireNativeSession(input.sessionId);
     this.store.updateSession(session.sessionId, { state: "checkpointing" });
     await this.rpc.call("main", "developmentNative.checkpointTool", [input]);
     const native = await this.rpc.call<NativeReceipt>("main", "developmentNative.inspectTool", [
-      { sessionId: session.sessionId },
+      { sessionId: session.sessionId }
     ]);
     return this.updateNative(session, native);
   }
 
   @schemaRpc()
-  async inspectNative(input: {
-    sessionId: string;
-    assessPendingChanges?: boolean;
-  }): Promise<DevelopmentSession> {
+  async inspectNative(input: { sessionId: string; assessPendingChanges?: boolean }): Promise<DevelopmentSession> {
     const session = this.requireNativeSession(input.sessionId);
-    const native = await this.rpc.call<NativeReceipt>("main", "developmentNative.inspectTool", [
-      input,
-    ]);
+    const native = await this.rpc.call<NativeReceipt>("main", "developmentNative.inspectTool", [input]);
     return this.updateNative(session, native);
   }
 
   @schemaRpc()
-  async stopNativeTool(input: {
-    sessionId: string;
-    idempotencyKey: string;
-  }): Promise<DevelopmentSession> {
+  async stopNativeTool(input: { sessionId: string; idempotencyKey: string }): Promise<DevelopmentSession> {
     const session = this.requireNativeSession(input.sessionId);
-    this.store.recordSessionRepairIntent({ ...input, action: "stop-native-tool" });
+    this.store.recordSessionRepairIntent({
+      ...input,
+      action: "stop-native-tool"
+    });
     const native = await this.rpc.call<NativeReceipt>("main", "developmentNative.stopTool", [
-      { sessionId: session.sessionId },
+      { sessionId: session.sessionId }
     ]);
     return this.updateNative(session, native);
   }
 
   @schemaRpc()
-  readNativeTerminal(input: {
-    sessionId: string;
-    after?: number;
-    maxBytes?: number;
-  }): Promise<TerminalSnapshot> {
+  readNativeTerminal(input: { sessionId: string; after?: number; maxBytes?: number }): Promise<TerminalSnapshot> {
     const session = this.requireNativeSession(input.sessionId);
-    return this.rpc.call("main", "developmentNative.readTerminal", [
-      { ...input, sessionId: session.sessionId },
-    ]);
+    return this.rpc.call("main", "developmentNative.readTerminal", [{ ...input, sessionId: session.sessionId }]);
   }
 
   @schemaRpc()
-  async writeNativeTerminal(input: {
-    sessionId: string;
-    writeId: string;
-    data: string;
-  }): Promise<void> {
+  async writeNativeTerminal(input: { sessionId: string; writeId: string; data: string }): Promise<void> {
     const session = this.requireNativeSession(input.sessionId);
-    await this.rpc.call("main", "developmentNative.writeTerminal", [
-      { ...input, sessionId: session.sessionId },
-    ]);
+    await this.rpc.call("main", "developmentNative.writeTerminal", [{ ...input, sessionId: session.sessionId }]);
   }
 
   @schemaRpc()
-  async resizeNativeTerminal(input: {
-    sessionId: string;
-    columns: number;
-    rows: number;
-  }): Promise<void> {
+  async resizeNativeTerminal(input: { sessionId: string; columns: number; rows: number }): Promise<void> {
     const session = this.requireNativeSession(input.sessionId);
-    await this.rpc.call("main", "developmentNative.resizeTerminal", [
-      { ...input, sessionId: session.sessionId },
-    ]);
+    await this.rpc.call("main", "developmentNative.resizeTerminal", [{ ...input, sessionId: session.sessionId }]);
   }
 
   @schemaRpc()
@@ -688,14 +673,17 @@ export class DevelopmentDO extends DurableObjectBase {
     return this.store
       .listRuns({})
       .filter(
-        (run): run is DevelopmentRun & { artifact: NonNullable<DevelopmentRun["artifact"]> } =>
-          run.artifact !== null
+        (
+          run
+        ): run is DevelopmentRun & {
+          artifact: NonNullable<DevelopmentRun["artifact"]>;
+        } => run.artifact !== null
       )
       .map((run) => ({
         owner: "development-run" as const,
         ownerId: run.runId,
         reason: "retained-result" as const,
-        artifact: run.artifact,
+        artifact: run.artifact
       }));
   }
 
@@ -721,9 +709,9 @@ export class DevelopmentDO extends DurableObjectBase {
       attachedHost: {
         ...run.attachedHost,
         state: "route-lost",
-        routeLostAt: Date.now(),
+        routeLostAt: Date.now()
       },
-      message: "Attached child route was lost",
+      message: "Attached child route was lost"
     });
   }
 
@@ -773,7 +761,7 @@ export class DevelopmentDO extends DurableObjectBase {
         };
     try {
       status = await this.rpc.call("main", "developmentNative.inspectBuild", [
-        { runId: run.runId, snapshotDigest: run.snapshot.snapshotDigest },
+        { runId: run.runId, snapshotDigest: run.snapshot.snapshotDigest }
       ]);
     } catch (error) {
       const diagnostic = toDiagnostic(error);
@@ -790,10 +778,10 @@ export class DevelopmentDO extends DurableObjectBase {
           knownEffects: {
             executionRoot: "owned",
             process: "unknown",
-            artifact: run.artifact ? "retained" : "absent",
-          },
+            artifact: run.artifact ? "retained" : "absent"
+          }
         },
-        message: diagnostic.message,
+        message: diagnostic.message
       });
     }
     for (const log of status.logs) this.store.appendEvent(run.runId, "log", log);
@@ -803,7 +791,7 @@ export class DevelopmentDO extends DurableObjectBase {
         runId: run.runId,
         expected: [run.state],
         state: phase,
-        message: phase === "building" ? "Building host artifacts" : "Installing dependencies",
+        message: phase === "building" ? "Building host artifacts" : "Installing dependencies"
       });
     }
     if (status.state === "running") {
@@ -818,7 +806,7 @@ export class DevelopmentDO extends DurableObjectBase {
           hostReadiness: status.hostReadiness,
           client: status.client,
           attachedHost: status.attachedHost,
-          message: "Exact artifacts verified; reviewed target is starting",
+          message: "Exact artifacts verified; reviewed target is starting"
         });
       }
       return run;
@@ -844,10 +832,10 @@ export class DevelopmentDO extends DurableObjectBase {
           knownEffects: {
             executionRoot: "owned",
             process: "absent",
-            artifact: "absent",
-          },
+            artifact: "absent"
+          }
         },
-        message: diagnostic.message,
+        message: diagnostic.message
       });
     }
     if (status.state === "ready") {
@@ -862,7 +850,7 @@ export class DevelopmentDO extends DurableObjectBase {
         attachedHost: status.attachedHost,
         commitPoint: "ready",
         repair: null,
-        message: "Reviewed development target is ready",
+        message: "Reviewed development target is ready"
       });
     }
     return this.store.transitionRun({
@@ -872,7 +860,7 @@ export class DevelopmentDO extends DurableObjectBase {
       artifact: status.artifact,
       commitPoint: "artifacts-verified",
       terminal: true,
-      message: "Exact build artifacts verified",
+      message: "Exact build artifacts verified"
     });
   }
 
@@ -885,21 +873,20 @@ export class DevelopmentDO extends DurableObjectBase {
   } | null> {
     const workspaceSource = await this.resolveWorkspaceSource();
     const status = await this.callSemanticRead<VcsStatusResult>(workspaceSource, "vcsStatus", {
-      contextId,
+      contextId
     });
     try {
-      const inspected = await this.callSemanticRead<VcsInspectResult>(
-        workspaceSource,
-        "vcsInspect",
-        {
-          node: { kind: "repository", state: status.workingHead, repositoryId },
-          edgeLimit: 1,
-        }
-      );
+      const inspected = await this.callSemanticRead<VcsInspectResult>(workspaceSource, "vcsInspect", {
+        node: { kind: "repository", state: status.workingHead, repositoryId },
+        edgeLimit: 1
+      });
       if (inspected.node.kind !== "repository" || inspected.node.value.kind !== "present") {
         return null;
       }
-      return { repoPath: inspected.node.value.repoPath, sourceState: status.workingHead };
+      return {
+        repoPath: inspected.node.value.repoPath,
+        sourceState: status.workingHead
+      };
     } catch (error) {
       if (
         typeof error === "object" &&
@@ -940,9 +927,12 @@ export class DevelopmentDO extends DurableObjectBase {
         causalParent: null,
         contextIntegrity:
           integrity.class === "external"
-            ? { class: "external" as const, externalKeys: [...integrity.externalKeys] }
-            : { class: "internal" as const, externalKeys: [] },
-      },
+            ? {
+                class: "external" as const,
+                externalKeys: [...integrity.externalKeys]
+              }
+            : { class: "internal" as const, externalKeys: [] }
+      }
     };
   }
 
@@ -952,9 +942,7 @@ export class DevelopmentDO extends DurableObjectBase {
       targetId?: string;
     }>("main", "workers.resolveService", [WORKSPACE_SOURCE_PROTOCOL]);
     if (resolved.kind !== "durable-object" || !resolved.targetId) {
-      throw new Error(
-        `Workspace protocol ${WORKSPACE_SOURCE_PROTOCOL} must resolve to a Durable Object`
-      );
+      throw new Error(`Workspace protocol ${WORKSPACE_SOURCE_PROTOCOL} must resolve to a Durable Object`);
     }
     return resolved.targetId;
   }
@@ -962,17 +950,14 @@ export class DevelopmentDO extends DurableObjectBase {
   private async retireSessionEffects(session: DevelopmentSession): Promise<DevelopmentSession> {
     const cleanup: string[] = [];
     if (session.mode === "native-tool") {
-      const retired = await this.rpc.call<{ retired: boolean; cleanupErrors: string[] }>(
-        "main",
-        "developmentNative.retireTool",
-        [{ sessionId: session.sessionId }]
-      );
+      const retired = await this.rpc.call<{
+        retired: boolean;
+        cleanupErrors: string[];
+      }>("main", "developmentNative.retireTool", [{ sessionId: session.sessionId }]);
       cleanup.push(...retired.cleanupErrors);
     }
     try {
-      await this.rpc.call("main", "runtime.dropSemanticContext", [
-        { contextId: session.contextId },
-      ]);
+      await this.rpc.call("main", "runtime.dropSemanticContext", [{ contextId: session.contextId }]);
     } catch (error) {
       cleanup.push(error instanceof Error ? error.message : String(error));
     }
@@ -982,7 +967,7 @@ export class DevelopmentDO extends DurableObjectBase {
         contextEffect: "absent",
         primaryDiagnostic: null,
         cleanupDiagnostics: [],
-        repairAttention: null,
+        repairAttention: null
       });
     }
     const diagnostics = cleanup.map((message) => toDiagnostic(new Error(message)));
@@ -991,7 +976,7 @@ export class DevelopmentDO extends DurableObjectBase {
       contextEffect: "unknown",
       primaryDiagnostic: diagnostics[0]!,
       cleanupDiagnostics: diagnostics,
-      repairAttention: "actionable",
+      repairAttention: "actionable"
     });
   }
 
@@ -1016,12 +1001,11 @@ export class DevelopmentDO extends DurableObjectBase {
         process: native.process,
         lastCheckpoint: native.lastCheckpoint,
         pendingChanges: native.pendingChanges,
-        repair: native.repair,
+        repair: native.repair
       },
       primaryDiagnostic: native.repair ? toDiagnostic(new Error(native.repair.primaryError)) : null,
-      cleanupDiagnostics:
-        native.repair?.cleanupErrors.map((message) => toDiagnostic(new Error(message))) ?? [],
-      repairAttention: native.repair?.attention ?? null,
+      cleanupDiagnostics: native.repair?.cleanupErrors.map((message) => toDiagnostic(new Error(message))) ?? [],
+      repairAttention: native.repair?.attention ?? null
     });
   }
 
@@ -1087,9 +1071,7 @@ export class DevelopmentDO extends DurableObjectBase {
 
   private runtimeKind(): DevelopmentRun["ownerRuntimeKind"] {
     const kind = this.caller?.callerKind;
-    return ["panel", "app", "worker", "do", "extension", "shell", "server", "agent"].includes(
-      String(kind)
-    )
+    return ["panel", "app", "worker", "do", "extension", "shell", "server", "agent"].includes(String(kind))
       ? (kind as DevelopmentRun["ownerRuntimeKind"])
       : "do";
   }
@@ -1106,12 +1088,16 @@ export class DevelopmentDO extends DurableObjectBase {
       sessionId: string;
       runId: string;
       recipeId: string;
+      pair: DevelopmentPairSelection;
       target: DevelopmentRun["target"];
     }
   ): void {
     if (
       run.sessionId !== input.sessionId ||
       run.recipe.recipeId !== input.recipeId ||
+      run.snapshot.pair.kind !== input.pair.kind ||
+      run.snapshot.pair.host.repositoryId !== input.pair.hostRepositoryId ||
+      run.snapshot.pair.base.repositoryId !== input.pair.baseRepositoryId ||
       canonicalJson(run.target) !== canonicalJson(input.target)
     ) {
       throw coded("EIDEMPOTENCYDRIFT", "Run id was reused with different intent");
@@ -1119,10 +1105,7 @@ export class DevelopmentDO extends DurableObjectBase {
   }
 }
 
-function recipeMatchesTarget(
-  recipe: DevelopmentRun["recipe"]["target"],
-  target: DevelopmentRun["target"]
-): boolean {
+function recipeMatchesTarget(recipe: DevelopmentRun["recipe"]["target"], target: DevelopmentRun["target"]): boolean {
   return (
     recipe.kind === target.kind &&
     (recipe.kind === "build-only" ||
@@ -1133,16 +1116,18 @@ function recipeMatchesTarget(
   );
 }
 
-function toDiagnostic(error: unknown): { code: string; message: string; at: number } {
+function toDiagnostic(error: unknown): {
+  code: string;
+  message: string;
+  at: number;
+} {
   return {
     code:
-      typeof error === "object" &&
-      error !== null &&
-      typeof (error as { code?: unknown }).code === "string"
+      typeof error === "object" && error !== null && typeof (error as { code?: unknown }).code === "string"
         ? String((error as { code: string }).code)
         : "EDEVELOPMENT",
     message: error instanceof Error ? error.message : String(error),
-    at: Date.now(),
+    at: Date.now()
   };
 }
 

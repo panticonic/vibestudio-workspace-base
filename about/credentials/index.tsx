@@ -486,7 +486,7 @@ function CredentialsPage() {
       const managed = await credentials.inspectStoredCredentials();
       setItems(managed);
       const [savedPasswords, neverSave, savedFormFill] = await Promise.allSettled([
-        browserData.getPasswords().then((rows) =>
+        browserData.listPasswordSummaries().then((rows) =>
           rows.map((row) => ({
             id: row.id,
             origin: row.origin_url,

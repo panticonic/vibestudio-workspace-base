@@ -116,10 +116,17 @@ export class WorkspacePresentationDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  indexPanel(input: IndexablePanel & { source: string }, entityId: string | null): string | null {
+  indexPanel(
+    input: IndexablePanel & { source: string },
+    entityId: string | null,
+    options?: { explicit?: boolean }
+  ): string | null {
     const now = Date.now();
+    const existingTitle = entityId ? this.entityTitle(entityId) : null;
     const title =
-      normalizePanelTitle(input.title) ?? (entityId ? this.entityTitle(entityId) : null);
+      entityId && this.isEntityTitleExplicit(entityId) && !options?.explicit
+        ? existingTitle
+        : (normalizePanelTitle(input.title) ?? existingTitle);
     this.sql.exec(
       `INSERT INTO panels(
          slot_id, entity_id, source, searchable_title, searchable_path,
@@ -146,13 +153,19 @@ export class WorkspacePresentationDO extends DurableObjectBase {
       input.keywords ? JSON.stringify(input.keywords) : null,
       now
     );
-    if (entityId && title) this.setEntityTitle(entityId, title);
+    if (entityId && title) this.setEntityTitle(entityId, title, options);
     return entityId;
   }
 
   @schemaRpc()
-  updatePanelTitle(slotId: string, entityId: string, title: string): string {
-    this.setEntityTitle(entityId, title);
+  updatePanelTitle(
+    slotId: string,
+    entityId: string,
+    title: string,
+    options?: { explicit?: boolean }
+  ): string {
+    if (this.isEntityTitleExplicit(entityId) && !options?.explicit) return entityId;
+    this.setEntityTitle(entityId, title, options);
     this.sql.exec(
       `UPDATE panels SET entity_id = ?, searchable_title = ?, last_indexed_at = ? WHERE slot_id = ?`,
       entityId,
@@ -164,13 +177,19 @@ export class WorkspacePresentationDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  setEntityTitle(entityId: string, title: string | null): void {
+  setEntityTitle(
+    entityId: string,
+    title: string | null,
+    options?: { explicit?: boolean }
+  ): void {
     const normalized = normalizePanelTitle(title);
     this.ctx.storage.transactionSync(() => {
       if (normalized === undefined) {
         this.sql.exec(`DELETE FROM entity_titles WHERE entity_id = ?`, entityId);
+        this.deleteStateValue(this.explicitTitleKey(entityId));
         return;
       }
+      if (this.isEntityTitleExplicit(entityId) && !options?.explicit) return;
       this.sql.exec(
         `INSERT INTO entity_titles(entity_id, title) VALUES (?, ?)
          ON CONFLICT(entity_id) DO UPDATE SET title = excluded.title`,
@@ -183,14 +202,25 @@ export class WorkspacePresentationDO extends DurableObjectBase {
         Date.now(),
         entityId
       );
+      if (options?.explicit) this.setStateValue(this.explicitTitleKey(entityId), "1");
     });
   }
 
   @schemaRpc()
-  listEntityTitles(): Array<{ id: string; title: string }> {
+  listEntityTitles(): Array<{ id: string; title: string; explicit: boolean }> {
     return this.sql
       .exec(`SELECT entity_id AS id, title FROM entity_titles ORDER BY entity_id`)
-      .toArray() as Array<{ id: string; title: string }>;
+      .toArray()
+      .map((row) => ({
+        id: String(row["id"]),
+        title: String(row["title"]),
+        explicit: this.isEntityTitleExplicit(String(row["id"])),
+      }));
+  }
+
+  @schemaRpc()
+  isEntityTitleExplicit(entityId: string): boolean {
+    return this.getStateValue(this.explicitTitleKey(entityId)) === "1";
   }
 
   @schemaRpc()
@@ -300,6 +330,10 @@ export class WorkspacePresentationDO extends DurableObjectBase {
       .exec(`SELECT title FROM entity_titles WHERE entity_id = ?`, entityId)
       .toArray()[0]?.["title"];
     return typeof title === "string" ? title : null;
+  }
+
+  private explicitTitleKey(entityId: string): string {
+    return `workspace-presentation.explicit-title:${entityId}`;
   }
 
   private sanitizeSearchQuery(query: string): string {

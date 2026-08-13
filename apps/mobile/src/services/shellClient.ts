@@ -53,7 +53,6 @@ import { panelRuntimeMethods } from "@vibestudio/service-schemas/panelRuntime";
 import { credentialsMethods } from "@vibestudio/service-schemas/credentials";
 import { pushMethods } from "@vibestudio/service-schemas/push";
 import { workspaceMethods } from "@vibestudio/service-schemas/workspace";
-import { workspaceStateMethods } from "@vibestudio/service-schemas/workspaceState";
 import { hubControlMethods } from "@vibestudio/service-schemas/hubControl";
 import {
   createDurableObjectServiceClient,
@@ -83,6 +82,10 @@ import {
 import type { Panel } from "@vibestudio/shared/types";
 import { HOST_COMMAND_CONTRIBUTION_EVENT, type HostCommand } from "@vibestudio/shared/hostCommands";
 import { HostCommandRegistry } from "@vibestudio/shell-core/panelCommandRegistry";
+import {
+  createWorkspacePresentationClient,
+  type WorkspacePresentationClient,
+} from "@workspace/runtime/workspace-presentation";
 
 export type { MobileAccountProfile, MobileAccountProfileUpdate } from "./accountProfileClient";
 
@@ -161,14 +164,6 @@ function createWorkspaceRpcClient(transport: MobileRpcClient) {
   );
 }
 
-function createWorkspaceStateRpcClient(transport: MobileRpcClient) {
-  return createTypedServiceClient(
-    "workspace-state",
-    workspaceStateMethods,
-    (service, method, args) => transport.call("main", `${service}.${method}`, args)
-  );
-}
-
 function createHubControlClient(transport: MobileRpcClient) {
   return createTypedServiceClient("hubControl", hubControlMethods, (service, method, args) =>
     transport.call("main", `${service}.${method}`, args)
@@ -181,7 +176,6 @@ type PanelRuntimeClient = ReturnType<typeof createPanelRuntimeClient>;
 type CredentialsClient = ReturnType<typeof createCredentialsClient>;
 type PushClient = ReturnType<typeof createPushClient>;
 type WorkspaceRpcClient = ReturnType<typeof createWorkspaceRpcClient>;
-type WorkspaceStateRpcClient = ReturnType<typeof createWorkspaceStateRpcClient>;
 type WorkspaceInfo = Awaited<ReturnType<WorkspaceClient["getInfo"]>>;
 
 export class MobileHostTargetApprovalRequiredError extends Error {
@@ -211,7 +205,7 @@ class MobilePanels implements PanelHost {
   private readonly panelRuntime: PanelRuntimeClient;
   private readonly browserData: BrowserDataClient;
   private readonly workspaceRpc: WorkspaceRpcClient;
-  private readonly workspaceState: WorkspaceStateRpcClient;
+  private readonly presentation: WorkspacePresentationClient;
   private readonly runtimeConnectionBySlot = new Map<
     string,
     { runtimeEntityId: PanelEntityId; connectionId: string }
@@ -239,16 +233,16 @@ class MobilePanels implements PanelHost {
     });
     this.panelRuntime = createPanelRuntimeClient(this.deps.transport);
     this.workspaceRpc = createWorkspaceRpcClient(this.deps.transport);
-    this.workspaceState = createWorkspaceStateRpcClient(this.deps.transport);
+    this.presentation = createWorkspacePresentationClient(this.deps.transport);
     this.browserData = createBrowserDataClient({
       callService: (service: string, method: string, args: unknown[]) =>
         this.deps.transport.call("main", `${service}.${method}`, args),
     });
     const source: PanelTreeQuerySource = {
-      rootGroups: (input) => this.workspaceState.panelTree.rootGroups(input),
-      page: (input) => this.workspaceState.panelTree.page(input),
-      path: (slotId) => this.workspaceState.panelTree.path(slotId),
-      search: (input) => this.workspaceState.panelTree.search(input),
+      rootGroups: (input) => this.presentation.rootGroups(input),
+      page: (input) => this.presentation.page(input),
+      path: (slotId) => this.presentation.path(slotId),
+      search: (input) => this.presentation.searchTree(input),
     };
     this.treeCache = new PanelTreeCache(source, {
       pageSize: 50,
@@ -430,7 +424,7 @@ class MobilePanels implements PanelHost {
   async observe(
     panelId: string
   ): Promise<import("@vibestudio/shared/panel/observation").PanelObservation> {
-    const detail = await this.workspaceState.panelTree.detail(panelId);
+    const detail = await this.presentation.detail(panelId);
     if (!detail) throw new Error(`Panel not found: ${panelId}`);
     const runtime = await this.panelRuntime.observeSlot(panelId);
     const options = detail.currentHistory.options
@@ -482,10 +476,10 @@ class MobilePanels implements PanelHost {
     return this.treeCache.loadPath(asPanelSlotId(panelId));
   }
   queryTreePage(input: import("@vibestudio/shared/panel/treeIndex").PanelTreePageInput) {
-    return this.workspaceState.panelTree.page(input);
+    return this.presentation.page(input);
   }
   async getStateArgs(panelId: string): Promise<Record<string, unknown>> {
-    const detail = await this.workspaceState.panelTree.detail(panelId);
+    const detail = await this.presentation.detail(panelId);
     if (!detail) throw new Error(`Panel not found: ${panelId}`);
     return decodePanelStateArgs(detail.currentHistory.state_args);
   }

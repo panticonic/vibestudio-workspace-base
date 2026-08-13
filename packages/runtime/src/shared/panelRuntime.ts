@@ -50,6 +50,7 @@ import {
 import { readPanelStateArgs, updatePanelStateArgs } from "./panelStateArgsPersistence.js";
 import { asPanelEntityId, asPanelSlotId } from "@vibestudio/shared/panel/idValues";
 import { callWorkspaceState, createRuntimeWorkspaceStateClient } from "./workspaceStateClient.js";
+import { createWorkspacePresentationClient } from "./workspacePresentation.js";
 import {
   commitPreparedPanelNavigation,
   type PanelNavigationCommitResult,
@@ -221,7 +222,7 @@ export interface CreatePanelRuntimeOptions {
       | "runtime.createEntity"
       | "runtime.reserveEntity"
       | "workspace-state.slot.create"
-      | "panel.index";
+      | "workspace.presentation.indexPanel";
     durationMs: number;
     outcome: "ok" | "error";
   }) => void;
@@ -232,6 +233,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
   const callState = <T>(method: string, args: unknown[]): Promise<T> =>
     callWorkspaceState<T>(options.rpc, method, args);
   const workspaceState = createRuntimeWorkspaceStateClient(options.rpc);
+  const presentation = createWorkspacePresentationClient(options.rpc);
   const navigationClients: PanelNavigationTransactionClients = {
     runtime: {
       retireEntity: (id) => options.rpc.call("main", "runtime.retireEntity", [{ id }]),
@@ -252,12 +254,12 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
   const callPanelState = async <T>(method: string, args: unknown[]): Promise<T> => {
     try {
       const read = {
-        rootGroups: () => workspaceState.getPanelTreeRootGroups(args[0] as never),
-        rootsForCaller: () => callState("panelTree.rootsForCaller", args),
-        page: () => workspaceState.getPanelTreePage(args[0] as never),
-        path: () => workspaceState.getPanelTreePath(asPanelSlotId(String(args[0]))),
-        detail: () => workspaceState.getPanelDetail(asPanelSlotId(String(args[0]))),
-        search: () => workspaceState.searchPanelTree(args[0] as never),
+        rootGroups: () => presentation.rootGroups(args[0] as never),
+        rootsForCaller: () => presentation.rootsForCaller(args[0] as never),
+        page: () => presentation.page(args[0] as never),
+        path: () => presentation.path(String(args[0])),
+        detail: () => presentation.detail(String(args[0])),
+        search: () => presentation.searchTree(args[0] as never),
       }[method];
       if (!read) throw new Error(`Unknown workspace-state panel read: ${method}`);
       return (await read()) as T;
@@ -672,6 +674,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
 
   const closePanel = async (id: string): Promise<PanelLifecycleResult> => {
     const closed = await workspaceState.closeSlot(asPanelSlotId(id));
+    const removed: string[] = [];
     for (;;) {
       const page = await workspaceState.getCloseCleanupPage({
         closeId: closed.closeId,
@@ -679,6 +682,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       });
       if (page.items.length === 0) break;
       for (const item of page.items) {
+        removed.push(item.slotId);
         if (item.entityId) {
           await options.rpc.call("main", "runtime.retireEntity", [{ id: item.entityId }]);
         }
@@ -688,6 +692,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       );
       if (!page.nextCursor) break;
     }
+    if (removed.length > 0) await presentation.removeSlots(removed);
     return {
       panelId: id,
       operation: "close",
@@ -780,7 +785,8 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
           ? new URL(source).hostname || new URL(source).protocol.replace(/:$/, "") || "browser"
           : (panelMetadata?.title ?? source)
       ) ?? "panel";
-    await callState("panel.updateTitle", [id, title, { explicit: false }]);
+    await presentation.syncSlot(id);
+    await presentation.updatePanelTitle(id, title, { explicit: false });
     const attempt = await ensurePanelMaterialized(id);
     const observation = await observePanel(id);
     rememberMetadata({
@@ -1119,7 +1125,9 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
     },
     unload: (id) => options.rpc.call<PanelLifecycleResult>("main", "panelRuntime.unloadSlot", [id]),
     setTitle: (id, title, titleOptions) =>
-      callState("panel.updateTitle", [id, normalizePanelTitle(title) ?? "", titleOptions]),
+      presentation
+        .updatePanelTitle(id, normalizePanelTitle(title) ?? "", titleOptions)
+        .then(() => undefined),
     navigate: async (id, source, navigateOptions) => {
       return navigatePanel(id, source, navigateOptions);
     },
@@ -1272,7 +1280,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
       };
     },
     sourceUsage(limit = 200) {
-      return callState<PanelSourceUsage[]>("panel.sourceUsage", [limit]);
+      return presentation.sourceUsage(limit);
     },
     parent(id) {
       const parentId =
@@ -1343,7 +1351,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         | "runtime.createEntity"
         | "runtime.reserveEntity"
         | "workspace-state.slot.create"
-        | "panel.index",
+        | "workspace.presentation.indexPanel",
       operation: () => Promise<T>
     ): Promise<T> => {
       const startedAt = Date.now();
@@ -1451,6 +1459,7 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
           },
         })
       );
+      await presentation.syncSlot(id);
       slotCommitted = true;
     } catch (error) {
       if (slotCommitted) rethrowCommittedFailure(error);
@@ -1468,11 +1477,11 @@ export function createPanelRuntime(options: CreatePanelRuntimeOptions): PanelRun
         normalizePanelTitle(parsedUrl?.protocol.replace(/:$/, "")) ??
         normalizePanelTitle(source) ??
         "panel";
-      await timed("panel.index", () =>
-        callState("panel.index", [{ id, title, path: historySource }])
+      await timed("workspace.presentation.indexPanel", () =>
+        presentation.indexPanel({ id, title, path: historySource })
       );
       if (explicitTitle !== undefined) {
-        await callState("panel.updateTitle", [id, title, { explicit: true }]);
+        await presentation.updatePanelTitle(id, title, { explicit: true });
       }
       const panelHandle = fromMetadata({
         id,

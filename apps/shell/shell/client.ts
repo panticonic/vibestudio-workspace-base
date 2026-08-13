@@ -19,7 +19,10 @@ import {
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import { HostLaunchClient } from "@vibestudio/service-schemas/clients/hostLaunchClient";
 import { extensionsMethods } from "@vibestudio/service-schemas/extensions";
-import { menuMethods, type PanelContextPresentation } from "@vibestudio/service-schemas/menu";
+import {
+  menuMethods,
+  type PanelContextPresentation,
+} from "@vibestudio/service-schemas/menu";
 import { notificationMethods } from "@vibestudio/service-schemas/notification";
 import { panelRuntimeMethods } from "@vibestudio/service-schemas/panelRuntime";
 import { createPanelRuntime } from "@workspace/runtime/panel-runtime";
@@ -79,6 +82,7 @@ import {
 } from "@vibestudio/shared/panelChrome";
 import type { WorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
 import { createTemplateManagementClient } from "@workspace/template-management";
+import { createWorkspacePresentationClient } from "@workspace/runtime/workspace-presentation";
 import { HostCommandRegistry } from "@vibestudio/shell-core/panelCommandRegistry";
 import {
   HOST_COMMAND_CONTRIBUTION_EVENT,
@@ -107,7 +111,8 @@ const g = globalThis as unknown as {
 if (!g.__vibestudioTransport) throw new Error("Shell transport not available");
 const transport: EnvelopeRpcTransport = {
   send: (envelope) => assertPresent(g.__vibestudioTransport).send(envelope),
-  onMessage: (handler) => assertPresent(g.__vibestudioTransport).onMessage(handler),
+  onMessage: (handler) =>
+    assertPresent(g.__vibestudioTransport).onMessage(handler),
   status: () => "connected",
   ready: () => Promise.resolve(),
   onStatusChange: () => () => {},
@@ -118,22 +123,6 @@ const rpc: RpcClient = createRpcClient({
   transport,
 });
 
-const nativeSlotProtocolStateKey = "__vibestudioNativeSlotProtocolState";
-const nativeSlotProtocolGlobal = globalThis as typeof globalThis & {
-  [nativeSlotProtocolStateKey]?: { rendererInstanceId: string; nextBindingSequence: number };
-};
-const nativeSlotProtocolState = (nativeSlotProtocolGlobal[nativeSlotProtocolStateKey] ??= {
-  rendererInstanceId:
-    globalThis.crypto?.randomUUID?.() ??
-    `shell-renderer-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`,
-  nextBindingSequence: 0,
-});
-
-/** Stable across component remounts/HMR and replaced by a full renderer document reload. */
-export const nativeSlotRendererInstanceId = nativeSlotProtocolState.rendererInstanceId;
-export function nextNativeSlotBindingSequence(): number {
-  return ++nativeSlotProtocolState.nextBindingSequence;
-}
 export const hostLaunch = new HostLaunchClient((service, method, args) =>
   rpc.call("main", `${service}.${method}`, args)
 );
@@ -147,11 +136,15 @@ const shellPresenceClient = createTypedServiceClient(
   shellPresenceMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const appClient = createTypedServiceClient("app", appMethods, (service, method, args) =>
-  rpc.call("main", `${service}.${method}`, args)
+const appClient = createTypedServiceClient(
+  "app",
+  appMethods,
+  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const accountClient = createTypedServiceClient("account", accountMethods, (service, method, args) =>
-  rpc.call("main", `${service}.${method}`, args)
+const accountClient = createTypedServiceClient(
+  "account",
+  accountMethods,
+  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
 // Electron chrome owns a distinct event domain that projects workspace events
 // together with native host state. Other runtimes use the canonical `events`.
@@ -162,15 +155,18 @@ const extensionsClient = createTypedServiceClient(
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
 const browserDataClient = createBrowserDataClient({
-  callService: (service, method, args) => rpc.call("main", `${service}.${method}`, args),
+  callService: (service, method, args) =>
+    rpc.call("main", `${service}.${method}`, args),
 });
 const browserEnvironmentClient = createTypedServiceClient(
   "browserEnvironment",
   browserEnvironmentMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const menuClient = createTypedServiceClient("menu", menuMethods, (service, method, args) =>
-  rpc.call("main", `${service}.${method}`, args)
+const menuClient = createTypedServiceClient(
+  "menu",
+  menuMethods,
+  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
 const productPanelRuntime = createPanelRuntime({ rpc });
 const focusPanel = async (panelId: string): Promise<PanelFocusResult> => {
@@ -197,12 +193,15 @@ const autofillClient = createTypedServiceClient(
   autofillMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const viewClient = createTypedServiceClient("view", viewMethods, (service, method, args) =>
-  rpc.call("main", `${service}.${method}`, args)
+const viewClient = createTypedServiceClient(
+  "view",
+  viewMethods,
+  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
 const browserSiteActions = createBrowserSiteActions({
   native: {
-    getBrowserPageIdentity: (panelId) => viewClient.getBrowserPageIdentity(panelId),
+    getBrowserPageIdentity: (panelId) =>
+      viewClient.getBrowserPageIdentity(panelId),
     setNativeBrowserZoom: (panelId, origin, zoomFactor) =>
       viewClient.setNativeBrowserZoom(panelId, origin, zoomFactor),
     clearNativeBrowserSiteData: (panelId, origin) =>
@@ -215,24 +214,31 @@ const workspaceClient = createTypedServiceClient(
   workspaceMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const runtimeClient = createTypedServiceClient("runtime", runtimeMethods, (service, method, args) =>
-  rpc.call("main", `${service}.${method}`, args)
+const runtimeClient = createTypedServiceClient(
+  "runtime",
+  runtimeMethods,
+  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const buildClient = createTypedServiceClient("build", buildMethods, (service, method, args) =>
-  rpc.call("main", `${service}.${method}`, args)
+const buildClient = createTypedServiceClient(
+  "build",
+  buildMethods,
+  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
 const workspaceStateClient = createTypedServiceClient(
   "workspace-state",
   workspaceStateMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
+const workspacePresentation = createWorkspacePresentationClient(rpc);
 const panelRuntimeClient = createTypedServiceClient(
   "panelRuntime",
   panelRuntimeMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const vcsClient = createTypedServiceClient("vcs", vcsMethods, (service, method, args) =>
-  rpc.call("main", `${service}.${method}`, args)
+const vcsClient = createTypedServiceClient(
+  "vcs",
+  vcsMethods,
+  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
 const hubControlClient = createTypedServiceClient(
   "hubControl",
@@ -276,18 +282,20 @@ export const app = {
   listPendingUpdates: () => appClient.listPendingUpdates(),
 };
 
-async function collectBrowserSessionRows(): Promise<BrowserHistoryAddressRow[]> {
+async function collectBrowserSessionRows(): Promise<
+  BrowserHistoryAddressRow[]
+> {
   const profile = await accountClient.getProfile();
   if (!profile?.userId) return [];
   const rows: BrowserHistoryAddressRow[] = [];
-  const groups: Array<Parameters<typeof workspaceStateClient.panelTree.page>[0]["group"]> = [
-    { kind: "roots", ownerUserId: profile.userId },
-  ];
+  const groups: Array<
+    Parameters<typeof workspacePresentation.page>[0]["group"]
+  > = [{ kind: "roots", ownerUserId: profile.userId }];
   while (groups.length > 0) {
     const group = groups.shift()!;
     let cursor: string | undefined;
     do {
-      const page = await workspaceStateClient.panelTree.page({
+      const page = await workspacePresentation.page({
         group,
         ...(cursor ? { cursor } : {}),
         limit: 200,
@@ -296,11 +304,18 @@ async function collectBrowserSessionRows(): Promise<BrowserHistoryAddressRow[]> 
         if (node.childCount > 0) {
           groups.push({ kind: "children", parentSlotId: node.slotId });
         }
-        const sourceUrl = node.source ? browserUrlFromPanelSource(node.source) : null;
+        const sourceUrl = node.source
+          ? browserUrlFromPanelSource(node.source)
+          : null;
         if (!sourceUrl) continue;
-        const chrome = await viewClient.getChromeState(node.slotId).catch(() => null);
+        const chrome = await viewClient
+          .getChromeState(node.slotId)
+          .catch(() => null);
         rows.push({
-          url: chrome?.kind === "browser" ? chrome.resolvedUrl || sourceUrl : sourceUrl,
+          url:
+            chrome?.kind === "browser"
+              ? chrome.resolvedUrl || sourceUrl
+              : sourceUrl,
           title: chrome?.kind === "browser" ? chrome.title : node.title,
         });
       }
@@ -310,13 +325,17 @@ async function collectBrowserSessionRows(): Promise<BrowserHistoryAddressRow[]> 
   return rows;
 }
 
-async function getPanelStateArgs(panelId: string): Promise<Record<string, unknown>> {
-  const detail = await workspaceStateClient.panelTree.detail(panelId);
+async function getPanelStateArgs(
+  panelId: string
+): Promise<Record<string, unknown>> {
+  const detail = await workspacePresentation.detail(panelId);
   if (!detail) throw new Error(`Panel not found: ${panelId}`);
   return decodePanelStateArgs(detail.currentHistory.state_args);
 }
 
-async function localPresentationKey(name: "layout" | "collapsed"): Promise<string> {
+async function localPresentationKey(
+  name: "layout" | "collapsed"
+): Promise<string> {
   const workspaceId = await workspaceClient.getActive();
   if (typeof workspaceId !== "string" || workspaceId.length === 0) {
     throw new Error("Active workspace is unavailable");
@@ -337,7 +356,9 @@ async function saveLocalLayout(layout: PersistedLayout): Promise<void> {
 }
 
 async function loadCollapsedPanelIds(): Promise<string[]> {
-  const raw = window.localStorage.getItem(await localPresentationKey("collapsed"));
+  const raw = window.localStorage.getItem(
+    await localPresentationKey("collapsed")
+  );
   if (raw === null) return [];
   const parsed = JSON.parse(raw) as unknown;
   if (
@@ -363,17 +384,24 @@ async function saveCollapsedPanelIds(ids: Iterable<string>): Promise<void> {
 // Panel Service
 // =============================================================================
 export const panel = {
-  getRootGroups: (input: Parameters<typeof workspaceStateClient.panelTree.rootGroups>[0]) =>
-    workspaceStateClient.panelTree.rootGroups(input),
-  getTreePage: (input: Parameters<typeof workspaceStateClient.panelTree.page>[0]) =>
-    workspaceStateClient.panelTree.page(input),
-  getTreePath: (panelId: string) => workspaceStateClient.panelTree.path(panelId),
-  searchTree: (input: Parameters<typeof workspaceStateClient.panelTree.search>[0]) =>
-    workspaceStateClient.panelTree.search(input),
-  observe: (panelId: string) => productPanelRuntime.panelTree.get(panelId).observe(),
+  getRootGroups: (
+    input: Parameters<typeof workspacePresentation.rootGroups>[0]
+  ) => workspacePresentation.rootGroups(input),
+  getTreePage: (
+    input: Parameters<typeof workspacePresentation.page>[0]
+  ) => workspacePresentation.page(input),
+  getTreePath: (panelId: string) =>
+    workspacePresentation.path(panelId),
+  searchTree: (
+    input: Parameters<typeof workspacePresentation.searchTree>[0]
+  ) => workspacePresentation.searchTree(input),
+  observe: (panelId: string) =>
+    productPanelRuntime.panelTree.get(panelId).observe(),
   getPresentation: (panelId: string) => viewClient.getPresentation(panelId),
-  getPresentations: (panelIds: string[]) => viewClient.getPresentations(panelIds),
-  getLocalPresentation: (panelId: string) => viewClient.getLocalPresentation(panelId),
+  getPresentations: (panelIds: string[]) =>
+    viewClient.getPresentations(panelIds),
+  getLocalPresentation: (panelId: string) =>
+    viewClient.getLocalPresentation(panelId),
   getFocusedPanelId: () => viewClient.getFocusedPanelId(),
   setFocusedPanelId: (panelId: string) => viewClient.setFocusedPanelId(panelId),
   focus: focusPanel,
@@ -382,16 +410,22 @@ export const panel = {
   savePanelLayout: saveLocalLayout,
   ensureLoaded: (panelId: string) => viewClient.ensurePanelLoaded(panelId),
   updateTheme: (theme: ThemeAppearance) => viewClient.updateTheme(theme),
-  updateThemeConfig: (config: ThemeConfig) => viewClient.updateThemeConfig(config),
+  updateThemeConfig: (config: ThemeConfig) =>
+    viewClient.updateThemeConfig(config),
   openDevTools: (panelId: string) => viewClient.openPanelDevTools(panelId),
   getChromeState: (panelId: string) => viewClient.getChromeState(panelId),
   getRuntimeLease: async (panelId: string) => {
-    const detail = await workspaceStateClient.panelTree.detail(panelId);
+    const detail = await workspacePresentation.detail(panelId);
     if (!detail) return null;
     const snapshot = await panelRuntimeClient.getSnapshot();
-    return snapshot.leases.find((lease) => lease.runtimeEntityId === detail.entity.id) ?? null;
+    return (
+      snapshot.leases.find(
+        (lease) => lease.runtimeEntityId === detail.entity.id
+      ) ?? null
+    );
   },
-  takeOver: (panelId: string) => productPanelRuntime.panelTree.get(panelId).takeOver(),
+  takeOver: (panelId: string) =>
+    productPanelRuntime.panelTree.get(panelId).takeOver(),
   togglePin: (panelId: string) => viewClient.togglePin(panelId),
   listPinnedPanelIds: () => viewClient.listPinnedPanelIds(),
   getAddressOptions: (source: string) =>
@@ -411,27 +445,40 @@ export const panel = {
         getSearchEngines: () => browserDataClient.getSearchEngines(),
       },
     }),
-  markBrowserNavigationIntent: (panelId: string, intent: BrowserNavigationIntent) =>
-    viewClient.markBrowserNavigationIntent(panelId, intent),
-  reload: (panelId: string) => productPanelRuntime.panelTree.get(panelId).reload(),
-  reloadView: (panelId: string) => productPanelRuntime.panelTree.get(panelId).reload(),
+  markBrowserNavigationIntent: (
+    panelId: string,
+    intent: BrowserNavigationIntent
+  ) => viewClient.markBrowserNavigationIntent(panelId, intent),
+  reload: (panelId: string) =>
+    productPanelRuntime.panelTree.get(panelId).reload(),
+  reloadView: (panelId: string) =>
+    productPanelRuntime.panelTree.get(panelId).reload(),
   forceReloadView: (panelId: string) => viewClient.browserForceReload(panelId),
-  findInPage: (panelId: string, text: string, options: { forward: boolean; findNext: boolean }) =>
-    viewClient.findInPage(panelId, text, options),
+  findInPage: (
+    panelId: string,
+    text: string,
+    options: { forward: boolean; findNext: boolean }
+  ) => viewClient.findInPage(panelId, text, options),
   stopFindInPage: (panelId: string) => viewClient.stopFindInPage(panelId),
-  getBrowserSiteState: (panelId: string) => browserSiteActions.getBrowserSiteState(panelId),
-  toggleBrowserBookmark: (panelId: string) => browserSiteActions.toggleBrowserBookmark(panelId),
+  getBrowserSiteState: (panelId: string) =>
+    browserSiteActions.getBrowserSiteState(panelId),
+  toggleBrowserBookmark: (panelId: string) =>
+    browserSiteActions.toggleBrowserBookmark(panelId),
   setBrowserZoom: (panelId: string, zoomFactor: number) =>
     browserSiteActions.setBrowserZoom(panelId, zoomFactor),
-  clearBrowserSiteData: (panelId: string) => browserSiteActions.clearBrowserSiteData(panelId),
+  clearBrowserSiteData: (panelId: string) =>
+    browserSiteActions.clearBrowserSiteData(panelId),
   printBrowserPage: (panelId: string) => viewClient.printBrowserPage(panelId),
-  saveBrowserPagePdf: (panelId: string) => viewClient.saveBrowserPagePdf(panelId),
+  saveBrowserPagePdf: (panelId: string) =>
+    viewClient.saveBrowserPagePdf(panelId),
   stopBrowserMedia: (panelId: string) => viewClient.stopBrowserMedia(panelId),
-  rebuildPanel: (panelId: string) => productPanelRuntime.panelTree.get(panelId).rebuild(),
+  rebuildPanel: (panelId: string) =>
+    productPanelRuntime.panelTree.get(panelId).rebuild(),
   navigateHistory: (panelId: string, delta: -1 | 1) =>
     productPanelRuntime.panelTree.navigateHistory(panelId, delta),
-  unload: (panelId: string) => productPanelRuntime.panelTree.get(panelId).unload(),
-  archive: (panelId: string) => workspaceStateClient.slot.close(panelId),
+  unload: (panelId: string) =>
+    productPanelRuntime.panelTree.get(panelId).unload(),
+  archive: (panelId: string) => productPanelRuntime.panelTree.get(panelId).archive(),
   createAboutPanel: async (page: string) => {
     const createOptions =
       page === "new"
@@ -443,7 +490,11 @@ export const panel = {
             },
           }
         : undefined;
-    const result = await viewClient.createPanel(null, `about/${page}`, createOptions);
+    const result = await viewClient.createPanel(
+      null,
+      `about/${page}`,
+      createOptions
+    );
     return { ...result, kind: "workspace" as const };
   },
   /** Create a panel from any source path (not prefixed with "about/"). */
@@ -458,7 +509,10 @@ export const panel = {
   ) =>
     productPanelRuntime.panelTree
       .navigate(panelId, source, options)
-      .then((observation) => ({ id: observation.panelId, title: observation.title })),
+      .then((observation) => ({
+        id: observation.panelId,
+        title: observation.title,
+      })),
   /** Create a root panel; use createChild for an explicit parent relationship. */
   createPanel: async (
     source: string,
@@ -475,7 +529,9 @@ export const panel = {
     }
   ) => {
     const parentIdPromise =
-      options?.isRoot === false ? panel.getFocusedPanelId() : Promise.resolve(null);
+      options?.isRoot === false
+        ? panel.getFocusedPanelId()
+        : Promise.resolve(null);
     return parentIdPromise.then((parentId) =>
       viewClient.createPanel(parentId, source, {
         title: options?.title,
@@ -544,8 +600,12 @@ export const panel = {
     }),
   movePanel: (request: MovePanelRequest) =>
     workspaceStateClient.slot.move(request.panelId, request.newParentId, {
-      ...(request.beforePanelId !== undefined ? { beforeSlotId: request.beforePanelId } : {}),
-      ...(request.afterPanelId !== undefined ? { afterSlotId: request.afterPanelId } : {}),
+      ...(request.beforePanelId !== undefined
+        ? { beforeSlotId: request.beforePanelId }
+        : {}),
+      ...(request.afterPanelId !== undefined
+        ? { afterSlotId: request.afterPanelId }
+        : {}),
     }),
   getCollapsedIds: loadCollapsedPanelIds,
   setCollapsed: async (panelId: string, collapsed: boolean) => {
@@ -565,11 +625,15 @@ export const panel = {
 // =============================================================================
 const hostCommandRegistry = new HostCommandRegistry();
 
-rpc.on(HOST_COMMAND_CONTRIBUTION_EVENT, (event) => hostCommandRegistry.accept(event));
+rpc.on(HOST_COMMAND_CONTRIBUTION_EVENT, (event) =>
+  hostCommandRegistry.accept(event)
+);
 
 export const hostCommands = {
   list: async () => {
-    const focusedPanelId = await viewClient.getFocusedPanelId().catch(() => null);
+    const focusedPanelId = await viewClient
+      .getFocusedPanelId()
+      .catch(() => null);
     return hostCommandRegistry.list(focusedPanelId);
   },
   run: (panelId: string, commandId: string) =>
@@ -621,20 +685,62 @@ type NativeShellOverlayBridge = {
 type DesiredNativePanelSlot = {
   nativeSlotId: string;
   bindingId: string;
-  bindingSequence: number;
   panelId: string;
   bounds: NativePanelSlotBounds;
   focused: boolean;
 };
 const desiredNativePanelSlots = new Map<string, DesiredNativePanelSlot>();
 let desiredNativePanelSlotRevision = 0;
-const syncDesiredNativePanelSlots = async () => {
-  const revision = ++desiredNativePanelSlotRevision;
-  return viewClient.syncNativePanelSlots({
-    rendererInstanceId: nativeSlotRendererInstanceId,
-    revision,
-    slots: [...desiredNativePanelSlots.values()],
-  });
+let nativePanelSyncTail = Promise.resolve();
+let nativePanelAdapterHandshake: {
+  hostGeneration: string;
+  shellGeneration: string;
+};
+let nativePanelAdapterConnection: Promise<void> | null = null;
+export const connectNativePanelAdapter = () => {
+  nativePanelAdapterConnection ??= viewClient
+    .connectNativePanelAdapter({
+      sealedLaunchIdentity: "@workspace-apps/shell",
+      supportedProtocolVersions: [1],
+    })
+    .then((result) => {
+      if (!result.accepted)
+        throw new Error(`Panel host rejected shell: ${result.reason}`);
+      nativePanelAdapterHandshake = result.handshake;
+      desiredNativePanelSlotRevision = 0;
+    });
+  return nativePanelAdapterConnection;
+};
+const syncDesiredNativePanelSlots = () => {
+  const apply = async () => {
+    await connectNativePanelAdapter();
+    const revision = ++desiredNativePanelSlotRevision;
+    const result = await viewClient.applyNativePanelSurfaces({
+      protocolVersion: 1,
+      hostGeneration: nativePanelAdapterHandshake.hostGeneration,
+      shellGeneration: nativePanelAdapterHandshake.shellGeneration,
+      revision,
+      surfaces: [...desiredNativePanelSlots.values()].map((slot) => ({
+        surfaceId: slot.nativeSlotId,
+        materialization: {
+          runtimeEntityId: slot.panelId,
+          leaseConnectionId: slot.bindingId,
+        },
+        visible: true,
+        focused: slot.focused,
+        bounds: slot.bounds,
+      })),
+    });
+    if (!result.accepted)
+      throw new Error(`Native panel adapter rejected desired state: ${result.reason}`);
+    return result.observation;
+  };
+  const current = nativePanelSyncTail.then(apply, apply);
+  nativePanelSyncTail = current.then(
+    () => undefined,
+    () => undefined
+  );
+  return current;
 };
 export const view = {
   forwardMouseClick: (viewId: string, point: { x: number; y: number }) =>
@@ -643,9 +749,6 @@ export const view = {
   bindNativePanelSlot: async (request: {
     nativeSlotId: string;
     bindingId: string;
-    rendererInstanceId: string;
-    bindingSequence: number;
-    operationSequence: number;
     panelId: string;
     bounds: NativePanelSlotBounds;
     focused?: boolean;
@@ -653,25 +756,23 @@ export const view = {
     desiredNativePanelSlots.set(request.nativeSlotId, {
       nativeSlotId: request.nativeSlotId,
       bindingId: request.bindingId,
-      bindingSequence: request.bindingSequence,
       panelId: request.panelId,
       bounds: request.bounds,
       focused: request.focused === true,
     });
     const observed = await syncDesiredNativePanelSlots();
-    return (
-      observed.slots[request.nativeSlotId] ?? {
-        status: "missing" as const,
-        reason: `native adapter did not observe ${request.nativeSlotId}`,
-      }
-    );
+    return observed.surfaces.some(
+      (surface) => surface.surfaceId === request.nativeSlotId
+    )
+      ? { status: "bound" as const }
+      : {
+          status: "missing" as const,
+          reason: `native adapter did not observe ${request.nativeSlotId}`,
+        };
   },
   updateNativePanelSlot: async (request: {
     nativeSlotId: string;
     bindingId: string;
-    rendererInstanceId: string;
-    bindingSequence: number;
-    operationSequence: number;
     bounds?: NativePanelSlotBounds;
     focused?: boolean;
   }) => {
@@ -685,32 +786,29 @@ export const view = {
     desiredNativePanelSlots.set(request.nativeSlotId, {
       ...current,
       ...(request.bounds ? { bounds: request.bounds } : {}),
-      ...(typeof request.focused === "boolean" ? { focused: request.focused } : {}),
+      ...(typeof request.focused === "boolean"
+        ? { focused: request.focused }
+        : {}),
     });
     const observed = await syncDesiredNativePanelSlots();
-    return (
-      observed.slots[request.nativeSlotId] ?? {
-        status: "missing" as const,
-        reason: `native adapter did not observe ${request.nativeSlotId}`,
-      }
-    );
+    return observed.surfaces.some(
+      (surface) => surface.surfaceId === request.nativeSlotId
+    )
+      ? { status: "updated" as const }
+      : {
+          status: "missing" as const,
+          reason: `native adapter did not observe ${request.nativeSlotId}`,
+        };
   },
   clearNativePanelSlot: async (request: {
     nativeSlotId: string;
     bindingId: string;
-    rendererInstanceId: string;
-    bindingSequence: number;
-    operationSequence: number;
   }) => {
     const current = desiredNativePanelSlots.get(request.nativeSlotId);
     if (current?.bindingId === request.bindingId) {
       desiredNativePanelSlots.delete(request.nativeSlotId);
       await syncDesiredNativePanelSlots();
     }
-  },
-  setHostedShellReady: async (request: { ready: boolean; rendererInstanceId: string }) => {
-    await viewClient.setHostedShellReady(request);
-    if (request.ready) await syncDesiredNativePanelSlots();
   },
   setShellOverlay: (active: boolean) => viewClient.setShellOverlay(active),
   showNativeShellOverlay: (options: NativeShellOverlayOptions) =>
@@ -720,17 +818,23 @@ export const view = {
       id?: string;
     }
   ) => viewClient.updateNativeShellOverlay(options),
-  hideNativeShellOverlay: (id?: string) => viewClient.hideNativeShellOverlay(id),
-  showContentOverlay: (options: Parameters<typeof viewClient.showContentOverlay>[0]) =>
-    viewClient.showContentOverlay(options),
-  updateContentOverlay: (options: Parameters<typeof viewClient.updateContentOverlay>[0]) =>
-    viewClient.updateContentOverlay(options),
+  hideNativeShellOverlay: (id?: string) =>
+    viewClient.hideNativeShellOverlay(id),
+  showContentOverlay: (
+    options: Parameters<typeof viewClient.showContentOverlay>[0]
+  ) => viewClient.showContentOverlay(options),
+  updateContentOverlay: (
+    options: Parameters<typeof viewClient.updateContentOverlay>[0]
+  ) => viewClient.updateContentOverlay(options),
   hideContentOverlay: () => viewClient.hideContentOverlay(),
-  browserNavigate: (browserId: string, url: string) => viewClient.browserNavigate(browserId, url),
+  browserNavigate: (browserId: string, url: string) =>
+    viewClient.browserNavigate(browserId, url),
   browserGoBack: (browserId: string) => viewClient.browserGoBack(browserId),
-  browserGoForward: (browserId: string) => viewClient.browserGoForward(browserId),
+  browserGoForward: (browserId: string) =>
+    viewClient.browserGoForward(browserId),
   browserReload: (browserId: string) => viewClient.browserReload(browserId),
-  browserForceReload: (browserId: string) => viewClient.browserForceReload(browserId),
+  browserForceReload: (browserId: string) =>
+    viewClient.browserForceReload(browserId),
   browserStop: (browserId: string) => viewClient.browserStop(browserId),
 };
 export const nativeShellOverlay = {
@@ -774,22 +878,26 @@ type ShellNetworkBridge = {
  */
 export const shellNetwork = {
   notifyOnline: () => {
-    const bridge = (globalThis as unknown as { __vibestudioApp?: ShellNetworkBridge })
-      .__vibestudioApp;
+    const bridge = (
+      globalThis as unknown as { __vibestudioApp?: ShellNetworkBridge }
+    ).__vibestudioApp;
     bridge?.notifyNetworkOnline?.();
   },
 };
 export const incomingPairLink = {
-  getPending: () => g.__vibestudioIncomingPairLink?.getPending() ?? Promise.resolve(null),
+  getPending: () =>
+    g.__vibestudioIncomingPairLink?.getPending() ?? Promise.resolve(null),
   onLink: (handler: (link: ConnectPairing) => void) =>
     g.__vibestudioIncomingPairLink?.onLink(handler) ?? (() => {}),
 };
 export const incomingPanelLocation = {
-  getPending: () => g.__vibestudioIncomingPanelLocation?.getPending() ?? Promise.resolve(null),
+  getPending: () =>
+    g.__vibestudioIncomingPanelLocation?.getPending() ?? Promise.resolve(null),
   onLocation: (handler: (location: PanelLocation) => void) =>
     g.__vibestudioIncomingPanelLocation?.onLocation(handler) ?? (() => {}),
   prepareWorkspaceRelaunch: (location: PanelLocation | null) =>
-    g.__vibestudioIncomingPanelLocation?.prepareWorkspaceRelaunch(location) ?? Promise.resolve(),
+    g.__vibestudioIncomingPanelLocation?.prepareWorkspaceRelaunch(location) ??
+    Promise.resolve(),
 };
 // =============================================================================
 // Menu Service
@@ -800,8 +908,10 @@ interface Position {
 }
 export const menu = {
   showHamburger: (position: Position) => menuClient.showHamburger(position),
-  showContext: (items: Array<{ id: string; label: string }>, position: Position) =>
-    menuClient.showContext(items, position),
+  showContext: (
+    items: Array<{ id: string; label: string }>,
+    position: Position
+  ) => menuClient.showContext(items, position),
   showPanelContext: (
     panelId: string,
     position: Position,
@@ -829,7 +939,8 @@ export const workspace = {
     const entry = (await hubControlClient.listWorkspaces()).find(
       (workspace) => workspace.name === name
     );
-    if (!entry) throw new Error(`Workspace "${name}" is not visible to this account`);
+    if (!entry)
+      throw new Error(`Workspace "${name}" is not visible to this account`);
     return hubControlClient.routeWorkspace({ workspaceId: entry.workspaceId });
   },
   delete: async (name: string) => {
@@ -845,17 +956,22 @@ export const workspace = {
 // Template mutations return immediately after asking through the normal
 // approval surface. The shell intentionally renders that state as a human
 // message rather than exposing the approval record identity.
-export const templates = createTemplateManagementClient((extension, method, args) =>
-  extensionsClient.invoke(extension, method, args)
+export const templates = createTemplateManagementClient(
+  (extension, method, args) => extensionsClient.invoke(extension, method, args)
 );
 export const credentials = {
-  requestCredentialInput: (input: Parameters<typeof credentialsClient.requestCredentialInput>[0]) =>
-    credentialsClient.requestCredentialInput(input),
+  requestCredentialInput: (
+    input: Parameters<typeof credentialsClient.requestCredentialInput>[0]
+  ) => credentialsClient.requestCredentialInput(input),
 };
 /** Standard semantic VCS review flow, including coordinator-owned external deltas. */
 export const vcs = {
   status: (contextId: string) => vcsClient.status({ contextId }),
-  compareDelta: async (contextId: string, sourceDeltaId: string, cursor?: string) => {
+  compareDelta: async (
+    contextId: string,
+    sourceDeltaId: string,
+    cursor?: string
+  ) => {
     const status = await vcsClient.status({ contextId });
     return vcsClient.compare({
       target: status.workingHead,
@@ -897,7 +1013,8 @@ export type DeviceRecord = HubDevice;
 export type PairingInvite = HubPairingInvite;
 export const remoteCred = {
   getCurrent: () => remoteCredClient.getCurrent(),
-  pair: (link: string, label?: string) => remoteCredClient.pair({ link, label }),
+  pair: (link: string, label?: string) =>
+    remoteCredClient.pair({ link, label }),
   reconnectNow: () => remoteCredClient.reconnectNow(),
   clear: () => remoteCredClient.clear(),
   relaunch: () => remoteCredClient.relaunch(),
@@ -940,11 +1057,14 @@ export const ACCOUNT_PROFILE_CHANGED_EVENT = "account-profile-changed";
 
 export const account = {
   getProfile: () => accountClient.getProfile(),
-  resolveProfiles: (userIds: readonly string[]) => accountClient.resolveProfiles([...userIds]),
+  resolveProfiles: (userIds: readonly string[]) =>
+    accountClient.resolveProfiles([...userIds]),
   updateProfile: async (input: ShellAccountProfileUpdate) => {
     const profile = await hubControlClient.updateProfile(input);
     window.dispatchEvent(
-      new CustomEvent<ShellAccountProfile>(ACCOUNT_PROFILE_CHANGED_EVENT, { detail: profile })
+      new CustomEvent<ShellAccountProfile>(ACCOUNT_PROFILE_CHANGED_EVENT, {
+        detail: profile,
+      })
     );
     return profile;
   },
@@ -959,7 +1079,11 @@ const resolvedChannelClients = new Map<string, DurableObjectServiceClient>();
 function channelClient(channelId: string): DurableObjectServiceClient {
   let client = resolvedChannelClients.get(channelId);
   if (!client) {
-    client = createDurableObjectServiceClient(rpc, CHANNEL_SERVICE_PROTOCOL, channelId);
+    client = createDurableObjectServiceClient(
+      rpc,
+      CHANNEL_SERVICE_PROTOCOL,
+      channelId
+    );
     resolvedChannelClients.set(channelId, client);
   }
   return client;
@@ -975,8 +1099,12 @@ export interface ShellUserNotification extends UserNotification {
   channelInvite?: ShellChannelInvite;
 }
 
-async function describeChannelInvite(invite: ChannelInvite): Promise<ShellChannelInvite> {
-  const config = await channelClient(invite.channelId).call<{ title?: string } | null>("getConfig");
+async function describeChannelInvite(
+  invite: ChannelInvite
+): Promise<ShellChannelInvite> {
+  const config = await channelClient(invite.channelId).call<{
+    title?: string;
+  } | null>("getConfig");
   return {
     ...invite,
     channelTitle: config?.title?.trim() || invite.channelId,
@@ -986,9 +1114,10 @@ async function describeChannelInvite(invite: ChannelInvite): Promise<ShellChanne
 export const userNotifications = {
   /** Read one durable account inbox; never enumerate producer/channel DOs. */
   async list(): Promise<ShellUserNotification[]> {
-    const { notifications } = await userNotificationStore.call<UserNotificationListResult>(
-      "listUserNotificationsForMe"
-    );
+    const { notifications } =
+      await userNotificationStore.call<UserNotificationListResult>(
+        "listUserNotificationsForMe"
+      );
     const channelInvites = notifications
       .map((notification) => channelInviteFromNotification(notification))
       .filter((invite): invite is ChannelInvite => invite !== null);
@@ -996,7 +1125,9 @@ export const userNotifications = {
       ...new Set(
         channelInvites
           .map((invite) =>
-            invite.addedBy.startsWith("user:") ? invite.addedBy.slice("user:".length) : null
+            invite.addedBy.startsWith("user:")
+              ? invite.addedBy.slice("user:".length)
+              : null
           )
           .filter((userId): userId is string => Boolean(userId))
       ),
@@ -1023,20 +1154,26 @@ export const userNotifications = {
         ? invite.addedBy.slice("user:".length)
         : null;
       const inviter = inviterUserId ? profiles[inviterUserId] : undefined;
-      hydratedInvites.set(invite.channelId, inviter ? { ...invite, inviter } : invite);
+      hydratedInvites.set(
+        invite.channelId,
+        inviter ? { ...invite, inviter } : invite
+      );
     }
     return notifications.map((notification) => {
       const invite = channelInviteFromNotification(notification);
-      const channelInvite = invite ? hydratedInvites.get(invite.channelId) : undefined;
+      const channelInvite = invite
+        ? hydratedInvites.get(invite.channelId)
+        : undefined;
       return channelInvite ? { ...notification, channelInvite } : notification;
     });
   },
 
   async acknowledge(id: string): Promise<boolean> {
-    const result = await userNotificationStore.call<UserNotificationAcknowledgementResult>(
-      "acknowledgeUserNotification",
-      { id }
-    );
+    const result =
+      await userNotificationStore.call<UserNotificationAcknowledgementResult>(
+        "acknowledgeUserNotification",
+        { id }
+      );
     return result.acknowledged;
   },
 
@@ -1045,11 +1182,11 @@ export const userNotifications = {
   async openChannel(channelId: string): Promise<{ id: string }> {
     const profile = await account.getProfile();
     const findInGroup = async (
-      group: Parameters<typeof workspaceStateClient.panelTree.page>[0]["group"]
+      group: Parameters<typeof workspacePresentation.page>[0]["group"]
     ): Promise<string | null> => {
       let cursor: string | undefined;
       do {
-        const page = await workspaceStateClient.panelTree.page({
+        const page = await workspacePresentation.page({
           group,
           ...(cursor ? { cursor } : {}),
           limit: 100,
@@ -1059,11 +1196,17 @@ export const userNotifications = {
             productPanelRuntime.panelTree.get(node.slotId).observe(),
             getPanelStateArgs(node.slotId),
           ]);
-          if (observation.source === "panels/chat" && stateArgs["channelName"] === channelId) {
+          if (
+            observation.source === "panels/chat" &&
+            stateArgs["channelName"] === channelId
+          ) {
             return node.slotId;
           }
           if (node.childCount > 0) {
-            const nested = await findInGroup({ kind: "children", parentSlotId: node.slotId });
+            const nested = await findInGroup({
+              kind: "children",
+              parentSlotId: node.slotId,
+            });
             if (nested) return nested;
           }
         }
@@ -1085,7 +1228,9 @@ export const userNotifications = {
       service.call<string | null>("getContextId"),
     ]);
     if (!contextId) {
-      throw new Error("This conversation is not ready yet. Please try again in a moment.");
+      throw new Error(
+        "This conversation is not ready yet. Please try again in a moment."
+      );
     }
     const handle = await productPanelRuntime.openPanel("panels/chat", {
       parentId: null,
@@ -1107,8 +1252,10 @@ export const events = {
   subscribe: (event: EventName) => eventsClient.subscribe(event),
   unsubscribe: (event: EventName) => eventsClient.unsubscribe(event),
   unsubscribeAll: () => eventsClient.unsubscribeAll(),
-  on: <E extends EventName>(event: E, listener: (payload: EventPayloads[E]) => void) =>
-    eventsClient.on(event, listener),
+  on: <E extends EventName>(
+    event: E,
+    listener: (payload: EventPayloads[E]) => void
+  ) => eventsClient.on(event, listener),
 };
 
 /**
@@ -1118,17 +1265,21 @@ export const events = {
  * join an `events.watch` response, and watched broadcasts never arrive here.
  */
 export const directEvents = {
-  on: <E extends EventName>(event: E, listener: (payload: EventPayloads[E]) => void) =>
-    rpc.on(event, ({ payload }) => listener(payload as EventPayloads[E])),
+  on: <E extends EventName>(
+    event: E,
+    listener: (payload: EventPayloads[E]) => void
+  ) => rpc.on(event, ({ payload }) => listener(payload as EventPayloads[E])),
 };
 // =============================================================================
 // Notification Service
 // =============================================================================
 import type { NotificationPayload } from "@vibestudio/shared/events";
 export const notification = {
-  show: (opts: Omit<NotificationPayload, "id" | "sourcePanelId" | "iconDataUrl">) =>
-    notificationClient.show(opts),
-  reportAction: (id: string, actionId: string) => notificationClient.reportAction(id, actionId),
+  show: (
+    opts: Omit<NotificationPayload, "id" | "sourcePanelId" | "iconDataUrl">
+  ) => notificationClient.show(opts),
+  reportAction: (id: string, actionId: string) =>
+    notificationClient.reportAction(id, actionId),
   dismiss: (id: string) => notificationClient.dismiss(id),
 };
 // =============================================================================
@@ -1145,22 +1296,33 @@ export const browserEnvironment = browserEnvironmentClient;
 // =============================================================================
 export const supervisedUnits = {
   list: () => runtimeClient.supervision.list(),
-  versions: (releaseId: string) => runtimeClient.supervision.versions({ kind: "app", releaseId }),
+  versions: (releaseId: string) =>
+    runtimeClient.supervision.versions({ kind: "app", releaseId }),
   rollback: (releaseId: string, opts?: { buildKey?: string }) =>
     runtimeClient.supervision.rollback({ kind: "app", releaseId }, opts),
-  restart: (identity: RuntimeSupervisionEntityKey) => runtimeClient.supervision.restart(identity),
+  restart: (identity: RuntimeSupervisionEntityKey) =>
+    runtimeClient.supervision.restart(identity),
   recoverExecution: (
     entityId: string,
     expectedExecutionDigest: string,
     strategy: "restore-exact" | "replace-incarnation"
-  ) => runtimeClient.recoverExecution({ entityId, expectedExecutionDigest, strategy }),
+  ) =>
+    runtimeClient.recoverExecution({
+      entityId,
+      expectedExecutionDigest,
+      strategy,
+    }),
   activate: (kind: "app" | "extension", releaseId: string) =>
     runtimeClient.supervision.activate({ kind, releaseId }),
   prepare: (kind: "app" | "extension", releaseId: string, ref: string) =>
     runtimeClient.supervision.prepare({ kind, releaseId }, { ref }),
   logs: (
     identity: RuntimeSupervisionEntityKey,
-    opts?: { since?: number; level?: "debug" | "info" | "warn" | "error"; limit?: number }
+    opts?: {
+      since?: number;
+      level?: "debug" | "info" | "warn" | "error";
+      limit?: number;
+    }
   ) => runtimeClient.supervision.logs(identity, opts),
   health: (
     identity: RuntimeSupervisionEntityKey,
@@ -1184,15 +1346,19 @@ import { assertPresent } from "../utils/assertPresent";
 export const shellApproval = {
   resolve: (approvalId: string, decision: ApprovalDecision) =>
     shellApprovalClient.resolve(approvalId, decision),
-  resolveBootstrap: (approvalId: string, decision: Extract<ApprovalDecision, "once" | "deny">) =>
-    shellApprovalClient.resolveBootstrap([approvalId], decision),
+  resolveBootstrap: (
+    approvalId: string,
+    decision: Extract<ApprovalDecision, "once" | "deny">
+  ) => shellApprovalClient.resolveBootstrap([approvalId], decision),
   resolveInstallReview: (
     approvalId: string,
     resolution: import("@vibestudio/shared/authority/unitInstallReview").TemplateInstallResolution
   ) => shellApprovalClient.resolveInstallReview(approvalId, resolution),
   resolveMissionReview: (
     approvalId: string,
-    resolution: { decision: "approve"; selectedAuthorityKeys: string[] } | { decision: "dismiss" }
+    resolution:
+      | { decision: "approve"; selectedAuthorityKeys: string[] }
+      | { decision: "dismiss" }
   ) => shellApprovalClient.resolveMissionReview(approvalId, resolution),
   submitClientConfig: (approvalId: string, values: Record<string, string>) =>
     shellApprovalClient.submitClientConfig(approvalId, values),
