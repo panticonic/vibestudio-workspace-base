@@ -144,11 +144,27 @@ export function createWorkspacePresentationClient(
     nodes: WorkspacePanelTreeNode[],
   ): Promise<PanelTreeNode[]> => {
     if (nodes.length === 0) return [];
-    const titles = await owner.call<Record<string, string>>(
+    (globalThis as typeof globalThis & { __panelPresentationDebug?: unknown }).__panelPresentationDebug = {
+      stage: "titles",
+      nodes,
+    };
+    const resolvedOwner = await owner.resolve();
+    (globalThis as typeof globalThis & { __panelPresentationDebug?: unknown }).__panelPresentationDebug = {
+      stage: "titles-call",
+      nodes,
+      resolvedOwner,
+    };
+    const titles = await rpc.call<Record<string, string>>(
+      resolvedOwner.targetId,
       "titlesForSlots",
-      nodes.map((node) => node.slotId),
+      [nodes.map((node) => node.slotId)],
     );
-    return Promise.all(
+    (globalThis as typeof globalThis & { __panelPresentationDebug?: unknown }).__panelPresentationDebug = {
+      stage: "icons",
+      nodes,
+      titles,
+    };
+    const result = await Promise.all(
       nodes.map(async (node) => {
         const icon = await iconForSource(node.source);
         const { options, ...topology } = node;
@@ -168,6 +184,11 @@ export function createWorkspacePresentationClient(
         };
       }),
     );
+    (globalThis as typeof globalThis & { __panelPresentationDebug?: unknown }).__panelPresentationDebug = {
+      stage: "complete",
+      result,
+    };
+    return result;
   };
 
   const presentPage = async (

@@ -541,6 +541,19 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
       }),
     [cache, cacheVersion, localSelectedChildren, orderedGroups, presentations, treeRevision]
   );
+  (
+    globalThis as typeof globalThis & {
+      __panelTreeDebug?: unknown;
+    }
+  ).__panelTreeDebug = {
+    cacheVersion,
+    rootGroups,
+    ownerGroups,
+    treeLoadError,
+    initialized,
+    refreshing,
+    treeRevision,
+  };
   useEffect(() => {
     const retained: PanelTreeGroup[] = orderedGroups.map((owner) => ({
       kind: "roots",
