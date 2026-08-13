@@ -356,6 +356,7 @@ function renderSheet(
     onSubmitCredentialInput: jest.fn(async () => undefined),
     onSubmitSecretInput: jest.fn(async () => undefined),
     onResolveMissionReview: jest.fn(async () => undefined),
+    onResolveInstallReview: jest.fn(async () => undefined),
     ...overrides,
   };
   const view = render(<ApprovalSheet {...props} />);
