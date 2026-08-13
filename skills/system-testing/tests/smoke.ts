@@ -6,9 +6,15 @@ import {
   incompleteToolCalls,
 } from "./_helpers.js";
 
-function completedEvalFileRoundTrip(result: Parameters<typeof getToolCalls>[0]): boolean {
+function completedEvalFileRoundTrip(
+  result: Parameters<typeof getToolCalls>[0],
+): boolean {
   return getToolCalls(result).some((call) => {
-    if (call.name !== "eval" || call.execution?.status !== "complete" || call.execution.isError) {
+    if (
+      call.name !== "eval" ||
+      call.execution?.status !== "complete" ||
+      call.execution.isError
+    ) {
       return false;
     }
     const code = call.arguments?.["code"];
@@ -22,13 +28,18 @@ function completedEvalFileRoundTrip(result: Parameters<typeof getToolCalls>[0]):
 
 function codeLoadsRuntimeModule(code: string): boolean {
   return (
-    /\bimport\s*\(/u.test(code) || /\bimport\s+(?:[\s\S]*?\s+from\s+)?["'][^"']+["']/u.test(code)
+    /\bimport\s*\(/u.test(code) ||
+    /\bimport\s+(?:[\s\S]*?\s+from\s+)?["'][^"']+["']/u.test(code)
   );
 }
 
-function pathAsReportedFromSearchRoot(workspacePath: string, searchRoot: string): string {
+function pathAsReportedFromSearchRoot(
+  workspacePath: string,
+  searchRoot: string,
+): string {
   const normalizedRoot = searchRoot.replace(/^\.\/+/u, "").replace(/\/+$/u, "");
-  if (normalizedRoot.length === 0 || normalizedRoot === ".") return workspacePath;
+  if (normalizedRoot.length === 0 || normalizedRoot === ".")
+    return workspacePath;
   if (workspacePath === normalizedRoot) {
     return workspacePath.slice(workspacePath.lastIndexOf("/") + 1);
   }
@@ -59,7 +70,7 @@ export const smokeTests: TestCase[] = [
           call.execution?.status === "complete" &&
           call.execution.isError !== true &&
           typeof call.arguments?.["code"] === "string" &&
-          JSON.stringify(call.execution.result ?? "").includes("120")
+          JSON.stringify(call.execution.result ?? "").includes("120"),
       );
       const hasResult = verified && /\b120\b/.test(msg);
       return {
@@ -125,7 +136,7 @@ export const smokeTests: TestCase[] = [
           call.execution?.status === "complete" &&
           call.execution.isError !== true &&
           typeof call.arguments?.["code"] === "string" &&
-          codeLoadsRuntimeModule(call.arguments["code"])
+          codeLoadsRuntimeModule(call.arguments["code"]),
       );
       const hasExports =
         loadedPackage &&
@@ -135,7 +146,9 @@ export const smokeTests: TestCase[] = [
           lower.includes("import"));
       return {
         passed: hasExports,
-        reason: hasExports ? undefined : `Expected export information, got: ${msg.slice(0, 200)}`,
+        reason: hasExports
+          ? undefined
+          : `Expected export information, got: ${msg.slice(0, 200)}`,
       };
     },
   },
@@ -150,7 +163,8 @@ export const smokeTests: TestCase[] = [
     validation: "harness",
     validate: (result) => {
       const msg = findLastAgentMessage(result);
-      if (!msg.trim()) return { passed: false, reason: "No agent response received" };
+      if (!msg.trim())
+        return { passed: false, reason: "No agent response received" };
       const calls = getToolCalls(result);
       const completed = completedToolNames(result);
       const missing = ["grep"].filter((name) => !completed.has(name));
@@ -174,7 +188,7 @@ export const smokeTests: TestCase[] = [
           call.execution.isError !== true &&
           typeof call.arguments?.["path"] === "string" &&
           typeof call.arguments?.["content"] === "string" &&
-          call.arguments["content"].includes("agentic-file-tools-smoke")
+          call.arguments["content"].includes("agentic-file-tools-smoke"),
       );
       const editWrite = calls.find(
         (call) =>
@@ -183,19 +197,19 @@ export const smokeTests: TestCase[] = [
           call.execution.isError !== true &&
           typeof call.arguments?.["path"] === "string" &&
           typeof call.arguments?.["newText"] === "string" &&
-          call.arguments["newText"].includes("agentic-file-tools-smoke")
+          call.arguments["newText"].includes("agentic-file-tools-smoke"),
       );
       const patchWrite = calls
         .filter(
           (call) =>
             call.name === "apply_patch" &&
             call.execution?.status === "complete" &&
-            call.execution.isError !== true
+            call.execution.isError !== true,
         )
         .flatMap((call) =>
           Array.isArray(call.arguments?.["operations"])
             ? (call.arguments["operations"] as unknown[])
-            : []
+            : [],
         )
         .find((operation): operation is Record<string, unknown> =>
           Boolean(
@@ -203,15 +217,19 @@ export const smokeTests: TestCase[] = [
             typeof operation === "object" &&
             !Array.isArray(operation) &&
             (operation as Record<string, unknown>)["kind"] === "write" &&
-            typeof (operation as Record<string, unknown>)["path"] === "string" &&
-            typeof (operation as Record<string, unknown>)["content"] === "string" &&
+            typeof (operation as Record<string, unknown>)["path"] ===
+              "string" &&
+            typeof (operation as Record<string, unknown>)["content"] ===
+              "string" &&
             String((operation as Record<string, unknown>)["content"]).includes(
-              "agentic-file-tools-smoke"
-            )
-          )
+              "agentic-file-tools-smoke",
+            ),
+          ),
         );
       const path =
-        directWrite?.arguments?.["path"] ?? editWrite?.arguments?.["path"] ?? patchWrite?.["path"];
+        directWrite?.arguments?.["path"] ??
+        editWrite?.arguments?.["path"] ??
+        patchWrite?.["path"];
       const grep = calls.find((call) => {
         if (
           call.name !== "grep" ||
@@ -223,16 +241,23 @@ export const smokeTests: TestCase[] = [
           return false;
         }
         const searchRoot =
-          typeof call.arguments?.["path"] === "string" ? call.arguments["path"] : ".";
+          typeof call.arguments?.["path"] === "string"
+            ? call.arguments["path"]
+            : ".";
         const reportedPath = pathAsReportedFromSearchRoot(path, searchRoot);
         const output = JSON.stringify(call.execution.result ?? "");
-        return output.includes(reportedPath) && output.includes("agentic-file-tools-smoke");
+        return (
+          output.includes(reportedPath) &&
+          output.includes("agentic-file-tools-smoke")
+        );
       });
       // A write containing the marker joined to grep's canonical path+matching
       // line establishes both persistence and content. A subsequent read is
       // equally valid, but is not a mandatory ritual when it repeats those
       // bytes.
-      const hasEvidence = Boolean((directWrite || editWrite || patchWrite) && grep);
+      const hasEvidence = Boolean(
+        (directWrite || editWrite || patchWrite) && grep,
+      );
       return {
         passed: hasEvidence,
         reason: hasEvidence

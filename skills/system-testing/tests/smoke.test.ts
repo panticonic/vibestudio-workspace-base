@@ -7,12 +7,16 @@ function execution(
   readPath: string | null = "notes/marker.txt",
   searchRoot = ".",
   writtenContent = "agentic-file-tools-smoke",
-  writeTool: "write" | "edit" | "apply_patch" = "write"
+  writeTool: "write" | "edit" | "apply_patch" = "write",
 ): TestExecutionResult {
   const writtenPath =
-    writeTool === "apply_patch" ? "projects/default/notes/marker.txt" : "notes/marker.txt";
+    writeTool === "apply_patch"
+      ? "projects/default/notes/marker.txt"
+      : "notes/marker.txt";
   const reportedPath =
-    searchRoot === "notes" || searchRoot === "notes/marker.txt" ? "marker.txt" : writtenPath;
+    searchRoot === "notes" || searchRoot === "notes/marker.txt"
+      ? "marker.txt"
+      : writtenPath;
   const invocations = [
     writeTool === "write"
       ? {
@@ -46,15 +50,17 @@ function execution(
             result: { details: { status: "applied", paths: [writtenPath] } },
           }
         : {
-          id: "apply-patch",
-          name: "apply_patch",
-          status: "complete",
-          isError: false,
-          arguments: {
-            operations: [{ kind: "write", path: writtenPath, content: writtenContent }],
+            id: "apply-patch",
+            name: "apply_patch",
+            status: "complete",
+            isError: false,
+            arguments: {
+              operations: [
+                { kind: "write", path: writtenPath, content: writtenContent },
+              ],
+            },
+            result: { details: { status: "applied", paths: [writtenPath] } },
           },
-          result: { details: { status: "applied", paths: [writtenPath] } },
-        },
     {
       id: "grep",
       name: "grep",
@@ -100,21 +106,33 @@ function execution(
 }
 
 describe("smoke validators", () => {
-  const test = smokeTests.find((candidate) => candidate.name === "file-search-read-tools")!;
+  const test = smokeTests.find(
+    (candidate) => candidate.name === "file-search-read-tools",
+  )!;
 
   it("accepts natural reporting backed by an exact write/search/read chain", () => {
     expect(test.prompt).not.toMatch(/finish with|FIND_OK|GREP_OK|READ_OK/i);
-    expect(test.validate(execution())).toEqual({ passed: true, reason: undefined });
+    expect(test.validate(execution())).toEqual({
+      passed: true,
+      reason: undefined,
+    });
     expect(test.validation).toBe("harness");
-    expect(test.workspaceRepoFixture).toEqual({ kind: "content", section: "projects" });
+    expect(test.workspaceRepoFixture).toEqual({
+      kind: "content",
+      section: "projects",
+    });
   });
 
   it("accepts search paths reported relative to a scoped search root", () => {
-    expect(test.validate(execution("notes/marker.txt", "notes")).passed).toBe(true);
+    expect(test.validate(execution("notes/marker.txt", "notes")).passed).toBe(
+      true,
+    );
   });
 
   it("accepts basename output when grep searches one exact file", () => {
-    expect(test.validate(execution("notes/marker.txt", "notes/marker.txt")).passed).toBe(true);
+    expect(
+      test.validate(execution("notes/marker.txt", "notes/marker.txt")).passed,
+    ).toBe(true);
   });
 
   it("accepts an exact write joined to exact grep evidence without a redundant read", () => {
@@ -123,25 +141,32 @@ describe("smoke validators", () => {
 
   it("accepts the current atomic patch surface joined to exact grep evidence", () => {
     expect(
-      test.validate(execution(null, ".", "agentic-file-tools-smoke", "apply_patch")).passed
+      test.validate(
+        execution(null, ".", "agentic-file-tools-smoke", "apply_patch"),
+      ).passed,
     ).toBe(true);
   });
 
   it("accepts the receipt-bound edit surface joined to exact grep evidence", () => {
-    expect(test.validate(execution(null, ".", "agentic-file-tools-smoke", "edit")).passed).toBe(
-      true
-    );
+    expect(
+      test.validate(execution(null, ".", "agentic-file-tools-smoke", "edit"))
+        .passed,
+    ).toBe(true);
   });
 
   it("accepts a descriptive note when canonical grep evidence contains the marker", () => {
     expect(
-      test.validate(execution(null, ".", "prefix agentic-file-tools-smoke suffix")).passed
+      test.validate(
+        execution(null, ".", "prefix agentic-file-tools-smoke suffix"),
+      ).passed,
     ).toBe(true);
   });
 
   it("rejects content search evidence that does not identify the written path", () => {
     const result = execution();
-    const grep = result.messages.find((message) => message.invocation?.name === "grep")?.invocation;
+    const grep = result.messages.find(
+      (message) => message.invocation?.name === "grep",
+    )?.invocation;
     if (grep) {
       (grep as unknown as { result: unknown }).result = {
         matches: ["notes/unrelated.txt:1"],
@@ -151,11 +176,18 @@ describe("smoke validators", () => {
   });
 
   it("requires the factorial claim to agree with the canonical runtime result", () => {
-    const factorial = smokeTests.find((candidate) => candidate.name === "eval-return-value")!;
+    const factorial = smokeTests.find(
+      (candidate) => candidate.name === "eval-return-value",
+    )!;
     const result = {
       duration: 0,
       messages: [
-        { kind: "message", senderId: "user", complete: true, content: "prompt" },
+        {
+          kind: "message",
+          senderId: "user",
+          complete: true,
+          content: "prompt",
+        },
         {
           kind: "message",
           senderId: "agent",
@@ -167,7 +199,9 @@ describe("smoke validators", () => {
             name: "eval",
             status: "complete",
             isError: false,
-            arguments: { code: "return [1, 2, 3, 4, 5].reduce((a, b) => a * b, 1)" },
+            arguments: {
+              code: "return [1, 2, 3, 4, 5].reduce((a, b) => a * b, 1)",
+            },
             result: { details: { returnValue: 120 } },
           },
         },
@@ -188,11 +222,18 @@ describe("smoke validators", () => {
   });
 
   it("accepts static runtime imports as package-load evidence", () => {
-    const buildService = smokeTests.find((candidate) => candidate.name === "build-service")!;
+    const buildService = smokeTests.find(
+      (candidate) => candidate.name === "build-service",
+    )!;
     const result = {
       duration: 0,
       messages: [
-        { kind: "message", senderId: "user", complete: true, content: "prompt" },
+        {
+          kind: "message",
+          senderId: "user",
+          complete: true,
+          content: "prompt",
+        },
         {
           kind: "message",
           senderId: "agent",
@@ -207,7 +248,9 @@ describe("smoke validators", () => {
             arguments: {
               code: 'import * as runtime from "@workspace/runtime"; return Object.keys(runtime)',
             },
-            result: { details: { success: true, returnValue: ["workers", "rpc"] } },
+            result: {
+              details: { success: true, returnValue: ["workers", "rpc"] },
+            },
           },
         },
         {
@@ -220,6 +263,9 @@ describe("smoke validators", () => {
       ],
     } as TestExecutionResult;
 
-    expect(buildService.validate(result)).toEqual({ passed: true, reason: undefined });
+    expect(buildService.validate(result)).toEqual({
+      passed: true,
+      reason: undefined,
+    });
   });
 });
