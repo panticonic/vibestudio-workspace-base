@@ -72,7 +72,8 @@
     "@workspace/about-shared": "workspace:*",
     "@radix-ui/react-icons": "1.3.2",
     "@radix-ui/themes": "3.3.0",
-    "react": "19.2.4"
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
   },
   "type": "module"
 }
