@@ -88,6 +88,28 @@ providers:
   gitInterop:
     extension: extensions/git-bridge
 services:
+  - action: manage semantic source, history, and workspace initialization
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+        - session
+        - mission
+    description: Owns semantic source, history, projections, and workspace initialization.
+    durableObject:
+      className: GadWorkspaceDO
+    name: gad.workspace
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.workspace-source.v1
+      - vibestudio.gad.workspace.v1
+    source: workers/workspace-source
+    title: Workspace source
   - action: send and receive messages in your conversations
     authority:
       binding: declared
@@ -248,6 +270,9 @@ services:
     source: workers/missions
     title: Missions
 singletonObjects:
+  - className: GadWorkspaceDO
+    key: workspace
+    source: workers/workspace-source
   - className: BrowserDataDO
     key: workspace-browser-data
     source: workers/browser-data

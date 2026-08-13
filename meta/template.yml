@@ -223,6 +223,9 @@ initPanels:
         run on the selected local or self-hosted server; never claim that every
         operation runs on the user's current machine.
 singletonObjects:
+  - source: workers/workspace-source
+    className: GadWorkspaceDO
+    key: workspace
   - source: workers/browser-data
     className: BrowserDataDO
     key: workspace-browser-data
@@ -245,6 +248,28 @@ singletonObjects:
     className: MissionsDO
     key: workspace-missions
 services:
+  - source: workers/workspace-source
+    name: gad.workspace
+    title: Workspace source
+    action: manage semantic source, history, and workspace initialization
+    description: Owns semantic source, history, projections, and workspace initialization.
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.workspace-source.v1
+      - vibestudio.gad.workspace.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+        - session
+        - mission
+    durableObject:
+      className: GadWorkspaceDO
   - source: workers/pubsub-channel
     name: channel
     title: Conversations
