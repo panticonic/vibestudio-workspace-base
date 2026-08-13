@@ -7,7 +7,7 @@ function execution(
   readPath: string | null = "notes/marker.txt",
   searchRoot = ".",
   writtenContent = "agentic-file-tools-smoke",
-  writeTool: "write" | "apply_patch" = "write"
+  writeTool: "write" | "edit" | "apply_patch" = "write"
 ): TestExecutionResult {
   const writtenPath =
     writeTool === "apply_patch" ? "projects/default/notes/marker.txt" : "notes/marker.txt";
@@ -26,7 +26,26 @@ function execution(
           },
           result: { ok: true },
         }
-      : {
+      : writeTool === "edit"
+        ? {
+            id: "edit",
+            name: "edit",
+            status: "complete",
+            isError: false,
+            arguments: {
+              path: writtenPath,
+              oldText: "Disposable system-test project.\n",
+              newText: `Disposable system-test project.\n\n${writtenContent}\n`,
+              receipt: {
+                protocol: "workspace-read-receipt.v1",
+                path: writtenPath,
+                contentHash: "before",
+                byteLength: 32,
+              },
+            },
+            result: { details: { status: "applied", paths: [writtenPath] } },
+          }
+        : {
           id: "apply-patch",
           name: "apply_patch",
           status: "complete",
@@ -106,6 +125,12 @@ describe("smoke validators", () => {
     expect(
       test.validate(execution(null, ".", "agentic-file-tools-smoke", "apply_patch")).passed
     ).toBe(true);
+  });
+
+  it("accepts the receipt-bound edit surface joined to exact grep evidence", () => {
+    expect(test.validate(execution(null, ".", "agentic-file-tools-smoke", "edit")).passed).toBe(
+      true
+    );
   });
 
   it("accepts a descriptive note when canonical grep evidence contains the marker", () => {

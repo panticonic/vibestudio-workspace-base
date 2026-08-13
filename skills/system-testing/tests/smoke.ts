@@ -176,6 +176,15 @@ export const smokeTests: TestCase[] = [
           typeof call.arguments?.["content"] === "string" &&
           call.arguments["content"].includes("agentic-file-tools-smoke")
       );
+      const editWrite = calls.find(
+        (call) =>
+          call.name === "edit" &&
+          call.execution?.status === "complete" &&
+          call.execution.isError !== true &&
+          typeof call.arguments?.["path"] === "string" &&
+          typeof call.arguments?.["newText"] === "string" &&
+          call.arguments["newText"].includes("agentic-file-tools-smoke")
+      );
       const patchWrite = calls
         .filter(
           (call) =>
@@ -201,7 +210,8 @@ export const smokeTests: TestCase[] = [
             )
           )
         );
-      const path = directWrite?.arguments?.["path"] ?? patchWrite?.["path"];
+      const path =
+        directWrite?.arguments?.["path"] ?? editWrite?.arguments?.["path"] ?? patchWrite?.["path"];
       const grep = calls.find((call) => {
         if (
           call.name !== "grep" ||
@@ -222,7 +232,7 @@ export const smokeTests: TestCase[] = [
       // line establishes both persistence and content. A subsequent read is
       // equally valid, but is not a mandatory ritual when it repeats those
       // bytes.
-      const hasEvidence = Boolean((directWrite || patchWrite) && grep);
+      const hasEvidence = Boolean((directWrite || editWrite || patchWrite) && grep);
       return {
         passed: hasEvidence,
         reason: hasEvidence
