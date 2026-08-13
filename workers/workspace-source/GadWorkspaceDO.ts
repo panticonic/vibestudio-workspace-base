@@ -1421,7 +1421,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
       const store = this.semanticVcsStore();
 
       if (phase === "context") {
-        const ensured = workspace.ensureContextCoordinate(
+        // Exact root import is a filesystem-consuming workflow: establish the
+        // ordinary projected context before the first repository patch. A
+        // coordinate-only context deliberately has no materialization basis.
+        const ensured = workspace.ensureContext(
           {
             contextId,
             commandId: `${input.commandId}:context`,
