@@ -87,7 +87,6 @@ providers:
     source: "@workspace/runtime"
   gitInterop:
     extension: extensions/git-bridge
-routes: []
 services:
   - action: send and receive messages in your conversations
     authority:
