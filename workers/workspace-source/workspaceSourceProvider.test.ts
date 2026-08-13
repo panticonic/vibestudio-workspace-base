@@ -86,11 +86,25 @@ describe("WorkspaceSourceProviderV1", () => {
           snapshot: repositorySnapshot,
           files: [{ path: "vibestudio.yml", contentHash, mode: 0o644 }],
         },
+        {
+          repoPath: "panels/example",
+          subdir: "panels/example",
+          snapshot: canonicalSnapshotDigest([
+            {
+              path: "index.tsx",
+              contentHash,
+              size: bytes.byteLength,
+              mode: 0o100644,
+            },
+          ]),
+          files: [{ path: "index.tsx", contentHash, mode: 0o644 }],
+        },
       ],
     };
 
     let inspection =
       await instance.workspaceSourceInitializeExactSnapshot(input);
+    const effectKinds: string[] = [];
     for (
       let step = 0;
       inspection.state === "initializing" && step < 10;
@@ -102,6 +116,7 @@ describe("WorkspaceSourceProviderV1", () => {
         continue;
       }
       const effect = inspection.pendingEffect;
+      effectKinds.push(effect.kind);
       inspection = await instance.workspaceSourceInitializeExactSnapshot({
         ...input,
         acknowledgement: {
@@ -129,6 +144,12 @@ describe("WorkspaceSourceProviderV1", () => {
         initializedStateHash: expect.stringMatching(/^state:[0-9a-f]{64}$/u),
       },
     });
+    expect(effectKinds).toEqual([
+      "materialize-context",
+      "observe-content",
+      "materialize-context",
+      "publish-main",
+    ]);
     await expect(
       instance.workspaceSourceInitializeExactSnapshot(input),
     ).resolves.toEqual(inspection);
