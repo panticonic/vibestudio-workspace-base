@@ -248,8 +248,8 @@ services:
   - source: workers/workspace-source
     name: gad.workspace
     title: Workspace source
-    action: manage semantic source, history, and workspace initialization
-    description: Owns semantic source, history, projections, and workspace initialization.
+    action: manage your workspace files, history, and setup
+    description: Manages your workspace's files, version history, and initial setup.
     notability: everyday
     presentation:
       domain: automation
@@ -296,7 +296,7 @@ services:
     name: browser.data
     title: Browser data
     action: use browser history, bookmarks, downloads, and preferences
-    description: Store durable browser product facts outside the protected host vault.
+    description: Access your browser history, bookmarks, downloads, and saved preferences.
     notability: everyday
     presentation:
       domain: web
@@ -315,7 +315,7 @@ services:
     name: workspace.presentation
     title: Workspace presentation
     action: manage panel titles, search, and launcher usage
-    description: Store durable workspace presentation facts and rebuildable search indexes.
+    description: Manage how panels, search results, and the app launcher are organized.
     notability: everyday
     presentation:
       domain: computer
@@ -373,7 +373,7 @@ services:
       className: TestkitDriverDO
   - source: workers/phone-provisioning
     name: phone.provisioning
-    title: Phone provisioning
+    title: Connected phones
     action: manage connected phones
     description: Discover, install, and pair phones through a connected desktop.
     notability: headline
@@ -394,7 +394,7 @@ services:
     name: development
     title: Development
     action: manage development sessions
-    description: Build and test exact semantic source candidates through host-owned effects.
+    description: Build and test workspace changes before they're saved.
     notability: everyday
     presentation:
       domain: automation
@@ -411,9 +411,9 @@ services:
       className: DevelopmentDO
   - source: workers/missions
     name: missions
-    title: Missions
-    action: manage reviewed automations
-    description: Author and run reviewed workspace automations.
+    title: Automated tasks
+    action: manage automated tasks
+    description: Create and run automated tasks that you review before they start.
     notability: headline
     presentation:
       domain: automation

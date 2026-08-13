@@ -88,7 +88,7 @@ providers:
   gitInterop:
     extension: extensions/git-bridge
 services:
-  - action: manage semantic source, history, and workspace initialization
+  - action: manage your workspace files, history, and setup
     authority:
       binding: declared
       principals:
@@ -97,7 +97,7 @@ services:
         - code
         - session
         - mission
-    description: Owns semantic source, history, projections, and workspace initialization.
+    description: Manages your workspace's files, version history, and initial setup.
     durableObject:
       className: GadWorkspaceDO
     name: gad.workspace
@@ -140,7 +140,7 @@ services:
         - host
         - user
         - code
-    description: Store durable browser product facts outside the protected host vault.
+    description: Access your browser history, bookmarks, downloads, and saved preferences.
     durableObject:
       className: BrowserDataDO
     name: browser.data
@@ -159,7 +159,7 @@ services:
         - host
         - user
         - code
-    description: Store durable workspace presentation facts and rebuildable search indexes.
+    description: Manage how panels, search results, and the app launcher are organized.
     durableObject:
       className: WorkspacePresentationDO
     name: workspace.presentation
@@ -230,7 +230,7 @@ services:
     protocols:
       - vibestudio.phone-provisioning.v1
     source: workers/phone-provisioning
-    title: Phone provisioning
+    title: Connected phones
   - action: manage development sessions
     authority:
       binding: declared
@@ -238,7 +238,7 @@ services:
         - host
         - user
         - code
-    description: Build and test exact semantic source candidates through host-owned effects.
+    description: Build and test workspace changes before they're saved.
     durableObject:
       className: DevelopmentDO
     name: development
@@ -250,14 +250,14 @@ services:
       - vibestudio.development.v1
     source: workers/development
     title: Development
-  - action: manage reviewed automations
+  - action: manage automated tasks
     authority:
       binding: declared
       principals:
         - host
         - user
         - code
-    description: Author and run reviewed workspace automations.
+    description: Create and run automated tasks that you review before they start.
     durableObject:
       className: MissionsDO
     name: missions
@@ -268,7 +268,7 @@ services:
     protocols:
       - vibestudio.missions.v1
     source: workers/missions
-    title: Missions
+    title: Automated tasks
 singletonObjects:
   - className: GadWorkspaceDO
     key: workspace
