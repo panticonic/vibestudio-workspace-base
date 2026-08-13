@@ -430,7 +430,13 @@ export default function CollectionPanel() {
     () => ({ clientId: panel.slotId, rpc, recoveryCoordinator }),
     []
   );
-  const importLoader = useMemo(() => createPanelImportLoader(rpc), []);
+  const importLoader = useMemo(
+    () =>
+      createPanelImportLoader(rpc, {
+        defaultWorkspaceRef: () => `ctx:${resolvedContextId}`,
+      }),
+    [resolvedContextId]
+  );
 
   return (
     <Theme appearance={theme} accentColor="iris" radius="medium" style={{ height: "100dvh" }}>

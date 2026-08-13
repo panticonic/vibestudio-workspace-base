@@ -14,9 +14,12 @@ interface RpcLike {
  * part of the chat's ConnectionConfig; this factory supplies only the optional
  * dynamic-loading capability required by authored UI and client evaluation.
  */
-export function createPanelImportLoader(rpc: RpcLike): SandboxImportLoader {
+export function createPanelImportLoader(
+  rpc: RpcLike,
+  options: { defaultWorkspaceRef: () => `ctx:${string}` }
+): SandboxImportLoader {
   const build = createBuildServiceClient((service, method, args) =>
     rpc.call("main", `${service}.${method}`, args)
   );
-  return createEvalImportLoader(build, "panel");
+  return createEvalImportLoader(build, "panel", options);
 }

@@ -1313,7 +1313,13 @@ export default function ChatPanel() {
     [handleForkSwitch, handleOpenForkPanel, readForkCursors, markForkRead, handleExternalFork]
   );
 
-  const importLoader = useMemo(() => createPanelImportLoader(rpc), []);
+  const importLoader = useMemo(
+    () =>
+      createPanelImportLoader(rpc, {
+        defaultWorkspaceRef: () => `ctx:${resolvedContextId}`,
+      }),
+    [resolvedContextId]
+  );
 
   const panelMetadata = useMemo(
     () => ({
