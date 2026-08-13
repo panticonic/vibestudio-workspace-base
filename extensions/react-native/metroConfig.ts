@@ -7,8 +7,6 @@ interface NativeModulePolicy {
   blockedImports: Record<string, string[]>;
 }
 
-const require = createRequire(import.meta.url);
-
 export function writeProjectedMetroConfig(input: BuildProviderInput, tempDir: string): string {
   const nodeModulesPath = input.dependencyProjection.nodeModulesPath;
   if (!nodeModulesPath) {
@@ -16,7 +14,8 @@ export function writeProjectedMetroConfig(input: BuildProviderInput, tempDir: st
   }
   const app = appManifest(input);
   const policy = readNativeModulePolicy(input.sourcePath, app["nativeModulePolicy"]);
-  const metroConfigPackage = require.resolve("@react-native/metro-config");
+  const projectedRequire = createRequire(path.join(nodeModulesPath, "package.json"));
+  const metroConfigPackage = projectedRequire.resolve("@react-native/metro-config");
   const configPath = path.join(tempDir, "metro.config.cjs");
   const data = JSON.stringify({
     sourcePath: input.sourcePath,

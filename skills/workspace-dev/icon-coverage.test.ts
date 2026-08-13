@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const UNIT_ROOTS = ["about", "panels", "workers", "apps", "extensions"] as const;
 
 describe("built-in workspace unit icons", () => {
@@ -12,7 +12,7 @@ describe("built-in workspace unit icons", () => {
     const invalid: string[] = [];
 
     for (const unitRoot of UNIT_ROOTS) {
-      const root = path.join(REPO_ROOT, "workspace", unitRoot);
+      const root = path.join(REPO_ROOT, unitRoot);
       for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
         if (!entry.isDirectory()) continue;
         const manifestPath = path.join(root, entry.name, "package.json");

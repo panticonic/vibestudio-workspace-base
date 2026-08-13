@@ -5,35 +5,52 @@
   "type": "module",
   "vibestudio": {
     "title": "Automations",
+    "icon": "🎯",
     "kind": "worker",
     "entry": "index.ts",
     "durable": {
-      "classes": [{ "className": "MissionsDO" }]
+      "classes": [
+        {
+          "className": "MissionsDO"
+        }
+      ]
     },
     "authority": {
       "provides": [],
       "requests": [
         {
           "capability": "reviewed-closure.activate",
-          "resource": { "kind": "prefix", "prefix": "closure:" },
+          "resource": {
+            "kind": "prefix",
+            "prefix": "closure:"
+          },
           "tier": "gated",
           "evidence": "bounded-dynamic"
         },
         {
           "capability": "reviewed-closure.suspend",
-          "resource": { "kind": "prefix", "prefix": "mission:" },
+          "resource": {
+            "kind": "prefix",
+            "prefix": "mission:"
+          },
           "tier": "gated",
           "evidence": "bounded-dynamic"
         },
         {
           "capability": "reviewed-closure.retire",
-          "resource": { "kind": "prefix", "prefix": "mission:" },
+          "resource": {
+            "kind": "prefix",
+            "prefix": "mission:"
+          },
           "tier": "critical",
           "evidence": "bounded-dynamic"
         },
         {
           "capability": "reviewed-closure.bind-session",
-          "resource": { "kind": "prefix", "prefix": "mission:" },
+          "resource": {
+            "kind": "prefix",
+            "prefix": "mission:"
+          },
           "tier": "gated",
           "evidence": "bounded-dynamic"
         }
@@ -45,5 +62,9 @@
     "@vibestudio/shared": "workspace:*",
     "@workspace/runtime": "workspace:*"
   },
-  "devDependencies": { "vitest": "^3.2.2" }
+  "devDependencies": {
+    "@vibestudio/durable": "workspace:*",
+    "@vibestudio/rpc": "workspace:*",
+    "vitest": "^3.2.2"
+  }
 }

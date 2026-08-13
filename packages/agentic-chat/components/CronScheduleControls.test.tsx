@@ -3,7 +3,10 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { describe, expect, it, vi } from "vitest";
-import { CronScheduleDisplay, CronScheduleEditor } from "./CronScheduleControls.js";
+import {
+  CronScheduleDisplay,
+  CronScheduleEditor,
+} from "./CronScheduleControls.js";
 
 describe("CronScheduleControls", () => {
   it("explains an advanced schedule while retaining its exact editable expression", () => {
@@ -16,14 +19,16 @@ describe("CronScheduleControls", () => {
           onExpressionChange={onExpressionChange}
           onTimezoneChange={vi.fn()}
         />
-      </Theme>
+      </Theme>,
     );
 
-    expect((screen.getByLabelText("Cron expression") as HTMLInputElement).value).toBe(
-      "*/15 9-17 * * MON-FRI"
-    );
     expect(
-      screen.getByText(/Every 15 minutes during hours 9 through 17 on Monday through Friday/)
+      (screen.getByLabelText("Cron expression") as HTMLInputElement).value,
+    ).toBe("*/15 9-17 * * MON-FRI");
+    expect(
+      screen.getByText(
+        /Every 15 minutes during hours 9 through 17 on Monday through Friday/,
+      ),
     ).toBeTruthy();
     expect(screen.getByText("Next five runs")).toBeTruthy();
     expect(onExpressionChange).not.toHaveBeenCalled();
@@ -38,7 +43,7 @@ describe("CronScheduleControls", () => {
           onExpressionChange={vi.fn()}
           onTimezoneChange={vi.fn()}
         />
-      </Theme>
+      </Theme>,
     );
 
     expect(screen.getByRole("alert").textContent).toMatch(/five-field/);
@@ -47,8 +52,12 @@ describe("CronScheduleControls", () => {
   it("keeps raw syntax subordinate to the readable dashboard presentation", () => {
     render(
       <Theme>
-        <CronScheduleDisplay expression="0 9 * * MON#2" timezone="Europe/Berlin" technical />
-      </Theme>
+        <CronScheduleDisplay
+          expression="0 9 * * MON#2"
+          timezone="Europe/Berlin"
+          technical
+        />
+      </Theme>,
     );
 
     expect(screen.getByText(/second Monday.*9:00/)).toBeTruthy();

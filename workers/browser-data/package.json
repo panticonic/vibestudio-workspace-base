@@ -5,17 +5,29 @@
   "type": "module",
   "vibestudio": {
     "title": "Browser Data",
+    "icon": "🌐",
     "kind": "worker",
     "entry": "index.ts",
     "durable": {
-      "classes": [{ "className": "BrowserDataDO" }]
+      "classes": [
+        {
+          "className": "BrowserDataDO"
+        }
+      ]
     },
-    "authority": { "provides": [], "requests": [] }
+    "authority": {
+      "provides": [],
+      "requests": []
+    }
   },
   "dependencies": {
     "@vibestudio/browser-data": "workspace:*",
     "@vibestudio/service-schemas": "workspace:*",
     "@workspace/runtime": "workspace:*"
   },
-  "devDependencies": { "vitest": "^3.2.2" }
+  "devDependencies": {
+    "@vibestudio/durable": "workspace:*",
+    "@vibestudio/rpc": "workspace:*",
+    "vitest": "^3.2.2"
+  }
 }

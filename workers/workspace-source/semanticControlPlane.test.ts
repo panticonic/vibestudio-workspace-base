@@ -557,7 +557,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
     db.run(`INSERT INTO state (key, value) VALUES ('application_marker', ?)`, ["preserved"]);
 
     await expect(createTestDO(GadWorkspaceDO, undefined, { db })).rejects.toThrow(
-      /no schema identity/
+      /no current schema identity/
     );
     expect(db.exec(`SELECT value FROM state WHERE key = 'application_marker'`)[0]!.values).toEqual([
       ["preserved"],

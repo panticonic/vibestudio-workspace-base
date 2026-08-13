@@ -32,42 +32,62 @@ describe("sandbox source hooks", () => {
   let originalModuleMap: unknown;
   let originalRequire: unknown;
   let originalPreload: unknown;
-  let originalRequestIdleCallback: typeof globalThis.requestIdleCallback | undefined;
-  let originalCancelIdleCallback: typeof globalThis.cancelIdleCallback | undefined;
+  let originalRequestIdleCallback:
+    | typeof globalThis.requestIdleCallback
+    | undefined;
+  let originalCancelIdleCallback:
+    | typeof globalThis.cancelIdleCallback
+    | undefined;
 
   beforeEach(() => {
-    originalModuleMap = (globalThis as Record<string, unknown>)["__vibestudioModuleMap__"];
-    originalRequire = (globalThis as Record<string, unknown>)["__vibestudioRequire__"];
-    originalPreload = (globalThis as Record<string, unknown>)["__vibestudioPreloadModules__"];
+    originalModuleMap = (globalThis as Record<string, unknown>)[
+      "__vibestudioModuleMap__"
+    ];
+    originalRequire = (globalThis as Record<string, unknown>)[
+      "__vibestudioRequire__"
+    ];
+    originalPreload = (globalThis as Record<string, unknown>)[
+      "__vibestudioPreloadModules__"
+    ];
     originalRequestIdleCallback = globalThis.requestIdleCallback;
     originalCancelIdleCallback = globalThis.cancelIdleCallback;
 
     const moduleMap: Record<string, unknown> = {};
-    (globalThis as Record<string, unknown>)["__vibestudioModuleMap__"] = moduleMap;
-    (globalThis as Record<string, unknown>)["__vibestudioRequire__"] = (id: string) => {
+    (globalThis as Record<string, unknown>)["__vibestudioModuleMap__"] =
+      moduleMap;
+    (globalThis as Record<string, unknown>)["__vibestudioRequire__"] = (
+      id: string,
+    ) => {
       if (id in moduleMap) return moduleMap[id];
       throw new Error(`Module not found: ${id}`);
     };
-    (globalThis as Record<string, unknown>)["__vibestudioPreloadModules__"] = async (
-      ids: string[]
-    ) =>
-      ids.map((id) => {
-        if (id in moduleMap) return moduleMap[id];
-        throw new Error(`Module not found: ${id}`);
-      });
+    (globalThis as Record<string, unknown>)["__vibestudioPreloadModules__"] =
+      async (ids: string[]) =>
+        ids.map((id) => {
+          if (id in moduleMap) return moduleMap[id];
+          throw new Error(`Module not found: ${id}`);
+        });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     if (originalModuleMap === undefined)
       delete (globalThis as Record<string, unknown>)["__vibestudioModuleMap__"];
-    else (globalThis as Record<string, unknown>)["__vibestudioModuleMap__"] = originalModuleMap;
+    else
+      (globalThis as Record<string, unknown>)["__vibestudioModuleMap__"] =
+        originalModuleMap;
     if (originalRequire === undefined)
       delete (globalThis as Record<string, unknown>)["__vibestudioRequire__"];
-    else (globalThis as Record<string, unknown>)["__vibestudioRequire__"] = originalRequire;
+    else
+      (globalThis as Record<string, unknown>)["__vibestudioRequire__"] =
+        originalRequire;
     if (originalPreload === undefined)
-      delete (globalThis as Record<string, unknown>)["__vibestudioPreloadModules__"];
-    else (globalThis as Record<string, unknown>)["__vibestudioPreloadModules__"] = originalPreload;
+      delete (globalThis as Record<string, unknown>)[
+        "__vibestudioPreloadModules__"
+      ];
+    else
+      (globalThis as Record<string, unknown>)["__vibestudioPreloadModules__"] =
+        originalPreload;
     if (originalRequestIdleCallback === undefined)
       delete (globalThis as Record<string, unknown>)["requestIdleCallback"];
     else globalThis.requestIdleCallback = originalRequestIdleCallback;
@@ -88,10 +108,16 @@ describe("sandbox source hooks", () => {
     };
     const loadImport = async (specifier: string, ref: string | undefined) => {
       loadCalls.push({ specifier, ref });
-      return { bundle: `module.exports = { label: "ready" };`, format: "cjs" as const };
+      return {
+        bundle: `module.exports = { label: "ready" };`,
+        format: "cjs" as const,
+      };
     };
     const messages = [
-      makeMessage({ id: "ui-1", source: { type: "file", path: "packages/app/ui.tsx" } }),
+      makeMessage({
+        id: "ui-1",
+        source: { type: "file", path: "packages/app/ui.tsx" },
+      }),
     ];
 
     function Harness() {
@@ -109,7 +135,7 @@ describe("sandbox source hooks", () => {
         const entry = states[states.length - 1]?.inlineUiComponents.get("ui-1");
         expect(entry?.Component).toBeTruthy();
       },
-      { timeout: 5_000 }
+      { timeout: 5_000 },
     );
     expect(loadCalls).toEqual([{ specifier: "label-lib", ref: "npm:2" }]);
   });
@@ -130,7 +156,10 @@ describe("sandbox source hooks", () => {
     ];
     const loadImport = async (specifier: string, ref: string | undefined) => {
       loadCalls.push({ specifier, ref });
-      return { bundle: `module.exports = { label: "ready" };`, format: "cjs" as const };
+      return {
+        bundle: `module.exports = { label: "ready" };`,
+        format: "cjs" as const,
+      };
     };
 
     function Harness() {
@@ -171,7 +200,8 @@ describe("sandbox source hooks", () => {
 
     function Harness({ messages }: { messages: ChatMessage[] }) {
       const state = useInlineUi({ messages, loadImport });
-      const Component = state.inlineUiComponents.get("versioned-card")?.Component;
+      const Component =
+        state.inlineUiComponents.get("versioned-card")?.Component;
       return Component ? (
         <Component props={{}} chat={{}} scope={{}} scopes={{}} />
       ) : (
@@ -179,7 +209,9 @@ describe("sandbox source hooks", () => {
       );
     }
 
-    const view = render(<Harness messages={[message("npm:1", "first-revision")]} />);
+    const view = render(
+      <Harness messages={[message("npm:1", "first-revision")]} />,
+    );
     await waitFor(() => expect(view.getByText("npm:1")).toBeTruthy());
 
     view.rerender(<Harness messages={[message("npm:2", "second-revision")]} />);
@@ -193,10 +225,9 @@ describe("sandbox source hooks", () => {
   });
 
   it("serializes in-flight stable-card revisions before changing package refs", async () => {
-    const moduleMap = (globalThis as Record<string, unknown>)["__vibestudioModuleMap__"] as Record<
-      string,
-      unknown
-    >;
+    const moduleMap = (globalThis as Record<string, unknown>)[
+      "__vibestudioModuleMap__"
+    ] as Record<string, unknown>;
     let releaseFirstImport!: () => void;
     const firstImportGate = new Promise<void>((resolve) => {
       releaseFirstImport = resolve;
@@ -229,7 +260,9 @@ describe("sandbox source hooks", () => {
       );
     }
 
-    const view = render(<Harness messages={[message("npm:1", "first-revision")]} />);
+    const view = render(
+      <Harness messages={[message("npm:1", "first-revision")]} />,
+    );
     await waitFor(() => expect(loadCalls).toEqual(["npm:1"]));
 
     view.rerender(<Harness messages={[message("npm:2", "second-revision")]} />);
@@ -248,7 +281,8 @@ describe("sandbox source hooks", () => {
     let source = `export default function App() { return "first"; }`;
     let sourceReads = 0;
     const loadSourceFile = async (sourcePath: string) => {
-      if (sourcePath !== "packages/app/Card.tsx") throw new Error(`Missing ${sourcePath}`);
+      if (sourcePath !== "packages/app/Card.tsx")
+        throw new Error(`Missing ${sourcePath}`);
       sourceReads += 1;
       return source;
     };
@@ -281,7 +315,9 @@ describe("sandbox source hooks", () => {
   });
 
   it("retries a failed stable inline_ui compilation on the next render revision", async () => {
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const consoleError = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     let source = `export default function (`;
     const message = (renderedAt: string) =>
       makeMessage({
@@ -316,10 +352,9 @@ describe("sandbox source hooks", () => {
   });
 
   it("compiles the onboarding overview through the file-backed inline UI pipeline", async () => {
-    const moduleMap = (globalThis as Record<string, unknown>)["__vibestudioModuleMap__"] as Record<
-      string,
-      unknown
-    >;
+    const moduleMap = (globalThis as Record<string, unknown>)[
+      "__vibestudioModuleMap__"
+    ] as Record<string, unknown>;
     moduleMap["react"] = React;
     moduleMap["react/jsx-runtime"] = ReactJsxRuntime;
     moduleMap["react/jsx-dev-runtime"] = ReactJsxDevRuntime;
@@ -329,8 +364,8 @@ describe("sandbox source hooks", () => {
     moduleMap["@workspace/model-catalog/catalog"] = {};
 
     const sourcePath = "skills/onboarding/SetupHub.tsx";
-    const checkoutRoot =
-      path.basename(process.cwd()) === "workspace" ? path.dirname(process.cwd()) : process.cwd();
+    const workspaceRoot =
+      process.env["VIBESTUDIO_USERLAND_ROOT"] ?? process.cwd();
     const states: InlineUiState[] = [];
     const messages = [
       makeMessage({
@@ -343,7 +378,7 @@ describe("sandbox source hooks", () => {
       const state = useInlineUi({
         messages,
         loadSourceFile: (sourceFilePath) =>
-          readFile(path.join(checkoutRoot, "workspace", sourceFilePath), "utf8"),
+          readFile(path.join(workspaceRoot, sourceFilePath), "utf8"),
       });
       useEffect(() => {
         states.push(state);
@@ -355,11 +390,13 @@ describe("sandbox source hooks", () => {
 
     await waitFor(
       () => {
-        const entry = states.at(-1)?.inlineUiComponents.get("onboarding-setup-overview");
+        const entry = states
+          .at(-1)
+          ?.inlineUiComponents.get("onboarding-setup-overview");
         expect(entry?.error).toBeUndefined();
         expect(entry?.Component).toBeTruthy();
       },
-      { timeout: 5_000 }
+      { timeout: 5_000 },
     );
   });
 
@@ -375,9 +412,15 @@ describe("sandbox source hooks", () => {
     };
     const loadImport = async (specifier: string, ref: string | undefined) => {
       loadCalls.push({ specifier, ref });
-      return { bundle: `module.exports = { label: "ready" };`, format: "cjs" as const };
+      return {
+        bundle: `module.exports = { label: "ready" };`,
+        format: "cjs" as const,
+      };
     };
-    const data = { id: "bar-1", source: { type: "file" as const, path: "packages/app/bar.tsx" } };
+    const data = {
+      id: "bar-1",
+      source: { type: "file" as const, path: "packages/app/bar.tsx" },
+    };
 
     function Harness() {
       const state = useActionBar({
@@ -399,7 +442,7 @@ describe("sandbox source hooks", () => {
         expect(entry?.error).toBeUndefined();
         expect(entry?.Component).toBeTruthy();
       },
-      { timeout: 5_000 }
+      { timeout: 5_000 },
     );
     expect(loadCalls).toEqual([{ specifier: "label-lib", ref: "npm:3" }]);
   });
@@ -451,20 +494,20 @@ describe("sandbox source hooks", () => {
   });
 
   it("renders the compiled model credential card with the panel's exposed modules", async () => {
-    const moduleMap = (globalThis as Record<string, unknown>)["__vibestudioModuleMap__"] as Record<
-      string,
-      unknown
-    >;
+    const moduleMap = (globalThis as Record<string, unknown>)[
+      "__vibestudioModuleMap__"
+    ] as Record<string, unknown>;
     moduleMap["react"] = React;
     moduleMap["react/jsx-runtime"] = ReactJsxRuntime;
     moduleMap["react/jsx-dev-runtime"] = ReactJsxDevRuntime;
     moduleMap["@radix-ui/themes"] = RadixThemes;
     moduleMap["@workspace/react/responsive"] = ReactResponsive;
 
-    const sourcePath = "packages/agentic-chat/components/ModelCredentialRequiredCard.tsx";
-    const cwd = process.cwd();
-    const checkoutRoot = path.basename(cwd) === "workspace" ? path.dirname(cwd) : cwd;
-    const source = await readFile(path.join(checkoutRoot, "workspace", sourcePath), "utf8");
+    const sourcePath =
+      "packages/agentic-chat/components/ModelCredentialRequiredCard.tsx";
+    const workspaceRoot =
+      process.env["VIBESTUDIO_USERLAND_ROOT"] ?? process.cwd();
+    const source = await readFile(path.join(workspaceRoot, sourcePath), "utf8");
     const states: InlineUiState[] = [];
     const messages = [
       makeMessage({
@@ -490,7 +533,9 @@ describe("sandbox source hooks", () => {
       useEffect(() => {
         states.push(state);
       }, [state]);
-      const Component = state.inlineUiComponents.get("model-credential-card")?.Component;
+      const Component = state.inlineUiComponents.get(
+        "model-credential-card",
+      )?.Component;
       return Component ? (
         <Component
           props={JSON.parse(messages[0]!.content).props}
@@ -505,7 +550,9 @@ describe("sandbox source hooks", () => {
 
     await waitFor(() => {
       expect(
-        states[states.length - 1]?.inlineUiComponents.get("model-credential-card")?.error
+        states[states.length - 1]?.inlineUiComponents.get(
+          "model-credential-card",
+        )?.error,
       ).toBeUndefined();
       expect(view.getByText(/Credential required for/)).toBeTruthy();
     });

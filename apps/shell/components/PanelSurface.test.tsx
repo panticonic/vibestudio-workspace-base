@@ -6,9 +6,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PanelSurface } from "./PanelSurface";
 
 const shellClient = vi.hoisted(() => ({
-  bindNativePanelSlot: vi.fn<(...args: unknown[]) => Promise<unknown>>(() => Promise.resolve()),
-  updateNativePanelSlot: vi.fn<(...args: unknown[]) => Promise<unknown>>(() => Promise.resolve()),
-  clearNativePanelSlot: vi.fn<(...args: unknown[]) => Promise<void>>(() => Promise.resolve()),
+  bindNativePanelSlot: vi.fn<(...args: unknown[]) => Promise<unknown>>(() =>
+    Promise.resolve(),
+  ),
+  updateNativePanelSlot: vi.fn<(...args: unknown[]) => Promise<unknown>>(() =>
+    Promise.resolve(),
+  ),
+  clearNativePanelSlot: vi.fn<(...args: unknown[]) => Promise<void>>(() =>
+    Promise.resolve(),
+  ),
 }));
 
 vi.mock("../shell/client", () => ({
@@ -25,12 +31,21 @@ vi.mock("../shell/client", () => ({
 }));
 
 describe("PanelSurface", () => {
-  const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+  const originalGetBoundingClientRect =
+    HTMLElement.prototype.getBoundingClientRect;
   const originalRequestAnimationFrame = window.requestAnimationFrame;
   const originalCancelAnimationFrame = window.cancelAnimationFrame;
+  let animationFrames: FrameRequestCallback[];
+
+  function flushAnimationFrames() {
+    const callbacks = animationFrames.splice(0);
+    act(() => {
+      for (const callback of callbacks) callback(performance.now());
+    });
+  }
 
   beforeEach(() => {
-    vi.useFakeTimers();
+    animationFrames = [];
     shellClient.bindNativePanelSlot.mockReset();
     shellClient.bindNativePanelSlot.mockResolvedValue({ status: "bound" });
     shellClient.updateNativePanelSlot.mockReset();
@@ -49,18 +64,16 @@ describe("PanelSurface", () => {
       toJSON: () => ({}),
     })) as typeof HTMLElement.prototype.getBoundingClientRect;
     window.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
-      return window.setTimeout(() => callback(Date.now()), 0);
+      animationFrames.push(callback);
+      return animationFrames.length;
     }) as typeof window.requestAnimationFrame;
-    window.cancelAnimationFrame = vi.fn((id: number) => {
-      window.clearTimeout(id);
-    }) as typeof window.cancelAnimationFrame;
+    window.cancelAnimationFrame = vi.fn() as typeof window.cancelAnimationFrame;
   });
 
   afterEach(() => {
     HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
-    vi.useRealTimers();
   });
 
   it("claims its initial slot without waiting for an animation frame", () => {
@@ -80,21 +93,17 @@ describe("PanelSurface", () => {
     });
   });
 
-  it("updates focus without rebinding the declaration", async () => {
+  it("updates focus without rebinding the declaration", () => {
     const { rerender } = render(
-      <PanelSurface nativeSlotId="slot-1" panelId="panel-1" focused={false} />
+      <PanelSurface nativeSlotId="slot-1" panelId="panel-1" focused={false} />,
     );
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
+    flushAnimationFrames();
     expect(shellClient.bindNativePanelSlot).toHaveBeenCalledTimes(1);
 
     rerender(<PanelSurface nativeSlotId="slot-1" panelId="panel-1" focused />);
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
+    flushAnimationFrames();
     expect(shellClient.updateNativePanelSlot).toHaveBeenCalledWith({
       nativeSlotId: "slot-1",
       rendererInstanceId: "renderer-test",
@@ -107,14 +116,17 @@ describe("PanelSurface", () => {
     expect(shellClient.bindNativePanelSlot).toHaveBeenCalledTimes(1);
   });
 
-  it("resyncs geometry when the layout epoch changes", async () => {
+  it("resyncs geometry when the layout epoch changes", () => {
     const { rerender } = render(
-      <PanelSurface nativeSlotId="slot-1" panelId="panel-1" layoutEpoch={1} focused />
+      <PanelSurface
+        nativeSlotId="slot-1"
+        panelId="panel-1"
+        layoutEpoch={1}
+        focused
+      />,
     );
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
+    flushAnimationFrames();
     expect(shellClient.bindNativePanelSlot).toHaveBeenCalledTimes(1);
 
     HTMLElement.prototype.getBoundingClientRect = vi.fn(() => ({
@@ -128,15 +140,22 @@ describe("PanelSurface", () => {
       height: 300,
       toJSON: () => ({}),
     })) as typeof HTMLElement.prototype.getBoundingClientRect;
-    rerender(<PanelSurface nativeSlotId="slot-1" panelId="panel-1" layoutEpoch={2} focused />);
+    rerender(
+      <PanelSurface
+        nativeSlotId="slot-1"
+        panelId="panel-1"
+        layoutEpoch={2}
+        focused
+      />,
+    );
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
+    flushAnimationFrames();
 
     expect(shellClient.bindNativePanelSlot).toHaveBeenCalledTimes(1);
     expect(shellClient.updateNativePanelSlot).toHaveBeenCalledWith(
-      expect.objectContaining({ bounds: { x: 40, y: 50, width: 400, height: 300 } })
+      expect.objectContaining({
+        bounds: { x: 40, y: 50, width: 400, height: 300 },
+      }),
     );
   });
 
@@ -146,10 +165,12 @@ describe("PanelSurface", () => {
       () =>
         new Promise((resolve) => {
           resolveBind = resolve as (result: { status: "bound" }) => void;
-        })
+        }),
     );
 
-    const { unmount } = render(<PanelSurface nativeSlotId="slot-1" panelId="panel-1" focused />);
+    const { unmount } = render(
+      <PanelSurface nativeSlotId="slot-1" panelId="panel-1" focused />,
+    );
     const bindRequest = shellClient.bindNativePanelSlot.mock.calls[0]?.[0] as {
       bindingSequence: number;
       operationSequence: number;
@@ -157,18 +178,21 @@ describe("PanelSurface", () => {
 
     unmount();
 
-    const clearRequest = shellClient.clearNativePanelSlot.mock.calls[0]?.[0] as {
+    const clearRequest = shellClient.clearNativePanelSlot.mock
+      .calls[0]?.[0] as {
       nativeSlotId: string;
       bindingSequence: number;
       operationSequence: number;
     };
     expect(clearRequest.nativeSlotId).toBe("slot-1");
     expect(clearRequest.bindingSequence).toBe(bindRequest.bindingSequence);
-    expect(clearRequest.operationSequence).toBeGreaterThan(bindRequest.operationSequence);
+    expect(clearRequest.operationSequence).toBeGreaterThan(
+      bindRequest.operationSequence,
+    );
 
     await act(async () => {
       resolveBind?.({ status: "bound" });
-      await vi.runAllTimersAsync();
+      await Promise.resolve();
     });
     expect(shellClient.bindNativePanelSlot).toHaveBeenCalledTimes(1);
   });
@@ -179,45 +203,48 @@ describe("PanelSurface", () => {
       () =>
         new Promise((resolve) => {
           resolveBind = resolve as (result: { status: "bound" }) => void;
-        })
+        }),
     );
     const { rerender } = render(
-      <PanelSurface nativeSlotId="slot-1" panelId="panel-1" focused={false} />
+      <PanelSurface nativeSlotId="slot-1" panelId="panel-1" focused={false} />,
     );
 
     rerender(<PanelSurface nativeSlotId="slot-1" panelId="panel-1" focused />);
     expect(shellClient.updateNativePanelSlot).toHaveBeenCalledWith(
-      expect.objectContaining({ focused: true })
+      expect.objectContaining({ focused: true }),
     );
 
     await act(async () => {
       resolveBind?.({ status: "bound" });
-      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
     });
 
     expect(shellClient.bindNativePanelSlot).toHaveBeenCalledTimes(1);
   });
 
-  it("orders StrictMode release and replay as one binding incarnation", async () => {
+  it("orders StrictMode release and replay as one binding incarnation", () => {
     render(
       <React.StrictMode>
         <PanelSurface nativeSlotId="slot-1" panelId="panel-1" focused />
-      </React.StrictMode>
+      </React.StrictMode>,
     );
 
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
+    flushAnimationFrames();
 
-    const clearRequest = shellClient.clearNativePanelSlot.mock.calls[0]?.[0] as {
+    const clearRequest = shellClient.clearNativePanelSlot.mock
+      .calls[0]?.[0] as {
       bindingSequence: number;
       operationSequence: number;
     };
-    const lastBindRequest = shellClient.bindNativePanelSlot.mock.calls.at(-1)?.[0] as {
+    const lastBindRequest = shellClient.bindNativePanelSlot.mock.calls.at(
+      -1,
+    )?.[0] as {
       bindingSequence: number;
       operationSequence: number;
     };
     expect(lastBindRequest.bindingSequence).toBe(clearRequest.bindingSequence);
-    expect(lastBindRequest.operationSequence).toBeGreaterThan(clearRequest.operationSequence);
+    expect(lastBindRequest.operationSequence).toBeGreaterThan(
+      clearRequest.operationSequence,
+    );
   });
 });

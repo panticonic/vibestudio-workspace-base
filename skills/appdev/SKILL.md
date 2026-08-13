@@ -10,16 +10,16 @@ and DOs are sandboxed services, extensions are trusted Node services.
 
 ## Read by task
 
-| Task | Reference |
-| --- | --- |
-| Package, manifest, source, dependencies, panel commands | [AUTHORING.md](AUTHORING.md) |
-| External dependencies, overrides, and patches | [workspace dependency resolution](../workspace-dev/DEPENDENCIES.md) |
-| Electron, React Native, or terminal contracts | [TARGETS.md](TARGETS.md) |
-| Capability declarations | [CAPABILITIES.md](CAPABILITIES.md) |
-| Semantic development and diagnostics | [DEV_LOOP.md](DEV_LOOP.md) |
-| Native bootstrap, pairing, mobile artifacts | [MOBILE.md](MOBILE.md) |
-| Remote clients and credentials | [REMOTE_CLIENTS.md](REMOTE_CLIENTS.md) |
-| Focused checks and smoke coverage | [TESTING.md](TESTING.md) |
+| Task                                                    | Reference                                                           |
+| ------------------------------------------------------- | ------------------------------------------------------------------- |
+| Package, manifest, source, dependencies, panel commands | [AUTHORING.md](AUTHORING.md#hosting-panel-contributed-commands)     |
+| External dependencies, overrides, and patches           | [workspace dependency resolution](../workspace-dev/DEPENDENCIES.md) |
+| Electron, React Native, or terminal contracts           | [TARGETS.md](TARGETS.md)                                            |
+| Capability declarations                                 | [CAPABILITIES.md](CAPABILITIES.md)                                  |
+| Semantic development and diagnostics                    | [DEV_LOOP.md](DEV_LOOP.md)                                          |
+| Native bootstrap, pairing, mobile artifacts             | [MOBILE.md](MOBILE.md)                                              |
+| Remote clients and credentials                          | [REMOTE_CLIENTS.md](REMOTE_CLIENTS.md)                              |
+| Focused checks and smoke coverage                       | [TESTING.md](TESTING.md)                                            |
 
 Read only references relevant to the target and change.
 

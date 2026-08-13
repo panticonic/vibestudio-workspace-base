@@ -51,7 +51,7 @@ describe("template registry contract", () => {
         registry,
         { catalogId: "news", registryCommit: commit, registrySnapshot: snapshot },
         coordinates,
-        57
+        58
       )
     ).toEqual({
       catalogId: "news",
@@ -81,7 +81,7 @@ describe("template registry contract", () => {
         registry,
         { catalogId: "news", registryCommit: commit, registrySnapshot: snapshot },
         coordinates,
-        58
+        57
       )
     ).toThrow(TemplateRegistryEpochError);
   });

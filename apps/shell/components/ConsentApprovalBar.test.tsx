@@ -1,7 +1,13 @@
 // @vitest-environment jsdom
 
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -25,19 +31,28 @@ const shellClient = vi.hoisted(() => ({
   resolveInstallReview: vi.fn(() => Promise.resolve()),
   subscribe: vi.fn(() => Promise.resolve()),
   unsubscribe: vi.fn(() => Promise.resolve()),
-  onEvent: vi.fn((_event: string, _listener: (payload: unknown) => void) => () => {}),
-  getText: vi.fn<(hash: string) => Promise<string | null>>(() => Promise.resolve("blob-text")),
+  onEvent: vi.fn(
+    (_event: string, _listener: (payload: unknown) => void) => () => {},
+  ),
+  getText: vi.fn<(hash: string) => Promise<string | null>>(() =>
+    Promise.resolve("blob-text"),
+  ),
   getProfile: vi.fn(() =>
-    Promise.resolve({ userId: "alice", handle: "alice", displayName: "Alice", role: "member" })
+    Promise.resolve({
+      userId: "alice",
+      handle: "alice",
+      displayName: "Alice",
+      role: "member",
+    }),
   ),
   getTreePage: vi.fn<GetTreePageFn>(() =>
-    Promise.resolve({ revision: 1, nodes: [], nextCursor: null })
+    Promise.resolve({ revision: 1, nodes: [], nextCursor: null }),
   ),
   observe: vi.fn((slotId: string) =>
     Promise.resolve({
       slotId,
       source: slotId === "gadb" ? "about/workspace-history" : "panels/chat",
-    })
+    }),
   ),
   navigate: vi.fn(() => Promise.resolve(null)),
   createPanel: vi.fn(() => Promise.resolve(null)),
@@ -49,7 +64,11 @@ const shellClient = vi.hoisted(() => ({
 const overlay = vi.hoisted(() => ({
   options: null as {
     open?: boolean;
-    props?: { approval?: { approvalId?: string }; queue?: unknown; decisionError?: unknown };
+    props?: {
+      approval?: { approvalId?: string };
+      queue?: unknown;
+      decisionError?: unknown;
+    };
   } | null,
   onIntent: null as ((payload: unknown) => void) | null,
 }));
@@ -79,7 +98,10 @@ vi.mock("../shell/client", () => ({
 }));
 
 vi.mock("../shell/useShellContentOverlay", () => ({
-  useShellContentOverlay: (options: unknown, onIntent: (payload: unknown) => void) => {
+  useShellContentOverlay: (
+    options: unknown,
+    onIntent: (payload: unknown) => void,
+  ) => {
     overlay.options = options as typeof overlay.options;
     overlay.onIntent = onIntent;
   },
@@ -129,9 +151,16 @@ const fullSurface = vi.hoisted(() => ({
   } | null,
 }));
 vi.mock("./ApprovalFullSurface", () => ({
-  ApprovalFullSurface: (props: { approval: { approvalId: string }; onClose: () => void }) => {
+  ApprovalFullSurface: (props: {
+    approval: { approvalId: string };
+    onClose: () => void;
+  }) => {
     fullSurface.props = props;
-    return React.createElement("div", { "data-testid": "full-surface" }, props.approval.approvalId);
+    return React.createElement(
+      "div",
+      { "data-testid": "full-surface" },
+      props.approval.approvalId,
+    );
   },
 }));
 
@@ -144,7 +173,10 @@ function emit(intent: ApprovalCardIntent): void {
 }
 
 function capabilityApproval(
-  partial: Partial<PendingCapabilityApproval> & { approvalId: string; title: string }
+  partial: Partial<PendingCapabilityApproval> & {
+    approvalId: string;
+    title: string;
+  },
 ): PendingCapabilityApproval {
   return {
     kind: "capability",
@@ -166,7 +198,9 @@ function capabilityApproval(
   };
 }
 
-function hostAppStartupApproval(approvalId: string): PendingUnitInstallReviewApproval {
+function hostAppStartupApproval(
+  approvalId: string,
+): PendingUnitInstallReviewApproval {
   return {
     kind: "unit-install-review",
     mode: "adopt-root",
@@ -207,7 +241,13 @@ function hostAppStartupApproval(approvalId: string): PendingUnitInstallReviewApp
         section: "template",
       },
     ],
-    summary: { panels: 0, agents: 0, services: 0, clientApps: 1, extensions: 0 },
+    summary: {
+      panels: 0,
+      agents: 0,
+      services: 0,
+      clientApps: 1,
+      extensions: 0,
+    },
     unchangedPartCount: 0,
   };
 }
@@ -216,7 +256,9 @@ function hostAppStartupApproval(approvalId: string): PendingUnitInstallReviewApp
  * A review of ordinary workspace parts — panels, not client apps, so the launch
  * gate does not own it and it lands in this queue like any other approval.
  */
-function installReviewApproval(approvalId: string): PendingUnitInstallReviewApproval {
+function installReviewApproval(
+  approvalId: string,
+): PendingUnitInstallReviewApproval {
   return {
     ...hostAppStartupApproval(approvalId),
     mode: "install",
@@ -235,7 +277,13 @@ function installReviewApproval(approvalId: string): PendingUnitInstallReviewAppr
         repoPath: "panels/news",
       },
     ],
-    summary: { panels: 1, agents: 0, services: 0, clientApps: 0, extensions: 0 },
+    summary: {
+      panels: 1,
+      agents: 0,
+      services: 0,
+      clientApps: 0,
+      extensions: 0,
+    },
   };
 }
 
@@ -260,7 +308,7 @@ function mountBar() {
   return render(
     <Theme>
       <ConsentApprovalBar />
-    </Theme>
+    </Theme>,
   );
 }
 
@@ -285,21 +333,34 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("sends a heartbeat and lists pending while mounted", async () => {
-    vi.useFakeTimers();
+    let heartbeatTick: (() => void) | undefined;
+    const realSetInterval = window.setInterval.bind(window);
+    const captureHeartbeat = ((handler: TimerHandler, timeout?: number) => {
+      if (
+        timeout === 5_000 &&
+        !heartbeatTick &&
+        typeof handler === "function"
+      ) {
+        heartbeatTick = handler as () => void;
+      }
+      return realSetInterval(handler, timeout);
+    }) as typeof window.setInterval;
+    const setInterval = vi
+      .spyOn(window, "setInterval")
+      .mockImplementation(captureHeartbeat);
+    const view = render(React.createElement(ConsentApprovalBar));
     try {
-      render(React.createElement(ConsentApprovalBar));
       expect(shellClient.heartbeat).toHaveBeenCalledTimes(1);
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(shellClient.listPending).toHaveBeenCalledTimes(1);
-      await act(async () => {
-        vi.advanceTimersByTime(5_000);
+      await waitFor(() =>
+        expect(shellClient.listPending).toHaveBeenCalledTimes(1),
+      );
+      act(() => {
+        heartbeatTick?.();
       });
       expect(shellClient.heartbeat).toHaveBeenCalledTimes(2);
     } finally {
-      vi.useRealTimers();
+      view.unmount();
+      setInterval.mockRestore();
     }
   });
 
@@ -332,19 +393,27 @@ describe("ConsentApprovalBar coordinator", () => {
 
   it("minimizes to a pill on a minimize intent and reopens on click", async () => {
     shellClient.listPending.mockResolvedValueOnce([
-      capabilityApproval({ approvalId: "solo", title: "Lonely", callerTitle: "Chat A" }),
+      capabilityApproval({
+        approvalId: "solo",
+        title: "Lonely",
+        callerTitle: "Chat A",
+      }),
     ]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
 
     emit({ type: "minimize", approvalId: "solo" });
-    const pill = await screen.findByRole("button", { name: "Review approval: Lonely" });
+    const pill = await screen.findByRole("button", {
+      name: "Review approval: Lonely",
+    });
     expect(pill).toBeTruthy();
     expect(overlay.options).toBeNull();
 
     fireEvent.click(pill);
     await waitFor(() => expect(overlay.options?.open).toBe(true));
-    expect(screen.queryByRole("button", { name: "Review approval: Lonely" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Review approval: Lonely" }),
+    ).toBeNull();
   });
 
   it("keeps queued attention in the pill until the user chooses to review it", async () => {
@@ -358,10 +427,14 @@ describe("ConsentApprovalBar coordinator", () => {
     ]);
     mountBar();
 
-    const pill = await screen.findByRole("button", { name: "Review approval: Queued approval" });
+    const pill = await screen.findByRole("button", {
+      name: "Review approval: Queued approval",
+    });
     expect(overlay.options).toBeNull();
     fireEvent.click(pill);
-    await waitFor(() => expect(overlay.options?.props?.approval?.approvalId).toBe("queued"));
+    await waitFor(() =>
+      expect(overlay.options?.props?.approval?.approvalId).toBe("queued"),
+    );
   });
 
   it("keeps publication preparation non-blocking until its review is ready", async () => {
@@ -375,14 +448,24 @@ describe("ConsentApprovalBar coordinator", () => {
     ]);
     mountBar();
 
-    await screen.findByRole("button", { name: "Review approval: Preparing workspace update…" });
+    await screen.findByRole("button", {
+      name: "Review approval: Preparing workspace update…",
+    });
     expect(overlay.options).toBeNull();
   });
 
   it("shows an interrupting approval ahead of earlier queued attention", async () => {
     shellClient.listPending.mockResolvedValueOnce([
-      capabilityApproval({ approvalId: "queued", title: "Queued", attention: "queue" }),
-      capabilityApproval({ approvalId: "interrupt", title: "Interrupt", attention: "interrupt" }),
+      capabilityApproval({
+        approvalId: "queued",
+        title: "Queued",
+        attention: "queue",
+      }),
+      capabilityApproval({
+        approvalId: "interrupt",
+        title: "Interrupt",
+        attention: "interrupt",
+      }),
     ]);
     mountBar();
     await waitFor(() => {
@@ -417,7 +500,9 @@ describe("ConsentApprovalBar coordinator", () => {
       expect(overlay.options?.open).toBe(true);
       expect(overlay.options?.props?.approval?.approvalId).toBe("queued");
     });
-    expect(screen.queryByRole("button", { name: "Review approval: Queued" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Review approval: Queued" }),
+    ).toBeNull();
   });
 
   it("minimizes queued preparation from a different requester after an interrupt resolves", async () => {
@@ -439,12 +524,20 @@ describe("ConsentApprovalBar coordinator", () => {
     ]);
     mountBar();
     await waitFor(() => {
-      expect(overlay.options?.props?.approval?.approvalId).toBe("conversation-permission");
+      expect(overlay.options?.props?.approval?.approvalId).toBe(
+        "conversation-permission",
+      );
     });
 
-    emit({ type: "decide", decision: "once", approvalId: "conversation-permission" });
+    emit({
+      type: "decide",
+      decision: "once",
+      approvalId: "conversation-permission",
+    });
 
-    await screen.findByRole("button", { name: "Review approval: Update meta main" });
+    await screen.findByRole("button", {
+      name: "Review approval: Update meta main",
+    });
     expect(overlay.options).toBeNull();
   });
 
@@ -474,7 +567,9 @@ describe("ConsentApprovalBar coordinator", () => {
     expect(overlay.options?.props?.approval?.approvalId).toBe("current");
   });
 
-  function diffApproval(approvalId: string): PendingCapabilityApproval & { diffReview: unknown } {
+  function diffApproval(
+    approvalId: string,
+  ): PendingCapabilityApproval & { diffReview: unknown } {
     return {
       ...capabilityApproval({ approvalId, title: "Publish changes" }),
       diffReview: [
@@ -483,7 +578,14 @@ describe("ConsentApprovalBar coordinator", () => {
           oldState: "state:a",
           newState: "state:b",
           diffStat: { filesChanged: 1, insertions: 1, deletions: 0 },
-          changedFiles: [{ path: "src/a.ts", kind: "changed", oldHash: "h-old", newHash: "h-new" }],
+          changedFiles: [
+            {
+              path: "src/a.ts",
+              kind: "changed",
+              oldHash: "h-old",
+              newHash: "h-new",
+            },
+          ],
         },
       ],
     };
@@ -518,10 +620,16 @@ describe("ConsentApprovalBar coordinator", () => {
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
 
-    emit({ type: "fetch-blob", hash: "h-new", approvalId: "d1" } as unknown as ApprovalCardIntent);
+    emit({
+      type: "fetch-blob",
+      hash: "h-new",
+      approvalId: "d1",
+    } as unknown as ApprovalCardIntent);
     await waitFor(() => {
       expect(shellClient.getText).toHaveBeenCalledWith("h-new");
-      const props = overlay.options?.props as { blobResults?: Record<string, unknown> };
+      const props = overlay.options?.props as {
+        blobResults?: Record<string, unknown>;
+      };
       expect(props.blobResults?.["h-new"]).toEqual({ text: "blob-text" });
     });
 
@@ -548,19 +656,33 @@ describe("ConsentApprovalBar coordinator", () => {
       const props = overlay.options?.props as {
         blobResults?: Record<string, unknown>;
       };
-      expect(props.blobResults?.["h-new"]).toEqual({ error: "temporary connection loss" });
+      expect(props.blobResults?.["h-new"]).toEqual({
+        error: "temporary connection loss",
+      });
     });
 
-    emit({ type: "fetch-blob", hash: "h-new", approvalId: "retry", refresh: true });
+    emit({
+      type: "fetch-blob",
+      hash: "h-new",
+      approvalId: "retry",
+      refresh: true,
+    });
     await waitFor(() => {
       expect(shellClient.getText).toHaveBeenCalledTimes(2);
       const props = overlay.options?.props as {
         blobResults?: Record<string, unknown>;
       };
-      expect(props.blobResults?.["h-new"]).toEqual({ text: "recovered content" });
+      expect(props.blobResults?.["h-new"]).toEqual({
+        text: "recovered content",
+      });
     });
 
-    emit({ type: "fetch-blob", hash: "h-new", approvalId: "retry", refresh: true });
+    emit({
+      type: "fetch-blob",
+      hash: "h-new",
+      approvalId: "retry",
+      refresh: true,
+    });
     await Promise.resolve();
     expect(shellClient.getText).toHaveBeenCalledTimes(2);
   });
@@ -575,7 +697,11 @@ describe("ConsentApprovalBar coordinator", () => {
   };
 
   it("creates Workspace History with the target on an inspection intent", async () => {
-    shellClient.getTreePage.mockResolvedValueOnce({ revision: 1, nodes: [], nextCursor: null });
+    shellClient.getTreePage.mockResolvedValueOnce({
+      revision: 1,
+      nodes: [],
+      nextCursor: null,
+    });
     shellClient.listPending.mockResolvedValueOnce([diffApproval("d1")]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
@@ -587,9 +713,12 @@ describe("ConsentApprovalBar coordinator", () => {
     } as unknown as ApprovalCardIntent);
 
     await waitFor(() => {
-      expect(shellClient.createPanel).toHaveBeenCalledWith("about/workspace-history", {
-        stateArgs: { diffTarget: gadTarget },
-      });
+      expect(shellClient.createPanel).toHaveBeenCalledWith(
+        "about/workspace-history",
+        {
+          stateArgs: { diffTarget: gadTarget },
+        },
+      );
     });
     expect(shellClient.navigate).not.toHaveBeenCalled();
   });
@@ -611,16 +740,24 @@ describe("ConsentApprovalBar coordinator", () => {
     } as unknown as ApprovalCardIntent);
 
     await waitFor(() => {
-      expect(shellClient.navigate).toHaveBeenCalledWith("gadb", "about/workspace-history", {
-        stateArgs: { diffTarget: gadTarget },
-      });
+      expect(shellClient.navigate).toHaveBeenCalledWith(
+        "gadb",
+        "about/workspace-history",
+        {
+          stateArgs: { diffTarget: gadTarget },
+        },
+      );
       expect(shellClient.navigateToId).toHaveBeenCalledWith("gadb");
     });
     expect(shellClient.createPanel).not.toHaveBeenCalled();
   });
 
   it("does not navigate another owner's Workspace History panel", async () => {
-    shellClient.getTreePage.mockResolvedValueOnce({ revision: 1, nodes: [], nextCursor: null });
+    shellClient.getTreePage.mockResolvedValueOnce({
+      revision: 1,
+      nodes: [],
+      nextCursor: null,
+    });
     shellClient.listPending.mockResolvedValueOnce([diffApproval("d1")]);
     mountBar();
     await waitFor(() => expect(overlay.options?.open).toBe(true));
@@ -649,7 +786,9 @@ describe("ConsentApprovalBar coordinator", () => {
    * opens on the full surface, in this document, as a real dialog.
    */
   it("opens an install review on the full surface instead of the floating card", async () => {
-    shellClient.listPending.mockResolvedValueOnce([installReviewApproval("news")]);
+    shellClient.listPending.mockResolvedValueOnce([
+      installReviewApproval("news"),
+    ]);
     mountBar();
 
     await screen.findByTestId("full-surface");
@@ -669,32 +808,43 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   it("leaves the review pending when the surface is closed without deciding", async () => {
-    shellClient.listPending.mockResolvedValueOnce([installReviewApproval("news")]);
+    shellClient.listPending.mockResolvedValueOnce([
+      installReviewApproval("news"),
+    ]);
     mountBar();
     await screen.findByTestId("full-surface");
 
     // Closing is not declining: the review stays in the queue and the pill
     // offers it back, exactly as minimizing the floating card does.
     act(() => fullSurface.props?.onClose?.());
-    expect(await screen.findByRole("button", { name: /Review approval/u })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /Review approval/u }),
+    ).toBeTruthy();
     expect(screen.queryByTestId("full-surface")).toBeNull();
     expect(shellClient.resolve).not.toHaveBeenCalled();
   });
 
   it("resolves the review the surface's own actions decide", async () => {
-    shellClient.listPending.mockResolvedValueOnce([installReviewApproval("news")]);
+    shellClient.listPending.mockResolvedValueOnce([
+      installReviewApproval("news"),
+    ]);
     mountBar();
     await screen.findByTestId("full-surface");
 
     const resolution = { decision: "install", allowNow: [] } as const;
     await act(async () => {
-      (fullSurface.props as unknown as { emit: (intent: unknown) => void }).emit({
+      (
+        fullSurface.props as unknown as { emit: (intent: unknown) => void }
+      ).emit({
         type: "resolve-install-review",
         approvalId: "news",
         resolution,
       });
     });
-    expect(shellClient.resolveInstallReview).toHaveBeenCalledWith("news", resolution);
+    expect(shellClient.resolveInstallReview).toHaveBeenCalledWith(
+      "news",
+      resolution,
+    );
   });
 
   it("keeps the next review actionable while the previous review awaits its landing receipt", async () => {
@@ -705,19 +855,24 @@ describe("ConsentApprovalBar coordinator", () => {
         () =>
           new Promise((resolve) => {
             finishFirst = resolve;
-          })
+          }),
       )
       .mockImplementationOnce(
         () =>
           new Promise((resolve) => {
             finishSecond = resolve;
-          })
+          }),
       );
     const first = installReviewApproval("first");
-    const second = { ...installReviewApproval("second"), attention: "queue" as const };
+    const second = {
+      ...installReviewApproval("second"),
+      attention: "queue" as const,
+    };
     shellClient.listPending.mockResolvedValueOnce([first]);
     mountBar();
-    await waitFor(() => expect(fullSurface.props?.approval?.approvalId).toBe("first"));
+    await waitFor(() =>
+      expect(fullSurface.props?.approval?.approvalId).toBe("first"),
+    );
 
     const resolution = { decision: "install", allowNow: [] } as const;
     act(() => {
@@ -727,22 +882,31 @@ describe("ConsentApprovalBar coordinator", () => {
         resolution,
       });
     });
-    expect(shellClient.resolveInstallReview).toHaveBeenCalledWith("first", resolution);
+    expect(shellClient.resolveInstallReview).toHaveBeenCalledWith(
+      "first",
+      resolution,
+    );
     // Recording the answer and waiting for its landing receipt are different
     // phases. The decided review leaves immediately; a long reconciliation
     // must not pin it on screen as "Saving…".
-    await waitFor(() => expect(screen.queryByTestId("full-surface")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByTestId("full-surface")).toBeNull(),
+    );
 
     // The queue removes a decided review immediately. Its RPC remains open
     // until publication landing is known, so the next review can legitimately
     // become current before the first call returns.
     const pendingChangedListener = shellClient.onEvent.mock.calls.find(
-      ([event]) => event === "shell-approval:pending-changed"
+      ([event]) => event === "shell-approval:pending-changed",
     )?.[1];
     expect(pendingChangedListener).toBeTypeOf("function");
     act(() => pendingChangedListener?.({ pending: [second] }));
-    await waitFor(() => expect(fullSurface.props?.approval?.approvalId).toBe("second"));
-    expect(screen.queryByRole("button", { name: /Review approval/u })).toBeNull();
+    await waitFor(() =>
+      expect(fullSurface.props?.approval?.approvalId).toBe("second"),
+    );
+    expect(
+      screen.queryByRole("button", { name: /Review approval/u }),
+    ).toBeNull();
     expect(fullSurface.props?.actionPending).toBe(false);
 
     act(() => {
@@ -752,7 +916,10 @@ describe("ConsentApprovalBar coordinator", () => {
         resolution,
       });
     });
-    expect(shellClient.resolveInstallReview).toHaveBeenCalledWith("second", resolution);
+    expect(shellClient.resolveInstallReview).toHaveBeenCalledWith(
+      "second",
+      resolution,
+    );
     expect(shellClient.resolveInstallReview).toHaveBeenCalledTimes(2);
 
     // Settle both deferred receipts so the mounted coordinator has no work
@@ -766,10 +933,16 @@ describe("ConsentApprovalBar coordinator", () => {
 
   it("restores an install review when recording its decision fails", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-    shellClient.resolveInstallReview.mockRejectedValueOnce(new Error("review write blocked"));
-    shellClient.listPending.mockResolvedValueOnce([installReviewApproval("startup")]);
+    shellClient.resolveInstallReview.mockRejectedValueOnce(
+      new Error("review write blocked"),
+    );
+    shellClient.listPending.mockResolvedValueOnce([
+      installReviewApproval("startup"),
+    ]);
     mountBar();
-    await waitFor(() => expect(fullSurface.props?.approval?.approvalId).toBe("startup"));
+    await waitFor(() =>
+      expect(fullSurface.props?.approval?.approvalId).toBe("startup"),
+    );
 
     act(() => {
       fullSurface.props?.emit?.({
@@ -789,7 +962,10 @@ describe("ConsentApprovalBar coordinator", () => {
 
   it("keeps a same-agent follow-up visible across a briefly empty queue", async () => {
     shellClient.resolveInstallReview.mockResolvedValueOnce(undefined);
-    const first = { ...installReviewApproval("first"), callerId: "agent:builder" };
+    const first = {
+      ...installReviewApproval("first"),
+      callerId: "agent:builder",
+    };
     const second = {
       ...installReviewApproval("second"),
       callerId: "agent:builder",
@@ -797,7 +973,9 @@ describe("ConsentApprovalBar coordinator", () => {
     };
     shellClient.listPending.mockResolvedValueOnce([first]);
     mountBar();
-    await waitFor(() => expect(fullSurface.props?.approval?.approvalId).toBe("first"));
+    await waitFor(() =>
+      expect(fullSurface.props?.approval?.approvalId).toBe("first"),
+    );
 
     act(() => {
       fullSurface.props?.emit?.({
@@ -808,19 +986,28 @@ describe("ConsentApprovalBar coordinator", () => {
     });
 
     const pendingChangedListener = shellClient.onEvent.mock.calls.find(
-      ([event]) => event === "shell-approval:pending-changed"
+      ([event]) => event === "shell-approval:pending-changed",
     )?.[1];
     act(() => pendingChangedListener?.({ pending: [] }));
-    await waitFor(() => expect(screen.queryByTestId("full-surface")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByTestId("full-surface")).toBeNull(),
+    );
 
     act(() => pendingChangedListener?.({ pending: [second] }));
-    await waitFor(() => expect(fullSurface.props?.approval?.approvalId).toBe("second"));
-    expect(screen.queryByRole("button", { name: /Review approval/u })).toBeNull();
+    await waitFor(() =>
+      expect(fullSurface.props?.approval?.approvalId).toBe("second"),
+    );
+    expect(
+      screen.queryByRole("button", { name: /Review approval/u }),
+    ).toBeNull();
   });
 
   it("does not pop open an unrelated queued approval after a review drains", async () => {
     shellClient.resolveInstallReview.mockResolvedValueOnce(undefined);
-    const first = { ...installReviewApproval("first"), callerId: "agent:builder" };
+    const first = {
+      ...installReviewApproval("first"),
+      callerId: "agent:builder",
+    };
     const unrelated = {
       ...installReviewApproval("unrelated"),
       callerId: "agent:other",
@@ -828,7 +1015,9 @@ describe("ConsentApprovalBar coordinator", () => {
     };
     shellClient.listPending.mockResolvedValueOnce([first]);
     mountBar();
-    await waitFor(() => expect(fullSurface.props?.approval?.approvalId).toBe("first"));
+    await waitFor(() =>
+      expect(fullSurface.props?.approval?.approvalId).toBe("first"),
+    );
 
     act(() => {
       fullSurface.props?.emit?.({
@@ -838,12 +1027,14 @@ describe("ConsentApprovalBar coordinator", () => {
       });
     });
     const pendingChangedListener = shellClient.onEvent.mock.calls.find(
-      ([event]) => event === "shell-approval:pending-changed"
+      ([event]) => event === "shell-approval:pending-changed",
     )?.[1];
     act(() => pendingChangedListener?.({ pending: [] }));
     act(() => pendingChangedListener?.({ pending: [unrelated] }));
 
-    expect(await screen.findByRole("button", { name: /Review approval/u })).toBeTruthy();
+    expect(
+      await screen.findByRole("button", { name: /Review approval/u }),
+    ).toBeTruthy();
     expect(screen.queryByTestId("full-surface")).toBeNull();
   });
 
@@ -854,15 +1045,19 @@ describe("ConsentApprovalBar coordinator", () => {
    */
   async function resolveWith(
     outcome: unknown,
-    options: { captureTimers?: boolean } = {}
+    options: { captureTimers?: boolean } = {},
   ): Promise<void> {
-    shellClient.listPending.mockResolvedValueOnce([installReviewApproval("news")]);
+    shellClient.listPending.mockResolvedValueOnce([
+      installReviewApproval("news"),
+    ]);
     shellClient.resolveInstallReview.mockResolvedValueOnce(outcome as never);
     mountBar();
     await screen.findByTestId("full-surface");
     if (options.captureTimers) vi.useFakeTimers();
     await act(async () => {
-      (fullSurface.props as unknown as { emit: (intent: unknown) => void }).emit({
+      (
+        fullSurface.props as unknown as { emit: (intent: unknown) => void }
+      ).emit({
         type: "resolve-install-review",
         approvalId: "news",
         resolution: { decision: "install", allowNow: [] },
@@ -883,7 +1078,11 @@ describe("ConsentApprovalBar coordinator", () => {
       title: "News",
       kind: "panel",
     },
-    landing: { landed: ["panels/news@ev"], failed: [], workspaceUnchanged: false },
+    landing: {
+      landed: ["panels/news@ev"],
+      failed: [],
+      workspaceUnchanged: false,
+    },
   };
 
   const workspaceReadyOutcome = {
@@ -897,7 +1096,11 @@ describe("ConsentApprovalBar coordinator", () => {
       title: "About Vibestudio",
       kind: "panel",
     },
-    landing: { landed: ["about/about@ev"], failed: [], workspaceUnchanged: false },
+    landing: {
+      landed: ["about/about@ev"],
+      failed: [],
+      workspaceUnchanged: false,
+    },
   } as const;
 
   it("says what was added and opens it, by the same mechanism as every other panel", async () => {
@@ -907,7 +1110,9 @@ describe("ConsentApprovalBar coordinator", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open News →" }));
 
     await waitFor(() =>
-      expect(shellClient.createPanel).toHaveBeenCalledWith("panels/news", { title: "News" })
+      expect(shellClient.createPanel).toHaveBeenCalledWith("panels/news", {
+        title: "News",
+      }),
     );
     // The result has handed the user to what it was pointing at, so it goes.
     await waitFor(() => expect(screen.queryByText("News added")).toBeNull());
@@ -991,7 +1196,11 @@ describe("ConsentApprovalBar coordinator", () => {
       landing: {
         landed: ["panels/news@ev"],
         failed: [
-          { identityKey: "workers/feed@ev", title: "Feed Importer", reason: "Build failed." },
+          {
+            identityKey: "workers/feed@ev",
+            title: "Feed Importer",
+            reason: "Build failed.",
+          },
         ],
         // A partial failure is not a clean one, and the surface may not round it
         // up to one.

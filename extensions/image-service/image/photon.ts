@@ -23,7 +23,7 @@ import { fileURLToPath, pathToFileURL } from "url";
 // whenever import.meta appears in CJS output, even behind typeof guards.
 declare const __filename: string | undefined;
 const requireFromUrl: string =
-  (typeof __filename !== "undefined" && __filename)
+  typeof __filename !== "undefined" && __filename
     ? pathToFileURL(__filename).href
     : pathToFileURL(process.cwd() + "/").href;
 
@@ -34,7 +34,9 @@ const WASM_FILENAME = "photon_rs_bg.wasm";
 
 // Lazy-loaded photon module
 let photonModule: typeof import("@silvia-odwyer/photon-node") | null = null;
-let loadPromise: Promise<typeof import("@silvia-odwyer/photon-node") | null> | null = null;
+let loadPromise: Promise<
+  typeof import("@silvia-odwyer/photon-node") | null
+> | null = null;
 
 function pathOrNull(file: unknown): string | null {
   if (typeof file === "string") {
@@ -56,11 +58,15 @@ function getFallbackWasmPaths(): string[] {
 }
 
 function patchPhotonWasmRead(): () => void {
-  const originalReadFileSync = fs.readFileSync.bind(fs) as typeof fs.readFileSync;
+  const originalReadFileSync = fs.readFileSync.bind(
+    fs,
+  ) as typeof fs.readFileSync;
   const fallbackPaths = getFallbackWasmPaths();
   const mutableFs = fs as { readFileSync: typeof fs.readFileSync };
 
-  const patchedReadFileSync = ((...args: Parameters<typeof fs.readFileSync>) => {
+  const patchedReadFileSync = ((
+    ...args: Parameters<typeof fs.readFileSync>
+  ) => {
     const [file, options] = args;
     const resolvedPath = pathOrNull(file);
     if (resolvedPath?.endsWith(WASM_FILENAME)) {
@@ -113,7 +119,9 @@ function patchPhotonWasmRead(): () => void {
  * Load the photon module asynchronously.
  * Returns cached module on subsequent calls.
  */
-export async function loadPhoton(): Promise<typeof import("@silvia-odwyer/photon-node") | null> {
+export async function loadPhoton(): Promise<
+  typeof import("@silvia-odwyer/photon-node") | null
+> {
   if (photonModule) {
     return photonModule;
   }
@@ -123,7 +131,11 @@ export async function loadPhoton(): Promise<typeof import("@silvia-odwyer/photon
   loadPromise = (async () => {
     const restoreReadFileSync = patchPhotonWasmRead();
     try {
-      photonModule = require("@silvia-odwyer/photon-node") as typeof import("@silvia-odwyer/photon-node");
+      const imported = await import("@silvia-odwyer/photon-node");
+      const moduleNamespace = imported as unknown as {
+        default?: typeof imported;
+      };
+      photonModule = moduleNamespace.default ?? imported;
       return photonModule;
     } catch {
       photonModule = null;

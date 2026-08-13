@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "title": "Workspace presentation",
+    "icon": "🖼️",
     "kind": "worker",
     "entry": "index.ts",
     "durable": {
@@ -25,6 +26,8 @@
     "@workspace/runtime": "workspace:*"
   },
   "devDependencies": {
+    "@vibestudio/durable": "workspace:*",
+    "@vibestudio/rpc": "workspace:*",
     "vitest": "^3.2.2"
   }
 }

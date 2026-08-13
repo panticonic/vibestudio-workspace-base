@@ -5,6 +5,7 @@
   "type": "module",
   "vibestudio": {
     "title": "Phone Provisioning",
+    "icon": "📱",
     "kind": "worker",
     "entry": "index.ts",
     "durable": {

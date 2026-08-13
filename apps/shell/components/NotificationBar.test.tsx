@@ -1,9 +1,19 @@
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { EventName, EventPayloads, NotificationPayload } from "@vibestudio/shared/events";
+import type {
+  EventName,
+  EventPayloads,
+  NotificationPayload,
+} from "@vibestudio/shared/events";
 
 const shellClient = vi.hoisted(() => ({
   applyUpdate: vi.fn(() => Promise.resolve({ applied: true })),
@@ -50,11 +60,14 @@ function renderBar() {
   render(
     <Theme>
       <NotificationBar />
-    </Theme>
+    </Theme>,
   );
 }
 
-function emitShellEvent<E extends EventName>(event: E, payload: EventPayloads[E]) {
+function emitShellEvent<E extends EventName>(
+  event: E,
+  payload: EventPayloads[E],
+) {
   const callback = vi
     .mocked(useShellEvent)
     .mock.calls.find(([registeredEvent]) => registeredEvent === event)?.[1] as
@@ -66,7 +79,10 @@ function emitShellEvent<E extends EventName>(event: E, payload: EventPayloads[E]
   });
 }
 
-function emitDirectShellEvent<E extends EventName>(event: E, payload: EventPayloads[E]) {
+function emitDirectShellEvent<E extends EventName>(
+  event: E,
+  payload: EventPayloads[E],
+) {
   const callback = vi
     .mocked(useDirectShellEvent)
     .mock.calls.find(([registeredEvent]) => registeredEvent === event)?.[1] as
@@ -107,7 +123,18 @@ describe("NotificationBar", () => {
   });
 
   it("auto-dismisses a transient processing notice at its explicit TTL", async () => {
-    vi.useFakeTimers();
+    let dismissAtTtl: (() => void) | undefined;
+    const realSetTimeout = window.setTimeout.bind(window);
+    const captureDismiss = ((handler: TimerHandler, timeout?: number) => {
+      if (timeout === 6_000 && typeof handler === "function") {
+        dismissAtTtl = handler as () => void;
+        return 1;
+      }
+      return realSetTimeout(handler, timeout);
+    }) as typeof window.setTimeout;
+    const setTimeout = vi
+      .spyOn(window, "setTimeout")
+      .mockImplementation(captureDismiss);
     try {
       renderBar();
       emitDirectShellEvent("notification:show", {
@@ -119,13 +146,17 @@ describe("NotificationBar", () => {
       });
 
       expect(screen.getByText("Running Daily summary")).toBeTruthy();
-      await act(async () => vi.advanceTimersByTimeAsync(5_999));
-      expect(screen.getByText("Running Daily summary")).toBeTruthy();
-      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(dismissAtTtl).toBeTypeOf("function");
+      act(() => dismissAtTtl?.());
       expect(screen.queryByText("Running Daily summary")).toBeNull();
-      expect(shellClient.reportAction).toHaveBeenCalledWith("mission-processing", "dismiss");
+      await waitFor(() =>
+        expect(shellClient.reportAction).toHaveBeenCalledWith(
+          "mission-processing",
+          "dismiss",
+        ),
+      );
     } finally {
-      vi.useRealTimers();
+      setTimeout.mockRestore();
     }
   });
 
@@ -151,10 +182,13 @@ describe("NotificationBar", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "View automation" }));
     await waitFor(() =>
-      expect(shellClient.createPanel).toHaveBeenCalledWith("about/automations", {
-        focus: true,
-        stateArgs: { missionId: "msn_daily" },
-      })
+      expect(shellClient.createPanel).toHaveBeenCalledWith(
+        "about/automations",
+        {
+          focus: true,
+          stateArgs: { missionId: "msn_daily" },
+        },
+      ),
     );
   });
 
@@ -168,13 +202,29 @@ describe("NotificationBar", () => {
       message:
         "@workspace-extensions/react-native failed 5 times and will not restart until reloaded.",
       details: [
-        { label: "Extension", value: "@workspace-extensions/react-native", mono: true },
+        {
+          label: "Extension",
+          value: "@workspace-extensions/react-native",
+          mono: true,
+        },
         { label: "Attempts", value: "5" },
-        { label: "Latest error", value: "Cannot find module typedServiceClient.js", mono: true },
+        {
+          label: "Latest error",
+          value: "Cannot find module typedServiceClient.js",
+          mono: true,
+        },
       ],
       history: [
-        { title: "Attempt 1", message: "First crash\nstack line 1", timestamp: 1 },
-        { title: "Attempt 2", message: "Second crash\nstack line 2", timestamp: 2 },
+        {
+          title: "Attempt 1",
+          message: "First crash\nstack line 1",
+          timestamp: 1,
+        },
+        {
+          title: "Attempt 2",
+          message: "Second crash\nstack line 2",
+          timestamp: 2,
+        },
       ],
     };
 
@@ -189,7 +239,9 @@ describe("NotificationBar", () => {
     expect(screen.getByText("Extension")).toBeTruthy();
     expect(screen.getByText("@workspace-extensions/react-native")).toBeTruthy();
     expect(screen.getByText("Latest error")).toBeTruthy();
-    expect(screen.getByText("Cannot find module typedServiceClient.js")).toBeTruthy();
+    expect(
+      screen.getByText("Cannot find module typedServiceClient.js"),
+    ).toBeTruthy();
     expect(screen.getByText("Recent errors")).toBeTruthy();
     expect(screen.getByText(/Attempt 1/)).toBeTruthy();
     expect(screen.getByText(/Attempt 2/)).toBeTruthy();
@@ -256,7 +308,7 @@ describe("NotificationBar", () => {
       expect(shellClient.recoverExecution).toHaveBeenCalledWith(
         "do:workers/agent:Agent:one",
         digest,
-        "restore-exact"
+        "restore-exact",
       );
     });
   });
