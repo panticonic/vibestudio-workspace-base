@@ -27,7 +27,7 @@ function stateWith(
   }>,
   extras: {
     turns?: Array<{ turnId: string; status: "open" | "waiting" | "closed" }>;
-    invocations?: Array<{ id: string; name: string; turnId: string }>;
+    invocations?: Array<{ id: string; name: string; turnId: string; status?: string }>;
   } = {}
 ): ChannelViewState {
   const state = createInitialChannelViewState() as unknown as Mutable;
@@ -61,7 +61,7 @@ function stateWith(
       invocationId: invocation.id,
       name: invocation.name,
       turnId: invocation.turnId,
-      status: "completed",
+      status: invocation.status ?? "completed",
       actor: { kind: "agent", id: "agent-1" },
     };
   }
@@ -133,7 +133,30 @@ describe("projectTranscript", () => {
         ],
       }
     );
-    expect(projectTranscript(state, "shell-1")[0]?.toolChips).toEqual(["panel_describe"]);
+    // Two calls are two pills. Deduping by name hid repeated work — and, with
+    // no state carried, hid failures behind an identical-looking chip.
+    expect(projectTranscript(state, "shell-1")[0]?.toolChips).toEqual([
+      { name: "panel_describe", state: "done" },
+      { name: "panel_describe", state: "done" },
+    ]);
+  });
+
+  it("distinguishes work in flight from work that ended badly", () => {
+    const state = stateWith(
+      [{ id: "m1", seq: 1, actorId: "agent-1", kind: "agent", text: "looking", turnId: "t1" }],
+      {
+        invocations: [
+          { id: "i1", name: "panel_console", turnId: "t1", status: "running" },
+          { id: "i2", name: "panel_eval", turnId: "t1", status: "failed" },
+          { id: "i3", name: "panel_screenshot", turnId: "t1", status: "completed" },
+        ],
+      }
+    );
+    expect(projectTranscript(state, "shell-1")[0]?.toolChips).toEqual([
+      { name: "panel_console", state: "running" },
+      { name: "panel_eval", state: "failed" },
+      { name: "panel_screenshot", state: "done" },
+    ]);
   });
 });
 
@@ -143,5 +166,38 @@ describe("hasOpenTurn", () => {
     expect(hasOpenTurn(stateWith([], { turns: [{ turnId: "t1", status: "open" }] }))).toBe(true);
     expect(hasOpenTurn(stateWith([], { turns: [{ turnId: "t1", status: "closed" }] }))).toBe(false);
     expect(hasOpenTurn(stateWith([]))).toBe(false);
+  });
+});
+
+describe("transcript order", () => {
+  it("reads newest-first for a surface whose input is at the top", () => {
+    const state = stateWith([
+      { id: "m1", seq: 1, actorId: "shell-1", text: "first" },
+      { id: "m2", seq: 2, actorId: "agent-1", kind: "agent", text: "second" },
+      { id: "m3", seq: 3, actorId: "shell-1", text: "third" },
+    ]);
+    expect(
+      projectTranscript(state, "shell-1", { order: "newest-first" }).map((m) => m.text)
+    ).toEqual(["third", "second", "first"]);
+    // Same messages either way: order decides which end is read, never which
+    // messages survive truncation.
+    expect(
+      projectTranscript(state, "shell-1", { order: "oldest-first" }).map((m) => m.text)
+    ).toEqual(["first", "second", "third"]);
+  });
+
+  it("keeps the newest N when truncating, whichever end it reads from", () => {
+    const state = stateWith(
+      Array.from({ length: TRANSCRIPT_LIMIT + 3 }, (_, index) => ({
+        id: `m${index}`,
+        seq: index + 1,
+        actorId: "shell-1",
+        text: `m${index}`,
+      }))
+    );
+    const newestFirst = projectTranscript(state, "shell-1", { order: "newest-first" });
+    expect(newestFirst).toHaveLength(TRANSCRIPT_LIMIT);
+    expect(newestFirst[0]?.text).toBe(`m${TRANSCRIPT_LIMIT + 2}`);
+    expect(newestFirst.at(-1)?.text).toBe("m3");
   });
 });

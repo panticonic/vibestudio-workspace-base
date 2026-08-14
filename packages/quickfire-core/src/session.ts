@@ -20,15 +20,43 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AGENTIC_EVENT_PAYLOAD_KIND,
   createInitialChannelViewState,
+  pubsubAgenticEventToEnvelope,
   reduceChannelView,
   type ChannelViewState,
 } from "@workspace/agentic-protocol";
 import type { PubSubClient } from "@workspace/pubsub";
 import type { QuickfireResumeChip, QuickfireTranscriptMessage } from "./model";
-import { hasOpenTurn, projectTranscript, TRANSCRIPT_LIMIT } from "./transcript";
+import {
+  hasOpenTurn,
+  projectTranscript,
+  TRANSCRIPT_LIMIT,
+  type TranscriptOrder,
+} from "./transcript";
 
 export { hasOpenTurn, projectTranscript, TRANSCRIPT_LIMIT };
+export type { TranscriptOrder };
+
+/** Per-client presentation choices the shared lifecycle honors. */
+export interface QuickfireSessionOptions {
+  /**
+   * Which end of the conversation this client reads from. Desktop puts its one
+   * input at the top and therefore wants the newest message under it; mobile is
+   * an ordinary chat and keeps the default.
+   */
+  transcriptOrder?: TranscriptOrder;
+}
+
+/** One channel-client event carrying a trajectory payload. */
+interface PubSubAgenticWireEvent {
+  type?: string;
+  pubsubId?: number;
+  senderId?: string;
+  ts?: number;
+  senderMetadata?: { name?: string; type?: string; handle?: string };
+  payload?: { actor: { id: string } };
+}
 
 /** ~30 Hz. Streaming deltas arrive far faster than a surface can repaint. */
 const PUSH_INTERVAL_MS = 33;
@@ -57,8 +85,19 @@ export interface QuickfireTransport {
   ) => Promise<QuickfireSessionFacts>;
   clear: (slotId: string) => Promise<unknown>;
   promote: (slotId: string) => Promise<QuickfireSessionFacts | null>;
-  /** Join the conversation's channel for live delivery. */
-  connectToChannel: (channelId: string, contextId: string) => PubSubClient;
+  /**
+   * Join the conversation's channel for live delivery.
+   *
+   * `clientId` is the participant id this client claims — the bound slot, the
+   * way a panel caller passes its slot id rather than the raw transport id. A
+   * client that claims nothing claims its transport id, which is not an
+   * identity the channel can admit.
+   */
+  connectToChannel: (
+    channelId: string,
+    contextId: string,
+    options: { clientId?: string; replayMessageLimit?: number }
+  ) => PubSubClient;
 }
 
 export interface QuickfireSessionView {
@@ -107,8 +146,10 @@ const IDLE: QuickfireSessionView = {
  */
 export function useQuickfireSessionCore(
   slotId: string | null,
-  transport: QuickfireTransport
+  transport: QuickfireTransport,
+  options: QuickfireSessionOptions = {}
 ): QuickfireSessionController {
+  const transcriptOrder = options.transcriptOrder ?? "oldest-first";
   const [view, setView] = useState<QuickfireSessionView>(IDLE);
   const transportRef = useRef(transport);
   transportRef.current = transport;
@@ -134,10 +175,10 @@ export function useQuickfireSessionCore(
     const state = stateRef.current;
     setView((current) => ({
       ...current,
-      transcript: projectTranscript(state, selfKeyRef.current),
+      transcript: projectTranscript(state, selfKeyRef.current, { order: transcriptOrder }),
       streaming: hasOpenTurn(state),
     }));
-  }, []);
+  }, [transcriptOrder]);
 
   const schedulePush = useCallback(() => {
     if (pushTimerRef.current !== null) return;
@@ -195,7 +236,8 @@ export function useQuickfireSessionCore(
 
         const client = transportRef.current.connectToChannel(
           session.channelId,
-          session.contextId
+          session.contextId,
+          { clientId: slotId, replayMessageLimit: TRANSCRIPT_LIMIT }
         );
         clientRef.current = client;
         selfKeyRef.current = client.clientId ?? null;
@@ -203,7 +245,25 @@ export function useQuickfireSessionCore(
           try {
             for await (const event of client.events({ includeReplay: true })) {
               if (disposed || generationRef.current !== generation) return;
-              stateRef.current = reduceChannelView(stateRef.current, event as never);
+              // A wire event is NOT the envelope the reducer consumes. Feeding
+              // one straight in (behind a cast) misses every branch and returns
+              // the state untouched, which renders as an empty transcript with a
+              // healthy subscription and no error anywhere — the exact failure
+              // this conversion existed to prevent in the chat client.
+              const wire = event as PubSubAgenticWireEvent;
+              if (wire.type !== AGENTIC_EVENT_PAYLOAD_KIND || !wire.payload) continue;
+              stateRef.current = reduceChannelView(
+                stateRef.current,
+                pubsubAgenticEventToEnvelope(session.channelId, {
+                  ...(wire.pubsubId === undefined ? {} : { pubsubId: wire.pubsubId }),
+                  ...(wire.senderId === undefined ? {} : { senderId: wire.senderId }),
+                  ...(wire.ts === undefined ? {} : { ts: wire.ts }),
+                  ...(wire.senderMetadata === undefined
+                    ? {}
+                    : { senderMetadata: wire.senderMetadata }),
+                  payload: wire.payload,
+                }) as never
+              );
               schedulePush();
             }
           } catch (error) {
@@ -323,7 +383,8 @@ export function useQuickfireSessionCore(
       });
       const client = transportRef.current.connectToChannel(
         session.channelId,
-        session.contextId
+        session.contextId,
+        { clientId: slotId, replayMessageLimit: TRANSCRIPT_LIMIT }
       );
       clientRef.current = client;
       stateRef.current = createInitialChannelViewState();

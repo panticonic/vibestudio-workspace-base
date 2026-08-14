@@ -112,7 +112,7 @@ describe("QuickfireAgentWorker", () => {
       "panel_cdp_endpoint",
       "read",
       "edit",
-      "say",
+      "notify",
     ]);
   });
 

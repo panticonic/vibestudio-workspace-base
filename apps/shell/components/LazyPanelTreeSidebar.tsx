@@ -733,35 +733,40 @@ function SidebarFooter({ activeWorkspaceName, onSwitchWorkspace, onNewPanel }: S
 
   return (
     <Box px="1" py="1">
-      {/* Above "New panel" because it acts on the workspace you already have:
-          talk about a panel first, create one second. The glyph is the same ✦
-          the palette and the conversation header use. */}
-      <Tooltip content="Command agent (⌘/Ctrl+Shift+K)">
+      {/* The two ways to start something, side by side while the pane is wide
+          enough for both labels. `wrap` does the deciding: each button asks for
+          its own basis and they fall onto separate lines when the sidebar is
+          dragged narrower, so there is no width measurement to keep in sync
+          with the real layout. Command leads because it acts on what is already
+          open; New panel creates. */}
+      <Flex gap="1" wrap="wrap">
+        <Tooltip content="Command (⌘/Ctrl+K)">
+          <Button
+            variant="soft"
+            color="gray"
+            size="2"
+            className="app-touch-target"
+            onClick={() => openCommandAgent()}
+            aria-label="Command"
+            style={{ flex: "1 1 116px", minWidth: 0 }}
+          >
+            <span aria-hidden="true">✦</span>
+            Command
+          </Button>
+        </Tooltip>
         <Button
           variant="soft"
           color="gray"
           size="2"
           className="app-touch-target"
-          onClick={() => openCommandAgent()}
-          aria-label="Command agent"
-          style={{ width: "100%", marginBottom: 4 }}
+          onClick={onNewPanel}
+          aria-label="New panel"
+          style={{ flex: "1 1 116px", minWidth: 0 }}
         >
-          <span aria-hidden="true">✦</span>
-          Command agent
+          <PlusIcon />
+          New panel
         </Button>
-      </Tooltip>
-      <Button
-        variant="soft"
-        color="gray"
-        size="2"
-        className="app-touch-target"
-        onClick={onNewPanel}
-        aria-label="New panel"
-        style={{ width: "100%" }}
-      >
-        <PlusIcon />
-        New panel
-      </Button>
+      </Flex>
 
       {/* One session row: which workspace you're in, plus the two controls that
           belong to the whole app rather than any panel. The switcher is its own

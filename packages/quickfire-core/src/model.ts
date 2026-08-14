@@ -48,6 +48,12 @@ export interface QuickfireRow {
   disabled?: boolean;
 }
 
+export interface QuickfireToolChip {
+  name: string;
+  /** Running work, finished work, and work that ended badly must look different. */
+  state: "running" | "done" | "failed";
+}
+
 export interface QuickfireGroup {
   key: string;
   label: string;
@@ -86,8 +92,15 @@ export interface QuickfireTranscriptMessage {
   text: string;
   /** Still streaming: render the live delta treatment. */
   streaming?: boolean;
-  /** Compact tool chips, e.g. "describe panel". */
-  toolChips?: string[];
+  /**
+   * Compact tool pills, in call order.
+   *
+   * Carrying `state` is the difference between a transcript that shows work and
+   * one that only shows names: a deduped list of names renders a running call,
+   * a finished one, a failure and an interruption identically, which is what
+   * made "is the agent doing anything?" unanswerable from the overlay.
+   */
+  toolChips?: QuickfireToolChip[];
   error?: boolean;
 }
 
@@ -106,6 +119,13 @@ export interface QuickfireResumeChip {
 export interface QuickfireComposeView {
   panelTitle: string;
   hint: string;
+  /**
+   * Which end of the conversation the transcript is rendered from. Presentation
+   * only — the projection has already ordered the messages; the renderer uses
+   * this to place the compose hint next to the input rather than after the
+   * oldest message.
+   */
+  transcriptOrder?: "oldest-first" | "newest-first";
   /** Why sending is unavailable right now; null when the user can type. */
   disabledReason: string | null;
   /** Bounded tail of the conversation: last N messages plus the live delta. */

@@ -195,6 +195,7 @@ export {
   isStoredValueRef,
 } from "./stored-values.js";
 
+export { pubsubAgenticEventToEnvelope } from "./envelopes.js";
 export type {
   ChannelEnvelope,
   ChannelRosterEntry,

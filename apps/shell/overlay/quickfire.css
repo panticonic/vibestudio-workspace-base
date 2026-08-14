@@ -532,3 +532,25 @@
   font-family: inherit;
   color: var(--gray-11);
 }
+
+/* The send hint sits between the input and the newest message when the
+   conversation reads downward, so it needs the transcript's gutter rather than
+   the footer's. */
+.quickfire-compose-keys-lead {
+  margin: 0;
+  padding: 6px 14px 0;
+  color: var(--gray-a9);
+  font-size: 11px;
+}
+
+/* A pill says what happened, not just what was called: work in flight, work
+   that finished, and work that ended badly must be distinguishable at a glance
+   (a name-only pill made all three identical). */
+.quickfire-chip-running {
+  border-color: var(--accent-a7);
+  color: var(--accent-a11);
+}
+.quickfire-chip-failed {
+  border-color: var(--red-a7);
+  color: var(--red-a11);
+}

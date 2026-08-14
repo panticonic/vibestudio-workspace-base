@@ -1405,13 +1405,28 @@ export const quickfire = {
  * does; the shell already declares `vibestudio.channel.v1` and
  * `workspace-service:channel`.
  */
-export function connectToChannel(channelId: string, contextId: string): PubSubClient {
+export function connectToChannel(
+  channelId: string,
+  contextId: string,
+  options: { clientId?: string; replayMessageLimit?: number } = {}
+): PubSubClient {
   return connectViaRpc({
     rpc,
     channel: channelId,
     contextId,
     protocol: CHANNEL_SERVICE_PROTOCOL,
-    replayMode: "collect",
+    // `stream`, not `collect`: the transcript is reduced from the event stream,
+    // so replay has to arrive AS events. Collected replay left the reducer with
+    // nothing to reduce — a bound conversation whose messages were durably
+    // stored and never rendered, with no error on any layer.
+    replayMode: "stream",
+    ...(options.replayMessageLimit === undefined
+      ? {}
+      : { replayMessageLimit: options.replayMessageLimit }),
+    // A stable participant id, the way panel callers pass their slot id rather
+    // than `rpc.selfId`. Without one the client claims the bare transport id
+    // ("shell"), which is not an identity the channel can admit.
+    ...(options.clientId ? { clientId: options.clientId } : {}),
     type: "user",
   });
 }

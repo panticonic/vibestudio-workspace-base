@@ -247,20 +247,20 @@ export function AppBar({
               />
             ) : null}
           </Pressable>
-          {onOpenCommands ? (
-            <IconButton
-              icon={Sparkles}
-              onPress={onOpenCommands}
-              label="Commands and command agent"
-              color={colors.primary}
-            />
-          ) : null}
           {onShowActions ? (
             <IconButton
               icon={MoreHorizontal}
               onPress={onShowActions}
               label="Panel menu"
               color={colors.textSecondary}
+            />
+          ) : null}
+          {onOpenCommands ? (
+            <IconButton
+              icon={Sparkles}
+              onPress={onOpenCommands}
+              label="Command"
+              color={colors.primary}
             />
           ) : null}
           <IconButton

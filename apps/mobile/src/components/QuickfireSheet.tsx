@@ -391,13 +391,37 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                           </Text>
                           {message.toolChips?.length ? (
                             <View style={styles.toolChips}>
-                              {message.toolChips.map((chip) => (
+                              {message.toolChips.map((chip, index) => (
                                 <View
-                                  key={chip}
-                                  style={[styles.toolChip, { backgroundColor: colors.surface }]}
+                                  key={`${chip.name}:${index}`}
+                                  style={[
+                                    styles.toolChip,
+                                    { backgroundColor: colors.surface },
+                                    chip.state === "failed"
+                                      ? { borderColor: colors.danger }
+                                      : chip.state === "running"
+                                        ? { borderColor: colors.primary }
+                                        : null,
+                                  ]}
                                 >
-                                  <Text style={[type.micro, { color: colors.textSecondary }]}>
-                                    {chip}
+                                  <Text
+                                    style={[
+                                      type.micro,
+                                      {
+                                        color:
+                                          chip.state === "failed"
+                                            ? colors.danger
+                                            : chip.state === "running"
+                                              ? colors.primary
+                                              : colors.textSecondary,
+                                      },
+                                    ]}
+                                  >
+                                    {chip.state === "running"
+                                      ? `◌ ${chip.name}`
+                                      : chip.state === "failed"
+                                        ? `✕ ${chip.name}`
+                                        : chip.name}
                                   </Text>
                                 </View>
                               ))}
@@ -582,6 +606,8 @@ const styles = StyleSheet.create({
   },
   toolChip: {
     borderRadius: radius.pill,
+    borderWidth: hairline,
+    borderColor: "transparent",
     paddingHorizontal: spacing.sm,
     paddingVertical: 2,
   },

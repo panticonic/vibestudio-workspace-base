@@ -1593,8 +1593,8 @@ export function MainScreen() {
       sessionFor: (slotId, options) => shellClient.quickfire.sessionFor(slotId, options),
       clear: (slotId) => shellClient.quickfire.clear(slotId),
       promote: (slotId) => shellClient.quickfire.promote(slotId),
-      connectToChannel: (channelId, contextId) =>
-        shellClient.connectToChannel(channelId, contextId),
+      connectToChannel: (channelId, contextId, options) =>
+        shellClient.connectToChannel(channelId, contextId, options),
     };
   }, [shellClient]);
 

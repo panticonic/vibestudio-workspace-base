@@ -87,6 +87,13 @@ export type QuickfireIntent =
   /** Backspace pressed with an empty input: pop an argument, or drop the mode. */
   | { type: "backspace-empty" }
   | { type: "escape" }
+  /**
+   * Escape pressed outside the overlay document — synthesized by the host while
+   * an overlay is visible, because a focused panel eats the key before any
+   * renderer sees it. Closes outright rather than walking the Esc chain: the
+   * user was not in the overlay, so there is no scope to step back through.
+   */
+  | { type: "host-escape" }
   | { type: "dismiss" }
   | { type: "send"; text: string };
 

@@ -2731,12 +2731,20 @@ export class PubSubChannel extends DurableObjectBase {
     // row; renderers resolve them live from the host-projected identity
     // read (WP0 §3.7). Agents/vessels keep supplying their own descriptor.
     const subscribeCaller = this.caller;
+    // Which callers are a *person at a client*, as opposed to an agent vessel or
+    // background code. Panels were the only ones named originally, which left
+    // the desktop shell chrome — the app the command overlay runs in — unable to
+    // join any channel at all: its participant id stayed the raw client id and
+    // the authorization check below rejected it. A chrome app and a paired
+    // device shell are as much a human's client as a panel is; what makes the
+    // claim safe is the host-stamped `userId`, which no client can assert.
+    const humanClient =
+      subscribeCaller?.callerPanelId !== undefined ||
+      subscribeCaller?.callerKind === "app" ||
+      subscribeCaller?.callerKind === "shell" ||
+      this.authorization?.authorizingOrigin.kind === "user";
     const verifiedUserId =
-      subscribeCaller?.userId &&
-      (subscribeCaller.callerPanelId ||
-        this.authorization?.authorizingOrigin.kind === "user")
-        ? subscribeCaller.userId
-        : null;
+      subscribeCaller?.userId && humanClient ? subscribeCaller.userId : null;
     // Clean cut: every verified panel/shell is a human account. There is no
     // client marker, asserted kind, or pre-canonical participant-id convention.
     if (!doRef && verifiedUserId) {

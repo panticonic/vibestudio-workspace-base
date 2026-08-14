@@ -1153,13 +1153,23 @@ export class ShellClient {
    * panel does; the app already declares `vibestudio.channel.v1` and
    * `workspace-service:channel`.
    */
-  connectToChannel(channelId: string, contextId: string): PubSubClient {
+  connectToChannel(
+    channelId: string,
+    contextId: string,
+    options: { clientId?: string; replayMessageLimit?: number } = {},
+  ): PubSubClient {
     return connectViaRpc({
       rpc: this.transport,
       channel: channelId,
       contextId,
       protocol: "vibestudio.channel.v1",
-      replayMode: "collect",
+      // See the desktop client: the transcript is reduced from the event
+      // stream, so replay must arrive as events rather than be collected.
+      replayMode: "stream",
+      ...(options.replayMessageLimit === undefined
+        ? {}
+        : { replayMessageLimit: options.replayMessageLimit }),
+      ...(options.clientId ? { clientId: options.clientId } : {}),
       type: "user",
     });
   }

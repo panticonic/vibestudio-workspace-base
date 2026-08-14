@@ -189,7 +189,7 @@ export class QuickfireAgentWorker extends AgentWorkerBase {
         visibility,
       }),
       createEditTool(cwd, vcs, mutationContext, fs),
-      this.createSayTool(channelId, fs),
+      this.createNotifyTool(channelId, fs),
     ];
   }
 }

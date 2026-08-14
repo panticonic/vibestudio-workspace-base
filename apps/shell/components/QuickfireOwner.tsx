@@ -42,7 +42,7 @@ import type {
   BrowserAddressSuggestion,
   PanelChromeState,
 } from "@vibestudio/shared/panelChrome";
-import { hostCommands, panel, workspace } from "../shell/client";
+import { hostCommands, panel, quickfire, workspace } from "../shell/client";
 import { useShellEvent } from "../shell/useShellEvent";
 import { useShellContentOverlay, type ContentOverlayBounds } from "../shell/useShellContentOverlay";
 import { effectiveThemeAtom, themeConfigAtom, setThemeModeAtom, setThemeConfigAtom } from "../state/themeAtoms";
@@ -205,6 +205,42 @@ export function QuickfireOwner() {
   const commands = useMemo(() => [...slate, ...contributed], [contributed, slate]);
 
   // --- Opening --------------------------------------------------------------
+  /**
+   * Slots known to hold a live conversation, so the *next* open can decide the
+   * scope without waiting for a round trip. Refreshed on every open.
+   */
+  const conversationSlotsRef = useRef<Set<string>>(new Set());
+
+  /**
+   * One key, resume-aware: opening over a panel that already has a conversation
+   * lands *in* that conversation rather than in the ranked list. A promoted one
+   * is excluded — the chat panel owns it, and there is nothing to continue here.
+   *
+   * The cache answers instantly when this shell has looked before; the refresh
+   * behind it only switches scope while the input is still untouched, so it can
+   * never rewrite something the user has started typing.
+   */
+  const resumeIntoConversation = useCallback((slotId: string) => {
+    const enter = () =>
+      setState((current) =>
+        current.open && current.mode === "all" && !current.argSession && current.query === ""
+          ? { ...current, mode: "quickfire", inputEpoch: current.inputEpoch + 1 }
+          : current
+      );
+    if (conversationSlotsRef.current.has(slotId)) enter();
+    void quickfire
+      .list()
+      .then((rows) => {
+        conversationSlotsRef.current = new Set(
+          rows.filter((row) => row.promotedAt === null).map((row) => row.slotId)
+        );
+        if (conversationSlotsRef.current.has(slotId)) enter();
+      })
+      .catch(() => {
+        // Not knowing means opening the palette, which is the honest default.
+      });
+  }, []);
+
   const open = useCallback(
     (mode: QuickfireMode, options?: { panelId?: string }) => {
       setPanelLost(false);
@@ -223,6 +259,7 @@ export function QuickfireOwner() {
           const focused = await panel.getFocusedPanelId();
           returnFocusPanelIdRef.current = focused;
           const target = options?.panelId ?? focused;
+          if (mode === "all" && target) resumeIntoConversation(target);
           setChromeState(target ? await panel.getChromeState(target) : null);
         } catch {
           // A palette that cannot describe the panel is still a working palette;
@@ -251,18 +288,13 @@ export function QuickfireOwner() {
           .catch(() => setWorkspaceNames([]));
       })();
     },
-    []
+    [resumeIntoConversation]
   );
 
   useShellEvent(
     "open-command-palette",
     useCallback(() => open("all"), [open])
   );
-  useShellEvent(
-    "open-quickfire",
-    useCallback(() => open("quickfire"), [open])
-  );
-
   // Chrome-side requests (tree button, breadcrumb and tree context menus) come
   // through an atom because a renderer cannot emit shell events.
   const commandAgentRequest = useAtomValue(commandAgentRequestAtom);
@@ -824,7 +856,12 @@ export function QuickfireOwner() {
           );
           return;
         case "escape":
-          // Esc chain (§1.3): leave the argument session, then the mode, then close.
+          // Escape means "put this away". The spec's chain also stepped back
+          // through the scope first, which read as Esc not working: now that one
+          // key opens straight into a resumed conversation, the scope you are in
+          // is rarely one you navigated to, and pressing Esc twice to close a
+          // thing you opened once is not a mental model worth defending.
+          // Backspace on an empty input still drops the scope prefix.
           if (state.argSession) {
             applySessionOutcome(
               reduceArgSession(state.argSession, { type: "escape" }),
@@ -832,14 +869,15 @@ export function QuickfireOwner() {
             );
             return;
           }
-          if (state.mode !== "all") {
-            setState((current) => setMode(current, "all"));
-            return;
-          }
           close();
           return;
         case "dismiss":
           close();
+          return;
+        case "host-escape":
+          // Only meaningful while we are the visible overlay; the approval card
+          // receives the same forwarded intent and ignores it.
+          if (state.open) close();
           return;
         case "send":
           setClearArmed(false);
@@ -913,7 +951,8 @@ export function QuickfireOwner() {
 
   const surfaceProps = useMemo<QuickfireSurfaceProps>(() => {
     const session = state.argSession;
-    const quickfire = quickfireSession;
+    // Named apart from the imported `quickfire` service client.
+    const conversation = quickfireSession;
     const arg = session ? activeArgSpec(session) : undefined;
     return {
       mode: state.mode,
@@ -949,20 +988,23 @@ export function QuickfireOwner() {
           ? {
               panelTitle: chromeState?.title ?? "this panel",
               hint: "Ask about this panel. I can describe what it is and how it is running.",
+              // The overlay's input is at the top, so the conversation reads
+              // downward from it: newest first (see `useQuickfireSession`).
+              transcriptOrder: "newest-first" as const,
               // Honest about why the box is dead, never silently inert.
               disabledReason: panelLost
                 ? "That panel closed. Reopen the command agent over another panel to keep going."
                 : !chromeState
                   ? "No panel is focused, so there is nothing to ask about."
-                  : quickfire.view.error,
-              transcript: quickfire.view.transcript,
-              resume: quickfire.view.resume,
-              connecting: quickfire.view.connecting,
-              streaming: quickfire.view.streaming,
-              promoted: quickfire.view.promoted,
+                  : conversation.view.error,
+              transcript: conversation.view.transcript,
+              resume: conversation.view.resume,
+              connecting: conversation.view.connecting,
+              streaming: conversation.view.streaming,
+              promoted: conversation.view.promoted,
               clearArmed,
-              hasConversation: quickfire.view.hasConversation,
-              error: quickfire.view.error,
+              hasConversation: conversation.view.hasConversation,
+              error: conversation.view.error,
             }
           : null,
     };

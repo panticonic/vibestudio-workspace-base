@@ -25,16 +25,16 @@ export interface CommandAgentOpenRequest {
 export const commandAgentRequestAtom = atom<CommandAgentOpenRequest | null>(null);
 
 /**
- * Ask for the overlay. Defaults to the conversation scope, because every caller
- * of this atom is a "talk to the agent about this panel" affordance; the palette
- * scopes are reached by accelerator and by the mode chips.
+ * Ask for the overlay in the same state the accelerator produces: the palette,
+ * which resumes straight into the panel's conversation when it already has one.
+ * Callers name the panel, never the scope.
  */
 export const openCommandAgentAtom = atom(
   null,
   (get, set, request?: { mode?: QuickfireMode; panelId?: string }) => {
     const previous = get(commandAgentRequestAtom);
     set(commandAgentRequestAtom, {
-      mode: request?.mode ?? "quickfire",
+      mode: request?.mode ?? "all",
       ...(request?.panelId ? { panelId: request.panelId } : {}),
       sequence: (previous?.sequence ?? 0) + 1,
     });

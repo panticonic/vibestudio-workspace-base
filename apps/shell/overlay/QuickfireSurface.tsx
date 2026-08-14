@@ -127,6 +127,35 @@ function QuickfireCard(props: QuickfireSurfaceProps & { emit: (intent: Quickfire
     }
   };
 
+  // Escape and list navigation must work wherever focus sits inside the card —
+  // after clicking a row, Clear, or a mode chip the input no longer has it, and
+  // hanging the whole key map off the input made the overlay feel stuck. The
+  // input keeps its own handler for the text-editing keys (ghost completion,
+  // backspace-on-empty, send); this document-level listener only covers the
+  // keys that belong to the surface as a whole.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.target === inputRef.current) return;
+      switch (event.key) {
+        case "Escape":
+          event.preventDefault();
+          emit({ type: "escape" });
+          return;
+        case "ArrowDown":
+          event.preventDefault();
+          emit({ type: "move", delta: 1 });
+          return;
+        case "ArrowUp":
+          event.preventDefault();
+          emit({ type: "move", delta: -1 });
+          return;
+        default:
+      }
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [emit]);
+
   return (
     <div className="quickfire-card" role="dialog" aria-label="Command palette">
       <div className="quickfire-entry">
@@ -256,10 +285,14 @@ function QuickfireConversation({
   compose: NonNullable<QuickfireSurfaceProps["compose"]>;
   emit: (intent: QuickfireIntent) => void;
 }) {
-  const tailRef = useRef<HTMLDivElement | null>(null);
+  const newestFirst = compose.transcriptOrder === "newest-first";
+  // Keep the newest message in view. Which edge that is depends on the order:
+  // reading downward from the input, "newest" is the top of the list, and
+  // scrolling to the bottom would walk away from the reply that just arrived.
+  const newestRef = useRef<HTMLDivElement | null>(null);
   useLayoutEffect(() => {
-    tailRef.current?.scrollIntoView({ block: "end" });
-  }, [compose.transcript]);
+    newestRef.current?.scrollIntoView({ block: newestFirst ? "start" : "end" });
+  }, [compose.transcript, newestFirst]);
 
   if (compose.promoted) {
     return (
@@ -294,24 +327,29 @@ function QuickfireConversation({
       <div className="quickfire-conversation-header">
         <span className="quickfire-conversation-title">✦ {compose.panelTitle}</span>
         <span className="quickfire-conversation-actions">
+          {/* Both conversation exits are spelled out side by side: throw it
+              away, or move it somewhere it can grow. An unlabelled glyph made
+              the second one invisible, and the first is destructive enough that
+              it should say what it does before it asks again. */}
           <button
             type="button"
             className={`quickfire-action${compose.clearArmed ? " quickfire-action-armed" : ""}`}
             disabled={!compose.hasConversation}
+            title="Delete this panel's conversation"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => emit({ type: "clear" })}
           >
-            {compose.clearArmed ? "⟲ really clear?" : "⟲ clear"}
+            {compose.clearArmed ? "⟲ Really clear?" : "⟲ Clear"}
           </button>
           <button
             type="button"
             className="quickfire-action"
             disabled={!compose.hasConversation}
-            title="Open as chat panel"
+            title="Move this conversation into a chat panel below this one, keeping its history"
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => emit({ type: "promote" })}
           >
-            ⧉
+            ⧉ Move to chat panel
           </button>
         </span>
       </div>
@@ -338,8 +376,17 @@ function QuickfireConversation({
         </div>
       ) : null}
 
+      {/* Newest-first puts the send hint between the input and the newest
+          message, where it belongs; oldest-first leaves it after the list. */}
+      {newestFirst && compose.transcript.length > 0 && !compose.disabledReason ? (
+        <p className="quickfire-compose-keys quickfire-compose-keys-lead">
+          ⏎ send · ⇧⏎ newline · ⌘⏎ open as chat panel
+        </p>
+      ) : null}
+
       {compose.transcript.length > 0 ? (
         <div className="quickfire-transcript">
+          {newestFirst ? <div ref={newestRef} /> : null}
           {compose.transcript.map((message) => (
             <article
               key={message.id}
@@ -354,16 +401,27 @@ function QuickfireConversation({
               </p>
               {message.toolChips?.length ? (
                 <p className="quickfire-tool-chips">
-                  {message.toolChips.map((chip) => (
-                    <span key={chip} className="quickfire-chip">
-                      {chip}
+                  {message.toolChips.map((chip, index) => (
+                    <span
+                      key={`${chip.name}:${index}`}
+                      className={`quickfire-chip quickfire-chip-${chip.state}`}
+                      title={
+                        chip.state === "running"
+                          ? `${chip.name} — running`
+                          : chip.state === "failed"
+                            ? `${chip.name} — did not finish`
+                            : chip.name
+                      }
+                    >
+                      {chip.state === "running" ? "◌ " : chip.state === "failed" ? "✕ " : ""}
+                      {chip.name}
                     </span>
                   ))}
                 </p>
               ) : null}
             </article>
           ))}
-          <div ref={tailRef} />
+          {newestFirst ? null : <div ref={newestRef} />}
         </div>
       ) : (
         <p className="quickfire-compose-hint">
@@ -387,9 +445,11 @@ function QuickfireConversation({
               ■ stop
             </button>
           ) : null}
-          <span className="quickfire-compose-keys">
-            ⏎ send · ⇧⏎ newline · ⌘⏎ open as chat panel
-          </span>
+          {newestFirst && compose.transcript.length > 0 ? null : (
+            <span className="quickfire-compose-keys">
+              ⏎ send · ⇧⏎ newline · ⌘⏎ open as chat panel
+            </span>
+          )}
         </p>
       )}
     </div>

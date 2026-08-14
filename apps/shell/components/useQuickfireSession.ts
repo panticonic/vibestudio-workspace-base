@@ -38,5 +38,9 @@ const transport: QuickfireTransport = {
  */
 export function useQuickfireSession(slotId: string | null): QuickfireSessionController {
   const bound = useMemo(() => transport, []);
-  return useQuickfireSessionCore(slotId, bound);
+  // The overlay's only input sits at the TOP of the card — it is the palette's
+  // input, reused. So the newest message belongs directly beneath it and older
+  // ones recede downward; a bottom-anchored chat would put the reply furthest
+  // from the caret the user is still typing in.
+  return useQuickfireSessionCore(slotId, bound, { transcriptOrder: "newest-first" });
 }
