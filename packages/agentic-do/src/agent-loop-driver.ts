@@ -2038,9 +2038,11 @@ export class AgentLoopDriver {
   // "Never re-execute an attempted run" is structural: once
   // `deferredEvalStartAttempted`
   // is durably recorded, every later dispatch of the row takes the read-only
-  // eval.get recovery path (agent-vessel runDeferredEval) and a missing run
-  // row settles as the typed `runtime_generation_lost` infrastructure failure
-  // instead of a second eval.start. All redrive triggers are lifecycle events
+  // eval.get recovery path (agent-vessel runDeferredEval). A missing run stays
+  // parked while exact host admission reconciliation can still recover it; a
+  // persistently absent generation exhausts the durable retry budget and then
+  // settles as `runtime_generation_lost`, never by issuing a second
+  // eval.start. All redrive triggers are lifecycle events
   // (resume, terminal delivery, authority nudge); the ~60s parked-row alarm
   // remains only as the delivery-loss backstop.
 

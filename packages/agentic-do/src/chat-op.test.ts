@@ -2665,6 +2665,19 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     expect(probe.rpcCalls.filter((call) => call.method === "eval.start")).toHaveLength(1);
     expect(probe.rpcCalls.filter((call) => call.method === "eval.get")).toHaveLength(2);
   });
+
+  it("parks an ambiguously acknowledged start while host admission reconciliation is pending", async () => {
+    const probe = await makeGateProbe();
+    probe.seedDeferredEvalForTest(ids.invocationEffect("inv-admission-race"), false);
+    probe.startRunError = new Error("response lost before admission was observable");
+    probe.getRunStatus = { status: "unknown" };
+
+    await expect(
+      probe.callGate(CHANNEL, "inv-admission-race", { code: "1+1" })
+    ).resolves.toEqual({ deferred: true, reason: "external-result" });
+    expect(probe.rpcCalls.filter((call) => call.method === "eval.start")).toHaveLength(1);
+    expect(probe.rpcCalls.filter((call) => call.method === "eval.get")).toHaveLength(1);
+  });
 });
 
 describe("AgentVesselBase.runDeferredSpawn", () => {

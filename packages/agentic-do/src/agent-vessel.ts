@@ -2631,8 +2631,14 @@ export abstract class AgentVesselBase extends DurableObjectBase {
 
   // ── Channel membership ───────────────────────────────────────────────────
 
+  // `host` alongside `code`: a conversation whose vessel the HOST created (the
+  // quickfire service, which mints the channel and the vessel together) has no
+  // userland code to join it on its behalf, and membership is exactly the step
+  // that makes the vessel reachable. This is not a new power — the host already
+  // creates and retires these entities — and it matches `interruptChannel` and
+  // the channel-intake methods below, which admit the host for the same reason.
   @rpc({
-    principals: ["code"],
+    principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -2867,8 +2873,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     });
   }
 
+  // Symmetric with `subscribeChannel`: whoever may join a host-created vessel to
+  // its channel must be able to detach it again, or the release path leaves a
+  // live subscription behind on every cleared conversation.
   @rpc({
-    principals: ["user", "code"],
+    principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -5300,10 +5309,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   /**
    * Redrive path for a run whose eval.start ack is durably recorded: the ONLY
    * consultation is the read-only durable run state (`eval.get`). A terminal
-   * settles inline; a live run stays parked; a MISSING run row after a
-   * recorded start means the EvalDO runtime generation that owned the run is
-   * gone (dispose/reset) — we never auto-re-run, so it settles as the typed
-   * `runtime_generation_lost` infrastructure failure.
+   * settles inline; a live run stays parked. A missing row is not immediately
+   * terminal because the host may still be reconciling an ambiguously
+   * acknowledged, idempotent start. The run stays parked for push/redrive; a
+   * persistently absent generation is settled by the durable retry budget
+   * without ever re-executing the eval body.
    */
   private async recoverStartedDeferredEval(
     channelId: string,
@@ -5328,17 +5338,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       return { deferred: true, reason: "external-result" };
     }
     if (snapshot.status === "unknown") {
-      this.forgetDeferredEval(channelId, runId);
-      this.traceHotPath(channelId, "deferred-eval.completed", { source: "backstop-poll" });
-      return this.deferredEvalSettlement(invocationId, {
-        success: false,
-        console: "",
-        error:
-          "eval runtime generation lost: the durable run record no longer exists after a " +
-          "previously attempted start; the eval is not re-executed automatically",
-        failureKind: "infrastructure",
-        failureCode: "runtime_generation_lost",
-      });
+      return { deferred: true, reason: "external-result" };
     }
     if (snapshot.status === "done" || snapshot.status === "approval-route-lost") {
       if (!snapshot.result) throw new Error(`eval: terminal run ${runId} has no result`);
