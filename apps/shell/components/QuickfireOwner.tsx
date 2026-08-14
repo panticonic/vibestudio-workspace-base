@@ -47,6 +47,7 @@ import { useShellEvent } from "../shell/useShellEvent";
 import { useShellContentOverlay, type ContentOverlayBounds } from "../shell/useShellContentOverlay";
 import { effectiveThemeAtom, themeConfigAtom, setThemeModeAtom, setThemeConfigAtom } from "../state/themeAtoms";
 import { workspaceChooserDialogOpenAtom } from "../state/appModeAtoms";
+import { commandAgentRequestAtom } from "../state/commandAgentAtoms";
 import { useNavigationActions } from "./NavigationContext";
 import {
   buildSlate,
@@ -90,6 +91,8 @@ const SUCCESS_FLASH_MS = 900;
 const MAX_OPEN_PANELS = 300;
 /** Same debounce the title bar's address field uses, so history feels identical. */
 const HISTORY_DEBOUNCE_MS = 120;
+/** Rows one durable panel-title search may contribute per keystroke. */
+const PANEL_SEARCH_LIMIT = 20;
 
 interface OverlayState {
   open: boolean;
@@ -120,6 +123,15 @@ export function QuickfireOwner() {
   const [chromeState, setChromeState] = useState<PanelChromeState | null>(null);
   const [pinnedPanelIds, setPinnedPanelIds] = useState<string[]>([]);
   const [openPanels, setOpenPanels] = useState<OpenPanelEntry[]>([]);
+  /**
+   * Durable title matches for the current query, merged over the walked index.
+   *
+   * The walk is bounded (`MAX_OPEN_PANELS`) and happens once per open, so on a
+   * large workspace it cannot be the whole answer to "which panel is called
+   * X". The workspace's own full-text panel search is; it runs debounced beside
+   * the local filter, and rows appear the moment either source has them.
+   */
+  const [treeHits, setTreeHits] = useState<OpenPanelEntry[]>([]);
   const [history, setHistory] = useState<BrowserAddressSuggestion[]>([]);
   const [workspaceNames, setWorkspaceNames] = useState<string[]>([]);
   const [contributed, setContributed] = useState<CommandSpec[]>([]);
@@ -171,7 +183,7 @@ export function QuickfireOwner() {
   const ctx = useMemo<SurfaceContext>(
     () => ({
       platform: "desktop",
-      openPanels: { entries: openPanels },
+      openPanels: { entries: mergePanelEntries(openPanels, treeHits) },
       ...(chromeState
         ? {
             focusedPanel: {
@@ -187,14 +199,14 @@ export function QuickfireOwner() {
           }
         : {}),
     }),
-    [chromeState, openPanels, pinnedPanelIds]
+    [chromeState, openPanels, pinnedPanelIds, treeHits]
   );
 
   const commands = useMemo(() => [...slate, ...contributed], [contributed, slate]);
 
   // --- Opening --------------------------------------------------------------
   const open = useCallback(
-    (mode: QuickfireMode) => {
+    (mode: QuickfireMode, options?: { panelId?: string }) => {
       setPanelLost(false);
       setState((current) => ({
         ...CLOSED,
@@ -205,9 +217,13 @@ export function QuickfireOwner() {
       setFocusRequest((sequence) => sequence + 1);
       void (async () => {
         try {
+          // Focus restore always names the panel the user was actually on, even
+          // when the overlay was opened *about* a different one (a context menu
+          // on a background tree node): dismissing must not move them.
           const focused = await panel.getFocusedPanelId();
           returnFocusPanelIdRef.current = focused;
-          setChromeState(focused ? await panel.getChromeState(focused) : null);
+          const target = options?.panelId ?? focused;
+          setChromeState(target ? await panel.getChromeState(target) : null);
         } catch {
           // A palette that cannot describe the panel is still a working palette;
           // only the panel-scoped commands drop out.
@@ -246,6 +262,17 @@ export function QuickfireOwner() {
     "open-quickfire",
     useCallback(() => open("quickfire"), [open])
   );
+
+  // Chrome-side requests (tree button, breadcrumb and tree context menus) come
+  // through an atom because a renderer cannot emit shell events.
+  const commandAgentRequest = useAtomValue(commandAgentRequestAtom);
+  useEffect(() => {
+    if (!commandAgentRequest) return;
+    open(commandAgentRequest.mode, {
+      ...(commandAgentRequest.panelId ? { panelId: commandAgentRequest.panelId } : {}),
+    });
+    // `sequence` is the identity of the request: repeating the same ask reopens.
+  }, [commandAgentRequest, open]);
 
   /**
    * Close the overlay. Focus returns to the panel the user was looking at only
@@ -308,6 +335,50 @@ export function QuickfireOwner() {
     };
   }, [state.open]);
 
+  // --- Live durable panel-title search -------------------------------------
+  // Non-blocking by construction: the locally filtered walk already renders,
+  // and these hits merge in when they arrive. Never awaited, never cleared
+  // before the replacement lands, so the list does not flicker while typing.
+  const panelSearchQuery =
+    !state.argSession && (state.mode === "all" || state.mode === "goto")
+      ? (state.mode === "goto" ? parseGotoScope(searchQuery).query : searchQuery).trim()
+      : "";
+  useEffect(() => {
+    if (!state.open || !panelSearchQuery) {
+      setTreeHits([]);
+      return;
+    }
+    let live = true;
+    const timer = window.setTimeout(() => {
+      void panel
+        .searchTree({ query: panelSearchQuery, limit: PANEL_SEARCH_LIMIT })
+        .then((page) => {
+          if (!live) return;
+          setTreeHits(
+            page.hits.map((hit) => {
+              const parent = hit.ancestors.at(-1);
+              return {
+                id: hit.node.slotId,
+                title: hit.node.title,
+                source: hit.node.source ?? "",
+                ...(hit.node.icon ? { icon: hit.node.icon } : {}),
+                ...(parent ? { location: parent.title } : {}),
+              };
+            })
+          );
+        })
+        .catch(() => {
+          // A palette that cannot reach the durable index still searches what
+          // it walked; dropping the local rows too would be strictly worse.
+          if (live) setTreeHits([]);
+        });
+    }, HISTORY_DEBOUNCE_MS);
+    return () => {
+      live = false;
+      window.clearTimeout(timer);
+    };
+  }, [panelSearchQuery, state.open]);
+
   // --- Browser history for the `@` scope and mixed mode ---------------------
   // Same data path as the title bar's address autocomplete
   // (`panel.getBrowserAddressOptions` → the shell's browser-data client), so
@@ -361,7 +432,7 @@ export function QuickfireOwner() {
     return [
       {
         key: "quickfire-conversations",
-        label: "Quickfire conversations",
+        label: "Command agent conversations",
         rows: quickfireConversations.map((row) => ({
           id: `quickfire-slot:${row.slotId}`,
           title: openPanels.find((entry) => entry.id === row.slotId)?.title ?? row.slotId,
@@ -586,6 +657,24 @@ export function QuickfireOwner() {
           void panel.createBrowser(target.url, { focus: true }).catch(reportCommandFailure);
           close({ restoreFocus: false });
           return;
+        case "quickfire-ask":
+          // Enter on typed prose is one gesture: switch into the conversation
+          // over this panel and send what was typed. The compose box opens empty
+          // because the message is already on its way — the core queues it until
+          // the binding resolves.
+          setQuickfireConversations(null);
+          setState((current) => ({
+            ...current,
+            mode: "quickfire",
+            argSession: null,
+            query: "",
+            inputEpoch: current.inputEpoch + 1,
+            selectedId: null,
+            selectionTouched: false,
+          }));
+          setClearArmed(false);
+          void quickfireSession.send(target.prompt).catch(reportCommandFailure);
+          return;
         case "chat":
           void panel
             .createPanel("panels/chat", { focus: true, stateArgs: { initialPrompt: target.prompt } })
@@ -600,6 +689,7 @@ export function QuickfireOwner() {
       close,
       navigateToId,
       open,
+      quickfireSession,
       rowTargets,
       rows,
       state.argSession,
@@ -861,7 +951,7 @@ export function QuickfireOwner() {
               hint: "Ask about this panel. I can describe what it is and how it is running.",
               // Honest about why the box is dead, never silently inert.
               disabledReason: panelLost
-                ? "That panel closed. Reopen quickfire over another panel to keep going."
+                ? "That panel closed. Reopen the command agent over another panel to keep going."
                 : !chromeState
                   ? "No panel is focused, so there is nothing to ask about."
                   : quickfire.view.error,
@@ -909,6 +999,22 @@ export function QuickfireOwner() {
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Union of the walked index and the durable search hits, walk order first.
+ *
+ * The walk carries the tree order the sidebar shows, which is what the idle list
+ * and tie-breaking rank by; search hits are appended for panels the bounded walk
+ * never reached. Slot ids are the identity, so a panel found twice appears once.
+ */
+function mergePanelEntries(
+  walked: OpenPanelEntry[],
+  found: OpenPanelEntry[]
+): OpenPanelEntry[] {
+  if (found.length === 0) return walked;
+  const seen = new Set(walked.map((entry) => entry.id));
+  return [...walked, ...found.filter((entry) => !seen.has(entry.id))];
+}
 
 /** Bounded walk of the open panel forest — the "already open" index (§4.1). */
 async function collectOpenPanels(): Promise<OpenPanelEntry[]> {

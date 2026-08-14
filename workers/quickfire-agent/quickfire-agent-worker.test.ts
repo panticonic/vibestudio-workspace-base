@@ -93,7 +93,7 @@ describe("QuickfireAgentWorker", () => {
     const participant = instance.participant();
     expect(participant).toMatchObject({
       handle: "quickfire",
-      name: "Quickfire",
+      name: "Command agent",
       type: "agent",
       metadata: { productOwned: true },
     });

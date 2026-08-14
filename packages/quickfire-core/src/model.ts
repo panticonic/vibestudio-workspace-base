@@ -26,7 +26,7 @@ export const QUICKFIRE_MODE_CHIPS: Array<{ mode: QuickfireMode; label: string }>
   { mode: "all", label: "All" },
   { mode: "commands", label: "Commands" },
   { mode: "goto", label: "Go to" },
-  { mode: "quickfire", label: "Quickfire" },
+  { mode: "quickfire", label: "Command agent" },
 ];
 
 /** Cycle order for repeating the palette accelerator while open (§1.3). */

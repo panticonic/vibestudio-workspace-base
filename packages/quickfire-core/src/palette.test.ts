@@ -4,6 +4,7 @@ import {
   HISTORY_SCOPE_TOKEN,
   buildPaletteRows,
   buildRowTargets,
+  completionForRow,
   emptyMessageFor,
   inputForMode,
   modeForInput,
@@ -81,6 +82,60 @@ describe("palette projection", () => {
     // Desktop-only on a mobile context.
     expect(ids).not.toContain("command:debug.devtools");
     expect(ids).toContain("panel:panel:tree/root/0");
+  });
+
+  it("leads the mixed scope with the ask row for typed prose", () => {
+    const asking: SurfaceContext = {
+      ...ctx,
+      focusedPanel: { panelId: "panel:tree/root/0", title: "Keyboard Shortcuts" },
+    };
+    const groups = buildPaletteRows({
+      mode: "all",
+      argSession: null,
+      query: "why aren't keyboard combos editable?",
+      ctx: asking,
+      commands,
+    });
+    const first = groups[0]!.rows[0]!;
+    expect(first.id).toBe("ask:why aren't keyboard combos editable?");
+    expect(first.title).toBe("Ask about “Keyboard Shortcuts”");
+    expect(buildRowTargets(groups, commands, { argSession: null }).get(first.id)).toEqual({
+      kind: "quickfire-ask",
+      prompt: "why aren't keyboard combos editable?",
+    });
+  });
+
+  it("falls back to asking when nothing else matches, so Enter always has a target", () => {
+    const groups = buildPaletteRows({
+      mode: "all",
+      argSession: null,
+      query: "zzzz",
+      ctx,
+      commands,
+    });
+    expect(groups.flatMap((group) => group.rows.map((row) => row.id))).toEqual(["ask:zzzz"]);
+  });
+
+  it("leads with the panel when the query names one, so Enter switches to it", () => {
+    const groups = buildPaletteRows({
+      mode: "all",
+      argSession: null,
+      query: "Import wiz",
+      ctx,
+      commands,
+    });
+    const first = groups[0]!.rows[0]!;
+    expect(first.id).toBe("panel:panel:tree/root/0");
+    expect(completionForRow(first)).toBe("Import wizard");
+    expect(buildRowTargets(groups, commands, { argSession: null }).get(first.id)).toEqual({
+      kind: "panel",
+      panelId: "panel:tree/root/0",
+    });
+  });
+
+  it("keeps a matching command ahead of the ask row", () => {
+    const groups = buildPaletteRows({ mode: "all", argSession: null, query: "theme", ctx, commands });
+    expect(groups[0]!.rows[0]!.id).toBe("command:view.theme");
   });
 
   it("shows only the active argument's options once a session is open", () => {

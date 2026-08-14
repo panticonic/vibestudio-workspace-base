@@ -12,7 +12,10 @@ import {
   buildArgSuggestions,
   buildCommandSuggestions,
   groupOmniboxSuggestions,
+  isLikelyAgentPrompt,
   rankHistorySuggestions,
+  textMatchScore,
+  MATCH_PREFIX,
   activeArgSpec,
   type ArgSession,
   type CommandSpec,
@@ -29,7 +32,11 @@ import {
 
 /** Which suggestion kinds a mode shows, in display order. */
 export const QUICKFIRE_MODE_GROUP_ORDER: Record<QuickfireMode, OmniboxKind[]> = {
-  all: ["command", "panel", "history", "url", "chat", "option"],
+  // `chat` leads the mixed scope because the only chat row it ever produces is
+  // the quickfire ask row, and that row is emitted exactly when asking is the
+  // likely intent (§4.1) — so it must be the default Enter target, not a
+  // footnote under commands that matched nothing.
+  all: ["chat", "command", "panel", "history", "url", "option"],
   commands: ["command", "option"],
   goto: ["panel", "history", "url", "command", "chat", "option"],
   quickfire: ["chat", "command", "panel", "history", "url", "option"],
@@ -49,6 +56,8 @@ export type QuickfireRowTarget =
   | { kind: "panel"; panelId: string }
   | { kind: "url"; url: string }
   | { kind: "quickfire-slot"; slotId: string }
+  /** Ask the agent bound to the current panel — the mixed scope's default. */
+  | { kind: "quickfire-ask"; prompt: string }
   | { kind: "chat"; prompt: string };
 
 /**
@@ -157,6 +166,8 @@ export function buildPaletteRows(input: PaletteRowsInput): QuickfireGroup[] {
   }
 
   const suggestions: Array<{ kind: OmniboxKind; row: QuickfireRow }> = [];
+  /** Set when an open panel's title matches the query at prefix strength or better. */
+  let strongPanelMatch = false;
   const scope = mode === "goto" ? parseGotoScope(input.query) : { historyOnly: false, query: input.query };
   const trimmed = scope.query.trim();
 
@@ -180,14 +191,27 @@ export function buildPaletteRows(input: PaletteRowsInput): QuickfireGroup[] {
   }
 
   if (!scope.historyOnly && (mode === "all" || mode === "goto")) {
-    const normalized = trimmed.toLowerCase();
-    const matching = ctx.openPanels.entries.filter(
-      (entry) =>
-        !normalized ||
-        entry.title.toLowerCase().includes(normalized) ||
-        entry.source.toLowerCase().includes(normalized)
-    );
-    for (const entry of matching.slice(0, limit)) {
+    // Titles are ranked, not merely filtered: a title-prefix hit beats a hit
+    // buried in a source path, so the best panel is the row that ghost-completes
+    // and the row Enter switches to. Tree order breaks ties, which keeps the
+    // idle list (empty query) in the shape the sidebar shows.
+    const scored = ctx.openPanels.entries.flatMap((entry, index) => {
+      if (!trimmed) return [{ entry, index, score: 0 }];
+      const score = Math.max(
+        textMatchScore(trimmed, entry.title),
+        // A source-path match is real but weaker than the visible title.
+        textMatchScore(trimmed, entry.source) - 1
+      );
+      return score < 0 ? [] : [{ entry, index, score }];
+    });
+    scored.sort((a, b) => b.score - a.score || a.index - b.index);
+    // Typing a panel's name is a request to go there. When the query names one
+    // that precisely, destinations lead the mixed scope so Enter switches to the
+    // panel and the ghost completes its title — otherwise "Keyboard Shortcuts"
+    // would run the same-named command instead of showing the panel you can see
+    // in the sidebar.
+    strongPanelMatch = (scored[0]?.score ?? -1) >= MATCH_PREFIX;
+    for (const { entry } of scored.slice(0, limit)) {
       suggestions.push({
         kind: "panel",
         row: {
@@ -238,6 +262,29 @@ export function buildPaletteRows(input: PaletteRowsInput): QuickfireGroup[] {
     }
   }
 
+  // The mixed scope's fallback and its agentic fast path are one row (§4.1):
+  // typed prose goes to the panel's agent, and so does anything that matched
+  // nothing else. Without it, Enter on "why is this cut off?" had no target at
+  // all and the palette silently did nothing.
+  if (mode === "all" && trimmed && (isLikelyAgentPrompt(trimmed) || suggestions.length === 0)) {
+    const panelTitle = ctx.focusedPanel?.title;
+    const conversation = ctx.quickfire;
+    suggestions.unshift({
+      kind: "chat",
+      row: {
+        id: `ask:${trimmed}`,
+        title: panelTitle ? `Ask about “${panelTitle}”` : "Ask about this panel",
+        meta:
+          conversation?.hasConversation && !conversation.promoted
+            ? conversation.messageCount
+              ? `Continues this panel's conversation · ${conversation.messageCount} messages`
+              : "Continues this panel's conversation"
+            : `Send “${trimmed}” to the agent bound to this panel`,
+        icon: "✦",
+      },
+    });
+  }
+
   if (!scope.historyOnly && mode === "quickfire" && trimmed) {
     suggestions.push({
       kind: "chat",
@@ -250,9 +297,13 @@ export function buildPaletteRows(input: PaletteRowsInput): QuickfireGroup[] {
     });
   }
 
+  const order =
+    mode === "all" && strongPanelMatch
+      ? (["chat", "panel", "command", "history", "url", "option"] as OmniboxKind[])
+      : QUICKFIRE_MODE_GROUP_ORDER[mode];
   return groupOmniboxSuggestions(
     suggestions.map((entry) => ({ ...entry.row, kind: entry.kind })),
-    QUICKFIRE_MODE_GROUP_ORDER[mode]
+    order
   ).map((group) => ({
     key: group.kind,
     label: group.label,
@@ -291,6 +342,8 @@ export function buildRowTargets(
           kind: "quickfire-slot",
           slotId: row.id.slice("quickfire-slot:".length),
         });
+      } else if (row.id.startsWith("ask:")) {
+        targets.set(row.id, { kind: "quickfire-ask", prompt: row.id.slice("ask:".length) });
       } else if (row.id.startsWith("chat:")) {
         targets.set(row.id, { kind: "chat", prompt: row.id.slice("chat:".length) });
       }

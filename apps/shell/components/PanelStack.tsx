@@ -44,6 +44,7 @@ import {
   pinnedPanelIdsAtom,
   workspaceChooserDialogOpenAtom,
 } from "../state/appModeAtoms";
+import { openCommandAgentAtom } from "../state/commandAgentAtoms";
 import { getCurrentSnapshot } from "@vibestudio/shared/panel/accessors";
 import { useNavigationActions, useNavigationLayout } from "./NavigationContext";
 import type { NavigateToPanelId } from "./NavigationContext";
@@ -155,6 +156,7 @@ export const PanelStack = memo(function PanelStack({
   const setPinnedPanelIds = useSetAtom(pinnedPanelIdsAtom);
   const bumpPinMutationSeq = useSetAtom(pinMutationSeqAtom);
   const openWorkspaceChooser = useSetAtom(workspaceChooserDialogOpenAtom);
+  const openCommandAgent = useSetAtom(openCommandAgentAtom);
 
   // The layout content viewport (the area right of the sidebar) drives the
   // engine's fit tests; measured with a ResizeObserver. A callback ref (state,
@@ -466,6 +468,11 @@ export const PanelStack = memo(function PanelStack({
   const handlePanelAction = useCallback(
     async (panelId: string, action: PanelContextMenuAction) => {
       switch (action) {
+        case "command-agent":
+          // Bound to the panel the menu was opened on, which is not necessarily
+          // the focused one — that is the point of offering it here.
+          openCommandAgent({ panelId });
+          break;
         case "back":
           await panelService.markBrowserNavigationIntent(
             panelId,
@@ -586,6 +593,7 @@ export const PanelStack = memo(function PanelStack({
     [
       navigatePanelHistory,
       createChildForPanel,
+      openCommandAgent,
       panelMap,
       setPinnedPanelIds,
       bumpPinMutationSeq,

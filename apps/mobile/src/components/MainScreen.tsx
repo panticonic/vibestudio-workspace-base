@@ -1524,7 +1524,7 @@ export function MainScreen() {
   const showQuickfireConversations = useCallback(
     (rows: Parameters<MobileSlateDeps["showQuickfireConversations"]>[0]) => {
       showActionSheet({
-        title: "Quickfire conversations",
+        title: "Command agent conversations",
         items: rows.map((row) => ({
           id: row.slotId,
           label:

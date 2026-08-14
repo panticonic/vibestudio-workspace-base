@@ -217,12 +217,12 @@ export function buildSlateDefinitions(deps: SlateDefinitionDeps): CommandSpec[] 
       accelerator: "⌘L",
     },
 
-    // ---- Quickfire ----------------------------------------------------------
+    // ---- Command agent ------------------------------------------------------
     {
       id: "quickfire.ask",
       title: "Ask About This Panel",
       aliases: ["ask"],
-      section: "Quickfire",
+      section: "Command agent",
       icon: "✦",
       surfaces: everywhere,
       args: [{ name: "prompt", label: "prompt", type: "string", required: false }],
@@ -230,7 +230,7 @@ export function buildSlateDefinitions(deps: SlateDefinitionDeps): CommandSpec[] 
     {
       id: "quickfire.clear",
       title: "Clear Panel Conversation",
-      section: "Quickfire",
+      section: "Command agent",
       icon: "⟲",
       surfaces: everywhere,
       danger: true,
@@ -239,15 +239,15 @@ export function buildSlateDefinitions(deps: SlateDefinitionDeps): CommandSpec[] 
     {
       id: "quickfire.promote",
       title: "Open Conversation as Chat Panel",
-      section: "Quickfire",
+      section: "Command agent",
       icon: "⧉",
       surfaces: everywhere,
       availability: needsPanel,
     },
     {
       id: "quickfire.list",
-      title: "Quickfire Conversations",
-      section: "Quickfire",
+      title: "Command Agent Conversations",
+      section: "Command agent",
       icon: "✦",
       surfaces: everywhere,
     },
@@ -255,7 +255,7 @@ export function buildSlateDefinitions(deps: SlateDefinitionDeps): CommandSpec[] 
       id: "agent.new-chat",
       title: "New Chat",
       aliases: ["chat"],
-      section: "Quickfire",
+      section: "Command agent",
       icon: "✧",
       surfaces: everywhere,
       args: [{ name: "prompt", label: "prompt", type: "string", required: false }],

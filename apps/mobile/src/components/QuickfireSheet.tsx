@@ -39,7 +39,11 @@ import {
 } from "@workspace/quickfire-core/session";
 import { themeColorsAtom } from "../state/themeAtoms";
 import { pushToastAtom } from "../state/toastAtoms";
-import { dismissQuickfireSheetAtom, quickfireSheetAtom } from "../state/commandSheetAtoms";
+import {
+  dismissQuickfireSheetAtom,
+  quickfireSheetAtom,
+  type QuickfireSheetRequest,
+} from "../state/commandSheetAtoms";
 import { hairline, radius, shadow, spacing, type } from "../design/tokens";
 import { Copy, RotateCcw, SendHorizontal, Sparkles, Square } from "../design/icons";
 import { IconButton } from "./ui/primitives";
@@ -98,7 +102,9 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
 
   useEffect(() => {
     if (!request) return;
-    setDraft(request.draft ?? "");
+    // A handed-off send opens with an empty compose box: the text is already on
+    // its way, not waiting for a second tap.
+    setDraft(request.send ? "" : (request.draft ?? ""));
     setClearArmed(false);
     translateY.setValue(SLIDE_DISTANCE);
     backdropOpacity.setValue(0);
@@ -157,6 +163,18 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
       }),
     [pushToast]
   );
+
+  /**
+   * Deliver a handed-off send exactly once per request. The session core queues
+   * the text until the binding resolves, so this does not wait for the channel.
+   */
+  const handedOffRef = useRef<QuickfireSheetRequest | null>(null);
+  useEffect(() => {
+    const text = request?.send ? (request.draft ?? "").trim() : "";
+    if (!text || handedOffRef.current === request) return;
+    handedOffRef.current = request;
+    void session.send(text).catch(report("Could not send"));
+  }, [report, request, session]);
 
   const handleSend = useCallback(() => {
     const text = draft.trim();
@@ -221,7 +239,7 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={close}
-            accessibilityLabel="Dismiss quickfire"
+            accessibilityLabel="Dismiss the command agent"
             testID="quickfire-backdrop"
           />
         </Animated.View>

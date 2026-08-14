@@ -255,18 +255,22 @@ export function CommandSheet({
   }, [historyQuery, request, slateDeps.panels, wantsHistory]);
 
   const handOffToQuickfire = useCallback(
-    (draft: string) => {
+    (draft: string, options?: { send?: boolean }) => {
       const slotId = slateDeps.activePanelId;
       if (!slotId) {
         pushToast({
           title: "No panel is open",
-          message: "Quickfire is bound to the panel you are looking at.",
+          message: "The command agent is bound to the panel you are looking at.",
           tone: "warning",
         });
         return;
       }
       close();
-      openQuickfire({ slotId, ...(draft.trim() ? { draft: draft.trim() } : {}) });
+      openQuickfire({
+        slotId,
+        ...(draft.trim() ? { draft: draft.trim() } : {}),
+        ...(options?.send && draft.trim() ? { send: true } : {}),
+      });
     },
     [close, openQuickfire, pushToast, slateDeps.activePanelId]
   );
@@ -279,7 +283,7 @@ export function CommandSheet({
       return [
         {
           key: "quickfire-conversations",
-          label: "Quickfire conversations",
+          label: "Command agent conversations",
           rows: conversations.map((row) => ({
             id: `quickfire-slot:${row.slotId}`,
             title: openPanels.find((entry) => entry.id === row.slotId)?.title ?? row.slotId,
@@ -437,6 +441,11 @@ export function CommandSheet({
             );
           close();
           return;
+        case "quickfire-ask":
+          // Same gesture as desktop: the sheet hands off to the conversation
+          // over the active panel and the prompt goes with it.
+          handOffToQuickfire(target.prompt, { send: true });
+          return;
         case "chat":
           void slateDeps.panels
             .createRootPanel("panels/chat", {
@@ -459,6 +468,7 @@ export function CommandSheet({
       applySessionOutcome,
       argSession,
       close,
+      handOffToQuickfire,
       openQuickfire,
       pushToast,
       rowTargets,
@@ -663,7 +673,7 @@ export function CommandSheet({
                             { color: selected ? colors.primary : colors.textSecondary },
                           ]}
                         >
-                          {chip.mode === "quickfire" ? "✦ Quickfire" : chip.label}
+                          {chip.mode === "quickfire" ? `✦ ${chip.label}` : chip.label}
                         </Text>
                       </Pressable>
                     );

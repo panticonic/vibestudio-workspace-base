@@ -118,6 +118,16 @@ export function useQuickfireSessionCore(
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationRef = useRef(0);
   const freshRef = useRef(false);
+  /**
+   * Text sent before the channel finished connecting.
+   *
+   * Entering quickfire from the palette's ask row (§4.1) sends and binds in the
+   * same gesture, and binding is a round trip: dropping the message because the
+   * client is a few hundred milliseconds behind would lose the thing the user
+   * actually typed. Queued text is flushed once the channel is ready, and
+   * discarded when the binding it was typed for goes away.
+   */
+  const queuedRef = useRef<string[]>([]);
 
   const flush = useCallback(() => {
     pushTimerRef.current = null;
@@ -134,11 +144,26 @@ export function useQuickfireSessionCore(
     pushTimerRef.current = setTimeout(flush, PUSH_INTERVAL_MS);
   }, [flush]);
 
+  /** Put one message on the wire, surfacing a failure inline rather than throwing. */
+  const deliver = useCallback(async (client: PubSubClient, text: string) => {
+    try {
+      await client.send(text, { mentions: ["quickfire"] });
+    } catch (error) {
+      setView((current) => ({
+        ...current,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    }
+  }, []);
+
   useEffect(() => {
     const generation = (generationRef.current += 1);
     const wantsFresh = freshRef.current;
     freshRef.current = false;
     if (!slotId) {
+      // Settling into an unbound state is where queued text dies: the binding it
+      // was typed for no longer exists, and nothing later should inherit it.
+      queuedRef.current = [];
       setView(IDLE);
       return;
     }
@@ -194,6 +219,12 @@ export function useQuickfireSessionCore(
         selfKeyRef.current = client.clientId ?? selfKeyRef.current;
         setView((current) => ({ ...current, connecting: false }));
         flush();
+        const queued = queuedRef.current;
+        queuedRef.current = [];
+        for (const text of queued) {
+          await deliver(client, text);
+          if (disposed || generationRef.current !== generation) return;
+        }
       } catch (error) {
         if (disposed || generationRef.current !== generation) return;
         setView((current) => ({
@@ -217,21 +248,25 @@ export function useQuickfireSessionCore(
       // survives until an explicit lifecycle event ends it.
       void client?.close().catch(() => undefined);
     };
-  }, [flush, schedulePush, slotId]);
+  }, [deliver, flush, schedulePush, slotId]);
 
-  const send = useCallback(async (text: string) => {
-    const trimmed = text.trim();
-    const client = clientRef.current;
-    if (!trimmed || !client) return;
-    try {
-      await client.send(trimmed, { mentions: ["quickfire"] });
-    } catch (error) {
-      setView((current) => ({
-        ...current,
-        error: error instanceof Error ? error.message : String(error),
-      }));
-    }
-  }, []);
+  const send = useCallback(
+    async (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      const client = clientRef.current;
+      // Not connected yet: the resolve effect delivers this once the channel is
+      // ready (see `queuedRef`). Sending and binding are one gesture from the
+      // palette's ask row, so the message waits for the binding rather than
+      // being dropped on the floor.
+      if (!client) {
+        queuedRef.current.push(trimmed);
+        return;
+      }
+      await deliver(client, trimmed);
+    },
+    [deliver]
+  );
 
   const stop = useCallback(async () => {
     const client = clientRef.current;

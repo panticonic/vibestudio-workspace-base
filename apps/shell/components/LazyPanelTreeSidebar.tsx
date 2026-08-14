@@ -54,6 +54,7 @@ import {
   pinnedPanelIdsAtom,
   workspaceChooserDialogOpenAtom,
 } from "../state/appModeAtoms.js";
+import { openCommandAgentAtom } from "../state/commandAgentAtoms.js";
 import { assertPresent } from "../utils/assertPresent";
 import { PanelIcon } from "./PanelIcon";
 import { ConnectionStatusBadge } from "./ConnectionStatusBadge";
@@ -719,6 +720,7 @@ interface SidebarFooterProps {
 
 function SidebarFooter({ activeWorkspaceName, onSwitchWorkspace, onNewPanel }: SidebarFooterProps) {
   const setConnectionSettingsOpen = useSetAtom(connectionSettingsDialogOpenAtom);
+  const openCommandAgent = useSetAtom(openCommandAgentAtom);
   const handleWorkspaceKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === "Enter" || e.key === " ") {
@@ -731,6 +733,23 @@ function SidebarFooter({ activeWorkspaceName, onSwitchWorkspace, onNewPanel }: S
 
   return (
     <Box px="1" py="1">
+      {/* Above "New panel" because it acts on the workspace you already have:
+          talk about a panel first, create one second. The glyph is the same ✦
+          the palette and the conversation header use. */}
+      <Tooltip content="Command agent (⌘/Ctrl+Shift+K)">
+        <Button
+          variant="soft"
+          color="gray"
+          size="2"
+          className="app-touch-target"
+          onClick={() => openCommandAgent()}
+          aria-label="Command agent"
+          style={{ width: "100%", marginBottom: 4 }}
+        >
+          <span aria-hidden="true">✦</span>
+          Command agent
+        </Button>
+      </Tooltip>
       <Button
         variant="soft"
         color="gray"

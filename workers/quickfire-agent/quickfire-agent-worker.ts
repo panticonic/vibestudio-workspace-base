@@ -46,7 +46,7 @@ export class QuickfireAgentWorker extends AgentWorkerBase {
 
   constructor(ctx: ConstructorParameters<typeof AgentWorkerBase>[0], env: unknown) {
     super(ctx, env);
-    void this.setOwnTitle("Quickfire");
+    void this.setOwnTitle("Command agent");
   }
 
   /**
@@ -73,7 +73,7 @@ export class QuickfireAgentWorker extends AgentWorkerBase {
   ): ParticipantDescriptor {
     return {
       handle: "quickfire",
-      name: "Quickfire",
+      name: "Command agent",
       type: "agent",
       metadata: { productOwned: true },
       methods: this.getStandardAgentMethods({ include: QUICKFIRE_PARTICIPANT_METHOD_NAMES }),

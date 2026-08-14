@@ -37,6 +37,12 @@ export interface QuickfireSheetRequest {
   slotId: string;
   /** Text to prefill the compose box with, e.g. from `>ask …`. */
   draft?: string;
+  /**
+   * Send `draft` immediately instead of prefilling it. Set only when the tap
+   * that opened the sheet already *was* the send gesture (the palette's ask
+   * row), never when the user may still be typing.
+   */
+  send?: boolean;
 }
 
 export const quickfireSheetAtom = atom<QuickfireSheetRequest | null>(null);

@@ -251,7 +251,7 @@ export function AppBar({
             <IconButton
               icon={Sparkles}
               onPress={onOpenCommands}
-              label="Commands and quickfire"
+              label="Commands and command agent"
               color={colors.primary}
             />
           ) : null}
