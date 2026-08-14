@@ -14,6 +14,7 @@ export interface LazyTitleNavigationData {
   currentSiblings: PanelSummary[];
   currentId: string;
   currentTitle: string;
+  currentChildCount: number;
 }
 
 /**

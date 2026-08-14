@@ -312,8 +312,9 @@ export const PanelStack = memo(function PanelStack({
       currentSiblings: siblings,
       currentId: visiblePanel.id,
       currentTitle: visiblePanel.title,
+      currentChildCount: panelMap.get(visiblePanel.id)?.childCount ?? 0,
     };
-  }, [ancestors, siblings, visiblePanel]);
+  }, [ancestors, panelMap, siblings, visiblePanel]);
 
   // Build lazy status navigation data
   const lazyStatusNavigationData = useMemo<LazyStatusNavigationData | null>(() => {

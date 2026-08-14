@@ -1296,6 +1296,7 @@ const groupStyle = {
 interface HoverableBreadcrumbItemProps {
   panelId: string;
   title: string;
+  hasChildren: boolean;
   icon?: string;
   source?: string;
   favicon?: PanelSummary["favicon"];
@@ -1315,6 +1316,7 @@ interface HoverableBreadcrumbItemProps {
 function HoverableBreadcrumbItem({
   panelId,
   title,
+  hasChildren,
   icon,
   source,
   favicon,
@@ -1341,8 +1343,9 @@ function HoverableBreadcrumbItem({
 
   const archivePanel = () => {
     if (
+      hasChildren &&
       !window.confirm(
-        `Close “${title}”? Child panels, if any, will also be archived.`,
+        `Close “${title}”? Child panels will also be archived.`,
       )
     )
       return;
@@ -1717,6 +1720,7 @@ function BreadcrumbBar({
       key={panel.id}
       panelId={panel.id}
       title={panel.title}
+      hasChildren={panel.childCount > 0}
       icon={panel.icon}
       source={panel.source}
       favicon={panel.favicon}
@@ -1736,6 +1740,7 @@ function BreadcrumbBar({
       key={ancestor.id}
       panelId={ancestor.id}
       title={ancestor.title}
+      hasChildren={ancestor.childCount > 0}
       icon={ancestor.icon}
       source={ancestor.source}
       favicon={ancestor.favicon}
@@ -2016,6 +2021,7 @@ function BreadcrumbBar({
             <HoverableBreadcrumbItem
               panelId={navigationData?.currentId ?? "current-panel"}
               title={navigationData?.currentTitle ?? title}
+              hasChildren={(navigationData?.currentChildCount ?? 0) > 0}
               isActive={true}
               isCurrent={true}
               onNavigate={() => {

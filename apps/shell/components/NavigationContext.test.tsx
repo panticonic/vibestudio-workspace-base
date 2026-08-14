@@ -55,6 +55,7 @@ function LazyNavigationWriter() {
           currentSiblings: [],
           currentId: "panel-1",
           currentTitle: "Panel 1",
+          currentChildCount: 0,
         })
       }
     >

@@ -897,6 +897,7 @@ export function useAncestors(panelId: string | null): {
                 : {}),
               ...(source ? { source } : {}),
               ...(favicon ? { favicon } : {}),
+              childCount: node.childCount,
               depth: nodes.length - index,
             };
           }),
