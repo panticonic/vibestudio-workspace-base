@@ -296,7 +296,12 @@ export class HeadlessRunner {
     const fixture = this.workspaceRepoFixture;
     if (!fixture || fixture.kind === "created-repository") return prompt;
     const repoPath = `${fixture.section}/${fixture.repoName}`;
-    return `Task resources:\n- Disposable repository: ${repoPath}\n\n${prompt}`;
+    return (
+      "Prepared task input:\n" +
+      `- Use this exact disposable repository: ${repoPath}\n` +
+      "- Do not search for, create, or substitute another fixture.\n\n" +
+      prompt
+    );
   }
 
   /** Serializable evidence for inspect/status output. */
