@@ -40,6 +40,39 @@ export interface ChannelRosterEntry {
   roles: string[];
 }
 
+/** Lift a non-trajectory pubsub event into the canonical channel envelope. */
+export function pubsubChannelEventToEnvelope<Payload>(
+  channelId: string,
+  payloadKind: string,
+  wire: {
+    pubsubId?: number;
+    senderId?: string;
+    ts?: number;
+    senderMetadata?: { name?: string; type?: string; handle?: string };
+    payload: Payload;
+  }
+): ChannelEnvelope<Payload> {
+  const participantId = wire.senderId ?? "channel";
+  const metadata = wire.senderMetadata;
+  return {
+    envelopeId: `pubsub:${wire.pubsubId ?? crypto.randomUUID()}` as EnvelopeId,
+    channelId: channelId as ChannelId,
+    seq: wire.pubsubId ?? 0,
+    from: {
+      kind: participantKindFromWire(metadata?.type),
+      id: participantId,
+      ...(metadata?.name === undefined ? {} : { displayName: metadata.name }),
+      participantId,
+      ...(metadata ? { metadata } : {}),
+    } as ActorRef,
+    payload: wire.payload,
+    payloadKind,
+    contentClass: "external",
+    externalKeys: [`msg:${channelId}/${wire.pubsubId ?? "unattributed"}`],
+    publishedAt: new Date(wire.ts ?? Date.now()).toISOString(),
+  };
+}
+
 /**
  * Lift one pubsub wire event into the envelope `reduceChannelView` consumes.
  *

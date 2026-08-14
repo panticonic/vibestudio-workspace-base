@@ -737,16 +737,19 @@ export function QuickfireOwner() {
    */
   const promoteToChatPanel = useCallback(async () => {
     const parentSlot = chromeState?.panelId;
-    const channelId = await quickfireSession.promote();
-    if (!channelId) return;
+    const promoted = await quickfireSession.promote();
+    if (!promoted) return;
+    const { channelId, contextId } = promoted;
     const opened = parentSlot
       ? await panel.createChild(parentSlot, "panels/chat", {
           stateArgs: { channelName: channelId },
+          contextId,
           focus: true,
         })
       : await panel.createPanel("panels/chat", {
           focus: true,
           stateArgs: { channelName: channelId },
+          contextId,
         });
     if (opened?.id) promotedPanelIdsRef.current.set(channelId, opened.id);
     close({ restoreFocus: false });
@@ -762,7 +765,8 @@ export function QuickfireOwner() {
    */
   const focusPromotedPanel = useCallback(async () => {
     const channelId = quickfireSession.view.channelId;
-    if (!channelId) return;
+    const contextId = quickfireSession.view.contextId;
+    if (!channelId || !contextId) return;
     const known = promotedPanelIdsRef.current.get(channelId);
     if (known) {
       navigateToId(known);
@@ -772,10 +776,11 @@ export function QuickfireOwner() {
     const opened = await panel.createPanel("panels/chat", {
       focus: true,
       stateArgs: { channelName: channelId },
+      contextId,
     });
     if (opened?.id) promotedPanelIdsRef.current.set(channelId, opened.id);
     close({ restoreFocus: false });
-  }, [close, navigateToId, quickfireSession.view.channelId]);
+  }, [close, navigateToId, quickfireSession.view.channelId, quickfireSession.view.contextId]);
 
   const handleIntent = useCallback(
     (payload: unknown) => {
@@ -998,6 +1003,7 @@ export function QuickfireOwner() {
                   ? "No panel is focused, so there is nothing to ask about."
                   : conversation.view.error,
               transcript: conversation.view.transcript,
+              credentialRequest: conversation.view.credentialRequest,
               resume: conversation.view.resume,
               connecting: conversation.view.connecting,
               streaming: conversation.view.streaming,

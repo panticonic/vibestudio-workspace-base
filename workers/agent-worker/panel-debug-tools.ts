@@ -38,7 +38,6 @@ function unattached(): AgentToolResult<null> {
     details: null,
   };
 }
-
 /* ── panel_screenshot ─────────────────────────────────────────────────── */
 
 const screenshotParameters = Type.Object(

@@ -196,8 +196,8 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
   const handlePromote = useCallback(() => {
     void session
       .promote()
-      .then(async (channelId) => {
-        if (!channelId) {
+      .then(async (promoted) => {
+        if (!promoted) {
           pushToast({
             title: "This panel has no conversation to open",
             message: "Ask something first, then open it as a chat panel.",
@@ -205,7 +205,7 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
           });
           return;
         }
-        await openChatPanel(channelId);
+        await openChatPanel(promoted.channelId);
         close();
       })
       .catch(report("Could not open the chat panel"));

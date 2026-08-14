@@ -111,7 +111,6 @@ template:
     - workers/missions
     - workers/phone-provisioning
     - workers/pubsub-channel
-    - workers/quickfire-agent
     - workers/silent-agent-worker
     - workers/system-agent
     - workers/system-test-runner

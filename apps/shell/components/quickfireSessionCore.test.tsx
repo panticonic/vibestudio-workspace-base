@@ -46,6 +46,23 @@ function wireMessageEvent(text: string, senderId = "user:me") {
   };
 }
 
+/** The out-of-band credential event published when a model cannot authenticate. */
+function wireCredentialEvent() {
+  return {
+    type: "agentic.credential-connect.v1",
+    pubsubId: 2,
+    senderId: "do:agent",
+    ts: 1_700_000_000_100,
+    senderMetadata: { name: "Command agent", type: "agent" },
+    payload: {
+      credKey: "cred-openai-codex",
+      providerId: "openai-codex",
+      connectSpec: { kind: "oauth" },
+      reason: "Credential needs refresh",
+    },
+  };
+}
+
 function fakeChannelClient(events: unknown[] = []) {
   return {
     clientId: "user:me",
@@ -150,15 +167,15 @@ describe("useQuickfireSessionCore", () => {
     expect(transport.clear).not.toHaveBeenCalled();
   });
 
-  it("returns the promoted channel id so the caller can open a chat panel", async () => {
+  it("returns the promoted channel and context so the chat panel can attach to both", async () => {
     const { transport } = transportFor(fresh);
     const { result } = renderHook(() => useQuickfireSessionCore("slot", transport));
     await waitFor(() => expect(result.current.view.connecting).toBe(false));
-    let channelId: string | null = null;
+    let promoted: { channelId: string; contextId: string } | null = null;
     await act(async () => {
-      channelId = await result.current.promote();
+      promoted = await result.current.promote();
     });
-    expect(channelId).toBe("channel-1");
+    expect(promoted).toMatchObject({ channelId: "channel-1", contextId: "ctx-1" });
     expect(result.current.view.promoted).toBe(true);
   });
 
@@ -265,5 +282,18 @@ describe("useQuickfireSessionCore reduction", () => {
         "why is this panel laid out this way?"
       )
     );
+  });
+
+  it("surfaces credential waits instead of leaving an unexplained stop spinner", async () => {
+    const { transport } = transportFor(fresh, {}, [wireCredentialEvent()]);
+    const { result } = renderHook(() => useQuickfireSessionCore("slot-a", transport));
+
+    await waitFor(() =>
+      expect(result.current.view.credentialRequest).toEqual({
+        providerId: "openai-codex",
+        reason: "Credential needs refresh",
+      })
+    );
+    expect(result.current.view.streaming).toBe(false);
   });
 });

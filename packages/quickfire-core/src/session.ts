@@ -21,7 +21,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AGENTIC_EVENT_PAYLOAD_KIND,
+  CREDENTIAL_CONNECT_PAYLOAD_KIND,
   createInitialChannelViewState,
+  pubsubChannelEventToEnvelope,
   pubsubAgenticEventToEnvelope,
   reduceChannelView,
   type ChannelViewState,
@@ -55,7 +57,7 @@ interface PubSubAgenticWireEvent {
   senderId?: string;
   ts?: number;
   senderMetadata?: { name?: string; type?: string; handle?: string };
-  payload?: { actor: { id: string } };
+  payload?: unknown;
 }
 
 /** ~30 Hz. Streaming deltas arrive far faster than a surface can repaint. */
@@ -103,12 +105,18 @@ export interface QuickfireTransport {
 export interface QuickfireSessionView {
   slotId: string | null;
   channelId: string | null;
+  contextId: string | null;
   connecting: boolean;
   /** True once a durable mapping exists for the slot. */
   hasConversation: boolean;
   promoted: boolean;
   resume: QuickfireResumeChip | null;
   transcript: QuickfireTranscriptMessage[];
+  /** Unresolved model credential request carried by the conversation channel. */
+  credentialRequest: {
+    providerId: string;
+    reason: string | null;
+  } | null;
   streaming: boolean;
   error: string | null;
 }
@@ -118,18 +126,20 @@ export interface QuickfireSessionController {
   send: (text: string) => Promise<void>;
   stop: () => Promise<void>;
   clear: () => Promise<void>;
-  promote: () => Promise<string | null>;
+  promote: () => Promise<QuickfireSessionFacts | null>;
   startFresh: () => Promise<void>;
 }
 
 const IDLE: QuickfireSessionView = {
   slotId: null,
   channelId: null,
+  contextId: null,
   connecting: false,
   hasConversation: false,
   promoted: false,
   resume: null,
   transcript: [],
+  credentialRequest: null,
   streaming: false,
   error: null,
 };
@@ -173,10 +183,21 @@ export function useQuickfireSessionCore(
   const flush = useCallback(() => {
     pushTimerRef.current = null;
     const state = stateRef.current;
+    const credentialRequest = Object.values(state.credentialRequests)
+      .sort((left, right) => left.seq - right.seq)
+      .at(-1);
     setView((current) => ({
       ...current,
       transcript: projectTranscript(state, selfKeyRef.current, { order: transcriptOrder }),
-      streaming: hasOpenTurn(state),
+      // A waiting turn needs an interaction, not a stop spinner. Only an
+      // actively executing turn is presented as streaming.
+      streaming: Object.values(state.turns).some((turn) => turn.status === "open"),
+      credentialRequest: credentialRequest
+        ? {
+            providerId: credentialRequest.providerId,
+            reason: credentialRequest.reason ?? null,
+          }
+        : null,
     }));
   }, [transcriptOrder]);
 
@@ -220,6 +241,7 @@ export function useQuickfireSessionCore(
           ...current,
           slotId,
           channelId: session.channelId,
+          contextId: session.contextId,
           hasConversation: true,
           promoted: session.state === "promoted",
           resume:
@@ -251,6 +273,18 @@ export function useQuickfireSessionCore(
               // healthy subscription and no error anywhere — the exact failure
               // this conversion existed to prevent in the chat client.
               const wire = event as PubSubAgenticWireEvent;
+              if (wire.type === CREDENTIAL_CONNECT_PAYLOAD_KIND && wire.payload) {
+                stateRef.current = reduceChannelView(
+                  stateRef.current,
+                  pubsubChannelEventToEnvelope(
+                    session.channelId,
+                    CREDENTIAL_CONNECT_PAYLOAD_KIND,
+                    { ...wire, payload: wire.payload }
+                  )
+                );
+                schedulePush();
+                continue;
+              }
               if (wire.type !== AGENTIC_EVENT_PAYLOAD_KIND || !wire.payload) continue;
               stateRef.current = reduceChannelView(
                 stateRef.current,
@@ -261,7 +295,7 @@ export function useQuickfireSessionCore(
                   ...(wire.senderMetadata === undefined
                     ? {}
                     : { senderMetadata: wire.senderMetadata }),
-                  payload: wire.payload,
+                  payload: wire.payload as { actor: { id: string } },
                 }) as never
               );
               schedulePush();
@@ -362,7 +396,7 @@ export function useQuickfireSessionCore(
     const promoted = await transportRef.current.promote(slotId);
     if (!promoted) return null;
     setView((current) => ({ ...current, promoted: true }));
-    return promoted.channelId;
+    return promoted;
   }, [slotId]);
 
   const startFresh = useCallback(async () => {
@@ -378,6 +412,7 @@ export function useQuickfireSessionCore(
         ...IDLE,
         slotId,
         channelId: session.channelId,
+        contextId: session.contextId,
         hasConversation: true,
         connecting: true,
       });

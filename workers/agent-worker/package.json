@@ -10,6 +10,9 @@
       "classes": [
         {
           "className": "AiChatWorker"
+        },
+        {
+          "className": "QuickfireAgentWorker"
         }
       ]
     },
@@ -206,13 +209,16 @@
     }
   },
   "dependencies": {
+    "@sinclair/typebox": "0.27.12",
     "@workspace/runtime": "workspace:*",
     "@workspace/agentic-do": "workspace:*",
     "@workspace/pubsub": "workspace:*",
     "@workspace/harness": "workspace:*",
+    "@workspace/pi-core": "workspace:*",
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/rpc": "workspace:*",
     "@workspace/agentic-protocol": "workspace:*",
     "vitest": "3.2.7"

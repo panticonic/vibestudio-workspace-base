@@ -45,7 +45,6 @@ describe("panel_screenshot", () => {
     expect(callMain.mock.calls).toHaveLength(0);
   });
 });
-
 describe("panel_console", () => {
   const history = {
     entries: [

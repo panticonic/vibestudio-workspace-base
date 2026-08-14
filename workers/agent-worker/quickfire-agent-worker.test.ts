@@ -168,7 +168,6 @@ describe("QuickfireAgentWorker", () => {
     );
   });
 });
-
 describe("formatPanelContext", () => {
   it("names the tool for facts this host cannot see instead of reporting zero", () => {
     const block = formatPanelContext(SNAPSHOT);

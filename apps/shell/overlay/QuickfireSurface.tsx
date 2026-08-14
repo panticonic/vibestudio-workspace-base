@@ -376,6 +376,23 @@ function QuickfireConversation({
         </div>
       ) : null}
 
+      {compose.credentialRequest ? (
+        <div className="quickfire-error">
+          <span>
+            {compose.credentialRequest.reason ??
+              `Model credential required for ${compose.credentialRequest.providerId}.`}
+          </span>{" "}
+          <button
+            type="button"
+            className="quickfire-action"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => emit({ type: "promote" })}
+          >
+            Reconnect in chat →
+          </button>
+        </div>
+      ) : null}
+
       {/* Newest-first puts the send hint between the input and the newest
           message, where it belongs; oldest-first leaves it after the list. */}
       {newestFirst && compose.transcript.length > 0 && !compose.disabledReason ? (

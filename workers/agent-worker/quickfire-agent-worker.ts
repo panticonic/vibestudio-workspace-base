@@ -2,7 +2,7 @@ import { AgentWorkerBase, type AgentToolExecutionContext } from "@workspace/agen
 import type { ParticipantDescriptor } from "@workspace/harness";
 import type { AgentTool } from "@workspace/pi-core";
 import { createRpcFs } from "@workspace/runtime/worker";
-import { QUICKFIRE_AGENT_PROMPT } from "./prompts.js";
+import { QUICKFIRE_AGENT_PROMPT } from "./quickfire-prompts.js";
 import { createPanelDescribeTool, formatPanelContext } from "./panel-describe-tool.js";
 import {
   createPanelCdpEndpointTool,
@@ -15,7 +15,6 @@ import {
 function requireBoundMutationInvocation(): never {
   throw new Error("A semantic mutation requires a bound trajectory invocation command id");
 }
-
 const QUICKFIRE_PARTICIPANT_METHOD_NAMES = [
   "pause",
   "resume",

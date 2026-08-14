@@ -65,7 +65,6 @@ export function formatPanelContext(snapshot: PanelContextSnapshot): string {
   lines.push(`open siblings: ${siblings || "(none)"}`);
   return `<panel-context>\n${lines.join("\n")}\n</panel-context>`;
 }
-
 export function createPanelDescribeTool(
   callMain: <T>(method: string, args: unknown[]) => Promise<T>,
   boundPanelId: string | null

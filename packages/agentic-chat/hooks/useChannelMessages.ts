@@ -25,6 +25,7 @@ import {
   CREDENTIAL_CONNECT_PAYLOAD_KIND,
   applyMessageEvent,
   createInitialChannelViewState,
+  pubsubChannelEventToEnvelope,
   reduceChannelView,
   type AgenticEvent,
   type ChannelEnvelope,
@@ -272,7 +273,10 @@ export function useChannelMessages<T extends ParticipantMetadata = ParticipantMe
           if (wire.type === CREDENTIAL_CONNECT_PAYLOAD_KIND && wire.payload) {
             channelStateRef.current = reduceChannelView(
               channelStateRef.current,
-              credentialConnectWireToEnvelope(client.channelId, wire)
+              pubsubChannelEventToEnvelope(client.channelId, CREDENTIAL_CONNECT_PAYLOAD_KIND, {
+                ...wire,
+                payload: wire.payload,
+              })
             );
             if (wire.phase === "replay") {
               replayDirty = true;
@@ -390,7 +394,7 @@ export function useChannelMessages<T extends ParticipantMetadata = ParticipantMe
         if (raw.type === CREDENTIAL_CONNECT_PAYLOAD_KIND && payload) {
           channelStateRef.current = reduceChannelView(
             channelStateRef.current,
-            credentialConnectWireToEnvelope(c.channelId, {
+            pubsubChannelEventToEnvelope(c.channelId, CREDENTIAL_CONNECT_PAYLOAD_KIND, {
               pubsubId: raw.id,
               senderId: raw.senderId,
               ts: raw.ts,
@@ -445,7 +449,7 @@ export function useChannelMessages<T extends ParticipantMetadata = ParticipantMe
             if (raw.type === CREDENTIAL_CONNECT_PAYLOAD_KIND && payload) {
               channelStateRef.current = reduceChannelView(
                 channelStateRef.current,
-                credentialConnectWireToEnvelope(c.channelId, {
+                pubsubChannelEventToEnvelope(c.channelId, CREDENTIAL_CONNECT_PAYLOAD_KIND, {
                   pubsubId: raw.id,
                   senderId: raw.senderId,
                   ts: raw.ts,
@@ -614,37 +618,6 @@ function messageTypeDefinitionsSignature(definitions: MessageTypeDefinition[]): 
       cleared: definition.cleared,
     }))
   );
-}
-
-function credentialConnectWireToEnvelope(
-  channelId: string,
-  wire: {
-    pubsubId?: number;
-    senderId?: string;
-    ts?: number;
-    senderMetadata?: { name?: string; type?: string; handle?: string };
-    payload?: unknown;
-  }
-): ChannelEnvelope {
-  const participantId = wire.senderId ?? "agent";
-  const metadata = wire.senderMetadata;
-  return {
-    envelopeId: `pubsub:${wire.pubsubId ?? crypto.randomUUID()}` as never,
-    channelId: channelId as never,
-    seq: wire.pubsubId ?? 0,
-    from: {
-      kind: participantKind(metadata?.type),
-      id: participantId,
-      displayName: metadata?.name,
-      participantId,
-      metadata,
-    },
-    payload: wire.payload as never,
-    payloadKind: CREDENTIAL_CONNECT_PAYLOAD_KIND,
-    contentClass: "external",
-    externalKeys: [`msg:${channelId}/${wire.pubsubId ?? "unattributed"}`],
-    publishedAt: new Date(wire.ts ?? Date.now()).toISOString(),
-  } as ChannelEnvelope;
 }
 
 function pubsubAgenticEventToEnvelope(

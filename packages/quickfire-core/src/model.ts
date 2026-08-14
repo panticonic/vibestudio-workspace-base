@@ -130,6 +130,8 @@ export interface QuickfireComposeView {
   disabledReason: string | null;
   /** Bounded tail of the conversation: last N messages plus the live delta. */
   transcript: QuickfireTranscriptMessage[];
+  /** A model credential request the compact surface cannot complete inline. */
+  credentialRequest: { providerId: string; reason: string | null } | null;
   /** Non-null only when this open resumed an existing conversation. */
   resume: QuickfireResumeChip | null;
   /** True while the conversation is still being resolved/created. */

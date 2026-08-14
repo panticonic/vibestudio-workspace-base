@@ -1797,10 +1797,12 @@ export abstract class AgentVesselBase extends DurableObjectBase {
                 err instanceof Error ? err.message : err
               );
             }
-            if (err instanceof CredentialPendingError) {
-              throw err;
-            }
-            throw new CredentialPendingError(providerId, modelBaseUrl);
+            // Only a successful resolver returning null means "no credential".
+            // Service exposure, authority, transport, and implementation
+            // failures are not credential absence and must retain their real
+            // identity; collapsing them here produced a bogus reconnect card
+            // and parked the turn forever.
+            throw err;
           }
           installUrlBoundModelFetchProxy(modelBaseUrl ?? "*", (url, init) =>
             this.credentials.fetch(url, init)
