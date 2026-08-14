@@ -2,13 +2,18 @@ import * as fs from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("onboarding skill template handoff", () => {
-  it("pins the React renderer and its DOM peer to one exact version", () => {
+  it("takes React and the theme from the panel realm rather than owning them", () => {
     const manifest = JSON.parse(
       fs.readFileSync(new URL("package.json", import.meta.url), "utf8")
-    ) as { dependencies?: Record<string, string> };
+    ) as { dependencies?: Record<string, string>; peerDependencies?: Record<string, string> };
 
-    expect(manifest.dependencies?.["react"]).toMatch(/^\d+\.\d+\.\d+$/u);
-    expect(manifest.dependencies?.["react-dom"]).toBe(manifest.dependencies?.["react"]);
+    // This skill's components render inside a panel's realm. Owning React here
+    // would put a second copy in that realm, where the host's hooks and this
+    // skill's hooks stop being the same hooks.
+    expect(manifest.dependencies?.["react"]).toBeUndefined();
+    expect(manifest.dependencies?.["@radix-ui/themes"]).toBeUndefined();
+    expect(manifest.peerDependencies?.["react"]).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(manifest.peerDependencies?.["@radix-ui/themes"]).toMatch(/^\d+\.\d+\.\d+$/u);
   });
 
   it("routes selected registry outcomes through Templates", () => {

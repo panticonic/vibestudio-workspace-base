@@ -59,6 +59,14 @@ state all see the same canonical event.
   feedback components.
 - Use Radix primitives from `@radix-ui/themes` and icons from
   `@radix-ui/react-icons`.
+- Your component runs inside the hosting panel's realm and uses that realm's
+  React and Radix Theme. When it lives in a skill or package that declares
+  manifest dependencies, declare `react` and `@radix-ui/themes` under
+  `peerDependencies`, never `dependencies`: owning them bundles a second copy
+  into the guest, and two Reacts in one realm means the host's hooks and yours
+  are different hooks -- a hook error with no obvious cause, or a Radix
+  component rendering outside the host's Theme. See [external dependency
+  resolution](../workspace-dev/DEPENDENCIES.md#own-it-or-let-the-realm-provide-it).
 - Design against the component's own card width, not the browser viewport.
   Panel splits can be narrow on a wide desktop, so do not use Radix breakpoint
   objects such as `columns={{ initial: "1", sm: "2" }}` for primary layout.

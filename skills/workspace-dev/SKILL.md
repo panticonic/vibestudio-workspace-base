@@ -57,6 +57,12 @@ purpose, workflow, ownership, invariants, and diagnostics.
   data — build real empty states, real data-entry flows, and real persistence.
 - Use workspace-root-relative paths. Never put host checkout paths in workspace
   source or tool arguments.
+- Declare every package you import, and declare it in the right place: a unit
+  loaded on its own (panel, about page, app, worker, extension) owns React and
+  its UI kit in `dependencies`; a unit loaded into someone else's realm (skill,
+  package) declares them in `peerDependencies` so it uses the realm's live
+  instances. Nothing is installed on your behalf. See [external dependency
+  resolution](DEPENDENCIES.md#own-it-or-let-the-realm-provide-it).
 - Use structured read/edit/write/move/copy and semantic VCS tools for managed
   files. Use eval for runtime operations, not as a file editor or shell.
 - Use `verify` for exact-context build checks and focused tests.

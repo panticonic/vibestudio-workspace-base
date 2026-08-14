@@ -8,6 +8,7 @@ materialized source being built. It never inherits root package-manager policy.
 ## Contents
 
 - [Declare dependencies](#declare-dependencies)
+- [Own it, or let the realm provide it](#own-it-or-let-the-realm-provide-it)
 - [Override a resolution](#override-a-resolution)
 - [Patch an exact dependency](#patch-an-exact-dependency)
 - [Own a patched integration](#own-a-patched-integration)
@@ -30,6 +31,86 @@ Use `workspace:*` for internal workspace packages. Do not add a buildable unit
 to `pnpm-workspace.yaml`, the checkout lockfile, or the host's dependencies.
 Build V2 installs the external closure into a content-addressed derived
 environment when it builds a consumer.
+
+Declare everything you import. Nothing is added on your behalf: a package that
+appears in no manifest is not installed, even when something you depend on
+names it as its own peer. A gap surfaces as an unresolved import naming the
+specifier, never as a version the registry picked for you.
+
+## Own it, or let the realm provide it
+
+Two declarations, and the difference is who supplies the running instance.
+
+`dependencies` are yours. They are installed for your closure and bundled into
+your artifact, at the version you name.
+
+`peerDependencies` belong to whatever composes you. They are installed so your
+code typechecks, but never bundled: the realm that loads you supplies the live
+instance.
+
+That distinction is not bookkeeping. A panel's inline UI, a `feedback_custom`
+component and an eval'd snippet all execute inside the *panel's* realm and
+resolve their imports through that realm's module map. A guest that bundles its
+own React puts a second React in one realm, and the host's hooks and the
+guest's hooks stop being the same hooks -- which presents as a hook error far
+from its cause, or as a Radix component rendering outside the host's Theme.
+
+Which one you write follows from how the unit is loaded:
+
+| Unit | Loaded | React and the UI kit go in |
+| --- | --- | --- |
+| Panel, about page, app | On its own | `dependencies` -- it *is* the realm |
+| Worker, extension | On its own | `dependencies`, if it renders at all |
+| Skill, package | Into someone's realm | `peerDependencies` |
+
+A runtime root has nothing above it, so it must own every peer its closure
+asks for. Build V2 refuses it otherwise, naming the packages that asked:
+
+```
+@workspace-about/new is loaded on its own, so nothing provides its closure's
+peers: react-dom@19.2.4 (required by @workspace/about-shared, @workspace/react,
+@workspace/ui). Declare each as a dependency of @workspace-about/new at the
+version it should own.
+```
+
+Own the pair together. `react-dom` carries its own peer range on `react`, so a
+root that owns one and not the other is a root whose renderer version is
+decided by whatever resolves first.
+
+A library leaves its peers external and gets them from the realm at load. If
+the realm does not have one, the import fails at load naming the module -- fix
+it by exposing the module on the host panel (`vibestudio.exposeModules`), not
+by moving the peer into `dependencies`.
+
+### Say what you actually accept
+
+A peer range is a claim about every consumer, and it is checked. Write the
+range you mean:
+
+```json
+{
+  "peerDependencies": { "react": "^19.0.0" },
+  "peerDependenciesMeta": { "react": { "optional": true } }
+}
+```
+
+An exact `19.0.0` says *only* 19.0.0 will do. If a consuming app owns 19.2.4,
+its build is refused -- correctly, because the claim was false. `^19.0.0` says
+what a shared package usually means: any React 19, whichever one my consumer
+owns. `@workspace/quickfire-core` needs exactly this, because the desktop shell
+provides 19.2.4 while `apps/mobile` provides 19.0.0, pinned by the react-native
+renderer compiled into the installed APK.
+
+Mark a peer `optional` when only part of your package needs it -- most often a
+type-only reference (`import type { ComponentType } from "react"`). It is still
+installed for typechecking and still external, but a consumer that never
+reaches that part is not made to own an instance. `@workspace/eval` and
+`@workspace/agentic-core` are declared this way, which is why a worker can use
+them without adopting a renderer it never runs.
+
+A peer is optional for a closure only when every package that declares it says
+so: one package that genuinely renders makes the instance required for all of
+them.
 
 ## Override a resolution
 
@@ -144,8 +225,13 @@ consumer about that userland dependency.
 
 For each build, Build V2:
 
-1. Collects policies and patch bytes from the exact internal source closure.
-2. Installs the derived registry dependency environment.
+1. Collects policies and patch bytes from the exact internal source closure,
+   splitting externals into what the unit owns and what its peers leave to the
+   composing realm.
+2. Installs the derived registry dependency environment -- both halves, since a
+   typecheck needs a peer's declarations, and nothing beyond them: npm does not
+   add unmet peers on its own, and peer ranges between installed packages are
+   proven from the resulting tree.
 3. Applies each patch to every installed package whose name and version exactly
    match the selector, including hoisted and nested copies.
 4. Seals dependency versions, overrides, patch roots, and patch-content digests
@@ -187,6 +273,15 @@ though its isolated runtime Build V2 build is valid.
 
 Run an exact Build V2 report for the consuming unit. A root `pnpm install` does
 not exercise userland patching and is not evidence that the patch works.
+
+Dependency-shaped build refusals name their own remedy:
+
+| Refusal | Meaning |
+| --- | --- |
+| `loaded on its own, so nothing provides its closure's peers` | A runtime root reached a peer nobody owns. Declare it in that root's `dependencies`. |
+| `resolves a dependency its own closure rejects` | A peer range excludes the version its consumer owns. The range is a claim; make it true or widen it. |
+| `requires X@range, but the closure installed X@version` | Two installed packages disagree. Declare a version their dependents share. |
+| `Module "X" not available` at load | A library's peer is not in the loading realm. Expose it on the host panel (`vibestudio.exposeModules`). |
 
 From a Vibestudio source checkout, run the relevant focused tests plus:
 
