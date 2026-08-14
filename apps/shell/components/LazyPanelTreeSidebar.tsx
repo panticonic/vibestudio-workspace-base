@@ -733,39 +733,34 @@ function SidebarFooter({ activeWorkspaceName, onSwitchWorkspace, onNewPanel }: S
 
   return (
     <Box px="1" py="1">
-      {/* The two ways to start something, side by side while the pane is wide
-          enough for both labels. `wrap` does the deciding: each button asks for
-          its own basis and they fall onto separate lines when the sidebar is
-          dragged narrower, so there is no width measurement to keep in sync
-          with the real layout. Command leads because it acts on what is already
-          open; New panel creates. */}
-      <Flex gap="1" wrap="wrap">
+      {/* Keep the two primary actions compact and side by side at every sidebar
+          width. Their full names remain available through the tooltip and
+          accessible name. */}
+      <Flex gap="1">
         <Tooltip content="Command (⌘/Ctrl+K)">
-          <Button
+          <IconButton
             variant="soft"
             color="gray"
             size="2"
             className="app-touch-target"
             onClick={() => openCommandAgent()}
             aria-label="Command"
-            style={{ flex: "1 1 116px", minWidth: 0 }}
           >
             <span aria-hidden="true">✦</span>
-            Command
-          </Button>
+          </IconButton>
         </Tooltip>
-        <Button
-          variant="soft"
-          color="gray"
-          size="2"
-          className="app-touch-target"
-          onClick={onNewPanel}
-          aria-label="New panel"
-          style={{ flex: "1 1 116px", minWidth: 0 }}
-        >
-          <PlusIcon />
-          New panel
-        </Button>
+        <Tooltip content="New panel">
+          <IconButton
+            variant="soft"
+            color="gray"
+            size="2"
+            className="app-touch-target"
+            onClick={onNewPanel}
+            aria-label="New panel"
+          >
+            <PlusIcon />
+          </IconButton>
+        </Tooltip>
       </Flex>
 
       {/* One session row: which workspace you're in, plus the two controls that
