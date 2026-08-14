@@ -29,7 +29,9 @@ export type ProvenanceQueryRefusalCode =
   | "plan-unavailable"
   | "full-scan"
   | "cartesian-join"
-  | "scan-budget";
+  | "scan-budget"
+  /** The deployed SQLite refused the statement on a limit of its own. */
+  | "engine-error";
 
 export interface ProvenanceQueryRefusal {
   stage: "validation" | "plan" | "execution";
@@ -295,13 +297,23 @@ interface PlanStep {
   detail: string;
 }
 
-function planSteps(sql: SqlStorage, query: string): PlanStep[] | null {
+/**
+ * The plan, or null when the engine could not produce one.
+ *
+ * An *empty* plan is not a missing plan: it is the plan for a statement that
+ * scans nothing at all, which the catalog view and any constant-only query
+ * produce. Treating the two alike refused the cheapest possible queries — the
+ * quiet shape of the failure this gate must never have, since a surface that
+ * refuses everything is indistinguishable from a healthy one to its caller.
+ */
+function planSteps(sql: SqlStorage, query: string): PlanStep[] | { error: unknown } {
   try {
-    const rows = sql.exec(`EXPLAIN QUERY PLAN ${query}`).toArray();
-    if (rows.length === 0) return null;
-    return rows.map((row) => ({ detail: String(row["detail"] ?? "") }));
-  } catch {
-    return null;
+    return sql
+      .exec(`EXPLAIN QUERY PLAN ${query}`)
+      .toArray()
+      .map((row) => ({ detail: String(row["detail"] ?? "") }));
+  } catch (error) {
+    return { error };
   }
 }
 
@@ -330,14 +342,23 @@ export function gateProvenanceQueryPlan(
   query: string,
   budget: ProvenanceQueryBudget
 ): ProvenanceQueryRefusal | null {
-  const steps = planSteps(sql, query);
-  if (steps === null) {
-    return refuse(
-      "plan",
-      "plan-unavailable",
-      "The engine could not produce a query plan for this statement, so its scan cost cannot be bounded before execution"
-    );
+  const planned = planSteps(sql, query);
+  if (!Array.isArray(planned)) {
+    // A throwing EXPLAIN usually means the *statement* is wrong — a misspelled
+    // column, say — not that the engine cannot plan. Reporting "scan cost cannot
+    // be bounded" for `no such column` sends the agent to fix the wrong thing,
+    // so the engine's own message decides which failure this is.
+    const message =
+      planned.error instanceof Error ? planned.error.message : String(planned.error);
+    return /\bexplain\b/iu.test(message) && /unsupported|no such module|not supported/iu.test(message)
+      ? refuse(
+          "plan",
+          "plan-unavailable",
+          "The engine could not produce a query plan for this statement, so its scan cost cannot be bounded before execution"
+        )
+      : { ...engineRefusal(planned.error), stage: "plan" };
   }
+  const steps = planned;
   const counts = new Map<string, number>();
   const fullScans: Array<{ table: string; rows: number }> = [];
   for (const step of steps) {
@@ -384,6 +405,21 @@ interface CursorLike {
   [Symbol.iterator]?: () => Iterator<Record<string, unknown>>;
 }
 
+/**
+ * Turn a raw engine failure into the typed refusal the contract promises. The
+ * engine's own message is the most precise statement of the bound available, so
+ * it is quoted rather than replaced with a guess.
+ */
+function engineRefusal(error: unknown): ProvenanceQueryRefusal {
+  const message = error instanceof Error ? error.message : String(error);
+  return refuse(
+    "execution",
+    "engine-error",
+    `The database engine refused this statement: ${message.slice(0, 400)}. Rewrite the query — this is a limit of the deployed engine, not of your authorization`,
+    null
+  );
+}
+
 /** Execute one validated, plan-gated query with a streamed scan abort. */
 export function executeProvenanceQuery(
   sql: SqlStorage,
@@ -404,25 +440,40 @@ export function executeProvenanceQuery(
   const plan = gateProvenanceQueryPlan(sql, bounded, budget);
   if (plan) return { ...empty, refusal: plan };
 
-  const cursor = sql.exec(bounded) as unknown as CursorLike;
+  // The deployed engine enforces limits the fallback engine used in unit tests
+  // does not, so a well-formed query can still be rejected by SQLite itself.
+  // That is a refusal like any other and must arrive typed and named: letting it
+  // escape as an untyped tool failure tells the agent "do not retry" about a
+  // query it could trivially correct, and breaks the contract that every layer
+  // refuses distinctly and names its bound.
+  let cursor: CursorLike;
+  try {
+    cursor = sql.exec(bounded) as unknown as CursorLike;
+  } catch (error) {
+    return { ...empty, refusal: engineRefusal(error) };
+  }
   const collected: Record<string, unknown>[] = [];
   let refusal: ProvenanceQueryRefusal | null = null;
-  if (typeof cursor[Symbol.iterator] === "function") {
-    for (const row of cursor as Iterable<Record<string, unknown>>) {
-      collected.push(row);
-      if ((cursor.rowsRead ?? 0) > budget.scanBudget) {
-        refusal = refuse(
-          "execution",
-          "scan-budget",
-          `The query read more than ${budget.scanBudget} rows before completing; the partial result below is what it produced before the budget stopped it`,
-          String(cursor.rowsRead ?? 0)
-        );
-        break;
+  try {
+    if (typeof cursor[Symbol.iterator] === "function") {
+      for (const row of cursor as Iterable<Record<string, unknown>>) {
+        collected.push(row);
+        if ((cursor.rowsRead ?? 0) > budget.scanBudget) {
+          refusal = refuse(
+            "execution",
+            "scan-budget",
+            `The query read more than ${budget.scanBudget} rows before completing; the partial result below is what it produced before the budget stopped it`,
+            String(cursor.rowsRead ?? 0)
+          );
+          break;
+        }
+        if (collected.length > limit) break;
       }
-      if (collected.length > limit) break;
+    } else {
+      collected.push(...cursor.toArray());
     }
-  } else {
-    collected.push(...cursor.toArray());
+  } catch (error) {
+    refusal = engineRefusal(error);
   }
   const rowsRead = cursor.rowsRead ?? collected.length;
   if (!refusal && rowsRead > budget.scanBudget) {

@@ -57,7 +57,10 @@ Use one stable, unique instance ID throughout an investigation.
    Pass an explicit model only when the model itself is the experiment. Default
    route and quota fallback live in `config.ts`.
 
-4. On non-zero exit, inspect the retained run immediately:
+4. On non-zero exit, inspect the retained run. A failed run's diagnostics are
+   persisted locally when it completes, so this still works after the instance
+   that produced it has been recycled — but the trajectory is not, so export it
+   before reprovisioning if you need the full transcript:
 
    ```bash
    pnpm system-test --instance <id> inspect <run-id> --json
@@ -91,6 +94,16 @@ Never report completion while an owned instance, panel, page, or inspector is
 still live. Stop only for missing credentials, required new authority,
 unavailable external infrastructure, or an unauthorized server restart — not at
 an artifact path or validator message.
+
+## Drive the system directly before spending an agent turn
+
+`vibestudio vcs <method> --session <name> --input '<json>'` reaches every
+semantic method on a provisioned instance — including `walk`, `query`, and
+`search` — in about two seconds and without a model in the loop. Attach a probe
+session once (`vibestudio agent attach probe`) and use it to answer "does this
+surface work at all" before writing or rerunning a scenario. An agentic run is
+the right instrument for *whether an agent can find and use* a capability; it is
+a slow and nondeterministic way to learn *whether the capability functions*.
 
 ## Orchestrator and test subject
 

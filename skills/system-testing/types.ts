@@ -22,6 +22,17 @@ export const HISTORICAL_CONTENT_WORKSPACE_REPO_FIXTURE = {
   section: "projects",
 } as const satisfies WorkspaceRepoCreationScope;
 
+/**
+ * A repository whose *record* is the fixture: an exact set of work units,
+ * intents, commit messages, and one true counteraction, seeded through public
+ * semantic VCS rather than improvised by a setup agent. Provenance questions
+ * are about the record, so the record has to be the controlled variable.
+ */
+export const PROVENANCE_RECORD_WORKSPACE_REPO_FIXTURE = {
+  kind: "provenance-record",
+  section: "projects",
+} as const satisfies WorkspaceRepoCreationScope;
+
 export const BUILDABLE_PACKAGE_WORKSPACE_REPO_FIXTURE = {
   kind: "buildable-package",
   section: "packages",

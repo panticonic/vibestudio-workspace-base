@@ -213,7 +213,9 @@ describe("reduced VCS agentic catalog", () => {
         protocolContent: [
           {
             type: "text",
-            text: 'past · change:archive-window · stated: "Extend the archive window from 14 to 21 days because delayed regional exports can arrive through day 18; a three-day buffer prevents premature deletion"',
+            // Subjects render as a kind plus a compact ref; identifier hygiene
+            // means a rendered block never spells a change identity.
+            text: 'past · change @r4-91af · stated: "Extend the archive window from 14 to 21 days because delayed regional exports can arrive through day 18; a three-day buffer prevents premature deletion"',
           },
         ],
       }

@@ -43,6 +43,7 @@ import { agentOrchestrationTests } from "./tests/agent-orchestration.js";
 import { mobileTests } from "./tests/mobile.js";
 import { deliveryHardeningTests } from "./tests/delivery-hardening.js";
 import { intentDiscoveryTests } from "./tests/intent-discovery.js";
+import { provenanceQuestionTests } from "./tests/provenance-questions.js";
 
 export {
   agentCapabilityTests,
@@ -73,6 +74,7 @@ export {
   oauthTests,
   panelTests,
   projectLifecycleTests,
+  provenanceQuestionTests,
   rpcTests,
   scaffoldMatrixTests,
   selfDevelopmentTests,
@@ -119,6 +121,7 @@ export function allTests(): TestCase[] {
     ...filesystemTests,
     ...vcsTests,
     ...vcsAdvancedTests,
+    ...provenanceQuestionTests,
     ...gitInteropTests,
     ...templateTests,
     ...panelTests,

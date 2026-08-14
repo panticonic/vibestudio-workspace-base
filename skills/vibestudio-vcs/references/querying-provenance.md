@@ -10,14 +10,19 @@ views. The canonical tables stay private; the views are the contract.
 The catalog is self-describing. This is the first query to run, and the only
 schema fact worth remembering:
 
+`prov_schema` is one row per relation, so the whole contract fits in one page —
+read it, then read the `columns` cell of whichever relation you need.
+
 ```ts
-provenance({ query: "SELECT relation, column_name, meaning FROM prov_schema" });
+provenance({ query: "SELECT relation, meaning, column_count FROM prov_schema" });
 provenance({
-  query:
-    "SELECT column_name, meaning FROM prov_schema WHERE relation = 'prov_decision_entries'",
+  query: "SELECT columns FROM prov_schema WHERE relation = 'prov_decision_entries'",
 });
 provenance({ query: "SELECT version FROM prov_schema_version" });
 ```
+
+Prefer `WHERE relation = '…'` over `LIKE`: it is exact, and the deployed engine
+enforces pattern limits the development engine does not.
 
 Relations, in one line each: `prov_work_units` (intent tier and text, persisted
 from the one resolver), `prov_changes`, `prov_applied_changes`,

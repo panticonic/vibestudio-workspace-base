@@ -10,6 +10,12 @@ import {
 /** A scriptable engine: the gate and the abort are testable without a workspace. */
 function stubSql(script: {
   plan?: string[];
+  /** The engine cannot plan at all, as distinct from planning an empty plan. */
+  planThrows?: boolean;
+  /** The engine rejects the statement while planning it. */
+  planError?: string;
+  /** The engine accepts the statement structurally, then refuses to run it. */
+  execThrows?: string;
   counts?: Record<string, number>;
   rows?: Record<string, unknown>[];
   rowsRead?: number;
@@ -18,10 +24,15 @@ function stubSql(script: {
   return {
     exec(query: string) {
       if (query.startsWith("EXPLAIN QUERY PLAN")) {
+        if (script.planThrows) throw new Error("no such module: EXPLAIN");
+        if (script.planError) throw new Error(script.planError);
         return {
           toArray: () => (script.plan ?? []).map((detail) => ({ detail })),
           one: () => ({}),
         };
+      }
+      if (script.execThrows && !/SELECT count\(\*\) AS n FROM/u.test(query)) {
+        throw new Error(script.execThrows);
       }
       const count = /SELECT count\(\*\) AS n FROM "([^"]+)"/u.exec(query);
       if (count) {
@@ -151,11 +162,45 @@ describe("the plan gate", () => {
   });
 
   it("fails closed when the engine cannot produce a plan", () => {
-    const result = executeProvenanceQuery(stubSql({ plan: [] }), {
+    const result = executeProvenanceQuery(stubSql({ planThrows: true }), {
       query: "SELECT work_unit_id FROM prov_work_units",
       limit: 10,
     });
     expect(result.refusal).toMatchObject({ stage: "plan", code: "plan-unavailable" });
+  });
+
+  it("names the real problem when the statement itself is wrong", () => {
+    // `no such column` is not "scan cost cannot be bounded". Reporting it that
+    // way sends the agent to fix the budget instead of the typo.
+    const result = executeProvenanceQuery(
+      stubSql({ planError: "no such column: column_name at offset 7" }),
+      { query: "SELECT column_name FROM prov_schema", limit: 10 }
+    );
+    expect(result.refusal).toMatchObject({ stage: "plan", code: "engine-error" });
+    expect(result.refusal?.message).toContain("no such column: column_name");
+  });
+
+  it("allows a statement whose plan is empty because it scans nothing", () => {
+    // An empty plan is a plan. Conflating it with a missing one refused the
+    // cheapest statements in the contract, including the catalog view itself.
+    const result = executeProvenanceQuery(stubSql({ plan: [], rows: [{ version: 1 }] }), {
+      query: "SELECT version FROM prov_schema_version",
+      limit: 10,
+    });
+    expect(result.refusal).toBeNull();
+    expect(result.rows).toEqual([[1]]);
+  });
+
+  it("turns an engine limit into a typed refusal instead of an exception", () => {
+    // The deployed engine enforces limits the fallback engine does not. Letting
+    // one escape untyped tells the agent to stop rather than to rewrite.
+    const result = executeProvenanceQuery(
+      stubSql({ plan: ["SCAN prov_work_units"], execThrows: "LIKE or GLOB pattern too complex" }),
+      { query: "SELECT work_unit_id FROM prov_work_units WHERE kind LIKE 'e%'", limit: 10 }
+    );
+    expect(result.refusal).toMatchObject({ stage: "execution", code: "engine-error" });
+    expect(result.refusal?.message).toContain("LIKE or GLOB pattern too complex");
+    expect(result.rows).toEqual([]);
   });
 });
 

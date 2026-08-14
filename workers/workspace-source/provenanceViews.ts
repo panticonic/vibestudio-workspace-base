@@ -266,7 +266,7 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
   {
     relation: "prov_messages",
     meaning:
-      "Trajectory messages with bounded text; full text stays behind blobstore.",
+      "Trajectory messages with a bounded excerpt; inspect the message ref for its full recorded text.",
     columns: [
       { column: "log_id", meaning: "Trajectory log." },
       { column: "head", meaning: "Trajectory head." },
@@ -281,7 +281,12 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
       },
       {
         column: "text_excerpt",
-        meaning: "Bounded excerpt of the message text.",
+        meaning: "Leading excerpt of the message text, bounded by the view.",
+      },
+      {
+        column: "text_length",
+        meaning:
+          "Full recorded length; longer than the excerpt means text was cut, so inspect the ref.",
       },
     ],
   },
@@ -317,12 +322,15 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
   },
   {
     relation: "prov_schema",
-    meaning: "This catalog. Query it to discover relations and columns.",
+    meaning: "This catalog. One row per relation; query it first to learn the contract.",
     columns: [
       { column: "relation", meaning: "View name." },
-      { column: "column_name", meaning: "Column name." },
-      { column: "meaning", meaning: "What the column means." },
-      { column: "relation_meaning", meaning: "What the relation means." },
+      { column: "meaning", meaning: "What the relation means." },
+      { column: "column_count", meaning: "How many columns the relation has." },
+      {
+        column: "columns",
+        meaning: "Every column as `name — meaning`, separated by `; `.",
+      },
     ],
   },
   {
@@ -338,21 +346,31 @@ export const PROV_RELATIONS: ReadonlySet<string> = new Set(
 
 const sqlText = (value: string): string => `'${value.replaceAll("'", "''")}'`;
 
+/**
+ * A catalog nobody can finish reading is not self-describing. One row per column
+ * put the contract at 104 rows against a 50-row default page, so the single
+ * taught discovery call could never complete and an agent learned only the
+ * alphabetically-first relations. One row per relation keeps the whole contract
+ * inside one page, with the column detail carried along in `columns`.
+ *
+ * A VALUES rowset also has no compound-SELECT term limit. The original UNION ALL
+ * form crossed workerd's SQLite deployment limit as the contract grew and
+ * stopped an otherwise healthy workspace from starting.
+ */
 function catalogView(): string {
-  const rows = PROV_CATALOG.flatMap((relation) =>
-    relation.columns.map(
-      (column) =>
-        `(${sqlText(relation.relation)}, ${sqlText(column.column)}, ` +
-        `${sqlText(column.meaning)}, ${sqlText(relation.meaning)})`,
-    ),
-  );
-  // A VALUES rowset has no compound-SELECT term limit. The former UNION ALL
-  // view crossed workerd's SQLite deployment limit as the discoverable schema
-  // grew, preventing an otherwise healthy workspace from starting.
+  const rows = PROV_CATALOG.map((relation) => {
+    const columns = relation.columns
+      .map((column) => `${column.column} — ${column.meaning}`)
+      .join("; ");
+    return (
+      `(${sqlText(relation.relation)}, ${sqlText(relation.meaning)}, ` +
+      `${relation.columns.length}, ${sqlText(columns)})`
+    );
+  });
   return (
     "CREATE VIEW IF NOT EXISTS prov_schema AS\n" +
-    "SELECT column1 AS relation, column2 AS column_name, column3 AS meaning, " +
-    "column4 AS relation_meaning\n" +
+    "SELECT column1 AS relation, column2 AS meaning, column3 AS column_count, " +
+    "column4 AS columns\n" +
     `FROM (VALUES\n${rows.join(",\n")}\n)`
   );
 }
@@ -555,7 +573,10 @@ export function createProvenanceViews(sql: SqlStorage): void {
              substr(
                coalesce(json_extract(event.payload_ref_json, '$.blocks[0].content'), ''),
                1, 400
-             ) AS text_excerpt
+             ) AS text_excerpt,
+             length(
+               coalesce(json_extract(event.payload_ref_json, '$.blocks[0].content'), '')
+             ) AS text_length
         FROM trajectory_messages message
         LEFT JOIN log_events event
                ON event.log_id = message.log_id

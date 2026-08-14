@@ -35,7 +35,7 @@ provenance({ target: "packages/example/src/index.ts", walk: "cause" });
 provenance({ target: "@r7-1c9a", walk: "cohort", scope: "turn" });
 provenance({ target: "packages/example/src/retry.ts", walk: "rejections" });
 provenance({ target: "search: retry backoff" });
-provenance({ query: "SELECT relation, column_name, meaning FROM prov_schema" });
+provenance({ query: "SELECT relation, meaning, column_count FROM prov_schema" });
 provenance({ targets: ["@r3-11ab", "@r4-77cd"] });
 ```
 
@@ -65,10 +65,21 @@ rendered subject carries the `@ref` you pass back.
 
 1. **Gather** — `cause` for what was asked, `cohort` for the pattern, and
    `rejections` for the counter-evidence.
-2. **Hypothesize** the axiom that makes all three consistent.
+2. **Hypothesize** the axiom that makes all three consistent. The axiom is a
+   property of the environment, not of the file you are looking at. Ask what
+   the recorded choices have in common — three settings all kept short is
+   evidence about *time*, not about retries, sockets, and uploads separately.
 3. **Check** it against the rejections and the intent-annotated history. If a
    rejection contradicts your hypothesis, the hypothesis is wrong, not the
    rejection.
+
+   **Do not dismiss a rejection because its subject differs from yours.** The
+   most common abduction failure is reading "someone raised the retry backoff
+   and it was undone" as a fact about retries, concluding it says nothing about
+   the keepalive you are adding, and repeating the rejected work under another
+   name. Ask instead what property the rejected work shares with yours. If your
+   change has that property, the rejection is about your change, whatever
+   coordinate it was recorded at — say so before acting, and let the user decide.
 4. **Write it down** if it will recur — as ordinary prose in the relevant notes
    file, with the edit's own intent naming the evidence it came from. There is
    no theory store: a recovered axiom is a paragraph in a tracked file, with

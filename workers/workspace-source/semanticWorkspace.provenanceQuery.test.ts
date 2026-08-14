@@ -10,7 +10,11 @@ import {
   type VcsSearchResult,
   type VcsWalkResult,
 } from "@vibestudio/service-schemas/vcs";
-import { createSemanticVcsSchema } from "./semanticVcsSchema.js";
+import {
+  createSemanticVcsSchema,
+  createTrajectoryMirrorSchema,
+} from "./semanticVcsSchema.js";
+import { PROV_CATALOG } from "./provenanceViews.js";
 import {
   SemanticWorkspace,
   type SemanticDispatchRequest,
@@ -46,29 +50,7 @@ function complete<T>(result: SemanticDispatchResult): T {
 async function fixture() {
   const sql = await createInMemorySql();
   createSemanticVcsSchema(sql);
-  sql.exec(`
-    CREATE TABLE trajectory_invocations (
-      log_id TEXT NOT NULL, head TEXT NOT NULL, invocation_id TEXT NOT NULL,
-      turn_id TEXT, kind TEXT, status TEXT NOT NULL, terminal_outcome TEXT,
-      request_ref_json TEXT, started_event_id TEXT, completed_event_id TEXT,
-      updated_at TEXT NOT NULL, PRIMARY KEY (log_id, head, invocation_id)
-    )
-  `);
-  sql.exec(`
-    CREATE TABLE trajectory_turns (
-      log_id TEXT NOT NULL, head TEXT NOT NULL, turn_id TEXT NOT NULL,
-      opened_at TEXT, closed_at TEXT, summary TEXT, ordinal INTEGER,
-      trigger_message_id TEXT, PRIMARY KEY (log_id, head, turn_id)
-    )
-  `);
-  sql.exec(`
-    CREATE TABLE trajectory_messages (
-      log_id TEXT NOT NULL, head TEXT NOT NULL, message_id TEXT NOT NULL,
-      turn_id TEXT, role TEXT NOT NULL, status TEXT NOT NULL,
-      started_event_id TEXT, completed_event_id TEXT, updated_at TEXT NOT NULL,
-      PRIMARY KEY (log_id, head, message_id)
-    )
-  `);
+  createTrajectoryMirrorSchema(sql);
   sql.exec(`
     CREATE TABLE log_events (
       log_id TEXT NOT NULL, head TEXT NOT NULL, envelope_id TEXT NOT NULL,
@@ -333,9 +315,30 @@ describe("provenance walks", () => {
     expect(labels.some((label) => label.startsWith("message"))).toBe(true);
     const terminal = result.entries.at(-1)!;
     expect(terminal.boundary).toBe("human-statement");
-    expect(terminal.detail).toBe("Cap the retry backoff at 30 seconds");
+    // The statement is the answer the walk exists to deliver, so it travels as
+    // prose the renderer will show in full, not as a compacted incidental
+    // detail. Q2 previously reached this entry and then truncated the request.
+    expect(terminal.statement).toEqual({
+      text: "Cap the retry backoff at 30 seconds",
+      sender: "user",
+    });
     const intents = result.entries.flatMap((entry) => (entry.intent ? [entry.intent] : []));
     expect(intents[0]).toMatchObject({ tier: "stated" });
+  });
+
+  it("carries the requester's words beside an author's summary", async () => {
+    const { semantic, capped } = await fixture();
+    const result = await walk(semantic, {
+      contextId: "context:test",
+      walk: "cause",
+      subject: { kind: "work-unit", workUnitId: capped.workUnitId },
+      visibilityContextIds: ["context:test"],
+    });
+    // The resolved rung stays `stated` — the ladder is untouched — but the
+    // statement that summary interpreted is no longer discarded at write time.
+    const work = result.entries.find((entry) => entry.label.startsWith("work unit"))!;
+    expect(work.intent).toMatchObject({ tier: "stated" });
+    expect(work.statement?.text).toContain("Cap the retry backoff");
   });
 
   it("answers Q3 with the cohort of everything the same command touched", async () => {
@@ -479,11 +482,38 @@ describe("the prov_* relational contract", () => {
     const { semantic } = await fixture();
     const result = await query(semantic, {
       contextId: "context:test",
-      query: "SELECT relation, column_name, meaning FROM prov_schema WHERE relation = 'prov_changes'",
+      query: "SELECT relation, meaning, columns FROM prov_schema WHERE relation = 'prov_changes'",
       visibilityContextIds: ["context:test"],
     });
     expect(result.refusal).toBeNull();
-    expect(column(result, "column_name")).toContain("effect_digest");
+    expect(String(column(result, "columns")[0])).toContain("effect_digest");
+  });
+
+  it("fits the whole contract in one default page, or it is not discoverable", async () => {
+    const { semantic } = await fixture();
+    // The taught first move must complete. A catalog that overflows the page it
+    // is read with teaches an agent only its alphabetically-first relations.
+    const result = await query(semantic, {
+      contextId: "context:test",
+      query: "SELECT relation, meaning, column_count FROM prov_schema",
+      visibilityContextIds: ["context:test"],
+    });
+    expect(result.refusal).toBeNull();
+    expect(result.truncated).toBe(false);
+    expect(result.rows.length).toBe(PROV_CATALOG.length);
+  });
+
+  it("does not refuse a statement whose plan is legitimately empty", async () => {
+    const { semantic } = await fixture();
+    // The catalog scans no table at all. Treating "no plan rows" as "no plan"
+    // refused the cheapest queries in the contract.
+    const result = await query(semantic, {
+      contextId: "context:test",
+      query: "SELECT version FROM prov_schema_version",
+      visibilityContextIds: ["context:test"],
+    });
+    expect(result.refusal).toBeNull();
+    expect(result.rows.length).toBe(1);
   });
 
   it("joins the record as a database: rejected coordinates by intent tier", async () => {

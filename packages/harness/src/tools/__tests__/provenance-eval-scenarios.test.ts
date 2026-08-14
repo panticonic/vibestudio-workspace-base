@@ -29,11 +29,17 @@ describe("provenance eval catalog", () => {
 
   it("names a real covering test wherever it claims one", () => {
     for (const scenario of PROVENANCE_EVAL_SCENARIOS) {
-      if (scenario.status !== "covered-by-unit-test") {
+      if (scenario.status === "scaffolded") {
         expect(scenario.coveringTest, scenario.question).toBeUndefined();
         continue;
       }
-      expect(scenario.coveringTest, scenario.question).toMatch(/\.test\.ts/u);
+      // A unit test is named by its file; a system test is named by its
+      // declaring suite and case, because the case is the unit that runs.
+      expect(scenario.coveringTest, scenario.question).toMatch(
+        scenario.status === "covered-by-unit-test"
+          ? /\.test\.ts/u
+          : /^skills\/system-testing\/tests\/[\w-]+\.ts › [\w-]+$/u
+      );
     }
   });
 });

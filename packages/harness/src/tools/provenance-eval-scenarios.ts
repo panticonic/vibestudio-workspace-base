@@ -4,18 +4,31 @@
  * Each canonical question has a normative budget — tool calls and rendered
  * provenance tokens — that the redesign claims to hit. This module is the
  * machine-readable statement of those claims plus the fixture shape each
- * scenario needs. The scenario *runner* is deliberately not implemented here:
- * this repository has no agentic-eval harness to host it (`packages/eval` is
- * the JavaScript execution sandbox, not an agent eval suite), so wiring these
- * into a runner is a separate, honest piece of work rather than a fake pass.
+ * scenario needs. There is still no runner that measures the *budgets*
+ * (`packages/eval` is the JavaScript execution sandbox, not an agent eval
+ * suite), so the token and call economics remain unmeasured.
+ *
+ * What does exist is correctness coverage on a real workspace authority:
+ * `skills/system-testing/tests/provenance-questions.ts` runs headless agents
+ * against the deployed engine. That distinction matters more than it looks.
+ * Every unit test below runs on the sql.js fallback and against mocked host
+ * dispatch, and both instruments stayed green while `vcs.walk`, `vcs.query`,
+ * and `vcs.search` were unreachable end-to-end and while the catalog view
+ * exceeded the deployed SQLite compound-SELECT limit. A `covered-by-unit-test`
+ * status is evidence about the mechanism, never about the surface.
  *
  * Status values say exactly how far each scenario got:
  *  - `scaffolded`: fixture shape and budget recorded here; no runner yet.
  *  - `covered-by-unit-test`: the mechanism's behavior is asserted by a named
  *    deterministic test, though not its token/call economics.
+ *  - `covered-by-system-test`: a headless agent exercises the surface end to
+ *    end on a real workspace authority; still not the budget.
  */
 
-export type ProvenanceScenarioStatus = "scaffolded" | "covered-by-unit-test";
+export type ProvenanceScenarioStatus =
+  | "scaffolded"
+  | "covered-by-unit-test"
+  | "covered-by-system-test";
 
 export interface ProvenanceEvalScenario {
   /** Canonical question identifier from the redesign (Q1–Q7). */
@@ -60,9 +73,9 @@ export const PROVENANCE_EVAL_SCENARIOS: readonly ProvenanceEvalScenario[] = [
       "the terminal entry is labeled as a human-statement boundary",
       "no content-addressed identity appears in the rendered block",
     ],
-    status: "covered-by-unit-test",
+    status: "covered-by-system-test",
     coveringTest:
-      "workers/workspace-source/semanticWorkspace.provenanceQuery.test.ts › answers Q2 with one causal spine",
+      "skills/system-testing/tests/provenance-questions.ts › provenance-recovers-the-originating-request",
   },
   {
     question: "Q3",
@@ -74,9 +87,9 @@ export const PROVENANCE_EVAL_SCENARIOS: readonly ProvenanceEvalScenario[] = [
       "every touched coordinate is named once, grouped, with a count",
       "the cohort is reachable in at most two calls from a cold start",
     ],
-    status: "covered-by-unit-test",
+    status: "covered-by-system-test",
     coveringTest:
-      "workers/workspace-source/semanticWorkspace.provenanceQuery.test.ts › answers Q3 with the cohort",
+      "skills/system-testing/tests/provenance-questions.ts › provenance-recovers-the-cohort-of-one-request",
   },
   {
     question: "Q4",
@@ -116,9 +129,9 @@ export const PROVENANCE_EVAL_SCENARIOS: readonly ProvenanceEvalScenario[] = [
       "the rejection and the intent that explains it are both recovered",
       "the agent consults rejections before repeating rejected work",
     ],
-    status: "covered-by-unit-test",
+    status: "covered-by-system-test",
     coveringTest:
-      "workers/workspace-source/semanticWorkspace.provenanceQuery.test.ts › answers Q6 with the rejection",
+      "skills/system-testing/tests/provenance-questions.ts › provenance-consults-rejections-before-repeating-them",
   },
   {
     question: "Q7",
@@ -130,9 +143,9 @@ export const PROVENANCE_EVAL_SCENARIOS: readonly ProvenanceEvalScenario[] = [
       "the subject is found from a hunch rather than an identity",
       "a search hit is a valid walk target (search → cause in two calls)",
     ],
-    status: "covered-by-unit-test",
+    status: "covered-by-system-test",
     coveringTest:
-      "workers/workspace-source/semanticWorkspace.provenanceQuery.test.ts › entry by content",
+      "skills/system-testing/tests/provenance-questions.ts › provenance-finds-a-subject-by-its-prose",
   },
   {
     question: "abduction",

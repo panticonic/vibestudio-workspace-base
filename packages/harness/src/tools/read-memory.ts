@@ -168,9 +168,18 @@ export function renderReadMemoryBlock(input: {
     repositoryId: input.result.repositoryId,
     fileId: input.result.fileId,
   };
+  const target = input.reference ? input.reference(fileRoot) : input.label;
   const footer = input.reference
-    ? `dig deeper · provenance({"target":"${input.reference(fileRoot)}","walk":"cause"}) · ${PROVENANCE_REF_FOOTER}`
-    : `dig deeper · provenance({"target":"${input.label}","walk":"cause"})`;
+    ? `dig deeper · provenance({"target":"${target}","walk":"cause"}) · ${PROVENANCE_REF_FOOTER}`
+    : `dig deeper · provenance({"target":"${target}","walk":"cause"})`;
+  // Negative evidence only when there is some: an unconditional hint is noise
+  // that teaches agents to skip the line, which is the opposite of the point.
+  const rejections =
+    input.result.rejectionCount > 0
+      ? `${input.result.rejectionCount} earlier attempt${
+          input.result.rejectionCount === 1 ? " at this file was" : "s at this file were"
+        } undone · provenance({"target":"${target}","walk":"rejections"})`
+      : null;
   const episodes = input.result.episodes
     .map((episode) =>
       prepareEpisode(
@@ -199,6 +208,7 @@ export function renderReadMemoryBlock(input: {
             ...input.result.history.map((entry) => historyText(entry, input.reference)),
           ]
         : []),
+      ...(rejections ? [rejections] : []),
       ...(dropped ? [PROVENANCE_TRUNCATION_MARKER] : []),
       footer,
     ].join("\n");

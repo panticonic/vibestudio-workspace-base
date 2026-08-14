@@ -40,6 +40,41 @@ Keep exact schema/effect assertions in `@workspace/testkit`. Use
 `validation: "harness"` only when the case is explicitly a deterministic or
 wire-protocol probe rather than a model-judgment task.
 
+## Grade the capability in two halves
+
+A validator that reads only the final message collapses two independent
+questions — did the mechanism deliver what the task needs, and did the agent use
+it — into one red result that tells you neither. It also drifts into demanding a
+phrasing, which grades the sentence rather than the behavior. Observed cases:
+an agent that reported "it was increased once, then reverted" failed a check
+requiring `already|previously` within eighty characters of `reverted`; an
+inventory that named two of three coordinates and their count failed a check
+requiring all three filenames, one of which only existed because a *setup* agent
+had happened to obey a naming instruction.
+
+Write each case as:
+
+- **the surface half, exact** — assert against the tool result: the walk kind
+  that ran, the evidence its rendered block carried, the number of coordinates a
+  cohort actually produced, the hit count a search returned, the absence of a
+  typed failure. This half is machine-checkable and its failure means the
+  mechanism broke.
+- **the agent half, deliberately loose** — one discriminating token that only an
+  agent which used the evidence could produce. Not a conjunction of three, and
+  never a required sentence shape.
+
+Order the checks so the sharpest diagnosis reports first: transport failure,
+then missing evidence, then the agent's use of it. A failing case should name
+which half broke, because "the mechanism is dead" and "the mechanism worked and
+the agent ignored it" are different findings with different owners — and the
+second is often the more valuable one.
+
+Two anti-patterns worth naming. Do not let the answer be reachable without the
+surface under test: if the reason is written into a file comment, an agent can
+grep its way to a pass and the case grades reading rather than recovery. And do
+not assert a boundary the system does not have — a case built on a premise the
+product deliberately rejects measures nothing, however green or red it goes.
+
 ## Isolate tests
 
 Ordinary tests use fresh headless contexts. Tests that create or publish

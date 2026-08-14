@@ -20,6 +20,26 @@ maintained as parallel prose constants.
   commit, incremental integration, exact-event publication, move/copy identity,
   counteractions, causal/blame walks, honest import boundaries (including mixed
   native-edited and untouched imported spans), freshness, and idempotency.
+- `provenance-questions`: the question-shaped surfaces — recovering an
+  originating request, the cohort of one request, negative evidence before
+  repeating it, entry by recorded prose, set-shaped questions, the visibility
+  boundary, and the flagship: recovering a constraint nobody ever wrote down.
+  These are the only coverage that observes walks, `prov_*` queries, and search
+  under the deployed SQLite engine and across the host↔authority dispatch seam;
+  the unit suites run on the sql.js fallback and cannot fail on either. Each
+  case also asserts that a surface refused rather than died, because a surface
+  that always fails closed reads exactly like a healthy one.
+
+  Two fixture rules make these cases mean what they claim. The evidence exists
+  only in the record — intents, commit messages, undone changes, trajectory
+  messages — and never in file content, so an agent cannot grep its way to a
+  pass; and the flagship's constraint is never stated anywhere, so recovering
+  it is abduction rather than retrieval. A provenance fixture that writes the
+  answer into a comment grades reading, not recovery.
+
+  Known gap: no scenario yet produces a merge coordinate resolved `ours`, which
+  the redesign counts as first-class negative evidence alongside counteractions
+  and reverts.
 - `git-interop`: fresh external status, credential selection, canonical
   imports and commit mappings that require
   managed edit → semantic commit → protected publication → Git export/push;

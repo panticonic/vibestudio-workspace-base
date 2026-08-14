@@ -43,7 +43,8 @@ intent and bounded, reusable continuations.
 | Walk stops early with a boundary label | Correct behavior — evidence ends there |
 | `query` refused at `validation` | The statement is not one SELECT over `prov_*`; read `prov_schema` |
 | `query` refused at `plan` | Missing index or missing join predicate on the named relation |
-| `query` refused at `execution` | The plan streamed past the scan budget; narrow the filter |
+| `query` refused at `execution` with `scan-budget` | The plan streamed past the scan budget; narrow the filter |
+| `query` refused at `execution` with `engine-error` | The deployed SQLite rejected the statement on a limit of its own; the message quotes it. Rewrite the statement — this is never an authorization problem, and never a reason to stop |
 | `search` returns `indexMode: "scan"` | FTS5 is unavailable in this build; ranking is degraded, results are not |
 | Search misses an obviously indexed phrase | Index maintenance gap — rebuild and fix the writing transaction |
 | Confusing result | Typed summary or UI navigation problem |

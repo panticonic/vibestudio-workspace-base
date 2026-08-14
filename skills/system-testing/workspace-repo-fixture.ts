@@ -43,6 +43,7 @@ export const SIZABLE_HISTORY_FIXTURE_REVISIONS = 36;
 export type WorkspaceRepoCreationScope =
   | { kind: "content"; section: "projects" }
   | { kind: "historical-content"; section: "projects" }
+  | { kind: "provenance-record"; section: "projects" }
   | { kind: "buildable-package"; section: "packages" }
   | { kind: "buildable-extension"; section: "extensions" }
   | { kind: "buildable-app"; section: "apps" }
@@ -275,6 +276,15 @@ export class WorkspaceRepoFixtureLifecycle {
           expectedWorkingHead = { kind: "event", eventId: next.eventId };
         }
       }
+      if (this.fixture.kind === "provenance-record") {
+        await this.seedProvenanceRecord({
+          contextId,
+          repositoryId,
+          repoPath,
+          storeFiles,
+          head: { kind: "event" as const, eventId: imported.eventId },
+        });
+      }
       return {
         ...this.fixture,
         testName: this.testName,
@@ -310,6 +320,91 @@ export class WorkspaceRepoFixtureLifecycle {
       }
       throw setupError;
     }
+  }
+
+  /**
+   * Seed an exact provenance record: the shape the question is about, not an
+   * agent's improvisation of it.
+   *
+   * Building this record by prompting setup agents made the record itself vary
+   * per run — filenames, intent wording, and commit granularity were whatever
+   * the setup model chose — so scenarios ended up grading a setup agent's
+   * compliance instead of the reader's capability, and failed intermittently
+   * for reasons no product change could fix. Seeding it through the public
+   * semantic VCS instead makes every run identical, cuts a four-turn setup to
+   * none, and lets a validator assert against known intents.
+   *
+   * The record deliberately contains: one work unit touching three coordinates
+   * (a cohort with real breadth), an attempt that was undone with its reason on
+   * the record (negative evidence, as a true counteraction rather than an
+   * overwrite), and unrelated work carrying distinct prose (so content search
+   * has to discriminate rather than return the only document).
+   */
+  private async seedProvenanceRecord(input: {
+    contextId: string;
+    repositoryId: string;
+    repoPath: string;
+    storeFiles: (
+      files: Array<{ path: string; content: string }>
+    ) => Promise<Array<{ path: string; contentHash: string; mode: number }>>;
+    head: { kind: "event"; eventId: string };
+  }): Promise<void> {
+    const { contextId, repositoryId, repoPath, storeFiles } = input;
+    let head = input.head;
+    const revise = async (
+      label: string,
+      revision: PROVENANCE_RECORD_REVISION
+    ): Promise<{ eventId: string; workUnitId: string }> => {
+      const files = await storeFiles(
+        [...revision.files].sort((left, right) =>
+          left.path < right.path ? -1 : left.path > right.path ? 1 : 0
+        )
+      );
+      const next = await this.port.vcs.importSnapshot({
+        contextId,
+        commandId: this.command(label),
+        expectedWorkingHead: head,
+        intentSummary: revision.intent,
+        source: {
+          kind: "generated" as const,
+          uri: `system-test://${this.testName}/${this.repoName}/provenance`,
+          snapshotRevision: `fixture:provenance:${label}:${sha256HexSyncText(
+            JSON.stringify({ repoPath, files })
+          )}`,
+        },
+        repositories: [{ repositoryId, repoPath, files }],
+        message: revision.message,
+      });
+      head = { kind: "event", eventId: next.eventId };
+      return { eventId: next.eventId, workUnitId: next.workUnitId };
+    };
+
+    await revise("policy", PROVENANCE_RECORD_REVISIONS.policy);
+    const raised = await revise("raise", PROVENANCE_RECORD_REVISIONS.raise);
+    await revise("unrelated", PROVENANCE_RECORD_REVISIONS.unrelated);
+
+    // The undoing is a real counteraction, not another overwrite: `rejections`
+    // exists to surface work that was tried and undone, and an overwrite records
+    // no such relationship.
+    const raisedChangeIds = await this.authoredChangeIds(raised.workUnitId);
+    if (raisedChangeIds.length === 0) {
+      throw new Error("Provenance fixture could not identify the change to counteract");
+    }
+    // Every mutation names the exact observed working state, fixtures included.
+    const observed = await this.port.vcs.status({ contextId });
+    const reverted = await this.port.vcs.revert({
+      contextId,
+      commandId: this.command("undo-raise"),
+      expectedWorkingHead: observed.workingHead,
+      intentSummary: PROVENANCE_RECORD_UNDO_INTENT,
+      changeIds: raisedChangeIds,
+    });
+    await this.port.vcs.commit({
+      contextId,
+      commandId: this.command("undo-commit"),
+      expectedWorkingHead: reverted.workingHead,
+      message: PROVENANCE_RECORD_UNDO_MESSAGE,
+    });
   }
 
   async cleanup(
@@ -928,6 +1023,14 @@ function repositorySeedFiles(
   if (fixture.kind === "historical-content") {
     return historicalPolicyFiles(0);
   }
+  if (fixture.kind === "provenance-record") {
+    return [
+      {
+        path: "README.md",
+        content: `# ${repoName}\n\nDisposable system-test project.\n`,
+      },
+    ];
+  }
   if (fixture.kind === "buildable-extension") {
     return buildableExtensionFiles(repoName);
   }
@@ -1264,6 +1367,59 @@ function trustedUnitSkillFile(
     ].join("\n"),
   };
 }
+
+/**
+ * The exact record every provenance-question scenario reads. Three short
+ * timeouts recorded as one piece of work, one long one that was tried and
+ * undone with its reason, and unrelated work that gives content search
+ * something to discriminate against.
+ */
+interface ProvenanceRecordRevision {
+  files: Array<{ path: string; content: string }>;
+  intent: string;
+  message: string;
+}
+type PROVENANCE_RECORD_REVISION = ProvenanceRecordRevision;
+
+const PROVENANCE_RECORD_UNDO_INTENT =
+  "Put the backoff ceiling back to 30 seconds: staging cut the link before the retry ever fired";
+const PROVENANCE_RECORD_UNDO_MESSAGE =
+  "Undo the 300-second backoff ceiling after staging cut the link mid-wait";
+
+const PROVENANCE_RECORD_REVISIONS: Record<
+  "policy" | "raise" | "unrelated",
+  ProvenanceRecordRevision
+> = {
+  policy: {
+    files: [
+      { path: "src/retry-policy.ts", content: "export const backoffCeilingSeconds = 30;\n" },
+      { path: "src/socket-policy.ts", content: "export const pingIntervalSeconds = 20;\n" },
+      { path: "src/upload-policy.ts", content: "export const chunkSeconds = 25;\n" },
+    ],
+    intent:
+      "Cap the retry backoff at 30 seconds, ping the socket every 20, and size upload chunks to finish inside 25",
+    message: "Apply the short-timeout policy across retry, socket, and upload paths",
+  },
+  raise: {
+    files: [
+      { path: "src/retry-policy.ts", content: "export const backoffCeilingSeconds = 300;\n" },
+      { path: "src/socket-policy.ts", content: "export const pingIntervalSeconds = 20;\n" },
+      { path: "src/upload-policy.ts", content: "export const chunkSeconds = 25;\n" },
+    ],
+    intent: "Raise the backoff ceiling to 300 seconds to cut reconnect churn",
+    message: "Raise the backoff ceiling to 300 seconds",
+  },
+  unrelated: {
+    files: [
+      { path: "src/retry-policy.ts", content: "export const backoffCeilingSeconds = 300;\n" },
+      { path: "src/socket-policy.ts", content: "export const pingIntervalSeconds = 20;\n" },
+      { path: "src/upload-policy.ts", content: "export const chunkSeconds = 25;\n" },
+      { path: "src/cache-policy.ts", content: "export const cacheTtlSeconds = 900;\n" },
+    ],
+    intent: "Cache the upstream feed for 900 seconds because it refreshes quarter-hourly",
+    message: "Cache the upstream feed for a quarter hour",
+  },
+};
 
 interface HistoricalContentRevision {
   revision: number;

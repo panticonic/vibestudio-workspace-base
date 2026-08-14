@@ -59,6 +59,16 @@ export interface ProvenanceBlockInput {
 
 const quoted = (value: string): string => JSON.stringify(compactText(value, 160));
 
+/**
+ * An incidental mention of prose is rent, so it compacts hard. The prose a
+ * surface was *asked for* — the originating statement, an inspected message —
+ * is the answer, and compacting it to a mention is how a walk can reach the
+ * right subject and still fail the question. The shared render budget remains
+ * the real ceiling.
+ */
+const PROSE_LIMIT = 1_200;
+const prose = (value: string): string => JSON.stringify(compactText(value, PROSE_LIMIT));
+
 function countedPreview(total: number, preview: number, label: string): string {
   const plural = label.endsWith("y") ? `${label.slice(0, -1)}ies` : `${label}s`;
   return `${total} ${total === 1 ? label : plural} (${preview} in preview)`;
@@ -283,7 +293,7 @@ function inspectedNodeSummary(
         `role ${value.role}`,
         `status ${value.status}`,
         value.senderRef ? `sender ${value.senderRef.kind}` : null,
-        text ? `text ${quoted(text)}` : null,
+        text ? `text ${prose(text)}` : null,
       ]
         .filter(Boolean)
         .join(" · ");
@@ -367,17 +377,40 @@ export function renderProvenanceBlock(input: ProvenanceBlockInput): string | nul
       })}`
     );
   }
-  if (streams.adjacency) {
-    for (const edge of input.result.edges) {
-      lines.push(
-        `  ${subjectLabel(edge.from, input.reference)} —${edge.kind}→ ${subjectLabel(edge.to, input.reference)}`
-      );
-    }
-  }
+  if (streams.adjacency) lines.push(...renderAdjacency(input.result.edges, input.reference));
   return renderWithinBudget({
     header: `prov · ${input.label} · ${pageLabel}`,
     lines,
     footer: input.reference ? PROVENANCE_REF_FOOTER : undefined,
+  });
+}
+
+/**
+ * §2.4's law — edges not on the spine are counted, not listed — applied to the
+ * single-hop fallback, which was exempt from it. A commit event neighbours every
+ * repository in the workspace, so an agent that lands there pages through dozens
+ * of identical `contains-repository` lines, none of which is ever the answer.
+ * A relation with several targets renders once with a count and one ref to
+ * follow; a relation with a single target still renders in full.
+ */
+const ADJACENCY_PREVIEW = 2;
+
+function renderAdjacency(
+  edges: CanonicalProvenanceResult["edges"],
+  reference?: NodeReference
+): string[] {
+  const byKind = new Map<string, CanonicalProvenanceResult["edges"][number][]>();
+  for (const edge of edges) byKind.set(edge.kind, [...(byKind.get(edge.kind) ?? []), edge]);
+  return [...byKind].flatMap(([kind, group]) => {
+    const shown = group.slice(0, group.length > ADJACENCY_PREVIEW + 1 ? ADJACENCY_PREVIEW : group.length);
+    const lines = shown.map(
+      (edge) =>
+        `  ${subjectLabel(edge.from, reference)} —${kind}→ ${subjectLabel(edge.to, reference)}`
+    );
+    const remainder = group.length - shown.length;
+    return remainder > 0
+      ? [...lines, `  … and ${remainder} more —${kind}→ ${group[0]!.to.kind}`]
+      : lines;
   });
 }
 
@@ -422,12 +455,26 @@ export function renderWalkBlock(input: {
       lines.push(
         `${indent}${intent}${entry.label}${detail} · ${input.reference(entry.node)}${boundary}`
       );
+      if (entry.statement) {
+        lines.push(`${indent}  asked by ${entry.statement.sender}: ${prose(entry.statement.text)}`);
+      }
     }
   }
   for (const omission of result.omitted) {
     lines.push(`  … and ${omission.count} ${omission.label}`);
   }
   for (const note of result.notes) lines.push(`  note · ${note}`);
+  // Measured abduction failure: agents reach the rejections, read each one as a
+  // fact about the coordinate it was recorded at, and repeat the rejected work
+  // under another name. The orientation skill teaches otherwise, but an agent
+  // doing ordinary work never opens it — so the reading rule travels with the
+  // evidence. This is a fixed line, not an interpretation of it.
+  if (result.walk === "rejections" && result.entries.length > 0) {
+    lines.push(
+      "  reading · a rejection is evidence about a property, not about a coordinate — " +
+        "ask what your change shares with what was undone here before repeating it"
+    );
+  }
   if (result.nextCursor && input.continuation) {
     lines.push(`  more → ${input.continuation(result.nextCursor)}`);
   }

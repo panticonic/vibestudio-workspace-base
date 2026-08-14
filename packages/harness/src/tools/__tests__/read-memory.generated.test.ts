@@ -40,6 +40,7 @@ function attached(overrides: Partial<Extract<VcsReadMemoryResult, { status: "att
     coordinateKind: "utf16" as const,
     episodes: [],
     history: [],
+    rejectionCount: 0,
     truncated: false,
     ...overrides,
   } satisfies Extract<VcsReadMemoryResult, { status: "attached" }>;
@@ -264,5 +265,29 @@ describe("generated read-memory renderer corpus", () => {
     expect(output).toContain('yours · stated: "Keep the invariant explicit"');
     expect(output).not.toContain("counteracts");
     expect(output).not.toContain("committed as");
+  });
+});
+
+describe("negative evidence on the ordinary read path", () => {
+  const episodes = [
+    episode(0, {
+      ranges: [{ start: 0, end: 9 }],
+      intent: { tier: "stated", text: "Cap the export batch size at 64" },
+    }),
+  ];
+
+  it("says so when the coordinate carries rejected work, with the move to make", () => {
+    // An agent has to suspect a rejection exists before it can ask for one, so
+    // the suspicion travels with the bytes it is already reading.
+    const rendered = render(attached({ episodes, rejectionCount: 2 })) ?? "";
+    expect(rendered).toContain("2 earlier attempts at this file were undone");
+    expect(rendered).toContain('"walk":"rejections"');
+  });
+
+  it("stays silent when there is nothing to warn about", () => {
+    // An unconditional hint is noise, and noise teaches agents to skip the line.
+    const rendered = render(attached({ episodes, rejectionCount: 0 })) ?? "";
+    expect(rendered).not.toContain("undone");
+    expect(rendered).not.toContain('"walk":"rejections"');
   });
 });

@@ -1,7 +1,10 @@
 // Builtin semantic-authority tests.
 import { describe, expect, it } from "vitest";
 import { createInMemorySql } from "@vibestudio/durable/test-utils";
-import { createSemanticVcsSchema } from "./semanticVcsSchema.js";
+import {
+  createSemanticVcsSchema,
+  createTrajectoryMirrorSchema,
+} from "./semanticVcsSchema.js";
 import { SemanticWorkspace, type SemanticDispatchRequest } from "./semanticWorkspace.js";
 import { SemanticVcsStore } from "./semanticVcsStore.js";
 
@@ -20,16 +23,7 @@ describe("SemanticWorkspace repository creation", () => {
   it("authors the repository identity and all initial files in one lifecycle work unit", async () => {
     const sql = await createInMemorySql();
     createSemanticVcsSchema(sql);
-    sql.exec(`
-      CREATE TABLE trajectory_invocations (
-        log_id TEXT NOT NULL,
-        head TEXT NOT NULL,
-        invocation_id TEXT NOT NULL,
-        status TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (log_id, head, invocation_id)
-      )
-    `);
+    createTrajectoryMirrorSchema(sql);
     sql.exec(
       `INSERT INTO trajectory_invocations
        (log_id, head, invocation_id, status, updated_at)

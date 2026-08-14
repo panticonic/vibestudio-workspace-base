@@ -4096,11 +4096,7 @@ export class SemanticWorkspace {
       `repo:${this.externalSourceIdentity(input.oldSource)}`,
       `repo:${this.externalSourceIdentity(input.newSource)}`,
     ].sort(compareUtf16CodeUnits);
-    const evidence = this.workUnitEvidence(
-      input.contextId,
-      input.commandId,
-      input.intentSummary ?? null
-    );
+    const evidence = this.workUnitEvidence(input.contextId, input.commandId);
     const workUnitIdValue = workUnitIdentity({
       commandId: input.commandId,
       kind: "external-unapplied",
@@ -4639,12 +4635,37 @@ export class SemanticWorkspace {
     });
   }
 
+  /**
+   * The requester's captured words for a work unit, independent of which rung
+   * the ladder resolved to. When the author stated an intent the resolved text
+   * is that summary; the statement it summarized is what abduction needs.
+   */
+  private statementForWorkUnit(
+    workUnitId: string
+  ): { text: string; sender: string } | null {
+    const row = this.deps.sql
+      .exec(
+        `SELECT trigger_excerpt, trigger_sender_json
+           FROM gad_work_units WHERE work_unit_id = ? LIMIT 1`,
+        workUnitId
+      )
+      .toArray()[0] as Row | undefined;
+    if (!row || row["trigger_excerpt"] == null || row["trigger_sender_json"] == null) return null;
+    const sender = trajectorySenderRef(JSON.parse(String(row["trigger_sender_json"])));
+    const text = boundedMemoryText(String(row["trigger_excerpt"]), 2_000);
+    return text && sender ? { text, sender: sender.id } : null;
+  }
+
   private workUnitEvidence(
     contextId: string,
-    commandId: string,
-    intentSummary: string | null
+    commandId: string
   ): Pick<WorkUnitRecord, "authorContextId" | "triggerEvidence"> {
-    if (intentSummary != null) return { authorContextId: contextId, triggerEvidence: null };
+    // Trigger evidence is captured whether or not the author stated an intent.
+    // Resolution is unaffected — `resolveIntent` still prefers the stated rung,
+    // so the ladder and the persisted resolved columns are bit-identical. What
+    // changes is that the requester's own words survive: an author's summary is
+    // an interpretation, and discarding the statement it interpreted destroys
+    // the only evidence abduction can actually run on.
     const cause = this.readMemoryCause(commandId);
     const text =
       cause?.["triggerText"] == null
@@ -5339,11 +5360,18 @@ export class SemanticWorkspace {
       .toArray()[0] as Row | undefined;
     if (!work) return { entries, omitted: [], notes };
     const workKind = String(work["kind"]);
+    const workIntent = this.intentForWorkUnit(origin.workUnitId);
+    const workStatement = this.statementForWorkUnit(origin.workUnitId);
     entries.push({
       node: { kind: "work-unit", workUnitId: origin.workUnitId },
       label: `work unit · ${workKind}`,
       depth,
-      intent: this.intentForWorkUnit(origin.workUnitId),
+      intent: workIntent,
+      // Only when it adds evidence: at trigger tier the resolved text already
+      // is the statement, so repeating it would be rent without information.
+      ...(workStatement && workIntent.tier !== "trigger"
+        ? { statement: workStatement }
+        : {}),
       ...(workKind === "import" ? { boundary: "import-snapshot" as const } : {}),
       ...(workKind === "external-unapplied" ? { boundary: "external-delta" as const } : {}),
     });
@@ -5423,11 +5451,20 @@ export class SemanticWorkspace {
         .map((block) => String(block["content"] ?? ""))
         .join("\n");
       const human = senderKind === "user" || (senderKind === null && role === "user");
+      const statementText = human ? boundedMemoryText(text, 2_000) : null;
       entries.push({
         node: message,
         label: `message · ${role}${senderKind ? ` from ${senderKind}` : ""}`,
         depth,
-        ...(text ? { detail: boundedMemoryText(text, 600) ?? "" } : {}),
+        ...(!human && boundedMemoryText(text, 600)
+          ? { detail: boundedMemoryText(text, 600)! }
+          : {}),
+        // The originating statement is the answer this walk exists to deliver,
+        // not an incidental mention, so it travels as a statement rather than
+        // as a compacted detail.
+        ...(statementText
+          ? { statement: { text: statementText, sender: senderKind ?? role ?? "requester" } }
+          : {}),
         ...(human
           ? { boundary: "human-statement" as const }
           : senderKind === "agent"
@@ -5453,7 +5490,70 @@ export class SemanticWorkspace {
    * patterns across a cohort, not from single edits, so this renders the whole
    * neighborhood of one scope as a grouped manifest.
    */
+  /**
+   * Work units a subject scopes directly, or null when the subject is an
+   * ordinary artifact that must be resolved through its authoring work unit.
+   */
+  private cohortScopeSeed(subject: Row): string[] | null {
+    const kind = String(subject["kind"] ?? "");
+    if (kind === "event") {
+      return (
+        this.deps.sql
+          .exec(
+            `SELECT DISTINCT app.work_unit_id AS work_unit_id
+               FROM gad_workspace_event_applications link
+               JOIN gad_work_unit_applications app ON app.application_id = link.application_id
+              WHERE link.event_id = ?`,
+            String(subject["eventId"])
+          )
+          .toArray() as Row[]
+      ).map((row) => String(row["work_unit_id"]));
+    }
+    if (kind === "trajectory-turn") {
+      return (
+        this.deps.sql
+          .exec(
+            `SELECT DISTINCT work.work_unit_id AS work_unit_id
+               FROM trajectory_invocations invocation
+               JOIN vcs_command_journal command
+                 ON command.cause_log_id = invocation.log_id
+                AND command.cause_head = invocation.head
+                AND command.cause_invocation_id = invocation.invocation_id
+               JOIN gad_work_units work ON work.command_id = command.command_id
+              WHERE invocation.log_id = ? AND invocation.head = ? AND invocation.turn_id = ?`,
+            String(subject["logId"]),
+            String(subject["head"]),
+            String(subject["turnId"])
+          )
+          .toArray() as Row[]
+      ).map((row) => String(row["work_unit_id"]));
+    }
+    if (kind === "command") {
+      return (
+        this.deps.sql
+          .exec(
+            `SELECT work_unit_id FROM gad_work_units WHERE command_id = ?`,
+            String(subject["commandId"])
+          )
+          .toArray() as Row[]
+      ).map((row) => String(row["work_unit_id"]));
+    }
+    return null;
+  }
+
   private cohortWalk(subject: Row, scope: "work-unit" | "command" | "turn"): WalkPage {
+    const notes: string[] = [];
+    // A cohort subject may itself *be* a scope. A commit event carries a whole
+    // application chain and a turn carries a whole request, so resolving either
+    // through one representative work unit answers a narrower question than the
+    // caller asked. Seed directly from the scope when the subject names one.
+    const seeded = this.cohortScopeSeed(subject);
+    if (seeded) {
+      if (seeded.length === 0) {
+        notes.push("This subject carries no authored work in your visible basis.");
+      }
+      return this.cohortManifest(seeded, notes);
+    }
     const origin = this.walkOriginWorkUnit(subject);
     if (!origin) {
       return {
@@ -5469,7 +5569,6 @@ export class SemanticWorkspace {
         notes: [],
       };
     }
-    const notes: string[] = [];
     let workUnitIds = [origin.workUnitId];
     if (scope !== "work-unit") {
       const commandRow = this.deps.sql
@@ -5513,6 +5612,11 @@ export class SemanticWorkspace {
         }
       }
     }
+    return this.cohortManifest(workUnitIds, notes);
+  }
+
+  /** The grouped manifest one scope's work units produce, whatever seeded them. */
+  private cohortManifest(workUnitIds: readonly string[], notes: string[]): WalkPage {
     const visible = this.visibleWorkUnitIds(workUnitIds);
     const omitted: Row[] = [];
     if (visible.size < workUnitIds.length) {
@@ -5803,34 +5907,83 @@ export class SemanticWorkspace {
    */
   private search(input: VcsSearchInput): Row {
     this.materializeVisibilityBasis(input.visibilityContextIds ?? []);
-    const mode = provenanceSearchIndexMode(this.deps.sql) ?? "plain";
     const limit = Math.min(input.limit, 50);
-    const rows =
-      mode === "fts"
-        ? (this.deps.sql
-            .exec(
-              `SELECT subject_kind, subject_id, log_id, head, label,
-                      snippet(prov_search_index, 0, '', '', '…', 24) AS excerpt
-                 FROM prov_search
-                 JOIN prov_search_index ON prov_search_index.rowid = prov_search.rowid
-                WHERE prov_search_index MATCH ?
-                ORDER BY bm25(prov_search_index)
-                LIMIT ?`,
-              ftsMatchExpression(input.text),
-              limit + 1
-            )
-            .toArray() as Row[])
-        : (this.deps.sql
-            .exec(
-              `SELECT subject_kind, subject_id, log_id, head, label,
-                      substr(text, 1, 400) AS excerpt
-                 FROM prov_search
-                WHERE lower(text) LIKE '%' || lower(?) || '%'
-                LIMIT ?`,
-              input.text,
-              limit + 1
-            )
-            .toArray() as Row[]);
+    /**
+     * The unranked fallback matches every term rather than the whole phrase.
+     * A literal substring match means "relay payload limits" finds nothing
+     * while "relay" finds everything — degrading *results*, not just ranking,
+     * which is the one thing the fallback is not allowed to do.
+     */
+    const terms = input.text
+      .split(/\s+/u)
+      .map((term) => term.trim())
+      .filter((term) => term.length > 0)
+      .slice(0, 8);
+    const scan = (): Row[] => {
+      const predicate = (terms.length > 0 ? terms : [input.text])
+        .map(() => `lower(text) LIKE '%' || lower(?) || '%'`)
+        .join(" AND ");
+      return this.deps.sql
+        .exec(
+          `SELECT subject_kind, subject_id, log_id, head, label,
+                  substr(text, 1, 400) AS excerpt
+             FROM prov_search
+            WHERE ${predicate}
+            LIMIT ?`,
+          ...(terms.length > 0 ? terms : [input.text]),
+          limit + 1
+        )
+        .toArray() as Row[];
+    };
+    /**
+     * Ranked search reads the index directly, because `MATCH`, `bm25`, and
+     * `snippet` all need the FTS table by name — not a view over it, and not
+     * an alias for it — and re-derives visibility by existence in `prov_search`
+     * rather than restating the predicate, so there stays one definition of
+     * what a caller may see, as §2.2.2 requires.
+     */
+    const ranked = (): Row[] =>
+      this.deps.sql
+        .exec(
+          `SELECT prov_search_index.subject_kind AS subject_kind,
+                  prov_search_index.subject_id AS subject_id,
+                  prov_search_index.log_id AS log_id,
+                  prov_search_index.head AS head,
+                  prov_search_index.label AS label,
+                  snippet(prov_search_index, 0, '', '', '…', 24) AS excerpt
+             FROM prov_search_index
+            WHERE prov_search_index MATCH ?
+              AND EXISTS (
+                SELECT 1 FROM prov_search visible
+                 WHERE visible.subject_kind = prov_search_index.subject_kind
+                   AND visible.subject_id = prov_search_index.subject_id
+                   AND visible.log_id IS prov_search_index.log_id
+                   AND visible.head IS prov_search_index.head
+              )
+            ORDER BY bm25(prov_search_index)
+            LIMIT ?`,
+          ftsMatchExpression(input.text),
+          limit + 1
+        )
+        .toArray() as Row[];
+    let mode = provenanceSearchIndexMode(this.deps.sql) ?? "plain";
+    let rows: Row[];
+    if (mode === "fts") {
+      try {
+        rows = ranked();
+      } catch (error) {
+        // Ranking is an optimization; entry by content is the capability. A
+        // ranked path that fails on the deployed engine must degrade to the
+        // scan and say so, not make the question unanswerable.
+        console.warn("[ProvenanceSearch] ranked search unavailable; falling back to scan", {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        mode = "plain";
+        rows = scan();
+      }
+    } else {
+      rows = scan();
+    }
     const hits = rows.slice(0, limit).map((row) => {
       const subjectKind = String(row["subject_kind"]);
       const subjectId = String(row["subject_id"]);
@@ -6131,11 +6284,56 @@ export class SemanticWorkspace {
       coordinateKind: "utf16",
       episodes,
       history: historyRows.slice(0, input.historyLimit).map(({ entry }) => entry),
+      rejectionCount: this.rejectionCountForFile(input.contextId, point.state.fileId),
       truncated:
         blamed["nextCursor"] != null ||
         grouped.size > input.episodeLimit ||
         historyRows.length > input.historyLimit,
     };
+  }
+
+  /**
+   * How much rejected work this coordinate carries, for the caller.
+   *
+   * A rejection is the strongest axiom evidence the record holds and the
+   * hardest to reach: an agent has to suspect it exists before it can ask. It
+   * is cheap to count here, on the path every reader already takes, so the
+   * suspicion arrives with the bytes rather than having to precede them.
+   */
+  private rejectionCountForFile(contextId: string, fileId: string): number {
+    // Almost every coordinate carries no rejected work, and this runs on the
+    // ordinary read path, so the indexed existence check comes first: only a
+    // coordinate that actually has counteractions pays for the visibility basis
+    // the parity invariant requires.
+    const any = this.deps.sql
+      .exec(
+        `SELECT 1
+           FROM gad_change_coordinates coordinate
+           JOIN gad_change_counteractions counteraction
+             ON counteraction.counteracted_change_id = coordinate.change_id
+          WHERE coordinate.file_id = ? LIMIT 1`,
+        fileId
+      )
+      .toArray();
+    if (any.length === 0) return 0;
+    this.materializeVisibilityBasis([contextId]);
+    const rows = this.deps.sql
+      .exec(
+        `SELECT counteracting.work_unit_id AS counteracting_work_unit_id
+           FROM gad_change_coordinates coordinate
+           JOIN gad_change_counteractions counteraction
+             ON counteraction.counteracted_change_id = coordinate.change_id
+           JOIN gad_changes counteracting ON counteracting.change_id = counteraction.change_id
+          WHERE coordinate.file_id = ?
+          LIMIT ?`,
+        fileId,
+        MAX_REJECTION_ROWS
+      )
+      .toArray() as Row[];
+    const visible = this.visibleWorkUnitIds(
+      rows.map((row) => String(row["counteracting_work_unit_id"]))
+    );
+    return rows.filter((row) => visible.has(String(row["counteracting_work_unit_id"]))).length;
   }
 
   private readMemoryEpisode(
@@ -6876,7 +7074,7 @@ export class SemanticWorkspace {
     const basisRoot = this.deps.store.stateRoot(basis);
     const createdAt = this.deps.now();
     const contentIntegrity = this.contentIntegrityForMutation(basis, draft, contextIntegrity);
-    const evidence = this.workUnitEvidence(input.contextId, commandId, draft.intentSummary);
+    const evidence = this.workUnitEvidence(input.contextId, commandId);
     const workUnitIdValue = workUnitIdentity({
       commandId,
       kind: draft.kind,

@@ -56,7 +56,7 @@
     },
     {
       "path": "references/querying-provenance.md",
-      "sha256": "59007807f6b83ae9c0ff546189cf810ec11ccbd7ca035e44210654925fb4ae09"
+      "sha256": "50e51faa404d8f079215161a46579753889777e4cac162f33e3a2863de35a498"
     },
     {
       "path": "references/revert-counteractions.md",
@@ -75,5 +75,5 @@
       "sha256": "1b8a8b5b185b47039733272129292f2d6442205bb02d4b07e328790795eb77cb"
     }
   ],
-  "packageDigest": "55f0a91336123d39b286cb71b58d2791528102a41c67c99447141dd51fef5094"
+  "packageDigest": "5043e1e2c9ca2823311e92588f94ef2bcc2bc9b1274fbad3b19df089fbc0189d"
 }

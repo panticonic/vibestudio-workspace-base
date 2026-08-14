@@ -65,13 +65,16 @@ const provenanceSchema = Type.Object(
     scope: Type.Optional(
       Type.Union(
         [Type.Literal("work-unit"), Type.Literal("command"), Type.Literal("turn")],
-        { description: 'Cohort breadth; defaults to "command".' }
+        {
+          description:
+            'Cohort breadth; defaults to "turn", the unit that matches one request. Narrow to "command" or "work-unit" when the turn is too broad.',
+        }
       )
     ),
     query: Type.Optional(
       Type.String({
         description:
-          "One read-only SELECT over the prov_* views. Start from `SELECT relation, column_name, meaning FROM prov_schema` to discover the contract. A returned @ref may be used as a value; trusted code binds it to the exact identity.",
+          "One read-only SELECT over the prov_* views. Start from `SELECT relation, meaning, columns FROM prov_schema` — one row per relation, so the whole contract arrives in a single page. A returned @ref may be used as a value; trusted code binds it to the exact identity.",
       })
     ),
     limit: Type.Optional(
@@ -560,7 +563,9 @@ export function createProvenanceTool(
             contextId: contextId(),
             walk: walkKind,
             subject: resolved.root,
-            scope: scope ?? "command",
+            // The contract owns the default breadth; restating it here silently
+            // pinned every cohort to one tool call's worth of work.
+            scope: scope ?? "turn",
             ...(walkBasis?.cursor ? { cursor: walkBasis.cursor } : {}),
             limit: Math.min(input.limit ?? WALK_ENTRY_LIMIT, 200),
           });

@@ -415,7 +415,10 @@ function requireHistoricalEditedFileContext(result: TestExecutionResult) {
     }
     const text = protocolText(call);
     if (call.name === "provenance") {
-      return call.arguments?.["target"] === currentPath && /\bchange:\S+/u.test(text);
+      // Subjects render as a kind plus a compact ref, never as a raw
+      // content-addressed identity, so the evidence of a resolved subject is
+      // the ref grammar rather than a spelled-out change id.
+      return call.arguments?.["target"] === currentPath && /@r[0-9a-z]+-[0-9a-f]{4}/u.test(text);
     }
     if (call.name !== "memory_recall") return false;
     const envelope = isRecord(call.execution.result) ? call.execution.result : null;

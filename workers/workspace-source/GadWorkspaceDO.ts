@@ -36,6 +36,12 @@ import {
   type ChannelEnvelopePageRequest,
 } from "@vibestudio/shared/channelEnvelopePaging";
 import type {
+  AgentDirectoryEntry,
+  AgentDirectoryListing,
+  ChannelDescription,
+  DescribeChannelsInput,
+  ListAgentDirectoryInput,
+  SearchAgentDirectoryInput,
   AgentHealthInspection,
   ChannelEnvelopeInspection,
   StoredChannelMessageTypeDefinition,
@@ -58,6 +64,12 @@ import type {
   GadJsonRecord,
 } from "@vibestudio/service-schemas/workspaceSource";
 export type {
+  AgentDirectoryEntry,
+  AgentDirectoryListing,
+  ChannelDescription,
+  DescribeChannelsInput,
+  ListAgentDirectoryInput,
+  SearchAgentDirectoryInput,
   AgentHealthInspection,
   ChannelEnvelopeInspection,
   StoredChannelMessageTypeDefinition,
@@ -126,7 +138,11 @@ import {
   canonicalJson,
   stateHashForRoot,
 } from "@vibestudio/content-addressing";
-import { createSemanticVcsSchema, SEMANTIC_VCS_REQUIRED_TABLES } from "./semanticVcsSchema.js";
+import {
+  createSemanticVcsSchema,
+  createTrajectoryMirrorSchema,
+  SEMANTIC_VCS_REQUIRED_TABLES,
+} from "./semanticVcsSchema.js";
 import { SemanticVcsError, SemanticVcsStore } from "./semanticVcsStore.js";
 import {
   SemanticWorkspace,
@@ -155,7 +171,7 @@ type ChannelRosterRow = ChannelRosterInspection["rows"][number];
 type StorageDiagnostic = AgentHealthInspection["storage"]["rows"][number];
 
 /** First supported production schema for the semantic workspace authority. */
-const GAD_WORKSPACE_SCHEMA_VERSION = 63;
+const GAD_WORKSPACE_SCHEMA_VERSION = 65;
 
 const PUBLICATION_RETRY_BASE_MS = 250;
 const PUBLICATION_RETRY_MAX_MS = 30_000;
@@ -235,6 +251,89 @@ function createMemoryIndex(sql: {
   }
 }
 
+/**
+ * The agent directory (messaging plan §4.4) — a projection, not a new source of
+ * truth. Every row is derived from presence, turn, and message events this DO
+ * already ingests.
+ *
+ * **Identity is a (worker, channel) pair**, keyed `"<handle>@<channelId>"`,
+ * which is also the addressee grammar: what `discover_agents` prints is
+ * literally what `notify` accepts. A worker agent sitting in three channels is
+ * three rows sharing a `worker_id` — correct, because "message the gmail agent"
+ * is meaningless without saying *where*, and the three rows carry genuinely
+ * different status. `worker_id` and `run_id` are indexed lookup columns, never
+ * the key: "all instances of this worker" is a query, not an identity.
+ */
+function createAgentDirectory(sql: {
+  exec(query: string, ...bindings: SqlBinding[]): unknown;
+}): void {
+  sql.exec(`
+    CREATE TABLE IF NOT EXISTS agent_directory (
+      instance_id       TEXT PRIMARY KEY,
+      channel_id        TEXT NOT NULL,
+      participant_id    TEXT NOT NULL,
+      kind              TEXT,
+      handle            TEXT,
+      display_name      TEXT,
+      description       TEXT,
+      parent_instance_id TEXT,
+      run_id            TEXT,
+      worker_id         TEXT,
+      owner_user_id     TEXT,
+      status            TEXT NOT NULL DEFAULT 'idle'
+        CHECK (status IN ('running', 'idle', 'hibernated', 'terminal')),
+      status_event_id   TEXT,
+      last_activity_at  INTEGER,
+      summary           TEXT
+    )
+  `);
+  sql.exec(
+    `CREATE INDEX IF NOT EXISTS idx_agent_directory_channel
+       ON agent_directory (channel_id, status)`
+  );
+  sql.exec(`CREATE INDEX IF NOT EXISTS idx_agent_directory_worker ON agent_directory (worker_id)`);
+  sql.exec(`CREATE INDEX IF NOT EXISTS idx_agent_directory_run ON agent_directory (run_id)`);
+  sql.exec(
+    `CREATE INDEX IF NOT EXISTS idx_agent_directory_participant
+       ON agent_directory (channel_id, participant_id)`
+  );
+}
+
+/** FTS mirror of the directory's prose columns, with the same virtual-table /
+ *  plain-table fallback as `gad_memory_fts` — FTS5 is absent under the sql.js
+ *  test harness and present under workerd, and that difference has bitten this
+ *  file before. Same write and read logic either way. */
+function createAgentDirectoryIndex(sql: {
+  exec(query: string, ...bindings: SqlBinding[]): unknown;
+}): "fts" | "plain" {
+  try {
+    sql.exec(
+      `CREATE VIRTUAL TABLE IF NOT EXISTS gad_agent_directory_fts USING fts5(
+         text, instance_id UNINDEXED, channel_id UNINDEXED, status UNINDEXED
+       )`
+    );
+    return "fts";
+  } catch {
+    sql.exec(
+      `CREATE TABLE IF NOT EXISTS gad_agent_directory_fts (
+         text TEXT NOT NULL, instance_id TEXT NOT NULL,
+         channel_id TEXT, status TEXT
+       )`
+    );
+    return "plain";
+  }
+}
+
+function existingAgentDirectoryIndexMode(sql: {
+  exec(query: string, ...bindings: SqlBinding[]): { toArray(): Record<string, unknown>[] };
+}): "fts" | "plain" | null {
+  const row = sql
+    .exec(`SELECT sql FROM sqlite_master WHERE name = 'gad_agent_directory_fts' LIMIT 1`)
+    .toArray()[0];
+  if (!row) return null;
+  return /\bCREATE\s+VIRTUAL\s+TABLE\b/iu.test(String(row["sql"] ?? "")) ? "fts" : "plain";
+}
+
 function existingMemoryIndexMode(sql: {
   exec(query: string, ...bindings: SqlBinding[]): { toArray(): Record<string, unknown>[] };
 }): "fts" | "plain" | null {
@@ -283,6 +382,7 @@ const GAD_REQUIRED_TABLES = [
   "user_notifications",
   "channel_membership_index",
   "channel_membership_revisions",
+  "agent_directory",
   "gad_blobs",
   "workspace_source_initializations",
   "publication_delivery_outbox",
@@ -1065,106 +1165,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       )
     `);
     this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_ref_log_name ON ref_log(ref_name, id)`);
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS trajectory_turns (
-        log_id TEXT NOT NULL,
-        head TEXT NOT NULL,
-        turn_id TEXT NOT NULL,
-        opened_at TEXT,
-        closed_at TEXT,
-        summary TEXT,
-        -- §6.3 turn-decay basis: the turn's per-branch ordinal (count of prior
-        -- turns on this (log_id, head) at turn.opened). Wall-clock is display-only.
-        ordinal INTEGER,
-        -- Exact private trajectory message that triggered this turn. Actor and
-        -- intent are derived by walking to that message; they are never copied
-        -- onto the turn as an authorship snapshot. Nullable for non-message
-        -- turns such as scheduled or heartbeat work.
-        trigger_message_id TEXT,
-        PRIMARY KEY (log_id, head, turn_id)
-      )
-    `);
-    this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_trajectory_turns_trigger_message
-       ON trajectory_turns(log_id, head, trigger_message_id)`
-    );
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS trajectory_messages (
-        log_id TEXT NOT NULL,
-        head TEXT NOT NULL,
-        message_id TEXT NOT NULL,
-        turn_id TEXT,
-        role TEXT NOT NULL,
-        status TEXT NOT NULL,
-        started_event_id TEXT,
-        completed_event_id TEXT,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (log_id, head, message_id)
-      )
-    `);
-    this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_trajectory_messages_turn
-       ON trajectory_messages(log_id, head, turn_id, message_id)`
-    );
-    this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_trajectory_messages_started
-       ON trajectory_messages(started_event_id, log_id, head, message_id)`
-    );
-    this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_trajectory_messages_completed
-       ON trajectory_messages(completed_event_id, log_id, head, message_id)`
-    );
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS trajectory_message_blocks (
-        log_id TEXT NOT NULL,
-        head TEXT NOT NULL,
-        block_id TEXT NOT NULL,
-        message_id TEXT NOT NULL,
-        block_index INTEGER NOT NULL,
-        block_type TEXT NOT NULL,
-        invocation_id TEXT,
-        PRIMARY KEY (log_id, head, block_id)
-      )
-    `);
-    this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_trajectory_message_blocks_message
-       ON trajectory_message_blocks(log_id, head, message_id, block_index, block_id)`
-    );
-    this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_trajectory_message_blocks_invocation
-       ON trajectory_message_blocks(invocation_id, log_id, head, message_id)`
-    );
-    this.sql.exec(`
-      CREATE TABLE IF NOT EXISTS trajectory_invocations (
-        log_id TEXT NOT NULL,
-        head TEXT NOT NULL,
-        invocation_id TEXT NOT NULL,
-        turn_id TEXT,
-        transport_call_id TEXT,
-        kind TEXT,
-        status TEXT NOT NULL,
-        terminal_outcome TEXT,
-        terminal_reason_code TEXT,
-        request_ref_json TEXT,
-        result_ref_json TEXT,
-        started_event_id TEXT,
-        completed_event_id TEXT,
-        updated_at TEXT NOT NULL,
-        PRIMARY KEY (log_id, head, invocation_id)
-      )
-    `);
-    this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_trajectory_invocations_transport ON trajectory_invocations(transport_call_id)`
-    );
-    // Invocation→turn traversal is shared by semantic provenance inspectors.
-    this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_trajectory_invocations_scoped_turn
-       ON trajectory_invocations(log_id, head, turn_id, invocation_id)`
-    );
-    this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_trajectory_invocations_identity
-       ON trajectory_invocations(invocation_id, log_id, head)`
-    );
+    createTrajectoryMirrorSchema(this.sql);
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS trajectory_invocation_outputs (
         log_id TEXT NOT NULL,
@@ -1298,6 +1299,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
     // exact database shape. Lazy creation changed sqlite_master after schema
     // identity was sealed, so the next activation rejected its own database.
     createMemoryIndex(this.sql);
+    createAgentDirectory(this.sql);
+    createAgentDirectoryIndex(this.sql);
     // Provenance is compiled from normalized point tables. We intentionally do
     // not create union views or persisted traversal continuations: callers
     // inspect a node and keyset-page its immediate indexed edges.
@@ -1753,6 +1756,21 @@ export class GadWorkspaceDO extends DurableObjectBase {
   @schemaRpc()
   vcsBlame(request: SemanticDispatchRequest): Promise<unknown> {
     return this.vcsSemantic("blame", request);
+  }
+
+  @schemaRpc()
+  vcsWalk(request: SemanticDispatchRequest): Promise<unknown> {
+    return this.vcsSemantic("walk", request);
+  }
+
+  @schemaRpc()
+  vcsQuery(request: SemanticDispatchRequest): Promise<unknown> {
+    return this.vcsSemantic("query", request);
+  }
+
+  @schemaRpc()
+  vcsSearch(request: SemanticDispatchRequest): Promise<unknown> {
+    return this.vcsSemantic("search", request);
   }
 
   @schemaRpc()
@@ -3019,6 +3037,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
     const kind = envelope.payloadKind;
     if (kind === "turn.opened" || kind === "turn.closed") {
       this.projectTurn(envelope);
+      this.projectAgentDirectoryActivity(envelope, kind === "turn.opened" ? "running" : "idle");
       return;
     }
     if (kind.startsWith("message.")) {
@@ -3157,6 +3176,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
         eventId: String(envelope.envelopeId),
         anchor: { messageId, turnId: envelope.causality?.turnId ?? null },
       });
+    }
+    // A deliberate `notify` (wire saliency "say") is the instance's own account
+    // of what it is doing, so it refreshes the directory summary. Ordinary turn
+    // narration deliberately does not.
+    if (kind === "message.completed" && payload["saliency"] === "say" && memoryTexts.length > 0) {
+      this.projectAgentDirectorySummary(envelope, memoryTexts.join("\n"));
     }
   }
 
@@ -3344,6 +3369,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
       )
       .toArray()[0] as JsonRecord | undefined;
 
+    this.projectAgentDirectoryPresence(envelope, { action, channelId, participantId, metadata });
+
     if (action === "join") {
       if (openRow) {
         if (rolesJson) {
@@ -3397,6 +3424,172 @@ export class GadWorkspaceDO extends DurableObjectBase {
       participantId,
       String(openRow["joined_at"])
     );
+  }
+
+  // -------------------------------------------------------------------------
+  // Agent directory (messaging plan §4.4) — the discovery projection
+  // -------------------------------------------------------------------------
+
+  private agentDirectoryIndexMode: "fts" | "plain" | null = null;
+
+  private ensureAgentDirectoryIndex(): "fts" | "plain" {
+    if (this.agentDirectoryIndexMode) return this.agentDirectoryIndexMode;
+    // createTables() runs from the base constructor before subclass field
+    // initializers, so this cache cannot be seeded there.
+    this.agentDirectoryIndexMode =
+      existingAgentDirectoryIndexMode(this.sql) ?? createAgentDirectoryIndex(this.sql);
+    return this.agentDirectoryIndexMode;
+  }
+
+  /** Keep the searchable text for one instance in step with its row. */
+  private indexAgentDirectoryRow(row: {
+    instanceId: string;
+    channelId: string;
+    status: string;
+    text: string;
+  }): void {
+    this.ensureAgentDirectoryIndex();
+    this.sql.exec(`DELETE FROM gad_agent_directory_fts WHERE instance_id = ?`, row.instanceId);
+    if (!row.text.trim()) return;
+    this.sql.exec(
+      `INSERT INTO gad_agent_directory_fts (text, instance_id, channel_id, status)
+       VALUES (?, ?, ?, ?)`,
+      row.text,
+      row.instanceId,
+      row.channelId,
+      row.status
+    );
+  }
+
+  private reindexAgentDirectoryInstance(instanceId: string): void {
+    const row = this.sql
+      .exec(
+        `SELECT channel_id, status, handle, display_name, description, summary
+           FROM agent_directory WHERE instance_id = ?`,
+        instanceId
+      )
+      .toArray()[0] as JsonRecord | undefined;
+    if (!row) return;
+    this.indexAgentDirectoryRow({
+      instanceId,
+      channelId: String(row["channel_id"]),
+      status: String(row["status"]),
+      text: [row["handle"], row["display_name"], row["description"], row["summary"]]
+        .map((value) => asString(value) ?? "")
+        .filter(Boolean)
+        .join(" — "),
+    });
+  }
+
+  /**
+   * Presence is the identity writer: a join names the handle, kind, and
+   * description, and a leave is the only *fact* that an instance is done with a
+   * channel. Terminal rows are kept, not deleted — a historical agent whose
+   * channel is durable is exactly the "agent to wake up" catalog.
+   */
+  private projectAgentDirectoryPresence(
+    envelope: LogEnvelope,
+    input: { action: string; channelId: string; participantId: string; metadata: JsonRecord }
+  ): void {
+    const type = asString(input.metadata["type"]);
+    // Humans and panels are addressable, but they are not agent *instances*;
+    // the roster projection already answers "who is on this channel".
+    if (type !== "agent" && type !== "headless") return;
+    const handle = asString(input.metadata["handle"]) ?? input.participantId;
+    const instanceId = `${handle}@${input.channelId}`;
+    const subagent = parseRecord(JSON.stringify(input.metadata["subagent"] ?? null));
+    const status = input.action === "leave" ? "terminal" : "idle";
+    this.sql.exec(
+      `INSERT INTO agent_directory
+         (instance_id, channel_id, participant_id, kind, handle, display_name, description,
+          parent_instance_id, run_id, worker_id, owner_user_id, status, status_event_id,
+          last_activity_at, summary)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+       ON CONFLICT(instance_id) DO UPDATE SET
+         participant_id = excluded.participant_id,
+         kind = COALESCE(excluded.kind, agent_directory.kind),
+         display_name = COALESCE(excluded.display_name, agent_directory.display_name),
+         description = COALESCE(excluded.description, agent_directory.description),
+         parent_instance_id = COALESCE(excluded.parent_instance_id, agent_directory.parent_instance_id),
+         run_id = COALESCE(excluded.run_id, agent_directory.run_id),
+         worker_id = excluded.worker_id,
+         owner_user_id = COALESCE(excluded.owner_user_id, agent_directory.owner_user_id),
+         status = excluded.status,
+         status_event_id = excluded.status_event_id,
+         last_activity_at = excluded.last_activity_at`,
+      instanceId,
+      input.channelId,
+      input.participantId,
+      asString(subagent["runId"]) ? "subagent" : (asString(input.metadata["kind"]) ?? "worker-agent"),
+      handle,
+      asString(input.metadata["name"]),
+      asString(input.metadata["description"]),
+      asString(subagent["parentInstanceId"]),
+      asString(subagent["runId"]),
+      input.participantId,
+      asString(input.metadata["ownerUserId"]),
+      status,
+      envelope.envelopeId,
+      Date.parse(envelope.appendedAt ?? "") || null
+    );
+    this.reindexAgentDirectoryInstance(instanceId);
+  }
+
+  /**
+   * Status flips on *events*, never on elapsed time: a turn opening is the fact
+   * that this instance is running, a turn closing that it is idle. There is no
+   * clock-driven "went quiet" transition anywhere in this projection —
+   * `last_activity_at` is informational and gates nothing.
+   */
+  private projectAgentDirectoryActivity(
+    envelope: LogEnvelope,
+    status: "running" | "idle"
+  ): void {
+    const channelId = channelIdFromTrajectoryLog(envelope.logId);
+    if (!channelId) return;
+    const actor = envelope.actor as unknown as JsonRecord;
+    const participantId = asString(actor["participantId"]) ?? asString(actor["id"]);
+    if (!participantId) return;
+    this.sql.exec(
+      `UPDATE agent_directory
+          SET status = CASE WHEN status = 'terminal' THEN status ELSE ? END,
+              status_event_id = ?,
+              last_activity_at = ?
+        WHERE channel_id = ? AND participant_id = ?`,
+      status,
+      envelope.envelopeId,
+      Date.parse(envelope.appendedAt ?? "") || null,
+      channelId,
+      participantId
+    );
+  }
+
+  /** A deliberate utterance is the best self-description an instance produces,
+   *  so it is what `discover_agents` searches — not a transcript dump. */
+  private projectAgentDirectorySummary(envelope: LogEnvelope, summary: string): void {
+    const channelId = channelIdFromTrajectoryLog(envelope.logId);
+    if (!channelId) return;
+    const actor = envelope.actor as unknown as JsonRecord;
+    const participantId = asString(actor["participantId"]) ?? asString(actor["id"]);
+    if (!participantId) return;
+    const trimmed = summary.trim().slice(0, 400);
+    if (!trimmed) return;
+    this.sql.exec(
+      `UPDATE agent_directory SET summary = ?, last_activity_at = ?
+        WHERE channel_id = ? AND participant_id = ?`,
+      trimmed,
+      Date.parse(envelope.appendedAt ?? "") || null,
+      channelId,
+      participantId
+    );
+    const row = this.sql
+      .exec(
+        `SELECT instance_id FROM agent_directory WHERE channel_id = ? AND participant_id = ?`,
+        channelId,
+        participantId
+      )
+      .toArray()[0] as JsonRecord | undefined;
+    if (row) this.reindexAgentDirectoryInstance(String(row["instance_id"]));
   }
 
   // -------------------------------------------------------------------------
@@ -5240,6 +5433,183 @@ export class GadWorkspaceDO extends DurableObjectBase {
       },
       rows,
     };
+  }
+
+  private agentDirectoryEntry(row: JsonRecord): AgentDirectoryEntry {
+    const handle = asString(row["handle"]);
+    const channelId = String(row["channel_id"]);
+    return {
+      instanceId: String(row["instance_id"]),
+      // The ref IS the addressee grammar: discovering an instance and being
+      // able to message it are the same act (plan §4.4).
+      ref: `agent:${handle ?? String(row["participant_id"])}@${channelId}`,
+      channelId,
+      participantId: String(row["participant_id"]),
+      kind: asString(row["kind"]),
+      handle,
+      displayName: asString(row["display_name"]),
+      description: asString(row["description"]),
+      parentInstanceId: asString(row["parent_instance_id"]),
+      runId: asString(row["run_id"]),
+      workerId: asString(row["worker_id"]),
+      ownerUserId: asString(row["owner_user_id"]),
+      status: String(row["status"]) as AgentDirectoryEntry["status"],
+      statusEventId: asString(row["status_event_id"]),
+      lastActivityAt: typeof row["last_activity_at"] === "number" ? row["last_activity_at"] : null,
+      summary: asString(row["summary"]),
+    };
+  }
+
+  private agentDirectoryListing(entries: AgentDirectoryEntry[]): AgentDirectoryListing {
+    return {
+      summary: {
+        rows: entries.length,
+        running: entries.filter((entry) => entry.status === "running").length,
+        terminal: entries.filter((entry) => entry.status === "terminal").length,
+      },
+      entries,
+    };
+  }
+
+  @schemaRpc()
+  listAgentDirectory(input: ListAgentDirectoryInput): AgentDirectoryListing {
+    this.ensureReady();
+    const limit = Math.min(Math.max(input.limit ?? 100, 1), 500);
+    const filters: string[] = [];
+    const bindings: SqlBinding[] = [];
+    if (input.channelId) {
+      filters.push(`channel_id = ?`);
+      bindings.push(input.channelId);
+    }
+    if (input.workerId) {
+      filters.push(`worker_id = ?`);
+      bindings.push(input.workerId);
+    }
+    if (input.runId) {
+      filters.push(`run_id = ?`);
+      bindings.push(input.runId);
+    }
+    if (input.handle) {
+      filters.push(`handle = ?`);
+      bindings.push(input.handle);
+    }
+    if (input.status) {
+      filters.push(`status = ?`);
+      bindings.push(input.status);
+    } else if (!input.includeTerminal) {
+      filters.push(`status != 'terminal'`);
+    }
+    const where = filters.length > 0 ? `WHERE ${filters.join(" AND ")}` : "";
+    const rows = this.sql
+      .exec(
+        `SELECT * FROM agent_directory ${where}
+          ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'idle' THEN 1
+                               WHEN 'hibernated' THEN 2 ELSE 3 END,
+                   last_activity_at DESC,
+                   instance_id
+          LIMIT ?`,
+        ...bindings,
+        limit
+      )
+      .toArray() as JsonRecord[];
+    return this.agentDirectoryListing(rows.map((row) => this.agentDirectoryEntry(row)));
+  }
+
+  @schemaRpc()
+  searchAgentDirectory(input: SearchAgentDirectoryInput): AgentDirectoryListing {
+    this.ensureReady();
+    const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
+    const mode = this.ensureAgentDirectoryIndex();
+    const statusFilter = input.includeTerminal ? "" : ` AND d.status != 'terminal'`;
+    const rows =
+      mode === "fts"
+        ? (this.sql
+            .exec(
+              `SELECT d.* FROM gad_agent_directory_fts f
+                 JOIN agent_directory d ON d.instance_id = f.instance_id
+                WHERE gad_agent_directory_fts MATCH ?${statusFilter}
+                ORDER BY bm25(gad_agent_directory_fts)
+                LIMIT ?`,
+              // Terms are quoted so a purpose query can't inject FTS5 syntax;
+              // OR-ed because "gmail triage" should match either word.
+              ftsQuery(recallTokens([input.query]), " OR "),
+              limit
+            )
+            .toArray() as JsonRecord[])
+        : (this.sql
+            .exec(
+              `SELECT d.* FROM gad_agent_directory_fts f
+                 JOIN agent_directory d ON d.instance_id = f.instance_id
+                WHERE ${recallTokens([input.query])
+                  .map(() => `f.text LIKE ?`)
+                  .join(" OR ") || "1 = 0"}${statusFilter}
+                ORDER BY d.last_activity_at DESC
+                LIMIT ?`,
+              ...recallTokens([input.query]).map((term) => `%${term}%`),
+              limit
+            )
+            .toArray() as JsonRecord[]);
+    return this.agentDirectoryListing(rows.map((row) => this.agentDirectoryEntry(row)));
+  }
+
+  /**
+   * Channel enrichment for discovery: who is in each channel, how busy it is,
+   * and when it last moved.
+   *
+   * There is deliberately no `title`. A channel's title is DO-local config on
+   * the channel itself and produces no durable event, so this projection has no
+   * honest source for one — inventing a field every caller would find silently
+   * stale is worse than omitting it. Callers that need a title ask the channel.
+   */
+  @schemaRpc()
+  describeChannels(input: DescribeChannelsInput): ChannelDescription[] {
+    this.ensureReady();
+    const limit = Math.min(Math.max(input.limit ?? 50, 1), 200);
+    const channelIds =
+      input.channelIds && input.channelIds.length > 0
+        ? input.channelIds.slice(0, limit)
+        : (
+            this.sql
+              .exec(
+                `SELECT DISTINCT log_id FROM log_heads WHERE log_kind = 'channel' LIMIT ?`,
+                limit
+              )
+              .toArray() as JsonRecord[]
+          ).map((row) => {
+            const logId = String(row["log_id"]);
+            return channelIdFromTrajectoryLog(logId) ?? logId;
+          });
+    return channelIds.map((channelId) => {
+      const stats = this.sql
+        .exec(
+          `SELECT COUNT(*) AS n, MAX(appended_at) AS last FROM log_events
+            WHERE log_id = ? AND head = ?`,
+          channelId,
+          CHANNEL_LOG_HEAD
+        )
+        .toArray()[0] as JsonRecord | undefined;
+      const participants = (
+        this.sql
+          .exec(
+            `SELECT participant_id, handle, kind, status FROM agent_directory
+              WHERE channel_id = ? ORDER BY handle, participant_id`,
+            channelId
+          )
+          .toArray() as JsonRecord[]
+      ).map((row) => ({
+        participantId: String(row["participant_id"]),
+        handle: asString(row["handle"]),
+        kind: asString(row["kind"]),
+        status: asString(row["status"]) as ChannelDescription["participants"][number]["status"],
+      }));
+      const last = asString(stats?.["last"]);
+      return {
+        channelId,
+        envelopeCount: asNumber(stats?.["n"] ?? 0),
+        lastEnvelopeAt: last ? (Date.parse(last) || null) : null,
+        participants,
+      };
+    });
   }
 
   @schemaRpc()
