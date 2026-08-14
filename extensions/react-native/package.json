@@ -49,7 +49,10 @@
       ]
     }
   },
+  "//dependencies": "The Babel plugins this provider injects are part of its toolchain, not the app's: a built workspace app is a bare source tree with no node_modules beside it, so it cannot resolve a plugin it names itself. Reanimated's plugin is the exception and comes from the app's own dependency projection, because it is versioned with the app's Reanimated.",
   "dependencies": {
+    "@babel/plugin-transform-export-namespace-from": "7.27.1",
+    "@react-native/metro-babel-transformer": "0.79.7",
     "@react-native/metro-config": "0.79.7",
     "@vibestudio/shared": "workspace:*"
   }
