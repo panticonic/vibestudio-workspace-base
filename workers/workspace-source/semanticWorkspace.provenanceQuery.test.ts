@@ -430,6 +430,51 @@ describe("the prov_* relational contract", () => {
     expect(new Set(column(result, "intent_tier"))).not.toContain(null);
   });
 
+  it("makes every relation it advertises selectable", async () => {
+    const { semantic } = await fixture();
+    const catalog = await query(semantic, {
+      contextId: "context:test",
+      query: "SELECT DISTINCT relation FROM prov_schema",
+      visibilityContextIds: ["context:test"],
+    });
+    const relations = column(catalog, "relation").map(String);
+    expect(relations.length).toBeGreaterThan(15);
+    for (const relation of relations) {
+      const result = await query(semantic, {
+        contextId: "context:test",
+        query: `SELECT * FROM ${relation}`,
+        visibilityContextIds: ["context:test"],
+      });
+      expect(result.refusal, relation).toBeNull();
+    }
+  });
+
+  it("pins file coordinates to the caller's visible basis", async () => {
+    const { semantic } = await fixture();
+    const result = await query(semantic, {
+      contextId: "context:test",
+      query: "SELECT path, presence FROM prov_files",
+      visibilityContextIds: ["context:test"],
+    });
+    expect(result.refusal).toBeNull();
+    expect(column(result, "path")).toContain("retry.ts");
+    expect(column(result, "presence")).toContain("placed");
+  });
+
+  it("reaches the trajectory mirror through the same visibility basis", async () => {
+    const { semantic } = await fixture();
+    const result = await query(semantic, {
+      contextId: "context:test",
+      query: `SELECT message.role AS role, message.sender_kind AS sender_kind,
+                     message.text_excerpt AS excerpt
+                FROM prov_messages message`,
+      visibilityContextIds: ["context:test"],
+    });
+    expect(result.refusal).toBeNull();
+    expect(column(result, "excerpt")).toContain("Cap the retry backoff at 30 seconds");
+    expect(column(result, "sender_kind")).toContain("user");
+  });
+
   it("describes itself through the catalog view", async () => {
     const { semantic } = await fixture();
     const result = await query(semantic, {
