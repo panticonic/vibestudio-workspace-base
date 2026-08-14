@@ -320,16 +320,26 @@ function boundBuildReport(report: UnitBuildReportWire): {
     truncatedDiagnosticText += value.length - limit;
     return `${value.slice(0, limit)}… [truncated]`;
   };
-  const diagnostics = report.diagnostics.slice(0, MAX_DIAGNOSTICS).map((diagnostic) => ({
-    ...diagnostic,
-    message: clamp(diagnostic.message, MAX_DIAGNOSTIC_MESSAGE_CHARS)!,
-    ...(diagnostic.lineText === undefined
-      ? {}
-      : { lineText: clamp(diagnostic.lineText, MAX_DIAGNOSTIC_CONTEXT_CHARS) }),
-    ...(diagnostic.suggestion === undefined
-      ? {}
-      : { suggestion: clamp(diagnostic.suggestion, MAX_DIAGNOSTIC_CONTEXT_CHARS) }),
-  }));
+  const diagnostics = report.diagnostics.slice(0, MAX_DIAGNOSTICS).map((diagnostic) => {
+    // Host-derived structured repairs are bounded by construction; the size
+    // valve only guards a malformed oversized payload. Never rewrite repair
+    // contents — a truncated edit instruction is worse than none.
+    const repair = (diagnostic as { repair?: unknown }).repair;
+    const repairOversized =
+      repair !== undefined && JSON.stringify(repair).length > MAX_DIAGNOSTIC_CONTEXT_CHARS;
+    if (repairOversized) truncatedDiagnosticText += JSON.stringify(repair).length;
+    return {
+      ...diagnostic,
+      message: clamp(diagnostic.message, MAX_DIAGNOSTIC_MESSAGE_CHARS)!,
+      ...(diagnostic.lineText === undefined
+        ? {}
+        : { lineText: clamp(diagnostic.lineText, MAX_DIAGNOSTIC_CONTEXT_CHARS) }),
+      ...(diagnostic.suggestion === undefined
+        ? {}
+        : { suggestion: clamp(diagnostic.suggestion, MAX_DIAGNOSTIC_CONTEXT_CHARS) }),
+      ...(repairOversized ? { repair: undefined } : {}),
+    };
+  });
   const builds = report.builds.map((build) => ({
     ...build,
     diagnosticIndexes: build.diagnosticIndexes.filter((index) => index < diagnostics.length),

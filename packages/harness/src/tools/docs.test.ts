@@ -61,6 +61,32 @@ describe("renderEntry (readable docs_open text)", () => {
     expect(text).not.toContain('"type": "array"');
   });
 
+  it("names parameters in the signature, breakdown, and rpc example when the catalog carries argumentNames", () => {
+    const entry: CatalogEntry = {
+      id: "service:docs.search",
+      surface: "service",
+      qualifiedName: "docs.search",
+      title: "docs.search",
+      argumentNames: ["query", "options"],
+      argsSchema: {
+        type: "array",
+        minItems: 1,
+        maxItems: 2,
+        items: [
+          { type: "string", description: "Keyword query." },
+          { type: "object", properties: { limit: { type: "integer" } } },
+        ],
+      },
+    };
+
+    const text = renderEntry(entry);
+
+    expect(text).toContain("docs.search(query: string, options?: { limit?: integer })");
+    expect(text).toContain("query: string — Keyword query.");
+    expect(text).toContain('await rpc.call("main", "docs.search", ["query", { ... }])');
+    expect(text).not.toContain("arg0");
+  });
+
   it("renders object args with field types, optional markers, and field docs", () => {
     const entry: CatalogEntry = {
       id: "service:feeds.add",

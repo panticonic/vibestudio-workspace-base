@@ -419,6 +419,14 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+/**
+ * The exact React runtime the Base desktop shell provides to panels. The one
+ * Base-owned pin the panel scaffold emits; a contract test asserts it matches
+ * packages/react's declared peer runtime so scaffolds can never drift from
+ * what the shell actually loads.
+ */
+export const BASE_PANEL_REACT_VERSION = "19.2.4";
+
 const TYPE_DIRS: Record<ProjectType, string> = {
   panel: "panels",
   package: "packages",
@@ -832,8 +840,8 @@ async function resolveProject(
             "react/jsx-dev-runtime",
           ],
           dependencies: {
-            react: "19.2.4",
-            "react-dom": "19.2.4",
+            react: BASE_PANEL_REACT_VERSION,
+            "react-dom": BASE_PANEL_REACT_VERSION,
           },
         });
         files["index.tsx"] =
@@ -1048,10 +1056,6 @@ type RecordRow = {
 
 export class ${className} extends DurableObjectBase {
   static override schemaVersion = 1;
-
-  protected override schemaProductionBaseline() {
-    return { version: 1, name: "${name}-v1" } as const;
-  }
 
   protected override createTables(): void {
     this.sql.exec(\`

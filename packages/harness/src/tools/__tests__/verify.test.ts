@@ -150,6 +150,46 @@ describe("context-exact verify tool", () => {
     expect(JSON.stringify(result)).not.toContain("[object Object]");
   });
 
+  it("passes host-derived structured repairs through the diagnostic bounds untouched", async () => {
+    const repair = {
+      code: "missing-authority-request",
+      file: "panels/editor/package.json",
+      field: "vibestudio.authority.requests",
+      request: {
+        capability: "workspace-service:notes",
+        resource: { kind: "exact", key: "do:workers/notes:NotesDO:main" },
+        tier: "gated",
+        evidence: "exact",
+      },
+      docsId: "workspace:notes",
+    };
+    const { callMain } = rpcResult({
+      repoPath: "panels/editor",
+      kind: "panel",
+      status: "failed" as const,
+      diagnostics: [
+        {
+          source: "authority" as const,
+          severity: "error" as const,
+          file: "panels/editor/index.tsx",
+          line: 4,
+          column: 9,
+          message: "Calling notes.delete requires 'workspace-service:notes' at gated tier",
+          repair,
+        } as never,
+      ],
+      builds: [{ target: "runtime" as const, diagnosticIndexes: [0] }],
+    });
+    const result = await createVerifyTool(callMain, () => "context-7").execute("call-build", {
+      operation: "build",
+      target: "panels/editor",
+    });
+
+    const report = (result.details as { report: { diagnostics: Array<{ repair?: unknown }> } })
+      .report;
+    expect(report.diagnostics[0]!.repair).toEqual(repair);
+  });
+
   it("classifies a skipped content target as a correctable request", async () => {
     const { callMain } = rpcResult({
       repoPath: "packages/docs",

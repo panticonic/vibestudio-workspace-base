@@ -24,6 +24,8 @@ export interface CatalogEntry extends CatalogHit {
   access?: Record<string, unknown>;
   argsSchema?: Record<string, unknown>;
   returnsSchema?: Record<string, unknown>;
+  /** Author-facing parameter names, positionally matching the args tuple. */
+  argumentNames?: string[];
   members?: string[];
   examples?: unknown[];
   signature?: string;
@@ -175,8 +177,9 @@ function typeString(schema: unknown): string {
 }
 
 /** A method's tuple args schema → a readable parameter list, e.g.
- *  `(string /^[0-9a-f]{64}$/, number?)`. */
-function describeArgs(argsSchema: unknown): string {
+ *  `(string /^[0-9a-f]{64}$/, number?)` — or, when the catalog carries the
+ *  author-facing parameter names, `(query: string, options?: number)`. */
+function describeArgs(argsSchema: unknown, argumentNames?: string[]): string {
   const s = argsSchema as JsonSchema | undefined;
   const tuple = s?.["prefixItems"] ?? s?.["items"];
   if (!s || s["type"] !== "array" || !Array.isArray(tuple)) {
@@ -184,12 +187,20 @@ function describeArgs(argsSchema: unknown): string {
   }
   const items = tuple as unknown[];
   const min = typeof s["minItems"] === "number" ? (s["minItems"] as number) : items.length;
-  return `(${items.map((item, i) => `${typeString(item)}${i >= min ? "?" : ""}`).join(", ")})`;
+  return `(${items
+    .map((item, i) => {
+      const optional = i >= min;
+      const name = argumentNames?.[i];
+      return name
+        ? `${name}${optional ? "?" : ""}: ${typeString(item)}`
+        : `${typeString(item)}${optional ? "?" : ""}`;
+    })
+    .join(", ")})`;
 }
 
 /** Surface the `.describe()` docs on tuple args + their object fields as a
  *  "Parameters:" block (only the ones that actually carry a description). */
-function argBreakdown(argsSchema: unknown): string {
+function argBreakdown(argsSchema: unknown, argumentNames?: string[]): string {
   const s = argsSchema as JsonSchema | undefined;
   const tuple = s?.["prefixItems"] ?? s?.["items"];
   const items = s && s["type"] === "array" && Array.isArray(tuple) ? (tuple as unknown[]) : [];
@@ -197,7 +208,9 @@ function argBreakdown(argsSchema: unknown): string {
   items.forEach((item, i) => {
     const arg = item as JsonSchema;
     if (typeof arg["description"] === "string") {
-      lines.push(`  arg${i}: ${typeString(item)} — ${arg["description"] as string}`);
+      lines.push(
+        `  ${argumentNames?.[i] ?? `arg${i}`}: ${typeString(item)} — ${arg["description"] as string}`
+      );
     }
     const props = arg["properties"];
     if (props && typeof props === "object") {
@@ -227,7 +240,11 @@ function formatExamples(qualifiedName: string, examples: unknown[]): string {
     .join("\n");
 }
 
-function serviceRpcExample(qualifiedName: string, argsSchema: unknown): string | null {
+function serviceRpcExample(
+  qualifiedName: string,
+  argsSchema: unknown,
+  argumentNames?: string[]
+): string | null {
   const s = argsSchema as JsonSchema | undefined;
   const tuple = s?.["prefixItems"] ?? s?.["items"];
   if (!s || s["type"] !== "array" || !Array.isArray(tuple)) return null;
@@ -235,7 +252,8 @@ function serviceRpcExample(qualifiedName: string, argsSchema: unknown): string |
   const args = items.map((item, index) => {
     const type = typeString(item);
     if (type.startsWith("{ ")) return "{ ... }";
-    if (type === "string" || type.startsWith("string ")) return `"arg${index}"`;
+    if (type === "string" || type.startsWith("string "))
+      return `"${argumentNames?.[index] ?? `arg${index}`}"`;
     if (type === "integer" || type === "number") return "0";
     if (type === "boolean") return "false";
     if (type.endsWith("[]")) return "[]";
@@ -284,17 +302,17 @@ export function renderEntry(entry: CatalogEntry): string {
   // Readable signature + parameter docs instead of raw JSON-schema dumps (the full
   // typed schema is still available via docs.getSchema / the panel's schema view).
   if (entry.argsSchema || entry.returnsSchema) {
-    const sig = `${entry.qualifiedName}${describeArgs(entry.argsSchema)}`;
+    const sig = `${entry.qualifiedName}${describeArgs(entry.argsSchema, entry.argumentNames)}`;
     parts.push(
       clamp(
         entry.returnsSchema ? `${sig} → ${typeString(entry.returnsSchema)}` : sig,
         MAX_SCHEMA_CHARS
       )
     );
-    const breakdown = argBreakdown(entry.argsSchema);
+    const breakdown = argBreakdown(entry.argsSchema, entry.argumentNames);
     if (breakdown) parts.push(clamp(breakdown, MAX_SCHEMA_CHARS));
     if (entry.surface === "service") {
-      const rpcExample = serviceRpcExample(entry.qualifiedName, entry.argsSchema);
+      const rpcExample = serviceRpcExample(entry.qualifiedName, entry.argsSchema, entry.argumentNames);
       if (rpcExample) {
         parts.push(
           `Eval/raw RPC call:\n${rpcExample}\n\n` +

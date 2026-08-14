@@ -987,3 +987,37 @@ describe("forkProject", () => {
     expect(mocks.edit).not.toHaveBeenCalled();
   });
 });
+
+describe("scaffold runtime contract", () => {
+  beforeEach(resetRuntimeMocks);
+
+  it("pins the panel scaffold's React to the exact runtime Base declares", async () => {
+    const { BASE_PANEL_REACT_VERSION, createProjects } = await import("./create-project.js");
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+
+    // The shell realm provides this exact React; packages/react peers on it.
+    const baseRoot = join(import.meta.dirname, "..", "..");
+    const reactPackage = JSON.parse(
+      readFileSync(join(baseRoot, "packages", "react", "package.json"), "utf8"),
+    ) as { peerDependencies?: Record<string, string> };
+    expect(reactPackage.peerDependencies?.["react"]).toBe(BASE_PANEL_REACT_VERSION);
+    expect(reactPackage.peerDependencies?.["react-dom"]).toBe(BASE_PANEL_REACT_VERSION);
+    const shellPackage = JSON.parse(
+      readFileSync(join(baseRoot, "apps", "shell", "package.json"), "utf8"),
+    ) as { dependencies?: Record<string, string> };
+    expect(shellPackage.dependencies?.["react"]).toBe(BASE_PANEL_REACT_VERSION);
+
+    // And the generated scaffold carries exactly that pin.
+    await createProjects([
+      { projectType: "panel", name: "react-pin-probe", title: "React Pin Probe" },
+    ]);
+    const manifest = JSON.parse(
+      String(mocks.files.get("panels/react-pin-probe/package.json")),
+    ) as { dependencies?: Record<string, string> };
+    expect(manifest.dependencies).toEqual({
+      react: BASE_PANEL_REACT_VERSION,
+      "react-dom": BASE_PANEL_REACT_VERSION,
+    });
+  });
+});
