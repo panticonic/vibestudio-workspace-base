@@ -12,6 +12,7 @@ export type {
   DurableObjectContext,
   SqlStorage,
   SqlResult,
+  TypedSqlStorage,
   DORef,
   LifecyclePrepareInput,
   LifecyclePrepareResult,

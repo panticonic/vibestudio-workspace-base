@@ -43,7 +43,12 @@ const patchOperationSchema = Type.Union([
           },
           { additionalProperties: false }
         ),
-        { minItems: 1, maxItems: 1_000 }
+        {
+          minItems: 1,
+          maxItems: 1_000,
+          description:
+            'Required replacement list. Example: {"kind":"replace","path":"packages/app/index.ts","replacements":[{"oldText":"before","newText":"after"}]}. oldText/newText are nested here, not fields of the operation.',
+        }
       ),
     },
     { additionalProperties: false }
@@ -118,7 +123,7 @@ export function createApplyPatchTool(
     name: "apply_patch",
     label: "Apply patch",
     description:
-      "Atomically author multiple managed workspace file changes in one semantic VCS work unit. Every path includes its top-level section and repository name, for example projects/app/README.md; workspace-root files are not managed repositories. Replacement matching is deterministic and shared with edit: one exact occurrence wins; if exact bytes are absent, one normalized occurrence may match across line endings, trailing whitespace, smart punctuation, Unicode spaces, and BOM-preserving text. Missing, stale, or ambiguous preconditions return a structured conflict with no mutation. Pass receipts from read without reconstructing hashes for optimistic concurrency. Use write or edit for the ergonomic single-file forms, and move_file/copy_file for identity-preserving transfers.",
+      'Atomically author multiple managed workspace file changes in one semantic VCS work unit. A replace operation has {"kind":"replace","path":"...","replacements":[{"oldText":"...","newText":"..."}]}; intent belongs only at the top level, beside operations. Every path includes its top-level section and repository name, for example projects/app/README.md; workspace-root files are not managed repositories. Replacement matching is deterministic and shared with edit: one exact occurrence wins; if exact bytes are absent, one normalized occurrence may match across line endings, trailing whitespace, smart punctuation, Unicode spaces, and BOM-preserving text. Missing, stale, or ambiguous preconditions return a structured conflict with no mutation. Pass receipts from read without reconstructing hashes for optimistic concurrency. Use write or edit for the ergonomic single-file forms, and move_file/copy_file for identity-preserving transfers.',
     parameters: applyPatchSchema,
     cancellationMode: "settle",
     execute: async (

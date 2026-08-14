@@ -468,16 +468,15 @@ export class TodoStore extends DurableObjectBase {
     updatedAt: string;
   }> {
     this.ensureReady();
-    return (
-      this.sql
-        .exec(`SELECT * FROM todos ORDER BY updated_at DESC`)
-        .toArray() as TodoRow[]
-    ).map((row) => ({
-      id: row.id,
-      title: row.title,
-      done: row.done === 1,
-      updatedAt: row.updated_at,
-    }));
+    return this.sql
+      .exec<TodoRow>(`SELECT * FROM todos ORDER BY updated_at DESC`)
+      .toArray()
+      .map((row) => ({
+        id: row.id,
+        title: row.title,
+        done: row.done === 1,
+        updatedAt: row.updated_at,
+      }));
   }
 }
 ```

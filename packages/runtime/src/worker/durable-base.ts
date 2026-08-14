@@ -253,6 +253,17 @@ export interface SqlResult {
   one(): Record<string, unknown>;
 }
 
+/** Typed authoring facade over the raw workerd SQL cursor. */
+export interface TypedSqlStorage {
+  exec<Row extends object = Record<string, unknown>>(
+    query: string,
+    ...bindings: unknown[]
+  ): {
+    toArray(): Row[];
+    one(): Row;
+  };
+}
+
 export interface DORef {
   source: string;
   className: string;
@@ -264,7 +275,7 @@ export interface DORef {
 
 export abstract class DurableObjectBase {
   protected ctx: DurableObjectContext;
-  protected sql: SqlStorage;
+  protected sql: TypedSqlStorage;
   protected env: Record<string, unknown>;
 
   private _schemaReady = false;
@@ -287,7 +298,7 @@ export abstract class DurableObjectBase {
 
   constructor(ctx: DurableObjectContext, env: unknown) {
     this.ctx = ctx;
-    this.sql = ctx.storage.sql;
+    this.sql = ctx.storage.sql as TypedSqlStorage;
     this._directRpcNonces = new DurableDirectRpcNonceLedger({
       exec: (query, ...bindings) => this.sql.exec(query, ...bindings),
       transactionSync: (callback) => this.ctx.storage.transactionSync(callback),

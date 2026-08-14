@@ -160,6 +160,10 @@ const CORRECTABLE_IMPORT_FAILURE_CODES = new Set([
   "package_manifest_missing",
   "package_export_not_found",
   "package_export_target_missing",
+  // An undeclared package import in a managed system test is authored input,
+  // not a package-loader outage. Preserve the typed rejection so the agent can
+  // choose an available module or repair its code in the same turn.
+  "EUNEXPECTEDTESTPROMPT",
 ]);
 
 function structuredFailureCode(error: unknown): string | undefined {

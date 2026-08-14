@@ -538,6 +538,30 @@ return fs.readFileSync("/tmp/a");`,
     });
   });
 
+  it("keeps an unexpected managed-test package prompt caller-correctable", async () => {
+    const result = await executeSandbox('import "typescript"; return "unreachable";', {
+      syntax: "typescript",
+      imports: { typescript: "npm:latest" },
+      loadImport: async () => {
+        throw Object.assign(new Error("Unexpected authority prompt in system test"), {
+          errorKind: "application",
+          code: "EUNEXPECTEDTESTPROMPT",
+          errorData: {
+            code: "EUNEXPECTEDTESTPROMPT",
+            failureKind: "user-code",
+          },
+        });
+      },
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: "Unexpected authority prompt in system test",
+      failureKind: "user-code",
+      failureCode: "EUNEXPECTEDTESTPROMPT",
+    });
+  });
+
   it("keeps a conflicting retained module execution caller-correctable", async () => {
     const result = await executeSandbox(
       'import { answer } from "@workspace/example"; return answer;',
