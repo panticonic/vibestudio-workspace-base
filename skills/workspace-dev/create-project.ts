@@ -832,7 +832,7 @@ async function resolveProject(
             "react/jsx-dev-runtime",
           ],
           dependencies: {
-            react: "^19.0.0",
+            react: "19.2.4",
           },
         });
         files["index.tsx"] =
