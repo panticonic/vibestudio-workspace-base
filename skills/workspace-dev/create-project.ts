@@ -833,6 +833,7 @@ async function resolveProject(
           ],
           dependencies: {
             react: "19.2.4",
+            "react-dom": "19.2.4",
           },
         });
         files["index.tsx"] =

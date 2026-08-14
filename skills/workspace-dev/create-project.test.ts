@@ -474,7 +474,10 @@ describe("createProjects", () => {
     const manifest = JSON.parse(
       mocks.files.get("panels/minimal/package.json") as string,
     );
-    expect(manifest.dependencies).toEqual({ react: "19.2.4" });
+    expect(manifest.dependencies).toEqual({
+      react: "19.2.4",
+      "react-dom": "19.2.4",
+    });
     expect(manifest.vibestudio.exposeModules).toEqual([
       "react",
       "react/jsx-runtime",
