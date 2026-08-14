@@ -273,18 +273,27 @@ function validatePanelGenerationRecovery(result: TestExecutionResult) {
     return (
       code.includes(".rebuild(") &&
       code.includes(".refresh(") &&
-      records(call).some((record) => record["status"] === "replaced")
+      records(call).some(
+        (record) =>
+          record["status"] === "replaced" || record["sessionStatus"] === "replaced"
+      )
     );
   });
   const observedInteraction = evalCalls.slice(Math.max(0, refresh)).some((call) =>
     records(call).some((record) => {
       const effect = record["effect"];
-      return (
+      const canonicalOutcome =
         record["protocol"] === "cdp-interaction-outcome.v1" &&
         record["delivery"] === "dispatched" &&
         isRecord(effect) &&
-        effect["status"] === "observed"
-      );
+        effect["status"] === "observed";
+      const compactOutcome =
+        record["sessionStatus"] === "replaced" &&
+        record["clickStatus"] === "observed" &&
+        typeof record["before"] === "string" &&
+        typeof record["after"] === "string" &&
+        record["before"] !== record["after"];
+      return canonicalOutcome || compactOutcome;
     })
   );
   return initial >= 0 && refresh > initial && observedInteraction

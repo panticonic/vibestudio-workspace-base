@@ -410,6 +410,27 @@ describe("developer ergonomics scenarios", () => {
         execution([open, verify, targetedEdit, rebuild])
       )
     ).toEqual({ passed: true, reason: undefined });
+
+    const compactRebuild = call(
+      "compact-rebuild",
+      "eval",
+      {
+        code: "await scope.panel.rebuild(); const refreshed = await scope.session.refresh();",
+      },
+      {
+        returnValue: {
+          sessionStatus: "replaced",
+          before: "Count: 0",
+          after: "Count: 1",
+          clickStatus: "observed",
+        },
+      }
+    );
+    expect(
+      scenario("panel-rebuild-reacquire-and-interact").validate(
+        execution([open, verify, targetedEdit, compactRebuild])
+      )
+    ).toEqual({ passed: true, reason: undefined });
   });
 
   it("requires a stale receipt refusal with fresh evidence before the corrected patch", () => {
