@@ -252,8 +252,17 @@ function validateExtensionlessScreenshot(result: TestExecutionResult) {
 }
 
 function validatePanelGenerationRecovery(result: TestExecutionResult) {
-  const base = completedScenarioEvidence(result, ["eval", "verify", "apply_patch"]);
+  const base = completedScenarioEvidence(result, ["eval", "verify"]);
   if (!base.passed) return base;
+  const sourceImproved = getToolCalls(result).some(
+    (call) => (call.name === "apply_patch" || call.name === "edit") && isComplete(call)
+  );
+  if (!sourceImproved) {
+    return {
+      passed: false,
+      reason: "The panel source was not visibly improved before rebuilding",
+    };
+  }
   const evalCalls = getToolCalls(result).filter((call) => call.name === "eval" && isComplete(call));
   const initial = evalCalls.findIndex((call) =>
     String(call.arguments?.["code"] ?? "").includes("cdp.session")

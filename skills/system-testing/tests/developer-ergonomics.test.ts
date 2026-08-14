@@ -398,6 +398,18 @@ describe("developer ergonomics scenarios", () => {
         execution([open, verify, edit, rebuild])
       )
     ).toEqual({ passed: true, reason: undefined });
+
+    const targetedEdit = call(
+      "targeted-edit",
+      "edit",
+      { path: "panels/counter/index.tsx" },
+      { applicationId: "application:counter-edit" }
+    );
+    expect(
+      scenario("panel-rebuild-reacquire-and-interact").validate(
+        execution([open, verify, targetedEdit, rebuild])
+      )
+    ).toEqual({ passed: true, reason: undefined });
   });
 
   it("requires a stale receipt refusal with fresh evidence before the corrected patch", () => {
