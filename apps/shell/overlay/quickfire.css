@@ -1,0 +1,534 @@
+/**
+ * Quickfire overlay card (spec §4).
+ *
+ * Same visual family as the approval card — it is the same content-overlay
+ * primitive, so it positions statically and lets `OverlaySurfaceHost` provide
+ * the margin its elevation shadow needs. Rows and group labels follow the
+ * `launcher.css` conventions from `about/new` rather than inventing a second
+ * palette language; everything keys off the shared Radix/token layer so light
+ * and dark both read correctly without per-rule branches.
+ */
+
+.quickfire-card,
+.quickfire-card * {
+  box-sizing: border-box;
+}
+
+.quickfire-card {
+  position: relative;
+  /* 640px, clamped to the anchor the chrome measured. */
+  width: min(640px, var(--overlay-max-width, 640px));
+  max-width: var(--overlay-max-width, 100vw);
+  max-height: var(--overlay-max-height, calc(100vh - 32px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: var(--radius-5);
+  background: var(--surface-raised);
+  box-shadow:
+    inset 0 0 0 1px var(--surface-border),
+    var(--approval-card-shadow, var(--elevation-overlay));
+  transform-origin: top center;
+  animation: quickfire-in var(--motion-emphasized) var(--ease-emphasized);
+  outline: none;
+  --scrollbar-thumb: color-mix(in srgb, var(--gray-10) 55%, transparent);
+}
+
+@keyframes quickfire-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- Input --------------------------------------------------------------- */
+
+.quickfire-entry {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 14px 16px 10px;
+}
+
+.quickfire-entry-icon {
+  flex-shrink: 0;
+  color: var(--gray-9);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.quickfire-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: block;
+}
+
+.quickfire-input,
+.quickfire-ghost {
+  font-family: inherit;
+  font-size: 15px;
+  line-height: 22px;
+  letter-spacing: normal;
+}
+
+.quickfire-input {
+  width: 100%;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--gray-12);
+  outline: none;
+}
+
+.quickfire-input::placeholder {
+  color: var(--gray-9);
+}
+
+/* Ghost text sits exactly under the caret line; only the suffix is visible. */
+.quickfire-ghost {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  white-space: pre;
+  overflow: hidden;
+}
+
+.quickfire-ghost-typed {
+  visibility: hidden;
+}
+
+.quickfire-ghost-suffix {
+  color: var(--gray-a8);
+}
+
+/* ---- Argument breadcrumb (§4.2) ------------------------------------------ */
+
+.quickfire-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+
+.quickfire-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--radius-3);
+  background: var(--gray-a3);
+  color: var(--gray-12);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.quickfire-chip-command {
+  background: var(--accent-a3);
+  color: var(--accent-11);
+  font-weight: 600;
+}
+
+.quickfire-chip-name {
+  color: var(--gray-10);
+}
+
+.quickfire-arg-label {
+  color: var(--gray-10);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.quickfire-error {
+  margin: 0;
+  padding: 0 16px 8px;
+  color: var(--red-11);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+/* ---- Mode chips ---------------------------------------------------------- */
+
+.quickfire-modes {
+  flex-shrink: 0;
+  display: flex;
+  gap: 6px;
+  padding: 0 16px 12px;
+}
+
+.quickfire-mode {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  padding: 2px 10px;
+  border-radius: var(--radius-4);
+  background: var(--gray-a2);
+  color: var(--gray-11);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 20px;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    color var(--motion-fast) var(--ease-standard);
+}
+
+.quickfire-mode:hover {
+  background: var(--gray-a3);
+}
+
+.quickfire-mode[aria-pressed="true"] {
+  background: var(--accent-a3);
+  color: var(--accent-11);
+}
+
+/* ---- Results ------------------------------------------------------------- */
+
+.quickfire-results {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 8px;
+  border-top: 1px solid var(--gray-a4);
+}
+
+.quickfire-group-label {
+  margin: 0;
+  padding: 10px 8px 4px;
+  color: var(--gray-10);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.quickfire-row {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  width: 100%;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 8px;
+  border-radius: var(--radius-3);
+  background: transparent;
+  color: var(--gray-12);
+  font-family: inherit;
+  text-align: left;
+}
+
+.quickfire-row[aria-selected="true"] {
+  background: var(--accent-a3);
+}
+
+.quickfire-row[aria-disabled="true"] {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.quickfire-row[data-danger] .quickfire-row-title {
+  color: var(--red-11);
+}
+
+.quickfire-row[data-danger][aria-selected="true"] {
+  background: var(--red-a3);
+}
+
+/* A command that does not navigate leaves the palette open, so the row itself
+   has to say it ran (§4.4). 900ms, then back to normal. */
+.quickfire-row[data-flash] {
+  animation: quickfire-flash 900ms var(--ease-standard);
+}
+
+@keyframes quickfire-flash {
+  0%,
+  60% {
+    background: var(--grass-a4);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+.quickfire-row-icon {
+  flex-shrink: 0;
+  width: 18px;
+  text-align: center;
+  color: var(--gray-10);
+  font-size: 13px;
+}
+
+.quickfire-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.quickfire-row-title {
+  font-size: 13px;
+  line-height: 20px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quickfire-row-meta {
+  flex: 1;
+  min-width: 0;
+  color: var(--gray-10);
+  font-size: 12px;
+  line-height: 18px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quickfire-row-trailing {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.quickfire-row-badge {
+  padding: 1px 6px;
+  border-radius: var(--radius-4);
+  background: var(--gray-a3);
+  color: var(--gray-11);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.quickfire-empty {
+  margin: 0;
+  padding: 16px;
+  border-top: 1px solid var(--gray-a4);
+  color: var(--gray-10);
+  font-size: 13px;
+  text-align: center;
+}
+
+/* ---- Quickfire conversation (§4.3) -------------------------------------- */
+
+.quickfire-compose {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px;
+  border-top: 1px solid var(--gray-a4);
+}
+
+.quickfire-compose-hint {
+  margin: 0;
+  color: var(--gray-11);
+  font-size: 13px;
+  line-height: 20px;
+}
+
+.quickfire-compose-disabled {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: var(--radius-3);
+  background: var(--amber-a3);
+  color: var(--amber-11);
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.quickfire-conversation-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.quickfire-conversation-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--gray-12);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.quickfire-conversation-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.quickfire-action {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--gray-11);
+  font: inherit;
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: var(--radius-2);
+  cursor: pointer;
+}
+
+.quickfire-action:hover:not(:disabled) {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+
+.quickfire-action:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* The armed half of the two-step clear reads as destructive, without a modal. */
+.quickfire-action-armed {
+  background: var(--red-a3);
+  color: var(--red-11);
+}
+
+.quickfire-resume {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+  padding: 5px 9px;
+  border-radius: var(--radius-2);
+  background: var(--gray-a2);
+  color: var(--gray-10);
+  font-size: 11px;
+}
+
+.quickfire-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.quickfire-message {
+  border-radius: var(--radius-3);
+  padding: 8px 10px;
+  background: var(--gray-a2);
+}
+
+.quickfire-message-you {
+  background: var(--accent-a3);
+}
+
+.quickfire-message-error {
+  background: var(--red-a3);
+}
+
+.quickfire-message-author {
+  margin: 0 0 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--gray-10);
+}
+
+.quickfire-message-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--gray-12);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Live delta indicator: the transcript renders streaming text as it arrives. */
+.quickfire-caret {
+  display: inline-block;
+  width: 2px;
+  height: 13px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--accent-9);
+  animation: quickfire-caret-blink 1s steps(2, start) infinite;
+}
+
+@keyframes quickfire-caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+.quickfire-tool-chips {
+  margin: 6px 0 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.quickfire-compose-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.quickfire-compose-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 10px 0 0;
+}
+
+.quickfire-compose-keys {
+  color: var(--gray-9);
+  font-size: 11px;
+}
+
+/* ---- Context strip (§4.1) ------------------------------------------------ */
+
+.quickfire-context {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--gray-a4);
+  background: var(--gray-a2);
+  color: var(--gray-10);
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.quickfire-context-panel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--gray-11);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quickfire-context-lost {
+  color: var(--gray-9);
+  font-style: italic;
+}
+
+.quickfire-context-hints {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.quickfire-context-hints kbd {
+  font-family: inherit;
+  color: var(--gray-11);
+}

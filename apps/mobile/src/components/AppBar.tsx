@@ -22,9 +22,9 @@ import { pushToastAtom } from "../state/toastAtoms";
 import {
   isBrowserPanelSource,
   splitTextByMatchRanges,
-  type AddressAutocompleteItem,
   type TextMatchRange,
 } from "@vibestudio/shared/panelChrome";
+import type { AddressAutocompleteItem } from "@workspace/omnibox-core";
 import { getCurrentSnapshot } from "@vibestudio/shared/panel/accessors";
 import { hairline, radius, spacing, touchTarget, type } from "../design/tokens";
 import {
@@ -39,6 +39,7 @@ import {
   Plus,
   RefreshCw,
   Search,
+  Sparkles,
   Square,
   Workflow,
   X,
@@ -71,6 +72,14 @@ interface AppBarProps {
   onAddressQueryChange?: (value: string) => void;
   onSelectAddressSuggestion?: (item: AddressAutocompleteItem) => void;
   onShowActions?: () => void;
+  /** Open the searchable command sheet (quickfire-overlay-spec §7.1). */
+  onOpenCommands?: () => void;
+  /**
+   * Long-press on the active panel pill: the command sheet pre-scoped to "Go
+   * to" (§7.1). The panel menu keeps its own `⋯` button, so this reassignment
+   * costs no affordance.
+   */
+  onOpenGoTo?: () => void;
 }
 
 export function AppBar({
@@ -93,6 +102,8 @@ export function AppBar({
   onAddressQueryChange,
   onSelectAddressSuggestion,
   onShowActions,
+  onOpenCommands,
+  onOpenGoTo,
 }: AppBarProps) {
   const insets = useSafeAreaInsets();
   const colors = useAtomValue(themeColorsAtom);
@@ -183,9 +194,13 @@ export function AppBar({
           ) : null}
           <Pressable
             onPress={onToggleAddressBar}
-            onLongPress={onShowActions}
+            onLongPress={onOpenGoTo ?? onShowActions}
             accessibilityRole="button"
-            accessibilityLabel="Edit address. Long-press for panel menu."
+            accessibilityLabel={
+              onOpenGoTo
+                ? "Edit address. Long-press to go to another panel."
+                : "Edit address. Long-press for panel menu."
+            }
             style={({ pressed }) => [
               styles.pill,
               {
@@ -232,6 +247,14 @@ export function AppBar({
               />
             ) : null}
           </Pressable>
+          {onOpenCommands ? (
+            <IconButton
+              icon={Sparkles}
+              onPress={onOpenCommands}
+              label="Commands and quickfire"
+              color={colors.primary}
+            />
+          ) : null}
           {onShowActions ? (
             <IconButton
               icon={MoreHorizontal}

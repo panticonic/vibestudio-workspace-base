@@ -37,6 +37,9 @@ export function useShellContentOverlay(
   onIntent?: (payload: unknown) => void
 ): void {
   const shownRef = useRef(false);
+  /** The surface currently shown, so teardown can name the instance to hide.
+   *  Overlays are per-surface instances in main, so `hide` is surface-scoped. */
+  const shownSurfaceRef = useRef<OverlaySurfaceKey | null>(null);
   const consumedFocusRequestRef = useRef<string | undefined>(undefined);
   const onIntentRef = useRef(onIntent);
   onIntentRef.current = onIntent;
@@ -52,9 +55,11 @@ export function useShellContentOverlay(
   const focusRequest = options?.focusRequest;
   useEffect(() => {
     if (!open || !surface || !bounds || !theme) {
-      if (shownRef.current) {
+      const shownSurface = shownSurfaceRef.current;
+      if (shownRef.current && shownSurface) {
         shownRef.current = false;
-        void view.hideContentOverlay();
+        shownSurfaceRef.current = null;
+        void view.hideContentOverlay(shownSurface);
       }
       return;
     }
@@ -68,8 +73,9 @@ export function useShellContentOverlay(
       theme,
       focus: shouldFocus,
     };
-    if (!shownRef.current) {
+    if (!shownRef.current || shownSurfaceRef.current !== surface) {
       shownRef.current = true;
+      shownSurfaceRef.current = surface;
       void view.showContentOverlay(payload);
       return;
     }
@@ -89,9 +95,11 @@ export function useShellContentOverlay(
   // Ensure the overlay is torn down if the owner unmounts while open.
   useEffect(
     () => () => {
-      if (shownRef.current) {
+      const shownSurface = shownSurfaceRef.current;
+      if (shownRef.current && shownSurface) {
         shownRef.current = false;
-        void view.hideContentOverlay();
+        shownSurfaceRef.current = null;
+        void view.hideContentOverlay(shownSurface);
       }
       consumedFocusRequestRef.current = undefined;
     },

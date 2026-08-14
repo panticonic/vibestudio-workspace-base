@@ -1,7 +1,20 @@
 import type { BrowserAddressSuggestion } from "@vibestudio/shared/panelChrome";
 import type { LaunchablePanel } from "./launchablePanels";
 
-export type LauncherMode = "all" | "panels" | "history" | "chat";
+/**
+ * The unified prefix grammar (spec §1.2).
+ *
+ * Until P6 this engine spoke `about/new`'s original grammar, where `>` meant
+ * "panels only" and `@` meant "history only". The overlay palette demoted
+ * panels off `>` (in an overlay, *actions* are the primary citizens) and made
+ * `@` the single "go to" scope over destinations of every kind. Keeping two
+ * grammars for the same keystrokes was the last thing standing between the two
+ * surfaces, so `about/new` adopted this one: `@` is go-to, `/` is chat, bare is
+ * everything. `>` remains parsed — `about/new` has no command slate for it to
+ * mean anything else — and is treated as an alias of `@` so a year of muscle
+ * memory still lands somewhere sensible while the deprecation hint is shown.
+ */
+export type LauncherMode = "all" | "goto" | "chat";
 
 export interface LauncherInput {
   mode: LauncherMode;
@@ -22,19 +35,23 @@ export type LauncherSuggestion =
   | { id: string; kind: "url"; url: string; score: number }
   | { id: string; kind: "chat"; prompt: string; score: number };
 
-const MATCH_EXACT = 3_000_000_000_000;
-const MATCH_PREFIX = 2_000_000_000_000;
-const MATCH_SUBSTRING = 1_000_000_000_000;
-const PROMPT_PRIORITY = 2_250_000_000_000;
-const URL_PRIORITY = 4_000_000_000_000;
-const DEFAULT_LAUNCHER_SUGGESTION_LIMIT = 20;
+export const MATCH_EXACT = 3_000_000_000_000;
+export const MATCH_PREFIX = 2_000_000_000_000;
+export const MATCH_SUBSTRING = 1_000_000_000_000;
+export const PROMPT_PRIORITY = 2_250_000_000_000;
+export const URL_PRIORITY = 4_000_000_000_000;
+export const DEFAULT_LAUNCHER_SUGGESTION_LIMIT = 20;
 
 export function parseLauncherInput(input: string): LauncherInput {
   const first = input[0];
   const prefix = first === ">" || first === "@" || first === "/" ? first : "";
-  const mode: LauncherMode =
-    prefix === ">" ? "panels" : prefix === "@" ? "history" : prefix === "/" ? "chat" : "all";
+  const mode: LauncherMode = prefix === "/" ? "chat" : prefix ? "goto" : "all";
   return { mode, prefix, query: prefix ? input.slice(1).trimStart() : input };
+}
+
+/** True while the typed prefix is the retired panels-only `>` (see LauncherMode). */
+export function isDeprecatedLauncherPrefix(input: LauncherInput): boolean {
+  return input.prefix === ">";
 }
 
 export function isLikelyAgentPrompt(input: string): boolean {
@@ -51,7 +68,7 @@ export function isLikelyAgentPrompt(input: string): boolean {
   );
 }
 
-function textMatchScore(query: string, ...values: Array<string | undefined>): number {
+export function textMatchScore(query: string, ...values: Array<string | undefined>): number {
   if (!query) return 0;
   const normalized = query.toLowerCase();
   const candidates = values.filter(Boolean).map((value) => value!.toLowerCase());
@@ -61,7 +78,7 @@ function textMatchScore(query: string, ...values: Array<string | undefined>): nu
   return -1;
 }
 
-function usageScore(count: number, lastUsed: number): number {
+export function usageScore(count: number, lastUsed: number): number {
   // Frequency dominates within a match tier; recency breaks close ties without
   // allowing an often-used weak substring to outrank an exact destination.
   return Math.log2(Math.max(0, count) + 1) * 10_000_000_000 + Math.min(lastUsed, 9_999_999_999);
@@ -72,6 +89,38 @@ function browserUsage(browser: BrowserAddressSuggestion): number {
     (browser.visitCount ?? 0) + (browser.typedCount ?? 0) * 2,
     browser.lastVisit ?? 0
   );
+}
+
+export type HistorySuggestion = Extract<LauncherSuggestion, { kind: "history" }>;
+
+/**
+ * Rank browser history rows on the launcher's terms: match tier first, visit
+ * and typed counts only breaking ties inside a tier.
+ *
+ * Exported because the palette surfaces (the desktop overlay's `@` scope and
+ * the mobile command sheet) show history as their own group alongside commands
+ * and open panels, rather than going through `buildLauncherSuggestions`. They
+ * must rank it identically to `about/new` — one engine, one answer.
+ */
+export function rankHistorySuggestions(
+  query: string,
+  browserSuggestions: BrowserAddressSuggestion[],
+  limit?: number
+): HistorySuggestion[] {
+  const trimmed = query.trim();
+  const ranked: HistorySuggestion[] = [];
+  for (const browser of browserSuggestions) {
+    const match = textMatchScore(trimmed, browser.title, browser.url);
+    if (match < 0) continue;
+    ranked.push({
+      id: `history:${browser.url}`,
+      kind: "history",
+      browser,
+      score: match + browserUsage(browser),
+    });
+  }
+  ranked.sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+  return limit === undefined ? ranked : ranked.slice(0, limit);
 }
 
 export function buildLauncherSuggestions(input: {
@@ -92,7 +141,7 @@ export function buildLauncherSuggestions(input: {
     return candidates;
   }
 
-  if (parsed.mode === "all" || parsed.mode === "panels") {
+  if (parsed.mode === "all" || parsed.mode === "goto") {
     for (const panel of input.panels) {
       const match = textMatchScore(query, panel.title, panel.path);
       if (match < 0) continue;
@@ -106,17 +155,8 @@ export function buildLauncherSuggestions(input: {
     }
   }
 
-  if (parsed.mode === "all" || parsed.mode === "history") {
-    for (const browser of input.browserSuggestions) {
-      const match = textMatchScore(query, browser.title, browser.url);
-      if (match < 0) continue;
-      candidates.push({
-        id: `history:${browser.url}`,
-        kind: "history",
-        browser,
-        score: match + browserUsage(browser),
-      });
-    }
+  if (parsed.mode === "all" || parsed.mode === "goto") {
+    candidates.push(...rankHistorySuggestions(query, input.browserSuggestions));
   }
 
   if (parsed.mode === "all" && input.browserUrl) {

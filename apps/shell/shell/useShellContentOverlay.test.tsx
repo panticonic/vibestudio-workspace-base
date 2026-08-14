@@ -68,4 +68,20 @@ describe("useShellContentOverlay", () => {
       )
     );
   });
+
+  it("hides the surface it showed, not whatever else is open", async () => {
+    const rendered = render(<Probe options={{ ...baseOptions, surface: "quickfire" }} />);
+    await waitFor(() => expect(shellClient.show).toHaveBeenCalled());
+
+    rendered.rerender(<Probe options={null} />);
+    await waitFor(() => expect(shellClient.hide).toHaveBeenCalledWith("quickfire"));
+  });
+
+  it("hides on unmount so a closing owner cannot strand its overlay", async () => {
+    const rendered = render(<Probe options={{ ...baseOptions, surface: "quickfire" }} />);
+    await waitFor(() => expect(shellClient.show).toHaveBeenCalled());
+
+    rendered.unmount();
+    expect(shellClient.hide).toHaveBeenCalledWith("quickfire");
+  });
 });

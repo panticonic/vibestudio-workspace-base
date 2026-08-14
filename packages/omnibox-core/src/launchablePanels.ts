@@ -1,4 +1,12 @@
-import type { WorkspaceNode } from "@workspace/runtime";
+/**
+ * The launcher's projection of the workspace source tree.
+ *
+ * The walk itself lives in `./panelSources` — one traversal serves both this
+ * catalogue and the title bar's panel-path completion (P6).
+ */
+import { visitWorkspaceNodes, type WorkspaceNode } from "./panelSources";
+
+export type { WorkspaceNode };
 
 export interface LaunchablePanel {
   path: string;
@@ -34,18 +42,12 @@ function launchablePanel(node: WorkspaceNode): LaunchablePanel {
 export function collectLaunchablePanelGroups(nodes: WorkspaceNode[]): LaunchablePanelGroups {
   const groups: LaunchablePanelGroups = { panels: [], about: [] };
 
-  const visit = (node: WorkspaceNode) => {
+  visitWorkspaceNodes(nodes, (node) => {
     if (node.launchable && !node.launchable.hidden) {
       if (node.path.startsWith("panels/")) groups.panels.push(launchablePanel(node));
       else if (node.path.startsWith("about/")) groups.about.push(launchablePanel(node));
     }
-
-    node.children.forEach(visit);
-  };
-
-  for (const node of nodes) {
-    visit(node);
-  }
+  });
 
   groups.panels.sort(byTitle);
   groups.about.sort(byTitle);

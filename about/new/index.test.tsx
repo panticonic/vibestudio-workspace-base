@@ -283,10 +283,10 @@ describe("new panel launcher", () => {
   it("accepts the highlighted inline completion with Tab", async () => {
     render(<AboutPanelRoot />);
     const input = screen.getByRole("combobox") as HTMLTextAreaElement;
-    fireEvent.change(input, { target: { value: ">term" } });
+    fireEvent.change(input, { target: { value: "@term" } });
     await screen.findByText("Terminal");
     fireEvent.keyDown(input, { key: "Tab" });
-    expect(input.value).toBe(">Terminal");
+    expect(input.value).toBe("@Terminal");
     expect(mocks.reopen).not.toHaveBeenCalled();
   });
 
@@ -331,15 +331,33 @@ describe("new panel launcher", () => {
     fireEvent.change(input, { target: { value: "chat" } });
     await findRow("Chat");
 
-    fireEvent.click(screen.getByRole("button", { name: /Panels/ }));
-    await waitFor(() => expect(input.value).toBe(">chat"));
+    fireEvent.click(screen.getByRole("button", { name: /Go to/ }));
+    await waitFor(() => expect(input.value).toBe("@chat"));
+    // `@` is destinations of every kind — it must not drop the agent prompt's
+    // neighbours the way the old history-only scope did, and it must not offer
+    // the two things that are not destinations (a literal URL, a chat prompt).
     await waitFor(() =>
       expect(screen.queryAllByRole("group").map((group) => group.textContent?.slice(0, 6))).toEqual(
         ["Panels"]
       )
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Panels/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Go to/ }));
     await waitFor(() => expect(input.value).toBe("chat"));
+  });
+
+  it("routes the retired `>` prefix into the go-to scope and says so", async () => {
+    render(<AboutPanelRoot />);
+    const input = screen.getByRole("combobox") as HTMLTextAreaElement;
+    fireEvent.change(input, { target: { value: ">example" } });
+
+    // The deprecation notice is the whole point of keeping `>` parseable.
+    await screen.findByText(/is now/);
+    // `>` used to mean panels only; it now searches history too.
+    await findRow("Example Docs");
+
+    fireEvent.click(screen.getByRole("button", { name: "Use @" }));
+    await waitFor(() => expect(input.value).toBe("@example"));
+    expect(screen.queryByText(/is now/)).toBeNull();
   });
 });

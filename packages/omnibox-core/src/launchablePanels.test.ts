@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import type { WorkspaceNode } from "@workspace/runtime";
 import {
   collectLaunchablePanelGroups,
   parseCachedLaunchablePanelGroups,
   serializeLaunchablePanelGroups,
+  type WorkspaceNode,
 } from "./launchablePanels";
 
 function node(

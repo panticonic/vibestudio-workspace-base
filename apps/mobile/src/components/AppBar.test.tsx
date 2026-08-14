@@ -2,7 +2,7 @@ import { fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import { SvgUri } from "react-native-svg";
 import { AppBar } from "./AppBar";
-import type { AddressAutocompleteItem } from "@vibestudio/shared/panelChrome";
+import type { AddressAutocompleteItem } from "@workspace/omnibox-core";
 import { shellClientAtom, panelTreeRevisionAtom } from "../state/shellClientAtom";
 import { activePanelIdAtom } from "../state/navigationAtoms";
 

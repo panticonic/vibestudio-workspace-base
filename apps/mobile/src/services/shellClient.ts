@@ -38,10 +38,12 @@ import {
 } from "@vibestudio/shared/panel/ids";
 import {
   getSharedBrowserAddressOptions,
-  getSharedPanelAddressOptions,
   type BrowserAddressOptions,
-  type PanelAddressOptions,
 } from "@vibestudio/shared/panelChrome";
+import {
+  getSharedPanelAddressOptions,
+  type PanelAddressOptions,
+} from "@workspace/omnibox-core";
 import {
   createBrowserDataClient,
   type BrowserDataClient,
@@ -62,6 +64,8 @@ import { blobstoreMethods } from "@vibestudio/service-schemas/blobstore";
 import { panelRuntimeMethods } from "@vibestudio/service-schemas/panelRuntime";
 import { credentialsMethods } from "@vibestudio/service-schemas/credentials";
 import { pushMethods } from "@vibestudio/service-schemas/push";
+import { quickfireMethods } from "@vibestudio/service-schemas/quickfire";
+import { connectViaRpc, type PubSubClient } from "@workspace/pubsub";
 import { workspaceMethods } from "@vibestudio/service-schemas/workspace";
 import { hubControlMethods } from "@vibestudio/service-schemas/hubControl";
 import { shellBrowserPrivacyMethods } from "@vibestudio/service-schemas/shellBrowserPrivacy";
@@ -224,6 +228,22 @@ function createWorkspaceRpcClient(transport: MobileRpcClient) {
   );
 }
 
+/**
+ * Panel-slot-scoped agent micro-sessions (quickfire-overlay-spec §2.4, §7.2).
+ *
+ * The mobile quickfire sheet talks to the same host service the desktop overlay
+ * does; unlike desktop there is no props bridge in the way, so the sheet drives
+ * this client directly through `@workspace/quickfire-core/session`.
+ */
+function createQuickfireClient(transport: MobileRpcClient) {
+  return createTypedServiceClient(
+    "quickfire",
+    quickfireMethods,
+    (service, method, args) =>
+      transport.call("main", `${service}.${method}`, args),
+  );
+}
+
 function createHubControlClient(transport: MobileRpcClient) {
   return createTypedServiceClient(
     "hubControl",
@@ -238,6 +258,7 @@ type BlobstoreClient = ReturnType<typeof createBlobstoreClient>;
 type PanelRuntimeClient = ReturnType<typeof createPanelRuntimeClient>;
 type CredentialsClient = ReturnType<typeof createCredentialsClient>;
 type PushClient = ReturnType<typeof createPushClient>;
+type QuickfireRpcClient = ReturnType<typeof createQuickfireClient>;
 type WorkspaceRpcClient = ReturnType<typeof createWorkspaceRpcClient>;
 type WorkspaceInfo = Awaited<ReturnType<WorkspaceClient["getInfo"]>>;
 
@@ -1068,6 +1089,21 @@ export class ShellClient {
   readonly panelRuntime: PanelRuntimeClient;
   readonly credentialService: CredentialsClient;
   readonly push: PushClient;
+  /**
+   * Panel-slot-scoped agent micro-sessions (quickfire-overlay-spec §2.4).
+   * Bound to a slot only by an explicit user gesture — calling `sessionFor`
+   * creates an agent, so the sheet must call it when the user opens quickfire
+   * over that panel and never on focus change.
+   */
+  readonly quickfire: {
+    sessionFor(
+      slotId: string,
+      options?: { fresh?: boolean },
+    ): ReturnType<QuickfireRpcClient["sessionFor"]>;
+    clear(slotId: string): ReturnType<QuickfireRpcClient["clear"]>;
+    promote(slotId: string): ReturnType<QuickfireRpcClient["promote"]>;
+    list(): ReturnType<QuickfireRpcClient["list"]>;
+  };
   readonly hostLaunch: HostLaunchClient;
   readonly browserPrivacy: ReturnType<typeof createShellBrowserPrivacyClient>;
   readonly recovery: RecoveryCoordinator;
@@ -1110,6 +1146,23 @@ export class ShellClient {
   private navigationListeners = new Set<(panelId: string) => void>();
   private readonly browserPrivacyPresentation =
     new BrowserPrivacyPresentationState();
+
+  /**
+   * Join a channel as this device. The quickfire sheet needs live delivery (not
+   * a poll) to render streaming deltas, so it connects the same way the chat
+   * panel does; the app already declares `vibestudio.channel.v1` and
+   * `workspace-service:channel`.
+   */
+  connectToChannel(channelId: string, contextId: string): PubSubClient {
+    return connectViaRpc({
+      rpc: this.transport,
+      channel: channelId,
+      contextId,
+      protocol: "vibestudio.channel.v1",
+      replayMode: "collect",
+      type: "user",
+    });
+  }
 
   /** Listen to an event addressed directly to this authenticated mobile session. */
   onDirectEvent<E extends EventName>(
@@ -1232,6 +1285,17 @@ export class ShellClient {
     this.panelRuntime = createPanelRuntimeClient(this.transport);
     this.credentialService = createCredentialsClient(this.transport);
     this.push = createPushClient(this.transport);
+    const quickfireClient = createQuickfireClient(this.transport);
+    this.quickfire = {
+      sessionFor: (slotId, options) =>
+        quickfireClient.sessionFor({
+          slotId,
+          ...(options?.fresh ? { fresh: true } : {}),
+        }),
+      clear: (slotId) => quickfireClient.clear({ slotId }),
+      promote: (slotId) => quickfireClient.promote({ slotId }),
+      list: () => quickfireClient.list(),
+    };
     this.hostLaunch = new HostLaunchClient((service, method, args) =>
       this.transport.call("main", `${service}.${method}`, args),
     );

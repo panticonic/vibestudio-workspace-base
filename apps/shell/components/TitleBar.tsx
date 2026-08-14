@@ -50,14 +50,16 @@ import type {
   DescendantSiblingGroup,
 } from "./navigationTypes";
 import {
-  buildAddressAutocompleteItems,
-  type AddressAutocompleteItem,
   type AddressAction,
   type BrowserAddressOptions,
-  type PanelAddressOptions,
   type PanelChromeState,
-  type PanelSourceSuggestion,
 } from "@vibestudio/shared/panelChrome";
+import {
+  buildAddressAutocompleteItems,
+  type AddressAutocompleteItem,
+  type PanelAddressOptions,
+  type PanelSourceSuggestion,
+} from "@workspace/omnibox-core";
 import {
   getAddressNavigationModeFromModifiers,
   isPanelClosePointerButton,

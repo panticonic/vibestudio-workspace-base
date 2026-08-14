@@ -30,6 +30,8 @@ import {
   remoteCredMethods,
   type RemoteCredCurrent as RemoteCredCurrentContract,
 } from "@vibestudio/service-schemas/remoteCred";
+import { quickfireMethods } from "@vibestudio/service-schemas/quickfire";
+import { connectViaRpc, type PubSubClient } from "@workspace/pubsub";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
 import { shellPresenceMethods } from "@vibestudio/service-schemas/shellPresence";
 import { autofillMethods } from "@vibestudio/service-schemas/autofill";
@@ -77,9 +79,9 @@ import { decodePanelStateArgs } from "@vibestudio/shared/panelStateArgs";
 import {
   browserUrlFromPanelSource,
   getSharedBrowserAddressOptions,
-  getSharedPanelAddressOptions,
   type BrowserHistoryAddressRow,
 } from "@vibestudio/shared/panelChrome";
+import { getSharedPanelAddressOptions } from "@workspace/omnibox-core";
 import type { WorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
 import { createTemplateManagementClient } from "@workspace/template-management";
 import { createWorkspacePresentationClient } from "@workspace/runtime/workspace-presentation";
@@ -826,7 +828,7 @@ export const view = {
   updateContentOverlay: (
     options: Parameters<typeof viewClient.updateContentOverlay>[0]
   ) => viewClient.updateContentOverlay(options),
-  hideContentOverlay: () => viewClient.hideContentOverlay(),
+  hideContentOverlay: (surface: string) => viewClient.hideContentOverlay({ surface }),
   browserNavigate: (browserId: string, url: string) =>
     viewClient.browserNavigate(browserId, url),
   browserGoBack: (browserId: string) => viewClient.browserGoBack(browserId),
@@ -1374,3 +1376,42 @@ export const shellApproval = {
 export const shellPresence = {
   heartbeat: () => shellPresenceClient.heartbeat(),
 };
+
+// =============================================================================
+// Quickfire — panel-slot-scoped agent micro-sessions (quickfire-overlay-spec §2.4)
+// =============================================================================
+const quickfireClient = createTypedServiceClient(
+  "quickfire",
+  quickfireMethods,
+  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
+);
+
+export const quickfire = {
+  /**
+   * Resolve (creating on first use) the conversation bound to a panel slot.
+   * Calling this IS the user gesture that binds the slot — the owner must only
+   * call it when the user actually enters quickfire mode over that panel.
+   */
+  sessionFor: (slotId: string, options?: { fresh?: boolean }) =>
+    quickfireClient.sessionFor({ slotId, ...(options?.fresh ? { fresh: true } : {}) }),
+  clear: (slotId: string) => quickfireClient.clear({ slotId }),
+  promote: (slotId: string) => quickfireClient.promote({ slotId }),
+  list: () => quickfireClient.list(),
+};
+
+/**
+ * Join a channel as this shell device. The overlay needs live delivery (not a
+ * poll) to render streaming deltas, so it connects the same way the chat panel
+ * does; the shell already declares `vibestudio.channel.v1` and
+ * `workspace-service:channel`.
+ */
+export function connectToChannel(channelId: string, contextId: string): PubSubClient {
+  return connectViaRpc({
+    rpc,
+    channel: channelId,
+    contextId,
+    protocol: CHANNEL_SERVICE_PROTOCOL,
+    replayMode: "collect",
+    type: "user",
+  });
+}

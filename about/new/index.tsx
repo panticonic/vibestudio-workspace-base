@@ -22,24 +22,22 @@ import { isReviewPending } from "@vibestudio/shared/authority/reviewPending";
 import type { PanelSourceUsage } from "@vibestudio/shared/panelSearchTypes";
 import { useIsMobile } from "@workspace/react/responsive";
 import { AboutPage, AboutThemeRoot } from "../../packages/about-shared/ui";
-import { browserUrlFromEntry } from "./entryIntent";
-import {
-  collectLaunchablePanelGroups,
-  LAUNCHABLE_PANEL_CACHE_KEY,
-  parseCachedLaunchablePanelGroups,
-  serializeLaunchablePanelGroups,
-  type LaunchablePanelGroups,
-} from "./launchablePanels";
 import {
   autocompleteForSuggestion,
+  browserUrlFromEntry,
   buildIdleLauncherSuggestions,
   buildLauncherSuggestions,
+  collectLaunchablePanelGroups,
   groupLauncherSuggestions,
+  LAUNCHABLE_PANEL_CACHE_KEY,
+  parseCachedLaunchablePanelGroups,
   parseLauncherInput,
+  serializeLaunchablePanelGroups,
   type LauncherMode,
   type LauncherSuggestion,
+  type LaunchablePanelGroups,
   type PanelUsage,
-} from "./launcherSuggestions";
+} from "@workspace/omnibox-core";
 import "./launcher.css";
 
 interface NavigationTarget {
@@ -65,11 +63,23 @@ const BACKGROUND_REFRESH_DEADLINE_MS = 500;
 /** With nothing typed there is no relevance signal, so lead with the workspace. */
 const IDLE_GROUP_ORDER: LauncherSuggestion["kind"][] = ["panel", "history", "url", "chat"];
 
+/**
+ * The unified prefix grammar (spec §1.2).
+ *
+ * `>` used to be this page's "panels only" scope. It now belongs to the
+ * overlay palette's command slate, which this page does not have — so `@` is
+ * the single "go to" scope over panels *and* history, `/` is chat, and bare is
+ * everything. A typed `>` is still parsed as `@` for one release, with the
+ * deprecation notice below saying so, rather than silently searching nothing.
+ */
 const MODES: Array<{ prefix: Exclude<ModePrefix, "">; mode: LauncherMode; label: string }> = [
-  { prefix: ">", mode: "panels", label: "Panels" },
-  { prefix: "@", mode: "history", label: "History" },
+  { prefix: "@", mode: "goto", label: "Go to" },
   { prefix: "/", mode: "chat", label: "Chat" },
 ];
+
+/** The retired panels-only prefix, kept working for one release. */
+const DEPRECATED_PREFIX = ">";
+const REPLACEMENT_PREFIX = "@";
 
 /** Let the launcher paint and accept input before optional ranking data starts crossing RPC. */
 function scheduleBackgroundRefresh(callback: () => void): () => void {
@@ -479,7 +489,7 @@ function NewPanelPage() {
 
   useEffect(() => {
     const requestId = ++historyRequestRef.current;
-    if (parsedInput.mode === "panels" || parsedInput.mode === "chat") {
+    if (parsedInput.mode === "chat") {
       setBrowserSuggestions([]);
       setHistoryError(false);
       setHistoryReviewPending(false);
@@ -816,6 +826,21 @@ function NewPanelPage() {
           </Button>
         </LauncherNotice>
       ) : null}
+      {parsedInput.prefix === DEPRECATED_PREFIX ? (
+        <LauncherNotice color="orange">
+          <Text size="2">
+            <code>&gt;</code> is now <code>@</code> — one &ldquo;go to&rdquo; scope for panels and
+            recent pages. Searching there instead.
+          </Text>
+          <Button
+            size="1"
+            variant="soft"
+            onClick={() => replaceInput(`${REPLACEMENT_PREFIX}${parsedInput.query}`)}
+          >
+            Use @
+          </Button>
+        </LauncherNotice>
+      ) : null}
       {historyError ? (
         <LauncherNotice color="orange">
           <Text size="2">History suggestions couldn&apos;t be loaded.</Text>
@@ -895,8 +920,10 @@ function NewPanelPage() {
           <Text size="2" color="gray">
             {parsedInput.prefix
               ? `Nothing in ${
-                  MODES.find((mode) => mode.prefix === parsedInput.prefix)?.label.toLowerCase() ??
-                  "this scope"
+                  MODES.find(
+                    (mode) =>
+                      mode.mode === parsedInput.mode
+                  )?.label.toLowerCase() ?? "this scope"
                 } matches “${parsedInput.query}”.`
               : `Nothing matches “${parsedInput.query}”.`}
           </Text>

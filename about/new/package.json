@@ -96,9 +96,10 @@
   },
   "dependencies": {
     "@vibestudio/shared": "workspace:*",
+    "@workspace/about-shared": "workspace:*",
+    "@workspace/omnibox-core": "workspace:*",
     "@workspace/react": "workspace:*",
-    "@workspace/runtime": "workspace:*",
-    "@workspace/about-shared": "workspace:*"
+    "@workspace/runtime": "workspace:*"
   },
   "type": "module"
 }

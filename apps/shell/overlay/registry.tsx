@@ -4,10 +4,12 @@
  * floatable above the panels; the chrome drives it via `useShellContentOverlay`.
  */
 import { ApprovalCardSurface } from "./ApprovalCardSurface";
+import { QuickfireSurface } from "./QuickfireSurface";
 import type { OverlaySurfaceComponent, OverlaySurfaceKey } from "./types";
 
 export const OVERLAY_SURFACES: Record<OverlaySurfaceKey, OverlaySurfaceComponent> = {
   "approval-card": ApprovalCardSurface,
+  quickfire: QuickfireSurface,
 };
 
 export function getOverlaySurface(key: string): OverlaySurfaceComponent | null {

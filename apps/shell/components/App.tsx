@@ -15,7 +15,6 @@ import { useAtomValue } from "jotai";
 import { useShellEvent } from "../shell/useShellEvent";
 import { app, notification, panel, workspace, shellNetwork } from "../shell/client";
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
-import { AppCommandPalette } from "./AppCommandPalette";
 
 // Lazy-load MainMode — this creates a separate chunk containing PanelApp,
 // PanelStack, TitleBar, LazyPanelTreeSidebar, @dnd-kit/*, and all transitive deps.
@@ -119,7 +118,6 @@ export function App() {
 
   return (
     <Theme appearance={effectiveTheme} {...themeConfig} className="app-shell-theme">
-      <AppCommandPalette />
       <ChunkErrorBoundary
         onRetry={() => {
           // Reassign to create a fresh lazy() with a new import() promise

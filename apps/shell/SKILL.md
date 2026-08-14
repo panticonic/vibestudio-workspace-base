@@ -36,6 +36,41 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
 - Share canonical data and presentation rules, not renderer components. Add a
   focused behavioral test in every affected client; explicitly state when a
   surface has no mobile equivalent instead of silently omitting it.
+- Command palette and quickfire: the desktop overlay (`components/QuickfireOwner`
+  + `overlay/QuickfireSurface`) and the mobile `CommandSheet` / `QuickfireSheet`
+  are two renderers over one model. Ranking lives in `@workspace/omnibox-core`;
+  the slate's *definitions*, the row projection, the transcript projection and
+  the session lifecycle live in `@workspace/quickfire-core`. Each client owns
+  only its `run` implementations and its renderer, so a new command is a
+  definition plus two runs — never a second definition.
+- Surface flags are the honest record of parity. A command whose `surfaces`
+  omit `"mobile"` must say why in a comment on the definition. Currently
+  desktop-only beyond the spec's own list: `view.accent` (mobile has no accent
+  system) and `app.check-updates` (mobile updates go through the trusted OTA
+  prompt, not a command). Mobile also reshapes two behaviors deliberately:
+  `workspace.switch` opens Settings rather than re-routing from a search field,
+  and the `/` scope hands off to the full-height quickfire sheet instead of
+  rendering inline.
+- One omnibox, one ranking path. `@workspace/omnibox-core` ranks `about/new`,
+  the palette's `@` scope, the title bar's address autocomplete and the mobile
+  address field. `@vibestudio/shared/panelChrome` keeps only chrome *facts*
+  (address parsing, history/bookmark normalization and merging); it must not
+  grow a second row builder. The prefix grammar is uniform: `>` commands, `@`
+  go to, `/` quickfire, bare mixed. `about/new` has no command slate, so its
+  `>` is a deprecated alias of `@` for one release and shows a hint row saying
+  so.
+- Palette history comes from `panel.getBrowserAddressOptions` — the exact call
+  the address bar makes — with search-engine rows filtered out and no favicon
+  fetch (glyph-only rows, matching the address bar). Do not add a second
+  history query.
+- Slate gaps left open on purpose, because their backing surface does not
+  exist yet rather than because they were forgotten: `panel.move` (the
+  placement engine in `layout/placementEngine.ts` has no directional move
+  action — only `move-pane-to-new-column`), `panel.collapse` (no collapse
+  concept in the layout model at all), and `authority.pause-agents` /
+  `authority.lock` (the shell requests no `permissions.*` capability; adding
+  them is an authority-manifest expansion, not a UI change). Add the backing
+  action or capability first, then the command.
 
 ## Panel Lifecycle and UI Projections
 

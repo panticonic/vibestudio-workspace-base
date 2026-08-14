@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   autocompleteForSuggestion,
+  isDeprecatedLauncherPrefix,
+  rankHistorySuggestions,
   buildIdleLauncherSuggestions,
   buildLauncherSuggestions,
   groupLauncherSuggestions,
@@ -26,14 +28,22 @@ const history = [
 ];
 
 describe("launcher suggestions", () => {
-  it("parses explicit panel, history, and chat modes", () => {
-    expect(parseLauncherInput("> term")).toEqual({ mode: "panels", prefix: ">", query: "term" });
-    expect(parseLauncherInput("@example").mode).toBe("history");
+  it("parses the unified go-to and chat scopes", () => {
+    expect(parseLauncherInput("@ term")).toEqual({ mode: "goto", prefix: "@", query: "term" });
     expect(parseLauncherInput("/ explain this")).toEqual({
       mode: "chat",
       prefix: "/",
       query: "explain this",
     });
+    expect(parseLauncherInput("plain")).toEqual({ mode: "all", prefix: "", query: "plain" });
+  });
+
+  it("keeps the retired panels-only prefix working as an alias of go-to", () => {
+    const parsed = parseLauncherInput("> term");
+    expect(parsed).toEqual({ mode: "goto", prefix: ">", query: "term" });
+    // The prefix survives parsing precisely so the page can say it is retired.
+    expect(isDeprecatedLauncherPrefix(parsed)).toBe(true);
+    expect(isDeprecatedLauncherPrefix(parseLauncherInput("@term"))).toBe(false);
   });
 
   it("ranks panel and browser destinations in one usage-weighted list", () => {
@@ -152,14 +162,24 @@ describe("launcher suggestions", () => {
   });
 
   it("limits explicit modes to their destination type", () => {
-    const panelOnly = buildLauncherSuggestions({
+    const goTo = buildLauncherSuggestions({
+      value: "@",
+      panels,
+      panelUsage: {},
+      browserSuggestions: history,
+      browserUrl: "https://typed.example/",
+    });
+    // Go-to is destinations of every kind except the two that are not
+    // destinations: a literal URL row and an agent prompt.
+    expect(new Set(goTo.map((item) => item.kind))).toEqual(new Set(["panel", "history"]));
+    const aliased = buildLauncherSuggestions({
       value: ">",
       panels,
       panelUsage: {},
       browserSuggestions: history,
       browserUrl: null,
     });
-    expect(panelOnly.every((item) => item.kind === "panel")).toBe(true);
+    expect(new Set(aliased.map((item) => item.kind))).toEqual(new Set(["panel", "history"]));
     const chatOnly = buildLauncherSuggestions({
       value: "/hello there",
       panels,
@@ -170,16 +190,29 @@ describe("launcher suggestions", () => {
     expect(chatOnly.map((item) => item.kind)).toEqual(["chat"]);
   });
 
+  it("ranks history the same way whether it is reached through the launcher or a palette", () => {
+    const throughLauncher = buildLauncherSuggestions({
+      value: "@example",
+      panels: [],
+      panelUsage: {},
+      browserSuggestions: history,
+      browserUrl: null,
+    });
+    const throughPalette = rankHistorySuggestions("example", history);
+    expect(throughPalette).toEqual(throughLauncher);
+    expect(rankHistorySuggestions("example", history, 1)).toHaveLength(1);
+  });
+
   it("offers inline completion for a selected prefix destination", () => {
     const suggestion = buildLauncherSuggestions({
-      value: ">term",
+      value: "@term",
       panels,
       panelUsage: {},
       browserSuggestions: [],
       browserUrl: null,
     })[0];
-    expect(autocompleteForSuggestion(">term", suggestion)).toEqual({
-      value: ">Terminal",
+    expect(autocompleteForSuggestion("@term", suggestion)).toEqual({
+      value: "@Terminal",
       suffix: "inal",
     });
   });

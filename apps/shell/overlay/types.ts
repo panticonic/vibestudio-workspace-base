@@ -13,7 +13,7 @@ import type { ComponentType } from "react";
 import type { ThemeConfig } from "@vibestudio/shared/theme";
 
 /** Keys of the registered overlay surfaces (see ./registry). */
-export type OverlaySurfaceKey = "approval-card";
+export type OverlaySurfaceKey = "approval-card" | "quickfire";
 
 /**
  * Contract every overlay surface component implements: it receives its

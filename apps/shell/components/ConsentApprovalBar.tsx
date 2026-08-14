@@ -24,6 +24,7 @@ import { account, blobstore, events, panel, shellApproval, shellPresence } from 
 import { useShellContentOverlay, type ContentOverlayBounds } from "../shell/useShellContentOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
 import { effectiveThemeAtom, themeConfigAtom } from "../state/themeAtoms";
+import { FOCUS_APPROVAL_REQUEST_EVENT } from "../commands/slate";
 import { useNavigationActions } from "./NavigationContext";
 import { ApprovalKindIcon } from "./ApprovalCard";
 import { ApprovalFullSurface } from "./ApprovalFullSurface";
@@ -148,20 +149,25 @@ export function ConsentApprovalBar() {
     return () => window.clearInterval(intervalId);
   }, []);
 
-  useShellEvent(
-    "focus-approval-card",
-    useCallback(() => {
-      reviewingQueuedRef.current = true;
-      setMinimized(false);
-      const approvalId = currentApprovalIdRef.current;
-      if (approvalId) {
-        setKeyboardFocusRequest((previous) => ({
-          approvalId,
-          sequence: (previous?.sequence ?? 0) + 1,
-        }));
-      }
-    }, [])
-  );
+  const focusCurrentApproval = useCallback(() => {
+    reviewingQueuedRef.current = true;
+    setMinimized(false);
+    const approvalId = currentApprovalIdRef.current;
+    if (approvalId) {
+      setKeyboardFocusRequest((previous) => ({
+        approvalId,
+        sequence: (previous?.sequence ?? 0) + 1,
+      }));
+    }
+  }, []);
+  useShellEvent("focus-approval-card", focusCurrentApproval);
+  // The same request from inside this document: `focus-approval-card` is a
+  // main→renderer shell event, so the quickfire slate's
+  // `authority.focus-approval` command cannot emit it and asks here instead.
+  useEffect(() => {
+    window.addEventListener(FOCUS_APPROVAL_REQUEST_EVENT, focusCurrentApproval);
+    return () => window.removeEventListener(FOCUS_APPROVAL_REQUEST_EVENT, focusCurrentApproval);
+  }, [focusCurrentApproval]);
 
   useEffect(() => {
     const controller = createApprovalStateController({

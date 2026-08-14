@@ -53,6 +53,18 @@ pairing.
   kind-specific.
 - Add a focused mobile behavioral test when shared shell behavior changes. A
   desktop-only test is not evidence for the mobile client.
+- The command palette and panel-scoped agent sessions are shared model, native
+  renderer: `src/commands/slate.ts` binds `@workspace/quickfire-core`'s slate
+  definitions to mobile implementations, `src/components/CommandSheet.tsx` runs
+  the shared omnibox engine and argument state machine, and
+  `src/components/QuickfireSheet.tsx` drives the same durable conversation the
+  desktop overlay does through `@workspace/quickfire-core/session`. Do not add a
+  mobile-only command definition or a second ranking path.
+- The command sheet's "Recent pages" group and the `AppBar` address field share
+  one source: `ShellClient.panels.getBrowserAddressOptions`, ranked by
+  `@workspace/omnibox-core`. Search-engine rows are dropped in the sheet (an
+  address-bar affordance, not a destination) and favicons are not fetched.
+  `nav.history` re-scopes the sheet to `@history:` rather than navigating.
 
 ## Verification
 

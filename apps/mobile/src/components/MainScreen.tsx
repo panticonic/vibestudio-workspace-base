@@ -20,6 +20,8 @@ import { AppBar } from "./AppBar";
 import { LoadedPanelWebView } from "./LoadedPanelWebView";
 import { syncManagedWebViewThemes } from "./webViewThemes";
 import { ApprovalSheet } from "./ApprovalSheet";
+import { CommandSheet } from "./CommandSheet";
+import { QuickfireSheet } from "./QuickfireSheet";
 import { BrowserPrivacyManager } from "./BrowserPrivacyManager";
 import { Toast } from "./Toast";
 import { VibestudioLogo } from "./VibestudioLogo";
@@ -29,7 +31,7 @@ import type { WebViewNavigation } from "react-native-webview/lib/WebViewTypes";
 import type { PanelPageObservation } from "@vibestudio/shared/panel/observation";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import { panelTreeRevisionAtom, shellClientAtom } from "../state/shellClientAtom";
-import { colorSchemeAtom, themeColorsAtom } from "../state/themeAtoms";
+import { colorSchemeAtom, themeColorsAtom, themePreferenceAtom } from "../state/themeAtoms";
 import { approvalDeepLinkAtom } from "../state/approvalDeepLinkAtom";
 import { pushToastAtom } from "../state/toastAtoms";
 import {
@@ -66,12 +68,14 @@ import { resetToNativeBootstrap } from "../services/auth";
 import { clearShellCredential } from "../services/mobileCredentials";
 import {
   buildPanelChromeState,
-  buildAddressAutocompleteItems,
   isBrowserPanelSource,
   parseAddressInput,
   type AddressAction,
-  type AddressAutocompleteItem,
 } from "@vibestudio/shared/panelChrome";
+import {
+  buildAddressAutocompleteItems,
+  type AddressAutocompleteItem,
+} from "@workspace/omnibox-core";
 import {
   applySearchTemplate,
   canonicalizeBrowserHistoryUrl,
@@ -102,6 +106,14 @@ import {
   type UserNotification,
 } from "@vibestudio/shared/userNotifications";
 import { showActionSheetAtom } from "../state/actionSheetAtoms";
+import {
+  openCommandSheetAtom,
+  openQuickfireSheetAtom,
+} from "../state/commandSheetAtoms";
+import { collectMobileOpenPanels } from "../shellCore/openPanelIndex";
+import type { PanelDescriptor } from "@workspace/omnibox-core";
+import type { QuickfireTransport } from "@workspace/quickfire-core/session";
+import type { MobileSlateDeps } from "../commands/slate";
 import { spacing, type as typeScale } from "../design/tokens";
 import {
   Archive as ArchiveIcon,
@@ -1453,6 +1465,139 @@ export function MainScreen() {
       showActionSheet,
     ]
   );
+  // ---- Command sheet + quickfire sheet (quickfire-overlay-spec §7) ---------
+  const openCommandSheet = useSetAtom(openCommandSheetAtom);
+  const openQuickfireSheet = useSetAtom(openQuickfireSheetAtom);
+  const setThemePreference = useSetAtom(themePreferenceAtom);
+
+  /**
+   * The "already open" index, read from the cache the drawer already renders so
+   * the sheet issues no tree RPCs of its own and cannot disagree with it.
+   */
+  const openPanelEntries = useMemo(() => {
+    if (!shellClient) return [];
+    return collectMobileOpenPanels(shellClient.panels.treeCache);
+  }, [panelTreeRevision, shellClient]);
+
+  /** What the slate's availability predicates read about the acted-on panel. */
+  const focusedPanelDescriptor = useMemo<PanelDescriptor | undefined>(() => {
+    if (!shellClient || !activePanelId) return undefined;
+    const panel = shellClient.panels.registry.getPanel(activePanelId);
+    const source = panel ? getCurrentSnapshot(panel).source : undefined;
+    const isBrowser = source ? isBrowserPanelSource(source) : false;
+    return {
+      panelId: activePanelId,
+      title: panel?.title ?? activePanelTitle,
+      ...(source ? { source } : {}),
+      kind: isBrowser ? ("browser" as const) : ("workspace" as const),
+      canGoBack: activeChromeState?.canGoBack === true,
+      canGoForward: activeChromeState?.canGoForward === true,
+      pinned: pinnedPanelIds.has(activePanelId),
+      // A browser panel's address belongs to the address bar, not a share link.
+      addressable: !isBrowser,
+    };
+  }, [
+    activeChromeState,
+    activePanelId,
+    activePanelTitle,
+    panelTreeRevision,
+    pinnedPanelIds,
+    shellClient,
+  ]);
+
+  const contributedCommandContributions = useMemo(() => {
+    if (!shellClient || !activePanelId) return [];
+    const commands = shellClient.hostCommands.get(activePanelId);
+    return commands.length ? [{ panelId: activePanelId, commands }] : [];
+  }, [activePanelId, panelTreeRevision, shellClient]);
+
+  const dispatchContributedCommand = useCallback(
+    (panelId: string, commandId: string) => {
+      const webView = webViewRefsMap.current.get(panelId);
+      if (!webView) return false;
+      webView.dispatchHostEvent(HOST_COMMAND_RUN_EVENT, { commandId });
+      return true;
+    },
+    []
+  );
+
+  const showQuickfireConversations = useCallback(
+    (rows: Parameters<MobileSlateDeps["showQuickfireConversations"]>[0]) => {
+      showActionSheet({
+        title: "Quickfire conversations",
+        items: rows.map((row) => ({
+          id: row.slotId,
+          label:
+            shellClient?.panels.registry.getPanel(row.slotId)?.title ?? row.slotId,
+          description:
+            row.promotedAt === null ? "conversation" : "continued in a chat panel",
+        })),
+        onSelect: (slotId) => {
+          activatePanel(slotId);
+          openQuickfireSheet({ slotId });
+        },
+      });
+    },
+    [activatePanel, openQuickfireSheet, shellClient, showActionSheet]
+  );
+
+  /**
+   * Show a promoted conversation as a chat panel. `openChannel` finds the panel
+   * this device already opened for the channel before creating another, which
+   * is what keeps promotion a view change rather than a duplicate. Declared
+   * before `slateDeps` because the slate's `quickfire.promote` routes through
+   * the same path as the sheet's ⧉ — one promotion behavior, not two.
+   */
+  const openChatPanelForChannel = useCallback(
+    async (channelId: string) => {
+      if (!shellClient) return;
+      const opened = await shellClient.userNotifications.openChannel(channelId);
+      activatePanel(opened.id);
+      refreshTree();
+    },
+    [activatePanel, refreshTree, shellClient]
+  );
+
+  const slateDeps = useMemo<MobileSlateDeps | null>(() => {
+    if (!shellClient) return null;
+    return {
+      activePanelId,
+      panels: shellClient.panels,
+      quickfire: shellClient.quickfire,
+      performPanelCommand,
+      navigateToPanel: activatePanel,
+      setThemePreference,
+      copyText: copyToClipboard,
+      openWorkspaceSettings: () => navigation.getParent()?.navigate("Settings" as never),
+      showQuickfireConversations,
+      openChatPanelForChannel,
+    };
+  }, [
+    openChatPanelForChannel,
+    activatePanel,
+    activePanelId,
+    navigation,
+    performPanelCommand,
+    setThemePreference,
+    shellClient,
+    showQuickfireConversations,
+  ]);
+
+  /**
+   * The quickfire service plus a channel join. Stable across renders so the
+   * session core never re-resolves a conversation because a callback changed.
+   */
+  const quickfireTransport = useMemo<QuickfireTransport | null>(() => {
+    if (!shellClient) return null;
+    return {
+      sessionFor: (slotId, options) => shellClient.quickfire.sessionFor(slotId, options),
+      clear: (slotId) => shellClient.quickfire.clear(slotId),
+      promote: (slotId) => shellClient.quickfire.promote(slotId),
+      connectToChannel: (channelId, contextId) =>
+        shellClient.connectToChannel(channelId, contextId),
+    };
+  }, [shellClient]);
+
   const executeAddressAction = useCallback(
     (action: AddressAction, mode: AddressNavigationMode = "current") => {
       if (!shellClient) return;
@@ -2036,6 +2181,8 @@ export function MainScreen() {
         onAddressQueryChange={setAddressQuery}
         onSelectAddressSuggestion={(item) => executeAddressAction(item.action)}
         onShowActions={() => showPanelActions()}
+        onOpenCommands={() => openCommandSheet()}
+        onOpenGoTo={() => openCommandSheet({ mode: "goto" })}
       />
 
       {currentUserNotification ? (
@@ -2178,6 +2325,22 @@ export function MainScreen() {
         onFetchDiffContent={fetchApprovalDiffContent}
         onOpenDiffFile={openApprovalDiffFile}
       />
+      {slateDeps ? (
+        <CommandSheet
+          slateDeps={slateDeps}
+          {...(focusedPanelDescriptor ? { focusedPanel: focusedPanelDescriptor } : {})}
+          openPanels={openPanelEntries}
+          contributedCommands={contributedCommandContributions}
+          runContributedCommand={dispatchContributedCommand}
+        />
+      ) : null}
+      {quickfireTransport ? (
+        <QuickfireSheet
+          transport={quickfireTransport}
+          panelTitle={activePanelTitle}
+          openChatPanel={openChatPanelForChannel}
+        />
+      ) : null}
       {shellClient && browserPrivacySection !== null ? (
         <BrowserPrivacyManager
           initialSection={browserPrivacySection}

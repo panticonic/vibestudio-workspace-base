@@ -1,0 +1,21 @@
+{
+  "name": "@workspace/quickfire-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "//": "Platform-neutral half of the quickfire overlay (quickfire-overlay-spec). The root entry is pure model + palette projection + the built-in slate definitions; ./transcript and ./session are split out so the desktop overlay surface bundle never pulls the channel client in behind a type import.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./transcript": "./src/transcript.ts",
+    "./session": "./src/session.ts"
+  },
+  "dependencies": {
+    "@vibestudio/shared": "workspace:*",
+    "@workspace/agentic-protocol": "workspace:*",
+    "@workspace/omnibox-core": "workspace:*",
+    "@workspace/pubsub": "workspace:*"
+  },
+  "peerDependencies": {
+    "react": "19.2.4"
+  }
+}

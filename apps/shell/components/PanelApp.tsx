@@ -14,6 +14,7 @@ import { TitleBar } from "./TitleBar";
 import { NotificationBar } from "./NotificationBar";
 import { UserNotificationBar } from "./UserNotificationBar";
 import { ConsentApprovalBar, APPROVAL_OVERLAY_HOST_ID } from "./ConsentApprovalBar";
+import { QuickfireOwner, QUICKFIRE_OVERLAY_HOST_ID } from "./QuickfireOwner";
 import type { PanelChromeState } from "@vibestudio/shared/panelChrome";
 import type { FocusedPaneChromeState, PaneChromeCommand } from "./paneChrome";
 
@@ -245,6 +246,7 @@ function PanelAppContent() {
       <NotificationBar />
       <UserNotificationBar />
       <ConsentApprovalBar />
+      <QuickfireOwner />
       {/* Panel region — also the positioning host the approval card portals
           into, so it floats over the panels rather than the chrome. */}
       <Box
@@ -258,6 +260,14 @@ function PanelAppContent() {
           flexDirection: "column",
         }}
       >
+        {/* Quickfire's own anchor: it spans the panel viewport but is never a
+            hit target, so the owner can measure the region without changing
+            how the approval card's host box lays out. */}
+        <div
+          id={QUICKFIRE_OVERLAY_HOST_ID}
+          aria-hidden="true"
+          style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
+        />
         <PanelStack
           onTitleChange={setCurrentTitle}
           onChromeStateChange={setChromeState}

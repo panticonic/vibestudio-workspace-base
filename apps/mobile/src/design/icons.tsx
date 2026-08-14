@@ -68,6 +68,9 @@ export const Power = icon("Power", "⏻");
 export const Settings = icon("Settings", "⚙");
 export const Settings2 = icon("Settings2", "⚙");
 export const Share2 = icon("Share2", "↥");
+export const SendHorizontal = icon("SendHorizontal", "➤");
+export const Sparkles = icon("Sparkles", "✦");
+export const RotateCcw = icon("RotateCcw", "⟲");
 export const Unplug = icon("Unplug", "⏚");
 export const User = icon("User", "◕");
 
