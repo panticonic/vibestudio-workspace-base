@@ -286,10 +286,18 @@ Dependency-shaped build refusals name their own remedy:
 From a Vibestudio source checkout, run the relevant focused tests plus:
 
 ```sh
+pnpm check:userland-dependencies
 pnpm check:package-dependencies
 pnpm check:userland-package-manager-boundary
 pnpm type-check:userland
 ```
+
+`check:userland-dependencies` answers the ownership question for every unit
+from the graph alone, without building anything, and prints the same refusal a
+build would. Use it after editing any manifest: a build only asks about the
+unit you build, so an app whose closure lost an owner can stay quiet until the
+moment it is loaded on a device. Inside a workspace, `verify` asks the same
+question for the unit it checks.
 
 The boundary check rejects userland package-manager policy, host dependencies
 on userland units, and root patches reaching into `workspace/`. When updating
