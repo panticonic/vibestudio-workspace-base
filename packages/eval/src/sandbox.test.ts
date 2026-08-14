@@ -482,7 +482,7 @@ return fs.readFileSync("/tmp/a");`,
     expect(result.error).toContain("@workspace/runtime");
     expect(result.error).not.toContain("npm:latest");
     expect(result).toMatchObject({
-      failureKind: "infrastructure",
+      failureKind: "user-code",
       failureCode: "unsupported_node_module",
     });
   });

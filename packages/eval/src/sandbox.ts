@@ -1758,7 +1758,7 @@ export async function executeSandbox(
           success: false,
           consoleOutput: "",
           error: unavailableModuleMessage(missing),
-          failureKind: "infrastructure",
+          failureKind: "user-code",
           failureCode: "unsupported_node_module",
         };
       }
