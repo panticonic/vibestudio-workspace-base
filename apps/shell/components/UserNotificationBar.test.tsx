@@ -94,6 +94,29 @@ function channelNotification(
   };
 }
 
+
+function agentMessageNotification(
+  patch: Partial<ShellUserNotification> = {}
+): ShellUserNotification {
+  return {
+    id: "agent.message:say:call-1:usr_bob",
+    userId: "usr_bob",
+    kind: "agent.message",
+    title: "The nightly build is red.",
+    message: "The nightly build is red.\nHere is what broke.",
+    createdAt: 20,
+    revision: 1,
+    agentMessage: {
+      channelId: "ch-build",
+      messageId: "say:call-1",
+      senderParticipantId: "do:builder",
+      senderHandle: "builder",
+      rung: "inbox",
+    },
+    ...patch,
+  };
+}
+
 describe("UserNotificationBar", () => {
   beforeEach(() => {
     watchedEventHandlers.clear();
@@ -171,5 +194,47 @@ describe("UserNotificationBar", () => {
     render(<UserNotificationBar />);
 
     expect(await screen.findByText(/account subject missing/)).toBeTruthy();
+  });
+
+  it("renders an escalated agent message with its sender", async () => {
+    shellClient.list.mockResolvedValue([agentMessageNotification()]);
+    render(<UserNotificationBar />);
+
+    expect(await screen.findByText("The nightly build is red.")).toBeTruthy();
+    expect(screen.getByText(/from @builder/)).toBeTruthy();
+    expect(screen.getByText("Message")).toBeTruthy();
+  });
+
+  it("opens the notified message in its channel, then acknowledges it", async () => {
+    const order: string[] = [];
+    shellClient.list.mockResolvedValue([agentMessageNotification()]);
+    shellClient.openChannel.mockImplementation(async () => {
+      order.push("open");
+      return { id: "panel-chat" };
+    });
+    shellClient.acknowledge.mockImplementation(async () => {
+      order.push("acknowledge");
+      return true;
+    });
+    render(<UserNotificationBar />);
+
+    fireEvent.click(await screen.findByText("Open"));
+
+    await waitFor(() => expect(order).toEqual(["open", "acknowledge"]));
+    // The envelope the sender escalated is the one the panel is asked to show.
+    expect(shellClient.openChannel).toHaveBeenCalledWith("ch-build", {
+      focusMessageId: "say:call-1",
+    });
+  });
+
+  it("keeps the entry when opening fails, so a person never loses the message", async () => {
+    shellClient.list.mockResolvedValue([agentMessageNotification()]);
+    shellClient.openChannel.mockRejectedValue(new Error("panel host is down"));
+    render(<UserNotificationBar />);
+
+    fireEvent.click(await screen.findByText("Open"));
+
+    await waitFor(() => expect(screen.getByText(/panel host is down/)).toBeTruthy());
+    expect(shellClient.acknowledge).not.toHaveBeenCalled();
   });
 });

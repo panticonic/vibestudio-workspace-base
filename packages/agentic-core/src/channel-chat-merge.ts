@@ -25,6 +25,7 @@ import type {
 import type {
   ChannelViewState,
   ForkProjection,
+  ProjectedExternalPublication,
   MessageTier,
   ProjectedApproval,
   ProjectedCustomMessage,
@@ -136,6 +137,9 @@ export function chatMessagesFromChannelView(state: ChannelViewState): ChatMessag
   const forks = (state.forks ?? []).map((fork) =>
     projectedForkToChatMessage(fork, forkAnchorTime(fork.forkPointId))
   );
+  const crossChannel = Object.values(state.externalPublications ?? {}).map((publication) =>
+    projectedPublicationToChatMessage(publication)
+  );
   const credentialRequests = Object.values(state.credentialRequests ?? {}).map(
     (request): ChatMessage & { sortTime: number } => ({
       id: `credential:${request.credKey}`,
@@ -171,6 +175,7 @@ export function chatMessagesFromChannelView(state: ChannelViewState): ChatMessag
     ...custom,
     ...systemNotices,
     ...forks,
+    ...crossChannel,
     ...credentialRequests,
   ]
     .sort(
@@ -537,6 +542,46 @@ function deliveryFields(
 
 /** Project one direct-child fork into an inline "conversation forked" system
  *  row. `anchorTime` interleaves it with the transcript at its fork point. */
+/**
+ * Outgoing cross-channel dispatch row (messaging plan §4.10.3).
+ *
+ * Agent-side, lifecycle-weight marginalia: it is the agent's own speech, but it
+ * is *aside* from this conversation — the utterance itself lives in the target
+ * channel. Consecutive dispatches to the same channel are grouped by the UI,
+ * so a chatty agent cannot bury a human's conversation.
+ */
+function projectedPublicationToChatMessage(
+  publication: ProjectedExternalPublication
+): ChatMessage & { sortTime: number } {
+  const handle = (publication.from.metadata as { handle?: unknown } | undefined)?.handle;
+  return {
+    id: `cross-channel:${publication.key}`,
+    senderId: publication.from.id,
+    content: publication.summary ?? "sent a message to another conversation",
+    contentType: "cross-channel-sent",
+    kind: "message",
+    complete: true,
+    crossChannel: {
+      channelId: publication.channelId,
+      envelopeId: publication.envelopeId,
+      ...(publication.summary ? { summary: publication.summary } : {}),
+      from: {
+        kind: publication.from.kind,
+        id: publication.from.id,
+        ...(publication.from.displayName ? { displayName: publication.from.displayName } : {}),
+        ...(typeof handle === "string" ? { handle } : {}),
+      },
+      publishedAt: publication.publishedAt,
+    },
+    senderMetadata: {
+      name: publication.from.displayName ?? publication.from.id,
+      type: publication.from.kind,
+      ...(typeof handle === "string" ? { handle } : {}),
+    },
+    sortTime: Date.parse(publication.publishedAt) || 0,
+  } as ChatMessage & { sortTime: number };
+}
+
 function projectedForkToChatMessage(
   fork: ForkProjection,
   anchorTime: number
@@ -582,11 +627,25 @@ function projectedMessageToChatMessages(
   // transcript order anchored to the message lifecycle, not acknowledgments.
   const sortTime = Date.parse(message.completedAt ?? message.startedAt ?? "") || 0;
   const lifecycle = lifecycleNoticeFromMessage(message);
+  const actorMetadata = message.actor.metadata as
+    | { handle?: unknown; origin?: { channelId?: unknown; participantId?: unknown } }
+    | undefined;
   const senderMetadata = {
     name: message.actor.displayName ?? message.actor.id,
     type: message.actor.kind,
-    handle: message.actor.id,
+    handle:
+      typeof actorMetadata?.handle === "string" ? actorMetadata.handle : message.actor.id,
   };
+  // A guest envelope (messaging plan §4.10.4) is an ORDINARY message here — it
+  // is someone talking — and differs only by the origin its metadata earns it.
+  const origin =
+    typeof actorMetadata?.origin?.channelId === "string" &&
+    typeof actorMetadata.origin.participantId === "string"
+      ? {
+          channelId: actorMetadata.origin.channelId,
+          participantId: actorMetadata.origin.participantId,
+        }
+      : undefined;
   const complete = message.status === "completed" || message.status === "failed";
   const thinking = (message.blocks ?? []).flatMap((block, index) => {
     if (block.type !== "thinking") return [];
@@ -692,6 +751,7 @@ function projectedMessageToChatMessages(
             ? "Interrupted"
             : undefined,
       ...deliveryFields(message, intendedRecipients),
+      ...(origin ? { origin } : {}),
       senderMetadata,
       sortTime,
     } as ChatMessage & { sortTime: number },

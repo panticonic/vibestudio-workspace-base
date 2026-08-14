@@ -1,6 +1,8 @@
 import { AGENTIC_EVENT_PAYLOAD_KIND, CREDENTIAL_CONNECT_PAYLOAD_KIND } from "./constants.js";
 import type {
   ActorRef,
+  ExternalEnvelopeObservedPayload,
+  ExternalEnvelopePublishedPayload,
   AgenticEvent,
   AutomationDefinitionSnapshot,
   AutomationInstitutedPayload,
@@ -134,6 +136,38 @@ export interface ForkProjection {
   archived: boolean;
 }
 
+/** Cross-channel refs are identified by (channel, envelope), never by envelope
+ *  id alone — two channels can and do use the same message id. */
+export function externalRefKey(channelId: string, envelopeId: string): string {
+  return `${channelId}\u0000${envelopeId}`;
+}
+
+
+/** One reference to something an agent of this channel published elsewhere. */
+export interface ProjectedExternalPublication {
+  key: string;
+  channelId: string;
+  envelopeId: string;
+  payloadKind?: string;
+  /** One-line excerpt so the collapsed row reads well offline. It is NOT the
+   *  record of record — the full text is durable in the target channel, and in
+   *  this channel as the `notify` invocation's own arguments. */
+  summary?: string;
+  from: ActorRef;
+  publishedAt: string;
+  seq?: number;
+}
+
+/** The authoring context of a guest envelope that arrived here. */
+export interface ProjectedExternalObservation {
+  key: string;
+  channelId: string;
+  envelopeId: string;
+  from: ParticipantRef;
+  payloadKind?: string;
+  observedAt: string;
+}
+
 export interface ChannelViewState {
   channelId?: string;
   cursor?: number;
@@ -159,6 +193,17 @@ export interface ChannelViewState {
    *  Keyed by messageId; values are participant keys. */
   intendedRecipientsByMessage: Record<string, string[]>;
   roster: Record<string, ChannelRosterEntry>;
+  /**
+   * Cross-channel traffic (messaging plan §4.10.1), keyed `<channelId>\u0000<envelopeId>`.
+   *
+   * `externalPublications` is what THIS channel's agents said elsewhere — a
+   * reference, never a relayed transcript: the utterance itself lives once, in
+   * the target channel's log (D15). `externalObservations` is the reverse
+   * back-pointer a guest envelope leaves behind, so an incoming message can
+   * name the context it was authored in.
+   */
+  externalPublications: Record<string, ProjectedExternalPublication>;
+  externalObservations: Record<string, ProjectedExternalObservation>;
   timeline: ChannelTimelineEntry[];
   seenEnvelopeIds: Record<string, true>;
   ignoredEnvelopeIds: string[];
@@ -167,6 +212,8 @@ export interface ChannelViewState {
 
 export function createInitialChannelViewState(): ChannelViewState {
   return {
+    externalPublications: {},
+    externalObservations: {},
     credentialRequests: {},
     messages: {},
     invocations: {},
@@ -562,6 +609,42 @@ export function reduceChannelView(
         next = { ...next, credentialRequests: rest };
       }
     }
+  } else if (event.kind === "external.envelope_published") {
+    const payload = event.payload as ExternalEnvelopePublishedPayload;
+    const added: Record<string, ProjectedExternalPublication> = {};
+    for (const publication of payload.publications ?? []) {
+      const key = externalRefKey(String(publication.channelId), String(publication.envelopeId));
+      added[key] = {
+        key,
+        channelId: String(publication.channelId),
+        envelopeId: String(publication.envelopeId),
+        ...(publication.payloadKind ? { payloadKind: publication.payloadKind } : {}),
+        ...(publication.summary ? { summary: publication.summary } : {}),
+        from: event.actor,
+        publishedAt: event.createdAt,
+        ...(envelope.seq !== undefined ? { seq: envelope.seq } : {}),
+      };
+    }
+    if (Object.keys(added).length > 0) {
+      next = { ...next, externalPublications: { ...next.externalPublications, ...added } };
+    }
+  } else if (event.kind === "external.envelope_observed") {
+    const payload = event.payload as ExternalEnvelopeObservedPayload;
+    const key = externalRefKey(String(payload.channelId), String(payload.envelopeId));
+    next = {
+      ...next,
+      externalObservations: {
+        ...next.externalObservations,
+        [key]: {
+          key,
+          channelId: String(payload.channelId),
+          envelopeId: String(payload.envelopeId),
+          from: payload.from,
+          ...(payload.payloadKind ? { payloadKind: payload.payloadKind } : {}),
+          observedAt: event.createdAt,
+        },
+      },
+    };
   } else if (event.kind === "external.participant_observed") {
     const payload = event.payload;
     if ("participant" in payload) {

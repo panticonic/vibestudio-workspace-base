@@ -61,6 +61,8 @@ import {
   type AutomationDefinitionSnapshot,
   type CustomMessageDisplayMode,
   type ParticipantRef,
+  type AddresseeDirectoryEntry,
+  type ResolveAddresseeContext,
 } from "@workspace/agentic-protocol";
 import { canonicalJson, sha256HexSyncText, stableSha256Hex } from "@vibestudio/content-addressing";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
@@ -225,6 +227,38 @@ export function subagentRunHandle(runId: string): string {
   return runId.length > SUBAGENT_RUN_HANDLE_LENGTH
     ? `${runId.slice(0, SUBAGENT_RUN_HANDLE_LENGTH)}…`
     : runId;
+}
+
+/** The roster as the addressee resolver wants it. The loop's `RosterEntry`
+ *  keeps the handle and the participant id beside the ref rather than inside
+ *  it, so lift both in — otherwise `@handle` resolution never sees a handle. */
+/**
+ * `owner` resolves to the one person on this channel — and only when there is
+ * exactly one.
+ *
+ * There is no separate channel-ownership fact in this build, and the roster is
+ * the honest approximation: a single-human channel has an unambiguous owner. A
+ * channel with several people does NOT, so `owner` fails closed there and the
+ * agent is told to name whom it meant. Picking the first human would be exactly
+ * the "tell the wrong person" failure the addressee model exists to prevent.
+ */
+function soleChannelUserId(roster: readonly ParticipantRef[]): string | undefined {
+  const users = roster.filter((entry) => entry.kind === "user");
+  if (users.length !== 1) return undefined;
+  const id = users[0]?.participantId ?? users[0]?.id ?? "";
+  return id.startsWith("user:") ? id.slice("user:".length) : id || undefined;
+}
+
+function rosterParticipantRef(entry: RosterEntry): ParticipantRef {
+  const handle =
+    entry.handle ?? (entry.ref.metadata as { handle?: unknown } | undefined)?.handle ?? undefined;
+  return {
+    ...entry.ref,
+    participantId: entry.ref.participantId ?? entry.participantId,
+    ...(typeof handle === "string" && handle
+      ? { metadata: { ...(entry.ref.metadata ?? {}), handle } }
+      : {}),
+  };
 }
 
 function subagentLaunchReceipt(run: Pick<SubagentRunRow, "runId" | "status">): string {
@@ -1059,8 +1093,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
 
   /** Channel publication discipline (WS-4 `publishPolicy` StepPolicy). Default
    *  agents publish everything (`undefined` ⇒ "all"); the silent agent overrides
-   *  this to "say-only" (the old `silentPolicy` behavior). */
-  protected getPublishPolicy(_channelId: string): "all" | "turn-final" | "say-only" | undefined {
+   *  this to "notify-only" (the old `silentPolicy` behavior). */
+  protected getPublishPolicy(
+    _channelId: string
+  ): "all" | "turn-final" | "notify-only" | "say-only" | undefined {
     return undefined;
   }
 
@@ -2469,6 +2505,61 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     try {
       const raw = this.getStateValue(`agent:roster:${channelId}`);
       return raw ? (JSON.parse(raw) as RosterEntry[]) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * The lookup tables `resolveAddressee` (messaging plan §4.2) needs, assembled
+   * from what this vessel already knows durably: who is on the channel, who
+   * supervises it, and which children it is running.
+   *
+   * The directory and workspace-user tables are deliberately absent until the
+   * Gad directory lands (§4.4): an `agent:` ref or an off-roster `user:` ref
+   * therefore fails closed with "use discover_agents", which is the honest
+   * answer while there is nothing to discover them from.
+   */
+  protected async addresseeContext(channelId: string): Promise<ResolveAddresseeContext> {
+    const parentParticipantId = this.subagentIdentity()?.parentParticipantId;
+    const roster = this.rosterSnapshot(channelId).map(rosterParticipantRef);
+    const ownerUserId = soleChannelUserId(roster);
+    return {
+      channelId,
+      roster,
+      ...(parentParticipantId ? { parent: { participantId: parentParticipantId } } : {}),
+      runs: this.subagentRuns.listLive().map((run) => ({
+        runId: run.runId,
+        taskChannelId: run.taskChannelId,
+        ...(run.childParticipantId ? { participantId: run.childParticipantId } : {}),
+      })),
+      directory: await this.agentDirectoryEntries(),
+      ...(ownerUserId ? { ownerUserId } : {}),
+    };
+  }
+
+  /** The Gad directory as addressing sees it. A directory read that fails is an
+   *  empty directory, not a failed message: `agent:` refs then fail closed with
+   *  "use discover_agents", which is the same answer a caller gets when the
+   *  instance genuinely is not there. */
+  protected async agentDirectoryEntries(): Promise<AddresseeDirectoryEntry[]> {
+    try {
+      const listing = await this.callGad<{
+        entries: Array<{
+          instanceId: string;
+          handle: string | null;
+          channelId: string;
+          participantId: string;
+        }>;
+      }>("listAgentDirectory", { includeTerminal: true });
+      return listing.entries
+        .filter((entry) => entry.handle)
+        .map((entry) => ({
+          instanceId: entry.instanceId,
+          handle: entry.handle as string,
+          channelId: entry.channelId,
+          participantId: entry.participantId,
+        }));
     } catch {
       return [];
     }
@@ -4046,6 +4137,29 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       : undefined;
   }
 
+  /** The hop depth of the conversation currently being answered on a channel.
+   *  Written wherever an inbound event's depth is resolved; read by `notify`
+   *  when it stamps a guest envelope. A human message resets the streak to 0
+   *  upstream, so this needs no reset of its own. */
+  protected recordInboundAgentHops(channelId: string, hops: number | undefined): void {
+    if (typeof hops !== "number" || !Number.isFinite(hops)) return;
+    try {
+      this.setStateValue(`agent:inbound-hops:${channelId}`, String(hops));
+    } catch {
+      /* depth tracking is advisory; never fail delivery over it */
+    }
+  }
+
+  protected inboundAgentHops(channelId: string): number {
+    try {
+      const raw = this.getStateValue(`agent:inbound-hops:${channelId}`);
+      const value = raw ? Number(raw) : 0;
+      return Number.isFinite(value) && value >= 0 ? value : 0;
+    } catch {
+      return 0;
+    }
+  }
+
   protected async shouldRespond(
     channelId: string,
     event: ChannelEvent,
@@ -4147,6 +4261,13 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     const settings = this.getAgentSettings();
     // respondFrom is per-agent: resolve handle entries to this channel's ids.
     const respondFrom = resolveRespondFromHandles(settings.respondFrom, respondParticipants);
+    const inboundHops =
+      (event.annotations?.["agentHops"] as number | undefined) ?? agentStreakHops;
+    // Remember what depth this conversation is at, so a cross-channel `notify`
+    // can carry the count over the boundary (plan §4.6, D13). Without this the
+    // hop cap is a per-channel fold and an A↔B ping-pong gets twice the depth
+    // it should: each channel sees a fresh streak.
+    this.recordInboundAgentHops(channelId, inboundHops);
     const decision = resolveShouldRespond({
       event: {
         senderParticipantId: event.senderId,
@@ -4155,7 +4276,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         replyTo: payload.replyTo,
         replyToSenderId,
         to: payload.to,
-        agentHops: (event.annotations?.["agentHops"] as number | undefined) ?? agentStreakHops,
+        agentHops: inboundHops,
       },
       self: { participantId: this.participantId() },
       policy: settings.respondPolicy,
@@ -6508,7 +6629,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       // 6) Supervisor stance on the task channel (§9): delivery interest
       // "addressed" — child tool activity stays in the canonical task log
       // with ZERO supervisor mailbox rows; only utterances addressed to the
-      // supervisor (child `say` carries the parent audience) create parent
+      // supervisor (child `notify` carries the parent audience) create parent
       // work. NOTE: any future parent-made channel_call against a task
       // channel would need addressed invocation terminals before it could
       // settle under this stance.
@@ -6973,7 +7094,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       );
     }
     if (typeof message !== "string" || !message.trim()) {
-      throw new Error("send_to_subagent requires a non-empty message");
+      throw new Error("notify to a subagent run requires non-empty content");
     }
     const participantId =
       this.subscriptions.getParticipantId(run.taskChannelId) ?? this.participantId();

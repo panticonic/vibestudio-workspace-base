@@ -60,7 +60,7 @@ evidence.
 
 Typed, pre-effect agent-control refusals are diagnostic-only for the same
 reason. In particular, `inspect_subagent` may return `InvalidReference` for an
-ambiguous run or repository-relative file query, and `send_to_subagent` returns
+ambiguous run or repository-relative file query, and `notify({ to: 'run:…' })` returns
 `SubagentTerminal` when execution has already ended. Preserve the invocation
 and reason code, require the agent to retry with an exact identity or use the
 retained inspect/read/merge surface, and do not classify the guard as failed

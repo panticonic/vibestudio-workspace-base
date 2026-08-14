@@ -6,6 +6,7 @@ import {
   type ShellChannelInvite,
   type ShellUserNotification,
 } from "../shell/client";
+import type { AgentMessageNotificationData } from "@vibestudio/shared/userNotifications";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
 import { events } from "../shell/client";
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
@@ -114,6 +115,39 @@ export function UserNotificationBar() {
     [removeLocal]
   );
 
+  /**
+   * Opening the message acknowledges it (plan §4.5.4): the entry retires on the
+   * fact that the person actually looked, never on a prediction that they were
+   * already looking. Acknowledgement stays second so a failed panel open cannot
+   * consume the entry.
+   */
+  const openAgentMessage = useCallback(
+    async (notification: ShellUserNotification, message: AgentMessageNotificationData) => {
+      setBusyNotificationId(notification.id);
+      setError(null);
+      let opened = false;
+      try {
+        await userNotifications.openChannel(message.channelId, {
+          focusMessageId: message.messageId,
+        });
+        opened = true;
+        setOpenedNotificationId(notification.id);
+        await userNotifications.acknowledge(notification.id);
+        removeLocal(notification.id);
+      } catch (cause) {
+        const detail = errorMessage(cause);
+        setError(
+          opened
+            ? `Conversation opened, but the notification could not be cleared: ${detail}`
+            : detail
+        );
+      } finally {
+        setBusyNotificationId(null);
+      }
+    },
+    [removeLocal]
+  );
+
   const joinChannel = useCallback(
     async (notification: ShellUserNotification, invite: ShellChannelInvite) => {
       setBusyNotificationId(notification.id);
@@ -183,6 +217,7 @@ export function UserNotificationBar() {
 
   const notification = notifications[0]!;
   const invite = notification.channelInvite;
+  const agentMessage = notification.agentMessage;
   const busy = busyNotificationId === notification.id;
   const opened = openedNotificationId === notification.id;
   const inviter = invite
@@ -209,13 +244,16 @@ export function UserNotificationBar() {
         borderBottom: "1px solid var(--accent-a6)",
       }}
     >
-      {invite ? <ChatBubbleIcon aria-hidden /> : <InfoCircledIcon aria-hidden />}
+      {invite || agentMessage ? <ChatBubbleIcon aria-hidden /> : <InfoCircledIcon aria-hidden />}
       <Badge color="blue" variant="soft" radius="full">
-        {invite ? "Invitation" : "Notification"}
+        {invite ? "Invitation" : agentMessage ? "Message" : "Notification"}
       </Badge>
       <Text size="2" style={{ flex: "1 1 220px", minWidth: 0 }} truncate>
         <Text weight="medium">{invite?.channelTitle ?? notification.title}</Text>
         {invite ? <Text color="gray"> · invited by {inviter}</Text> : null}
+        {agentMessage?.senderHandle ? (
+          <Text color="gray"> · from @{agentMessage.senderHandle}</Text>
+        ) : null}
         {!invite && notification.message ? (
           <Text color="gray"> · {notification.message}</Text>
         ) : null}
@@ -240,6 +278,16 @@ export function UserNotificationBar() {
           {opened ? "Opened" : "Join"}
         </Button>
       ) : null}
+      {agentMessage ? (
+        <Button
+          size="1"
+          disabled={busy || opened}
+          onClick={() => void openAgentMessage(notification, agentMessage)}
+        >
+          {busy ? <Spinner size="1" /> : null}
+          {opened ? "Opened" : "Open"}
+        </Button>
+      ) : null}
       <IconButton
         size="1"
         variant="ghost"
@@ -249,6 +297,7 @@ export function UserNotificationBar() {
         aria-label={
           invite ? `Dismiss invitation to ${invite.channelTitle}` : `Dismiss ${notification.title}`
         }
+        title="Dismiss without opening"
       >
         <Cross2Icon />
       </IconButton>

@@ -190,7 +190,7 @@ describe("subagent prompt contract", () => {
       depth: 2,
     });
 
-    expect(prompt).toContain("Use `say` sparingly");
+    expect(prompt).toContain("Use `notify` sparingly");
     expect(prompt).toContain("## Durable Assigned Task");
     expect(prompt).toContain("Implement the assigned fixture and verify it.");
     expect(prompt).toContain("Do not search for a different task");

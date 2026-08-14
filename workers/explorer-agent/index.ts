@@ -53,7 +53,7 @@ function str(value: unknown): string {
 
 /**
  * The explorer agent: a silent agent variant that agentically tests the workspace's
- * own capability surface. It inherits silence + the `say` tool from
+ * own capability surface. It inherits silence + the `notify` tool from
  * `SilentAgentWorker`, and adds (a) the explorer system prompt (the oracle loop —
  * full methodology in `workers/explorer-agent/SKILL.md`), and (b) a
  * `report_finding` tool that durably logs findings (commit + push) and
@@ -129,7 +129,7 @@ export class ExplorerAgentWorker extends SilentAgentWorker {
   /**
    * Visible when it responds. "Stays quiet unless addressed" is enforced by the respond
    * policy above — NOT by suppressing output. SilentAgentWorker's silent step policy hid
-   * the ENTIRE turn (speak-only-via-`say`), which made an addressed explorer look
+   * the ENTIRE turn (speak-only-via-`notify`), which made an addressed explorer look
    * unresponsive even when it ran. Drop it so an addressed (or scheduled) run SHOWS its
    * work; findings still go to the committed file + the findings card.
    */

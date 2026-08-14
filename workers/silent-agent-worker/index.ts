@@ -34,11 +34,12 @@ export class SilentAgentWorker extends AiChatWorker {
     };
   }
 
-  /** Silent agents publish only turn boundaries; speaking is the explicit `say`
-   *  tool. This is now the config-level `publishPolicy: "say-only"` (WS-4's
-   *  publishPolicy StepPolicy) — the old `silentPolicy()` runner wrapper is gone. */
-  protected override getPublishPolicy(_channelId: string): "say-only" {
-    return "say-only";
+  /** Silent agents publish only turn boundaries; speaking is the explicit
+   *  `notify` tool. This is the config-level `publishPolicy: "notify-only"`
+   *  (WS-4's publishPolicy StepPolicy) — the old `silentPolicy()` runner
+   *  wrapper is gone. */
+  protected override getPublishPolicy(_channelId: string): "notify-only" {
+    return "notify-only";
   }
 
   protected override async getLoopTools(
@@ -46,10 +47,10 @@ export class SilentAgentWorker extends AiChatWorker {
     execution?: AgentToolExecutionContext
   ): Promise<AgentTool[]> {
     const cfg = asSilentAgentConfig(this.subscriptions.getConfig(channelId));
-    // The generalized `say` tool is provided by AgentWorkerBase.getLoopTools.
+    // The generalized `notify` tool is provided by AgentWorkerBase.getLoopTools.
     const tools = await super.getLoopTools(channelId, execution);
     if (!cfg.allowedTools || cfg.allowedTools.length === 0) return tools;
-    const allowed = new Set([...cfg.allowedTools, "say"]);
+    const allowed = new Set([...cfg.allowedTools, "notify"]);
     return tools.filter((tool) => allowed.has(tool.name));
   }
 }

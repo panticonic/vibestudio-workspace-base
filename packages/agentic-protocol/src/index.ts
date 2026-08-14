@@ -170,14 +170,40 @@ export {
   sanitizeAgenticEventParticipantRefs,
   isParticipantKind,
   isParticipantRef,
+  isHandleResolutionFailure,
+  resolveHandle,
   resolveMentionToUser,
   userParticipantId,
 } from "./participant-ref.js";
 export type {
+  HandleResolution,
+  HandleResolutionFailure,
   PrivateParticipantMetadata,
   PublicMethodSummary,
   PublicParticipantMetadata,
 } from "./participant-ref.js";
+
+export {
+  ALERT_RUNGS,
+  addresseeIsUser,
+  boundChannelAddressee,
+  defaultAlertRung,
+  isAddresseeError,
+  isAlertRung,
+  parseAddressee,
+  resolveAddressee,
+} from "./addressee.js";
+export type {
+  AddresseeDirectoryEntry,
+  AddresseeError,
+  AddresseeErrorCode,
+  AddresseeRunEntry,
+  AddresseeUserEntry,
+  AlertRung,
+  ParsedAddressee,
+  ResolveAddresseeContext,
+  ResolvedAddressee,
+} from "./addressee.js";
 
 export {
   MAX_INLINE_TRAJECTORY_EVENT_BYTES,
@@ -261,10 +287,16 @@ export type {
   ProjectedCredentialRequest,
   ProjectedCustomMessage,
   ProjectedCustomMessageUpdate,
+  ProjectedExternalObservation,
+  ProjectedExternalPublication,
   ProjectedMessageTypeDefinition,
   ProjectedSystemNotice,
 } from "./reducer-channel.js";
-export { createInitialChannelViewState, reduceChannelView } from "./reducer-channel.js";
+export {
+  createInitialChannelViewState,
+  externalRefKey,
+  reduceChannelView,
+} from "./reducer-channel.js";
 
 export {
   CONVERSATION_POLICIES,

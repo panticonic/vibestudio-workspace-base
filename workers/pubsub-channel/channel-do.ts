@@ -1822,6 +1822,27 @@ export class PubSubChannel extends DurableObjectBase {
   }
 
   /** Look up metadata from either live session presence or durable membership. */
+  /**
+   * A guest envelope — a publish by a participant who never joined this channel
+   * (messaging plan §4.6) — is not a loophole around locked membership. It runs
+   * the same admission check a join would, and fails closed.
+   *
+   * The error names the CHANNEL as closed rather than the addressee as unknown:
+   * an agent that cannot tell those two apart retries an unknown addressee
+   * forever, and correctly gives up on a closed channel.
+   */
+  private assertGuestAdmission(participantId: string): void {
+    const policy = this.lockedMembershipPolicy();
+    if (!policy || policy.participants.includes(participantId)) return;
+    throw Object.assign(
+      new Error(
+        `This channel has locked membership and does not admit ${participantId}. ` +
+          `Its participants are fixed at initialization; there is no way in.`,
+      ),
+      { code: "ClosedChannel" },
+    );
+  }
+
   private getSenderMetadata(
     participantId: string,
   ): Record<string, unknown> | undefined {
@@ -3122,6 +3143,7 @@ export class PubSubChannel extends DurableObjectBase {
     },
   ): Promise<{ id?: number }> {
     this.assertParticipantCaller(participantId, "publish");
+    this.assertGuestAdmission(participantId);
     this.markParticipantActive(participantId);
     const ref = opts?.ref;
     const attachments = opts?.attachments;

@@ -130,9 +130,15 @@ export interface AgentLoopConfig {
    *  last in `defaultPolicies`). "all" = today's behavior (every model outcome
    *  publishes). "turn-final" = only the end-of-turn (tier "primary") message
    *  publishes; intermediate tool-step text stays trajectory-only (streamed as
-   *  ephemeral deltas). "say-only" = NO model message publishes; the agent speaks
-   *  only through its explicit `say` tool + turn boundaries. Absent ⇒ "all". */
-  publishPolicy?: "all" | "turn-final" | "say-only";
+   *  ephemeral deltas). "notify-only" = NO model message publishes; the agent
+   *  speaks only through its explicit `notify` tool + turn boundaries. Absent ⇒
+   *  "all".
+   *
+   *  `"say-only"` is a frozen accepted alias for `"notify-only"`: the value is
+   *  checked into agent configs across templates, and invalidating those buys
+   *  nothing. Read it through `isNotifyOnlyPolicy`; only ever write
+   *  "notify-only". */
+  publishPolicy?: "all" | "turn-final" | "notify-only" | "say-only";
   /** Max subagent nesting depth (enforced at spawn by the vessel). Absent ⇒
    *  the vessel's implementation default. */
   maxSubagentDepth?: number;

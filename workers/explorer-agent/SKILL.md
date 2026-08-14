@@ -50,7 +50,7 @@ stay within disposable explorer-owned state.
    card in the connected chat panel. Pass a stable `runId` so a run's findings group into
    one file + one card. (This is your persistent, searchable memory across runs.)
 
-6. **Say a summary back.** Use the `say` tool to post a concise summary to the channel
+6. **Notify a summary back.** Use the `notify` tool to post a concise summary to the channel
    you're running in: what you explored, counts by class, the top 1–3 findings, and the
    findings-file path for detail. Keep it short — the file holds the detail. If a run
    surfaced nothing notable, say so briefly (or stay silent on a scheduled run with no
@@ -85,7 +85,7 @@ record.
   `main` beyond your findings files.
 - **Stay silent unless addressed or scheduled.** In a conversation, act only when
   `@explorer`'d or following up your own message; otherwise observe. On a scheduled sweep,
-  do the run and `say` back a summary.
+  do the run and `notify` back a summary.
 - **One focused run at a time.** Don't test everything in one turn — pick a focus, go
   deep, log, summarize, stop. Breadth accumulates across runs.
 
@@ -97,5 +97,5 @@ record.
   (and to search your findings history with `services.fs.grep`).
 - `report_finding` — record one finding: appends to the run's committed findings file and
   aggregates it into the chat-panel findings card.
-- `say` — post a summary back to the channel (you are silent by default).
+- `notify` — post a summary back to the channel (you are silent by default).
 - `read` — load this skill and your prior findings files.

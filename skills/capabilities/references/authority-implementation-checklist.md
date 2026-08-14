@@ -107,7 +107,7 @@ Treat these invariants as one boundary:
 - product-blessed worker effective version and execution digest;
 - product prompt and eval handbook;
 - no workspace prompt override, skill injection, or memory recall;
-- exactly `eval` and `say` as model-facing tools;
+- exactly `eval` and `notify` as model-facing tools;
 - ordinary typed service/runtime APIs inside eval;
 - no non-delegated approval payload or settlement;
 - no delegation activation, renewal, or widening from conversation eval;

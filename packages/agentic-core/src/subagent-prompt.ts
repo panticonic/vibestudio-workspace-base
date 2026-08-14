@@ -110,8 +110,9 @@ Execution ownership:
 - Return advice or a proposed implementation only when the task explicitly asks for analysis rather than implementation, or when a concrete blocker prevents execution.
 
 Progress:
-- Use \`say\` sparingly for meaningful parent-visible milestones, blockers, or verification results.
-- Ordinary messages and \`say\` updates are progress only. They do not finish the run.
+- Use \`notify\` sparingly for meaningful parent-visible milestones, blockers, or verification results. Omit \`to\` and it reaches your parent; the assigned task's stated reporting expectations govern over this default.
+- Ordinary messages and \`notify\` updates are progress only. They do not finish the run.
+- Do not notify to acknowledge, thank, or restate what the parent already knows. If an exchange stops producing new information, stop messaging.
 
 ${completion}
 

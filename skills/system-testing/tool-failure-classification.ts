@@ -110,8 +110,9 @@ export function isEvalGuestCodeFailure(
 
 /**
  * Subagent tools expose typed no-effect domain refusals. inspect_subagent
- * reports ambiguous references before reading anything; send_to_subagent
- * refuses terminal runs with a structured SubagentTerminal outcome naming the
+ * reports ambiguous references before reading anything; `notify` to a
+ * `run:` addressee refuses terminal runs with a structured SubagentTerminal
+ * outcome naming the
  * retained result and the real options. Keep these visible without treating
  * the guard itself as a platform execution failure.
  */
@@ -122,7 +123,7 @@ export function isSafeSubagentDomainRejection(
   if (toolName === "inspect_subagent" && terminalReasonCode === "InvalidReference") {
     return true;
   }
-  return toolName === "send_to_subagent" && terminalReasonCode === "SubagentTerminal";
+  return toolName === "notify" && terminalReasonCode === "SubagentTerminal";
 }
 
 export type BuiltInToolFailureClassification =

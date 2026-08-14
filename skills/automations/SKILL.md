@@ -327,6 +327,30 @@ Do not use the completion protocol merely to report that one periodic check
 succeeded. A completion response wins over a time or count boundary reached by
 that same terminal run, preserving the automation's meaningful final result.
 
+## Surface results where the person actually is
+
+An unattended run happens while nobody is watching, so putting its result only
+in the channel means nobody sees it until they next look. Report with `notify`:
+
+```ts
+notify({
+  to: "owner",
+  title: "Weekly dependency audit",
+  content: "3 packages moved to a new major. `zod` needs a code change; the other two are drop-in.",
+});                                   // alert defaults to "inbox"
+```
+
+`alert: "inbox"` — the default whenever a person is addressed — writes a durable
+notification entry and reaches their phone. That is what makes an unattended
+schedule useful. Reserve `alert: "interrupt"` for a result someone would want to
+be pulled away from; a routine green tick usually deserves no notification at
+all, only the channel record.
+
+Transient toasts are UI feedback for something the user is already doing. They
+are not the proactive surface for a scheduled run, and a run that reports only
+through one has effectively reported nothing. The `messaging` skill covers the
+rungs and the etiquette in full.
+
 ## Supervise and diagnose
 
 Use `overview` for a bounded snapshot. It returns a cursor-paged definition

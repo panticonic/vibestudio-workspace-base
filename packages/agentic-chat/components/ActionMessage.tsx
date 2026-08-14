@@ -61,6 +61,12 @@ function messageCountLabel(count: number): string {
   return `${count} ${count === 1 ? "message" : "messages"}`;
 }
 
+/** `notify`'s `to` is one ref or a list of them; an absent `to` is the channel. */
+function notifyAddressees(value: unknown): string[] {
+  const list = Array.isArray(value) ? value : value == null ? [] : [value];
+  return list.filter((ref): ref is string => typeof ref === "string" && ref.length > 0);
+}
+
 /**
  * Label + one-line preview for an invocation. Exported so the subagent run
  * card renders a child's tool calls with exactly the naming the parent chat
@@ -157,10 +163,13 @@ export function toolPresentation(payload: InvocationCardPayload): {
       preview: runId ? `Transcript catch-up for ${runId}` : "Transcript catch-up",
     };
   }
-  if (payload.name === "send_to_subagent") {
+  if (payload.name === "notify") {
+    const addressees = notifyAddressees(args["to"]);
     return {
-      displayName: "Send To Subagent",
-      preview: compactText(args["message"], 110) || (runId ? `Steer ${runId}` : "Steering message"),
+      displayName: "Notify",
+      preview:
+        compactText(args["content"], 110) ||
+        (addressees.length > 0 ? `To ${addressees.join(", ")}` : "Channel message"),
     };
   }
   if (payload.name === "inspect_subagent") {
@@ -193,8 +202,10 @@ function SupervisionActionSummary({ payload }: { payload: InvocationCardPayload 
     const note = compactText(args["noteToSelf"] ?? details?.["noteToSelf"], 160);
     if (note) rows.push(["Note", note]);
   }
-  if (payload.name === "send_to_subagent") {
-    rows.push(["Message", compactText(args["message"], 220)]);
+  if (payload.name === "notify") {
+    const addressees = notifyAddressees(args["to"]);
+    rows.push(["To", addressees.length > 0 ? addressees.join(", ") : "channel"]);
+    rows.push(["Message", compactText(args["content"], 220)]);
   }
   if (payload.name === "read_subagent") {
     rows.push(["Cursor", compactText(args["afterSeq"] ?? 0, 24)]);

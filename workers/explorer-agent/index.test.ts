@@ -72,12 +72,12 @@ describe("ExplorerAgentWorker", () => {
     expect(worker.respondPolicy()).toBe("mentioned-or-followup");
   });
 
-  it("exposes report_finding alongside the inherited say tool", async () => {
+  it("exposes report_finding alongside the inherited notify tool", async () => {
     const { instance } = await createTestDO(TestExplorerAgentWorker);
     const worker = instance as TestExplorerAgentWorker;
     const names = (await worker.tools()).map((tool) => tool.name);
     expect(names).toContain("report_finding");
-    expect(names).toContain("say");
+    expect(names).toContain("notify");
   });
 
   it("resumes publication without exposing a partially published finding", async () => {

@@ -123,6 +123,23 @@ export interface ApprovalCardPayload {
 
 /** Inline system-row payload projected from a channel's direct-child forks
  *  (`ChannelViewState.forks`). Rendered as "⑂ <actor> forked from message N". */
+/**
+ * One outgoing cross-channel dispatch (messaging plan §4.10.3).
+ *
+ * It is a *reference*: `summary` is a one-line excerpt so the collapsed row
+ * reads well offline, and expanding observes the target channel's envelope
+ * rather than showing a relayed copy (D15).
+ */
+export interface CrossChannelRowPayload {
+  channelId: string;
+  envelopeId: string;
+  summary?: string;
+  /** `agent:<handle>@<channelId>` refs the dispatch was addressed to, if known. */
+  addressees?: string[];
+  from: { kind: string; id: string; displayName?: string; handle?: string };
+  publishedAt: string;
+}
+
 export interface ForkRowPayload {
   forkId: string;
   forkedChannelId: string;
@@ -272,6 +289,11 @@ export interface ChatMessage {
   replaces?: { messageId: string; seq: number };
   /** Present on inline fork-annotation rows (`contentType === "fork"`). */
   fork?: ForkRowPayload;
+  /** Present on outgoing cross-channel rows (`contentType === "cross-channel-sent"`). */
+  crossChannel?: CrossChannelRowPayload;
+  /** Origin of an incoming guest envelope, when the sender is not on this
+   *  roster (messaging plan §4.10.4). Drives the origin chip. */
+  origin?: { channelId: string; participantId: string };
   kind?: "message" | "method" | "system";
   complete?: boolean;
   replyTo?: string;

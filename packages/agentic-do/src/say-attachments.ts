@@ -1,5 +1,5 @@
 /**
- * Attachment loading for the `say` tool — resolves working-tree file paths
+ * Attachment loading for the `notify` tool — resolves working-tree file paths
  * into base64 channel attachments (see ChannelAttachment in channel-client.ts).
  * Image-only for now: the chat panel renders message attachments through its
  * image gallery, so accepting other types would silently show nothing.

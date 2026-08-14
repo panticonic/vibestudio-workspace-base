@@ -71,9 +71,9 @@ describe("SystemAgentWorker", () => {
     expect(instance.enablesMethod("connectModelCredential")).toBe(false);
   });
 
-  it("exposes exactly ordinary eval and say, without workspace memory", async () => {
+  it("exposes exactly ordinary eval and notify, without workspace memory", async () => {
     const { instance } = await createTestDO(TestSystemAgentWorker);
-    expect((await instance.tools()).map((tool) => tool.name)).toEqual(["eval", "say"]);
+    expect((await instance.tools()).map((tool) => tool.name)).toEqual(["eval", "notify"]);
     expect(instance.includesMemory()).toBe(false);
   });
 

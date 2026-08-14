@@ -236,41 +236,129 @@ export function userParticipantId(userId: string): string {
   return userId.startsWith("user:") ? userId : `user:${userId}`;
 }
 
+/** Why a handle did not resolve, with near-miss handles to suggest back to
+ *  the caller. Messaging plan §4.2.1: the tool surfaces this text instead of
+ *  guessing, so an agent can correct itself in one turn. */
+export interface HandleResolutionFailure {
+  error: "unknown" | "ambiguous";
+  /** Candidate handles (or ids) worth trying — near misses for "unknown",
+   *  the colliding participants for "ambiguous". */
+  suggestions: string[];
+}
+
+export type HandleResolution = ParticipantRef | HandleResolutionFailure;
+
+export function isHandleResolutionFailure(
+  value: HandleResolution
+): value is HandleResolutionFailure {
+  return "error" in value;
+}
+
+/** Matching is tiered, exact-first: id, then handle, then displayName. Fuzzy
+ *  never resolves — it only populates suggestions. */
+const HANDLE_MATCH_TIERS = ["id", "handle", "displayName"] as const;
+
+function suggestionFor(ref: ParticipantRef): string {
+  const handle = ref.metadata?.["handle"];
+  if (typeof handle === "string" && handle.length > 0) return `@${handle}`;
+  return ref.participantId ?? ref.id;
+}
+
+/**
+ * Resolve an `@mention` / handle / id token against a roster (messaging plan
+ * §4.2.1). Matching is attribution-grade (mutual trust, plan §0.0), never an
+ * authorization check — it answers "who was meant", and the write path decides
+ * whether the message lands.
+ *
+ * Tiered and exact: participant id first (a bare `<id>` also matches a human's
+ * `user:<id>`), then exact case-insensitive `metadata.handle`, then
+ * displayName. A tier is only consulted when no earlier tier matched, so an id
+ * on a late roster entry can never lose to a handle on an early one.
+ *
+ * **Ambiguity is an error, not a tie-break.** Two participants sharing a handle
+ * in one roster is a directory bug; failing closed surfaces it instead of
+ * silently delivering to whichever the iteration order happened to hit.
+ */
+export function resolveHandle(
+  mention: string,
+  roster: Iterable<ParticipantRef>,
+  opts?: { kinds?: readonly ParticipantKind[] }
+): HandleResolution {
+  const token = mention.trim().replace(/^@/, "");
+  if (token.length === 0) return { error: "unknown", suggestions: [] };
+  const asMemberId = userParticipantId(token);
+  const needle = token.toLowerCase();
+  const kinds = opts?.kinds;
+  const matches: Record<(typeof HANDLE_MATCH_TIERS)[number], ParticipantRef[]> = {
+    id: [],
+    handle: [],
+    displayName: [],
+  };
+  const candidates: ParticipantRef[] = [];
+
+  for (const ref of roster) {
+    if (kinds && !kinds.includes(ref.kind)) continue;
+    candidates.push(ref);
+    const id = ref.participantId ?? ref.id;
+    if (id === token || (ref.kind === "user" && id === asMemberId)) {
+      matches.id.push(ref);
+      continue;
+    }
+    const handle = ref.metadata?.["handle"];
+    if (typeof handle === "string" && handle.toLowerCase() === needle) {
+      matches.handle.push(ref);
+      continue;
+    }
+    if (typeof ref.displayName === "string" && ref.displayName.toLowerCase() === needle) {
+      matches.displayName.push(ref);
+    }
+  }
+
+  for (const tier of HANDLE_MATCH_TIERS) {
+    const tiered = matches[tier];
+    if (tiered.length === 1) return tiered[0] as ParticipantRef;
+    if (tiered.length > 1) {
+      return {
+        error: "ambiguous",
+        suggestions: tiered.map((ref) => ref.participantId ?? ref.id),
+      };
+    }
+  }
+
+  // Near misses: substring either way, so both "gmail" → "@gmail-agent" and
+  // "gmail-agent-2" → "@gmail-agent" suggest something useful.
+  const suggestions = candidates
+    .filter((ref) => {
+      const handle = ref.metadata?.["handle"];
+      const label = typeof handle === "string" ? handle.toLowerCase() : "";
+      const name = typeof ref.displayName === "string" ? ref.displayName.toLowerCase() : "";
+      return (
+        (label.length > 0 && (label.includes(needle) || needle.includes(label))) ||
+        (name.length > 0 && (name.includes(needle) || needle.includes(name)))
+      );
+    })
+    .slice(0, 5)
+    .map(suggestionFor);
+  return { error: "unknown", suggestions };
+}
+
 /**
  * Resolve an `@mention` / handle / `user:<id>` token to the roster's stable
  * human participant (WP7 §5). The policy agent uses this to target `ask_user` /
  * `feedback_form` at a SPECIFIC human; an UNaddressed prompt falls back to all
  * `kind:"user"` participants (first-answer-wins), so this helper's job is only
- * the addressed case. Matching is attribution-grade (mutual trust, plan §0.0),
- * never an authorization check: an explicit `user:<id>` (or bare `<id>`) matches
- * by participant id first, then an exact case-insensitive handle, then
- * displayName. Returns the matching `ParticipantRef`, or null when no human in
- * the roster matches.
+ * the addressed case. Returns the matching `ParticipantRef`, or null when no
+ * human in the roster matches unambiguously.
+ *
+ * Human-only by contract, not by accident: `ask_user` asks a *person*. Agent
+ * addressing goes through `resolveHandle` directly.
  */
 export function resolveMentionToUser(
   mention: string,
   roster: Iterable<ParticipantRef>
 ): ParticipantRef | null {
-  const token = mention.trim().replace(/^@/, "");
-  if (token.length === 0) return null;
-  const asMemberId = userParticipantId(token);
-  const needle = token.toLowerCase();
-  let displayNameMatch: ParticipantRef | null = null;
-  for (const ref of roster) {
-    if (ref.kind !== "user") continue;
-    const id = ref.participantId ?? ref.id;
-    if (id === token || id === asMemberId) return ref;
-    const handle = ref.metadata?.["handle"];
-    if (typeof handle === "string" && handle.toLowerCase() === needle) return ref;
-    if (
-      !displayNameMatch &&
-      typeof ref.displayName === "string" &&
-      ref.displayName.toLowerCase() === needle
-    ) {
-      displayNameMatch = ref;
-    }
-  }
-  return displayNameMatch;
+  const resolved = resolveHandle(mention, roster, { kinds: ["user"] });
+  return isHandleResolutionFailure(resolved) ? null : resolved;
 }
 
 function participantKindFromMetadata(

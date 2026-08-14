@@ -83,6 +83,7 @@ template:
     - skills/github
     - skills/local-models
     - skills/memory
+    - skills/messaging
     - skills/mobile-system-testing
     - skills/onboarding
     - skills/performance

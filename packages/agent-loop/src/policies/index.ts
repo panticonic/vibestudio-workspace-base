@@ -4,7 +4,12 @@
  * (consumer extras) → compaction.
  */
 
-import { AGENTIC_PROTOCOL_VERSION, type ParticipantRef } from "@workspace/agentic-protocol";
+import {
+  AGENTIC_PROTOCOL_VERSION,
+  isHandleResolutionFailure,
+  resolveHandle,
+  type ParticipantRef,
+} from "@workspace/agentic-protocol";
 import { ids } from "../ids.js";
 import {
   askUserFanoutCallId,
@@ -193,22 +198,28 @@ function askUserTargetHint(raw: unknown): string | undefined {
 }
 
 /** Resolve a target hint (`@handle`, bare handle, or `user:<id>`) to a human
- *  roster participant. Attribution/data-hygiene, not security: unresolvable
- *  hints fall back to broadcast rather than failing the ask. */
+ *  roster participant through the SHARED resolver (messaging plan §4.2.1), so
+ *  `ask_user` and `notify` cannot disagree about what a handle means. The
+ *  `kinds` filter keeps ask_user human-only; ambiguity fails closed there
+ *  rather than being tie-broken by roster order here. */
 function resolveAskUserTarget(
   humans: AskUserParticipant[],
   hint: string
 ): AskUserParticipant | undefined {
   const mention = hint.startsWith("@") ? hint.slice(1) : hint;
-  const lower = mention.toLowerCase();
-  return humans.find(
-    (entry) =>
-      entry.ref.id === hint ||
-      entry.participantId === hint ||
-      entry.handle?.toLowerCase() === lower ||
-      (typeof entry.ref.metadata?.["handle"] === "string" &&
-        (entry.ref.metadata["handle"] as string).toLowerCase() === lower)
-  );
+  // The loop keeps the handle and participant id beside the ref, so lift both
+  // in before resolving — otherwise a handle-only hint never matches.
+  const refs: ParticipantRef[] = humans.map((entry) => ({
+    ...entry.ref,
+    participantId: entry.ref.participantId ?? entry.participantId,
+    ...(entry.handle ? { metadata: { ...(entry.ref.metadata ?? {}), handle: entry.handle } } : {}),
+  }));
+  const resolved = resolveHandle(mention, refs, { kinds: ["user"] });
+  if (isHandleResolutionFailure(resolved)) return undefined;
+  const index = refs.indexOf(resolved);
+  // Hand back the original entry: the normalized copy exists only for matching,
+  // and the transport target must stay the roster's canonical ref.
+  return index >= 0 ? humans[index] : undefined;
 }
 
 /** ask-user: rewrite ask_user invocations to a channel feedback_form call.
@@ -439,6 +450,14 @@ export function forkPolicy(): StepPolicy {
   };
 }
 
+/** The one reader of the notify-only publish discipline. `"say-only"` is the
+ *  frozen legacy spelling of the same value (plan §4.3): it appears in
+ *  checked-in agent configs, so it is normalized on read rather than migrated
+ *  — a rename that invalidates existing manifests buys nothing. */
+export function isNotifyOnlyPolicy(policy: string | undefined): boolean {
+  return policy === "notify-only" || policy === "say-only";
+}
+
 /** publish-policy: config-driven channel publication discipline. Reads
  *  `state.config.publishPolicy` and gates the `publish` flag across every
  *  publication surface — step-produced appends (`intercept`), driver-produced
@@ -454,11 +473,12 @@ export function forkPolicy(): StepPolicy {
  *    placeholder + any secondary-tier `message.completed`/`message.failed`) stay
  *    trajectory-only (live viewers still see them via the KEPT ephemeral deltas).
  *    Turn boundaries + invocation/approval/system outcomes still publish.
- *  "say-only": nothing publishes but turn open/close; the agent speaks only via
- *    its explicit `say` tool (published out-of-band, bypassing this filter) and
- *    all ephemeral signals are dropped. (Exactly the old silentPolicy behavior.) */
+ *  "notify-only" (alias: the frozen legacy spelling "say-only"): nothing
+ *    publishes but turn open/close; the agent speaks only via its explicit
+ *    `notify` tool (published out-of-band, bypassing this filter) and all
+ *    ephemeral signals are dropped. (Exactly the old silentPolicy behavior.) */
 export function publishPolicyPolicy(): StepPolicy {
-  const sayOnly = (items: AppendItem[]): AppendItem[] =>
+  const notifyOnly = (items: AppendItem[]): AppendItem[] =>
     items.map((item) =>
       item.payloadKind === "turn.opened" || item.payloadKind === "turn.closed"
         ? item
@@ -475,14 +495,8 @@ export function publishPolicyPolicy(): StepPolicy {
       return item;
     });
   const filterFor = (state: AgentState): ((items: AppendItem[]) => AppendItem[]) | null => {
-    switch (state.config.publishPolicy) {
-      case "say-only":
-        return sayOnly;
-      case "turn-final":
-        return turnFinal;
-      default:
-        return null; // "all" or absent ⇒ identity
-    }
+    if (isNotifyOnlyPolicy(state.config.publishPolicy)) return notifyOnly;
+    return state.config.publishPolicy === "turn-final" ? turnFinal : null;
   };
   return {
     name: "publish-policy",
@@ -496,8 +510,8 @@ export function publishPolicyPolicy(): StepPolicy {
       return filter ? filter(items) : items;
     },
     filterEphemeral({ state, emit }) {
-      // say-only suppresses all streaming signals; turn-final + all keep them.
-      return state.config.publishPolicy === "say-only" ? null : emit;
+      // notify-only suppresses all streaming signals; turn-final + all keep them.
+      return isNotifyOnlyPolicy(state.config.publishPolicy) ? null : emit;
     },
   };
 }

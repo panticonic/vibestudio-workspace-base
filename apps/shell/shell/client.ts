@@ -66,7 +66,9 @@ import {
 } from "@vibestudio/shared/workspaceServiceRpc";
 import type { ChannelInvite } from "@vibestudio/shared/channelInvites";
 import {
+  agentMessageNotificationData,
   channelInviteFromNotification,
+  type AgentMessageNotificationData,
   type UserNotification,
   type UserNotificationAcknowledgementResult,
   type UserNotificationListResult,
@@ -1099,6 +1101,8 @@ export interface ShellChannelInvite extends ChannelInvite {
 export interface ShellUserNotification extends UserNotification {
   /** Present for the built-in `channel.invite` kind after shell hydration. */
   channelInvite?: ShellChannelInvite;
+  /** Present for `agent.message` — an agent addressed this person (plan §4.5). */
+  agentMessage?: AgentMessageNotificationData;
 }
 
 async function describeChannelInvite(
@@ -1166,7 +1170,9 @@ export const userNotifications = {
       const channelInvite = invite
         ? hydratedInvites.get(invite.channelId)
         : undefined;
-      return channelInvite ? { ...notification, channelInvite } : notification;
+      if (channelInvite) return { ...notification, channelInvite };
+      const agentMessage = agentMessageNotificationData(notification);
+      return agentMessage ? { ...notification, agentMessage } : notification;
     });
   },
 
@@ -1179,9 +1185,17 @@ export const userNotifications = {
     return result.acknowledged;
   },
 
-  /** Open the known invited channel in its owning context. Acknowledgement is
-   * deliberately separate so a failed panel creation never consumes the invite. */
-  async openChannel(channelId: string): Promise<{ id: string }> {
+  /**
+   * Find-or-open the chat panel for a channel in its owning context.
+   *
+   * `focusMessageId` names the envelope the caller wants shown — an escalated
+   * agent message, an invite's first post. Acknowledgement is deliberately
+   * separate so a failed panel creation never consumes the notification.
+   */
+  async openChannel(
+    channelId: string,
+    opts?: { focusMessageId?: string }
+  ): Promise<{ id: string }> {
     const profile = await account.getProfile();
     const findInGroup = async (
       group: Parameters<typeof workspacePresentation.page>[0]["group"]
@@ -1239,7 +1253,10 @@ export const userNotifications = {
       focus: true,
       contextId,
       title: config?.title?.trim() || undefined,
-      stateArgs: { channelName: channelId },
+      stateArgs: {
+        channelName: channelId,
+        ...(opts?.focusMessageId ? { focusMessageId: opts.focusMessageId } : {}),
+      },
     });
     return { id: handle.id };
   },

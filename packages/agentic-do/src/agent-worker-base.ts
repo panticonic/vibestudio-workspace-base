@@ -17,6 +17,22 @@ import type { RpcClient } from "@vibestudio/rpc";
 import type { VcsCommitResult } from "@vibestudio/service-schemas/vcs";
 import { SUPPORTED_IMAGE_TYPES } from "@workspace/pubsub";
 import {
+  AGENT_MESSAGE_NOTIFICATION_KIND,
+  agentMessageNotificationId,
+  type AgentMessageNotificationData,
+} from "@vibestudio/shared/userNotifications";
+import {
+  AGENTIC_PROTOCOL_VERSION,
+  ALERT_RUNGS,
+  defaultAlertRung,
+  isAddresseeError,
+  isAlertRung,
+  resolveAddressee,
+  type AddresseeError,
+  type ParticipantRef,
+  type ResolvedAddressee,
+} from "@workspace/agentic-protocol";
+import {
   AgentVesselBase,
   type AgentPromptResources,
   type AgentToolExecutionContext,
@@ -57,6 +73,85 @@ type StandardAgentMethodOptions = {
 
 export function hasAskableUser(roster: readonly { ref: { kind: string } }[]): boolean {
   return roster.some((participant) => participant.ref.kind === "user");
+}
+
+/** A headline for escalated surfaces when the sender did not give one. */
+function firstLine(content: string): string {
+  const line = content.trim().split("\n")[0] ?? "";
+  return line.length > 120 ? `${line.slice(0, 117)}…` : line || "New message";
+}
+
+/** `to` accepts one ref or a list; an omitted `to` means the whole channel. */
+function normalizeAddresseeRefs(value: unknown): string[] {
+  if (value == null) return [];
+  const list = Array.isArray(value) ? value : [value];
+  return list.filter((ref): ref is string => typeof ref === "string" && ref.trim().length > 0);
+}
+
+/** Group foreign addressees by target channel: one envelope per channel. */
+function groupByChannel(
+  addressees: readonly ResolvedAddressee[]
+): Array<{ channelId: string; addressees: ResolvedAddressee[] }> {
+  const byChannel = new Map<string, ResolvedAddressee[]>();
+  for (const entry of addressees) {
+    const list = byChannel.get(entry.channelId);
+    if (list) list.push(entry);
+    else byChannel.set(entry.channelId, [entry]);
+  }
+  return [...byChannel].map(([channelId, list]) => ({ channelId, addressees: list }));
+}
+
+/** A resolution failure reaches the model verbatim, suggestions and all: the
+ *  point of failing closed is that the agent can retry with the right name. */
+function addresseeToolError(ref: string, error: AddresseeError): Error {
+  return Object.assign(new Error(error.message), {
+    code: error.code,
+    errorData: { code: error.code, addressee: ref, suggestions: error.suggestions },
+  });
+}
+
+function addresseeLabel(resolved: ResolvedAddressee): string {
+  switch (resolved.kind) {
+    case "user":
+      return `user:${resolved.userId}`;
+    case "agent":
+      return `agent:${resolved.instanceId}`;
+    case "run":
+      return `run:${resolved.runId}`;
+    case "participant":
+    case "parent":
+      return `participant:${resolved.participantId}`;
+    default:
+      return `channel:${resolved.channelId}`;
+  }
+}
+
+/** An explicit `channel:` addressee means everyone here. */
+function broadcastsToChannel(resolved: ResolvedAddressee): boolean {
+  return resolved.kind === "channel";
+}
+
+/** The channel audience for the addressees that live on this channel. */
+function audienceSelectors(
+  resolved: readonly ResolvedAddressee[]
+): Array<{ kind: "participant"; participantId: string }> {
+  const seen = new Set<string>();
+  const selectors: Array<{ kind: "participant"; participantId: string }> = [];
+  for (const entry of resolved) {
+    // A foreign addressee is reached by a guest envelope in ITS channel, not by
+    // an audience selector here — this channel's roster has never heard of it.
+    if (entry.kind === "run" || entry.foreign) continue;
+    const participantId =
+      entry.kind === "participant" || entry.kind === "parent" || entry.kind === "agent"
+        ? entry.participantId
+        : entry.kind === "user"
+          ? entry.participantId
+          : undefined;
+    if (!participantId || seen.has(participantId)) continue;
+    seen.add(participantId);
+    selectors.push({ kind: "participant", participantId });
+  }
+  return selectors;
 }
 
 function requireBoundMutationInvocation(): never {
@@ -272,14 +367,15 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         },
       }),
     ] as unknown as AgentTool[];
-    // The generalized `say` tool (carries saliency:"say"; the config-level
+    // The generalized `notify` tool (carries saliency:"say"; the config-level
     // publishPolicy governs whether model narration also publishes) + the
     // subagent supervision surface. The child-side `complete` tool is added
     // ONLY when this agent is itself a subagent.
     return [
       ...base,
       this.createSetTitleTool(channelId),
-      this.createSayTool(channelId, fs),
+      this.createNotifyTool(channelId, fs),
+      ...this.createDiscoveryTools(channelId),
       ...this.createSubagentTools(channelId, toolRpc),
     ];
   }
@@ -319,23 +415,374 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
     };
   }
 
-  /** The generalized `say` tool: an explicit, deliberate channel utterance
-   *  (saliency:"say"). Its messageId is derived from the tool-call id, so a
-   *  redriven invocation re-sends the SAME message (dedup), never a duplicate.
-   *  `attachments` names image files in the agent's working tree (the same fs
-   *  the read/write tools use), so a captured screenshot reaches the user by
-   *  path — the bytes never travel through the model. */
-  protected createSayTool(channelId: string, fs: ReturnType<typeof createRpcFs>): AgentTool<never> {
+
+  /**
+   * Write one durable inbox entry for an addressed person (plan §4.5 step 3).
+   *
+   * The host stays content-blind: this writes to the workspace's own semantic
+   * control plane, and the host only ever sees the opaque "inbox changed" ping
+   * Gad raises. A failed escalation must not fail the message — the envelope is
+   * already on the channel, which is the canonical copy — so the error is
+   * reported back as a note rather than thrown.
+   */
+  protected async escalateNotify(input: {
+    userId: string;
+    channelId: string;
+    messageId: string;
+    senderParticipantId: string;
+    senderHandle?: string;
+    rung: "inbox" | "interrupt";
+    title: string;
+    message: string;
+  }): Promise<string | null> {
+    const id = agentMessageNotificationId(input.messageId, input.userId);
+    const data: AgentMessageNotificationData = {
+      channelId: input.channelId,
+      messageId: input.messageId,
+      senderParticipantId: input.senderParticipantId,
+      ...(input.senderHandle ? { senderHandle: input.senderHandle } : {}),
+      rung: input.rung,
+    };
+    try {
+      await this.callGad("putUserNotification", {
+        id,
+        userId: input.userId,
+        kind: AGENT_MESSAGE_NOTIFICATION_KIND,
+        title: input.title,
+        message: input.message,
+        data,
+        createdAt: Date.now(),
+        revision: 1,
+      });
+      return id;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Publish one guest envelope into a channel this agent is not a member of,
+   * and record the reference on its own channel (plan §4.6, §4.10.1).
+   *
+   * Three writes, one canonical copy (D15):
+   *  - the target channel gets the utterance itself, addressed to the agents
+   *    named, with `origin` on the sender metadata so the recipient can see who
+   *    is talking and from where;
+   *  - the target channel also gets `external.participant_observed` — the guest
+   *    identity recorded without faking a join — and
+   *    `external.envelope_observed`, the back-pointer to the authoring context;
+   *  - the sender's channel gets `external.envelope_published`: a *reference*,
+   *    not a relayed transcript. The full text is already durable here as the
+   *    `notify` invocation's arguments.
+   *
+   * The hop count is stamped explicitly. Without it a guest envelope arriving
+   * in a channel it never touched starts a fresh per-channel streak, and an
+   * A↔B ping-pong gets twice the depth the cap intends (D13).
+   */
+  protected async sendGuestEnvelope(input: {
+    toolCallId: string;
+    fromChannelId: string;
+    targetChannelId: string;
+    participantId: string;
+    content: string;
+    addressees: ResolvedAddressee[];
+    replyTo?: string;
+  }): Promise<{ text: string; details: Record<string, unknown> }> {
+    const descriptor = this.getEffectiveParticipantInfo(
+      input.fromChannelId,
+      this.subscriptions.getConfig(input.fromChannelId)
+    );
+    const senderMetadata: Record<string, unknown> = {
+      ...descriptor.metadata,
+      name: descriptor.name,
+      type: descriptor.type,
+      handle: descriptor.handle,
+      origin: { channelId: input.fromChannelId, participantId: input.participantId },
+    };
+    // Per-target dedup id: a redriven notify re-sends this same envelope rather
+    // than a second fan-out (plan §4.3).
+    const messageId = `say:${input.toolCallId}:${input.targetChannelId}`;
+    const to = input.addressees
+      .filter((entry) => entry.kind === "agent")
+      .map((entry) => ({
+        kind: "participant" as const,
+        participantId: (entry as Extract<ResolvedAddressee, { kind: "agent" }>).participantId,
+      }));
+    const agentHops = this.inboundAgentHops(input.fromChannelId) + 1;
+    const guest: ParticipantRef = {
+      kind: "agent",
+      id: input.participantId,
+      participantId: input.participantId,
+      ...(descriptor.name ? { displayName: descriptor.name } : {}),
+      metadata: senderMetadata,
+    };
+    const target = this.createChannelClient(input.targetChannelId);
+    try {
+      // The guest identity is recorded before the utterance, so a reader that
+      // sees the message can always resolve who sent it.
+      await target.publishAgenticEvent(
+        input.participantId,
+        {
+          kind: "external.participant_observed",
+          actor: { kind: "agent", id: input.participantId, metadata: senderMetadata },
+          payload: {
+            protocol: AGENTIC_PROTOCOL_VERSION,
+            participant: guest,
+            action: "updated",
+          },
+          createdAt: new Date().toISOString(),
+        } as never,
+        { idempotencyKey: `${messageId}:participant`, senderMetadata }
+      );
+      await target.send(input.participantId, messageId, input.content, {
+        saliency: "say",
+        senderMetadata,
+        ...(input.replyTo ? { replyTo: input.replyTo } : {}),
+        ...(to.length > 0 ? { to } : {}),
+        agentHops,
+      });
+      await target.publishAgenticEvent(
+        input.participantId,
+        {
+          kind: "external.envelope_observed",
+          actor: { kind: "agent", id: input.participantId, metadata: senderMetadata },
+          payload: {
+            protocol: AGENTIC_PROTOCOL_VERSION,
+            channelId: input.fromChannelId,
+            envelopeId: messageId,
+            from: guest,
+            payloadKind: "message.completed",
+          },
+          createdAt: new Date().toISOString(),
+        } as never,
+        { idempotencyKey: `${messageId}:observed`, senderMetadata }
+      );
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      if (code === "ClosedChannel") throw error;
+      throw Object.assign(
+        new Error(
+          `notify could not reach ${input.targetChannelId}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        ),
+        { code: "CrossChannelDeliveryFailed" }
+      );
+    }
+
+    // The reference on the sender's own channel. A failure here loses the local
+    // marginalia, never the message — which already landed.
+    try {
+      await this.createChannelClient(input.fromChannelId).publishAgenticEvent(
+        input.participantId,
+        {
+          kind: "external.envelope_published",
+          actor: { kind: "agent", id: input.participantId, metadata: senderMetadata },
+          payload: {
+            protocol: AGENTIC_PROTOCOL_VERSION,
+            publications: [
+              {
+                channelId: input.targetChannelId,
+                envelopeId: messageId,
+                payloadKind: "message.completed",
+                summary: firstLine(input.content),
+              },
+            ],
+          },
+          createdAt: new Date().toISOString(),
+        } as never,
+        { idempotencyKey: `${messageId}:published`, senderMetadata }
+      );
+    } catch {
+      /* the utterance is already durable in the target channel */
+    }
+
+    const labels = input.addressees.map(addresseeLabel).join(", ");
     return {
-      name: "say",
-      label: "say",
+      text: `sent ${messageId} to ${labels || input.targetChannelId}`,
+      details: {
+        messageId,
+        channelId: input.targetChannelId,
+        guest: true,
+        agentHops,
+        addressees: input.addressees.map(addresseeLabel),
+      },
+    };
+  }
+
+  /** The two discovery tools (plan §4.7). They are the READ side of
+   *  `resolveAddressee`: every row prints the exact ref `notify` accepts, so
+   *  "who can I message" and "how do I message them" are one answer, not two
+   *  vocabularies the agent has to translate between. */
+  protected createDiscoveryTools(channelId: string): AgentTool[] {
+    return [
+      {
+        name: "list_addressees",
+        label: "list_addressees",
+        description:
+          "List everyone you can message right now: this channel's participants, your supervisor if you have one, your live subagent runs, and running agent instances elsewhere. Each row prints the exact `to` value notify accepts.",
+        parameters: {
+          type: "object",
+          properties: {
+            includeDirectory: {
+              type: "boolean",
+              description:
+                "Include agent instances in other channels (default true). Set false for just this conversation.",
+            },
+          },
+        } as never,
+        execute: async (_toolCallId, params) => {
+          const includeDirectory = (params as { includeDirectory?: unknown }).includeDirectory;
+          const context = await this.addresseeContext(channelId);
+          const lines: string[] = [];
+          const rows: Record<string, unknown>[] = [];
+          const push = (ref: string, kind: string, note: string) => {
+            lines.push(`${ref}  — ${kind}${note ? `: ${note}` : ""}`);
+            rows.push({ ref, kind, note });
+          };
+          push("(omit `to`)", "channel", "everyone in this conversation");
+          for (const participant of context.roster) {
+            const handle = participant.metadata?.["handle"];
+            const id = participant.participantId ?? participant.id;
+            push(
+              typeof handle === "string" && handle ? `@${handle}` : `participant:${id}`,
+              participant.kind,
+              participant.displayName ?? ""
+            );
+          }
+          if (context.parent) {
+            push("parent", "supervisor", "the agent that spawned you");
+          }
+          for (const run of context.runs ?? []) {
+            push(`run:${run.runId}`, "subagent run", run.taskChannelId);
+          }
+          if (includeDirectory !== false) {
+            for (const entry of context.directory ?? []) {
+              if (entry.channelId === channelId) continue;
+              push(`agent:${entry.instanceId}`, "agent elsewhere", entry.channelId);
+            }
+          }
+          return {
+            content: [{ type: "text", text: lines.join("\n") }],
+            details: { addressees: rows },
+          };
+        },
+      } as AgentTool,
+      {
+        name: "discover_agents",
+        label: "discover_agents",
+        description:
+          "Find agents by what they do (e.g. 'gmail triage', 'nightly builds'). Searches handles, names, descriptions, and each instance's latest deliberate message. Returns refs ready to paste into notify. Terminal instances stay findable — their channels are durable, so messaging one wakes it.",
+        parameters: {
+          type: "object",
+          properties: {
+            query: {
+              type: "string",
+              description: "What the agent you are looking for does.",
+            },
+            includeTerminal: {
+              type: "boolean",
+              description: "Include instances that have left their channel (default false).",
+            },
+            limit: { type: "integer", minimum: 1, maximum: 50 },
+          },
+          required: ["query"],
+        } as never,
+        execute: async (_toolCallId, params) => {
+          const input = params as { query?: unknown; includeTerminal?: unknown; limit?: unknown };
+          if (typeof input.query !== "string" || !input.query.trim()) {
+            throw new Error("discover_agents requires a non-empty query");
+          }
+          const listing = await this.callGad<{
+            summary: { rows: number };
+            entries: Array<Record<string, unknown>>;
+          }>("searchAgentDirectory", {
+            query: input.query.trim(),
+            ...(input.includeTerminal === true ? { includeTerminal: true } : {}),
+            ...(typeof input.limit === "number" ? { limit: input.limit } : {}),
+          });
+          if (listing.entries.length === 0) {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: `No agent matched "${input.query}". Use list_addressees to see who is already here.`,
+                },
+              ],
+              details: { entries: [] },
+            };
+          }
+          const text = listing.entries
+            .map((entry) => {
+              // The overview is the instance's own latest utterance, not a
+              // transcript dump (plan §4.7).
+              const overview = entry["summary"] ?? entry["description"] ?? "";
+              return `${entry["ref"]}  [${entry["status"]}] ${entry["displayName"] ?? entry["handle"] ?? ""}${
+                overview ? `\n    ${String(overview).replace(/\s+/gu, " ").slice(0, 200)}` : ""
+              }`;
+            })
+            .join("\n");
+          return {
+            content: [{ type: "text", text }],
+            details: { entries: listing.entries },
+          };
+        },
+      } as AgentTool,
+    ];
+  }
+
+  /** The one messaging primitive (plan §4.1): an explicit, deliberate
+   *  utterance aimed at whoever `to` names — the channel, a participant, a
+   *  supervisor, a child run — with an escalation rung saying what the
+   *  recipient should experience.
+   *
+   *  Its messageId is derived from the tool-call id *per target*, so a redriven
+   *  invocation re-sends the SAME set of messages (dedup), never a second
+   *  fan-out. `attachments` names image files in the agent's working tree (the
+   *  same fs the read/write tools use), so a captured screenshot reaches the
+   *  user by path — the bytes never travel through the model.
+   *
+   *  The wire `saliency` stays `"say"` (D3, revised): the tool renamed, the
+   *  envelope field did not, because every reader types it as a literal inside
+   *  a strict schema and a rename buys nothing but a release-skew matrix. */
+  protected createNotifyTool(
+    channelId: string,
+    fs: ReturnType<typeof createRpcFs>
+  ): AgentTool<never> {
+    return {
+      name: "notify",
+      label: "notify",
       description:
-        "Send a concise, deliberate message to the channel. This is the explicit way to surface text to participants (e.g. when the agent publishes only on demand). " +
-        `To show the user an image (e.g. a screenshot you captured), save it as a file and list its path in attachments; supported types: ${SUPPORTED_IMAGE_TYPES.join(", ")}.`,
+        "Send a concise, deliberate message. This is the one way to surface text to anyone: the channel by default, or exactly whom `to` names. " +
+        "Addressing someone does not compel a reply; it makes one possible. " +
+        `To show an image (e.g. a screenshot you captured), save it as a file and list its path in attachments; supported types: ${SUPPORTED_IMAGE_TYPES.join(", ")}.`,
       parameters: {
         type: "object",
         properties: {
-          content: { type: "string", description: "Message text to send to the channel." },
+          content: { type: "string", description: "Message text (markdown) to send." },
+          to: {
+            type: "array",
+            items: { type: "string" },
+            description:
+              "Optional addressees. Omit to address the whole channel. Each entry is one of: " +
+              "@handle (a participant here), participant:<id>, user:<id>, owner, parent (your " +
+              "supervisor), run:<id> (a subagent you spawned), channel:<id>. An unrecognized " +
+              "addressee fails the call with suggestions; nothing is ever broadcast as a guess.",
+          },
+          alert: {
+            type: "string",
+            enum: [...ALERT_RUNGS],
+            description:
+              "What the recipient should experience. 'none' = the message just lands in the " +
+              "channel. 'inbox' = also a durable notification entry and a phone push; the " +
+              "default whenever you address a person. 'interrupt' = also seizes their screen; " +
+              "choose it only when waiting would cost them something real.",
+          },
+          title: {
+            type: "string",
+            description:
+              "Optional short headline for escalated surfaces. Defaults to the first line of content.",
+          },
           replyTo: { type: "string", description: "Optional message id this is replying to." },
           mentions: {
             type: "array",
@@ -354,54 +801,187 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       execute: async (toolCallId, params) => {
         const input = params as {
           content?: unknown;
+          to?: unknown;
+          alert?: unknown;
+          title?: unknown;
           replyTo?: unknown;
           mentions?: unknown;
           attachments?: unknown;
         };
-        if (typeof input.content !== "string" || input.content.trim().length === 0) {
-          throw new Error("say requires non-empty content");
+        const content = input.content;
+        if (typeof content !== "string" || content.trim().length === 0) {
+          throw new Error("notify requires non-empty content");
+        }
+        if (input.alert !== undefined && !isAlertRung(input.alert)) {
+          throw new Error(`notify alert must be one of ${ALERT_RUNGS.join(", ")}`);
         }
         const participantId = this.subscriptions.getParticipantId(channelId);
         if (!participantId) throw new Error("agent is not subscribed to the channel");
-        const paths = Array.isArray(input.attachments)
-          ? input.attachments.filter((path): path is string => typeof path === "string")
-          : [];
-        const attachments = await readSayAttachments(fs, paths);
-        const descriptor = this.getEffectiveParticipantInfo(
-          channelId,
-          this.subscriptions.getConfig(channelId)
-        );
-        const messageId = `say:${toolCallId}`;
-        // A subagent's deliberate `say` is, per §9, an utterance intended for
-        // its supervisor. The supervisor observes the task channel with
-        // delivery interest "addressed", so carry the parent in the audience
-        // explicitly — otherwise the say stays in the task log without ever
-        // creating supervisor work.
-        const parentParticipantId = this.subagentIdentity()?.parentParticipantId;
-        await this.createChannelClient(channelId).send(participantId, messageId, input.content, {
-          saliency: "say",
-          senderMetadata: {
-            ...descriptor.metadata,
-            name: descriptor.name,
-            type: descriptor.type,
-            handle: descriptor.handle,
-          },
-          replyTo: typeof input.replyTo === "string" ? input.replyTo : undefined,
-          mentions: Array.isArray(input.mentions)
-            ? input.mentions.filter((mention): mention is string => typeof mention === "string")
-            : undefined,
-          ...(parentParticipantId
-            ? { to: [{ kind: "participant", participantId: parentParticipantId }] }
-            : {}),
-          attachments: attachments.length > 0 ? attachments : undefined,
+
+        const refs = normalizeAddresseeRefs(input.to);
+        const context = await this.addresseeContext(channelId);
+        const resolved = refs.map((ref) => {
+          const outcome = resolveAddressee(ref, context);
+          if (isAddresseeError(outcome)) throw addresseeToolError(ref, outcome);
+          return outcome;
         });
-        const attachmentNote =
-          attachments.length > 0
-            ? ` with ${attachments.length} attachment${attachments.length === 1 ? "" : "s"} (${attachments.map((attachment) => attachment.name).join(", ")})`
-            : "";
+        const alert = isAlertRung(input.alert) ? input.alert : defaultAlertRung(resolved);
+
+        // Runs are addressed through the supervision path, not the channel
+        // audience: the child lives in its own task channel, and that path
+        // already refuses a terminal run with the operations that remain open.
+        const runs = resolved.filter(
+          (entry): entry is Extract<ResolvedAddressee, { kind: "run" }> => entry.kind === "run"
+        );
+        const offChannel = resolved.filter(
+          (entry) => entry.kind === "user" && !entry.inRoster
+        );
+        if (offChannel.length > 0) {
+          throw Object.assign(
+            new Error(
+              `${offChannel.map(addresseeLabel).join(", ")} is not on this channel; reaching them needs the escalation pipeline, which is not enabled in this build.`
+            ),
+            { code: "EscalationUnsupported" }
+          );
+        }
+        // Foreign addressees get a guest envelope in THEIR channel (plan §4.6):
+        // an envelope belongs to exactly one log, so a `to` list spanning
+        // channels produces one envelope per target channel, never a broadcast.
+        const foreign = resolved.filter(
+          (entry): entry is Extract<ResolvedAddressee, { foreign: true }> =>
+            entry.kind !== "run" && entry.foreign
+        );
+
+        const results: string[] = [];
+        const sent: Record<string, unknown>[] = [];
+        let channelMessageId: string | null = null;
+
+        // A subagent's deliberate notify is, absent an explicit audience, an
+        // utterance intended for its supervisor. The supervisor observes the
+        // task channel with delivery interest "addressed", so carry the parent
+        // in the audience explicitly — otherwise it stays in the task log
+        // without ever creating supervisor work.
+        const parentParticipantId = this.subagentIdentity()?.parentParticipantId;
+        const selectors =
+          refs.length === 0
+            ? parentParticipantId
+              ? [{ kind: "participant" as const, participantId: parentParticipantId }]
+              : []
+            : audienceSelectors(resolved);
+        const addressesChannel = refs.length > 0 && resolved.some(broadcastsToChannel);
+        const wantsChannelEnvelope = refs.length === 0 || addressesChannel || selectors.length > 0;
+
+        if (wantsChannelEnvelope) {
+          const paths = Array.isArray(input.attachments)
+            ? input.attachments.filter((path): path is string => typeof path === "string")
+            : [];
+          const attachments = await readSayAttachments(fs, paths);
+          const descriptor = this.getEffectiveParticipantInfo(
+            channelId,
+            this.subscriptions.getConfig(channelId)
+          );
+          const messageId = `say:${toolCallId}`;
+          await this.createChannelClient(channelId).send(participantId, messageId, content, {
+            saliency: "say",
+            senderMetadata: {
+              ...descriptor.metadata,
+              name: descriptor.name,
+              type: descriptor.type,
+              handle: descriptor.handle,
+            },
+            replyTo: typeof input.replyTo === "string" ? input.replyTo : undefined,
+            mentions: Array.isArray(input.mentions)
+              ? input.mentions.filter((mention): mention is string => typeof mention === "string")
+              : undefined,
+            // An explicit `channel:` addressee means everyone, so it erases the
+            // narrower selectors rather than being unioned with them.
+            ...(addressesChannel || selectors.length === 0 ? {} : { to: selectors }),
+            attachments: attachments.length > 0 ? attachments : undefined,
+            metadata: {
+              notify: {
+                alert,
+                ...(typeof input.title === "string" && input.title.trim()
+                  ? { title: input.title.trim() }
+                  : {}),
+              },
+            },
+          });
+          const attachmentNote =
+            attachments.length > 0
+              ? ` with ${attachments.length} attachment${attachments.length === 1 ? "" : "s"} (${attachments.map((attachment) => attachment.name).join(", ")})`
+              : "";
+          channelMessageId = messageId;
+          results.push(`sent message ${messageId}${attachmentNote}`);
+          sent.push({
+            messageId,
+            channelId,
+            alert,
+            attachments: attachments.map((attachment) => attachment.name),
+          });
+        }
+
+        for (const run of runs) {
+          // Per-target dedup id: two runs addressed by one call must not
+          // collide on `subagent-msg:<toolCallId>`.
+          const result = await this.sendToSubagent(
+            runs.length > 1 ? `${toolCallId}:${run.runId}` : toolCallId,
+            run.runId,
+            content,
+            channelId
+          );
+          const text = result.content
+            ?.map((block) => (block.type === "text" ? block.text : ""))
+            .join("")
+            .trim();
+          results.push(text || `sent to subagent ${run.runId}`);
+          sent.push({ runId: run.runId, channelId: run.channelId, alert: "none" });
+        }
+
+        // Escalation (plan §4.5): the envelope above is always the canonical
+        // copy; the inbox entry is the durable half that reaches a person who
+        // is not looking. There is no presence check — the entry retires when
+        // the user actually reads the message (§4.5.4), a fact, not a guess.
+        if (alert !== "none" && channelMessageId) {
+          const descriptor = this.getEffectiveParticipantInfo(
+            channelId,
+            this.subscriptions.getConfig(channelId)
+          );
+          for (const addressee of resolved) {
+            if (addressee.kind !== "user") continue;
+            const notification = await this.escalateNotify({
+              userId: addressee.userId,
+              channelId,
+              messageId: channelMessageId,
+              senderParticipantId: participantId,
+              senderHandle: descriptor.handle,
+              rung: alert,
+              title:
+                typeof input.title === "string" && input.title.trim()
+                  ? input.title.trim()
+                  : firstLine(content),
+              message: content,
+            });
+            if (notification) sent.push({ notificationId: notification, userId: addressee.userId });
+          }
+        }
+
+        for (const target of groupByChannel(foreign)) {
+          const outcome = await this.sendGuestEnvelope({
+            toolCallId,
+            fromChannelId: channelId,
+            targetChannelId: target.channelId,
+            participantId,
+            content,
+            addressees: target.addressees,
+            replyTo: typeof input.replyTo === "string" ? input.replyTo : undefined,
+          });
+          results.push(outcome.text);
+          sent.push(outcome.details);
+        }
+
         return {
-          content: [{ type: "text", text: `sent message ${messageId}${attachmentNote}` }],
-          details: { messageId, attachments: attachments.map((attachment) => attachment.name) },
+          content: [{ type: "text", text: results.join("; ") }],
+          details: { alert, sent },
         };
       },
     };
@@ -418,7 +998,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         name: "spawn_subagent",
         label: "spawn_subagent",
         description:
-          "Delegate separable work to a child agent in its own durable task channel and retained child context. Returns a runId once launch succeeds; the spawn invocation does not stay open for the child's lifetime. Use for independent investigation, parallel work, or isolated edits; do small linear work yourself. mode:'fresh' seeds a child from task; mode:'fork' starts from your current trajectory and can share context-window cache. Track the runId exactly, continue useful foreground work, and steer only with new instructions. After terminal delivery, review the retained result and decide from the user's goal whether to integrate it; inspection-only and comparison tasks may deliberately leave it unintegrated. Detailed activity remains on the canonical child transcript. Terminal results immediately free execution capacity and remain inspectable, readable, and mergeable; no cleanup tool is required. Use cancel_subagent only to stop a live run. If siblings remain live, continue foreground work or suspend_turn({ reason:'waiting_for_background' }) again. The child finishes only by calling complete.",
+          "Delegate separable work to a child agent in its own durable task channel and retained child context. Returns a runId once launch succeeds; the spawn invocation does not stay open for the child's lifetime. Use for independent investigation, parallel work, or isolated edits; do small linear work yourself. mode:'fresh' seeds a child from task; mode:'fork' starts from your current trajectory and can share context-window cache. Track the runId exactly, continue useful foreground work, and steer only with new instructions via notify({ to: 'run:<runId>' }) — never to ask how it is going. After terminal delivery, review the retained result and decide from the user's goal whether to integrate it; inspection-only and comparison tasks may deliberately leave it unintegrated. Detailed activity remains on the canonical child transcript. Terminal results immediately free execution capacity and remain inspectable, readable, and mergeable; no cleanup tool is required. Use cancel_subagent only to stop a live run. If siblings remain live, continue foreground work or suspend_turn({ reason:'waiting_for_background' }) again. The child finishes only by calling complete.",
         parameters: {
           type: "object",
           properties: {
@@ -482,33 +1062,10 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         },
       } as AgentTool,
       {
-        name: "send_to_subagent",
-        label: "send_to_subagent",
-        description:
-          "Send steering or new information directly to the exact child participant. Use this to correct course or add context, not to poll for progress.",
-        parameters: {
-          type: "object",
-          properties: {
-            runId: {
-              type: "string",
-              description:
-                "The exact subagent runId or any sufficiently long unique prefix; the display ellipsis is optional.",
-            },
-            message: { type: "string", description: "Message to send to the subagent." },
-          },
-          required: ["runId", "message"],
-        } as never,
-        execute: async (toolCallId, params) => {
-          const p = params as { runId?: unknown; message?: unknown };
-          return this.sendToSubagent(
-            toolCallId,
-            String(p.runId ?? ""),
-            String(p.message ?? ""),
-            channelId
-          );
-        },
-      } as AgentTool,
-      {
+        // `send_to_subagent` is gone: steering a child is a message like any
+        // other, so it is `notify({ to: "run:<id>", ... })`. Its guidance —
+        // steer with new instructions, never poll for progress — moved to the
+        // spawn description above and the subagent prompt.
         name: "inspect_subagent",
         label: "inspect_subagent",
         description:

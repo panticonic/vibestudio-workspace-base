@@ -37,18 +37,33 @@ interface ChannelSendOptions {
   /**
    * Salience tier. A `ChannelClient.send` is an explicit, deliberate message
    * — the agent (or headless participant) choosing to surface text to the
-   * channel, e.g. the silent agent's `say` tool — so it defaults to "primary"
+   * channel, e.g. the silent agent's `notify` tool — so it defaults to "primary"
    * (tier 1). The model-loop's own turn narration is tiered separately in
    * agent-loop. Pass "secondary" to send a deliberately slight message.
    */
   tier?: MessageTier;
   /**
    * Salience flag: `"say"` marks the message as an explicit, deliberate
-   * utterance (the generalized `say` tool). It survives the `turn-final`
+   * utterance (the generalized `notify` tool; the wire value is frozen at
+   * "say"). It survives the `turn-final`
    * wake filter and is surfaced by the chat projection. Omit for ordinary
    * traffic.
    */
   saliency?: "say";
+  /**
+   * Free-form send intent carried on the message payload. `notify` puts its
+   * escalation rung and headline here (`{ notify: { alert, title } }`) so the
+   * durable envelope — not a side table — records what the sender asked the
+   * recipient to experience.
+   */
+  metadata?: Record<string, unknown>;
+  /**
+   * Caller-computed conversation depth. The channel policy folds a per-channel
+   * agent streak of its own, but honours an explicit count — which is what
+   * carries the hop cap across a channel boundary on a guest envelope
+   * (messaging plan §4.6). Omit for ordinary sends.
+   */
+  agentHops?: number;
 }
 /** Decoded byte count of a base64 string (padding-aware). */
 function base64ByteLength(base64: string): number {
@@ -132,7 +147,10 @@ export class ChannelClient {
         displayName,
         metadata: senderMetadata,
       },
-      causality: { messageId: messageId as never },
+      causality: {
+        messageId: messageId as never,
+        ...(typeof opts?.agentHops === "number" ? { agentHops: opts.agentHops } : {}),
+      },
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         role: participantType === "agent" ? "assistant" : "user",
@@ -150,6 +168,7 @@ export class ChannelClient {
         mentions: opts?.mentions,
         replyTo: opts?.replyTo as never,
         to: opts?.to,
+        ...(opts?.metadata ? { metadata: opts.metadata } : {}),
       },
       createdAt: new Date().toISOString(),
     };

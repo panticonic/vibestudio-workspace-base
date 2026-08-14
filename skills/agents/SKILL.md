@@ -38,6 +38,13 @@ gets its own agent DO. This is load-bearing:
 - Never replace the helper with `resolveDurableObject` and a guessed key — that
   resolves a supplied identity rather than minting a safe channel-local one.
 
+That per-channel key is also this instance's **directory identity**. Joining a
+channel registers the agent in the workspace agent directory as
+`<handle>@<channelId>`, which is directly addressable:
+`notify({ to: "agent:<handle>@<channelId>" })`. One worker in three channels is
+three directory rows sharing a worker id — correct, because "message the gmail
+agent" is meaningless without saying where. See the `messaging` skill.
+
 Re-adding the same handle to the same channel is idempotent. Membership is
 durable; presence and typing are disposable UI state. The helper delegates to
 the canonical `launchAgentIntoChannel` lifecycle. Panel products that can
@@ -50,6 +57,11 @@ Use `respondPolicy: "mentioned-strict"` for agents that should act only on
 addressed work. Give ordinary unmentioned player text one explicit default
 recipient—usually a command interpreter—instead of broadcasting it. A direct
 mention may bypass the interpreter when the product intends expert access.
+
+Address work with the `notify` addressee grammar (`@handle`,
+`participant:<id>`, `agent:<handle>@<channelId>`) rather than hand-rolled
+mention plumbing; an unresolvable addressee fails the call with suggestions
+instead of degrading into a broadcast. The `messaging` skill is the reference.
 
 A command interpreter translates natural language into narrow addressed
 requests. It must reread authoritative application state before resolving

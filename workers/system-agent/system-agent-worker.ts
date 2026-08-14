@@ -76,7 +76,7 @@ export class SystemAgentWorker extends AgentWorkerBase {
         <T>(method: string, args: unknown[]) => toolRpc.call<T>("main", method, args),
         { subKey: channelId }
       ),
-      this.createSayTool(channelId, fs),
+      this.createNotifyTool(channelId, fs),
     ];
   }
 }

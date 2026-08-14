@@ -739,6 +739,9 @@ export const MessageCard = React.memo(function MessageCard({
   }
 
   // Inline "conversation forked" annotation row (from ChannelViewState.forks).
+  if (msg.contentType === "cross-channel-sent" && msg.crossChannel) {
+    return <CrossChannelDispatchRow key={key} dispatch={msg.crossChannel} />;
+  }
   if (msg.contentType === "fork" && msg.fork) {
     return <ForkRow key={key} fork={msg.fork} />;
   }
@@ -860,6 +863,20 @@ export const MessageCard = React.memo(function MessageCard({
                 >
                   @{senderInfo.handle}
                 </Text>
+                {/* Guest chip (messaging plan §4.10.4): this participant is not
+                    on our roster. The message is still an ordinary message —
+                    someone talking — it just came from somewhere else. */}
+                {msg.origin ? (
+                  <Text
+                    as="span"
+                    size="1"
+                    color="gray"
+                    style={{ marginLeft: 6 }}
+                    title={`Guest from ${msg.origin.channelId}`}
+                  >
+                    ◆ from {msg.origin.channelId}
+                  </Text>
+                ) : null}
               </Box>
               {showModelBadge && (
                 <Badge
@@ -1092,6 +1109,45 @@ export const MessageCard = React.memo(function MessageCard({
 });
 
 /** Inline "conversation forked" annotation row + a Switch affordance. */
+/**
+ * Outgoing cross-channel dispatch (messaging plan §4.10.3).
+ *
+ * Deliberately marginalia, not a turn: it is the agent's own speech, but it was
+ * said *somewhere else*. The body is the reference excerpt — the utterance
+ * itself lives once, in the target channel's log (D15) — so this row must never
+ * read as if the conversation happened here.
+ */
+function CrossChannelDispatchRow({
+  dispatch,
+}: {
+  dispatch: NonNullable<ChatMessage["crossChannel"]>;
+}) {
+  const sender = dispatch.from.handle
+    ? `@${dispatch.from.handle}`
+    : (dispatch.from.displayName ?? dispatch.from.id);
+  return (
+    <Box className="message-row message-row-system">
+      <Card className="message-card message-card-lifecycle">
+        <Flex direction="column" gap="1">
+          <Flex align="center" gap="2" wrap="wrap">
+            <Text size="1" aria-hidden="true">
+              ↗
+            </Text>
+            <Text size="1" color="gray" style={{ minWidth: 0 }}>
+              {sender} sent a message in {dispatch.channelId}
+            </Text>
+          </Flex>
+          {dispatch.summary ? (
+            <Text size="1" color="gray" style={{ minWidth: 0 }} truncate>
+              “{dispatch.summary}”
+            </Text>
+          ) : null}
+        </Flex>
+      </Card>
+    </Box>
+  );
+}
+
 function ForkRow({ fork }: { fork: NonNullable<ChatMessage["fork"]> }) {
   const forkState = useOptionalChatMessageActions()?.forkState;
   if (fork.archived) return null;
