@@ -560,7 +560,7 @@ describe("HeadlessRunner", () => {
       "if the task creates",
     );
     expect(runner.withTaskResources("Inspect the prepared project.")).toBe(
-      `Prepared task input:\n- Use this exact disposable repository: projects/${repoName}\n- Do not search for, create, or substitute another fixture.\n\nInspect the prepared project.`,
+      `Prepared task input:\n- Use this exact disposable repository: projects/${repoName}\n- This is starting material; inspect and modify it as needed to complete the request.\n- Do not search for, create, or substitute another fixture.\n\nInspect the prepared project.`,
     );
     expect(mocks.rpc.call).toHaveBeenNthCalledWith(
       1,

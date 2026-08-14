@@ -299,6 +299,7 @@ export class HeadlessRunner {
     return (
       "Prepared task input:\n" +
       `- Use this exact disposable repository: ${repoPath}\n` +
+      "- This is starting material; inspect and modify it as needed to complete the request.\n" +
       "- Do not search for, create, or substitute another fixture.\n\n" +
       prompt
     );
