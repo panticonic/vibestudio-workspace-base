@@ -25,7 +25,11 @@ describe("buildModelContext: multi-agent attribution", () => {
         kind: "assistant",
         seq: 1,
         messageId: "m1",
-        senderRef: { kind: "agent", id: "agent:other", metadata: { handle: "ai-chat" } },
+        senderRef: {
+          kind: "agent",
+          id: "agent:other",
+          metadata: { handle: "ai-chat" },
+        },
         blocks: [
           { type: "thinking", content: "hidden reasoning" },
           { type: "text", content: "I added the explorer" },
@@ -44,11 +48,17 @@ describe("buildModelContext: multi-agent attribution", () => {
         },
       },
     ];
-    const state: AgentState = { ...initialAgentState({ channelId: "c", config, selfId }), entries };
+    const state: AgentState = {
+      ...initialAgentState({ channelId: "c", config, selfId }),
+      entries,
+    };
 
     const msgs = buildModelContext(state);
     // ai-chat's message is NOT the explorer's own voice — it's attributed user context.
-    expect(msgs[0]).toEqual({ role: "user", content: "[ai-chat]: I added the explorer" });
+    expect(msgs[0]).toEqual({
+      role: "user",
+      content: "[ai-chat]: I added the explorer",
+    });
     // the explorer's own message stays assistant.
     expect(msgs[1]).toEqual({
       role: "assistant",
@@ -87,6 +97,8 @@ describe("buildModelContext: multi-agent attribution", () => {
         role: "user",
         content: {
           message: "Set up GitHub",
+          instruction:
+            "Act on this structured UI interaction now. Treat the interaction payload as authoritative; do not rediscover its target from visible labels or repository search.",
           interaction,
         },
       },
@@ -106,7 +118,12 @@ describe("buildModelContext: multi-agent attribution", () => {
         envelopeId: "e-observation",
         content: {
           role: "user",
-          blocks: [{ type: "text", content: "Channel observation: application.incident.v1" }],
+          blocks: [
+            {
+              type: "text",
+              content: "Channel observation: application.incident.v1",
+            },
+          ],
         },
         structuredInput,
       },

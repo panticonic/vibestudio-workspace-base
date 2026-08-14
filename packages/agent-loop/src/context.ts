@@ -4,7 +4,11 @@
  * TrajectoryBackedSessionStorage — the log IS the session.
  */
 
-import type { AgentState, AssistantModelIdentity, SessionEntry } from "./state.js";
+import type {
+  AgentState,
+  AssistantModelIdentity,
+  SessionEntry,
+} from "./state.js";
 
 export interface ModelMessage {
   role: "user" | "assistant" | "toolResult";
@@ -18,7 +22,7 @@ export interface ModelMessage {
 
 export function buildModelContext(
   state: AgentState,
-  contextThroughSeq: number = Number.POSITIVE_INFINITY
+  contextThroughSeq: number = Number.POSITIVE_INFINITY,
 ): ModelMessage[] {
   const messages: ModelMessage[] = [];
   for (const entry of state.entries) {
@@ -34,7 +38,8 @@ function participantLabel(ref: {
   metadata?: Record<string, unknown>;
   id: string;
 }): string {
-  if (typeof ref.displayName === "string" && ref.displayName) return ref.displayName;
+  if (typeof ref.displayName === "string" && ref.displayName)
+    return ref.displayName;
   const handle = ref.metadata?.["handle"];
   if (typeof handle === "string" && handle) return handle;
   return ref.id;
@@ -47,7 +52,10 @@ function assistantBlocksToText(blocks: unknown[]): string {
     if (raw && typeof raw === "object") {
       const block = raw as Record<string, unknown>;
       if (block["type"] === "text") {
-        const text = typeof block["content"] === "string" ? block["content"] : block["text"];
+        const text =
+          typeof block["content"] === "string"
+            ? block["content"]
+            : block["text"];
         if (typeof text === "string") parts.push(text);
       }
     }
@@ -55,27 +63,48 @@ function assistantBlocksToText(blocks: unknown[]): string {
   return parts.join("\n").trim() || "(no text content)";
 }
 
-function modelMessageFromEntry(entry: SessionEntry, selfId?: string): ModelMessage {
+const STRUCTURED_INTERACTION_INSTRUCTION =
+  "Act on this structured UI interaction now. Treat the interaction payload as authoritative; do not rediscover its target from visible labels or repository search.";
+
+function interactiveUserContent(
+  message: unknown,
+  interaction: unknown,
+): Record<string, unknown> {
+  return {
+    message,
+    instruction: STRUCTURED_INTERACTION_INSTRUCTION,
+    interaction,
+  };
+}
+
+function modelMessageFromEntry(
+  entry: SessionEntry,
+  selfId?: string,
+): ModelMessage {
   switch (entry.kind) {
     case "user": {
       const interaction = entry.metadata?.interaction;
       if (entry.structuredInput !== undefined) {
         return {
           role: "user",
-          content: {
-            message: readableUserMessage(entry.content),
-            structuredInput: entry.structuredInput,
-            ...(interaction ? { interaction } : {}),
-          },
+          content: interaction
+            ? {
+                ...interactiveUserContent(
+                  readableUserMessage(entry.content),
+                  interaction,
+                ),
+                structuredInput: entry.structuredInput,
+              }
+            : {
+                message: readableUserMessage(entry.content),
+                structuredInput: entry.structuredInput,
+              },
         };
       }
       return {
         role: "user",
         content: interaction
-          ? {
-              message: entry.content,
-              interaction,
-            }
+          ? interactiveUserContent(entry.content, interaction)
           : entry.content,
       };
     }
@@ -120,7 +149,7 @@ function readableUserMessage(content: unknown): unknown {
           typeof block === "object" &&
           typeof (block as { content?: unknown }).content === "string"
             ? (block as { content: string }).content
-            : null
+            : null,
         )
         .filter((value): value is string => value !== null)
         .join("\n");

@@ -36,7 +36,14 @@ const config: AgentLoopConfig = {
 };
 
 function turnOpened(actorId: string, turnId: string, seq: number): LogEnvelope {
-  return envelope(actorId, "turn.opened", {}, { turnId }, seq, `turn:${turnId}:opened`);
+  return envelope(
+    actorId,
+    "turn.opened",
+    {},
+    { turnId },
+    seq,
+    `turn:${turnId}:opened`,
+  );
 }
 
 function envelope(
@@ -45,7 +52,7 @@ function envelope(
   payload: Record<string, unknown>,
   causality: Record<string, unknown>,
   seq: number,
-  envelopeId = `${payloadKind}:${seq}`
+  envelopeId = `${payloadKind}:${seq}`,
 ): LogEnvelope {
   return {
     logId: "branch:channel:c",
@@ -98,8 +105,8 @@ describe("fold: an agent only owns turns it authored", () => {
           senderRef: { kind: "user", id: "user:1", participantId: "user:1" },
         },
         { messageId: "parent-message" },
-        1
-      )
+        1,
+      ),
     );
     state = applyEvent(state, turnOpened(parentId, "parent-turn", 2));
 
@@ -129,7 +136,13 @@ describe("fold: an agent only owns turns it authored", () => {
     };
     const state = applyEvent(
       initialAgentState({ channelId: "c", config, selfId }),
-      envelope(selfId, "message.completed", payload, { messageId: "recv:1" }, 1)
+      envelope(
+        selfId,
+        "message.completed",
+        payload,
+        { messageId: "recv:1" },
+        1,
+      ),
     );
 
     expect(state.entries[0]).toMatchObject({
@@ -140,6 +153,8 @@ describe("fold: an agent only owns turns it authored", () => {
       role: "user",
       content: {
         message: payload,
+        instruction:
+          "Act on this structured UI interaction now. Treat the interaction payload as authoritative; do not rediscover its target from visible labels or repository search.",
         interaction,
       },
     });
@@ -158,17 +173,25 @@ describe("fold: an agent only owns turns it authored", () => {
       "message.completed",
       {
         role: "user",
-        blocks: [{ type: "text", content: "Channel observation: application.incident.v1" }],
+        blocks: [
+          {
+            type: "text",
+            content: "Channel observation: application.incident.v1",
+          },
+        ],
         outcome: "completed",
         turnTriggerEnvelopeId: "custom-envelope-7",
         structuredInput,
         senderRef: { kind: "external", id: "service:incidents" },
       },
       { messageId: "recv:observation-7" },
-      1
+      1,
     );
 
-    const state = applyEvent(initialAgentState({ channelId: "c", config, selfId }), persisted);
+    const state = applyEvent(
+      initialAgentState({ channelId: "c", config, selfId }),
+      persisted,
+    );
 
     expect(state.entries[0]).toMatchObject({ kind: "user", structuredInput });
     expect(buildModelContext(state)).toEqual([
@@ -198,19 +221,26 @@ describe("fold: an agent only owns turns it authored", () => {
           "message.started",
           { role: "assistant", modelRequest: descriptorWithoutSpec },
           { messageId: "m:missing-spec", turnId },
-          2
-        )
-      )
+          2,
+        ),
+      ),
     ).toThrow(/lacks the required journaled modelSpec/u);
   });
 
   it("ignores another participant's turn.opened but adopts its own (selfId filter)", () => {
     const selfId = "agent:self";
-    let state: AgentState = initialAgentState({ channelId: "c", config, selfId });
+    let state: AgentState = initialAgentState({
+      channelId: "c",
+      config,
+      selfId,
+    });
 
     // A DIFFERENT agent's turn.opened (from the shared channel log) must NOT become ours —
     // otherwise we'd continue its turn under its turnId → GAD id-collision.
-    state = applyEvent(state, turnOpened("agent:other", "t:c:trig:agent:other", 1));
+    state = applyEvent(
+      state,
+      turnOpened("agent:other", "t:c:trig:agent:other", 1),
+    );
     expect(state.openTurn).toBeNull();
     expect(state.lastSeq).toBe(1); // ...but the fold position still advances over it.
 
@@ -237,10 +267,13 @@ describe("fold: an agent only owns turns it authored", () => {
       envelope(
         "agent:other",
         "message.completed",
-        { role: "assistant", blocks: [{ type: "text", content: "other agent result" }] },
+        {
+          role: "assistant",
+          blocks: [{ type: "text", content: "other agent result" }],
+        },
         { messageId: "m:foreign" },
-        1
-      )
+        1,
+      ),
     );
 
     expect(state.inFlightModelCall?.messageId).toBe("m:own");
@@ -264,8 +297,8 @@ describe("fold: an agent only owns turns it authored", () => {
         "message.started",
         { role: "assistant", modelRequest },
         { messageId: "m:model-identity", turnId: "turn:model-identity" },
-        2
-      )
+        2,
+      ),
     );
     state = applyEvent(
       state,
@@ -278,8 +311,8 @@ describe("fold: an agent only owns turns it authored", () => {
           outcome: "completed",
         },
         { messageId: "m:model-identity", turnId: "turn:model-identity" },
-        3
-      )
+        3,
+      ),
     );
 
     expect(state.entries.at(-1)).toMatchObject({
@@ -295,7 +328,11 @@ describe("fold: an agent only owns turns it authored", () => {
 
   it("ignores another agent's invocation lifecycle state", () => {
     const selfId = "agent:self";
-    let state: AgentState = initialAgentState({ channelId: "c", config, selfId });
+    let state: AgentState = initialAgentState({
+      channelId: "c",
+      config,
+      selfId,
+    });
 
     state = applyEvent(
       state,
@@ -308,8 +345,8 @@ describe("fold: an agent only owns turns it authored", () => {
           request: { path: "/x" },
         },
         { invocationId: "inv-foreign", turnId: "t:other" },
-        1
-      )
+        1,
+      ),
     );
     expect(state.pendingInvocations).toEqual({});
     expect(state.lastSeq).toBe(1);
@@ -321,8 +358,8 @@ describe("fold: an agent only owns turns it authored", () => {
         "invocation.completed",
         { result: "foreign result" },
         { invocationId: "inv-foreign", turnId: "t:other" },
-        2
-      )
+        2,
+      ),
     );
     expect(state.pendingInvocations).toEqual({});
     expect(state.entries).toEqual([]);
