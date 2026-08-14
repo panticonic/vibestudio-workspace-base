@@ -583,6 +583,9 @@ function completeTodoRuntimeVerificationIndex(
   let code = "";
   let cleanConsoleObserved = false;
   let renderedCaptureObserved = false;
+  let addedTaskObserved = false;
+  let completedAndDeletedObserved = false;
+  let filterObserved = false;
   for (let index = fromIndex; index < calls.length; index += 1) {
     const call = calls[index]!;
     if (
@@ -600,7 +603,38 @@ function completeTodoRuntimeVerificationIndex(
     if (observedRenderedCapture(call)) {
       renderedCaptureObserved = true;
     }
+    for (const record of returnedRecords(call)) {
+      if (
+        typeof record["storageLen"] === "number" &&
+        record["storageLen"] > 0 &&
+        Array.isArray(record["titles"]) &&
+        record["titles"].length > 0 &&
+        record["hasError"] === false
+      ) {
+        addedTaskObserved = true;
+      }
+      if (
+        isRecord(record["completeResult"]) &&
+        isRecord(record["clearCompleted"]) &&
+        record["storageCount"] === 0
+      ) {
+        completedAndDeletedObserved = true;
+      }
+      if (isRecord(record["afterSearch"]) && isRecord(record["afterStatus"])) {
+        filterObserved = true;
+      }
+    }
     const lower = code.toLowerCase();
+    if (
+      /\.cdp\.page\s*\(/u.test(code) &&
+      renderedCaptureObserved &&
+      addedTaskObserved &&
+      completedAndDeletedObserved &&
+      filterObserved &&
+      cleanConsoleObserved
+    ) {
+      return index;
+    }
     if (
       /\.cdp\.page\s*\(/u.test(code) &&
       renderedCaptureObserved &&

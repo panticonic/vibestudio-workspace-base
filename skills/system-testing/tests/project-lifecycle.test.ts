@@ -155,6 +155,52 @@ describe("project lifecycle prompts", () => {
         },
       ],
     });
+
+    const source = "panels/task-manager";
+    const result = todoExecution([
+      invocation("create", "eval", { code: "createProjects()" }, {
+        returnValue: [{
+          created: source,
+          files: ["package.json", "index.tsx"],
+          preflight: { ok: true, projectType: "panel", checked: ["identity"] },
+          publication: {
+            published: true,
+            committedEventId: "workspace-event:created",
+            publishedEventId: "workspace-event:created",
+            mainEventId: "workspace-event:created",
+            effectId: "host-effect:created",
+          },
+        }],
+      }),
+      invocation("build", "verify", { operation: "build", target: source }, {
+        receipt: {
+          protocol: "build-verification-receipt.v1",
+          status: "ok",
+          target: source,
+          unit: { repoPath: source },
+        },
+      }),
+      invocation("runtime", "eval", {
+        code:
+          "await panel.cdp.page(); await page.screenshot(); window.location.reload(); " +
+          "const history = await panel.cdp.consoleHistory(); return { history };",
+      }, {
+        returnValue: {
+          storageLen: 1,
+          titles: ["Manual Task"],
+          hasError: false,
+          completeResult: { done: "1/1" },
+          clearCompleted: { remaining: 0 },
+          storageCount: 0,
+          afterSearch: { matches: 1 },
+          afterStatus: { matches: 0 },
+          history: { errors: [] },
+        },
+      }),
+    ]);
+    const final = result.messages[result.messages.length - 1] as { content?: string };
+    final.content = "Built, launched, and debugged the task project with a clean build.";
+    expect(test.validate(result)).toEqual({ passed: true, reason: undefined });
   });
 
   it("accepts a published generated worker scaffold", () => {
