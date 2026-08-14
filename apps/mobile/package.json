@@ -7,6 +7,15 @@
   "vibestudio": {
     "displayName": "Vibestudio Mobile",
     "icon": "📱",
+    "//dependencyResolution": "The patch adds writeStoredAsset, which lets the panel-asset facade hand a cached body straight to the socket instead of pumping it through JS. The APK is built from the host checkout, where pnpm applies the same patch, so the native half is always present; without this declaration the bundle installs the stock package and the facade calls a method that is not there, aborting the response mid-body. Keep the version here equal to the react-native-tcp-socket dependency below and to the host's patchedDependencies entry.",
+    "dependencyResolution": {
+      "patches": {
+        "react-native-tcp-socket@6.4.1": {
+          "path": "patches/react-native-tcp-socket@6.4.1.patch",
+          "roots": ["react-native-tcp-socket"]
+        }
+      }
+    },
     "app": {
       "target": "react-native",
       "renderer": "App.tsx",

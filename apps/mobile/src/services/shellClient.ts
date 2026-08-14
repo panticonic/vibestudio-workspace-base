@@ -26,6 +26,7 @@ import type {
   RuntimeLeaseSnapshot,
 } from "@vibestudio/shared/panel/panelLease";
 import type { PanelPageObservation } from "@vibestudio/shared/panel/observation";
+import { reconcileTrackedRuntimeLeases } from "./runtimeLeaseRepair";
 import type { PanelTreeInvalidation } from "@vibestudio/shared/panel/treeIndex";
 import {
   createPanelHostRegistration,
@@ -474,6 +475,20 @@ class MobilePanels implements PanelHost {
 
   private async ensureRegistered(): Promise<void> {
     if (this.registered) return;
+    await this.panelRuntime.registerClient(this.registration);
+    this.registered = true;
+  }
+  /**
+   * Re-establish this device's registration with the runtime coordinator.
+   *
+   * A recovered transport may be talking to a freshly started workspace that has
+   * never heard of this device, even though the app process and every mounted
+   * WebView survived. `registered` records what this process did, not what the
+   * remote knows, so it is not evidence about remote state: without an
+   * unconditional re-register every later acquire fails with "Unknown runtime
+   * client session". Mirrors the desktop host's recoverClientRegistration.
+   */
+  async recoverRegistration(): Promise<void> {
     await this.panelRuntime.registerClient(this.registration);
     this.registered = true;
   }
@@ -965,7 +980,7 @@ class MobilePanels implements PanelHost {
   async syncRuntimeLeases(): Promise<void> {
     const snapshot = await this.panelRuntime.getSnapshot();
     this.registry.applyRuntimeLeaseSnapshot(snapshot);
-    this.syncTrackedRuntimeLeases(snapshot);
+    await this.syncTrackedRuntimeLeases(snapshot);
   }
   async handleBridgeCall(
     panelId: string,
@@ -1053,15 +1068,49 @@ class MobilePanels implements PanelHost {
     const tracked = this.runtimeConnectionBySlot.delete(panelId);
     if (tracked) this.bridgeAdapterInstance?.closePanelSession(panelId);
   }
-  private syncTrackedRuntimeLeases(snapshot: RuntimeLeaseSnapshot): void {
-    const activeSlots = new Set<string>();
-    for (const lease of snapshot.leases) {
-      if (lease.clientSessionId !== this.deps.clientSessionId) continue;
-      activeSlots.add(String(lease.slotId));
-      this.trackRuntimeLease(lease);
-    }
-    for (const slotId of Array.from(this.runtimeConnectionBySlot.keys())) {
-      if (!activeSlots.has(slotId)) this.clearTrackedRuntimeLease(slotId);
+  private async syncTrackedRuntimeLeases(
+    snapshot: RuntimeLeaseSnapshot,
+  ): Promise<void> {
+    const { ours, lost, orphaned } = reconcileTrackedRuntimeLeases({
+      snapshot,
+      trackedSlotIds: Array.from(this.runtimeConnectionBySlot.keys()),
+      clientSessionId: this.deps.clientSessionId,
+    });
+    for (const lease of ours) this.trackRuntimeLease(lease);
+    for (const slotId of lost) this.clearTrackedRuntimeLease(slotId);
+    await this.repairRuntimeLeases(orphaned);
+  }
+  /**
+   * Re-acquire the routes this device is still presenting.
+   *
+   * Re-acquire the *same* runtime entity and connection id the WebView was
+   * materialized with, so the identity already injected into the live page stays
+   * valid and the panel's dedicated session is not torn down: repairing a route
+   * must be invisible to a page that never stopped running. A denial means
+   * another client holds the runtime after all, which is the one case where
+   * dropping the tracked route is correct.
+   */
+  private async repairRuntimeLeases(panelIds: readonly string[]): Promise<void> {
+    for (const panelId of panelIds) {
+      const tracked = this.runtimeConnectionBySlot.get(panelId);
+      if (!tracked) continue;
+      try {
+        const result = await this.panelRuntime.acquire(
+          tracked.runtimeEntityId,
+          createPanelRuntimeLeaseRequest({
+            slotId: panelId,
+            clientSessionId: this.deps.clientSessionId,
+            connectionId: tracked.connectionId,
+          }),
+        );
+        if (!result.acquired) this.clearTrackedRuntimeLease(panelId);
+      } catch (error) {
+        this.clearTrackedRuntimeLease(panelId);
+        console.warn("[MobilePanels] Failed to repair panel runtime lease", {
+          panelId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
     }
   }
 }
@@ -1623,6 +1672,7 @@ export class ShellClient {
       this.recovery.registerResubscribeHandler(
         "mobile-panel-tree",
         async () => {
+          await this.panels.recoverRegistration();
           await drainWorkspaceMutationQueue(this);
           await this.panels.refresh();
         },
@@ -1630,6 +1680,7 @@ export class ShellClient {
       this.recovery.registerColdRecoverHandler(
         "mobile-panel-tree",
         async () => {
+          await this.panels.recoverRegistration();
           await drainWorkspaceMutationQueue(this);
           await this.panels.recoverSnapshot();
         },
