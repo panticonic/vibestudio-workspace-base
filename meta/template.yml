@@ -56,6 +56,7 @@ template:
     - packages/pi-ai
     - packages/pi-core
     - packages/pubsub
+    - packages/quickfire-core
     - packages/react
     - packages/runtime
     - packages/svelte
@@ -109,6 +110,7 @@ template:
     - workers/missions
     - workers/phone-provisioning
     - workers/pubsub-channel
+    - workers/quickfire-agent
     - workers/silent-agent-worker
     - workers/system-agent
     - workers/system-test-runner
