@@ -143,17 +143,17 @@ describe("generated read-memory renderer corpus", () => {
     );
     expect(first).toContain("● lines ");
     expect(first).toContain("imported from outside workspace history");
-    expect(first).toContain("counteracts change:prior:0");
+    expect(first).toContain("counteracts change");
+    expect(first).not.toContain("change:prior:0");
     expect(first).toContain('committed as "Commit preserves invariant 0"');
-    expect(first).toContain('arrived via merge {"kind":"decision","decisionId":"decision:1"}');
+    expect(first).toContain("arrived via merge decision");
+    expect(first).not.toContain("decision:1");
     expect(first).toContain('source trigger: "Tighten retry behavior"');
     expect(first).toContain('composed with yours stated: "Migrate configuration"');
     expect(first).toContain("earlier file history");
+    expect(first).toContain("truncated to the render budget");
     expect(first).toContain(
-      "attachment truncated; use the compact continuations below for complete coverage"
-    );
-    expect(first).toContain(
-      'dig deeper into this file · provenance({"target":"packages/fixture/src/memory.ts"})'
+      'dig deeper · provenance({"target":"packages/fixture/src/memory.ts","walk":"cause"})'
     );
     expect(first).toContain("…");
     expect(first).not.toContain("  Preserve   a whitespace");
@@ -231,9 +231,10 @@ describe("generated read-memory renderer corpus", () => {
       },
     });
 
-    expect(output).toContain('work unit work-unit · provenance({"target":"@r1-work"})');
-    expect(output).toContain('change change · provenance({"target":"@r1-chan"})');
-    expect(output).toContain('dig deeper into this file · provenance({"target":"@r1-file"})');
+    expect(output).toContain("work unit work-unit @r1-work");
+    expect(output).toContain("change change @r1-chan");
+    expect(output).toContain('dig deeper · provenance({"target":"@r1-file","walk":"cause"})');
+    expect(output).toContain("continue: pass any @ref back as target");
     expect(output).not.toContain('"workUnitId"');
     expect(output).not.toContain('"fileId"');
   });

@@ -28,6 +28,7 @@ import {
   loadProvenanceReference,
   putProvenanceReference,
 } from "./provenance-reference.js";
+import { PROVENANCE_REF_FOOTER } from "./render-budget.js";
 import {
   resolveToolWorkingState,
   toVcsPath,
@@ -240,16 +241,41 @@ export type ToolWorkflowVcs = Pick<
   | "readFile"
 >;
 
-function mutationText(verb: string, result: VcsWorkingMutationResult): string {
+/**
+ * Mutation results name their subjects with compact refs, never with the
+ * content-addressed identities the model would have to transcribe. The refs
+ * are the same ones `provenance` issues, so either tool accepts them back.
+ */
+function mutationText(
+  verb: string,
+  result: VcsWorkingMutationResult,
+  references: AgentReferenceStore
+): string {
+  const changeRefs = (ids: readonly string[]): string =>
+    ids
+      .slice(0, 10)
+      .map((changeId) => putProvenanceReference(references, { kind: "change", changeId }, 5))
+      .join(" ");
   return (
-    `${verb} in ${result.applicationId}; work unit ${result.workUnitId}; ` +
+    `${verb} · work unit ${putProvenanceReference(references, { kind: "work-unit", workUnitId: result.workUnitId }, 5)} · ` +
     `${result.changeCount} authored and ${result.incorporatedChangeCount} incorporated changes ` +
     `(${result.changeIds.length} authored and ${result.incorporatedChangeIds.length} incorporated in preview).` +
-    (result.changeIds.length > 0 ? ` Authored changes: ${result.changeIds.join(", ")}.` : "") +
+    (result.changeIds.length > 0 ? ` Authored: ${changeRefs(result.changeIds)}.` : "") +
     (result.incorporatedChangeIds.length > 0
-      ? ` Incorporated changes: ${result.incorporatedChangeIds.join(", ")}.`
-      : "")
+      ? ` Incorporated: ${changeRefs(result.incorporatedChangeIds)}.`
+      : "") +
+    `\n${PROVENANCE_REF_FOOTER}`
   );
+}
+
+/** A change selector is either a compact ref or an exact identity. */
+function resolveChangeSelector(selector: string, references: AgentReferenceStore): string {
+  if (!isAgentReference(selector)) return selector;
+  const root = loadProvenanceReference(references, selector).root;
+  if (root.kind !== "change") {
+    throw new Error(`Reference ${selector} is a ${root.kind}, not a change`);
+  }
+  return root.changeId;
 }
 
 interface VcsCompareReference {
@@ -542,12 +568,14 @@ export function createWorkspaceVcsTool(
           contextId,
           expectedWorkingHead,
           commandId: toolCommandId(context),
-          changeIds: command.changeIds,
+          changeIds: command.changeIds.map((selector) =>
+            resolveChangeSelector(selector, references)
+          ),
           ...(command.intent ? { intentSummary: command.intent } : {}),
         });
         return resultOf(
           command.operation,
-          mutationText("Reverted semantic changes", result),
+          mutationText("Reverted semantic changes", result, references),
           result
         );
       }
@@ -722,13 +750,11 @@ export function createWorkspaceVcsTool(
             const workRef = putProvenanceReference(references, span.workUnit, 5);
             const commandRef = putProvenanceReference(references, span.command, 5);
             return (
-              `${span.start}..${span.end} · ${span.stop} · ` +
-              `change provenance({"target":"${changeRef}"}) · ` +
-              `applied change provenance({"target":"${appliedChangeRef}"}) · ` +
-              `work provenance({"target":"${workRef}"}) · ` +
-              `command provenance({"target":"${commandRef}"})` +
+              `${span.start}..${span.end} · ${span.stop} · ${span.tier} · ` +
+              `change ${changeRef} · applied ${appliedChangeRef} · ` +
+              `work ${workRef} · command ${commandRef}` +
               (span.stop === "import-boundary"
-                ? ` · inspect terminal change with provenance({"target":"${changeRef}"}), then owning import work with provenance({"target":"${workRef}"}) for the exact external snapshot; earlier coordinate authorship is unknown`
+                ? " · import boundary: the owning import work carries the external snapshot; earlier coordinate authorship is unknown"
                 : "")
             );
           });
@@ -739,8 +765,8 @@ export function createWorkspaceVcsTool(
                 cursor: result.nextCursor,
               } satisfies VcsBlameReference)
             : null;
-          if (continuationRef)
-            lines.push(`More spans: vcs({"operation":"blame","ref":"${continuationRef}"}).`);
+          if (continuationRef) lines.push(`more spans → ${continuationRef}`);
+          if (lines.length > 0) lines.push(PROVENANCE_REF_FOOTER);
           return resultOf(
             command.operation,
             lines.join("\n") || "No blame spans for the requested range",

@@ -557,7 +557,7 @@ describe("workspace VCS agent tool", () => {
     expect(result.content[0]).toMatchObject({
       type: "text",
       text: expect.stringMatching(
-        /1\.\.4 · authored · change provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) · applied change provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) · work provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) · command provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\)/u
+        /1\.\.4 · authored · [a-z]+ · change @r[0-9a-z]+-[0-9a-f]{4} · applied @r[0-9a-z]+-[0-9a-f]{4} · work @r[0-9a-z]+-[0-9a-f]{4} · command @r[0-9a-z]+-[0-9a-f]{4}/u
       ),
     });
   });
@@ -707,7 +707,7 @@ describe("workspace VCS agent tool", () => {
     expect(result.content[0]).toMatchObject({
       type: "text",
       text: expect.stringMatching(
-        /change provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) · applied change provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) · work provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) · command provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) · inspect terminal change with provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\), then owning import work with provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) for the exact external snapshot/u
+        /change @r[0-9a-z]+-[0-9a-f]{4} · applied @r[0-9a-z]+-[0-9a-f]{4} · work @r[0-9a-z]+-[0-9a-f]{4} · command @r[0-9a-z]+-[0-9a-f]{4} · import boundary: the owning import work carries the external snapshot/u
       ),
     });
     expect(result.details).toMatchObject({

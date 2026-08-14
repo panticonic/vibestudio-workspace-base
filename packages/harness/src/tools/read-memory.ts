@@ -4,25 +4,26 @@ import type {
   VcsReadMemoryResult,
   VcsSemanticNodeRef,
 } from "@vibestudio/service-schemas/vcs";
+import {
+  PROVENANCE_REF_FOOTER,
+  PROVENANCE_RENDER_BUDGET,
+  PROVENANCE_TRUNCATION_MARKER,
+  compactText,
+} from "./render-budget.js";
 
 type AttachedReadMemory = Extract<VcsReadMemoryResult, { status: "attached" }>;
 type HistoryEntry = VcsHistoryResult["entries"][number];
 
-/** Hard attention budget for the ubiquitous read attachment. */
-export const READ_MEMORY_RENDER_BUDGET = 6_000;
+/** Hard attention budget for the ubiquitous read attachment; shared with
+ *  every other provenance surface so they all degrade the same way. */
+export const READ_MEMORY_RENDER_BUDGET = PROVENANCE_RENDER_BUDGET;
 
-const compact = (value: string, limit = 280): string => {
-  const normalized = value.replace(/\s+/gu, " ").trim();
-  return normalized.length <= limit
-    ? normalized
-    : `${normalized.slice(0, Math.max(0, limit - 1)).trimEnd()}…`;
-};
+const compact = compactText;
 const quoted = (value: string): string => JSON.stringify(compact(value));
 type ReferenceSemanticRoot = (value: VcsSemanticNodeRef) => string;
+/** A subject renders as its kind and a ref; identities stay in trusted code. */
 const root = (value: VcsSemanticNodeRef, reference?: ReferenceSemanticRoot): string =>
-  reference
-    ? `${value.kind} · provenance(${JSON.stringify({ target: reference(value) })})`
-    : JSON.stringify(value);
+  reference ? `${value.kind} ${reference(value)}` : value.kind;
 
 function lineAt(
   content: string,
@@ -102,7 +103,11 @@ function prepareEpisode(
       work,
       change,
       ...(episode.counteractsChangeIds.length > 0
-        ? [`counteracts ${episode.counteractsChangeIds.join(", ")}`]
+        ? [
+            `counteracts ${episode.counteractsChangeIds
+              .map((changeId) => root({ kind: "change", changeId }, reference))
+              .join(", ")}`,
+          ]
         : []),
     ],
     ...(currentParent
@@ -136,7 +141,9 @@ function episodeText(value: RenderableEpisode): string {
 
 function historyText(entry: HistoryEntry, reference?: ReferenceSemanticRoot): string {
   const intent = entry.intent ? ` · ${entry.intent.tier}: ${quoted(entry.intent.text)}` : "";
-  const decision = entry.viaDecisionId ? ` · via decision ${entry.viaDecisionId}` : "";
+  const decision = entry.viaDecisionId
+    ? ` · via ${root({ kind: "decision", decisionId: entry.viaDecisionId }, reference)}`
+    : "";
   return `- ${quoted(entry.summary)}${intent}${decision} · ${root(entry.node, reference)}`;
 }
 
@@ -162,8 +169,8 @@ export function renderReadMemoryBlock(input: {
     fileId: input.result.fileId,
   };
   const footer = input.reference
-    ? `dig deeper into this file · provenance(${JSON.stringify({ target: input.reference(fileRoot) })}) · pass every returned @ref through the same target field`
-    : `dig deeper into this file · provenance(${JSON.stringify({ target: input.label })})`;
+    ? `dig deeper · provenance({"target":"${input.reference(fileRoot)}","walk":"cause"}) · ${PROVENANCE_REF_FOOTER}`
+    : `dig deeper · provenance({"target":"${input.label}","walk":"cause"})`;
   const episodes = input.result.episodes
     .map((episode) =>
       prepareEpisode(
@@ -192,9 +199,7 @@ export function renderReadMemoryBlock(input: {
             ...input.result.history.map((entry) => historyText(entry, input.reference)),
           ]
         : []),
-      ...(dropped
-        ? ["… attachment truncated; use the compact continuations below for complete coverage"]
-        : []),
+      ...(dropped ? [PROVENANCE_TRUNCATION_MARKER] : []),
       footer,
     ].join("\n");
   for (const field of [

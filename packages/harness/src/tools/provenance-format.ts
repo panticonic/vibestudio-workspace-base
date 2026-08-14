@@ -1,7 +1,25 @@
-/** Compact renderer for one page of canonical semantic-graph edges. */
+/** Renderer for the agent-facing provenance surfaces.
+ *
+ * Identifier hygiene is a law here, not a preference: a raw content-addressed
+ * identity is never rendered to the model. Every subject renders as a short
+ * human label plus a compact `@ref`; exact typed roots live only behind the
+ * reference store. The model is never asked to copy, compare, or construct an
+ * identity, because one mistyped identity fails closed with a refusal it
+ * cannot diagnose.
+ */
 
-import type { VcsSemanticNodeRef } from "@vibestudio/service-schemas/vcs";
+import type {
+  VcsQueryResult,
+  VcsSearchResult,
+  VcsSemanticNodeRef,
+  VcsWalkResult,
+} from "@vibestudio/service-schemas/vcs";
 import type { ToolVcs } from "./tool-vcs.js";
+import {
+  PROVENANCE_REF_FOOTER,
+  compactText,
+  renderWithinBudget,
+} from "./render-budget.js";
 
 export type CanonicalProvenanceResult = Awaited<ReturnType<ToolVcs["neighbors"]>>;
 export type CanonicalProvenanceInspection = Awaited<ReturnType<ToolVcs["inspect"]>>;
@@ -12,6 +30,11 @@ export interface ProvenancePages {
   fileHistory: number;
   limit: number;
 }
+
+export type NodeReference = (
+  root: VcsSemanticNodeRef,
+  continuation?: { stream: "adjacency" | "file-history"; page: number; cursor: string }
+) => string;
 
 export function provenancePageStreams(pages: ProvenancePages): {
   inspection: boolean;
@@ -31,42 +54,40 @@ export interface ProvenanceBlockInput {
   history?: CanonicalProvenanceHistory;
   result: CanonicalProvenanceResult;
   pages?: ProvenancePages;
-  reference?: (
-    root: VcsSemanticNodeRef,
-    continuation?: { stream: "adjacency" | "file-history"; page: number; cursor: string }
-  ) => string;
+  reference?: NodeReference;
 }
 
-function historyCall(
-  history: CanonicalProvenanceHistory,
-  page: number,
-  limit: number,
-  reference?: ProvenanceBlockInput["reference"]
-): string {
-  return `provenance(${JSON.stringify({
-    ...(reference
-      ? {
-          target: reference(history.root, {
-            stream: "file-history",
-            page,
-            cursor: history.nextCursor!,
-          }),
-        }
-      : { root: history.root, historyPage: page, ...(limit === 5 ? {} : { limit }) }),
-  })})`;
-}
-
-function quoted(value: string): string {
-  const limit = 160;
-  return JSON.stringify(value.length <= limit ? value : `${value.slice(0, limit - 1)}…`);
-}
+const quoted = (value: string): string => JSON.stringify(compactText(value, 160));
 
 function countedPreview(total: number, preview: number, label: string): string {
   const plural = label.endsWith("y") ? `${label.slice(0, -1)}ies` : `${label}s`;
   return `${total} ${total === 1 ? label : plural} (${preview} in preview)`;
 }
 
-function inspectedNodeSummary(inspection: CanonicalProvenanceInspection): string {
+/** A subject renders as its kind and a ref — never as its identity. */
+export function subjectLabel(node: VcsSemanticNodeRef, reference?: NodeReference): string {
+  return reference ? `${node.kind} ${reference(node)}` : node.kind;
+}
+
+/** Refs for a bounded list of subjects, counted rather than enumerated. */
+function referencedList(
+  kind: VcsSemanticNodeRef["kind"],
+  ids: readonly string[],
+  build: (id: string) => VcsSemanticNodeRef,
+  reference: NodeReference | undefined,
+  maximum = 3
+): string | null {
+  if (ids.length === 0) return null;
+  const shown = ids.slice(0, maximum);
+  const refs = reference ? shown.map((id) => reference(build(id))).join(" ") : "";
+  const remainder = ids.length > shown.length ? ` and ${ids.length - shown.length} more` : "";
+  return `${kind}${ids.length === 1 ? "" : "s"}${refs ? ` ${refs}` : ""}${remainder}`;
+}
+
+function inspectedNodeSummary(
+  inspection: CanonicalProvenanceInspection,
+  reference?: NodeReference
+): string {
   const node = inspection.node;
   switch (node.kind) {
     case "event": {
@@ -93,20 +114,39 @@ function inspectedNodeSummary(inspection: CanonicalProvenanceInspection): string
       const value = node.value;
       return [
         "application",
-        `work ${value.workUnitId}`,
-        `basis ${nodeLabel(value.basis)}`,
+        referencedList(
+          "work-unit",
+          [value.workUnitId],
+          (workUnitId) => ({ kind: "work-unit", workUnitId }),
+          reference
+        ),
+        `basis ${subjectLabel(value.basis, reference)}`,
         countedPreview(value.appliedChangeCount, value.appliedChanges.length, "applied change"),
-      ].join(" · ");
+      ]
+        .filter(Boolean)
+        .join(" · ");
     }
     case "applied-change": {
       const value = node.value;
       return [
         "applied-change",
-        `application ${value.applicationId}`,
-        `change ${value.changeId}`,
+        referencedList(
+          "application",
+          [value.applicationId],
+          (applicationId) => ({ kind: "application", applicationId }),
+          reference
+        ),
+        referencedList(
+          "change",
+          [value.changeId],
+          (changeId) => ({ kind: "change", changeId }),
+          reference
+        ),
         `ordinal ${value.ordinal}`,
         `${value.appliedEffects.length} effect${value.appliedEffects.length === 1 ? "" : "s"}`,
-      ].join(" · ");
+      ]
+        .filter(Boolean)
+        .join(" · ");
     }
     case "work-unit": {
       const value = node.value;
@@ -115,7 +155,12 @@ function inspectedNodeSummary(inspection: CanonicalProvenanceInspection): string
         "work-unit",
         value.kind,
         `${value.intent.tier}: ${quoted(value.intent.text)}`,
-        `command ${value.commandId}`,
+        referencedList(
+          "command",
+          [value.commandId],
+          (commandId) => ({ kind: "command", commandId }),
+          reference
+        ),
         countedPreview(
           value.authoredChangeCount,
           value.authoredChangeIds.length,
@@ -128,7 +173,7 @@ function inspectedNodeSummary(inspection: CanonicalProvenanceInspection): string
         ),
         countedPreview(value.decisionCount, value.decisionIds.length, "decision"),
         externalSnapshot
-          ? `external snapshot ${externalSnapshot.sourceKind}:${quoted(externalSnapshot.sourceUri)} @ ${quoted(externalSnapshot.snapshotRevision)} · snapshot digest ${externalSnapshot.snapshotDigest} · ${countedPreview(externalSnapshot.targetRepositoryIds.length, externalSnapshot.targetRepositoryIds.length, "target repository")} · pre-import coordinate authorship unknown`
+          ? `external snapshot ${externalSnapshot.sourceKind}:${quoted(externalSnapshot.sourceUri)} @ ${quoted(externalSnapshot.snapshotRevision)} · ${countedPreview(externalSnapshot.targetRepositoryIds.length, externalSnapshot.targetRepositoryIds.length, "target repository")} · pre-import coordinate authorship unknown`
           : null,
       ]
         .filter(Boolean)
@@ -139,8 +184,26 @@ function inspectedNodeSummary(inspection: CanonicalProvenanceInspection): string
       return [
         "change",
         value.kind,
-        `work ${value.authoredByWorkUnitId}`,
+        referencedList(
+          "work-unit",
+          [value.authoredByWorkUnitId],
+          (workUnitId) => ({ kind: "work-unit", workUnitId }),
+          reference
+        ),
         `${value.effects.length} effect${value.effects.length === 1 ? "" : "s"}`,
+        referencedList(
+          "change",
+          value.counteractsChangeIds,
+          (changeId) => ({ kind: "change", changeId }),
+          reference
+        )
+          ? `counteracts ${referencedList(
+              "change",
+              value.counteractsChangeIds,
+              (changeId) => ({ kind: "change", changeId }),
+              reference
+            )}`
+          : null,
       ]
         .filter(Boolean)
         .join(" · ");
@@ -151,8 +214,7 @@ function inspectedNodeSummary(inspection: CanonicalProvenanceInspection): string
         "decision",
         `${value.intent.tier}: ${quoted(value.intent.text)}`,
         ...value.sourceIntents.map(
-          (source) =>
-            `source ${source.workUnitId} ${source.intent.tier}: ${quoted(source.intent.text)}`
+          (source) => `source ${source.intent.tier}: ${quoted(source.intent.text)}`
         ),
         `${value.entries.length} coordinate entr${value.entries.length === 1 ? "y" : "ies"}`,
         `${value.entries.reduce((count, entry) => count + entry.accountedSourceChangeIds.length, 0)} accounted source changes`,
@@ -162,12 +224,7 @@ function inspectedNodeSummary(inspection: CanonicalProvenanceInspection): string
     }
     case "command": {
       const value = node.value;
-      return [
-        "command",
-        value.method,
-        value.status,
-        value.contextId ? `context ${value.contextId}` : "workspace-scoped",
-      ].join(" · ");
+      return ["command", value.method, value.status].join(" · ");
     }
     case "file": {
       const value = node.value;
@@ -179,31 +236,29 @@ function inspectedNodeSummary(inspection: CanonicalProvenanceInspection): string
             `${value.byteLength} bytes`,
             `${value.coordinateExtent} ${value.contentKind === "text" ? "UTF-16 units" : "byte coordinates"}`,
           ].join(" · ")
-        : `file · tombstone · change ${value.tombstoneChangeId}`;
+        : "file · tombstone";
     }
     case "repository": {
       const value = node.value;
       return value.kind === "present"
-        ? `repository · ${value.repoPath} · manifest ${value.manifestId}`
-        : `repository · tombstone · change ${value.tombstoneChangeId}`;
+        ? `repository · ${value.repoPath}`
+        : "repository · tombstone";
     }
-    case "trajectory": {
-      const value = node.value;
-      return `trajectory · ${value.logId}@${value.head}`;
-    }
+    case "trajectory":
+      return "trajectory · this session";
     case "trajectory-invocation": {
       const value = node.value;
       return [
         "trajectory-invocation",
         value.name ? `name ${quoted(value.name)}` : null,
         `status ${value.status}`,
-        value.turnId ? `turn ${value.turnId}` : null,
         value.terminalOutcome ? `outcome ${value.terminalOutcome}` : null,
+        // A blob digest is not a graph subject and has no ref: it is the exact
+        // argument of the read the agent is being told to make. Identifier
+        // hygiene governs subject identities, not this one call argument.
         value.requestRef
           ? `request ${value.requestRef.digest} · ${value.requestRef.encoding} · ${value.requestRef.originalBytes} bytes · read services.blobstore.getText(${JSON.stringify(value.requestRef.digest)})`
           : null,
-        value.startedEventId ? `started ${value.startedEventId}` : null,
-        value.completedEventId ? `completed ${value.completedEventId}` : null,
       ]
         .filter(Boolean)
         .join(" · ");
@@ -213,7 +268,6 @@ function inspectedNodeSummary(inspection: CanonicalProvenanceInspection): string
       return [
         "trajectory-turn",
         value.ordinal === null ? null : `ordinal ${value.ordinal}`,
-        value.triggerMessageId ? `trigger ${value.triggerMessageId}` : null,
         value.summary ? `summary ${quoted(value.summary)}` : null,
         value.openedAt ? `opened ${value.openedAt}` : null,
         value.closedAt ? `closed ${value.closedAt}` : null,
@@ -228,84 +282,12 @@ function inspectedNodeSummary(inspection: CanonicalProvenanceInspection): string
         "trajectory-message",
         `role ${value.role}`,
         `status ${value.status}`,
-        value.turnId ? `turn ${value.turnId}` : null,
-        value.sourceMessageId ? `source ${value.sourceMessageId}` : null,
-        value.senderRef
-          ? `sender ${value.senderRef.kind}:${value.senderRef.id}${value.senderRef.participantId ? ` participant ${value.senderRef.participantId}` : ""}`
-          : null,
+        value.senderRef ? `sender ${value.senderRef.kind}` : null,
         text ? `text ${quoted(text)}` : null,
       ]
         .filter(Boolean)
         .join(" · ");
     }
-  }
-}
-
-function provenanceCall(
-  root: VcsSemanticNodeRef,
-  adjacencyPage?: number,
-  limit = 5,
-  reference?: ProvenanceBlockInput["reference"],
-  cursor?: string
-): string {
-  const input = {
-    ...(reference
-      ? {
-          target: reference(
-            root,
-            adjacencyPage && cursor
-              ? { stream: "adjacency", page: adjacencyPage, cursor }
-              : undefined
-          ),
-        }
-      : {
-          root,
-          ...(adjacencyPage ? { adjacencyPage } : {}),
-          ...(limit === 5 ? {} : { limit }),
-        }),
-  };
-  return `provenance(${JSON.stringify(input)})`;
-}
-
-function referencedNode(
-  node: VcsSemanticNodeRef,
-  reference?: ProvenanceBlockInput["reference"]
-): string {
-  return reference
-    ? `${node.kind} · provenance(${JSON.stringify({ target: reference(node) })})`
-    : JSON.stringify(node);
-}
-
-function nodeLabel(node: VcsSemanticNodeRef): string {
-  switch (node.kind) {
-    case "event":
-      return node.eventId;
-    case "external-delta":
-      return node.deltaId;
-    case "application":
-      return node.applicationId;
-    case "applied-change":
-      return node.appliedChangeId;
-    case "work-unit":
-      return node.workUnitId;
-    case "change":
-      return node.changeId;
-    case "decision":
-      return node.decisionId;
-    case "command":
-      return node.commandId;
-    case "file":
-      return `${node.repositoryId}/${node.fileId}`;
-    case "repository":
-      return node.repositoryId;
-    case "trajectory":
-      return `${node.logId}@${node.head}`;
-    case "trajectory-invocation":
-      return `${node.invocationId} @ ${node.logId}@${node.head}`;
-    case "trajectory-turn":
-      return `${node.turnId} @ ${node.logId}@${node.head}`;
-    case "trajectory-message":
-      return `${node.messageId} @ ${node.logId}@${node.head}`;
   }
 }
 
@@ -350,39 +332,190 @@ export function renderProvenanceBlock(input: ProvenanceBlockInput): string | nul
       : streams.adjacency && !streams.fileHistory
         ? `adjacency page ${pages.adjacency}`
         : `${input.result.edges.length} edge${input.result.edges.length === 1 ? "" : "s"}`;
-  const lines = [`prov · ${input.label} · ${pageLabel}`];
+  const lines: string[] = [];
   if (streams.inspection && input.inspection) {
-    lines.push(`  node · ${inspectedNodeSummary(input.inspection)}`);
+    lines.push(`  node · ${inspectedNodeSummary(input.inspection, input.reference)}`);
     const next = inspectionContinuation(input.inspection);
-    if (next) {
-      lines.push(
-        `  inspect ${next.label} → ${provenanceCall(next.root, undefined, pages.limit, input.reference)}`
-      );
+    if (next && input.reference) {
+      lines.push(`  inspect ${next.label} → ${input.reference(next.root)}`);
     }
   }
-  if (streams.fileHistory && input.history?.nextCursor) {
+  if (streams.fileHistory && input.history?.nextCursor && input.reference) {
     lines.push(
-      `  more file history → ${historyCall(input.history, pages.fileHistory + 1, pages.limit, input.reference)}`
+      `  more file history → ${input.reference(input.history.root, {
+        stream: "file-history",
+        page: pages.fileHistory + 1,
+        cursor: input.history.nextCursor,
+      })}`
     );
   }
   if (streams.fileHistory) {
     for (const entry of input.history?.entries ?? []) {
       lines.push(
-        `  past · ${input.reference ? referencedNode(entry.node, input.reference) : nodeLabel(entry.node)} · ${JSON.stringify(entry.summary)}`
+        `  past · ${quoted(entry.summary)}${
+          entry.intent ? ` · ${entry.intent.tier}: ${quoted(entry.intent.text)}` : ""
+        }${entry.viaDecisionId && input.reference ? ` · via decision ${input.reference({ kind: "decision", decisionId: entry.viaDecisionId })}` : ""} · ${subjectLabel(entry.node, input.reference)}`
       );
     }
   }
-  if (streams.adjacency && input.result.nextCursor) {
+  if (streams.adjacency && input.result.nextCursor && input.reference) {
     lines.push(
-      `  more → ${provenanceCall(input.result.root, pages.adjacency + 1, pages.limit, input.reference, input.result.nextCursor)}`
+      `  more → ${input.reference(input.result.root, {
+        stream: "adjacency",
+        page: pages.adjacency + 1,
+        cursor: input.result.nextCursor,
+      })}`
     );
   }
   if (streams.adjacency) {
     for (const edge of input.result.edges) {
       lines.push(
-        `  ${referencedNode(edge.from, input.reference)} —${edge.kind}→ ${referencedNode(edge.to, input.reference)}`
+        `  ${subjectLabel(edge.from, input.reference)} —${edge.kind}→ ${subjectLabel(edge.to, input.reference)}`
       );
     }
   }
-  return lines.join("\n");
+  return renderWithinBudget({
+    header: `prov · ${input.label} · ${pageLabel}`,
+    lines,
+    footer: input.reference ? PROVENANCE_REF_FOOTER : undefined,
+  });
+}
+
+const WALK_HEADLINE: Record<VcsWalkResult["walk"], string> = {
+  cause: "what was being attempted",
+  cohort: "what else happened under this intent",
+  rejections: "what was tried and rejected here",
+};
+
+const BOUNDARY_NOTE: Record<string, string> = {
+  "human-statement": "← the originating human statement",
+  "subagent-brief": "← assignment from a parent task",
+  "external-delta": "← declared external delta",
+  "import-snapshot": "← import boundary; earlier authorship is outside this workspace",
+  "outside-visibility": "← boundary: outside your visible basis",
+  "no-recorded-cause": "← no recorded cause",
+};
+
+/** Walks render as a spine: intents lead, mechanics trail, edges are counted. */
+export function renderWalkBlock(input: {
+  label: string;
+  result: VcsWalkResult;
+  reference: NodeReference;
+  continuation?: (cursor: string) => string;
+}): string {
+  const { result } = input;
+  const grouped = new Map<string, typeof result.entries>();
+  for (const entry of result.entries) {
+    const key = entry.group ?? "";
+    grouped.set(key, [...(grouped.get(key) ?? []), entry]);
+  }
+  const lines: string[] = [];
+  for (const [group, entries] of grouped) {
+    if (group) lines.push(`  ${group} (${entries.length})`);
+    for (const entry of entries) {
+      const indent = "  ".repeat(1 + (group ? 1 : entry.depth));
+      const intent = entry.intent
+        ? `${entry.intent.tier}: ${quoted(entry.intent.text)} · `
+        : "";
+      const detail = entry.detail ? ` · ${quoted(entry.detail)}` : "";
+      const boundary = entry.boundary ? ` ${BOUNDARY_NOTE[entry.boundary] ?? ""}` : "";
+      lines.push(
+        `${indent}${intent}${entry.label}${detail} · ${input.reference(entry.node)}${boundary}`
+      );
+    }
+  }
+  for (const omission of result.omitted) {
+    lines.push(`  … and ${omission.count} ${omission.label}`);
+  }
+  for (const note of result.notes) lines.push(`  note · ${note}`);
+  if (result.nextCursor && input.continuation) {
+    lines.push(`  more → ${input.continuation(result.nextCursor)}`);
+  }
+  return renderWithinBudget({
+    header: `prov ${result.walk} · ${input.label} · ${WALK_HEADLINE[result.walk]}`,
+    lines,
+    footer: PROVENANCE_REF_FOOTER,
+  });
+}
+
+const tableCell = (value: string | number | boolean | null): string =>
+  value === null ? "" : String(value).replaceAll("|", "\\|").replaceAll("\n", " ");
+
+/** Sets render as tables; narrative prose is reserved for causal chains. */
+export function renderQueryBlock(input: {
+  result: VcsQueryResult;
+  identityColumns?: (column: string, value: string) => string | null;
+}): string {
+  const { result } = input;
+  if (result.refusal) {
+    return renderWithinBudget({
+      header: `prov query · refused at ${result.refusal.stage}${result.refusal.term ? ` · ${result.refusal.term}` : ""}`,
+      lines: [
+        `  ${result.refusal.message}`,
+        ...(result.rows.length > 0 ? [`  ${result.rows.length} partial rows follow`] : []),
+        ...(result.rows.length > 0
+          ? renderRows(result, input.identityColumns)
+          : []),
+      ],
+    });
+  }
+  return renderWithinBudget({
+    header: `prov query · ${result.rows.length} row${result.rows.length === 1 ? "" : "s"}${result.truncated ? " (truncated)" : ""} · contract v${result.schemaVersion}`,
+    lines: renderRows(result, input.identityColumns),
+    footer: PROVENANCE_REF_FOOTER,
+    truncated: result.truncated,
+  });
+}
+
+function renderRows(
+  result: VcsQueryResult,
+  identityColumns?: (column: string, value: string) => string | null
+): string[] {
+  if (result.columns.length === 0) return ["  (no columns)"];
+  const header = `| ${result.columns.join(" | ")} |`;
+  const divider = `| ${result.columns.map(() => "---").join(" | ")} |`;
+  const rows = result.rows.map((row) => {
+    const cells = row.map((value, index) => {
+      const column = result.columns[index]!;
+      const replaced =
+        typeof value === "string" ? (identityColumns?.(column, value) ?? null) : null;
+      return tableCell(replaced ?? value);
+    });
+    return `| ${cells.join(" | ")} |`;
+  });
+  return [header, divider, ...rows];
+}
+
+/** Search hits are one line each: kind, resolved intent or excerpt, and a ref. */
+export function renderSearchBlock(input: {
+  result: VcsSearchResult;
+  reference: NodeReference;
+}): string {
+  const lines = input.result.hits.map((hit) => {
+    const intent = hit.intent ? `${hit.intent.tier}: ${quoted(hit.intent.text)}` : quoted(hit.excerpt);
+    return `  ${hit.subjectKind} · ${intent} · ${input.reference(hit.node)}`;
+  });
+  return renderWithinBudget({
+    header: `prov search · ${quoted(input.result.text)} · ${input.result.hits.length} hit${
+      input.result.hits.length === 1 ? "" : "s"
+    }${input.result.indexMode === "scan" ? " (unranked scan)" : ""}`,
+    lines: lines.length > 0 ? lines : ["  no subject in your visible basis mentions that"],
+    footer: PROVENANCE_REF_FOOTER,
+    truncated: input.result.truncated,
+  });
+}
+
+/** Batch inspection: expand several agenda items under one header. */
+export function renderInspectionBatch(input: {
+  inspections: readonly { target: string; inspection: CanonicalProvenanceInspection }[];
+  reference: NodeReference;
+}): string {
+  return renderWithinBudget({
+    header: `prov · ${input.inspections.length} subject${input.inspections.length === 1 ? "" : "s"}`,
+    lines: input.inspections.map(
+      ({ target, inspection }) =>
+        `  ${target} · ${inspectedNodeSummary(inspection, input.reference)}`
+    ),
+    footer: PROVENANCE_REF_FOOTER,
+  });
 }

@@ -441,12 +441,80 @@ function fixture() {
       nextCursor: "cursor:history",
     })
   );
+  const walk = vi.fn(
+    async (
+      input: Parameters<ProvenanceToolDeps["vcs"]["walk"]>[0]
+    ): ReturnType<ProvenanceToolDeps["vcs"]["walk"]> => ({
+      walk: input.walk,
+      scope: input.walk === "cohort" ? (input.scope ?? "command") : null,
+      subject: input.subject,
+      entries: [
+        {
+          node: { kind: "work-unit", workUnitId: "work-unit:1" },
+          label: "work unit · edit",
+          depth: 0,
+          intent: { tier: "stated", text: "Cap the retry backoff at 30 seconds" },
+        },
+        {
+          node: { kind: "trajectory-message", logId: "log:1", head: "head:1", messageId: "m:1" },
+          label: "message · user from user",
+          depth: 3,
+          detail: "Cap the retry backoff at 30 seconds",
+          boundary: "human-statement",
+        },
+      ],
+      omitted: [{ label: "sibling applications", count: 3 }],
+      notes: [],
+      nextCursor: "cursor:walk",
+    })
+  );
+  const query = vi.fn(
+    async (
+      _input: Parameters<ProvenanceToolDeps["vcs"]["query"]>[0]
+    ): ReturnType<ProvenanceToolDeps["vcs"]["query"]> => ({
+      schemaVersion: 1,
+      columns: ["work_unit_id", "intent_tier"],
+      rows: [["work-unit:1", "stated"]],
+      rowsRead: 1,
+      truncated: false,
+      refusal: null,
+    })
+  );
+  const search = vi.fn(
+    async (
+      input: Parameters<ProvenanceToolDeps["vcs"]["search"]>[0]
+    ): ReturnType<ProvenanceToolDeps["vcs"]["search"]> => ({
+      text: input.text,
+      indexMode: "fts",
+      hits: [
+        {
+          node: { kind: "work-unit", workUnitId: "work-unit:1" },
+          subjectKind: "work-unit",
+          label: "work unit",
+          excerpt: "cap the retry backoff",
+          intent: { tier: "stated", text: "Cap the retry backoff at 30 seconds" },
+        },
+      ],
+      truncated: false,
+    })
+  );
   const value: ProvenanceToolDeps = {
-    vcs: { status, resolveRepository, neighbors, inspect, readFile, history },
+    vcs: { status, resolveRepository, neighbors, inspect, readFile, history, walk, query, search },
     contextId: "context:1",
     session: { logId: "log:1", head: "head:1" },
   };
-  return { value, status, resolveRepository, neighbors, inspect, readFile, history };
+  return {
+    value,
+    status,
+    resolveRepository,
+    neighbors,
+    inspect,
+    readFile,
+    history,
+    walk,
+    query,
+    search,
+  };
 }
 
 describe("createProvenanceTool", () => {
@@ -559,10 +627,10 @@ describe("createProvenanceTool", () => {
     });
     const text = result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(text).toMatch(
-      /past · change · provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) · "Explain the public entry point"/u
+      /past · "Explain the public entry point" · change @r[0-9a-z]+-[0-9a-f]{4}/u
     );
     expect(text).toMatch(
-      /more file history → provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\)/u
+      /more file history → @r[0-9a-z]+-[0-9a-f]{4}/u
     );
     expect(text).not.toContain("cursor:history");
     expect(text).not.toContain("cursor:next");
@@ -607,7 +675,7 @@ describe("createProvenanceTool", () => {
     const text = result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(text).toContain("file history page 2");
     expect(text).toMatch(
-      /more file history → provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\)/u
+      /more file history → @r[0-9a-z]+-[0-9a-f]{4}/u
     );
     expect(text.indexOf("more file history")).toBeLessThan(text.indexOf("past ·"));
     expect(text).not.toContain("node ·");
@@ -824,10 +892,10 @@ describe("createProvenanceTool", () => {
     const text = result.content[0]?.type === "text" ? result.content[0].text : "";
 
     expect(text).toContain(
-      'node · work-unit · edit · stated: "Rename the public entry point" · command command:1'
+      'node · work-unit · edit · stated: "Rename the public entry point" · command @r'
     );
     expect(text).toMatch(
-      /work-unit · provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) —authored-change→ change · provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\)/u
+      /work-unit @r[0-9a-z]+-[0-9a-f]{4} —authored-change→ change @r[0-9a-z]+-[0-9a-f]{4}/u
     );
     expect(text.indexOf("node ·")).toBeLessThan(text.indexOf("—authored-change→"));
     expect(detailsOf(result)).toMatchObject({ subjectKind: "work-unit", adjacencyCount: 1 });
@@ -850,15 +918,15 @@ describe("createProvenanceTool", () => {
     const commandText = command.content[0]?.type === "text" ? command.content[0].text : "";
     const invocationText = invocation.content[0]?.type === "text" ? invocation.content[0].text : "";
 
-    expect(commandText).toContain("node · command · vcs.edit · complete · context context:1");
+    expect(commandText).toContain("node · command · vcs.edit · complete");
     expect(invocationText).toContain(
-      'node · trajectory-invocation · name "provenance" · status complete · turn turn:1 · outcome success'
+      'node · trajectory-invocation · name "provenance" · status complete · outcome success'
     );
     expect(invocationText).toContain(
       'request aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa · json · 48 bytes · read services.blobstore.getText("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")'
     );
     expect(invocationText).toMatch(
-      /trajectory-invocation · provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\) —part-of-trajectory→ trajectory · provenance\(\{"target":"@r[0-9a-z]+-[0-9a-f]{4}"\}\)/u
+      /trajectory-invocation @r[0-9a-z]+-[0-9a-f]{4} —part-of-trajectory→ trajectory @r[0-9a-z]+-[0-9a-f]{4}/u
     );
     expect(invocationText.indexOf("node ·")).toBeLessThan(
       invocationText.indexOf("—part-of-trajectory→")
@@ -872,7 +940,7 @@ describe("createProvenanceTool", () => {
     const details = detailsOf(result);
     const rendered = result.content[0]?.type === "text" ? result.content[0].text : "";
 
-    expect(rendered).toContain("node · command · vcs.edit · complete · context context:1");
+    expect(rendered).toContain("node · command · vcs.edit · complete");
     expect(details).toMatchObject({ subjectKind: "command", adjacencyCount: 0 });
     expect(rendered).not.toContain("trajectory-invocation");
   });
@@ -904,10 +972,10 @@ describe("createProvenanceTool", () => {
     const messageText = message.content[0]?.type === "text" ? message.content[0].text : "";
 
     expect(turnText).toContain(
-      "node · trajectory-turn · ordinal 1 · trigger message:prompt · summary"
+      "node · trajectory-turn · ordinal 1 · summary"
     );
     expect(messageText).toContain(
-      'node · trajectory-message · role user · status completed · turn turn:1 · source channel-message:prompt · sender user:user:alice participant user:alice · text "Move the parser"'
+      'node · trajectory-message · role user · status completed · sender user · text "Move the parser"'
     );
     expect(turnDetails).toMatchObject({ subjectKind: "trajectory-turn", adjacencyCount: 1 });
   });
@@ -943,5 +1011,154 @@ describe("createProvenanceTool", () => {
     });
     const text = result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(text).toContain("Trajectory subnodes require the compact ref");
+  });
+});
+
+describe("question-shaped provenance surfaces", () => {
+  const textOf = (result: { content: Array<{ type: string; text?: string }> }): string =>
+    result.content[0]?.type === "text" ? (result.content[0].text ?? "") : "";
+
+  it("renders a cause walk as a spine with intents leading and refs, not identities", async () => {
+    const f = fixture();
+    const tool = createProvenanceTool("/", f.value);
+    const result = await tool.execute("call:cause", {
+      target: "work-unit:1",
+      walk: "cause",
+    });
+    const text = textOf(result);
+
+    expect(f.walk).toHaveBeenCalledWith(
+      expect.objectContaining({
+        contextId: "context:1",
+        walk: "cause",
+        subject: { kind: "work-unit", workUnitId: "work-unit:1" },
+      })
+    );
+    expect(text).toContain("prov cause · work-unit:1 · what was being attempted");
+    expect(text).toContain('stated: "Cap the retry backoff at 30 seconds" · work unit · edit');
+    expect(text).toContain("← the originating human statement");
+    expect(text).toContain("… and 3 sibling applications");
+    expect(text).toContain("continue: pass any @ref back as target");
+    // Only the caller's own echoed target may name a subject; the body never does.
+    for (const line of text.split("\n").slice(1)) {
+      expect(line).not.toContain("work-unit:1");
+      expect(line).not.toContain("log:1");
+    }
+    expect(detailsOf(result)).toMatchObject({ walk: "cause", entryCount: 2 });
+  });
+
+  it("resumes a walk from the ref it advertised, without re-stating the walk", async () => {
+    const f = fixture();
+    const references = createMemoryAgentReferenceStore();
+    const tool = createProvenanceTool("/", f.value, references);
+    const first = await tool.execute("call:cohort", {
+      target: "work-unit:1",
+      walk: "cohort",
+      scope: "turn",
+    });
+    const continuation = /more → (@r[0-9a-z]+-[0-9a-f]{4})/u.exec(textOf(first))?.[1];
+    expect(continuation).toBeTruthy();
+    await tool.execute("call:cohort-next", { target: continuation! });
+    expect(f.walk).toHaveBeenLastCalledWith(
+      expect.objectContaining({ walk: "cohort", scope: "turn", cursor: "cursor:walk" })
+    );
+  });
+
+  it("renders query results as a table with refs in the identity columns", async () => {
+    const f = fixture();
+    const tool = createProvenanceTool("/", f.value);
+    const result = await tool.execute("call:query", {
+      query: "SELECT work_unit_id, intent_tier FROM prov_work_units",
+    });
+    const text = textOf(result);
+
+    expect(text).toContain("| work_unit_id | intent_tier |");
+    expect(text).toMatch(/\| @r[0-9a-z]+-[0-9a-f]{4} \| stated \|/u);
+    expect(text).not.toContain("work-unit:1");
+    expect(detailsOf(result)).toMatchObject({ rowCount: 1, refused: null });
+  });
+
+  it("binds a returned ref inside query text to its exact identity", async () => {
+    const f = fixture();
+    const references = createMemoryAgentReferenceStore();
+    const tool = createProvenanceTool("/", f.value, references);
+    const ref = putProvenanceReference(
+      references,
+      { kind: "work-unit", workUnitId: "work-unit:1" },
+      5
+    );
+    await tool.execute("call:bound-query", {
+      query: `SELECT change_id FROM prov_changes WHERE work_unit_id = '${ref}'`,
+    });
+    expect(f.query).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: "SELECT change_id FROM prov_changes WHERE work_unit_id = 'work-unit:1'",
+      })
+    );
+  });
+
+  it("renders a plan-stage refusal with the offending term instead of rows", async () => {
+    const f = fixture();
+    f.query.mockResolvedValueOnce({
+      schemaVersion: 1,
+      columns: [],
+      rows: [],
+      rowsRead: 0,
+      truncated: false,
+      refusal: {
+        stage: "plan",
+        code: "full-scan",
+        message: "The plan scans every row of a relation backing `gad_changes` (500000 rows).",
+        term: "gad_changes",
+      },
+    });
+    const tool = createProvenanceTool("/", f.value);
+    const text = textOf(
+      await tool.execute("call:refused", { query: "SELECT change_id FROM prov_changes" })
+    );
+    expect(text).toContain("prov query · refused at plan · gad_changes");
+  });
+
+  it("enters by content when the subject cannot be named", async () => {
+    const f = fixture();
+    const tool = createProvenanceTool("/", f.value);
+    const text = textOf(await tool.execute("call:search", { target: "search: retries backoff" }));
+
+    expect(f.search).toHaveBeenCalledWith(
+      expect.objectContaining({ contextId: "context:1", text: "retries backoff" })
+    );
+    expect(text).toContain("prov search");
+    expect(text).toMatch(
+      /work-unit · stated: "Cap the retry backoff at 30 seconds" · @r[0-9a-z]+-[0-9a-f]{4}/u
+    );
+  });
+
+  it("expands several agenda items in one call instead of one call each", async () => {
+    const f = fixture();
+    const references = createMemoryAgentReferenceStore();
+    const tool = createProvenanceTool("/", f.value, references);
+    const refs = [
+      putProvenanceReference(references, { kind: "work-unit", workUnitId: "work-unit:1" }, 5),
+      putProvenanceReference(references, { kind: "change", changeId: "change:1" }, 5),
+    ];
+    const result = await tool.execute("call:batch", { targets: refs });
+    const text = textOf(result);
+
+    expect(f.inspect).toHaveBeenCalledTimes(2);
+    expect(text).toContain("prov · 2 subjects");
+    expect(detailsOf(result)).toMatchObject({ inspectedCount: 2 });
+    expect(text).not.toContain("work-unit:1 ·");
+  });
+
+  it("accepts the new question-shaped parameters and still refuses invented ones", () => {
+    const tool = createProvenanceTool("/", fixture().value);
+    expect(Value.Check(tool.parameters, { target: "packages/foo/bar.ts", walk: "cause" })).toBe(
+      true
+    );
+    expect(Value.Check(tool.parameters, { walk: "cohort", scope: "turn" })).toBe(true);
+    expect(Value.Check(tool.parameters, { query: "SELECT 1 FROM prov_events" })).toBe(true);
+    expect(Value.Check(tool.parameters, { targets: ["@r1-abcd", "@r2-abcd"] })).toBe(true);
+    expect(Value.Check(tool.parameters, { walk: "drift" })).toBe(false);
+    expect(Value.Check(tool.parameters, { sql: "SELECT 1" })).toBe(false);
   });
 });

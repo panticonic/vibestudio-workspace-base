@@ -19,13 +19,22 @@ import {
 import { resolveToolWorkingState, toVcsPath } from "./tool-vcs.js";
 import {
   provenancePageStreams,
+  renderInspectionBatch,
   renderProvenanceBlock,
+  renderQueryBlock,
+  renderSearchBlock,
+  renderWalkBlock,
   type CanonicalProvenanceHistory,
   type CanonicalProvenanceInspection,
   type CanonicalProvenanceResult,
+  type NodeReference,
 } from "./provenance-format.js";
 
 const ORIENTATION_EDGE_LIMIT = 5;
+/** Default page sizes for the question-shaped surfaces. */
+const WALK_ENTRY_LIMIT = 50;
+const QUERY_ROW_LIMIT = 50;
+const SEARCH_HIT_LIMIT = 10;
 
 class InvalidProvenanceTargetError extends Error {}
 
@@ -34,21 +43,49 @@ const provenanceSchema = Type.Object(
     target: Type.Optional(
       Type.String({
         description:
-          'Friendly selector used to start a walk: an existing managed file path (not an intermediate directory), exact repository root, "session", or semantic shorthand such as "workspace-event:...", "applied-change:...", "change:...", or "decision:...". A service, tool, package name, or general topic is not a target.',
+          'Friendly selector: an existing managed file path (not an intermediate directory), exact repository root, "session", a returned compact @ref, "search: some words" to find subjects by their recorded prose, or a semantic shorthand such as "workspace-event:...", "change:...", or "decision:...". A service, tool, package name, or general topic is not a target.',
+      })
+    ),
+    targets: Type.Optional(
+      Type.Array(Type.String(), {
+        maxItems: 10,
+        description:
+          "Up to ten returned @refs to expand together under one header. Use this instead of ten separate calls.",
+      })
+    ),
+    walk: Type.Optional(
+      Type.Union(
+        [Type.Literal("cause"), Type.Literal("cohort"), Type.Literal("rejections")],
+        {
+          description:
+            'Named multi-hop traversal. "cause": from this subject up to the originating human statement. "cohort": everything else the same work touched. "rejections": what was tried here and undone, and why.',
+        }
+      )
+    ),
+    scope: Type.Optional(
+      Type.Union(
+        [Type.Literal("work-unit"), Type.Literal("command"), Type.Literal("turn")],
+        { description: 'Cohort breadth; defaults to "command".' }
+      )
+    ),
+    query: Type.Optional(
+      Type.String({
+        description:
+          "One read-only SELECT over the prov_* views. Start from `SELECT relation, column_name, meaning FROM prov_schema` to discover the contract. A returned @ref may be used as a value; trusted code binds it to the exact identity.",
       })
     ),
     limit: Type.Optional(
       Type.Integer({
         minimum: 1,
         description:
-          "Preferred entries per adjacency and file-history page. Values above 20 are safely clamped. Omit it when following a returned reference because the reference retains the page geometry.",
+          "Preferred entries per page. Values above the surface bound are safely clamped. Omit it when following a returned reference because the reference retains the page geometry.",
       })
     ),
   },
   {
     additionalProperties: false,
     description:
-      "Inspect one subject. Use target for a friendly path or semantic identity, then pass each returned compact @ref back through the same target field. A continuation ref is complete: do not add a cursor or page. Omit target for the current session.",
+      "Name your question, then use its mechanism: walk for causes, cohorts, and rejections; query for set-shaped questions; a search: target when you cannot name the subject; a bare target to inspect one subject. Pass returned compact @refs back through target or targets. A continuation ref is complete: do not add a cursor or page.",
   }
 );
 
@@ -59,6 +96,12 @@ export interface ProvenanceToolDetails {
   subjectKind: VcsSemanticNodeRef["kind"];
   adjacencyCount?: number;
   historyCount?: number;
+  walk?: "cause" | "cohort" | "rejections";
+  entryCount?: number;
+  rowCount?: number;
+  hitCount?: number;
+  inspectedCount?: number;
+  refused?: string | null;
   limit: number;
   continuations: Array<
     { target: string; kind: "adjacency" | "file-history" }
@@ -87,10 +130,87 @@ export interface WorkspacePathProvenanceDeps {
 export interface ProvenanceToolDeps {
   vcs: Pick<
     ToolVcs,
-    "status" | "resolveRepository" | "neighbors" | "inspect" | "readFile" | "history"
+    | "status"
+    | "resolveRepository"
+    | "neighbors"
+    | "inspect"
+    | "readFile"
+    | "history"
+    | "walk"
+    | "query"
+    | "search"
   >;
   contextId: string | (() => string);
   session: { logId: string; head: string };
+}
+
+/** The one identity a node carries, for binding `@ref`s into query text. */
+function nodeIdentity(node: VcsSemanticNodeRef): string | null {
+  switch (node.kind) {
+    case "work-unit":
+      return node.workUnitId;
+    case "change":
+      return node.changeId;
+    case "applied-change":
+      return node.appliedChangeId;
+    case "application":
+      return node.applicationId;
+    case "event":
+      return node.eventId;
+    case "decision":
+      return node.decisionId;
+    case "command":
+      return node.commandId;
+    case "external-delta":
+      return node.deltaId;
+    case "file":
+      return node.fileId;
+    case "repository":
+      return node.repositoryId;
+    case "trajectory-message":
+      return node.messageId;
+    case "trajectory-turn":
+      return node.turnId;
+    case "trajectory-invocation":
+      return node.invocationId;
+    case "trajectory":
+      return node.logId;
+  }
+}
+
+const IDENTITY_COLUMN_NODES: Record<string, (value: string) => VcsSemanticNodeRef> = {
+  work_unit_id: (workUnitId) => ({ kind: "work-unit", workUnitId }),
+  change_id: (changeId) => ({ kind: "change", changeId }),
+  counteracted_change_id: (changeId) => ({ kind: "change", changeId }),
+  result_change_id: (changeId) => ({ kind: "change", changeId }),
+  last_change_id: (changeId) => ({ kind: "change", changeId }),
+  applied_change_id: (appliedChangeId) => ({ kind: "applied-change", appliedChangeId }),
+  child_applied_change_id: (appliedChangeId) => ({ kind: "applied-change", appliedChangeId }),
+  parent_applied_change_id: (appliedChangeId) => ({ kind: "applied-change", appliedChangeId }),
+  application_id: (applicationId) => ({ kind: "application", applicationId }),
+  event_id: (eventId) => ({ kind: "event", eventId }),
+  parent_event_id: (eventId) => ({ kind: "event", eventId }),
+  source_event_id: (eventId) => ({ kind: "event", eventId }),
+  decision_id: (decisionId) => ({ kind: "decision", decisionId }),
+  command_id: (commandId) => ({ kind: "command", commandId }),
+  delta_id: (deltaId) => ({ kind: "external-delta", deltaId }),
+  source_delta_id: (deltaId) => ({ kind: "external-delta", deltaId }),
+};
+
+/**
+ * Bind compact refs inside query text to their exact identities. The model
+ * never transcribes a content-addressed identity in either direction: it pastes
+ * back a ref it was given, and trusted code resolves it.
+ */
+export function bindQueryReferences(query: string, references: AgentReferenceStore): string {
+  return query.replaceAll(/@r[0-9a-z]+-[0-9a-f]{4}/gu, (ref) => {
+    const basis = loadProvenanceReference(references, ref);
+    const identity = nodeIdentity(parseRoot(basis.root));
+    if (identity === null) {
+      throw new AgentReferenceUnavailableError(ref);
+    }
+    return identity;
+  });
 }
 
 function contextIdOf(deps: WorkspacePathProvenanceDeps): string {
@@ -312,23 +432,166 @@ async function loadProvenancePages(
   return { inspection, neighbors, history };
 }
 
+/** Resolve any accepted target form to an exact typed root. */
+async function rootForTarget(
+  cwd: string,
+  deps: ProvenanceToolDeps,
+  references: AgentReferenceStore,
+  target: string
+): Promise<{ label: string; root: VcsSemanticNodeRef }> {
+  if (isAgentReference(target)) {
+    return { label: target, root: parseRoot(loadProvenanceReference(references, target).root) };
+  }
+  const path = target.startsWith("file:") ? target.slice(5) : target;
+  if (splitRepoPath(path)) {
+    const resolved = await neighborsForWorkspacePath(cwd, deps, path, { limit: 1 });
+    return { label: resolved.label, root: resolved.root };
+  }
+  return { label: target, root: semanticRootForTarget(target, deps.session) };
+}
+
 export function createProvenanceTool(
   cwd: string,
   deps: ProvenanceToolDeps,
   references: AgentReferenceStore = createMemoryAgentReferenceStore()
 ): AgentTool<typeof provenanceSchema, ProvenanceToolDetails | ProvenanceToolDiagnostic> {
+  const contextId = () => contextIdOf(deps);
+  const reference: NodeReference = (root, continuation) =>
+    putProvenanceReference(references, root, ORIENTATION_EDGE_LIMIT, continuation);
   return {
     name: "provenance",
     label: "provenance",
     executionMode: "parallel",
     description:
-      'Inspect "session", a semantic shorthand, an existing managed repository/file path, or a short returned @ref and walk one bounded page. Use the single target field for friendly entry points, graph endpoints, and complete continuation refs. Never add a cursor or page to a returned ref. Exact roots, page geometry, and VCS cursors stay inside trusted code. Service/tool/package names are not targets. Managed files also include a small exact change-history preview.',
+      'Answer a provenance question at the granularity of the question. walk: "cause" recovers what was being attempted, "cohort" what else happened under that intent, "rejections" what was tried here and undone. query runs one read-only SELECT over the prov_* views for set-shaped questions. A "search: words" target finds subjects you cannot name. A bare target inspects one subject and its immediate edges; targets expands up to ten refs at once. Exact roots, page geometry, and cursors stay inside trusted code — pass back the compact @refs you were given.',
     parameters: provenanceSchema,
     execute: async (_toolCallId, input) => {
       const pages = { adjacency: 1, fileHistory: 1, limit: Math.min(input.limit ?? ORIENTATION_EDGE_LIMIT, 20) };
       let targetLabel = "session";
       try {
+        if (input.query) {
+          const result = await deps.vcs.query({
+            contextId: contextId(),
+            query: bindQueryReferences(input.query, references),
+            limit: Math.min(input.limit ?? QUERY_ROW_LIMIT, 200),
+          });
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: renderQueryBlock({
+                  result,
+                  identityColumns: (column, value) => {
+                    const build = IDENTITY_COLUMN_NODES[column];
+                    return build ? reference(build(value)) : null;
+                  },
+                }),
+              },
+            ],
+            details: {
+              target: "query",
+              ref: "",
+              subjectKind: "command" as const,
+              limit: pages.limit,
+              rowCount: result.rows.length,
+              refused: result.refusal?.code ?? null,
+              continuations: [],
+            },
+          };
+        }
+        if (input.targets && input.targets.length > 0) {
+          const inspections = await Promise.all(
+            input.targets.slice(0, 10).map(async (candidate) => {
+              const resolved = await rootForTarget(cwd, deps, references, candidate.trim());
+              return {
+                target: resolved.label,
+                inspection: await deps.vcs.inspect({ node: resolved.root, edgeLimit: 1 }),
+              };
+            })
+          );
+          return {
+            content: [
+              { type: "text" as const, text: renderInspectionBatch({ inspections, reference }) },
+            ],
+            details: {
+              target: input.targets.join(" "),
+              ref: "",
+              subjectKind: inspections[0]?.inspection.root.kind ?? ("command" as const),
+              limit: pages.limit,
+              inspectedCount: inspections.length,
+              continuations: [],
+            },
+          };
+        }
         const requestedTarget = String(input.target ?? "session").trim() || "session";
+        if (/^search\s*:/iu.test(requestedTarget)) {
+          const text = requestedTarget.replace(/^search\s*:/iu, "").trim();
+          if (!text) {
+            return invalidTargetResult(requestedTarget, "A search target needs words to look for");
+          }
+          const result = await deps.vcs.search({
+            contextId: contextId(),
+            text,
+            limit: Math.min(input.limit ?? SEARCH_HIT_LIMIT, 50),
+          });
+          return {
+            content: [
+              { type: "text" as const, text: renderSearchBlock({ result, reference }) },
+            ],
+            details: {
+              target: requestedTarget,
+              ref: "",
+              subjectKind: "command" as const,
+              limit: pages.limit,
+              hitCount: result.hits.length,
+              continuations: [],
+            },
+          };
+        }
+        const walkBasis = isAgentReference(requestedTarget)
+          ? loadProvenanceReference(references, requestedTarget).walk
+          : undefined;
+        const walkKind = input.walk ?? walkBasis?.walk;
+        if (walkKind) {
+          const resolved = await rootForTarget(cwd, deps, references, requestedTarget);
+          targetLabel = resolved.label;
+          const scope = input.scope ?? walkBasis?.scope;
+          const result = await deps.vcs.walk({
+            contextId: contextId(),
+            walk: walkKind,
+            subject: resolved.root,
+            scope: scope ?? "command",
+            ...(walkBasis?.cursor ? { cursor: walkBasis.cursor } : {}),
+            limit: Math.min(input.limit ?? WALK_ENTRY_LIMIT, 200),
+          });
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: renderWalkBlock({
+                  label: targetLabel,
+                  result,
+                  reference,
+                  continuation: (cursor) =>
+                    putProvenanceReference(references, resolved.root, pages.limit, undefined, {
+                      walk: walkKind,
+                      cursor,
+                      ...(scope ? { scope } : {}),
+                    }),
+                }),
+              },
+            ],
+            details: {
+              target: targetLabel,
+              ref: reference(resolved.root),
+              subjectKind: resolved.root.kind,
+              limit: pages.limit,
+              walk: walkKind,
+              entryCount: result.entries.length,
+              continuations: [],
+            },
+          };
+        }
         if (isAgentReference(requestedTarget)) {
           const basis = loadProvenanceReference(references, requestedTarget);
           const root = parseRoot(basis.root);

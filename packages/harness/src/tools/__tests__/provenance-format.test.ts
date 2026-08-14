@@ -5,13 +5,31 @@ import {
   type CanonicalProvenanceResult,
 } from "../provenance-format.js";
 
+/** Refs are the only identity the model ever sees, so tests render with one. */
 function render(inspection: CanonicalProvenanceInspection): string {
   const result: CanonicalProvenanceResult = {
     root: inspection.root,
     edges: [],
     nextCursor: null,
   };
-  return renderProvenanceBlock({ label: "inspection", inspection, result }) ?? "";
+  let sequence = 0;
+  return (
+    renderProvenanceBlock({
+      label: "inspection",
+      inspection,
+      result,
+      reference: () => `@r${(sequence += 1).toString(36)}-0000`,
+    }) ?? ""
+  );
+}
+
+/** No rendered block may contain a raw content-addressed identity. */
+function expectNoRawIdentity(rendered: string, identities: readonly string[]): void {
+  for (const identity of identities) {
+    if (rendered.includes(identity)) {
+      throw new Error(`rendered block leaked the identity ${identity}`);
+    }
+  }
 }
 
 describe("provenance formatting", () => {
@@ -39,9 +57,8 @@ describe("provenance formatting", () => {
       hasMoreEdges: false,
     });
 
-    expect(rendered).toContain(
-      'inspect sole application → provenance({"root":{"kind":"application","applicationId":"application:import"}})'
-    );
+    expect(rendered).toMatch(/inspect sole application → @r[0-9a-z]+-0000/u);
+    expectNoRawIdentity(rendered, ["application:import", "command:import"]);
   });
 
   it("makes exact external evidence visible on its owning import work unit", () => {
@@ -87,8 +104,14 @@ describe("provenance formatting", () => {
     expect(rendered).toContain("2 target repositories");
     expect(rendered).toContain("https://example.test/owner/project.git");
     expect(rendered).toContain("0123456789abcdef");
-    expect(rendered).toContain("snapshot:derived");
     expect(rendered).toContain("pre-import coordinate authorship unknown");
+    expect(rendered).toMatch(/command @r[0-9a-z]+-0000/u);
+    expectNoRawIdentity(rendered, [
+      "work:import",
+      "command:import",
+      "snapshot:derived",
+      "repository:one",
+    ]);
   });
 
   it("renders an imported file as an ordinary change without duplicating snapshot evidence", () => {
@@ -119,8 +142,9 @@ describe("provenance formatting", () => {
       hasMoreEdges: false,
     });
 
-    expect(rendered).toContain("change · content-replace · work work:import");
+    expect(rendered).toMatch(/change · content-replace · work-unit @r[0-9a-z]+-0000/u);
     expect(rendered).not.toContain("external snapshot");
+    expectNoRawIdentity(rendered, ["work:import", "change:imported-file", "effect:imported-file"]);
   });
 
   it("uses exact totals while naming the bounded application preview", () => {
@@ -144,9 +168,8 @@ describe("provenance formatting", () => {
     });
 
     expect(rendered).toContain("243 applied changes (0 in preview)");
-    expect(rendered).toContain(
-      'inspect owning work → provenance({"root":{"kind":"work-unit","workUnitId":"work:import"}})'
-    );
+    expect(rendered).toMatch(/inspect owning work → @r[0-9a-z]+-0000/u);
+    expectNoRawIdentity(rendered, ["work:import", "application:import", "event:base"]);
   });
 
   it("renders an applied change as a reusable basis-specific graph node", () => {
@@ -178,8 +201,9 @@ describe("provenance formatting", () => {
       hasMoreEdges: false,
     });
 
-    expect(rendered).toContain(
-      "applied-change · application application:target · change change:source · ordinal 2 · 1 effect"
+    expect(rendered).toMatch(
+      /applied-change · application @r[0-9a-z]+-0000 · change @r[0-9a-z]+-0000 · ordinal 2 · 1 effect/u
     );
+    expectNoRawIdentity(rendered, ["application:target", "change:source", "applied-change:target"]);
   });
 });

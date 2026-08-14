@@ -138,9 +138,10 @@ describe("createReadTool", () => {
     expect((result.content[2] as { text: string }).text).toContain(
       'stated: "Keep the retry budget owned by the caller"'
     );
-    expect((result.content[2] as { text: string }).text).toContain(
-      'change {"kind":"change","changeId":"change:value"}'
-    );
+    // Without a reference store the renderer names the kind and nothing else:
+    // a content-addressed identity is never rendered to the model.
+    expect((result.content[2] as { text: string }).text).toContain("change change");
+    expect((result.content[2] as { text: string }).text).not.toContain("change:value");
     expect(result.details).toMatchObject({
       receipt: {
         protocol: "workspace-read-receipt.v1",
