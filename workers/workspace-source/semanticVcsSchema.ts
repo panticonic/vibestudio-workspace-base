@@ -1,5 +1,11 @@
 // Builtin semantic-authority implementation.
 import type { SqlStorage } from "@vibestudio/durable";
+import {
+  PROV_VISIBILITY_TABLES,
+  createProvenanceSearchIndex,
+  createProvenanceSearchView,
+  createProvenanceViews,
+} from "./provenanceViews.js";
 
 /**
  * Production baseline schema for the semantic workspace machine.
@@ -10,7 +16,9 @@ import type { SqlStorage } from "@vibestudio/durable";
  * source capabilities, certificates, ancestry closures, application
  * sequences, traversal continuations, packet proofs, or outcomes/realizations.
  * Work units do retain their bounded author context and causal trigger evidence.
- * Version 56 is the first supported
+ * The `prov_*` views created at the end of this file are the agent-facing
+ * contract over these tables; the tables themselves stay private.
+ * Version 57 is the first supported
  * production shape; older experimental epochs are rejected intact because no
  * lossless historical translation exists.
  */
@@ -46,6 +54,7 @@ export const SEMANTIC_VCS_REQUIRED_TABLES = [
   "vcs_command_journal",
   "gad_effect_intents",
   "gad_materialized_repository_states",
+  ...PROV_VISIBILITY_TABLES,
 ] as const;
 
 export function createSemanticVcsSchema(sql: SqlStorage): void {
@@ -247,6 +256,17 @@ export function createSemanticVcsSchema(sql: SqlStorage): void {
         AND (content_class = 'external' OR json_array_length(external_lineage_json) = 0)
       ),
       normalization_protocol TEXT NOT NULL,
+      -- Frozen output of the one intent loader over evidence that is itself
+      -- immutable once the row exists. This is derived-but-frozen input for
+      -- SQL carriers (views cannot call the loader), not a cache that can go
+      -- stale under it; a resolver protocol change ships a recompute that runs
+      -- through the same loader and bumps resolver_protocol.
+      resolved_intent_text TEXT,
+      resolved_intent_tier TEXT CHECK (
+        resolved_intent_tier IS NULL
+        OR resolved_intent_tier IN ('stated', 'trigger', 'mechanical')
+      ),
+      resolver_protocol TEXT,
       created_at TEXT NOT NULL,
       CHECK (
         (trigger_excerpt IS NULL AND trigger_sender_json IS NULL)
@@ -549,4 +569,14 @@ export function createSemanticVcsSchema(sql: SqlStorage): void {
     CREATE INDEX IF NOT EXISTS idx_gad_materialized_repository_states_effect
       ON gad_materialized_repository_states(receipt_effect_id, workspace_fact_root_id, repository_id);
   `);
+  // The agent-facing relational contract is derived from the tables above and
+  // is created last so the views read as a projection of a complete schema.
+  createProvenanceRelationalContract(sql);
+}
+
+/** Views, the caller-scoped visibility basis, and the derived search index. */
+export function createProvenanceRelationalContract(sql: SqlStorage): void {
+  createProvenanceViews(sql);
+  createProvenanceSearchIndex(sql);
+  createProvenanceSearchView(sql);
 }

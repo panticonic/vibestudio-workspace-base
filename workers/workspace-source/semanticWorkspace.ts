@@ -29,6 +29,9 @@ import {
   type VcsMoveInput,
   type VcsNeighborsInput,
   type VcsPushInput,
+  type VcsQueryInput,
+  type VcsSearchInput,
+  type VcsWalkInput,
   type VcsReadFileInput,
   type VcsReadMemoryInput,
   type VcsResolveRepositoryInput,
@@ -93,6 +96,9 @@ import {
   type ExternalDeltaRecord,
 } from "./semanticVcsStore.js";
 import { contentMappingFromRow } from "./semanticVcsContentMappingCodec.js";
+import { execBatchedInsert } from "./sqlBatch.js";
+import { executeProvenanceQuery } from "./provenanceQuery.js";
+import { PROV_RESOLVER_PROTOCOL, provenanceSearchIndexMode } from "./provenanceViews.js";
 
 type Row = Record<string, unknown>;
 type PlacedFileState = Extract<WorkspaceFileState, { presence: "placed" }>;
@@ -117,6 +123,34 @@ type LatestAppliedFileChange = {
 
 const MAX_WORKING_APPLICATIONS = 10_000;
 const MAX_ANCESTRY_EDGES = 100_000;
+/** Walk bounds are query shapes, not policies: they are fixed server-side. */
+const MAX_CAUSE_MESSAGE_HOPS = 8;
+const MAX_REJECTION_ROWS = 200;
+const MAX_INDEXED_MESSAGES = 5_000;
+
+type WalkPage = { entries: Row[]; omitted: Row[]; notes: string[] };
+
+const walkCursorOffset = (cursor: string | undefined, basis: Row): number => {
+  const position = parseSemanticCursor(cursor, "walk", basis);
+  if (!position) return 0;
+  const offset = Number(position["offset"]);
+  if (!Number.isSafeInteger(offset) || offset < 0) {
+    throw new SemanticVcsError("InvalidReference", "Invalid walk cursor position");
+  }
+  return offset;
+};
+
+/**
+ * FTS5 query syntax is a real language and an agent's plain phrase is not one.
+ * Quote each term so a hunch never becomes a syntax error the caller cannot
+ * diagnose; ranking still comes from the index.
+ */
+const ftsMatchExpression = (text: string): string =>
+  text
+    .split(/[^\p{L}\p{N}_]+/u)
+    .filter((term) => term.length > 0)
+    .map((term) => `"${term.replaceAll('"', "")}"`)
+    .join(" OR ") || '""';
 const stateFileKey = (state: StateNodeRef, fileId: string): string =>
   `${stateNodeKey(state)}\0${fileId}`;
 
@@ -1252,6 +1286,12 @@ export class SemanticWorkspace {
         return { kind: "complete", result: this.history(parsed as VcsHistoryInput) };
       case "blame":
         return { kind: "complete", result: this.blame(parsed as VcsBlameInput) };
+      case "walk":
+        return { kind: "complete", result: this.walk(parsed as VcsWalkInput) };
+      case "query":
+        return { kind: "complete", result: this.query(parsed as VcsQueryInput) };
+      case "search":
+        return { kind: "complete", result: this.search(parsed as VcsSearchInput) };
       case "readMemory":
         return {
           kind: "complete",
@@ -1317,6 +1357,7 @@ export class SemanticWorkspace {
             integratesEventIds: [],
             maxApplications: MAX_WORKING_APPLICATIONS,
           });
+          this.indexEventMessage(committed.event.eventId, committed.event.message ?? null);
           const commitCompletedAt = Date.now();
           const result = {
             contextId: importInput.contextId,
@@ -1682,6 +1723,9 @@ export class SemanticWorkspace {
       neighbors: true,
       history: true,
       blame: true,
+      walk: true,
+      query: true,
+      search: true,
       readMemory: true,
       resolveRepository: true,
       readFile: true,
@@ -3489,6 +3533,7 @@ export class SemanticWorkspace {
         integratesDeltaIds: derivedDeltaSources,
         maxApplications: MAX_WORKING_APPLICATIONS,
       });
+      this.indexEventMessage(committed.event.eventId, input.message ?? null);
       for (const sourceEventId of integrationSourceEventIds) {
         this.deps.sql.exec(
           `DELETE FROM gad_integration_projection
@@ -4315,7 +4360,9 @@ export class SemanticWorkspace {
         deltaId
       );
     }
-    return this.publicExternalDelta(this.deps.store.registerExternalDelta(record, candidate));
+    const registered = this.deps.store.registerExternalDelta(record, candidate);
+    this.recordDerivedWorkUnitIndex(record.workUnitId);
+    return this.publicExternalDelta(registered);
   }
 
   private externalSourceIdentity(source: VcsRegisterExternalDeltaInput["oldSource"]): string {
@@ -5001,6 +5048,978 @@ export class SemanticWorkspace {
       spans: page,
       nextCursor: next ? blameCursor(cursorBasis, Number(next["start"])) : null,
     };
+  }
+
+  // -------------------------------------------------------------------------
+  // Named walks, the relational contract, and entry by content.
+  //
+  // These three surfaces are sized to the questions agents actually ask: what
+  // was attempted (cause), what else happened under that intent (cohort), and
+  // what was tried and rejected (rejections); plus set-oriented access through
+  // the `prov_*` views and content entry through the derived search index.
+  // Every one of them derives from the same immediate edges at read time and
+  // is scoped by the caller's visibility basis, so nothing here can return a
+  // row the caller could not have reached by a legal hand-built walk.
+  // -------------------------------------------------------------------------
+
+  /**
+   * Materialize the caller's readable basis once per operation.
+   *
+   * This is the exact closure `referenceStateReachable` walks per reference —
+   * the event ancestry of the caller's committed heads, published main, and
+   * recorded integration sources, plus the caller-reachable working chains —
+   * computed once instead of per reference. Views join through it, so
+   * "query-reachable" and "walk-reachable" are the same predicate by
+   * construction rather than by two implementations agreeing.
+   */
+  private materializeVisibilityBasis(contextIds: readonly string[]): void {
+    this.deps.sql.exec(`DELETE FROM prov_vis_events`);
+    this.deps.sql.exec(`DELETE FROM prov_vis_applications`);
+    this.deps.sql.exec(`DELETE FROM prov_vis_commands`);
+    if (contextIds.length === 0) return;
+
+    const eventRoots = new Set<string>();
+    const workingApplications = new Set<string>();
+    for (const contextId of contextIds) {
+      const context = this.deps.store.context(contextId);
+      if (!context) continue;
+      eventRoots.add(context.committed.ref.eventId);
+      const chain = this.deps.store.workingChain(contextId, MAX_WORKING_APPLICATIONS);
+      for (const applicationId of chain.applicationIds) workingApplications.add(applicationId);
+      for (const sourceEventId of this.integrationSourceEventIds(chain.applicationIds)) {
+        eventRoots.add(sourceEventId);
+      }
+    }
+    const mainEventId = this.deps.store.mainEventId();
+    if (mainEventId) eventRoots.add(mainEventId);
+
+    const events = new Set<string>();
+    for (const rootEventId of eventRoots) {
+      for (const eventId of this.eventAncestors(rootEventId)) events.add(eventId);
+    }
+    execBatchedInsert(
+      this.deps.sql,
+      `INSERT OR IGNORE INTO prov_vis_events (event_id)`,
+      1,
+      [...events].map((eventId) => [eventId])
+    );
+    execBatchedInsert(
+      this.deps.sql,
+      `INSERT OR IGNORE INTO prov_vis_applications (application_id)`,
+      1,
+      [...workingApplications].map((applicationId) => [applicationId])
+    );
+    this.deps.sql.exec(
+      `INSERT OR IGNORE INTO prov_vis_applications (application_id)
+         SELECT link.application_id FROM gad_workspace_event_applications link
+           JOIN prov_vis_events vis ON vis.event_id = link.event_id`
+    );
+    this.deps.sql.exec(
+      `INSERT OR IGNORE INTO prov_vis_commands (command_id)
+         SELECT event.command_id FROM gad_workspace_events event
+           JOIN prov_vis_events vis ON vis.event_id = event.event_id`
+    );
+    this.deps.sql.exec(
+      `INSERT OR IGNORE INTO prov_vis_commands (command_id)
+         SELECT work.command_id FROM gad_work_units work
+           JOIN gad_work_unit_applications app ON app.work_unit_id = work.work_unit_id
+           JOIN prov_vis_applications vis ON vis.application_id = app.application_id`
+    );
+    this.deps.sql.exec(
+      `INSERT OR IGNORE INTO prov_vis_commands (command_id)
+         SELECT command_id FROM vcs_command_journal
+          WHERE scope_kind = 'context'
+            AND scope_id IN (SELECT CAST(value AS TEXT) FROM json_each(?))`,
+      canonicalJson([...contextIds])
+    );
+  }
+
+  private visibleWorkUnitIds(workUnitIds: readonly string[]): Set<string> {
+    if (workUnitIds.length === 0) return new Set();
+    const rows = this.deps.sql
+      .exec(
+        `SELECT work_unit_id FROM prov_work_units
+          WHERE work_unit_id IN (SELECT CAST(value AS TEXT) FROM json_each(?))`,
+        canonicalJson([...workUnitIds])
+      )
+      .toArray() as Row[];
+    return new Set(rows.map((row) => String(row["work_unit_id"])));
+  }
+
+  private visibleCommand(commandId: string): boolean {
+    return (
+      this.deps.sql
+        .exec(`SELECT 1 FROM prov_vis_commands WHERE command_id = ? LIMIT 1`, commandId)
+        .toArray().length > 0
+    );
+  }
+
+  private walk(input: VcsWalkInput): Row {
+    this.materializeVisibilityBasis(input.visibilityContextIds ?? []);
+    const subject = input.subject as Row;
+    const basis = { walk: input.walk, subject: input.subject, scope: input.scope };
+    const offset = walkCursorOffset(input.cursor, basis);
+    const page =
+      input.walk === "cause"
+        ? this.causeWalk(subject)
+        : input.walk === "cohort"
+          ? this.cohortWalk(subject, input.scope)
+          : this.rejectionsWalk(subject);
+    const entries = page.entries.slice(offset, offset + input.limit);
+    return {
+      walk: input.walk,
+      scope: input.walk === "cohort" ? input.scope : null,
+      subject: input.subject,
+      entries,
+      omitted: page.omitted,
+      notes: page.notes,
+      nextCursor:
+        offset + input.limit < page.entries.length
+          ? semanticCursor("walk", basis, { offset: offset + input.limit })
+          : null,
+    };
+  }
+
+  /**
+   * Resolve any subject to the authored work unit that explains it. The walk
+   * never fabricates a work unit: a subject with no authored origin returns
+   * null and the caller renders that as a boundary.
+   */
+  private walkOriginWorkUnit(subject: Row): { workUnitId: string; via: Row[] } | null {
+    const kind = String(subject["kind"] ?? "");
+    const via: Row[] = [];
+    let changeId: string | null = null;
+    if (kind === "work-unit") return { workUnitId: String(subject["workUnitId"]), via };
+    if (kind === "change") changeId = String(subject["changeId"]);
+    if (kind === "applied-change") {
+      const row = this.deps.sql
+        .exec(
+          `SELECT change_id FROM gad_applied_changes WHERE applied_change_id = ?`,
+          String(subject["appliedChangeId"])
+        )
+        .toArray()[0] as Row | undefined;
+      if (!row) return null;
+      changeId = String(row["change_id"]);
+      via.push({ kind: "change", changeId });
+    }
+    if (kind === "file") {
+      const terminal = this.latestAppliedChangeForFile(
+        asState(subject["state"] as StateNodeRef),
+        String(subject["fileId"])
+      );
+      if (!terminal) return null;
+      via.push({ kind: "applied-change", appliedChangeId: terminal.appliedChangeId });
+      via.push({ kind: "change", changeId: terminal.changeId });
+      return { workUnitId: terminal.workUnitId, via };
+    }
+    if (kind === "application") {
+      const row = this.deps.sql
+        .exec(
+          `SELECT work_unit_id FROM gad_work_unit_applications WHERE application_id = ?`,
+          String(subject["applicationId"])
+        )
+        .toArray()[0] as Row | undefined;
+      return row ? { workUnitId: String(row["work_unit_id"]), via } : null;
+    }
+    if (kind === "decision") {
+      const row = this.deps.sql
+        .exec(
+          `SELECT work_unit_id FROM gad_integration_decisions WHERE decision_id = ?`,
+          String(subject["decisionId"])
+        )
+        .toArray()[0] as Row | undefined;
+      return row ? { workUnitId: String(row["work_unit_id"]), via } : null;
+    }
+    if (kind === "external-delta") {
+      const row = this.deps.sql
+        .exec(
+          `SELECT work_unit_id FROM gad_external_deltas WHERE delta_id = ?`,
+          String(subject["deltaId"])
+        )
+        .toArray()[0] as Row | undefined;
+      return row ? { workUnitId: String(row["work_unit_id"]), via } : null;
+    }
+    if (kind === "event") {
+      const row = this.deps.sql
+        .exec(
+          `SELECT app.work_unit_id AS work_unit_id
+             FROM gad_workspace_event_applications link
+             JOIN gad_work_unit_applications app ON app.application_id = link.application_id
+            WHERE link.event_id = ? ORDER BY link.ordinal DESC LIMIT 1`,
+          String(subject["eventId"])
+        )
+        .toArray()[0] as Row | undefined;
+      return row ? { workUnitId: String(row["work_unit_id"]), via } : null;
+    }
+    if (changeId === null) return null;
+    const row = this.deps.sql
+      .exec(`SELECT work_unit_id FROM gad_changes WHERE change_id = ?`, changeId)
+      .toArray()[0] as Row | undefined;
+    return row ? { workUnitId: String(row["work_unit_id"]), via } : null;
+  }
+
+  private changeLabel(changeId: string): string {
+    const row = this.deps.sql
+      .exec(
+        `SELECT change.kind AS kind, coalesce(result.path, base.path) AS path
+           FROM gad_changes change
+           LEFT JOIN gad_change_coordinates base
+                  ON base.change_id = change.change_id AND base.role = 'base'
+           LEFT JOIN gad_change_coordinates result
+                  ON result.change_id = change.change_id AND result.role = 'result'
+          WHERE change.change_id = ? LIMIT 1`,
+        changeId
+      )
+      .toArray()[0] as Row | undefined;
+    if (!row) return "change";
+    const path = row["path"] == null ? null : String(row["path"]);
+    return `${publicChangeKind(String(row["kind"]))}${path ? ` ${path}` : ""}`;
+  }
+
+  private messageExcerpt(logId: string, head: string, messageId: string): Row | null {
+    try {
+      return this.inspectNode({ kind: "trajectory-message", logId, head, messageId })[
+        "value"
+      ] as Row;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Q2 — what was actually being attempted. One indented causal narrative from
+   * any subject up to the originating human statement, stopping at whatever
+   * evidence boundary it actually reaches instead of inventing continuity.
+   */
+  private causeWalk(subject: Row): WalkPage {
+    const entries: Row[] = [];
+    const notes: string[] = [];
+    const origin = this.walkOriginWorkUnit(subject);
+    if (!origin) {
+      return {
+        entries: [
+          {
+            node: subject,
+            label: `${String(subject["kind"])} has no authored origin in the record`,
+            depth: 0,
+            boundary: "no-recorded-cause",
+          },
+        ],
+        omitted: [],
+        notes,
+      };
+    }
+    let depth = 0;
+    for (const node of origin.via) {
+      entries.push({
+        node,
+        label:
+          node["kind"] === "change"
+            ? this.changeLabel(String(node["changeId"]))
+            : "applied change",
+        depth,
+      });
+      depth += 1;
+    }
+    if (this.visibleWorkUnitIds([origin.workUnitId]).size === 0) {
+      entries.push({
+        node: { kind: "work-unit", workUnitId: origin.workUnitId },
+        label: "authoring work is outside your visible basis",
+        depth,
+        boundary: "outside-visibility",
+      });
+      return { entries, omitted: [], notes };
+    }
+    const work = this.deps.sql
+      .exec(
+        `SELECT kind, command_id, external_snapshot_json, content_class
+           FROM gad_work_units WHERE work_unit_id = ? LIMIT 1`,
+        origin.workUnitId
+      )
+      .toArray()[0] as Row | undefined;
+    if (!work) return { entries, omitted: [], notes };
+    const workKind = String(work["kind"]);
+    entries.push({
+      node: { kind: "work-unit", workUnitId: origin.workUnitId },
+      label: `work unit · ${workKind}`,
+      depth,
+      intent: this.intentForWorkUnit(origin.workUnitId),
+      ...(workKind === "import" ? { boundary: "import-snapshot" as const } : {}),
+      ...(workKind === "external-unapplied" ? { boundary: "external-delta" as const } : {}),
+    });
+    depth += 1;
+    if (workKind === "import" || workKind === "external-unapplied") {
+      notes.push(
+        workKind === "import"
+          ? "Authorship before this import boundary is outside workspace history."
+          : "This work declares a change made outside the workspace."
+      );
+      return { entries, omitted: [], notes };
+    }
+    const commandId = String(work["command_id"]);
+    if (!this.visibleCommand(commandId)) {
+      entries.push({
+        node: { kind: "command", commandId },
+        label: "originating command is outside your visible basis",
+        depth,
+        boundary: "outside-visibility",
+      });
+      return { entries, omitted: [], notes };
+    }
+    const command = this.deps.sql
+      .exec(`SELECT method, status FROM vcs_command_journal WHERE command_id = ? LIMIT 1`, commandId)
+      .toArray()[0] as Row | undefined;
+    entries.push({
+      node: { kind: "command", commandId },
+      label: `command · ${command ? String(command["method"]) : "unknown method"}`,
+      depth,
+    });
+    depth += 1;
+    const cause = this.readMemoryCause(commandId);
+    if (!cause) {
+      entries[entries.length - 1] = {
+        ...entries[entries.length - 1]!,
+        boundary: "no-recorded-cause",
+      };
+      notes.push("This command records no causing tool invocation.");
+      return { entries, omitted: [], notes };
+    }
+    const invocation = cause["invocation"] as Row;
+    entries.push({
+      node: invocation,
+      label: `tool invocation · ${cause["toolName"] == null ? "unnamed" : String(cause["toolName"])}`,
+      depth,
+      ...(cause["terminalOutcome"] == null
+        ? {}
+        : { detail: `outcome ${String(cause["terminalOutcome"])}` }),
+    });
+    depth += 1;
+    const turn = cause["turn"] as Row | null;
+    if (turn) {
+      entries.push({
+        node: turn,
+        label: "turn",
+        depth,
+        ...(cause["turnSummary"] == null
+          ? {}
+          : { detail: boundedMemoryText(String(cause["turnSummary"]), 300) ?? "" }),
+      });
+      depth += 1;
+    }
+    let message = cause["message"] as Row | null;
+    const seen = new Set<string>();
+    for (let hop = 0; message && hop < MAX_CAUSE_MESSAGE_HOPS; hop += 1) {
+      const logId = String(message["logId"]);
+      const head = String(message["head"]);
+      const messageId = String(message["messageId"]);
+      if (seen.has(messageId)) break;
+      seen.add(messageId);
+      const value = this.messageExcerpt(logId, head, messageId);
+      if (!value) break;
+      const sender = value["senderRef"] as Row | null;
+      const senderKind = sender ? String(sender["kind"]) : null;
+      const role = String(value["role"] ?? "");
+      const text = (Array.isArray(value["textBlocks"]) ? (value["textBlocks"] as Row[]) : [])
+        .map((block) => String(block["content"] ?? ""))
+        .join("\n");
+      const human = senderKind === "user" || (senderKind === null && role === "user");
+      entries.push({
+        node: message,
+        label: `message · ${role}${senderKind ? ` from ${senderKind}` : ""}`,
+        depth,
+        ...(text ? { detail: boundedMemoryText(text, 600) ?? "" } : {}),
+        ...(human
+          ? { boundary: "human-statement" as const }
+          : senderKind === "agent"
+            ? { boundary: "subagent-brief" as const }
+            : {}),
+      });
+      depth += 1;
+      if (human || senderKind === "agent") break;
+      const sourceMessageId =
+        typeof value["sourceMessageId"] === "string" ? value["sourceMessageId"] : null;
+      message = sourceMessageId
+        ? { kind: "trajectory-message", logId, head, messageId: sourceMessageId }
+        : null;
+      if (!message) {
+        notes.push("The chain ends at a message with no recorded source.");
+      }
+    }
+    return { entries, omitted: [], notes };
+  }
+
+  /**
+   * Q3 — what else happened under that intent. Axioms are imputed from
+   * patterns across a cohort, not from single edits, so this renders the whole
+   * neighborhood of one scope as a grouped manifest.
+   */
+  private cohortWalk(subject: Row, scope: "work-unit" | "command" | "turn"): WalkPage {
+    const origin = this.walkOriginWorkUnit(subject);
+    if (!origin) {
+      return {
+        entries: [
+          {
+            node: subject,
+            label: `${String(subject["kind"])} has no authored origin in the record`,
+            depth: 0,
+            boundary: "no-recorded-cause",
+          },
+        ],
+        omitted: [],
+        notes: [],
+      };
+    }
+    const notes: string[] = [];
+    let workUnitIds = [origin.workUnitId];
+    if (scope !== "work-unit") {
+      const commandRow = this.deps.sql
+        .exec(`SELECT command_id FROM gad_work_units WHERE work_unit_id = ?`, origin.workUnitId)
+        .toArray()[0] as Row | undefined;
+      const commandId = commandRow ? String(commandRow["command_id"]) : null;
+      if (commandId) {
+        if (scope === "command") {
+          workUnitIds = (
+            this.deps.sql
+              .exec(`SELECT work_unit_id FROM gad_work_units WHERE command_id = ?`, commandId)
+              .toArray() as Row[]
+          ).map((row) => String(row["work_unit_id"]));
+        } else {
+          const rows = this.deps.sql
+            .exec(
+              `SELECT work.work_unit_id AS work_unit_id
+                 FROM vcs_command_journal origin
+                 JOIN trajectory_invocations originInvocation
+                   ON originInvocation.log_id = origin.cause_log_id
+                  AND originInvocation.head = origin.cause_head
+                  AND originInvocation.invocation_id = origin.cause_invocation_id
+                 JOIN trajectory_invocations sibling
+                   ON sibling.log_id = originInvocation.log_id
+                  AND sibling.head = originInvocation.head
+                  AND sibling.turn_id = originInvocation.turn_id
+                 JOIN vcs_command_journal command
+                   ON command.cause_log_id = sibling.log_id
+                  AND command.cause_head = sibling.head
+                  AND command.cause_invocation_id = sibling.invocation_id
+                 JOIN gad_work_units work ON work.command_id = command.command_id
+                WHERE origin.command_id = ?`,
+              commandId
+            )
+            .toArray() as Row[];
+          workUnitIds = rows.map((row) => String(row["work_unit_id"]));
+          if (workUnitIds.length === 0) {
+            workUnitIds = [origin.workUnitId];
+            notes.push("This work has no recorded turn; the cohort fell back to its work unit.");
+          }
+        }
+      }
+    }
+    const visible = this.visibleWorkUnitIds(workUnitIds);
+    const omitted: Row[] = [];
+    if (visible.size < workUnitIds.length) {
+      omitted.push({
+        label: "work units outside your visible basis",
+        count: workUnitIds.length - visible.size,
+      });
+    }
+    const scopedWorkUnitIds = [...visible].sort(compareUtf16CodeUnits);
+    const entries: Row[] = [];
+    for (const workUnitId of scopedWorkUnitIds) {
+      const row = this.deps.sql
+        .exec(`SELECT kind FROM gad_work_units WHERE work_unit_id = ?`, workUnitId)
+        .toArray()[0] as Row | undefined;
+      entries.push({
+        node: { kind: "work-unit", workUnitId },
+        label: `work unit · ${row ? String(row["kind"]) : "unknown"}`,
+        depth: 0,
+        group: "work",
+        intent: this.intentForWorkUnit(workUnitId),
+      });
+    }
+    if (scopedWorkUnitIds.length === 0) return { entries, omitted, notes };
+    const scopedJson = canonicalJson(scopedWorkUnitIds);
+    const coordinates = this.deps.sql
+      .exec(
+        `SELECT coalesce(result.path, base.path) AS path,
+                count(*) AS change_count,
+                min(change.change_id) AS sample_change_id
+           FROM gad_changes change
+           LEFT JOIN gad_change_coordinates base
+                  ON base.change_id = change.change_id AND base.role = 'base'
+           LEFT JOIN gad_change_coordinates result
+                  ON result.change_id = change.change_id AND result.role = 'result'
+          WHERE change.work_unit_id IN (SELECT CAST(value AS TEXT) FROM json_each(?))
+          GROUP BY coalesce(result.path, base.path)
+          ORDER BY change_count DESC, path`,
+        scopedJson
+      )
+      .toArray() as Row[];
+    for (const row of coordinates) {
+      const count = Number(row["change_count"]);
+      entries.push({
+        node: { kind: "change", changeId: String(row["sample_change_id"]) },
+        label: `${row["path"] == null ? "workspace coordinate" : String(row["path"])} · ${count} change${count === 1 ? "" : "s"}`,
+        depth: 0,
+        group: "coordinates",
+      });
+    }
+    const decisions = this.deps.sql
+      .exec(
+        `SELECT decision_id FROM gad_integration_decisions
+          WHERE work_unit_id IN (SELECT CAST(value AS TEXT) FROM json_each(?))
+          ORDER BY created_at DESC, decision_id`,
+        scopedJson
+      )
+      .toArray() as Row[];
+    for (const row of decisions) {
+      entries.push({
+        node: { kind: "decision", decisionId: String(row["decision_id"]) },
+        label: "integration decision",
+        depth: 0,
+        group: "decisions",
+      });
+    }
+    const commits = this.deps.sql
+      .exec(
+        `SELECT DISTINCT event.event_id AS event_id, event.message AS message,
+                event.created_at AS created_at
+           FROM gad_work_units work
+           JOIN gad_work_unit_applications app ON app.work_unit_id = work.work_unit_id
+           JOIN gad_workspace_event_applications link
+             ON link.application_id = app.application_id
+           JOIN gad_workspace_events event ON event.event_id = link.event_id
+           JOIN prov_vis_events vis ON vis.event_id = event.event_id
+          WHERE work.work_unit_id IN (SELECT CAST(value AS TEXT) FROM json_each(?))
+          ORDER BY event.created_at DESC, event.event_id`,
+        scopedJson
+      )
+      .toArray() as Row[];
+    for (const row of commits) {
+      entries.push({
+        node: { kind: "event", eventId: String(row["event_id"]) },
+        label: `commit · ${row["message"] == null ? "no message" : boundedMemoryText(String(row["message"]), 200)}`,
+        depth: 0,
+        group: "commits",
+      });
+    }
+    return { entries, omitted, notes };
+  }
+
+  /**
+   * Q6 — what was tried and rejected here. For theory update a rejection is
+   * worth ten confirmations, so counteractions, reverts, superseded external
+   * deltas, and `ours`/`current` merge resolutions are collected in one place
+   * with the intent that explains *why* the work was undone.
+   */
+  private rejectionsWalk(subject: Row): WalkPage {
+    const kind = String(subject["kind"] ?? "");
+    let fileId: string | null = null;
+    let repositoryId: string | null = null;
+    if (kind === "file") {
+      fileId = String(subject["fileId"]);
+      repositoryId = String(subject["repositoryId"]);
+    } else {
+      const origin = this.walkOriginWorkUnit(subject);
+      const changeId = origin?.via.find((node) => node["kind"] === "change")?.["changeId"];
+      if (typeof changeId === "string") {
+        const row = this.deps.sql
+          .exec(
+            `SELECT file_id, repository_id FROM gad_change_coordinates
+              WHERE change_id = ? ORDER BY role LIMIT 1`,
+            changeId
+          )
+          .toArray()[0] as Row | undefined;
+        fileId = row?.["file_id"] == null ? null : String(row["file_id"]);
+        repositoryId = row?.["repository_id"] == null ? null : String(row["repository_id"]);
+      }
+    }
+    const notes: string[] = [];
+    const entries: Row[] = [];
+    if (fileId === null && repositoryId === null) {
+      notes.push("This subject has no file or repository coordinate to collect rejections for.");
+      return { entries, omitted: [], notes };
+    }
+    const counteractions = this.deps.sql
+      .exec(
+        `SELECT counteraction.change_id AS counteracting_change_id,
+                counteraction.counteracted_change_id AS counteracted_change_id,
+                counteracting.work_unit_id AS counteracting_work_unit_id,
+                counteracted.work_unit_id AS counteracted_work_unit_id,
+                work.created_at AS created_at
+           FROM gad_change_coordinates coordinate
+           JOIN gad_change_counteractions counteraction
+             ON counteraction.counteracted_change_id = coordinate.change_id
+           JOIN gad_changes counteracted ON counteracted.change_id = coordinate.change_id
+           JOIN gad_changes counteracting ON counteracting.change_id = counteraction.change_id
+           JOIN gad_work_units work ON work.work_unit_id = counteracting.work_unit_id
+          WHERE coordinate.file_id = ?
+          ORDER BY work.created_at DESC, counteraction.change_id
+          LIMIT ?`,
+        fileId,
+        MAX_REJECTION_ROWS
+      )
+      .toArray() as Row[];
+    const visible = this.visibleWorkUnitIds([
+      ...counteractions.map((row) => String(row["counteracting_work_unit_id"])),
+      ...counteractions.map((row) => String(row["counteracted_work_unit_id"])),
+    ]);
+    let hidden = 0;
+    for (const row of counteractions) {
+      const counteractingWorkUnitId = String(row["counteracting_work_unit_id"]);
+      const counteractedWorkUnitId = String(row["counteracted_work_unit_id"]);
+      if (!visible.has(counteractingWorkUnitId) || !visible.has(counteractedWorkUnitId)) {
+        hidden += 1;
+        continue;
+      }
+      const attempted = this.intentForWorkUnit(counteractedWorkUnitId);
+      entries.push({
+        node: { kind: "work-unit", workUnitId: counteractingWorkUnitId },
+        label: `undone · ${this.changeLabel(String(row["counteracted_change_id"]))}`,
+        depth: 0,
+        group: "counteractions",
+        intent: this.intentForWorkUnit(counteractingWorkUnitId),
+        detail: `attempted (${attempted.tier}): ${boundedMemoryText(attempted.text, 300) ?? ""}`,
+      });
+    }
+    const reverts = this.deps.sql
+      .exec(
+        `SELECT DISTINCT work.work_unit_id AS work_unit_id, work.created_at AS created_at
+           FROM gad_work_units work
+           JOIN gad_changes change ON change.work_unit_id = work.work_unit_id
+           JOIN gad_change_coordinates coordinate ON coordinate.change_id = change.change_id
+          WHERE work.kind = 'revert' AND coordinate.file_id = ?
+          ORDER BY work.created_at DESC, work.work_unit_id
+          LIMIT ?`,
+        fileId,
+        MAX_REJECTION_ROWS
+      )
+      .toArray() as Row[];
+    const visibleReverts = this.visibleWorkUnitIds(
+      reverts.map((row) => String(row["work_unit_id"]))
+    );
+    for (const row of reverts) {
+      const workUnitId = String(row["work_unit_id"]);
+      if (!visibleReverts.has(workUnitId)) {
+        hidden += 1;
+        continue;
+      }
+      entries.push({
+        node: { kind: "work-unit", workUnitId },
+        label: "revert",
+        depth: 0,
+        group: "reverts",
+        intent: this.intentForWorkUnit(workUnitId),
+      });
+    }
+    if (repositoryId !== null) {
+      const superseded = this.deps.sql
+        .exec(
+          `SELECT delta.delta_id AS delta_id, delta.work_unit_id AS work_unit_id,
+                  delta.repo_path AS repo_path, delta.created_at AS created_at
+             FROM gad_external_deltas delta
+            WHERE delta.repository_id = ? AND delta.status = 'superseded'
+            ORDER BY delta.created_at DESC, delta.delta_id
+            LIMIT ?`,
+          repositoryId,
+          MAX_REJECTION_ROWS
+        )
+        .toArray() as Row[];
+      const visibleDeltas = this.visibleWorkUnitIds(
+        superseded.map((row) => String(row["work_unit_id"]))
+      );
+      for (const row of superseded) {
+        const workUnitId = String(row["work_unit_id"]);
+        if (!visibleDeltas.has(workUnitId)) {
+          hidden += 1;
+          continue;
+        }
+        entries.push({
+          node: { kind: "external-delta", deltaId: String(row["delta_id"]) },
+          label: `superseded external delta · ${String(row["repo_path"])}`,
+          depth: 0,
+          group: "external",
+          intent: this.intentForWorkUnit(workUnitId),
+        });
+      }
+    }
+    if (fileId !== null) {
+      const declined = this.deps.sql
+        .exec(
+          `SELECT entry.decision_id AS decision_id, entry.resolution AS resolution,
+                  entry.rationale AS rationale, decision.work_unit_id AS work_unit_id,
+                  decision.created_at AS created_at
+             FROM gad_merge_decision_entries entry
+             JOIN gad_integration_decisions decision ON decision.decision_id = entry.decision_id
+            WHERE entry.coordinate_kind = 'file' AND entry.coordinate_id = ?
+              AND entry.resolution IN ('ours', 'current')
+            ORDER BY decision.created_at DESC, entry.decision_id
+            LIMIT ?`,
+          fileId,
+          MAX_REJECTION_ROWS
+        )
+        .toArray() as Row[];
+      const visibleDecisions = this.visibleWorkUnitIds(
+        declined.map((row) => String(row["work_unit_id"]))
+      );
+      for (const row of declined) {
+        const workUnitId = String(row["work_unit_id"]);
+        if (!visibleDecisions.has(workUnitId)) {
+          hidden += 1;
+          continue;
+        }
+        entries.push({
+          node: { kind: "decision", decisionId: String(row["decision_id"]) },
+          label: `incoming change declined · resolved ${String(row["resolution"])}`,
+          depth: 0,
+          group: "merge",
+          intent: this.intentForWorkUnit(workUnitId),
+          ...(row["rationale"] == null
+            ? {}
+            : { detail: `rationale: ${boundedMemoryText(String(row["rationale"]), 300)}` }),
+        });
+      }
+    }
+    if (entries.length === 0) {
+      notes.push("Nothing has been rejected at this coordinate in your visible basis.");
+    }
+    return {
+      entries,
+      omitted: hidden > 0 ? [{ label: "rejections outside your visible basis", count: hidden }] : [],
+      notes,
+    };
+  }
+
+  private query(input: VcsQueryInput): Row {
+    this.materializeVisibilityBasis(input.visibilityContextIds ?? []);
+    return executeProvenanceQuery(this.deps.sql, {
+      query: input.query,
+      limit: input.limit,
+    }) as unknown as Row;
+  }
+
+  /**
+   * Q7 — find the subject you cannot name. Without content entry every
+   * question that starts from a hunch instead of an identity is unaskable, and
+   * the abduction loop starts from hunches.
+   */
+  private search(input: VcsSearchInput): Row {
+    this.materializeVisibilityBasis(input.visibilityContextIds ?? []);
+    const mode = provenanceSearchIndexMode(this.deps.sql) ?? "plain";
+    const limit = Math.min(input.limit, 50);
+    const rows =
+      mode === "fts"
+        ? (this.deps.sql
+            .exec(
+              `SELECT subject_kind, subject_id, log_id, head, label,
+                      snippet(prov_search_index, 0, '', '', '…', 24) AS excerpt
+                 FROM prov_search
+                 JOIN prov_search_index ON prov_search_index.rowid = prov_search.rowid
+                WHERE prov_search_index MATCH ?
+                ORDER BY bm25(prov_search_index)
+                LIMIT ?`,
+              ftsMatchExpression(input.text),
+              limit + 1
+            )
+            .toArray() as Row[])
+        : (this.deps.sql
+            .exec(
+              `SELECT subject_kind, subject_id, log_id, head, label,
+                      substr(text, 1, 400) AS excerpt
+                 FROM prov_search
+                WHERE lower(text) LIKE '%' || lower(?) || '%'
+                LIMIT ?`,
+              input.text,
+              limit + 1
+            )
+            .toArray() as Row[]);
+    const hits = rows.slice(0, limit).map((row) => {
+      const subjectKind = String(row["subject_kind"]);
+      const subjectId = String(row["subject_id"]);
+      const node =
+        subjectKind === "work-unit"
+          ? { kind: "work-unit", workUnitId: subjectId }
+          : subjectKind === "decision"
+            ? { kind: "decision", decisionId: subjectId }
+            : subjectKind === "event"
+              ? { kind: "event", eventId: subjectId }
+              : subjectKind === "external-delta"
+                ? { kind: "external-delta", deltaId: subjectId }
+                : {
+                    kind: "trajectory-message",
+                    logId: String(row["log_id"]),
+                    head: String(row["head"]),
+                    messageId: subjectId,
+                  };
+      return {
+        node,
+        subjectKind,
+        label: row["label"] == null ? subjectKind : String(row["label"]),
+        excerpt: boundedMemoryText(String(row["excerpt"] ?? ""), 600) ?? subjectKind,
+        ...(subjectKind === "work-unit"
+          ? { intent: this.intentForWorkUnit(subjectId) }
+          : {}),
+      };
+    });
+    return {
+      text: input.text,
+      indexMode: mode === "fts" ? "fts" : "scan",
+      hits,
+      truncated: rows.length > limit,
+    };
+  }
+
+  /**
+   * Freeze the one loader's output onto the work-unit row and index its prose.
+   *
+   * SQL views evaluate at query time and cannot call the TypeScript loader, so
+   * a view expression carrying the ladder would be a second resolver
+   * implementation. Persisting the loader's own output instead keeps exactly
+   * one implementation of the ladder in the system.
+   */
+  private recordDerivedWorkUnitIndex(workUnitId: string): void {
+    const intent = this.intentForWorkUnit(workUnitId);
+    this.deps.sql.exec(
+      `UPDATE gad_work_units
+          SET resolved_intent_text = ?, resolved_intent_tier = ?, resolver_protocol = ?
+        WHERE work_unit_id = ?`,
+      intent.text,
+      intent.tier,
+      PROV_RESOLVER_PROTOCOL,
+      workUnitId
+    );
+    const trigger = this.deps.sql
+      .exec(`SELECT trigger_excerpt FROM gad_work_units WHERE work_unit_id = ?`, workUnitId)
+      .toArray()[0] as Row | undefined;
+    this.indexSearchSubject("work-unit", workUnitId, null, null, `work unit`, [
+      intent.text,
+      trigger?.["trigger_excerpt"] == null ? "" : String(trigger["trigger_excerpt"]),
+    ]);
+    const decisions = this.deps.sql
+      .exec(
+        `SELECT decision.decision_id AS decision_id, entry.rationale AS rationale
+           FROM gad_integration_decisions decision
+           LEFT JOIN gad_merge_decision_entries entry ON entry.decision_id = decision.decision_id
+          WHERE decision.work_unit_id = ?`,
+        workUnitId
+      )
+      .toArray() as Row[];
+    const rationales = new Map<string, string[]>();
+    for (const row of decisions) {
+      const decisionId = String(row["decision_id"]);
+      const bucket = rationales.get(decisionId) ?? [];
+      if (row["rationale"] != null) bucket.push(String(row["rationale"]));
+      rationales.set(decisionId, bucket);
+    }
+    for (const [decisionId, texts] of rationales) {
+      this.indexSearchSubject("decision", decisionId, null, null, "integration decision", texts);
+    }
+    const delta = this.deps.sql
+      .exec(`SELECT delta_id, repo_path FROM gad_external_deltas WHERE work_unit_id = ?`, workUnitId)
+      .toArray()[0] as Row | undefined;
+    if (delta) {
+      this.indexSearchSubject(
+        "external-delta",
+        String(delta["delta_id"]),
+        null,
+        null,
+        `external delta · ${String(delta["repo_path"])}`,
+        [intent.text]
+      );
+    }
+  }
+
+  /** Index one commit message; events are written outside the mutation path. */
+  private indexEventMessage(eventId: string, message: string | null): void {
+    if (!message) return;
+    this.indexSearchSubject("event", eventId, null, null, "commit", [message]);
+  }
+
+  private indexSearchSubject(
+    subjectKind: string,
+    subjectId: string,
+    logId: string | null,
+    head: string | null,
+    label: string,
+    texts: readonly string[]
+  ): void {
+    const text = texts
+      .map((value) => value.trim())
+      .filter((value) => value.length > 0)
+      .join("\n");
+    this.deps.sql.exec(
+      `DELETE FROM prov_search_index WHERE subject_kind = ? AND subject_id = ?`,
+      subjectKind,
+      subjectId
+    );
+    if (!text) return;
+    this.deps.sql.exec(
+      `INSERT INTO prov_search_index (text, subject_kind, subject_id, log_id, head, label)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      boundedMemoryText(text, 4_000) ?? text,
+      subjectKind,
+      subjectId,
+      logId,
+      head,
+      label
+    );
+  }
+
+  /**
+   * Rebuild the derived index from the canonical rows. The index is derived
+   * and rebuildable by construction; nothing reads it as an authority.
+   */
+  rebuildProvenanceSearchIndex(): { indexed: number } {
+    this.deps.sql.exec(`DELETE FROM prov_search_index`);
+    const workUnits = this.deps.sql
+      .exec(`SELECT work_unit_id FROM gad_work_units`)
+      .toArray() as Row[];
+    for (const row of workUnits) this.recordDerivedWorkUnitIndex(String(row["work_unit_id"]));
+    const events = this.deps.sql
+      .exec(`SELECT event_id, message FROM gad_workspace_events WHERE message IS NOT NULL`)
+      .toArray() as Row[];
+    for (const row of events) {
+      this.indexEventMessage(String(row["event_id"]), String(row["message"]));
+    }
+    const messages = this.deps.sql
+      .exec(
+        `SELECT log_id, head, message_id, role FROM trajectory_messages
+          ORDER BY log_id, head, message_id LIMIT ?`,
+        MAX_INDEXED_MESSAGES
+      )
+      .toArray() as Row[];
+    for (const row of messages) {
+      const logId = String(row["log_id"]);
+      const head = String(row["head"]);
+      const messageId = String(row["message_id"]);
+      const value = this.messageExcerpt(logId, head, messageId);
+      if (!value) continue;
+      const text = (Array.isArray(value["textBlocks"]) ? (value["textBlocks"] as Row[]) : [])
+        .map((block) => String(block["content"] ?? ""))
+        .join("\n");
+      this.indexSearchSubject(
+        "trajectory-message",
+        messageId,
+        logId,
+        head,
+        `message · ${String(row["role"])}`,
+        [text]
+      );
+    }
+    return {
+      indexed: Number(
+        (this.deps.sql.exec(`SELECT count(*) AS n FROM prov_search_index`).toArray()[0] as Row)["n"]
+      ),
+    };
+  }
+
+  /**
+   * Recompute every persisted resolved intent through the one loader. This is
+   * the migration a resolver-protocol change ships with; it never reimplements
+   * the ladder.
+   */
+  recomputeResolvedIntents(): { recomputed: number } {
+    const rows = this.deps.sql.exec(`SELECT work_unit_id FROM gad_work_units`).toArray() as Row[];
+    for (const row of rows) this.recordDerivedWorkUnitIndex(String(row["work_unit_id"]));
+    return { recomputed: rows.length };
   }
 
   /**
@@ -6232,6 +7251,9 @@ export class SemanticWorkspace {
     };
     const applicationPersistenceStartedAt = Date.now();
     const context = this.deps.store.applyApplication(plan);
+    // Derived-but-frozen intent and the search index are written in the same
+    // transaction as the rows they describe, by the one loader.
+    this.recordDerivedWorkUnitIndex(workUnitIdValue);
     const profileCompletedAt = Date.now();
     const totalMs = profileCompletedAt - profileStartedAt;
     if (totalMs >= 100) {

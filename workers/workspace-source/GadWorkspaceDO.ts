@@ -155,7 +155,7 @@ type ChannelRosterRow = ChannelRosterInspection["rows"][number];
 type StorageDiagnostic = AgentHealthInspection["storage"]["rows"][number];
 
 /** First supported production schema for the semantic workspace authority. */
-const GAD_WORKSPACE_SCHEMA_VERSION = 62;
+const GAD_WORKSPACE_SCHEMA_VERSION = 63;
 
 const PUBLICATION_RETRY_BASE_MS = 250;
 const PUBLICATION_RETRY_MAX_MS = 30_000;
