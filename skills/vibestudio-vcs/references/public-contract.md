@@ -32,6 +32,9 @@ mutation except `push` advances an exact context working head; `commit` and
 | `vcs.inspect` | `read` | Inspect one typed semantic node and a bounded preview of its direct adjacency. | `Unauthorized`, `InvalidReference`, `ScopeTooLarge`, `IntegrityFailure` |
 | `vcs.neighbors` | `read` | Page immediate typed provenance edges without persisting traversal state. | `Unauthorized`, `InvalidReference`, `ScopeTooLarge`, `IntegrityFailure` |
 | `vcs.history` | `read` | Page event history in either direction or past file history from one exact state. | `Unauthorized`, `InvalidReference`, `ScopeTooLarge`, `IntegrityFailure` |
+| `vcs.walk` | `read` | Run one curated multi-hop provenance traversal (cause, cohort, rejections) with server-owned depth and fan-out bounds. | `Unauthorized`, `InvalidReference`, `ScopeTooLarge`, `IntegrityFailure` |
+| `vcs.query` | `read` | Run one caller-scoped read-only SELECT against the versioned prov_* views; canonical tables stay private. | `Unauthorized`, `InvalidReference`, `ScopeTooLarge`, `IntegrityFailure` |
+| `vcs.search` | `read` | Find semantic subjects by their recorded prose (intents, rationales, event messages, trigger excerpts). | `Unauthorized`, `InvalidReference`, `ScopeTooLarge`, `IntegrityFailure` |
 | `vcs.blame` | `read` | Trace an exact bounded file range through immediate content-coordinate mappings. | `Unauthorized`, `InvalidReference`, `ScopeTooLarge`, `IntegrityFailure` |
 | `vcs.readMemory` | `read` | Project bounded blame-backed workspace memory for the exact text range and content hash returned by a managed file read. | `Unauthorized`, `InvalidReference`, `ScopeTooLarge`, `IntegrityFailure` |
 | `vcs.resolveRepository` | `read` | Resolve one canonical repository path at one exact semantic state. | `Unauthorized`, `InvalidReference`, `ScopeTooLarge`, `IntegrityFailure` |

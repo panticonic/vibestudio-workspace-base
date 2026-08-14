@@ -1,6 +1,6 @@
 ---
 name: provenance-orientation
-description: Trace origin, causation, lineage, integration decisions, or import boundaries from a managed path, session, event, or semantic root.
+description: Recover why tracked state is the way it is — what was attempted, what else happened under that intent, what was rejected, and which subjects match a description.
 ---
 
 # Provenance orientation
@@ -8,52 +8,93 @@ description: Trace origin, causation, lineage, integration decisions, or import 
 Read [Vibestudio VCS](../vibestudio-vcs/SKILL.md) first. Provenance is the
 adjacency of semantic VCS and trajectory records, not a parallel store.
 
-## Start at the decision boundary
+The point of provenance is not audit. It is theory maintenance: users prompt in
+consequences ("cap the backoff at 30s") and almost never state the axiom behind
+them ("this deploy target kills long-lived connections"). Your job is to
+reconstruct enough of the record to impute that axiom before you act against it.
 
-A managed-text `read` already attaches a bounded explanation for the displayed
-lines. Stop when it answers the question. Continue only when history changes the
-next action: unfamiliar code, integration, ambiguous intent, copy attribution,
-or an import boundary.
+## Name your question, then use its mechanism
+
+| Your question | Mechanism |
+| --- | --- |
+| Why do these bytes exist? | already attached to the managed `read` — stop there when it answers |
+| What was actually being attempted? | `provenance({ target, walk: "cause" })` |
+| What else happened under that intent? | `provenance({ target, walk: "cohort" })` |
+| How are these two things related? | cause-walk both, intersect the refs; or one `query` join |
+| What has this coordinate been *for*? | `vcs({ operation: "blame" })` and file history, read as intent drift |
+| What was tried and rejected here? | `provenance({ target, walk: "rejections" })` |
+| Which subjects match a description? | `provenance({ target: "search: some words" })` |
+| A set-shaped question ("all X where Y") | `provenance({ query: "SELECT …" })` |
+| Nothing above fits | `provenance({ target })` for one subject's immediate edges |
+
+Each of these is meant to cost one call. If you are about to spend five calls
+walking a chain by hand, you have picked the wrong mechanism.
 
 ```ts
-provenance({ target: "session" });
-provenance({ target: "packages/example/src/index.ts" });
-provenance({ target: "change:…" });
+provenance({ target: "packages/example/src/index.ts", walk: "cause" });
+provenance({ target: "@r7-1c9a", walk: "cohort", scope: "turn" });
+provenance({ target: "packages/example/src/retry.ts", walk: "rejections" });
+provenance({ target: "search: retry backoff" });
+provenance({ query: "SELECT relation, column_name, meaning FROM prov_schema" });
+provenance({ targets: ["@r3-11ab", "@r4-77cd"] });
 ```
 
-`target` is the sole selector: start with a friendly target, then pass every
-returned compact `@ref` through the same field. Trusted state retains exact
-typed roots; do not repeat long content-addressed identities. Event,
-application, work-unit, change, decision, and command string shorthands remain
-accepted through `target`.
+`target` is the sole selector for a subject: a managed path, `session`, a
+semantic shorthand, a `search:` phrase, or a compact `@ref` you were given.
+`targets` expands up to ten refs at once instead of ten calls. Never repeat a
+long content-addressed identity: trusted code retains exact roots, and every
+rendered subject carries the `@ref` you pass back.
 
-## Choose the smallest read
+## What each walk gives you
 
-- `provenance({ target })` — resolve a managed path/identity or follow one `@ref`.
-- `provenance({ target: ref })` — follow an endpoint or continue the advertised stream.
-- `vcs({ operation: "blame", ... })` — trace an exact file range through content
-  mappings.
+- **cause** — one indented narrative from the artifact up through applied
+  change → work unit → command → invocation → turn → trigger message, following
+  message sources until it reaches a human statement or a labeled boundary
+  (subagent brief, external delta, import snapshot, outside your visibility).
+  Intents lead; mechanics trail. A boundary is a fact, not a failure: the walk
+  never fabricates continuity across one.
+- **cohort** — everything else the same `work-unit`, `command`, or `turn`
+  touched, grouped by coordinate, decision, and commit. Axioms show up as
+  patterns across a cohort, not in a single edit.
+- **rejections** — counteracted changes with the intent of the work that undid
+  them, revert work, superseded external deltas, and merge coordinates resolved
+  `ours`/`current`. A user saying *no* is the strongest evidence the record
+  holds; consult it before repeating work that was already rejected.
 
-Continue by copying the advertised `provenance({ target: ref })` call unchanged.
-The channel-scoped ref durably retains the exact root, stream, page, query, and
-opaque service cursor inside trusted code. Never add a page or cursor. Start a separate read when the
-question changes. Use live schemas for edge kinds and node shapes; never parse
-IDs, construct private roots, query semantic tables, or cache a client graph.
+## The abduction pattern
+
+1. **Gather** — `cause` for what was asked, `cohort` for the pattern, and
+   `rejections` for the counter-evidence.
+2. **Hypothesize** the axiom that makes all three consistent.
+3. **Check** it against the rejections and the intent-annotated history. If a
+   rejection contradicts your hypothesis, the hypothesis is wrong, not the
+   rejection.
+4. **Write it down** if it will recur — as ordinary prose in the relevant notes
+   file, with the edit's own intent naming the evidence it came from. There is
+   no theory store: a recovered axiom is a paragraph in a tracked file, with
+   authorship, history, and revision already provided by the VCS.
+5. **Treat an inherited note as a prior, not as ground truth.** Every written
+   axiom is someone's guess. When the stakes warrant it, re-check it against the
+   evidence walks; when the evidence contradicts it, edit the note (or say so),
+   never silently obey or silently override it.
 
 ## Interpret evidence narrowly
 
 Keep actor, executor, cause, intent, authorization, and content origin separate.
-An edge records a relationship, not the truth of every upstream claim. Walk to
-the exact change, work unit, decision, command, event, or trajectory record
-needed for a consequential conclusion.
+An edge records a relationship, not the truth of every upstream claim.
 
 Intent tiers are not interchangeable: `stated` is explicit purpose, `trigger` is
 durable assignment evidence, `mechanical` describes only the effect. Never
-invent private reasoning or authorship from a turn summary.
+invent private reasoning or authorship from a turn summary, and never launder a
+`mechanical` line into a claim about what someone wanted.
 
 A copy should reach its immediate source coordinate. An integration explanation
 should reach the decision and source changes it accounted for. At an external
 import boundary, report the recorded source kind, credential-free URI, revision,
-digest, and target repositories as snapshot facts. Importer intent explains why
-bytes entered Vibestudio — it does not identify the earlier file author or
-external committer.
+and target repositories as snapshot facts. Importer intent explains why bytes
+entered Vibestudio — it does not identify the earlier file author.
+
+Every surface is bounded and scoped to what you may read. A pruned branch
+renders as a labeled boundary, a long list as a counted omission plus a `@ref`,
+and an over-broad query as a typed refusal that names the offending term. Narrow
+the question; never treat a refusal as a reason to retry it larger.

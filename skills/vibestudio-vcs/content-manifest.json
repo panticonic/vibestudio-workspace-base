@@ -4,7 +4,7 @@
   "files": [
     {
       "path": "SKILL.md",
-      "sha256": "7001d4a27542242d54c8d03020b459e486ac34ac5339888dfdb3c9fd018e9ebc"
+      "sha256": "cecd02e72e45045ad986accb64d19c38c23dc0877936a0b829c86152fe600e7a"
     },
     {
       "path": "agents/openai.yaml",
@@ -12,7 +12,7 @@
     },
     {
       "path": "evaluations/schema-fixtures.json",
-      "sha256": "bae0edd16397e52093d10013f3b6174f7b32c1a1ef4a68ff8cf32acba53ee001"
+      "sha256": "527be6176dc6fd26bed5f58f14cc6460b6c61cf6d40fe93ace4d3bc4636b2ae4"
     },
     {
       "path": "package.json",
@@ -48,11 +48,15 @@
     },
     {
       "path": "references/public-contract.json",
-      "sha256": "2ea9800d7f1c41ef8ed9069bbd1c220e4969411945bded5ab4ea564c2ef62e57"
+      "sha256": "646d70d62b30bf219634d72983492338ae1426980d9dc1e3e9c918a644d2c4bc"
     },
     {
       "path": "references/public-contract.md",
-      "sha256": "c556567501dc5af5c0f41ca3bbfdfb8756064caa791077e110b7de1f13ac160f"
+      "sha256": "92267fe8dbc01264cd9dfd8f95f5757031ec5a375541561d19afccf9591645e4"
+    },
+    {
+      "path": "references/querying-provenance.md",
+      "sha256": "59007807f6b83ae9c0ff546189cf810ec11ccbd7ca035e44210654925fb4ae09"
     },
     {
       "path": "references/revert-counteractions.md",
@@ -71,5 +75,5 @@
       "sha256": "1b8a8b5b185b47039733272129292f2d6442205bb02d4b07e328790795eb77cb"
     }
   ],
-  "packageDigest": "1676661ec04f61d9fe6f81e6628ef3d901326fb5663762db01bd9dbf0d6d2729"
+  "packageDigest": "55f0a91336123d39b286cb71b58d2791528102a41c67c99447141dd51fef5094"
 }

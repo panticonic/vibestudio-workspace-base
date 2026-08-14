@@ -22,7 +22,10 @@
               "kind": "file-create",
               "repositoryId": "repository:app",
               "path": "src/example.ts",
-              "content": { "kind": "text", "text": "export const value = 1;\n" },
+              "content": {
+                "kind": "text",
+                "text": "export const value = 1;\n"
+              },
               "mode": 420
             }
           ]
@@ -37,7 +40,10 @@
         {
           "commandId": "command:move",
           "contextId": "context:task",
-          "expectedWorkingHead": { "kind": "application", "applicationId": "application:edit" },
+          "expectedWorkingHead": {
+            "kind": "application",
+            "applicationId": "application:edit"
+          },
           "moves": [
             {
               "kind": "file",
@@ -58,15 +64,24 @@
         {
           "commandId": "command:copy",
           "contextId": "context:task",
-          "expectedWorkingHead": { "kind": "application", "applicationId": "application:move" },
+          "expectedWorkingHead": {
+            "kind": "application",
+            "applicationId": "application:move"
+          },
           "copies": [
             {
               "source": {
-                "state": { "kind": "application", "applicationId": "application:move" },
+                "state": {
+                  "kind": "application",
+                  "applicationId": "application:move"
+                },
                 "repositoryId": "repository:app",
                 "fileId": "file:example"
               },
-              "destination": { "repositoryId": "repository:app", "path": "src/copied.ts" }
+              "destination": {
+                "repositoryId": "repository:app",
+                "path": "src/copied.ts"
+              }
             }
           ]
         }
@@ -80,13 +95,18 @@
         {
           "commandId": "command:merge",
           "contextId": "context:task",
-          "expectedWorkingHead": { "kind": "application", "applicationId": "application:copy" },
+          "expectedWorkingHead": {
+            "kind": "application",
+            "applicationId": "application:copy"
+          },
           "source": { "kind": "event", "eventId": "event:source" },
-          "resolutions": [{
-            "coordinate": { "kind": "file", "id": "file:obsolete" },
-            "resolution": "ours",
-            "rationale": "The target already uses the replacement design"
-          }]
+          "resolutions": [
+            {
+              "coordinate": { "kind": "file", "id": "file:obsolete" },
+              "resolution": "ours",
+              "rationale": "The target already uses the replacement design"
+            }
+          ]
         }
       ]
     },
@@ -98,7 +118,10 @@
         {
           "commandId": "command:revert",
           "contextId": "context:task",
-          "expectedWorkingHead": { "kind": "application", "applicationId": "application:copy" },
+          "expectedWorkingHead": {
+            "kind": "application",
+            "applicationId": "application:copy"
+          },
           "changeIds": ["change:copy"]
         }
       ]
@@ -127,7 +150,10 @@
         {
           "commandId": "command:discard",
           "contextId": "context:scratch",
-          "expectedWorkingHead": { "kind": "application", "applicationId": "application:scratch" }
+          "expectedWorkingHead": {
+            "kind": "application",
+            "applicationId": "application:scratch"
+          }
         }
       ]
     },
@@ -196,7 +222,11 @@
             }
           ],
           "externalPathEvidence": [
-            { "path": "README.md", "revision": "deadbeef", "author": "Legacy Author" }
+            {
+              "path": "README.md",
+              "revision": "deadbeef",
+              "author": "Legacy Author"
+            }
           ]
         }
       ]
@@ -207,7 +237,10 @@
       "valid": true,
       "args": [
         {
-          "target": { "kind": "application", "applicationId": "application:target" },
+          "target": {
+            "kind": "application",
+            "applicationId": "application:target"
+          },
           "source": { "kind": "event", "eventId": "event:source" },
           "limit": 50
         }
@@ -217,13 +250,23 @@
       "name": "inspect-change",
       "method": "inspect",
       "valid": true,
-      "args": [{ "node": { "kind": "change", "changeId": "change:1" }, "edgeLimit": 50 }]
+      "args": [
+        {
+          "node": { "kind": "change", "changeId": "change:1" },
+          "edgeLimit": 50
+        }
+      ]
     },
     {
       "name": "page-neighbors",
       "method": "neighbors",
       "valid": true,
-      "args": [{ "root": { "kind": "application", "applicationId": "application:1" }, "limit": 50 }]
+      "args": [
+        {
+          "root": { "kind": "application", "applicationId": "application:1" },
+          "limit": 50
+        }
+      ]
     },
     {
       "name": "read-history",
@@ -398,7 +441,11 @@
           "contextId": "context:task",
           "expectedTargetFrontierId": "frontier:old",
           "changes": [
-            { "kind": "file-delete", "repositoryId": "repository:app", "fileId": "file:1" }
+            {
+              "kind": "file-delete",
+              "repositoryId": "repository:app",
+              "fileId": "file:1"
+            }
           ]
         }
       ]
@@ -411,7 +458,10 @@
         {
           "commandId": "command:old-commit",
           "contextId": "context:task",
-          "expectedWorkingHead": { "kind": "application", "applicationId": "application:1" },
+          "expectedWorkingHead": {
+            "kind": "application",
+            "applicationId": "application:1"
+          },
           "selection": { "workUnitIds": ["work-unit:1"] }
         }
       ]
@@ -427,8 +477,14 @@
           "expectedWorkingHead": { "kind": "event", "eventId": "event:1" },
           "copies": [
             {
-              "source": { "repositoryId": "repository:app", "fileId": "file:1" },
-              "destination": { "repositoryId": "repository:app", "path": "src/copy.ts" }
+              "source": {
+                "repositoryId": "repository:app",
+                "fileId": "file:1"
+              },
+              "destination": {
+                "repositoryId": "repository:app",
+                "path": "src/copy.ts"
+              }
             }
           ]
         }
@@ -460,6 +516,66 @@
           "path": "src/example.ts"
         }
       ]
+    },
+    {
+      "name": "walk-cause-from-change",
+      "method": "walk",
+      "valid": true,
+      "args": [
+        {
+          "contextId": "context:task",
+          "walk": "cause",
+          "subject": { "kind": "change", "changeId": "change:one" }
+        }
+      ]
+    },
+    {
+      "name": "walk-cohort-by-turn",
+      "method": "walk",
+      "valid": true,
+      "args": [
+        {
+          "contextId": "context:task",
+          "walk": "cohort",
+          "scope": "turn",
+          "subject": { "kind": "work-unit", "workUnitId": "work-unit:one" }
+        }
+      ]
+    },
+    {
+      "name": "walk-rejects-unknown-kind",
+      "method": "walk",
+      "valid": false,
+      "args": [
+        {
+          "contextId": "context:task",
+          "walk": "drift",
+          "subject": { "kind": "work-unit", "workUnitId": "work-unit:one" }
+        }
+      ]
+    },
+    {
+      "name": "query-work-unit-intents",
+      "method": "query",
+      "valid": true,
+      "args": [
+        {
+          "contextId": "context:task",
+          "query": "SELECT work_unit_id, intent_tier FROM prov_work_units"
+        }
+      ]
+    },
+    {
+      "name": "query-rejects-empty-statement",
+      "method": "query",
+      "valid": false,
+      "args": [{ "contextId": "context:task", "query": "" }]
+    },
+    {
+      "name": "search-by-recorded-prose",
+      "method": "search",
+      "valid": true,
+      "args": [{ "contextId": "context:task", "text": "retry backoff" }]
     }
   ]
 }

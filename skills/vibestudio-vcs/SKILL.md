@@ -152,6 +152,7 @@ checks. It never includes uncommitted work.
 - [Revert and counteractions](references/revert-counteractions.md)
 - [Semantic commit](references/semantic-commit.md)
 - [Provenance, intent, and blame](references/provenance-and-blame.md)
+- [Querying provenance](references/querying-provenance.md)
 - [External snapshot import](references/external-snapshot-import.md)
 - [Checks and publication](references/checks-and-publication.md)
 - [Typed recovery](references/typed-recovery.md)
