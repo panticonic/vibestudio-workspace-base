@@ -563,6 +563,30 @@ describe("the prov_* relational contract", () => {
     expect(result.refusal?.message).toContain("prov_schema");
   });
 
+  it("refuses a private object in any syntactic position, not only after FROM", async () => {
+    const { semantic } = await fixture();
+    for (const attempt of [
+      "SELECT * FROM prov_events, gad_work_units",
+      "SELECT * FROM prov_events event, vcs_command_journal command WHERE command.command_id = event.event_id",
+      "SELECT * FROM prov_events, prov_search_index",
+      "SELECT * FROM prov_events WHERE event_id IN (SELECT event_id FROM prov_vis_events)",
+    ]) {
+      const result = await query(semantic, {
+        contextId: "context:test",
+        query: attempt,
+        visibilityContextIds: ["context:test"],
+      });
+      expect(result.refusal).toMatchObject({ stage: "validation", code: "unknown-relation" });
+      expect(result.rows).toEqual([]);
+    }
+    const prose = await query(semantic, {
+      contextId: "context:test",
+      query: "SELECT event_id FROM prov_events WHERE message = 'gad_work_units'",
+      visibilityContextIds: ["context:test"],
+    });
+    expect(prose.refusal).toBeNull();
+  });
+
   it("refuses recursion, which is what walks are for", async () => {
     const { semantic } = await fixture();
     const result = await query(semantic, {

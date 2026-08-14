@@ -91,6 +91,22 @@ describe("structural validation", () => {
       validateProvenanceQuery("SELECT * FROM prov_events WHERE message = 'drop table gad_changes'")
     ).toBeNull();
   });
+
+  it("refuses a supplied private name in any position, including a comma join", () => {
+    const privateNames = new Set(["gad_work_units", "prov_search_index"]);
+    expect(
+      validateProvenanceQuery("SELECT * FROM prov_events, gad_work_units", privateNames)
+    ).toMatchObject({ code: "unknown-relation", term: "gad_work_units" });
+    expect(
+      validateProvenanceQuery("SELECT * FROM prov_events, prov_search_index", privateNames)
+    ).toMatchObject({ code: "unknown-relation", term: "prov_search_index" });
+    expect(
+      validateProvenanceQuery(
+        "SELECT * FROM prov_events WHERE message = 'gad_work_units'",
+        privateNames
+      )
+    ).toBeNull();
+  });
 });
 
 describe("the plan gate", () => {

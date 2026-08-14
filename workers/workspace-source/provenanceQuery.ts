@@ -181,8 +181,18 @@ function refuse(
 /**
  * Structural admissibility: one SELECT, `prov_` relations only, no recursion,
  * no statement that could write or reach outside the contract.
+ *
+ * The FROM/JOIN check catches the common miss with a teaching message, but it
+ * cannot see every syntactic position a relation can occupy (comma joins,
+ * `IN table`, indexed-by clauses). `privateNames` closes that class: any bare
+ * word naming a real database object outside the contract refuses the query
+ * outright, wherever it appears. String literals are never inspected, so
+ * prose mentioning a table name stays legal.
  */
-export function validateProvenanceQuery(query: string): ProvenanceQueryRefusal | null {
+export function validateProvenanceQuery(
+  query: string,
+  privateNames?: ReadonlySet<string>
+): ProvenanceQueryRefusal | null {
   const tokens = tokenizeSql(query);
   if (tokens.length === 0) {
     return refuse("validation", "not-a-select", "The query is empty");
@@ -214,6 +224,14 @@ export function validateProvenanceQuery(query: string): ProvenanceQueryRefusal |
   }
   for (const [index, token] of body.entries()) {
     if (token.kind !== "word") continue;
+    if (privateNames?.has(token.lower) && !PROV_RELATIONS.has(token.lower)) {
+      return refuse(
+        "validation",
+        "unknown-relation",
+        `\`${token.value}\` is not part of the provenance contract; run \`SELECT relation, column_name, meaning FROM prov_schema\` for the catalog`,
+        token.value
+      );
+    }
     if (token.lower === "recursive") {
       return refuse(
         "validation",
@@ -255,6 +273,22 @@ export function validateProvenanceQuery(query: string): ProvenanceQueryRefusal |
     }
   }
   return null;
+}
+
+/** Every real table/view outside the `prov_*` contract, straight from the engine. */
+function privateDatabaseNames(sql: SqlStorage): ReadonlySet<string> {
+  const names = new Set<string>();
+  try {
+    for (const row of sql
+      .exec(`SELECT name FROM sqlite_master WHERE type IN ('table', 'view')`)
+      .toArray()) {
+      const name = String(row["name"] ?? "").toLowerCase();
+      if (name && !PROV_RELATIONS.has(name)) names.add(name);
+    }
+  } catch {
+    // With no catalog to consult, the FROM/JOIN relation check still holds.
+  }
+  return names;
 }
 
 interface PlanStep {
@@ -363,7 +397,7 @@ export function executeProvenanceQuery(
     rowsRead: 0,
     truncated: false,
   };
-  const structural = validateProvenanceQuery(input.query);
+  const structural = validateProvenanceQuery(input.query, privateDatabaseNames(sql));
   if (structural) return { ...empty, refusal: structural };
   const limit = Math.max(1, Math.min(input.limit, budget.rowLimit));
   const bounded = `SELECT * FROM (\n${input.query.replace(/;\s*$/u, "")}\n) LIMIT ${limit + 1}`;
