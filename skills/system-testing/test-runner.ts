@@ -12,16 +12,25 @@ import {
 } from "./tool-failure-classification.js";
 import type { HeadlessRunner } from "./runner.js";
 import type { ChatMessage } from "@workspace/agentic-core";
-import type { HeadlessSession, SessionSnapshot } from "@workspace/agentic-session";
+import type {
+  HeadlessSession,
+  SessionSnapshot,
+} from "@workspace/agentic-session";
 import { logIdForChannel } from "@vibestudio/trajectory-identity";
 import { systemTestFailure } from "./structured-error.js";
 import { materializeValidationEvidence } from "./validation-evidence.js";
 import { DEFAULT_SYSTEM_TEST_TIMEOUT_MS } from "./config.js";
-import { projectValidationInput, validationFailureProvenance } from "./validation-failure.js";
+import {
+  projectValidationInput,
+  validationFailureProvenance,
+} from "./validation-failure.js";
 import { channelDeliveryLatencyViolations } from "./delivery-latency.js";
 import type { SystemTestJsonValue } from "./structured-error.js";
 import { assertSystemTestDeclaration } from "./prompt-contract.js";
-import { findFinalAgentCompletionMessage, isAgentCompletionMessage } from "./agent-message.js";
+import {
+  findFinalAgentCompletionMessage,
+  isAgentCompletionMessage,
+} from "./agent-message.js";
 
 const NON_INTERACTIVE_TERMINAL_WAIT_REASONS = [
   "model_credential_required",
@@ -30,7 +39,11 @@ const NON_INTERACTIVE_TERMINAL_WAIT_REASONS = [
 const AGENT_INTERRUPT_TIMEOUT_MS = 30_000;
 
 type MaybePromise<T> = T | Promise<T>;
-type RunSuiteFilter = { category?: string; name?: string; concurrency?: number };
+type RunSuiteFilter = {
+  category?: string;
+  name?: string;
+  concurrency?: number;
+};
 
 export class TestRunner {
   private cancellationError: Error | null = null;
@@ -41,19 +54,23 @@ export class TestRunner {
     private runner: HeadlessRunner,
     private opts?: {
       onTestStart?: (test: TestCase) => void;
-      onTestEnd?: (test: TestCase, result: TestResult, execution: TestExecutionResult) => void;
+      onTestEnd?: (
+        test: TestCase,
+        result: TestResult,
+        execution: TestExecutionResult,
+      ) => void;
       onTestPhase?: (test: TestCase, phase: string) => void;
       onTestResult?: (
         entry: TestSuiteResultEntry,
-        aggregate: TestSuiteResult
+        aggregate: TestSuiteResult,
       ) => MaybePromise<void>;
       concurrency?: number;
       testTimeoutMs?: number;
-    }
+    },
   ) {
     if (!runner) {
       throw new Error(
-        "TestRunner requires a HeadlessRunner instance. Usage: new TestRunner(new HeadlessRunner(contextId))"
+        "TestRunner requires a HeadlessRunner instance. Usage: new TestRunner(new HeadlessRunner(contextId))",
       );
     }
   }
@@ -75,7 +92,10 @@ export class TestRunner {
     this.wakeSuiteSchedulers?.();
   }
 
-  async runSuite(tests: TestCase[], filter?: RunSuiteFilter): Promise<TestSuiteResult> {
+  async runSuite(
+    tests: TestCase[],
+    filter?: RunSuiteFilter,
+  ): Promise<TestSuiteResult> {
     const filtered = tests.filter((t) => {
       if (filter?.category && t.category !== filter.category) return false;
       if (filter?.name && !t.name.includes(filter.name)) return false;
@@ -83,10 +103,12 @@ export class TestRunner {
     });
 
     const startTime = Date.now();
-    const results: Array<TestSuiteResultEntry | undefined> = new Array(filtered.length);
+    const results: Array<TestSuiteResultEntry | undefined> = new Array(
+      filtered.length,
+    );
     const concurrency = this.normalizeConcurrency(
       filter?.concurrency ?? this.opts?.concurrency ?? 1,
-      filtered.length
+      filtered.length,
     );
     const pending = new Set(filtered.map((_test, index) => index));
     const activeResources = new Set<string>();
@@ -105,12 +127,16 @@ export class TestRunner {
       for (const wake of waiters) wake();
     };
     this.wakeSuiteSchedulers = wakeSchedulers;
-    const claimRunnable = async (): Promise<{ index: number; resources: string[] } | null> => {
+    const claimRunnable = async (): Promise<{
+      index: number;
+      resources: string[];
+    } | null> => {
       for (;;) {
         if (this.cancelled) return null;
         for (const index of pending) {
           const resources = resourcesFor(filtered[index]!);
-          if (resources.some((resource) => activeResources.has(resource))) continue;
+          if (resources.some((resource) => activeResources.has(resource)))
+            continue;
           pending.delete(index);
           for (const resource of resources) activeResources.add(resource);
           return { index, resources };
@@ -139,7 +165,12 @@ export class TestRunner {
       if (this.opts?.onTestResult) {
         await this.opts.onTestResult(
           entry,
-          this.buildSuiteResult(tests.length, filtered.length, results, startTime)
+          this.buildSuiteResult(
+            tests.length,
+            filtered.length,
+            results,
+            startTime,
+          ),
         );
       }
     };
@@ -151,7 +182,8 @@ export class TestRunner {
         try {
           await runAt(claim.index);
         } finally {
-          for (const resource of claim.resources) activeResources.delete(resource);
+          for (const resource of claim.resources)
+            activeResources.delete(resource);
           wakeSchedulers();
         }
       }
@@ -160,19 +192,27 @@ export class TestRunner {
     try {
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
     } finally {
-      if (this.wakeSuiteSchedulers === wakeSchedulers) this.wakeSuiteSchedulers = null;
+      if (this.wakeSuiteSchedulers === wakeSchedulers)
+        this.wakeSuiteSchedulers = null;
     }
 
-    return this.buildSuiteResult(tests.length, filtered.length, results, startTime);
+    return this.buildSuiteResult(
+      tests.length,
+      filtered.length,
+      results,
+      startTime,
+    );
   }
 
   private buildSuiteResult(
     sourceTotal: number,
     filteredTotal: number,
     entries: Array<TestSuiteResultEntry | undefined>,
-    startTime: number
+    startTime: number,
   ): TestSuiteResult {
-    const results = entries.filter((entry): entry is TestSuiteResultEntry => Boolean(entry));
+    const results = entries.filter((entry): entry is TestSuiteResultEntry =>
+      Boolean(entry),
+    );
     let passed = 0,
       failed = 0,
       errored = 0;
@@ -182,7 +222,9 @@ export class TestRunner {
       if (entry.execution.error) errored++;
       else if (entry.result.passed) passed++;
       else failed++;
-      const entryToolFailures = unexpectedToolFailures(entry.execution.toolFailures).length;
+      const entryToolFailures = unexpectedToolFailures(
+        entry.execution.toolFailures,
+      ).length;
       toolFailureCount += entryToolFailures;
       if (entryToolFailures > 0) testsWithToolFailures++;
     }
@@ -205,10 +247,14 @@ export class TestRunner {
     return Math.min(total, Math.max(1, Math.floor(value)));
   }
 
-  async runOne(test: TestCase): Promise<{ result: TestResult; execution: TestExecutionResult }> {
+  async runOne(
+    test: TestCase,
+  ): Promise<{ result: TestResult; execution: TestExecutionResult }> {
     const startTime = Date.now();
     const testTimeoutMs =
-      this.opts?.testTimeoutMs ?? test.timeoutMs ?? DEFAULT_SYSTEM_TEST_TIMEOUT_MS;
+      this.opts?.testTimeoutMs ??
+      test.timeoutMs ??
+      DEFAULT_SYSTEM_TEST_TIMEOUT_MS;
     const testDeadline = startTime + testTimeoutMs;
     const testRunner =
       typeof this.runner.forTest === "function"
@@ -218,7 +264,9 @@ export class TestRunner {
           })
         : this.runner;
     let session: HeadlessSession | undefined;
-    let outcome: { result: TestResult; execution: TestExecutionResult } | undefined;
+    let outcome:
+      | { result: TestResult; execution: TestExecutionResult }
+      | undefined;
     let workspaceRepoFixtureState:
       | Awaited<ReturnType<HeadlessRunner["prepareWorkspaceRepoFixture"]>>
       | undefined;
@@ -232,15 +280,20 @@ export class TestRunner {
       assertSystemTestDeclaration(test);
       if (test.workspaceRepoFixture) {
         enterPhase("workspace-fixture-setup");
-        workspaceRepoFixtureState = await testRunner.prepareWorkspaceRepoFixture();
+        workspaceRepoFixtureState =
+          await testRunner.prepareWorkspaceRepoFixture();
       }
       enterPhase(test.orchestrate ? "orchestration" : "session-setup");
-      const remainingTimeMs = (): number => Math.max(0, testDeadline - Date.now());
+      const remainingTimeMs = (): number =>
+        Math.max(0, testDeadline - Date.now());
       const sendAndCapture = async (
         targetSession: HeadlessSession,
         prompt: string,
-        phase?: string
-      ): Promise<{ response: ChatMessage; modelExecutionEvidence: unknown }> => {
+        phase?: string,
+      ): Promise<{
+        response: ChatMessage;
+        modelExecutionEvidence: unknown;
+      }> => {
         const timeoutMessage = phase
           ? `Timed out waiting for agent to finish test "${test.name}" during ${phase}`
           : `Timed out waiting for agent to finish test "${test.name}"`;
@@ -252,13 +305,17 @@ export class TestRunner {
         if (this.cancellationError) controller.abort(this.cancellationError);
         try {
           if (controller.signal.aborted) {
-            throw this.cancellationError ?? new Error("System-test wait aborted");
+            throw (
+              this.cancellationError ?? new Error("System-test wait aborted")
+            );
           }
           const remaining = remainingTimeMs();
           if (remaining <= 0) throw new Error(timeoutMessage);
           const onMessage = (
             targetSession as unknown as {
-              onMessage?: (listener: (message: ChatMessage) => void) => () => void;
+              onMessage?: (
+                listener: (message: ChatMessage) => void,
+              ) => () => void;
             }
           ).onMessage;
           if (typeof onMessage === "function") {
@@ -269,15 +326,18 @@ export class TestRunner {
               });
             });
           }
-          const wait = targetSession.sendAndWait(prompt, {
-            signal: controller.signal,
-            terminalWaitingReasons: NON_INTERACTIVE_TERMINAL_WAIT_REASONS,
-          });
+          const wait = targetSession.sendAndWait(
+            testRunner.withTaskResources(prompt),
+            {
+              signal: controller.signal,
+              terminalWaitingReasons: NON_INTERACTIVE_TERMINAL_WAIT_REASONS,
+            },
+          );
           response = (await this.withTimeout(
             authorityFailure ? Promise.race([wait, authorityFailure]) : wait,
             remaining,
             timeoutMessage,
-            controller
+            controller,
           )) as ChatMessage;
           stopAuthorityWatch?.();
         } catch (error) {
@@ -288,8 +348,8 @@ export class TestRunner {
             throw new AggregateError(
               [terminalError, interruptError],
               `${errorMessage(terminalError)}; agent interruption failed: ${errorMessage(
-                interruptError
-              )}`
+                interruptError,
+              )}`,
             );
           }
           throw terminalError;
@@ -305,7 +365,7 @@ export class TestRunner {
           modelExecutionEvidence: await this.captureAndAssertModelExecution(
             targetSession,
             test.name,
-            phase ?? "agent turn"
+            phase ?? "agent turn",
           ),
         };
       };
@@ -314,14 +374,21 @@ export class TestRunner {
             runner: testRunner,
             remainingTimeMs,
             sendAndWait: async (targetSession, prompt, phase) => {
-              const completed = await sendAndCapture(targetSession, prompt, phase);
+              const completed = await sendAndCapture(
+                targetSession,
+                prompt,
+                phase,
+              );
               return completed.response;
             },
           })
         : await (async (): Promise<TestExecutionResult> => {
             session = await testRunner.spawn();
             enterPhase("agent-turn");
-            const { modelExecutionEvidence } = await sendAndCapture(session, test.prompt);
+            const { modelExecutionEvidence } = await sendAndCapture(
+              session,
+              test.prompt,
+            );
 
             const messages = [...session.messages] as ChatMessage[];
             const snapshot = session.snapshot();
@@ -335,20 +402,22 @@ export class TestRunner {
             };
           })();
       execution.duration ||= Date.now() - startTime;
-      execution.modelExecutionEvidence ??= execution.snapshot?.modelExecutionEvidence;
+      execution.modelExecutionEvidence ??=
+        execution.snapshot?.modelExecutionEvidence;
       const validationExecution = await materializeValidationEvidence(
         execution,
-        testRunner.validationEvidenceReader
+        testRunner.validationEvidenceReader,
       );
       validationExecution.toolFailures = classifyToolFailures(
         collectToolFailures(validationExecution),
-        test.expectedToolFailures
+        test.expectedToolFailures,
       );
       // Persist only the bounded summaries. The canonical request/result bodies
       // remain content-addressed in the durable execution record.
       execution.toolFailures = validationExecution.toolFailures;
       if (test.validation !== "harness") {
-        const trajectoryReview = buildAgentTrajectoryReview(validationExecution);
+        const trajectoryReview =
+          buildAgentTrajectoryReview(validationExecution);
         validationExecution.trajectoryReview = trajectoryReview;
         execution.trajectoryReview = trajectoryReview;
       }
@@ -364,13 +433,17 @@ export class TestRunner {
           result = evidence.passed
             ? {
                 passed: true,
-                details: { ...(result.details ?? {}), ...(evidence.details ?? {}) },
+                details: {
+                  ...(result.details ?? {}),
+                  ...(evidence.details ?? {}),
+                },
               }
             : evidence;
         }
       }
       if (test.validation !== "harness") {
-        const inspections = findSystemTestImplementationInspections(validationExecution);
+        const inspections =
+          findSystemTestImplementationInspections(validationExecution);
         if (inspections.length > 0) {
           execution.diagnostics = {
             ...(execution.diagnostics ?? {}),
@@ -391,11 +464,12 @@ export class TestRunner {
       let modelExecutionEvidence: unknown;
       if (session) {
         try {
-          modelExecutionEvidence = await session.captureModelExecutionEvidence();
+          modelExecutionEvidence =
+            await session.captureModelExecutionEvidence();
         } catch (evidenceErr) {
           console.warn(
             "[system-testing] Failed to capture model evidence for failed headless session:",
-            evidenceErr
+            evidenceErr,
           );
         }
       }
@@ -403,29 +477,39 @@ export class TestRunner {
       try {
         snapshot = session?.snapshot();
       } catch (snapshotErr) {
-        console.warn("[system-testing] Failed to snapshot failed headless session:", snapshotErr);
+        console.warn(
+          "[system-testing] Failed to snapshot failed headless session:",
+          snapshotErr,
+        );
       }
       const failure = systemTestFailure(failurePhase, err);
-      const errorMessage = formatExecutionError(failure.error.message, messages, snapshot);
+      const errorMessage = formatExecutionError(
+        failure.error.message,
+        messages,
+        snapshot,
+      );
       const execution: TestExecutionResult = {
         messages,
         duration,
         error: errorMessage,
         failure,
         snapshot,
-        ...(modelExecutionEvidence !== undefined ? { modelExecutionEvidence } : {}),
+        ...(modelExecutionEvidence !== undefined
+          ? { modelExecutionEvidence }
+          : {}),
         ...(snapshot ? { provenance: provenanceFromSnapshot(snapshot) } : {}),
       };
       if (failurePhase === "validation") {
         execution.validationFailure = validationFailureProvenance({
           test,
           error: err,
-          inputProjection: validationInputProjection ?? projectValidationInput(execution),
+          inputProjection:
+            validationInputProjection ?? projectValidationInput(execution),
         });
       }
       execution.toolFailures = classifyToolFailures(
         collectToolFailures(execution),
-        test.expectedToolFailures
+        test.expectedToolFailures,
       );
       if (test.validation !== "harness") {
         execution.trajectoryReview = buildAgentTrajectoryReview(execution);
@@ -448,7 +532,9 @@ export class TestRunner {
             ...(outcome.execution.diagnostics ?? {}),
             ...sharedDiagnostics,
           };
-          const latencyViolations = channelDeliveryLatencyViolations(outcome.execution.diagnostics);
+          const latencyViolations = channelDeliveryLatencyViolations(
+            outcome.execution.diagnostics,
+          );
           if (outcome.result.passed && latencyViolations.length > 0) {
             outcome.result = {
               passed: false,
@@ -459,9 +545,13 @@ export class TestRunner {
           outcome.execution.diagnostics = {
             ...(outcome.execution.diagnostics ?? {}),
             generatedAt:
-              (outcome.execution.diagnostics?.["generatedAt"] as string | undefined) ??
-              new Date().toISOString(),
-            diagnosticCollectionFailure: systemTestFailure("diagnostic:collection", diagnosticErr),
+              (outcome.execution.diagnostics?.["generatedAt"] as
+                | string
+                | undefined) ?? new Date().toISOString(),
+            diagnosticCollectionFailure: systemTestFailure(
+              "diagnostic:collection",
+              diagnosticErr,
+            ),
           };
         }
       }
@@ -473,7 +563,8 @@ export class TestRunner {
           // later tests race work from an earlier trajectory.
           enterPhase("session-cleanup");
           await session.close({
-            onPhase: (cleanup) => enterPhase(`session-cleanup:${cleanup.phase}`),
+            onPhase: (cleanup) =>
+              enterPhase(`session-cleanup:${cleanup.phase}`),
           });
           if (outcome) {
             outcome.execution.diagnostics = {
@@ -486,7 +577,10 @@ export class TestRunner {
           }
         }
       } catch (cleanupErr) {
-        console.warn("[system-testing] Failed to close headless session:", cleanupErr);
+        console.warn(
+          "[system-testing] Failed to close headless session:",
+          cleanupErr,
+        );
         recordCleanupFailure(outcome, "session-close", cleanupErr, "close");
       }
       let cleanupErrors: NonNullable<SessionSnapshot["cleanupErrors"]> = [];
@@ -495,7 +589,7 @@ export class TestRunner {
       } catch (snapshotErr) {
         console.warn(
           "[system-testing] Failed to snapshot headless cleanup diagnostics:",
-          snapshotErr
+          snapshotErr,
         );
       }
       if (cleanupErrors.length > 0 && outcome) {
@@ -503,12 +597,16 @@ export class TestRunner {
           systemTestFailure(`session-cleanup:${error.phase}`, {
             name: "SessionCleanupError",
             message: error.message,
-          })
+          }),
         );
         const messages = failures.map(
-          (failure, index) => `${cleanupErrors[index]!.phase}: ${failure.error.message}`
+          (failure, index) =>
+            `${cleanupErrors[index]!.phase}: ${failure.error.message}`,
         );
-        outcome.execution.cleanupErrors = [...(outcome.execution.cleanupErrors ?? []), ...messages];
+        outcome.execution.cleanupErrors = [
+          ...(outcome.execution.cleanupErrors ?? []),
+          ...messages,
+        ];
         outcome.execution.cleanupFailures = [
           ...(outcome.execution.cleanupFailures ?? []),
           ...failures,
@@ -536,7 +634,7 @@ export class TestRunner {
         try {
           const fixtureCleanup = await testRunner.cleanupWorkspaceRepoFixture(
             workspaceRepoFixtureState,
-            (phase) => enterPhase(`workspace-fixture-cleanup:${phase}`)
+            (phase) => enterPhase(`workspace-fixture-cleanup:${phase}`),
           );
           if (outcome) {
             outcome.execution.diagnostics = {
@@ -547,16 +645,18 @@ export class TestRunner {
               },
             };
           }
-          if (fixtureCleanup.unexpectedPublishedRepositoriesRemoved.length > 0) {
+          if (
+            fixtureCleanup.unexpectedPublishedRepositoriesRemoved.length > 0
+          ) {
             recordCleanupFailure(
               outcome,
               "workspace-fixture-scope",
               new Error(
                 `test published repository identity or identities outside its fixture scope: ${fixtureCleanup.unexpectedPublishedRepositoriesRemoved
                   .map((repository) => repository.repoPath)
-                  .join(", ")}; counteracted during teardown`
+                  .join(", ")}; counteracted during teardown`,
               ),
-              "workspace-repo-fixture"
+              "workspace-repo-fixture",
             );
           }
         } catch (fixtureCleanupErr) {
@@ -564,7 +664,7 @@ export class TestRunner {
             outcome,
             "workspace-fixture-cleanup",
             fixtureCleanupErr,
-            "workspace-repo-fixture"
+            "workspace-repo-fixture",
           );
         }
       }
@@ -579,7 +679,7 @@ export class TestRunner {
     promise: Promise<T>,
     timeoutMs: number,
     message: string,
-    controller?: AbortController
+    controller?: AbortController,
   ): Promise<T> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
@@ -609,7 +709,7 @@ export class TestRunner {
   private async captureAndAssertModelExecution(
     session: HeadlessSession,
     testName: string,
-    phase: string
+    phase: string,
   ): Promise<unknown> {
     const evidence = await session.captureModelExecutionEvidence();
     const record = asRecord(evidence);
@@ -618,7 +718,7 @@ export class TestRunner {
       : [];
     if (calls.length === 0) {
       throw new Error(
-        `System test "${testName}" has no journaled model execution evidence after ${phase}`
+        `System test "${testName}" has no journaled model execution evidence after ${phase}`,
       );
     }
     const policy =
@@ -636,7 +736,8 @@ export class TestRunner {
       const separator = ref.indexOf(":");
       return (
         !allowedRefs.has(ref) ||
-        call?.["provider"] !== (separator >= 0 ? ref.slice(0, separator) : ref) ||
+        call?.["provider"] !==
+          (separator >= 0 ? ref.slice(0, separator) : ref) ||
         call?.["model"] !== (separator >= 0 ? ref.slice(separator + 1) : "")
       );
     });
@@ -647,14 +748,14 @@ export class TestRunner {
             (call) =>
               `${String(call?.["ref"] ?? "unknown")} ` +
               `(provider=${String(call?.["provider"] ?? "missing")}, ` +
-              `model=${String(call?.["model"] ?? "missing")})`
-          )
+              `model=${String(call?.["model"] ?? "missing")})`,
+          ),
         ),
       ];
       throw new Error(
         `System test "${testName}" executed ${actual.join(", ")} during ${phase}; expected ${[
           ...allowedRefs,
-        ].join(" then ")}`
+        ].join(" then ")}`,
       );
     }
     if (allowedRefs.size > 1) {
@@ -664,7 +765,7 @@ export class TestRunner {
         const messageId = String(call?.["messageId"] ?? "");
         if (!messageId) {
           throw new Error(
-            `System test "${testName}" recorded a model call without turn identity during ${phase}`
+            `System test "${testName}" recorded a model call without turn identity during ${phase}`,
           );
         }
         // Model message ids end in the per-turn call index.
@@ -681,13 +782,16 @@ export class TestRunner {
           : turnCalls
               .slice(0, fallbackIndex)
               .some(
-                (call) => call?.["ref"] !== policy.primaryModel || call?.["outcome"] !== "failed"
-              ) || refs.slice(fallbackIndex).some((ref) => ref !== fallbackModel);
+                (call) =>
+                  call?.["ref"] !== policy.primaryModel ||
+                  call?.["outcome"] !== "failed",
+              ) ||
+              refs.slice(fallbackIndex).some((ref) => ref !== fallbackModel);
       });
       if (invalidTransition) {
         throw new Error(
           `System test "${testName}" has an invalid model transition during ${phase}; ` +
-            `expected each turn to use primary-only calls or failed ${policy.primaryModel} call(s) followed only by ${fallbackModel}`
+            `expected each turn to use primary-only calls or failed ${policy.primaryModel} call(s) followed only by ${fallbackModel}`,
         );
       }
     }
@@ -697,7 +801,8 @@ export class TestRunner {
       const hasPositiveUsage =
         (typeof totalTokens === "number" && totalTokens > 0) ||
         ["input", "output", "cacheRead", "reasoning"].some(
-          (key) => typeof usage?.[key] === "number" && (usage[key] as number) > 0
+          (key) =>
+            typeof usage?.[key] === "number" && (usage[key] as number) > 0,
         );
       return (
         typeof call?.["api"] === "string" &&
@@ -710,7 +815,7 @@ export class TestRunner {
     if (!metered) {
       throw new Error(
         `System test "${testName}" has model labels for ${policy.activeModel} but no ` +
-          `completed API/auth record with positive metered usage after ${phase}`
+          `completed API/auth record with positive metered usage after ${phase}`,
       );
     }
     return evidence;
@@ -721,13 +826,21 @@ function recordCleanupFailure(
   outcome: { result: TestResult; execution: TestExecutionResult } | undefined,
   phase: string,
   error: unknown,
-  humanPrefix?: string
+  humanPrefix?: string,
 ): void {
   if (!outcome) return;
   const failure = systemTestFailure(phase, error);
-  const message = humanPrefix ? `${humanPrefix}: ${failure.error.message}` : failure.error.message;
-  outcome.execution.cleanupErrors = [...(outcome.execution.cleanupErrors ?? []), message];
-  outcome.execution.cleanupFailures = [...(outcome.execution.cleanupFailures ?? []), failure];
+  const message = humanPrefix
+    ? `${humanPrefix}: ${failure.error.message}`
+    : failure.error.message;
+  outcome.execution.cleanupErrors = [
+    ...(outcome.execution.cleanupErrors ?? []),
+    message,
+  ];
+  outcome.execution.cleanupFailures = [
+    ...(outcome.execution.cleanupFailures ?? []),
+    failure,
+  ];
   outcome.execution.error ??= `Headless cleanup failed: ${message}`;
   if (outcome.result.passed) {
     outcome.result = {
@@ -742,7 +855,9 @@ function recordCleanupFailure(
     details: {
       ...(outcome.result.details ?? {}),
       cleanupErrors: [
-        ...((outcome.result.details?.["cleanupErrors"] as string[] | undefined) ?? []),
+        ...((outcome.result.details?.["cleanupErrors"] as
+          | string[]
+          | undefined) ?? []),
         message,
       ],
     },
@@ -756,7 +871,7 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 function provenanceFromSnapshot(
-  snapshot: SessionSnapshot
+  snapshot: SessionSnapshot,
 ): NonNullable<TestExecutionResult["provenance"]> {
   return {
     channelId: snapshot.channelId,
@@ -770,7 +885,7 @@ function provenanceFromSnapshot(
 function formatExecutionError(
   message: string,
   messages: readonly ChatMessage[],
-  snapshot?: SessionSnapshot
+  snapshot?: SessionSnapshot,
 ): string {
   const base = message;
   if (!/^Timed out waiting for agent to finish test/.test(base)) return base;
@@ -782,7 +897,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-const UNEXPECTED_TEST_PROMPT = /EUNEXPECTEDTESTPROMPT|Unexpected authority prompt in system test/iu;
+const UNEXPECTED_TEST_PROMPT =
+  /EUNEXPECTEDTESTPROMPT|Unexpected authority prompt in system test/iu;
 
 /**
  * An unexpected test-policy prompt is a harness/configuration failure, not a
@@ -794,9 +910,15 @@ function unexpectedTestPolicyFailure(message: ChatMessage): Error | null {
   if (message.contentType !== "invocation") return null;
   const payload = ((message as { invocation?: unknown }).invocation ??
     parseJson(message.content)) as InvocationLike | undefined;
-  const execution = isRecord(payload?.execution) ? payload.execution : undefined;
+  const execution = isRecord(payload?.execution)
+    ? payload.execution
+    : undefined;
   const status = asString(execution?.["status"]) ?? asString(payload?.status);
-  if (status !== "error" && status !== "failed" && execution?.["isError"] !== true) {
+  if (
+    status !== "error" &&
+    status !== "failed" &&
+    execution?.["isError"] !== true
+  ) {
     return null;
   }
   const candidates = [
@@ -810,7 +932,8 @@ function unexpectedTestPolicyFailure(message: ChatMessage): Error | null {
   ];
   for (const candidate of candidates) {
     if (candidate === undefined) continue;
-    const text = typeof candidate === "string" ? candidate : safeJson(candidate);
+    const text =
+      typeof candidate === "string" ? candidate : safeJson(candidate);
     if (UNEXPECTED_TEST_PROMPT.test(text)) {
       return new Error(clip(text, 2_000));
     }
@@ -820,45 +943,61 @@ function unexpectedTestPolicyFailure(message: ChatMessage): Error | null {
 
 function timeoutDiagnosticDetails(
   messages: readonly ChatMessage[],
-  snapshot?: SessionSnapshot
+  snapshot?: SessionSnapshot,
 ): string[] {
   const details: string[] = [];
   const pendingInvocations = (snapshot?.invocations ?? []).filter(
-    (invocation) => !isSettledInvocationStatus(invocation.status)
+    (invocation) => !isSettledInvocationStatus(invocation.status),
   );
   if (pendingInvocations.length > 0) {
     details.push(
       `Pending invocations: ${pendingInvocations
         .slice(0, 5)
-        .map((invocation) => `${invocation.name}:${invocation.status || "unknown"}`)
+        .map(
+          (invocation) =>
+            `${invocation.name}:${invocation.status || "unknown"}`,
+        )
         .join(
-          ", "
-        )}${pendingInvocations.length > 5 ? ` (+${pendingInvocations.length - 5} more)` : ""}.`
+          ", ",
+        )}${pendingInvocations.length > 5 ? ` (+${pendingInvocations.length - 5} more)` : ""}.`,
     );
   }
-  const lastLifecycle = [...messages].reverse().find((message) => message.lifecycle);
+  const lastLifecycle = [...messages]
+    .reverse()
+    .find((message) => message.lifecycle);
   if (lastLifecycle?.lifecycle) {
     const reason = lastLifecycle.lifecycle.reason
       ? ` reason=${lastLifecycle.lifecycle.reason}`
       : "";
     details.push(
-      `Last lifecycle: ${lastLifecycle.lifecycle.status}${reason} "${lastLifecycle.lifecycle.title}".`
+      `Last lifecycle: ${lastLifecycle.lifecycle.status}${reason} "${lastLifecycle.lifecycle.title}".`,
     );
   }
   const lastDiagnostic = [...messages]
     .reverse()
     .find((message) => message.diagnostic || message.error);
   if (lastDiagnostic) {
-    const code = lastDiagnostic.diagnostic?.code ? ` code=${lastDiagnostic.diagnostic.code}` : "";
+    const code = lastDiagnostic.diagnostic?.code
+      ? ` code=${lastDiagnostic.diagnostic.code}`
+      : "";
     const title =
-      lastDiagnostic.diagnostic?.title ?? lastDiagnostic.error ?? lastDiagnostic.content;
+      lastDiagnostic.diagnostic?.title ??
+      lastDiagnostic.error ??
+      lastDiagnostic.content;
     details.push(`Last diagnostic:${code} "${String(title).slice(0, 200)}".`);
   }
   return details;
 }
 
 function isSettledInvocationStatus(status: string): boolean {
-  return ["complete", "completed", "error", "failed", "cancelled", "abandoned"].includes(status);
+  return [
+    "complete",
+    "completed",
+    "error",
+    "failed",
+    "cancelled",
+    "abandoned",
+  ].includes(status);
 }
 
 interface InvocationLike {
@@ -894,13 +1033,14 @@ export interface SystemTestImplementationInspection {
 
 /** Exact anti-cheating boundary for ordinary agent-goal scenarios. */
 export function findSystemTestImplementationInspections(
-  execution: TestExecutionResult
+  execution: TestExecutionResult,
 ): SystemTestImplementationInspection[] {
   const found: SystemTestImplementationInspection[] = [];
   const seen = new Set<string>();
   const inspect = (invocation: InvocationLike | undefined) => {
     if (!invocation || typeof invocation !== "object") return;
-    const name = asString(invocation.name) ?? asString(invocation.method) ?? "(unknown)";
+    const name =
+      asString(invocation.name) ?? asString(invocation.method) ?? "(unknown)";
     if (!["read", "grep", "find", "ls", "eval"].includes(name)) return;
     const args = invocation.arguments;
     const serialized = args === undefined ? "" : safeJson(args);
@@ -915,9 +1055,8 @@ export function findSystemTestImplementationInspections(
   for (const message of execution.messages) {
     if (message.contentType !== "invocation") continue;
     inspect(
-      ((message as { invocation?: unknown }).invocation ?? parseJson(message.content)) as
-        | InvocationLike
-        | undefined
+      ((message as { invocation?: unknown }).invocation ??
+        parseJson(message.content)) as InvocationLike | undefined,
     );
   }
   for (const invocation of execution.snapshot?.invocations ?? []) {
@@ -926,16 +1065,22 @@ export function findSystemTestImplementationInspections(
   return found;
 }
 
-function collectToolFailures(execution: TestExecutionResult): ToolFailureSummary[] {
+function collectToolFailures(
+  execution: TestExecutionResult,
+): ToolFailureSummary[] {
   const failures: ToolFailureSummary[] = [];
   const seen = new Set<string>();
 
   const add = (summary: ToolFailureSummary) => {
     const key = summary.id
       ? `id:${summary.id}`
-      : [summary.name, summary.status, summary.error, summary.resultSummary, summary.source].join(
-          "\0"
-        );
+      : [
+          summary.name,
+          summary.status,
+          summary.error,
+          summary.resultSummary,
+          summary.source,
+        ].join("\0");
     if (seen.has(key)) return;
     seen.add(key);
     failures.push(summary);
@@ -948,13 +1093,16 @@ function collectToolFailures(execution: TestExecutionResult): ToolFailureSummary
     const summary = summarizeToolFailure(
       payload,
       "message",
-      (message as { error?: unknown }).error
+      (message as { error?: unknown }).error,
     );
     if (summary) add(summary);
   }
 
   for (const invocation of execution.snapshot?.invocations ?? []) {
-    const summary = summarizeToolFailure(invocation as InvocationLike, "snapshot");
+    const summary = summarizeToolFailure(
+      invocation as InvocationLike,
+      "snapshot",
+    );
     if (summary) add(summary);
   }
 
@@ -963,7 +1111,7 @@ function collectToolFailures(execution: TestExecutionResult): ToolFailureSummary
 
 function classifyToolFailures(
   failures: ToolFailureSummary[],
-  expected: TestCase["expectedToolFailures"]
+  expected: TestCase["expectedToolFailures"],
 ): ToolFailureSummary[] {
   return failures.map((failure) => {
     const builtIn = classifyBuiltInToolFailure({
@@ -979,42 +1127,55 @@ function classifyToolFailures(
       // classification and retain the invocation, but make the distinction
       // explicit so a guest-code exception cannot become an infrastructure
       // regression merely because the agent explored a bad input.
-      const text = `${failure.error ?? ""}\n${failure.resultSummary ?? ""}`.toLowerCase();
+      const text =
+        `${failure.error ?? ""}\n${failure.resultSummary ?? ""}`.toLowerCase();
       const deliberatelyExpected = expected?.some(
         (candidate) =>
           candidate.name === failure.name &&
-          (!candidate.errorIncludes || text.includes(candidate.errorIncludes.toLowerCase()))
+          (!candidate.errorIncludes ||
+            text.includes(candidate.errorIncludes.toLowerCase())),
       );
       return deliberatelyExpected
-        ? { ...failure, expected: true, diagnosticOnly: true, classification: builtIn }
+        ? {
+            ...failure,
+            expected: true,
+            diagnosticOnly: true,
+            classification: builtIn,
+          }
         : { ...failure, diagnosticOnly: true, classification: builtIn };
     }
     if (!expected?.length) return failure;
-    const text = `${failure.error ?? ""}\n${failure.resultSummary ?? ""}`.toLowerCase();
+    const text =
+      `${failure.error ?? ""}\n${failure.resultSummary ?? ""}`.toLowerCase();
     const matched = expected.some(
       (candidate) =>
         candidate.name === failure.name &&
-        (!candidate.errorIncludes || text.includes(candidate.errorIncludes.toLowerCase()))
+        (!candidate.errorIncludes ||
+          text.includes(candidate.errorIncludes.toLowerCase())),
     );
     return matched ? { ...failure, expected: true } : failure;
   });
 }
 
-function unexpectedToolFailures(failures: ToolFailureSummary[] | undefined): ToolFailureSummary[] {
+function unexpectedToolFailures(
+  failures: ToolFailureSummary[] | undefined,
+): ToolFailureSummary[] {
   return (failures ?? []).filter(isUnexpectedToolFailure);
 }
 
 function summarizeToolFailure(
   invocation: InvocationLike | undefined,
   source: ToolFailureSummary["source"],
-  messageError?: unknown
+  messageError?: unknown,
 ): ToolFailureSummary | null {
   if (!invocation || typeof invocation !== "object") return null;
   const exec = isRecord(invocation.execution) ? invocation.execution : {};
   const status = asString(exec.status) ?? asString(invocation.status);
-  const terminalOutcome = asString(exec.terminalOutcome) ?? asString(invocation.terminalOutcome);
+  const terminalOutcome =
+    asString(exec.terminalOutcome) ?? asString(invocation.terminalOutcome);
   const terminalReasonCode =
-    asString(exec.terminalReasonCode) ?? asString(invocation.terminalReasonCode);
+    asString(exec.terminalReasonCode) ??
+    asString(invocation.terminalReasonCode);
   const isError = exec.isError === true;
   const hasFailureStatus = status === "error" || status === "failed";
   const hasFailureOutcome = /error|fail/i.test(terminalOutcome ?? "");
@@ -1024,13 +1185,23 @@ function summarizeToolFailure(
     messageError ??
     (isError ? (exec.result ?? exec.description) : undefined);
 
-  if (!isError && !hasFailureStatus && !hasFailureOutcome && rawError === undefined) return null;
+  if (
+    !isError &&
+    !hasFailureStatus &&
+    !hasFailureOutcome &&
+    rawError === undefined
+  )
+    return null;
 
   const rawResult = invocation.result ?? exec.result;
   const resultDetails =
-    isRecord(rawResult) && isRecord(rawResult["details"]) ? rawResult["details"] : undefined;
+    isRecord(rawResult) && isRecord(rawResult["details"])
+      ? rawResult["details"]
+      : undefined;
   const nestedFailure =
-    resultDetails && isRecord(resultDetails["failure"]) ? resultDetails["failure"] : undefined;
+    resultDetails && isRecord(resultDetails["failure"])
+      ? resultDetails["failure"]
+      : undefined;
   const failureKind =
     asString(exec.failureKind) ??
     asString(invocation.failureKind) ??
@@ -1041,7 +1212,8 @@ function summarizeToolFailure(
     asString(invocation.failureCode) ??
     (resultDetails ? asString(resultDetails["failureCode"]) : undefined) ??
     (nestedFailure ? asString(nestedFailure["failureCode"]) : undefined);
-  const name = asString(invocation.name) ?? asString(invocation.method) ?? "(unknown)";
+  const name =
+    asString(invocation.name) ?? asString(invocation.method) ?? "(unknown)";
   return {
     id: asString(invocation.id),
     name,
@@ -1055,14 +1227,16 @@ function summarizeToolFailure(
       ? { failureKind }
       : {}),
     error: summarizeError(rawError),
-    resultSummary: rawResult === undefined ? undefined : summarizeValue(rawResult, 240),
+    resultSummary:
+      rawResult === undefined ? undefined : summarizeValue(rawResult, 240),
     source,
   };
 }
 
 function summarizeError(value: unknown): string | undefined {
   if (value === undefined) return undefined;
-  if (isRecord(value) && typeof value["error"] === "string") return clip(value["error"], 240);
+  if (isRecord(value) && typeof value["error"] === "string")
+    return clip(value["error"], 240);
   if (value instanceof Error) return clip(value.message, 240);
   return summarizeValue(value, 240);
 }
@@ -1097,7 +1271,9 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
 }
 
-export function validateAgentCompletionReport(result: TestExecutionResult): TestResult {
+export function validateAgentCompletionReport(
+  result: TestExecutionResult,
+): TestResult {
   if (result.error) {
     return {
       passed: false,
@@ -1111,14 +1287,18 @@ export function validateAgentCompletionReport(result: TestExecutionResult): Test
     };
   }
 
-  const final = findFinalAgentCompletionMessage(result.messages)?.content?.trim();
-  if (!final) return { passed: false, reason: "No agent completion report received" };
+  const final = findFinalAgentCompletionMessage(
+    result.messages,
+  )?.content?.trim();
+  if (!final)
+    return { passed: false, reason: "No agent completion report received" };
 
   const review = result.trajectoryReview ?? buildAgentTrajectoryReview(result);
   if (review.agentReportedOutcome === "conflicting") {
     return {
       passed: false,
-      reason: "Agent completion report contained conflicting completed and incomplete outcomes",
+      reason:
+        "Agent completion report contained conflicting completed and incomplete outcomes",
       details: { trajectoryReview: review },
     };
   }
@@ -1138,7 +1318,9 @@ export function validateAgentCompletionReport(result: TestExecutionResult): Test
 function buildAgentTrajectoryReview(result: TestExecutionResult) {
   const final = finalAgentCompletionMessage(result);
   const completed = /(?:^|\n)\s*Task completed\.(?=\s|$)/u.test(final ?? "");
-  const incomplete = /(?:^|\n)\s*Task not completed\.(?=\s|$)/u.test(final ?? "");
+  const incomplete = /(?:^|\n)\s*Task not completed\.(?=\s|$)/u.test(
+    final ?? "",
+  );
   const failures = unexpectedToolFailures(result.toolFailures);
   const failureCounts = new Map<string, number>();
   for (const failure of failures) {
@@ -1155,22 +1337,31 @@ function buildAgentTrajectoryReview(result: TestExecutionResult) {
     .slice(0, 8)
     .map(([name, count]) => ({ name, count }));
   const evidence = asRecord(result.modelExecutionEvidence);
-  const evidenceCalls = Array.isArray(evidence?.["calls"]) ? evidence["calls"].length : 0;
+  const evidenceCalls = Array.isArray(evidence?.["calls"])
+    ? evidence["calls"].length
+    : 0;
   const modelCallCount =
-    typeof evidence?.["totalCalls"] === "number" ? evidence["totalCalls"] : evidenceCalls;
+    typeof evidence?.["totalCalls"] === "number"
+      ? evidence["totalCalls"]
+      : evidenceCalls;
   const invocationCount = invocationNames.length;
   const substantialCompletionCount = result.messages.filter(
-    (message) => isAgentCompletionMessage(message) && message.content.trim().length >= 500
+    (message) =>
+      isAgentCompletionMessage(message) && message.content.trim().length >= 500,
   ).length;
   const subagentTranscriptAccessCount = invocationNames.filter(
-    (name) => name === "read_subagent" || name === "inspect_subagent"
+    (name) => name === "read_subagent" || name === "inspect_subagent",
   ).length;
   const potentialConfusionSignals = [
     ...(!final ? ["missing-completion-report"] : []),
-    ...(substantialCompletionCount > 1 ? ["multiple-substantial-completion-reports"] : []),
+    ...(substantialCompletionCount > 1
+      ? ["multiple-substantial-completion-reports"]
+      : []),
     ...(modelCallCount >= 16 ? ["high-model-call-count"] : []),
     ...(invocationCount >= 24 ? ["high-tool-invocation-count"] : []),
-    ...(subagentTranscriptAccessCount >= 2 ? ["subagent-transcript-chasing"] : []),
+    ...(subagentTranscriptAccessCount >= 2
+      ? ["subagent-transcript-chasing"]
+      : []),
     ...frequentOperations.map(({ name }) => `frequent-operation:${name}`),
     ...[...failureCounts]
       .filter(([, count]) => count > 1)
@@ -1200,18 +1391,26 @@ function buildAgentTrajectoryReview(result: TestExecutionResult) {
 
 function trajectoryInvocationNames(result: TestExecutionResult): string[] {
   if (result.snapshot?.invocations.length) {
-    return result.snapshot.invocations.map((invocation) => invocation.name || "(unknown)");
+    return result.snapshot.invocations.map(
+      (invocation) => invocation.name || "(unknown)",
+    );
   }
   return result.messages.flatMap((message) => {
     if (message.contentType !== "invocation") return [];
     const invocation = ((message as { invocation?: unknown }).invocation ??
       parseJson(message.content)) as InvocationLike | undefined;
-    return [asString(invocation?.name) ?? asString(invocation?.method) ?? "(unknown)"];
+    return [
+      asString(invocation?.name) ?? asString(invocation?.method) ?? "(unknown)",
+    ];
   });
 }
 
-function finalAgentCompletionMessage(result: TestExecutionResult): string | null {
-  return findFinalAgentCompletionMessage(result.messages)?.content?.trim() ?? null;
+function finalAgentCompletionMessage(
+  result: TestExecutionResult,
+): string | null {
+  return (
+    findFinalAgentCompletionMessage(result.messages)?.content?.trim() ?? null
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

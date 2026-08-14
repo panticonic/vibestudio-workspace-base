@@ -1,16 +1,35 @@
-import { HeadlessSession, type HeadlessWithAgentConfig, type SessionSnapshot } from "@workspace/agentic-session";
+import {
+  HeadlessSession,
+  type HeadlessWithAgentConfig,
+  type SessionSnapshot,
+} from "@workspace/agentic-session";
 import type { ConnectionConfig } from "@workspace/agentic-core";
-import { blobstore, gad, openPanel, panelTree, rpc, vcs, workers } from "@workspace/runtime";
-import { SYSTEM_TEST_AGENT_MODEL, systemTestModelRoute, type SystemTestThinkingLevel } from "./config.js";
+import {
+  blobstore,
+  gad,
+  openPanel,
+  panelTree,
+  rpc,
+  vcs,
+  workers,
+} from "@workspace/runtime";
+import {
+  SYSTEM_TEST_AGENT_MODEL,
+  systemTestModelRoute,
+  type SystemTestThinkingLevel,
+} from "./config.js";
 import { systemTestFailure } from "./structured-error.js";
 import {
   WorkspaceRepoFixtureLifecycle,
   type WorkspaceRepoFixtureCleanup,
   type WorkspaceRepoCreationScope,
-  type WorkspaceRepoFixtureState
+  type WorkspaceRepoFixtureState,
 } from "./workspace-repo-fixture.js";
 import type { AgentExecutionTestPolicySpec } from "@vibestudio/shared/authority/testPolicy";
-import { vcsStateNodeRefSchema, type VcsStateNodeRef } from "@vibestudio/service-schemas/vcs";
+import {
+  vcsStateNodeRefSchema,
+  type VcsStateNodeRef,
+} from "@vibestudio/service-schemas/vcs";
 import type { AttachedHostApprovalAuditEvent } from "@vibestudio/service-schemas/attachedHosts";
 import type { TestAuthorityPolicy } from "./types.js";
 import type { BlobReader } from "@workspace/agentic-protocol";
@@ -117,7 +136,7 @@ export interface SelfDevelopmentRepository {
 }
 
 function fixturePublicationAuthority(
-  fixture: (WorkspaceRepoCreationScope & { repoName: string | null }) | null
+  fixture: (WorkspaceRepoCreationScope & { repoName: string | null }) | null,
 ): AgentExecutionTestPolicySpec["authority"] {
   if (!fixture) return [];
   return [
@@ -131,17 +150,17 @@ function fixturePublicationAuthority(
       // repository fixture.
       resource: {
         kind: "prefix" as const,
-        prefix: "workspace-source-change:publication:"
+        prefix: "workspace-source-change:publication:",
       },
       tier: "gated",
-      decision: "once"
-    }
+      decision: "once",
+    },
   ];
 }
 
 function fixtureContextAuthority(
   policy: AgentExecutionTestPolicySpec | null,
-  counteractionRepoPaths: readonly string[]
+  counteractionRepoPaths: readonly string[],
 ): AgentExecutionTestPolicySpec | null {
   if (!policy || counteractionRepoPaths.length === 0) return policy;
   const repoPaths = [...new Set(counteractionRepoPaths)].sort();
@@ -154,12 +173,12 @@ function fixtureContextAuthority(
         capability: { kind: "exact" as const, key: "workspace-repo-delete" },
         resource: {
           kind: "exact" as const,
-          key: `workspace-repo-delete:${repoPath}`
+          key: `workspace-repo-delete:${repoPath}`,
         },
         tier: "critical" as const,
-        decision: "once" as const
-      }))
-    ]
+        decision: "once" as const,
+      })),
+    ],
   };
 }
 
@@ -179,11 +198,16 @@ export class HeadlessRunner {
     sessionPolicies: Map<HeadlessSession, ModelPolicyState>;
   };
   private readonly testName: string | null;
-  private readonly workspaceRepoFixture: (WorkspaceRepoCreationScope & { repoName: string | null }) | null;
+  private readonly workspaceRepoFixture:
+    | (WorkspaceRepoCreationScope & { repoName: string | null })
+    | null;
   private readonly workspaceRepoFixtureLifecycle: WorkspaceRepoFixtureLifecycle | null;
   private readonly testAuthorityPolicy: AgentExecutionTestPolicySpec | null;
   private developmentTargetPromise: Promise<string> | null = null;
-  private readonly sessionRpcFaultEvidence = new WeakMap<HeadlessSession, SystemTestRpcFaultEvidence[]>();
+  private readonly sessionRpcFaultEvidence = new WeakMap<
+    HeadlessSession,
+    SystemTestRpcFaultEvidence[]
+  >();
 
   /**
    * Model is per-agent, so each spawned headless agent is created with the
@@ -202,11 +226,14 @@ export class HeadlessRunner {
     },
     testName: string | null = null,
     workspaceRepoFixture: HeadlessRunner["workspaceRepoFixture"] = null,
-    testAuthorityPolicy: AgentExecutionTestPolicySpec | null = null
+    testAuthorityPolicy: AgentExecutionTestPolicySpec | null = null,
   ) {
     this.contextId = contextId;
     const primaryModel = opts?.model ?? SYSTEM_TEST_AGENT_MODEL;
-    const modelRoute = systemTestModelRoute(primaryModel, opts?.model === undefined);
+    const modelRoute = systemTestModelRoute(
+      primaryModel,
+      opts?.model === undefined,
+    );
     this.shared = shared ?? {
       sessions: new Set(),
       testNames: new Map(),
@@ -215,8 +242,8 @@ export class HeadlessRunner {
       modelPolicy: {
         ...modelRoute,
         activeModel: primaryModel,
-        activations: []
-      }
+        activations: [],
+      },
     };
     this.testName = testName;
     this.testAuthorityPolicy = testAuthorityPolicy;
@@ -227,17 +254,24 @@ export class HeadlessRunner {
             vcs,
             blobstore,
             createContext: (input) => {
-              const contextPolicy = fixtureContextAuthority(testAuthorityPolicy, input?.counteractionRepoPaths ?? []);
-              return rpc.call<{ contextId: string }>("main", "runtime.createContext", [
-                contextPolicy ? { testPolicy: contextPolicy } : {}
-              ]);
+              const contextPolicy = fixtureContextAuthority(
+                testAuthorityPolicy,
+                input?.counteractionRepoPaths ?? [],
+              );
+              return rpc.call<{ contextId: string }>(
+                "main",
+                "runtime.createContext",
+                [contextPolicy ? { testPolicy: contextPolicy } : {}],
+              );
             },
             destroyContext: (contextId) =>
-              rpc.call<void>("main", "runtime.destroyContext", [{ contextId, recursive: true }])
+              rpc.call<void>("main", "runtime.destroyContext", [
+                { contextId, recursive: true },
+              ]),
           },
           testName ?? "unknown",
           workspaceRepoFixture.repoName,
-          workspaceRepoFixture
+          workspaceRepoFixture,
         )
       : null;
   }
@@ -252,12 +286,27 @@ export class HeadlessRunner {
     return this.workspaceRepoFixture?.repoName ?? null;
   }
 
+  /**
+   * Put harness-created task inputs where the agent first looks: in the task
+   * turn itself. The system prompt still owns authority and isolation policy;
+   * this block is only concrete resource discovery, shared by every
+   * fixture-backed test.
+   */
+  withTaskResources(prompt: string): string {
+    const fixture = this.workspaceRepoFixture;
+    if (!fixture || fixture.kind === "created-repository") return prompt;
+    const repoPath = `${fixture.section}/${fixture.repoName}`;
+    return `Task resources:\n- Disposable repository: ${repoPath}\n\n${prompt}`;
+  }
+
   /** Serializable evidence for inspect/status output. */
   modelPolicySnapshot(session?: HeadlessSession): Readonly<ModelPolicyState> {
-    const policy = (session && this.shared.sessionPolicies.get(session)) ?? this.shared.modelPolicy;
+    const policy =
+      (session && this.shared.sessionPolicies.get(session)) ??
+      this.shared.modelPolicy;
     return {
       ...policy,
-      activations: policy.activations.map((activation) => ({ ...activation }))
+      activations: policy.activations.map((activation) => ({ ...activation })),
     };
   }
 
@@ -267,7 +316,7 @@ export class HeadlessRunner {
     opts?: {
       workspaceRepoFixture?: WorkspaceRepoCreationScope;
       authorityPolicy?: TestAuthorityPolicy;
-    }
+    },
   ): HeadlessRunner {
     const repoNameStem = `system-test-${slugifyTestName(testName)}-`;
     const workspaceRepoFixture = opts?.workspaceRepoFixture
@@ -276,7 +325,7 @@ export class HeadlessRunner {
             opts.workspaceRepoFixture.kind === "created-repository"
               ? null
               : `${repoNameStem}${crypto.randomUUID().slice(0, 8)}`,
-          ...opts.workspaceRepoFixture
+          ...opts.workspaceRepoFixture,
         }
       : null;
     const authorityPolicy =
@@ -287,7 +336,9 @@ export class HeadlessRunner {
       this.contextId,
       {
         model: this.shared.modelPolicy.primaryModel,
-        ...(this.shared.thinkingLevel ? { thinkingLevel: this.shared.thinkingLevel } : {})
+        ...(this.shared.thinkingLevel
+          ? { thinkingLevel: this.shared.thinkingLevel }
+          : {}),
       },
       this.shared,
       testName,
@@ -305,9 +356,9 @@ export class HeadlessRunner {
                   model: this.shared.modelPolicy.fallbackModel,
                   thinkingLevel: "low",
                   on: ["usage_limit_terminal"],
-                  scope: "all-turns"
+                  scope: "all-turns",
                 }
-              : "disabled"
+              : "disabled",
         },
         authority: [
           {
@@ -315,69 +366,69 @@ export class HeadlessRunner {
             capability: { kind: "exact", key: "credential.use" },
             resource: { kind: "exact", key: "credential.use" },
             tier: "gated",
-            decision: "once"
+            decision: "once",
           },
           {
             ruleId: "headless-channel",
             capability: { kind: "exact", key: "workspace-service:channel" },
             resource: {
               kind: "prefix",
-              prefix: "do:workers/pubsub-channel:PubSubChannel:headless-"
+              prefix: "do:workers/pubsub-channel:PubSubChannel:headless-",
             },
             tier: "gated",
-            decision: "once"
+            decision: "once",
           },
           {
             ruleId: "subagent-task-channels",
             capability: { kind: "exact", key: "workspace-service:channel" },
             resource: {
               kind: "prefix",
-              prefix: "do:workers/pubsub-channel:PubSubChannel:task-"
+              prefix: "do:workers/pubsub-channel:PubSubChannel:task-",
             },
             tier: "gated",
-            decision: "once"
+            decision: "once",
           },
           {
             ruleId: "workspace-state-runtime",
             capability: {
               kind: "exact",
-              key: "workspace-service:workspace.state"
+              key: "workspace-service:workspace.state",
             },
             resource: {
               kind: "prefix",
-              prefix: "do:vibestudio/internal:WorkspaceDO:"
+              prefix: "do:vibestudio/internal:WorkspaceDO:",
             },
             tier: "gated",
-            decision: "once"
+            decision: "once",
           },
           {
             ruleId: "semantic-workspace",
             capability: {
               kind: "exact",
-              key: "workspace-service:gad.workspace"
+              key: "workspace-service:gad.workspace",
             },
             resource: {
               kind: "exact",
-              key: "do:workers/workspace-source:GadWorkspaceDO:workspace"
+              key: "do:workers/workspace-source:GadWorkspaceDO:workspace",
             },
             tier: "gated",
-            decision: "once"
+            decision: "once",
           },
           {
             ruleId: "model-settings",
             capability: { kind: "exact", key: "workspace-service:models" },
             resource: {
               kind: "exact",
-              key: "do:workers/model-settings:ModelSettingsDO:workspace-model-settings"
+              key: "do:workers/model-settings:ModelSettingsDO:workspace-model-settings",
             },
             tier: "gated",
-            decision: "once"
+            decision: "once",
           },
           ...fixturePublicationAuthority(workspaceRepoFixture),
-          ...(authorityPolicy?.authority ?? [])
+          ...(authorityPolicy?.authority ?? []),
         ],
-        unexpectedPrompts: "fail"
-      }
+        unexpectedPrompts: "fail",
+      },
     );
   }
 
@@ -397,7 +448,7 @@ export class HeadlessRunner {
    */
   async cleanupWorkspaceRepoFixture(
     state: WorkspaceRepoFixtureState,
-    onPhase?: (phase: string) => void
+    onPhase?: (phase: string) => void,
   ): Promise<WorkspaceRepoFixtureCleanup> {
     return this.requireWorkspaceRepoFixtureLifecycle().cleanup(state, onPhase);
   }
@@ -446,26 +497,34 @@ export class HeadlessRunner {
   }): Promise<HeadlessSession> {
     const policy = this.shared.modelPolicy;
     const model = policy.activeModel;
-    const contextMode = opts?.context ?? (this.workspaceRepoFixture ? "task" : "isolated");
-    const taskContextId = this.workspaceRepoFixtureLifecycle?.taskContextId ?? null;
+    const contextMode =
+      opts?.context ?? (this.workspaceRepoFixture ? "task" : "isolated");
+    const taskContextId =
+      this.workspaceRepoFixtureLifecycle?.taskContextId ?? null;
     if (contextMode === "task" && !taskContextId) {
-      throw new Error("Workspace repository fixture must be prepared before spawning its task agent");
+      throw new Error(
+        "Workspace repository fixture must be prepared before spawning its task agent",
+      );
     }
     const agentContextId =
-      contextMode === "parent" ? this.contextId : contextMode === "task" ? taskContextId : undefined;
+      contextMode === "parent"
+        ? this.contextId
+        : contextMode === "task"
+          ? taskContextId
+          : undefined;
     const fixturePrompt = this.workspaceRepoFixture
       ? this.workspaceRepoFixture.kind === "created-repository"
         ? `\n\nHarness-owned test scope: this task owns exactly one repository that it creates under ${JSON.stringify(
-            `${this.workspaceRepoFixture.section}/`
+            `${this.workspaceRepoFixture.section}/`,
           )}. All pre-existing repositories and every other newly created repository are outside the test scope.`
         : this.workspaceRepoFixture.kind === "buildable-panel-with-derived"
           ? `\n\nHarness-owned test scope: the disposable source repository ${JSON.stringify(
-              `${this.workspaceRepoFixture.section}/${this.workspaceRepoFixture.repoName}`
+              `${this.workspaceRepoFixture.section}/${this.workspaceRepoFixture.repoName}`,
             )} is already present in this context. This task owns that source and exactly one derived repository it creates under ${JSON.stringify(
-              `${this.workspaceRepoFixture.section}/`
+              `${this.workspaceRepoFixture.section}/`,
             )}; all other repositories are outside the test scope.`
           : `\n\nHarness-owned test scope: the exact disposable repository ${JSON.stringify(
-              `${this.workspaceRepoFixture.section}/${this.workspaceRepoFixture.repoName}`
+              `${this.workspaceRepoFixture.section}/${this.workspaceRepoFixture.repoName}`,
             )} is already present in this context. It is the only repository owned by this test; ` +
             `all other repositories are outside the fixture scope.`
       : "";
@@ -475,14 +534,16 @@ export class HeadlessRunner {
       targetId: string,
       method: string,
       args: unknown[],
-      options?: { timeoutMs?: number; signal?: AbortSignal }
+      options?: { timeoutMs?: number; signal?: AbortSignal },
     ): Promise<R> => {
       const key = `call:${method}`;
       const occurrence = (occurrenceByOperation.get(key) ?? 0) + 1;
       occurrenceByOperation.set(key, occurrence);
       const fault = opts?.rpcFaults?.find(
         (candidate) =>
-          candidate.transport === "call" && candidate.method === method && (candidate.occurrence ?? 1) === occurrence
+          candidate.transport === "call" &&
+          candidate.method === method &&
+          (candidate.occurrence ?? 1) === occurrence,
       );
       if (fault) {
         rpcFaultEvidence.push({
@@ -491,9 +552,12 @@ export class HeadlessRunner {
           occurrence,
           injected: true,
           message: fault.message,
-          ...(fault.code ? { code: fault.code } : {})
+          ...(fault.code ? { code: fault.code } : {}),
         });
-        throw Object.assign(new Error(fault.message), fault.code ? { code: fault.code } : {});
+        throw Object.assign(
+          new Error(fault.message),
+          fault.code ? { code: fault.code } : {},
+        );
       }
       return rpcConfig.call<R>(targetId, method, args, options);
     };
@@ -508,7 +572,7 @@ export class HeadlessRunner {
           (candidate) =>
             candidate.transport === "stream" &&
             candidate.method === method &&
-            (candidate.occurrence ?? 1) === occurrence
+            (candidate.occurrence ?? 1) === occurrence,
         );
         if (fault) {
           rpcFaultEvidence.push({
@@ -517,9 +581,12 @@ export class HeadlessRunner {
             occurrence,
             injected: true,
             message: fault.message,
-            ...(fault.code ? { code: fault.code } : {})
+            ...(fault.code ? { code: fault.code } : {}),
           });
-          throw Object.assign(new Error(fault.message), fault.code ? { code: fault.code } : {});
+          throw Object.assign(
+            new Error(fault.message),
+            fault.code ? { code: fault.code } : {},
+          );
         }
         return rpcConfig.stream(targetId, method, args, options);
       },
@@ -530,34 +597,44 @@ export class HeadlessRunner {
               const registration = rpcConfig.registerResidentSession!(...args);
               return {
                 transport: {
-                  call: <R = unknown>(targetId: string, method: string, callArgs: unknown[]) =>
-                    callWithFault<R>(targetId, method, callArgs)
+                  call: <R = unknown>(
+                    targetId: string,
+                    method: string,
+                    callArgs: unknown[],
+                  ) => callWithFault<R>(targetId, method, callArgs),
                 },
                 close: () => registration.close(),
                 ...(registration.relationshipEnded
                   ? {
-                      relationshipEnded: () => registration.relationshipEnded!()
+                      relationshipEnded: () =>
+                        registration.relationshipEnded!(),
                     }
-                  : {})
+                  : {}),
               };
-            }
+            },
           }
-        : {})
+        : {}),
     };
-    const recoveryCoordinator = opts?.recoverSubscriptions ? createRecoveryCoordinator() : undefined;
+    const recoveryCoordinator = opts?.recoverSubscriptions
+      ? createRecoveryCoordinator()
+      : undefined;
     const session = await HeadlessSession.createWithAgent({
       config: {
         clientId: rpc.selfId,
         rpc: faultingRpc,
-        ...(recoveryCoordinator ? { recoveryCoordinator } : {})
+        ...(recoveryCoordinator ? { recoveryCoordinator } : {}),
       },
-      rpcCall: (t: string, m: string, args: unknown[], options) => rpcConfig.call(t, m, args, options),
+      rpcCall: (t: string, m: string, args: unknown[], options) =>
+        rpcConfig.call(t, m, args, options),
       source: opts?.source ?? "workers/agent-worker",
       className: opts?.className ?? "AiChatWorker",
       ...(agentContextId ? { contextId: agentContextId } : {}),
-      ...(!agentContextId && this.testAuthorityPolicy ? { testPolicy: this.testAuthorityPolicy } : {}),
+      ...(!agentContextId && this.testAuthorityPolicy
+        ? { testPolicy: this.testAuthorityPolicy }
+        : {}),
       includeSyntheticPanelUiMethods: opts?.syntheticPanelUiTools === true,
-      includeValidationRetryProbeMethod: opts?.validationRetryProbeTool === true,
+      includeValidationRetryProbeMethod:
+        opts?.validationRetryProbeTool === true,
       ...(opts?.methods ? { methods: opts.methods } : {}),
       // The model rides the spawned agent's CREATION config (per-agent, seeded
       // from stateArgs.agentConfig) so it inherits the orchestrator's model.
@@ -569,16 +646,21 @@ export class HeadlessRunner {
         systemPrompt: `${SYSTEM_TEST_AGENT_PROMPT}${fixturePrompt}${opts?.additionalSystemPrompt ?? ""}`,
         systemPromptMode: "append",
         model,
-        ...(this.shared.thinkingLevel ? { thinkingLevel: this.shared.thinkingLevel } : {}),
-        ...(policy.fallbackModel && policy.fallbackThinkingLevel && policy.fallbackOn && policy.fallbackScope
+        ...(this.shared.thinkingLevel
+          ? { thinkingLevel: this.shared.thinkingLevel }
+          : {}),
+        ...(policy.fallbackModel &&
+        policy.fallbackThinkingLevel &&
+        policy.fallbackOn &&
+        policy.fallbackScope
           ? {
               fallbackModel: policy.fallbackModel,
               fallbackThinkingLevel: policy.fallbackThinkingLevel,
               fallbackOn: [...policy.fallbackOn],
-              fallbackScope: policy.fallbackScope
+              fallbackScope: policy.fallbackScope,
             }
-          : {})
-      }
+          : {}),
+      },
     });
     this.sessionRpcFaultEvidence.set(session, rpcFaultEvidence);
     this.shared.sessions.add(session);
@@ -590,13 +672,15 @@ export class HeadlessRunner {
       fallbackThinkingLevel: policy.fallbackThinkingLevel,
       fallbackOn: policy.fallbackOn,
       fallbackScope: policy.fallbackScope,
-      activations: []
+      activations: [],
     };
     this.shared.sessionPolicies.set(session, sessionPolicy);
     return session;
   }
 
-  rpcFaultEvidence(session: HeadlessSession): readonly SystemTestRpcFaultEvidence[] {
+  rpcFaultEvidence(
+    session: HeadlessSession,
+  ): readonly SystemTestRpcFaultEvidence[] {
     return [...(this.sessionRpcFaultEvidence.get(session) ?? [])];
   }
 
@@ -605,7 +689,7 @@ export class HeadlessRunner {
   snapshotAll(): Array<{ testName: string | null; snapshot: SessionSnapshot }> {
     return [...this.shared.sessions].map((session) => ({
       testName: this.shared.testNames.get(session) ?? null,
-      snapshot: session.snapshot()
+      snapshot: session.snapshot(),
     }));
   }
 
@@ -617,32 +701,59 @@ export class HeadlessRunner {
     const diagnostics: Record<string, unknown> = {
       generatedAt: new Date().toISOString(),
       contextId: this.contextId,
-      channelId
+      channelId,
     };
     try {
-      diagnostics["buildProvenance"] = await rpc.call("main", "build.inspectBuildProvenance", [
-        "@workspace-skills/system-testing"
-      ]);
+      diagnostics["buildProvenance"] = await rpc.call(
+        "main",
+        "build.inspectBuildProvenance",
+        ["@workspace-skills/system-testing"],
+      );
     } catch (err) {
-      diagnostics["buildProvenanceFailure"] = systemTestFailure("diagnostic:build-provenance", err);
+      diagnostics["buildProvenanceFailure"] = systemTestFailure(
+        "diagnostic:build-provenance",
+        err,
+      );
     }
     try {
-      diagnostics["durableWork"] = await rpc.call("main", "durableWork.inspect", []);
+      diagnostics["durableWork"] = await rpc.call(
+        "main",
+        "durableWork.inspect",
+        [],
+      );
     } catch (err) {
-      diagnostics["durableWorkFailure"] = systemTestFailure("diagnostic:durable-work", err);
+      diagnostics["durableWorkFailure"] = systemTestFailure(
+        "diagnostic:durable-work",
+        err,
+      );
     }
     if (channelId) {
       try {
-        const service = (await rpc.call("main", "workers.resolveService", ["vibestudio.channel.v1", channelId])) as {
+        const service = (await rpc.call("main", "workers.resolveService", [
+          "vibestudio.channel.v1",
+          channelId,
+        ])) as {
           kind?: unknown;
           targetId?: unknown;
         };
-        if (service.kind !== "durable-object" || typeof service.targetId !== "string") {
-          throw new Error("channel service did not resolve to a Durable Object");
+        if (
+          service.kind !== "durable-object" ||
+          typeof service.targetId !== "string"
+        ) {
+          throw new Error(
+            "channel service did not resolve to a Durable Object",
+          );
         }
-        diagnostics["channelDelivery"] = await rpc.call(service.targetId, "getState", []);
+        diagnostics["channelDelivery"] = await rpc.call(
+          service.targetId,
+          "getState",
+          [],
+        );
       } catch (err) {
-        diagnostics["channelDeliveryFailure"] = systemTestFailure("diagnostic:channel-delivery", err);
+        diagnostics["channelDeliveryFailure"] = systemTestFailure(
+          "diagnostic:channel-delivery",
+          err,
+        );
       }
       try {
         diagnostics["agentHealth"] = await gad.inspectAgentHealth({
@@ -650,10 +761,13 @@ export class HeadlessRunner {
           branchId: opts?.branchId,
           limit: 50,
           envelopeLimit: 25,
-          storageLimit: 25
+          storageLimit: 25,
         });
       } catch (err) {
-        diagnostics["agentHealthFailure"] = systemTestFailure("diagnostic:agent-health", err);
+        diagnostics["agentHealthFailure"] = systemTestFailure(
+          "diagnostic:agent-health",
+          err,
+        );
       }
     }
     return diagnostics;
@@ -674,19 +788,25 @@ export class HeadlessRunner {
         {
           scope: { key: subKey, lifecycle: "finite" },
           runId,
-          source: { kind: "inline", code: "await new Promise(() => {});" }
-        }
+          source: { kind: "inline", code: "await new Promise(() => {});" },
+        },
       ]);
       activated = true;
       if (started.runId !== runId) {
-        throw new Error(`eval.start returned ${started.runId}, expected ${runId}`);
+        throw new Error(
+          `eval.start returned ${started.runId}, expected ${runId}`,
+        );
       }
-      const cancel = await rpc.call<{ ok: true; forcedReset: boolean }>("main", "eval.cancel", [
-        { scopeKey: subKey, runId }
-      ]);
-      const terminal = await rpc.call<{ status: string; result?: unknown }>("main", "eval.get", [
-        { scopeKey: subKey, runId }
-      ]);
+      const cancel = await rpc.call<{ ok: true; forcedReset: boolean }>(
+        "main",
+        "eval.cancel",
+        [{ scopeKey: subKey, runId }],
+      );
+      const terminal = await rpc.call<{ status: string; result?: unknown }>(
+        "main",
+        "eval.get",
+        [{ scopeKey: subKey, runId }],
+      );
       return { runId, cancel, terminal };
     } finally {
       if (activated) {
@@ -712,46 +832,60 @@ export class HeadlessRunner {
           runId,
           source: {
             kind: "inline",
-            code: 'console.log("SYSTEM_TEST_EVAL_EVENT"); return { eventProbe: true };'
-          }
-        }
+            code: 'console.log("SYSTEM_TEST_EVAL_EVENT"); return { eventProbe: true };',
+          },
+        },
       ]);
       activated = true;
       if (started.runId !== runId) {
-        throw new Error(`eval.start returned ${started.runId}, expected ${runId}`);
+        throw new Error(
+          `eval.start returned ${started.runId}, expected ${runId}`,
+        );
       }
       let terminal: { status: string; result?: unknown } | null = null;
       const settleDeadline = Date.now() + 30_000;
       while (Date.now() < settleDeadline) {
-        terminal = await rpc.call<{ status: string; result?: unknown }>("main", "eval.get", [
-          { scopeKey: subKey, runId }
-        ]);
-        if (terminal.status === "done" || terminal.status === "cancelled") break;
+        terminal = await rpc.call<{ status: string; result?: unknown }>(
+          "main",
+          "eval.get",
+          [{ scopeKey: subKey, runId }],
+        );
+        if (terminal.status === "done" || terminal.status === "cancelled")
+          break;
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      if (!terminal || (terminal.status !== "done" && terminal.status !== "cancelled")) {
-        throw new Error(`eval run ${runId} did not settle before event pagination`);
+      if (
+        !terminal ||
+        (terminal.status !== "done" && terminal.status !== "cancelled")
+      ) {
+        throw new Error(
+          `eval run ${runId} did not settle before event pagination`,
+        );
       }
       const readPage = () =>
         rpc.call<EvalEventPagesProbe["firstPage"]>("main", "eval.events", [
-          { scopeKey: subKey, runId, after: 0, limit: 1 }
+          { scopeKey: subKey, runId, after: 0, limit: 1 },
         ]);
       const firstPage = await readPage();
       const repeatedFirstPage = await readPage();
       const pages: EvalEventPagesProbe["pages"] = [];
       let after = 0;
       do {
-        const page = await rpc.call<EvalEventPagesProbe["firstPage"]>("main", "eval.events", [
-          { scopeKey: subKey, runId, after, limit: 1 }
-        ]);
+        const page = await rpc.call<EvalEventPagesProbe["firstPage"]>(
+          "main",
+          "eval.events",
+          [{ scopeKey: subKey, runId, after, limit: 1 }],
+        );
         pages.push(page);
         after = page.next;
         if (!page.hasMore) break;
       } while (pages.length < 256);
-      if (pages.at(-1)?.hasMore) throw new Error(`eval event stream exceeded bounded pagination`);
+      if (pages.at(-1)?.hasMore)
+        throw new Error(`eval event stream exceeded bounded pagination`);
       return { runId, firstPage, repeatedFirstPage, pages, terminal };
     } finally {
-      if (activated) await rpc.call("main", "eval.dispose", [{ scopeKey: subKey }]);
+      if (activated)
+        await rpc.call("main", "eval.dispose", [{ scopeKey: subKey }]);
     }
   }
 
@@ -762,8 +896,14 @@ export class HeadlessRunner {
    * live eval invocation so durable invocation replay crosses a real vessel
    * instance loss without disrupting unrelated agents.
    */
-  async faultAbortAgentVesselForReplayProbe(targetId: string): Promise<AgentVesselFaultProbe> {
-    const result = await rpc.call<{ aborted: true }>("main", "runtime.faultAbortAgentVessel", [{ targetId }]);
+  async faultAbortAgentVesselForReplayProbe(
+    targetId: string,
+  ): Promise<AgentVesselFaultProbe> {
+    const result = await rpc.call<{ aborted: true }>(
+      "main",
+      "runtime.faultAbortAgentVessel",
+      [{ targetId }],
+    );
     return { targetId, aborted: result.aborted };
   }
 
@@ -776,21 +916,21 @@ export class HeadlessRunner {
     const status = await vcs.status({ contextId: this.contextId });
     const repository = await vcs.resolveRepository({
       state: status.workingHead,
-      repoPath: "projects/vibestudio"
+      repoPath: "projects/vibestudio",
     });
     if (!repository) {
       throw Object.assign(
         new Error(
-          "Self-development prerequisite unavailable: projects/vibestudio is not adopted in the harness context"
+          "Self-development prerequisite unavailable: projects/vibestudio is not adopted in the harness context",
         ),
-        { code: "ESELFDEVELOPMENT_REPOSITORY" }
+        { code: "ESELFDEVELOPMENT_REPOSITORY" },
       );
     }
     return {
       contextId: this.contextId,
       repositoryId: repository.repositoryId,
       repoPath: "projects/vibestudio",
-      workingHead: status.workingHead
+      workingHead: status.workingHead,
     };
   }
 
@@ -799,19 +939,21 @@ export class HeadlessRunner {
     const repoPath = "projects/vibestudio-workspace-base" as const;
     const repository = await vcs.resolveRepository({
       state: status.workingHead,
-      repoPath
+      repoPath,
     });
     if (!repository) {
       throw Object.assign(
-        new Error(`Self-development prerequisite unavailable: ${repoPath} is not adopted in the harness context`),
-        { code: "ESELFDEVELOPMENT_BASE_REPOSITORY" }
+        new Error(
+          `Self-development prerequisite unavailable: ${repoPath} is not adopted in the harness context`,
+        ),
+        { code: "ESELFDEVELOPMENT_BASE_REPOSITORY" },
       );
     }
     return {
       contextId: this.contextId,
       repositoryId: repository.repositoryId,
       repoPath,
-      workingHead: status.workingHead
+      workingHead: status.workingHead,
     };
   }
 
@@ -840,13 +982,15 @@ export class HeadlessRunner {
       | "writeNativeTerminal"
       | "stopNativeTool"
       | "closeSession",
-    input?: unknown
+    input?: unknown,
   ): Promise<T> {
     this.developmentTargetPromise ??= workers
       .resolveService("vibestudio.development.v1")
       .then((service) => {
         if (service.kind !== "durable-object" || !service.targetId) {
-          throw new Error("vibestudio.development.v1 did not resolve to a Durable Object service");
+          throw new Error(
+            "vibestudio.development.v1 did not resolve to a Durable Object service",
+          );
         }
         return service.targetId;
       })
@@ -863,9 +1007,11 @@ export class HeadlessRunner {
     sessionId: string,
     service: string,
     method: string,
-    args: unknown[]
+    args: unknown[],
   ): Promise<T> {
-    return rpc.call<T>("main", "attachedHosts.invokeAttached", [{ sessionId, service, method, args }]);
+    return rpc.call<T>("main", "attachedHosts.invokeAttached", [
+      { sessionId, service, method, args },
+    ]);
   }
 
   /** Open and attest the owner-scoped ordinary attached-host client. */
@@ -883,16 +1029,21 @@ export class HeadlessRunner {
   /** Read bounded parent-captured approval evidence without changing child results. */
   async listAttachedDevelopmentHostApprovalAudit(
     sessionId: string,
-    input: { after?: string; limit?: number } = {}
+    input: { after?: string; limit?: number } = {},
   ): Promise<{
     events: AttachedHostApprovalAuditEvent[];
     nextCursor: string | null;
   }> {
-    return rpc.call("main", "attachedHosts.listApprovalAudit", [{ sessionId, ...input }]);
+    return rpc.call("main", "attachedHosts.listApprovalAudit", [
+      { sessionId, ...input },
+    ]);
   }
 
   /** Author one disposable semantic marker used to prove dirty-state capture. */
-  async createSelfDevelopmentDirtyMarker(repository: SelfDevelopmentRepository, commandId: string): Promise<unknown> {
+  async createSelfDevelopmentDirtyMarker(
+    repository: SelfDevelopmentRepository,
+    commandId: string,
+  ): Promise<unknown> {
     return vcs.edit({
       contextId: repository.contextId,
       commandId,
@@ -905,11 +1056,11 @@ export class HeadlessRunner {
           path: `.vibestudio-system-test/${commandId.replace(/[^a-zA-Z0-9._-]/gu, "-")}.txt`,
           content: {
             kind: "text",
-            text: "self-development dirty-state probe\n"
+            text: "self-development dirty-state probe\n",
           },
-          mode: 0o644
-        }
-      ]
+          mode: 0o644,
+        },
+      ],
     });
   }
 
@@ -917,18 +1068,22 @@ export class HeadlessRunner {
   async discardSelfDevelopmentDirtyMarker(
     contextId: string,
     expectedWorkingHead: unknown,
-    commandId: string
+    commandId: string,
   ): Promise<unknown> {
     return vcs.discard({
       contextId,
       commandId,
-      expectedWorkingHead: vcsStateNodeRefSchema.parse(expectedWorkingHead)
+      expectedWorkingHead: vcsStateNodeRefSchema.parse(expectedWorkingHead),
     });
   }
 
-  private requireWorkspaceRepoFixture(): NonNullable<HeadlessRunner["workspaceRepoFixture"]> {
+  private requireWorkspaceRepoFixture(): NonNullable<
+    HeadlessRunner["workspaceRepoFixture"]
+  > {
     if (!this.workspaceRepoFixture) {
-      throw new Error("Workspace repo fixture lifecycle was requested for a test without a fixture");
+      throw new Error(
+        "Workspace repo fixture lifecycle was requested for a test without a fixture",
+      );
     }
     return this.workspaceRepoFixture;
   }
