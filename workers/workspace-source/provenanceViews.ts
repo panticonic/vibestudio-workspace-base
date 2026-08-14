@@ -44,14 +44,31 @@ export interface ProvRelationDescription {
 export const PROV_CATALOG: readonly ProvRelationDescription[] = [
   {
     relation: "prov_work_units",
-    meaning: "One authored unit of work; resolved intent is the persisted ladder output.",
+    meaning:
+      "One authored unit of work; resolved intent is the persisted ladder output.",
     columns: [
-      { column: "work_unit_id", meaning: "Work unit identity (bind with an @ref)." },
-      { column: "kind", meaning: "edit | file-transfer | lifecycle | merge | revert | import | external-unapplied." },
-      { column: "intent_tier", meaning: "stated | trigger | mechanical; never laundered." },
+      {
+        column: "work_unit_id",
+        meaning: "Work unit identity (bind with an @ref).",
+      },
+      {
+        column: "kind",
+        meaning:
+          "edit | file-transfer | lifecycle | merge | revert | import | external-unapplied.",
+      },
+      {
+        column: "intent_tier",
+        meaning: "stated | trigger | mechanical; never laundered.",
+      },
       { column: "intent_text", meaning: "Resolved intent text at that tier." },
-      { column: "resolver_protocol", meaning: "Intent-ladder protocol that produced the columns." },
-      { column: "author_context_id", meaning: "Context that authored the work." },
+      {
+        column: "resolver_protocol",
+        meaning: "Intent-ladder protocol that produced the columns.",
+      },
+      {
+        column: "author_context_id",
+        meaning: "Context that authored the work.",
+      },
       { column: "command_id", meaning: "Originating semantic command." },
       { column: "created_at", meaning: "Capture-time timestamp." },
       { column: "content_class", meaning: "internal | external." },
@@ -63,12 +80,21 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
     columns: [
       { column: "change_id", meaning: "Change identity." },
       { column: "work_unit_id", meaning: "Authoring work unit." },
-      { column: "kind", meaning: "Change kind (file-create, text-edit, file-delete, …)." },
-      { column: "file_id", meaning: "Result file identity when the change places a file." },
+      {
+        column: "kind",
+        meaning: "Change kind (file-create, text-edit, file-delete, …).",
+      },
+      {
+        column: "file_id",
+        meaning: "Result file identity when the change places a file.",
+      },
       { column: "repository_id", meaning: "Result repository identity." },
       { column: "base_path", meaning: "Path before the change." },
       { column: "result_path", meaning: "Path after the change." },
-      { column: "effect_digest", meaning: "Canonical digest of the change effect." },
+      {
+        column: "effect_digest",
+        meaning: "Canonical digest of the change effect.",
+      },
     ],
   },
   {
@@ -86,7 +112,10 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
     meaning: "Immediate content-coordinate lineage between applied changes.",
     columns: [
       { column: "child_applied_change_id", meaning: "Later applied change." },
-      { column: "parent_applied_change_id", meaning: "Earlier applied change." },
+      {
+        column: "parent_applied_change_id",
+        meaning: "Earlier applied change.",
+      },
       { column: "relation", meaning: "preserves | copies | incorporates." },
     ],
   },
@@ -136,21 +165,34 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
       { column: "work_unit_id", meaning: "Owning merge work unit." },
       { column: "target_state_kind", meaning: "event | application." },
       { column: "target_state_id", meaning: "Exact target state." },
-      { column: "source_event_id", meaning: "Integrated source event, when any." },
-      { column: "source_delta_id", meaning: "Integrated external delta, when any." },
+      {
+        column: "source_event_id",
+        meaning: "Integrated source event, when any.",
+      },
+      {
+        column: "source_delta_id",
+        meaning: "Integrated external delta, when any.",
+      },
       { column: "created_at", meaning: "Decision timestamp." },
     ],
   },
   {
     relation: "prov_decision_entries",
-    meaning: "Per-coordinate accounting of one decision; `ours`/`current` are rejections.",
+    meaning:
+      "Per-coordinate accounting of one decision; `ours`/`current` are rejections.",
     columns: [
       { column: "decision_id", meaning: "Owning decision." },
       { column: "coordinate_kind", meaning: "file | repository." },
       { column: "coordinate_id", meaning: "Coordinate identity." },
-      { column: "resolution", meaning: "adopt | convergent | composed | ours | current." },
+      {
+        column: "resolution",
+        meaning: "adopt | convergent | composed | ours | current.",
+      },
       { column: "rationale", meaning: "Recorded rationale prose, when any." },
-      { column: "result_change_id", meaning: "Change the resolution produced, when any." },
+      {
+        column: "result_change_id",
+        meaning: "Change the resolution produced, when any.",
+      },
     ],
   },
   {
@@ -170,18 +212,25 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
       { column: "repository_id", meaning: "Affected repository." },
       { column: "repo_path", meaning: "Repository path." },
       { column: "status", meaning: "active | superseded | finalized." },
-      { column: "superseded_by_delta_id", meaning: "Superseding delta, when any." },
+      {
+        column: "superseded_by_delta_id",
+        meaning: "Superseding delta, when any.",
+      },
       { column: "created_at", meaning: "Declaration timestamp." },
     ],
   },
   {
     relation: "prov_commands",
-    meaning: "The command journal: the join between semantic work and trajectories.",
+    meaning:
+      "The command journal: the join between semantic work and trajectories.",
     columns: [
       { column: "command_id", meaning: "Command identity." },
       { column: "method", meaning: "Semantic method name." },
       { column: "status", meaning: "pending | effect-pending | complete." },
-      { column: "cause_invocation_id", meaning: "Causing tool invocation, when any." },
+      {
+        column: "cause_invocation_id",
+        meaning: "Causing tool invocation, when any.",
+      },
       { column: "cause_log_id", meaning: "Causing trajectory log." },
       { column: "cause_head", meaning: "Causing trajectory head." },
       { column: "created_at", meaning: "Command timestamp." },
@@ -207,13 +256,17 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
       { column: "head", meaning: "Trajectory head." },
       { column: "turn_id", meaning: "Turn identity." },
       { column: "ordinal", meaning: "Turn order." },
-      { column: "trigger_message_id", meaning: "Message that opened the turn." },
+      {
+        column: "trigger_message_id",
+        meaning: "Message that opened the turn.",
+      },
       { column: "summary", meaning: "Turn summary, when any." },
     ],
   },
   {
     relation: "prov_messages",
-    meaning: "Trajectory messages with bounded text; full text stays behind blobstore.",
+    meaning:
+      "Trajectory messages with bounded text; full text stays behind blobstore.",
     columns: [
       { column: "log_id", meaning: "Trajectory log." },
       { column: "head", meaning: "Trajectory head." },
@@ -222,8 +275,14 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
       { column: "role", meaning: "user | assistant | system | tool." },
       { column: "sender_kind", meaning: "Sender principal kind." },
       { column: "sender_id", meaning: "Sender principal identity." },
-      { column: "source_message_id", meaning: "Message this one continues from." },
-      { column: "text_excerpt", meaning: "Bounded excerpt of the message text." },
+      {
+        column: "source_message_id",
+        meaning: "Message this one continues from.",
+      },
+      {
+        column: "text_excerpt",
+        meaning: "Bounded excerpt of the message text.",
+      },
     ],
   },
   {
@@ -234,14 +293,21 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
       { column: "repository_id", meaning: "Repository identity." },
       { column: "path", meaning: "Path at the last visible placement." },
       { column: "presence", meaning: "placed | deleted." },
-      { column: "last_change_id", meaning: "Change that last placed the coordinate." },
+      {
+        column: "last_change_id",
+        meaning: "Change that last placed the coordinate.",
+      },
     ],
   },
   {
     relation: "prov_search",
     meaning: "Full-text entry by content over stored prose.",
     columns: [
-      { column: "subject_kind", meaning: "work-unit | decision | event | external-delta | trajectory-message." },
+      {
+        column: "subject_kind",
+        meaning:
+          "work-unit | decision | event | external-delta | trajectory-message.",
+      },
       { column: "subject_id", meaning: "Subject identity." },
       { column: "log_id", meaning: "Trajectory log for message subjects." },
       { column: "head", meaning: "Trajectory head for message subjects." },
@@ -267,7 +333,7 @@ export const PROV_CATALOG: readonly ProvRelationDescription[] = [
 ];
 
 export const PROV_RELATIONS: ReadonlySet<string> = new Set(
-  PROV_CATALOG.map((relation) => relation.relation)
+  PROV_CATALOG.map((relation) => relation.relation),
 );
 
 const sqlText = (value: string): string => `'${value.replaceAll("'", "''")}'`;
@@ -276,11 +342,19 @@ function catalogView(): string {
   const rows = PROV_CATALOG.flatMap((relation) =>
     relation.columns.map(
       (column) =>
-        `SELECT ${sqlText(relation.relation)} AS relation, ${sqlText(column.column)} AS column_name, ` +
-        `${sqlText(column.meaning)} AS meaning, ${sqlText(relation.meaning)} AS relation_meaning`
-    )
+        `(${sqlText(relation.relation)}, ${sqlText(column.column)}, ` +
+        `${sqlText(column.meaning)}, ${sqlText(relation.meaning)})`,
+    ),
   );
-  return `CREATE VIEW IF NOT EXISTS prov_schema AS\n${rows.join("\nUNION ALL\n")}`;
+  // A VALUES rowset has no compound-SELECT term limit. The former UNION ALL
+  // view crossed workerd's SQLite deployment limit as the discoverable schema
+  // grew, preventing an otherwise healthy workspace from starting.
+  return (
+    "CREATE VIEW IF NOT EXISTS prov_schema AS\n" +
+    "SELECT column1 AS relation, column2 AS column_name, column3 AS meaning, " +
+    "column4 AS relation_meaning\n" +
+    `FROM (VALUES\n${rows.join(",\n")}\n)`
+  );
 }
 
 /**
@@ -532,7 +606,7 @@ export function createProvenanceSearchIndex(sql: SqlStorage): "fts" | "plain" {
       `CREATE VIRTUAL TABLE IF NOT EXISTS prov_search_index USING fts5(
          text, subject_kind UNINDEXED, subject_id UNINDEXED,
          log_id UNINDEXED, head UNINDEXED, label UNINDEXED
-       )`
+       )`,
     );
     return "fts";
   } catch {
@@ -540,18 +614,24 @@ export function createProvenanceSearchIndex(sql: SqlStorage): "fts" | "plain" {
       `CREATE TABLE IF NOT EXISTS prov_search_index (
          text TEXT NOT NULL, subject_kind TEXT NOT NULL, subject_id TEXT NOT NULL,
          log_id TEXT, head TEXT, label TEXT
-       )`
+       )`,
     );
     return "plain";
   }
 }
 
-export function provenanceSearchIndexMode(sql: SqlStorage): "fts" | "plain" | null {
+export function provenanceSearchIndexMode(
+  sql: SqlStorage,
+): "fts" | "plain" | null {
   const row = sql
-    .exec(`SELECT sql FROM sqlite_master WHERE name = 'prov_search_index' LIMIT 1`)
+    .exec(
+      `SELECT sql FROM sqlite_master WHERE name = 'prov_search_index' LIMIT 1`,
+    )
     .toArray()[0];
   if (!row) return null;
-  return /\bCREATE\s+VIRTUAL\s+TABLE\b/iu.test(String(row["sql"] ?? "")) ? "fts" : "plain";
+  return /\bCREATE\s+VIRTUAL\s+TABLE\b/iu.test(String(row["sql"] ?? ""))
+    ? "fts"
+    : "plain";
 }
 
 /** The searchable projection joins visibility exactly as the typed views do. */
