@@ -20,7 +20,13 @@
     "@workspace/pi-core": "workspace:*",
     "@workspace/pubsub": "workspace:*"
   },
+  "//peerDependencies": "React appears here for one reason: component *types* cross this boundary (custom-message-types.ts names ComponentType). Nothing in this package renders, so it is optional -- a worker that only runs sessions needs the declarations to typecheck, never an instance to bundle.",
   "peerDependencies": {
     "react": "19.2.4"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
   }
 }
