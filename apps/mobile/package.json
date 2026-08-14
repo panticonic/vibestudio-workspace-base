@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "//dependencies": "Keep react-native-webview pinned with apps/mobile; 13.17.0 makes JSX props resolve to never under our TS/React setup.",
+  "//dependencies": "Keep react-native-webview pinned with apps/mobile; 13.17.0 makes JSX props resolve to never under our TS/React setup. react is 19.0.0, not the 19.2.4 the rest of the workspace uses: this bundle runs against react-native-renderer inside the installed APK, and the renderer shipped with react-native 0.79 refuses to start unless react matches it exactly. Bump both together when react-native moves. react-native-webrtc is declared here rather than left to @vibestudio/mobile-webrtc, which only peers on it: this app owns the version, and like every native module it must match the one compiled into the APK.",
   "vibestudio": {
     "displayName": "Vibestudio Mobile",
     "icon": "📱",
@@ -445,12 +445,12 @@
     "@react-native-firebase/app": "23.8.8",
     "@react-native-firebase/messaging": "23.8.8",
     "@react-navigation/drawer": "7.9.8",
-    "@react-navigation/native": "7.2.2",
+    "@react-navigation/native": "7.3.16",
     "@react-navigation/stack": "7.8.9",
     "jotai": "2.20.2",
     "lucide-react-native": "1.14.0",
     "path-browserify": "1.0.1",
-    "react": "19.2.4",
+    "react": "19.0.0",
     "react-native": "0.79.7",
     "react-native-gesture-handler": "2.30.1",
     "react-native-get-random-values": "1.11.0",
@@ -462,6 +462,7 @@
     "react-native-svg": "15.15.4",
     "react-native-tcp-socket": "6.4.1",
     "react-native-url-polyfill": "3.0.0",
+    "react-native-webrtc": "124.0.7",
     "react-native-webview": "13.16.1"
   }
 }
