@@ -326,8 +326,11 @@ export class TestRunner {
               });
             });
           }
+          const taskPrompt = test.workspaceRepoFixture
+            ? testRunner.withTaskResources(prompt)
+            : prompt;
           const wait = targetSession.sendAndWait(
-            testRunner.withTaskResources(prompt),
+            taskPrompt,
             {
               signal: controller.signal,
               terminalWaitingReasons: NON_INTERACTIVE_TERMINAL_WAIT_REASONS,

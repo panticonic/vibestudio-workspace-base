@@ -300,7 +300,7 @@ describe("ApprovalCard", () => {
       .closest(".approval-card") as HTMLElement;
     expect(card.getAttribute("data-approval-tone")).toBe("red");
 
-    const trustButton = screen.getByText("Trust this version").closest("button");
+    const trustButton = screen.getByText("Remember for this version").closest("button");
     expect(trustButton?.getAttribute("data-accent-color")).toBe("red");
     expect(
       screen.getByText("Allow once").closest("button")?.getAttribute("data-accent-color")
@@ -423,7 +423,10 @@ describe("ApprovalCard", () => {
     const { emit } = renderCard(credential);
 
     expect(
-      screen.getByText("Trust this version").closest("button")?.getAttribute("data-accent-color")
+      screen
+        .getByText("Remember for this version")
+        .closest("button")
+        ?.getAttribute("data-accent-color")
     ).toBe("sky");
     expect(screen.getByText("Use once").closest("button")?.getAttribute("data-accent-color")).toBe(
       ""

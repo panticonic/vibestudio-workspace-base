@@ -377,7 +377,8 @@ export function createPanelRuntime(
       : {};
     return {
       id,
-      title: detail.slot.current_entity_title ?? id,
+      title:
+        detail.slot.current_entity_title ?? metadataCache.get(id)?.title ?? id,
       source: detail.currentHistory.source,
       kind: isBrowserPanelSource(detail.currentHistory.source)
         ? "browser"

@@ -1033,6 +1033,7 @@ describe("TestRunner", () => {
       modelRef: TEST_MODEL,
       forTest: vi.fn((testName: string) => ({
         modelRef: TEST_MODEL,
+        withTaskResources: (prompt: string) => prompt,
         prepareWorkspaceRepoFixture: vi.fn(async () => {
           activeSetups += 1;
           maxActiveSetups = Math.max(maxActiveSetups, activeSetups);
@@ -1140,6 +1141,7 @@ describe("TestRunner", () => {
     };
     const childRunner = {
       modelRef: TEST_MODEL,
+      withTaskResources: (prompt: string) => prompt,
       prepareWorkspaceRepoFixture: vi.fn(async () => fixtureState),
       spawn: vi.fn(async () => session),
       collectDiagnostics: vi.fn(async () => ({})),
@@ -1232,6 +1234,7 @@ describe("TestRunner", () => {
     };
     const childRunner = {
       modelRef: TEST_MODEL,
+      withTaskResources: (prompt: string) => prompt,
       spawn: vi.fn(async () => session),
       collectDiagnostics: vi.fn(async () => ({})),
       prepareWorkspaceRepoFixture: vi.fn(async () => fixtureState),
