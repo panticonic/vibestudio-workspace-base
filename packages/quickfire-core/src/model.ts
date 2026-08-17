@@ -83,13 +83,29 @@ export interface QuickfireContextStrip {
   lost?: boolean;
 }
 
-/** One rendered transcript line. Content is already flattened to text. */
+/**
+ * A run of message content the surface can render distinctly.
+ *
+ * Prose and code are separated because they are read differently: a fenced
+ * block wants a monospace box that preserves every space, and flattening it
+ * into a paragraph — which is what the overlay did — turns the most common
+ * useful answer an agent gives (a snippet) into an unreadable smear.
+ */
+export type QuickfireSegment =
+  | { type: "text"; text: string }
+  | { type: "code"; text: string; language?: string };
+
+/** One rendered transcript line spoken by a participant. */
 export interface QuickfireTranscriptMessage {
+  kind: "message";
   id: string;
   /** "you" for this device's own messages, otherwise the agent handle. */
   author: "you" | "agent" | "other";
   authorLabel: string;
+  /** Flattened plain text. Still the whole content for compact renderers. */
   text: string;
+  /** Same content split into prose and code runs, for renderers that can. */
+  segments?: QuickfireSegment[];
   /** Still streaming: render the live delta treatment. */
   streaming?: boolean;
   /**
@@ -102,7 +118,61 @@ export interface QuickfireTranscriptMessage {
    */
   toolChips?: QuickfireToolChip[];
   error?: boolean;
+  /**
+   * The failure text itself. `error` alone says a turn broke without saying
+   * how, which leaves the user with nothing to act on in a venue whose whole
+   * point is speed.
+   */
+  errorText?: string;
+  /** Which model produced this, when the channel recorded one. */
+  modelLabel?: string;
+  /** Attachments are announced by count; the compact venue does not show them. */
+  attachmentCount?: number;
+  /**
+   * Sent from this surface but not yet acknowledged by the channel — including
+   * text queued while the conversation was still binding. Without this the
+   * first message a user ever sends here vanishes until the agent replies.
+   */
+  pending?: boolean;
 }
+
+/** A non-conversational line: lifecycle, diagnostic, fork, or task marginalia. */
+export interface QuickfireTranscriptNotice {
+  kind: "notice";
+  id: string;
+  severity: "info" | "warning" | "error";
+  title: string;
+  detail?: string;
+  /**
+   * The chat panel offers a recovery this venue cannot run (resume at reset,
+   * retry on a local model, start clean). The overlay says so and offers the
+   * panel rather than pretending the notice is inert.
+   */
+  recoverable?: boolean;
+}
+
+/** The agent is doing something that has not produced a message yet. */
+export interface QuickfireTranscriptActivity {
+  kind: "activity";
+  id: string;
+  state: "working" | "waiting";
+  label: string;
+}
+
+/** A user decision the compact venue cannot answer inline. */
+export interface QuickfireTranscriptApproval {
+  kind: "approval";
+  id: string;
+  status: "pending" | "granted" | "denied";
+  question: string;
+  reason?: string;
+}
+
+export type QuickfireTranscriptEntry =
+  | QuickfireTranscriptMessage
+  | QuickfireTranscriptNotice
+  | QuickfireTranscriptActivity
+  | QuickfireTranscriptApproval;
 
 /**
  * Resume state for a conversation that already existed when the surface opened
@@ -128,8 +198,14 @@ export interface QuickfireComposeView {
   transcriptOrder?: "oldest-first" | "newest-first";
   /** Why sending is unavailable right now; null when the user can type. */
   disabledReason: string | null;
-  /** Bounded tail of the conversation: last N messages plus the live delta. */
-  transcript: QuickfireTranscriptMessage[];
+  /** Bounded tail of the conversation: last N entries plus the live delta. */
+  transcript: QuickfireTranscriptEntry[];
+  /**
+   * How many entries the bound dropped. The compact venue keeps a tail on
+   * purpose, but silently showing 20 of 200 reads as "this is the whole
+   * conversation", so the count is offered alongside the way to see them all.
+   */
+  olderCount: number;
   /** A model credential request the compact surface cannot complete inline. */
   credentialRequest: { providerId: string; reason: string | null } | null;
   /** Non-null only when this open resumed an existing conversation. */

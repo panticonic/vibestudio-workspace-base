@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./agent-launch": "./src/agent-launch.ts",
+    "./channel-chat-merge": "./src/channel-chat-merge.ts",
     "./provisional-agent-lifecycle": "./src/provisional-agent-lifecycle.ts",
     "./panel-import-loader": "./src/panel-import-loader.ts",
     "./subagent-prompt": "./src/subagent-prompt.ts"
