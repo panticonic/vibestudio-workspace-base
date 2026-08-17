@@ -17,6 +17,7 @@ import {
   type QuickfireRow,
   type QuickfireSurfaceProps,
 } from "./quickfireSurfaceModel";
+import type { QuickfireTranscriptEntry } from "@workspace/quickfire-core";
 import type { OverlaySurfaceComponentProps } from "./types";
 import "./quickfire.css";
 
@@ -404,39 +405,11 @@ function QuickfireConversation({
       {compose.transcript.length > 0 ? (
         <div className="quickfire-transcript">
           {newestFirst ? <div ref={newestRef} /> : null}
-          {compose.transcript.map((message) => (
-            <article
-              key={message.id}
-              className={`quickfire-message quickfire-message-${message.author}${
-                message.error ? " quickfire-message-error" : ""
-              }`}
-            >
-              <h3 className="quickfire-message-author">{message.authorLabel}</h3>
-              <p className="quickfire-message-text">
-                {message.text}
-                {message.streaming ? <span className="quickfire-caret" aria-hidden="true" /> : null}
-              </p>
-              {message.toolChips?.length ? (
-                <p className="quickfire-tool-chips">
-                  {message.toolChips.map((chip, index) => (
-                    <span
-                      key={`${chip.name}:${index}`}
-                      className={`quickfire-chip quickfire-chip-${chip.state}`}
-                      title={
-                        chip.state === "running"
-                          ? `${chip.name} — running`
-                          : chip.state === "failed"
-                            ? `${chip.name} — did not finish`
-                            : chip.name
-                      }
-                    >
-                      {chip.state === "running" ? "◌ " : chip.state === "failed" ? "✕ " : ""}
-                      {chip.name}
-                    </span>
-                  ))}
-                </p>
-              ) : null}
-            </article>
+          {compose.olderCount > 0 ? (
+            <p className="quickfire-compose-hint">{compose.olderCount} older entries hidden</p>
+          ) : null}
+          {compose.transcript.map((entry) => (
+            <QuickfireTranscriptRow key={entry.id} entry={entry} />
           ))}
           {newestFirst ? null : <div ref={newestRef} />}
         </div>
@@ -470,6 +443,68 @@ function QuickfireConversation({
         </p>
       )}
     </div>
+  );
+}
+
+function QuickfireTranscriptRow({ entry }: { entry: QuickfireTranscriptEntry }) {
+  if (entry.kind !== "message") {
+    const title =
+      entry.kind === "approval"
+        ? entry.question
+        : entry.kind === "activity"
+          ? entry.label
+          : entry.title;
+    const detail = entry.kind === "notice" ? entry.detail : entry.kind === "approval" ? entry.reason : undefined;
+    return (
+      <article className={`quickfire-message quickfire-message-${entry.kind}`}>
+        <h3 className="quickfire-message-author">
+          {entry.kind === "approval"
+            ? entry.status === "pending"
+              ? "Approval needed"
+              : `Approval ${entry.status}`
+            : entry.kind === "activity"
+              ? "Agent"
+              : entry.title}
+        </h3>
+        <p className="quickfire-message-text">
+          {title}
+          {detail ? ` — ${detail}` : ""}
+        </p>
+      </article>
+    );
+  }
+  return (
+    <article
+      className={`quickfire-message quickfire-message-${entry.author}${
+        entry.error ? " quickfire-message-error" : ""
+      }`}
+    >
+      <h3 className="quickfire-message-author">{entry.authorLabel}</h3>
+      <p className="quickfire-message-text">
+        {entry.text}
+        {entry.streaming ? <span className="quickfire-caret" aria-hidden="true" /> : null}
+      </p>
+      {entry.toolChips?.length ? (
+        <p className="quickfire-tool-chips">
+          {entry.toolChips.map((chip, index) => (
+            <span
+              key={`${chip.name}:${index}`}
+              className={`quickfire-chip quickfire-chip-${chip.state}`}
+              title={
+                chip.state === "running"
+                  ? `${chip.name} — running`
+                  : chip.state === "failed"
+                    ? `${chip.name} — did not finish`
+                    : chip.name
+              }
+            >
+              {chip.state === "running" ? "◌ " : chip.state === "failed" ? "✕ " : ""}
+              {chip.name}
+            </span>
+          ))}
+        </p>
+      ) : null}
+    </article>
   );
 }
 

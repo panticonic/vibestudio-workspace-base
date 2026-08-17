@@ -274,6 +274,8 @@ export interface ChatMessage {
   senderId: string;
   content: string;
   contentType?: string;
+  /** Turn that produced this row, used to attach invocation chips to replies. */
+  turnId?: string;
   /**
    * Durable envelope seq at which this message first appeared (from
    * `ProjectedMessage.seq`). The fork-point locus: "Fork from here" roots at

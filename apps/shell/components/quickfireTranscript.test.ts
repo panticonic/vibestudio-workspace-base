@@ -74,7 +74,7 @@ describe("projectTranscript", () => {
       { id: "m2", seq: 2, actorId: "agent-1", kind: "agent", text: "because it clamps", handle: "quickfire" },
       { id: "m1", seq: 1, actorId: "shell-1", text: "why is the chart cut off?" },
     ]);
-    expect(projectTranscript(state, "shell-1")).toEqual([
+    expect(projectTranscript(state, "shell-1").entries).toEqual([
       expect.objectContaining({
         id: "m1",
         author: "you",
@@ -99,7 +99,7 @@ describe("projectTranscript", () => {
         text: `message ${index}`,
       }))
     );
-    const transcript = projectTranscript(state, "shell-1");
+    const transcript = projectTranscript(state, "shell-1").entries;
     expect(transcript).toHaveLength(TRANSCRIPT_LIMIT);
     expect(transcript[0]?.id).toBe(`m${15}`);
     expect(transcript.at(-1)?.id).toBe(`m${TRANSCRIPT_LIMIT + 14}`);
@@ -109,7 +109,7 @@ describe("projectTranscript", () => {
     const state = stateWith([
       { id: "m1", seq: 1, actorId: "agent-1", kind: "agent", text: "the cont", status: "streaming" },
     ]);
-    expect(projectTranscript(state, "shell-1")[0]).toMatchObject({ streaming: true });
+    expect(projectTranscript(state, "shell-1").entries[0]).toMatchObject({ streaming: true });
   });
 
   it("drops retracted messages and flags failed ones", () => {
@@ -117,7 +117,7 @@ describe("projectTranscript", () => {
       { id: "m1", seq: 1, actorId: "shell-1", text: "oops", retracted: true },
       { id: "m2", seq: 2, actorId: "agent-1", kind: "agent", text: "no model", status: "failed" },
     ]);
-    const transcript = projectTranscript(state, "shell-1");
+    const transcript = projectTranscript(state, "shell-1").entries;
     expect(transcript.map((message) => message.id)).toEqual(["m2"]);
     expect(transcript[0]).toMatchObject({ error: true });
   });
@@ -135,7 +135,9 @@ describe("projectTranscript", () => {
     );
     // Two calls are two pills. Deduping by name hid repeated work — and, with
     // no state carried, hid failures behind an identical-looking chip.
-    expect(projectTranscript(state, "shell-1")[0]?.toolChips).toEqual([
+    const [first] = projectTranscript(state, "shell-1").entries;
+    expect(first?.kind).toBe("message");
+    expect(first?.kind === "message" ? first.toolChips : undefined).toEqual([
       { name: "panel_describe", state: "done" },
       { name: "panel_describe", state: "done" },
     ]);
@@ -152,7 +154,9 @@ describe("projectTranscript", () => {
         ],
       }
     );
-    expect(projectTranscript(state, "shell-1")[0]?.toolChips).toEqual([
+    const [first] = projectTranscript(state, "shell-1").entries;
+    expect(first?.kind).toBe("message");
+    expect(first?.kind === "message" ? first.toolChips : undefined).toEqual([
       { name: "panel_console", state: "running" },
       { name: "panel_eval", state: "failed" },
       { name: "panel_screenshot", state: "done" },
@@ -177,12 +181,16 @@ describe("transcript order", () => {
       { id: "m3", seq: 3, actorId: "shell-1", text: "third" },
     ]);
     expect(
-      projectTranscript(state, "shell-1", { order: "newest-first" }).map((m) => m.text)
+      projectTranscript(state, "shell-1", { order: "newest-first" }).entries
+        .filter((m) => m.kind === "message")
+        .map((m) => m.text)
     ).toEqual(["third", "second", "first"]);
     // Same messages either way: order decides which end is read, never which
     // messages survive truncation.
     expect(
-      projectTranscript(state, "shell-1", { order: "oldest-first" }).map((m) => m.text)
+      projectTranscript(state, "shell-1", { order: "oldest-first" }).entries
+        .filter((m) => m.kind === "message")
+        .map((m) => m.text)
     ).toEqual(["first", "second", "third"]);
   });
 
@@ -195,7 +203,7 @@ describe("transcript order", () => {
         text: `m${index}`,
       }))
     );
-    const newestFirst = projectTranscript(state, "shell-1", { order: "newest-first" });
+    const newestFirst = projectTranscript(state, "shell-1", { order: "newest-first" }).entries;
     expect(newestFirst).toHaveLength(TRANSCRIPT_LIMIT);
     expect(newestFirst[0]?.text).toBe(`m${TRANSCRIPT_LIMIT + 2}`);
     expect(newestFirst.at(-1)?.text).toBe("m3");

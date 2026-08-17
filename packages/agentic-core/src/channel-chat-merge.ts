@@ -47,6 +47,12 @@ import {
 import type { InvocationCardPayload } from "./invocation-card-payload.js";
 import type { SubagentRunState, TaskCardPayload } from "./task-card-payload.js";
 
+// The shared projection is part of the public boundary consumed by the
+// platform-neutral Quickfire projection. Re-exporting the wire-shaped result
+// type keeps that consumer on the same canonical merge contract instead of
+// making it reach into this package's private derived-types module.
+export type { ChatMessage } from "./derived-types.js";
+
 type StoredValueRefPreview = { preview?: string };
 
 export function chatMessagesFromChannelView(state: ChannelViewState): ChatMessage[] {
@@ -737,6 +743,7 @@ function projectedMessageToChatMessages(
       content,
       kind: "message",
       complete,
+      ...(message.turnId ? { turnId: message.turnId } : {}),
       replyTo: message.replyTo,
       mentions: message.mentions,
       tier: messageTier(message),

@@ -278,7 +278,11 @@ describe("useQuickfireSessionCore reduction", () => {
     const { result } = renderHook(() => useQuickfireSessionCore("slot-a", transport));
 
     await waitFor(() =>
-      expect(result.current.view.transcript.map((message) => message.text)).toContain(
+      expect(
+        result.current.view.transcript
+          .filter((message) => message.kind === "message")
+          .map((message) => message.text)
+      ).toContain(
         "why is this panel laid out this way?"
       )
     );

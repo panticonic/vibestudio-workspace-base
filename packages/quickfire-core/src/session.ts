@@ -29,7 +29,7 @@ import {
   type ChannelViewState,
 } from "@workspace/agentic-protocol";
 import type { PubSubClient } from "@workspace/pubsub";
-import type { QuickfireResumeChip, QuickfireTranscriptMessage } from "./model";
+import type { QuickfireResumeChip, QuickfireTranscriptEntry } from "./model";
 import {
   hasOpenTurn,
   projectTranscript,
@@ -111,7 +111,8 @@ export interface QuickfireSessionView {
   hasConversation: boolean;
   promoted: boolean;
   resume: QuickfireResumeChip | null;
-  transcript: QuickfireTranscriptMessage[];
+  transcript: QuickfireTranscriptEntry[];
+  olderCount: number;
   /** Unresolved model credential request carried by the conversation channel. */
   credentialRequest: {
     providerId: string;
@@ -139,6 +140,7 @@ const IDLE: QuickfireSessionView = {
   promoted: false,
   resume: null,
   transcript: [],
+  olderCount: 0,
   credentialRequest: null,
   streaming: false,
   error: null,
@@ -183,12 +185,16 @@ export function useQuickfireSessionCore(
   const flush = useCallback(() => {
     pushTimerRef.current = null;
     const state = stateRef.current;
+    const projection = projectTranscript(state, selfKeyRef.current, {
+      order: transcriptOrder,
+    });
     const credentialRequest = Object.values(state.credentialRequests)
       .sort((left, right) => left.seq - right.seq)
-      .at(-1);
+      .slice(-1)[0];
     setView((current) => ({
       ...current,
-      transcript: projectTranscript(state, selfKeyRef.current, { order: transcriptOrder }),
+      transcript: projection.entries,
+      olderCount: projection.olderCount,
       // A waiting turn needs an interaction, not a stop spinner. Only an
       // actively executing turn is presented as streaming.
       streaming: Object.values(state.turns).some((turn) => turn.status === "open"),

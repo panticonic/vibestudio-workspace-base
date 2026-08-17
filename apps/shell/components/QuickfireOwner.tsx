@@ -1003,6 +1003,7 @@ export function QuickfireOwner() {
                   ? "No panel is focused, so there is nothing to ask about."
                   : conversation.view.error,
               transcript: conversation.view.transcript,
+              olderCount: conversation.view.olderCount,
               credentialRequest: conversation.view.credentialRequest,
               resume: conversation.view.resume,
               connecting: conversation.view.connecting,

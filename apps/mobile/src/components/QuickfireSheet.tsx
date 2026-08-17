@@ -37,7 +37,8 @@ import {
   useQuickfireSessionCore,
   type QuickfireTransport,
 } from "@workspace/quickfire-core/session";
-import { themeColorsAtom } from "../state/themeAtoms";
+import type { QuickfireTranscriptEntry } from "@workspace/quickfire-core";
+import { themeColorsAtom, type ThemeColors } from "../state/themeAtoms";
 import { pushToastAtom } from "../state/toastAtoms";
 import {
   dismissQuickfireSheetAtom,
@@ -367,68 +368,16 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                           : "Ask about this panel. I can describe what it is and how it is running."}
                       </Text>
                     ) : (
-                      view.transcript.map((message) => (
-                        <View
-                          key={message.id}
-                          testID={`quickfire-message-${message.id}`}
-                          style={[
-                            styles.message,
-                            {
-                              backgroundColor:
-                                message.author === "you"
-                                  ? colors.accentSoft
-                                  : colors.surfaceSunken,
-                              borderColor: message.error ? colors.danger : "transparent",
-                            },
-                          ]}
-                        >
-                          <Text style={[type.micro, { color: colors.textTertiary }]}>
-                            {message.authorLabel}
+                      <>
+                        {view.olderCount > 0 ? (
+                          <Text style={[type.caption, { color: colors.textTertiary }]}>
+                            {view.olderCount} older entries hidden
                           </Text>
-                          <Text style={[type.body, { color: colors.text }]}>
-                            {message.text}
-                            {message.streaming ? " ▌" : ""}
-                          </Text>
-                          {message.toolChips?.length ? (
-                            <View style={styles.toolChips}>
-                              {message.toolChips.map((chip, index) => (
-                                <View
-                                  key={`${chip.name}:${index}`}
-                                  style={[
-                                    styles.toolChip,
-                                    { backgroundColor: colors.surface },
-                                    chip.state === "failed"
-                                      ? { borderColor: colors.danger }
-                                      : chip.state === "running"
-                                        ? { borderColor: colors.primary }
-                                        : null,
-                                  ]}
-                                >
-                                  <Text
-                                    style={[
-                                      type.micro,
-                                      {
-                                        color:
-                                          chip.state === "failed"
-                                            ? colors.danger
-                                            : chip.state === "running"
-                                              ? colors.primary
-                                              : colors.textSecondary,
-                                      },
-                                    ]}
-                                  >
-                                    {chip.state === "running"
-                                      ? `◌ ${chip.name}`
-                                      : chip.state === "failed"
-                                        ? `✕ ${chip.name}`
-                                        : chip.name}
-                                  </Text>
-                                </View>
-                              ))}
-                            </View>
-                          ) : null}
-                        </View>
-                      ))
+                        ) : null}
+                        {view.transcript.map((entry) => (
+                          <QuickfireTranscriptRow key={entry.id} entry={entry} colors={colors} />
+                        ))}
+                      </>
                     )}
                   </ScrollView>
 
@@ -486,6 +435,100 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
         </KeyboardAvoidingView>
       </View>
     </Modal>
+  );
+}
+
+function QuickfireTranscriptRow({
+  entry,
+  colors,
+}: {
+  entry: QuickfireTranscriptEntry;
+  colors: ThemeColors;
+}) {
+  if (entry.kind !== "message") {
+    const title =
+      entry.kind === "approval"
+        ? entry.question
+        : entry.kind === "activity"
+          ? entry.label
+          : entry.title;
+    const detail = entry.kind === "notice" ? entry.detail : entry.kind === "approval" ? entry.reason : undefined;
+    return (
+      <View
+        testID={`quickfire-message-${entry.id}`}
+        style={[styles.message, { backgroundColor: colors.surfaceSunken }]}
+      >
+        <Text style={[type.micro, { color: colors.textTertiary }]}>
+          {entry.kind === "approval"
+            ? entry.status === "pending"
+              ? "Approval needed"
+              : `Approval ${entry.status}`
+            : entry.kind === "activity"
+              ? "Agent"
+              : entry.title}
+        </Text>
+        <Text style={[type.body, { color: colors.text }]}>
+          {title}
+          {detail ? ` — ${detail}` : ""}
+        </Text>
+      </View>
+    );
+  }
+  return (
+    <View
+      testID={`quickfire-message-${entry.id}`}
+      style={[
+        styles.message,
+        {
+          backgroundColor: entry.author === "you" ? colors.accentSoft : colors.surfaceSunken,
+          borderColor: entry.error ? colors.danger : "transparent",
+        },
+      ]}
+    >
+      <Text style={[type.micro, { color: colors.textTertiary }]}>{entry.authorLabel}</Text>
+      <Text style={[type.body, { color: colors.text }]}>
+        {entry.text}
+        {entry.streaming ? " ▌" : ""}
+      </Text>
+      {entry.toolChips?.length ? (
+        <View style={styles.toolChips}>
+          {entry.toolChips.map((chip, index) => (
+            <View
+              key={`${chip.name}:${index}`}
+              style={[
+                styles.toolChip,
+                { backgroundColor: colors.surface },
+                chip.state === "failed"
+                  ? { borderColor: colors.danger }
+                  : chip.state === "running"
+                    ? { borderColor: colors.primary }
+                    : null,
+              ]}
+            >
+              <Text
+                style={[
+                  type.micro,
+                  {
+                    color:
+                      chip.state === "failed"
+                        ? colors.danger
+                        : chip.state === "running"
+                          ? colors.primary
+                          : colors.textSecondary,
+                  },
+                ]}
+              >
+                {chip.state === "running"
+                  ? `◌ ${chip.name}`
+                  : chip.state === "failed"
+                    ? `✕ ${chip.name}`
+                    : chip.name}
+              </Text>
+            </View>
+          ))}
+        </View>
+      ) : null}
+    </View>
   );
 }
 
