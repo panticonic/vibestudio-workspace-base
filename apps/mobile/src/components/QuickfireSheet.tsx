@@ -11,7 +11,7 @@
  * Lifecycle rules that matter here (§1.4):
  *  - Opening over a slot is what binds the conversation. Swiping the sheet away
  *    is a view change only — the conversation persists.
- *  - Clearing is two-step and explicit; there is no timer anywhere in this file.
+ *  - Clearing immediately archives the old conversation and binds a fresh one.
  *  - Promotion transfers ownership to a chat panel, after which this sheet
  *    offers "continued in chat panel →" plus "start a new conversation here"
  *    instead of a compose row.
@@ -19,8 +19,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
+  ActivityIndicator,
   Easing,
   KeyboardAvoidingView,
+  Linking,
   Modal,
   PanResponder,
   Platform,
@@ -31,14 +33,22 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   useQuickfireSessionCore,
   type QuickfireSessionSource,
   type QuickfireTransport,
 } from "@workspace/quickfire-core/session";
-import type { QuickfireTranscriptEntry } from "@workspace/quickfire-core";
+import { parseQuickfireMarkdown } from "@workspace/quickfire-core";
+import type {
+  QuickfireMarkdownInline,
+  QuickfireToolCall,
+  QuickfireTranscriptEntry,
+} from "@workspace/quickfire-core";
 import { themeColorsAtom, type ThemeColors } from "../state/themeAtoms";
 import { pushToastAtom } from "../state/toastAtoms";
 import {
@@ -47,7 +57,13 @@ import {
   type QuickfireSheetRequest,
 } from "../state/commandSheetAtoms";
 import { hairline, radius, shadow, spacing, type } from "../design/tokens";
-import { Copy, RotateCcw, SendHorizontal, Sparkles, Square } from "../design/icons";
+import {
+  Copy,
+  RotateCcw,
+  SendHorizontal,
+  Sparkles,
+  Square,
+} from "../design/icons";
 import { IconButton } from "./ui/primitives";
 
 const SLIDE_DISTANCE = 720;
@@ -64,7 +80,11 @@ export interface QuickfireSheetProps {
   openChatPanel: (channelId: string) => Promise<void>;
 }
 
-export function QuickfireSheet({ transport, panelTitle, openChatPanel }: QuickfireSheetProps) {
+export function QuickfireSheet({
+  transport,
+  panelTitle,
+  openChatPanel,
+}: QuickfireSheetProps) {
   const request = useAtomValue(quickfireSheetAtom);
   const dismiss = useSetAtom(dismissQuickfireSheetAtom);
   const pushToast = useSetAtom(pushToastAtom);
@@ -80,8 +100,12 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
         channelId: conversation.channelId,
         contextId: conversation.contextId,
         clientId: `conversation:${conversation.channelId}`,
-        ...(conversation.focusMessageId ? { focusMessageId: conversation.focusMessageId } : {}),
-        ...(conversation.replyTo ? { replyTo: { participantId: conversation.replyTo.participantId } } : {}),
+        ...(conversation.focusMessageId
+          ? { focusMessageId: conversation.focusMessageId }
+          : {}),
+        ...(conversation.replyTo
+          ? { replyTo: { participantId: conversation.replyTo.participantId } }
+          : {}),
       };
     }
     return request.slotId ? { kind: "slot", slotId: request.slotId } : null;
@@ -97,8 +121,6 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
     : panelTitle;
 
   const [draft, setDraft] = useState("");
-  /** Two-step clear: the first press arms it, the second performs it (§4.3). */
-  const [clearArmed, setClearArmed] = useState(false);
   const scrollRef = useRef<ScrollView | null>(null);
   const translateY = useRef(new Animated.Value(SLIDE_DISTANCE)).current;
   const backdropOpacity = useRef(new Animated.Value(0)).current;
@@ -128,7 +150,6 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
     // A handed-off send opens with an empty compose box: the text is already on
     // its way, not waiting for a second tap.
     setDraft(request.send ? "" : (request.draft ?? ""));
-    setClearArmed(false);
     translateY.setValue(SLIDE_DISTANCE);
     backdropOpacity.setValue(0);
     Animated.parallel([
@@ -150,7 +171,10 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
 
   useEffect(() => {
     if (view.transcript.length === 0) return;
-    const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 32);
+    const timer = setTimeout(
+      () => scrollRef.current?.scrollToEnd({ animated: true }),
+      32,
+    );
     return () => clearTimeout(timer);
   }, [view.transcript]);
 
@@ -174,7 +198,7 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
           }
         },
       }),
-    [close, translateY]
+    [close, translateY],
   );
 
   const report = useCallback(
@@ -184,7 +208,7 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
         message: error instanceof Error ? error.message : String(error),
         tone: "danger",
       }),
-    [pushToast]
+    [pushToast],
   );
 
   /**
@@ -203,18 +227,12 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
     const text = draft.trim();
     if (!text) return;
     setDraft("");
-    setClearArmed(false);
     void session.send(text).catch(report("Could not send"));
   }, [draft, report, session]);
 
   const handleClear = useCallback(() => {
-    if (!clearArmed) {
-      setClearArmed(true);
-      return;
-    }
-    setClearArmed(false);
     void session.clear().catch(report("Could not clear the conversation"));
-  }, [clearArmed, report, session]);
+  }, [report, session]);
 
   const handlePromote = useCallback(() => {
     void session
@@ -257,7 +275,10 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
     >
       <View style={styles.root}>
         <Animated.View
-          style={[styles.backdrop, { backgroundColor: colors.overlay, opacity: backdropOpacity }]}
+          style={[
+            styles.backdrop,
+            { backgroundColor: colors.overlay, opacity: backdropOpacity },
+          ]}
         >
           <Pressable
             style={StyleSheet.absoluteFill}
@@ -271,7 +292,11 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
           style={styles.avoider}
           pointerEvents="box-none"
         >
-          <SafeAreaView edges={["bottom"]} style={styles.safeArea} pointerEvents="box-none">
+          <SafeAreaView
+            edges={["bottom"]}
+            style={styles.safeArea}
+            pointerEvents="box-none"
+          >
             <Animated.View
               testID="quickfire-sheet"
               accessibilityViewIsModal
@@ -288,13 +313,24 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
               ]}
             >
               <View {...panResponder.panHandlers} style={styles.grabArea}>
-                <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+                <View
+                  style={[styles.grabber, { backgroundColor: colors.border }]}
+                />
               </View>
 
-              <View style={[styles.header, { borderBottomColor: colors.borderSubtle }]}>
+              <View
+                style={[
+                  styles.header,
+                  { borderBottomColor: colors.borderSubtle },
+                ]}
+              >
                 <Sparkles size={17} color={colors.primary} />
                 <Text
-                  style={[type.bodyStrong, styles.headerTitle, { color: colors.text }]}
+                  style={[
+                    type.bodyStrong,
+                    styles.headerTitle,
+                    { color: colors.text },
+                  ]}
                   numberOfLines={1}
                 >
                   {headerTitle}
@@ -302,27 +338,28 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                 {isConversation ? null : (
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel={clearArmed ? "Really clear conversation" : "Clear conversation"}
+                    accessibilityLabel="Clear conversation"
                     disabled={!view.hasConversation}
                     onPress={handleClear}
                     hitSlop={6}
                     style={[
                       styles.clearButton,
                       {
-                        backgroundColor: clearArmed ? colors.dangerSoft : "transparent",
+                        backgroundColor: "transparent",
                         opacity: view.hasConversation ? 1 : 0.4,
                       },
                     ]}
                   >
-                    <RotateCcw size={16} color={clearArmed ? colors.danger : colors.textSecondary} />
-                    {clearArmed ? (
-                      <Text style={[type.caption, { color: colors.danger }]}>really clear?</Text>
-                    ) : null}
+                    <RotateCcw size={16} color={colors.textSecondary} />
                   </Pressable>
                 )}
                 <IconButton
                   icon={Copy}
-                  label={isConversation ? "Open in chat panel" : "Open conversation as chat panel"}
+                  label={
+                    isConversation
+                      ? "Open in chat panel"
+                      : "Open conversation as chat panel"
+                  }
                   onPress={handlePromote}
                   disabled={!view.hasConversation || view.promoted}
                   color={colors.textSecondary}
@@ -333,13 +370,17 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
               {view.promoted ? (
                 <View style={styles.promoted}>
                   <Text style={[type.body, { color: colors.textSecondary }]}>
-                    This conversation continues in a chat panel, which now owns it.
+                    This conversation continues in a chat panel, which now owns
+                    it.
                   </Text>
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Continued in chat panel"
                     onPress={handleFocusPromoted}
-                    style={[styles.promotedAction, { borderColor: colors.primary }]}
+                    style={[
+                      styles.promotedAction,
+                      { borderColor: colors.primary },
+                    ]}
                   >
                     <Text style={[type.bodyStrong, { color: colors.primary }]}>
                       continued in chat panel →
@@ -349,11 +390,18 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                     accessibilityRole="button"
                     accessibilityLabel="Start a new conversation here"
                     onPress={() => {
-                      void session.startFresh().catch(report("Could not start a conversation"));
+                      void session
+                        .startFresh()
+                        .catch(report("Could not start a conversation"));
                     }}
-                    style={[styles.promotedAction, { borderColor: colors.borderSubtle }]}
+                    style={[
+                      styles.promotedAction,
+                      { borderColor: colors.borderSubtle },
+                    ]}
                   >
-                    <Text style={[type.bodyStrong, { color: colors.textSecondary }]}>
+                    <Text
+                      style={[type.bodyStrong, { color: colors.textSecondary }]}
+                    >
                       start a new conversation here
                     </Text>
                   </Pressable>
@@ -363,9 +411,14 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                   {view.resume ? (
                     <View
                       testID="quickfire-resume-chip"
-                      style={[styles.resume, { backgroundColor: colors.surfaceSunken }]}
+                      style={[
+                        styles.resume,
+                        { backgroundColor: colors.surfaceSunken },
+                      ]}
                     >
-                      <Text style={[type.caption, { color: colors.textSecondary }]}>
+                      <Text
+                        style={[type.caption, { color: colors.textSecondary }]}
+                      >
                         {resumeLabel(view.resume)}
                       </Text>
                       <Pressable
@@ -374,7 +427,9 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                         onPress={handlePromote}
                         hitSlop={6}
                       >
-                        <Text style={[type.caption, { color: colors.primary }]}>show all →</Text>
+                        <Text style={[type.caption, { color: colors.primary }]}>
+                          show all →
+                        </Text>
                       </Pressable>
                     </View>
                   ) : null}
@@ -386,27 +441,52 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                     keyboardShouldPersistTaps="handled"
                   >
                     {view.transcript.length === 0 ? (
-                      <Text style={[type.body, styles.hint, { color: colors.textTertiary }]}>
-                        {view.connecting
-                          ? "Starting a conversation about this panel…"
-                          : "Ask about this panel. I can describe what it is and how it is running."}
-                      </Text>
+                      <View style={[styles.hint, styles.activityHeader]}>
+                        {view.connecting ? (
+                          <ActivityIndicator
+                            size="small"
+                            color={colors.primary}
+                          />
+                        ) : null}
+                        <Text
+                          style={[type.body, { color: colors.textTertiary }]}
+                        >
+                          {view.connecting
+                            ? "Starting a conversation about this panel…"
+                            : "Ask about this panel. I can describe what it is and how it is running."}
+                        </Text>
+                      </View>
                     ) : (
                       <>
                         {view.olderCount > 0 ? (
-                          <Text style={[type.caption, { color: colors.textTertiary }]}>
+                          <Text
+                            style={[
+                              type.caption,
+                              { color: colors.textTertiary },
+                            ]}
+                          >
                             {view.olderCount} older entries hidden
                           </Text>
                         ) : null}
                         {view.transcript.map((entry) => (
-                          <QuickfireTranscriptRow key={entry.id} entry={entry} colors={colors} />
+                          <QuickfireTranscriptRow
+                            key={entry.id}
+                            entry={entry}
+                            colors={colors}
+                          />
                         ))}
                       </>
                     )}
                   </ScrollView>
 
                   {composeDisabledReason ? (
-                    <Text style={[type.caption, styles.error, { color: colors.danger }]}>
+                    <Text
+                      style={[
+                        type.caption,
+                        styles.error,
+                        { color: colors.danger },
+                      ]}
+                    >
                       {composeDisabledReason}
                     </Text>
                   ) : null}
@@ -414,7 +494,10 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                   <View
                     style={[
                       styles.compose,
-                      { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
+                      {
+                        backgroundColor: colors.surfaceSunken,
+                        borderColor: colors.borderSubtle,
+                      },
                     ]}
                   >
                     <TextInput
@@ -436,7 +519,9 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                         icon={Square}
                         label="Stop"
                         onPress={() => {
-                          void session.stop().catch(report("Could not stop the turn"));
+                          void session
+                            .stop()
+                            .catch(report("Could not stop the turn"));
                         }}
                         color={colors.danger}
                         size={17}
@@ -446,7 +531,10 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                         icon={SendHorizontal}
                         label="Send"
                         onPress={handleSend}
-                        disabled={draft.trim().length === 0 || composeDisabledReason !== null}
+                        disabled={
+                          draft.trim().length === 0 ||
+                          composeDisabledReason !== null
+                        }
                         color={colors.primary}
                         size={17}
                       />
@@ -469,32 +557,86 @@ function QuickfireTranscriptRow({
   entry: QuickfireTranscriptEntry;
   colors: ThemeColors;
 }) {
+  const [expanded, setExpanded] = useState(false);
+  if (entry.kind === "thinking") {
+    return (
+      <View
+        style={[
+          styles.record,
+          {
+            borderColor: colors.primary,
+            backgroundColor: colors.surfaceSunken,
+          },
+        ]}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`${expanded ? "Hide" : "Show"} reasoning: ${entry.title}`}
+          onPress={() => setExpanded((value) => !value)}
+          style={styles.recordSummary}
+        >
+          {entry.streaming ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : null}
+          <Text style={[type.micro, { color: colors.primary }]}>
+            {entry.title} {expanded ? "▴" : "▾"}
+          </Text>
+        </Pressable>
+        {expanded ? (
+          <QuickfireMarkdown source={entry.text} colors={colors} />
+        ) : null}
+      </View>
+    );
+  }
+  if (entry.kind === "activity") {
+    return (
+      <View
+        testID={`quickfire-message-${entry.id}`}
+        style={styles.activity}
+      >
+        <View style={styles.activityHeader}>
+          {entry.state === "working" ? (
+            <ActivityIndicator size="small" color={colors.primary} />
+          ) : null}
+          <Text style={[type.micro, { color: colors.textSecondary }]}>
+            {entry.label}
+          </Text>
+        </View>
+        {entry.toolCalls?.length ? (
+          <QuickfireToolCalls calls={entry.toolCalls} colors={colors} />
+        ) : null}
+      </View>
+    );
+  }
   if (entry.kind !== "message") {
     const title =
       entry.kind === "approval"
         ? entry.question
-        : entry.kind === "activity"
-          ? entry.label
-          : entry.title;
-    const detail = entry.kind === "notice" ? entry.detail : entry.kind === "approval" ? entry.reason : undefined;
+        : entry.title;
+    const detail =
+      entry.kind === "notice"
+        ? entry.detail
+        : entry.kind === "approval"
+          ? entry.reason
+          : undefined;
     return (
       <View
         testID={`quickfire-message-${entry.id}`}
         style={[styles.message, { backgroundColor: colors.surfaceSunken }]}
       >
-        <Text style={[type.micro, { color: colors.textTertiary }]}>
-          {entry.kind === "approval"
-            ? entry.status === "pending"
-              ? "Approval needed"
-              : `Approval ${entry.status}`
-            : entry.kind === "activity"
-              ? "Agent"
+        <View style={styles.activityHeader}>
+          <Text style={[type.micro, { color: colors.textTertiary }]}>
+            {entry.kind === "approval"
+              ? entry.status === "pending"
+                ? "Approval needed"
+                : `Approval ${entry.status}`
               : entry.title}
-        </Text>
-        <Text style={[type.body, { color: colors.text }]}>
-          {title}
-          {detail ? ` — ${detail}` : ""}
-        </Text>
+          </Text>
+        </View>
+        <QuickfireMarkdown
+          source={`${title}${detail ? ` — ${detail}` : ""}`}
+          colors={colors}
+        />
       </View>
     );
   }
@@ -504,65 +646,265 @@ function QuickfireTranscriptRow({
       style={[
         styles.message,
         {
-          backgroundColor: entry.author === "you" ? colors.accentSoft : colors.surfaceSunken,
+          backgroundColor:
+            entry.author === "you" ? colors.accentSoft : colors.surfaceSunken,
           borderColor: entry.error ? colors.danger : "transparent",
         },
       ]}
     >
-      <Text style={[type.micro, { color: colors.textTertiary }]}>{entry.authorLabel}</Text>
-      <Text style={[type.body, { color: colors.text }]}>
-        {entry.text}
-        {entry.streaming ? " ▌" : ""}
+      <Text style={[type.micro, { color: colors.textTertiary }]}>
+        {entry.authorLabel}
       </Text>
-      {entry.toolChips?.length ? (
-        <View style={styles.toolChips}>
-          {entry.toolChips.map((chip, index) => (
-            <View
-              key={`${chip.name}:${index}`}
-              style={[
-                styles.toolChip,
-                { backgroundColor: colors.surface },
-                chip.state === "failed"
-                  ? { borderColor: colors.danger }
-                  : chip.state === "running"
-                    ? { borderColor: colors.primary }
-                    : null,
-              ]}
-            >
-              <Text
-                style={[
-                  type.micro,
-                  {
-                    color:
-                      chip.state === "failed"
-                        ? colors.danger
-                        : chip.state === "running"
-                          ? colors.primary
-                          : colors.textSecondary,
-                  },
-                ]}
-              >
-                {chip.state === "running"
-                  ? `◌ ${chip.name}`
-                  : chip.state === "failed"
-                    ? `✕ ${chip.name}`
-                    : chip.name}
-              </Text>
-            </View>
-          ))}
-        </View>
+      <QuickfireMarkdown source={entry.text} colors={colors} />
+      {entry.streaming ? (
+        <Text style={[type.body, { color: colors.primary }]}> ▌</Text>
+      ) : null}
+      {entry.toolCalls?.length ? (
+        <QuickfireToolCalls calls={entry.toolCalls} colors={colors} />
       ) : null}
     </View>
   );
 }
 
+function QuickfireToolCalls({
+  calls,
+  colors,
+}: {
+  calls: QuickfireToolCall[];
+  colors: ThemeColors;
+}) {
+  return (
+    <View style={styles.toolCalls}>
+      {calls.map((call) => (
+        <QuickfireToolCallRecord key={call.id} call={call} colors={colors} />
+      ))}
+    </View>
+  );
+}
+
+function QuickfireToolCallRecord({
+  call,
+  colors,
+}: {
+  call: QuickfireToolCall;
+  colors: ThemeColors;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <View
+      style={[
+        styles.toolCall,
+        { backgroundColor: colors.surface },
+        call.state === "failed"
+          ? { borderColor: colors.danger }
+          : call.state === "running"
+            ? { borderColor: colors.primary }
+            : { borderColor: colors.borderSubtle },
+      ]}
+    >
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${expanded ? "Hide" : "Show"} ${call.name} tool call details`}
+        onPress={() => setExpanded((value) => !value)}
+        style={styles.recordSummary}
+      >
+        <Text
+          style={[
+            type.micro,
+            {
+              color:
+                call.state === "failed"
+                  ? colors.danger
+                  : call.state === "running"
+                    ? colors.primary
+                    : colors.textSecondary,
+            },
+          ]}
+        >
+          {call.state === "running"
+            ? "◌ "
+            : call.state === "failed"
+              ? "✕ "
+              : "✓ "}
+          {call.name} {expanded ? "▴" : "▾"}
+        </Text>
+      </Pressable>
+      {expanded ? <MobileToolDetails call={call} colors={colors} /> : null}
+    </View>
+  );
+}
+
+function MobileToolDetails({
+  call,
+  colors,
+}: {
+  call: QuickfireToolCall;
+  colors: ThemeColors;
+}) {
+  const details = [
+    call.input ? ["Input", call.input] : null,
+    call.progress?.length ? ["Progress", call.progress.join("\n")] : null,
+    call.output ? ["Output", call.output] : null,
+    call.failure ? ["Failure", call.failure] : null,
+  ].filter((item): item is string[] => item !== null);
+  if (details.length === 0) {
+    return (
+      <Text
+        style={[
+          type.caption,
+          styles.recordDetail,
+          { color: colors.textTertiary },
+        ]}
+      >
+        No details were recorded.
+      </Text>
+    );
+  }
+  return (
+    <View style={styles.recordDetail}>
+      {details.map(([label, value]) => (
+        <View key={label}>
+          <Text style={[type.micro, { color: colors.textTertiary }]}>
+            {label}
+          </Text>
+          <Text
+            selectable
+            style={[
+              styles.code,
+              { color: colors.text, backgroundColor: colors.surfaceSunken },
+            ]}
+          >
+            {value}
+          </Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function QuickfireMarkdown({
+  source,
+  colors,
+}: {
+  source: string;
+  colors: ThemeColors;
+}) {
+  return (
+    <View style={styles.markdown}>
+      {parseQuickfireMarkdown(source).map((block, index) => {
+        const key = `${block.kind}:${index}`;
+        if (block.kind === "code-block")
+          return (
+            <Text
+              key={key}
+              selectable
+              style={[
+                styles.code,
+                { color: colors.text, backgroundColor: colors.surface },
+              ]}
+            >
+              {block.text}
+            </Text>
+          );
+        if (block.kind === "heading")
+          return (
+            <Text key={key} style={[type.bodyStrong, { color: colors.text }]}>
+              <MarkdownInline nodes={block.children} colors={colors} />
+            </Text>
+          );
+        if (block.kind === "bullet-list" || block.kind === "ordered-list")
+          return (
+            <View key={key}>
+              {block.items.map((item, itemIndex) => (
+                <Text
+                  key={itemIndex}
+                  style={[type.body, { color: colors.text }]}
+                >
+                  {block.kind === "bullet-list" ? "•" : `${itemIndex + 1}.`}{" "}
+                  <MarkdownInline nodes={item} colors={colors} />
+                </Text>
+              ))}
+            </View>
+          );
+        if (block.kind === "quote")
+          return (
+            <Text
+              key={key}
+              style={[
+                type.body,
+                styles.quote,
+                { color: colors.textSecondary, borderLeftColor: colors.border },
+              ]}
+            >
+              <MarkdownInline nodes={block.children} colors={colors} />
+            </Text>
+          );
+        return (
+          <Text key={key} style={[type.body, { color: colors.text }]}>
+            <MarkdownInline nodes={block.children} colors={colors} />
+          </Text>
+        );
+      })}
+    </View>
+  );
+}
+
+function MarkdownInline({
+  nodes,
+  colors,
+}: {
+  nodes: QuickfireMarkdownInline[];
+  colors: ThemeColors;
+}) {
+  return nodes.map((node, index) => {
+    if (node.kind === "text") return node.text;
+    if (node.kind === "code")
+      return (
+        <Text
+          key={index}
+          style={[styles.inlineCode, { backgroundColor: colors.surface }]}
+        >
+          {node.text}
+        </Text>
+      );
+    if (node.kind === "strong")
+      return (
+        <Text key={index} style={{ fontWeight: "700" }}>
+          <MarkdownInline nodes={node.children} colors={colors} />
+        </Text>
+      );
+    if (node.kind === "emphasis")
+      return (
+        <Text key={index} style={{ fontStyle: "italic" }}>
+          <MarkdownInline nodes={node.children} colors={colors} />
+        </Text>
+      );
+    return (
+      <Text
+        key={index}
+        accessibilityRole="link"
+        style={{ color: colors.primary, textDecorationLine: "underline" }}
+        onPress={() => void Linking.openURL(node.href)}
+      >
+        <MarkdownInline nodes={node.children} colors={colors} />
+      </Text>
+    );
+  });
+}
+
 /** "Resumed · 3 messages · 2h ago"; each segment is omitted when unknown. */
-function resumeLabel(resume: { messageCount: number | null; lastActivityAt: number | null }): string {
+function resumeLabel(resume: {
+  messageCount: number | null;
+  lastActivityAt: number | null;
+}): string {
   const parts = ["Resumed"];
   if (resume.messageCount !== null) {
-    parts.push(`${resume.messageCount} message${resume.messageCount === 1 ? "" : "s"}`);
+    parts.push(
+      `${resume.messageCount} message${resume.messageCount === 1 ? "" : "s"}`,
+    );
   }
-  if (resume.lastActivityAt !== null) parts.push(relativeTime(resume.lastActivityAt));
+  if (resume.lastActivityAt !== null)
+    parts.push(relativeTime(resume.lastActivityAt));
   return parts.join(" · ");
 }
 
@@ -665,18 +1007,59 @@ const styles = StyleSheet.create({
     padding: spacing.md,
     gap: 2,
   },
-  toolChips: {
+  activity: {
+    gap: spacing.xs,
+    paddingVertical: 2,
+  },
+  activityHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  toolCalls: {
     flexDirection: "row",
     flexWrap: "wrap",
     gap: spacing.xs,
     marginTop: spacing.xs,
   },
-  toolChip: {
-    borderRadius: radius.pill,
+  toolCall: {
+    borderRadius: radius.md,
     borderWidth: hairline,
-    borderColor: "transparent",
+    overflow: "hidden",
+  },
+  record: {
+    borderRadius: radius.md,
+    borderWidth: hairline,
+    overflow: "hidden",
+  },
+  recordSummary: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
     paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
+    paddingVertical: spacing.xs,
+  },
+  recordDetail: {
+    gap: spacing.xs,
+    padding: spacing.sm,
+  },
+  markdown: {
+    gap: spacing.xs,
+  },
+  code: {
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+    fontSize: 12,
+    lineHeight: 17,
+    padding: spacing.sm,
+    borderRadius: radius.sm,
+  },
+  inlineCode: {
+    fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
+    fontSize: 13,
+  },
+  quote: {
+    borderLeftWidth: 2,
+    paddingLeft: spacing.sm,
   },
   error: {
     paddingHorizontal: spacing.lg,

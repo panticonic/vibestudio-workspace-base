@@ -391,12 +391,6 @@
   cursor: default;
 }
 
-/* The armed half of the two-step clear reads as destructive, without a modal. */
-.quickfire-action-armed {
-  background: var(--red-a3);
-  color: var(--red-11);
-}
-
 .quickfire-resume {
   display: flex;
   align-items: center;
@@ -430,6 +424,45 @@
   background: var(--red-a3);
 }
 
+.quickfire-activity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 0;
+  color: var(--gray-11);
+  font-size: 11px;
+}
+
+.quickfire-activity-status {
+  display: flex;
+  align-items: center;
+  min-height: 18px;
+  font-weight: 600;
+}
+
+.quickfire-activity .quickfire-tool-calls {
+  margin-top: 0;
+}
+
+.quickfire-spinner {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 5px;
+  border: 1.5px solid var(--accent-a5);
+  border-top-color: var(--accent-10);
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: quickfire-spin 700ms linear infinite;
+}
+
+@keyframes quickfire-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .quickfire-message-author {
   margin: 0 0 3px;
   font-size: 10px;
@@ -444,8 +477,53 @@
   font-size: 13px;
   line-height: 19px;
   color: var(--gray-12);
+  overflow-wrap: anywhere;
+}
+
+.quickfire-message-text > :first-child,
+.quickfire-record > :first-child {
+  margin-top: 0;
+}
+
+.quickfire-message-text > :last-child,
+.quickfire-record > :last-child {
+  margin-bottom: 0;
+}
+
+.quickfire-message-text p,
+.quickfire-message-text ul,
+.quickfire-message-text ol,
+.quickfire-message-text blockquote {
+  margin: 0 0 6px;
+}
+
+.quickfire-message-text pre,
+.quickfire-record pre {
+  margin: 5px 0;
+  padding: 7px;
+  border-radius: var(--radius-2);
+  background: var(--gray-a3);
+  font: 11px/16px var(--code-font-family, monospace);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.quickfire-message-text code {
+  padding: 1px 3px;
+  border-radius: 3px;
+  background: var(--gray-a4);
+  font-family: var(--code-font-family, monospace);
+}
+
+.quickfire-message-text blockquote {
+  padding-left: 8px;
+  border-left: 2px solid var(--gray-a6);
+  color: var(--gray-11);
+}
+
+.quickfire-markdown-heading {
+  display: block;
+  margin-bottom: 5px;
 }
 
 /* Live delta indicator: the transcript renders streaming text as it arrives. */
@@ -465,11 +543,68 @@
   }
 }
 
-.quickfire-tool-chips {
-  margin: 6px 0 0;
+.quickfire-tool-calls {
+  margin-top: 6px;
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.quickfire-record {
+  border: 1px solid var(--gray-a5);
+  border-radius: var(--radius-2);
+  background: var(--gray-a2);
+  color: var(--gray-11);
+  font-size: 11px;
+}
+
+.quickfire-record > summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 3px 7px;
+  font-weight: 600;
+}
+
+.quickfire-record > summary::-webkit-details-marker {
+  display: none;
+}
+
+.quickfire-record[open] {
+  flex-basis: 100%;
+}
+
+.quickfire-record[open] > summary {
+  border-bottom: 1px solid var(--gray-a4);
+}
+
+.quickfire-thinking {
+  align-self: flex-start;
+  padding: 0;
+  border-color: var(--purple-a6);
+}
+
+.quickfire-thinking > :not(summary),
+.quickfire-record-details,
+.quickfire-record-empty {
+  margin: 0;
+  padding: 7px 9px;
+}
+
+.quickfire-record-details h4 {
+  margin: 5px 0 2px;
+  color: var(--gray-10);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.quickfire-tool-running {
+  border-color: var(--accent-a7);
+  color: var(--accent-a11);
+}
+
+.quickfire-tool-failed {
+  border-color: var(--red-a7);
+  color: var(--red-a11);
 }
 
 .quickfire-compose-actions {

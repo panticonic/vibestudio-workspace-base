@@ -45,6 +45,8 @@ import {
 export { panelAssetCacheKey } from "@vibestudio/shared/panel/assetPathPolicy";
 import type { MobileRpcClient } from "./mobileTransport";
 import { getNativeAppStorage } from "./nativeAppStorage";
+import { createPipeGate, type PipeGate } from "./panelAssetPipeGate";
+import { withPanelAssetRetry } from "./panelAssetRetry";
 import {
   MobileAssetStore,
   type MobileAssetStoreNamespace,
@@ -106,6 +108,30 @@ export interface MobileFetchedResponse {
 }
 
 /**
+ * Concurrent asset fetches allowed to occupy the WebRTC pipe at once.
+ *
+ * The point is to stop a webview's fan-out from being answered as one
+ * back-to-back burst, which react-native-webrtc's receive bridge drops whole
+ * (six simultaneous streams lost, single streams of 126 KB fine — see
+ * panelAssetPipeGate). It is NOT meant to serialize the panel.
+ *
+ * This started at 1, which was wrong in a way worth recording: a limit of one
+ * makes every fetch a single point of failure for the whole panel. A request
+ * that hangs after its response arrives holds the only slot forever, so no
+ * later asset is even requested and the panel dies on a load timeout with no
+ * error anywhere — observed on device. A small window keeps the anti-burst
+ * property while leaving the panel alive when one fetch misbehaves.
+ *
+ * Now that lost bulk messages announce themselves (the mux's sequence gap),
+ * this is measurable rather than guessed: raise it, and a gap says the bridge
+ * could not keep up.
+ *
+ * Store hits never take the gate: they cost zero pipe bytes, so a warm panel
+ * still loads fully parallel.
+ */
+const MAX_CONCURRENT_PIPE_FETCHES = 4;
+
+/**
  * Start the loopback panel-asset façade. Resolves once the port is bound; point
  * `buildPanelUrl` (via `hostConfig.port`) at the returned `port`.
  */
@@ -114,6 +140,7 @@ export async function startPanelAssetFacade(
   namespace: MobileAssetStoreNamespace
 ): Promise<PanelAssetFacade> {
   const store = new MobileAssetStore(namespace);
+  const pipeGate = createPipeGate(MAX_CONCURRENT_PIPE_FETCHES);
   const preferredPort = await readPersistedPort();
   const activeSockets = new Set<TcpSocketConn>();
   const activeRequests = new Set<Promise<void>>();
@@ -128,7 +155,7 @@ export async function startPanelAssetFacade(
     }
     activeSockets.add(connection);
     connection.once("close", () => activeSockets.delete(connection));
-    handleConnection(transport, store, connection, (request) => {
+    handleConnection(transport, store, pipeGate, connection, (request) => {
       activeRequests.add(request);
       void request.then(
         () => activeRequests.delete(request),
@@ -195,6 +222,7 @@ export async function startPanelAssetFacade(
 function handleConnection(
   transport: MobileRpcClient,
   store: MobileAssetStore,
+  pipeGate: PipeGate,
   socket: TcpSocketConn,
   trackRequest: (request: Promise<void>) => void
 ): void {
@@ -255,7 +283,7 @@ function handleConnection(
       return;
     }
     dispatched = true;
-    trackRequest(handleRequest(transport, store, socket, head));
+    trackRequest(handleRequest(transport, store, pipeGate, socket, head));
   });
   socket.on("error", () => {
     try {
@@ -269,6 +297,7 @@ function handleConnection(
 async function handleRequest(
   transport: MobileRpcClient,
   store: MobileAssetStore,
+  pipeGate: PipeGate,
   socket: TcpSocketConn,
   rawHead: string
 ): Promise<void> {
@@ -309,6 +338,12 @@ async function handleRequest(
   let transferredBytes = 0;
   let bridgeCrossings = 0;
   let ttfbMs: number | null = null;
+  // Serialization is a real cost, so it is reported rather than assumed free:
+  // this is what a fetch spent waiting for the pipe instead of using it.
+  let gateWaitMs = 0;
+  // Retries spent on transient pipe failures; surfaced so a flapping link shows
+  // up as degraded rather than silently costing latency.
+  let retriedAttempts = 0;
   const markHeadSent = (): void => {
     headSent = true;
     ttfbMs ??= Date.now() - startedAt;
@@ -336,8 +371,30 @@ async function handleRequest(
       await writeStoredAsset(socket, acquisition.asset, markHeadSent);
       return;
     }
+    // Held across the body, not just the request: the frames that get lost are
+    // the response's, so releasing at `fetcher()` would let the next stream's
+    // frames interleave with this one's and rebuild the burst we are avoiding.
+    const gateQueuedAt = Date.now();
+    const releasePipe = await pipeGate.acquire();
+    gateWaitMs = Date.now() - gateQueuedAt;
     try {
-      const response = await fetcher();
+      // A dropped pipe must cost a retry, not the panel. Safe only while
+      // nothing has been written: `headSent` is the commit point, after which
+      // re-fetching would append a second body to a half-sent response.
+      const response = await withPanelAssetRetry(
+        transport,
+        {
+          canRetry: () => !headSent,
+          onRetry: (attempt, error) => {
+            retriedAttempts = attempt;
+            const detail = error instanceof Error ? error.message : String(error);
+            console.warn(
+              `[panel-facade] retry ${attempt} for ${target} after transient pipe failure: ${detail}`
+            );
+          },
+        },
+        fetcher
+      );
       if (!response.cacheable) {
         tier = "no-store";
         acquisition.complete(null);
@@ -357,6 +414,8 @@ async function handleRequest(
     } catch (error) {
       acquisition.fail(error);
       throw error;
+    } finally {
+      releasePipe();
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -390,6 +449,8 @@ async function handleRequest(
       transferredBytes,
       bridgeCrossings,
       ttfbMs,
+      gateWaitMs,
+      retriedAttempts,
       totalMs: Date.now() - startedAt,
     });
     console.log(`[VibestudioMobileSmoke] phase=${phase} ${telemetry}`);

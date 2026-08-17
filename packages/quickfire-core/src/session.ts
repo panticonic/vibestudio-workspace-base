@@ -26,7 +26,7 @@ import {
   pubsubChannelEventToEnvelope,
   pubsubAgenticEventToEnvelope,
   reduceChannelView,
-  type ChannelViewState,
+  type ChannelViewState
 } from "@workspace/agentic-protocol";
 import type { PubSubClient } from "@workspace/pubsub";
 import type { QuickfireResumeChip, QuickfireTranscriptEntry } from "./model";
@@ -34,7 +34,7 @@ import {
   hasOpenTurn,
   projectTranscript,
   TRANSCRIPT_LIMIT,
-  type TranscriptOrder,
+  type TranscriptOrder
 } from "./transcript";
 
 export { hasOpenTurn, projectTranscript, TRANSCRIPT_LIMIT };
@@ -66,10 +66,8 @@ const PUSH_INTERVAL_MS = 33;
 /**
  * The facts a client needs back from `quickfire.sessionFor`/`promote`.
  *
- * Structural on purpose: the canonical schema lives in the host repo
- * (`@vibestudio/service-schemas/quickfire`) and this package deliberately does
- * not depend on it, so both clients can pass their own typed client's result
- * straight through.
+ * Structural so both clients can pass the userland service result straight
+ * through without coupling the UI reducer to its durable implementation.
  */
 export interface QuickfireSessionFacts {
   channelId: string;
@@ -110,10 +108,7 @@ export type QuickfireSessionSource =
 
 /** Everything the core needs from its host client. */
 export interface QuickfireTransport {
-  sessionFor: (
-    slotId: string,
-    options?: { fresh?: boolean }
-  ) => Promise<QuickfireSessionFacts>;
+  sessionFor: (slotId: string, options?: { fresh?: boolean }) => Promise<QuickfireSessionFacts>;
   clear: (slotId: string) => Promise<unknown>;
   promote: (slotId: string) => Promise<QuickfireSessionFacts | null>;
   /**
@@ -180,8 +175,18 @@ const IDLE: QuickfireSessionView = {
   olderCount: 0,
   credentialRequest: null,
   streaming: false,
-  error: null,
+  error: null
 };
+
+function durableResponseObservedAfter(state: ChannelViewState, afterCursor: number): boolean {
+  const agentMessageObserved = Object.values(state.messages).some(
+    (message) =>
+      (message.actor.kind === "agent" || message.role === "assistant") &&
+      (message.lastContentSeq ?? message.seq ?? 0) > afterCursor
+  );
+  if (agentMessageObserved) return true;
+  return Object.values(state.turns).some((turn) => (turn.lastSeq ?? 0) > afterCursor);
+}
 
 /** Accept the historical `slotId` string form as well as a source object. */
 function normalizeSource(
@@ -237,12 +242,19 @@ export function useQuickfireSessionCore(
    * discarded when the binding it was typed for goes away.
    */
   const queuedRef = useRef<string[]>([]);
+  const awaitingResponseRef = useRef<{ afterCursor: number } | null>(null);
 
   const flush = useCallback(() => {
     pushTimerRef.current = null;
     const state = stateRef.current;
+    const awaiting = awaitingResponseRef.current;
+    if (awaiting && durableResponseObservedAfter(state, awaiting.afterCursor)) {
+      awaitingResponseRef.current = null;
+    }
     const projection = projectTranscript(state, selfKeyRef.current, {
       order: transcriptOrder,
+      pendingTexts: queuedRef.current,
+      awaitingResponse: awaitingResponseRef.current !== null
     });
     const credentialRequest = Object.values(state.credentialRequests)
       .sort((left, right) => left.seq - right.seq)
@@ -253,13 +265,15 @@ export function useQuickfireSessionCore(
       olderCount: projection.olderCount,
       // A waiting turn needs an interaction, not a stop spinner. Only an
       // actively executing turn is presented as streaming.
-      streaming: Object.values(state.turns).some((turn) => turn.status === "open"),
+      streaming:
+        awaitingResponseRef.current !== null ||
+        Object.values(state.turns).some((turn) => turn.status === "open"),
       credentialRequest: credentialRequest
         ? {
             providerId: credentialRequest.providerId,
-            reason: credentialRequest.reason ?? null,
+            reason: credentialRequest.reason ?? null
           }
-        : null,
+        : null
     }));
   }, [transcriptOrder]);
 
@@ -269,7 +283,7 @@ export function useQuickfireSessionCore(
   }, [flush]);
 
   /** Put one message on the wire, surfacing a failure inline rather than throwing. */
-  const deliver = useCallback(async (client: PubSubClient, text: string) => {
+  const deliver = useCallback(async (client: PubSubClient, text: string): Promise<boolean> => {
     const bound = sourceRef.current;
     try {
       if (bound?.kind === "conversation") {
@@ -281,18 +295,25 @@ export function useQuickfireSessionCore(
           ...(bound.replyTo
             ? {
                 mentions: [bound.replyTo.participantId],
-                to: [{ kind: "participant" as const, participantId: bound.replyTo.participantId }],
+                to: [
+                  {
+                    kind: "participant" as const,
+                    participantId: bound.replyTo.participantId
+                  }
+                ]
               }
-            : {}),
+            : {})
         });
       } else {
         await client.send(text, { mentions: ["quickfire"] });
       }
+      return true;
     } catch (error) {
       setView((current) => ({
         ...current,
-        error: error instanceof Error ? error.message : String(error),
+        error: error instanceof Error ? error.message : String(error)
       }));
+      return false;
     }
   }, []);
 
@@ -304,6 +325,7 @@ export function useQuickfireSessionCore(
     const client = clientRef.current;
     clientRef.current = null;
     selfKeyRef.current = null;
+    awaitingResponseRef.current = null;
     // Leaving the channel is a view change only; the durable conversation
     // survives until an explicit lifecycle event ends it.
     void client?.close().catch(() => undefined);
@@ -328,7 +350,7 @@ export function useQuickfireSessionCore(
                 contextId: bound.contextId,
                 state: "resumed",
                 messageCount: null,
-                lastActivityAt: null,
+                lastActivityAt: null
               };
         if (!live()) return;
         setView((current) => ({
@@ -343,22 +365,18 @@ export function useQuickfireSessionCore(
             bound.kind === "slot" && session.state === "resumed"
               ? {
                   messageCount: session.messageCount,
-                  lastActivityAt: session.lastActivityAt,
+                  lastActivityAt: session.lastActivityAt
                 }
               : null,
-          connecting: session.state !== "promoted",
+          connecting: session.state !== "promoted"
         }));
         // A promoted slot conversation is read from its chat panel, not here.
         if (session.state === "promoted") return;
 
-        const client = transportRef.current.connectToChannel(
-          session.channelId,
-          session.contextId,
-          {
-            clientId: bound.kind === "slot" ? bound.slotId : bound.clientId,
-            replayMessageLimit: TRANSCRIPT_LIMIT,
-          }
-        );
+        const client = transportRef.current.connectToChannel(session.channelId, session.contextId, {
+          clientId: bound.kind === "slot" ? bound.slotId : bound.clientId,
+          replayMessageLimit: TRANSCRIPT_LIMIT
+        });
         clientRef.current = client;
         selfKeyRef.current = client.clientId ?? null;
         void (async () => {
@@ -374,11 +392,10 @@ export function useQuickfireSessionCore(
               if (wire.type === CREDENTIAL_CONNECT_PAYLOAD_KIND && wire.payload) {
                 stateRef.current = reduceChannelView(
                   stateRef.current,
-                  pubsubChannelEventToEnvelope(
-                    session.channelId,
-                    CREDENTIAL_CONNECT_PAYLOAD_KIND,
-                    { ...wire, payload: wire.payload }
-                  )
+                  pubsubChannelEventToEnvelope(session.channelId, CREDENTIAL_CONNECT_PAYLOAD_KIND, {
+                    ...wire,
+                    payload: wire.payload
+                  })
                 );
                 schedulePush();
                 continue;
@@ -393,7 +410,7 @@ export function useQuickfireSessionCore(
                   ...(wire.senderMetadata === undefined
                     ? {}
                     : { senderMetadata: wire.senderMetadata }),
-                  payload: wire.payload as { actor: { id: string } },
+                  payload: wire.payload as { actor: { id: string } }
                 }) as never
               );
               schedulePush();
@@ -402,7 +419,7 @@ export function useQuickfireSessionCore(
             if (!live()) return;
             setView((current) => ({
               ...current,
-              error: error instanceof Error ? error.message : String(error),
+              error: error instanceof Error ? error.message : String(error)
             }));
           }
         })();
@@ -420,15 +437,16 @@ export function useQuickfireSessionCore(
         const queued = queuedRef.current;
         queuedRef.current = [];
         for (const text of queued) {
-          await deliver(client, text);
+          if (!(await deliver(client, text))) awaitingResponseRef.current = null;
           if (!live()) return;
         }
+        flush();
       } catch (error) {
         if (!live()) return;
         setView((current) => ({
           ...current,
           connecting: false,
-          error: error instanceof Error ? error.message : String(error),
+          error: error instanceof Error ? error.message : String(error)
         }));
       }
     },
@@ -442,6 +460,7 @@ export function useQuickfireSessionCore(
       // Settling into an unbound state is where queued text dies: the binding it
       // was typed for no longer exists, and nothing later should inherit it.
       queuedRef.current = [];
+      awaitingResponseRef.current = null;
       setView(IDLE);
       return;
     }
@@ -449,7 +468,7 @@ export function useQuickfireSessionCore(
       ...IDLE,
       source: bound,
       slotId: bound.kind === "slot" ? bound.slotId : null,
-      connecting: true,
+      connecting: true
     });
     stateRef.current = createInitialChannelViewState();
     void bind(bound, generation, false);
@@ -466,20 +485,31 @@ export function useQuickfireSessionCore(
       const trimmed = text.trim();
       if (!trimmed) return;
       const client = clientRef.current;
+      awaitingResponseRef.current = {
+        afterCursor: stateRef.current.cursor ?? 0
+      };
+      setView((current) => ({ ...current, error: null, streaming: true }));
+      flush();
       // Not connected yet: the resolve effect delivers this once the channel is
       // ready (see `queuedRef`). Sending and binding are one gesture from the
       // palette's ask row, so the message waits for the binding rather than
       // being dropped on the floor.
       if (!client) {
         queuedRef.current.push(trimmed);
+        flush();
         return;
       }
-      await deliver(client, trimmed);
+      if (!(await deliver(client, trimmed))) {
+        awaitingResponseRef.current = null;
+        flush();
+      }
     },
-    [deliver]
+    [deliver, flush]
   );
 
   const stop = useCallback(async () => {
+    awaitingResponseRef.current = null;
+    flush();
     const client = clientRef.current;
     if (!client) return;
     const agents = Object.values(stateRef.current.roster).filter(
@@ -489,14 +519,14 @@ export function useQuickfireSessionCore(
       const participantId = agent.participant.participantId ?? agent.participant.id;
       try {
         await client.callMethod(participantId, "pause", {
-          reason: "User interrupted quickfire",
+          reason: "User interrupted quickfire"
         }).result;
       } catch {
         // Pausing is advisory: a vessel that is already idle rejects, and that
         // is not a failure the user needs to see.
       }
     }
-  }, []);
+  }, [flush]);
 
   const clear = useCallback(async () => {
     const bound = sourceRef.current;
@@ -505,11 +535,13 @@ export function useQuickfireSessionCore(
       throw new Error("A conversation opened from a notification cannot be cleared here");
     }
     await transportRef.current.clear(bound.slotId);
-    generationRef.current += 1;
+    const generation = (generationRef.current += 1);
     closeClient();
+    queuedRef.current = [];
     stateRef.current = createInitialChannelViewState();
-    setView({ ...IDLE, source: bound, slotId: bound.slotId });
-  }, [closeClient]);
+    setView({ ...IDLE, source: bound, slotId: bound.slotId, connecting: true });
+    await bind(bound, generation, true);
+  }, [bind, closeClient]);
 
   const promote = useCallback(async (): Promise<QuickfireSessionFacts | null> => {
     const bound = sourceRef.current;
@@ -522,7 +554,7 @@ export function useQuickfireSessionCore(
         contextId: bound.contextId,
         state: "promoted",
         messageCount: null,
-        lastActivityAt: null,
+        lastActivityAt: null
       };
     }
     const promoted = await transportRef.current.promote(bound.slotId);
@@ -555,7 +587,7 @@ export function useQuickfireSessionCore(
       stop,
       clear,
       promote,
-      startFresh,
+      startFresh
     }),
     [clear, promote, send, source, startFresh, stop, view]
   );

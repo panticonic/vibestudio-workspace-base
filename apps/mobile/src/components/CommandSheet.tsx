@@ -60,7 +60,7 @@ import {
   type QuickfireMode,
   type QuickfireRow,
 } from "@workspace/quickfire-core";
-import type { QuickfireSessionSummary } from "@vibestudio/service-schemas/quickfire";
+import type { QuickfireSessionSummary } from "@workspace/quickfire-core/service";
 import type { BrowserAddressSuggestion } from "@vibestudio/shared/panelChrome";
 import { themeColorsAtom } from "../state/themeAtoms";
 import { pushToastAtom } from "../state/toastAtoms";

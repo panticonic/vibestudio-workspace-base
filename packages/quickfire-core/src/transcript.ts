@@ -19,11 +19,15 @@ import type { ChannelViewState } from "@workspace/agentic-protocol";
 import { chatMessagesFromChannelView } from "@workspace/agentic-core/channel-chat-merge";
 import type { ChatMessage } from "@workspace/agentic-core/channel-chat-merge";
 import type {
-  QuickfireSegment,
-  QuickfireToolChip,
+  QuickfireToolCall,
   QuickfireTranscriptEntry,
   QuickfireTranscriptMessage,
 } from "./model";
+import {
+  parseQuickfireMarkdown,
+  type QuickfireMarkdownBlock,
+  type QuickfireMarkdownInline,
+} from "./markdown";
 
 /** Last N entries pushed to the surface (§2.4). */
 export const TRANSCRIPT_LIMIT = 20;
@@ -48,6 +52,8 @@ export interface TranscriptProjectionOptions {
    * including sends still queued behind the binding handshake.
    */
   pendingTexts?: readonly string[];
+  /** A local send was accepted but its durable agent turn has not arrived yet. */
+  awaitingResponse?: boolean;
 }
 
 export interface TranscriptProjection {
@@ -61,7 +67,7 @@ export interface TranscriptProjection {
  *
  * Inline UI and custom messages are excluded from this venue by design (the
  * overlay agent is told it has no such surface), and the invocation/progress
- * cards are already represented — more compactly — as the per-turn tool chips.
+ * cards are already represented — more compactly — as per-turn tool records.
  * Typing pills become an explicit activity row instead.
  */
 const OMITTED_CONTENT_TYPES = new Set([
@@ -83,28 +89,33 @@ const OMITTED_CONTENT_TYPES = new Set([
 export function projectTranscript(
   state: ChannelViewState,
   selfParticipantKey: string | null,
-  options: TranscriptProjectionOptions = {}
+  options: TranscriptProjectionOptions = {},
 ): TranscriptProjection {
-  const { limit = TRANSCRIPT_LIMIT, order = "oldest-first", pendingTexts = [] } = options;
+  const {
+    limit = TRANSCRIPT_LIMIT,
+    order = "oldest-first",
+    pendingTexts = [],
+    awaitingResponse = false,
+  } = options;
   const merged = chatMessagesFromChannelView(state);
-  const toolChipsByTurn = toolChipsByTurnId(state);
+  const toolCallsByTurn = toolCallsByTurnId(state);
 
   const projected: QuickfireTranscriptEntry[] = [];
   for (const message of merged) {
     if (message.retracted) continue;
-    if (message.contentType && OMITTED_CONTENT_TYPES.has(message.contentType)) continue;
-    const entry = projectChatMessage(message, selfParticipantKey, toolChipsByTurn);
+    if (message.contentType && OMITTED_CONTENT_TYPES.has(message.contentType))
+      continue;
+    const entry = projectChatMessage(
+      message,
+      selfParticipantKey,
+      toolCallsByTurn,
+    );
     if (entry) projected.push(entry);
   }
 
-  // A turn that is open but has produced nothing yet is the case the overlay
-  // most needed and least had: the user pressed Enter and the card sat blank.
-  const openTurn = openTurnActivity(state);
-  if (openTurn && !projected.some((entry) => entry.kind === "message" && entry.streaming)) {
-    projected.push(openTurn);
-  }
-
-  // Optimistic echoes go last: they are, by definition, the newest thing said.
+  // Optimistic echoes follow the durable transcript. Activity comes after
+  // them: work starts because of the send, and both renderer orders therefore
+  // place the live status between the input and the message that caused it.
   for (const [index, text] of pendingTexts.entries()) {
     projected.push({
       kind: "message",
@@ -112,24 +123,43 @@ export function projectTranscript(
       author: "you",
       authorLabel: "you",
       text,
-      segments: splitSegments(text),
       pending: true,
     });
   }
+
+  // A turn that is open but has produced nothing yet is the case the overlay
+  // most needed and least had: the user pressed Enter and the card sat blank.
+  const activity = currentActivity(state, toolCallsByTurn, awaitingResponse);
+  if (activity) projected.push(activity);
 
   // Truncate before reordering: the bound is on WHICH entries are kept (the
   // newest N), never on which end they are read from.
   const olderCount = Math.max(0, projected.length - limit);
   const tail = projected.slice(-limit);
-  return { entries: order === "newest-first" ? [...tail].reverse() : tail, olderCount };
+  return {
+    entries: order === "newest-first" ? [...tail].reverse() : tail,
+    olderCount,
+  };
 }
 
 function projectChatMessage(
   message: ChatMessage,
   selfParticipantKey: string | null,
-  toolChipsByTurn: Map<string, QuickfireToolChip[]>
+  toolCallsByTurn: Map<string, QuickfireToolCall[]>,
 ): QuickfireTranscriptEntry | null {
   const { contentType } = message;
+
+  if (contentType === "thinking") {
+    const text = message.content ?? "";
+    if (!text.trim()) return null;
+    return {
+      kind: "thinking",
+      id: message.id,
+      title: reasoningTitle(text),
+      text,
+      ...(message.complete === false ? { streaming: true } : {}),
+    };
+  }
 
   if (contentType === "approval" && message.approval) {
     return {
@@ -158,22 +188,33 @@ function projectChatMessage(
       id: message.id,
       severity,
       title: message.diagnostic.title,
-      ...(message.diagnostic.detail ?? message.content
+      ...((message.diagnostic.detail ?? message.content)
         ? { detail: message.diagnostic.detail ?? message.content }
         : {}),
       // The panel offers "Resume at reset" / "Retry with local model" here.
       // This venue cannot run either, so it advertises the panel instead.
-      ...(message.diagnostic.resetAt || severity === "error" ? { recoverable: true } : {}),
+      ...(message.diagnostic.resetAt || severity === "error"
+        ? { recoverable: true }
+        : {}),
     };
   }
 
   if (contentType === "lifecycle" && message.lifecycle) {
+    if (message.lifecycle.status === "waiting") {
+      return {
+        kind: "activity",
+        id: message.id,
+        state: "waiting",
+        phase: "waiting",
+        label: message.lifecycle.title,
+      };
+    }
     return {
       kind: "notice",
       id: message.id,
       severity: "info",
       title: message.lifecycle.title,
-      ...(message.lifecycle.detail ?? message.content
+      ...((message.lifecycle.detail ?? message.content)
         ? { detail: message.lifecycle.detail ?? message.content }
         : {}),
     };
@@ -196,7 +237,9 @@ function projectChatMessage(
       id: message.id,
       severity: "info",
       title:
-        contentType === "fork" ? "This conversation was forked" : "Sent in another conversation",
+        contentType === "fork"
+          ? "This conversation was forked"
+          : "Sent in another conversation",
       ...(message.content ? { detail: message.content } : {}),
     };
   }
@@ -214,12 +257,21 @@ function projectChatMessage(
   const hasBody = text.trim().length > 0;
   const senderType = message.senderMetadata?.type;
   const isAgent = senderType === "agent";
-  const isSelf = selfParticipantKey !== null && message.senderId === selfParticipantKey;
-  const toolChips = message.turnId ? toolChipsByTurn.get(message.turnId) : undefined;
+  const isSelf =
+    selfParticipantKey !== null && message.senderId === selfParticipantKey;
+  const toolCalls = message.turnId
+    ? toolCallsByTurn.get(message.turnId)
+    : undefined;
   const streaming = message.complete === false && !message.error;
 
-  // A bodiless, chipless, errorless row is noise in a card this small.
-  if (!hasBody && !message.error && !toolChips?.length && !message.attachments?.length) return null;
+  // A bodiless message with no tool records, errors, or attachments is noise.
+  if (
+    !hasBody &&
+    !message.error &&
+    !toolCalls?.length &&
+    !message.attachments?.length
+  )
+    return null;
 
   const projectedMessage: QuickfireTranscriptMessage = {
     kind: "message",
@@ -229,17 +281,59 @@ function projectChatMessage(
       ? "you"
       : (message.senderMetadata?.name ?? (isAgent ? "agent" : "someone")),
     text,
-    ...(hasBody ? { segments: splitSegments(text) } : {}),
     ...(streaming ? { streaming: true } : {}),
-    ...(toolChips?.length ? { toolChips } : {}),
+    ...(toolCalls?.length ? { toolCalls } : {}),
     ...(message.error ? { error: true, errorText: message.error } : {}),
     ...(message.pending ? { pending: true } : {}),
     ...(message.model?.displayName || message.model?.ref
-      ? { modelLabel: (message.model.displayName || message.model.ref) as string }
+      ? {
+          modelLabel: (message.model.displayName ||
+            message.model.ref) as string,
+        }
       : {}),
-    ...(message.attachments?.length ? { attachmentCount: message.attachments.length } : {}),
+    ...(message.attachments?.length
+      ? { attachmentCount: message.attachments.length }
+      : {}),
   };
   return projectedMessage;
+}
+
+const REASONING_TITLE_LIMIT = 72;
+
+/** Turn the first meaningful Markdown block into a useful collapsed label. */
+export function reasoningTitle(source: string): string {
+  const text = parseQuickfireMarkdown(source)
+    .map(markdownBlockText)
+    .find((candidate) => candidate.trim().length > 0) ?? source;
+  const normalized = text.replace(/\s+/gu, " ").trim() || source.trim();
+  const characters = [...normalized];
+  return characters.length <= REASONING_TITLE_LIMIT
+    ? normalized
+    : `${characters.slice(0, REASONING_TITLE_LIMIT - 1).join("")}…`;
+}
+
+function markdownBlockText(block: QuickfireMarkdownBlock): string {
+  switch (block.kind) {
+    case "paragraph":
+    case "heading":
+    case "quote":
+      return markdownInlineText(block.children);
+    case "bullet-list":
+    case "ordered-list":
+      return markdownInlineText(block.items[0] ?? []);
+    case "code-block":
+      return block.text.split("\n", 1)[0] ?? "";
+  }
+}
+
+function markdownInlineText(nodes: QuickfireMarkdownInline[]): string {
+  return nodes
+    .map((node) =>
+      node.kind === "text" || node.kind === "code"
+        ? node.text
+        : markdownInlineText(node.children),
+    )
+    .join("");
 }
 
 /**
@@ -247,12 +341,25 @@ function projectChatMessage(
  * console reads are five calls, and collapsing them hides both the work and its
  * failures.
  */
-function toolChipsByTurnId(state: ChannelViewState): Map<string, QuickfireToolChip[]> {
-  const byTurn = new Map<string, QuickfireToolChip[]>();
+function toolCallsByTurnId(
+  state: ChannelViewState,
+): Map<string, QuickfireToolCall[]> {
+  const byTurn = new Map<string, QuickfireToolCall[]>();
   for (const invocation of Object.values(state.invocations)) {
     if (!invocation.turnId) continue;
-    if (typeof invocation.name !== "string" || invocation.name.length === 0) continue;
-    const chip: QuickfireToolChip = {
+    if (typeof invocation.name !== "string" || invocation.name.length === 0)
+      continue;
+    const progress = invocation.progress
+      .map(
+        (item) =>
+          item.message ??
+          (item.data === undefined ? "" : formatDetail(item.data)),
+      )
+      .filter(Boolean)
+      .slice(-20);
+    const failure = invocation.failure ?? invocation.terminalReason;
+    const call: QuickfireToolCall = {
+      id: invocation.invocationId,
       name: invocation.name,
       state:
         invocation.status === "failed" ||
@@ -262,63 +369,139 @@ function toolChipsByTurnId(state: ChannelViewState): Map<string, QuickfireToolCh
           : invocation.status === "completed"
             ? "done"
             : "running",
+      ...(invocation.request === undefined
+        ? {}
+        : { input: formatDetail(invocation.request) }),
+      ...(invocation.result === undefined && invocation.outputs.length === 0
+        ? {}
+        : {
+            output: formatDetail(
+              invocation.result === undefined
+                ? invocation.outputs
+                : invocation.result,
+            ),
+          }),
+      ...(progress.length > 0 ? { progress } : {}),
+      ...(failure ? { failure: formatDetail(failure) } : {}),
     };
-    const chips = byTurn.get(invocation.turnId);
-    if (chips) chips.push(chip);
-    else byTurn.set(invocation.turnId, [chip]);
+    const calls = byTurn.get(invocation.turnId);
+    if (calls) calls.push(call);
+    else byTurn.set(invocation.turnId, [call]);
   }
   return byTurn;
 }
 
-function openTurnActivity(state: ChannelViewState): QuickfireTranscriptEntry | null {
-  const waiting = Object.values(state.turns).find((turn) => turn.status === "waiting");
-  if (waiting) {
-    return {
-      kind: "activity",
-      id: `activity:${waiting.turnId}`,
-      state: "waiting",
-      label: "waiting for you",
-    };
+function currentActivity(
+  state: ChannelViewState,
+  toolCallsByTurn: Map<string, QuickfireToolCall[]>,
+  awaitingResponse: boolean,
+): QuickfireTranscriptEntry | null {
+  const turns = Object.values(state.turns).sort(
+    (left, right) => activityOrder(right) - activityOrder(left),
+  );
+  const activeTurn = turns.find(
+    (turn) => turn.status === "open" || turn.status === "waiting",
+  );
+  // Waiting turns are already projected by the canonical chat merge as a
+  // lifecycle entry carrying the actual summary/reason. `projectChatMessage`
+  // turns that one entry into the compact activity shape; adding another here
+  // would render the same wait twice.
+  if (activeTurn?.status === "waiting") return null;
+  const orphanedRunningInvocation = Object.values(state.invocations).find(
+    (invocation) =>
+      invocation.status === "running" || invocation.status === "started",
+  );
+  const turnId = activeTurn?.turnId ?? orphanedRunningInvocation?.turnId;
+  if (!turnId) {
+    return awaitingResponse
+      ? {
+          kind: "activity",
+          id: "activity:awaiting-response",
+          state: "working",
+          phase: "starting",
+          label: "Starting…",
+        }
+      : null;
   }
-  const open = Object.values(state.turns).find((turn) => turn.status === "open");
-  if (!open) return null;
-  return { kind: "activity", id: `activity:${open.turnId}`, state: "working", label: "working" };
+
+  const toolCalls = toolCallsByTurn.get(turnId) ?? [];
+  const hasRunningTool = toolCalls.some((call) => call.state === "running");
+  const turnMessages = Object.values(state.messages).filter(
+    (message) =>
+      message.turnId === turnId &&
+      message.status !== "completed" &&
+      message.status !== "failed",
+  );
+  const hasResponse = turnMessages.some((message) =>
+    (message.blocks ?? []).some(
+      (block) =>
+        block.type === "text" && "content" in block && Boolean(block.content),
+    ),
+  );
+  const phase = hasRunningTool
+    ? "using-tools"
+    : hasResponse
+      ? "responding"
+      : "thinking";
+  return {
+    kind: "activity",
+    id: `activity:${turnId}`,
+    state: "working",
+    phase,
+    label:
+      phase === "using-tools"
+        ? "Using tools…"
+        : phase === "responding"
+          ? "Responding…"
+          : "Thinking…",
+    ...(toolCalls.length > 0 ? { toolCalls } : {}),
+  };
 }
 
-/**
- * Split content into prose and fenced-code runs.
- *
- * Deliberately only fences: this venue renders a card a few lines tall, and a
- * full markdown pipeline there buys headings and tables nobody can read at that
- * size. Code is the one run whose formatting is load-bearing — losing the line
- * breaks in a snippet makes the answer useless rather than merely plain.
- */
-export function splitSegments(content: string): QuickfireSegment[] {
-  const segments: QuickfireSegment[] = [];
-  const fence = /```([\w+-]*)\n?([\s\S]*?)(?:```|$)/g;
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-  while ((match = fence.exec(content)) !== null) {
-    const prose = content.slice(cursor, match.index);
-    if (prose.trim()) segments.push({ type: "text", text: prose.trim() });
-    const code = match[2] ?? "";
-    if (code.trim()) {
-      segments.push({
-        type: "code",
-        text: code.replace(/\n$/, ""),
-        ...(match[1] ? { language: match[1] } : {}),
-      });
-    }
-    cursor = fence.lastIndex;
+function activityOrder(turn: ChannelViewState["turns"][string]): number {
+  if (turn.lastSeq !== undefined) return turn.lastSeq;
+  const timestamp = Date.parse(turn.updatedAt ?? turn.openedAt);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function formatDetail(value: unknown): string {
+  const seen = new WeakSet<object>();
+  let rendered: string;
+  try {
+    rendered =
+      typeof value === "string"
+        ? value
+        : (JSON.stringify(
+            value,
+            (key, nested) => {
+              if (
+                (key === "data" || key === "base64") &&
+                typeof nested === "string"
+              ) {
+                return `[${nested.length} characters omitted]`;
+              }
+              if (typeof nested === "string" && nested.length > 2_000) {
+                return `${nested.slice(0, 2_000)}…`;
+              }
+              if (nested && typeof nested === "object") {
+                if (seen.has(nested)) return "[circular]";
+                seen.add(nested);
+              }
+              return nested;
+            },
+            2,
+          ) ?? String(value));
+  } catch {
+    rendered = String(value);
   }
-  const rest = content.slice(cursor);
-  if (rest.trim()) segments.push({ type: "text", text: rest.trim() });
-  return segments.length > 0 ? segments : [{ type: "text", text: content }];
+  return rendered.length > 6_000
+    ? `${rendered.slice(0, 6_000)}\n… detail truncated`
+    : rendered;
 }
 
 /** A turn is in flight while any turn is open or waiting on the user. */
 export function hasOpenTurn(state: ChannelViewState): boolean {
   return Object.values(state.turns).some(
-    (turn) => turn.status === "open" || turn.status === "waiting"
+    (turn) => turn.status === "open" || turn.status === "waiting",
   );
 }

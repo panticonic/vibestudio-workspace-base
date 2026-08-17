@@ -71,7 +71,7 @@ export type QuickfireIntent =
   | { type: "send-and-promote"; text: string }
   /** Stop the turn in flight. */
   | { type: "stop" }
-  /** First click arms the two-step clear; second click performs it. */
+  /** Clear this slot's conversation and bind a fresh one. */
   | { type: "clear" }
   | { type: "promote" }
   /** Focus the chat panel that a promoted conversation continued into. */
@@ -94,6 +94,12 @@ export type QuickfireIntent =
    * user was not in the overlay, so there is no scope to step back through.
    */
   | { type: "host-escape" }
+  /**
+   * Pointer press in a sibling native view, outside this overlay document.
+   * The host does not consume it; the target keeps ownership of navigation and
+   * focus while the shell closes this transient surface.
+   */
+  | { type: "host-pointer-down" }
   | { type: "dismiss" }
   | { type: "send"; text: string };
 

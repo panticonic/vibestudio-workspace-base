@@ -14,7 +14,7 @@ import {
   TRANSCRIPT_LIMIT,
   useQuickfireSessionCore,
   type QuickfireSessionFacts,
-  type QuickfireTransport,
+  type QuickfireTransport
 } from "@workspace/quickfire-core/session";
 
 /**
@@ -39,10 +39,10 @@ function wireMessageEvent(text: string, senderId = "user:me") {
         protocol: "agentic.trajectory.v1",
         role: "user",
         blocks: [{ blockId: "msg-1:block:0", type: "text", content: text }],
-        outcome: "completed",
+        outcome: "completed"
       },
-      createdAt: "2026-08-14T12:00:00.000Z",
-    },
+      createdAt: "2026-08-14T12:00:00.000Z"
+    }
   };
 }
 
@@ -58,8 +58,29 @@ function wireCredentialEvent() {
       credKey: "cred-openai-codex",
       providerId: "openai-codex",
       connectSpec: { kind: "oauth" },
-      reason: "Credential needs refresh",
-    },
+      reason: "Credential needs refresh"
+    }
+  };
+}
+
+function wireTurnEvent(
+  kind: "turn.opened" | "turn.waiting",
+  pubsubId: number,
+  payload: Record<string, unknown> = {}
+) {
+  return {
+    type: "agentic.trajectory.v1/event",
+    pubsubId,
+    senderId: "agent-1",
+    ts: 1_700_000_000_000 + pubsubId,
+    senderMetadata: { name: "Command agent", type: "agent" },
+    payload: {
+      kind,
+      actor: { kind: "agent", id: "agent-1", participantId: "agent-1" },
+      turnId: "turn-1",
+      payload: { protocol: "agentic.trajectory.v1", ...payload },
+      createdAt: new Date(1_700_000_000_000 + pubsubId).toISOString()
+    }
   };
 }
 
@@ -74,15 +95,50 @@ function fakeChannelClient(events: unknown[] = []) {
             index < events.length
               ? Promise.resolve({ value: events[index++], done: false })
               : // Then park: a live channel stays open rather than ending.
-                new Promise<IteratorResult<unknown>>(() => {}),
+                new Promise<IteratorResult<unknown>>(() => {})
         };
-      },
+      }
     }),
     ready: () => Promise.resolve(),
     close: vi.fn(() => Promise.resolve()),
     send: vi.fn(() => Promise.resolve()),
     recordReadReceipt: vi.fn(() => Promise.resolve()),
-    callMethod: vi.fn(() => ({ result: Promise.resolve() })),
+    callMethod: vi.fn(() => ({ result: Promise.resolve() }))
+  };
+}
+
+function channelClientEmittingOnSend(eventsOnSend: unknown[]) {
+  const queued: unknown[] = [];
+  let resolveNext: ((result: IteratorResult<unknown>) => void) | null = null;
+  const emit = (event: unknown) => {
+    const resolve = resolveNext;
+    if (resolve) {
+      resolveNext = null;
+      resolve({ value: event, done: false });
+    } else {
+      queued.push(event);
+    }
+  };
+  return {
+    clientId: "user:me",
+    events: () => ({
+      [Symbol.asyncIterator]: () => ({
+        next: () => {
+          const event = queued.shift();
+          if (event !== undefined) return Promise.resolve({ value: event, done: false });
+          return new Promise<IteratorResult<unknown>>((resolve) => {
+            resolveNext = resolve;
+          });
+        }
+      })
+    }),
+    ready: () => Promise.resolve(),
+    close: vi.fn(() => Promise.resolve()),
+    send: vi.fn(async () => {
+      eventsOnSend.forEach(emit);
+    }),
+    recordReadReceipt: vi.fn(() => Promise.resolve()),
+    callMethod: vi.fn(() => ({ result: Promise.resolve() }))
   };
 }
 
@@ -98,7 +154,7 @@ function transportFor(
     clear: vi.fn(async () => ({ cleared: true, archived: 1 })),
     promote: vi.fn(async () => ({ ...session, state: "promoted" as const })),
     connectToChannel,
-    ...overrides,
+    ...overrides
   };
   return { transport, client, connectToChannel };
 }
@@ -108,7 +164,7 @@ const fresh: QuickfireSessionFacts = {
   contextId: "ctx-1",
   state: "fresh",
   messageCount: null,
-  lastActivityAt: null,
+  lastActivityAt: null
 };
 
 describe("useQuickfireSessionCore", () => {
@@ -121,16 +177,16 @@ describe("useQuickfireSessionCore", () => {
 
   it("resolves and joins the conversation bound to a slot", async () => {
     const { transport, connectToChannel } = transportFor(fresh);
-    const { result } = renderHook(() =>
-      useQuickfireSessionCore("panel:tree/root/0", transport)
-    );
+    const { result } = renderHook(() => useQuickfireSessionCore("panel:tree/root/0", transport));
     await waitFor(() => expect(result.current.view.connecting).toBe(false));
-    expect(transport.sessionFor).toHaveBeenCalledWith("panel:tree/root/0", { fresh: false });
+    expect(transport.sessionFor).toHaveBeenCalledWith("panel:tree/root/0", {
+      fresh: false
+    });
     // The bound slot is the participant this client claims, the way a panel
     // caller passes its slot id; replay streams so the reducer sees it.
     expect(connectToChannel).toHaveBeenCalledWith("channel-1", "ctx-1", {
       clientId: "panel:tree/root/0",
-      replayMessageLimit: TRANSCRIPT_LIMIT,
+      replayMessageLimit: TRANSCRIPT_LIMIT
     });
     expect(result.current.view.channelId).toBe("channel-1");
     expect(result.current.view.hasConversation).toBe(true);
@@ -141,18 +197,21 @@ describe("useQuickfireSessionCore", () => {
       ...fresh,
       state: "resumed",
       messageCount: 3,
-      lastActivityAt: 1_700_000_000_000,
+      lastActivityAt: 1_700_000_000_000
     });
     const { result } = renderHook(() => useQuickfireSessionCore("slot", transport));
     await waitFor(() => expect(result.current.view.resume).not.toBeNull());
     expect(result.current.view.resume).toEqual({
       messageCount: 3,
-      lastActivityAt: 1_700_000_000_000,
+      lastActivityAt: 1_700_000_000_000
     });
   });
 
   it("never joins the channel of a promoted conversation", async () => {
-    const { transport, connectToChannel } = transportFor({ ...fresh, state: "promoted" });
+    const { transport, connectToChannel } = transportFor({
+      ...fresh,
+      state: "promoted"
+    });
     const { result } = renderHook(() => useQuickfireSessionCore("slot", transport));
     await waitFor(() => expect(result.current.view.promoted).toBe(true));
     expect(connectToChannel).not.toHaveBeenCalled();
@@ -176,11 +235,14 @@ describe("useQuickfireSessionCore", () => {
     await act(async () => {
       promoted = await result.current.promote();
     });
-    expect(promoted).toMatchObject({ channelId: "channel-1", contextId: "ctx-1" });
+    expect(promoted).toMatchObject({
+      channelId: "channel-1",
+      contextId: "ctx-1"
+    });
     expect(result.current.view.promoted).toBe(true);
   });
 
-  it("clearing detaches locally as well as server-side", async () => {
+  it("clearing archives the old session and binds a fresh empty conversation", async () => {
     const { transport, client } = transportFor(fresh);
     const { result } = renderHook(() => useQuickfireSessionCore("slot", transport));
     await waitFor(() => expect(result.current.view.connecting).toBe(false));
@@ -189,7 +251,9 @@ describe("useQuickfireSessionCore", () => {
     });
     expect(transport.clear).toHaveBeenCalledWith("slot");
     expect(client.close).toHaveBeenCalled();
-    expect(result.current.view.hasConversation).toBe(false);
+    expect(transport.sessionFor).toHaveBeenLastCalledWith("slot", { fresh: true });
+    expect(result.current.view.hasConversation).toBe(true);
+    expect(result.current.view.connecting).toBe(false);
     expect(result.current.view.transcript).toEqual([]);
   });
 
@@ -197,7 +261,7 @@ describe("useQuickfireSessionCore", () => {
     const { transport } = transportFor(fresh, {
       sessionFor: vi.fn(async () => {
         throw new Error("workspace is offline");
-      }),
+      })
     });
     const { result } = renderHook(() => useQuickfireSessionCore("slot", transport));
     await waitFor(() => expect(result.current.view.error).toBe("workspace is offline"));
@@ -212,7 +276,7 @@ describe("useQuickfireSessionCore conversation source (messaging plan §4.8)", (
     contextId: "ctx-notify",
     clientId: "conversation:channel-notify",
     focusMessageId: "say:call-1",
-    replyTo: { participantId: "do:news-agent" },
+    replyTo: { participantId: "do:news-agent" }
   };
 
   it("joins an existing channel without minting a session", async () => {
@@ -222,7 +286,7 @@ describe("useQuickfireSessionCore conversation source (messaging plan §4.8)", (
     expect(transport.sessionFor).not.toHaveBeenCalled();
     expect(connectToChannel).toHaveBeenCalledWith("channel-notify", "ctx-notify", {
       clientId: "conversation:channel-notify",
-      replayMessageLimit: TRANSCRIPT_LIMIT,
+      replayMessageLimit: TRANSCRIPT_LIMIT
     });
     expect(result.current.mode).toBe("conversation");
     expect(result.current.view.hasConversation).toBe(true);
@@ -242,7 +306,7 @@ describe("useQuickfireSessionCore conversation source (messaging plan §4.8)", (
     expect(client.send).toHaveBeenCalledWith("on it", {
       replyTo: "say:call-1",
       mentions: ["do:news-agent"],
-      to: [{ kind: "participant", participantId: "do:news-agent" }],
+      to: [{ kind: "participant", participantId: "do:news-agent" }]
     });
   });
 
@@ -255,7 +319,10 @@ describe("useQuickfireSessionCore conversation source (messaging plan §4.8)", (
     expect(transport.clear).not.toHaveBeenCalled();
     const promoted = await result.current.promote();
     expect(transport.promote).not.toHaveBeenCalled();
-    expect(promoted).toMatchObject({ channelId: "channel-notify", contextId: "ctx-notify" });
+    expect(promoted).toMatchObject({
+      channelId: "channel-notify",
+      contextId: "ctx-notify"
+    });
   });
 });
 
@@ -267,7 +334,9 @@ describe("useQuickfireSessionCore startFresh", () => {
     await act(async () => {
       await result.current.startFresh();
     });
-    expect(transport.sessionFor).toHaveBeenLastCalledWith("slot", { fresh: true });
+    expect(transport.sessionFor).toHaveBeenLastCalledWith("slot", {
+      fresh: true
+    });
     expect(connectToChannel).toHaveBeenCalledTimes(2);
     // The event loop is attached on the rebind too: the transcript renders.
     await waitFor(() => expect(result.current.view.transcript.length).toBeGreaterThan(0));
@@ -275,6 +344,55 @@ describe("useQuickfireSessionCore startFresh", () => {
 });
 
 describe("useQuickfireSessionCore send queue", () => {
+  it("shows work immediately after send, before the channel opens a turn", async () => {
+    const { transport } = transportFor(fresh);
+    const { result } = renderHook(() => useQuickfireSessionCore("slot", transport));
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+
+    await act(async () => {
+      await result.current.send("what is the channel id?");
+    });
+
+    expect(result.current.view.streaming).toBe(true);
+    expect(result.current.view.transcript).toContainEqual(
+      expect.objectContaining({
+        kind: "activity",
+        phase: "starting",
+        label: "Starting…"
+      })
+    );
+  });
+
+  it("hands optimistic activity to the durable turn and does not call a wait streaming", async () => {
+    const client = channelClientEmittingOnSend([
+      wireTurnEvent("turn.opened", 1),
+      wireTurnEvent("turn.waiting", 2, {
+        reason: "input_required",
+        summary: "Waiting for your choice"
+      })
+    ]);
+    const { transport } = transportFor(fresh, {
+      connectToChannel: vi.fn(() => client as never)
+    });
+    const { result } = renderHook(() => useQuickfireSessionCore("slot", transport));
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+
+    await act(async () => {
+      await result.current.send("show me the choices");
+    });
+
+    await waitFor(() =>
+      expect(result.current.view.transcript).toContainEqual(
+        expect.objectContaining({
+          kind: "activity",
+          state: "waiting",
+          label: "Waiting for your choice"
+        })
+      )
+    );
+    expect(result.current.view.streaming).toBe(false);
+  });
+
   it("delivers text typed before the binding resolved", async () => {
     // The palette's ask row sends and binds in one gesture: `send` is called
     // while the slot is still null, so the message exists before any channel
@@ -309,7 +427,7 @@ describe("useQuickfireSessionCore send queue", () => {
           releaseBinding = resolve;
         });
         return fresh;
-      }),
+      })
     });
     const { result, rerender } = renderHook(
       ({ slotId }: { slotId: string | null }) => useQuickfireSessionCore(slotId, transport),
@@ -333,7 +451,6 @@ describe("useQuickfireSessionCore send queue", () => {
   });
 });
 
-
 describe("useQuickfireSessionCore reduction", () => {
   it("renders a channel event as a transcript message", async () => {
     // The reducer consumes a ChannelEnvelope, while the client yields a WIRE
@@ -343,7 +460,7 @@ describe("useQuickfireSessionCore reduction", () => {
     // healthy. That shipped, and only a full app run could see it. This test
     // sees it in milliseconds.
     const { transport } = transportFor(fresh, {}, [
-      wireMessageEvent("why is this panel laid out this way?"),
+      wireMessageEvent("why is this panel laid out this way?")
     ]);
     const { result } = renderHook(() => useQuickfireSessionCore("slot-a", transport));
 
@@ -352,9 +469,7 @@ describe("useQuickfireSessionCore reduction", () => {
         result.current.view.transcript
           .filter((message) => message.kind === "message")
           .map((message) => message.text)
-      ).toContain(
-        "why is this panel laid out this way?"
-      )
+      ).toContain("why is this panel laid out this way?")
     );
   });
 
@@ -365,7 +480,7 @@ describe("useQuickfireSessionCore reduction", () => {
     await waitFor(() =>
       expect(result.current.view.credentialRequest).toEqual({
         providerId: "openai-codex",
-        reason: "Credential needs refresh",
+        reason: "Credential needs refresh"
       })
     );
     expect(result.current.view.streaming).toBe(false);

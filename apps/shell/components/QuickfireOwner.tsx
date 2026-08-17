@@ -69,9 +69,9 @@ import {
   type QuickfireMode,
   type QuickfireSurfaceProps,
 } from "../overlay/quickfireSurfaceModel";
-import type { QuickfireSessionSummary } from "@vibestudio/service-schemas/quickfire";
+import type { QuickfireSessionSummary } from "@workspace/quickfire-core/service";
 import type { OverlayThemeInfo } from "../overlay/types";
-import { useQuickfireSession } from "./useQuickfireSession";
+import { useQuickfireSession, type QuickfireSessionSource } from "./useQuickfireSession";
 
 /**
  * Id of the panel-region div (rendered by `PanelApp`) whose rect anchors the
@@ -149,8 +149,6 @@ export function QuickfireOwner() {
   const [anchorBounds, setAnchorBounds] = useState<ContentOverlayBounds | null>(null);
   const [panelLost, setPanelLost] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
-  /** Two-step clear: the first ⟲ arms it, the second performs it (§4.3). */
-  const [clearArmed, setClearArmed] = useState(false);
   /** Rows for the `quickfire.list` picker; non-null only while it is showing. */
   const [quickfireConversations, setQuickfireConversations] = useState<
     QuickfireSessionSummary[] | null
@@ -338,7 +336,6 @@ export function QuickfireOwner() {
   const close = useCallback((options?: { restoreFocus?: boolean }) => {
     setState(CLOSED);
     setQuickfireConversations(null);
-    setClearArmed(false);
     const returnTo = returnFocusPanelIdRef.current;
     returnFocusPanelIdRef.current = null;
     if (options?.restoreFocus !== false && returnTo) {
@@ -745,7 +742,6 @@ export function QuickfireOwner() {
             selectedId: null,
             selectionTouched: false,
           }));
-          setClearArmed(false);
           void quickfireSession.send(target.prompt).catch(reportCommandFailure);
           return;
         case "chat":
@@ -935,12 +931,15 @@ export function QuickfireOwner() {
           // receives the same forwarded intent and ignores it.
           if (state.open) close();
           return;
+        case "host-pointer-down":
+          // The underlying native view is handling this same press. Do not
+          // restore the old panel and race the user's chosen focus target.
+          if (state.open) close({ restoreFocus: false });
+          return;
         case "send":
-          setClearArmed(false);
           void quickfireSession.send(intent.text);
           return;
         case "send-and-promote":
-          setClearArmed(false);
           void quickfireSession
             .send(intent.text)
             .then(() => promoteToChatPanel())
@@ -953,12 +952,6 @@ export function QuickfireOwner() {
           // A conversation surface has no clear (plan §4.8); the button is not
           // rendered, so this is only a stray keyboard path.
           if (state.conversation) return;
-          // Two-step, no modal: arm, then confirm (§4.3).
-          if (!clearArmed) {
-            setClearArmed(true);
-            return;
-          }
-          setClearArmed(false);
           void quickfireSession.clear().catch(reportCommandFailure);
           return;
         case "promote":
@@ -976,7 +969,6 @@ export function QuickfireOwner() {
     [
       activateRow,
       applySessionOutcome,
-      clearArmed,
       state.conversation,
       close,
       focusPromotedPanel,
@@ -1077,7 +1069,6 @@ export function QuickfireOwner() {
               connecting: conversation.view.connecting,
               streaming: conversation.view.streaming,
               promoted: conversation.view.promoted,
-              clearArmed,
               hasConversation: conversation.view.hasConversation,
               error: conversation.view.error,
             }
@@ -1085,7 +1076,6 @@ export function QuickfireOwner() {
     };
   }, [
     chromeState,
-    clearArmed,
     ghostSuffix,
     panelLost,
     quickfireSession,

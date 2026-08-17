@@ -15,14 +15,20 @@
 /** The four scopes of §1.2, in chip order. */
 export type QuickfireMode = "all" | "commands" | "goto" | "quickfire";
 
-export const QUICKFIRE_MODE_PREFIX: Record<QuickfireMode, "" | ">" | "@" | "/"> = {
+export const QUICKFIRE_MODE_PREFIX: Record<
+  QuickfireMode,
+  "" | ">" | "@" | "/"
+> = {
   all: "",
   commands: ">",
   goto: "@",
   quickfire: "/",
 };
 
-export const QUICKFIRE_MODE_CHIPS: Array<{ mode: QuickfireMode; label: string }> = [
+export const QUICKFIRE_MODE_CHIPS: Array<{
+  mode: QuickfireMode;
+  label: string;
+}> = [
   { mode: "all", label: "All" },
   { mode: "commands", label: "Commands" },
   { mode: "goto", label: "Go to" },
@@ -30,7 +36,12 @@ export const QUICKFIRE_MODE_CHIPS: Array<{ mode: QuickfireMode; label: string }>
 ];
 
 /** Cycle order for repeating the palette accelerator while open (§1.3). */
-export const QUICKFIRE_MODE_CYCLE: QuickfireMode[] = ["all", "commands", "goto", "quickfire"];
+export const QUICKFIRE_MODE_CYCLE: QuickfireMode[] = [
+  "all",
+  "commands",
+  "goto",
+  "quickfire",
+];
 
 export interface QuickfireRow {
   id: string;
@@ -48,10 +59,16 @@ export interface QuickfireRow {
   disabled?: boolean;
 }
 
-export interface QuickfireToolChip {
+export interface QuickfireToolCall {
+  id: string;
   name: string;
   /** Running work, finished work, and work that ended badly must look different. */
   state: "running" | "done" | "failed";
+  /** Bounded, human-readable snapshots of the canonical invocation record. */
+  input?: string;
+  output?: string;
+  progress?: string[];
+  failure?: string;
 }
 
 export interface QuickfireGroup {
@@ -83,18 +100,6 @@ export interface QuickfireContextStrip {
   lost?: boolean;
 }
 
-/**
- * A run of message content the surface can render distinctly.
- *
- * Prose and code are separated because they are read differently: a fenced
- * block wants a monospace box that preserves every space, and flattening it
- * into a paragraph — which is what the overlay did — turns the most common
- * useful answer an agent gives (a snippet) into an unreadable smear.
- */
-export type QuickfireSegment =
-  | { type: "text"; text: string }
-  | { type: "code"; text: string; language?: string };
-
 /** One rendered transcript line spoken by a participant. */
 export interface QuickfireTranscriptMessage {
   kind: "message";
@@ -104,19 +109,17 @@ export interface QuickfireTranscriptMessage {
   authorLabel: string;
   /** Flattened plain text. Still the whole content for compact renderers. */
   text: string;
-  /** Same content split into prose and code runs, for renderers that can. */
-  segments?: QuickfireSegment[];
   /** Still streaming: render the live delta treatment. */
   streaming?: boolean;
   /**
-   * Compact tool pills, in call order.
+   * Inspectable tool records, in call order.
    *
    * Carrying `state` is the difference between a transcript that shows work and
    * one that only shows names: a deduped list of names renders a running call,
    * a finished one, a failure and an interruption identically, which is what
    * made "is the agent doing anything?" unanswerable from the overlay.
    */
-  toolChips?: QuickfireToolChip[];
+  toolCalls?: QuickfireToolCall[];
   error?: boolean;
   /**
    * The failure text itself. `error` alone says a turn broke without saying
@@ -156,7 +159,19 @@ export interface QuickfireTranscriptActivity {
   kind: "activity";
   id: string;
   state: "working" | "waiting";
+  phase: "starting" | "thinking" | "using-tools" | "responding" | "waiting";
   label: string;
+  toolCalls?: QuickfireToolCall[];
+}
+
+/** A model reasoning record, intentionally distinct from its eventual reply. */
+export interface QuickfireTranscriptThinking {
+  kind: "thinking";
+  id: string;
+  /** First meaningful Markdown block, flattened and bounded for the disclosure label. */
+  title: string;
+  text: string;
+  streaming?: boolean;
 }
 
 /** A user decision the compact venue cannot answer inline. */
@@ -172,6 +187,7 @@ export type QuickfireTranscriptEntry =
   | QuickfireTranscriptMessage
   | QuickfireTranscriptNotice
   | QuickfireTranscriptActivity
+  | QuickfireTranscriptThinking
   | QuickfireTranscriptApproval;
 
 /**
@@ -227,8 +243,6 @@ export interface QuickfireComposeView {
    * conversation here" instead of a compose row.
    */
   promoted: boolean;
-  /** Second press of the two-step clear affordance turns this true. */
-  clearArmed: boolean;
   /** True once a conversation exists, enabling clear/promote in the header. */
   hasConversation: boolean;
   /** Set when resolving or sending failed; shown inline, never as a modal. */
