@@ -23,6 +23,7 @@ import {
   type EffectKind,
   type EffectOutcome,
   type Incoming,
+  type ModelFailureClass,
   type StepContext,
   type StepFn,
   type StepPolicy,
@@ -114,6 +115,20 @@ function assistantMessageText(blocks: unknown[]): string | undefined {
  * schema's `runtime_generation_lost` failure code (failureKind
  * "infrastructure"). */
 export const RUNTIME_GENERATION_LOST_CODE = "runtime_generation_lost";
+
+const BOUNDED_MODEL_TRANSPORT_FAILURE_CODES = new Set<ModelFailureClass>([
+  "model_stream_stalled_retryable",
+  "unknown_retryable",
+]);
+
+function isBoundedModelTransportFailureCode(
+  code: string | undefined
+): code is ModelFailureClass {
+  return (
+    code !== undefined &&
+    BOUNDED_MODEL_TRANSPORT_FAILURE_CODES.has(code as ModelFailureClass)
+  );
+}
 
 /** Durable start-attempt marker persisted inside the outbox row's descriptor. */
 type DeferredEvalDescriptorMarker = { deferredEvalStartAttempted?: boolean };
@@ -1821,10 +1836,16 @@ export class AgentLoopDriver {
     // An unclassified transport failure does not: retry it once for a transient
     // disconnect, then settle visibly instead of leaving an interactive turn
     // in a permanent typing state.
-    const attemptLimit =
-      outcome.code === "unknown_retryable" ? 2 : maxAttempts(updated?.descriptor ?? row.descriptor);
+    const boundedModelTransportFailureCode =
+      updated?.descriptor.kind === "model_call" &&
+      isBoundedModelTransportFailureCode(outcome.code)
+        ? outcome.code
+        : null;
+    const attemptLimit = boundedModelTransportFailureCode
+      ? 2
+      : maxAttempts(updated?.descriptor ?? row.descriptor);
     if (updated && updated.attempts >= attemptLimit) {
-      if (updated.descriptor.kind === "model_call" && outcome.code === "unknown_retryable") {
+      if (boundedModelTransportFailureCode) {
         return {
           kind: "model",
           blocks: [],
@@ -1832,7 +1853,7 @@ export class AgentLoopDriver {
           errorReason: outcome.reason,
           recoverable: false,
           failure: {
-            code: "unknown_retryable",
+            code: boundedModelTransportFailureCode,
             reason: outcome.reason,
             recoverable: false,
           },

@@ -106,7 +106,6 @@ const PROVIDER_LEVEL_FAILURE_CODES = new Set([
   "provider_overloaded_retryable",
   "auth_or_credentials",
   "circuit_breaker_open_retryable",
-  "unknown_retryable",
 ]);
 
 function chatCallMethod(chat: Record<string, unknown>): ChatCallMethod | null {
@@ -237,6 +236,9 @@ export const MessageCard = React.memo(function MessageCard({
   const [retryLocalState, setRetryLocalState] = useState<
     "idle" | "switching" | "ready" | "sent" | "failed"
   >("idle");
+  const [retryState, setRetryState] = useState<
+    "idle" | "sending" | "ready" | "sent" | "failed"
+  >("idle");
   const [cleanStartState, setCleanStartState] = useState<
     "idle" | "starting" | "started" | "failed"
   >("idle");
@@ -272,6 +274,11 @@ export const MessageCard = React.memo(function MessageCard({
     msg.contentType === "diagnostic" &&
     msg.diagnostic?.code === "message_failed" &&
     msg.diagnostic.failureCode === "context_overflow_terminal";
+  const sameModelRetryFailure =
+    msg.contentType === "diagnostic" &&
+    msg.diagnostic?.code === "message_failed" &&
+    (msg.diagnostic.failureCode === "model_stream_stalled_retryable" ||
+      msg.diagnostic.failureCode === "unknown_retryable");
   const shouldInspectCurrentAgentModel =
     providerLevelModelFailure || localContextOverflowFailure;
   const currentAgentModelIsLocal =
@@ -283,6 +290,8 @@ export const MessageCard = React.memo(function MessageCard({
     currentAgentModelKnown &&
     !currentAgentModelIsLocal &&
     Boolean(callMethod && (inputActions || sendFromChat));
+  const canRetry =
+    sameModelRetryFailure && Boolean(inputActions || sendFromChat);
   const canStartCleanLocalChat =
     localContextOverflowFailure &&
     currentAgentModelKnown &&
@@ -352,6 +361,22 @@ export const MessageCard = React.memo(function MessageCard({
     selfId,
     sendFromChat,
   ]);
+
+  const handleRetry = useCallback(async () => {
+    setRetryState("sending");
+    try {
+      if (sendFromChat) {
+        await sendFromChat("retry", { tier: "primary" });
+        setRetryState("sent");
+      } else if (inputActions) {
+        inputActions.onInputChange("retry");
+        setRetryState("ready");
+      }
+    } catch (err) {
+      console.warn("[MessageCard] Retry failed:", err);
+      setRetryState("failed");
+    }
+  }, [inputActions, sendFromChat]);
 
   const handleStartCleanLocalChat = useCallback(async () => {
     const onNewConversation = messageActions?.onNewConversation;
@@ -670,6 +695,33 @@ export const MessageCard = React.memo(function MessageCard({
                           : retryLocalState === "failed"
                             ? "Retry local failed"
                             : "Retry with local model"}
+                  </Button>
+                </Flex>
+              )}
+              {canRetry && (
+                <Flex align="center" gap="2" wrap="wrap">
+                  <Button
+                    size="1"
+                    variant="soft"
+                    color={retryState === "failed" ? "red" : "blue"}
+                    disabled={
+                      retryState === "sending" ||
+                      retryState === "ready" ||
+                      retryState === "sent"
+                    }
+                    onClick={handleRetry}
+                    title="Retry this turn with the current model"
+                  >
+                    <ReloadIcon />
+                    {retryState === "sending"
+                      ? "Retrying"
+                      : retryState === "ready"
+                        ? "Ready — press Send"
+                        : retryState === "sent"
+                          ? "Retry sent"
+                          : retryState === "failed"
+                            ? "Retry failed"
+                            : "Retry"}
                   </Button>
                 </Flex>
               )}

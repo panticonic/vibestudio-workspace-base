@@ -8,6 +8,7 @@ export type ModelFailureClass =
   | "circuit_breaker_open_retryable"
   | "context_overflow_terminal"
   | "infrastructure_terminal"
+  | "model_stream_stalled_retryable"
   | "unknown_retryable";
 
 export interface ModelFailureInfo {
@@ -157,6 +158,10 @@ export function classifyModelFailure(
 
   if (isInfrastructureTerminal(codeKey, readable)) {
     return terminal("infrastructure_terminal", readable);
+  }
+
+  if (codeKey === "model_stream_stalled_retryable") {
+    return retryable("model_stream_stalled_retryable", readable, DEFAULT_UNKNOWN_RETRY_MS);
   }
 
   if (isAuthOrCredentialError(codeKey, status, readable)) {

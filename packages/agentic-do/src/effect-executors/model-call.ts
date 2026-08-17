@@ -49,6 +49,8 @@ const LOCAL_MODEL_PREFILL_POLL_MS = 1000;
 const DEFAULT_CODEX_TRANSPORT_IDLE_TIMEOUT_MS = 60_000;
 
 class ModelProgressIdleTimeoutError extends Error {
+  readonly code = "model_stream_stalled_retryable";
+
   constructor(timeoutMs: number) {
     super(`Model stream made no semantic progress for ${timeoutMs}ms`);
     this.name = "ModelProgressIdleTimeoutError";

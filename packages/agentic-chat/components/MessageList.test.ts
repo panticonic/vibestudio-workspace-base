@@ -342,6 +342,46 @@ describe("MessageList typing indicators (roster-based)", () => {
     });
   });
 
+  it.each(["model_stream_stalled_retryable", "unknown_retryable"])(
+    "retries a %s failure with the current model",
+    async (failureCode) => {
+      const callMethod = vi.fn(async () => ({ model: "openai-codex:gpt-5.3" }));
+      const send = vi.fn(async () => undefined);
+      render(
+        React.createElement(MessageList, {
+          messages: [
+            makeMessage({
+              id: "diagnostic:msg-stream-stalled",
+              senderId: "agent-1",
+              contentType: "diagnostic",
+              kind: "system",
+              content: "Model stream made no semantic progress for 60000ms",
+              complete: true,
+              diagnostic: {
+                messageId: "msg-stream-stalled",
+                code: "message_failed",
+                failureCode,
+                severity: "error",
+                title: "Message failed",
+                detail: "Model stream made no semantic progress for 60000ms",
+              },
+            }),
+          ],
+          participants: {},
+          selfId: "user-1",
+          allParticipants: makeParticipant("agent-1", { handle: "ai-chat" }),
+          chat: { callMethod, send },
+        } as never)
+      );
+
+      fireEvent.click(await screen.findByRole("button", { name: /^retry$/i }));
+
+      await waitFor(() => expect(send).toHaveBeenCalledWith("retry", { tier: "primary" }));
+      expect(callMethod).not.toHaveBeenCalled();
+      expect(screen.queryByRole("button", { name: /retry with local model/i })).toBeNull();
+    }
+  );
+
   it("does not mark local retry ready or send retry when live model switching fails", async () => {
     const calls: Array<{ participantId: string; method: string; args: unknown }> = [];
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

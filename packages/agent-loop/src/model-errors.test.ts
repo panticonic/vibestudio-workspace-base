@@ -4,6 +4,22 @@ import { classifyModelFailure, modelFailureInputFromUnknown } from "./model-erro
 const now = "2026-06-15T18:00:00.000Z";
 
 describe("classifyModelFailure", () => {
+  it("keeps semantic stream stalls distinct from generic provider failures", () => {
+    expect(
+      classifyModelFailure(
+        modelFailureInputFromUnknown(
+          Object.assign(new Error("Model stream made no semantic progress for 60000ms"), {
+            code: "model_stream_stalled_retryable",
+          })
+        )
+      )
+    ).toMatchObject({
+      code: "model_stream_stalled_retryable",
+      recoverable: true,
+      retryAfterMs: 1_000,
+    });
+  });
+
   it("retries premature provider WebSocket closes through the bounded effect policy", () => {
     expect(
       classifyModelFailure({

@@ -2699,7 +2699,7 @@ describe("AgentLoopDriver", () => {
                   kind: "retry",
                   reason: "model stream made no semantic progress",
                   retryAfterMs: 1_000,
-                  code: "unknown_retryable",
+                  code: "model_stream_stalled_retryable",
                 };
               },
             } satisfies EffectExecutor)

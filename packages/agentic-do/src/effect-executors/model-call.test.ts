@@ -629,7 +629,7 @@ describe("modelCallExecutor", () => {
       })
     ).resolves.toMatchObject({
       kind: "retry",
-      code: "unknown_retryable",
+      code: "model_stream_stalled_retryable",
       reason: "Model stream made no semantic progress for 15ms",
     });
     expect(returnCalled).toBe(true);
