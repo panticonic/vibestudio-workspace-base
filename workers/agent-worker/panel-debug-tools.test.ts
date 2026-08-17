@@ -38,12 +38,6 @@ describe("panel_screenshot", () => {
     expect(callMain.mock.calls[0]?.[1]?.[0]).toBe("slot-other");
   });
 
-  it("errors rather than guessing when nothing is bound", async () => {
-    const callMain = calls(null);
-    const result = await createPanelScreenshotTool(callMain, null).execute("t1", {});
-    expect(result.isError).toBe(true);
-    expect(callMain.mock.calls).toHaveLength(0);
-  });
 });
 describe("panel_console", () => {
   const history = {

@@ -159,7 +159,7 @@ class FakeWebSocket {
       arg: {
         name?: string;
         value?: string;
-        values?: string[];
+        values?: Array<string | { value?: string; label?: string; index?: number }>;
         checked?: boolean;
         retainToken?: string;
         token?: string;
@@ -674,6 +674,38 @@ describe("worker CDP client", () => {
       checkboxOps.some((expression) => expression.includes('"op":"releaseRetainedElement"'))
     ).toBe(true);
     await expect(page.getByRole("combobox").selectOption("two")).resolves.toEqual(["two"]);
+  });
+
+  it("accepts Playwright-style select option matchers", async () => {
+    installFakeWebSocket();
+    const browser = await BrowserImpl.connect("ws://cdp");
+    const page = browser.contexts()[0]!.pages()[0]!;
+
+    await expect(page.getByRole("combobox").selectOption({ label: "Two" })).resolves.toEqual([
+      { label: "Two" },
+    ]);
+    await expect(page.getByRole("combobox").selectOption({ index: 1 })).resolves.toEqual([
+      { index: 1 },
+    ]);
+
+    const selectEvaluation = FakeWebSocket.sent
+      .filter((entry) => entry.method === "Runtime.evaluate")
+      .map((entry) => String(entry.params?.["expression"] ?? ""))
+      .filter((expression) => expression.includes('"op":"selectOption"'));
+    expect(selectEvaluation.at(-2)).toContain('"values":[{"label":"Two"}]');
+    expect(selectEvaluation.at(-1)).toContain('"values":[{"index":1}]');
+  });
+
+  it("rejects malformed select option matchers before sending CDP work", async () => {
+    installFakeWebSocket();
+    const browser = await BrowserImpl.connect("ws://cdp");
+    const page = browser.contexts()[0]!.pages()[0]!;
+    const sentBefore = FakeWebSocket.sent.length;
+
+    await expect(
+      page.getByRole("combobox").selectOption({ label: 42 as unknown as string })
+    ).rejects.toThrow("selectOption option.label must be a string");
+    expect(FakeWebSocket.sent).toHaveLength(sentBefore);
   });
 
   it("supports page keyboard chords and text insertion", async () => {

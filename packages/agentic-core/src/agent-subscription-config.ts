@@ -25,6 +25,32 @@ export interface AgentObservationConfig {
 }
 
 /**
+ * A stable resource attached to one channel relationship. Workers interpret
+ * only resource kinds they own; launchers may compose bindings without the
+ * runtime host learning worker-specific state shapes.
+ */
+export interface AgentResourceBinding {
+  kind: string;
+  id: string;
+}
+
+/** One model tool selected from the worker's checked-in tool registry. */
+export interface AgentToolBinding {
+  kind: string;
+  /** Optional key in `resources`; required by tools that act on a resource. */
+  resource?: string;
+}
+
+/**
+ * Composable channel behavior. This deliberately contains registry keys and
+ * resource references, never RPC method names or executable callbacks.
+ */
+export interface AgentChannelFeatures {
+  resources?: Record<string, AgentResourceBinding>;
+  tools?: AgentToolBinding[];
+}
+
+/**
  * The per-agent BEHAVIOR settings. These are PER-AGENT: seeded into the agent's
  * creation `stateArgs.agentConfig` and persisted in its settings record. They must
  * NEVER ride a channel subscription — a channel subscription is membership +
@@ -90,6 +116,8 @@ export interface AgentSubscriptionConfig extends AgentConfig {
   wakePolicy?: AgentWakePolicy;
   /** Structured non-chat channel payloads exposed to the model on this channel. */
   observations?: AgentObservationConfig;
+  /** Channel-scoped tools and resource bindings selected from the worker registry. */
+  features?: AgentChannelFeatures;
   /** Worker-specific extras (e.g. the test-agent's deterministic-mode keys). */
   [key: string]: unknown;
 }

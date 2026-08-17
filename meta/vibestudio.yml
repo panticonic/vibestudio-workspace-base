@@ -192,6 +192,25 @@ services:
       - vibestudio.models.v1
     source: workers/model-settings
     title: AI model settings
+  - action: manage panel-bound command conversations
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+    description: Owns durable command-agent conversations attached to panel slots.
+    durableObject:
+      className: QuickfireSessionsDO
+    name: quickfire
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.quickfire.v1
+    source: workers/quickfire-service
+    title: Command conversations
   - action: run workspace tests and record results
     authority:
       binding: declared
@@ -279,6 +298,9 @@ singletonObjects:
   - className: ModelSettingsDO
     key: workspace-model-settings
     source: workers/model-settings
+  - className: QuickfireSessionsDO
+    key: workspace-quickfire
+    source: workers/quickfire-service
   - className: TestkitDriverDO
     key: workspace-testkit-driver
     source: workers/testkit-driver
@@ -291,7 +313,7 @@ singletonObjects:
   - className: MissionsDO
     key: workspace-missions
     source: workers/missions
-systemEpoch: 59
+systemEpoch: 60
 trust:
   chromeApps:
     - apps/shell

@@ -30,7 +30,10 @@ import {
   remoteCredMethods,
   type RemoteCredCurrent as RemoteCredCurrentContract,
 } from "@vibestudio/service-schemas/remoteCred";
-import { quickfireMethods } from "@vibestudio/service-schemas/quickfire";
+import {
+  QUICKFIRE_SERVICE_PROTOCOL,
+  type QuickfireSession,
+} from "@workspace/quickfire-core/service";
 import { connectViaRpc, type PubSubClient } from "@workspace/pubsub";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
 import { shellPresenceMethods } from "@vibestudio/service-schemas/shellPresence";
@@ -1431,11 +1434,7 @@ export const shellPresence = {
 // =============================================================================
 // Quickfire — panel-slot-scoped agent micro-sessions (quickfire-overlay-spec §2.4)
 // =============================================================================
-const quickfireClient = createTypedServiceClient(
-  "quickfire",
-  quickfireMethods,
-  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
-);
+const quickfireClient = createDurableObjectServiceClient(rpc, QUICKFIRE_SERVICE_PROTOCOL);
 
 export const quickfire = {
   /**
@@ -1444,10 +1443,15 @@ export const quickfire = {
    * call it when the user actually enters quickfire mode over that panel.
    */
   sessionFor: (slotId: string, options?: { fresh?: boolean }) =>
-    quickfireClient.sessionFor({ slotId, ...(options?.fresh ? { fresh: true } : {}) }),
-  clear: (slotId: string) => quickfireClient.clear({ slotId }),
-  promote: (slotId: string) => quickfireClient.promote({ slotId }),
-  list: () => quickfireClient.list(),
+    quickfireClient.call<QuickfireSession>("sessionFor", {
+      slotId,
+      ...(options?.fresh ? { fresh: true } : {}),
+    }),
+  clear: (slotId: string) =>
+    quickfireClient.call<{ cleared: boolean }>("clear", { slotId }),
+  promote: (slotId: string) =>
+    quickfireClient.call<QuickfireSession | null>("promote", { slotId }),
+  list: () => quickfireClient.call<QuickfireSession[]>("list"),
 };
 
 /**

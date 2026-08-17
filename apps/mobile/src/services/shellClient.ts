@@ -65,7 +65,10 @@ import { blobstoreMethods } from "@vibestudio/service-schemas/blobstore";
 import { panelRuntimeMethods } from "@vibestudio/service-schemas/panelRuntime";
 import { credentialsMethods } from "@vibestudio/service-schemas/credentials";
 import { pushMethods } from "@vibestudio/service-schemas/push";
-import { quickfireMethods } from "@vibestudio/service-schemas/quickfire";
+import {
+  QUICKFIRE_SERVICE_PROTOCOL,
+  type QuickfireSession,
+} from "@workspace/quickfire-core/service";
 import { connectViaRpc, type PubSubClient } from "@workspace/pubsub";
 import { workspaceMethods } from "@vibestudio/service-schemas/workspace";
 import { hubControlMethods } from "@vibestudio/service-schemas/hubControl";
@@ -232,17 +235,21 @@ function createWorkspaceRpcClient(transport: MobileRpcClient) {
 /**
  * Panel-slot-scoped agent micro-sessions (quickfire-overlay-spec §2.4, §7.2).
  *
- * The mobile quickfire sheet talks to the same host service the desktop overlay
- * does; unlike desktop there is no props bridge in the way, so the sheet drives
- * this client directly through `@workspace/quickfire-core/session`.
+ * Mobile and desktop resolve the same Base-owned durable service. Unlike
+ * desktop there is no props bridge in the way, so the sheet drives the service
+ * client directly.
  */
 function createQuickfireClient(transport: MobileRpcClient) {
-  return createTypedServiceClient(
-    "quickfire",
-    quickfireMethods,
-    (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args),
-  );
+  const client = createDurableObjectServiceClient(transport, QUICKFIRE_SERVICE_PROTOCOL);
+  return {
+    sessionFor: (input: { slotId: string; fresh?: boolean }) =>
+      client.call<QuickfireSession>("sessionFor", input),
+    clear: (input: { slotId: string }) =>
+      client.call<{ cleared: boolean }>("clear", input),
+    promote: (input: { slotId: string }) =>
+      client.call<QuickfireSession | null>("promote", input),
+    list: () => client.call<QuickfireSession[]>("list"),
+  };
 }
 
 function createHubControlClient(transport: MobileRpcClient) {

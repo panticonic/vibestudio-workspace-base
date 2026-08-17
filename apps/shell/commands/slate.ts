@@ -22,7 +22,7 @@ import {
 import type { ThemeConfig } from "@vibestudio/shared/theme";
 import { createPanelShareUrl } from "@vibestudio/shared/panelLocation";
 import { app, hostCommands, notification, panel, quickfire, workspace } from "../shell/client";
-import type { QuickfireSessionSummary } from "@vibestudio/service-schemas/quickfire";
+import type { QuickfireSessionSummary } from "@workspace/quickfire-core/service";
 import type { QuickfireMode } from "../overlay/quickfireSurfaceModel";
 
 /**

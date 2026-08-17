@@ -36,12 +36,15 @@ export type {
 export type {
   AgentApprovalLevel,
   AgentConfig,
+  AgentChannelFeatures,
   AgentObservationConfig,
+  AgentResourceBinding,
   AgentRespondPolicy,
   AgentSettingKey,
   AgentSubscriptionConfig,
   AgentSystemPromptMode,
   AgentThinkingLevel,
+  AgentToolBinding,
   ChannelSubscriptionConfig,
 } from "./agent-subscription-config.js";
 export {

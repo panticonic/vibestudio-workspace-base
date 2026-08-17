@@ -32,6 +32,12 @@ export interface CdpProfileOptions {
   maxNetworkRecords?: number;
 }
 
+export interface SelectOptionMatcher {
+  value?: string;
+  label?: string;
+  index?: number;
+}
+
 export interface CdpProfileRuntimeMetrics {
   taskDurationMs: number;
   scriptDurationMs: number;
@@ -201,7 +207,10 @@ export interface CdpLocator {
   check(opts?: ActionOptions): Promise<void>;
   uncheck(opts?: ActionOptions): Promise<void>;
   setChecked(checked: boolean, opts?: ActionOptions): Promise<void>;
-  selectOption(value: string | string[], opts?: ActionOptions): Promise<string[]>;
+  selectOption(
+    value: string | string[] | SelectOptionMatcher | SelectOptionMatcher[],
+    opts?: ActionOptions
+  ): Promise<string[]>;
   focus(opts?: ActionOptions): Promise<void>;
   blur(opts?: ActionOptions): Promise<void>;
   selectText(opts?: ActionOptions): Promise<void>;
