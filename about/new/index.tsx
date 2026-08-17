@@ -47,18 +47,26 @@ interface NavigationTarget {
 
 interface OpenPanel {
   id: string;
+  title: string;
   source: string;
   canonicalSource: string;
+  parentId: string | null;
   handle: PanelHandle;
 }
 
-type DisplaySuggestion = LauncherSuggestion & { openPanel?: OpenPanel };
+type DisplaySuggestion = LauncherSuggestion & {
+  /** Existing browser destination; activating it focuses rather than duplicates it. */
+  openPanel?: OpenPanel;
+  /** Workspace panel instances accompany, but never replace, the fresh-open action. */
+  openPanels?: OpenPanel[];
+};
 
 type ModePrefix = "" | ">" | "@" | "/";
 
 const PANEL_USAGE_CACHE_KEY = "vibestudio:new-panel-durable-usage";
 const CATALOG_REVALIDATE_INTERVAL_MS = 30_000;
 const BACKGROUND_REFRESH_DEADLINE_MS = 500;
+const INSTANCE_EXPAND_DWELL_MS = 400;
 
 /** With nothing typed there is no relevance signal, so lead with the workspace. */
 const IDLE_GROUP_ORDER: LauncherSuggestion["kind"][] = ["panel", "history", "url", "chat"];
@@ -171,11 +179,13 @@ async function readOpenPanels(
         const source = entry.handle.source;
         const openPanel: OpenPanel = {
           id: entry.node.slotId,
+          title: entry.handle.title,
           source,
           canonicalSource:
             entry.handle.kind === "browser"
               ? (canonicalizeUrlForAddress(source) ?? source)
               : source,
+          parentId: entry.handle.parentId,
           handle: entry.handle,
         };
         found.push(openPanel);
@@ -217,6 +227,7 @@ function suggestionMeta(suggestion: DisplaySuggestion): string {
 
 function activationLabel(suggestion: DisplaySuggestion | undefined): string {
   if (!suggestion) return "Open";
+  if (suggestion.kind === "panel" && suggestion.openPanels?.length) return "Open new";
   if (suggestion.openPanel) return "Focus";
   return suggestion.kind === "chat" ? "Send" : "Open";
 }
@@ -285,20 +296,28 @@ function LauncherNotice({ color, children }: { color: "orange" | "red"; children
 function SuggestionRow({
   suggestion,
   selected,
-  pending,
+  expanded,
+  pendingId,
   disabled,
   favicon,
   onSelect,
   onActivate,
+  onFocusExisting,
+  onToggleExisting,
 }: {
   suggestion: DisplaySuggestion;
   selected: boolean;
-  pending: boolean;
+  expanded: boolean;
+  pendingId: string | null;
   disabled: boolean;
   favicon?: string;
   onSelect: () => void;
   onActivate: () => void;
+  onFocusExisting: (openPanel: OpenPanel) => void;
+  onToggleExisting: () => void;
 }) {
+  const pending = pendingId === suggestion.id;
+  const openPanels = suggestion.kind === "panel" ? (suggestion.openPanels ?? []) : [];
   const body = (
     <>
       <SuggestionIcon suggestion={suggestion} favicon={favicon} />
@@ -307,7 +326,9 @@ function SuggestionRow({
         <span className="launcher-meta">{suggestionMeta(suggestion)}</span>
       </span>
       <span className="launcher-row-trailing">
-        {suggestion.openPanel ? <span className="launcher-open-badge">Already open</span> : null}
+        {suggestion.openPanel ? (
+          <span className="launcher-open-badge">Already open</span>
+        ) : null}
         {pending ? (
           <Spinner size="1" />
         ) : selected ? (
@@ -321,6 +342,7 @@ function SuggestionRow({
     id: `launcher-${suggestion.id}`,
     role: "option",
     "aria-selected": selected,
+    "aria-expanded": openPanels.length ? expanded : undefined,
     "aria-disabled": disabled || undefined,
     onMouseMove: onSelect,
   };
@@ -328,12 +350,8 @@ function SuggestionRow({
   // A panel destination is a real link, so the usual browser gestures — middle
   // click, modifier click, copy address — keep working. Everything else is a
   // command with no addressable target.
-  const href =
-    suggestion.kind === "panel" && !suggestion.openPanel
-      ? buildPanelLink(suggestion.panel.path)
-      : undefined;
-  if (href) {
-    return (
+  const href = suggestion.kind === "panel" ? buildPanelLink(suggestion.panel.path) : undefined;
+  const primary = href ? (
       <a
         {...shared}
         href={href}
@@ -345,12 +363,80 @@ function SuggestionRow({
       >
         {body}
       </a>
-    );
-  }
-  return (
+  ) : (
     <button {...shared} type="button" disabled={disabled} onClick={onActivate}>
       {body}
     </button>
+  );
+
+  return (
+    <div className="launcher-row-shell" data-expanded={expanded || undefined}>
+      <div className="launcher-row-primary">
+        {primary}
+        {openPanels.length ? (
+          <button
+            type="button"
+            className="launcher-open-disclosure"
+            aria-label={`${expanded ? "Hide" : "Show"} ${openPanels.length} open ${suggestionLabel(
+              suggestion
+            )} ${openPanels.length === 1 ? "panel" : "panels"}`}
+            aria-expanded={expanded}
+            disabled={disabled}
+            onClick={onToggleExisting}
+          >
+            <span>{openPanels.length} open</span>
+            <span className="launcher-open-disclosure-chevron" aria-hidden="true">
+              {expanded ? "⌃" : "⌄"}
+            </span>
+          </button>
+        ) : null}
+      </div>
+      {expanded ? (
+        <div
+          className="launcher-open-instances"
+          aria-label={`Open ${suggestionLabel(suggestion)} panels`}
+        >
+          <div className="launcher-open-instances-heading">
+            <span>
+              <strong>Already open</strong>
+              <span>Choose an instance, or press Enter to open another.</span>
+            </span>
+          </div>
+          <div className="launcher-open-instance-list">
+            {openPanels.map((openPanel, index) => {
+              const instancePending = pendingId === `existing:${openPanel.id}`;
+              return (
+                <button
+                  key={openPanel.id}
+                  type="button"
+                  className="launcher-open-instance"
+                  disabled={disabled}
+                  aria-label={`Go to ${openPanel.title || suggestionLabel(suggestion)}, ${
+                    openPanel.parentId ? "nested panel" : "top-level panel"
+                  }`}
+                  onClick={() => onFocusExisting(openPanel)}
+                >
+                  <span className="launcher-open-instance-index" aria-hidden="true">
+                    {index + 1}
+                  </span>
+                  <span className="launcher-open-instance-text">
+                    <span className="launcher-open-instance-title">
+                      {openPanel.title || suggestionLabel(suggestion)}
+                    </span>
+                    <span className="launcher-open-instance-meta">
+                      {openPanel.parentId ? "Nested panel" : "Top-level panel"}
+                    </span>
+                  </span>
+                  <span className="launcher-open-instance-action">
+                    {instancePending ? <Spinner size="1" /> : "Go there →"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -370,6 +456,7 @@ function NewPanelPage() {
   const [historyRefreshEpoch, setHistoryRefreshEpoch] = useState(0);
   const [favicons, setFavicons] = useState<Record<string, string | null>>({});
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [navigationError, setNavigationError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -379,6 +466,7 @@ function NewPanelPage() {
   const selectionTouchedRef = useRef(false);
   const navigationStartedRef = useRef(false);
   const lastNavigationRef = useRef<NavigationTarget | null>(null);
+  const lastExistingRef = useRef<{ openPanel: OpenPanel; suggestionId: string } | null>(null);
   const catalogFetchRef = useRef<Promise<void> | null>(null);
   const lastCatalogFetchRef = useRef(0);
   const liveRefreshRef = useRef(0);
@@ -556,12 +644,14 @@ function NewPanelPage() {
       groupLauncherSuggestions<DisplaySuggestion>(
         baseSuggestions.map((suggestion) => {
           const source = destinationSource(suggestion);
-          const openPanel = source
-            ? openPanels.find(
-                (entry) => entry.source === source || entry.canonicalSource === source
-              )
-            : undefined;
-          return openPanel ? { ...suggestion, openPanel } : suggestion;
+          if (!source) return suggestion;
+          const matches = openPanels.filter(
+            (entry) => entry.source === source || entry.canonicalSource === source
+          );
+          if (!matches.length) return suggestion;
+          return suggestion.kind === "panel"
+            ? { ...suggestion, openPanels: matches }
+            : { ...suggestion, openPanel: matches[0] };
         }),
         parsedInput.query.trim() ? undefined : IDLE_GROUP_ORDER
       ),
@@ -585,6 +675,16 @@ function NewPanelPage() {
   );
   const selected = suggestions.find((item) => item.id === selectedId) ?? suggestions[0];
   const completion = autocompleteForSuggestion(value, selected);
+
+  // Let a deliberate pause reveal live instances without making fast arrow-key
+  // traversal accordion the whole list. Pointer/touch and keyboard users can
+  // also disclose immediately through the badge or Right Arrow.
+  useEffect(() => {
+    setExpandedId(null);
+    if (!selected?.openPanels?.length) return;
+    const timer = window.setTimeout(() => setExpandedId(selected.id), INSTANCE_EXPAND_DWELL_MS);
+    return () => window.clearTimeout(timer);
+  }, [selected?.id, selected?.openPanels?.length]);
 
   useEffect(() => {
     if (!selected?.id) return;
@@ -635,6 +735,7 @@ function NewPanelPage() {
     if (navigationStartedRef.current) return;
     navigationStartedRef.current = true;
     lastNavigationRef.current = target;
+    lastExistingRef.current = null;
     setPendingId(id);
     setNavigationError(null);
     if (target.href) {
@@ -648,10 +749,30 @@ function NewPanelPage() {
     });
   }, []);
 
+  const focusExisting = useCallback(
+    (openPanel: OpenPanel, suggestionId: string) => {
+      if (pendingId) return;
+      lastExistingRef.current = { openPanel, suggestionId };
+      lastNavigationRef.current = null;
+      setPendingId(`existing:${openPanel.id}`);
+      setNavigationError(null);
+      void (async () => {
+        await openPanel.handle.focus();
+        // Choosing an existing destination completes the launcher's job. Retire
+        // this transient about/new slot instead of leaving it behind in the tree.
+        await panelTree.self().archive();
+      })().catch((cause: unknown) => {
+        setPendingId(null);
+        setNavigationError(cause instanceof Error ? cause.message : String(cause));
+      });
+    },
+    [pendingId]
+  );
+
   const activate = useCallback(
     (suggestion: DisplaySuggestion | undefined) => {
       if (!suggestion || pendingId) return;
-      if (suggestion.openPanel) {
+      if (suggestion.kind !== "panel" && suggestion.openPanel) {
         setPendingId(suggestion.id);
         void suggestion.openPanel.handle.focus().catch((cause: unknown) => {
           setPendingId(null);
@@ -758,6 +879,12 @@ function NewPanelPage() {
                       event.preventDefault();
                       replaceInput(completion.value);
                     }
+                  } else if (event.key === "ArrowRight" && selected?.openPanels?.length) {
+                    event.preventDefault();
+                    setExpandedId(selected.id);
+                  } else if (event.key === "ArrowLeft" && expandedId === selected?.id) {
+                    event.preventDefault();
+                    setExpandedId(null);
                   } else if (event.key === "Enter" && !event.shiftKey && selected) {
                     event.preventDefault();
                     activate(selected);
@@ -861,6 +988,11 @@ function NewPanelPage() {
             variant="soft"
             color="red"
             onClick={() => {
+              const existing = lastExistingRef.current;
+              if (existing) {
+                focusExisting(existing.openPanel, existing.suggestionId);
+                return;
+              }
               const target = lastNavigationRef.current;
               if (target && selected) beginNavigation(target, selected.id);
             }}
@@ -894,7 +1026,8 @@ function NewPanelPage() {
                     key={suggestion.id}
                     suggestion={suggestion}
                     selected={suggestion.id === selected?.id}
-                    pending={suggestion.id === pendingId}
+                    expanded={suggestion.id === expandedId}
+                    pendingId={pendingId}
                     disabled={!!pendingId}
                     favicon={
                       (suggestion.kind === "history"
@@ -909,6 +1042,10 @@ function NewPanelPage() {
                       setSelectedId(suggestion.id);
                     }}
                     onActivate={() => activate(suggestion)}
+                    onFocusExisting={(openPanel) => focusExisting(openPanel, suggestion.id)}
+                    onToggleExisting={() =>
+                      setExpandedId((current) => (current === suggestion.id ? null : suggestion.id))
+                    }
                   />
                 ))}
               </div>

@@ -218,6 +218,31 @@
   gap: 2px;
 }
 
+.launcher-row-shell {
+  border: 1px solid transparent;
+  border-radius: 12px;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard);
+}
+
+.launcher-row-shell[data-expanded] {
+  border-color: var(--accent-a7);
+  background: linear-gradient(135deg, var(--accent-a3), transparent 72%), var(--color-surface);
+  box-shadow: var(--elevation-1);
+}
+
+.launcher-row-primary {
+  display: flex;
+  align-items: stretch;
+}
+
+.launcher-row-primary > .launcher-row {
+  flex: 1;
+  min-width: 0;
+}
+
 .launcher-row {
   display: flex;
   align-items: center;
@@ -245,6 +270,12 @@
 .launcher-row[aria-selected="true"] {
   border-color: var(--accent-a8);
   background: var(--accent-a4);
+}
+
+.launcher-row-shell[data-expanded] .launcher-row[aria-selected="true"] {
+  border-color: transparent;
+  border-radius: 11px 8px 8px 8px;
+  background: transparent;
 }
 
 .launcher-row:focus-visible {
@@ -305,6 +336,197 @@
   font-size: var(--font-size-1);
   font-weight: 500;
   white-space: nowrap;
+}
+
+.launcher-open-disclosure {
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  margin-right: 9px;
+  padding: 4px 7px 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: var(--grass-a3);
+  color: var(--grass-11);
+  font: inherit;
+  font-size: var(--font-size-1);
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.launcher-open-disclosure:hover,
+.launcher-open-disclosure:focus-visible,
+.launcher-open-disclosure[aria-expanded="true"] {
+  border-color: var(--grass-a7);
+  background: var(--grass-a4);
+}
+
+.launcher-open-disclosure:focus-visible {
+  outline: 2px solid var(--grass-a5);
+  outline-offset: 1px;
+}
+
+.launcher-open-disclosure-chevron {
+  font-size: 12px;
+  line-height: 1;
+}
+
+/* ---- Existing instances ------------------------------------------------- */
+
+.launcher-open-instances {
+  margin: 0 10px 10px 50px;
+  padding-top: 9px;
+  border-top: 1px solid var(--accent-a5);
+  animation: launcher-instances-enter var(--motion-fast) var(--ease-standard) both;
+}
+
+.launcher-open-instances-heading {
+  padding: 0 2px 8px;
+}
+
+.launcher-open-instances-heading > span {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.launcher-open-instances-heading strong {
+  color: var(--accent-11);
+  font-size: var(--font-size-1);
+  letter-spacing: 0.01em;
+}
+
+.launcher-open-instances-heading span span {
+  overflow: hidden;
+  color: var(--gray-10);
+  font-size: var(--font-size-1);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.launcher-open-instance-list {
+  display: grid;
+  gap: 4px;
+  max-height: 210px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.launcher-open-instance {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--gray-a2);
+  color: var(--gray-12);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--motion-fast) var(--ease-standard),
+    background var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.launcher-open-instance:hover {
+  border-color: var(--accent-a6);
+  background: var(--accent-a3);
+  transform: translateX(2px);
+}
+
+.launcher-open-instance:focus-visible {
+  border-color: var(--accent-9);
+  outline: 2px solid var(--accent-a5);
+  outline-offset: 1px;
+}
+
+.launcher-open-instance:disabled {
+  cursor: default;
+  transform: none;
+}
+
+.launcher-open-instance-index {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--accent-a4);
+  color: var(--accent-11);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.launcher-open-instance-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.launcher-open-instance-title,
+.launcher-open-instance-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.launcher-open-instance-title {
+  font-size: var(--font-size-2);
+  font-weight: 500;
+}
+
+.launcher-open-instance-meta {
+  color: var(--gray-10);
+  font-size: var(--font-size-1);
+}
+
+.launcher-open-instance-action {
+  color: var(--accent-11);
+  font-size: var(--font-size-1);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+@keyframes launcher-instances-enter {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 520px) {
+  .launcher-open-instances {
+    margin-left: 10px;
+  }
+
+  .launcher-open-instances-heading > span {
+    display: block;
+  }
+
+  .launcher-open-instances-heading span span {
+    display: block;
+    margin-top: 2px;
+    white-space: normal;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .launcher-open-instances {
+    animation: none;
+  }
 }
 
 /* ---- Icons --------------------------------------------------------------- */

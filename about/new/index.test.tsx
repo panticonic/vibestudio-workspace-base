@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   roots: vi.fn(),
   children: vi.fn(),
   focus: vi.fn(),
+  archive: vi.fn(),
   onFocus: vi.fn(),
 }));
 
@@ -30,6 +31,7 @@ vi.mock("@workspace/runtime", () => ({
     reopen: mocks.reopen,
   },
   panelTree: {
+    self: () => ({ archive: mocks.archive }),
     sourceUsage: mocks.sourceUsage,
     roots: mocks.roots,
     children: mocks.children,
@@ -81,6 +83,7 @@ describe("new panel launcher", () => {
     mocks.roots.mockReset().mockResolvedValue({ entries: [], nextCursor: null, revision: 1 });
     mocks.children.mockReset().mockResolvedValue({ entries: [], nextCursor: null, revision: 1 });
     mocks.focus.mockReset().mockResolvedValue({ phase: "ready" });
+    mocks.archive.mockReset().mockResolvedValue({ phase: "archived" });
     mocks.onFocus.mockReset().mockImplementation((callback: () => void) => {
       panelFocusCallback = callback;
       return () => {};
@@ -290,7 +293,7 @@ describe("new panel launcher", () => {
     expect(mocks.reopen).not.toHaveBeenCalled();
   });
 
-  it("focuses an already-open destination instead of creating a duplicate", async () => {
+  it("keeps opening a new panel as the primary action when an instance exists", async () => {
     mocks.roots.mockResolvedValue({
       revision: 1,
       nextCursor: null,
@@ -299,8 +302,10 @@ describe("new panel launcher", () => {
           node: { slotId: "slot-terminal", childCount: 0 },
           handle: {
             id: "slot-terminal",
+            title: "Terminal · API server",
             source: "panels/terminal",
             kind: "workspace",
+            parentId: null,
             focus: mocks.focus,
           },
         },
@@ -309,13 +314,109 @@ describe("new panel launcher", () => {
     render(<AboutPanelRoot />);
     const input = screen.getByRole("combobox");
     fireEvent.change(input, { target: { value: "terminal" } });
-    const badge = await screen.findByText("Already open");
+    const badge = await screen.findByText("1 open");
+    const title = await findRow("Terminal");
     await waitFor(() =>
-      expect(badge.closest('[role="option"]')?.getAttribute("aria-selected")).toBe("true")
+      expect(title.closest('[role="option"]')?.getAttribute("aria-selected")).toBe("true")
     );
+
+    const row = title.closest('[role="option"]');
+    expect(row?.tagName).toBe("A");
+    expect(row?.getAttribute("href")).toBe("/panels/terminal/");
+    expect(screen.getByRole("button", { name: /Open new/u })).toBeTruthy();
+    expect(badge.closest("button")?.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Terminal · API server")).toBeNull();
+    expect(await screen.findByText("Terminal · API server")).toBeTruthy();
+
+    const requestFrame = vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
     fireEvent.keyDown(input, { key: "Enter" });
-    await waitFor(() => expect(mocks.focus).toHaveBeenCalledTimes(1));
+    expect(requestFrame).toHaveBeenCalledTimes(1);
+    expect(mocks.focus).not.toHaveBeenCalled();
+    requestFrame.mockRestore();
+  });
+
+  it("does not unfold instances while the keyboard is moving through rows", async () => {
+    mocks.roots.mockResolvedValue({
+      revision: 1,
+      nextCursor: null,
+      entries: [
+        {
+          node: { slotId: "slot-terminal", childCount: 0 },
+          handle: {
+            id: "slot-terminal",
+            title: "Long-running shell",
+            source: "panels/terminal",
+            kind: "workspace",
+            parentId: null,
+            focus: mocks.focus,
+          },
+        },
+      ],
+    });
+
+    render(<AboutPanelRoot />);
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "terminal" } });
+    await screen.findByText("1 open");
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    expect(screen.queryByText("Long-running shell")).toBeNull();
+  });
+
+  it("expands every open instance and retires New Panel after choosing one", async () => {
+    const focusFirst = vi.fn().mockResolvedValue({ phase: "ready" });
+    const focusSecond = vi.fn().mockResolvedValue({ phase: "ready" });
+    mocks.roots.mockResolvedValue({
+      revision: 1,
+      nextCursor: null,
+      entries: [
+        {
+          node: { slotId: "slot-chat-a", childCount: 0 },
+          handle: {
+            id: "slot-chat-a",
+            title: "Release planning",
+            source: "panels/chat",
+            kind: "workspace",
+            parentId: null,
+            focus: focusFirst,
+          },
+        },
+        {
+          node: { slotId: "slot-chat-b", childCount: 0 },
+          handle: {
+            id: "slot-chat-b",
+            title: "Bug triage",
+            source: "panels/chat",
+            kind: "workspace",
+            parentId: "slot-project",
+            focus: focusSecond,
+          },
+        },
+      ],
+    });
+
+    render(<AboutPanelRoot />);
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, { target: { value: "chat" } });
+
+    const disclosure = await screen.findByRole("button", { name: /Show 2 open Chat panels/u });
+    fireEvent.keyDown(input, { key: "ArrowRight" });
+    expect(await screen.findByText("Release planning")).toBeTruthy();
+    fireEvent.keyDown(input, { key: "ArrowLeft" });
+    await waitFor(() => expect(screen.queryByText("Release planning")).toBeNull());
+
+    fireEvent.click(disclosure);
+    expect(await screen.findByText("Release planning")).toBeTruthy();
+    expect(screen.getByText("Top-level panel")).toBeTruthy();
+    expect(screen.getByText("Nested panel")).toBeTruthy();
+
+    fireEvent.click(screen.getByText("Bug triage").closest("button")!);
+    await waitFor(() => expect(focusSecond).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.archive).toHaveBeenCalledTimes(1));
+    expect(focusFirst).not.toHaveBeenCalled();
     expect(mocks.reopen).not.toHaveBeenCalled();
+    expect(focusSecond.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.archive.mock.invocationCallOrder[0]!
+    );
   });
 
   it("renders panel destinations as addressable links", async () => {
