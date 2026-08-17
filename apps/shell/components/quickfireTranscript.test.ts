@@ -170,7 +170,7 @@ describe("projectTranscript", () => {
         id: "activity:awaiting-response",
         state: "working",
         phase: "starting",
-        label: "Starting…",
+        label: "starting",
       },
     ]);
   });
@@ -195,7 +195,7 @@ describe("projectTranscript", () => {
       expect.objectContaining({
         kind: "activity",
         phase: "responding",
-        label: "Responding…",
+        label: "responding",
       }),
     ]);
   });
@@ -220,7 +220,7 @@ describe("projectTranscript", () => {
       {
         kind: "activity",
         phase: "thinking",
-        label: "Thinking…",
+        label: "thinking",
       },
     );
 
@@ -235,7 +235,7 @@ describe("projectTranscript", () => {
       expect.objectContaining({
         kind: "activity",
         phase: "using-tools",
-        label: "Using tools…",
+        label: "using tools",
         toolCalls: [
           { id: "i1", name: "panel_describe", state: "done" },
           { id: "i2", name: "panel_screenshot", state: "running" },
@@ -377,7 +377,6 @@ describe("projectTranscript", () => {
     expect(projectTranscript(state, "shell-1").entries).toEqual([
       expect.objectContaining({
         kind: "thinking",
-        title: "Checking the panel",
         text: "Checking **the panel**",
       }),
       expect.objectContaining({
@@ -453,5 +452,70 @@ describe("transcript order", () => {
       text: `m${TRANSCRIPT_LIMIT + 2}`,
     });
     expect(newestFirst.at(-1)).toMatchObject({ kind: "message", text: "m3" });
+  });
+});
+
+/**
+ * What the compact venue is entitled to do is *abbreviate*. It is not entitled
+ * to disagree with the channel about what happened, which is what dropping a
+ * content type quietly amounts to.
+ */
+describe("nothing is elided", () => {
+  it("announces an agent card it will not run, without dumping its payload", () => {
+    const state = stateWith([]) as unknown as {
+      customMessages: Record<string, unknown>;
+    };
+    state.customMessages["card-1"] = {
+      messageId: "card-1",
+      typeId: "revenue-chart",
+      displayMode: "inline",
+      initialState: { rows: [1, 2, 3] },
+      updates: [],
+      lastSeq: 4,
+      startedAt: "2026-08-14T00:00:10.000Z",
+    };
+
+    const entries = projectTranscript(
+      state as unknown as ChannelViewState,
+      "shell-1",
+    ).entries;
+    expect(entries).toEqual([
+      // No `at`: the merge does not carry a timestamp for card rows, and the
+      // surface omits the field rather than inventing "just now".
+      { kind: "rich", id: "custom:card-1", title: "Card · revenue-chart" },
+    ]);
+    // The serialized card state is not prose and never becomes the body.
+    expect(JSON.stringify(entries)).not.toContain("rows");
+  });
+
+  it("carries a message's time, and a tool call's duration", () => {
+    const state = stateWith(
+      [
+        {
+          id: "m1",
+          seq: 1,
+          actorId: "agent-1",
+          kind: "agent",
+          text: "read it",
+          turnId: "t1",
+        },
+      ],
+      {
+        invocations: [
+          { id: "i1", name: "panel_console", turnId: "t1", status: "completed" },
+        ],
+      },
+    );
+    const invocation = (state as unknown as { invocations: Record<string, Record<string, unknown>> })
+      .invocations["i1"]!;
+    invocation["startedAt"] = "2026-08-14T00:00:00.000Z";
+    invocation["completedAt"] = "2026-08-14T00:00:01.500Z";
+
+    const [entry] = projectTranscript(state, "shell-1").entries;
+    expect(entry).toMatchObject({
+      kind: "message",
+      at: Date.parse(new Date(2000).toISOString()),
+      toolCalls: [expect.objectContaining({ name: "panel_console", durationMs: 1500 })],
+    });
   });
 });

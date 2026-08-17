@@ -50,7 +50,11 @@ function transportFor(
   return { transport, client };
 }
 
-function renderSheet(transport: QuickfireTransport, openChatPanel = jest.fn(async () => {})) {
+function renderSheet(
+  transport: QuickfireTransport,
+  openChatPanel = jest.fn(async () => {}),
+  openLink = jest.fn()
+) {
   const store = createStore();
   const utils = render(
     <Provider store={store}>
@@ -58,10 +62,11 @@ function renderSheet(transport: QuickfireTransport, openChatPanel = jest.fn(asyn
         transport={transport}
         panelTitle="Sales dashboard"
         openChatPanel={openChatPanel}
+        openLink={openLink}
       />
     </Provider>
   );
-  return { ...utils, store, openChatPanel };
+  return { ...utils, store, openChatPanel, openLink };
 }
 
 describe("QuickfireSheet", () => {
@@ -116,17 +121,18 @@ describe("QuickfireSheet", () => {
       fireEvent(compose, "submitEditing");
     });
 
-    expect(await findByText("Starting…")).toBeTruthy();
+    expect(await findByText("Working")).toBeTruthy();
+    expect(await findByText("starting")).toBeTruthy();
   });
 
   it("clears and binds a fresh conversation on the first press", async () => {
     const { transport } = transportFor();
     const { store, getByLabelText } = renderSheet(transport);
     act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
-    await waitFor(() => getByLabelText("Clear conversation"));
+    await waitFor(() => getByLabelText("Clear this conversation and start a new one"));
 
     await act(async () => {
-      fireEvent.press(getByLabelText("Clear conversation"));
+      fireEvent.press(getByLabelText("Clear this conversation and start a new one"));
     });
     expect(transport.clear).toHaveBeenCalledWith("slot");
     expect(transport.sessionFor).toHaveBeenLastCalledWith("slot", { fresh: true });
@@ -150,12 +156,12 @@ describe("QuickfireSheet", () => {
     const openChatPanel = jest.fn(async () => {});
     const { store, queryByTestId, getByLabelText } = renderSheet(transport, openChatPanel);
     act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
-    await waitFor(() => getByLabelText("Continued in chat panel"));
+    await waitFor(() => getByLabelText("Open the chat panel this conversation continued into"));
     expect(queryByTestId("quickfire-compose")).toBeNull();
     expect(transport.connectToChannel).not.toHaveBeenCalled();
     getByLabelText("Start a new conversation here");
     await act(async () => {
-      fireEvent.press(getByLabelText("Continued in chat panel"));
+      fireEvent.press(getByLabelText("Open the chat panel this conversation continued into"));
     });
     expect(openChatPanel).toHaveBeenCalledWith("channel-1");
   });
@@ -165,9 +171,9 @@ describe("QuickfireSheet", () => {
     const openChatPanel = jest.fn(async () => {});
     const { store, getByLabelText } = renderSheet(transport, openChatPanel);
     act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
-    await waitFor(() => getByLabelText("Open conversation as chat panel"));
+    await waitFor(() => getByLabelText("Move this conversation into a chat panel, keeping its history"));
     await act(async () => {
-      fireEvent.press(getByLabelText("Open conversation as chat panel"));
+      fireEvent.press(getByLabelText("Move this conversation into a chat panel, keeping its history"));
     });
     expect(transport.promote).toHaveBeenCalledWith("slot");
     await waitFor(() => expect(openChatPanel).toHaveBeenCalledWith("channel-1"));

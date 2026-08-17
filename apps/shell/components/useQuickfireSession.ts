@@ -47,5 +47,10 @@ export function useQuickfireSession(
   // input, reused. So the newest message belongs directly beneath it and older
   // ones recede downward; a bottom-anchored chat would put the reply furthest
   // from the caret the user is still typing in.
-  return useQuickfireSessionCore(source, bound, { transcriptOrder: "newest-first" });
+  // Image bytes stay out of the pushed props until asked for: this transcript
+  // crosses a process boundary on every reduce flush.
+  return useQuickfireSessionCore(source, bound, {
+    transcriptOrder: "newest-first",
+    imageDelivery: "on-demand",
+  });
 }

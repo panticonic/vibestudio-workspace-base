@@ -12,6 +12,10 @@
  * process boundary as serialized overlay props.
  */
 
+import type { TextMatchRange } from "@vibestudio/shared/panelChrome";
+
+export type { TextMatchRange };
+
 /** The four scopes of §1.2, in chip order. */
 export type QuickfireMode = "all" | "commands" | "goto" | "quickfire";
 
@@ -46,6 +50,11 @@ export const QUICKFIRE_MODE_CYCLE: QuickfireMode[] = [
 export interface QuickfireRow {
   id: string;
   title: string;
+  /**
+   * Where the query matched the title. A palette that ranks by a match and then
+   * refuses to show it makes the ordering look arbitrary.
+   */
+  titleRanges?: TextMatchRange[];
   /** Secondary line: where it leads, or what activating it will do. */
   meta?: string;
   /** Emoji or short glyph; neither client has an icon registry of its own. */
@@ -69,6 +78,44 @@ export interface QuickfireToolCall {
   output?: string;
   progress?: string[];
   failure?: string;
+  /** Wall time the invocation record accounts for, when it has both ends. */
+  durationMs?: number;
+  /** The call paused for a decision; the approval card is where it is answered. */
+  awaitingApproval?: boolean;
+  /** Images the call produced. A screenshot tool that shows no screenshot is a
+   *  tool the user has to take on faith. */
+  images?: QuickfireImage[];
+}
+
+/**
+ * An image a tool returned — a screenshot, a rendered chart.
+ *
+ * The bytes are *optional* on purpose. On desktop the transcript crosses a
+ * process boundary as serialized overlay props on every reduce flush, and a
+ * 400 KB screenshot re-serialized at 30 Hz is not a picture, it is a stall. So
+ * the projection describes the image always and carries it only when the
+ * surface may show it now: mobile, which has no boundary, gets it inline;
+ * desktop asks for one on the user's gesture (`reveal-image`).
+ */
+export interface QuickfireImage {
+  id: string;
+  mimeType: string;
+  width?: number;
+  height?: number;
+  /** Decoded size, for the "show it" affordance's label. */
+  bytes: number;
+  /** Present only when this surface may render it right now. */
+  dataUrl?: string;
+}
+
+/** One attachment, named rather than counted — a count is not a description. */
+export interface QuickfireAttachment {
+  id: string;
+  name: string;
+  /** MIME type or a short kind word, whichever the channel recorded. */
+  kind?: string;
+  /** Bytes, when known; rendered as a human size. */
+  size?: number;
 }
 
 export interface QuickfireGroup {
@@ -129,8 +176,18 @@ export interface QuickfireTranscriptMessage {
   errorText?: string;
   /** Which model produced this, when the channel recorded one. */
   modelLabel?: string;
-  /** Attachments are announced by count; the compact venue does not show them. */
-  attachmentCount?: number;
+  /** Named attachments. Announcing "2 attachments" told the user nothing. */
+  attachments?: QuickfireAttachment[];
+  /** Epoch ms this message landed; display only, and absent when unrecorded. */
+  at?: number;
+  /** The author revised it after sending. */
+  edited?: boolean;
+  /**
+   * The escalation the sender declared (messaging plan §4.5). This is the whole
+   * reason a notification-bound conversation is open at all, so the surface says
+   * what rung it came in on and what the sender called it.
+   */
+  escalation?: { alert: "inbox" | "interrupt"; title?: string };
   /**
    * Sent from this surface but not yet acknowledged by the channel — including
    * text queued while the conversation was still binding. Without this the
@@ -152,6 +209,25 @@ export interface QuickfireTranscriptNotice {
    * panel rather than pretending the notice is inert.
    */
   recoverable?: boolean;
+  at?: number;
+}
+
+/**
+ * Agent-authored rich content this venue deliberately does not execute: inline
+ * UI cards and custom message types (command-overlay client-runtime plan §2).
+ *
+ * It used to be dropped from the projection entirely, so an agent that answered
+ * with a card produced a conversation with a visible gap in it. Now it is
+ * announced, described by whatever the channel recorded, and offered to the one
+ * surface that can run it.
+ */
+export interface QuickfireTranscriptRich {
+  kind: "rich";
+  id: string;
+  /** "Interactive card", "Chart" — the type's own name where the channel has one. */
+  title: string;
+  detail?: string;
+  at?: number;
 }
 
 /** The agent is doing something that has not produced a message yet. */
@@ -168,8 +244,6 @@ export interface QuickfireTranscriptActivity {
 export interface QuickfireTranscriptThinking {
   kind: "thinking";
   id: string;
-  /** First meaningful Markdown block, flattened and bounded for the disclosure label. */
-  title: string;
   text: string;
   streaming?: boolean;
 }
@@ -181,6 +255,9 @@ export interface QuickfireTranscriptApproval {
   status: "pending" | "granted" | "denied";
   question: string;
   reason?: string;
+  /** What is actually being asked for, when the request carried a payload. */
+  detail?: string;
+  at?: number;
 }
 
 export type QuickfireTranscriptEntry =
@@ -188,7 +265,8 @@ export type QuickfireTranscriptEntry =
   | QuickfireTranscriptNotice
   | QuickfireTranscriptActivity
   | QuickfireTranscriptThinking
-  | QuickfireTranscriptApproval;
+  | QuickfireTranscriptApproval
+  | QuickfireTranscriptRich;
 
 /**
  * Resume state for a conversation that already existed when the surface opened
@@ -229,10 +307,24 @@ export interface QuickfireComposeView {
    * conversation", so the count is offered alongside the way to see them all.
    */
   olderCount: number;
+  /**
+   * Whether those older entries can be shown here, right now, without leaving.
+   * The venue keeps a tail on purpose, but "N older entries hidden" with no way
+   * to see them is the surface telling the user it knows something they cannot
+   * have; the replay the client already holds is enough to widen the window.
+   */
+  expandable: boolean;
   /** A model credential request the compact surface cannot complete inline. */
   credentialRequest: { providerId: string; reason: string | null } | null;
   /** Non-null only when this open resumed an existing conversation. */
   resume: QuickfireResumeChip | null;
+  /**
+   * The message this surface was opened *on* — the notification the person
+   * tapped (messaging plan §4.8). Opening a conversation and leaving the user
+   * to work out which line they were called about is most of what made the
+   * notification path feel like a dead end, so the entry is marked.
+   */
+  focusMessageId?: string | null;
   /** True while the conversation is still being resolved/created. */
   connecting: boolean;
   /** True while an agent turn is open; the compose row shows a stop affordance. */
@@ -247,4 +339,20 @@ export interface QuickfireComposeView {
   hasConversation: boolean;
   /** Set when resolving or sending failed; shown inline, never as a modal. */
   error: string | null;
+  /**
+   * One-tap openers for an empty conversation.
+   *
+   * A blank box under "ask about this panel" tells you the venue exists and
+   * nothing about what it can do. These are the capabilities, phrased as the
+   * questions people actually arrive with, and they are panel-aware because a
+   * browser panel and a workspace panel are asked different things.
+   */
+  suggestions?: QuickfireSuggestion[];
+}
+
+export interface QuickfireSuggestion {
+  id: string;
+  label: string;
+  /** What is actually sent; usually longer than the label. */
+  prompt: string;
 }

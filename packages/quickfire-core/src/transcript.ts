@@ -17,17 +17,17 @@
 
 import type { ChannelViewState } from "@workspace/agentic-protocol";
 import { chatMessagesFromChannelView } from "@workspace/agentic-core/channel-chat-merge";
+import {
+  base64ByteLength,
+  extractResultImages,
+  imageDataUrl,
+} from "@workspace/agentic-core/result-images";
 import type { ChatMessage } from "@workspace/agentic-core/channel-chat-merge";
 import type {
   QuickfireToolCall,
   QuickfireTranscriptEntry,
   QuickfireTranscriptMessage,
 } from "./model";
-import {
-  parseQuickfireMarkdown,
-  type QuickfireMarkdownBlock,
-  type QuickfireMarkdownInline,
-} from "./markdown";
 
 /** Last N entries pushed to the surface (§2.4). */
 export const TRANSCRIPT_LIMIT = 20;
@@ -46,6 +46,14 @@ export type TranscriptOrder = "oldest-first" | "newest-first";
 
 export interface TranscriptProjectionOptions {
   limit?: number;
+  /**
+   * How image results reach the surface. `inline` embeds them (mobile, and any
+   * renderer in the same process); `on-demand` describes them and embeds only
+   * the ones the user has asked to see (`revealedImageIds`), because the desktop
+   * overlay's props are IPC.
+   */
+  imageDelivery?: "inline" | "on-demand";
+  revealedImageIds?: ReadonlySet<string>;
   order?: TranscriptOrder;
   /**
    * Text sent from this surface that the channel has not echoed back yet,
@@ -63,16 +71,17 @@ export interface TranscriptProjection {
 }
 
 /**
- * Content types the compact venue deliberately does not carry.
+ * Content types this venue renders through some *other* record, so projecting
+ * them again would double up rather than add anything.
  *
- * Inline UI and custom messages are excluded from this venue by design (the
- * overlay agent is told it has no such surface), and the invocation/progress
- * cards are already represented — more compactly — as per-turn tool records.
- * Typing pills become an explicit activity row instead.
+ * Invocation and progress cards are the per-turn tool records; the credential
+ * request is the compose row's own banner; a typing pill is the activity row.
+ * Note what is NOT here any more: `inline_ui` and `custom` used to be dropped
+ * outright, which turned an agent's card into a hole in the conversation. This
+ * venue still will not execute them — it announces them and offers the surface
+ * that can (see `projectRichContent`).
  */
-const OMITTED_CONTENT_TYPES = new Set([
-  "inline_ui",
-  "custom",
+const REPRESENTED_ELSEWHERE = new Set([
   "invocation",
   "toolcall-progress",
   "credential-connect",
@@ -96,19 +105,25 @@ export function projectTranscript(
     order = "oldest-first",
     pendingTexts = [],
     awaitingResponse = false,
+    imageDelivery = "inline",
+    revealedImageIds,
   } = options;
   const merged = chatMessagesFromChannelView(state);
-  const toolCallsByTurn = toolCallsByTurnId(state);
+  const toolCallsByTurn = toolCallsByTurnId(state, {
+    imageDelivery,
+    ...(revealedImageIds ? { revealedImageIds } : {}),
+  });
 
   const projected: QuickfireTranscriptEntry[] = [];
   for (const message of merged) {
     if (message.retracted) continue;
-    if (message.contentType && OMITTED_CONTENT_TYPES.has(message.contentType))
+    if (message.contentType && REPRESENTED_ELSEWHERE.has(message.contentType))
       continue;
     const entry = projectChatMessage(
       message,
       selfParticipantKey,
       toolCallsByTurn,
+      messageTimeOf(state, message.id),
     );
     if (entry) projected.push(entry);
   }
@@ -146,8 +161,14 @@ function projectChatMessage(
   message: ChatMessage,
   selfParticipantKey: string | null,
   toolCallsByTurn: Map<string, QuickfireToolCall[]>,
+  at: number | undefined,
 ): QuickfireTranscriptEntry | null {
   const { contentType } = message;
+  const when = at === undefined ? {} : { at };
+
+  if (contentType === "inline_ui" || contentType === "custom") {
+    return projectRichContent(message, when);
+  }
 
   if (contentType === "thinking") {
     const text = message.content ?? "";
@@ -155,13 +176,13 @@ function projectChatMessage(
     return {
       kind: "thinking",
       id: message.id,
-      title: reasoningTitle(text),
       text,
       ...(message.complete === false ? { streaming: true } : {}),
     };
   }
 
   if (contentType === "approval" && message.approval) {
+    const question = message.approval.question ?? message.content;
     return {
       kind: "approval",
       id: message.id,
@@ -171,8 +192,15 @@ function projectChatMessage(
           : message.approval.status === "denied"
             ? "denied"
             : "pending",
-      question: message.approval.question ?? message.content,
+      question,
       ...(message.approval.reason ? { reason: message.approval.reason } : {}),
+      // The question is the headline; anything else the card carried is the
+      // detail behind it, which the compact venue keeps behind a disclosure
+      // rather than discarding.
+      ...(message.content && message.content !== question
+        ? { detail: message.content }
+        : {}),
+      ...when,
     };
   }
 
@@ -196,6 +224,7 @@ function projectChatMessage(
       ...(message.diagnostic.resetAt || severity === "error"
         ? { recoverable: true }
         : {}),
+      ...when,
     };
   }
 
@@ -217,6 +246,7 @@ function projectChatMessage(
       ...((message.lifecycle.detail ?? message.content)
         ? { detail: message.lifecycle.detail ?? message.content }
         : {}),
+      ...when,
     };
   }
 
@@ -226,6 +256,7 @@ function projectChatMessage(
       id: message.id,
       severity: "info",
       title: message.content || "Background task",
+      ...when,
     };
   }
 
@@ -241,6 +272,7 @@ function projectChatMessage(
           ? "This conversation was forked"
           : "Sent in another conversation",
       ...(message.content ? { detail: message.content } : {}),
+      ...when,
     };
   }
 
@@ -250,6 +282,7 @@ function projectChatMessage(
       id: message.id,
       severity: "info",
       title: message.content || "Automation ran",
+      ...when,
     };
   }
 
@@ -292,48 +325,76 @@ function projectChatMessage(
         }
       : {}),
     ...(message.attachments?.length
-      ? { attachmentCount: message.attachments.length }
+      ? {
+          attachments: message.attachments.map((attachment, index) => ({
+            id: attachment.id || `${message.id}:${index}`,
+            name: attachment.name || `attachment ${index + 1}`,
+            ...(attachment.mimeType ? { kind: attachment.mimeType } : {}),
+            ...(attachment.data?.length
+              ? { size: attachment.data.length }
+              : {}),
+          })),
+        }
       : {}),
+    ...(message.editedAt || message.revision ? { edited: true } : {}),
+    ...(message.escalation && message.escalation.alert !== "none"
+      ? {
+          escalation: {
+            alert: message.escalation.alert,
+            ...(message.escalation.title
+              ? { title: message.escalation.title }
+              : {}),
+          },
+        }
+      : {}),
+    ...when,
   };
   return projectedMessage;
 }
 
-const REASONING_TITLE_LIMIT = 72;
-
-/** Turn the first meaningful Markdown block into a useful collapsed label. */
-export function reasoningTitle(source: string): string {
-  const text = parseQuickfireMarkdown(source)
-    .map(markdownBlockText)
-    .find((candidate) => candidate.trim().length > 0) ?? source;
-  const normalized = text.replace(/\s+/gu, " ").trim() || source.trim();
-  const characters = [...normalized];
-  return characters.length <= REASONING_TITLE_LIMIT
-    ? normalized
-    : `${characters.slice(0, REASONING_TITLE_LIMIT - 1).join("")}…`;
+/**
+ * An agent-authored card this venue does not run (plan §2).
+ *
+ * Naming it and saying where it *can* be opened is the honest form; the earlier
+ * behavior — dropping it — made the transcript disagree with the channel about
+ * what had been said.
+ */
+function projectRichContent(
+  message: ChatMessage,
+  when: { at?: number },
+): QuickfireTranscriptEntry {
+  const typeId = message.custom?.typeId;
+  const failure = message.custom?.error?.message;
+  // `content` for these rows is the card's serialized payload, not prose. It is
+  // the card's *state*, so showing it here would be a wall of JSON where a
+  // sentence belongs; the card's own surface is the place that renders it.
+  return {
+    kind: "rich",
+    id: message.id,
+    title: typeId ? `Card · ${typeId}` : "Interactive card",
+    ...(failure ? { detail: failure } : {}),
+    ...when,
+  };
 }
 
-function markdownBlockText(block: QuickfireMarkdownBlock): string {
-  switch (block.kind) {
-    case "paragraph":
-    case "heading":
-    case "quote":
-      return markdownInlineText(block.children);
-    case "bullet-list":
-    case "ordered-list":
-      return markdownInlineText(block.items[0] ?? []);
-    case "code-block":
-      return block.text.split("\n", 1)[0] ?? "";
-  }
-}
-
-function markdownInlineText(nodes: QuickfireMarkdownInline[]): string {
-  return nodes
-    .map((node) =>
-      node.kind === "text" || node.kind === "code"
-        ? node.text
-        : markdownInlineText(node.children),
-    )
-    .join("");
+/**
+ * Epoch ms for a message, read from the durable record rather than invented.
+ *
+ * `ChatMessage` carries no timestamp — the merge is about content — so the time
+ * comes from the projected envelope that produced it. A message the channel
+ * never timestamped simply has none, and the surface omits the field instead of
+ * showing "just now" for something from yesterday.
+ */
+function messageTimeOf(
+  state: ChannelViewState,
+  messageId: string,
+): number | undefined {
+  const projected = state.messages[messageId];
+  const stamp =
+    projected?.completedAt ?? projected?.startedAt ?? projected?.updatedAt;
+  if (!stamp) return undefined;
+  const parsed = Date.parse(stamp);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 /**
@@ -343,6 +404,10 @@ function markdownInlineText(nodes: QuickfireMarkdownInline[]): string {
  */
 function toolCallsByTurnId(
   state: ChannelViewState,
+  images: {
+    imageDelivery: "inline" | "on-demand";
+    revealedImageIds?: ReadonlySet<string>;
+  },
 ): Map<string, QuickfireToolCall[]> {
   const byTurn = new Map<string, QuickfireToolCall[]>();
   for (const invocation of Object.values(state.invocations)) {
@@ -358,6 +423,25 @@ function toolCallsByTurnId(
       .filter(Boolean)
       .slice(-20);
     const failure = invocation.failure ?? invocation.terminalReason;
+    const resultImages = extractResultImages(
+      invocation.result ?? invocation.outputs,
+    ).map((image, index) => {
+      const id = `${invocation.invocationId}:${index}`;
+      const visible =
+        images.imageDelivery === "inline" || images.revealedImageIds?.has(id) === true;
+      return {
+        id,
+        mimeType: image.mimeType,
+        ...(image.width === undefined ? {} : { width: image.width }),
+        ...(image.height === undefined ? {} : { height: image.height }),
+        bytes: base64ByteLength(image.data),
+        ...(visible ? { dataUrl: imageDataUrl(image) } : {}),
+      };
+    });
+    const duration = durationBetween(
+      invocation.startedAt,
+      invocation.completedAt ?? invocation.updatedAt,
+    );
     const call: QuickfireToolCall = {
       id: invocation.invocationId,
       name: invocation.name,
@@ -383,6 +467,11 @@ function toolCallsByTurnId(
           }),
       ...(progress.length > 0 ? { progress } : {}),
       ...(failure ? { failure: formatDetail(failure) } : {}),
+      ...(duration === undefined ? {} : { durationMs: duration }),
+      ...(invocation.requiresApproval && invocation.status !== "completed"
+        ? { awaitingApproval: true }
+        : {}),
+      ...(resultImages.length > 0 ? { images: resultImages } : {}),
     };
     const calls = byTurn.get(invocation.turnId);
     if (calls) calls.push(call);
@@ -419,7 +508,7 @@ function currentActivity(
           id: "activity:awaiting-response",
           state: "working",
           phase: "starting",
-          label: "Starting…",
+          label: "starting",
         }
       : null;
   }
@@ -450,12 +539,25 @@ function currentActivity(
     phase,
     label:
       phase === "using-tools"
-        ? "Using tools…"
+        ? "using tools"
         : phase === "responding"
-          ? "Responding…"
-          : "Thinking…",
+          ? "responding"
+          : "thinking",
     ...(toolCalls.length > 0 ? { toolCalls } : {}),
   };
+}
+
+/** Milliseconds between two ISO stamps, when both are present and sane. */
+function durationBetween(
+  from: string | undefined,
+  to: string | undefined,
+): number | undefined {
+  if (!from || !to) return undefined;
+  const start = Date.parse(from);
+  const end = Date.parse(to);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end < start)
+    return undefined;
+  return end - start;
 }
 
 function activityOrder(turn: ChannelViewState["turns"][string]): number {

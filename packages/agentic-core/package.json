@@ -1,7 +1,7 @@
 {
   "name": "@workspace/agentic-core",
   "version": "0.1.0",
-  "description": "Headless agentic session management — shared business logic (no React)",
+  "description": "Headless agentic session management \u2014 shared business logic (no React)",
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
@@ -9,7 +9,8 @@
     "./channel-chat-merge": "./src/channel-chat-merge.ts",
     "./provisional-agent-lifecycle": "./src/provisional-agent-lifecycle.ts",
     "./panel-import-loader": "./src/panel-import-loader.ts",
-    "./subagent-prompt": "./src/subagent-prompt.ts"
+    "./subagent-prompt": "./src/subagent-prompt.ts",
+    "./result-images": "./src/result-images.ts"
   },
   "dependencies": {
     "@vibestudio/service-schemas": "workspace:*",

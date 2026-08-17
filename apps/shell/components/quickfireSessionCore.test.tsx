@@ -11,6 +11,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  REPLAY_LIMIT,
   TRANSCRIPT_LIMIT,
   useQuickfireSessionCore,
   type QuickfireSessionFacts,
@@ -24,21 +25,21 @@ import {
  * schema-parses its input and silently returns the previous state when the
  * shape is wrong, so an approximate fixture would pass for the wrong reason.
  */
-function wireMessageEvent(text: string, senderId = "user:me") {
+function wireMessageEvent(text: string, senderId = "user:me", ordinal = 1) {
   return {
     type: "agentic.trajectory.v1/event",
-    pubsubId: 1,
+    pubsubId: ordinal,
     senderId,
-    ts: 1_700_000_000_000,
+    ts: 1_700_000_000_000 + ordinal,
     senderMetadata: { name: "you", type: "user" },
     payload: {
       kind: "message.completed",
       actor: { kind: "user", id: senderId, participantId: senderId },
-      causality: { messageId: "msg-1" },
+      causality: { messageId: `msg-${ordinal}` },
       payload: {
         protocol: "agentic.trajectory.v1",
         role: "user",
-        blocks: [{ blockId: "msg-1:block:0", type: "text", content: text }],
+        blocks: [{ blockId: `msg-${ordinal}:block:0`, type: "text", content: text }],
         outcome: "completed"
       },
       createdAt: "2026-08-14T12:00:00.000Z"
@@ -186,7 +187,10 @@ describe("useQuickfireSessionCore", () => {
     // caller passes its slot id; replay streams so the reducer sees it.
     expect(connectToChannel).toHaveBeenCalledWith("channel-1", "ctx-1", {
       clientId: "panel:tree/root/0",
-      replayMessageLimit: TRANSCRIPT_LIMIT
+      // Replay is deliberately wider than the rendered tail: "12 earlier
+      // entries" is only an offer the surface can keep if the client already
+      // holds them.
+      replayMessageLimit: REPLAY_LIMIT
     });
     expect(result.current.view.channelId).toBe("channel-1");
     expect(result.current.view.hasConversation).toBe(true);
@@ -286,7 +290,7 @@ describe("useQuickfireSessionCore conversation source (messaging plan §4.8)", (
     expect(transport.sessionFor).not.toHaveBeenCalled();
     expect(connectToChannel).toHaveBeenCalledWith("channel-notify", "ctx-notify", {
       clientId: "conversation:channel-notify",
-      replayMessageLimit: TRANSCRIPT_LIMIT
+      replayMessageLimit: REPLAY_LIMIT
     });
     expect(result.current.mode).toBe("conversation");
     expect(result.current.view.hasConversation).toBe(true);
@@ -358,7 +362,7 @@ describe("useQuickfireSessionCore send queue", () => {
       expect.objectContaining({
         kind: "activity",
         phase: "starting",
-        label: "Starting…"
+        label: "starting"
       })
     );
   });
@@ -471,6 +475,27 @@ describe("useQuickfireSessionCore reduction", () => {
           .map((message) => message.text)
       ).toContain("why is this panel laid out this way?")
     );
+  });
+
+  it("shows the trimmed tail, then reveals it in place on request", async () => {
+    // One more than the tail so the surface has something to offer, and the
+    // offer is only honest because the join asked for `REPLAY_LIMIT`.
+    const total = TRANSCRIPT_LIMIT + 5;
+    const events = Array.from({ length: total }, (_value, index) =>
+      wireMessageEvent(`message ${index + 1}`, "user:me", index + 1)
+    );
+    const { transport } = transportFor(fresh, {}, events);
+    const { result } = renderHook(() => useQuickfireSessionCore("slot", transport));
+
+    await waitFor(() => expect(result.current.view.transcript.length).toBe(TRANSCRIPT_LIMIT));
+    expect(result.current.view.olderCount).toBe(5);
+    expect(result.current.view.expandable).toBe(true);
+
+    act(() => result.current.showOlder());
+
+    await waitFor(() => expect(result.current.view.transcript.length).toBe(total));
+    expect(result.current.view.olderCount).toBe(0);
+    expect(result.current.view.expandable).toBe(false);
   });
 
   it("surfaces credential waits instead of leaving an unexplained stop spinner", async () => {

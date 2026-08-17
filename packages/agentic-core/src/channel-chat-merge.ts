@@ -52,6 +52,7 @@ import type { SubagentRunState, TaskCardPayload } from "./task-card-payload.js";
 // type keeps that consumer on the same canonical merge contract instead of
 // making it reach into this package's private derived-types module.
 export type { ChatMessage } from "./derived-types.js";
+import { extractResultImages } from "./result-images.js";
 
 type StoredValueRefPreview = { preview?: string };
 
@@ -930,6 +931,7 @@ function projectedInvocationToChatMessage(invocation: ProjectedInvocation): Chat
     Object.keys(invocation.request as Record<string, unknown>).length > 0
       ? invocation.request
       : (inferred.request ?? invocation.request);
+  const resultImages = extractResultImages(invocation.result ?? invocation.outputs);
   const payload: InvocationCardPayload = {
     id: invocation.invocationId,
     ...(invocation.transportCallId ? { transportCallId: invocation.transportCallId } : {}),
@@ -952,6 +954,9 @@ function projectedInvocationToChatMessage(invocation: ProjectedInvocation): Chat
         invocation.outputs.length > 0
           ? invocation.outputs.map((output) => stringifyOutput(output)).join("\n")
           : undefined,
+      // Images a tool returned, lifted out of the result so they render as
+      // pictures instead of as an elided base64 field inside a JSON dump.
+      ...(resultImages.length > 0 ? { resultImages } : {}),
     },
   };
   return {

@@ -27,6 +27,7 @@ import {
   type OpenPanelEntry,
   type SurfaceContext,
 } from "@workspace/omnibox-core";
+import { classifyQuickfireLink, suggestedOpeners } from "@workspace/quickfire-core";
 import {
   QUICKFIRE_MODE_PLACEHOLDER,
   buildPaletteRows,
@@ -42,7 +43,7 @@ import type {
   BrowserAddressSuggestion,
   PanelChromeState,
 } from "@vibestudio/shared/panelChrome";
-import { hostCommands, panel, quickfire, userNotifications, workspace } from "../shell/client";
+import { app, hostCommands, panel, quickfire, userNotifications, workspace } from "../shell/client";
 import { useShellEvent } from "../shell/useShellEvent";
 import { useShellContentOverlay, type ContentOverlayBounds } from "../shell/useShellContentOverlay";
 import { effectiveThemeAtom, themeConfigAtom, setThemeModeAtom, setThemeConfigAtom } from "../state/themeAtoms";
@@ -115,6 +116,12 @@ interface OverlayState {
    * slot. Null for the command agent / palette.
    */
   conversation: Omit<ConversationSurfaceRequest, "sequence"> | null;
+  /**
+   * The user is choosing which panel this overlay acts on (§4.1). Activating a
+   * panel row rebinds the conversation instead of navigating to it — the whole
+   * point is to quickfire a panel you are *not* looking at.
+   */
+  retargeting: boolean;
 }
 
 const CLOSED: OverlayState = {
@@ -127,6 +134,7 @@ const CLOSED: OverlayState = {
   selectionTouched: false,
   flashRowId: null,
   conversation: null,
+  retargeting: false,
 };
 
 export function QuickfireOwner() {
@@ -154,6 +162,8 @@ export function QuickfireOwner() {
     QuickfireSessionSummary[] | null
   >(null);
   const flashTimerRef = useRef(0);
+  /** How far back through your own sent messages ↑ has walked; -1 is "not walking". */
+  const recallRef = useRef(-1);
   /** Panel focused when the overlay opened, restored on dismiss (§2.3). */
   const returnFocusPanelIdRef = useRef<string | null>(null);
   /** Chat panels this shell opened for a promoted conversation, by channel id. */
@@ -713,6 +723,25 @@ export function QuickfireOwner() {
           return;
         }
         case "panel":
+          if (state.retargeting) {
+            // Rebind, do not navigate: the overlay stays put and starts talking
+            // about the panel you picked.
+            setState((current) => ({
+              ...current,
+              retargeting: false,
+              mode: "quickfire",
+              query: "",
+              inputEpoch: current.inputEpoch + 1,
+              selectedId: null,
+              selectionTouched: false,
+            }));
+            setPanelLost(false);
+            void panel
+              .getChromeState(target.panelId)
+              .then(setChromeState)
+              .catch(() => setPanelLost(true));
+            return;
+          }
           navigateToId(target.panelId);
           close({ restoreFocus: false });
           return;
@@ -833,12 +862,65 @@ export function QuickfireOwner() {
     close({ restoreFocus: false });
   }, [close, navigateToId, quickfireSession.view.channelId, quickfireSession.view.contextId]);
 
+  /**
+   * Open a link the agent wrote.
+   *
+   * Deliberately never `panel.navigate`: the overlay floats over the panel the
+   * user is looking at, and replacing that panel's content because they clicked
+   * a reference in a reply would destroy the thing they were asking about. A
+   * link opens beside it — as a child of the bound panel when there is one.
+   */
+  const openLink = useCallback(
+    async (href: string) => {
+      const target = classifyQuickfireLink(href);
+      if (!target) return;
+      const parentSlot = chromeState?.panelId ?? null;
+      if (target.kind === "external") {
+        await app.openExternal(target.url);
+        return;
+      }
+      if (target.kind === "browser-url") {
+        await panel.createBrowser(target.url, { focus: true });
+      } else if (target.kind === "panel-source") {
+        await (parentSlot
+          ? panel.createChild(parentSlot, target.source, { focus: true })
+          : panel.createPanel(target.source, { focus: true, isRoot: true }));
+      } else {
+        const { location } = target;
+        const common = {
+          ref: location.ref,
+          contextId: location.contextId,
+          stateArgs: location.stateArgs,
+          placement: location.placement,
+        };
+        await (parentSlot
+          ? panel.createChild(parentSlot, location.source, {
+              ...common,
+              title: location.title,
+              slug: location.slug,
+              focus: location.focus ?? true,
+            })
+          : panel.createPanel(location.source, {
+              ...common,
+              title: location.title,
+              slug: location.slug,
+              isRoot: true,
+              focus: location.focus ?? true,
+            }));
+      }
+      // Opening moved focus deliberately; restoring the old panel would race it.
+      close({ restoreFocus: false });
+    },
+    [chromeState?.panelId, close]
+  );
+
   const handleIntent = useCallback(
     (payload: unknown) => {
       const intent = payload as QuickfireIntent | null;
       if (!intent || typeof intent !== "object" || typeof intent.type !== "string") return;
       switch (intent.type) {
         case "input":
+          recallRef.current = -1;
           setQuickfireConversations(null);
           setState((current) => ({
             ...current,
@@ -940,13 +1022,8 @@ export function QuickfireOwner() {
           // restore the old panel and race the user's chosen focus target.
           close({ restoreFocus: false });
           return;
-        case "host-pointer-down":
-          // The quickfire surface is a sibling native view, so clicks outside
-          // it are synthesized by the host rather than bubbling through a DOM
-          // backdrop. The clicked view keeps the original event and its action.
-          if (state.open) close();
-          return;
         case "send":
+          recallRef.current = -1;
           void quickfireSession.send(intent.text);
           return;
         case "send-and-promote":
@@ -957,6 +1034,49 @@ export function QuickfireOwner() {
           return;
         case "stop":
           void quickfireSession.stop().catch(reportCommandFailure);
+          return;
+        case "recall": {
+          // Your own words, newest first. The overlay's transcript is already
+          // newest-first, so this walks it in the order it is displayed.
+          const mine = quickfireSession.view.transcript
+            .filter(
+              (entry): entry is Extract<typeof entry, { kind: "message" }> =>
+                entry.kind === "message" && entry.author === "you"
+            )
+            .map((entry) => entry.text)
+            .filter((text) => text.trim().length > 0);
+          if (mine.length === 0) return;
+          const next = Math.min(
+            mine.length - 1,
+            Math.max(-1, recallRef.current + (intent.delta < 0 ? 1 : -1))
+          );
+          recallRef.current = next;
+          setState((current) => ({
+            ...current,
+            query: next < 0 ? "" : (mine[next] ?? ""),
+            inputEpoch: current.inputEpoch + 1,
+          }));
+          return;
+        }
+        case "retarget":
+          setState((current) => ({
+            ...current,
+            retargeting: true,
+            mode: "goto",
+            query: QUICKFIRE_MODE_PREFIX.goto,
+            inputEpoch: current.inputEpoch + 1,
+            selectedId: null,
+            selectionTouched: false,
+          }));
+          return;
+        case "show-older":
+          quickfireSession.showOlder();
+          return;
+        case "open-link":
+          void openLink(intent.href).catch(reportCommandFailure);
+          return;
+        case "reveal-image":
+          quickfireSession.revealImage(intent.imageId);
           return;
         case "clear":
           // A conversation surface has no clear (plan §4.8); the button is not
@@ -983,12 +1103,14 @@ export function QuickfireOwner() {
       close,
       focusPromotedPanel,
       ghostSuffix,
+      openLink,
       promoteToChatPanel,
       quickfireSession,
       rows,
       selectedId,
       state.argSession,
       state.mode,
+      state.retargeting,
     ]
   );
 
@@ -1074,13 +1196,28 @@ export function QuickfireOwner() {
                     : conversation.view.error,
               transcript: conversation.view.transcript,
               olderCount: conversation.view.olderCount,
+              expandable: conversation.view.expandable,
               credentialRequest: conversation.view.credentialRequest,
               resume: conversation.view.resume,
+              // The envelope this surface was opened on, so the notification the
+              // person tapped is the one they land on (messaging plan §4.8).
+              focusMessageId: state.conversation?.focusMessageId ?? null,
               connecting: conversation.view.connecting,
               streaming: conversation.view.streaming,
               promoted: conversation.view.promoted,
               hasConversation: conversation.view.hasConversation,
               error: conversation.view.error,
+              // Only for a slot conversation: a notification thread already has
+              // a subject, and offering "what is this panel doing?" there is
+              // answering a question nobody asked.
+              ...(state.conversation
+                ? {}
+                : {
+                    suggestions: suggestedOpeners({
+                      title: chromeState?.title ?? null,
+                      kind: chromeState?.kind === "browser" ? "browser" : "workspace",
+                    }),
+                  }),
             }
           : null,
     };

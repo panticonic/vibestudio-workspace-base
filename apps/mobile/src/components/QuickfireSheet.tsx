@@ -8,6 +8,12 @@
  * `useQuickfireSessionCore`, so both clients resolve, join, reduce and drive the
  * *same* durable conversation.
  *
+ * The conversation *inside* the sheet is now shared too: this file owns the
+ * sheet — the modal, the swipe, the keyboard avoidance, the compose row — and
+ * `@workspace/quickfire-core/ui` owns the heading, the transcript, the tool
+ * records and the Markdown, drawn through this app's native skin. What used to
+ * be ~500 lines of hand-rolled transcript here is a `<ConversationBody/>`.
+ *
  * Lifecycle rules that matter here (§1.4):
  *  - Opening over a slot is what binds the conversation. Swiping the sheet away
  *    is a view change only — the conversation persists.
@@ -19,10 +25,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Animated,
-  ActivityIndicator,
   Easing,
   KeyboardAvoidingView,
-  Linking,
   Modal,
   PanResponder,
   Platform,
@@ -33,23 +37,26 @@ import {
   TextInput,
   View,
 } from "react-native";
-import {
-  SafeAreaView,
-  useSafeAreaInsets,
-} from "react-native-safe-area-context";
+import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import ReactNativeHapticFeedback from "react-native-haptic-feedback";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   useQuickfireSessionCore,
   type QuickfireSessionSource,
   type QuickfireTransport,
 } from "@workspace/quickfire-core/session";
-import { parseQuickfireMarkdown } from "@workspace/quickfire-core";
-import type {
-  QuickfireMarkdownInline,
-  QuickfireToolCall,
-  QuickfireTranscriptEntry,
+import {
+  ConversationBody,
+  ConversationHeader,
+  QuickfireSkinProvider,
+  type ConversationIntent,
+} from "@workspace/quickfire-core/ui";
+import {
+  classifyQuickfireLink,
+  suggestedOpeners,
+  type QuickfireComposeView,
 } from "@workspace/quickfire-core";
-import { themeColorsAtom, type ThemeColors } from "../state/themeAtoms";
+import { themeColorsAtom } from "../state/themeAtoms";
 import { pushToastAtom } from "../state/toastAtoms";
 import {
   dismissQuickfireSheetAtom,
@@ -57,14 +64,10 @@ import {
   type QuickfireSheetRequest,
 } from "../state/commandSheetAtoms";
 import { hairline, radius, shadow, spacing, type } from "../design/tokens";
-import {
-  Copy,
-  RotateCcw,
-  SendHorizontal,
-  Sparkles,
-  Square,
-} from "../design/icons";
+import { SendHorizontal, Square } from "../design/icons";
 import { IconButton } from "./ui/primitives";
+import { openExternalUrl } from "../services/nativeCapabilities";
+import { useNativeSkin } from "./overlay/nativeSkin";
 
 const SLIDE_DISTANCE = 720;
 
@@ -78,12 +81,19 @@ export interface QuickfireSheetProps {
    * has no panes, so this is the detail view swapping to the chat panel.
    */
   openChatPanel: (channelId: string) => Promise<void>;
+  /**
+   * Open a destination an agent wrote. Routed through the app's own address
+   * handling so a workspace link becomes a panel; only genuinely external
+   * schemes leave the app.
+   */
+  openLink: (href: string) => void;
 }
 
 export function QuickfireSheet({
   transport,
   panelTitle,
   openChatPanel,
+  openLink,
 }: QuickfireSheetProps) {
   const request = useAtomValue(quickfireSheetAtom);
   const dismiss = useSetAtom(dismissQuickfireSheetAtom);
@@ -100,9 +110,7 @@ export function QuickfireSheet({
         channelId: conversation.channelId,
         contextId: conversation.contextId,
         clientId: `conversation:${conversation.channelId}`,
-        ...(conversation.focusMessageId
-          ? { focusMessageId: conversation.focusMessageId }
-          : {}),
+        ...(conversation.focusMessageId ? { focusMessageId: conversation.focusMessageId } : {}),
         ...(conversation.replyTo
           ? { replyTo: { participantId: conversation.replyTo.participantId } }
           : {}),
@@ -169,12 +177,18 @@ export function QuickfireSheet({
     ]).start();
   }, [backdropOpacity, request, translateY]);
 
+  const streamingRef = useRef(view.streaming);
+  useEffect(() => {
+    // A turn ending is the thing you were waiting for; say so in the hand.
+    if (streamingRef.current && !view.streaming && view.transcript.length > 0) {
+      ReactNativeHapticFeedback.trigger("impactLight");
+    }
+    streamingRef.current = view.streaming;
+  }, [view.streaming, view.transcript.length]);
+
   useEffect(() => {
     if (view.transcript.length === 0) return;
-    const timer = setTimeout(
-      () => scrollRef.current?.scrollToEnd({ animated: true }),
-      32,
-    );
+    const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 32);
     return () => clearTimeout(timer);
   }, [view.transcript]);
 
@@ -198,8 +212,28 @@ export function QuickfireSheet({
           }
         },
       }),
-    [close, translateY],
+    [close, translateY]
   );
+
+  /**
+   * One link policy, shared with desktop: workspace destinations open as panels
+   * through the app's own address handling, and only genuinely external schemes
+   * are handed to the OS.
+   */
+  const handleLink = useCallback(
+    (href: string) => {
+      const target = classifyQuickfireLink(href);
+      if (!target) return;
+      if (target.kind === "external") {
+        void openExternalUrl(target.url).catch(() => undefined);
+        return;
+      }
+      openLink(href);
+      close();
+    },
+    [close, openLink]
+  );
+  const skin = useNativeSkin(colors, { openLink: handleLink });
 
   const report = useCallback(
     (title: string) => (error: unknown) =>
@@ -208,7 +242,7 @@ export function QuickfireSheet({
         message: error instanceof Error ? error.message : String(error),
         tone: "danger",
       }),
-    [pushToast],
+    [pushToast]
   );
 
   /**
@@ -227,12 +261,10 @@ export function QuickfireSheet({
     const text = draft.trim();
     if (!text) return;
     setDraft("");
+    // The one moment in this surface where something leaves your hands.
+    ReactNativeHapticFeedback.trigger("impactLight");
     void session.send(text).catch(report("Could not send"));
   }, [draft, report, session]);
-
-  const handleClear = useCallback(() => {
-    void session.clear().catch(report("Could not clear the conversation"));
-  }, [report, session]);
 
   const handlePromote = useCallback(() => {
     void session
@@ -260,6 +292,71 @@ export function QuickfireSheet({
       .catch(report("Could not open the chat panel"));
   }, [close, openChatPanel, report, view.channelId]);
 
+  /**
+   * The same compose view the desktop chrome builds. Assembling it here is what
+   * lets the shared conversation components render on both clients without a
+   * mobile-shaped variant of every prop.
+   */
+  const compose = useMemo<QuickfireComposeView>(
+    () => ({
+      kind: isConversation ? "conversation" : "slot",
+      panelTitle: headerTitle,
+      hint: isConversation
+        ? "Reply here, or open the chat panel for the whole conversation."
+        : "Ask about this panel. I can describe what it is and how it is running.",
+      transcriptOrder: "oldest-first",
+      disabledReason: view.error,
+      transcript: view.transcript,
+      olderCount: view.olderCount,
+      expandable: view.expandable,
+      credentialRequest: view.credentialRequest,
+      resume: view.resume,
+      focusMessageId: request?.conversation?.focusMessageId ?? null,
+      connecting: view.connecting,
+      streaming: view.streaming,
+      promoted: view.promoted,
+      hasConversation: view.hasConversation,
+      error: view.error,
+      ...(isConversation
+        ? {}
+        : { suggestions: suggestedOpeners({ title: panelTitle, kind: "workspace" }) }),
+    }),
+    [headerTitle, isConversation, panelTitle, request?.conversation?.focusMessageId, view]
+  );
+
+  const onIntent = useCallback(
+    (intent: ConversationIntent) => {
+      switch (intent.kind) {
+        case "clear":
+          void session.clear().catch(report("Could not clear the conversation"));
+          return;
+        case "promote":
+          handlePromote();
+          return;
+        case "focus-promoted":
+          handleFocusPromoted();
+          return;
+        case "start-fresh":
+          void session.startFresh().catch(report("Could not start a conversation"));
+          return;
+        case "show-older":
+          session.showOlder();
+          return;
+        case "stop":
+          void session.stop().catch(report("Could not stop the turn"));
+          return;
+        case "send":
+          void session.send(intent.text).catch(report("Could not send"));
+          return;
+        case "retarget":
+          // Mobile binds to the panel on screen; choosing another one is done by
+          // switching panels, which is the drawer's job, not this sheet's.
+          return;
+      }
+    },
+    [handleFocusPromoted, handlePromote, report, session]
+  );
+
   if (!request) return null;
 
   const composeDisabledReason = view.error ?? null;
@@ -273,236 +370,81 @@ export function QuickfireSheet({
       presentationStyle="overFullScreen"
       onRequestClose={close}
     >
-      <View style={styles.root}>
-        <Animated.View
-          style={[
-            styles.backdrop,
-            { backgroundColor: colors.overlay, opacity: backdropOpacity },
-          ]}
-        >
-          <Pressable
-            style={StyleSheet.absoluteFill}
-            onPress={close}
-            accessibilityLabel="Dismiss the command agent"
-            testID="quickfire-backdrop"
-          />
-        </Animated.View>
-        <KeyboardAvoidingView
-          behavior={Platform.OS === "ios" ? "padding" : "height"}
-          style={styles.avoider}
-          pointerEvents="box-none"
-        >
-          <SafeAreaView
-            edges={["bottom"]}
-            style={styles.safeArea}
+      <QuickfireSkinProvider value={skin}>
+        <View style={styles.root}>
+          <Animated.View
+            style={[styles.backdrop, { backgroundColor: colors.overlay, opacity: backdropOpacity }]}
+          >
+            <Pressable
+              style={StyleSheet.absoluteFill}
+              onPress={close}
+              accessibilityLabel="Dismiss the command agent"
+              testID="quickfire-backdrop"
+            />
+          </Animated.View>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.avoider}
             pointerEvents="box-none"
           >
-            <Animated.View
-              testID="quickfire-sheet"
-              accessibilityViewIsModal
-              style={[
-                styles.sheet,
-                shadow.sheet,
-                {
-                  backgroundColor: colors.surfaceRaised,
-                  borderColor: colors.border,
-                  shadowColor: colors.shadow,
-                  paddingBottom: Math.max(insets.bottom, spacing.md),
-                  transform: [{ translateY }],
-                },
-              ]}
-            >
-              <View {...panResponder.panHandlers} style={styles.grabArea}>
-                <View
-                  style={[styles.grabber, { backgroundColor: colors.border }]}
-                />
-              </View>
-
-              <View
+            <SafeAreaView edges={["bottom"]} style={styles.safeArea} pointerEvents="box-none">
+              <Animated.View
+                testID="quickfire-sheet"
+                accessibilityViewIsModal
                 style={[
-                  styles.header,
-                  { borderBottomColor: colors.borderSubtle },
+                  styles.sheet,
+                  shadow.sheet,
+                  {
+                    backgroundColor: colors.surfaceRaised,
+                    borderColor: colors.border,
+                    shadowColor: colors.shadow,
+                    paddingBottom: Math.max(insets.bottom, spacing.md),
+                    transform: [{ translateY }],
+                  },
                 ]}
               >
-                <Sparkles size={17} color={colors.primary} />
-                <Text
-                  style={[
-                    type.bodyStrong,
-                    styles.headerTitle,
-                    { color: colors.text },
-                  ]}
-                  numberOfLines={1}
-                >
-                  {headerTitle}
-                </Text>
-                {isConversation ? null : (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Clear conversation"
-                    disabled={!view.hasConversation}
-                    onPress={handleClear}
-                    hitSlop={6}
-                    style={[
-                      styles.clearButton,
-                      {
-                        backgroundColor: "transparent",
-                        opacity: view.hasConversation ? 1 : 0.4,
-                      },
-                    ]}
-                  >
-                    <RotateCcw size={16} color={colors.textSecondary} />
-                  </Pressable>
-                )}
-                <IconButton
-                  icon={Copy}
-                  label={
-                    isConversation
-                      ? "Open in chat panel"
-                      : "Open conversation as chat panel"
-                  }
-                  onPress={handlePromote}
-                  disabled={!view.hasConversation || view.promoted}
-                  color={colors.textSecondary}
-                  size={17}
-                />
-              </View>
-
-              {view.promoted ? (
-                <View style={styles.promoted}>
-                  <Text style={[type.body, { color: colors.textSecondary }]}>
-                    This conversation continues in a chat panel, which now owns
-                    it.
-                  </Text>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Continued in chat panel"
-                    onPress={handleFocusPromoted}
-                    style={[
-                      styles.promotedAction,
-                      { borderColor: colors.primary },
-                    ]}
-                  >
-                    <Text style={[type.bodyStrong, { color: colors.primary }]}>
-                      continued in chat panel →
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Start a new conversation here"
-                    onPress={() => {
-                      void session
-                        .startFresh()
-                        .catch(report("Could not start a conversation"));
-                    }}
-                    style={[
-                      styles.promotedAction,
-                      { borderColor: colors.borderSubtle },
-                    ]}
-                  >
-                    <Text
-                      style={[type.bodyStrong, { color: colors.textSecondary }]}
-                    >
-                      start a new conversation here
-                    </Text>
-                  </Pressable>
+                <View {...panResponder.panHandlers} style={styles.grabArea}>
+                  <View style={[styles.grabber, { backgroundColor: colors.border }]} />
                 </View>
-              ) : (
-                <>
-                  {view.resume ? (
-                    <View
-                      testID="quickfire-resume-chip"
-                      style={[
-                        styles.resume,
-                        { backgroundColor: colors.surfaceSunken },
-                      ]}
-                    >
-                      <Text
-                        style={[type.caption, { color: colors.textSecondary }]}
-                      >
-                        {resumeLabel(view.resume)}
-                      </Text>
-                      <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel="Show all in a chat panel"
-                        onPress={handlePromote}
-                        hitSlop={6}
-                      >
-                        <Text style={[type.caption, { color: colors.primary }]}>
-                          show all →
-                        </Text>
-                      </Pressable>
-                    </View>
-                  ) : null}
 
-                  <ScrollView
-                    ref={scrollRef}
-                    style={styles.transcript}
-                    contentContainerStyle={styles.transcriptContent}
-                    keyboardShouldPersistTaps="handled"
-                  >
-                    {view.transcript.length === 0 ? (
-                      <View style={[styles.hint, styles.activityHeader]}>
-                        {view.connecting ? (
-                          <ActivityIndicator
-                            size="small"
-                            color={colors.primary}
-                          />
-                        ) : null}
-                        <Text
-                          style={[type.body, { color: colors.textTertiary }]}
-                        >
-                          {view.connecting
-                            ? "Starting a conversation about this panel…"
-                            : "Ask about this panel. I can describe what it is and how it is running."}
-                        </Text>
-                      </View>
-                    ) : (
-                      <>
-                        {view.olderCount > 0 ? (
-                          <Text
-                            style={[
-                              type.caption,
-                              { color: colors.textTertiary },
-                            ]}
-                          >
-                            {view.olderCount} older entries hidden
-                          </Text>
-                        ) : null}
-                        {view.transcript.map((entry) => (
-                          <QuickfireTranscriptRow
-                            key={entry.id}
-                            entry={entry}
-                            colors={colors}
-                          />
-                        ))}
-                      </>
-                    )}
-                  </ScrollView>
+                <View style={[styles.header, { borderBottomColor: colors.borderSubtle }]}>
+                  <ConversationHeader compose={compose} onIntent={onIntent} />
+                </View>
 
-                  {composeDisabledReason ? (
-                    <Text
-                      style={[
-                        type.caption,
-                        styles.error,
-                        { color: colors.danger },
-                      ]}
-                    >
-                      {composeDisabledReason}
-                    </Text>
-                  ) : null}
+                <ScrollView
+                  ref={scrollRef}
+                  style={styles.transcript}
+                  contentContainerStyle={styles.transcriptContent}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <ConversationBody
+                    compose={compose}
+                    now={Date.now()}
+                    onIntent={onIntent}
+                    onCardAction={(action, value) => {
+                      // Images arrive inline here (no process boundary), so the
+                      // only card actions left are promotion and resending.
+                      if (action === "retry" && value) {
+                        void session.send(value).catch(report("Could not send"));
+                      } else if (action === "open-chat") {
+                        handlePromote();
+                      }
+                    }}
+                  />
+                </ScrollView>
 
+                {view.promoted ? null : (
                   <View
                     style={[
                       styles.compose,
-                      {
-                        backgroundColor: colors.surfaceSunken,
-                        borderColor: colors.borderSubtle,
-                      },
+                      { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
                     ]}
                   >
                     <TextInput
                       testID="quickfire-compose"
-                      accessibilityLabel="Ask about this panel"
+                      accessibilityLabel={
+                        isConversation ? "Reply to this conversation" : "Ask about this panel"
+                      }
                       value={draft}
                       onChangeText={setDraft}
                       onSubmitEditing={handleSend}
@@ -511,18 +453,14 @@ export function QuickfireSheet({
                       returnKeyType="send"
                       blurOnSubmit
                       style={[styles.composeInput, { color: colors.text }]}
-                      placeholder="Ask about this panel…"
+                      placeholder={isConversation ? "Reply…" : "Ask about this panel…"}
                       placeholderTextColor={colors.textTertiary}
                     />
                     {view.streaming ? (
                       <IconButton
                         icon={Square}
                         label="Stop"
-                        onPress={() => {
-                          void session
-                            .stop()
-                            .catch(report("Could not stop the turn"));
-                        }}
+                        onPress={() => onIntent({ kind: "stop" })}
                         color={colors.danger}
                         size={17}
                       />
@@ -531,390 +469,26 @@ export function QuickfireSheet({
                         icon={SendHorizontal}
                         label="Send"
                         onPress={handleSend}
-                        disabled={
-                          draft.trim().length === 0 ||
-                          composeDisabledReason !== null
-                        }
+                        disabled={draft.trim().length === 0 || composeDisabledReason !== null}
                         color={colors.primary}
                         size={17}
                       />
                     )}
                   </View>
-                </>
-              )}
-            </Animated.View>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
-      </View>
+                )}
+
+                {composeDisabledReason ? (
+                  <Text style={[type.caption, styles.error, { color: colors.danger }]}>
+                    {composeDisabledReason}
+                  </Text>
+                ) : null}
+              </Animated.View>
+            </SafeAreaView>
+          </KeyboardAvoidingView>
+        </View>
+      </QuickfireSkinProvider>
     </Modal>
   );
-}
-
-function QuickfireTranscriptRow({
-  entry,
-  colors,
-}: {
-  entry: QuickfireTranscriptEntry;
-  colors: ThemeColors;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  if (entry.kind === "thinking") {
-    return (
-      <View
-        style={[
-          styles.record,
-          {
-            borderColor: colors.primary,
-            backgroundColor: colors.surfaceSunken,
-          },
-        ]}
-      >
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={`${expanded ? "Hide" : "Show"} reasoning: ${entry.title}`}
-          onPress={() => setExpanded((value) => !value)}
-          style={styles.recordSummary}
-        >
-          {entry.streaming ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : null}
-          <Text style={[type.micro, { color: colors.primary }]}>
-            {entry.title} {expanded ? "▴" : "▾"}
-          </Text>
-        </Pressable>
-        {expanded ? (
-          <QuickfireMarkdown source={entry.text} colors={colors} />
-        ) : null}
-      </View>
-    );
-  }
-  if (entry.kind === "activity") {
-    return (
-      <View
-        testID={`quickfire-message-${entry.id}`}
-        style={styles.activity}
-      >
-        <View style={styles.activityHeader}>
-          {entry.state === "working" ? (
-            <ActivityIndicator size="small" color={colors.primary} />
-          ) : null}
-          <Text style={[type.micro, { color: colors.textSecondary }]}>
-            {entry.label}
-          </Text>
-        </View>
-        {entry.toolCalls?.length ? (
-          <QuickfireToolCalls calls={entry.toolCalls} colors={colors} />
-        ) : null}
-      </View>
-    );
-  }
-  if (entry.kind !== "message") {
-    const title =
-      entry.kind === "approval"
-        ? entry.question
-        : entry.title;
-    const detail =
-      entry.kind === "notice"
-        ? entry.detail
-        : entry.kind === "approval"
-          ? entry.reason
-          : undefined;
-    return (
-      <View
-        testID={`quickfire-message-${entry.id}`}
-        style={[styles.message, { backgroundColor: colors.surfaceSunken }]}
-      >
-        <View style={styles.activityHeader}>
-          <Text style={[type.micro, { color: colors.textTertiary }]}>
-            {entry.kind === "approval"
-              ? entry.status === "pending"
-                ? "Approval needed"
-                : `Approval ${entry.status}`
-              : entry.title}
-          </Text>
-        </View>
-        <QuickfireMarkdown
-          source={`${title}${detail ? ` — ${detail}` : ""}`}
-          colors={colors}
-        />
-      </View>
-    );
-  }
-  return (
-    <View
-      testID={`quickfire-message-${entry.id}`}
-      style={[
-        styles.message,
-        {
-          backgroundColor:
-            entry.author === "you" ? colors.accentSoft : colors.surfaceSunken,
-          borderColor: entry.error ? colors.danger : "transparent",
-        },
-      ]}
-    >
-      <Text style={[type.micro, { color: colors.textTertiary }]}>
-        {entry.authorLabel}
-      </Text>
-      <QuickfireMarkdown source={entry.text} colors={colors} />
-      {entry.streaming ? (
-        <Text style={[type.body, { color: colors.primary }]}> ▌</Text>
-      ) : null}
-      {entry.toolCalls?.length ? (
-        <QuickfireToolCalls calls={entry.toolCalls} colors={colors} />
-      ) : null}
-    </View>
-  );
-}
-
-function QuickfireToolCalls({
-  calls,
-  colors,
-}: {
-  calls: QuickfireToolCall[];
-  colors: ThemeColors;
-}) {
-  return (
-    <View style={styles.toolCalls}>
-      {calls.map((call) => (
-        <QuickfireToolCallRecord key={call.id} call={call} colors={colors} />
-      ))}
-    </View>
-  );
-}
-
-function QuickfireToolCallRecord({
-  call,
-  colors,
-}: {
-  call: QuickfireToolCall;
-  colors: ThemeColors;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  return (
-    <View
-      style={[
-        styles.toolCall,
-        { backgroundColor: colors.surface },
-        call.state === "failed"
-          ? { borderColor: colors.danger }
-          : call.state === "running"
-            ? { borderColor: colors.primary }
-            : { borderColor: colors.borderSubtle },
-      ]}
-    >
-      <Pressable
-        accessibilityRole="button"
-        accessibilityLabel={`${expanded ? "Hide" : "Show"} ${call.name} tool call details`}
-        onPress={() => setExpanded((value) => !value)}
-        style={styles.recordSummary}
-      >
-        <Text
-          style={[
-            type.micro,
-            {
-              color:
-                call.state === "failed"
-                  ? colors.danger
-                  : call.state === "running"
-                    ? colors.primary
-                    : colors.textSecondary,
-            },
-          ]}
-        >
-          {call.state === "running"
-            ? "◌ "
-            : call.state === "failed"
-              ? "✕ "
-              : "✓ "}
-          {call.name} {expanded ? "▴" : "▾"}
-        </Text>
-      </Pressable>
-      {expanded ? <MobileToolDetails call={call} colors={colors} /> : null}
-    </View>
-  );
-}
-
-function MobileToolDetails({
-  call,
-  colors,
-}: {
-  call: QuickfireToolCall;
-  colors: ThemeColors;
-}) {
-  const details = [
-    call.input ? ["Input", call.input] : null,
-    call.progress?.length ? ["Progress", call.progress.join("\n")] : null,
-    call.output ? ["Output", call.output] : null,
-    call.failure ? ["Failure", call.failure] : null,
-  ].filter((item): item is string[] => item !== null);
-  if (details.length === 0) {
-    return (
-      <Text
-        style={[
-          type.caption,
-          styles.recordDetail,
-          { color: colors.textTertiary },
-        ]}
-      >
-        No details were recorded.
-      </Text>
-    );
-  }
-  return (
-    <View style={styles.recordDetail}>
-      {details.map(([label, value]) => (
-        <View key={label}>
-          <Text style={[type.micro, { color: colors.textTertiary }]}>
-            {label}
-          </Text>
-          <Text
-            selectable
-            style={[
-              styles.code,
-              { color: colors.text, backgroundColor: colors.surfaceSunken },
-            ]}
-          >
-            {value}
-          </Text>
-        </View>
-      ))}
-    </View>
-  );
-}
-
-function QuickfireMarkdown({
-  source,
-  colors,
-}: {
-  source: string;
-  colors: ThemeColors;
-}) {
-  return (
-    <View style={styles.markdown}>
-      {parseQuickfireMarkdown(source).map((block, index) => {
-        const key = `${block.kind}:${index}`;
-        if (block.kind === "code-block")
-          return (
-            <Text
-              key={key}
-              selectable
-              style={[
-                styles.code,
-                { color: colors.text, backgroundColor: colors.surface },
-              ]}
-            >
-              {block.text}
-            </Text>
-          );
-        if (block.kind === "heading")
-          return (
-            <Text key={key} style={[type.bodyStrong, { color: colors.text }]}>
-              <MarkdownInline nodes={block.children} colors={colors} />
-            </Text>
-          );
-        if (block.kind === "bullet-list" || block.kind === "ordered-list")
-          return (
-            <View key={key}>
-              {block.items.map((item, itemIndex) => (
-                <Text
-                  key={itemIndex}
-                  style={[type.body, { color: colors.text }]}
-                >
-                  {block.kind === "bullet-list" ? "•" : `${itemIndex + 1}.`}{" "}
-                  <MarkdownInline nodes={item} colors={colors} />
-                </Text>
-              ))}
-            </View>
-          );
-        if (block.kind === "quote")
-          return (
-            <Text
-              key={key}
-              style={[
-                type.body,
-                styles.quote,
-                { color: colors.textSecondary, borderLeftColor: colors.border },
-              ]}
-            >
-              <MarkdownInline nodes={block.children} colors={colors} />
-            </Text>
-          );
-        return (
-          <Text key={key} style={[type.body, { color: colors.text }]}>
-            <MarkdownInline nodes={block.children} colors={colors} />
-          </Text>
-        );
-      })}
-    </View>
-  );
-}
-
-function MarkdownInline({
-  nodes,
-  colors,
-}: {
-  nodes: QuickfireMarkdownInline[];
-  colors: ThemeColors;
-}) {
-  return nodes.map((node, index) => {
-    if (node.kind === "text") return node.text;
-    if (node.kind === "code")
-      return (
-        <Text
-          key={index}
-          style={[styles.inlineCode, { backgroundColor: colors.surface }]}
-        >
-          {node.text}
-        </Text>
-      );
-    if (node.kind === "strong")
-      return (
-        <Text key={index} style={{ fontWeight: "700" }}>
-          <MarkdownInline nodes={node.children} colors={colors} />
-        </Text>
-      );
-    if (node.kind === "emphasis")
-      return (
-        <Text key={index} style={{ fontStyle: "italic" }}>
-          <MarkdownInline nodes={node.children} colors={colors} />
-        </Text>
-      );
-    return (
-      <Text
-        key={index}
-        accessibilityRole="link"
-        style={{ color: colors.primary, textDecorationLine: "underline" }}
-        onPress={() => void Linking.openURL(node.href)}
-      >
-        <MarkdownInline nodes={node.children} colors={colors} />
-      </Text>
-    );
-  });
-}
-
-/** "Resumed · 3 messages · 2h ago"; each segment is omitted when unknown. */
-function resumeLabel(resume: {
-  messageCount: number | null;
-  lastActivityAt: number | null;
-}): string {
-  const parts = ["Resumed"];
-  if (resume.messageCount !== null) {
-    parts.push(
-      `${resume.messageCount} message${resume.messageCount === 1 ? "" : "s"}`,
-    );
-  }
-  if (resume.lastActivityAt !== null)
-    parts.push(relativeTime(resume.lastActivityAt));
-  return parts.join(" · ");
-}
-
-function relativeTime(epochMs: number): string {
-  const minutes = Math.floor((Date.now() - epochMs) / 60_000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
 }
 
 const styles = StyleSheet.create({
@@ -949,45 +523,9 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
   },
   header: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.sm,
     borderBottomWidth: hairline,
-  },
-  headerTitle: {
-    flex: 1,
-    minWidth: 0,
-  },
-  clearButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
-  },
-  promoted: {
-    padding: spacing.lg,
-    gap: spacing.md,
-  },
-  promotedAction: {
-    borderWidth: 1,
-    borderRadius: radius.md,
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    alignItems: "center",
-  },
-  resume: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginHorizontal: spacing.lg,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
   },
   transcript: {
     flex: 1,
@@ -996,74 +534,10 @@ const styles = StyleSheet.create({
   transcriptContent: {
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
-    gap: spacing.sm,
-  },
-  hint: {
-    paddingVertical: spacing.xl,
-  },
-  message: {
-    borderRadius: radius.md,
-    borderWidth: 1,
-    padding: spacing.md,
-    gap: 2,
-  },
-  activity: {
-    gap: spacing.xs,
-    paddingVertical: 2,
-  },
-  activityHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  toolCalls: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: spacing.xs,
-    marginTop: spacing.xs,
-  },
-  toolCall: {
-    borderRadius: radius.md,
-    borderWidth: hairline,
-    overflow: "hidden",
-  },
-  record: {
-    borderRadius: radius.md,
-    borderWidth: hairline,
-    overflow: "hidden",
-  },
-  recordSummary: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
-  },
-  recordDetail: {
-    gap: spacing.xs,
-    padding: spacing.sm,
-  },
-  markdown: {
-    gap: spacing.xs,
-  },
-  code: {
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
-    fontSize: 12,
-    lineHeight: 17,
-    padding: spacing.sm,
-    borderRadius: radius.sm,
-  },
-  inlineCode: {
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace" }),
-    fontSize: 13,
-  },
-  quote: {
-    borderLeftWidth: 2,
-    paddingLeft: spacing.sm,
   },
   error: {
     paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.xs,
+    paddingTop: spacing.xs,
   },
   compose: {
     flexDirection: "row",

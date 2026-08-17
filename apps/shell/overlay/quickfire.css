@@ -1,12 +1,26 @@
 /**
- * Quickfire overlay card (spec §4).
+ * The overlay card's visual language (spec §4).
  *
- * Same visual family as the approval card — it is the same content-overlay
- * primitive, so it positions statically and lets `OverlaySurfaceHost` provide
- * the margin its elevation shadow needs. Rows and group labels follow the
- * `launcher.css` conventions from `about/new` rather than inventing a second
- * palette language; everything keys off the shared Radix/token layer so light
- * and dark both read correctly without per-rule branches.
+ * Two style systems live here on purpose:
+ *
+ *  - `.quickfire-*` is the card itself — the palette input, the scope chips, the
+ *    result rows, the context strip. Desktop-only chrome, because only desktop
+ *    has a keyboard-driven palette.
+ *  - `.qf-*` is the desktop *skin* for `@workspace/quickfire-core/ui`: one rule
+ *    set per (primitive, data-attribute) pair, and nothing else. The shared
+ *    component tree emits those attributes; mobile's StyleSheet answers the same
+ *    contract natively. If a rule here needs to know it is styling a transcript
+ *    message, the abstraction has leaked and the fix belongs upstream.
+ *
+ * The redesign's rules of thumb, so later edits keep the same voice:
+ *   · Tone is carried by a rail and a wash, not by a heavy border or a fill.
+ *   · The agent's prose is plain typography on the card — no bubble, no box.
+ *     Only the user's own words, and non-conversational annotations, get a
+ *     container, so a long answer reads like a document and not like a receipt.
+ *   · Structure is quiet until you ask: every disclosure is a hairline until it
+ *     is opened, and then it earns its background.
+ *   · Nothing important is ever conveyed by colour alone — every tone pairs with
+ *     an icon and a word.
  */
 
 .quickfire-card,
@@ -31,7 +45,12 @@
   transform-origin: top center;
   animation: quickfire-in var(--motion-emphasized) var(--ease-emphasized);
   outline: none;
+  color: var(--gray-12);
   --scrollbar-thumb: color-mix(in srgb, var(--gray-10) 55%, transparent);
+  --qf-space-xs: 3px;
+  --qf-space-sm: 6px;
+  --qf-space-md: 10px;
+  --qf-space-lg: 16px;
 }
 
 @keyframes quickfire-in {
@@ -45,6 +64,21 @@
   }
 }
 
+/* ---- Conversation heading ------------------------------------------------ */
+
+.quickfire-header {
+  flex-shrink: 0;
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--gray-a3);
+  /* A conversation is a different room from the palette, and the tint at the
+     top is what says so before a single word is read. */
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--accent-a3) 60%, transparent),
+    transparent
+  );
+}
+
 /* ---- Input --------------------------------------------------------------- */
 
 .quickfire-entry {
@@ -52,14 +86,24 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 14px 16px 10px;
+  padding: 12px 14px 10px;
+}
+
+.quickfire-card[data-mode="conversation"] .quickfire-entry {
+  padding-top: 10px;
 }
 
 .quickfire-entry-icon {
   flex-shrink: 0;
+  width: 16px;
+  text-align: center;
   color: var(--gray-9);
-  font-size: 15px;
+  font-size: 14px;
   line-height: 1;
+}
+
+.quickfire-card[data-mode="conversation"] .quickfire-entry-icon {
+  color: var(--accent-10);
 }
 
 .quickfire-input-wrap {
@@ -105,6 +149,34 @@
 
 .quickfire-ghost-suffix {
   color: var(--gray-a8);
+}
+
+.quickfire-stop {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  appearance: none;
+  cursor: pointer;
+  padding: 3px 9px;
+  border: 1px solid var(--red-a6);
+  border-radius: var(--radius-4);
+  background: var(--red-a2);
+  color: var(--red-11);
+  font: inherit;
+  font-size: 11px;
+  line-height: 18px;
+}
+
+.quickfire-stop:hover {
+  background: var(--red-a3);
+}
+
+.quickfire-stop-mark {
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  background: currentColor;
 }
 
 /* ---- Argument breadcrumb (§4.2) ------------------------------------------ */
@@ -160,7 +232,7 @@
   flex-shrink: 0;
   display: flex;
   gap: 6px;
-  padding: 0 16px 12px;
+  padding: 0 14px 12px;
 }
 
 .quickfire-mode {
@@ -186,6 +258,7 @@
 .quickfire-mode[aria-pressed="true"] {
   background: var(--accent-a3);
   color: var(--accent-11);
+  box-shadow: inset 0 0 0 1px var(--accent-a5);
 }
 
 /* ---- Results ------------------------------------------------------------- */
@@ -195,25 +268,26 @@
   min-height: 0;
   overflow-y: auto;
   padding: 0 8px 8px;
-  border-top: 1px solid var(--gray-a4);
+  border-top: 1px solid var(--gray-a3);
 }
 
 .quickfire-group-label {
   margin: 0;
   padding: 10px 8px 4px;
   color: var(--gray-10);
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .quickfire-row {
+  position: relative;
   appearance: none;
   border: 0;
   cursor: pointer;
   width: 100%;
-  height: 36px;
+  height: 34px;
   display: flex;
   align-items: center;
   gap: 10px;
@@ -223,10 +297,24 @@
   color: var(--gray-12);
   font-family: inherit;
   text-align: left;
+  transition: background-color 90ms var(--ease-standard);
 }
 
 .quickfire-row[aria-selected="true"] {
   background: var(--accent-a3);
+}
+
+/* The selected row carries an accent edge as well as a wash, so the keyboard
+   position is legible at a glance and in high-contrast modes. */
+.quickfire-row[aria-selected="true"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent-9);
 }
 
 .quickfire-row[aria-disabled="true"] {
@@ -240,6 +328,10 @@
 
 .quickfire-row[data-danger][aria-selected="true"] {
   background: var(--red-a3);
+}
+
+.quickfire-row[data-danger][aria-selected="true"]::before {
+  background: var(--red-9);
 }
 
 /* A command that does not navigate leaves the palette open, so the row itself
@@ -282,6 +374,13 @@
   text-overflow: ellipsis;
 }
 
+/* Why this row is here. The address bar highlights the same way. */
+.quickfire-mark {
+  background: transparent;
+  color: var(--accent-11);
+  font-weight: 650;
+}
+
 .quickfire-row-meta {
   flex: 1;
   min-width: 0;
@@ -312,318 +411,55 @@
 .quickfire-empty {
   margin: 0;
   padding: 16px;
-  border-top: 1px solid var(--gray-a4);
+  border-top: 1px solid var(--gray-a3);
   color: var(--gray-10);
   font-size: 13px;
   text-align: center;
 }
 
-/* ---- Quickfire conversation (§4.3) -------------------------------------- */
+/* ---- Conversation body --------------------------------------------------- */
 
-.quickfire-compose {
+.quickfire-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 16px;
-  border-top: 1px solid var(--gray-a4);
+  padding: 10px 14px 14px;
+  border-top: 1px solid var(--gray-a3);
+  scrollbar-width: thin;
 }
 
-.quickfire-compose-hint {
-  margin: 0;
-  color: var(--gray-11);
-  font-size: 13px;
-  line-height: 20px;
-}
-
-.quickfire-compose-disabled {
-  margin: 8px 0 0;
-  padding: 8px 10px;
-  border-radius: var(--radius-3);
-  background: var(--amber-a3);
-  color: var(--amber-11);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-.quickfire-conversation-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-}
-
-.quickfire-conversation-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--gray-12);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.quickfire-conversation-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-.quickfire-action {
+/* A reply landed while you were reading something else. */
+.quickfire-new-below {
+  align-self: flex-start;
   appearance: none;
-  border: none;
-  background: transparent;
-  color: var(--gray-11);
+  cursor: pointer;
+  border: 1px solid var(--accent-a6);
+  border-radius: var(--radius-4);
+  padding: 2px 10px;
+  margin-bottom: 4px;
+  background: var(--accent-a3);
+  color: var(--accent-11);
   font: inherit;
   font-size: 11px;
-  padding: 3px 7px;
-  border-radius: var(--radius-2);
-  cursor: pointer;
+  line-height: 18px;
+  animation: quickfire-in var(--motion-fast) var(--ease-standard);
 }
 
-.quickfire-action:hover:not(:disabled) {
-  background: var(--gray-a3);
-  color: var(--gray-12);
-}
-
-.quickfire-action:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-.quickfire-resume {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 10px;
-  padding: 5px 9px;
-  border-radius: var(--radius-2);
-  background: var(--gray-a2);
-  color: var(--gray-10);
-  font-size: 11px;
-}
-
-.quickfire-transcript {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
-
-.quickfire-message {
-  border-radius: var(--radius-3);
-  padding: 8px 10px;
-  background: var(--gray-a2);
-}
-
-.quickfire-message-you {
-  background: var(--accent-a3);
-}
-
-.quickfire-message-error {
-  background: var(--red-a3);
-}
-
-.quickfire-activity {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 0;
-  color: var(--gray-11);
-  font-size: 11px;
-}
-
-.quickfire-activity-status {
-  display: flex;
-  align-items: center;
-  min-height: 18px;
-  font-weight: 600;
-}
-
-.quickfire-activity .quickfire-tool-calls {
-  margin-top: 0;
-}
-
-.quickfire-spinner {
-  display: inline-block;
-  width: 9px;
-  height: 9px;
-  margin-right: 5px;
-  border: 1.5px solid var(--accent-a5);
-  border-top-color: var(--accent-10);
-  border-radius: 50%;
-  vertical-align: -1px;
-  animation: quickfire-spin 700ms linear infinite;
-}
-
-@keyframes quickfire-spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.quickfire-message-author {
-  margin: 0 0 3px;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--gray-10);
-}
-
-.quickfire-message-text {
-  margin: 0;
-  font-size: 13px;
-  line-height: 19px;
-  color: var(--gray-12);
-  overflow-wrap: anywhere;
-}
-
-.quickfire-message-text > :first-child,
-.quickfire-record > :first-child {
-  margin-top: 0;
-}
-
-.quickfire-message-text > :last-child,
-.quickfire-record > :last-child {
-  margin-bottom: 0;
-}
-
-.quickfire-message-text p,
-.quickfire-message-text ul,
-.quickfire-message-text ol,
-.quickfire-message-text blockquote {
-  margin: 0 0 6px;
-}
-
-.quickfire-message-text pre,
-.quickfire-record pre {
-  margin: 5px 0;
-  padding: 7px;
-  border-radius: var(--radius-2);
-  background: var(--gray-a3);
-  font: 11px/16px var(--code-font-family, monospace);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.quickfire-message-text code {
-  padding: 1px 3px;
-  border-radius: 3px;
-  background: var(--gray-a4);
-  font-family: var(--code-font-family, monospace);
-}
-
-.quickfire-message-text blockquote {
-  padding-left: 8px;
-  border-left: 2px solid var(--gray-a6);
-  color: var(--gray-11);
-}
-
-.quickfire-markdown-heading {
-  display: block;
-  margin-bottom: 5px;
-}
-
-/* Live delta indicator: the transcript renders streaming text as it arrives. */
-.quickfire-caret {
-  display: inline-block;
-  width: 2px;
-  height: 13px;
-  margin-left: 2px;
-  vertical-align: text-bottom;
-  background: var(--accent-9);
-  animation: quickfire-caret-blink 1s steps(2, start) infinite;
-}
-
-@keyframes quickfire-caret-blink {
-  to {
-    visibility: hidden;
-  }
-}
-
-.quickfire-tool-calls {
-  margin-top: 6px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.quickfire-record {
-  border: 1px solid var(--gray-a5);
-  border-radius: var(--radius-2);
-  background: var(--gray-a2);
-  color: var(--gray-11);
-  font-size: 11px;
-}
-
-.quickfire-record > summary {
-  cursor: pointer;
-  list-style: none;
-  padding: 3px 7px;
-  font-weight: 600;
-}
-
-.quickfire-record > summary::-webkit-details-marker {
-  display: none;
-}
-
-.quickfire-record[open] {
-  flex-basis: 100%;
-}
-
-.quickfire-record[open] > summary {
-  border-bottom: 1px solid var(--gray-a4);
-}
-
-.quickfire-thinking {
-  align-self: flex-start;
-  padding: 0;
-  border-color: var(--purple-a6);
-}
-
-.quickfire-thinking > :not(summary),
-.quickfire-record-details,
-.quickfire-record-empty {
-  margin: 0;
-  padding: 7px 9px;
-}
-
-.quickfire-record-details h4 {
-  margin: 5px 0 2px;
-  color: var(--gray-10);
-  font-size: 10px;
-  text-transform: uppercase;
-}
-
-.quickfire-tool-running {
-  border-color: var(--accent-a7);
-  color: var(--accent-a11);
-}
-
-.quickfire-tool-failed {
-  border-color: var(--red-a7);
-  color: var(--red-a11);
-}
-
-.quickfire-compose-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.quickfire-compose-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 10px 0 0;
+.quickfire-new-below:hover {
+  background: var(--accent-a4);
 }
 
 .quickfire-compose-keys {
+  margin: 0 0 2px;
   color: var(--gray-9);
   font-size: 11px;
+  line-height: 16px;
+}
+
+.quickfire-compose-keys kbd,
+.quickfire-context-hints kbd {
+  font-family: inherit;
+  color: var(--gray-11);
 }
 
 /* ---- Context strip (§4.1) ------------------------------------------------ */
@@ -634,8 +470,8 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  padding: 8px 16px;
-  border-top: 1px solid var(--gray-a4);
+  padding: 7px 14px;
+  border-top: 1px solid var(--gray-a3);
   background: var(--gray-a2);
   color: var(--gray-10);
   font-size: 11px;
@@ -643,6 +479,14 @@
 }
 
 .quickfire-context-panel {
+  appearance: none;
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+  padding: 2px 6px;
+  margin-left: -6px;
+  border-radius: var(--radius-2);
+  background: transparent;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -651,6 +495,21 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.quickfire-context-panel:hover {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+
+.quickfire-context-swap {
+  opacity: 0;
+  transition: opacity var(--motion-fast) var(--ease-standard);
+}
+
+.quickfire-context-panel:hover .quickfire-context-swap,
+.quickfire-context-panel:focus-visible .quickfire-context-swap {
+  opacity: 1;
 }
 
 .quickfire-context-lost {
@@ -663,29 +522,576 @@
   white-space: nowrap;
 }
 
-.quickfire-context-hints kbd {
-  font-family: inherit;
+/* ==========================================================================
+   The skin: `@workspace/quickfire-core/ui` primitives, DOM edition.
+   ========================================================================== */
+
+.qf-box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.qf-box[data-row] {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+
+.qf-box[data-align="center"] {
+  align-items: center;
+}
+
+.qf-box[data-align="baseline"] {
+  align-items: baseline;
+}
+
+.qf-box[data-grow] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.qf-box[data-scroll] {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.qf-box[data-gap="xs"] {
+  gap: var(--qf-space-xs);
+}
+.qf-box[data-gap="sm"] {
+  gap: var(--qf-space-sm);
+}
+.qf-box[data-gap="md"] {
+  gap: var(--qf-space-md);
+}
+.qf-box[data-gap="lg"] {
+  gap: var(--qf-space-lg);
+}
+
+.qf-box[data-pad="xs"] {
+  padding: var(--qf-space-xs);
+}
+.qf-box[data-pad="sm"] {
+  padding: var(--qf-space-sm) var(--qf-space-md);
+}
+.qf-box[data-pad="md"] {
+  padding: var(--qf-space-md) var(--qf-space-lg);
+}
+.qf-box[data-pad="lg"] {
+  padding: var(--qf-space-lg);
+}
+
+/* Tone is one variable, resolved once, so every surface treatment below is a
+   single formula instead of a colour table per component. */
+.qf-box,
+.qf-text,
+.qf-press,
+.qf-pill,
+.qf-icon,
+.qf-spinner,
+.qf-disclosure {
+  --qf-tone: var(--gray-11);
+  --qf-tone-wash: var(--gray-a2);
+  --qf-tone-edge: var(--gray-a5);
+}
+
+[data-tone="accent"] {
+  --qf-tone: var(--accent-11);
+  --qf-tone-wash: var(--accent-a2);
+  --qf-tone-edge: var(--accent-a6);
+}
+[data-tone="success"] {
+  --qf-tone: var(--grass-11);
+  --qf-tone-wash: var(--grass-a2);
+  --qf-tone-edge: var(--grass-a6);
+}
+[data-tone="warning"] {
+  --qf-tone: var(--amber-11);
+  --qf-tone-wash: var(--amber-a2);
+  --qf-tone-edge: var(--amber-a6);
+}
+[data-tone="danger"] {
+  --qf-tone: var(--red-11);
+  --qf-tone-wash: var(--red-a2);
+  --qf-tone-edge: var(--red-a6);
+}
+[data-tone="info"] {
+  --qf-tone: var(--blue-11);
+  --qf-tone-wash: var(--blue-a2);
+  --qf-tone-edge: var(--blue-a6);
+}
+[data-tone="reasoning"] {
+  --qf-tone: var(--purple-11);
+  --qf-tone-wash: var(--purple-a2);
+  --qf-tone-edge: var(--purple-a6);
+}
+[data-tone="muted"] {
+  --qf-tone: var(--gray-10);
+}
+
+/* A speech card: the user's own words get a soft accent block; the agent's get
+   the card itself, because prose should not live in a receipt. */
+.qf-box[data-surface="card"] {
+  border-radius: var(--radius-4);
+  padding: 7px 10px;
+  background: var(--qf-tone-wash);
+}
+
+.qf-box[data-surface="card"][data-tone="neutral"] {
+  background: transparent;
+  padding: 2px 0;
+}
+
+.qf-box[data-surface="sunken"] {
+  border-radius: var(--radius-3);
+  background: var(--gray-a2);
+}
+
+.qf-box[data-surface="outline"] {
+  border: 1px solid var(--qf-tone-edge);
+  border-radius: var(--radius-3);
+  overflow: hidden;
+}
+
+/* An annotation on the conversation: a tone rail, a whisper of wash. */
+.qf-box[data-surface="rail"] {
+  border-left: 2px solid var(--qf-tone-edge);
+  border-radius: 0 var(--radius-3) var(--radius-3) 0;
+  background: var(--qf-tone-wash);
+  padding-left: 9px;
+}
+
+/* "This is the entry you were called about." Used when a conversation is opened
+   from a notification, so the person lands on the line, not just the thread. */
+.qf-box[data-emphasis] {
+  box-shadow:
+    inset 0 0 0 1px var(--qf-tone-edge),
+    0 0 0 3px var(--qf-tone-wash);
+  border-radius: var(--radius-4);
+}
+
+/* Secondary controls: there when you reach for them, quiet when you are
+   reading. Keyboard users get them the moment focus lands inside. */
+.qf-box[data-hover] {
+  opacity: 0;
+  /* Collapsed as well as invisible: a reserved strip of blank card under every
+     message is worse than the controls themselves. */
+  max-height: 0;
+  overflow: hidden;
+  transition:
+    opacity var(--motion-fast) var(--ease-standard),
+    max-height var(--motion-fast) var(--ease-standard);
+}
+
+.qf-box[data-surface]:hover > .qf-box[data-hover],
+.qf-box[data-hover]:focus-within,
+.qf-box[data-hover]:hover {
+  opacity: 1;
+  max-height: 40px;
+}
+
+.qf-text {
+  display: block;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 19px;
+  color: var(--gray-12);
+  overflow-wrap: anywhere;
+}
+
+/* Text inside text is a run, not a block — this is what lets the shared tree
+   nest `strong`/`code`/links inside a paragraph without knowing the platform. */
+.qf-text .qf-text,
+.qf-text .qf-press {
+  display: inline;
+}
+
+.qf-text[data-variant="strong"] {
+  font-weight: 650;
+}
+
+.qf-text[data-variant="emphasis"] {
+  font-style: italic;
+}
+
+.qf-text[data-variant="strike"] {
+  text-decoration: line-through;
+}
+
+.qf-text[data-variant="heading"] {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.qf-text[data-variant="label"] {
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--qf-tone);
+}
+
+.qf-text[data-variant="caption"] {
+  font-size: 11px;
+  line-height: 17px;
   color: var(--gray-11);
 }
 
-/* The send hint sits between the input and the newest message when the
-   conversation reads downward, so it needs the transcript's gutter rather than
-   the footer's. */
-.quickfire-compose-keys-lead {
-  margin: 0;
-  padding: 6px 14px 0;
-  color: var(--gray-a9);
-  font-size: 11px;
+.qf-text[data-variant="code"] {
+  display: inline;
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--gray-a3);
+  font-family: var(--code-font-family, monospace);
+  font-size: 11.5px;
 }
 
-/* A pill says what happened, not just what was called: work in flight, work
-   that finished, and work that ended badly must be distinguishable at a glance
-   (a name-only pill made all three identical). */
-.quickfire-chip-running {
-  border-color: var(--accent-a7);
-  color: var(--accent-a11);
+.qf-text[data-tone] {
+  color: var(--qf-tone);
 }
-.quickfire-chip-failed {
-  border-color: var(--red-a7);
-  color: var(--red-a11);
+
+.qf-text[data-clamp] {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qf-text[data-selectable] {
+  user-select: text;
+  white-space: pre-wrap;
+}
+
+.qf-press {
+  appearance: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  border-radius: var(--radius-2);
+  padding: 2px 6px;
+  background: transparent;
+  color: var(--qf-tone);
+  font: inherit;
+  text-decoration: none;
+  transition: background-color 90ms var(--ease-standard);
+}
+
+.qf-press:hover:not(:disabled) {
+  background: var(--qf-tone-wash);
+}
+
+.qf-press:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.qf-press[data-variant="quiet"] {
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  text-decoration-color: var(--accent-a7);
+}
+
+.qf-press[data-variant="primary"] {
+  padding: 4px 10px;
+  box-shadow: inset 0 0 0 1px var(--qf-tone-edge);
+}
+
+.qf-icon {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--qf-tone);
+}
+
+.qf-pill {
+  flex-shrink: 0;
+  padding: 0 6px;
+  border-radius: var(--radius-4);
+  background: var(--qf-tone-wash);
+  box-shadow: inset 0 0 0 1px var(--qf-tone-edge);
+  color: var(--qf-tone);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.qf-spinner {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 11px;
+  height: 11px;
+  border: 1.5px solid var(--qf-tone-edge);
+  border-top-color: var(--qf-tone);
+  border-radius: 50%;
+  animation: qf-spin 700ms linear infinite;
+}
+
+@keyframes qf-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.qf-rule {
+  width: 100%;
+  height: 1px;
+  margin: 2px 0;
+  border: 0;
+  background: var(--gray-a4);
+}
+
+.qf-image {
+  max-width: 100%;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--gray-a4);
+}
+
+.qf-figure {
+  margin: 0;
+  border: 1px solid var(--gray-a4);
+  border-radius: var(--radius-3);
+  overflow: hidden;
+  background: var(--gray-a2);
+}
+
+.qf-figure img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  margin: 0 auto;
+}
+
+.qf-figure figcaption {
+  padding: 4px 8px;
+  border-top: 1px solid var(--gray-a3);
+  color: var(--gray-10);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+/* Live text cursor on a streaming reply. */
+.qf-caret {
+  display: inline-block;
+  width: 2px;
+  height: 13px;
+  margin-top: 2px;
+  background: var(--accent-9);
+  animation: qf-blink 1s steps(2, start) infinite;
+}
+
+@keyframes qf-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* ---- Focus ----------------------------------------------------------------
+   Every control here is keyboard reachable, and until now none of them said so.
+   One ring, drawn on the focus-visible heuristic so pointer users never see it. */
+.qf-press:focus-visible,
+.qf-disclosure > summary:focus-visible,
+.qf-code-copy:focus-visible,
+.quickfire-row:focus-visible,
+.quickfire-mode:focus-visible,
+.quickfire-stop:focus-visible,
+.quickfire-input:focus-visible {
+  outline: 2px solid var(--accent-9);
+  outline-offset: 1px;
+  border-radius: var(--radius-2);
+}
+
+/* ---- Disclosure ---------------------------------------------------------- */
+
+.qf-disclosure {
+  width: 100%;
+  min-width: 0;
+  border-radius: var(--radius-3);
+}
+
+.qf-disclosure > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  padding: 3px 6px;
+  border-radius: var(--radius-3);
+  transition: background-color 90ms var(--ease-standard);
+}
+
+.qf-disclosure > summary::-webkit-details-marker {
+  display: none;
+}
+
+.qf-disclosure > summary:hover {
+  background: var(--gray-a2);
+}
+
+/* The triangle is the affordance; it is drawn rather than typed so it can
+   animate and so it never inherits a font's idea of a caret. */
+.qf-disclosure-mark {
+  flex-shrink: 0;
+  width: 0;
+  height: 0;
+  border-left: 4px solid var(--gray-9);
+  border-top: 3.5px solid transparent;
+  border-bottom: 3.5px solid transparent;
+  transition: transform 120ms var(--ease-standard);
+}
+
+.qf-disclosure[open] > summary .qf-disclosure-mark {
+  transform: rotate(90deg) translateX(-1px);
+}
+
+.qf-disclosure[open] {
+  background: var(--gray-a2);
+}
+
+.qf-disclosure-body {
+  padding: 0 6px 6px;
+  animation: qf-reveal 140ms var(--ease-standard);
+}
+
+@keyframes qf-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(-2px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- Code ---------------------------------------------------------------- */
+
+.qf-code {
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--gray-a4);
+  border-radius: var(--radius-3);
+  background: var(--gray-a2);
+  overflow: hidden;
+}
+
+.qf-code-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 4px 2px 8px;
+  border-bottom: 1px solid var(--gray-a3);
+  background: var(--gray-a2);
+}
+
+.qf-code-caption {
+  color: var(--gray-10);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.qf-code-copy {
+  flex-shrink: 0;
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  border: 0;
+  border-radius: var(--radius-2);
+  padding: 3px;
+  background: transparent;
+  color: var(--gray-10);
+  opacity: 0;
+  transition: opacity 120ms var(--ease-standard);
+}
+
+/* Reveal on hover or focus — present when wanted, invisible when reading. */
+.qf-code:hover .qf-code-copy,
+.qf-code-copy:focus-visible {
+  opacity: 1;
+}
+
+.qf-code-copy:hover {
+  background: var(--gray-a3);
+  color: var(--gray-12);
+}
+
+.qf-code > pre {
+  margin: 0;
+  padding: 7px 9px;
+  max-height: 280px;
+  overflow: auto;
+  font: 11px/17px var(--code-font-family, monospace);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--gray-12);
+}
+
+/* Syntax tokens, keyed to the same Radix scales the chat panel's code blocks
+   use (`agentic-chat/styles.css`), so a snippet reads identically in both
+   venues under any accent or appearance. Mobile has no tokenizer and shows the
+   same code unhighlighted — a difference in richness, never in content. */
+.qf-code .hljs-comment,
+.qf-code .hljs-quote {
+  color: var(--gray-10);
+  font-style: italic;
+}
+
+.qf-code .hljs-keyword,
+.qf-code .hljs-selector-tag,
+.qf-code .hljs-literal,
+.qf-code .hljs-symbol,
+.qf-code .hljs-name {
+  color: var(--purple-11);
+}
+
+.qf-code .hljs-string,
+.qf-code .hljs-title,
+.qf-code .hljs-section,
+.qf-code .hljs-attribute,
+.qf-code .hljs-template-tag,
+.qf-code .hljs-template-variable,
+.qf-code .hljs-type {
+  color: var(--green-11);
+}
+
+.qf-code .hljs-number,
+.qf-code .hljs-bullet,
+.qf-code .hljs-meta,
+.qf-code .hljs-link {
+  color: var(--blue-11);
+}
+
+.qf-code .hljs-built_in,
+.qf-code .hljs-builtin-name {
+  color: var(--orange-11);
+}
+
+.qf-code .hljs-emphasis {
+  font-style: italic;
+}
+
+.qf-code .hljs-strong {
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .quickfire-card,
+  .qf-disclosure-body {
+    animation: none;
+  }
+  .qf-spinner {
+    animation-duration: 2s;
+  }
 }

@@ -2389,6 +2389,11 @@ export function MainScreen() {
           transport={quickfireTransport}
           panelTitle={activePanelTitle}
           openChatPanel={openChatPanelForChannel}
+          // A link in agent prose opens beside the panel it is about, through
+          // the same address grammar the address field uses — never by
+          // replacing the panel the conversation is bound to, and never by
+          // handing the person to the system browser for a workspace link.
+          openLink={(href) => handleNavigateAddress(href, "child")}
         />
       ) : null}
       {shellClient && browserPrivacySection !== null ? (

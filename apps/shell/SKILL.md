@@ -33,9 +33,10 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
   same workspace model. Before finishing a user-facing shell change, audit the
   mobile equivalent: title bar/AppBar, panel tree/drawer, approvals, launcher
   and about/new flows, browser favicons, and loading/error/empty states.
-- Share canonical data and presentation rules, not renderer components. Add a
-  focused behavioral test in every affected client; explicitly state when a
-  surface has no mobile equivalent instead of silently omitting it.
+- Share canonical data and presentation rules, not renderer components — with
+  one deliberate exception, below. Add a focused behavioral test in every
+  affected client; explicitly state when a surface has no mobile equivalent
+  instead of silently omitting it.
 - Command palette and quickfire: the desktop overlay (`components/QuickfireOwner`
   + `overlay/QuickfireSurface`) and the mobile `CommandSheet` / `QuickfireSheet`
   are two renderers over one model. Ranking lives in `@workspace/omnibox-core`;
@@ -43,6 +44,22 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
   the session lifecycle live in `@workspace/quickfire-core`. Each client owns
   only its `run` implementations and its renderer, so a new command is a
   definition plus two runs — never a second definition.
+- **The conversation is the exception: its component tree is shared.**
+  `@workspace/quickfire-core/ui` renders the heading, transcript, tool records
+  and Markdown once, against a *skin* — a small set of semantic primitives
+  (`Box`/`Text`/`Pressable`/`Disclosure`/`Code`/…) each client implements in its
+  own idiom (`apps/shell/overlay/domSkin.tsx`,
+  `apps/mobile/src/components/overlay/nativeSkin.tsx`). Two hand-written
+  transcripts had drifted on exactly the details that matter — one showed a
+  tool's failure text and the other did not, one glued a notice's detail into its
+  heading, both parsed Markdown differently — and none of those were platform
+  differences. The line to hold: shared components name no DOM element, no React
+  Native view, no colour and no font; a skin decides nothing about product
+  meaning. If a style rule needs to know it is styling a transcript message, or a
+  shared component needs a `Platform.OS` check, the split is in the wrong place.
+- The palette itself is *not* shared, and should not be: a keyboard-driven card
+  with ghost completion and a bottom-anchored sheet with no keyboard are
+  genuinely different objects over the same row model.
 - Surface flags are the honest record of parity. A command whose `surfaces`
   omit `"mobile"` must say why in a comment on the definition. Currently
   desktop-only beyond the spec's own list: `view.accent` (mobile has no accent

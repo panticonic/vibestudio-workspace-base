@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Box, Flex, IconButton, Text, Tooltip } from "@radix-ui/themes";
 import { CheckIcon, CopyIcon } from "@radix-ui/react-icons";
+import "./diagram.css";
 
 // Lazy-loaded mermaid module (~1.5MB deferred until the first diagram renders),
 // mirroring the rehype-highlight / MDX lazy-loading in MessageContent.tsx.
@@ -93,10 +94,17 @@ function CopySourceButton({ code }: { code: string }) {
   );
 }
 
+/**
+ * The source, shown while the diagram loads and instead of it when it fails.
+ *
+ * Styled by this kit rather than by the chat panel's `.ns-codeblock`, so a
+ * surface that renders a diagram is not required to import a whole chat
+ * stylesheet to make the fallback legible.
+ */
 function DiagramSource({ code }: { code: string }) {
   return (
-    <pre className="ns-codeblock" style={{ margin: 0 }}>
-      <code style={{ display: "block" }}>{code}</code>
+    <pre className="ns-diagram-source">
+      <code>{code}</code>
     </pre>
   );
 }

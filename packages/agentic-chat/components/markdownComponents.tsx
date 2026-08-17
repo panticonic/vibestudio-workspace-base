@@ -1,6 +1,6 @@
 import { Children, isValidElement, type ReactNode } from "react";
 import type { Components } from "react-markdown";
-import { Diagram, MermaidDiagram } from "./MermaidDiagram";
+import { Diagram, MermaidDiagram } from "@workspace/ui/diagram";
 import {
   Badge,
   Blockquote,

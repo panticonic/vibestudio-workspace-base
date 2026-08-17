@@ -11,6 +11,7 @@ import {
   browserUrlFromEntry,
   buildArgSuggestions,
   buildCommandSuggestions,
+  findMatchRanges,
   groupOmniboxSuggestions,
   isLikelyAgentPrompt,
   rankHistorySuggestions,
@@ -143,6 +144,12 @@ export interface PaletteRowsInput {
 const DEFAULT_ROW_LIMIT = 12;
 
 /** Everything the ranked engines produce, projected into display groups. */
+/** Highlight ranges for a row title, using the address bar's own matcher. */
+function ranges(title: string, query: string): { titleRanges?: ReturnType<typeof findMatchRanges> } {
+  const found = findMatchRanges(title, query);
+  return found ? { titleRanges: found } : {};
+}
+
 export function buildPaletteRows(input: PaletteRowsInput): QuickfireGroup[] {
   const { mode, argSession, ctx, commands } = input;
   const limit = input.limit ?? DEFAULT_ROW_LIMIT;
@@ -178,6 +185,7 @@ export function buildPaletteRows(input: PaletteRowsInput): QuickfireGroup[] {
         row: {
           id: suggestion.id,
           title: suggestion.command.title,
+          ...ranges(suggestion.command.title, trimmed),
           ...(suggestion.command.description ? { meta: suggestion.command.description } : {}),
           ...(suggestion.command.icon ? { icon: suggestion.command.icon } : {}),
           ...(suggestion.command.accelerator
@@ -217,6 +225,7 @@ export function buildPaletteRows(input: PaletteRowsInput): QuickfireGroup[] {
         row: {
           id: `panel:${entry.id}`,
           title: entry.title,
+          ...ranges(entry.title, trimmed),
           ...(entry.location ? { meta: entry.location } : { meta: entry.source }),
           icon: "▤",
           badge: "open",
@@ -255,6 +264,7 @@ export function buildPaletteRows(input: PaletteRowsInput): QuickfireGroup[] {
         row: {
           id: `history:${browser.url}`,
           title: browser.title || browser.url,
+          ...ranges(browser.title || browser.url, trimmed),
           meta: browser.title ? browser.url : browser.source === "session" ? "open browser panel" : browser.source,
           icon: "🕘",
         },

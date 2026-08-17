@@ -12,8 +12,10 @@
  *  - `sessionFor` runs on the user gesture that enters quickfire mode, never on
  *    hover or focus change. Binding a slot creates an agent; that must be
  *    something the user did.
- *  - Only the last `TRANSCRIPT_LIMIT` messages are ever projected. "Show all"
- *    promotes to a chat panel instead of rendering a full transcript.
+ *  - Only the last `TRANSCRIPT_LIMIT` entries are projected at a time, over a
+ *    deliberately wider `REPLAY_LIMIT` join. `showOlder` widens the window
+ *    against the replay already held; "show all" still promotes to a chat panel
+ *    rather than turning this venue into one.
  *  - Reduction is throttled to ~30 Hz. A streaming turn emits far more events
  *    than either client can usefully repaint.
  */
@@ -43,6 +45,12 @@ export type { TranscriptOrder };
 /** Per-client presentation choices the shared lifecycle honors. */
 export interface QuickfireSessionOptions {
   /**
+   * `on-demand` keeps image bytes out of the projection until the user asks for
+   * one — the desktop overlay's transcript is serialized IPC on every flush, so
+   * a screenshot riding along would be re-sent thirty times a second.
+   */
+  imageDelivery?: "inline" | "on-demand";
+  /**
    * Which end of the conversation this client reads from. Desktop puts its one
    * input at the top and therefore wants the newest message under it; mobile is
    * an ordinary chat and keeps the default.
@@ -62,6 +70,20 @@ interface PubSubAgenticWireEvent {
 
 /** ~30 Hz. Streaming deltas arrive far faster than a surface can repaint. */
 const PUSH_INTERVAL_MS = 33;
+
+/**
+ * How much of the durable log the client asks for on join.
+ *
+ * Deliberately larger than what is rendered. The surface still shows a tail —
+ * a compact venue that dumps 200 entries is not compact — but "12 earlier
+ * entries" used to be a dead end, because the client had asked for exactly what
+ * it displayed and had nothing to expand into. Holding the wider replay makes
+ * "show them" a local decision instead of a promotion.
+ */
+export const REPLAY_LIMIT = 200;
+
+/** How many more entries each "show earlier" step reveals. */
+const EXPAND_STEP = 40;
 
 /**
  * The facts a client needs back from `quickfire.sessionFor`/`promote`.
@@ -139,6 +161,8 @@ export interface QuickfireSessionView {
   resume: QuickfireResumeChip | null;
   transcript: QuickfireTranscriptEntry[];
   olderCount: number;
+  /** Older entries are held here and can be revealed without leaving. */
+  expandable: boolean;
   /** Unresolved model credential request carried by the conversation channel. */
   credentialRequest: {
     providerId: string;
@@ -160,6 +184,13 @@ export interface QuickfireSessionController {
   promote: () => Promise<QuickfireSessionFacts | null>;
   /** Slot mode only; throws for a conversation. */
   startFresh: () => Promise<void>;
+  /** Widen the rendered window over the replay this client already holds. */
+  showOlder: () => void;
+  /**
+   * Carry one image's bytes to the surface (see `QuickfireImage`). A no-op for
+   * clients that deliver images inline.
+   */
+  revealImage: (imageId: string) => void;
 }
 
 const IDLE: QuickfireSessionView = {
@@ -173,6 +204,7 @@ const IDLE: QuickfireSessionView = {
   resume: null,
   transcript: [],
   olderCount: 0,
+  expandable: false,
   credentialRequest: null,
   streaming: false,
   error: null
@@ -220,6 +252,7 @@ export function useQuickfireSessionCore(
   options: QuickfireSessionOptions = {}
 ): QuickfireSessionController {
   const transcriptOrder = options.transcriptOrder ?? "oldest-first";
+  const imageDelivery = options.imageDelivery ?? "inline";
   const source = useMemo(() => normalizeSource(input), [input]);
   const key = sourceKey(source);
   const [view, setView] = useState<QuickfireSessionView>(IDLE);
@@ -243,6 +276,10 @@ export function useQuickfireSessionCore(
    */
   const queuedRef = useRef<string[]>([]);
   const awaitingResponseRef = useRef<{ afterCursor: number } | null>(null);
+  /** How many entries the surface is currently showing; grown by `showOlder`. */
+  const visibleLimitRef = useRef(TRANSCRIPT_LIMIT);
+  /** Images the user has asked to see; only meaningful for `on-demand`. */
+  const revealedImagesRef = useRef<Set<string>>(new Set());
 
   const flush = useCallback(() => {
     pushTimerRef.current = null;
@@ -252,7 +289,10 @@ export function useQuickfireSessionCore(
       awaitingResponseRef.current = null;
     }
     const projection = projectTranscript(state, selfKeyRef.current, {
+      limit: visibleLimitRef.current,
       order: transcriptOrder,
+      imageDelivery,
+      revealedImageIds: revealedImagesRef.current,
       pendingTexts: queuedRef.current,
       awaitingResponse: awaitingResponseRef.current !== null
     });
@@ -263,6 +303,7 @@ export function useQuickfireSessionCore(
       ...current,
       transcript: projection.entries,
       olderCount: projection.olderCount,
+      expandable: projection.olderCount > 0,
       // A waiting turn needs an interaction, not a stop spinner. Only an
       // actively executing turn is presented as streaming.
       streaming:
@@ -275,7 +316,7 @@ export function useQuickfireSessionCore(
           }
         : null
     }));
-  }, [transcriptOrder]);
+  }, [imageDelivery, transcriptOrder]);
 
   const schedulePush = useCallback(() => {
     if (pushTimerRef.current !== null) return;
@@ -375,7 +416,7 @@ export function useQuickfireSessionCore(
 
         const client = transportRef.current.connectToChannel(session.channelId, session.contextId, {
           clientId: bound.kind === "slot" ? bound.slotId : bound.clientId,
-          replayMessageLimit: TRANSCRIPT_LIMIT
+          replayMessageLimit: REPLAY_LIMIT
         });
         clientRef.current = client;
         selfKeyRef.current = client.clientId ?? null;
@@ -471,6 +512,7 @@ export function useQuickfireSessionCore(
       connecting: true
     });
     stateRef.current = createInitialChannelViewState();
+    visibleLimitRef.current = TRANSCRIPT_LIMIT;
     void bind(bound, generation, false);
     return () => {
       generationRef.current += 1;
@@ -539,6 +581,7 @@ export function useQuickfireSessionCore(
     closeClient();
     queuedRef.current = [];
     stateRef.current = createInitialChannelViewState();
+    visibleLimitRef.current = TRANSCRIPT_LIMIT;
     setView({ ...IDLE, source: bound, slotId: bound.slotId, connecting: true });
     await bind(bound, generation, true);
   }, [bind, closeClient]);
@@ -563,6 +606,19 @@ export function useQuickfireSessionCore(
     return promoted;
   }, []);
 
+  const revealImage = useCallback(
+    (imageId: string) => {
+      revealedImagesRef.current.add(imageId);
+      flush();
+    },
+    [flush]
+  );
+
+  const showOlder = useCallback(() => {
+    visibleLimitRef.current += EXPAND_STEP;
+    flush();
+  }, [flush]);
+
   const startFresh = useCallback(async () => {
     const bound = sourceRef.current;
     if (!bound) return;
@@ -575,6 +631,7 @@ export function useQuickfireSessionCore(
     closeClient();
     queuedRef.current = [];
     stateRef.current = createInitialChannelViewState();
+    visibleLimitRef.current = TRANSCRIPT_LIMIT;
     setView({ ...IDLE, source: bound, slotId: bound.slotId, connecting: true });
     await bind(bound, generation, true);
   }, [bind, closeClient]);
@@ -587,8 +644,10 @@ export function useQuickfireSessionCore(
       stop,
       clear,
       promote,
-      startFresh
+      startFresh,
+      showOlder,
+      revealImage
     }),
-    [clear, promote, send, source, startFresh, stop, view]
+    [clear, promote, revealImage, send, showOlder, source, startFresh, stop, view]
   );
 }

@@ -158,7 +158,7 @@ export {
   mdxComponents,
   streamingMarkdownComponents,
 } from "./components/markdownComponents";
-export { MermaidDiagram, Diagram } from "./components/MermaidDiagram";
+export { MermaidDiagram, Diagram } from "@workspace/ui/diagram";
 
 // --- Utilities ---
 export {

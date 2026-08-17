@@ -1,7 +1,7 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { Theme } from "@radix-ui/themes";
-import { MermaidDiagram } from "./MermaidDiagram";
+import { MermaidDiagram } from "@workspace/ui/diagram";
 import { MessageContent } from "./MessageContent";
 
 // Real-browser test (vitest.browser.config.ts): loads the actual mermaid

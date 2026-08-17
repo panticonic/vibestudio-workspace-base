@@ -71,6 +71,25 @@ export type QuickfireIntent =
   | { type: "send-and-promote"; text: string }
   /** Stop the turn in flight. */
   | { type: "stop" }
+  /**
+   * Widen the rendered window over the replay the session already holds. The
+   * compact venue keeps a tail on purpose; "12 earlier entries" with no way to
+   * see them was the surface withholding what it had.
+   */
+  | { type: "show-older" }
+  /**
+   * A link in agent prose was activated. The surface cannot open anything — it
+   * has no RPC, and its `WebContentsView` has no window-open handler — so the
+   * destination goes to the chrome, which resolves it through the same address
+   * grammar the title bar uses.
+   */
+  | { type: "open-link"; href: string }
+  /** Ask the chrome to carry one image's bytes across (see `QuickfireImage`). */
+  | { type: "reveal-image"; imageId: string }
+  /** Walk your own sent messages back into the input (↑ on an empty compose). */
+  | { type: "recall"; delta: number }
+  /** Re-aim the overlay at another open panel (spec §4.1 context strip). */
+  | { type: "retarget" }
   /** Clear this slot's conversation and bind a fresh one. */
   | { type: "clear" }
   | { type: "promote" }
@@ -95,9 +114,9 @@ export type QuickfireIntent =
    */
   | { type: "host-escape" }
   /**
-   * Pointer press in a sibling native view, outside this overlay document.
-   * The host does not consume it; the target keeps ownership of navigation and
-   * focus while the shell closes this transient surface.
+   * Pointer press outside the overlay document — synthesized by the host
+   * because the quickfire surface is a sibling native view and cannot receive
+   * DOM bubbling from the panel/chrome view underneath it.
    */
   | { type: "host-pointer-down" }
   | { type: "dismiss" }

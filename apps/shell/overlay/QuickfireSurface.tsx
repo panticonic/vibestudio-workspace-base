@@ -1,7 +1,13 @@
 /**
- * The "quickfire" overlay surface: the palette card floating over the live
- * panel. Pure view — props in, intents out, no RPC (the chrome-side
- * `QuickfireOwner` holds every piece of state and performs every call).
+ * The overlay surface: the palette card floating over the live panel, and the
+ * command-agent conversation it turns into (spec §4).
+ *
+ * Pure view — props in, intents out, no RPC (`QuickfireOwner` holds every piece
+ * of state and performs every call). What *is* new here is where the drawing
+ * happens: the conversation is `@workspace/quickfire-core/ui`'s component tree
+ * rendered through this file's DOM skin, so the desktop overlay and the mobile
+ * sheet are the same transcript with different primitives rather than two
+ * transcripts that agree by hand until they stop agreeing.
  *
  * The one thing this surface owns locally is the text input's value. Round
  * tripping each keystroke to the chrome and back would make typing stutter, so
@@ -9,7 +15,7 @@
  * overwrites it only when it deliberately wants to (mode chips, popping an
  * argument, restoring a query), which it signals by bumping `inputEpoch`.
  */
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   QUICKFIRE_MODE_CHIPS,
   isQuickfireSurfaceProps,
@@ -17,25 +23,33 @@ import {
   type QuickfireRow,
   type QuickfireSurfaceProps,
 } from "./quickfireSurfaceModel";
-import { parseQuickfireMarkdown } from "@workspace/quickfire-core";
-import type {
-  QuickfireMarkdownInline,
-  QuickfireToolCall,
-  QuickfireTranscriptEntry,
-} from "@workspace/quickfire-core";
+import {
+  ConversationBody,
+  ConversationHeader,
+  QuickfireSkinProvider,
+  type ConversationIntent,
+} from "@workspace/quickfire-core/ui";
+import { createDomSkin } from "./domSkin";
+import { splitTextByMatchRanges } from "@vibestudio/shared/panelChrome";
 import type { OverlaySurfaceComponentProps } from "./types";
 import "./quickfire.css";
 
-export function QuickfireSurface({
-  props,
-  emitIntent,
-}: OverlaySurfaceComponentProps) {
+export function QuickfireSurface({ props, emitIntent }: OverlaySurfaceComponentProps) {
+  const skin = useMemo(
+    () =>
+      createDomSkin({
+        openLink: (href) => (emitIntent as (intent: QuickfireIntent) => void)({
+          type: "open-link",
+          href,
+        }),
+      }),
+    [emitIntent],
+  );
   if (!isQuickfireSurfaceProps(props)) return null;
   return (
-    <QuickfireCard
-      {...props}
-      emit={emitIntent as (intent: QuickfireIntent) => void}
-    />
+    <QuickfireSkinProvider value={skin}>
+      <QuickfireCard {...props} emit={emitIntent as (intent: QuickfireIntent) => void} />
+    </QuickfireSkinProvider>
   );
 }
 
@@ -81,11 +95,8 @@ function QuickfireCard(
 
   useEffect(() => {
     if (!selectedId) return;
-    const row = listRef.current?.querySelector(
-      `[data-row-id="${CSS.escape(selectedId)}"]`,
-    );
-    if (row && "scrollIntoView" in row)
-      row.scrollIntoView({ block: "nearest" });
+    const row = listRef.current?.querySelector(`[data-row-id="${CSS.escape(selectedId)}"]`);
+    if (row && "scrollIntoView" in row) row.scrollIntoView({ block: "nearest" });
   }, [selectedId]);
 
   const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -93,13 +104,14 @@ function QuickfireCard(
     const atEnd = input.selectionStart === input.value.length;
     switch (event.key) {
       case "ArrowDown":
+      case "ArrowUp": {
         event.preventDefault();
-        emit({ type: "move", delta: 1 });
+        const delta = event.key === "ArrowDown" ? 1 : -1;
+        // In a conversation there are no rows to walk, and the thing a person
+        // reaches for ↑ to get is what they typed last — the shell habit.
+        emit(compose && !input.value ? { type: "recall", delta } : { type: "move", delta });
         return;
-      case "ArrowUp":
-        event.preventDefault();
-        emit({ type: "move", delta: -1 });
-        return;
+      }
       case "Tab":
         if (!ghostSuffix) return;
         event.preventDefault();
@@ -119,11 +131,7 @@ function QuickfireCard(
           if (compose.disabledReason || compose.promoted) return;
           const text = input.value;
           if (!text.trim()) return;
-          emit(
-            promoting
-              ? { type: "send-and-promote", text }
-              : { type: "send", text },
-          );
+          emit(promoting ? { type: "send-and-promote", text } : { type: "send", text });
           input.value = "";
           return;
         }
@@ -157,7 +165,7 @@ function QuickfireCard(
   // backspace-on-empty, send); this document-level listener only covers the
   // keys that belong to the surface as a whole.
   useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
+    const onDocumentKeyDown = (event: KeyboardEvent) => {
       if (event.target === inputRef.current) return;
       switch (event.key) {
         case "Escape":
@@ -175,31 +183,65 @@ function QuickfireCard(
         default:
       }
     };
-    document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    document.addEventListener("keydown", onDocumentKeyDown);
+    return () => document.removeEventListener("keydown", onDocumentKeyDown);
   }, [emit]);
 
+  // Newest-first means the newest entry is the top of the body, directly under
+  // the input. Keep it in view when it changes — but only for a reader who is
+  // already up there, because yanking someone out of an older answer they are
+  // deliberately reading is worse than making them scroll back.
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const newestId = compose?.transcript[0]?.id ?? null;
+  const [missedNew, setMissedNew] = useState(false);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body || !newestId) return;
+    if (body.scrollTop < 80) {
+      body.scrollTop = 0;
+      setMissedNew(false);
+      return;
+    }
+    // Something arrived while they were reading something else. Not moving the
+    // scroll was right; saying nothing about it was not.
+    setMissedNew(true);
+  }, [newestId]);
+
+  const conversing = compose !== null;
   return (
-    <div className="quickfire-card" role="dialog" aria-label="Command palette">
+    <div
+      className="quickfire-card"
+      data-mode={conversing ? "conversation" : "palette"}
+      role="dialog"
+      aria-label={conversing ? "Command agent" : "Command palette"}
+    >
+      {conversing ? (
+        // The overlay floats over the panel it is about; being able to move it
+        // off whatever you are trying to look at is the difference between a
+        // window and a lid.
+        <div className="quickfire-header" data-overlay-drag-handle="">
+          <ConversationHeader
+            compose={compose}
+            onIntent={(intent) => emit(conversationIntent(intent))}
+          />
+        </div>
+      ) : null}
+
       <div className="quickfire-entry">
         {argSession ? (
           <div className="quickfire-breadcrumb">
-            <span className="quickfire-chip quickfire-chip-command">
-              {argSession.commandTitle}
-            </span>
+            <span className="quickfire-chip quickfire-chip-command">{argSession.commandTitle}</span>
             {argSession.chips.map((chip) => (
               <span key={chip.name} className="quickfire-chip">
                 <span className="quickfire-chip-name">{chip.label}</span>
                 {chip.value}
               </span>
             ))}
-            <span className="quickfire-arg-label">
-              {argSession.activeLabel}:
-            </span>
+            <span className="quickfire-arg-label">{argSession.activeLabel}:</span>
           </div>
         ) : (
           <span className="quickfire-entry-icon" aria-hidden="true">
-            ⌕
+            {conversing ? "✦" : "⌕"}
           </span>
         )}
         <span className="quickfire-input-wrap">
@@ -219,25 +261,31 @@ function QuickfireCard(
             aria-expanded={groups.length > 0}
             aria-controls="quickfire-results"
             aria-label={
-              argSession
-                ? argSession.activeLabel
-                : "Run a command, go to a panel, or ask"
+              argSession ? argSession.activeLabel : "Run a command, go to a panel, or ask"
             }
             placeholder={placeholder}
             defaultValue={inputValue}
-            onChange={(event) =>
-              emit({ type: "input", value: event.target.value })
-            }
+            onChange={(event) => emit({ type: "input", value: event.target.value })}
             onKeyDown={onKeyDown}
           />
         </span>
+        {compose?.streaming ? (
+          <button
+            type="button"
+            className="quickfire-stop"
+            aria-label="Stop the turn in flight"
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => emit({ type: "stop" })}
+          >
+            <span className="quickfire-stop-mark" aria-hidden="true" />
+            Stop
+          </button>
+        ) : null}
       </div>
 
-      {argSession?.error ? (
-        <p className="quickfire-error">{argSession.error}</p>
-      ) : null}
+      {argSession?.error ? <p className="quickfire-error">{argSession.error}</p> : null}
 
-      {argSession ? null : (
+      {argSession || conversing ? null : (
         <div className="quickfire-modes" aria-label="Search scope">
           {QUICKFIRE_MODE_CHIPS.map((chip) => (
             <button
@@ -255,24 +303,53 @@ function QuickfireCard(
       )}
 
       {compose ? (
-        <QuickfireConversation compose={compose} emit={emit} />
-      ) : groups.length > 0 ? (
         <div
-          className="quickfire-results"
-          id="quickfire-results"
-          role="listbox"
-          ref={listRef}
+          className="quickfire-body"
+          ref={bodyRef}
+          onScroll={(event) => {
+            if (missedNew && event.currentTarget.scrollTop < 80) setMissedNew(false);
+          }}
         >
+          <ConversationBody
+            compose={compose}
+            now={Date.now()}
+            onIntent={(intent) => emit(conversationIntent(intent))}
+            onCardAction={(action, value) => {
+              if (action === "reveal-image" && value) {
+                emit({ type: "reveal-image", imageId: value });
+              } else if (action === "retry" && value) {
+                emit({ type: "send", text: value });
+              } else {
+                emit({ type: "promote" });
+              }
+            }}
+            leading={
+              missedNew ? (
+                <button
+                  type="button"
+                  className="quickfire-new-below"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    const body = bodyRef.current;
+                    if (body) body.scrollTop = 0;
+                    setMissedNew(false);
+                  }}
+                >
+                  ↑ New reply
+                </button>
+              ) : compose.disabledReason || compose.promoted ? null : (
+                <p className="quickfire-compose-keys">
+                  <kbd>⏎</kbd> send · <kbd>⇧⏎</kbd> newline · <kbd>⌘⏎</kbd> open as chat panel
+                </p>
+              )
+            }
+          />
+        </div>
+      ) : groups.length > 0 ? (
+        <div className="quickfire-results" id="quickfire-results" role="listbox" ref={listRef}>
           {groups.map((group) => (
-            <section
-              key={group.key}
-              role="group"
-              aria-labelledby={`quickfire-group-${group.key}`}
-            >
-              <h2
-                className="quickfire-group-label"
-                id={`quickfire-group-${group.key}`}
-              >
+            <section key={group.key} role="group" aria-labelledby={`quickfire-group-${group.key}`}>
+              <h2 className="quickfire-group-label" id={`quickfire-group-${group.key}`}>
                 {group.label}
               </h2>
               {group.rows.map((row) => (
@@ -291,25 +368,40 @@ function QuickfireCard(
         <p className="quickfire-empty">{emptyMessage}</p>
       ) : null}
 
-      <div className="quickfire-context">
-        <span className="quickfire-context-panel">
+      <div className="quickfire-context" data-overlay-drag-handle="">
+        <button
+          type="button"
+          className="quickfire-context-panel"
+          // Which panel this acts on is a choice, not a readout: §4.1 always
+          // said clicking here retargets, so you can quickfire a panel you are
+          // not looking at.
+          aria-label="Choose which panel this acts on"
+          title="Choose which panel this acts on"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => emit({ type: "retarget" })}
+        >
           {context ? (
             <>
               <span aria-hidden="true">{context.icon ?? "▤"}</span>
-              <span
-                className={context.lost ? "quickfire-context-lost" : undefined}
-              >
+              <span className={context.lost ? "quickfire-context-lost" : undefined}>
                 {context.lost ? "panel closed" : context.title}
               </span>
             </>
           ) : (
             <span className="quickfire-context-lost">no panel focused</span>
           )}
-        </span>
+          <span className="quickfire-context-swap" aria-hidden="true">
+            ⇄
+          </span>
+        </button>
         <span className="quickfire-context-hints">
           {argSession ? (
             <>
               <kbd>⏎</kbd> choose · <kbd>⌫</kbd> back · <kbd>esc</kbd>
+            </>
+          ) : conversing ? (
+            <>
+              <kbd>⌘K</kbd> palette · <kbd>esc</kbd> close
             </>
           ) : (
             <>
@@ -323,415 +415,30 @@ function QuickfireCard(
 }
 
 /**
- * The `/` mode conversation (§4.3). Pure view: every affordance emits an intent
- * and the chrome decides what it means.
+ * The shared conversation emits product intents; the overlay's wire protocol is
+ * the chrome's intent union. They are deliberately different vocabularies —
+ * "show older" is a rendering decision the chrome makes against the session,
+ * while "open the chat panel" is promotion by another name.
  */
-function QuickfireConversation({
-  compose,
-  emit,
-}: {
-  compose: NonNullable<QuickfireSurfaceProps["compose"]>;
-  emit: (intent: QuickfireIntent) => void;
-}) {
-  const newestFirst = compose.transcriptOrder === "newest-first";
-  // Keep the newest message in view. Which edge that is depends on the order:
-  // reading downward from the input, "newest" is the top of the list, and
-  // scrolling to the bottom would walk away from the reply that just arrived.
-  const newestRef = useRef<HTMLDivElement | null>(null);
-  useLayoutEffect(() => {
-    newestRef.current?.scrollIntoView({ block: newestFirst ? "start" : "end" });
-  }, [compose.transcript, newestFirst]);
-
-  if (compose.promoted) {
-    return (
-      <div className="quickfire-compose">
-        <p className="quickfire-compose-hint">
-          This conversation continues in a chat panel, which now owns it.
-        </p>
-        <div className="quickfire-compose-actions">
-          <button
-            type="button"
-            className="quickfire-action"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => emit({ type: "focus-promoted" })}
-          >
-            continued in chat panel →
-          </button>
-          <button
-            type="button"
-            className="quickfire-action"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => emit({ type: "start-fresh" })}
-          >
-            start a new conversation here
-          </button>
-        </div>
-      </div>
-    );
+function conversationIntent(intent: ConversationIntent): QuickfireIntent {
+  switch (intent.kind) {
+    case "clear":
+      return { type: "clear" };
+    case "promote":
+      return { type: "promote" };
+    case "focus-promoted":
+      return { type: "focus-promoted" };
+    case "start-fresh":
+      return { type: "start-fresh" };
+    case "show-older":
+      return { type: "show-older" };
+    case "stop":
+      return { type: "stop" };
+    case "send":
+      return { type: "send", text: intent.text };
+    case "retarget":
+      return { type: "retarget" };
   }
-
-  return (
-    <div className="quickfire-compose">
-      <div className="quickfire-conversation-header">
-        <span className="quickfire-conversation-title">
-          ✦ {compose.panelTitle}
-        </span>
-        <span className="quickfire-conversation-actions">
-          {/* Both conversation exits are spelled out side by side: throw it
-              away, or move it somewhere it can grow. */}
-          {compose.kind === "conversation" ? null : (
-            <button
-              type="button"
-              className="quickfire-action"
-              disabled={!compose.hasConversation}
-              title="Delete this panel's conversation"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => emit({ type: "clear" })}
-            >
-              ⟲ Clear
-            </button>
-          )}
-          <button
-            type="button"
-            className="quickfire-action"
-            disabled={!compose.hasConversation}
-            title={
-              compose.kind === "conversation"
-                ? "Open this conversation in its chat panel"
-                : "Move this conversation into a chat panel below this one, keeping its history"
-            }
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => emit({ type: "promote" })}
-          >
-            {compose.kind === "conversation"
-              ? "⧉ Open chat panel"
-              : "⧉ Move to chat panel"}
-          </button>
-        </span>
-      </div>
-
-      {compose.resume ? (
-        <div className="quickfire-resume">
-          <span>
-            Resumed
-            {compose.resume.messageCount === null
-              ? ""
-              : ` · ${compose.resume.messageCount} messages`}
-            {compose.resume.lastActivityAt === null
-              ? ""
-              : ` · ${relativeTime(compose.resume.lastActivityAt)}`}
-          </span>
-          <button
-            type="button"
-            className="quickfire-action"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => emit({ type: "promote" })}
-          >
-            show all →
-          </button>
-        </div>
-      ) : null}
-
-      {compose.credentialRequest ? (
-        <div className="quickfire-error">
-          <span>
-            {compose.credentialRequest.reason ??
-              `Model credential required for ${compose.credentialRequest.providerId}.`}
-          </span>{" "}
-          <button
-            type="button"
-            className="quickfire-action"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => emit({ type: "promote" })}
-          >
-            Reconnect in chat →
-          </button>
-        </div>
-      ) : null}
-
-      {/* Newest-first puts the send hint between the input and the newest
-          message, where it belongs; oldest-first leaves it after the list. */}
-      {newestFirst &&
-      compose.transcript.length > 0 &&
-      !compose.disabledReason ? (
-        <p className="quickfire-compose-keys quickfire-compose-keys-lead">
-          ⏎ send · ⇧⏎ newline · ⌘⏎ open as chat panel
-        </p>
-      ) : null}
-
-      {compose.transcript.length > 0 ? (
-        <div className="quickfire-transcript">
-          {newestFirst ? <div ref={newestRef} /> : null}
-          {compose.olderCount > 0 ? (
-            <p className="quickfire-compose-hint">
-              {compose.olderCount} older entries hidden
-            </p>
-          ) : null}
-          {compose.transcript.map((entry) => (
-            <QuickfireTranscriptRow key={entry.id} entry={entry} />
-          ))}
-          {newestFirst ? null : <div ref={newestRef} />}
-        </div>
-      ) : (
-        <p
-          className="quickfire-compose-hint"
-          aria-live={compose.connecting ? "polite" : undefined}
-        >
-          {compose.connecting ? (
-            <span className="quickfire-spinner" aria-hidden="true" />
-          ) : null}
-          {compose.connecting
-            ? compose.kind === "conversation"
-              ? "Opening the conversation…"
-              : "Starting a conversation about this panel…"
-            : compose.hint}
-        </p>
-      )}
-
-      {compose.error ? (
-        <p className="quickfire-error">{compose.error}</p>
-      ) : null}
-
-      {compose.disabledReason ? (
-        <p className="quickfire-compose-disabled">{compose.disabledReason}</p>
-      ) : (
-        <p className="quickfire-compose-footer">
-          {compose.streaming ? (
-            <button
-              type="button"
-              className="quickfire-action"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => emit({ type: "stop" })}
-            >
-              ■ stop
-            </button>
-          ) : null}
-          {newestFirst && compose.transcript.length > 0 ? null : (
-            <span className="quickfire-compose-keys">
-              ⏎ send · ⇧⏎ newline · ⌘⏎ open as chat panel
-            </span>
-          )}
-        </p>
-      )}
-    </div>
-  );
-}
-
-function QuickfireTranscriptRow({
-  entry,
-}: {
-  entry: QuickfireTranscriptEntry;
-}) {
-  if (entry.kind === "thinking") {
-    return (
-      <details
-        className="quickfire-record quickfire-thinking"
-        open={entry.streaming || undefined}
-      >
-        <summary>
-          {entry.streaming ? (
-            <span className="quickfire-spinner" aria-hidden="true" />
-          ) : null}
-          {entry.title}
-        </summary>
-        <QuickfireMarkdown source={entry.text} />
-      </details>
-    );
-  }
-  if (entry.kind === "activity") {
-    return (
-      <div
-        className={`quickfire-activity quickfire-activity-${entry.phase}`}
-        aria-live="polite"
-      >
-        <span className="quickfire-activity-status">
-          {entry.state === "working" ? (
-            <span className="quickfire-spinner" aria-hidden="true" />
-          ) : null}
-          {entry.label}
-        </span>
-        {entry.toolCalls?.length ? (
-          <QuickfireToolCalls calls={entry.toolCalls} />
-        ) : null}
-      </div>
-    );
-  }
-  if (entry.kind !== "message") {
-    const title =
-      entry.kind === "approval"
-        ? entry.question
-        : entry.title;
-    const detail =
-      entry.kind === "notice"
-        ? entry.detail
-        : entry.kind === "approval"
-          ? entry.reason
-          : undefined;
-    return (
-      <article
-        className={`quickfire-message quickfire-message-${entry.kind}`}
-      >
-        <h3 className="quickfire-message-author">
-          {entry.kind === "approval" ? (
-            entry.status === "pending" ? (
-              "Approval needed"
-            ) : (
-              `Approval ${entry.status}`
-            )
-          ) : (
-            entry.title
-          )}
-        </h3>
-        <div className="quickfire-message-text">
-          <QuickfireMarkdown
-            source={`${title}${detail ? ` — ${detail}` : ""}`}
-          />
-        </div>
-      </article>
-    );
-  }
-  return (
-    <article
-      className={`quickfire-message quickfire-message-${entry.author}${
-        entry.error ? " quickfire-message-error" : ""
-      }`}
-    >
-      <h3 className="quickfire-message-author">{entry.authorLabel}</h3>
-      <div className="quickfire-message-text">
-        <QuickfireMarkdown source={entry.text} />
-        {entry.streaming ? (
-          <span className="quickfire-caret" aria-hidden="true" />
-        ) : null}
-      </div>
-      {entry.toolCalls?.length ? (
-        <QuickfireToolCalls calls={entry.toolCalls} />
-      ) : null}
-    </article>
-  );
-}
-
-function QuickfireToolCalls({ calls }: { calls: QuickfireToolCall[] }) {
-  return (
-    <div className="quickfire-tool-calls">
-      {calls.map((call) => (
-        <details
-          key={call.id}
-          className={`quickfire-record quickfire-tool-${call.state}`}
-        >
-          <summary>
-            {call.state === "running"
-              ? "◌ "
-              : call.state === "failed"
-                ? "✕ "
-                : "✓ "}
-            {call.name}
-          </summary>
-          <ToolCallDetails call={call} />
-        </details>
-      ))}
-    </div>
-  );
-}
-
-function ToolCallDetails({ call }: { call: QuickfireToolCall }) {
-  if (!call.input && !call.output && !call.progress?.length && !call.failure) {
-    return <p className="quickfire-record-empty">No details were recorded.</p>;
-  }
-  return (
-    <div className="quickfire-record-details">
-      {call.input ? <DetailSection label="Input" value={call.input} /> : null}
-      {call.progress?.length ? (
-        <DetailSection label="Progress" value={call.progress.join("\n")} />
-      ) : null}
-      {call.output ? (
-        <DetailSection label="Output" value={call.output} />
-      ) : null}
-      {call.failure ? (
-        <DetailSection label="Failure" value={call.failure} />
-      ) : null}
-    </div>
-  );
-}
-
-function DetailSection({ label, value }: { label: string; value: string }) {
-  return (
-    <section>
-      <h4>{label}</h4>
-      <pre>{value}</pre>
-    </section>
-  );
-}
-
-function QuickfireMarkdown({ source }: { source: string }) {
-  return parseQuickfireMarkdown(source).map((block, index) => {
-    const key = `${block.kind}:${index}`;
-    if (block.kind === "code-block") return <pre key={key}>{block.text}</pre>;
-    if (block.kind === "heading") {
-      return (
-        <strong key={key} className="quickfire-markdown-heading">
-          <MarkdownInline nodes={block.children} />
-        </strong>
-      );
-    }
-    if (block.kind === "bullet-list" || block.kind === "ordered-list") {
-      const List = block.kind === "bullet-list" ? "ul" : "ol";
-      return (
-        <List key={key}>
-          {block.items.map((item, itemIndex) => (
-            <li key={itemIndex}>
-              <MarkdownInline nodes={item} />
-            </li>
-          ))}
-        </List>
-      );
-    }
-    if (block.kind === "quote")
-      return (
-        <blockquote key={key}>
-          <MarkdownInline nodes={block.children} />
-        </blockquote>
-      );
-    return (
-      <p key={key}>
-        <MarkdownInline nodes={block.children} />
-      </p>
-    );
-  });
-}
-
-function MarkdownInline({ nodes }: { nodes: QuickfireMarkdownInline[] }) {
-  return nodes.map((node, index) => {
-    if (node.kind === "text") return node.text;
-    if (node.kind === "code") return <code key={index}>{node.text}</code>;
-    if (node.kind === "strong")
-      return (
-        <strong key={index}>
-          <MarkdownInline nodes={node.children} />
-        </strong>
-      );
-    if (node.kind === "emphasis")
-      return (
-        <em key={index}>
-          <MarkdownInline nodes={node.children} />
-        </em>
-      );
-    return (
-      <a key={index} href={node.href} target="_blank" rel="noreferrer">
-        <MarkdownInline nodes={node.children} />
-      </a>
-    );
-  });
-}
-
-/** Coarse, human relative time for the resume chip. Display only. */
-function relativeTime(epochMs: number): string {
-  const seconds = Math.max(0, Math.round((Date.now() - epochMs) / 1000));
-  if (seconds < 60) return "just now";
-  const minutes = Math.round(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
 }
 
 function Row({
@@ -767,15 +474,21 @@ function Row({
         {row.icon ?? "›"}
       </span>
       <span className="quickfire-row-text">
-        <span className="quickfire-row-title">{row.title}</span>
-        {row.meta ? (
-          <span className="quickfire-row-meta">{row.meta}</span>
-        ) : null}
+        <span className="quickfire-row-title">
+          {splitTextByMatchRanges(row.title, row.titleRanges).map((part, index) =>
+            part.highlighted ? (
+              <mark key={index} className="quickfire-mark">
+                {part.text}
+              </mark>
+            ) : (
+              <span key={index}>{part.text}</span>
+            ),
+          )}
+        </span>
+        {row.meta ? <span className="quickfire-row-meta">{row.meta}</span> : null}
       </span>
       <span className="quickfire-row-trailing">
-        {row.badge ? (
-          <span className="quickfire-row-badge">{row.badge}</span>
-        ) : null}
+        {row.badge ? <span className="quickfire-row-badge">{row.badge}</span> : null}
         {row.accelerator ? <kbd>{row.accelerator}</kbd> : null}
       </span>
     </button>

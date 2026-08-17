@@ -252,7 +252,14 @@ function buildKeywordSearchRows(
     );
 }
 
-function findMatchRanges(text: string, query: string): TextMatchRange[] | undefined {
+/**
+ * Where a query occurs in a label, for highlighting.
+ *
+ * Exported because the command palette highlights the same way the address bar
+ * does; two implementations of "which characters matched" would drift into two
+ * different ideas of what matched.
+ */
+export function findMatchRanges(text: string, query: string): TextMatchRange[] | undefined {
   const needle = query.trim().toLowerCase();
   if (!needle) return undefined;
   const haystack = text.toLowerCase();

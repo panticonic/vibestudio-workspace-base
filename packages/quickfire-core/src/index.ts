@@ -9,5 +9,8 @@
  */
 export * from "./model";
 export * from "./markdown";
+export * from "./cards";
+export * from "./links";
+export * from "./openers";
 export * from "./palette";
 export * from "./slateDefinitions";

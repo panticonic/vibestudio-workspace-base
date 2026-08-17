@@ -61,6 +61,7 @@ import {
   type QuickfireRow,
 } from "@workspace/quickfire-core";
 import type { QuickfireSessionSummary } from "@workspace/quickfire-core/service";
+import { splitTextByMatchRanges } from "@vibestudio/shared/panelChrome";
 import type { BrowserAddressSuggestion } from "@vibestudio/shared/panelChrome";
 import { themeColorsAtom } from "../state/themeAtoms";
 import { pushToastAtom } from "../state/toastAtoms";
@@ -728,7 +729,18 @@ export function CommandSheet({
                           ]}
                           numberOfLines={1}
                         >
-                          {item.title}
+                          {/* Why this row is here — the same ranges the desktop
+                              palette and the address bar highlight. */}
+                          {splitTextByMatchRanges(item.title, item.titleRanges).map(
+                            (part, index) =>
+                              part.highlighted ? (
+                                <Text key={index} style={{ color: colors.primary }}>
+                                  {part.text}
+                                </Text>
+                              ) : (
+                                part.text
+                              )
+                          )}
                         </Text>
                         {item.meta ? (
                           <Text

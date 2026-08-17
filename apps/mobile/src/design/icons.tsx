@@ -70,12 +70,20 @@ export const Settings2 = icon("Settings2", "⚙");
 export const Share2 = icon("Share2", "↥");
 export const SendHorizontal = icon("SendHorizontal", "➤");
 export const Sparkles = icon("Sparkles", "✦");
+export const Wrench = icon("Wrench", "⚒");
+export const Gavel = icon("Gavel", "⚖");
+export const Brain = icon("Brain", "◌");
+export const LayoutTemplate = icon("LayoutTemplate", "▤");
+export const Paperclip = icon("Paperclip", "⁂");
 export const RotateCcw = icon("RotateCcw", "⟲");
 export const Unplug = icon("Unplug", "⏚");
 export const User = icon("User", "◕");
 
 // Status & feedback
-export const AlertTriangle = icon("AlertTriangle", "!");
+// Lucide 1.x renamed this to `TriangleAlert`; the old name resolves to nothing
+// and silently fell back to a bare "!" glyph everywhere it was used.
+export const AlertTriangle = icon("TriangleAlert", "!");
+export const TriangleAlert = AlertTriangle;
 export const Bell = icon("Bell", "◔");
 export const CheckCircle2 = icon("CheckCircle2", "✓");
 export const Check = icon("Check", "✓");
