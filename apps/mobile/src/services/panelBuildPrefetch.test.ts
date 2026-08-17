@@ -5,6 +5,7 @@ import {
   parsePanelBuildManifest,
   planPanelBuildPrefetch,
   prefetchPanelBuild,
+  type PanelBuildBodyReader,
   type PanelBuildManifestEntry,
   type PanelBuildPrefetchDeps,
 } from "./panelBuildPrefetch";
@@ -86,12 +87,21 @@ function createFakeStore() {
   return store;
 }
 
-function bodyOf(bytes: Uint8Array, chunk = 7): AsyncIterable<Uint8Array> {
+/**
+ * A pull reader over fixed bytes.
+ *
+ * Deliberately NOT an async generator: Hermes has no `Symbol.asyncIterator`, so
+ * a test double built on one would pass here and fail on device — which is
+ * exactly what happened.
+ */
+function bodyOf(bytes: Uint8Array, chunk = 7): PanelBuildBodyReader {
+  let offset = 0;
   return {
-    async *[Symbol.asyncIterator]() {
-      for (let offset = 0; offset < bytes.byteLength; offset += chunk) {
-        yield bytes.subarray(offset, offset + chunk);
-      }
+    read: () => {
+      if (offset >= bytes.byteLength) return Promise.resolve(null);
+      const part = bytes.subarray(offset, offset + chunk);
+      offset += chunk;
+      return Promise.resolve(part);
     },
   };
 }

@@ -127,17 +127,32 @@ export interface PanelBuildPrefetchReport {
   ms: number;
 }
 
+/**
+ * A pull-based body, deliberately NOT an `AsyncIterable`.
+ *
+ * Hermes does not define `Symbol.asyncIterator`, so an object literal keyed by
+ * it silently becomes a property named `undefined` and `for await` fails with
+ * "Object is not async iterable" — observed on device, after the desktop tests
+ * passed. `read()` resolving to null at end of stream needs no runtime support
+ * at all.
+ */
+export interface PanelBuildBodyReader {
+  read(): Promise<Uint8Array | null>;
+}
+
 export interface PanelBuildPrefetchDeps {
   store: Pick<MobileAssetStore, "acquire" | "openWrite" | "append" | "commit" | "abort">;
   /** Issue one `gateway.fetch` for a panel-origin path and return its body. */
-  fetchPath(path: string): Promise<{ status: number; body: AsyncIterable<Uint8Array> }>;
+  fetchPath(path: string): Promise<{ status: number; body: PanelBuildBodyReader }>;
   now?: () => number;
 }
 
-async function readAll(body: AsyncIterable<Uint8Array>): Promise<Uint8Array> {
+async function readAll(body: PanelBuildBodyReader): Promise<Uint8Array> {
   const parts: Uint8Array[] = [];
   let total = 0;
-  for await (const part of body) {
+  for (;;) {
+    const part = await body.read();
+    if (part === null) break;
     parts.push(part);
     total += part.byteLength;
   }
@@ -224,7 +239,9 @@ export async function prefetchPanelBuild(
       throw new Error(`Panel build bundle responded ${bundle.status}`);
     }
     const reader = createBlobBundleReader();
-    for await (const chunk of bundle.body) {
+    for (;;) {
+      const chunk = await bundle.body.read();
+      if (chunk === null) break;
       for (const blob of reader.push(chunk)) {
         const claims = pending.get(blob.digest);
         if (!claims) continue;

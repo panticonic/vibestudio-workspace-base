@@ -46,7 +46,10 @@ export { panelAssetCacheKey } from "@vibestudio/shared/panel/assetPathPolicy";
 import type { MobileRpcClient } from "./mobileTransport";
 import { getNativeAppStorage } from "./nativeAppStorage";
 import { createPipeGate, type PipeGate } from "./panelAssetPipeGate";
-import { prefetchPanelBuild } from "./panelBuildPrefetch";
+import {
+  prefetchPanelBuild,
+  type PanelBuildBodyReader,
+} from "./panelBuildPrefetch";
 import { withPanelAssetRetry } from "./panelAssetRetry";
 import {
   MobileAssetStore,
@@ -203,6 +206,14 @@ export async function startPanelAssetFacade(
     // unmanaged (browser:) panel and absent until a build completes.
     if (closing || !/^[0-9a-f]{64}$/u.test(buildKey) || prefetched.has(buildKey)) return;
     prefetched.add(buildKey);
+    // Start and failure both carry the smoke prefix: the device log capture
+    // keeps only lines that have it, so a bare console.warn would make a failed
+    // prefetch indistinguishable from one that was never requested.
+    console.log(
+      `[VibestudioMobileSmoke] phase=workspace-panel-build-prefetch-start ${JSON.stringify({
+        buildKey,
+      })}`
+    );
     const flight = prefetchPanelBuild(buildKey, {
       store,
       // Identity bytes (`gzip: false`): these pass through Hermes, which has no
@@ -223,7 +234,7 @@ export async function startPanelAssetFacade(
             release();
             return { status: result.status, body: EMPTY_BODY };
           }
-          return { status: result.status, body: iterateStream(result.body, release) };
+          return { status: result.status, body: streamReader(result.body, release) };
         } catch (error) {
           release();
           throw error;
@@ -240,9 +251,10 @@ export async function startPanelAssetFacade(
         // released, so each WebView request falls back to its own fetch.
         prefetched.delete(buildKey);
         console.warn(
-          `[panel-facade] build prefetch for ${buildKey} failed: ${
-            error instanceof Error ? error.message : String(error)
-          }`
+          `[VibestudioMobileSmoke] phase=workspace-panel-build-prefetch-failed ${JSON.stringify({
+            buildKey,
+            message: error instanceof Error ? error.message : String(error),
+          })}`
         );
       });
     // Tracked like a served request: `close()` must not tear the store down
@@ -289,35 +301,45 @@ export async function startPanelAssetFacade(
 }
 
 /**
- * Consume a fetched body as an async iterable, releasing the pipe slot exactly
- * once the last chunk is read (or the read fails).
+ * Expose a fetched body as a pull reader, releasing the pipe slot exactly once
+ * the last chunk is read (or a read fails).
  *
  * The slot is held across the BODY, not just the request — the frames that get
  * lost are the response's, so releasing earlier would let the next stream's
  * frames interleave and rebuild the burst the gate exists to prevent.
+ *
+ * A pull reader rather than an async iterable because Hermes does not define
+ * `Symbol.asyncIterator`: an object literal keyed by it becomes a property named
+ * `undefined`, and `for await` fails at runtime with "Object is not async
+ * iterable" — which is exactly what the first device run reported, after this
+ * passed every test on the desktop runtime.
  */
-const EMPTY_BODY: AsyncIterable<Uint8Array> = {
-  // eslint-disable-next-line @typescript-eslint/require-await
-  async *[Symbol.asyncIterator]() {},
-};
+const EMPTY_BODY: PanelBuildBodyReader = { read: () => Promise.resolve(null) };
 
-function iterateStream(
-  body: ReadableStream<Uint8Array>,
-  release: () => void
-): AsyncIterable<Uint8Array> {
+function streamReader(body: ReadableStream<Uint8Array>, release: () => void): PanelBuildBodyReader {
+  const reader = body.getReader();
+  let finished = false;
+  const finish = (): void => {
+    if (finished) return;
+    finished = true;
+    reader.releaseLock();
+    release();
+  };
   return {
-    async *[Symbol.asyncIterator]() {
-      const reader = body.getReader();
+    async read() {
+      if (finished) return null;
       try {
         for (;;) {
           const { done, value } = await reader.read();
           if (done) break;
-          if (value && value.byteLength > 0) yield value;
+          if (value && value.byteLength > 0) return value;
         }
-      } finally {
-        reader.releaseLock();
-        release();
+      } catch (error) {
+        finish();
+        throw error;
       }
+      finish();
+      return null;
     },
   };
 }
