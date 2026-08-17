@@ -315,6 +315,7 @@ await page.getByRole("checkbox").check();
 await page.getByRole("checkbox").uncheck();
 await page.getByRole("checkbox").setChecked(true);
 await page.getByLabel("Country").selectOption("US");
+await page.getByLabel("Country").selectOption({ label: "United States" });
 await page.locator("input").focus();
 await page.locator("input").blur();
 await page.locator(".far-below").scrollIntoViewIfNeeded();

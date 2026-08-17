@@ -98,6 +98,8 @@ await loc.click(); // also: dblclick, hover
 await loc.fill("text"); // also: type, clear, press("Enter")
 await loc.check(); // also: uncheck, setChecked(true)
 await loc.selectOption("value");
+await loc.selectOption({ label: "Visible label" });
+await loc.selectOption({ index: 1 });
 await loc.focus(); // also: blur, scrollIntoViewIfNeeded
 
 await page.keyboard.press("Control+A"); // Ctrl/Cmd aliases are accepted

@@ -97,6 +97,12 @@ type LocatorDescriptor = { steps: LocatorStep[] };
 type ByTextOptions = { exact?: boolean };
 type ByRoleOptions = { name?: TextMatcher; exact?: boolean };
 type ActionOptions = { timeout?: number };
+type SelectOptionMatcher = {
+  value?: string;
+  label?: string;
+  index?: number;
+};
+type SelectOptionInput = string | SelectOptionMatcher;
 type WaitState = "attached" | "detached" | "visible" | "hidden";
 type ClickOptions = ActionOptions & {
   /** Optional semantic postcondition observed after the pointer event is delivered. */
@@ -551,6 +557,17 @@ function nsAccName(el){
   var ti=nsAttr(el,"title"); if(ti) return nsNorm(ti);
   return "";
 }
+function nsLabelText(label){
+  var clone=label.cloneNode(true);
+  var controls=clone.querySelectorAll?clone.querySelectorAll("input,textarea,select,button,meter,output,progress"):[];
+  for(var i=0;i<controls.length;i++) controls[i].remove();
+  return nsText(clone);
+}
+function nsAssociatedLabelMatches(el,q,exact){
+  if(!el.labels) return false;
+  for(var i=0;i<el.labels.length;i++) if(nsValueMatch(nsLabelText(el.labels[i]),q,exact)) return true;
+  return false;
+}
 function nsVisible(el){
   if(!el||!el.getBoundingClientRect) return false;
   var s=getComputedStyle(el); var r=el.getBoundingClientRect();
@@ -563,6 +580,12 @@ function nsEditable(el){
   var tag=el.tagName ? el.tagName.toLowerCase() : "";
   if(tag!=="input" && tag!=="textarea" && tag!=="select") return false;
   return !el.disabled && !el.readOnly;
+}
+function nsSelectOptionMatch(option, matcher, index){
+  if(typeof matcher === "string") return option.value===matcher || option.label===matcher || nsNorm(option.textContent)===matcher;
+  if(matcher.value!==undefined && option.value===matcher.value) return true;
+  if(matcher.label!==undefined && option.label===matcher.label) return true;
+  return matcher.index!==undefined && index===matcher.index;
 }
 function nsStepFind(roots, step){
   var out=[];
@@ -586,6 +609,15 @@ function nsStepFind(roots, step){
     var scope=roots[k]===document?document:roots[k];
     var all=scope.querySelectorAll("*");
     for(var m=0;m<all.length;m++){ if(pred(all[m])) out.push(all[m]); }
+  }
+  if(step.by==="label"){
+    var associated=[]; var fallback=[];
+    for(var li=0;li<out.length;li++){
+      var candidate=out[li];
+      if(nsAssociatedLabelMatches(candidate,step.value,step.exact)) associated.push(candidate);
+      else fallback.push(candidate);
+    }
+    out=associated.concat(fallback);
   }
   var unique=nsDedupe(out);
   return step.by==="text" ? unique.filter(function(e){ return !nsHasTextMatchingDescendant(e,step.value,step.exact); }) : unique;
@@ -708,7 +740,7 @@ async function __nsRun(P){
     }
     case "fill": { var e=await nsWaitForState(d,"visible",t); if(!("value" in e) && !e.isContentEditable) throw new Error("Element is not fillable"); e.focus&&e.focus(); if(e.isContentEditable) e.textContent=a.value; else nsSetNativeProperty(e,"value",a.value); nsDispatchInput(e,a.value); await nsAfterAction(); return true; }
     case "clear": { var e=await nsWaitForState(d,"visible",t); e.focus&&e.focus(); if(e.isContentEditable) e.textContent=""; else nsSetNativeProperty(e,"value",""); nsDispatchInput(e,""); await nsAfterAction(); return true; }
-    case "selectOption": { var e=await nsWaitForState(d,"visible",t); var vals=a.values; var picked=[]; for(var i=0;i<e.options.length;i++){ var o=e.options[i]; var hit=vals.indexOf(o.value)!==-1||vals.indexOf(o.label)!==-1||vals.indexOf(nsNorm(o.textContent))!==-1; o.selected=hit; if(hit) picked.push(o.value); } e.dispatchEvent(new Event("input",{bubbles:true})); e.dispatchEvent(new Event("change",{bubbles:true})); await nsAfterAction(); return picked; }
+    case "selectOption": { var e=await nsWaitForState(d,"visible",t); if(!e.tagName || e.tagName.toLowerCase()!=="select") throw new Error("Element is not a select"); var vals=a.values; var picked=[]; for(var i=0;i<e.options.length;i++){ var o=e.options[i]; var hit=vals.some(function(matcher){ return nsSelectOptionMatch(o,matcher,i); }); o.selected=hit; if(hit) picked.push(o.value); } e.dispatchEvent(new Event("input",{bubbles:true})); e.dispatchEvent(new Event("change",{bubbles:true})); await nsAfterAction(); return picked; }
     case "focus": { var e=await nsWaitForState(d,"visible",t); e.focus&&e.focus(); await nsAfterAction(); return true; }
     case "blur": { var e=await nsWaitForState(d,"attached",t); e.blur&&e.blur(); await nsAfterAction(); return true; }
     case "scrollIntoView": { var e=await nsWaitForState(d,"attached",t); e.scrollIntoView({block:"center",inline:"center"}); await nsAfterAction(); return true; }
@@ -1771,8 +1803,44 @@ class WorkerCdpLocator {
   async setChecked(checked: boolean, opts: ActionOptions = {}): Promise<void> {
     await this.page.setCheckedDescriptor(this.descriptor, checked, opts);
   }
-  async selectOption(value: string | string[], opts: ActionOptions = {}): Promise<string[]> {
+  async selectOption(
+    value: SelectOptionInput | SelectOptionInput[],
+    opts: ActionOptions = {}
+  ): Promise<string[]> {
     const values = Array.isArray(value) ? value : [value];
+    for (const option of values) {
+      if (typeof option === "string") continue;
+      if (!option || typeof option !== "object" || Array.isArray(option)) {
+        throw new TypeError(
+          "selectOption values must be strings or objects with value, label, or index"
+        );
+      }
+      const keys = Object.keys(option);
+      if (keys.length === 0 || keys.some((key) => !["value", "label", "index"].includes(key))) {
+        throw new TypeError(
+          "selectOption option objects may only contain value, label, or index"
+        );
+      }
+      if (
+        option.value === undefined &&
+        option.label === undefined &&
+        option.index === undefined
+      ) {
+        throw new TypeError("selectOption option objects require value, label, or index");
+      }
+      if (option.value !== undefined && typeof option.value !== "string") {
+        throw new TypeError("selectOption option.value must be a string");
+      }
+      if (option.label !== undefined && typeof option.label !== "string") {
+        throw new TypeError("selectOption option.label must be a string");
+      }
+      if (
+        option.index !== undefined &&
+        (!Number.isInteger(option.index) || option.index < 0)
+      ) {
+        throw new TypeError("selectOption option.index must be a non-negative integer");
+      }
+    }
     return (await this.page.runLocatorOp(
       "selectOption",
       this.descriptor,
