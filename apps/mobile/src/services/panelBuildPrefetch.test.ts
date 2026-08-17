@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { encodeBlobRecord } from "@vibestudio/shared/panel/blobBundle";
 import {
   panelBuildResourcePath,
@@ -129,7 +130,17 @@ function createFakeServer(
       const records = indices.map((index) => {
         const artifact = entries[index]!;
         const content = contents[artifact.path]!;
-        return Buffer.from(encodeBlobRecord(digestOf(content), utf8(content)));
+        if (!path.includes("enc=gzip") || content.length < 1024) {
+          return Buffer.from(encodeBlobRecord(digestOf(content), utf8(content)));
+        }
+        const payload = gzipSync(Buffer.from(content, "utf8"));
+        return Buffer.from(
+          encodeBlobRecord(
+            digestOf(content),
+            new Uint8Array(payload),
+            createHash("sha256").update(payload).digest("hex")
+          )
+        );
       });
       return { status: 200, body: bodyOf(new Uint8Array(Buffer.concat(records))) };
     }
@@ -204,7 +215,7 @@ describe("panel build prefetch transfer", () => {
 
     expect(server.paths).toEqual([
       `/__vibestudio/panel-build/${BUILD_KEY}/__manifest.json`,
-      `/__vibestudio/panel-build/${BUILD_KEY}/__bundle?want=0,1`,
+      `/__vibestudio/panel-build/${BUILD_KEY}/__bundle?want=0,1&enc=gzip`,
     ]);
     expect(report).toMatchObject({ candidates: 2, alreadyStored: 0, requested: 2, stored: 2 });
     expect(report.bytes).toBe(contents["bundle.js"].length + contents["bundle.css"].length);
@@ -212,6 +223,45 @@ describe("panel build prefetch transfer", () => {
       `/__vibestudio/panel-build/${BUILD_KEY}/bundle.js`,
       `/__vibestudio/panel-build/${BUILD_KEY}/bundle.css`,
     ]);
+  });
+
+  it("stores a compressed artifact compressed, and says so", async () => {
+    // Hermes never inflates: the store keeps the gzip bytes and the façade turns
+    // the flag into a real Content-Encoding, exactly as the per-asset path does.
+    const compressible = `export const table = ${JSON.stringify("ab".repeat(2048))};`;
+    const store = createFakeStore();
+    const server = createFakeServer([entry("big.js", compressible)], {
+      "big.js": compressible,
+    });
+
+    const report = await prefetchPanelBuild(BUILD_KEY, { store, fetchPath: server.fetchPath });
+
+    expect(server.paths[1]).toContain("enc=gzip");
+    expect(report).toMatchObject({ stored: 1, rejected: 0 });
+    const stored = store.entries.get(`/__vibestudio/panel-build/${BUILD_KEY}/big.js`);
+    expect(stored?.metadata.gzip).toBe(true);
+    // Verified against the digest of what actually arrived, not of the artifact.
+    expect(stored?.digest).not.toBe(digestOf(compressible));
+    expect(report.bytes).toBeLessThan(compressible.length / 4);
+  });
+
+  it("still verifies a compressed record, and repairs one that does not match", async () => {
+    const compressible = `export const table = ${JSON.stringify("cd".repeat(2048))};`;
+    const store = createFakeStore();
+    const server = createFakeServer([entry("big.js", compressible)], { "big.js": compressible }, {
+      bundleFor: () =>
+        new Uint8Array(
+          encodeBlobRecord(digestOf(compressible), utf8("not what was promised"), digestOf("x"))
+        ),
+    });
+
+    const report = await prefetchPanelBuild(BUILD_KEY, { store, fetchPath: server.fetchPath });
+
+    expect(report.rejected).toBe(1);
+    // Repaired by the ordinary per-asset fetch, which serves identity bytes.
+    const stored = store.entries.get(`/__vibestudio/panel-build/${BUILD_KEY}/big.js`);
+    expect(stored?.metadata.gzip).toBe(false);
+    expect(stored?.digest).toBe(digestOf(compressible));
   });
 
   it("stores artifacts the façade can replay verbatim", async () => {

@@ -825,11 +825,6 @@ export function MainScreen() {
       // its attempt count so a persistent failure still backs off.
       panelMaterializationRetryQueue.cancel(entry.panelId, { resetAttempts: false });
       pendingPanelLoads.current.add(entry.panelId);
-      // Fill the asset store for this build while the lease and panel-init round
-      // trips are still in flight. Materialization does not wait on it: the
-      // store's single-flight makes any WebView request that arrives first wait
-      // on the same transfer rather than race it.
-      shellClient.prefetchPanelBuild(panel.buildKey);
       void withTimeout(
         materializeLatestMobilePanel({
           panelId: entry.panelId,
@@ -866,6 +861,15 @@ export function MainScreen() {
             panelId: entry.panelId,
             managed: materialized.managed,
           });
+          // Fill the asset store only once materialization's own round trips are
+          // done, and at the same moment the WebView is given its URL.
+          //
+          // Starting it any earlier measured badly on device: a multi-megabyte
+          // bulk transfer ahead of the lease and panel-init calls put those
+          // round trips behind it on the same pipe, and activate-to-ready went
+          // from 1.9 s to 8.4 s. The prefetch is not on anyone's critical path;
+          // the calls it was overtaking are.
+          shellClient.prefetchPanelBuild(currentPanel.buildKey);
           updateWebViewStack((current) =>
             current.map((currentEntry) =>
               currentEntry.panelId === entry.panelId

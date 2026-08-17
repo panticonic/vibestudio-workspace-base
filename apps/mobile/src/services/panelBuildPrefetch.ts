@@ -22,12 +22,14 @@
  *    absent would move 25× more bytes than the trips it saved were worth. Lazy
  *    chunks keep taking the ordinary per-request path; they are rare and often
  *    never requested at all.
- *  - **Identity bytes, not gzip.** The façade's per-asset path asks the gateway
- *    for gzip and hands the compressed body straight to the WebView, which
- *    inflates it natively. Here the bytes pass THROUGH Hermes, which has no
- *    cheap inflate — and a gzipped body would also hash to something other than
- *    the manifest's `integrity`, discarding the verification below. Raw bytes
- *    cost more pipe, but the pipe is not the bottleneck the measurement found.
+ *  - **Compressed bytes, never inflated here.** Identity bytes were tried first
+ *    and measured as a LOSS on a low-latency link — 4.2 s to first paint against
+ *    1.9 s — because saving ninety round trips does not pay for four times the
+ *    payload when a round trip costs 40 ms. The bundle now carries each
+ *    artifact's gzip derivative, the store keeps it compressed, and the WebView
+ *    inflates it natively, exactly as on the per-asset path. Hermes never
+ *    touches an inflate. The record's second digest is what makes this possible
+ *    without giving up the integrity check.
  *  - **The store's single-flight IS the handoff.** Each candidate key is claimed
  *    via `store.acquire` BEFORE the transfer starts, so a WebView request for
  *    the same asset waits on this one transfer rather than racing it with a
@@ -124,8 +126,23 @@ export interface PanelBuildPrefetchReport {
   bytes: number;
   /** Records whose bytes hashed to something other than their claimed digest. */
   rejected: number;
+  /** Time spent waiting on the pipe — the part a faster link would shorten. */
+  transferMs: number;
+  /** Time after the last byte arrived, still finishing writes. */
+  storeDrainMs: number;
   ms: number;
 }
+
+/**
+ * Blob writes allowed to be outstanding while the transfer continues.
+ *
+ * Small on purpose: each one holds its blob's bytes in Hermes until native has
+ * them, so this is the buffer's ceiling, not a throughput dial.
+ */
+const MAX_INFLIGHT_WRITES = 3;
+
+/** Bytes handed to one `append` call. See the call site for why it is sliced. */
+const APPEND_SLICE_BYTES = 128 * 1024;
 
 /**
  * A pull-based body, deliberately NOT an `AsyncIterable`.
@@ -196,6 +213,8 @@ export async function prefetchPanelBuild(
     stored: 0,
     bytes: 0,
     rejected: 0,
+    transferMs: 0,
+    storeDrainMs: 0,
     ms: 0,
   };
 
@@ -214,6 +233,10 @@ export async function prefetchPanelBuild(
   // list — one blob may satisfy several claims.
   const pending = new Map<string, (PanelBuildPrefetchCandidate & { release: Release })[]>();
   const wanted: number[] = [];
+  // Declared out here so the sweep below can wait for writes that were still in
+  // flight when the transfer threw. Abandoning them would let a store write race
+  // the facade close that follows a failed prefetch.
+  const writes: Promise<void>[] = [];
   try {
     for (const candidate of candidates) {
       const acquisition = await deps.store.acquire(candidate.cacheKey);
@@ -232,15 +255,60 @@ export async function prefetchPanelBuild(
       return report;
     }
 
+    // `enc=gzip` asks the server to frame each artifact's gzip derivative — the
+    // same bytes its per-asset route already serves, so it costs no new
+    // compression there and no inflate here: the store keeps them compressed and
+    // the WebView inflates natively, exactly as on the per-asset path. Without
+    // it a build moves roughly four times the bytes, which measured as a LOSS on
+    // a low-latency link (4.2 s to first paint against 1.9 s) even while saving
+    // ninety round trips.
     const bundle = await deps.fetchPath(
-      `${panelBuildResourcePath(buildKey, "__bundle")}?want=${wanted.join(",")}`
+      `${panelBuildResourcePath(buildKey, "__bundle")}?want=${wanted.join(",")}&enc=gzip`
     );
     if (bundle.status !== 200) {
       throw new Error(`Panel build bundle responded ${bundle.status}`);
     }
+    // Writing a blob must not stop reading the next one.
+    //
+    // Committing inline measured badly: a single ~1 MB artifact's base64 hop and
+    // native write held the read loop, so the pipe idled and the shell build
+    // moved at 157 KB/s where a build of 22 smaller artifacts over the same link
+    // in the same run managed 950 KB/s. Storage runs alongside the transfer
+    // instead, bounded so a slow disk cannot make this buffer the whole build.
+    const storeBlob = async (
+      claim: PanelBuildPrefetchCandidate & { release: Release },
+      payloadDigest: string,
+      bytes: Uint8Array,
+      gzip: boolean
+    ): Promise<void> => {
+      let stored: MobileStoredAsset | null = null;
+      try {
+        stored = await commitBlob(deps.store, claim, payloadDigest, bytes, gzip);
+        if (!stored) {
+          report.rejected += 1;
+          stored = await refetchArtifact(deps, claim);
+        }
+      } catch (error) {
+        // One artifact failing to reach the store is not a reason to strand the
+        // rest. Release this claim and let the WebView fetch it.
+        console.warn(
+          `[panel-prefetch] could not store ${claim.path}: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      }
+      claim.release.complete(stored);
+      if (stored) {
+        report.stored += 1;
+        report.bytes += stored.size;
+      }
+    };
+
     const reader = createBlobBundleReader();
     for (;;) {
+      const readAt = now();
       const chunk = await bundle.body.read();
+      report.transferMs += now() - readAt;
       if (chunk === null) break;
       for (const blob of reader.push(chunk)) {
         const claims = pending.get(blob.digest);
@@ -250,35 +318,26 @@ export async function prefetchPanelBuild(
         // finally-block sweep.
         pending.delete(blob.digest);
         for (const claim of claims) {
-          // One artifact failing to reach the store is not a reason to strand
-          // the rest. Release this claim and let the WebView fetch it.
-          let stored: MobileStoredAsset | null = null;
-          try {
-            stored = await commitBlob(deps.store, claim, blob.digest, blob.bytes);
-            if (!stored) {
-              report.rejected += 1;
-              stored = await refetchArtifact(deps, claim);
-            }
-          } catch (error) {
-            console.warn(
-              `[panel-prefetch] could not store ${claim.path}: ${
-                error instanceof Error ? error.message : String(error)
-              }`
-            );
-          }
-          claim.release.complete(stored);
-          if (stored) {
-            report.stored += 1;
-            report.bytes += stored.size;
-          }
+          // An identity record's two digests are equal by construction; a gzip
+          // payload cannot hash to the digest of what it encodes. That is how a
+          // record says which it is, and why the response needs no per-artifact
+          // encoding field.
+          writes.push(
+            storeBlob(claim, blob.payloadDigest, blob.bytes, blob.payloadDigest !== blob.digest)
+          );
         }
+        while (writes.length >= MAX_INFLIGHT_WRITES) await writes.shift();
       }
     }
     // A short stream means the answer was incomplete, not that the missing
     // artifacts do not exist; the claims released below send those to the
     // ordinary path.
     reader.end();
+    const drainAt = now();
+    await Promise.all(writes);
+    report.storeDrainMs = now() - drainAt;
   } finally {
+    await Promise.allSettled(writes);
     for (const claims of pending.values()) {
       for (const claim of claims) claim.release.complete(null);
     }
@@ -297,12 +356,13 @@ export async function prefetchPanelBuild(
  */
 type Release = { complete(asset: MobileStoredAsset | null): void };
 
-function artifactMetadata(contentType: string): MobileStoredAssetMetadata {
+function artifactMetadata(contentType: string, gzip: boolean): MobileStoredAssetMetadata {
   return {
     status: 200,
     statusText: "OK",
-    // Identity bytes: the façade must not tell the WebView otherwise.
-    gzip: false,
+    // The façade turns this into a real Content-Encoding, so it must describe
+    // the bytes actually stored.
+    gzip,
     contentType,
     // A build artifact is immutable and content-addressed by its path. The
     // per-asset path stores exactly this, so a prefetched entry and a fetched
@@ -328,16 +388,23 @@ function artifactMetadata(contentType: string): MobileStoredAssetMetadata {
 async function commitBlob(
   store: PanelBuildPrefetchDeps["store"],
   claim: PanelBuildPrefetchCandidate & { release: Release },
-  digest: string,
-  bytes: Uint8Array
+  payloadDigest: string,
+  bytes: Uint8Array,
+  gzip: boolean
 ): Promise<MobileStoredAsset | null> {
   const writeId = await store.openWrite(claim.cacheKey);
   let committed = false;
   try {
-    await store.append(writeId, bytes);
-    const stored = await store.commit(writeId, artifactMetadata(claim.contentType));
+    // Appended in slices: `append` base64-encodes on the JS thread and crosses
+    // the bridge as one string, so a whole ~1 MB artifact in one call is a
+    // single ~1.4 MB allocation that blocks everything else on that thread —
+    // including the pipe's own reads and keepalives.
+    for (let offset = 0; offset < bytes.byteLength; offset += APPEND_SLICE_BYTES) {
+      await store.append(writeId, bytes.subarray(offset, offset + APPEND_SLICE_BYTES));
+    }
+    const stored = await store.commit(writeId, artifactMetadata(claim.contentType, gzip));
     committed = true;
-    return stored.handle.endsWith(`:${digest}`) ? stored : null;
+    return stored.handle.endsWith(`:${payloadDigest}`) ? stored : null;
   } finally {
     if (!committed) await store.abort(writeId).catch(() => undefined);
   }
@@ -363,7 +430,7 @@ async function refetchArtifact(
     const writeId = await deps.store.openWrite(claim.cacheKey);
     try {
       await deps.store.append(writeId, bytes);
-      return await deps.store.commit(writeId, artifactMetadata(claim.contentType));
+      return await deps.store.commit(writeId, artifactMetadata(claim.contentType, false));
     } catch (error) {
       await deps.store.abort(writeId).catch(() => undefined);
       throw error;
