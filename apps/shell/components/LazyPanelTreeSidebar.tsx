@@ -733,34 +733,39 @@ function SidebarFooter({ activeWorkspaceName, onSwitchWorkspace, onNewPanel }: S
 
   return (
     <Box px="1" py="1">
-      {/* Keep the two primary actions compact and side by side at every sidebar
-          width. Their full names remain available through the tooltip and
-          accessible name. */}
-      <Flex gap="1">
-        <Tooltip content="Command (⌘/Ctrl+K)">
-          <IconButton
-            variant="soft"
-            color="gray"
-            size="2"
-            className="app-touch-target"
-            onClick={() => openCommandAgent()}
-            aria-label="Command"
-          >
-            <span aria-hidden="true">✦</span>
-          </IconButton>
-        </Tooltip>
-        <Tooltip content="New panel">
-          <IconButton
-            variant="soft"
-            color="gray"
-            size="2"
-            className="app-touch-target"
-            onClick={onNewPanel}
-            aria-label="New panel"
-          >
-            <PlusIcon />
-          </IconButton>
-        </Tooltip>
+      {/* The icon-only primary actions fill the footer evenly. The explicit flex
+          items keep them full-width even though each has a tooltip trigger. */}
+      <Flex gap="1" style={{ width: "100%" }}>
+        <Box style={{ flex: "1 1 0", minWidth: 0 }}>
+          <Tooltip content="Command (⌘/Ctrl+K)">
+            <IconButton
+              variant="soft"
+              color="violet"
+              size="2"
+              className="app-touch-target app-panel-tree-command"
+              onClick={() => openCommandAgent()}
+              aria-label="Command"
+              style={{ width: "100%" }}
+            >
+              <span aria-hidden="true">✦</span>
+            </IconButton>
+          </Tooltip>
+        </Box>
+        <Box style={{ flex: "1 1 0", minWidth: 0 }}>
+          <Tooltip content="New panel">
+            <IconButton
+              variant="soft"
+              color="cyan"
+              size="2"
+              className="app-touch-target app-panel-tree-new"
+              onClick={onNewPanel}
+              aria-label="New panel"
+              style={{ width: "100%" }}
+            >
+              <PlusIcon />
+            </IconButton>
+          </Tooltip>
+        </Box>
       </Flex>
 
       {/* One session row: which workspace you're in, plus the two controls that

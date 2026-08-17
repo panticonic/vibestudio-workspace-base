@@ -94,6 +94,12 @@ export type QuickfireIntent =
    * user was not in the overlay, so there is no scope to step back through.
    */
   | { type: "host-escape" }
+  /**
+   * Pointer press outside the overlay document — synthesized by the host
+   * because the quickfire surface is a sibling native view and cannot receive
+   * DOM bubbling from the panel/chrome view underneath it.
+   */
+  | { type: "host-pointer-down" }
   | { type: "dismiss" }
   | { type: "send"; text: string };
 

@@ -935,6 +935,12 @@ export function QuickfireOwner() {
           // receives the same forwarded intent and ignores it.
           if (state.open) close();
           return;
+        case "host-pointer-down":
+          // The quickfire surface is a sibling native view, so clicks outside
+          // it are synthesized by the host rather than bubbling through a DOM
+          // backdrop. The clicked view keeps the original event and its action.
+          if (state.open) close();
+          return;
         case "send":
           setClearArmed(false);
           void quickfireSession.send(intent.text);

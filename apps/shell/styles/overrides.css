@@ -210,6 +210,48 @@ body,
   outline-offset: -1px;
 }
 
+/* Panel tree footer actions: distinct semantic accents keep the two entry
+   points easy to scan without hard-coding a light/dark palette. */
+.app-panel-tree-command,
+.app-panel-tree-new {
+  border: 1px solid transparent;
+  transition:
+    background-color var(--motion-fast) var(--ease-standard),
+    border-color var(--motion-fast) var(--ease-standard),
+    box-shadow var(--motion-fast) var(--ease-standard),
+    transform var(--motion-fast) var(--ease-standard);
+}
+
+.app-panel-tree-command {
+  box-shadow: inset 0 0 0 1px var(--violet-a5);
+}
+
+.app-panel-tree-new {
+  box-shadow: inset 0 0 0 1px var(--cyan-a5);
+}
+
+.app-panel-tree-command:hover {
+  border-color: var(--violet-a6);
+  box-shadow: 0 3px 10px var(--violet-a3), inset 0 0 0 1px var(--violet-a6);
+  transform: translateY(-1px);
+}
+
+.app-panel-tree-new:hover {
+  border-color: var(--cyan-a6);
+  box-shadow: 0 3px 10px var(--cyan-a3), inset 0 0 0 1px var(--cyan-a6);
+  transform: translateY(-1px);
+}
+
+.app-panel-tree-command:focus-visible {
+  outline: 2px solid var(--violet-8);
+  outline-offset: 1px;
+}
+
+.app-panel-tree-new:focus-visible {
+  outline: 2px solid var(--cyan-8);
+  outline-offset: 1px;
+}
+
 /* (Reduced-motion handling is centralized in foundation.css — one global block
    collapses all animation/transition to instant; no per-rule overrides here.) */
 
