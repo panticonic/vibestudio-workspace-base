@@ -27,6 +27,11 @@ const PUBLIC_METADATA_KEYS = [
   "status",
   "color",
   "avatar",
+  // Discovery (messaging plan §4.4): an agent's one-line self-description and,
+  // for a subagent, the run it belongs to. Bounded strings, public by design —
+  // they are what `discover_agents` searches and what lineage joins on.
+  "description",
+  "subagentRunId",
 ] as const;
 
 export interface PublicMethodSummary {

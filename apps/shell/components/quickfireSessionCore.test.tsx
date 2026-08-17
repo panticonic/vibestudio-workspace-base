@@ -81,6 +81,7 @@ function fakeChannelClient(events: unknown[] = []) {
     ready: () => Promise.resolve(),
     close: vi.fn(() => Promise.resolve()),
     send: vi.fn(() => Promise.resolve()),
+    recordReadReceipt: vi.fn(() => Promise.resolve()),
     callMethod: vi.fn(() => ({ result: Promise.resolve() })),
   };
 }
@@ -201,6 +202,75 @@ describe("useQuickfireSessionCore", () => {
     const { result } = renderHook(() => useQuickfireSessionCore("slot", transport));
     await waitFor(() => expect(result.current.view.error).toBe("workspace is offline"));
     expect(result.current.view.connecting).toBe(false);
+  });
+});
+
+describe("useQuickfireSessionCore conversation source (messaging plan §4.8)", () => {
+  const conversation = {
+    kind: "conversation" as const,
+    channelId: "channel-notify",
+    contextId: "ctx-notify",
+    clientId: "conversation:channel-notify",
+    focusMessageId: "say:call-1",
+    replyTo: { participantId: "do:news-agent" },
+  };
+
+  it("joins an existing channel without minting a session", async () => {
+    const { transport, connectToChannel, client } = transportFor(fresh);
+    const { result } = renderHook(() => useQuickfireSessionCore(conversation, transport));
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+    expect(transport.sessionFor).not.toHaveBeenCalled();
+    expect(connectToChannel).toHaveBeenCalledWith("channel-notify", "ctx-notify", {
+      clientId: "conversation:channel-notify",
+      replayMessageLimit: TRANSCRIPT_LIMIT,
+    });
+    expect(result.current.mode).toBe("conversation");
+    expect(result.current.view.hasConversation).toBe(true);
+    // Opening on the escalated envelope is reading it (D16).
+    expect(client.recordReadReceipt).toHaveBeenCalledWith("say:call-1");
+    // No resume chip: this is not "your earlier quickfire session", it is a conversation.
+    expect(result.current.view.resume).toBeNull();
+  });
+
+  it("replies threaded under the opened envelope, addressed to the notifier", async () => {
+    const { transport, client } = transportFor(fresh);
+    const { result } = renderHook(() => useQuickfireSessionCore(conversation, transport));
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+    await act(async () => {
+      await result.current.send("on it");
+    });
+    expect(client.send).toHaveBeenCalledWith("on it", {
+      replyTo: "say:call-1",
+      mentions: ["do:news-agent"],
+      to: [{ kind: "participant", participantId: "do:news-agent" }],
+    });
+  });
+
+  it("has no clear or fresh, and promotes to its own facts", async () => {
+    const { transport } = transportFor(fresh);
+    const { result } = renderHook(() => useQuickfireSessionCore(conversation, transport));
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+    await expect(result.current.clear()).rejects.toThrow(/cannot be cleared/u);
+    await expect(result.current.startFresh()).rejects.toThrow(/cannot be restarted/u);
+    expect(transport.clear).not.toHaveBeenCalled();
+    const promoted = await result.current.promote();
+    expect(transport.promote).not.toHaveBeenCalled();
+    expect(promoted).toMatchObject({ channelId: "channel-notify", contextId: "ctx-notify" });
+  });
+});
+
+describe("useQuickfireSessionCore startFresh", () => {
+  it("rebinds through the same path, so the fresh session streams events", async () => {
+    const { transport, connectToChannel } = transportFor(fresh, {}, [wireMessageEvent("hello")]);
+    const { result } = renderHook(() => useQuickfireSessionCore("slot", transport));
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+    await act(async () => {
+      await result.current.startFresh();
+    });
+    expect(transport.sessionFor).toHaveBeenLastCalledWith("slot", { fresh: true });
+    expect(connectToChannel).toHaveBeenCalledTimes(2);
+    // The event loop is attached on the rebind too: the transcript renders.
+    await waitFor(() => expect(result.current.view.transcript.length).toBeGreaterThan(0));
   });
 });
 

@@ -2156,6 +2156,16 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
     return callChannel("getChannelPresence");
   }
 
+  /**
+   * Record that this participant has read a message. Human surfaces emit it for
+   * messages that were escalated to them (messaging plan §4.5.4/§4.10.6): the
+   * receipt is what tells the sender "seen" and what retires the inbox entry —
+   * one fact, one event.
+   */
+  async function recordReadReceipt(messageId: string): Promise<void> {
+    await callChannel("recordReceipt", pid, messageId, "read", {});
+  }
+
   async function sendMessage(
     content: string,
     sendOptions?: {
@@ -2756,6 +2766,7 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
     listInvitesForMe,
     acknowledgeInvite,
     getChannelPresence,
+    recordReadReceipt,
     onConfigChange: (handler: (config: ChannelConfig) => void) => {
       configChangeHandlers.add(handler);
       if (serverChannelConfig) handler(serverChannelConfig);

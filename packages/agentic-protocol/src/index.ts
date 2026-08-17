@@ -258,6 +258,7 @@ export type {
   ProjectedApproval,
   ProjectedInvocation,
   ProjectedMessage,
+  MessageNotifyIntent,
   ProjectedTask,
   TaskMap,
   TaskStatus,
@@ -270,6 +271,7 @@ export {
   applyMessageEvent,
   applyTaskEvent,
   participantKey,
+  readMessageNotifyIntent,
 } from "./handlers.js";
 
 export type { BranchProjection, TrajectoryState } from "./reducer-trajectory.js";

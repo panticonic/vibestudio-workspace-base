@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSetAtom } from "jotai";
 import { Badge, Button, Flex, IconButton, Spinner, Text } from "@radix-ui/themes";
 import { ChatBubbleIcon, Cross2Icon, InfoCircledIcon, ReloadIcon } from "@radix-ui/react-icons";
 import {
@@ -8,7 +9,8 @@ import {
 } from "../shell/client";
 import type { AgentMessageNotificationData } from "@vibestudio/shared/userNotifications";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
-import { events } from "../shell/client";
+import { events, notification as shellToast } from "../shell/client";
+import { openConversationSurfaceAtom } from "../state/commandAgentAtoms";
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
 import { useShellEvent } from "../shell/useShellEvent";
 import {
@@ -18,6 +20,34 @@ import {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function firstLine(text: string | undefined): string {
+  const line = (text ?? "").trim().split("\n")[0] ?? "";
+  return line.length > 140 ? `${line.slice(0, 137)}…` : line;
+}
+
+/**
+ * Entries grouped by sending agent instance, newest first (messaging plan
+ * §4.10.8): a background agent that reports twice before the person looks must
+ * not read as two unrelated interruptions. Non-agent entries group by kind.
+ */
+export function groupNotifications(
+  notifications: readonly ShellUserNotification[]
+): Array<{ key: string; entries: ShellUserNotification[] }> {
+  const groups = new Map<string, ShellUserNotification[]>();
+  for (const entry of notifications) {
+    const key = entry.agentMessage
+      ? `agent:${entry.agentMessage.senderParticipantId}@${entry.agentMessage.channelId}`
+      : `kind:${entry.kind}:${entry.id}`;
+    const list = groups.get(key);
+    if (list) list.push(entry);
+    else groups.set(key, [entry]);
+  }
+  return [...groups].map(([key, entries]) => ({
+    key,
+    entries: [...entries].sort((a, b) => b.createdAt - a.createdAt),
+  }));
 }
 
 /**
@@ -37,13 +67,43 @@ export function UserNotificationBar() {
    * that had not happened and an action that could not work.
    */
   const [awaitingReview, setAwaitingReview] = useState<PendingReviewNotice | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  /** History (acknowledged entries), loaded only when the person asks (§4.10.8). */
+  const [history, setHistory] = useState<ShellUserNotification[] | null>(null);
+  const [historyBusy, setHistoryBusy] = useState(false);
   const requestVersion = useRef(0);
+  const openConversationSurface = useSetAtom(openConversationSurfaceAtom);
+  /**
+   * `interrupt` mirrors (plan §4.10.9): a transient toast is issued by this
+   * surface for entries that ARRIVE while it is mounted at that rung — never
+   * for what was already there on load, and never as the record. The toast's
+   * "Reply" action routes back through `toastTargets`.
+   */
+  const seenIds = useRef<Set<string> | null>(null);
+  const toastTargets = useRef(new Map<string, ShellUserNotification>());
 
   const refresh = useCallback(async () => {
     const version = ++requestVersion.current;
     try {
       const next = await userNotifications.list();
       if (requestVersion.current !== version) return;
+      const previouslySeen = seenIds.current;
+      seenIds.current = new Set(next.map((entry) => entry.id));
+      if (previouslySeen) {
+        for (const entry of next) {
+          if (previouslySeen.has(entry.id) || entry.agentMessage?.rung !== "interrupt") continue;
+          void shellToast
+            .show({
+              type: "info",
+              title: entry.title,
+              message: firstLine(entry.message),
+              ttl: 15_000,
+              actions: [{ id: "reply", label: "Reply", variant: "solid" }],
+            })
+            .then((toastId) => toastTargets.current.set(toastId, entry))
+            .catch(() => undefined);
+        }
+      }
       setNotifications(next);
       setError(null);
       setAwaitingReview(null);
@@ -90,6 +150,22 @@ export function UserNotificationBar() {
     )
   );
 
+  const toggleHistory = useCallback(async () => {
+    if (history) {
+      setHistory(null);
+      return;
+    }
+    setHistoryBusy(true);
+    try {
+      const all = await userNotifications.list({ includeAcknowledged: true, limit: 50 });
+      setHistory(all.filter((entry) => entry.acknowledgedAt !== undefined));
+    } catch (cause) {
+      setError(errorMessage(cause));
+    } finally {
+      setHistoryBusy(false);
+    }
+  }, [history]);
+
   const removeLocal = useCallback((id: string) => {
     requestVersion.current += 1;
     setNotifications((current) => current.filter((notification) => notification.id !== id));
@@ -121,6 +197,24 @@ export function UserNotificationBar() {
    * already looking. Acknowledgement stays second so a failed panel open cannot
    * consume the entry.
    */
+  /**
+   * An invite to the same channel is redundant once the person opens a message
+   * from it (plan §4.6: the escalated entry doubles as the invite affordance),
+   * so it is retired alongside — silently; it never surfaces as a second row.
+   */
+  const acknowledgeInvitesFor = useCallback(
+    async (channelId: string) => {
+      const invites = notifications.filter(
+        (entry) => entry.channelInvite?.channelId === channelId
+      );
+      for (const invite of invites) {
+        await userNotifications.acknowledge(invite.id).catch(() => undefined);
+        removeLocal(invite.id);
+      }
+    },
+    [notifications, removeLocal]
+  );
+
   const openAgentMessage = useCallback(
     async (notification: ShellUserNotification, message: AgentMessageNotificationData) => {
       setBusyNotificationId(notification.id);
@@ -134,6 +228,7 @@ export function UserNotificationBar() {
         setOpenedNotificationId(notification.id);
         await userNotifications.acknowledge(notification.id);
         removeLocal(notification.id);
+        await acknowledgeInvitesFor(message.channelId);
       } catch (cause) {
         const detail = errorMessage(cause);
         setError(
@@ -145,8 +240,63 @@ export function UserNotificationBar() {
         setBusyNotificationId(null);
       }
     },
-    [removeLocal]
+    [acknowledgeInvitesFor, removeLocal]
   );
+
+  /**
+   * Reply in place (plan §4.8): the quickfire surface bound to the notifying
+   * agent's channel, landing on the escalated envelope. Opening it is reading
+   * it, so the entry is acknowledged once the surface is requested.
+   */
+  const replyToAgentMessage = useCallback(
+    async (notification: ShellUserNotification, message: AgentMessageNotificationData) => {
+      setBusyNotificationId(notification.id);
+      setError(null);
+      let opened = false;
+      try {
+        const conversation = await userNotifications.describeConversation(message.channelId);
+        openConversationSurface({
+          channelId: message.channelId,
+          contextId: conversation.contextId,
+          focusMessageId: message.messageId,
+          replyTo: {
+            participantId: message.senderParticipantId,
+            ...(message.senderHandle ? { handle: message.senderHandle } : {}),
+          },
+          ...(conversation.title ? { title: conversation.title } : {}),
+        });
+        opened = true;
+        setOpenedNotificationId(notification.id);
+        await userNotifications.acknowledge(notification.id);
+        removeLocal(notification.id);
+        await acknowledgeInvitesFor(message.channelId);
+      } catch (cause) {
+        const detail = errorMessage(cause);
+        setError(
+          opened
+            ? `Conversation opened, but the notification could not be cleared: ${detail}`
+            : detail
+        );
+      } finally {
+        setBusyNotificationId(null);
+      }
+    },
+    [acknowledgeInvitesFor, openConversationSurface, removeLocal]
+  );
+
+  // The interrupt toast's "Reply" action (plan §4.10.9) lands here.
+  const handleToastAction = useCallback(
+    (payload: { id: string; actionId: string }) => {
+      const target = toastTargets.current.get(payload.id);
+      if (!target) return;
+      toastTargets.current.delete(payload.id);
+      if (payload.actionId !== "reply" || !target.agentMessage) return;
+      void replyToAgentMessage(target, target.agentMessage);
+    },
+    [replyToAgentMessage]
+  );
+  useShellEvent("notification:action", handleToastAction);
+  useDirectShellEvent("notification:action", handleToastAction);
 
   const joinChannel = useCallback(
     async (notification: ShellUserNotification, invite: ShellChannelInvite) => {
@@ -215,7 +365,9 @@ export function UserNotificationBar() {
     );
   }
 
-  const notification = notifications[0]!;
+  const groups = groupNotifications(notifications);
+  const notification = groups[0]!.entries[0]!;
+  const groupSize = groups[0]!.entries.length;
   const invite = notification.channelInvite;
   const agentMessage = notification.agentMessage;
   const busy = busyNotificationId === notification.id;
@@ -227,80 +379,237 @@ export function UserNotificationBar() {
         ? "a workspace member"
         : invite.addedBy
     : null;
+  const others = notifications.length - 1;
+
+  const renderRow = (entry: ShellUserNotification, options: { count?: number }) => {
+    const rowInvite = entry.channelInvite;
+    const rowMessage = entry.agentMessage;
+    const rowBusy = busyNotificationId === entry.id;
+    const rowOpened = openedNotificationId === entry.id;
+    return (
+      <Flex key={entry.id} align="center" gap="2" wrap="wrap" style={{ minHeight: 30 }}>
+        {rowInvite || rowMessage ? <ChatBubbleIcon aria-hidden /> : <InfoCircledIcon aria-hidden />}
+        <Text size="2" style={{ flex: "1 1 220px", minWidth: 0 }} truncate>
+          <Text weight="medium">{rowInvite?.channelTitle ?? entry.title}</Text>
+          {rowInvite ? (
+            <Text color="gray">
+              {" "}
+              · invited by{" "}
+              {rowInvite.inviter
+                ? rowInvite.inviter.displayName || `@${rowInvite.inviter.handle}`
+                : "a workspace member"}
+            </Text>
+          ) : null}
+          {rowMessage?.senderHandle ? <Text color="gray"> · from @{rowMessage.senderHandle}</Text> : null}
+          {!rowInvite && entry.message ? <Text color="gray"> · {firstLine(entry.message)}</Text> : null}
+        </Text>
+        {options.count && options.count > 1 ? (
+          <Badge color="gray" variant="soft" title={`${options.count} messages from this agent`}>
+            ×{options.count}
+          </Badge>
+        ) : null}
+        {rowInvite ? (
+          <Button
+            size="1"
+            disabled={rowBusy || rowOpened}
+            onClick={() => void joinChannel(entry, rowInvite)}
+          >
+            {rowBusy ? <Spinner size="1" /> : null}
+            {rowOpened ? "Opened" : "Join"}
+          </Button>
+        ) : null}
+        {rowMessage ? (
+          <>
+            <Button
+              size="1"
+              disabled={rowBusy || rowOpened}
+              onClick={() => void replyToAgentMessage(entry, rowMessage)}
+              title="Reply to this agent right here"
+            >
+              {rowBusy ? <Spinner size="1" /> : null}
+              Reply
+            </Button>
+            <Button
+              size="1"
+              variant="soft"
+              disabled={rowBusy || rowOpened}
+              onClick={() => void openAgentMessage(entry, rowMessage)}
+              title="Open the conversation in a chat panel"
+            >
+              {rowOpened ? "Opened" : "Open"}
+            </Button>
+          </>
+        ) : null}
+        <IconButton
+          size="1"
+          variant="ghost"
+          color="gray"
+          disabled={rowBusy}
+          onClick={() => void dismiss(entry)}
+          aria-label={
+            rowInvite ? `Dismiss invitation to ${rowInvite.channelTitle}` : `Dismiss ${entry.title}`
+          }
+          title="Dismiss without opening"
+        >
+          <Cross2Icon />
+        </IconButton>
+      </Flex>
+    );
+  };
 
   return (
     <Flex
       role="region"
       aria-label="User notifications"
       aria-live="polite"
-      align="center"
-      gap="2"
+      direction="column"
       px="3"
       py="1"
-      wrap="wrap"
       style={{
         minHeight: 34,
         background: "var(--accent-a3)",
         borderBottom: "1px solid var(--accent-a6)",
       }}
     >
-      {invite || agentMessage ? <ChatBubbleIcon aria-hidden /> : <InfoCircledIcon aria-hidden />}
-      <Badge color="blue" variant="soft" radius="full">
-        {invite ? "Invitation" : agentMessage ? "Message" : "Notification"}
-      </Badge>
-      <Text size="2" style={{ flex: "1 1 220px", minWidth: 0 }} truncate>
-        <Text weight="medium">{invite?.channelTitle ?? notification.title}</Text>
-        {invite ? <Text color="gray"> · invited by {inviter}</Text> : null}
-        {agentMessage?.senderHandle ? (
-          <Text color="gray"> · from @{agentMessage.senderHandle}</Text>
-        ) : null}
-        {!invite && notification.message ? (
-          <Text color="gray"> · {notification.message}</Text>
-        ) : null}
-      </Text>
-      {notifications.length > 1 ? (
-        <Badge color="gray" variant="soft" title={`${notifications.length} pending notifications`}>
-          +{notifications.length - 1}
+      <Flex align="center" gap="2" wrap="wrap">
+        {invite || agentMessage ? <ChatBubbleIcon aria-hidden /> : <InfoCircledIcon aria-hidden />}
+        <Badge color="blue" variant="soft" radius="full">
+          {invite ? "Invitation" : agentMessage ? "Message" : "Notification"}
         </Badge>
-      ) : null}
-      {error ? (
-        <Text size="1" color="red" title={error}>
-          {error}
+        <Text size="2" style={{ flex: "1 1 220px", minWidth: 0 }} truncate>
+          <Text weight="medium">{invite?.channelTitle ?? notification.title}</Text>
+          {invite ? <Text color="gray"> · invited by {inviter}</Text> : null}
+          {agentMessage?.senderHandle ? (
+            <Text color="gray"> · from @{agentMessage.senderHandle}</Text>
+          ) : null}
+          {!invite && notification.message ? (
+            <Text color="gray"> · {firstLine(notification.message)}</Text>
+          ) : null}
         </Text>
-      ) : null}
-      {invite ? (
+        {groupSize > 1 ? (
+          <Badge color="gray" variant="soft" title={`${groupSize} messages from this agent`}>
+            ×{groupSize}
+          </Badge>
+        ) : null}
         <Button
           size="1"
-          disabled={busy || opened}
-          onClick={() => void joinChannel(notification, invite)}
+          variant="ghost"
+          color="gray"
+          title={
+            others > 0
+              ? `${notifications.length} pending notifications`
+              : "All notifications and history"
+          }
+          aria-label={others > 0 ? `${notifications.length} pending notifications` : "Notification history"}
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
         >
-          {busy ? <Spinner size="1" /> : null}
-          {opened ? "Opened" : "Join"}
+          {others > 0 ? `+${others}` : "…"}
         </Button>
-      ) : null}
-      {agentMessage ? (
-        <Button
+        {error ? (
+          <Text size="1" color="red" title={error}>
+            {error}
+          </Text>
+        ) : null}
+        {invite ? (
+          <Button
+            size="1"
+            disabled={busy || opened}
+            onClick={() => void joinChannel(notification, invite)}
+          >
+            {busy ? <Spinner size="1" /> : null}
+            {opened ? "Opened" : "Join"}
+          </Button>
+        ) : null}
+        {agentMessage ? (
+          <>
+            <Button
+              size="1"
+              disabled={busy || opened}
+              onClick={() => void replyToAgentMessage(notification, agentMessage)}
+              title="Reply to this agent right here"
+            >
+              {busy ? <Spinner size="1" /> : null}
+              Reply
+            </Button>
+            <Button
+              size="1"
+              variant="soft"
+              disabled={busy || opened}
+              onClick={() => void openAgentMessage(notification, agentMessage)}
+              title="Open the conversation in a chat panel"
+            >
+              {opened ? "Opened" : "Open"}
+            </Button>
+          </>
+        ) : null}
+        <IconButton
           size="1"
-          disabled={busy || opened}
-          onClick={() => void openAgentMessage(notification, agentMessage)}
+          variant="ghost"
+          color="gray"
+          disabled={busy}
+          onClick={() => void dismiss(notification)}
+          aria-label={
+            invite ? `Dismiss invitation to ${invite.channelTitle}` : `Dismiss ${notification.title}`
+          }
+          title="Dismiss without opening"
         >
-          {busy ? <Spinner size="1" /> : null}
-          {opened ? "Opened" : "Open"}
-        </Button>
+          <Cross2Icon />
+        </IconButton>
+      </Flex>
+      {expanded ? (
+        <Flex
+          direction="column"
+          gap="1"
+          pt="1"
+          role="list"
+          aria-label="All pending notifications"
+          style={{ borderTop: "1px solid var(--accent-a5)" }}
+        >
+          {groups.map((group) =>
+            renderRow(group.entries[0]!, { count: group.entries.length })
+          )}
+          <Flex align="center" gap="2" pt="1">
+            <Button size="1" variant="ghost" color="gray" disabled={historyBusy} onClick={() => void toggleHistory()}>
+              {historyBusy ? <Spinner size="1" /> : null}
+              {history ? "Hide acknowledged" : "Show acknowledged"}
+            </Button>
+          </Flex>
+          {history
+            ? history.length === 0
+              ? (
+                <Text size="1" color="gray">
+                  Nothing acknowledged yet.
+                </Text>
+              )
+              : history.map((entry) => (
+                <Flex key={entry.id} align="center" gap="2" style={{ opacity: 0.7 }}>
+                  <Text size="1" color="gray" style={{ flex: 1, minWidth: 0 }} truncate>
+                    {entry.channelInvite?.channelTitle ?? entry.title}
+                    {entry.agentMessage?.senderHandle ? ` · from @${entry.agentMessage.senderHandle}` : ""}
+                    {" · read"}
+                  </Text>
+                  {entry.agentMessage ? (
+                    <Button
+                      size="1"
+                      variant="ghost"
+                      color="gray"
+                      onClick={() =>
+                        void userNotifications
+                          .openChannel(entry.agentMessage!.channelId, {
+                            focusMessageId: entry.agentMessage!.messageId,
+                          })
+                          .catch((cause) => setError(errorMessage(cause)))
+                      }
+                    >
+                      Open
+                    </Button>
+                  ) : null}
+                </Flex>
+              ))
+            : null}
+        </Flex>
       ) : null}
-      <IconButton
-        size="1"
-        variant="ghost"
-        color="gray"
-        disabled={busy}
-        onClick={() => void dismiss(notification)}
-        aria-label={
-          invite ? `Dismiss invitation to ${invite.channelTitle}` : `Dismiss ${notification.title}`
-        }
-        title="Dismiss without opening"
-      >
-        <Cross2Icon />
-      </IconButton>
     </Flex>
   );
 }

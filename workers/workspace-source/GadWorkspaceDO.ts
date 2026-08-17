@@ -281,7 +281,7 @@ function createAgentDirectory(sql: {
       worker_id         TEXT,
       owner_user_id     TEXT,
       status            TEXT NOT NULL DEFAULT 'idle'
-        CHECK (status IN ('running', 'idle', 'hibernated', 'terminal')),
+        CHECK (status IN ('running', 'idle', 'terminal')),
       status_event_id   TEXT,
       last_activity_at  INTEGER,
       summary           TEXT
@@ -3026,8 +3026,18 @@ export class GadWorkspaceDO extends DurableObjectBase {
   // -------------------------------------------------------------------------
 
   private applyProjections(logKind: string, envelope: LogEnvelope): void {
+    // Roster and directory (messaging plan §4.4) are projected from the DURABLE
+    // relationship facts the channel appends — subscription opened / revised /
+    // ended / detached. Presence itself is a disposable presentation signal the
+    // channel never appends; accepting `payloadKind:"presence"` here remains for
+    // direct callers (tests, tooling) that describe a roster change that way.
     if (envelope.payloadKind === "presence") {
       this.applyChannelRosterProjection(envelope);
+      return;
+    }
+    const rosterAction = rosterActionForPayloadKind(envelope.payloadKind);
+    if (rosterAction) {
+      this.applyChannelRosterProjection(envelope, rosterAction);
       return;
     }
     if (envelope.payloadKind === AGENTIC_EVENT_PAYLOAD_KIND) {
@@ -3341,15 +3351,21 @@ export class GadWorkspaceDO extends DurableObjectBase {
     );
   }
 
-  private applyChannelRosterProjection(envelope: LogEnvelope): void {
+  private applyChannelRosterProjection(
+    envelope: LogEnvelope,
+    impliedAction?: "join" | "update" | "leave"
+  ): void {
     const payload =
       envelope.payload && typeof envelope.payload === "object"
         ? (envelope.payload as JsonRecord)
         : {};
-    const action = asString(payload["action"]);
+    const action = impliedAction ?? asString(payload["action"]);
     if (action !== "join" && action !== "update" && action !== "leave") return;
     const actor = envelope.actor as unknown as JsonRecord;
-    const participantId = asString(actor["participantId"]) ?? asString(actor["id"]);
+    const participantId =
+      asString(payload["participantId"]) ??
+      asString(actor["participantId"]) ??
+      asString(actor["id"]);
     if (!participantId) return;
     const channelId = envelope.logId;
     const metadata = parseRecord(
@@ -3431,6 +3447,36 @@ export class GadWorkspaceDO extends DurableObjectBase {
   // Agent directory (messaging plan §4.4) — the discovery projection
   // -------------------------------------------------------------------------
 
+  /**
+   * One-time backfill. Until 2026-08-17 the roster/directory projection was
+   * fed only by `payloadKind:"presence"` envelopes, which the channel never
+   * appends (presence is a disposable signal); the durable relationship facts
+   * — `channel.subscription.*` — were ignored. Existing workspaces therefore
+   * hold every join in their channel logs and nothing in the projection.
+   * Replay just those facts once, in log order, and remember that it happened.
+   */
+  private static readonly ROSTER_BACKFILL_MARKER = "roster-projection:subscription-facts:v1";
+
+  protected override afterSchemaReady(): void {
+    super.afterSchemaReady();
+    if (this.getStateValue(GadWorkspaceDO.ROSTER_BACKFILL_MARKER)) return;
+    const rows = this.sql
+      .exec(
+        `SELECT * FROM log_events
+          WHERE payload_kind IN (
+            'channel.subscription.opened', 'channel.subscription.revised',
+            'channel.subscription.ended', 'channel.subscription.detached')
+          ORDER BY log_id ASC, head ASC, seq ASC`
+      )
+      .toArray() as JsonRecord[];
+    for (const row of rows) {
+      const envelope = this.mapLogEnvelope(row);
+      const action = rosterActionForPayloadKind(envelope.payloadKind);
+      if (action) this.applyChannelRosterProjection(envelope, action);
+    }
+    this.setStateValue(GadWorkspaceDO.ROSTER_BACKFILL_MARKER, new Date().toISOString());
+  }
+
   private agentDirectoryIndexMode: "fts" | "plain" | null = null;
 
   private ensureAgentDirectoryIndex(): "fts" | "plain" {
@@ -3499,6 +3545,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
     const handle = asString(input.metadata["handle"]) ?? input.participantId;
     const instanceId = `${handle}@${input.channelId}`;
     const subagent = parseRecord(JSON.stringify(input.metadata["subagent"] ?? null));
+    const subagentRunId =
+      asString(subagent["runId"]) ?? asString(input.metadata["subagentRunId"]) ?? null;
     const status = input.action === "leave" ? "terminal" : "idle";
     this.sql.exec(
       `INSERT INTO agent_directory
@@ -3521,12 +3569,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
       instanceId,
       input.channelId,
       input.participantId,
-      asString(subagent["runId"]) ? "subagent" : (asString(input.metadata["kind"]) ?? "worker-agent"),
+      subagentRunId ? "subagent" : (asString(input.metadata["kind"]) ?? "worker-agent"),
       handle,
       asString(input.metadata["name"]),
       asString(input.metadata["description"]),
       asString(subagent["parentInstanceId"]),
-      asString(subagent["runId"]),
+      subagentRunId,
       input.participantId,
       asString(input.metadata["ownerUserId"]),
       status,
@@ -4186,9 +4234,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
       "trajectory_approvals",
       "trajectory_usage_rollups",
       "channel_roster",
+      "agent_directory",
     ]) {
       this.sql.exec(`DELETE FROM ${table}`);
     }
+    this.ensureAgentDirectoryIndex();
+    this.sql.exec(`DELETE FROM gad_agent_directory_fts`);
   }
 
   // -------------------------------------------------------------------------
@@ -5505,7 +5556,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       .exec(
         `SELECT * FROM agent_directory ${where}
           ORDER BY CASE status WHEN 'running' THEN 0 WHEN 'idle' THEN 1
-                               WHEN 'hibernated' THEN 2 ELSE 3 END,
+                               ELSE 3 END,
                    last_activity_at DESC,
                    instance_id
           LIMIT ?`,
@@ -6320,18 +6371,36 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   /** Durable account inbox; never enumerates producer/channel DOs. */
   @schemaRpc()
-  listUserNotificationsForMe(): UserNotificationListResult {
+  listUserNotificationsForMe(input?: {
+    includeAcknowledged?: boolean;
+    limit?: number;
+  }): UserNotificationListResult {
     this.ensureReady();
     const userId = this.verifiedUserNotificationCallerUserId("listUserNotificationsForMe");
+    const includeAcknowledged = input?.includeAcknowledged === true;
+    const limit =
+      typeof input?.limit === "number" && Number.isInteger(input.limit) && input.limit > 0
+        ? Math.min(input.limit, 500)
+        : null;
+    // The inbox is the durable record (messaging plan §4.10.8): the default view
+    // is what still wants attention; history is opt-in and bounded.
     const rows = this.sql
       .exec(
-        `SELECT user_id, notification_id, kind, title, message, data_json, created_at, producer_revision
-           FROM user_notifications WHERE user_id = ? AND acknowledged_at IS NULL
-           ORDER BY created_at DESC, notification_id ASC`,
+        `SELECT user_id, notification_id, kind, title, message, data_json, created_at, producer_revision, acknowledged_at
+           FROM user_notifications WHERE user_id = ?${includeAcknowledged ? "" : " AND acknowledged_at IS NULL"}
+           ORDER BY created_at DESC, notification_id ASC${limit ? ` LIMIT ${limit}` : ""}`,
         userId
       )
       .toArray();
-    return { notifications: rows.map((row) => this.userNotificationFromRow(row)) };
+    return {
+      notifications: rows.map((row) => {
+        const notification = this.userNotificationFromRow(row);
+        const acknowledgedAt = row["acknowledged_at"];
+        return typeof acknowledgedAt === "number"
+          ? { ...notification, acknowledgedAt }
+          : notification;
+      }),
+    };
   }
 
   /** Acknowledge/dismiss one notification for the verified account caller. */
@@ -6477,6 +6546,28 @@ export class GadWorkspaceDO extends DurableObjectBase {
 }
 
 /** Whether a payload kind is a member of the agentic EventKind vocabulary. */
+/**
+ * The channel's durable relationship facts, as roster actions. `presence` is
+ * kept for direct appenders that phrase a roster change that way (its payload
+ * then carries `action`).
+ */
+function rosterActionForPayloadKind(payloadKind: string): "join" | "update" | "leave" | null {
+  switch (payloadKind) {
+    case "channel.subscription.opened":
+      return "join";
+    case "channel.subscription.revised":
+      return "update";
+    case "channel.subscription.ended":
+    case "channel.subscription.detached":
+      return "leave";
+    case "presence":
+      // The payload names the action itself.
+      return null;
+    default:
+      return null;
+  }
+}
+
 function isStoredEventKind(payloadKind: string): boolean {
   return STORED_EVENT_KINDS.has(payloadKind);
 }

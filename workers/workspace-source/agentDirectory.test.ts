@@ -260,4 +260,51 @@ describe("agent directory", () => {
       { participantId: "do:gmail", handle: "gmail", kind: "worker-agent", status: "running" },
     ]);
   });
+
+  it("projects the channel's DURABLE subscription facts, not only presence signals", async () => {
+    // What the channel actually appends when an agent joins, revises its
+    // metadata (set_description), and leaves. Presence itself is a disposable
+    // signal the channel never writes; a directory fed only by it stays empty.
+    const { call } = await createTestDO(GadWorkspaceDO);
+    const append = (
+      envelopeId: string,
+      payloadKind: string,
+      payload: Record<string, unknown>,
+      metadata: Record<string, unknown>
+    ) =>
+      call("appendChannelEnvelope", {
+        channelId: "ch-sub",
+        envelopeId,
+        from: { kind: "agent", id: "do:gmail", participantId: "do:gmail", metadata },
+        payloadKind,
+        payload,
+        publishedAt: "2026-05-20T12:00:00.000Z",
+      });
+    await append(
+      "sub-1",
+      "channel.subscription.opened",
+      { participantId: "do:gmail", revision: 1, metadata: AGENT_METADATA },
+      AGENT_METADATA
+    );
+    let listing = await call<{ entries: Array<Record<string, unknown>> }>("listAgentDirectory", {});
+    expect(listing.entries).toEqual([
+      expect.objectContaining({ instanceId: "gmail@ch-sub", status: "idle", handle: "gmail" }),
+    ]);
+
+    const revised = { ...AGENT_METADATA, description: "Triaging today's newsletters." };
+    await append(
+      "sub-2",
+      "channel.subscription.revised",
+      { participantId: "do:gmail", revision: 2, metadata: revised },
+      revised
+    );
+    listing = await call("listAgentDirectory", {});
+    expect(listing.entries[0]).toMatchObject({ description: "Triaging today's newsletters." });
+
+    await append("sub-3", "channel.subscription.ended", { participantId: "do:gmail", revision: 3 }, revised);
+    listing = await call("listAgentDirectory", {});
+    expect(listing.entries).toEqual([]);
+    listing = await call("listAgentDirectory", { includeTerminal: true });
+    expect(listing.entries[0]).toMatchObject({ instanceId: "gmail@ch-sub", status: "terminal" });
+  });
 });

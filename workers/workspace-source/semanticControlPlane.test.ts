@@ -485,6 +485,14 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
     await expect(
       callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe")
     ).resolves.toEqual({ notifications: [] });
+    // The inbox is the durable record: history is opt-in and carries when it was read.
+    await expect(
+      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe", {
+        includeAcknowledged: true,
+      })
+    ).resolves.toMatchObject({
+      notifications: [{ id: "build:release-42", acknowledgedAt: expect.any(Number) }],
+    });
     await callAs(channelCaller("producer"), "putUserNotification", {
       id: "build:release-42",
       userId: "usr_bob",

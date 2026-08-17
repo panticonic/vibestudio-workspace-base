@@ -187,6 +187,13 @@ export interface QuickfireResumeChip {
 
 /** The `/` mode conversation view. */
 export interface QuickfireComposeView {
+  /**
+   * What the conversation is bound to (messaging plan §4.8). `slot` is the
+   * command agent over a panel; `conversation` is an existing channel opened
+   * from a notification — no clear, no fresh, and "promote" means "open its
+   * chat panel". Absent ⇒ `slot`.
+   */
+  kind?: "slot" | "conversation";
   panelTitle: string;
   hint: string;
   /**

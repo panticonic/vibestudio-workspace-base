@@ -518,6 +518,14 @@ export interface ChatContextValue {
   onRemoveAgent?: (handle: string) => void;
   onFocusPanel?: (panelId: string) => void;
   onReloadPanel?: (panelId: string) => void;
+  /** Find-or-open the chat panel for another channel, landing on an envelope
+   *  when given (messaging plan §4.10). */
+  onOpenChannel?: (
+    channelId: string,
+    opts?: { focusMessageId?: string },
+  ) => Promise<void> | void;
+  /** Acknowledge one inbox entry addressed to this person (messaging plan §4.5.4). */
+  onAcknowledgeEscalation?: (notificationId: string) => Promise<void> | void;
   /** Start a fresh conversation (surfaced for the command palette). */
   onNewConversation?: (
     options?: NewConversationOptions,

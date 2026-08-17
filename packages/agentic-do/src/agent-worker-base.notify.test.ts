@@ -44,14 +44,26 @@ class TestNotifyWorker extends SystemAgentWorker {
   readonly sends: RecordedSend[] = [];
   readonly steers: Array<{ toolCallId: string; runId: string; message: string }> = [];
   readonly gadCalls: Array<{ method: string; args: unknown[] }> = [];
+  readonly gadResults: Record<string, unknown> = {};
   readonly events: Array<{ channelId: string; kind: string; event: Record<string, unknown> }> = [];
   readonly closedChannels = new Set<string>();
+  readonly pushes: Array<{ userId: string; request: Record<string, unknown> }> = [];
+  readonly memberships: Array<{ channelId: string; userId: string }> = [];
+  users: ResolveAddresseeContext["users"] = [];
   directory: ResolveAddresseeContext["directory"] = [];
   ownerUserId: string | undefined = undefined;
   inboundHops = 0;
   runs: ResolveAddresseeContext["runs"] = [];
   failGad = false;
   parent: ResolveAddresseeContext["parent"] = undefined;
+
+  /** The system agent deliberately advertises only `eval` and `notify`, so the
+   *  discovery surface is reached directly rather than through its roster. */
+  discoveryTool(name: string): AgentTool {
+    const found = this.createDiscoveryTools("ch-home").find((entry) => entry.name === name);
+    if (!found) throw new Error(`${name} tool missing`);
+    return found;
+  }
 
   async notifyTool(): Promise<AgentTool> {
     const tools = await this.getLoopTools("ch-home");
@@ -67,8 +79,17 @@ class TestNotifyWorker extends SystemAgentWorker {
       ...(this.parent ? { parent: this.parent } : {}),
       runs: this.runs,
       directory: this.directory,
+      users: this.users,
       ...(this.ownerUserId ? { ownerUserId: this.ownerUserId } : {}),
     };
+  }
+
+  protected override async pushUserInbox(
+    userId: string,
+    request: Record<string, unknown>
+  ): Promise<number> {
+    this.pushes.push({ userId, request });
+    return 1;
   }
 
   protected override subagentIdentity(): never | null {
@@ -96,6 +117,7 @@ class TestNotifyWorker extends SystemAgentWorker {
   protected override async callGad<T>(method: string, ...args: unknown[]): Promise<T> {
     this.gadCalls.push({ method, args });
     if (this.failGad && method === "putUserNotification") throw new Error("gad unavailable");
+    if (method in this.gadResults) return this.gadResults[method] as T;
     if (method === "listAgentDirectory") return { entries: [] } as T;
     return {} as T;
   }
@@ -104,6 +126,7 @@ class TestNotifyWorker extends SystemAgentWorker {
     const sends = this.sends;
     const events = this.events;
     const closed = this.closedChannels;
+    const memberships = this.memberships;
     return {
       send: async (
         participantId: string,
@@ -119,6 +142,10 @@ class TestNotifyWorker extends SystemAgentWorker {
       publishAgenticEvent: async (_participantId: string, event: { kind: string }) => {
         events.push({ channelId, kind: event.kind, event });
         return {};
+      },
+      addMember: async (userId: string) => {
+        memberships.push({ channelId, userId });
+        return { alreadyMember: false };
       },
     } as never;
   }
@@ -295,6 +322,21 @@ describe("notify", () => {
     expect(instance.sends[0]?.opts["metadata"]).toEqual({ notify: { alert: "inbox" } });
   });
 
+  it("raises an explicit rung to the channel's people when nobody is addressed", async () => {
+    const instance = await worker();
+    const tool = await instance.notifyTool();
+    await tool.execute("call-done", {
+      content: "Restructure finished.",
+      alert: "inbox",
+    } as never);
+    // gabriel is the one person on the roster; agents are never escalated to.
+    const put = instance.gadCalls.filter((entry) => entry.method === "putUserNotification");
+    expect(put.map((entry) => (entry.args[0] as { userId: string }).userId)).toEqual(["gabriel"]);
+    // Without a rung, an untargeted notify stays a plain channel message.
+    await tool.execute("call-quiet2", { content: "still working" } as never);
+    expect(instance.gadCalls.filter((entry) => entry.method === "putUserNotification")).toHaveLength(1);
+  });
+
   it("does not escalate an agent-to-agent notify", async () => {
     const instance = await worker();
     const tool = await instance.notifyTool();
@@ -309,6 +351,56 @@ describe("notify", () => {
     // The envelope is the canonical copy; a failed inbox write must not lose it.
     await tool.execute("call-fail", { content: "heads up", to: ["user:gabriel"] } as never);
     expect(instance.sends).toHaveLength(1);
+  });
+
+  it("pushes the inbox entry to the person's devices, high priority only at interrupt", async () => {
+    const instance = await worker();
+    const tool = await instance.notifyTool();
+    await tool.execute("call-push", { content: "Report ready", to: ["user:gabriel"] } as never);
+    await tool.execute("call-push2", {
+      content: "Deploy is blocked",
+      to: ["user:gabriel"],
+      alert: "interrupt",
+    } as never);
+
+    expect(instance.pushes).toEqual([
+      {
+        userId: "gabriel",
+        request: expect.objectContaining({
+          notificationId: "agent.message:say:call-push:gabriel",
+          kind: "agent.message",
+          title: "Report ready",
+          priority: "normal",
+          channelId: "ch-home",
+          messageId: "say:call-push",
+        }),
+      },
+      {
+        userId: "gabriel",
+        request: expect.objectContaining({
+          notificationId: "agent.message:say:call-push2:gabriel",
+          priority: "high",
+        }),
+      },
+    ]);
+  });
+
+  it("reaches a workspace member who is not on the channel: membership, audience, inbox", async () => {
+    const instance = await worker();
+    instance.users = [{ userId: "sam", handle: "sam", displayName: "Sam" }];
+    const tool = await instance.notifyTool();
+    // By handle — the workspace member list is the fallback roster — and by id.
+    await tool.execute("call-off", { content: "Sam, your turn", to: ["@sam"] } as never);
+
+    expect(instance.memberships).toEqual([{ channelId: "ch-home", userId: "sam" }]);
+    expect(instance.sends[0]?.opts["to"]).toEqual([{ kind: "participant", participantId: "user:sam" }]);
+    const put = instance.gadCalls.filter((entry) => entry.method === "putUserNotification");
+    expect(put[0]?.args[0]).toMatchObject({ userId: "sam", data: { channelId: "ch-home" } });
+    expect(instance.pushes[0]?.userId).toBe("sam");
+
+    await expect(
+      tool.execute("call-off2", { content: "hi", to: ["user:nobody"] } as never)
+    ).rejects.toMatchObject({ code: "unknown-user" });
   });
 
   it("delivers to a foreign channel as a guest envelope, recording both sides", async () => {
@@ -331,9 +423,12 @@ describe("notify", () => {
     expect(send?.opts["to"]).toEqual([{ kind: "participant", participantId: "do:gmail" }]);
     // The hop count crosses the boundary explicitly, or the cap silently widens.
     expect(send?.opts["agentHops"]).toBe(3);
+    // The origin also names the authoring context (here the tool call: no
+    // bound-channel copy exists), so the recipient's "from #channel" link lands.
     expect((send?.opts["senderMetadata"] as Record<string, unknown>)["origin"]).toEqual({
       channelId: "ch-home",
       participantId: "do:self",
+      envelopeId: "call-x",
     });
 
     // The target learns who the guest is and where the utterance was authored;
@@ -376,5 +471,78 @@ describe("notify", () => {
       { kind: "participant", participantId: "do:a" },
       { kind: "participant", participantId: "do:b" },
     ]);
+  });
+});
+
+describe("discovery", () => {
+  it("prints every addressee in the exact form the send tool accepts", async () => {
+    const instance = await worker();
+    instance.parent = { participantId: "do:boss" };
+    instance.runs = [{ runId: "run-abc", taskChannelId: "ch-task" }];
+    instance.directory = [
+      { instanceId: "gmail@ch-mail", handle: "gmail", channelId: "ch-mail", participantId: "do:gmail" },
+    ];
+    const result = await instance.discoveryTool("list_addressees").execute("call-1", {} as never);
+
+    const refs = (result.details?.["addressees"] as Array<{ ref: string }>).map((row) => row.ref);
+    // Discovery output IS send input: anything printed here must be pasteable.
+    expect(refs).toEqual([
+      "(omit `to`)",
+      "@scribe",
+      "@explorer",
+      "@gabriel",
+      "parent",
+      "run:run-abc",
+      "agent:gmail@ch-mail",
+    ]);
+  });
+
+  it("omits agents in this channel from the elsewhere list", async () => {
+    const instance = await worker();
+    instance.directory = [
+      { instanceId: "scribe@ch-home", handle: "scribe", channelId: "ch-home", participantId: "do:scribe" },
+    ];
+    const result = await instance.discoveryTool("list_addressees").execute("call-2", {} as never);
+
+    // The roster already named this participant; listing it twice under two
+    // different refs would make the reader pick, and one of the picks is worse.
+    const refs = (result.details?.["addressees"] as Array<{ ref: string }>).map((row) => row.ref);
+    expect(refs.filter((ref) => ref.startsWith("agent:"))).toEqual([]);
+  });
+
+  it("returns discovered agents as pasteable refs, and says so when there are none", async () => {
+    const instance = await worker();
+    instance.gadResults["searchAgentDirectory"] = {
+      summary: { rows: 1 },
+      entries: [
+        {
+          ref: "agent:gmail@ch-mail",
+          status: "idle",
+          handle: "gmail",
+          displayName: "Gmail",
+          summary: "Triaged 12 threads; 2 need a reply.",
+        },
+      ],
+    };
+    const discover = instance.discoveryTool("discover_agents");
+    const hit = await discover.execute("call-3", { query: "email" } as never);
+    const text = hit.content?.map((block) => (block.type === "text" ? block.text : "")).join("");
+    expect(text).toContain("agent:gmail@ch-mail");
+    // The overview is the instance's own latest utterance, not a transcript dump.
+    expect(text).toContain("Triaged 12 threads");
+
+    instance.gadResults["searchAgentDirectory"] = { summary: { rows: 0 }, entries: [] };
+    const miss = await discover.execute("call-4", { query: "nothing here" } as never);
+    const missText = miss.content?.map((block) => (block.type === "text" ? block.text : "")).join("");
+    // An empty result must point somewhere, or the agent's next move is a guess.
+    expect(missText).toContain("list_addressees");
+  });
+
+  it("refuses an empty discovery query rather than listing everything", async () => {
+    const instance = await worker();
+    const discover = instance.discoveryTool("discover_agents");
+    await expect(discover.execute("call-5", { query: "   " } as never)).rejects.toThrow(
+      /non-empty query/iu
+    );
   });
 });

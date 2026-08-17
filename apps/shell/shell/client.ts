@@ -1118,11 +1118,15 @@ async function describeChannelInvite(
 }
 
 export const userNotifications = {
-  /** Read one durable account inbox; never enumerate producer/channel DOs. */
-  async list(): Promise<ShellUserNotification[]> {
+  /** Read one durable account inbox; never enumerate producer/channel DOs.
+   *  `includeAcknowledged` returns the history too (messaging plan §4.10.8). */
+  async list(
+    input?: { includeAcknowledged?: boolean; limit?: number }
+  ): Promise<ShellUserNotification[]> {
     const { notifications } =
       await userNotificationStore.call<UserNotificationListResult>(
-        "listUserNotificationsForMe"
+        "listUserNotificationsForMe",
+        ...(input ? [input] : [])
       );
     const channelInvites = notifications
       .map((notification) => channelInviteFromNotification(notification))
@@ -1186,6 +1190,27 @@ export const userNotifications = {
   },
 
   /**
+   * The facts the conversation surface (messaging plan §4.8) needs to bind to a
+   * channel an agent notified from: its owning context and its title. Asked of
+   * the channel itself — Gad has no honest source for a title.
+   */
+  async describeConversation(
+    channelId: string
+  ): Promise<{ contextId: string; title: string | null }> {
+    const service = channelClient(channelId);
+    const [config, contextId] = await Promise.all([
+      service.call<{ title?: string } | null>("getConfig"),
+      service.call<string | null>("getContextId"),
+    ]);
+    if (!contextId) {
+      throw new Error(
+        "This conversation is not ready yet. Please try again in a moment."
+      );
+    }
+    return { contextId, title: config?.title?.trim() || null };
+  },
+
+  /**
    * Find-or-open the chat panel for a channel in its owning context.
    *
    * `focusMessageId` names the envelope the caller wants shown — an escalated
@@ -1234,7 +1259,16 @@ export const userNotifications = {
       ? await findInGroup({ kind: "roots", ownerUserId: profile.userId })
       : null;
     if (existingId) {
-      await productPanelRuntime.panelTree.get(existingId).focus();
+      const existing = productPanelRuntime.panelTree.get(existingId);
+      if (opts?.focusMessageId) {
+        // The panel is already open: hand it the envelope to land on through
+        // its own stateArgs (it reacts to the host-published change), then
+        // bring it forward. A failure to set is a lost focus, not a lost open.
+        await existing.stateArgs
+          .set({ focusMessageId: opts.focusMessageId })
+          .catch(() => undefined);
+      }
+      await existing.focus();
       return { id: existingId };
     }
 

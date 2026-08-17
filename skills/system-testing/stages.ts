@@ -10,6 +10,7 @@ import { buildTests } from "./tests/build.js";
 import { oauthTests } from "./tests/oauth.js";
 import { workspaceTests } from "./tests/workspace.js";
 import { notificationTests } from "./tests/notifications.js";
+import { messagingTests } from "./tests/messaging.js";
 import { skillTests } from "./tests/skills.js";
 import { agentCapabilityTests } from "./tests/agent-capabilities.js";
 import { rpcTests } from "./tests/rpc-communication.js";
@@ -66,6 +67,7 @@ export {
   harnessResilienceTests,
   harnessToolTests,
   intentDiscoveryTests,
+  messagingTests,
   interactionSurfaceTests,
   localModelTests,
   mobileTests,
@@ -134,6 +136,7 @@ export function allTests(): TestCase[] {
     ...multiUserTests,
     ...approvalPermissionTests,
     ...notificationTests,
+    ...messagingTests,
     ...skillTests,
     ...agentCapabilityTests,
     ...rpcTests,

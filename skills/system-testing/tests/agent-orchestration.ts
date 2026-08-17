@@ -13,6 +13,23 @@ function callDetails(call: ReturnType<typeof getToolCalls>[number]) {
   return record(record(call.execution?.result)?.["details"]);
 }
 
+/**
+ * Compare a run reference the way the product resolves one.
+ *
+ * `spawn_subagent` reports an elided display handle and the supervision tools
+ * accept "the exact runId or any sufficiently long unique prefix; the display
+ * ellipsis is optional". An agent that drops the ellipsis is therefore doing
+ * exactly what it was told, and a validator demanding one exact spelling grades
+ * transcription rather than behaviour.
+ */
+function sameRunReference(reference: unknown, handle: string): boolean {
+  if (typeof reference !== "string" || !reference) return false;
+  const bare = (value: string) => value.replace(/…+$/u, "");
+  const left = bare(reference);
+  const right = bare(handle);
+  return left === right || left.startsWith(right) || right.startsWith(left);
+}
+
 function protocolText(call: ReturnType<typeof getToolCalls>[number]): string {
   const content = record(call.execution?.result)?.["protocolContent"];
   return Array.isArray(content)
@@ -58,7 +75,7 @@ function validateUnintegratedSubagentDiff(result: TestExecutionResult) {
     if (
       call.name !== "inspect_subagent" ||
       call.arguments?.["query"] !== "diff" ||
-      call.arguments?.["runId"] !== runHandle ||
+      !sameRunReference(call.arguments?.["runId"], runHandle) ||
       call.execution?.status !== "complete" ||
       call.execution.isError === true
     ) {
@@ -67,7 +84,7 @@ function validateUnintegratedSubagentDiff(result: TestExecutionResult) {
     const details = callDetails(call);
     const integration = record(details?.["semanticIntegration"]);
     return (
-      details?.["runId"] === runHandle &&
+      sameRunReference(details?.["runId"], runHandle) &&
       integration?.["state"] === "unattempted" &&
       integration["sourceEventId"] === sourceEventId
     );
@@ -91,11 +108,28 @@ function validateUnintegratedSubagentDiff(result: TestExecutionResult) {
       reason: "The child-relative diff did not prove a non-empty committed clean change",
     };
   }
-  const final = findLastAgentMessage(result);
-  if (!/export/iu.test(final) || !/(?:unintegrated|not integrated|left .*separate)/iu.test(final)) {
+  // "Deliberately left unintegrated" is a fact about what the parent did, not a
+  // phrase it has to say. Grading the prose failed an agent that wrote "without
+  // integrating" because the alternation happened to list "not integrated" —
+  // that measures wording, not behaviour.
+  const merged = calls.find(
+    (call) =>
+      call.name === "merge_subagent" &&
+      sameRunReference(call.arguments?.["runId"], runHandle) &&
+      call.execution?.status === "complete" &&
+      call.execution.isError !== true
+  );
+  if (merged) {
     return {
       passed: false,
-      reason: "The parent did not summarize the export diff and its unintegrated disposition",
+      reason: "The parent integrated the child's work in a case whose whole point is not to",
+    };
+  }
+  const final = findLastAgentMessage(result);
+  if (!/export/iu.test(final)) {
+    return {
+      passed: false,
+      reason: "The parent never reported what the child changed, so the review went unreported",
     };
   }
   return noIncompleteInvocations(result);

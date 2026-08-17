@@ -148,6 +148,31 @@ describe("chatMessagesFromChannelView", () => {
     });
   });
 
+  it("projects a notify's escalation onto the message, with the people it addressed", () => {
+    const message: AgenticEvent<"message.completed"> = {
+      kind: "message.completed",
+      actor: agent,
+      causality: { messageId: brandId<MessageId>("say:call-1") },
+      payload: {
+        ...textPayload("say:call-1", "assistant", "Briefing ready"),
+        saliency: "say",
+        to: [
+          { kind: "participant", participantId: "user:gabriel" },
+          { kind: "participant", participantId: "do:scribe" },
+        ],
+        metadata: { notify: { alert: "inbox", title: "Briefing" } },
+      },
+      createdAt: "2026-05-20T12:00:00.000Z",
+    };
+    const state = [envelope(message, 1)].reduce(reduceChannelView, createInitialChannelViewState());
+    const [chatMessage] = chatMessagesFromChannelView(state);
+    expect(chatMessage).toMatchObject({
+      id: "say:call-1",
+      // Only people count as escalation targets; the agent addressee does not.
+      escalation: { alert: "inbox", title: "Briefing", users: ["user:gabriel"] },
+    });
+  });
+
   it("projects assistant model provenance onto chat messages", () => {
     const message: AgenticEvent<"message.completed"> = {
       kind: "message.completed",
@@ -2630,5 +2655,173 @@ describe("chatMessagesFromChannelView", () => {
       .reduce(reduceChannelView, createInitialChannelViewState());
     const chat = chatMessagesFromChannelView(state).find((message) => message.id === id);
     expect(chat?.retracted).toBe(true);
+  });
+});
+
+describe("cross-channel traffic", () => {
+  const guest = {
+    kind: "agent" as const,
+    id: "do:news",
+    participantId: "do:news",
+    displayName: "News",
+    metadata: {
+      handle: "news",
+      origin: { channelId: "channel-news", participantId: "do:news" },
+    },
+  };
+
+  function published(
+    publications: Array<{ channelId: string; envelopeId: string; summary?: string }>,
+    createdAt: string
+  ): AgenticEvent<"external.envelope_published"> {
+    return {
+      kind: "external.envelope_published",
+      actor: { ...agent, metadata: { handle: "scribe" } },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        publications: publications.map((entry) => ({
+          channelId: brandId<ChannelId>(entry.channelId),
+          envelopeId: brandId<EnvelopeId>(entry.envelopeId),
+          payloadKind: "message.completed",
+          ...(entry.summary ? { summary: entry.summary } : {}),
+        })),
+      },
+      createdAt,
+    };
+  }
+
+  it("records a reference to what was said elsewhere, never a copy of it", () => {
+    const state = [
+      envelope(
+        published(
+          [
+            {
+              channelId: "channel-mail",
+              envelopeId: "say:call-1:channel-mail",
+              summary: "Can you extract the newsletter senders?",
+            },
+          ],
+          "2026-05-20T12:00:00.000Z"
+        ),
+        1
+      ),
+    ].reduce(reduceChannelView, createInitialChannelViewState());
+
+    const rows = chatMessagesFromChannelView(state);
+    const dispatches = rows.filter((row) => row.contentType === "cross-channel-sent");
+    expect(dispatches).toHaveLength(1);
+    expect(dispatches[0]).toMatchObject({
+      crossChannel: {
+        channelId: "channel-mail",
+        envelopeId: "say:call-1:channel-mail",
+        summary: "Can you extract the newsletter senders?",
+        from: { handle: "scribe" },
+      },
+    });
+    // The utterance itself lives once, in the target channel's log. A row here
+    // carrying it as ordinary content would make the foreign conversation look
+    // like it happened in this one.
+    expect(rows.some((row) => row.kind === "message" && row.contentType === undefined)).toBe(false);
+  });
+
+  it("keeps references from two channels apart when they share an envelope id", () => {
+    const state = [
+      envelope(
+        published(
+          [
+            { channelId: "channel-a", envelopeId: "say:call-1", summary: "for a" },
+            { channelId: "channel-b", envelopeId: "say:call-1", summary: "for b" },
+          ],
+          "2026-05-20T12:00:00.000Z"
+        ),
+        1
+      ),
+    ].reduce(reduceChannelView, createInitialChannelViewState());
+
+    // Identity is the (channel, envelope) pair; two channels routinely mint the
+    // same message id, and collapsing them would lose one dispatch entirely.
+    expect(Object.keys(state.externalPublications)).toHaveLength(2);
+    const dispatches = chatMessagesFromChannelView(state).filter(
+      (row) => row.contentType === "cross-channel-sent"
+    );
+    expect(dispatches.map((row) => row.crossChannel?.channelId).sort()).toEqual([
+      "channel-a",
+      "channel-b",
+    ]);
+  });
+
+  it("renders an arriving guest as an ordinary message carrying where it came from", () => {
+    const message: AgenticEvent<"message.completed"> = {
+      kind: "message.completed",
+      actor: guest,
+      causality: { messageId: brandId<MessageId>("say:call-9:channel-mail") },
+      payload: textPayload("say:call-9:channel-mail", "assistant", "Can you extract the senders?"),
+      createdAt: "2026-05-20T12:00:00.000Z",
+    };
+    const observed: AgenticEvent<"external.envelope_observed"> = {
+      kind: "external.envelope_observed",
+      actor: guest,
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        channelId: brandId<ChannelId>("channel-news"),
+        envelopeId: brandId<EnvelopeId>("say:call-9:channel-mail"),
+        from: guest,
+        payloadKind: "message.completed",
+      },
+      createdAt: "2026-05-20T12:00:01.000Z",
+    };
+
+    const state = [envelope(message, 1), envelope(observed, 2)].reduce(
+      reduceChannelView,
+      createInitialChannelViewState()
+    );
+
+    const row = chatMessagesFromChannelView(state).find(
+      (entry) => entry.id === "say:call-9:channel-mail"
+    );
+    // A guest envelope IS an ordinary message here — someone talking — and must
+    // not be demoted to a system row, or the conversation stops reading like one.
+    expect(row).toMatchObject({
+      kind: "message",
+      content: "Can you extract the senders?",
+      origin: { channelId: "channel-news", participantId: "do:news" },
+      senderMetadata: { handle: "news" },
+    });
+    expect(row?.contentType).toBeUndefined();
+
+    // The back-pointer to the authoring context is what makes the reverse walk
+    // (and the "from #channel" affordance) resolvable.
+    expect(Object.values(state.externalObservations)).toEqual([
+      expect.objectContaining({
+        channelId: "channel-news",
+        envelopeId: "say:call-9:channel-mail",
+      }),
+    ]);
+  });
+
+  it("emits one dispatch row per message sent to the same target", () => {
+    const events = [1, 2, 3].map((index) =>
+      envelope(
+        published(
+          [
+            {
+              channelId: "channel-mail",
+              envelopeId: `say:call-${index}:channel-mail`,
+              summary: `message ${index}`,
+            },
+          ],
+          `2026-05-20T12:00:0${index}.000Z`
+        ),
+        index
+      )
+    );
+    const state = events.reduce(reduceChannelView, createInitialChannelViewState());
+
+    // Three rows today. Grouping consecutive dispatches to one target into a
+    // single counted row is specified but not built; when it lands, this count
+    // is the assertion that has to change deliberately rather than silently.
+    expect(
+      chatMessagesFromChannelView(state).filter((row) => row.contentType === "cross-channel-sent")
+    ).toHaveLength(3);
   });
 });

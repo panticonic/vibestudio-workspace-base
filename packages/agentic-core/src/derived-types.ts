@@ -295,7 +295,19 @@ export interface ChatMessage {
   crossChannel?: CrossChannelRowPayload;
   /** Origin of an incoming guest envelope, when the sender is not on this
    *  roster (messaging plan §4.10.4). Drives the origin chip. */
-  origin?: { channelId: string; participantId: string };
+  origin?: { channelId: string; participantId: string; envelopeId?: string };
+  /**
+   * Escalation the sender declared on a `notify` (messaging plan §4.5, §4.10.5):
+   * the rung, an optional headline, and the people it was addressed to. Read
+   * state per person comes from the ordinary read receipt (`receipts`), so the
+   * footer and acknowledge-on-read need no second source (D16).
+   */
+  escalation?: {
+    alert: "none" | "inbox" | "interrupt";
+    title?: string;
+    /** `user:<id>` participant ids this message was addressed to. */
+    users: string[];
+  };
   kind?: "message" | "method" | "system";
   complete?: boolean;
   replyTo?: string;

@@ -34,6 +34,23 @@ export type TaskStatus =
   | "cancelled"
   | "abandoned";
 
+/** Escalation intent carried on a `notify` message payload (`metadata.notify`). */
+export interface MessageNotifyIntent {
+  alert: "none" | "inbox" | "interrupt";
+  title?: string;
+}
+
+/** Read `metadata.notify` off a message payload; absent or malformed ⇒ undefined. */
+export function readMessageNotifyIntent(metadata: unknown): MessageNotifyIntent | undefined {
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const notify = (metadata as { notify?: unknown }).notify;
+  if (!notify || typeof notify !== "object") return undefined;
+  const alert = (notify as { alert?: unknown }).alert;
+  if (alert !== "none" && alert !== "inbox" && alert !== "interrupt") return undefined;
+  const title = (notify as { title?: unknown }).title;
+  return { alert, ...(typeof title === "string" && title ? { title } : {}) };
+}
+
 export interface ProjectedMessage {
   messageId: MessageId;
   actor: ActorRef;
@@ -52,6 +69,10 @@ export interface ProjectedMessage {
   seq?: number;
   /** Marks an explicit supervisor `say`. */
   saliency?: "say";
+  /** The `notify` tool's declared escalation (messaging plan §4.3): what the
+   *  sender asked addressed people to experience. Projected from the message
+   *  payload's `metadata.notify` so the envelope stays the one record. */
+  notify?: MessageNotifyIntent;
   /** Edit-fork provenance: the parent message this supersedes. */
   replaces?: { messageId: string; seq: number };
   startedAt?: string;
@@ -373,6 +394,9 @@ export function applyMessageEvent(
     const to = "to" in payload ? payload.to : existing.to;
     const saliency = "saliency" in payload ? payload.saliency : existing.saliency;
     const replaces = "replaces" in payload ? payload.replaces : existing.replaces;
+    const notify =
+      ("metadata" in payload ? readMessageNotifyIntent(payload.metadata) : undefined) ??
+      existing.notify;
     return {
       ...messages,
       [messageId]: {
@@ -387,6 +411,7 @@ export function applyMessageEvent(
         ...(to !== undefined ? { to } : {}),
         ...(saliency !== undefined ? { saliency } : {}),
         ...(replaces !== undefined ? { replaces } : {}),
+        ...(notify !== undefined ? { notify } : {}),
         status: "started",
         startedAt: event.createdAt,
         updatedAt: event.createdAt,
@@ -453,6 +478,9 @@ export function applyMessageEvent(
     const saliency = "saliency" in payload ? payload.saliency : existing.saliency;
     const replaces = "replaces" in payload ? payload.replaces : existing.replaces;
     const model = "model" in payload ? payload.model : existing.model;
+    const notify =
+      ("metadata" in payload ? readMessageNotifyIntent(payload.metadata) : undefined) ??
+      existing.notify;
     return {
       ...messages,
       [messageId]: {
@@ -467,6 +495,7 @@ export function applyMessageEvent(
         ...(to !== undefined ? { to } : {}),
         ...(saliency !== undefined ? { saliency } : {}),
         ...(replaces !== undefined ? { replaces } : {}),
+        ...(notify !== undefined ? { notify } : {}),
         status: "completed",
         outcome,
         completedAt: event.createdAt,

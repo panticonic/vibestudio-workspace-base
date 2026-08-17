@@ -13,6 +13,8 @@ import { isNativeFirebaseConfigured } from "./nativeFirebase";
 declare const require: (moduleName: string) => unknown;
 
 export const APPROVAL_NOTIFICATION_CHANNEL_ID = "approvals";
+/** Escalated agent messages and other durable inbox entries (messaging plan §4.5). */
+export const INBOX_NOTIFICATION_CHANNEL_ID = "messages";
 
 export type NotificationActionId =
   | (typeof NOTIFICATION_ACTION_IDS_STANDARD)[number]
@@ -158,6 +160,15 @@ export async function setupNotificationCategories(): Promise<void> {
       });
     } catch (error) {
       console.warn("[Notifications] Failed to create approval channel:", error);
+    }
+    try {
+      await notifee.createChannel?.({
+        id: INBOX_NOTIFICATION_CHANNEL_ID,
+        name: "Messages",
+        importance: AndroidImportance?.HIGH,
+      });
+    } catch (error) {
+      console.warn("[Notifications] Failed to create messages channel:", error);
     }
   }
 

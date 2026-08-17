@@ -38,6 +38,31 @@ function participantLabel(ref: {
   metadata?: Record<string, unknown>;
   id: string;
 }): string {
+  const base = baseParticipantLabel(ref);
+  // A guest envelope (messaging plan §4.6/§4.10.4): the speaker is not on this
+  // roster, so `@handle` will not reach them. Say where they spoke from and the
+  // exact ref that does, or the model has no way to answer.
+  const origin = ref.metadata?.["origin"];
+  const originChannelId =
+    origin && typeof origin === "object"
+      ? (origin as { channelId?: unknown }).channelId
+      : undefined;
+  if (typeof originChannelId === "string" && originChannelId) {
+    const handle = ref.metadata?.["handle"];
+    const replyRef =
+      typeof handle === "string" && handle
+        ? `agent:${handle}@${originChannelId}`
+        : `channel:${originChannelId}`;
+    return `${base} (guest from channel ${originChannelId}; reply with notify to:"${replyRef}")`;
+  }
+  return base;
+}
+
+function baseParticipantLabel(ref: {
+  displayName?: string;
+  metadata?: Record<string, unknown>;
+  id: string;
+}): string {
   if (typeof ref.displayName === "string" && ref.displayName)
     return ref.displayName;
   const handle = ref.metadata?.["handle"];

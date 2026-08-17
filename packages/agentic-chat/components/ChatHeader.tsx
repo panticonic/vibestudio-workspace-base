@@ -15,6 +15,11 @@ import { ParticipantBadgeMenu } from "./ParticipantBadgeMenu";
 import { PendingAgentBadge } from "./PendingAgentBadge";
 import { ToolPermissionsDropdown } from "./ToolPermissionsDropdown";
 import { ForkSwitcher } from "./ForkSwitcher";
+import {
+  ExternalConversationsMenu,
+  externalConversationsFromMessages,
+  type ExternalConversationEntry,
+} from "./ExternalConversationsMenu";
 import { ChannelPeopleMenu } from "./ChannelPeopleMenu";
 import { ConversationAgentDialogs, useConversationActions } from "./useConversationActions";
 
@@ -74,6 +79,7 @@ function DesktopChatHeader() {
     onCallMethod,
     onDebugConsoleChange,
     onRemoveAgent,
+    onOpenChannel,
     chat,
     clientRef,
   } = useChatContext();
@@ -82,6 +88,16 @@ function DesktopChatHeader() {
   // participants (WP6 §6): handle/displayName/avatar/color resolve from the
   // host, so a hubControl.updateProfile re-renders here without roster rewrites.
   const participantIds = React.useMemo(() => Object.keys(participants), [participants]);
+  // Cross-channel traffic for the header menu (messaging plan §4.10.7). Keyed
+  // by content so streaming deltas do not defeat the inner header's memo.
+  const externalConversationsKey = React.useMemo(
+    () => JSON.stringify(externalConversationsFromMessages(messages)),
+    [messages]
+  );
+  const externalConversations = React.useMemo(
+    () => JSON.parse(externalConversationsKey) as ExternalConversationEntry[],
+    [externalConversationsKey]
+  );
   const accountProfiles = useAccountProfiles(
     (chat as { rpc?: AccountRpc } | undefined)?.rpc,
     participantIds
@@ -156,6 +172,8 @@ function DesktopChatHeader() {
       toolApproval={toolApproval}
       onRemoveAgent={onRemoveAgent}
       onDebugConsoleChange={onDebugConsoleChange}
+      externalConversations={externalConversations}
+      onOpenChannel={onOpenChannel}
     />
   );
 }
@@ -171,6 +189,9 @@ interface ChatHeaderInnerProps {
   participantPresenceStatus: Map<string, ChannelPresenceStatus>;
   /** Live `user:<userId>` → account profile projection (WP6 §6). */
   accountProfiles: Map<string, AccountProfile>;
+  /** Other channels this conversation's agents talked to (messaging plan §4.10.7). */
+  externalConversations: ExternalConversationEntry[];
+  onOpenChannel?: (channelId: string, opts?: { focusMessageId?: string }) => Promise<void> | void;
   pendingAgents: Map<string, PendingAgent>;
   onCallMethod?: (providerId: string, methodName: string, args: unknown) => void;
   toolApproval?: ToolApprovalProps;
@@ -193,6 +214,8 @@ function chatHeaderInnerPropsEqual(
     prev.toolApproval === next.toolApproval &&
     prev.onRemoveAgent === next.onRemoveAgent &&
     prev.onDebugConsoleChange === next.onDebugConsoleChange &&
+    prev.externalConversations === next.externalConversations &&
+    prev.onOpenChannel === next.onOpenChannel &&
     mapsShallowEqual(prev.participantActiveStatus, next.participantActiveStatus) &&
     mapsShallowEqual(prev.participantPresenceStatus, next.participantPresenceStatus)
   );
@@ -211,6 +234,8 @@ const ChatHeaderInner = React.memo(function ChatHeaderInner({
   toolApproval,
   onRemoveAgent,
   onDebugConsoleChange,
+  externalConversations,
+  onOpenChannel,
 }: ChatHeaderInnerProps) {
   const visiblePendingAgents = pendingAgents
     ? Array.from(pendingAgents.entries()).filter(([handle, _info]) => {
@@ -273,6 +298,7 @@ const ChatHeaderInner = React.memo(function ChatHeaderInner({
             />
           ))}
           <ForkSwitcher />
+          <ExternalConversationsMenu entries={externalConversations} onOpenChannel={onOpenChannel} />
           <ChatHeaderOverflowMenu
             participants={participants}
             accountProfiles={accountProfiles}

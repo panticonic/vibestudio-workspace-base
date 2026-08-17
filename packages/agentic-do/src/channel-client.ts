@@ -200,6 +200,15 @@ export class ChannelClient {
   ): Promise<{ id?: number }> {
     return this.call("publish", participantId, payloadKind, payload, opts);
   }
+  /**
+   * Add a workspace member to this channel (WP7 §3). Used by `notify` when it
+   * addresses a person who is not yet on the roster: membership is what lets
+   * the escalated inbox entry open the conversation (messaging plan §4.6).
+   * Idempotent on the channel side.
+   */
+  async addMember(userId: string): Promise<{ alreadyMember: boolean }> {
+    return this.call("addMember", { userId });
+  }
   async recordReadReceipt(
     participantId: string,
     messageId: string,

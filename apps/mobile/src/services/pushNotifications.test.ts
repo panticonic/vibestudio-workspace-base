@@ -322,6 +322,40 @@ describe("pushNotifications", () => {
     expect(mockNotifee.displayNotification).not.toHaveBeenCalled();
   });
 
+  it("displays a pushed inbox entry under its durable id, on the messages channel", async () => {
+    await displayApprovalNotification(
+      {
+        notification: { title: "ignored", body: "ignored" },
+        data: {
+          kind: "user-inbox",
+          notificationId: "agent.message:say:call-1:usr_bob",
+          inboxKind: "agent.message",
+          title: "Briefing ready",
+          body: "3 stories",
+          priority: "high",
+          channelId: "ch-news",
+          messageId: "say:call-1",
+          senderParticipantId: "do:news",
+          senderHandle: "news",
+        },
+      },
+      mockNotifee
+    );
+
+    expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: "agent.message:say:call-1:usr_bob",
+        title: "Briefing ready",
+        body: "3 stories",
+        data: expect.objectContaining({ kind: "user-inbox", channelId: "ch-news", messageId: "say:call-1" }),
+        android: expect.objectContaining({
+          channelId: "messages",
+          pressAction: { id: "open", launchActivity: "default" },
+        }),
+      })
+    );
+  });
+
   it("uses host-authored action labels for foreground Android notifications", async () => {
     await displayApprovalNotification(
       {

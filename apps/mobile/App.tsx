@@ -28,6 +28,7 @@ import {
 import { ActionSheetHost } from "./src/components/ui/ActionSheetHost";
 import { shellClientAtom } from "./src/state/shellClientAtom";
 import { approvalDeepLinkAtom } from "./src/state/approvalDeepLinkAtom";
+import { inboxDeepLinkAtom } from "./src/state/inboxDeepLinkAtom";
 import { pushToastAtom } from "./src/state/toastAtoms";
 import { parsePanelLocationLink, type PanelLocation } from "@vibestudio/shared/panelLocation";
 
@@ -42,6 +43,8 @@ function AppContent() {
   const setSystemColorScheme = useSetAtom(systemColorSchemeAtom);
   const hydrateThemePreference = useSetAtom(hydrateThemePreferenceAtom);
   const setApprovalDeepLink = useSetAtom(approvalDeepLinkAtom);
+  const setInboxDeepLink = useSetAtom(inboxDeepLinkAtom);
+  const inboxDeepLinkSequence = useRef(0);
   const pushToast = useSetAtom(pushToastAtom);
   const consumedPanelLinks = useRef(new Set<string>());
 
@@ -139,6 +142,8 @@ function AppContent() {
       .then(() =>
         registerForPushNotifications(shellClient, {
           onApprovalDeepLink: (approvalId) => setApprovalDeepLink(approvalId),
+          onInboxDeepLink: (payload) =>
+            setInboxDeepLink({ ...payload, sequence: (inboxDeepLinkSequence.current += 1) }),
           onToast: (toast) => pushToast(toast),
         })
       )
@@ -163,7 +168,7 @@ function AppContent() {
       disposed = true;
       cleanup?.();
     };
-  }, [pushToast, setApprovalDeepLink, shellClient]);
+  }, [pushToast, setApprovalDeepLink, setInboxDeepLink, shellClient]);
 
   return (
     <>

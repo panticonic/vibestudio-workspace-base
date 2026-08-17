@@ -62,6 +62,7 @@ import {
   type CustomMessageDisplayMode,
   type ParticipantRef,
   type AddresseeDirectoryEntry,
+  type AddresseeUserEntry,
   type ResolveAddresseeContext,
 } from "@workspace/agentic-protocol";
 import { canonicalJson, sha256HexSyncText, stableSha256Hex } from "@vibestudio/content-addressing";
@@ -1116,9 +1117,22 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     channelId: string,
     config?: unknown
   ): ParticipantDescriptor {
-    const descriptor = this.getParticipantInfo(channelId, config);
+    const declared = this.getParticipantInfo(channelId, config);
+    // The agent's own one-line self-description (`set_description`) rides the
+    // roster metadata: it is what the workspace directory shows and searches
+    // (messaging plan §4.4, D9), and it survives rejoin because it lives here.
+    const description = this.agentDescription(channelId);
+    const base: ParticipantDescriptor = description
+      ? { ...declared, metadata: { ...(declared.metadata ?? {}), description } }
+      : declared;
     const subagent = this.subagentIdentity();
-    if (!subagent) return descriptor;
+    if (!subagent) return base;
+    // The run identity rides on the roster metadata so the workspace agent
+    // directory can carry lineage (messaging plan §4.4) without a second writer.
+    const descriptor: ParticipantDescriptor = {
+      ...base,
+      metadata: { ...(base.metadata ?? {}), subagentRunId: subagent.runId },
+    };
 
     const configuredHandle = configuredParticipantHandle(config);
     if (configuredHandle) return { ...descriptor, handle: configuredHandle };
@@ -1133,6 +1147,38 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       ...descriptor,
       handle: deriveSubagentParticipantHandle(descriptor.handle, subagent.runId, objectKey),
     };
+  }
+
+  /** The self-description this agent set for a channel, if any. */
+  protected agentDescription(channelId: string): string | null {
+    try {
+      const value = this.getStateValue(`agent:description:${channelId}`);
+      return typeof value === "string" && value.trim() ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Set (or clear) this agent's self-description on a channel and revise its
+   * roster metadata so the directory reflects it now — not on the next join.
+   */
+  protected async setAgentDescription(channelId: string, description: string | null): Promise<void> {
+    if (description) this.setStateValue(`agent:description:${channelId}`, description);
+    else this.deleteStateValue(`agent:description:${channelId}`);
+    const participantId = this.subscriptions.getParticipantId(channelId);
+    if (!participantId) return;
+    const descriptor = this.getEffectiveParticipantInfo(
+      channelId,
+      this.subscriptions.getConfig(channelId)
+    );
+    await this.createChannelClient(channelId).updateMetadata(participantId, {
+      name: descriptor.name,
+      type: descriptor.type,
+      handle: descriptor.handle,
+      ...(descriptor.metadata ?? {}),
+      ...(descriptor.methods?.length ? { methods: descriptor.methods } : {}),
+    });
   }
 
   private subscriptionContextOrNull(channelId: string): string | null {
@@ -2526,6 +2572,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     const parentParticipantId = this.subagentIdentity()?.parentParticipantId;
     const roster = this.rosterSnapshot(channelId).map(rosterParticipantRef);
     const ownerUserId = soleChannelUserId(roster);
+    const [directory, users] = await Promise.all([
+      this.agentDirectoryEntries(),
+      this.workspaceUserEntries(),
+    ]);
     return {
       channelId,
       roster,
@@ -2535,9 +2585,32 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         taskChannelId: run.taskChannelId,
         ...(run.childParticipantId ? { participantId: run.childParticipantId } : {}),
       })),
-      directory: await this.agentDirectoryEntries(),
+      directory,
+      users,
       ...(ownerUserId ? { ownerUserId } : {}),
     };
+  }
+
+  /** The workspace's people, as addressing sees them (messaging plan §4.2):
+   *  the fallback roster for `user:<id>` and `@handle` refs naming someone who
+   *  is not on this channel yet. Read live from the host account projection; a
+   *  failed read is an empty list, so such refs fail closed with suggestions
+   *  from the channel roster rather than failing the message. */
+  protected async workspaceUserEntries(): Promise<AddresseeUserEntry[]> {
+    try {
+      const members = await this.rpc.call<
+        Array<{ userId: string; handle?: string; displayName?: string; revoked?: boolean }>
+      >("main", "account.listWorkspaceMembers", []);
+      return members
+        .filter((member) => member.revoked !== true)
+        .map((member) => ({
+          userId: member.userId,
+          ...(member.handle ? { handle: member.handle } : {}),
+          ...(member.displayName ? { displayName: member.displayName } : {}),
+        }));
+    } catch {
+      return [];
+    }
   }
 
   /** The Gad directory as addressing sees it. A directory read that fails is an

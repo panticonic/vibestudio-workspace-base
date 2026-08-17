@@ -96,6 +96,13 @@ export interface AgenticChatProps {
   composerDefaultMentions?: readonly string[];
   /** Product-owned readiness gate for the composer. */
   composerDisabled?: boolean;
+  /**
+   * Envelope to scroll to and highlight once present (messaging plan §4.5,
+   * §4.10). Notification surfaces and other channels' open links set it; the
+   * host clears it through `onFocusMessageConsumed` once honoured.
+   */
+  focusMessageId?: string;
+  onFocusMessageConsumed?: (messageId: string) => void;
 }
 
 /**
@@ -137,6 +144,8 @@ export const AgenticChat = forwardRef<AgenticChatHandle, AgenticChatProps>(funct
     composerPlaceholder,
     composerDefaultMentions,
     composerDisabled,
+    focusMessageId,
+    onFocusMessageConsumed,
   },
   ref
 ) {
@@ -207,6 +216,8 @@ export const AgenticChat = forwardRef<AgenticChatHandle, AgenticChatProps>(funct
             composerPlaceholder={composerPlaceholder}
             composerDefaultMentions={composerDefaultMentions}
             composerDisabled={composerDisabled}
+            focusMessageId={focusMessageId}
+            onFocusMessageConsumed={onFocusMessageConsumed}
           />
         </ChatProvider>
       </Theme>

@@ -371,6 +371,32 @@ describe("PubSubChannel", () => {
     ).resolves.toBeUndefined();
   });
 
+  it("refuses a guest publish into a locked channel as closed, not as an unknown participant", async () => {
+    const { instance } = await createGadBackedChannel();
+    setRpcCaller(instance, "server:test", "server");
+    await instance.initializeLockedChannel("ctx-sealed", {
+      membershipPolicy: { kind: "locked", participants: ["user:alice"] },
+    });
+
+    // A guest envelope (messaging plan §4.6) is an ordinary publish by a
+    // participant who never joined. It must run the same admission check a join
+    // would rather than slipping past it.
+    setRpcCaller(instance, "do:outsider", "do");
+    const refusal = instance.publish("do:outsider", AGENTIC_EVENT_PAYLOAD_KIND, {
+      kind: "message.completed",
+      actor: { kind: "agent", id: "do:outsider" },
+      causality: { messageId: "msg-guest" },
+      payload: { protocol: AGENTIC_PROTOCOL_VERSION, role: "assistant", outcome: "completed" },
+      createdAt: "2026-05-20T12:00:00.000Z",
+    });
+
+    // The distinction is load-bearing (D14): an agent that reads "unknown
+    // addressee" retries forever, and one that reads "closed channel" stops.
+    await expect(refusal).rejects.toMatchObject({ code: "ClosedChannel" });
+    await expect(refusal).rejects.toThrow(/locked membership/iu);
+    await expect(refusal).rejects.toThrow(/does not admit do:outsider/iu);
+  });
+
   it("does not let subscribe or generic config updates create or widen locked membership", async () => {
     const { instance } = await createGadBackedChannel();
     setRpcCaller(instance, "panel:alice", "panel", "panel:alice", "alice");

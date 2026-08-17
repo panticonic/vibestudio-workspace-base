@@ -55,6 +55,13 @@ maintained as parallel prose constants.
   external-integration lifecycles, with synthetic/revoked fixtures.
 - `workspace`, `multi-user`, `notifications`: workspace state, identity,
   participants, presence, and notifications.
+- `messaging`: addressing another participant, enumerating who is addressable,
+  and steering a running child. Fail-closed addressing is the sharpest case: an
+  addressee that cannot be resolved must never degrade into a broadcast.
+  Escalation to a person is deliberately absent — a headless test channel has no
+  human participant for `owner` to resolve to, so that rung is covered by
+  focused conventional tests instead of a scenario that could only ever assert
+  the attempt.
 - `unit-diagnostics`, `server-logs`, `harness-tools`: bounded operational and
   provenance inspection.
 - `local-models`: persistent model installation, readiness, and real delegated

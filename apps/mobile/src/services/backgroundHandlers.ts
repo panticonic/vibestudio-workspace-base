@@ -1,4 +1,6 @@
 import type { PushApprovalDataPayload } from "@vibestudio/shared/approvalContract";
+import { isPushUserInboxDataPayload } from "@vibestudio/shared/userNotifications";
+import { displayInboxNotification } from "./inboxNotifications";
 import { APPROVAL_CATEGORY_DECIDE } from "@vibestudio/shared/approvalContract";
 import {
   APPROVAL_NOTIFICATION_CHANNEL_ID,
@@ -121,6 +123,10 @@ export async function handleBackgroundMessage(
   notifee: Pick<NotifeeModule, "displayNotification" | "cancelNotification">
 ): Promise<void> {
   requireApprovedAppCapability("notifications", "background notification message");
+  if (isPushUserInboxDataPayload(message.data)) {
+    await displayInboxNotification(message.data, message, notifee);
+    return;
+  }
   const data = (message.data ?? {}) as PushApprovalDataPayload;
   if (data.kind === "approval-cancel") {
     const cancelKey = data.cancelKey ?? data.approvalId;

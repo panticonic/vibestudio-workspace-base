@@ -89,6 +89,9 @@ export interface PubSubClient<T extends ParticipantMetadata = ParticipantMetadat
   /** Connected and retained offline human presence for this channel. */
   getChannelPresence(): Promise<{ entries: ChannelPresenceEntry[]; generatedAt: number }>;
 
+  /** Record this participant's read receipt for one message (messaging plan §4.10.6). */
+  recordReadReceipt(messageId: string): Promise<void>;
+
   /** Register channel config change handler. Returns unsubscribe function. */
   onConfigChange(handler: (config: ChannelConfig) => void): () => void;
 

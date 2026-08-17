@@ -60,8 +60,13 @@ export function createGadClient(rpc: RpcCaller): GadClient {
   const adapter: GadClient = {
     status: () => call("getStatus"),
     ensureBlob: (hash, size, mimeType) => call("ensureBlob", hash, size, mimeType),
-    listUserNotificationsForMe: async () =>
-      (await call<UserNotificationListResult>("listUserNotificationsForMe")).notifications,
+    listUserNotificationsForMe: async (input) =>
+      (
+        await call<UserNotificationListResult>(
+          "listUserNotificationsForMe",
+          ...(input ? [input] : [])
+        )
+      ).notifications,
     acknowledgeUserNotification: async (id) =>
       (
         await call<UserNotificationAcknowledgementResult>("acknowledgeUserNotification", {

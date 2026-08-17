@@ -35,6 +35,7 @@ import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context"
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   useQuickfireSessionCore,
+  type QuickfireSessionSource,
   type QuickfireTransport,
 } from "@workspace/quickfire-core/session";
 import type { QuickfireTranscriptEntry } from "@workspace/quickfire-core";
@@ -70,9 +71,30 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
   const colors = useAtomValue(themeColorsAtom);
   const insets = useSafeAreaInsets();
 
-  const slotId = request?.slotId ?? null;
-  const session = useQuickfireSessionCore(slotId, transport);
+  const source = useMemo<QuickfireSessionSource | null>(() => {
+    if (!request) return null;
+    if (request.conversation) {
+      const conversation = request.conversation;
+      return {
+        kind: "conversation",
+        channelId: conversation.channelId,
+        contextId: conversation.contextId,
+        clientId: `conversation:${conversation.channelId}`,
+        ...(conversation.focusMessageId ? { focusMessageId: conversation.focusMessageId } : {}),
+        ...(conversation.replyTo ? { replyTo: { participantId: conversation.replyTo.participantId } } : {}),
+      };
+    }
+    return request.slotId ? { kind: "slot", slotId: request.slotId } : null;
+  }, [request]);
+  const session = useQuickfireSessionCore(source, transport);
   const view = session.view;
+  const isConversation = session.mode === "conversation";
+  const headerTitle = request?.conversation
+    ? (request.conversation.title ??
+      (request.conversation.replyTo?.handle
+        ? `@${request.conversation.replyTo.handle}`
+        : request.conversation.channelId))
+    : panelTitle;
 
   const [draft, setDraft] = useState("");
   /** Two-step clear: the first press arms it, the second performs it (§4.3). */
@@ -275,30 +297,32 @@ export function QuickfireSheet({ transport, panelTitle, openChatPanel }: Quickfi
                   style={[type.bodyStrong, styles.headerTitle, { color: colors.text }]}
                   numberOfLines={1}
                 >
-                  {panelTitle}
+                  {headerTitle}
                 </Text>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={clearArmed ? "Really clear conversation" : "Clear conversation"}
-                  disabled={!view.hasConversation}
-                  onPress={handleClear}
-                  hitSlop={6}
-                  style={[
-                    styles.clearButton,
-                    {
-                      backgroundColor: clearArmed ? colors.dangerSoft : "transparent",
-                      opacity: view.hasConversation ? 1 : 0.4,
-                    },
-                  ]}
-                >
-                  <RotateCcw size={16} color={clearArmed ? colors.danger : colors.textSecondary} />
-                  {clearArmed ? (
-                    <Text style={[type.caption, { color: colors.danger }]}>really clear?</Text>
-                  ) : null}
-                </Pressable>
+                {isConversation ? null : (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel={clearArmed ? "Really clear conversation" : "Clear conversation"}
+                    disabled={!view.hasConversation}
+                    onPress={handleClear}
+                    hitSlop={6}
+                    style={[
+                      styles.clearButton,
+                      {
+                        backgroundColor: clearArmed ? colors.dangerSoft : "transparent",
+                        opacity: view.hasConversation ? 1 : 0.4,
+                      },
+                    ]}
+                  >
+                    <RotateCcw size={16} color={clearArmed ? colors.danger : colors.textSecondary} />
+                    {clearArmed ? (
+                      <Text style={[type.caption, { color: colors.danger }]}>really clear?</Text>
+                    ) : null}
+                  </Pressable>
+                )}
                 <IconButton
                   icon={Copy}
-                  label="Open conversation as chat panel"
+                  label={isConversation ? "Open in chat panel" : "Open conversation as chat panel"}
                   onPress={handlePromote}
                   disabled={!view.hasConversation || view.promoted}
                   color={colors.textSecondary}

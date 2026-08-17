@@ -188,4 +188,42 @@ describe("agent tool failure contract", () => {
     });
     expect(renderAgentToolFailure(failure)).toContain("Correct the request");
   });
+
+  it("classifies messaging refusals: unresolved addressees are correctable, closed channels are not", () => {
+    const unresolved = agentToolFailureFromUnknown(
+      Object.assign(new Error('no participant "@scrib" on this channel.'), {
+        code: "unknown-handle",
+        errorData: {
+          code: "unknown-handle",
+          suggestions: ["@scribe"],
+          recovery: { action: "correct-request", instruction: "Did you mean @scribe?" },
+        },
+      }),
+      { operation: "notify", stage: "resolve" }
+    );
+    expect(unresolved).toMatchObject({
+      kind: "not-found",
+      retry: { policy: "correct-input" },
+      recovery: { action: "correct-request", instruction: "Did you mean @scribe?" },
+    });
+
+    const ambiguous = agentToolFailureFromUnknown(
+      Object.assign(new Error("runs in 2 channels"), { code: "ambiguous-agent" }),
+      { operation: "notify", stage: "resolve" }
+    );
+    expect(ambiguous.kind).toBe("invalid-input");
+
+    const closed = agentToolFailureFromUnknown(
+      Object.assign(new Error("locked membership"), {
+        code: "ClosedChannel",
+        errorData: { code: "ClosedChannel", recovery: { action: "stop", instruction: "Do not retry." } },
+      }),
+      { operation: "notify", stage: "deliver" }
+    );
+    expect(closed).toMatchObject({
+      kind: "domain",
+      retry: { policy: "none" },
+      recovery: { action: "stop" },
+    });
+  });
 });

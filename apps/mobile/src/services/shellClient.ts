@@ -1157,9 +1157,11 @@ export class ShellClient {
   readonly browserPrivacy: ReturnType<typeof createShellBrowserPrivacyClient>;
   readonly recovery: RecoveryCoordinator;
   readonly userNotifications: {
-    list(): Promise<UserNotification[]>;
+    list(input?: { includeAcknowledged?: boolean; limit?: number }): Promise<UserNotification[]>;
     acknowledge(id: string): Promise<boolean>;
     openChannel(channelId: string): Promise<{ id: string; title: string }>;
+    /** Facts the conversation sheet binds to (messaging plan §4.8). */
+    describeConversation(channelId: string): Promise<{ contextId: string; title: string | null }>;
   };
   readonly credentials: Credentials;
   private readonly serverIdentity: string;
@@ -1300,10 +1302,11 @@ export class ShellClient {
       return client;
     };
     this.userNotifications = {
-      list: async () =>
+      list: async (input) =>
         (
           await userNotificationStore.call<UserNotificationListResult>(
             "listUserNotificationsForMe",
+            ...(input ? [input] : []),
           )
         ).notifications,
       acknowledge: async (id) =>
@@ -1334,6 +1337,19 @@ export class ShellClient {
           contextId,
           stateArgs: { channelName: channelId },
         });
+      },
+      describeConversation: async (channelId) => {
+        const service = channelClient(channelId);
+        const [config, contextId] = await Promise.all([
+          service.call<{ title?: string } | null>("getConfig"),
+          service.call<string | null>("getContextId"),
+        ]);
+        if (!contextId) {
+          throw new Error(
+            "This conversation is not ready yet. Please try again in a moment.",
+          );
+        }
+        return { contextId, title: config?.title?.trim() || null };
       },
     };
     this.workspaces = new WorkspaceClient(this.transport);

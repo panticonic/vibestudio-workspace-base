@@ -350,3 +350,84 @@ describe("agentic.conversation.v1", () => {
     expect(resolved.map((policy) => policy.name)).toEqual([...DEFAULT_CHANNEL_POLICIES]);
   });
 });
+
+/**
+ * Cross-channel hop depth (messaging plan §4.6, D13).
+ *
+ * `agentHops` is a per-channel fold, so a chain that crosses channels would
+ * restart its streak in every channel it touches and get N times the depth the
+ * cap intends — while every single-channel test still passed. Termination is
+ * therefore not evidence; the observed count is.
+ */
+describe("agentic.conversation.v1 hop depth across channels", () => {
+  const policy = conversationV1Policy;
+
+  /** Depth reported for the Nth message of an A↔B chain inside one channel. */
+  function singleChannelDepth(steps: number): number {
+    let state = policy.init();
+    let annotated = 0;
+    for (let step = 1; step <= steps; step += 1) {
+      const senderId = step % 2 === 1 ? "agent:a" : "agent:b";
+      const draft = {
+        payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
+        payload: completedEnvelope(step, senderId, "agent").payload,
+        senderId,
+        senderKind: "agent" as const,
+      };
+      annotated = (policy.annotate(state, draft) as { agentHops: number }).agentHops;
+      state = policy.reduce(state, completedEnvelope(step, senderId, "agent"));
+    }
+    return annotated;
+  }
+
+  /**
+   * The same chain, but every message crosses into a channel that has never
+   * seen this conversation — a fresh policy state each step. The sender stamps
+   * `causality.agentHops = <inbound> + 1`, which the policy honours.
+   */
+  function crossChannelDepth(steps: number): number {
+    let inbound = 0;
+    let annotated = 0;
+    for (let step = 1; step <= steps; step += 1) {
+      const senderId = step % 2 === 1 ? "agent:a" : "agent:b";
+      const stamped = inbound + 1;
+      const draft = {
+        payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
+        payload: completedEnvelope(step, senderId, "agent", undefined, { agentHops: stamped })
+          .payload,
+        senderId,
+        senderKind: "agent" as const,
+      };
+      // A channel the chain has never touched: its fold starts from nothing.
+      annotated = (policy.annotate(policy.init(), draft) as { agentHops: number }).agentHops;
+      inbound = annotated;
+    }
+    return annotated;
+  }
+
+  it("counts a chain that crosses channels at the same depth as one that does not", () => {
+    for (const steps of [1, 2, 4, 6]) {
+      const local = singleChannelDepth(steps);
+      const crossed = crossChannelDepth(steps);
+      expect(
+        crossed,
+        `a ${steps}-step chain reached depth ${crossed} across channels but ${local} within one; ` +
+          `the hop cap is only as tight as the smaller number`
+      ).toBe(local);
+    }
+  });
+
+  it("would undercount without the explicit stamp, which is why the stamp exists", () => {
+    // Guard the guard: an unstamped guest envelope arriving in a fresh channel
+    // reports depth 1 no matter how deep the conversation already is. If this
+    // ever stops being true the stamping path has become redundant and the test
+    // above stops proving anything.
+    const draft = {
+      payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
+      payload: completedEnvelope(9, "agent:b", "agent").payload,
+      senderId: "agent:b",
+      senderKind: "agent" as const,
+    };
+    expect(policy.annotate(policy.init(), draft)).toEqual({ agentHops: 1 });
+  });
+});

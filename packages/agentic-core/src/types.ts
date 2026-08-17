@@ -186,6 +186,22 @@ export interface AgenticChatActions {
   firstAgentModelPreflight?: "checking" | "ready" | "selection-required";
   onFocusPanel?: (panelId: string) => void;
   onReloadPanel?: (panelId: string) => Promise<void>;
+  /**
+   * Find-or-open the chat panel for another channel, optionally landing on one
+   * envelope (messaging plan §4.10.3/§4.10.4/§4.10.7): the dispatch card's
+   * `[Open ▸]`, the guest chip's origin link, and the external-conversations
+   * menu all route through this. Absent on hosts that cannot open panels.
+   */
+  onOpenChannel?: (
+    channelId: string,
+    opts?: { focusMessageId?: string },
+  ) => Promise<void> | void;
+  /**
+   * Acknowledge one durable inbox entry addressed to this person (messaging
+   * plan §4.5.4): called when the transcript renders an escalated message.
+   * Hosts wire it to Gad `acknowledgeUserNotification`.
+   */
+  onAcknowledgeEscalation?: (notificationId: string) => Promise<void> | void;
   onBecomeVisible?: () => void;
   /** Raise host-level attention for a blocking in-chat question. */
   onAttentionRequired?: (title: string, message?: string) => void;

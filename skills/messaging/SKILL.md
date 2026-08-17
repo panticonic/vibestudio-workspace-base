@@ -28,10 +28,10 @@ notify({
 | Ref | Reaches |
 |---|---|
 | *(omitted)* | everyone in this conversation |
-| `@handle` | one participant here — an agent or a person |
+| `@handle` | one participant here — an agent or a person; a person is also found by handle when they are a workspace member who has not joined this channel yet |
 | `participant:<id>` | the same, by exact id |
-| `user:<id>` | a specific person |
-| `owner` | the person this channel belongs to |
+| `user:<id>` | a specific person, on this channel or not (they are added to it) |
+| `owner` | the person this channel belongs to (fails when there is more than one person here — nobody is guessed) |
 | `parent` | your supervisor, when you are a subagent |
 | `run:<runId>` | a subagent you spawned, in its own task channel |
 | `agent:<handle>@<channelId>` | an agent instance in another conversation |
@@ -57,6 +57,19 @@ not for how urgent the news feels to you.
 | `none` | the message in the channel, nothing else | agent-to-agent, and ordinary channel utterances. The default. |
 | `inbox` | + a durable notification entry and a phone push | the default whenever you address a person. It lands and it travels, without seizing a screen. |
 | `interrupt` | + a toast on whatever they are doing | only for something they would want to be pulled away from. |
+
+Escalation is **explicit**: an untargeted `notify` is a plain channel message.
+A rung above `none` reaches the people you addressed — or, when you raised the
+rung on purpose without naming anyone, the people in this conversation. Nobody
+outside the conversation is ever guessed at.
+
+What the person sees: a notification-center row (grouped per agent, so two
+reports before they look read as one), a phone notification, and — at
+`interrupt` — a toast. From any of these they can **reply in place** in a
+lightweight conversation view bound to your channel, or open the full chat
+panel landed on your message. Reading your message *is* acknowledging it: you
+see the ordinary read receipt, and the entry retires. Do not re-notify what
+has been read.
 
 Worked examples:
 
@@ -111,6 +124,12 @@ Notification is cheap. Keep it **rare**.
   overview, and print `agent:<handle>@<channelId>` refs ready to paste into
   `notify`.
 
+**Be findable.** The directory searches each instance's handle, name, its
+one-line description, and its latest deliberate message. Set the description
+yourself with `set_description("…")` — what you are for and what you are doing
+here — and update it when that changes materially. An agent with no
+description is found only by its handle.
+
 An agent instance is a **(worker, channel) pair**. The same worker sitting in
 three conversations is three instances with three refs, because "message the
 gmail agent" is meaningless without saying *where*. Addressing a bare
@@ -118,7 +137,10 @@ gmail agent" is meaningless without saying *where*. Addressing a bare
 
 Instances that have left their channel stay discoverable with
 `includeTerminal`. Their channels are durable, so messaging one wakes it — that
-is how you resume a conversation with an agent that finished weeks ago.
+is how you resume a conversation with an agent that finished weeks ago. Status
+is `running` / `idle` / `terminal`, flipped by lifecycle events only; `idle`
+includes an agent whose process has been evicted — it wakes on your message
+exactly like a running one.
 
 ## Talking to an agent in another conversation
 
@@ -130,8 +152,10 @@ notify({
 ```
 
 The message lands as an ordinary message in *their* channel, marked as coming
-from you and from here; they can reply symmetrically. Your own channel records a
-reference to it, not a copy — the utterance exists once, where it was said.
+from you and from here; they can reply symmetrically — a guest message tells its
+recipient the exact `agent:<handle>@<channelId>` ref to answer with. Your own
+channel records a reference to it, not a copy — the utterance exists once,
+where it was said. Guest messages are not editable after sending.
 
 Two consequences worth knowing:
 

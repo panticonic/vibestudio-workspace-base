@@ -42,12 +42,16 @@ import type {
   BrowserAddressSuggestion,
   PanelChromeState,
 } from "@vibestudio/shared/panelChrome";
-import { hostCommands, panel, quickfire, workspace } from "../shell/client";
+import { hostCommands, panel, quickfire, userNotifications, workspace } from "../shell/client";
 import { useShellEvent } from "../shell/useShellEvent";
 import { useShellContentOverlay, type ContentOverlayBounds } from "../shell/useShellContentOverlay";
 import { effectiveThemeAtom, themeConfigAtom, setThemeModeAtom, setThemeConfigAtom } from "../state/themeAtoms";
 import { workspaceChooserDialogOpenAtom } from "../state/appModeAtoms";
-import { commandAgentRequestAtom } from "../state/commandAgentAtoms";
+import {
+  commandAgentRequestAtom,
+  conversationSurfaceRequestAtom,
+  type ConversationSurfaceRequest,
+} from "../state/commandAgentAtoms";
 import { useNavigationActions } from "./NavigationContext";
 import {
   buildSlate,
@@ -105,6 +109,12 @@ interface OverlayState {
   /** True once the user has moved the selection off the top row. */
   selectionTouched: boolean;
   flashRowId: string | null;
+  /**
+   * Set when the overlay is a conversation surface (messaging plan §4.8): the
+   * quickfire card bound to an EXISTING channel rather than the focused panel's
+   * slot. Null for the command agent / palette.
+   */
+  conversation: Omit<ConversationSurfaceRequest, "sequence"> | null;
 }
 
 const CLOSED: OverlayState = {
@@ -116,6 +126,7 @@ const CLOSED: OverlayState = {
   selectedId: null,
   selectionTouched: false,
   flashRowId: null,
+  conversation: null,
 };
 
 export function QuickfireOwner() {
@@ -242,13 +253,17 @@ export function QuickfireOwner() {
   }, []);
 
   const open = useCallback(
-    (mode: QuickfireMode, options?: { panelId?: string }) => {
+    (
+      mode: QuickfireMode,
+      options?: { panelId?: string; conversation?: Omit<ConversationSurfaceRequest, "sequence"> }
+    ) => {
       setPanelLost(false);
       setState((current) => ({
         ...CLOSED,
         open: true,
         mode,
         inputEpoch: current.inputEpoch + 1,
+        conversation: options?.conversation ?? null,
       }));
       setFocusRequest((sequence) => sequence + 1);
       void (async () => {
@@ -305,6 +320,14 @@ export function QuickfireOwner() {
     });
     // `sequence` is the identity of the request: repeating the same ask reopens.
   }, [commandAgentRequest, open]);
+  // A notification asking to talk to the agent that sent it (plan §4.8): the
+  // same overlay, in `/` mode, bound to that conversation instead of a slot.
+  const conversationRequest = useAtomValue(conversationSurfaceRequestAtom);
+  useEffect(() => {
+    if (!conversationRequest) return;
+    const { sequence: _sequence, ...conversation } = conversationRequest;
+    open("quickfire", { conversation });
+  }, [conversationRequest, open]);
 
   /**
    * Close the overlay. Focus returns to the panel the user was looking at only
@@ -345,7 +368,25 @@ export function QuickfireOwner() {
     state.open && state.mode === "quickfire" && !state.argSession && !panelLost
       ? (chromeState?.panelId ?? null)
       : null;
-  const quickfireSession = useQuickfireSession(quickfireSlotId);
+  const conversationBinding = state.open && state.mode === "quickfire" ? state.conversation : null;
+  const quickfireSource = useMemo<QuickfireSessionSource | null>(() => {
+    if (conversationBinding) {
+      return {
+        kind: "conversation",
+        channelId: conversationBinding.channelId,
+        contextId: conversationBinding.contextId,
+        clientId: `conversation:${conversationBinding.channelId}`,
+        ...(conversationBinding.focusMessageId
+          ? { focusMessageId: conversationBinding.focusMessageId }
+          : {}),
+        ...(conversationBinding.replyTo
+          ? { replyTo: { participantId: conversationBinding.replyTo.participantId } }
+          : {}),
+      };
+    }
+    return quickfireSlotId ? { kind: "slot", slotId: quickfireSlotId } : null;
+  }, [conversationBinding, quickfireSlotId]);
+  const quickfireSession = useQuickfireSession(quickfireSource);
 
   const searchQuery = state.argSession ? state.query : stripModePrefix(state.query, state.mode);
 
@@ -736,6 +777,16 @@ export function QuickfireOwner() {
    * marked promoted so closing the source slot no longer archives it (§1.4).
    */
   const promoteToChatPanel = useCallback(async () => {
+    if (state.conversation) {
+      // A conversation surface has nothing to promote: its chat panel is
+      // found-or-opened (never duplicated), landing on the envelope it opened on.
+      const { channelId, focusMessageId } = state.conversation;
+      await userNotifications.openChannel(channelId, {
+        ...(focusMessageId ? { focusMessageId } : {}),
+      });
+      close({ restoreFocus: false });
+      return;
+    }
     const parentSlot = chromeState?.panelId;
     const promoted = await quickfireSession.promote();
     if (!promoted) return;
@@ -753,7 +804,7 @@ export function QuickfireOwner() {
         });
     if (opened?.id) promotedPanelIdsRef.current.set(channelId, opened.id);
     close({ restoreFocus: false });
-  }, [chromeState?.panelId, close, quickfireSession]);
+  }, [chromeState?.panelId, close, quickfireSession, state.conversation]);
 
   /**
    * Focus the chat panel a promoted conversation continued into.
@@ -899,6 +950,9 @@ export function QuickfireOwner() {
           void quickfireSession.stop().catch(reportCommandFailure);
           return;
         case "clear":
+          // A conversation surface has no clear (plan §4.8); the button is not
+          // rendered, so this is only a stray keyboard path.
+          if (state.conversation) return;
           // Two-step, no modal: arm, then confirm (§4.3).
           if (!clearArmed) {
             setClearArmed(true);
@@ -914,6 +968,7 @@ export function QuickfireOwner() {
           void focusPromotedPanel().catch(reportCommandFailure);
           return;
         case "start-fresh":
+          if (state.conversation) return;
           void quickfireSession.startFresh().catch(reportCommandFailure);
           return;
       }
@@ -922,6 +977,7 @@ export function QuickfireOwner() {
       activateRow,
       applySessionOutcome,
       clearArmed,
+      state.conversation,
       close,
       focusPromotedPanel,
       ghostSuffix,
@@ -991,17 +1047,29 @@ export function QuickfireOwner() {
       compose:
         state.mode === "quickfire" && !session
           ? {
-              panelTitle: chromeState?.title ?? "this panel",
-              hint: "Ask about this panel. I can describe what it is and how it is running.",
+              kind: state.conversation ? ("conversation" as const) : ("slot" as const),
+              panelTitle: state.conversation
+                ? (state.conversation.title ??
+                  (state.conversation.replyTo?.handle
+                    ? `@${state.conversation.replyTo.handle}`
+                    : state.conversation.channelId))
+                : (chromeState?.title ?? "this panel"),
+              hint: state.conversation
+                ? state.conversation.replyTo?.handle
+                  ? `Reply to @${state.conversation.replyTo.handle}. Open the chat panel for the whole conversation.`
+                  : "Reply here, or open the chat panel for the whole conversation."
+                : "Ask about this panel. I can describe what it is and how it is running.",
               // The overlay's input is at the top, so the conversation reads
               // downward from it: newest first (see `useQuickfireSession`).
               transcriptOrder: "newest-first" as const,
               // Honest about why the box is dead, never silently inert.
-              disabledReason: panelLost
-                ? "That panel closed. Reopen the command agent over another panel to keep going."
-                : !chromeState
-                  ? "No panel is focused, so there is nothing to ask about."
-                  : conversation.view.error,
+              disabledReason: state.conversation
+                ? conversation.view.error
+                : panelLost
+                  ? "That panel closed. Reopen the command agent over another panel to keep going."
+                  : !chromeState
+                    ? "No panel is focused, so there is nothing to ask about."
+                    : conversation.view.error,
               transcript: conversation.view.transcript,
               olderCount: conversation.view.olderCount,
               credentialRequest: conversation.view.credentialRequest,

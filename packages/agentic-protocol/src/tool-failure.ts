@@ -103,6 +103,12 @@ export class AgentToolFailureError extends Error {
 }
 
 const CODE_KIND: ReadonlyArray<[RegExp, AgentToolFailureKind]> = [
+  // Messaging (plan §4.10.11): an addressee that could not be resolved is a
+  // correctable request; a channel that refuses guests is a domain refusal the
+  // agent must not retry.
+  [/^ambiguous-(handle|agent|run)\b/i, "invalid-input"],
+  [/^(unknown-(handle|agent|run|user|channel)|no-owner|not-a-subagent)\b/i, "not-found"],
+  [/^(ClosedChannel|AddresseeUnreachable|CrossChannelDeliveryFailed)\b/, "domain"],
   [/cancel|abort|deadline|timeout/i, "cancelled"],
   [/integrity|corrupt|digest|mismatch/i, "integrity"],
   [/invalid|malformed|schema|argument|input/i, "invalid-input"],

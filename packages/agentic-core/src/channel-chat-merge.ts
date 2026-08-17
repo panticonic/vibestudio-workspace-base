@@ -634,7 +634,10 @@ function projectedMessageToChatMessages(
   const sortTime = Date.parse(message.completedAt ?? message.startedAt ?? "") || 0;
   const lifecycle = lifecycleNoticeFromMessage(message);
   const actorMetadata = message.actor.metadata as
-    | { handle?: unknown; origin?: { channelId?: unknown; participantId?: unknown } }
+    | {
+        handle?: unknown;
+        origin?: { channelId?: unknown; participantId?: unknown; envelopeId?: unknown };
+      }
     | undefined;
   const senderMetadata = {
     name: message.actor.displayName ?? message.actor.id,
@@ -650,6 +653,9 @@ function projectedMessageToChatMessages(
       ? {
           channelId: actorMetadata.origin.channelId,
           participantId: actorMetadata.origin.participantId,
+          ...(typeof actorMetadata.origin.envelopeId === "string"
+            ? { envelopeId: actorMetadata.origin.envelopeId }
+            : {}),
         }
       : undefined;
   const complete = message.status === "completed" || message.status === "failed";
@@ -751,6 +757,22 @@ function projectedMessageToChatMessages(
       ...(message.seq !== undefined ? { seq: message.seq } : {}),
       ...(message.saliency ? { saliency: message.saliency } : {}),
       ...(message.replaces ? { replaces: message.replaces } : {}),
+      ...(message.notify
+        ? {
+            escalation: {
+              alert: message.notify.alert,
+              ...(message.notify.title ? { title: message.notify.title } : {}),
+              users: (message.to ?? [])
+                .filter(
+                  (selector) =>
+                    selector.kind === "participant" &&
+                    typeof selector.participantId === "string" &&
+                    selector.participantId.startsWith("user:")
+                )
+                .map((selector) => selector.participantId as string),
+            },
+          }
+        : {}),
       error:
         message.status === "failed"
           ? (failureReason ?? "Message failed")

@@ -15,6 +15,7 @@ import {
   openPanel,
   notifications,
   extensions,
+  gad,
 } from "@workspace/runtime";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
@@ -171,6 +172,10 @@ interface ChatStateArgs {
   agentClass?: string;
   /** If set, automatically sent as the first user message once connected */
   initialPrompt?: string;
+  /** Envelope to scroll to and highlight once it is in the transcript — set by
+   *  notification surfaces and other channels' open links (messaging plan §4.5,
+   *  §4.10). Consumed (cleared) once honoured. */
+  focusMessageId?: string;
   /** Send initialPrompt even if the channel already has history (e.g. a fork). */
   forceInitialPrompt?: boolean;
   /** System prompt for the agent harness */
@@ -577,6 +582,30 @@ export default function ChatPanel() {
     await panel.focusPanel(panelId);
     window.location.reload();
   }, []);
+
+  // Find-or-open another channel's chat panel (dispatch cards, guest origin
+  // links, the external-conversations menu). Same rule the shell applies from
+  // the notification surfaces: never a second panel for an open conversation.
+  // The inbox half of acknowledge-on-read (messaging plan §4.5.4): the receipt
+  // is emitted by the shared hook; this retires the durable entry.
+  const handleAcknowledgeEscalation = useCallback(async (notificationId: string) => {
+    await gad.acknowledgeUserNotification(notificationId);
+  }, []);
+
+  // Once the transcript has landed on the requested envelope, drop the request
+  // from the panel's own stateArgs so it does not replay on remount.
+  const handleFocusMessageConsumed = useCallback((messageId: string) => {
+    if (panel.stateArgs.get<ChatStateArgs>().focusMessageId !== messageId) return;
+    void panel.stateArgs.set({ focusMessageId: null }).catch(() => undefined);
+  }, []);
+
+  const handleOpenChannel = useCallback(
+    async (targetChannelId: string, opts?: { focusMessageId?: string }) => {
+      const { openChannelPanel } = await import("./openChannelPanel");
+      await openChannelPanel(targetChannelId, opts);
+    },
+    []
+  );
 
   const openLocalModelsCapability = useCallback(async (server?: ServerKind) => {
     try {
@@ -1155,6 +1184,8 @@ export default function ChatPanel() {
       firstAgentChannelIsNew: bootstrapChannel !== null && channelName === bootstrapChannel,
       onFocusPanel: handleFocusPanel,
       onReloadPanel: handleReloadPanel,
+      onOpenChannel: handleOpenChannel,
+      onAcknowledgeEscalation: handleAcknowledgeEscalation,
       onOpenClaudeCode: handleOpenClaudeCode,
       onOpenLocalModelsLog: handleOpenLocalModelsLog,
       onOpenLocalModels: handleOpenLocalModels,
@@ -1184,6 +1215,8 @@ export default function ChatPanel() {
       bootstrapChannel,
       handleFocusPanel,
       handleReloadPanel,
+      handleOpenChannel,
+      handleAcknowledgeEscalation,
       handleOpenClaudeCode,
       handleOpenLocalModelsLog,
       handleOpenLocalModels,
@@ -1419,6 +1452,8 @@ export default function ChatPanel() {
           initialActionBarMaxHeight={stateArgs.actionBarMaxHeight ?? undefined}
           onActionBarFileChange={handleActionBarFileChange}
           connectionRetrySignal={connectionRetrySignal}
+          focusMessageId={stateArgs.focusMessageId}
+          onFocusMessageConsumed={handleFocusMessageConsumed}
         />
       </Suspense>
     </>

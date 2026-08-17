@@ -187,6 +187,24 @@ describe("resolveAddressee", () => {
     expect(offRoster).toMatchObject({ channelId: "ch-home", foreign: false });
   });
 
+  it("falls back to a workspace member for an @handle nobody on the roster carries", () => {
+    const users = [
+      { userId: "sam", handle: "sam" },
+      { userId: "alex", handle: "alex" },
+    ];
+    const resolved = expectResolved(resolveAddressee("@sam", ctx({ users })));
+    expect(resolved).toMatchObject({ kind: "user", userId: "sam", inRoster: false });
+    // The fallback is exact-only: a near miss still fails closed with the
+    // roster's suggestions rather than picking a member.
+    const miss = resolveAddressee("@sa", ctx({ users }));
+    expect(isAddresseeError(miss) && miss.code).toBe("unknown-handle");
+    // A roster hit always wins over a member with the same handle.
+    const onRoster = expectResolved(
+      resolveAddressee("@gabriel", ctx({ users: [{ userId: "gabriel", handle: "gabriel" }] }))
+    );
+    expect(onRoster).toMatchObject({ kind: "user", inRoster: true });
+  });
+
   it("resolves `owner` through the channel owner", () => {
     const resolved = expectResolved(resolveAddressee("owner", ctx({ ownerUserId: "gabriel" })));
     expect(resolved).toMatchObject({ kind: "user", userId: "gabriel", inRoster: true });

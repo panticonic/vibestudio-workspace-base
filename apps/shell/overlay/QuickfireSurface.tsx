@@ -332,25 +332,31 @@ function QuickfireConversation({
               away, or move it somewhere it can grow. An unlabelled glyph made
               the second one invisible, and the first is destructive enough that
               it should say what it does before it asks again. */}
-          <button
-            type="button"
-            className={`quickfire-action${compose.clearArmed ? " quickfire-action-armed" : ""}`}
-            disabled={!compose.hasConversation}
-            title="Delete this panel's conversation"
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => emit({ type: "clear" })}
-          >
-            {compose.clearArmed ? "⟲ Really clear?" : "⟲ Clear"}
-          </button>
+          {compose.kind === "conversation" ? null : (
+            <button
+              type="button"
+              className={`quickfire-action${compose.clearArmed ? " quickfire-action-armed" : ""}`}
+              disabled={!compose.hasConversation}
+              title="Delete this panel's conversation"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => emit({ type: "clear" })}
+            >
+              {compose.clearArmed ? "⟲ Really clear?" : "⟲ Clear"}
+            </button>
+          )}
           <button
             type="button"
             className="quickfire-action"
             disabled={!compose.hasConversation}
-            title="Move this conversation into a chat panel below this one, keeping its history"
+            title={
+              compose.kind === "conversation"
+                ? "Open this conversation in its chat panel"
+                : "Move this conversation into a chat panel below this one, keeping its history"
+            }
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => emit({ type: "promote" })}
           >
-            ⧉ Move to chat panel
+            {compose.kind === "conversation" ? "⧉ Open chat panel" : "⧉ Move to chat panel"}
           </button>
         </span>
       </div>
@@ -415,7 +421,11 @@ function QuickfireConversation({
         </div>
       ) : (
         <p className="quickfire-compose-hint">
-          {compose.connecting ? "Starting a conversation about this panel…" : compose.hint}
+          {compose.connecting
+            ? compose.kind === "conversation"
+              ? "Opening the conversation…"
+              : "Starting a conversation about this panel…"
+            : compose.hint}
         </p>
       )}
 

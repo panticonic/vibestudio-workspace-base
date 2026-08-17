@@ -79,6 +79,35 @@ export interface QuickfireSessionFacts {
   lastActivityAt: number | null;
 }
 
+/**
+ * What a session is bound to (messaging plan §4.8). The core does not care
+ * which: it resolves facts, joins the channel, reduces the log, and drives it.
+ *
+ *  - `slot` — the quickfire overlay: a per-slot agent minted on the user's
+ *    gesture (`transport.sessionFor`), clearable and restartable.
+ *  - `conversation` — an existing channel, e.g. the one an agent notified the
+ *    user from. Nothing is minted: the person joins as their ordinary `user:`
+ *    participant, and a reply is an ordinary message addressed back to the
+ *    notifying participant (`replyTo` the envelope, so respond policies wake
+ *    exactly the right agent). There is no "fresh" and no "clear" for a
+ *    channel that already exists — those controller members throw in this mode
+ *    and surfaces do not render them.
+ */
+export type QuickfireSessionSource =
+  | { kind: "slot"; slotId: string }
+  | {
+      kind: "conversation";
+      channelId: string;
+      contextId: string;
+      /** Stable client id for the observer connection (the channel maps a
+       *  human caller to `user:<id>` regardless). */
+      clientId: string;
+      /** The envelope this surface opened on; replies thread under it. */
+      focusMessageId?: string;
+      /** The participant that notified — replies are addressed to it. */
+      replyTo?: { participantId: string };
+    };
+
 /** Everything the core needs from its host client. */
 export interface QuickfireTransport {
   sessionFor: (
@@ -103,11 +132,13 @@ export interface QuickfireTransport {
 }
 
 export interface QuickfireSessionView {
+  /** What this session is bound to; `null` while unbound. */
+  source: QuickfireSessionSource | null;
   slotId: string | null;
   channelId: string | null;
   contextId: string | null;
   connecting: boolean;
-  /** True once a durable mapping exists for the slot. */
+  /** True once a durable mapping exists for the slot (always true for a conversation). */
   hasConversation: boolean;
   promoted: boolean;
   resume: QuickfireResumeChip | null;
@@ -124,14 +155,20 @@ export interface QuickfireSessionView {
 
 export interface QuickfireSessionController {
   view: QuickfireSessionView;
+  /** `slot` sessions can be cleared and restarted; `conversation` sessions cannot. */
+  mode: "slot" | "conversation" | null;
   send: (text: string) => Promise<void>;
   stop: () => Promise<void>;
+  /** Slot mode only; throws for a conversation. */
   clear: () => Promise<void>;
+  /** Slot mode only (promotion mints the chat panel); a conversation resolves to its own facts. */
   promote: () => Promise<QuickfireSessionFacts | null>;
+  /** Slot mode only; throws for a conversation. */
   startFresh: () => Promise<void>;
 }
 
 const IDLE: QuickfireSessionView = {
+  source: null,
   slotId: null,
   channelId: null,
   contextId: null,
@@ -146,31 +183,50 @@ const IDLE: QuickfireSessionView = {
   error: null,
 };
 
+/** Accept the historical `slotId` string form as well as a source object. */
+function normalizeSource(
+  input: string | QuickfireSessionSource | null | undefined
+): QuickfireSessionSource | null {
+  if (!input) return null;
+  return typeof input === "string" ? { kind: "slot", slotId: input } : input;
+}
+
+function sourceKey(source: QuickfireSessionSource | null): string {
+  if (!source) return "";
+  return source.kind === "slot"
+    ? `slot:${source.slotId}`
+    : `conversation:${source.channelId}:${source.contextId}:${source.clientId}`;
+}
+
 /**
- * Resolve and drive the conversation bound to `slotId`.
+ * Resolve and drive the conversation bound to `source`.
  *
- * Passing `slotId: null` (surface closed, or not in quickfire mode) tears the
- * connection down. The durable conversation is untouched by that — only clear,
- * slot close, and promotion end a conversation.
+ * Passing `null` (surface closed, or not in quickfire mode) tears the connection
+ * down. The durable conversation is untouched by that — only clear, slot close,
+ * and promotion end a slot conversation; a `conversation` source is never ended
+ * from here.
  *
  * `transport` is read through a ref, so a caller that rebuilds the object every
  * render does not churn the connection.
  */
 export function useQuickfireSessionCore(
-  slotId: string | null,
+  input: string | QuickfireSessionSource | null,
   transport: QuickfireTransport,
   options: QuickfireSessionOptions = {}
 ): QuickfireSessionController {
   const transcriptOrder = options.transcriptOrder ?? "oldest-first";
+  const source = useMemo(() => normalizeSource(input), [input]);
+  const key = sourceKey(source);
   const [view, setView] = useState<QuickfireSessionView>(IDLE);
   const transportRef = useRef(transport);
   transportRef.current = transport;
+  const sourceRef = useRef(source);
+  sourceRef.current = source;
   const clientRef = useRef<PubSubClient | null>(null);
   const stateRef = useRef<ChannelViewState>(createInitialChannelViewState());
   const selfKeyRef = useRef<string | null>(null);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const generationRef = useRef(0);
-  const freshRef = useRef(false);
   /**
    * Text sent before the channel finished connecting.
    *
@@ -214,8 +270,24 @@ export function useQuickfireSessionCore(
 
   /** Put one message on the wire, surfacing a failure inline rather than throwing. */
   const deliver = useCallback(async (client: PubSubClient, text: string) => {
+    const bound = sourceRef.current;
     try {
-      await client.send(text, { mentions: ["quickfire"] });
+      if (bound?.kind === "conversation") {
+        // A reply into an existing conversation: threaded under the envelope
+        // this surface opened on and addressed to whoever sent it, so a
+        // directed channel wakes exactly that agent and nobody else.
+        await client.send(text, {
+          ...(bound.focusMessageId ? { replyTo: bound.focusMessageId } : {}),
+          ...(bound.replyTo
+            ? {
+                mentions: [bound.replyTo.participantId],
+                to: [{ kind: "participant" as const, participantId: bound.replyTo.participantId }],
+              }
+            : {}),
+        });
+      } else {
+        await client.send(text, { mentions: ["quickfire"] });
+      }
     } catch (error) {
       setView((current) => ({
         ...current,
@@ -224,55 +296,75 @@ export function useQuickfireSessionCore(
     }
   }, []);
 
-  useEffect(() => {
-    const generation = (generationRef.current += 1);
-    const wantsFresh = freshRef.current;
-    freshRef.current = false;
-    if (!slotId) {
-      // Settling into an unbound state is where queued text dies: the binding it
-      // was typed for no longer exists, and nothing later should inherit it.
-      queuedRef.current = [];
-      setView(IDLE);
-      return;
+  const closeClient = useCallback(() => {
+    if (pushTimerRef.current !== null) {
+      clearTimeout(pushTimerRef.current);
+      pushTimerRef.current = null;
     }
-    setView({ ...IDLE, slotId, connecting: true });
-    stateRef.current = createInitialChannelViewState();
-    let disposed = false;
+    const client = clientRef.current;
+    clientRef.current = null;
+    selfKeyRef.current = null;
+    // Leaving the channel is a view change only; the durable conversation
+    // survives until an explicit lifecycle event ends it.
+    void client?.close().catch(() => undefined);
+  }, []);
 
-    void (async () => {
+  /**
+   * The one binding path: resolve the source to session facts, join the
+   * channel, and reduce its event stream. Both the resolve effect and
+   * `startFresh` go through here, so a fresh slot session gets the same live
+   * transcript as any other (the earlier duplicate connect path never
+   * subscribed to events at all).
+   */
+  const bind = useCallback(
+    async (bound: QuickfireSessionSource, generation: number, fresh: boolean) => {
+      const live = () => generationRef.current === generation;
       try {
-        const session = await transportRef.current.sessionFor(slotId, { fresh: wantsFresh });
-        if (disposed || generationRef.current !== generation) return;
+        const session: QuickfireSessionFacts =
+          bound.kind === "slot"
+            ? await transportRef.current.sessionFor(bound.slotId, { fresh })
+            : {
+                channelId: bound.channelId,
+                contextId: bound.contextId,
+                state: "resumed",
+                messageCount: null,
+                lastActivityAt: null,
+              };
+        if (!live()) return;
         setView((current) => ({
           ...current,
-          slotId,
+          source: bound,
+          slotId: bound.kind === "slot" ? bound.slotId : null,
           channelId: session.channelId,
           contextId: session.contextId,
           hasConversation: true,
           promoted: session.state === "promoted",
           resume:
-            session.state === "resumed"
+            bound.kind === "slot" && session.state === "resumed"
               ? {
                   messageCount: session.messageCount,
                   lastActivityAt: session.lastActivityAt,
                 }
               : null,
-          connecting: session.state === "promoted" ? false : true,
+          connecting: session.state !== "promoted",
         }));
-        // A promoted conversation is read from its chat panel, not here.
+        // A promoted slot conversation is read from its chat panel, not here.
         if (session.state === "promoted") return;
 
         const client = transportRef.current.connectToChannel(
           session.channelId,
           session.contextId,
-          { clientId: slotId, replayMessageLimit: TRANSCRIPT_LIMIT }
+          {
+            clientId: bound.kind === "slot" ? bound.slotId : bound.clientId,
+            replayMessageLimit: TRANSCRIPT_LIMIT,
+          }
         );
         clientRef.current = client;
         selfKeyRef.current = client.clientId ?? null;
         void (async () => {
           try {
             for await (const event of client.events({ includeReplay: true })) {
-              if (disposed || generationRef.current !== generation) return;
+              if (!live()) return;
               // A wire event is NOT the envelope the reducer consumes. Feeding
               // one straight in (behind a cast) misses every branch and returns
               // the state untouched, which renders as an empty transcript with a
@@ -307,7 +399,7 @@ export function useQuickfireSessionCore(
               schedulePush();
             }
           } catch (error) {
-            if (disposed || generationRef.current !== generation) return;
+            if (!live()) return;
             setView((current) => ({
               ...current,
               error: error instanceof Error ? error.message : String(error),
@@ -315,40 +407,59 @@ export function useQuickfireSessionCore(
           }
         })();
         await client.ready();
-        if (disposed || generationRef.current !== generation) return;
+        if (!live()) return;
         selfKeyRef.current = client.clientId ?? selfKeyRef.current;
         setView((current) => ({ ...current, connecting: false }));
         flush();
+        // Opening a conversation on an escalated envelope IS reading it
+        // (messaging plan §4.5.4/§4.10.6): the ordinary read receipt goes out,
+        // so the notifying agent sees "read" through the mechanism it has.
+        if (bound.kind === "conversation" && bound.focusMessageId) {
+          void client.recordReadReceipt(bound.focusMessageId).catch(() => undefined);
+        }
         const queued = queuedRef.current;
         queuedRef.current = [];
         for (const text of queued) {
           await deliver(client, text);
-          if (disposed || generationRef.current !== generation) return;
+          if (!live()) return;
         }
       } catch (error) {
-        if (disposed || generationRef.current !== generation) return;
+        if (!live()) return;
         setView((current) => ({
           ...current,
           connecting: false,
           error: error instanceof Error ? error.message : String(error),
         }));
       }
-    })();
+    },
+    [deliver, flush, schedulePush]
+  );
 
+  useEffect(() => {
+    const generation = (generationRef.current += 1);
+    const bound = source;
+    if (!bound) {
+      // Settling into an unbound state is where queued text dies: the binding it
+      // was typed for no longer exists, and nothing later should inherit it.
+      queuedRef.current = [];
+      setView(IDLE);
+      return;
+    }
+    setView({
+      ...IDLE,
+      source: bound,
+      slotId: bound.kind === "slot" ? bound.slotId : null,
+      connecting: true,
+    });
+    stateRef.current = createInitialChannelViewState();
+    void bind(bound, generation, false);
     return () => {
-      disposed = true;
-      if (pushTimerRef.current !== null) {
-        clearTimeout(pushTimerRef.current);
-        pushTimerRef.current = null;
-      }
-      const client = clientRef.current;
-      clientRef.current = null;
-      selfKeyRef.current = null;
-      // Leaving the channel is a view change only; the durable conversation
-      // survives until an explicit lifecycle event ends it.
-      void client?.close().catch(() => undefined);
+      generationRef.current += 1;
+      closeClient();
     };
-  }, [deliver, flush, schedulePush, slotId]);
+    // `key` is the identity of the binding; `source` is its (memoized) value.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bind, closeClient, key]);
 
   const send = useCallback(
     async (text: string) => {
@@ -388,61 +499,64 @@ export function useQuickfireSessionCore(
   }, []);
 
   const clear = useCallback(async () => {
-    if (!slotId) return;
-    await transportRef.current.clear(slotId);
+    const bound = sourceRef.current;
+    if (!bound) return;
+    if (bound.kind !== "slot") {
+      throw new Error("A conversation opened from a notification cannot be cleared here");
+    }
+    await transportRef.current.clear(bound.slotId);
+    generationRef.current += 1;
+    closeClient();
     stateRef.current = createInitialChannelViewState();
-    const client = clientRef.current;
-    clientRef.current = null;
-    void client?.close().catch(() => undefined);
-    setView({ ...IDLE, slotId });
-  }, [slotId]);
+    setView({ ...IDLE, source: bound, slotId: bound.slotId });
+  }, [closeClient]);
 
-  const promote = useCallback(async () => {
-    if (!slotId) return null;
-    const promoted = await transportRef.current.promote(slotId);
+  const promote = useCallback(async (): Promise<QuickfireSessionFacts | null> => {
+    const bound = sourceRef.current;
+    if (!bound) return null;
+    if (bound.kind === "conversation") {
+      // Nothing to mint: the conversation already has a home. The caller opens
+      // its chat panel from these facts (find-or-open, messaging plan §4.8).
+      return {
+        channelId: bound.channelId,
+        contextId: bound.contextId,
+        state: "promoted",
+        messageCount: null,
+        lastActivityAt: null,
+      };
+    }
+    const promoted = await transportRef.current.promote(bound.slotId);
     if (!promoted) return null;
     setView((current) => ({ ...current, promoted: true }));
     return promoted;
-  }, [slotId]);
+  }, []);
 
   const startFresh = useCallback(async () => {
-    freshRef.current = true;
-    // Re-run the resolve effect against the same slot.
-    generationRef.current += 1;
-    setView({ ...IDLE, slotId, connecting: true });
-    if (!slotId) return;
-    try {
-      const session = await transportRef.current.sessionFor(slotId, { fresh: true });
-      freshRef.current = false;
-      setView({
-        ...IDLE,
-        slotId,
-        channelId: session.channelId,
-        contextId: session.contextId,
-        hasConversation: true,
-        connecting: true,
-      });
-      const client = transportRef.current.connectToChannel(
-        session.channelId,
-        session.contextId,
-        { clientId: slotId, replayMessageLimit: TRANSCRIPT_LIMIT }
-      );
-      clientRef.current = client;
-      stateRef.current = createInitialChannelViewState();
-      await client.ready();
-      selfKeyRef.current = client.clientId ?? null;
-      setView((current) => ({ ...current, connecting: false }));
-    } catch (error) {
-      setView((current) => ({
-        ...current,
-        connecting: false,
-        error: error instanceof Error ? error.message : String(error),
-      }));
+    const bound = sourceRef.current;
+    if (!bound) return;
+    if (bound.kind !== "slot") {
+      throw new Error("A conversation opened from a notification cannot be restarted here");
     }
-  }, [slotId]);
+    // Rebind against the same slot through the ONE binding path, so the fresh
+    // session gets its live event stream like any other.
+    const generation = (generationRef.current += 1);
+    closeClient();
+    queuedRef.current = [];
+    stateRef.current = createInitialChannelViewState();
+    setView({ ...IDLE, source: bound, slotId: bound.slotId, connecting: true });
+    await bind(bound, generation, true);
+  }, [bind, closeClient]);
 
   return useMemo(
-    () => ({ view, send, stop, clear, promote, startFresh }),
-    [clear, promote, send, startFresh, stop, view]
+    () => ({
+      view,
+      mode: source ? source.kind : null,
+      send,
+      stop,
+      clear,
+      promote,
+      startFresh,
+    }),
+    [clear, promote, send, source, startFresh, stop, view]
   );
 }

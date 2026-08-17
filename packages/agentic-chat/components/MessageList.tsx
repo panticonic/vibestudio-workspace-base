@@ -252,6 +252,10 @@ export interface MessageListProps {
   renderInvocation?: InvocationRenderer;
   /** Override the empty-transcript placeholder (e.g. while an agent is launching). */
   emptyState?: React.ReactNode;
+  /** Envelope to scroll to and highlight once it is rendered (messaging plan
+   *  §4.5/§4.10). Consumed through `onFocusMessageConsumed`. */
+  focusMessageId?: string;
+  onFocusMessageConsumed?: (messageId: string) => void;
 }
 
 interface GroupedMessageRowProps {
@@ -317,6 +321,8 @@ export const MessageList = React.memo(function MessageList({
   renderInlineGroup: customRenderInlineGroup,
   renderInvocation,
   emptyState,
+  focusMessageId,
+  onFocusMessageConsumed,
 }: MessageListProps) {
   // --- Scroll state ---
   const [showNewContent, setShowNewContent] = useState(false);
@@ -359,6 +365,23 @@ export const MessageList = React.memo(function MessageList({
       setShowNewContent(false);
     }
   }, [isAtBottom]);
+
+  // Land on a requested envelope once it is in the DOM (messaging plan §4.5,
+  // §4.10): scroll it into view, mark it briefly, and tell the host it was
+  // honoured so the request does not replay on the next mount.
+  const focusConsumedRef = useRef(onFocusMessageConsumed);
+  focusConsumedRef.current = onFocusMessageConsumed;
+  useEffect(() => {
+    if (!focusMessageId) return;
+    if (!messages.some((message) => message.id === focusMessageId)) return;
+    const element = document.getElementById(`message-${focusMessageId}`);
+    if (!element) return;
+    element.scrollIntoView({ block: "center" });
+    element.classList.add("message-row-focused");
+    const timer = setTimeout(() => element.classList.remove("message-row-focused"), 2500);
+    focusConsumedRef.current?.(focusMessageId);
+    return () => clearTimeout(timer);
+  }, [focusMessageId, messages]);
 
   // Scroll to the latest content when the indicator is clicked.
   const handleScrollToNewContent = useCallback(() => {

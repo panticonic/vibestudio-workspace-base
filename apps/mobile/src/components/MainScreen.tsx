@@ -33,6 +33,7 @@ import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import { panelTreeRevisionAtom, shellClientAtom } from "../state/shellClientAtom";
 import { colorSchemeAtom, themeColorsAtom, themePreferenceAtom } from "../state/themeAtoms";
 import { approvalDeepLinkAtom } from "../state/approvalDeepLinkAtom";
+import { inboxDeepLinkAtom } from "../state/inboxDeepLinkAtom";
 import { pushToastAtom } from "../state/toastAtoms";
 import {
   activePanelIdAtom,
@@ -1520,6 +1521,50 @@ export function MainScreen() {
     },
     []
   );
+
+  /**
+   * A tapped inbox push (messaging plan §4.10.9): open the conversation sheet on
+   * the escalated envelope — same quickfire core, bound to that channel — and
+   * acknowledge the entry, which is exactly what opening it on the desktop does.
+   */
+  const [inboxDeepLink, setInboxDeepLink] = useAtom(inboxDeepLinkAtom);
+  useEffect(() => {
+    if (!inboxDeepLink || !shellClient) return;
+    const link = inboxDeepLink;
+    setInboxDeepLink(null);
+    void (async () => {
+      try {
+        if (link.channelId) {
+          const conversation = await shellClient.userNotifications.describeConversation(
+            link.channelId
+          );
+          openQuickfireSheet({
+            conversation: {
+              channelId: link.channelId,
+              contextId: conversation.contextId,
+              ...(link.messageId ? { focusMessageId: link.messageId } : {}),
+              ...(link.senderParticipantId
+                ? {
+                    replyTo: {
+                      participantId: link.senderParticipantId,
+                      ...(link.senderHandle ? { handle: link.senderHandle } : {}),
+                    },
+                  }
+                : {}),
+              ...(conversation.title ? { title: conversation.title } : {}),
+            },
+          });
+        }
+        await shellClient.userNotifications.acknowledge(link.notificationId);
+      } catch (error) {
+        pushToast({
+          title: "Could not open the message",
+          message: error instanceof Error ? error.message : String(error),
+          tone: "warning",
+        });
+      }
+    })();
+  }, [inboxDeepLink, openQuickfireSheet, pushToast, setInboxDeepLink, shellClient]);
 
   const showQuickfireConversations = useCallback(
     (rows: Parameters<MobileSlateDeps["showQuickfireConversations"]>[0]) => {

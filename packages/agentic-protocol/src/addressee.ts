@@ -271,6 +271,19 @@ export function resolveAddressee(
     case "handle": {
       const resolved = resolveHandle(parsed.handle, ctx.roster);
       if (isHandleResolutionFailure(resolved)) {
+        // A person can be addressed by handle before they are on this channel:
+        // the workspace member list is the fallback roster. Only an exact,
+        // unambiguous handle qualifies — a near-miss stays a failure with
+        // suggestions, never a guess.
+        if (resolved.error !== "ambiguous") {
+          const needle = parsed.handle.toLowerCase();
+          const members = (ctx.users ?? []).filter(
+            (entry) => entry.handle?.toLowerCase() === needle
+          );
+          if (members.length === 1) {
+            return resolveUser(ctx, (members[0] as AddresseeUserEntry).userId);
+          }
+        }
         return resolved.error === "ambiguous"
           ? {
               code: "ambiguous-handle",
@@ -289,6 +302,13 @@ export function resolveAddressee(
               suggestions: resolved.suggestions,
             };
       }
+      // A person is a person however they were named: `@gabriel` and
+      // `user:gabriel` must both escalate (plan §4.3 — addressing a person is
+      // what asks for their attention), so a human roster hit resolves to the
+      // `user` shape, never to a bare participant.
+      if (resolved.kind === "user") {
+        return resolveUser(ctx, userIdOf(participantIdOf(resolved)));
+      }
       return {
         kind: "participant",
         channelId: ctx.channelId,
@@ -306,6 +326,9 @@ export function resolveAddressee(
           message: `no participant "${parsed.participantId}" on this channel.`,
           suggestions: ctx.roster.slice(0, 5).map(participantIdOf),
         };
+      }
+      if (match.kind === "user") {
+        return resolveUser(ctx, userIdOf(participantIdOf(match)));
       }
       return {
         kind: "participant",

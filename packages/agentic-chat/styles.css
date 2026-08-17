@@ -477,6 +477,19 @@
   justify-content: flex-start;
 }
 
+/* A message another surface asked us to land on (notification open, cross-
+   channel link). Transient — the class is removed after a beat. */
+.message-row-focused > .message-card {
+  outline: 2px solid var(--accent-a8);
+  outline-offset: 2px;
+  transition: outline-color 1.2s ease-out;
+}
+
+/* Escalation footer (messaging plan §4.10.5): metadata on the message, muted. */
+.message-escalation-footer {
+  opacity: 0.8;
+}
+
 .message-row-system {
   align-self: center;
   justify-content: center;

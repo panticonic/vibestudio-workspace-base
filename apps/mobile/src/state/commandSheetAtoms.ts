@@ -33,8 +33,20 @@ export const dismissCommandSheetAtom = atom(null, (_get, set) => {
 });
 
 export interface QuickfireSheetRequest {
-  /** The panel slot the conversation binds to (§1.4). */
-  slotId: string;
+  /** The panel slot the conversation binds to (§1.4). Absent for a `conversation` request. */
+  slotId?: string;
+  /**
+   * An existing channel to talk in — the conversation surface an agent's
+   * notification opens (messaging plan §4.8). Nothing is minted: the person
+   * joins as themself and replies thread under the escalated envelope.
+   */
+  conversation?: {
+    channelId: string;
+    contextId: string;
+    focusMessageId?: string;
+    replyTo?: { participantId: string; handle?: string };
+    title?: string;
+  };
   /** Text to prefill the compose box with, e.g. from `>ask …`. */
   draft?: string;
   /**

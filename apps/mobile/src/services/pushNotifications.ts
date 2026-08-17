@@ -10,12 +10,17 @@ import {
   type PushApprovalDataPayload,
 } from "@vibestudio/shared/approvalContract";
 import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
+import {
+  isPushUserInboxDataPayload,
+  type PushUserInboxDataPayload,
+} from "@vibestudio/shared/userNotifications";
 import type { ShellClient } from "./shellClient";
 import { requireApprovedAppCapability } from "./appCapabilities";
 import {
   APPROVAL_NOTIFICATION_CHANNEL_ID,
   getAndroidNotificationActions,
 } from "./notificationCategories";
+import { displayInboxNotification } from "./inboxNotifications";
 import {
   drainBackgroundActionQueue,
   enqueueDeepLink,
@@ -92,6 +97,12 @@ export interface RemoteMessage {
 }
 export interface PushRuntimeCallbacks {
   onApprovalDeepLink?: (approvalId: string) => void;
+  /**
+   * A tapped inbox push (messaging plan §4.5 step 5 / §4.10.9): land the person
+   * on the escalated envelope — the conversation sheet on the phone — and
+   * acknowledge the entry the way any other surface would.
+   */
+  onInboxDeepLink?: (payload: PushUserInboxDataPayload) => void;
   onToast?: (toast: {
     title?: string;
     message: string;
@@ -231,6 +242,10 @@ export async function displayApprovalNotification(
   notifee: Pick<NotifeeModule, "displayNotification" | "cancelNotification">
 ): Promise<void> {
   requireApprovedAppCapability("notifications", "approval notification display");
+  if (isPushUserInboxDataPayload(message.data)) {
+    await displayInboxNotification(message.data, message, notifee);
+    return;
+  }
   const data = (message.data ?? {}) as PushApprovalDataPayload;
   if (data.kind === "approval-cancel") {
     const cancelKey = data.cancelKey ?? data.approvalId;
@@ -300,6 +315,15 @@ async function handleForegroundEvent(
   callbacks: PushRuntimeCallbacks
 ): Promise<void> {
   const notification = event.detail.notification;
+  if (isPushUserInboxDataPayload(notification?.data)) {
+    if (
+      event.type === EventType["PRESS"] ||
+      (event.type === EventType["ACTION_PRESS"] && event.detail.pressAction?.id === "open")
+    ) {
+      callbacks.onInboxDeepLink?.(notification.data as PushUserInboxDataPayload);
+    }
+    return;
+  }
   const approvalId = readApprovalId(notification);
   if (!approvalId) return;
   const actionId = event.detail.pressAction?.id;
@@ -407,6 +431,10 @@ export async function registerForPushNotifications(
   }
   cleanupFunctions.push(
     messaging.onNotificationOpenedApp((message) => {
+      if (isPushUserInboxDataPayload(message.data)) {
+        callbacks.onInboxDeepLink?.(message.data);
+        return;
+      }
       const approvalId = message.data?.["approvalId"];
       if (approvalId) void handleDeepLink(approvalId, callbacks);
     })
@@ -417,7 +445,9 @@ export async function registerForPushNotifications(
   } catch (error) {
     console.warn("[PushNotifications] Failed to read the launch notification:", error);
   }
-  if (initialNotification?.data?.["approvalId"]) {
+  if (initialNotification && isPushUserInboxDataPayload(initialNotification.data)) {
+    callbacks.onInboxDeepLink?.(initialNotification.data);
+  } else if (initialNotification?.data?.["approvalId"]) {
     await handleDeepLink(initialNotification.data["approvalId"], callbacks);
   }
   const appStateSub = AppState.addEventListener("change", (nextState: AppStateStatus) => {

@@ -7,6 +7,7 @@ import {
   Dialog,
   DropdownMenu,
   Flex,
+  HoverCard,
   IconButton,
   Text,
   TextArea,
@@ -18,6 +19,8 @@ import {
   ReloadIcon,
   Cross2Icon,
   DotsHorizontalIcon,
+  ChevronDownIcon,
+  ExternalLinkIcon,
 } from "@radix-ui/react-icons";
 import {
   CONTENT_TYPE_INLINE_UI,
@@ -35,6 +38,8 @@ import { InlineUiMessage, parseInlineUiData } from "./InlineUiMessage";
 import { AgentDisconnectedMessage } from "./AgentDisconnectedMessage";
 import { CustomMessageCard } from "./CustomMessage";
 import { AckBadge } from "./AckBadge";
+import { useForeignEnvelope } from "../hooks/useForeignEnvelope";
+import { SubagentTranscriptContent } from "./SubagentTranscript";
 import ModelCredentialRequiredCard from "./ModelCredentialRequiredCard";
 import {
   AutomationActivity,
@@ -867,15 +872,7 @@ export const MessageCard = React.memo(function MessageCard({
                     on our roster. The message is still an ordinary message —
                     someone talking — it just came from somewhere else. */}
                 {msg.origin ? (
-                  <Text
-                    as="span"
-                    size="1"
-                    color="gray"
-                    style={{ marginLeft: 6 }}
-                    title={`Guest from ${msg.origin.channelId}`}
-                  >
-                    ◆ from {msg.origin.channelId}
-                  </Text>
+                  <GuestOriginChip origin={msg.origin} sender={msg.senderMetadata} />
                 ) : null}
               </Box>
               {showModelBadge && (
@@ -1045,6 +1042,13 @@ export const MessageCard = React.memo(function MessageCard({
             </>
           )}
           {hasAttachments && <ImageGallery attachments={msg.attachments!} />}
+          {msg.escalation && msg.escalation.alert !== "none" ? (
+            <EscalationFooter
+              escalation={msg.escalation}
+              receipts={msg.receipts}
+              participants={participants}
+            />
+          ) : null}
           {hasError && (
             <Text size="2" color="red" style={{ whiteSpace: "pre-wrap" }}>
               Error: {msg.error}
@@ -1110,37 +1114,206 @@ export const MessageCard = React.memo(function MessageCard({
 
 /** Inline "conversation forked" annotation row + a Switch affordance. */
 /**
+ * The guest chip (messaging plan §4.10.4): the sender is not on this roster;
+ * the message is still an ordinary message — someone talking — it just came
+ * from somewhere else. The chip is the affordance to go there, landing on the
+ * authoring envelope when the origin named one.
+ */
+function GuestOriginChip({
+  origin,
+  sender,
+}: {
+  origin: NonNullable<ChatMessage["origin"]>;
+  sender?: { name?: string; handle?: string };
+}) {
+  const onOpenChannel = useOptionalChatMessageActions()?.onOpenChannel;
+  const label = `◆ from ${origin.channelId}`;
+  const open = () =>
+    void Promise.resolve(
+      onOpenChannel?.(origin.channelId, {
+        ...(origin.envelopeId ? { focusMessageId: origin.envelopeId } : {}),
+      })
+    ).catch(() => undefined);
+  const replyRef = sender?.handle
+    ? `agent:${sender.handle}@${origin.channelId}`
+    : `channel:${origin.channelId}`;
+  return (
+    <HoverCard.Root openDelay={250}>
+      <HoverCard.Trigger>
+        <Button
+          size="1"
+          variant="ghost"
+          color="gray"
+          style={{ marginLeft: 6, height: "auto", padding: "0 4px" }}
+          title="Guest participant — hover for who this is; click to open where they spoke from"
+          onClick={open}
+          disabled={!onOpenChannel}
+        >
+          {label} {onOpenChannel ? "▸" : ""}
+        </Button>
+      </HoverCard.Trigger>
+      <HoverCard.Content size="1" style={{ maxWidth: 320 }}>
+        <Flex direction="column" gap="1">
+          <Text size="2" weight="medium">
+            {sender?.name ?? sender?.handle ?? origin.participantId}
+            {sender?.handle ? (
+              <Text size="1" color="gray">
+                {" "}
+                @{sender.handle}
+              </Text>
+            ) : null}
+          </Text>
+          <Text size="1" color="gray">
+            Not on this roster — a guest speaking from another conversation.
+          </Text>
+          <Text size="1" color="gray">
+            Origin: {origin.channelId}
+          </Text>
+          <Text size="1" color="gray">
+            Reply ref: <code>{replyRef}</code>
+          </Text>
+          {onOpenChannel ? (
+            <Button size="1" variant="soft" onClick={open}>
+              Open their conversation
+            </Button>
+          ) : null}
+        </Flex>
+      </HoverCard.Content>
+    </HoverCard.Root>
+  );
+}
+
+/**
+ * Escalation footer (messaging plan §4.10.5): the rung the sender declared and
+ * how far it got, drawn from the same read receipts `AckBadge` uses. Metadata
+ * on the message, never a second row.
+ */
+function EscalationFooter({
+  escalation,
+  receipts,
+  participants,
+}: {
+  escalation: NonNullable<ChatMessage["escalation"]>;
+  receipts: ChatMessage["receipts"];
+  participants?: Record<string, Participant<ChatParticipantMetadata>>;
+}) {
+  const people = escalation.users.map((participantId) => {
+    const participant = participants?.[participantId];
+    const name =
+      participant?.metadata?.name ??
+      participant?.metadata?.handle ??
+      participantId.replace(/^user:/u, "");
+    const state = receipts?.byParticipant[participantId];
+    return { participantId, name: String(name), state: state === "read" ? "read" : "sent" };
+  });
+  if (people.length === 0) return null;
+  return (
+    <Text size="1" color="gray" className="message-escalation-footer">
+      ⤴{" "}
+      {people.map((person, index) => (
+        <span key={person.participantId}>
+          {index > 0 ? ", " : ""}
+          {person.name} · {escalation.alert} · {person.state}
+        </span>
+      ))}
+    </Text>
+  );
+}
+
+/**
  * Outgoing cross-channel dispatch (messaging plan §4.10.3).
  *
  * Deliberately marginalia, not a turn: it is the agent's own speech, but it was
  * said *somewhere else*. The body is the reference excerpt — the utterance
  * itself lives once, in the target channel's log (D15) — so this row must never
- * read as if the conversation happened here.
+ * read as if the conversation happened here. Expanding observes that envelope
+ * and its replies in place; `[Open ▸]` goes there.
  */
 function CrossChannelDispatchRow({
   dispatch,
 }: {
   dispatch: NonNullable<ChatMessage["crossChannel"]>;
 }) {
+  const actions = useOptionalChatMessageActions();
+  const onOpenChannel = actions?.onOpenChannel;
+  const childTranscript = actions?.childTranscript;
+  const [open, setOpen] = useState(false);
+  const observed = useForeignEnvelope({
+    connection: childTranscript ?? null,
+    channelId: dispatch.channelId,
+    envelopeId: dispatch.envelopeId,
+    enabled: open && Boolean(childTranscript),
+  });
   const sender = dispatch.from.handle
     ? `@${dispatch.from.handle}`
     : (dispatch.from.displayName ?? dispatch.from.id);
+  const target =
+    dispatch.addressees && dispatch.addressees.length > 0
+      ? dispatch.addressees
+          // `agent:gmail@ch-1` reads as `@gmail`; the channel is named once, after "in".
+          .map((ref) => ref.replace(/^agent:/u, "@").replace(/@[^@]+$/u, ""))
+          .join(", ")
+      : null;
+  const canExpand = Boolean(childTranscript);
+  const statusLabel = !open
+    ? null
+    : observed.error
+      ? "unavailable"
+      : observed.loading
+        ? "looking…"
+        : observed.status;
+  const handleOpen = () => {
+    if (!onOpenChannel) return;
+    void Promise.resolve(
+      onOpenChannel(dispatch.channelId, { focusMessageId: dispatch.envelopeId })
+    ).catch(() => undefined);
+  };
   return (
     <Box className="message-row message-row-system">
       <Card className="message-card message-card-lifecycle">
         <Flex direction="column" gap="1">
           <Flex align="center" gap="2" wrap="wrap">
-            <Text size="1" aria-hidden="true">
-              ↗
+            {canExpand ? (
+              <IconButton
+                size="1"
+                variant="ghost"
+                color="gray"
+                aria-expanded={open}
+                aria-label={open ? "Collapse" : "Show the message and replies"}
+                onClick={() => setOpen((value) => !value)}
+                style={{ transform: open ? "rotate(180deg)" : undefined }}
+              >
+                <ChevronDownIcon />
+              </IconButton>
+            ) : (
+              <Text size="1" aria-hidden="true">
+                ↗
+              </Text>
+            )}
+            <Text size="1" color="gray" style={{ minWidth: 0, flex: 1 }}>
+              {sender}
+              {target ? ` → ${target}` : ""} in {dispatch.channelId}
+              {statusLabel ? ` · ${statusLabel}` : ""}
             </Text>
-            <Text size="1" color="gray" style={{ minWidth: 0 }}>
-              {sender} sent a message in {dispatch.channelId}
-            </Text>
+            {onOpenChannel ? (
+              <Button size="1" variant="ghost" color="gray" onClick={handleOpen} title="Open that conversation">
+                Open <ExternalLinkIcon />
+              </Button>
+            ) : null}
           </Flex>
-          {dispatch.summary ? (
+          {!open && dispatch.summary ? (
             <Text size="1" color="gray" style={{ minWidth: 0 }} truncate>
               “{dispatch.summary}”
             </Text>
+          ) : null}
+          {open ? (
+            observed.error ? (
+              <Text size="1" color="amber">
+                Conversation no longer available ({observed.error}).
+              </Text>
+            ) : (
+              <SubagentTranscriptContent transcript={observed} />
+            )
           ) : null}
         </Flex>
       </Card>

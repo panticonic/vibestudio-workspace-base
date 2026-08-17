@@ -41,8 +41,15 @@ export function ChatProvider({ value, inputValue, children }: ChatProviderProps)
       forkState: value.forkState,
       onNewConversation: value.onNewConversation,
       childTranscript: value.childTranscript,
+      onOpenChannel: value.onOpenChannel,
     }),
-    [value.editPendingMessage, value.forkState, value.onNewConversation, value.childTranscript]
+    [
+      value.editPendingMessage,
+      value.forkState,
+      value.onNewConversation,
+      value.childTranscript,
+      value.onOpenChannel,
+    ]
   );
   const composerRuntime = useMemo<ChatComposerRuntimeValue>(
     () => ({

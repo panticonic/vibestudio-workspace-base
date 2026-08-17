@@ -8,6 +8,12 @@ const shellClient = vi.hoisted(() => ({
   list: vi.fn(),
   openChannel: vi.fn(),
   acknowledge: vi.fn(),
+  describeConversation: vi.fn(),
+}));
+const toastClient = vi.hoisted(() => ({
+  show: vi.fn(),
+  reportAction: vi.fn(),
+  dismiss: vi.fn(),
 }));
 const watchedEventHandlers = vi.hoisted(
   () => new Map<string, (payload: Record<string, unknown>) => void>()
@@ -18,6 +24,8 @@ const directEventHandlers = vi.hoisted(
 
 vi.mock("../shell/client", () => ({
   userNotifications: shellClient,
+  notification: toastClient,
+  events: { on: () => () => undefined, subscribe: async () => undefined, unsubscribe: async () => undefined },
 }));
 vi.mock("../shell/useShellEvent", () => ({
   useShellEvent: (event: string, callback: (payload: Record<string, unknown>) => void) => {
@@ -124,6 +132,10 @@ describe("UserNotificationBar", () => {
     shellClient.list.mockReset().mockResolvedValue([]);
     shellClient.openChannel.mockReset().mockResolvedValue({ id: "panel-chat" });
     shellClient.acknowledge.mockReset().mockResolvedValue(true);
+    shellClient.describeConversation
+      .mockReset()
+      .mockResolvedValue({ contextId: "ctx-build", title: "Build channel" });
+    toastClient.show.mockReset().mockResolvedValue("toast-1");
   });
 
   it("renders a channel invitation from the generic inbox", async () => {
@@ -225,6 +237,77 @@ describe("UserNotificationBar", () => {
     expect(shellClient.openChannel).toHaveBeenCalledWith("ch-build", {
       focusMessageId: "say:call-1",
     });
+  });
+
+  it("groups several messages from one agent into one row with a count", async () => {
+    shellClient.list.mockResolvedValue([
+      agentMessageNotification(),
+      agentMessageNotification({
+        id: "agent.message:say:call-2:usr_bob",
+        title: "Fixed it.",
+        createdAt: 30,
+        agentMessage: {
+          channelId: "ch-build",
+          messageId: "say:call-2",
+          senderParticipantId: "do:builder",
+          senderHandle: "builder",
+          rung: "inbox",
+        },
+      }),
+    ]);
+    render(<UserNotificationBar />);
+
+    // Newest first, and the group count instead of a second interruption.
+    expect(await screen.findByText("Fixed it.")).toBeTruthy();
+    expect(screen.getByTitle("2 messages from this agent").textContent).toBe("×2");
+  });
+
+  it("replies in place through the conversation surface, then acknowledges", async () => {
+    shellClient.list.mockResolvedValue([agentMessageNotification()]);
+    render(<UserNotificationBar />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Reply" }));
+
+    await waitFor(() =>
+      expect(shellClient.acknowledge).toHaveBeenCalledWith("agent.message:say:call-1:usr_bob")
+    );
+    expect(shellClient.describeConversation).toHaveBeenCalledWith("ch-build");
+    // The full panel is NOT opened for an in-place reply.
+    expect(shellClient.openChannel).not.toHaveBeenCalled();
+  });
+
+  it("mirrors a newly arriving interrupt as a toast, never one already there on load", async () => {
+    shellClient.list.mockResolvedValue([
+      agentMessageNotification({
+        id: "agent.message:say:call-0:usr_bob",
+        agentMessage: {
+          channelId: "ch-build",
+          messageId: "say:call-0",
+          senderParticipantId: "do:builder",
+          rung: "interrupt",
+        },
+      }),
+    ]);
+    render(<UserNotificationBar />);
+    await waitFor(() => expect(shellClient.list).toHaveBeenCalledTimes(1));
+    await screen.findByText("The nightly build is red.");
+    expect(toastClient.show).not.toHaveBeenCalled();
+
+    shellClient.list.mockResolvedValue([
+      agentMessageNotification({
+        id: "agent.message:say:call-9:usr_bob",
+        title: "Deploy blocked",
+        agentMessage: {
+          channelId: "ch-build",
+          messageId: "say:call-9",
+          senderParticipantId: "do:builder",
+          rung: "interrupt",
+        },
+      }),
+    ]);
+    directEventHandlers.get("user-notifications-changed")?.({ changedAt: 30 });
+    await waitFor(() => expect(toastClient.show).toHaveBeenCalledTimes(1));
+    expect(toastClient.show.mock.calls[0]?.[0]).toMatchObject({ title: "Deploy blocked" });
   });
 
   it("keeps the entry when opening fails, so a person never loses the message", async () => {

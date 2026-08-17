@@ -40,3 +40,34 @@ export const openCommandAgentAtom = atom(
     });
   }
 );
+
+/**
+ * Open the overlay as a lightweight conversation with the agent that notified
+ * the user (messaging plan §4.8): the same quickfire surface, bound to an
+ * EXISTING channel rather than a per-panel slot. Reply inline; pop out to the
+ * chat panel on demand. Set by the notification surfaces.
+ */
+export interface ConversationSurfaceRequest {
+  channelId: string;
+  contextId: string;
+  /** The envelope to land on; replies thread under it. */
+  focusMessageId?: string;
+  /** The participant that notified — replies are addressed to it. */
+  replyTo?: { participantId: string; handle?: string };
+  /** Header title (channel or sender), when the caller knows it. */
+  title?: string;
+  sequence: number;
+}
+
+export const conversationSurfaceRequestAtom = atom<ConversationSurfaceRequest | null>(null);
+
+export const openConversationSurfaceAtom = atom(
+  null,
+  (get, set, request: Omit<ConversationSurfaceRequest, "sequence">) => {
+    const previous = get(conversationSurfaceRequestAtom);
+    set(conversationSurfaceRequestAtom, {
+      ...request,
+      sequence: (previous?.sequence ?? 0) + 1,
+    });
+  }
+);

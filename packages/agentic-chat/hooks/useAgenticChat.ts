@@ -1460,6 +1460,8 @@ Use package imports available to inline_ui plus relative imports for local helpe
   const onRemoveAgent = actions?.onRemoveAgent ? handleRemoveAgent : undefined;
   const onFocusPanel = actions?.onFocusPanel;
   const onReloadPanel = actions?.onReloadPanel;
+  const onOpenChannel = actions?.onOpenChannel;
+  const onAcknowledgeEscalation = actions?.onAcknowledgeEscalation;
   const onNewConversation = actions?.onNewConversation;
   const onOpenClaudeCode = actions?.onOpenClaudeCode;
   const onOpenLocalModelsLog = actions?.onOpenLocalModelsLog;
@@ -1571,6 +1573,8 @@ Use package imports available to inline_ui plus relative imports for local helpe
       onRemoveAgent,
       onFocusPanel,
       onReloadPanel,
+      onOpenChannel,
+      onAcknowledgeEscalation,
       onNewConversation,
       onOpenClaudeCode,
       onOpenLocalModelsLog,
@@ -1649,6 +1653,8 @@ Use package imports available to inline_ui plus relative imports for local helpe
       onRemoveAgent,
       onFocusPanel,
       onReloadPanel,
+      onOpenChannel,
+      onAcknowledgeEscalation,
       onNewConversation,
       onOpenClaudeCode,
       onOpenLocalModelsLog,

@@ -32,6 +32,9 @@ export interface ChatLayoutProps extends Pick<
   renderDeliveryStatus?: (defaultContent: React.ReactNode) => React.ReactNode;
   /** Replace, wrap, or elide the stock composer. */
   renderComposer?: (defaultContent: React.ReactNode) => React.ReactNode;
+  /** Envelope to scroll to and highlight once present; see AgenticChatProps. */
+  focusMessageId?: string;
+  onFocusMessageConsumed?: (messageId: string) => void;
 }
 
 /**
@@ -65,6 +68,8 @@ export const ChatLayout = React.memo(function ChatLayout({
   renderHeader,
   renderDeliveryStatus,
   renderComposer,
+  focusMessageId,
+  onFocusMessageConsumed,
 }: ChatLayoutProps) {
   const defaultHeader = <ChatHeader />;
   const defaultDeliveryStatus = (
@@ -107,6 +112,8 @@ export const ChatLayout = React.memo(function ChatLayout({
           renderInvocation={renderInvocation}
           renderEmptyState={renderEmptyState}
           features={features}
+          focusMessageId={focusMessageId}
+          onFocusMessageConsumed={onFocusMessageConsumed}
         />
         {features.feedback ? <LazyChatFeedbackArea /> : null}
         {renderDeliveryStatus ? renderDeliveryStatus(defaultDeliveryStatus) : defaultDeliveryStatus}
