@@ -628,10 +628,6 @@ class AutomationCompletionProbe extends PromptEventProbe {
     return tool.execute("complete-call", { response });
   }
 
-  preparedAutomationPromptForTest(): Promise<string | undefined> | string | undefined {
-    return this.prepareImmediatePrompt(CHANNEL);
-  }
-
   async closeAutomationTurnForTest(input: {
     automation: NonNullable<AgentTurnMetadata["automation"]>;
     summary?: string;
@@ -748,6 +744,7 @@ describe("AgentVesselBase automation ingress", () => {
         command: expect.objectContaining({
           kind: "prompt",
           source: { envelopeId: "automation:run-health" },
+          content: expect.stringContaining("<automation-tick>"),
           metadata: expect.objectContaining({
             automation: promptAutomation,
             deliverAfterTurn: true,
@@ -774,9 +771,6 @@ describe("AgentVesselBase automation ingress", () => {
       configurable: true,
     });
 
-    expect(await vessel.preparedAutomationPromptForTest()).toContain(
-      "call complete_automation exactly once"
-    );
     await expect(
       vessel.completeAutomationForTest("All rollout targets are healthy.")
     ).resolves.toMatchObject({ terminate: true });
@@ -2230,11 +2224,8 @@ class SubagentSpawnProbe extends TestVessel {
   async guardBackgroundSuspensionForTest(channelId = CHANNEL) {
     return this.guardBackgroundSuspension(channelId);
   }
-  immediatePromptForTest(channelId = CHANNEL) {
-    return this.immediatePrompt(channelId);
-  }
-  async preparedImmediatePromptForTest(channelId = CHANNEL) {
-    return this.prepareImmediatePrompt(channelId);
+  systemPromptForTest(channelId = CHANNEL) {
+    return this.composePrompt(channelId);
   }
   setSubagentSourceForTest(runId: string, sourceEventId: string) {
     this.subagentRuns.setSourceEventId(runId, sourceEventId);
@@ -3618,7 +3609,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     );
   });
 
-  it("projects fresh engine-owned integration debt into every supervised prompt", async () => {
+  it("does not project supervised-run or VCS state into the system prompt", async () => {
     const probe = await makeSubagentSpawnProbe();
     const runId = "inv-prompt-integration";
     const sourceEventId = "event:child-source";
@@ -3645,11 +3636,11 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       )
     );
 
-    const prompt = await probe.preparedImmediatePromptForTest();
+    const prompt = await probe.systemPromptForTest();
 
-    expect(prompt).toContain('semanticIntegration={"state":"needs-decision"');
-    expect(prompt).toContain('"conflictCoordinateCount":3');
-    expect(probe.rpcCalls.map(({ method }) => method)).toEqual(["vcs.status"]);
+    expect(prompt).not.toContain("Durable Supervised Subagent Ledger");
+    expect(prompt).not.toContain("semanticIntegration");
+    expect(probe.rpcCalls).toEqual([]);
   });
 
   it("targets follow-up instructions to the exact child participant", async () => {

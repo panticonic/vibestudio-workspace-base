@@ -1187,7 +1187,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             task: {
               type: "string",
               description:
-                "The child's durable authoritative assignment, restated by the runtime on every model call. Include goal, relevant files/docs/skills, constraints, expected output, progress expectations, done criteria, and what to do if blocked.",
+                "The child's durable authoritative assignment, recorded in its stable runtime contract. Include goal, relevant files/docs/skills, constraints, expected output, progress expectations, done criteria, and what to do if blocked.",
             },
             config: {
               type: "object",

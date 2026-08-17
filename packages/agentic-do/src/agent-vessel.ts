@@ -115,7 +115,6 @@ import {
   type VcsIntegrationProjection,
   type VcsMergeInput,
   type VcsStateNodeRef,
-  type VcsStatusResult,
 } from "@vibestudio/service-schemas/vcs";
 import { toCredentialConnectRequest } from "@workspace/model-catalog/providerConnect";
 import {
@@ -1226,7 +1225,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     const resources = await this.loadPromptResources(channelId);
     const agentPrompt = this.getAgentPrompt(channelId);
     const override = this.getPromptOverride(channelId);
-    return composeSystemPrompt({
+    const composed = composeSystemPrompt({
       ...(resources.workspacePrompt !== undefined
         ? { workspacePrompt: resources.workspacePrompt }
         : {}),
@@ -1237,112 +1236,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         ? { systemPromptMode: override.systemPromptMode }
         : {}),
     });
-  }
-
-  /** Per-request prompt appended at the end of the model message context. */
-  protected immediatePrompt(channelId: string): string | undefined {
     const subagent = this.subagentIdentity();
-    const supervised = this.supervisedSubagentRuntimePrompt(channelId);
-    const parts = [subagent ? subagentRuntimePrompt(subagent) : "", supervised].filter(Boolean);
-    return parts.length > 0 ? parts.join("\n\n") : undefined;
-  }
-
-  /**
-   * A model must not reconstruct delegation state from old transcript text.
-   * Keep the supervisor's bounded lifecycle ledger at the model-call boundary,
-   * including retained terminal results.
-   */
-  private supervisedSubagentRuntimePrompt(
-    channelId: string,
-    parentStatusByContext: ReadonlyMap<
-      string,
-      Pick<VcsStatusResult, "workingHead" | "integrating">
-    > = new Map()
-  ): string {
-    const all = this.subagentRuns
-      .listAll()
-      .filter((run) => run.parentChannelId === channelId)
-      .sort((left, right) => right.lastActivityAt - left.lastActivityAt);
-    if (all.length === 0) return "";
-    const limit = 12;
-    const shown = all.slice(0, limit);
-    const rows = shown.map((run) => {
-      const config = run.launchConfig ? ` config=${JSON.stringify(run.launchConfig)}` : "";
-      const parentStatus = run.parentContextId
-        ? parentStatusByContext.get(run.parentContextId)
-        : undefined;
-      const semantic = semanticIntegrationForRun(
-        run,
-        parentStatus?.integrating,
-        parentStatus?.workingHead
-      );
-      return (
-        `- ${subagentRunHandle(run.runId)} (${run.label || "unlabeled"}): ` +
-        `status=${run.status}; ` +
-        `semanticIntegration=${JSON.stringify(semantic)}; ` +
-        `agentKind=${run.agentKind}${config}`
-      );
-    });
-    const omitted = all.length - shown.length;
-    return [
-      "## Durable Supervised Subagent Ledger",
-      "This is the authoritative lifecycle inventory for this supervisor channel. " +
-        "Use these handles directly; do not reconstruct them from transcript text. " +
-        "Terminal rows are retained results and consume no live execution slot. " +
-        "Do not spawn a replacement merely because a row is terminal.",
-      ...rows,
-      ...(omitted > 0 ? [`- ${omitted} older retained run(s) omitted from this bounded view`] : []),
-    ].join("\n");
-  }
-
-  /**
-   * Impure per-model-call context. Unlike the stable system prompt, this is
-   * prepared by the durable prompt-artifact effect immediately before the
-   * model request and may read fresh runtime projections.
-   */
-  protected prepareImmediatePrompt(
-    channelId: string,
-    signal?: AbortSignal
-  ): string | undefined | Promise<string | undefined> {
-    const subagent = this.subagentIdentity();
-    const automation = (
-      this.driver as AgentLoopDriver & {
-        peekLoadedLoop?: AgentLoopDriver["peekLoadedLoop"];
-      }
-    ).peekLoadedLoop?.(channelId)?.state.openTurn?.metadata?.automation;
-    const automationPrompt = automation
-      ? "You are executing one reviewed automation tick. If this tick establishes that the recurring goal is naturally finished and no future tick is needed, call complete_automation exactly once with a concise completion response. Otherwise finish normally so the schedule continues. Do not call complete_automation merely because this individual tick succeeded."
-      : "";
-    const immediate = this.immediatePrompt(channelId);
-    // Closed receipts already carry their frozen integration snapshot; only
-    // open runs have a live projection worth an RPC round-trip per model call.
-    const openRuns = this.subagentRuns
-      .listAll()
-      .filter((run) => run.parentChannelId === channelId && run.parentContextId);
-    if (openRuns.length === 0) {
-      const parts = [immediate, automationPrompt].filter(Boolean);
-      return parts.length > 0 ? parts.join("\n\n") : undefined;
-    }
-    return (async () => {
-      const contextIds = [...new Set(openRuns.map((run) => run.parentContextId!))];
-      const vcs = createSubagentVcsClient(this.rpc);
-      const statuses = await Promise.all(
-        contextIds.map(async (contextId) => [contextId, await vcs.status({ contextId })] as const)
-      );
-      if (signal?.aborted) {
-        throw signal.reason instanceof Error
-          ? signal.reason
-          : new Error("prompt preparation aborted");
-      }
-      const parentStatusByContext = new Map(statuses);
-      const supervised = this.supervisedSubagentRuntimePrompt(channelId, parentStatusByContext);
-      const parts = [
-        automationPrompt,
-        subagent ? subagentRuntimePrompt(subagent) : "",
-        supervised,
-      ].filter(Boolean);
-      return parts.length > 0 ? parts.join("\n\n") : undefined;
-    })();
+    return [composed, subagent ? subagentRuntimePrompt(subagent) : ""]
+      .filter(Boolean)
+      .join("\n\n");
   }
 
   /** Local tools registered with the local-tool executor. */
@@ -2262,7 +2159,6 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         ? channelApprovalLevel
         : settings.approvalLevel;
     const publishPolicy = this.getPublishPolicy(channelId);
-    const immediatePrompt = this.immediatePrompt(channelId);
     const materialized = this.materializedModel(channelId, settings.model);
     if (!materialized) {
       throw new Error(
@@ -2305,7 +2201,6 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       approvalLevel,
       respondPolicy: settings.respondPolicy,
       systemPromptHash: this.getStateValue(`agent:promptHash:${channelId}`) ?? "",
-      ...(immediatePrompt ? { immediatePrompt } : {}),
       toolSchemasHash,
       activeToolNames: JSON.parse(
         this.getStateValue(`agent:toolNames:${channelId}`) ?? "[]"
@@ -2413,10 +2308,6 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     };
     throwIfAborted();
     await stage("prompt-artifacts.local-model", () => this.refreshLocalModelEntry(channelId));
-    throwIfAborted();
-    const immediatePrompt = await stage("prompt-artifacts.immediate-prompt", () =>
-      this.prepareImmediatePrompt(channelId, signal)
-    );
     throwIfAborted();
     const systemPrompt = await stage("prompt-artifacts.resources", () =>
       this.composePrompt(channelId)
@@ -2526,16 +2417,12 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       this.setStateValue(artifactSigKey, signature);
     }
     throwIfAborted();
-    const {
-      roster: _foldOwnedRoster,
-      immediatePrompt: _synchronousImmediatePrompt,
-      ...patch
-    } = this.loopConfig(channelId);
+    const { roster: _foldOwnedRoster, ...patch } = this.loopConfig(channelId);
     this.traceHotPath(channelId, "prompt-artifacts.completed", {
       startedAt: preparationStartedAt,
       details: { toolCount: schemas.length },
     });
-    return { ...patch, immediatePrompt: immediatePrompt ?? "" };
+    return patch;
   }
 
   /** Explicit refresh API: materialize, then journal the same config patch the
@@ -2797,14 +2684,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
 
   // ── Channel membership ───────────────────────────────────────────────────
 
-  // `host` alongside `code`: a conversation whose vessel the HOST created (the
-  // quickfire service, which mints the channel and the vessel together) has no
-  // userland code to join it on its behalf, and membership is exactly the step
-  // that makes the vessel reachable. This is not a new power — the host already
-  // creates and retires these entities — and it matches `interruptChannel` and
-  // the channel-intake methods below, which admit the host for the same reason.
+  // Membership is established by the userland owner that created or acquired
+  // the agent. Host lifecycle code can interrupt an active vessel, but does not
+  // join it to arbitrary channels on a product service's behalf.
   @rpc({
-    principals: ["host", "code"],
+    principals: ["code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -2884,26 +2768,6 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   }
 
   /**
-   * Host lifecycle counterpart to the code-owned subscription API. Product
-   * orchestration may attach an already-created vessel without impersonating a
-   * code caller; channel.subscribe still authenticates this exact DO identity.
-   */
-  @rpc({
-    principals: ["host"],
-    effect: { kind: "open" },
-    tier: "open",
-    sensitivity: "write",
-  })
-  async attachChannel(opts: {
-    channelId: string;
-    contextId: string;
-    config?: unknown;
-    replay?: boolean;
-  }): Promise<{ ok: boolean; participantId: string }> {
-    return this.subscribeChannel(opts);
-  }
-
-  /**
    * Canonical unattended prompt ingress. The automation registry owns the
    * schedule and run ledger; the agent vessel owns only the ordinary durable
    * turn. `runId` is carried through the journal so the terminal turn can
@@ -2926,9 +2790,14 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     if (!input.automation.runId || !input.prompt.trim()) {
       throw new Error("Automation turn requires provenance and prompt text");
     }
+    const tickPrompt = `${input.prompt.trim()}
+
+<automation-tick>
+This is one reviewed recurring-automation tick. If this tick establishes that the recurring goal is naturally finished and no future tick is needed, call complete_automation exactly once with a concise completion response. Otherwise finish normally so the schedule continues. Do not call complete_automation merely because this individual tick succeeded.
+</automation-tick>`;
     await this.submitAgentInitiatedTurn(
       input.channelId,
-      { content: input.prompt },
+      { content: tickPrompt },
       {
         steeringId: `automation:${input.automation.runId}`,
         origin: "scheduled",
@@ -3039,11 +2908,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     });
   }
 
-  // Symmetric with `subscribeChannel`: whoever may join a host-created vessel to
-  // its channel must be able to detach it again, or the release path leaves a
-  // live subscription behind on every cleared conversation.
+  // Symmetric with `subscribeChannel`: an owning userland service must be able
+  // to detach a vessel during lifecycle cleanup.
   @rpc({
-    principals: ["host", "user", "code"],
+    principals: ["user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",

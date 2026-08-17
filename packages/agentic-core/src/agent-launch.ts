@@ -1,4 +1,7 @@
-import { AGENTIC_PROTOCOL_VERSION, type AgenticEvent } from "@workspace/agentic-protocol";
+import {
+  AGENTIC_PROTOCOL_VERSION,
+  type AgenticEvent,
+} from "@workspace/agentic-protocol";
 import type { RuntimeEntityCreateSpec } from "@vibestudio/shared/runtime/entitySpec";
 import { doTargetId } from "@vibestudio/shared/workspaceServiceRpc";
 import {
@@ -13,7 +16,11 @@ import {
  * authority is enforced by runtime/channel services, not by duplicate helpers.
  */
 export interface AgentLaunchRpc {
-  call<T = unknown>(target: string, method: string, args: unknown[]): Promise<T>;
+  call<T = unknown>(
+    target: string,
+    method: string,
+    args: unknown[],
+  ): Promise<T>;
 }
 
 export interface AgentEntityHandle {
@@ -36,6 +43,11 @@ export interface AgentEntityCreateInput {
   config?: AgentSubscriptionConfig | Record<string, unknown>;
   stateArgs?: Record<string, unknown>;
   agentBinding?: { entityId: string; channelId: string };
+  resourceBindings?: Array<{
+    resource: { kind: string; id: string };
+    capabilities: string[];
+    scope: { kind: "entity" } | { kind: "agent-channel"; channelId: string };
+  }>;
   /** Host derives the self entity/context coordinates and binds this agent to the channel. */
   agentChannelId?: string;
 }
@@ -100,17 +112,22 @@ export interface AgentTaskSeedChannel {
   publishAgenticEvent(
     participantId: string,
     event: AgenticEvent,
-    opts?: { idempotencyKey?: string; senderMetadata?: Record<string, unknown> }
+    opts?: {
+      idempotencyKey?: string;
+      senderMetadata?: Record<string, unknown>;
+    },
   ): Promise<{ id?: number }>;
 }
 
 function targetIdFor(handleOrTargetId: AgentEntityHandle | string): string {
-  return typeof handleOrTargetId === "string" ? handleOrTargetId : handleOrTargetId.targetId;
+  return typeof handleOrTargetId === "string"
+    ? handleOrTargetId
+    : handleOrTargetId.targetId;
 }
 
 function requireAgentSubscriptionResult(
   operation: "subscribeChannel" | "initFromTrajectoryFork",
-  result: unknown
+  result: unknown,
 ): AgentSubscriptionResult {
   if (
     !result ||
@@ -126,7 +143,9 @@ function requireAgentSubscriptionResult(
 
 type AgentEntityCreateSpec = Extract<RuntimeEntityCreateSpec, { kind: "do" }>;
 
-export function buildAgentEntityCreateSpec(input: AgentEntityCreateInput): AgentEntityCreateSpec {
+export function buildAgentEntityCreateSpec(
+  input: AgentEntityCreateInput,
+): AgentEntityCreateSpec {
   const stateArgs = {
     ...(input.stateArgs ?? {}),
     ...(input.config !== undefined ? { agentConfig: input.config } : {}),
@@ -143,27 +162,33 @@ export function buildAgentEntityCreateSpec(input: AgentEntityCreateInput): Agent
     ...(input.contextId ? { contextId: input.contextId } : {}),
     ...(Object.keys(stateArgs).length > 0 ? { stateArgs } : {}),
     ...(input.agentBinding ? { agentBinding: input.agentBinding } : {}),
+    ...(input.resourceBindings
+      ? { resourceBindings: input.resourceBindings }
+      : {}),
     ...(input.agentChannelId ? { agentChannelId: input.agentChannelId } : {}),
   };
 }
 
 export async function createAgentEntity(
   rpc: AgentLaunchRpc,
-  input: AgentEntityCreateInput
+  input: AgentEntityCreateInput,
 ): Promise<AgentEntityHandle> {
   return rpc.call<AgentEntityHandle>("main", "runtime.createEntity", [
     buildAgentEntityCreateSpec(input),
   ]);
 }
 
-export async function retireAgentEntity(rpc: AgentLaunchRpc, id: string): Promise<void> {
+export async function retireAgentEntity(
+  rpc: AgentLaunchRpc,
+  id: string,
+): Promise<void> {
   await rpc.call("main", "runtime.retireEntity", [{ id }]);
 }
 
 export async function subscribeAgentToChannel(
   rpc: AgentLaunchRpc,
   handleOrTargetId: AgentEntityHandle | string,
-  input: AgentChannelSubscriptionInput
+  input: AgentChannelSubscriptionInput,
 ): Promise<AgentSubscriptionResult> {
   return requireAgentSubscriptionResult(
     "subscribeChannel",
@@ -174,7 +199,7 @@ export async function subscribeAgentToChannel(
         config: toSubscriptionConfig(input.config),
         replay: input.replay,
       },
-    ])
+    ]),
   );
 }
 
@@ -184,7 +209,7 @@ export async function subscribeAgentToChannel(
  */
 export async function unsubscribeAgentFromChannel(
   rpc: AgentLaunchRpc,
-  input: AgentChannelUnsubscriptionInput
+  input: AgentChannelUnsubscriptionInput,
 ): Promise<{ ok: boolean }> {
   return rpc.call<{ ok: boolean }>(
     doTargetId({
@@ -193,32 +218,36 @@ export async function unsubscribeAgentFromChannel(
       objectKey: input.key,
     }),
     "unsubscribeChannel",
-    [input.channelId]
+    [input.channelId],
   );
 }
 
 export async function initAgentFromTrajectoryFork(
   rpc: AgentLaunchRpc,
   handleOrTargetId: AgentEntityHandle | string,
-  input: AgentTrajectoryForkInput
+  input: AgentTrajectoryForkInput,
 ): Promise<AgentSubscriptionResult> {
   return requireAgentSubscriptionResult(
     "initFromTrajectoryFork",
-    await rpc.call<unknown>(targetIdFor(handleOrTargetId), "initFromTrajectoryFork", [
-      {
-        parentLogId: input.parentLogId,
-        seq: input.seq,
-        taskChannelId: input.taskChannelId,
-        contextId: input.contextId,
-        config: toSubscriptionConfig(input.config),
-      },
-    ])
+    await rpc.call<unknown>(
+      targetIdFor(handleOrTargetId),
+      "initFromTrajectoryFork",
+      [
+        {
+          parentLogId: input.parentLogId,
+          seq: input.seq,
+          taskChannelId: input.taskChannelId,
+          contextId: input.contextId,
+          config: toSubscriptionConfig(input.config),
+        },
+      ],
+    ),
   );
 }
 
 export async function launchAgentIntoChannel(
   rpc: AgentLaunchRpc,
-  input: LaunchAgentIntoChannelInput
+  input: LaunchAgentIntoChannelInput,
 ): Promise<LaunchAgentIntoChannelResult> {
   // There are two disjoint identities behind the same subscription workflow:
   // an ordinary agent acts as itself on the channel, while a linked vessel
@@ -232,15 +261,19 @@ export async function launchAgentIntoChannel(
       : {
           ...input,
           agentChannelId: input.channelId,
-        }
+        },
   );
-  if (input.contextId && handle.contextId && handle.contextId !== input.contextId) {
+  if (
+    input.contextId &&
+    handle.contextId &&
+    handle.contextId !== input.contextId
+  ) {
     if (input.retireEntityOnSubscribeFailure && handle.id) {
       await retireAgentEntity(rpc, handle.id).catch(() => undefined);
     }
     throw new Error(
       `runtime.createEntity returned existing agent ${handle.id ?? handle.targetId} in context ` +
-        `${handle.contextId}, but channel ${input.channelId} is in context ${input.contextId}`
+        `${handle.contextId}, but channel ${input.channelId} is in context ${input.contextId}`,
     );
   }
   const contextId = input.contextId ?? handle.contextId;
@@ -250,7 +283,7 @@ export async function launchAgentIntoChannel(
     }
     throw new Error(
       input.missingContextErrorMessage ??
-        "runtime.createEntity did not return a contextId for agent subscription"
+        "runtime.createEntity did not return a contextId for agent subscription",
     );
   }
   try {
@@ -271,13 +304,17 @@ export async function launchAgentIntoChannel(
 
 export async function createSubagentContext(
   rpc: AgentLaunchRpc,
-  input: CreateSubagentContextInput
+  input: CreateSubagentContextInput,
 ): Promise<{ contextId: string }> {
-  return rpc.call<{ contextId: string }>("main", "runtime.createSubagentContext", [input]);
+  return rpc.call<{ contextId: string }>(
+    "main",
+    "runtime.createSubagentContext",
+    [input],
+  );
 }
 
 export function buildAgentTaskSeedEvent(
-  input: AgentTaskSeedInput
+  input: AgentTaskSeedInput,
 ): AgenticEvent<"message.completed"> {
   if (!input.childParticipantId.trim()) {
     throw new Error("Agent task seed requires a child participant identity");
@@ -305,7 +342,12 @@ export function buildAgentTaskSeedEvent(
       ],
       outcome: "completed",
       tier: "primary",
-      to: [{ kind: "participant" as const, participantId: input.childParticipantId }],
+      to: [
+        {
+          kind: "participant" as const,
+          participantId: input.childParticipantId,
+        },
+      ],
       // Turn metadata makes the child's ordinary turn closure observable to
       // its vessel. A subagent that returns a final answer instead of calling
       // the explicit `complete` tool must still publish a durable terminal.
@@ -317,13 +359,13 @@ export function buildAgentTaskSeedEvent(
 
 export async function publishAgentTaskSeed(
   channel: AgentTaskSeedChannel,
-  input: AgentTaskSeedInput
+  input: AgentTaskSeedInput,
 ): Promise<{ id?: number }> {
   const senderMetadata = input.senderMetadata ?? {};
   return channel.publishAgenticEvent(
     input.senderParticipantId,
     buildAgentTaskSeedEvent({ ...input, senderMetadata }),
-    { idempotencyKey: input.messageId, senderMetadata }
+    { idempotencyKey: input.messageId, senderMetadata },
   );
 }
 

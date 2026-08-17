@@ -902,54 +902,6 @@ describe("modelCallExecutor", () => {
     });
   });
 
-  it("keeps runtime-owned immediate instructions out of the user conversation", async () => {
-    mocks.getModel.mockReturnValue({ baseUrl: "https://model.test" });
-    const inputDescriptor = descriptor();
-    inputDescriptor.request.contextThroughSeq = 1;
-    inputDescriptor.request.immediatePrompt =
-      "## Subagent Operating Contract\nOnly `complete` ends this subagent run.";
-    const inputDeps = deps();
-    inputDeps.blobstore.getText = async (digest) => (digest === "sys" ? "BASE SYSTEM" : "");
-    let streamedContext: unknown;
-    mocks.stream.mockImplementation((_model, context) => {
-      streamedContext = context;
-      return {
-        async *[Symbol.asyncIterator]() {},
-        result: async () => ({
-          content: [{ type: "text", text: "ok" }],
-          stopReason: "stop",
-          usage: { input: 1, output: 1 },
-        }),
-      };
-    });
-
-    await expect(
-      modelCallExecutor.execute({
-        descriptor: inputDescriptor,
-        state: {
-          ...initialAgentState({ channelId: "channel-1", config }),
-          entries: [
-            {
-              kind: "user",
-              seq: 1,
-              envelopeId: "env-1",
-              content: "Original request",
-            },
-          ],
-        },
-        signal: new AbortController().signal,
-        deps: inputDeps,
-        onEphemeral: () => {},
-      })
-    ).resolves.toMatchObject({ kind: "model", stopReason: "completed" });
-
-    expect(streamedContext).toMatchObject({
-      systemPrompt:
-        "BASE SYSTEM\n\n## Subagent Operating Contract\nOnly `complete` ends this subagent run.",
-      messages: [{ role: "user", content: [{ type: "text", text: "Original request" }] }],
-    });
-  });
-
   it("budgets hydrated tool results and preserves complete tool-call/result units", async () => {
     const tinySpec = { ...modelSpec, contextWindow: 4_000, maxTokens: 2_000 };
     const inputDescriptor = descriptor({ modelSpec: tinySpec });

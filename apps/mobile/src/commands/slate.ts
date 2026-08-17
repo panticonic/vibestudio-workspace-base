@@ -22,7 +22,7 @@ import type { QuickfireMode } from "@workspace/quickfire-core";
 import type { BrowserAddressOptions } from "@vibestudio/shared/panelChrome";
 import { createPanelShareUrl } from "@vibestudio/shared/panelLocation";
 import type { PanelCommandId } from "@vibestudio/shared/panelCommands";
-import type { QuickfireSessionSummary } from "@vibestudio/service-schemas/quickfire";
+import type { QuickfireSessionSummary } from "@workspace/quickfire-core/service";
 
 /** What running a command asks the command sheet to do next. */
 export interface MobileCommandOutcome {
@@ -68,7 +68,7 @@ export interface MobileSlatePanels {
 }
 
 export interface MobileSlateQuickfire {
-  clear(slotId: string): Promise<{ cleared: boolean; archived: number }>;
+  clear(slotId: string): Promise<{ cleared: boolean }>;
   promote(slotId: string): Promise<{ channelId: string } | null>;
   list(): Promise<QuickfireSessionSummary[]>;
 }

@@ -25,15 +25,6 @@ class TestAgentVessel extends AgentVesselBase {
   promptForTest(channelId = "ch-1"): Promise<string> {
     return this.composePrompt(channelId);
   }
-  immediatePromptForTest(channelId = "ch-1"): string | undefined {
-    return this.immediatePrompt(channelId);
-  }
-  prepareImmediatePromptForTest(
-    channelId = "ch-1",
-    signal?: AbortSignal
-  ): Promise<string | undefined> {
-    return Promise.resolve(this.prepareImmediatePrompt(channelId, signal));
-  }
   driverForTest(): { dropLoop: (channelId: string) => void } {
     return this.driver as unknown as { dropLoop: (channelId: string) => void };
   }
@@ -114,7 +105,7 @@ describe("subagent participant handles", () => {
 });
 
 describe("subagent prompt contract", () => {
-  it("keeps child-specific completion guidance out of the system prompt and in the immediate prompt", async () => {
+  it("keeps the immutable child contract in the stable system prompt", async () => {
     const vessel = await makeVessel({
       STATE_ARGS: {
         subagent: {
@@ -132,17 +123,13 @@ describe("subagent prompt contract", () => {
     });
 
     const prompt = await vessel.promptForTest();
-    const immediatePrompt = vessel.immediatePromptForTest();
-
-    expect(prompt).not.toContain("## Subagent Operating Contract");
-    expect(prompt).not.toContain("Run id: run-1");
-    expect(immediatePrompt).toContain("## Subagent Operating Contract");
-    expect(immediatePrompt).toContain("## Forked Subagent Scope");
-    expect(immediatePrompt).toContain("Run id: run-1");
-    expect(immediatePrompt).toContain("context window cache is shared");
-    expect(immediatePrompt).toContain("focus narrowly on the particular task the parent gave you");
-    expect(immediatePrompt).toContain("complete({ report, outcome })");
-    expect(immediatePrompt).toContain(
+    expect(prompt).toContain("## Subagent Operating Contract");
+    expect(prompt).toContain("## Forked Subagent Scope");
+    expect(prompt).toContain("Run id: run-1");
+    expect(prompt).toContain("context window cache is shared");
+    expect(prompt).toContain("focus narrowly on the particular task the parent gave you");
+    expect(prompt).toContain("complete({ report, outcome })");
+    expect(prompt).toContain(
       "Idle, turn closure, and a normal final assistant message are not terminal"
     );
   });
@@ -151,31 +138,6 @@ describe("subagent prompt contract", () => {
     const vessel = await makeVessel();
 
     await expect(vessel.promptForTest()).resolves.not.toContain("## Subagent Operating Contract");
-    expect(vessel.immediatePromptForTest()).toBeUndefined();
-    await expect(vessel.prepareImmediatePromptForTest()).resolves.toBeUndefined();
-  });
-
-  it("prepares the immediate prompt at the per-model-call boundary", async () => {
-    const vessel = await makeVessel({
-      STATE_ARGS: {
-        subagent: {
-          runId: "run-fresh",
-          task: "Inspect the assigned package and report its exports.",
-          parentRef: "do:workers/agent-worker:AiChatWorker:ai-chat",
-          parentChannelId: "ch-parent",
-          taskChannelId: "ch-task",
-          parentParticipantId: "do:workers/agent-worker:AiChatWorker:ai-chat",
-          depth: 1,
-        },
-      },
-    });
-
-    await expect(vessel.prepareImmediatePromptForTest()).resolves.toBe(
-      vessel.immediatePromptForTest()
-    );
-    await expect(vessel.prepareImmediatePromptForTest()).resolves.toContain(
-      "Inspect the assigned package and report its exports."
-    );
   });
 
   it("keeps the standalone subagent runtime prompt focused on terminal semantics", () => {

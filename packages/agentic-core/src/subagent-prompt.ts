@@ -1,19 +1,18 @@
 /**
- * The subagent operating contract — the runtime prompt injected into every
- * spawned child agent, whatever its reasoning engine.
+ * The subagent operating contract — stable system-prompt material composed
+ * once for each spawned child agent, whatever its reasoning engine.
  *
  * Shared here (not in agentic-do) because it has two consumers that must not
- * drift: the in-process Pi vessel delivers it as the per-request
- * `immediatePrompt`, and external launcher extensions (e.g. claude-code)
- * render it into the launch profile so the bridge can surface it as MCP
- * server instructions.
+ * drift: the in-process Pi vessel composes it into the child's stable system
+ * prompt, and external launcher extensions (e.g. claude-code) render it into
+ * the launch profile so the bridge can surface it as MCP server instructions.
  */
 
 /** Subagent task-duty binding threaded into a child vessel's state. */
 export interface SubagentIdentity {
   runId: string;
-  /** The supervisor-assigned goal. Kept in the immediate runtime prompt on
-   * every turn so progress messages and context trimming cannot displace it. */
+  /** The supervisor-assigned goal. Kept in the child's stable runtime contract
+   * so progress messages and context trimming cannot displace it. */
   task: string;
   parentRef: string;
   parentChannelId: string;

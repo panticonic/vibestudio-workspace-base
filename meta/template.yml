@@ -111,6 +111,7 @@ template:
     - workers/missions
     - workers/phone-provisioning
     - workers/pubsub-channel
+    - workers/quickfire-service
     - workers/silent-agent-worker
     - workers/system-agent
     - workers/system-test-runner
@@ -132,7 +133,7 @@ templates:
   registry:
     url: git+https://github.com/panticonic/vibestudio-template-registry.git
     ref: refs/heads/main
-systemEpoch: 59
+systemEpoch: 60
 defaultRepo: projects/default
 defaultAgentConfig:
   model: openai-codex:gpt-5.6-sol
@@ -235,6 +236,9 @@ singletonObjects:
   - source: workers/model-settings
     className: ModelSettingsDO
     key: workspace-model-settings
+  - source: workers/quickfire-service
+    className: QuickfireSessionsDO
+    key: workspace-quickfire
   - source: workers/testkit-driver
     className: TestkitDriverDO
     key: workspace-testkit-driver
@@ -354,6 +358,25 @@ services:
         - mission
     durableObject:
       className: ModelSettingsDO
+  - source: workers/quickfire-service
+    name: quickfire
+    title: Command conversations
+    action: manage panel-bound command conversations
+    description: Owns durable command-agent conversations attached to panel slots.
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.quickfire.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+    durableObject:
+      className: QuickfireSessionsDO
   - source: workers/testkit-driver
     name: testkit-driver
     title: Test runner

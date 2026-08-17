@@ -6,8 +6,10 @@
   "//": "Platform-neutral half of the quickfire overlay (quickfire-overlay-spec). The root entry is pure model + palette projection + the built-in slate definitions; ./transcript and ./session are split out so the desktop overlay surface bundle never pulls the channel client in behind a type import.",
   "exports": {
     ".": "./src/index.ts",
+    "./agent": "./src/agent.ts",
     "./transcript": "./src/transcript.ts",
-    "./session": "./src/session.ts"
+    "./session": "./src/session.ts",
+    "./service": "./src/service.ts"
   },
   "dependencies": {
     "@workspace/agentic-core": "workspace:*",

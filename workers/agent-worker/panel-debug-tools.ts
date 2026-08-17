@@ -1,11 +1,10 @@
 /**
- * The quickfire agent's debug surface (quickfire-overlay-spec §5.3).
+ * Configurable panel debugging tools for AiChatWorker.
  *
- * Every tool here is a thin wrapper over a `panelCdp` RPC that already exists
- * and is already gated — no new capability kind, no privileged path. What makes
- * them prompt-free on an ordinary panel is the reviewed closure and the grants
- * the host mints when the user opens quickfire over that panel (§6), not
- * anything these tools do.
+ * Every tool here is a thin wrapper over an existing, gated `panelCdp` RPC;
+ * none creates a privileged path. A launcher may attach exact panel authority
+ * through a runtime resource binding, while the host continues to decide
+ * whether each requested target is allowed.
  *
  * Each one defaults to the conversation's bound slot and accepts an explicit
  * `panelId` for the rare deliberate cross-panel look; the host decides whether
@@ -26,18 +25,6 @@ const panelTarget = {
   ),
 };
 
-function unattached(): AgentToolResult<null> {
-  return {
-    content: [
-      {
-        type: "text",
-        text: "This conversation is not attached to a panel, and no panelId was given.",
-      },
-    ],
-    isError: true,
-    details: null,
-  };
-}
 /* ── panel_screenshot ─────────────────────────────────────────────────── */
 
 const screenshotParameters = Type.Object(
@@ -63,7 +50,7 @@ interface PanelScreenshotResult {
 
 export function createPanelScreenshotTool(
   callMain: CallMain,
-  boundPanelId: string | null
+  boundPanelId: string
 ): AgentTool<typeof screenshotParameters> {
   return {
     name: "panel_screenshot",
@@ -76,7 +63,6 @@ export function createPanelScreenshotTool(
       params: PanelScreenshotParams
     ): Promise<AgentToolResult<PanelScreenshotResult | null>> => {
       const panelId = params.panelId ?? boundPanelId;
-      if (!panelId) return unattached();
       const result = await callMain<PanelScreenshotResult>("panelCdp.screenshot", [
         panelId,
         params.format ? { format: params.format } : {},
@@ -138,7 +124,7 @@ function renderEntries(label: string, entries: ConsoleEntry[]): string {
 
 export function createPanelConsoleTool(
   callMain: CallMain,
-  boundPanelId: string | null
+  boundPanelId: string
 ): AgentTool<typeof consoleParameters> {
   return {
     name: "panel_console",
@@ -151,7 +137,6 @@ export function createPanelConsoleTool(
       params: PanelConsoleParams
     ): Promise<AgentToolResult<PanelConsoleResult | null>> => {
       const panelId = params.panelId ?? boundPanelId;
-      if (!panelId) return unattached();
       const result = await callMain<PanelConsoleResult>("panelCdp.consoleHistory", [
         panelId,
         {
@@ -209,7 +194,7 @@ interface PanelEvaluateResult {
 
 export function createPanelEvalTool(
   callMain: CallMain,
-  boundPanelId: string | null
+  boundPanelId: string
 ): AgentTool<typeof evalParameters> {
   return {
     name: "panel_eval",
@@ -222,7 +207,6 @@ export function createPanelEvalTool(
       params: PanelEvalParams
     ): Promise<AgentToolResult<PanelEvaluateResult | null>> => {
       const panelId = params.panelId ?? boundPanelId;
-      if (!panelId) return unattached();
       const expression = params.expression;
       if (typeof expression !== "string" || expression.length === 0) {
         return {
@@ -267,7 +251,7 @@ interface CdpEndpoint {
 
 export function createPanelCdpEndpointTool(
   callMain: CallMain,
-  boundPanelId: string | null
+  boundPanelId: string
 ): AgentTool<typeof cdpEndpointParameters> {
   return {
     name: "panel_cdp_endpoint",
@@ -280,7 +264,6 @@ export function createPanelCdpEndpointTool(
       params: PanelCdpEndpointParams
     ): Promise<AgentToolResult<CdpEndpoint | null>> => {
       const panelId = params.panelId ?? boundPanelId;
-      if (!panelId) return unattached();
       const endpoint = await callMain<CdpEndpoint>("panelCdp.getCdpEndpoint", [panelId]);
       return {
         content: [{ type: "text", text: `CDP endpoint for ${panelId}: ${endpoint.wsEndpoint}` }],

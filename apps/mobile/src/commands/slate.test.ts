@@ -17,7 +17,7 @@ function deps(overrides: Partial<MobileSlateDeps> = {}): MobileSlateDeps {
       })),
     },
     quickfire: {
-      clear: jest.fn(async () => ({ cleared: true, archived: 1 })),
+      clear: jest.fn(async () => ({ cleared: true })),
       promote: jest.fn(async () => ({ channelId: "channel-1" })),
       list: jest.fn(async () => []),
     },
@@ -142,7 +142,7 @@ describe("mobile slate", () => {
     const promote = buildMobileSlate().find((command) => command.id === "quickfire.promote")!;
     const slateDeps = deps({
       quickfire: {
-        clear: jest.fn(async () => ({ cleared: false, archived: 0 })),
+        clear: jest.fn(async () => ({ cleared: false })),
         promote: jest.fn(async () => null),
         list: jest.fn(async () => []),
       },

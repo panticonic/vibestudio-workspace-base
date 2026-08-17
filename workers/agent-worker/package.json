@@ -10,9 +10,6 @@
       "classes": [
         {
           "className": "AiChatWorker"
-        },
-        {
-          "className": "QuickfireAgentWorker"
         }
       ]
     },
@@ -210,6 +207,7 @@
   },
   "dependencies": {
     "@sinclair/typebox": "0.27.12",
+    "@workspace/agentic-core": "workspace:*",
     "@workspace/runtime": "workspace:*",
     "@workspace/agentic-do": "workspace:*",
     "@workspace/pubsub": "workspace:*",
