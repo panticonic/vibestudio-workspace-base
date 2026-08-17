@@ -777,14 +777,19 @@ export function QuickfireOwner() {
       // A conversation surface has nothing to promote: its chat panel is
       // found-or-opened (never duplicated), landing on the envelope it opened on.
       const { channelId, focusMessageId } = state.conversation;
+      close({ restoreFocus: false });
       await userNotifications.openChannel(channelId, {
         ...(focusMessageId ? { focusMessageId } : {}),
       });
-      close({ restoreFocus: false });
       return;
     }
     const parentSlot = chromeState?.panelId;
-    const promoted = await quickfireSession.promote();
+    // Capture the bound session and issue promotion before closing: closing
+    // removes the overlay's source binding on the next render, but must not
+    // leave its presentation onscreen while the durable RPC or panel build runs.
+    const promotion = quickfireSession.promote();
+    close({ restoreFocus: false });
+    const promoted = await promotion;
     if (!promoted) return;
     const { channelId, contextId } = promoted;
     const opened = parentSlot
@@ -799,7 +804,6 @@ export function QuickfireOwner() {
           contextId,
         });
     if (opened?.id) promotedPanelIdsRef.current.set(channelId, opened.id);
-    close({ restoreFocus: false });
   }, [chromeState?.panelId, close, quickfireSession, state.conversation]);
 
   /**
@@ -929,12 +933,12 @@ export function QuickfireOwner() {
         case "host-escape":
           // Only meaningful while we are the visible overlay; the approval card
           // receives the same forwarded intent and ignores it.
-          if (state.open) close();
+          close();
           return;
         case "host-pointer-down":
           // The underlying native view is handling this same press. Do not
           // restore the old panel and race the user's chosen focus target.
-          if (state.open) close({ restoreFocus: false });
+          close({ restoreFocus: false });
           return;
         case "send":
           void quickfireSession.send(intent.text);

@@ -17,6 +17,26 @@ describe("quickfire agent referent contract", () => {
     expect(QUICKFIRE_AGENT_PROMPT).toContain("system presents any approval out of band");
   });
 
+  it("points panel and service orchestration at the portable runtime", () => {
+    expect(QUICKFIRE_AGENT_PROMPT).toContain(
+      'await panelTree.page({ group: { kind: "children", parentSlotId }, limit: 50 })',
+    );
+    expect(QUICKFIRE_AGENT_PROMPT).toContain(
+      "await panelTree.search({ query, limit: 20 })",
+    );
+    expect(QUICKFIRE_AGENT_PROMPT).toContain(
+      'const handle = await openPanel(source, { parentId, focus: true, placement: { disposition: "side" } })',
+    );
+    expect(QUICKFIRE_AGENT_PROMPT).toContain(
+      "await handle.movePanel(parentId, { beforeSlotId })",
+    );
+    expect(QUICKFIRE_AGENT_PROMPT).toContain("await workers.listServices()");
+    expect(QUICKFIRE_AGENT_PROMPT).toContain("await workers.resolveService(protocol)");
+    expect(config().features).toMatchObject({
+      tools: expect.arrayContaining([{ kind: "standard" }]),
+    });
+  });
+
   it("makes panel context salient without dictating the user's referent", () => {
     expect(QUICKFIRE_AGENT_PROMPT).toContain(
       "They may be talking about that panel or its contents",
