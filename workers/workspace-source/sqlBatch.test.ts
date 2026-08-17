@@ -1,6 +1,7 @@
 // Builtin semantic-authority tests.
 import { describe, expect, it, vi } from "vitest";
 import type { SqlStorage } from "@vibestudio/durable";
+import { createInMemorySql } from "@vibestudio/durable/test-utils";
 
 import {
   DURABLE_OBJECT_SQL_MAX_BOUND_PARAMETERS,
@@ -17,17 +18,35 @@ function recordingSql(returned: Record<string, unknown>[] = []) {
 }
 
 describe("execBatchedInsert", () => {
-  it("keeps every statement within the Durable Objects binding limit", () => {
-    const { exec, sql } = recordingSql();
+  it("persists a snapshot-scale rowset through one bounded binding", async () => {
+    const sql = await createInMemorySql();
+    sql.exec(
+      `CREATE TABLE values_table (
+        id INTEGER PRIMARY KEY,
+        value TEXT NOT NULL,
+        optional TEXT
+      )`
+    );
     const rows = Array.from({ length: 101 }, (_, index) => [index, `value:${index}`, null]);
 
     execBatchedInsert(sql, "INSERT INTO values_table (id, value, optional)", 3, rows);
 
-    expect(exec).toHaveBeenCalledTimes(4);
-    for (const [, ...bindings] of exec.mock.calls) {
-      expect(bindings.length).toBeLessThanOrEqual(DURABLE_OBJECT_SQL_MAX_BOUND_PARAMETERS);
-    }
-    expect(exec.mock.calls.flatMap(([, ...bindings]) => bindings)).toEqual(rows.flat());
+    expect(
+      sql.exec(`SELECT id, value, optional FROM values_table ORDER BY id`).toArray()
+    ).toEqual(rows.map(([id, value, optional]) => ({ id, value, optional })));
+
+    const recording = recordingSql();
+    execBatchedInsert(
+      recording.sql,
+      "INSERT INTO values_table (id, value, optional)",
+      3,
+      rows
+    );
+    expect(recording.exec).toHaveBeenCalledTimes(1);
+    expect(recording.exec.mock.calls[0]?.slice(1)).toHaveLength(1);
+    expect(recording.exec.mock.calls[0]?.slice(1).length).toBeLessThanOrEqual(
+      DURABLE_OBJECT_SQL_MAX_BOUND_PARAMETERS
+    );
   });
 
   it("collects RETURNING rows from every statement", () => {
@@ -43,9 +62,8 @@ describe("execBatchedInsert", () => {
         rows,
         " RETURNING id"
       )
-    ).toEqual([...returned, ...returned]);
+    ).toEqual(returned);
     expect(exec.mock.calls.map(([query]) => query)).toEqual([
-      expect.stringContaining(" RETURNING id"),
       expect.stringContaining(" RETURNING id"),
     ]);
   });

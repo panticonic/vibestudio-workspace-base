@@ -1424,10 +1424,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
       const store = this.semanticVcsStore();
 
       if (phase === "context") {
-        // Exact root import is a filesystem-consuming workflow: establish the
-        // ordinary projected context before the first repository patch. A
-        // coordinate-only context deliberately has no materialization basis.
-        const ensured = workspace.ensureContext(
+        // This context is private staging for one immediate protected-main
+        // publication. The exact checkout already exists at the workspace
+        // root, so initialization needs the semantic coordinate, not a second
+        // disposable filesystem projection of the same snapshot.
+        const ensured = workspace.ensureContextCoordinate(
           {
             contextId,
             commandId: `${input.commandId}:context`,
@@ -1470,8 +1471,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
           continue;
         }
         const context = store.contextRequired(contextId);
-        const dispatched = await workspace.dispatch("vcsImportSnapshot", {
-          input: {
+        const dispatched = workspace.importSnapshotCoordinate(
+          {
             contextId,
             commandId: importCommandId,
             expectedWorkingHead: context.working.ref,
@@ -1483,15 +1484,15 @@ export class GadWorkspaceDO extends DurableObjectBase {
             },
             repositories: input.repositories.map((repository) => ({
               repoPath: repository.repoPath,
-              files: repository.files,
+              files: repository.files.map((file) => ({ ...file })),
             })),
             message: "Initialize exact workspace source",
           },
-          ingress: {
+          {
             causalParent: null,
             contextIntegrity: { class: "internal", externalKeys: [] },
-          },
-        });
+          }
+        );
         if (dispatched.kind === "host-read") {
           throw new Error("Workspace initialization emitted an unsupported host read");
         }

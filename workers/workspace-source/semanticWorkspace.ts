@@ -1367,14 +1367,25 @@ export class SemanticWorkspace {
             externalSnapshot: planned.externalSnapshot,
             importedRepositoryIds: planned.importedRepositoryIds,
           };
-          const projection = this.queueMaterialization(
-            importInput.contextId,
-            pending.commandId,
-            asState(importInput.expectedWorkingHead),
-            committed.context.working.ref,
-            [],
-            planned.draft
-          );
+          const projection = pending.payload["projection"];
+          if (projection !== "required" && projection !== "deferred") {
+            throw internalSemanticIntegrityFailure(
+              "EffectMismatch",
+              `Snapshot import has invalid projection policy ${String(projection)}`,
+              { contract: "import-observation" }
+            );
+          }
+          const materialization =
+            projection === "required"
+              ? this.queueMaterialization(
+                  importInput.contextId,
+                  pending.commandId,
+                  asState(importInput.expectedWorkingHead),
+                  committed.context.working.ref,
+                  [],
+                  planned.draft
+                )
+              : null;
           const materializationPlanCompletedAt = Date.now();
           this.deps.store.updatePendingCommandResult({
             scopeKind: "context",
@@ -1383,6 +1394,13 @@ export class SemanticWorkspace {
             result,
           });
           this.deps.store.compactAppliedObservation(pending.effectId);
+          if (!materialization) {
+            this.deps.store.finishEffectPendingCommand({
+              scopeKind: "context",
+              scopeId: importInput.contextId,
+              commandId: pending.commandId,
+            });
+          }
           const journalCompletedAt = Date.now();
           const totalMs = journalCompletedAt - profileStartedAt;
           if (totalMs >= 100) {
@@ -1401,7 +1419,9 @@ export class SemanticWorkspace {
               totalMs,
             });
           }
-          return { kind: "effects-pending", result, effects: [projection] };
+          return materialization
+            ? { kind: "effects-pending", result, effects: [materialization] }
+            : { kind: "complete", result };
         }
         if (method === "registerExternalDelta") {
           const deltaInput = parseVcsSemanticRequest("registerExternalDelta", commandInput)
@@ -1571,6 +1591,24 @@ export class SemanticWorkspace {
     ingress: SemanticDispatchRequest["ingress"]
   ): SemanticDispatchResult {
     return this.ensureContextWithProjection(input, ingress, "deferred");
+  }
+
+  /**
+   * Import into a coordinate-only bootstrap context. Exact workspace-source
+   * initialization publishes the result immediately and already owns the
+   * identical checked-out bytes, so projecting this private context would
+   * write the complete workspace a second time before readiness.
+   */
+  importSnapshotCoordinate(
+    input: VcsImportSnapshotInput,
+    ingress: SemanticDispatchRequest["ingress"]
+  ): SemanticDispatchResult {
+    const parsed = parseVcsSemanticRequest("importSnapshot", input).input;
+    return this.importSnapshot(
+      parsed as VcsImportSnapshotInput,
+      { input: parsed as Row, ingress },
+      "deferred"
+    );
   }
 
   private ensureContextWithProjection(
@@ -3613,7 +3651,8 @@ export class SemanticWorkspace {
 
   private importSnapshot(
     input: VcsImportSnapshotInput,
-    request: SemanticDispatchRequest
+    request: SemanticDispatchRequest,
+    projection: "required" | "deferred" = "required"
   ): SemanticDispatchResult {
     return this.runMutation("importSnapshot", input, request, () => {
       if (input.expectedWorkingHead.kind !== "event") {
@@ -3641,6 +3680,7 @@ export class SemanticWorkspace {
         payload: {
           method: "importSnapshot",
           representation: "descriptor",
+          projection,
           input: input as unknown as Row,
           contextIntegrity: request.ingress.contextIntegrity as unknown as Row,
           files: contentHashes.map((contentHash) => ({ contentHash })),

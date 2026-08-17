@@ -144,12 +144,7 @@ describe("WorkspaceSourceProviderV1", () => {
         initializedStateHash: expect.stringMatching(/^state:[0-9a-f]{64}$/u),
       },
     });
-    expect(effectKinds).toEqual([
-      "materialize-context",
-      "observe-content",
-      "materialize-context",
-      "publish-main",
-    ]);
+    expect(effectKinds).toEqual(["observe-content", "publish-main"]);
     await expect(
       instance.workspaceSourceInitializeExactSnapshot(input),
     ).resolves.toEqual(inspection);
