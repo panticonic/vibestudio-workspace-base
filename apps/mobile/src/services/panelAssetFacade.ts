@@ -46,6 +46,7 @@ export { panelAssetCacheKey } from "@vibestudio/shared/panel/assetPathPolicy";
 import type { MobileRpcClient } from "./mobileTransport";
 import { getNativeAppStorage } from "./nativeAppStorage";
 import { createPipeGate, type PipeGate } from "./panelAssetPipeGate";
+import { prefetchPanelBuild } from "./panelBuildPrefetch";
 import { withPanelAssetRetry } from "./panelAssetRetry";
 import {
   MobileAssetStore,
@@ -66,6 +67,12 @@ const PERSISTED_PORT_KEY = "vibestudio:panel-asset-facade:port";
 
 export interface PanelAssetFacade {
   port: number;
+  /**
+   * Fill the durable store for a panel build before its WebView asks, in one
+   * transfer instead of one round trip per file. Never rejects and never has to
+   * be awaited: a panel that races it simply waits on the same store claims.
+   */
+  prefetchBuild(buildKey: string): void;
   /** Enforce the durable store byte cap after a native memory warning. */
   trimCache(): void;
   close(): Promise<void>;
@@ -186,8 +193,70 @@ export async function startPanelAssetFacade(
   console.log(
     `[VibestudioMobileSmoke] phase=workspace-panel-facade-listening ${JSON.stringify({ port })}`
   );
+
+  // One prefetch per build for the life of the façade. The build key is a
+  // content digest, so a second pass could only re-confirm store hits — and it
+  // would do so on the panel's own critical path.
+  const prefetched = new Set<string>();
+  const prefetchBuild = (buildKey: string): void => {
+    // Callers hand this whatever `panel.buildKey` holds, which is empty for an
+    // unmanaged (browser:) panel and absent until a build completes.
+    if (closing || !/^[0-9a-f]{64}$/u.test(buildKey) || prefetched.has(buildKey)) return;
+    prefetched.add(buildKey);
+    const flight = prefetchPanelBuild(buildKey, {
+      store,
+      // Identity bytes (`gzip: false`): these pass through Hermes, which has no
+      // cheap inflate, and a compressed body would hash to something other than
+      // the digest the bundle claims — discarding the only integrity check in
+      // the path. The per-asset path still asks for gzip, because there the
+      // WebView inflates natively and nothing in JS touches the bytes.
+      fetchPath: async (path) => {
+        const release = await pipeGate.acquire();
+        try {
+          const result = await transport.streamReadable("main", "gateway.fetch", [
+            { path, method: "GET", headers: {}, gzip: false },
+          ]);
+          if (result.status !== 200) {
+            // The caller abandons a non-200 without reading it, so the slot has
+            // to be given back here rather than by the iterator it never runs.
+            void result.body.cancel().catch(() => undefined);
+            release();
+            return { status: result.status, body: EMPTY_BODY };
+          }
+          return { status: result.status, body: iterateStream(result.body, release) };
+        } catch (error) {
+          release();
+          throw error;
+        }
+      },
+    })
+      .then((report) => {
+        console.log(
+          `[VibestudioMobileSmoke] phase=workspace-panel-build-prefetched ${JSON.stringify(report)}`
+        );
+      })
+      .catch((error: unknown) => {
+        // A failed prefetch costs bytes, never a panel: every claim it took is
+        // released, so each WebView request falls back to its own fetch.
+        prefetched.delete(buildKey);
+        console.warn(
+          `[panel-facade] build prefetch for ${buildKey} failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`
+        );
+      });
+    // Tracked like a served request: `close()` must not tear the store down
+    // while a transfer still holds claims on it.
+    activeRequests.add(flight);
+    void flight.then(
+      () => activeRequests.delete(flight),
+      () => activeRequests.delete(flight)
+    );
+  };
+
   return {
     port,
+    prefetchBuild,
     trimCache: () => {
       void store
         .trim()
@@ -215,6 +284,40 @@ export async function startPanelAssetFacade(
         await serverClosed;
       })();
       return closeFlight;
+    },
+  };
+}
+
+/**
+ * Consume a fetched body as an async iterable, releasing the pipe slot exactly
+ * once the last chunk is read (or the read fails).
+ *
+ * The slot is held across the BODY, not just the request — the frames that get
+ * lost are the response's, so releasing earlier would let the next stream's
+ * frames interleave and rebuild the burst the gate exists to prevent.
+ */
+const EMPTY_BODY: AsyncIterable<Uint8Array> = {
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async *[Symbol.asyncIterator]() {},
+};
+
+function iterateStream(
+  body: ReadableStream<Uint8Array>,
+  release: () => void
+): AsyncIterable<Uint8Array> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      const reader = body.getReader();
+      try {
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          if (value && value.byteLength > 0) yield value;
+        }
+      } finally {
+        reader.releaseLock();
+        release();
+      }
     },
   };
 }

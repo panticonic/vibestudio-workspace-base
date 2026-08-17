@@ -1470,6 +1470,18 @@ export class ShellClient {
     smokePhase("workspace-panel-facade-ready", { port: this.facade.port });
   }
 
+  /**
+   * Warm the durable asset store for a panel build in one transfer.
+   *
+   * Called as soon as a panel's build key is known — ahead of the lease and
+   * panel-init round trips — so the WebView's first asset requests find the
+   * build already on device instead of spending one round trip per file. Safe
+   * to call repeatedly and for panels that have no build.
+   */
+  prefetchPanelBuild(buildKey: string | null | undefined): void {
+    if (buildKey) this.facade?.prefetchBuild(buildKey);
+  }
+
   /** Active workspace id, available after connect; null until then. */
   get workspaceId(): string | null {
     return this.workspaceInfo?.config.id ?? null;
