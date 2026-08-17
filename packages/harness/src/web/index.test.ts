@@ -22,6 +22,10 @@ interface MockTool {
     toolCallId: string,
     params: unknown,
     signal: AbortSignal | undefined,
+    onUpdate?: (result: {
+      content: Array<{ type: string; text: string }>;
+      details: unknown;
+    }) => void,
   ) => Promise<{
     content: Array<{ type: string; text: string }>;
     details?: unknown;
@@ -145,6 +149,10 @@ describe("createWebTools", () => {
     expect(registered.has("web_search")).toBe(true);
     expect(registered.has("web_fetch")).toBe(true);
     expect(registered.has("web_read")).toBe(true);
+    const properties = (registered.get("web_search")!.parameters as {
+      properties: Record<string, unknown>;
+    }).properties;
+    expect(Object.keys(properties)).toEqual(["queries"]);
   });
 
   it("uses DuckDuckGo when no API key is available", async () => {
@@ -155,11 +163,116 @@ describe("createWebTools", () => {
     const registered = registeredTools(createWebTools({ rpc: rpc as never, fetcher }));
 
     const tool = registered.get("web_search")!;
-    const result = await tool.execute("call-1", { query: "tc39 stage 3" }, undefined);
+    const result = await tool.execute("call-1", { queries: ["tc39 stage 3"] }, undefined);
     const details = result.details as { provider: string; results: unknown[] };
     expect(details.provider).toBe("duckduckgo");
     expect(details.results.length).toBeGreaterThan(0);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the configured Codex subscription search session and preserves citations", async () => {
+    const { rpc } = makeBlobstore();
+    const sse = [
+      'event: response.created\ndata: {"response":{"id":"resp-1"}}',
+      'event: response.output_item.done\ndata: {"item":{"id":"search-1","type":"web_search_call","status":"completed","action":{"type":"search","query":"current tc39 proposals"}}}',
+      'event: response.output_text.delta\ndata: {"delta":"Temporal is standardized."}',
+      'event: response.output_item.done\ndata: {"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Temporal is standardized.","annotations":[{"type":"url_citation","title":"TC39","url":"https://tc39.es/"}]}]}}',
+      'event: response.completed\ndata: {"response":{"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}',
+    ].join("\n\n");
+    const codexFetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        model: string;
+        tools: Array<Record<string, unknown>>;
+      };
+      expect(request.model).toBe("gpt-5.6-sol");
+      expect(request.tools[0]).toMatchObject({
+        type: "web_search",
+        external_web_access: true,
+        search_context_size: "high",
+      });
+      expect(new Headers(init?.headers).get("chatgpt-account-id")).toBe("account-1");
+      return new Response(sse, {
+        status: 200,
+        headers: { "content-type": "text/event-stream" },
+      });
+    });
+    const recordIngestion = vi.fn(async () => undefined);
+    const registered = registeredTools(createWebTools({
+      rpc: rpc as never,
+      recordIngestion,
+      searchBackend: "codex",
+      resolveCodexSearchSession: async () => ({
+        model: "gpt-5.6-sol",
+        accountId: "account-1",
+        sessionId: "channel-1",
+        fetcher: codexFetch,
+      }),
+    }));
+    const properties = (registered.get("web_search")!.parameters as {
+      properties: Record<string, unknown>;
+    }).properties;
+    expect(Object.keys(properties)).toEqual(["queries", "search_context_size", "freshness"]);
+    const onUpdate = vi.fn();
+
+    const result = await registered.get("web_search")!.execute(
+      "call-codex",
+      {
+        queries: ["current tc39 proposals"],
+        search_context_size: "high",
+        freshness: "live",
+      },
+      undefined,
+      onUpdate,
+    );
+
+    expect(result.content[0]?.text).toContain("Temporal is standardized.");
+    expect(result.content[0]?.text).toContain("https://tc39.es/");
+    expect(result.details).toMatchObject({
+      provider: "openai-codex",
+      api: "responses",
+      model: "gpt-5.6-sol",
+      queryCount: 1,
+      failedQueryCount: 0,
+      searchContextSize: "high",
+      results: [{
+        query: "current tc39 proposals",
+        sources: [{ title: "TC39", url: "https://tc39.es/" }],
+      }],
+    });
+    expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
+      content: [{ type: "text", text: "Temporal is standardized." }],
+      details: expect.objectContaining({
+        partial: true,
+        results: [expect.objectContaining({
+          query: "current tc39 proposals",
+          text: "Temporal is standardized.",
+        })],
+      }),
+    }));
+    expect(recordIngestion).toHaveBeenCalledWith({
+      key: "web:tc39.es",
+      via: "web-search:openai-codex",
+      classification: "external",
+    });
+  });
+
+  it("batches legacy-provider queries without exposing a second search tool", async () => {
+    const { rpc } = makeBlobstore();
+    const fetcher = vi.fn(async () =>
+      mockResponse(fixture("ddg-lite-sample.html"), { contentType: "text/html" }),
+    ) as unknown as typeof fetch;
+    const registered = registeredTools(createWebTools({ rpc: rpc as never, fetcher }));
+
+    const result = await registered.get("web_search")!.execute(
+      "call-batch",
+      { queries: ["query one", "query two"] },
+      undefined,
+    );
+
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect((result.details as { results: Array<{ query: string }> }).results.map(({ query }) => query))
+      .toEqual(["query one", "query two"]);
+    expect(registered.has("codex_search")).toBe(false);
   });
 
   it("selects Brave when a Brave credential is registered", async () => {
@@ -194,10 +307,13 @@ describe("createWebTools", () => {
     }));
 
     const tool = registered.get("web_search")!;
-    const result = await tool.execute("c", { query: "x" }, undefined);
-    const details = result.details as { provider: string; results: Array<{ snippet: string }> };
+    const result = await tool.execute("c", { queries: ["x"] }, undefined);
+    const details = result.details as {
+      provider: string;
+      results: Array<{ sources: Array<{ snippet: string }> }>;
+    };
     expect(details.provider).toBe("brave");
-    expect(details.results[0]!.snippet).toBe("from brave");
+    expect(details.results[0]!.sources[0]!.snippet).toBe("from brave");
   });
 
   it("selects Exa when an Exa credential is registered", async () => {
@@ -225,10 +341,13 @@ describe("createWebTools", () => {
       hasCredentialForOrigin: async (origin) => origin.includes("exa.ai"),
     }));
     const tool = registered.get("web_search")!;
-    const result = await tool.execute("c", { query: "x" }, undefined);
-    const details = result.details as { provider: string; results: Array<{ snippet: string }> };
+    const result = await tool.execute("c", { queries: ["x"] }, undefined);
+    const details = result.details as {
+      provider: string;
+      results: Array<{ sources: Array<{ snippet: string }> }>;
+    };
     expect(details.provider).toBe("exa");
-    expect(details.results[0]!.snippet).toBe("semantic snippet");
+    expect(details.results[0]!.sources[0]!.snippet).toBe("semantic snippet");
   });
 
   it("auto-upgrades to Tavily when a Tavily credential is registered", async () => {
@@ -256,10 +375,13 @@ describe("createWebTools", () => {
     }));
 
     const tool = registered.get("web_search")!;
-    const result = await tool.execute("call-1", { query: "anything" }, undefined);
-    const details = result.details as { provider: string; results: Array<{ url: string }> };
+    const result = await tool.execute("call-1", { queries: ["anything"] }, undefined);
+    const details = result.details as {
+      provider: string;
+      results: Array<{ sources: Array<{ url: string }> }>;
+    };
     expect(details.provider).toBe("tavily");
-    expect(details.results[0]!.url).toBe("https://example.com");
+    expect(details.results[0]!.sources[0]!.url).toBe("https://example.com");
   });
 
   it("web_fetch caches markdown in the blobstore and returns digest + head", async () => {

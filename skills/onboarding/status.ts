@@ -416,7 +416,7 @@ export function createStatusAdapters(
     "web-search": async () => {
       if (!(await deps.hasSkill("skills/web-research/SKILL.md"))) {
         return unavailable(
-          "Enhanced web search is unavailable because its base capability owner could not be loaded.",
+          "Alternative web search setup is unavailable because its capability owner could not be loaded.",
           "owner-unavailable"
         );
       }
@@ -424,13 +424,14 @@ export function createStatusAdapters(
       return provider === "duckduckgo"
         ? {
             state: "using-defaults",
-            summary: "Built-in DuckDuckGo search is active.",
+            summary:
+              "Codex agents use subscription search; other agents use built-in DuckDuckGo.",
             attention: "none",
             rawStage: provider,
           }
         : {
             state: "configured",
-            summary: `${provider[0]!.toUpperCase()}${provider.slice(1)} search is active.`,
+            summary: `${provider[0]!.toUpperCase()}${provider.slice(1)} is configured for non-Codex search.`,
             attention: "none",
             rawStage: provider,
           };

@@ -131,10 +131,10 @@ describe("onboarding status adapters", () => {
     });
   });
 
-  it("treats the built-in search provider as a healthy default", async () => {
+  it("describes the provider-specific search defaults", async () => {
     await expect(createStatusAdapters(dependencies())["web-search"]!()).resolves.toEqual({
       state: "using-defaults",
-      summary: "Built-in DuckDuckGo search is active.",
+      summary: "Codex agents use subscription search; other agents use built-in DuckDuckGo.",
       attention: "none",
       rawStage: "duckduckgo",
     });

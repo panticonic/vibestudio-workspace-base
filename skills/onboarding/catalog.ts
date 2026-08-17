@@ -230,8 +230,9 @@ export const onboardingCatalog: readonly OnboardingCapabilityDefinition[] = [
   },
   {
     id: "configuration.web-search",
-    title: "Enhanced web search",
-    summary: "Optionally use Tavily, Brave, or Exa instead of the built-in search provider.",
+    title: "Alternative web search",
+    summary:
+      "Optionally use Tavily, Brave, or Exa for non-Codex agents; Codex agents use subscription search by default.",
     category: "personalization",
     role: "optional-configuration",
     scope: "user-workspace",
@@ -245,7 +246,7 @@ export const onboardingCatalog: readonly OnboardingCapabilityDefinition[] = [
     setup: {
       statusAdapter: "web-search",
       successDescription:
-        "An enhanced provider credential is active; DuckDuckGo remains usable without it.",
+        "An alternative provider credential is active for non-Codex search; Codex subscription search remains the Codex default.",
     },
   },
   {

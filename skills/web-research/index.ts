@@ -1,11 +1,12 @@
 /**
  * Web-research skill helpers.
  *
- * The harness's `web_search` tool auto-selects between DuckDuckGo (free,
- * zero-config) and three keyed providers (Tavily, Brave, Exa) based on
- * which credentials the user has registered in the app's credentials
- * system. Each helper here pops the trusted credential-input UI for one
- * provider, asks the user to paste their API key, and stores it as a
+ * Agents configured with an OpenAI Codex primary use their connected subscription. For other
+ * model providers, the harness's `web_search` tool auto-selects between
+ * DuckDuckGo (free, zero-config) and three keyed providers (Tavily, Brave,
+ * Exa) based on which credentials the user has registered in the app's
+ * credentials system. Each helper here pops the trusted credential-input UI
+ * for one provider, asks the user to paste their API key, and stores it as a
  * URL-bound credential whose audience matches the provider's API origin.
  *
  * The harness never sees the key value. When `web_search` issues a

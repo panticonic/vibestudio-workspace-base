@@ -780,14 +780,23 @@ incomplete verification result, not permission to claim that the panel works.
 
 ### web_search
 
-Search the web for information.
+Search the web for current or source-backed information. Agents whose configured
+primary provider is OpenAI Codex use the connected Codex subscription and return
+cited answers; other providers use the configured search backend. Batch related
+queries.
 
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `query` | string | Yes | Search query |
-| `allowed_domains` | string[] | No | Only include results from these domains |
-| `blocked_domains` | string[] | No | Exclude results from these domains |
+| `queries` | string[] | Yes | One to five related search queries |
+
+When the configured primary provider is OpenAI Codex, the tool schema also
+exposes:
+
+| Name | Type | Required | Description |
+|------|------|----------|-------------|
+| `search_context_size` | `low` \| `medium` \| `high` | No | Search context size (default `medium`) |
+| `freshness` | `cached` \| `indexed` \| `live` | No | Freshness mode (default `live`) |
 
 ### web_fetch
 

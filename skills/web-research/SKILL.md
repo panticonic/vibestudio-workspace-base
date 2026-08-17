@@ -1,6 +1,6 @@
 ---
 name: web-research
-description: Search the web, fetch URLs into readable text, read bounded ranges, cite sources, or configure an enhanced search provider.
+description: Search the web, fetch URLs into readable text, read bounded ranges, cite sources, or configure an alternative search provider.
 ---
 
 # Web research
@@ -10,7 +10,9 @@ resource.
 
 ## Core workflow
 
-1. Use `web_search` to discover candidate URLs.
+1. Use `web_search` to discover candidate URLs. Batch related questions in
+   one `queries` array; agents whose configured primary provider is OpenAI
+   Codex use their connected subscription and return cited answers by default.
 2. Fetch the best source with `web_fetch`.
 3. Read the returned head first. If more is needed, use `web_read` with the
    returned digest and bounded offsets.
@@ -57,11 +59,13 @@ through host-mediated `credentials.fetch()` per [API
 integrations](../api-integrations/SKILL.md). Never keep copied endpoint recipes
 here — provider auth and response schemas change.
 
-## Enhanced search setup
+## Alternative search setup
 
-Built-in search works without a provider credential. When the user asks for an
-enhanced provider or repeated failures justify setup, render the checked-in
-workflow:
+Agents whose configured primary provider is OpenAI Codex use subscription
+search without separate setup.
+Other model providers use built-in DuckDuckGo search without a credential.
+When the user asks for Tavily, Brave, or Exa, or repeated non-Codex search
+failures justify setup, render the checked-in workflow:
 
 ```text
 inline_ui({

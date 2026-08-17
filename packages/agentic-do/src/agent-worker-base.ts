@@ -8,6 +8,10 @@
 
 import type { DurableObjectContext } from "@workspace/runtime/worker/durable-base";
 import { createRpcFs } from "@workspace/runtime/worker/rpc-fs";
+import {
+  createCredentialClient,
+  type StoredCredentialSummary,
+} from "@workspace/runtime/credentials";
 import type { AgentTool } from "@workspace/pi-core";
 import type { ParticipantDescriptor } from "@workspace/harness";
 import { createAgentReferenceStore } from "@workspace/harness/agent-references";
@@ -301,6 +305,14 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         }
       },
     };
+    const configuredModelRef = this.getAgentSettings().model;
+    const configuredModelSeparator = configuredModelRef.indexOf(":");
+    const configuredProviderId = configuredModelSeparator === -1
+      ? "anthropic"
+      : configuredModelRef.slice(0, configuredModelSeparator);
+    const configuredProviderModel = configuredModelSeparator === -1
+      ? configuredModelRef
+      : configuredModelRef.slice(configuredModelSeparator + 1);
     const base = [
       createReadTool(cwd, fs, {
         rpc: toolRpc,
@@ -374,6 +386,36 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           } catch {
             return false;
           }
+        },
+        searchBackend: configuredProviderId === "openai-codex" ? "codex" : "standard",
+        resolveCodexSearchSession: async (signal) => {
+          if (configuredProviderId !== "openai-codex") return null;
+          const credential = await toolRpc.call<StoredCredentialSummary | null>(
+            "main",
+            "credentials.resolveCredential",
+            [{ url: "https://chatgpt.com/backend-api" }],
+            { signal }
+          );
+          if (!credential) {
+            throw new Error(
+              "OpenAI Codex subscription is not configured. Connect the openai-codex model provider first."
+            );
+          }
+          const accountId =
+            credential.accountIdentity?.providerUserId ?? credential.metadata?.["accountId"];
+          if (!accountId) {
+            throw new Error(
+              "OpenAI Codex account id is missing from the connected credential. Reconnect the openai-codex model provider."
+            );
+          }
+          const credentialClient = createCredentialClient(toolRpc);
+          return {
+            model: configuredProviderModel,
+            accountId,
+            sessionId: channelId,
+            fetcher: (url: string, init?: RequestInit) =>
+              credentialClient.fetch(url, init, { credentialId: credential.id }),
+          };
         },
       }),
     ] as unknown as AgentTool[];
@@ -1500,7 +1542,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
 
   protected override getModelCredentialTokenClaims(
     providerId: string,
-    credential: import("@workspace/runtime/credentials").StoredCredentialSummary
+    credential: StoredCredentialSummary
   ): Record<string, unknown> {
     if (providerId !== "openai-codex") return {};
     const accountId =

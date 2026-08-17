@@ -39,8 +39,8 @@ Owner workflows remain authoritative:
 
 - Google and GitHub setup/checks use their dedicated skill helpers.
 - Browser migration uses `extensions/browser-data/SKILL.md`.
-- Enhanced search uses `skills/web-research/SKILL.md`; DuckDuckGo is already a
-  healthy default.
+- Alternative search setup uses `skills/web-research/SKILL.md`; Codex agents
+  use subscription search and other agents use DuckDuckGo without setup.
 - Recurring worker methods, exact inline agent evals, and agent prompts use
   `skills/automations/SKILL.md`; help shape and propose the inert draft before
   the user reviews it in Automations.

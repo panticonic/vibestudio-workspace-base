@@ -2,9 +2,9 @@
  * Vibestudio Web Tools Extension
  *
  * Registers three Pi tools:
- *   - `web_search` — Discovery via DuckDuckGo (zero-config) or an
- *     auto-selected keyed provider when the user has configured one
- *     in the credentials system.
+ *   - `web_search` — Batched, cited Codex subscription search when the
+ *     configured primary provider is openai-codex; otherwise DuckDuckGo
+ *     (zero-config) or an auto-selected keyed provider from the credentials system.
  *   - `web_fetch` — Fetches a URL, extracts main content with Mozilla
  *     Readability, converts to markdown, stores the full result in the
  *     content-addressed blobstore, and returns `{ url, title, digest, size, head }`.
@@ -19,26 +19,13 @@
  */
 import type { AgentTool } from "@workspace/pi-core";
 import { base64ToBytes } from "@vibestudio/rpc";
-import { searchDuckDuckGo } from "./duckduckgo.js";
-import { searchTavily } from "./tavily.js";
-import { searchBrave } from "./brave.js";
-import { searchExa } from "./exa.js";
-import { selectSearchProvider, type CredentialPresenceProbe } from "./provider.js";
+import { createWebSearchTool, type WebSearchDeps } from "./search.js";
 export type WebRpcCaller = <T = unknown>(target: string, method: string, args: unknown[]) => Promise<T>;
-export interface WebToolsDeps {
+export interface WebToolsDeps extends WebSearchDeps {
     /** RPC client for blobstore put/range reads. */
     rpc: {
         call: WebRpcCaller;
     };
-    /** Monotone session-latch recorder. It must settle before content is returned to the model. */
-    recordIngestion?: (entry: { key: string; via: string; classification: "external" | "derived" }) => Promise<void>;
-    /**
-     * Asks the host whether a credential exists for a given provider origin
-     * (e.g. `https://api.tavily.com/`). The host implements this by querying
-     * the credentials runtime — the harness never sees the credential value.
-     * Without this hook the extension stays on DuckDuckGo.
-     */
-    hasCredentialForOrigin?: CredentialPresenceProbe;
     /**
      * Override for the global fetch. In production the host wires a
      * binary-safe credentialed fetcher (`main:credentials.proxyFetch`)
@@ -59,8 +46,6 @@ export interface WebToolsDeps {
     sleep?: (ms: number) => Promise<void>;
 }
 const DEFAULT_HEAD_LENGTH = 5000;
-const DEFAULT_SEARCH_LIMIT = 5;
-const MAX_SEARCH_LIMIT = 20;
 const DEFAULT_READ_LIMIT = 8000;
 const MAX_READ_LIMIT = 32000;
 const DEFAULT_URL_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -70,19 +55,6 @@ const DEFAULT_PER_HOST_GAP_MS = 250;
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
-const SEARCH_PARAMETERS = {
-    type: "object",
-    properties: {
-        query: { type: "string", description: "Search query string." },
-        max_results: {
-            type: "integer",
-            description: `How many results to return (1-${MAX_SEARCH_LIMIT}, default ${DEFAULT_SEARCH_LIMIT}).`,
-            minimum: 1,
-            maximum: MAX_SEARCH_LIMIT,
-        },
-    },
-    required: ["query"],
-};
 const FETCH_PARAMETERS = {
     type: "object",
     properties: {
@@ -179,41 +151,7 @@ export function createWebTools(deps: WebToolsDeps): AgentTool[] {
         },
     };
     {
-        pi.registerTool({
-            name: "web_search",
-            label: "Web Search",
-            description: "Search the open web. Returns a list of { title, url, snippet }. Uses DuckDuckGo by default; auto-upgrades to Tavily / Brave / Exa when the user has registered a credential for one of those providers (see the web-research skill).",
-            parameters: SEARCH_PARAMETERS as never,
-            execute: async (_toolCallId, params, signal) => {
-                const { query, max_results } = params as {
-                    query: string;
-                    max_results?: number;
-                };
-                if (!query || typeof query !== "string") {
-                    throw new Error("web_search: 'query' is required");
-                }
-                const limit = clampInt(max_results, 1, MAX_SEARCH_LIMIT, DEFAULT_SEARCH_LIMIT);
-                const provider = await selectSearchProvider(deps.hasCredentialForOrigin);
-                const t0 = now();
-                const results = await runProvider(provider, query, limit, deps, withAbort(fetcher, signal));
-                if (deps.recordIngestion) {
-                    const domains = [...new Set(results.map((result) => hostnameOf(result.url)).filter((host): host is string => Boolean(host)))];
-                    await Promise.all(domains.map((host) => deps.recordIngestion!({ key: `web:${host}`, via: `web-search:${provider}`, classification: "external" })));
-                }
-                const elapsedMs = now() - t0;
-                const text = formatSearchResults(results, provider, query);
-                return {
-                    content: [{ type: "text" as const, text }],
-                    details: {
-                        provider,
-                        query,
-                        count: results.length,
-                        results,
-                        elapsed_ms: elapsedMs,
-                    },
-                };
-            },
-        });
+        pi.registerTool(createWebSearchTool(deps, withAbort(fetcher), now) as never);
         pi.registerTool({
             name: "web_fetch",
             label: "Web Fetch",
@@ -339,19 +277,6 @@ export function createWebTools(deps: WebToolsDeps): AgentTool[] {
         });
     }
     return tools;
-}
-async function runProvider(provider: import("./types.js").ProviderName, query: string, limit: number, _deps: WebToolsDeps, fetcher: typeof fetch): Promise<import("./types.js").SearchResult[]> {
-    switch (provider) {
-        case "tavily":
-            return searchTavily(query, limit, fetcher as never);
-        case "brave":
-            return searchBrave(query, limit, fetcher as never);
-        case "exa":
-            return searchExa(query, limit, fetcher as never);
-        case "duckduckgo":
-        default:
-            return searchDuckDuckGo(query, limit, fetcher as never);
-    }
 }
 function hostnameOf(input: string | URL | Request): string | null {
     try {
@@ -479,25 +404,6 @@ function clampInt(raw: unknown, min: number, max: number, fallback: number): num
     if (n > max)
         return max;
     return n;
-}
-function formatSearchResults(results: Array<{
-    title: string;
-    url: string;
-    snippet: string;
-}>, provider: string, query: string): string {
-    if (results.length === 0) {
-        return `No results for "${query}" (provider: ${provider}).`;
-    }
-    const lines: string[] = [`Web search results for "${query}" (provider: ${provider}):`, ""];
-    for (let i = 0; i < results.length; i++) {
-        const r = results[i]!;
-        lines.push(`${i + 1}. ${r.title}`);
-        lines.push(`   ${r.url}`);
-        if (r.snippet)
-            lines.push(`   ${r.snippet}`);
-        lines.push("");
-    }
-    return lines.join("\n");
 }
 export type { SearchResult, ProviderName } from "./types.js";
 export type { CredentialPresenceProbe } from "./provider.js";
