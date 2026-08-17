@@ -8,6 +8,7 @@ import {
 } from "@radix-ui/react-icons";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { PanelNavigationState } from "@vibestudio/shared/types";
+import { unitIconTarget } from "@vibestudio/shared/panel/assetPathPolicy";
 
 const BrowserFavicon = lazy(async () => {
   const module = await import("./BrowserFavicon");
@@ -16,12 +17,15 @@ const BrowserFavicon = lazy(async () => {
 
 export function PanelIcon({
   icon,
+  iconVersion,
   source,
   favicon,
   size = 16,
   fallback = false,
 }: {
   icon?: string;
+  /** Names the icon's content so the fetched glyph can be stored forever. */
+  iconVersion?: string;
   source?: string;
   favicon?: PanelNavigationState["favicon"];
   size?: number;
@@ -29,7 +33,7 @@ export function PanelIcon({
 }) {
   const imageSource =
     icon?.startsWith("./") && source
-      ? `../../__vibestudio/unit-icon?source=${encodeURIComponent(source)}&path=${encodeURIComponent(icon.slice(2))}`
+      ? `../../${unitIconTarget(source, icon, iconVersion)}`
       : icon?.startsWith("data:image/")
         ? icon
         : null;

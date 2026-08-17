@@ -19,6 +19,7 @@ import {
   type BrowserAddressSuggestion,
 } from "@vibestudio/shared/panelChrome";
 import { isReviewPending } from "@vibestudio/shared/authority/reviewPending";
+import { unitIconTarget } from "@vibestudio/shared/panel/assetPathPolicy";
 import type { PanelSourceUsage } from "@vibestudio/shared/panelSearchTypes";
 import { useIsMobile } from "@workspace/react/responsive";
 import { AboutPage, AboutThemeRoot } from "../../packages/about-shared/ui";
@@ -247,7 +248,11 @@ function SuggestionIcon({
       return (
         <img
           className="launcher-icon launcher-image-icon"
-          src={`${buildPanelLink(suggestion.panel.path)}../../__vibestudio/unit-icon?source=${encodeURIComponent(suggestion.panel.path)}&path=${encodeURIComponent(panelIcon.slice(2))}`}
+          src={`${buildPanelLink(suggestion.panel.path)}../../${unitIconTarget(
+            suggestion.panel.path,
+            panelIcon,
+            suggestion.panel.iconVersion
+          )}`}
           alt=""
           aria-hidden="true"
           onError={() => setImageFailed(true)}

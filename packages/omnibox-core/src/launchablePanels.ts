@@ -13,6 +13,8 @@ export interface LaunchablePanel {
   title: string;
   description?: string;
   icon?: string;
+  /** Names the icon's content, so its URL can be cached forever. */
+  iconVersion?: string;
 }
 
 export interface LaunchablePanelGroups {
@@ -35,6 +37,7 @@ function launchablePanel(node: WorkspaceNode): LaunchablePanel {
     title: node.launchable?.title ?? node.name,
     ...(node.launchable?.description ? { description: node.launchable.description } : {}),
     ...(node.launchable?.icon ? { icon: node.launchable.icon } : {}),
+    ...(node.launchable?.iconVersion ? { iconVersion: node.launchable.iconVersion } : {}),
   };
 }
 

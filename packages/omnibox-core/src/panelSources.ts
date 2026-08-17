@@ -31,6 +31,8 @@ export interface WorkspaceNode {
     title: string;
     description?: string;
     icon?: string;
+    /** Names a `./`-relative icon's content, so its URL can be cached forever. */
+    iconVersion?: string;
     hidden?: boolean;
   };
   packageInfo?: {

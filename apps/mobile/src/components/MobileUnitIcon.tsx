@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Image, StyleSheet, Text, View } from "react-native";
 import { SvgUri } from "react-native-svg";
+import { unitIconTarget } from "@vibestudio/shared/panel/assetPathPolicy";
 import {
   Globe,
   LayoutGrid,
@@ -28,6 +29,8 @@ function isSvgImage(uri: string): boolean {
 
 export function MobileUnitIcon(props: {
   icon?: string;
+  /** Names the icon's content so the fetched glyph can be stored forever. */
+  iconVersion?: string;
   source?: string;
   imageOverride?: string | null;
   kind: MobileUnitIconKind;
@@ -40,8 +43,8 @@ export function MobileUnitIcon(props: {
   const manifestImage = useMemo(() => {
     if (props.icon?.startsWith("data:image/")) return props.icon;
     if (!props.icon?.startsWith("./") || !props.source || !props.serverUrl) return null;
-    return `${props.serverUrl}/__vibestudio/unit-icon?source=${encodeURIComponent(props.source)}&path=${encodeURIComponent(props.icon.slice(2))}`;
-  }, [props.icon, props.serverUrl, props.source]);
+    return `${props.serverUrl}/${unitIconTarget(props.source, props.icon, props.iconVersion)}`;
+  }, [props.icon, props.iconVersion, props.serverUrl, props.source]);
   const image = props.imageOverride ?? manifestImage;
   const [imageFailed, setImageFailed] = useState(false);
   const handleImageError = useCallback(() => setImageFailed(true), []);
