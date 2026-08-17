@@ -10,10 +10,27 @@
     "./session": "./src/session.ts"
   },
   "dependencies": {
+    "@workspace/agentic-core": "workspace:*",
     "@vibestudio/shared": "workspace:*",
     "@workspace/agentic-protocol": "workspace:*",
     "@workspace/omnibox-core": "workspace:*",
     "@workspace/pubsub": "workspace:*"
+  },
+  "vibestudio": {
+    "authority": {
+      "provides": [],
+      "requests": [
+        {
+          "capability": "workspace.runtime-state.manage",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        }
+      ]
+    }
   },
   "//peerDependencies": "./session uses React hooks but this package owns no instance: the consuming app does. The desktop shell provides 19.2.4 (matched to its react-dom) and apps/mobile provides 19.0.0, forced by the react-native renderer inside the installed APK. The range says exactly that -- any React 19 -- and the build holds each consumer's own version to it.",
   "peerDependencies": {
