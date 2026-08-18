@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { validateDeterministicSummary } from "./deterministic-validator.js";
+import {
+  validateDeterministicRun,
+  validateDeterministicSummary,
+} from "./deterministic-validator.js";
 import { panelAutomationResourcesForSuite, PANEL_AUTOMATION_RESOURCE } from "./panel-authority.js";
 
 describe("deterministic system-test validation", () => {
@@ -16,6 +19,18 @@ describe("deterministic system-test validation", () => {
     ]);
 
     expect(result).toMatchObject({ passed: true });
+  });
+
+  it("validates harness-owned summary evidence without an agent transcript", () => {
+    expect(
+      validateDeterministicRun({
+        messages: [],
+        duration: 4,
+        diagnostics: {
+          deterministicSummary: { total: 2, passed: 2, failed: 0, errored: 0 },
+        },
+      })
+    ).toMatchObject({ passed: true });
   });
 
   it("serializes every panel-control suite on the shared automation resource", () => {

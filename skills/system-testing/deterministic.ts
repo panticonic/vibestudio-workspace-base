@@ -4,17 +4,15 @@
  * Two ways in:
  *  - runDeterministic(): run testkit suites directly (no agent session) and
  *    get a system-testing-shaped TestSuiteResult — fast, exact, cheap.
- *  - deterministicTestCases(): wrap each testkit suite as an agentic TestCase
- *    whose prompt has the test agent run the suite via eval and report the
- *    summary packet; validate() checks the structured counts. Use this when
- *    the deterministic suites should run inside the standard staged agentic
- *    workflow.
+ *  - deterministicTestCases(): wrap each testkit suite as a harness-orchestrated
+ *    TestCase so it participates in staged runs without spending a model turn
+ *    on a result the harness can observe exactly.
  */
-import { runSuites, type SuiteRunResult } from "@workspace/testkit";
+import { runSuites, summarize, type SuiteRunResult } from "@workspace/testkit";
 import { allSuites } from "@workspace/testkit/suites";
 import type { Suite } from "@workspace/testkit";
 import type { TestCase, TestSuiteResult } from "./types.js";
-import { validateDeterministicSummary } from "./deterministic-validator.js";
+import { validateDeterministicRun } from "./deterministic-validator.js";
 import {
   panelAutomationResourcesForSuite,
   panelControlAuthorityPolicy,
@@ -59,7 +57,7 @@ export async function runDeterministic(
   return { suiteResult, raw };
 }
 
-/** Wrap each testkit suite as one agentic TestCase for the staged workflow. */
+/** Wrap each testkit suite as one harness-owned TestCase for the staged workflow. */
 export function deterministicTestCases(suites: Suite[] = systemTestSuites()): TestCase[] {
   return suites.map((suite) => {
     const test: TestCase = {
@@ -79,7 +77,16 @@ export function deterministicTestCases(suites: Suite[] = systemTestSuites()): Te
         "Then reply with exactly the JSON the eval returned (the summary object) in a fenced code block.",
       ].join("\n"),
       validation: "harness",
-      validate: (result) => validateDeterministicSummary(result.messages),
+      orchestrate: async () => {
+        const startedAt = Date.now();
+        const raw = await runSuites([suite]);
+        return {
+          messages: [],
+          duration: Date.now() - startedAt,
+          diagnostics: { deterministicSummary: summarize(raw) },
+        };
+      },
+      validate: validateDeterministicRun,
     };
     const resources = panelAutomationResourcesForSuite(suite.options);
     return resources
