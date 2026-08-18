@@ -175,8 +175,8 @@ describe("createWebTools", () => {
     const sse = [
       'event: response.created\ndata: {"response":{"id":"resp-1"}}',
       'event: response.output_item.done\ndata: {"item":{"id":"search-1","type":"web_search_call","status":"completed","action":{"type":"search","query":"current tc39 proposals"}}}',
-      'event: response.output_text.delta\ndata: {"delta":"Temporal is standardized."}',
-      'event: response.output_item.done\ndata: {"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Temporal is standardized.","annotations":[{"type":"url_citation","title":"TC39","url":"https://tc39.es/"}]}]}}',
+      'event: response.output_text.delta\ndata: {"delta":"Temporal is standardized. TC39 maintains it."}',
+      'event: response.output_item.done\ndata: {"item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Temporal is standardized. TC39 maintains it.","annotations":[{"type":"url_citation","title":"TC39","url":"https://tc39.es/","start_index":0,"end_index":25},{"type":"url_citation","title":"TC39","url":"https://tc39.es/","start_index":26,"end_index":44}]}]}}',
       'event: response.completed\ndata: {"response":{"usage":{"input_tokens":10,"output_tokens":5,"total_tokens":15}}}',
     ].join("\n\n");
     const codexFetch = vi.fn(async (_url: string, init?: RequestInit) => {
@@ -225,7 +225,9 @@ describe("createWebTools", () => {
       onUpdate,
     );
 
-    expect(result.content[0]?.text).toContain("Temporal is standardized.");
+    expect(result.content[0]?.text).toContain(
+      "Temporal is standardized.[1] TC39 maintains it.[1]",
+    );
     expect(result.content[0]?.text).toContain("https://tc39.es/");
     expect(result.details).toMatchObject({
       provider: "openai-codex",
@@ -237,15 +239,19 @@ describe("createWebTools", () => {
       results: [{
         query: "current tc39 proposals",
         sources: [{ title: "TC39", url: "https://tc39.es/" }],
+        citations: [
+          { sourceIndex: 0, startIndex: 0, endIndex: 25 },
+          { sourceIndex: 0, startIndex: 26, endIndex: 44 },
+        ],
       }],
     });
     expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({
-      content: [{ type: "text", text: "Temporal is standardized." }],
+      content: [{ type: "text", text: "Temporal is standardized. TC39 maintains it." }],
       details: expect.objectContaining({
         partial: true,
         results: [expect.objectContaining({
           query: "current tc39 proposals",
-          text: "Temporal is standardized.",
+          text: "Temporal is standardized. TC39 maintains it.",
         })],
       }),
     }));
@@ -422,6 +428,45 @@ describe("createWebTools", () => {
     });
   });
 
+  it("uses the managed Chromium transport and selects browser-session authority explicitly", async () => {
+    const { rpc: blobRpc } = makeBlobstore();
+    const html = new TextEncoder().encode(SAMPLE_PAGE_HTML);
+    const call = vi.fn(async <T>(target: string, method: string, args: unknown[]): Promise<T> => {
+      if (method === "chromiumFetch.openBrowser") {
+        expect(args).toEqual(["https://example.com/private"]);
+        return {
+          responseId: "c531b602-45d7-4875-bbe8-c876f0721750",
+          url: "https://example.com/private",
+          status: 200,
+          statusText: "OK",
+          headers: { "content-type": "text/html; charset=utf-8" },
+          size: html.byteLength,
+        } as T;
+      }
+      if (method === "chromiumFetch.read") {
+        return { bytesBase64: Buffer.from(html).toString("base64"), done: true } as T;
+      }
+      return (await blobRpc.call(target, method, args)) as T;
+    });
+    const registered = registeredTools(createWebTools({ rpc: { call } as never }));
+
+    const result = await registered.get("web_fetch")!.execute(
+      "call-browser",
+      { url: "https://example.com/private", session: "browser" },
+      undefined,
+    );
+
+    expect(call).toHaveBeenCalledWith("main", "chromiumFetch.openBrowser", [
+      "https://example.com/private",
+    ]);
+    expect(call).toHaveBeenCalledWith(
+      "main",
+      "chromiumFetch.read",
+      ["c531b602-45d7-4875-bbe8-c876f0721750", 0, 256 * 1024],
+    );
+    expect((result.details as { session: string }).session).toBe("browser");
+  });
+
   it("web_read returns a slice of the cached page", async () => {
     const { rpc } = makeBlobstore();
     // Pre-populate the store via web_fetch.
@@ -594,38 +639,6 @@ describe("createWebTools", () => {
     expect(f.served_from_cache).toBe(false);
     expect(s.served_from_cache).toBe(true);
     expect(store.size).toBe(1);
-  });
-
-  it("paces successive requests to the same host", async () => {
-    const { rpc } = makeBlobstore();
-    let nowMs = 0;
-    const sleeps: number[] = [];
-    const fetcher = vi.fn(async () =>
-      mockResponse(SAMPLE_PAGE_HTML, {
-        contentType: "text/html",
-        url: "https://example.com/a",
-      }),
-    ) as unknown as typeof fetch;
-    const registered = registeredTools(createWebTools({
-      rpc: rpc as never,
-      fetcher,
-      perHostGapMs: 200,
-      urlCacheTtlMs: 0, // disable URL cache to force a real second fetch
-      now: () => nowMs,
-      sleep: async (ms) => {
-        sleeps.push(ms);
-        nowMs += ms;
-      },
-    }));
-
-    const tool = registered.get("web_fetch")!;
-    await tool.execute("c1", { url: "https://example.com/a" }, undefined);
-    nowMs += 50; // less than 200ms gap
-    await tool.execute("c2", { url: "https://example.com/a" }, undefined);
-
-    expect(fetcher).toHaveBeenCalledTimes(2);
-    expect(sleeps[0]).toBeGreaterThan(0);
-    expect(sleeps[0]).toBeLessThanOrEqual(200);
   });
 
   it("web_fetch URL cache respects the TTL", async () => {

@@ -12,15 +12,23 @@ resource.
 
 1. Use `web_search` to discover candidate URLs. Batch related questions in
    one `queries` array; agents whose configured primary provider is OpenAI
-   Codex use their connected subscription and return cited answers by default.
-2. Fetch the best source with `web_fetch`.
-3. Read the returned head first. If more is needed, use `web_read` with the
-   returned digest and bounded offsets.
-4. Answer from fetched content and cite the source URL.
+   Codex use their connected subscription and return source-backed answers
+   with inline citations by default.
+2. If a cited Codex answer fully supports the response, answer from it directly.
+   Use `web_fetch` when you need an exact quotation, table, omitted detail,
+   deeper verification, or content from a URL supplied by the user.
+3. After `web_fetch`, read the returned head first. If more is needed, use
+   `web_read` with the returned digest and bounded offsets.
+4. Cite the URLs supporting the answer.
+
+`web_fetch` uses a cookie-free Chromium session by default. Use
+`session: "browser"` only when the requested page needs the user's imported
+browser cookies; this is approval-gated because the returned content may be
+private.
 
 For a user-supplied URL, start with `web_fetch`. For workspace facts, use
-workspace files and live docs instead. Search snippets are discovery evidence,
-not a final-answer source.
+workspace files and live docs instead. Uncited search snippets are discovery
+evidence, not a final-answer source.
 
 Use each tool's exposed schema for current limits and fields.
 

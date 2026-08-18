@@ -38,10 +38,19 @@ export interface WebSearchSource {
     snippet?: string;
 }
 
+export interface WebSearchCitation {
+    /** Zero-based index into the query result's sources array. */
+    sourceIndex: number;
+    /** Character offsets into the unmodified query result text. */
+    startIndex?: number;
+    endIndex?: number;
+}
+
 export interface WebSearchQueryResult {
     query: string;
     text: string;
     sources: WebSearchSource[];
+    citations: WebSearchCitation[];
     searchCalls: CodexSearchCall[];
     error?: string;
     responseId?: string;
@@ -152,6 +161,7 @@ async function runCodexSearch(
         query,
         text: "",
         sources: [],
+        citations: [],
         searchCalls: [],
     }));
     let completedQueryCount = 0;
@@ -242,6 +252,7 @@ async function runStandardSearch(
             query,
             text: formatSearchResults(sources, provider, query),
             sources: sources.map(({ title, url, snippet }) => ({ title, url, snippet })),
+            citations: [],
             searchCalls: [],
         };
     }));
@@ -260,10 +271,29 @@ async function runStandardSearch(
 }
 
 function normalizeCodexResult(result: CodexSearchResult): WebSearchQueryResult {
+    const sources: WebSearchSource[] = [];
+    const sourceIndexes = new Map<string, number>();
+    const citations = result.citations.map(({ title, url, startIndex, endIndex }) => {
+        let sourceIndex = sourceIndexes.get(url);
+        if (sourceIndex === undefined) {
+            sourceIndex = sources.length;
+            sourceIndexes.set(url, sourceIndex);
+            sources.push({ title, url });
+        }
+        else if (!sources[sourceIndex]!.title && title) {
+            sources[sourceIndex]!.title = title;
+        }
+        return {
+            sourceIndex,
+            ...(startIndex !== undefined ? { startIndex } : {}),
+            ...(endIndex !== undefined ? { endIndex } : {}),
+        };
+    });
     return {
         query: result.query,
         text: result.text,
-        sources: result.citations.map(({ title, url }) => ({ title, url })),
+        sources,
+        citations,
         searchCalls: result.searchCalls,
         ...(result.responseId ? { responseId: result.responseId } : {}),
         ...(result.usage ? { usage: result.usage } : {}),
@@ -275,6 +305,7 @@ function failedQuery(query: string, error: unknown): WebSearchQueryResult {
         query,
         text: "",
         sources: [],
+        citations: [],
         searchCalls: [],
         error: error instanceof Error ? error.message : String(error),
     };
@@ -301,7 +332,7 @@ function formatNormalizedResults(results: WebSearchQueryResult[], provider: stri
             const sources = result.sources.map((source, index) =>
                 `${index + 1}. ${source.title?.trim() || source.url}: ${source.url}`);
             body = [
-                result.text || "(no response text)",
+                result.text ? renderCitations(result.text, result.citations) : "(no response text)",
                 sources.length > 0 ? `Sources:\n${sources.join("\n")}` : "",
             ].filter(Boolean).join("\n\n");
         }
@@ -310,6 +341,27 @@ function formatNormalizedResults(results: WebSearchQueryResult[], provider: stri
         }
         return multiple ? `## Query: ${result.query}\n\n${body}` : body;
     }).join("\n\n");
+}
+
+function renderCitations(text: string, citations: WebSearchCitation[]): string {
+    const markersByOffset = new Map<number, Set<number>>();
+    for (const citation of citations) {
+        const offset = citation.endIndex;
+        if (offset === undefined || offset < 0 || offset > text.length) continue;
+        const markers = markersByOffset.get(offset) ?? new Set<number>();
+        markers.add(citation.sourceIndex + 1);
+        markersByOffset.set(offset, markers);
+    }
+    let citedText = text;
+    const offsets = [...markersByOffset.keys()].sort((left, right) => right - left);
+    for (const offset of offsets) {
+        const marker = [...markersByOffset.get(offset)!]
+            .sort((left, right) => left - right)
+            .map((sourceNumber) => `[${sourceNumber}]`)
+            .join("");
+        citedText = `${citedText.slice(0, offset)}${marker}${citedText.slice(offset)}`;
+    }
+    return citedText;
 }
 
 async function runProvider(

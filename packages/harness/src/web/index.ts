@@ -27,11 +27,8 @@ export interface WebToolsDeps extends WebSearchDeps {
         call: WebRpcCaller;
     };
     /**
-     * Override for the global fetch. In production the host wires a
-     * binary-safe credentialed fetcher (`main:credentials.proxyFetch`)
-     * that auto-attaches auth by URL-audience matching and carries
-     * response bodies as bytes so PDFs/images round-trip intact. Tests
-     * pass plain mocks.
+     * Test/embedder override for web search and page retrieval. Production
+     * page retrieval uses the managed Chromium host; tests pass plain mocks.
      */
     fetcher?: typeof fetch;
     /** Length of the head excerpt included inline with `web_fetch` results. */
@@ -40,18 +37,12 @@ export interface WebToolsDeps extends WebSearchDeps {
     urlCacheTtlMs?: number;
     /** Override for `Date.now()` — used in tests. */
     now?: () => number;
-    /** Minimum gap (ms) between successive requests to the same hostname. 0 disables. */
-    perHostGapMs?: number;
-    /** Override for sleep — used in tests. */
-    sleep?: (ms: number) => Promise<void>;
 }
 const DEFAULT_HEAD_LENGTH = 5000;
 const DEFAULT_READ_LIMIT = 8000;
 const MAX_READ_LIMIT = 32000;
 const DEFAULT_URL_CACHE_TTL_MS = 10 * 60 * 1000;
 const MAX_URL_CACHE_ENTRIES = 200;
-/** Minimum gap between successive requests to the same hostname (politeness). */
-const DEFAULT_PER_HOST_GAP_MS = 250;
 const DEFAULT_FETCH_TIMEOUT_MS = 30_000;
 const textEncoder = new TextEncoder();
 const textDecoder = new TextDecoder();
@@ -59,6 +50,11 @@ const FETCH_PARAMETERS = {
     type: "object",
     properties: {
         url: { type: "string", description: "Absolute URL (http:// or https://) to fetch." },
+        session: {
+            type: "string",
+            enum: ["public", "browser"],
+            description: "Cookie-free public fetch (default), or approval-gated fetch using your imported browser cookies.",
+        },
     },
     required: ["url"],
 };
@@ -84,33 +80,16 @@ const READ_PARAMETERS = {
     required: ["digest"],
 };
 export function createWebTools(deps: WebToolsDeps): AgentTool[] {
-    const rawFetcher = (deps.fetcher ?? fetch) as typeof fetch;
+    const searchFetcher = (deps.fetcher ?? fetch) as typeof fetch;
     const headLength = Math.max(500, deps.headLength ?? DEFAULT_HEAD_LENGTH);
     const now = deps.now ?? Date.now;
-    const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     const urlCacheTtlMs = deps.urlCacheTtlMs ?? DEFAULT_URL_CACHE_TTL_MS;
-    const perHostGapMs = Math.max(0, deps.perHostGapMs ?? DEFAULT_PER_HOST_GAP_MS);
     const urlCache = new Map<string, {
         digest: string;
         size: number;
         title: string;
         expiresAt: number;
     }>();
-    const hostLastFetch = new Map<string, number>();
-    async function politeFetch(input: string | URL | Request, init?: RequestInit): Promise<Response> {
-        if (perHostGapMs > 0) {
-            const host = hostnameOf(input);
-            if (host) {
-                const last = hostLastFetch.get(host) ?? 0;
-                const wait = last + perHostGapMs - now();
-                if (wait > 0)
-                    await sleep(wait);
-                hostLastFetch.set(host, now());
-            }
-        }
-        return rawFetcher(input as never, init);
-    }
-    const fetcher = politeFetch as unknown as typeof fetch;
     function urlCacheGet(url: string): {
         digest: string;
         size: number;
@@ -151,15 +130,16 @@ export function createWebTools(deps: WebToolsDeps): AgentTool[] {
         },
     };
     {
-        pi.registerTool(createWebSearchTool(deps, withAbort(fetcher), now) as never);
+        pi.registerTool(createWebSearchTool(deps, withAbort(searchFetcher), now) as never);
         pi.registerTool({
             name: "web_fetch",
             label: "Web Fetch",
-            description: "Fetch a URL, extract its main content as markdown, and cache the full result in the blobstore. Returns the cleaned title, a head excerpt, and a digest. Use web_read with the digest to read more of the cached page without re-fetching.",
+            description: "Fetch a URL through managed Chromium, extract its main content as markdown, and cache the full result in the blobstore. Public mode is cookie-free. Browser mode uses imported browser cookies and requires approval. Returns the cleaned title, a head excerpt, and a digest.",
             parameters: FETCH_PARAMETERS as never,
             execute: async (_toolCallId, params, signal) => {
-                const { url } = params as {
+                const { url, session = "public" } = params as {
                     url: string;
+                    session?: "public" | "browser";
                 };
                 if (!url || typeof url !== "string") {
                     throw new Error("web_fetch: 'url' is required");
@@ -167,10 +147,14 @@ export function createWebTools(deps: WebToolsDeps): AgentTool[] {
                 if (!/^https?:\/\//iu.test(url)) {
                     throw new Error("web_fetch: 'url' must start with http:// or https://");
                 }
+                if (session !== "public" && session !== "browser") {
+                    throw new Error("web_fetch: 'session' must be 'public' or 'browser'");
+                }
                 const sourceHost = hostnameOf(url);
                 if (!sourceHost) throw new Error("web_fetch: URL has no canonical host");
                 const t0 = now();
-                const cached = urlCacheGet(url);
+                const cacheKey = `${session}:${url}`;
+                const cached = urlCacheGet(cacheKey);
                 if (cached) {
                     const headSlice = await readUtf8BlobRange(deps.rpc, cached.digest, 0, headLength);
                     if (headSlice !== null) {
@@ -207,13 +191,18 @@ export function createWebTools(deps: WebToolsDeps): AgentTool[] {
                 // support. Keep that feature payload out of every agent's cold
                 // isolate; workerd loads the split module on the first fetch.
                 const { extractPage } = await import("./extract.js");
-                const page = await extractPage(url, withAbort(fetcher, signal) as never, signal);
+                const pageFetcher = deps.fetcher ?? createChromiumFetcher(deps.rpc, session);
+                const page = await extractPage(
+                    url,
+                    withAbort(pageFetcher, signal) as never,
+                    signal
+                );
                 await deps.recordIngestion?.({ key: `web:${sourceHost}`, via: "web-fetch", classification: "external" });
                 const stored = await deps.rpc.call<{
                     digest: string;
                     size: number;
                 }>("main", "blobstore.putText", [page.markdown]);
-                urlCacheSet(url, stored.digest, stored.size, page.title);
+                urlCacheSet(cacheKey, stored.digest, stored.size, page.title);
                 const head = utf8Prefix(page.markdown, headLength);
                 const truncated = stored.size > head.byteLength;
                 const summary = [
@@ -239,6 +228,7 @@ export function createWebTools(deps: WebToolsDeps): AgentTool[] {
                         served_from_cache: false,
                         elapsed_ms: now() - t0,
                         content_type: page.contentType,
+                        session,
                     },
                 };
             },
@@ -277,6 +267,68 @@ export function createWebTools(deps: WebToolsDeps): AgentTool[] {
         });
     }
     return tools;
+}
+
+function createChromiumFetcher(
+    rpc: WebToolsDeps["rpc"],
+    session: "public" | "browser"
+): typeof fetch {
+    return (async (input: string | URL | Request, init?: RequestInit) => {
+        const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+        const opened = await rpc.call<{
+            responseId: string;
+            url: string;
+            status: number;
+            statusText: string;
+            headers: Record<string, string>;
+            size: number;
+        }>("main", `chromiumFetch.${session === "browser" ? "openBrowser" : "openPublic"}`, [url]);
+        let offset = 0;
+        let closed = false;
+        const close = async () => {
+            if (closed) return;
+            closed = true;
+            await rpc.call("main", "chromiumFetch.close", [opened.responseId]).catch(() => undefined);
+        };
+        const body = new ReadableStream<Uint8Array>({
+            async pull(controller) {
+                if (init?.signal?.aborted) {
+                    await close();
+                    controller.error(init.signal.reason ?? new Error("Chromium fetch aborted"));
+                    return;
+                }
+                try {
+                    const chunk = await rpc.call<{ bytesBase64: string; done: boolean }>(
+                        "main",
+                        "chromiumFetch.read",
+                        [opened.responseId, offset, 256 * 1024]
+                    );
+                    const bytes = base64ToBytes(chunk.bytesBase64);
+                    offset += bytes.byteLength;
+                    if (bytes.byteLength > 0) controller.enqueue(bytes);
+                    if (chunk.done) {
+                        closed = true;
+                        controller.close();
+                    }
+                } catch (error) {
+                    await close();
+                    controller.error(error);
+                }
+            },
+            cancel: close,
+        });
+        const consume = () => new Response(body).arrayBuffer();
+        return {
+            ok: opened.status >= 200 && opened.status < 300,
+            status: opened.status,
+            statusText: opened.statusText,
+            url: opened.url,
+            headers: new Headers(opened.headers),
+            body,
+            arrayBuffer: consume,
+            text: async () => textDecoder.decode(await consume()),
+        } as Response;
+    }) as typeof fetch;
 }
 function hostnameOf(input: string | URL | Request): string | null {
     try {

@@ -153,7 +153,7 @@ export async function searchWithCodex(input: {
   let streamedText = "";
   const messageText: string[] = [];
   const searchCalls = new Map<string, CodexSearchCall>();
-  const citations = new Map<string, CodexCitation>();
+  const citations: CodexCitation[] = [];
 
   for await (const event of parseSse(response.body)) {
     const data = event.data;
@@ -191,7 +191,7 @@ export async function searchWithCodex(input: {
     query,
     model: session.model,
     text: messageText.join("") || streamedText,
-    citations: [...citations.values()],
+    citations,
     searchCalls: [...searchCalls.values()],
     ...(responseId ? { responseId } : {}),
     ...(usage
@@ -210,7 +210,7 @@ function collectOutputItem(
   item: ResponseOutputItem | undefined,
   searchCalls: Map<string, CodexSearchCall>,
   messageText: string[],
-  citations: Map<string, CodexCitation>,
+  citations: CodexCitation[],
 ): void {
   if (!item) return;
   if (item.type === "web_search_call") {
@@ -227,22 +227,25 @@ function collectOutputItem(
     return;
   }
   if (item.type !== "message" || item.role !== "assistant") return;
+  let textOffset = messageText.reduce((length, text) => length + text.length, 0);
   for (const part of item.content ?? []) {
     if (part.type !== "output_text") continue;
-    messageText.push(part.text ?? "");
+    const partText = part.text ?? "";
+    messageText.push(partText);
     for (const annotation of part.annotations ?? []) {
       if (annotation.type !== "url_citation" || !annotation.url) continue;
-      citations.set(annotation.url, {
+      citations.push({
         url: annotation.url,
         ...(annotation.title ? { title: annotation.title } : {}),
         ...(annotation.start_index !== undefined
-          ? { startIndex: annotation.start_index }
+          ? { startIndex: textOffset + annotation.start_index }
           : {}),
         ...(annotation.end_index !== undefined
-          ? { endIndex: annotation.end_index }
+          ? { endIndex: textOffset + annotation.end_index }
           : {}),
       });
     }
+    textOffset += partText.length;
   }
 }
 

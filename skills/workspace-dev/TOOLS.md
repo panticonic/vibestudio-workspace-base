@@ -782,8 +782,8 @@ incomplete verification result, not permission to claim that the panel works.
 
 Search the web for current or source-backed information. Agents whose configured
 primary provider is OpenAI Codex use the connected Codex subscription and return
-cited answers; other providers use the configured search backend. Batch related
-queries.
+cited answers with inline source markers; other providers use the configured
+search backend. Batch related queries.
 
 **Parameters:**
 | Name | Type | Required | Description |
@@ -805,5 +805,8 @@ Fetch and process content from a URL.
 **Parameters:**
 | Name | Type | Required | Description |
 |------|------|----------|-------------|
-| `url` | string | Yes | URL to fetch |
-| `prompt` | string | Yes | What to extract from the page |
+| `url` | string | Yes | Absolute HTTP(S) URL to fetch |
+| `session` | `public` \| `browser` | No | Cookie-free public Chromium session (default), or approval-gated imported browser session |
+
+The full extracted page is cached in the blobstore. Use the returned digest
+with `web_read` to read beyond the inline head excerpt.
