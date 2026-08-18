@@ -187,6 +187,8 @@ export function createTestDirectAuthority(input: {
   const objectKey = input.objectKey ?? "test-key";
   const audience = `do:${source}:${className}:${objectKey}`;
   const capability = input.capability ?? `rpc:${input.method}`;
+  const resourceKey =
+    input.effect?.kind === "userland-capability" ? `${capability}:${audience}` : audience;
   const now = input.now ?? Date.now();
   const invocationDigest =
     input.tier === "critical" ? `test-invocation:${crypto.randomUUID()}` : undefined;
@@ -199,7 +201,10 @@ export function createTestDirectAuthority(input: {
   ] as string[];
   const requested = capabilities.map((requestedCapability) => ({
     capability: requestedCapability,
-    resource: { kind: "exact" as const, key: audience },
+    resource: {
+      kind: "exact" as const,
+      key: requestedCapability === capability ? resourceKey : audience,
+    },
   }));
   const context: AuthorizationContext = {
     authorizingOrigin: { kind, principal: subject } as AuthorizationContext["authorizingOrigin"],
@@ -231,7 +236,10 @@ export function createTestDirectAuthority(input: {
   const grants: AuthorityGrant[] = capabilities.map((grantedCapability) => ({
     subject,
     capability: grantedCapability,
-    resource: { kind: "exact", key: audience },
+    resource: {
+      kind: "exact",
+      key: grantedCapability === capability ? resourceKey : audience,
+    },
     effect: "allow",
     issuedBy: "host:test",
     createdAt: now,
@@ -252,7 +260,7 @@ export function createTestDirectAuthority(input: {
           ? { kind: "host-capability", capability, resource: { kind: "receiver-object" } }
           : { kind: "open" }),
     capability,
-    resourceKey: audience,
+    resourceKey,
     issuedAt: now,
     expiresAt: now + 5_000,
     nonce: crypto.randomUUID(),
