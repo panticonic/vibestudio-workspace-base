@@ -45,6 +45,7 @@ import { LOCAL_FALLBACK_MODEL_REF } from "@workspace/model-catalog/catalog";
 import { ChatMessageActionsContext } from "../context/ChatContext.js";
 import { MessageList } from "./MessageList.js";
 import { SubagentRunCard } from "./SubagentRunCard.js";
+import { SubagentTranscriptContent } from "./SubagentTranscript.js";
 
 function makeMessage(overrides: Record<string, unknown>) {
   return {
@@ -1009,5 +1010,54 @@ describe("SubagentRunCard", () => {
     expect(screen.getByText("run-2")).toBeTruthy();
     expect(screen.getByText("task-run-2")).toBeTruthy();
     expect(screen.getByText("ctx-run-2")).toBeTruthy();
+  });
+});
+
+describe("SubagentTranscriptContent", () => {
+  it("keeps loaded child history visible when live refresh fails", () => {
+    const retry = vi.fn();
+    render(
+      React.createElement(SubagentTranscriptContent, {
+        transcript: {
+          messages: [
+            makeMessage({
+              id: "child-history-1",
+              content: "Loaded child history remains readable.",
+              complete: true,
+            }) as ChatMessage,
+          ],
+          participants: {},
+          selfId: null,
+          loading: false,
+          error: "connection interrupted",
+          retry,
+        },
+      })
+    );
+
+    expect(screen.getByText("Loaded child history remains readable.")).toBeTruthy();
+    expect(screen.getByText(/loaded history is preserved/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry refresh" }));
+    expect(retry).toHaveBeenCalledOnce();
+  });
+
+  it("offers a retry instead of an endless loader after a terminal connection error", () => {
+    const retry = vi.fn();
+    render(
+      React.createElement(SubagentTranscriptContent, {
+        transcript: {
+          messages: [],
+          participants: {},
+          selfId: null,
+          loading: false,
+          error: "channel replay timed out",
+          retry,
+        },
+      })
+    );
+
+    expect(screen.queryByText(/Loading the child/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Retry transcript" }));
+    expect(retry).toHaveBeenCalledOnce();
   });
 });

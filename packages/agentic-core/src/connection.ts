@@ -21,6 +21,12 @@ import {
 
 export type ConnectionStatus = "disconnected" | "connecting" | "connected" | "error";
 
+/** A local channel subscription is expected to reach its replay boundary
+ * promptly. More importantly, every connection attempt must have a terminal
+ * outcome: without a deadline a lost ready marker leaves callers displaying a
+ * permanent loading state and leaves the half-open transport alive forever. */
+export const CONNECTION_READY_TIMEOUT_MS = 15_000;
+
 /**
  * Client-supplied participant metadata for connecting (WP6 §5). `handle` is
  * OPTIONAL here: a human panel no longer asserts one — the channel derives the
@@ -109,6 +115,11 @@ export class ConnectionManager {
     this.setStatus("connecting");
     const readyAbort = new AbortController();
     this.connectAbortController = readyAbort;
+    let readyTimedOut = false;
+    const readyTimer = setTimeout(() => {
+      readyTimedOut = true;
+      readyAbort.abort();
+    }, CONNECTION_READY_TIMEOUT_MS);
 
     let newClient: PubSubClient<ChatParticipantMetadata> | null = null;
     try {
@@ -232,7 +243,13 @@ export class ConnectionManager {
       this.setStatus("connected");
       return newClient;
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
+      const error = readyTimedOut
+        ? new Error(
+            `Channel ${channelId} did not finish loading within ${CONNECTION_READY_TIMEOUT_MS / 1_000} seconds`
+          )
+        : err instanceof Error
+          ? err
+          : new Error(String(err));
       await newClient?.close().catch(() => undefined);
       if (readyAbort.signal.aborted && this.connectAbortController !== readyAbort) {
         throw error;
@@ -244,6 +261,8 @@ export class ConnectionManager {
       this.setStatus("error");
       await this.disconnect().catch(() => undefined);
       throw error;
+    } finally {
+      clearTimeout(readyTimer);
     }
   }
 

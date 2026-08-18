@@ -1,4 +1,4 @@
-import { Box, Callout, Flex, Spinner, Text } from "@radix-ui/themes";
+import { Box, Button, Callout, Flex, Spinner, Text } from "@radix-ui/themes";
 import { MessageList } from "./MessageList";
 import { useChildTranscript, type ChildTranscriptConnection } from "../hooks/useChildTranscript";
 import type { ChildTranscriptResult } from "../hooks/useChildTranscript";
@@ -42,13 +42,16 @@ export function SubagentTranscriptContent({
 }) {
   const { messages, participants, selfId, loading, error } = transcript;
 
-  if (error) {
+  if (error && messages.length === 0) {
     return (
       <Callout.Root color="amber" size="1" className="subagent-transcript-error">
         <Callout.Text>
           Could not open the child&rsquo;s transcript ({error}). The retained task result remains
           available for inspection.
         </Callout.Text>
+        <Button size="1" variant="soft" color="amber" onClick={transcript.retry}>
+          Retry transcript
+        </Button>
       </Callout.Root>
     );
   }
@@ -74,6 +77,16 @@ export function SubagentTranscriptContent({
 
   return (
     <Box className="subagent-transcript" data-testid="subagent-transcript">
+      {error ? (
+        <Callout.Root color="amber" size="1" className="subagent-transcript-error">
+          <Callout.Text>
+            Live transcript refresh was interrupted ({error}). The loaded history is preserved.
+          </Callout.Text>
+          <Button size="1" variant="soft" color="amber" onClick={transcript.retry}>
+            Retry refresh
+          </Button>
+        </Callout.Root>
+      ) : null}
       <MessageList
         messages={messages}
         participants={participants}

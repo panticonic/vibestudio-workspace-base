@@ -1,5 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
-import { ConnectionManager } from "./connection.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { CONNECTION_READY_TIMEOUT_MS, ConnectionManager } from "./connection.js";
 import type { ChatParticipantMetadata, ConnectionConfig } from "./types.js";
 
 const CHANNEL_TARGET = "do:workers/pubsub-channel:PubSubChannel:chat-1";
@@ -51,6 +51,10 @@ const metadata: ChatParticipantMetadata = {
 };
 
 describe("ConnectionManager", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("closes a pubsub client when a pending connect is aborted", async () => {
     const config = createConfig();
     const manager = new ConnectionManager({ config, metadata, callbacks: {} });
@@ -100,5 +104,26 @@ describe("ConnectionManager", () => {
     await manager.disconnect();
 
     await expect(connectPromise).rejects.toThrow("ready aborted");
+  });
+
+  it("terminates a connection whose replay-ready boundary never arrives", async () => {
+    vi.useFakeTimers();
+    const config = createConfig();
+    const onError = vi.fn();
+    const manager = new ConnectionManager({ config, metadata, callbacks: { onError } });
+
+    const connectPromise = manager.connect({ channelId: "chat-1", methods: {} });
+    const rejected = expect(connectPromise).rejects.toThrow(
+      "Channel chat-1 did not finish loading within 15 seconds"
+    );
+    await vi.advanceTimersByTimeAsync(CONNECTION_READY_TIMEOUT_MS);
+
+    await rejected;
+    expect(manager.status).toBe("disconnected");
+    expect(onError).toHaveBeenCalledWith(
+      expect.objectContaining({
+        message: "Channel chat-1 did not finish loading within 15 seconds",
+      })
+    );
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ConnectionManager,
   type ChatParticipantMetadata,
@@ -32,6 +32,15 @@ export interface ChildTranscriptResult {
   /** True until the child's history has replayed. */
   loading: boolean;
   error: string | null;
+  /** Start a fresh observer generation after a terminal connection failure. */
+  retry: () => void;
+}
+
+let nextObserverGeneration = 0;
+
+function observerClientId(base: string, channelId: string): string {
+  nextObserverGeneration += 1;
+  return `${base}:observe:${channelId}:${nextObserverGeneration}`;
 }
 
 export function useChildTranscript(options: {
@@ -47,7 +56,9 @@ export function useChildTranscript(options: {
   >({});
   const [error, setError] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [retryGeneration, setRetryGeneration] = useState(0);
   const managerRef = useRef<ConnectionManager | null>(null);
+  const retry = useCallback(() => setRetryGeneration((value) => value + 1), []);
 
   const active = enabled && Boolean(connection && channelId);
 
@@ -62,12 +73,14 @@ export function useChildTranscript(options: {
     setConnecting(true);
     setError(null);
 
-    // A distinct clientId keeps this observer subscription from colliding with
-    // the parent panel's own connection in the transport's client registry.
+    // Every ATTEMPT gets a distinct client id. A channel-only suffix is not
+    // enough: StrictMode setup/cleanup, a retry, or two views of the same card
+    // can otherwise let an older asynchronous disconnect tear down the newer
+    // observer with the same registry identity.
     const manager = new ConnectionManager({
       config: {
         ...connection.config,
-        clientId: `${connection.config.clientId}:observe:${channelId}`,
+        clientId: observerClientId(connection.config.clientId, channelId),
       },
       metadata: { ...connection.metadata, type: "panel" },
       callbacks: {
@@ -76,6 +89,9 @@ export function useChildTranscript(options: {
         },
         onError: (err) => {
           if (!cancelled) setError(err.message);
+        },
+        onReconnect: () => {
+          if (!cancelled) setError(null);
         },
       },
     });
@@ -103,7 +119,7 @@ export function useChildTranscript(options: {
       });
       if (managerRef.current === manager) managerRef.current = null;
     };
-  }, [active, connection, channelId, contextId]);
+  }, [active, connection, channelId, contextId, retryGeneration]);
 
   const transcript = useChannelMessages(active ? client : null);
 
@@ -114,7 +130,17 @@ export function useChildTranscript(options: {
       selfId: client?.clientId ?? null,
       loading: active && (connecting || !transcript.replaySettled),
       error,
+      retry,
     }),
-    [transcript.messages, transcript.replaySettled, participants, client, active, connecting, error]
+    [
+      transcript.messages,
+      transcript.replaySettled,
+      participants,
+      client,
+      active,
+      connecting,
+      error,
+      retry,
+    ]
   );
 }
