@@ -34,7 +34,7 @@ with two first-class actions on the agent form:
   conversation for each run. Its reviewed action is either a normal model
   `prompt` or exact inline `eval` code executed without a model call. Eval is the
   light-weight script path: it uses the selected agent's channel-bound EvalDO,
-  so it needs no newly published worker.
+  so it does not require a new worker to be published.
 
 Typical choices are:
 
@@ -75,7 +75,8 @@ or manually fabricated object key:
 ```ts
 return await automations.propose({
   name: "Machine Learning fun facts",
-  summary: "Every two minutes, send the owner one concise Machine Learning fun fact.",
+  summary:
+    "Every two minutes, send the owner one concise Machine Learning fun fact.",
   action: {
     kind: "prompt",
     text: "Send one accurate Machine Learning fun fact with notify({ to: 'owner', alert: 'inbox', title: 'Machine Learning fun fact', content: '...' }).",
@@ -271,8 +272,9 @@ in the channel means nobody sees it until they next look. Report with `notify`:
 notify({
   to: "owner",
   title: "Weekly dependency audit",
-  content: "3 packages moved to a new major. `zod` needs a code change; the other two are drop-in.",
-});                                   // alert defaults to "inbox"
+  content:
+    "3 packages moved to a new major. `zod` needs a code change; the other two are drop-in.",
+}); // alert defaults to "inbox"
 ```
 
 `alert: "inbox"` — the default whenever a person is addressed — writes a durable

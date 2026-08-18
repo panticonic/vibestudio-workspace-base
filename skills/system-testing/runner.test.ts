@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
     const session = {
       config,
       entityId: `agent:${sequence}`,
+      agentEntityId: `agent:${sequence}`,
       contextId: input.contextId ?? `context:isolated:${sequence}`,
       onMessage(listener: (message: Record<string, unknown>) => void) {
         mocks.messageListeners.push(listener);
@@ -114,7 +115,8 @@ describe("HeadlessRunner", () => {
     let child = 0;
     let imported: Record<string, unknown> | undefined;
     mocks.rpc.call.mockImplementation(async (_target, method) => {
-      if (method === "runtime.createContext") return { contextId: "context:fixture" };
+      if (method === "runtime.createContext")
+        return { contextId: "context:fixture" };
       if (method === "runtime.createSubagentContext") {
         child += 1;
         return { contextId: `context:child:${child}` };
