@@ -48,6 +48,7 @@ export interface ConnectionCallbacks {
 
 export interface ConnectionConnectOptions {
   channelId: string;
+  channelTargetId?: string;
   methods: Record<string, MethodDefinition>;
   channelConfig?: ChannelConfig;
   contextId?: string;
@@ -91,7 +92,7 @@ export class ConnectionManager {
   }
 
   async connect(options: ConnectionConnectOptions): Promise<PubSubClient<ChatParticipantMetadata>> {
-    const { channelId, methods, channelConfig, contextId } = options;
+    const { channelId, channelTargetId, methods, channelConfig, contextId } = options;
     const replayMessageLimit = Math.min(
       this.config.replayMessageLimit ?? DEFAULT_CHANNEL_ENVELOPE_PAGE_LIMIT,
       MAX_CHANNEL_ENVELOPE_PAGE_LIMIT
@@ -126,6 +127,7 @@ export class ConnectionManager {
       newClient = connectViaRpc<ChatParticipantMetadata>({
         rpc: this.config.rpc,
         channel: channelId,
+        ...(channelTargetId ? { channelTargetId } : {}),
         contextId,
         channelConfig,
         // No asserted HUMAN handle (WP6 §5): the channel stamps human identity

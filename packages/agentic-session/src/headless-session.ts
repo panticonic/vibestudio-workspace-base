@@ -368,7 +368,7 @@ export class HeadlessSession {
     });
     try {
       const channelStartedAt = Date.now();
-      await createHeadlessChannel({
+      const channel = await createHeadlessChannel({
         rpcCall: config.rpcCall,
         channelId,
         contextId: agentContextId,
@@ -379,6 +379,7 @@ export class HeadlessSession {
         durationMs: Date.now() - channelStartedAt,
       });
       await session.connect(channelId, {
+        channelTargetId: channel.targetId,
         channelConfig,
         contextId: agentContextId,
         methods,
@@ -650,6 +651,7 @@ export class HeadlessSession {
   async connect(
     channelId: string,
     options?: {
+      channelTargetId?: string;
       channelConfig?: ChannelConfig;
       contextId?: string;
       methods?: Record<string, MethodDefinition>;
@@ -661,6 +663,7 @@ export class HeadlessSession {
 
     this._client = await this._connection.connect({
       channelId,
+      ...(options?.channelTargetId ? { channelTargetId: options.channelTargetId } : {}),
       methods,
       ...(options?.channelConfig ? { channelConfig: options.channelConfig } : {}),
       ...(options?.contextId ? { contextId: options.contextId } : {}),

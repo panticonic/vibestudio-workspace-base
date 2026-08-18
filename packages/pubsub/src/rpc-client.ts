@@ -254,6 +254,9 @@ export interface RpcConnectOptions<T extends ParticipantMetadata = ParticipantMe
     registerResidentSession?: ResidentSessionRegistrar["registerResidentSession"];
   };
   channel: string;
+  /** Exact channel entity returned by lifecycle creation. Supplying it avoids
+   * rediscovering the same context-bound service through a different caller. */
+  channelTargetId?: string;
   contextId?: string;
   channelConfig?: ChannelConfig;
   sinceId?: number;
@@ -296,7 +299,9 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
   // The subscribe ACK replaces this with the channel's authoritative actor id
   // (`user:<verifiedUserId>` for humans). Delivery still targets deliveryId.
   let pid = deliveryId;
-  let doTargetPromise: Promise<string> | null = null;
+  let doTargetPromise: Promise<string> | null = opts.channelTargetId
+    ? Promise.resolve(opts.channelTargetId)
+    : null;
   const resolveDoTarget = async (signal?: AbortSignal): Promise<string> => {
     while (true) {
       try {

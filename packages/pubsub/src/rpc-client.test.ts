@@ -472,6 +472,7 @@ describe("connectViaRpc", () => {
       const client = connectViaRpc({
         rpc: rpc as any,
         channel: CHANNEL,
+        channelTargetId: DO_TARGET,
         deliveryMode: "resident",
         residentEventHandler,
       });
@@ -481,6 +482,7 @@ describe("connectViaRpc", () => {
         targetId: DO_TARGET,
       });
       expect(rpc.stream).not.toHaveBeenCalled();
+      expect(rpc.call).not.toHaveBeenCalledWith("main", "workers.resolveService", expect.anything());
       expect(receiver).toBeTypeOf("function");
       expect(client.contextId).toBe("ctx-resident");
 
