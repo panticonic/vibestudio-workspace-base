@@ -52,6 +52,20 @@ function test() {
 }
 
 describe("credential store system test validator", () => {
+  it("pregrants only the bounded managed-credential summary read", () => {
+    expect(test().authorityPolicy).toEqual({
+      authority: [
+        {
+          ruleId: "inspect-managed-credential-summary",
+          capability: { kind: "exact", key: "credentials.audit.read" },
+          resource: { kind: "exact", key: "credentials.audit.read" },
+          tier: "gated",
+          decision: "once",
+        },
+      ],
+    });
+  });
+
   it("accepts one bounded, read-only managed-store inspection", () => {
     expect(
       test().validate(

@@ -131,6 +131,17 @@ export const credentialTests: TestCase[] = [
     category: "credentials",
     prompt:
       "How many managed credentials are stored here, and which lifecycle states are represented? Give me only a bounded summary—do not expose credential details or secrets, and do not change anything.",
+    authorityPolicy: {
+      authority: [
+        {
+          ruleId: "inspect-managed-credential-summary",
+          capability: { kind: "exact", key: "credentials.audit.read" },
+          resource: { kind: "exact", key: "credentials.audit.read" },
+          tier: "gated",
+          decision: "once",
+        },
+      ],
+    },
     validate: storeInspectionChecked,
   },
 ];
