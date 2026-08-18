@@ -392,7 +392,7 @@ export async function activate(ctx: ExtensionContextLike) {
       const { identity } = await currentIdentity();
       await ensureImportHosts(identity);
       assertNonSensitiveImportSelection(selection);
-      const started = coordinator.start(identity, selection);
+      const started = await coordinator.start(identity, selection);
       void coordinator.waitForJob(identity, started.jobId).then((completed) => {
         reportImportHealth(ctx, completed);
         ctx.emit("import-complete", completed);
