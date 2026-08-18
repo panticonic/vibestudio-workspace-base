@@ -1883,7 +1883,10 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
             for (const [callId] of executingMethods) abortExecutingMethod(callId);
             for (const [callId] of admittingMethods) abortExecutingMethod(callId);
           };
-          residentRegistration = rpc.registerResidentSession(channel, residentReceiver);
+          const channelTargetId = await getDoTarget(controller.signal);
+          residentRegistration = rpc.registerResidentSession(channel, residentReceiver, {
+            targetId: channelTargetId,
+          });
           const registration = residentRegistration;
           ownedResidentRegistration = registration;
           unregisterResident = () => registration.close();

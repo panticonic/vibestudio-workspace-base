@@ -477,7 +477,9 @@ describe("connectViaRpc", () => {
       });
       await client.ready();
 
-      expect(rpc.registerResidentSession).toHaveBeenCalledWith(CHANNEL, expect.any(Function));
+      expect(rpc.registerResidentSession).toHaveBeenCalledWith(CHANNEL, expect.any(Function), {
+        targetId: DO_TARGET,
+      });
       expect(rpc.stream).not.toHaveBeenCalled();
       expect(receiver).toBeTypeOf("function");
       expect(client.contextId).toBe("ctx-resident");
