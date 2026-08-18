@@ -123,15 +123,17 @@ function QuickfireCard(
     switch (event.key) {
       case "ArrowDown":
       case "ArrowUp": {
+        // Once a conversation composer contains text, vertical arrows belong
+        // to the textarea. The browser understands both explicit newlines and
+        // visual wrapping; intercepting the keys here made it impossible to
+        // move the caret through a multi-line message. Empty compose retains
+        // shell-style history recall, while palette input retains row walking.
+        if (compose && input.value.length > 0) return;
         event.preventDefault();
         const delta = event.key === "ArrowDown" ? 1 : -1;
         // In a conversation there are no rows to walk, and the thing a person
         // reaches for ↑ to get is what they typed last — the shell habit.
-        emit(
-          compose && !input.value
-            ? { type: "recall", delta }
-            : { type: "move", delta },
-        );
+        emit(compose ? { type: "recall", delta } : { type: "move", delta });
         return;
       }
       case "Tab":

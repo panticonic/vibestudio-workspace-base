@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { createEvent, fireEvent, render, screen } from "@testing-library/react";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { QuickfireSurfaceProps } from "./quickfireSurfaceModel";
 import { QuickfireSurface } from "./QuickfireSurface";
@@ -455,6 +455,24 @@ describe("QuickfireSurface screenshots and actions", () => {
 
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "ArrowUp" });
     expect(emitIntent).toHaveBeenCalledWith({ type: "recall", delta: -1 });
+  });
+
+  it("leaves vertical caret navigation to a non-empty message composer", () => {
+    const emitIntent = renderSurface();
+    const input = screen.getByRole("combobox");
+    fireEvent.change(input, {
+      target: { value: "A wrapped first line that continues\nsecond line" },
+    });
+    emitIntent.mockClear();
+
+    const up = createEvent.keyDown(input, { key: "ArrowUp" });
+    fireEvent(input, up);
+    const down = createEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent(input, down);
+
+    expect(up.defaultPrevented).toBe(false);
+    expect(down.defaultPrevented).toBe(false);
+    expect(emitIntent).not.toHaveBeenCalled();
   });
 
   it("lets you re-aim the overlay at another panel from the context strip", () => {
