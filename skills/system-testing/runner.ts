@@ -516,13 +516,17 @@ export class HeadlessRunner {
     let forkContextId: string | null = null;
     if (contextMode === "fork") {
       const owner = await this.fixtureForkOwner();
+      const ownerEntityId = owner.agentEntityId;
+      if (!ownerEntityId) {
+        throw new Error("Workspace fixture fork owner has no durable agent identity");
+      }
       const fork = await rpc.call<{ contextId: string }>(
         "main",
         "runtime.createSubagentContext",
         [
           {
             parentContextId: taskContextId!,
-            ownerEntityId: owner.entityId,
+            ownerEntityId,
             targetKey: `system-test-fixture-fork:${this.testName ?? "unknown"}:${crypto.randomUUID()}`,
           },
         ],
