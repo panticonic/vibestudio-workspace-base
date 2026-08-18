@@ -442,8 +442,8 @@ describe("filesystem semantic validators", () => {
             result: { details: { status: "applied", paths: [path] } },
           },
           {
-            name: "read",
-            arguments: { path, encoding: "base64", byteOffset: 0, byteLimit: 4 },
+            name: "read_binary",
+            arguments: { path, offset: 0, limit: 4 },
             result: {
               protocolContent: [
                 {

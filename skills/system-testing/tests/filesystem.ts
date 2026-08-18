@@ -160,14 +160,13 @@ function focusedBinaryRoundTrip(result: TestExecutionResult) {
     : undefined;
   const read = calls.find(
     (call) =>
-      call.name === "read" &&
+      call.name === "read_binary" &&
       call.execution?.status === "complete" &&
       call.execution.isError !== true &&
       call.arguments?.["path"] === binaryPath &&
-      call.arguments?.["encoding"] === "base64" &&
-      call.arguments?.["byteOffset"] === 0 &&
-      typeof call.arguments?.["byteLimit"] === "number" &&
-      call.arguments["byteLimit"] >= 4
+      call.arguments?.["offset"] === 0 &&
+      typeof call.arguments?.["limit"] === "number" &&
+      call.arguments["limit"] >= 4
   );
   const evidence = JSON.stringify(read?.execution?.result ?? null);
   const exactRead =
