@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 vi.mock("@workspace/runtime", () => ({
   panel: {
@@ -116,6 +117,20 @@ describe("categoryProgressPresentation", () => {
 });
 
 describe("import state presentation", () => {
+  it("declares authority to persist resumable import checkpoints", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("./package.json", import.meta.url), "utf8")
+    ) as {
+      vibestudio: { authority: { requests: unknown[] } };
+    };
+    expect(manifest.vibestudio.authority.requests).toContainEqual({
+      capability: "workspace.runtime-state.manage",
+      resource: { kind: "prefix", prefix: "" },
+      tier: "gated",
+      evidence: "intentional-broad",
+    });
+  });
+
   it("makes a completed import explicit", () => {
     expect(importStatusPresentation("complete")).toMatchObject({
       heading: "Import complete",
