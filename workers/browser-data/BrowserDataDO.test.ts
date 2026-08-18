@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DatabaseSync } from "node:sqlite";
+import { readFileSync } from "node:fs";
 import {
   DURABLE_OBJECT_FRAMEWORK_RPC_METHODS,
   type DurableObjectContext,
@@ -10,6 +11,27 @@ import { browserProductMethods } from "@vibestudio/service-schemas/browserData";
 import { BrowserDataDO } from "./BrowserDataDO.js";
 
 describe("BrowserDataDO schema", () => {
+  it("lets the exact reviewed writer finish a user-started background import", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+    ) as {
+      vibestudio: {
+        authority: {
+          provides: Array<{ name: string; grantScopes: string[] }>;
+        };
+      };
+    };
+    const capabilities = Object.fromEntries(
+      manifest.vibestudio.authority.provides.map((provided) => [
+        provided.name,
+        provided.grantScopes,
+      ]),
+    );
+
+    expect(capabilities["browser-data.write"]).toEqual(["once", "version"]);
+    expect(capabilities["browser-data.delete"]).toEqual(["once"]);
+  });
+
   it("has one typed declaration for every exposed data method", () => {
     const db = new DatabaseSync(":memory:");
     const instance = createBrowserDataDO(db);

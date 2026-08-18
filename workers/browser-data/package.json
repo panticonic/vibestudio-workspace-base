@@ -31,7 +31,8 @@
           },
           "notability": "everyday",
           "grantScopes": [
-            "once"
+            "once",
+            "version"
           ]
         },
         {
