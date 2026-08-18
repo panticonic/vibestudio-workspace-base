@@ -26,6 +26,10 @@
       "provides": [],
       "serviceRequests": [
         {
+          "protocol": "vibestudio.missions.v1",
+          "availability": "required"
+        },
+        {
           "protocol": "vibestudio.phone-provisioning.v1",
           "availability": "required"
         }

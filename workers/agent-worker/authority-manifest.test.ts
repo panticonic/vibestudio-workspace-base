@@ -24,6 +24,10 @@ describe("agent-worker authority manifest", () => {
       protocol: "vibestudio.phone-provisioning.v1",
       availability: "required",
     });
+    expect(manifest.vibestudio.authority.serviceRequests).toContainEqual({
+      protocol: "vibestudio.missions.v1",
+      availability: "required",
+    });
     expect(
       manifest.vibestudio.authority.requests.map(
         ({ capability }) => capability,
