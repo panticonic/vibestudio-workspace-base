@@ -1,5 +1,8 @@
 import type { TestCase, TestExecutionResult } from "../types.js";
-import { OPTIMIZABLE_PANEL_WORKSPACE_REPO_FIXTURE } from "../types.js";
+import {
+  BUILDABLE_PACKAGE_WORKSPACE_REPO_FIXTURE,
+  OPTIMIZABLE_PANEL_WORKSPACE_REPO_FIXTURE,
+} from "../types.js";
 import {
   completedScenarioEvidence,
   hasNonEmptyStructuredResult,
@@ -19,38 +22,23 @@ import {
   zeroWorkingCounts,
 } from "./_managed-unit-evidence.js";
 
-function buildResult(values: readonly unknown[]): boolean {
-  return walkRecords(values).some((record) => {
-    const artifactBuild =
-      typeof record["dir"] === "string" &&
-      Array.isArray(record["artifacts"]) &&
-      record["artifacts"].length > 0 &&
-      record["metadata"] !== null &&
-      typeof record["metadata"] === "object";
-    const successfulReport =
-      record["success"] === true ||
-      record["status"] === "ok" ||
-      (Array.isArray(record["builds"]) &&
-        record["builds"].length > 0 &&
-        record["builds"].every(
-          (build) =>
-            build !== null &&
-            typeof build === "object" &&
-            (build as Record<string, unknown>)["status"] === "ok"
-        ));
-    return artifactBuild || successfulReport;
-  });
-}
-
 function validateWorkspaceBuild(result: TestExecutionResult) {
-  const base = completedScenarioEvidence(result);
+  const base = completedScenarioEvidence(result, ["verify"]);
   if (!base.passed) return base;
-  if (!/build\.(?:getBuild|build|recompute)|services\.build/gu.test(base.evidence.evalCode)) {
-    return { passed: false, reason: "Completed eval did not invoke the workspace build surface" };
+  const contextId = result.provenance?.contextId;
+  if (!contextId) {
+    return { passed: false, reason: "Build verification exposed no exact task context" };
   }
-  return buildResult(base.evidence.evalValues)
+  const verified = base.evidence.calls.some((call) => {
+    const unit = unitForPath(call.arguments?.["target"], "packages");
+    return unit !== null && verificationMatches(call, "build", unit, contextId);
+  });
+  return verified
     ? { passed: true, reason: undefined }
-    : { passed: false, reason: "Completed build call did not return artifacts and metadata" };
+    : {
+        passed: false,
+        reason: "No successful exact-context package build verification was observed",
+      };
 }
 
 function buildPerformanceResult(values: readonly unknown[]): boolean {
@@ -347,8 +335,10 @@ export const buildTests: TestCase[] = [
     name: "build-workspace-package",
     description: "Build and type-check a workspace unit and verify success",
     category: "build",
+    workspaceRepoFixture: BUILDABLE_PACKAGE_WORKSPACE_REPO_FIXTURE,
     prompt:
-      "Build and type-check a small existing workspace UI unit and tell me whether it succeeded, including any diagnostics you observed.",
+      "Build and type-check the small disposable workspace package prepared for this task and tell me whether it succeeded, including any diagnostics you observed.",
+    validation: "agent-evidence",
     validate: validateWorkspaceBuild,
   },
   {

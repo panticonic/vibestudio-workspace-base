@@ -5,8 +5,80 @@ import type { TestExecutionResult } from "../types.js";
 import { buildTests } from "./build.js";
 
 const npmTest = buildTests.find((test) => test.name === "build-npm-package")!;
+const workspaceBuildTest = buildTests.find((test) => test.name === "build-workspace-package")!;
 const performanceTest = buildTests.find((test) => test.name === "build-performance-profile")!;
 const optimizationTest = buildTests.find((test) => test.name === "panel-performance-optimize")!;
+
+describe("workspace package build validation", () => {
+  const unit = "packages/system-test-build";
+  const contextId = "context:build";
+
+  it("uses a controlled buildable package and requires objective agent evidence", () => {
+    expect(workspaceBuildTest.workspaceRepoFixture).toEqual({
+      kind: "buildable-package",
+      section: "packages",
+    });
+    expect(workspaceBuildTest.validation).toBe("agent-evidence");
+  });
+
+  it("accepts a successful exact-context first-class build verification", () => {
+    const result = execution([
+      successfulPackageBuild(unit, contextId),
+      finalAgentMessage("The disposable package built and type-checked successfully."),
+    ]);
+    result.provenance = {
+      channelId: null,
+      branchId: null,
+      agentEntityId: null,
+      agentTargetId: null,
+      contextId,
+    };
+
+    expect(workspaceBuildTest.validate(result)).toEqual({ passed: true, reason: undefined });
+  });
+
+  it("rejects a diagnosed failed build instead of accepting truthful failure prose", () => {
+    const result = execution([
+      failedBuild(unit),
+      finalAgentMessage("The package did not build; the verifier returned diagnostics."),
+    ]);
+    result.provenance = {
+      channelId: null,
+      branchId: null,
+      agentEntityId: null,
+      agentTargetId: null,
+      contextId,
+    };
+
+    expect(workspaceBuildTest.validate(result)).toMatchObject({
+      passed: false,
+      reason: "Unexpected failed tool calls: verify",
+    });
+  });
+
+  it("rejects the obsolete generic-eval build path", () => {
+    const result = execution([
+      completedInvocation(
+        "eval",
+        { code: `return services.build.getBuildReport("${unit}")` },
+        { returnValue: { repoPath: unit, status: "ok", diagnostics: [] } }
+      ),
+      finalAgentMessage("The package built successfully."),
+    ]);
+    result.provenance = {
+      channelId: null,
+      branchId: null,
+      agentEntityId: null,
+      agentTargetId: null,
+      contextId,
+    };
+
+    expect(workspaceBuildTest.validate(result)).toMatchObject({
+      passed: false,
+      reason: "Missing completed tool evidence: verify",
+    });
+  });
+});
 
 describe("build performance validation", () => {
   it("gates the vague task on one causal measured optimization episode", () => {
@@ -361,6 +433,60 @@ function completedInvocation(
         terminalOutcome: "success",
         isError: false,
         result: { details },
+      },
+    }),
+  };
+}
+
+function successfulPackageBuild(unit: string, contextId: string): ChatMessage {
+  return completedInvocation(
+    "verify",
+    { operation: "build", target: unit },
+    {
+      operation: "build",
+      target: unit,
+      status: "ok",
+      report: { repoPath: unit, kind: "package", status: "ok", diagnostics: [], builds: [] },
+      receipt: {
+        protocol: "build-verification-receipt.v1",
+        contextId,
+        ref: `ctx:${contextId}`,
+        target: unit,
+        status: "ok",
+        unit: { repoPath: unit, kind: "package" },
+      },
+    }
+  );
+}
+
+function failedBuild(unit: string): ChatMessage {
+  return {
+    id: `verify-failed-${unit}`,
+    kind: "message",
+    senderId: "agent",
+    senderMetadata: { type: "agent" },
+    complete: true,
+    contentType: "invocation",
+    content: JSON.stringify({
+      id: `verify-failed-${unit}`,
+      name: "verify",
+      arguments: { operation: "build", target: unit },
+      execution: {
+        status: "error",
+        terminalOutcome: "tool_error",
+        isError: true,
+        result: {
+          details: {
+            operation: "build",
+            target: unit,
+            status: "failed",
+            failure: {
+              protocol: "agent-tool-failure.v1",
+              code: "build_verification_failed",
+              kind: "domain",
+            },
+          },
+        },
       },
     }),
   };

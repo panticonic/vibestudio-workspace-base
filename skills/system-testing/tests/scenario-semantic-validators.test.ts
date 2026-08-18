@@ -651,32 +651,51 @@ describe("filesystem semantic validators", () => {
 });
 
 describe("build semantic validators", () => {
-  it("requires canonical build artifacts and metadata", () => {
-    const result = execution("The selected UI unit built successfully with one output artifact.", [
+  it("requires a canonical exact-context first-class package build", () => {
+    const result = directExecution("The selected package built successfully.", [
       {
-        code: "return services.build.getBuild('panels/app');",
-        returnValue: {
-          dir: "/virtual/build/panels/app",
-          artifacts: ["index.js"],
-          metadata: { kind: "panel" },
+        name: "verify",
+        arguments: { operation: "build", target: "packages/example" },
+        result: {
+          details: {
+            operation: "build",
+            target: "packages/example",
+            status: "ok",
+            report: {
+              repoPath: "packages/example",
+              kind: "package",
+              status: "ok",
+              diagnostics: [],
+              builds: [],
+            },
+            receipt: {
+              protocol: "build-verification-receipt.v1",
+              target: "packages/example",
+              contextId: "context-build",
+              ref: "ctx:context-build",
+              status: "ok",
+              unit: { repoPath: "packages/example", kind: "package" },
+            },
+          },
         },
       },
     ]);
+    result.provenance = {
+      channelId: null,
+      branchId: null,
+      agentEntityId: null,
+      agentTargetId: null,
+      contextId: "context-build",
+    };
     expect(scenario(buildTests, "build-workspace-package").validate(result).passed).toBe(true);
+
     expect(
       scenario(buildTests, "build-workspace-package").validate(
         execution("The build report completed successfully.", [
           {
-            code: "return services.build.getBuildReport('panels/app');",
-            returnValue: { unit: "@workspace-panels/app", status: "ok", success: true },
+            code: "return services.build.getBuildReport('packages/example');",
+            returnValue: { repoPath: "packages/example", status: "ok" },
           },
-        ])
-      ).passed
-    ).toBe(true);
-    expect(
-      scenario(buildTests, "build-workspace-package").validate(
-        execution("The build succeeded.", [
-          { code: "return services.build.getBuild('panels/app');", returnValue: { ok: true } },
         ])
       ).passed
     ).toBe(false);
