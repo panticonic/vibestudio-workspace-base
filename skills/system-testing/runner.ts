@@ -204,7 +204,7 @@ export class HeadlessRunner {
   private readonly workspaceRepoFixtureLifecycle: WorkspaceRepoFixtureLifecycle | null;
   private readonly testAuthorityPolicy: AgentExecutionTestPolicySpec | null;
   private developmentTargetPromise: Promise<string> | null = null;
-  private fixtureForkOwnerPromise: Promise<HeadlessSession> | null = null;
+  private fixtureForkOwnerPromise: Promise<string> | null = null;
   private readonly sessionRpcFaultEvidence = new WeakMap<
     HeadlessSession,
     SystemTestRpcFaultEvidence[]
@@ -515,11 +515,7 @@ export class HeadlessRunner {
     }
     let forkContextId: string | null = null;
     if (contextMode === "fork") {
-      const owner = await this.fixtureForkOwner();
-      const ownerEntityId = owner.agentEntityId;
-      if (!ownerEntityId) {
-        throw new Error("Workspace fixture fork owner has no durable agent identity");
-      }
+      const ownerEntityId = await this.fixtureForkOwner();
       const fork = await rpc.call<{ contextId: string }>(
         "main",
         "runtime.createSubagentContext",
@@ -708,13 +704,33 @@ export class HeadlessRunner {
   }
 
   /**
-   * Keep one inert harness-owned runtime in the fixture context so ordinary
-   * task forks have a real lifecycle owner. Each `context: "fork"` spawn then
-   * starts from the fixture's unchanged working head in its own child context;
-   * sibling uncommitted work is neither shared nor copied.
+   * Keep one channel-free harness entity in the fixture context so ordinary
+   * task forks have a real lifecycle owner. A subscribed agent is not inert:
+   * cloning it also clones a live channel relationship into the child context.
+   * Each `context: "fork"` spawn therefore starts from the fixture's unchanged
+   * working head without inheriting any conversation state.
    */
-  private fixtureForkOwner(): Promise<HeadlessSession> {
-    this.fixtureForkOwnerPromise ??= this.spawn({ context: "task" });
+  private fixtureForkOwner(): Promise<string> {
+    const taskContextId = this.workspaceRepoFixtureLifecycle?.taskContextId;
+    if (!taskContextId) {
+      throw new Error("Workspace fixture fork owner requires a prepared task context");
+    }
+    this.fixtureForkOwnerPromise ??= rpc
+      .call<{ id?: string; contextId?: string }>("main", "runtime.createEntity", [
+        {
+          kind: "do",
+          execution: { surface: "code", source: "workers/system-test-runner" },
+          className: "SystemTestRunnerDO",
+          key: `system-test-fork-owner:${this.testName ?? "unknown"}:${crypto.randomUUID()}`,
+          contextId: taskContextId,
+        },
+      ])
+      .then((handle) => {
+        if (!handle.id || handle.contextId !== taskContextId) {
+          throw new Error("Workspace fixture fork owner was not created in its task context");
+        }
+        return handle.id;
+      });
     return this.fixtureForkOwnerPromise;
   }
 

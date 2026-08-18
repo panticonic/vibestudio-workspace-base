@@ -117,6 +117,9 @@ describe("HeadlessRunner", () => {
     mocks.rpc.call.mockImplementation(async (_target, method) => {
       if (method === "runtime.createContext")
         return { contextId: "context:fixture" };
+      if (method === "runtime.createEntity") {
+        return { id: "fork-owner:1", contextId: "context:fixture" };
+      }
       if (method === "runtime.createSubagentContext") {
         child += 1;
         return { contextId: `context:child:${child}` };
@@ -183,7 +186,6 @@ describe("HeadlessRunner", () => {
       ([config]) => (config as { contextId?: string }).contextId,
     );
     expect(spawned).toEqual([
-      "context:fixture",
       "context:child:1",
       "context:child:2",
     ]);
@@ -193,11 +195,11 @@ describe("HeadlessRunner", () => {
     expect(forks).toHaveLength(2);
     expect(forks[0]?.[2]?.[0]).toMatchObject({
       parentContextId: "context:fixture",
-      ownerEntityId: "agent:1",
+      ownerEntityId: "fork-owner:1",
     });
     expect(forks[1]?.[2]?.[0]).toMatchObject({
       parentContextId: "context:fixture",
-      ownerEntityId: "agent:1",
+      ownerEntityId: "fork-owner:1",
     });
     expect((forks[0]?.[2]?.[0] as { targetKey: string }).targetKey).not.toBe(
       (forks[1]?.[2]?.[0] as { targetKey: string }).targetKey,
