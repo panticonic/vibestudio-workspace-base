@@ -43,7 +43,7 @@ describe("MermaidDiagram (browser)", () => {
       { timeout: 20000 }
     );
     // The source stays visible so the user (or agent) can fix it
-    expect(container.querySelector(".ns-codeblock")?.textContent).toContain("flowchart TD");
+    expect(container.querySelector(".ns-diagram-source")?.textContent).toContain("flowchart TD");
     // No stray mermaid scratch elements leak into the document
     expect(document.querySelectorAll("[id^='dns-mermaid-']").length).toBe(0);
   });
