@@ -142,6 +142,14 @@ describe("system-testing CLI-neutral API", () => {
       }
       if (method === "inspectModels") return { models };
       if (method === "extensions.invokeProvider") return null;
+      if (method === "extensions.invoke") {
+        return {
+          version: 1,
+          revision: "test-registry",
+          systemEpoch: 60,
+          entries: [],
+        };
+      }
       if (method === "extensions.list") {
         return [
           "browser-data",
@@ -240,6 +248,34 @@ describe("system-testing CLI-neutral API", () => {
     expect(result.checks.find((check) => check.name === "claude-code-extension")).toMatchObject({
       ok: false,
       detail: expect.stringContaining("No provider registered for claudeCode"),
+    });
+  });
+
+  it("fails doctor before agentic execution when the verified template registry is incompatible", async () => {
+    configureHealthyDoctorModels([
+      { ref: SYSTEM_TEST_AGENT_MODEL, availability: { state: "ready" } },
+      { ref: SYSTEM_TEST_USAGE_LIMIT_FALLBACK_MODEL, availability: { state: "ready" } },
+    ]);
+    const priorImplementation = mocks.rpcCall.getMockImplementation();
+    mocks.rpcCall.mockImplementation(async (...args: unknown[]) => {
+      if (
+        args[1] === "extensions.invoke" &&
+        Array.isArray(args[2]) &&
+        args[2][1] === "catalog"
+      ) {
+        throw new Error(
+          "Template registry system epoch 59 does not match workspace system epoch 60"
+        );
+      }
+      return priorImplementation?.(...args);
+    });
+
+    const result = await systemTestDoctor();
+
+    expect(result.ok).toBe(false);
+    expect(result.checks.find((check) => check.name === "template-registry")).toMatchObject({
+      ok: false,
+      detail: expect.stringContaining("system epoch 59"),
     });
   });
 

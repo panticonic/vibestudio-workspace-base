@@ -529,6 +529,16 @@ export async function systemTestDoctor(
     "declared workspace extensions are approved and build-ready"
   );
   await capture(
+    "template-registry",
+    () =>
+      rpc.call("main", "extensions.invoke", [
+        "@workspace-extensions/template-composer",
+        "catalog",
+        [{ refresh: true }],
+      ]),
+    "verified template registry is reachable and compatible with the workspace epoch"
+  );
+  await capture(
     "claude-code-extension",
     () =>
       rpc.call("main", "extensions.invokeProvider", [
