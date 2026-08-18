@@ -104,6 +104,15 @@ describe("categoryProgressPresentation", () => {
       label: "7 processed",
     });
   });
+
+  it("does not present an initialized counter as a measured zero result", () => {
+    expect(categoryProgressPresentation(progress(), "copying")).toEqual({
+      value: undefined,
+      processed: 0,
+      label: "Reading…",
+      pending: true,
+    });
+  });
 });
 
 describe("import state presentation", () => {

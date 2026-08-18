@@ -952,7 +952,7 @@ function ProgressCard(props: {
               />
               <Flex gap="2" align="center" mt="1">
                 <Text size="1" color="gray">
-                  {progress.stored} stored
+                  {progressView.pending ? "Waiting for results…" : `${progress.stored} stored`}
                 </Text>
                 {progress.skipped > 0 && (
                   <Badge color="gray" size="1" variant="soft">

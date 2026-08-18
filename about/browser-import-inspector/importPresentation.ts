@@ -79,6 +79,7 @@ export interface CategoryProgressPresentation {
   processed: number;
   total?: number;
   label: string;
+  pending?: boolean;
 }
 
 /**
@@ -102,6 +103,24 @@ export function categoryProgressPresentation(
       processed,
       total: processed,
       label: `${processed} ${processed === 1 ? "record" : "records"} considered`,
+    };
+  }
+
+  // Import jobs create one zeroed counter per requested category before the
+  // native reader has opened or decrypted that category. Zero is not an
+  // observation yet: presenting it as "0 processed" (and a full progress bar)
+  // makes an active import look like an empty result.
+  if (
+    progress.itemsProcessed === 0 &&
+    progress.stored === 0 &&
+    progress.skipped === 0 &&
+    progress.errors === 0
+  ) {
+    return {
+      value: undefined,
+      processed: 0,
+      label: "Reading…",
+      pending: true,
     };
   }
 
