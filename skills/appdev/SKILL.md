@@ -50,8 +50,8 @@ Read only references relevant to the target and change.
   Use version-controlled project files when content benefits from history and
   collaboration; client component state and process memory are presentation
   state, not persistence.
-- Use `usePanelTheme()` and responsive layouts. Shared client behavior needs
-  focused evidence in every affected target.
+- Make sure you always make the page respect user's light / dark mode choices.
+  Use `usePanelTheme()` and responsive layouts for your design.
 - Panel commands are generic and host-local: panels own command meaning; apps
   own presentation and routing.
 
