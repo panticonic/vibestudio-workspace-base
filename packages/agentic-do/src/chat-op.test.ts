@@ -1905,12 +1905,70 @@ class EvalGateProbe extends TestVessel {
     (this as unknown as { _driver: unknown })._driver = { interruptChannel };
     return { interruptChannel };
   }
+
+  seedTurnRecoveryForTest(wakeId = "turn-recovery:effect-1"): void {
+    const now = Date.now();
+    this.sql.exec(
+      `INSERT INTO agent_wake_queue (
+         wake_id, channel_id, wake_kind, payload_json, prerequisite_delivery_id,
+         idempotency_key, attempts, next_attempt_at, lease_generation, created_at,
+         disposition
+       ) VALUES (?, ?, 'turn-recovery', '{}', NULL, ?, 0, ?, 0, ?, 'ready')`,
+      wakeId,
+      CHANNEL,
+      wakeId,
+      now,
+      now
+    );
+    this.markWorkReady("agent-wake");
+  }
+
+  stubDriverForRecovery(): { wake: ReturnType<typeof vi.fn> } {
+    const wake = vi.fn(async () => {});
+    (this as unknown as { _driver: unknown })._driver = { wake };
+    return { wake };
+  }
 }
 
 async function makeGateProbe(): Promise<EvalGateProbe> {
   const { instance } = await createTestDO(EvalGateProbe, TEST_AGENT_ENV);
   return instance;
 }
+
+describe("AgentVesselBase turn recovery", () => {
+  it("drives and settles a durable terminal-cascade wake on a replacement activation", async () => {
+    const probe = await makeGateProbe();
+    probe.seedTurnRecoveryForTest();
+    const { wake } = probe.stubDriverForRecovery();
+
+    const [claim] = probe.claimReadyWork("agent-wake", {
+      workerId: "replacement-worker",
+      now: Date.now(),
+      limit: 1,
+    });
+    expect(claim).toEqual(expect.objectContaining({ itemId: "turn-recovery:effect-1" }));
+
+    await expect(
+      probe.executeWakeClaim({ itemId: claim!.itemId, generation: claim!.generation })
+    ).resolves.toEqual({ processed: true });
+    expect(wake).toHaveBeenCalledWith(CHANNEL);
+    expect(
+      probe.settleReadyWork("agent-wake", {
+        workerId: "replacement-worker",
+        itemId: claim!.itemId,
+        generation: claim!.generation,
+        outcome: { executed: true },
+      })
+    ).toBe("accepted");
+    expect(
+      probe.claimReadyWork("agent-wake", {
+        workerId: "replacement-worker",
+        now: Date.now(),
+        limit: 1,
+      })
+    ).toEqual([]);
+  });
+});
 
 class SubagentSpawnProbe extends TestVessel {
   rpcCalls: Array<{ target: string; method: string; args: unknown[] }> = [];

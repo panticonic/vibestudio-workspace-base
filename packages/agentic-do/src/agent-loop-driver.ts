@@ -239,6 +239,21 @@ export interface DriverDeps {
   now(): number;
   scheduleAlarm(atMs: number): void;
   notifyWorkReady?(): void;
+  /**
+   * Atomically consume a locally completed effect and record the durable wake
+   * which will finish its remote-log cascade after activation loss. The
+   * callback owns the local outbox mutation so an activation can never expose
+   * "effect consumed" without also exposing its recovery intent.
+   */
+  commitTerminalOutcome?(
+    input: { channelId: string; branchId: string; effectId: string },
+    commitLocal: () => void
+  ): void | Promise<void>;
+  clearTerminalOutcomeRecovery?(input: {
+    channelId: string;
+    branchId: string;
+    effectId: string;
+  }): void | Promise<void>;
   onTurnClosed?(input: {
     channelId: string;
     turnId: string;
@@ -1758,10 +1773,20 @@ export class AgentLoopDriver {
     }
     this.kill("after-outcome-append");
     await this.cancelAskUserSiblings(row);
-    if (row.kind === "record_receipt") {
-      this.outbox.recordCompletionEvidence(row.branchId, row.effectId, this.deps.now());
+    const commitLocal = () => {
+      if (row.kind === "record_receipt") {
+        this.outbox.recordCompletionEvidence(row.branchId, row.effectId, this.deps.now());
+      }
+      this.outbox.delete(row.branchId, row.effectId);
+    };
+    if (this.deps.commitTerminalOutcome) {
+      await this.deps.commitTerminalOutcome(
+        { channelId: row.channelId, branchId: row.branchId, effectId: row.effectId },
+        commitLocal
+      );
+    } else {
+      commitLocal();
     }
-    this.outbox.delete(row.branchId, row.effectId);
     this.kill("after-outbox-delete");
     for (const envelope of envelopes) {
       loop.state = applyEvent(loop.state, envelope);
@@ -1773,6 +1798,11 @@ export class AgentLoopDriver {
     // settle() re-fetches the live loop (the cascade may have reloaded) and
     // checks compaction now that a turn may have closed.
     await this.settle(loop.channelId);
+    await this.deps.clearTerminalOutcomeRecovery?.({
+      channelId: row.channelId,
+      branchId: row.branchId,
+      effectId: row.effectId,
+    });
   }
 
   /** An unaddressed ask_user journals one call per human. Once any call lands a

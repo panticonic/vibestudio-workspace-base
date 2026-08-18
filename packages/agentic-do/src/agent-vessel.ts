@@ -782,12 +782,54 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         updated_at INTEGER NOT NULL
       )
     `);
+    const wakeQueueDefinition = this.sql
+      .exec(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_wake_queue'`)
+      .toArray()[0]?.["sql"];
+    if (
+      typeof wakeQueueDefinition === "string" &&
+      !wakeQueueDefinition.includes("'turn-recovery'")
+    ) {
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec(
+          `ALTER TABLE agent_wake_queue RENAME TO agent_wake_queue_before_turn_recovery`
+        );
+        this.sql.exec(`
+          CREATE TABLE agent_wake_queue (
+            wake_id TEXT PRIMARY KEY,
+            channel_id TEXT NOT NULL,
+            wake_kind TEXT NOT NULL CHECK (wake_kind IN (
+              'scheduled-model-resume',
+              'turn-recovery',
+              'subagent-terminal-publish',
+              'subagent-cancel-settle'
+            )),
+            payload_json TEXT NOT NULL,
+            prerequisite_delivery_id TEXT,
+            idempotency_key TEXT NOT NULL UNIQUE,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            next_attempt_at INTEGER NOT NULL,
+            lease_owner TEXT,
+            lease_generation INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL,
+            last_attempt_at INTEGER,
+            disposition TEXT NOT NULL DEFAULT 'ready'
+              CHECK (disposition IN ('ready', 'leased', 'retrying', 'terminal-completed', 'terminal-poison'))
+          )
+        `);
+        this.sql.exec(`
+          INSERT INTO agent_wake_queue
+          SELECT * FROM agent_wake_queue_before_turn_recovery
+        `);
+        this.sql.exec(`DROP TABLE agent_wake_queue_before_turn_recovery`);
+      });
+    }
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS agent_wake_queue (
         wake_id TEXT PRIMARY KEY,
         channel_id TEXT NOT NULL,
         wake_kind TEXT NOT NULL CHECK (wake_kind IN (
           'scheduled-model-resume',
+          'turn-recovery',
           'subagent-terminal-publish',
           'subagent-cancel-settle'
         )),
@@ -1424,6 +1466,35 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         this.scheduleAgentAlarm("agent-loop-driver", Math.max(at, Date.now() + 50));
       },
       notifyWorkReady: () => this.markWorkReady("agent-effect"),
+      commitTerminalOutcome: async (input, commitLocal) => {
+        const wakeId = `turn-recovery:${outboxExternalId(input.branchId, input.effectId)}`;
+        const now = Date.now();
+        this.ctx.storage.transactionSync(() => {
+          this.sql.exec(
+            `INSERT OR IGNORE INTO agent_wake_queue (
+               wake_id, channel_id, wake_kind, payload_json, prerequisite_delivery_id,
+               idempotency_key, attempts, next_attempt_at, lease_generation, created_at,
+               disposition
+             ) VALUES (?, ?, 'turn-recovery', '{}', NULL, ?, 0, ?, 0, ?, 'ready')`,
+            wakeId,
+            input.channelId,
+            wakeId,
+            now,
+            now
+          );
+          commitLocal();
+        });
+        this.markWorkReady("agent-wake");
+        // Persist the recovery edge before continuing the remote-log cascade.
+        // This request may be the last code the current activation executes.
+        await this.persistAlarmSchedule({ wakeAt: now });
+      },
+      clearTerminalOutcomeRecovery: (input) => {
+        this.sql.exec(
+          `DELETE FROM agent_wake_queue WHERE wake_id = ? AND disposition = 'ready'`,
+          `turn-recovery:${outboxExternalId(input.branchId, input.effectId)}`
+        );
+      },
       executorOverride: this.getDriverExecutorOverride(),
     });
     this._driver.connectSpecProvider = async (providerId) =>
@@ -3307,6 +3378,8 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
         String(payload["runId"]),
         typeof payload["reason"] === "string" ? payload["reason"] : "cancelled"
       );
+    } else if (wakeKind === "turn-recovery") {
+      await this.driver.wake(channelId);
     } else if (wakeKind === "scheduled-model-resume" && typeof payload["messageId"] === "string") {
       await this.driver.executeScheduledResume(channelId, payload["messageId"]);
     } else {
@@ -3406,7 +3479,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
           request.itemId
         )
         .toArray()[0];
-      if (channel?.["wake_kind"] === "scheduled-model-resume") {
+      if (
+        channel?.["wake_kind"] === "scheduled-model-resume" ||
+        channel?.["wake_kind"] === "turn-recovery"
+      ) {
         // This wake id is reusable when the same message is legitimately
         // scheduled again. Keeping a terminal row would make INSERT OR IGNORE
         // swallow that later schedule forever.

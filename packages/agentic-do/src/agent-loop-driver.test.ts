@@ -85,6 +85,8 @@ async function makeHarness(opts: {
   onGadCall?: (method: string) => void;
   channelPublish?: ChannelCallPort["publish"];
   onTurnClosed?: NonNullable<DriverDeps["onTurnClosed"]>;
+  commitTerminalOutcome?: NonNullable<DriverDeps["commitTerminalOutcome"]>;
+  clearTerminalOutcomeRecovery?: NonNullable<DriverDeps["clearTerminalOutcomeRecovery"]>;
 }) {
   const gad = opts.gad ?? (await createTestDO(GadWorkspaceDO, { __objectKey: "gad" }));
   const driverHost =
@@ -164,6 +166,12 @@ async function makeHarness(opts: {
     onEphemeral: (emit) => ephemerals.push(emit),
     now: () => (now += 7),
     scheduleAlarm: (at) => alarms.push(at),
+    ...(opts.commitTerminalOutcome
+      ? { commitTerminalOutcome: opts.commitTerminalOutcome }
+      : {}),
+    ...(opts.clearTerminalOutcomeRecovery
+      ? { clearTerminalOutcomeRecovery: opts.clearTerminalOutcomeRecovery }
+      : {}),
     ...(opts.onTurnClosed ? { onTurnClosed: opts.onTurnClosed } : {}),
     executorOverride: (descriptor) => {
       const override = opts.executorOverride?.(descriptor);
@@ -2239,6 +2247,84 @@ describe("AgentLoopDriver", () => {
       "turn.closed",
     ]);
     expect((await recovered.driver.loop(CHANNEL)).state.openTurn).toBeNull();
+    expect(recovered.driver.outbox.all()).toHaveLength(0);
+  });
+
+  it("leaves a durable recovery intent when activation loss follows local effect consumption", async () => {
+    const gad = await createTestDO(GadWorkspaceDO, { __objectKey: "gad" });
+    const host = await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" });
+    const recoveries = new Map<string, { channelId: string; branchId: string; effectId: string }>();
+    let deletedOutcomes = 0;
+    const crashed = await makeHarness({
+      script: { model: [textReply("done")], tool: [] },
+      gad,
+      driverSql: host,
+      commitTerminalOutcome: (input, commitLocal) => {
+        recoveries.set(input.effectId, input);
+        commitLocal();
+      },
+      clearTerminalOutcomeRecovery: (input) => {
+        recoveries.delete(input.effectId);
+      },
+      killPoint: (point) => {
+        if (point === "after-outbox-delete" && ++deletedOutcomes === 2) {
+          throw new Error("activation lost after consuming terminal outcome");
+        }
+      },
+    });
+
+    await crashed.driver.handleIncoming(CHANNEL, promptIncoming());
+    await crashed.driver.dispatchReadyEffectsForTest().catch(() => {});
+
+    expect(crashed.driver.outbox.all()).toHaveLength(0);
+    expect([...recoveries.values()]).toEqual([
+      expect.objectContaining({ channelId: CHANNEL, branchId: LOG_ID }),
+    ]);
+    expect(await logKinds(gad)).toEqual([
+      "message.completed",
+      "turn.opened",
+      "message.started",
+      "message.completed",
+    ]);
+
+    const recovered = await makeHarness({
+      script: { model: [], tool: [] },
+      gad,
+      driverSql: host,
+    });
+    await recovered.driver.wake(CHANNEL);
+
+    expect((await recovered.driver.loop(CHANNEL)).state.openTurn).toBeNull();
+    expect((await logKinds(gad)).at(-1)).toBe("turn.closed");
+  });
+
+  it("settles cancellation after recovering a completed turn from a prior activation", async () => {
+    const gad = await createTestDO(GadWorkspaceDO, { __objectKey: "gad" });
+    const host = await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" });
+    let deletedOutcomes = 0;
+    const crashed = await makeHarness({
+      script: { model: [textReply("done")], tool: [] },
+      gad,
+      driverSql: host,
+      commitTerminalOutcome: (_input, commitLocal) => commitLocal(),
+      killPoint: (point) => {
+        if (point === "after-outbox-delete" && ++deletedOutcomes === 2) {
+          throw new Error("activation lost before terminal cascade");
+        }
+      },
+    });
+    await crashed.driver.handleIncoming(CHANNEL, promptIncoming());
+    await crashed.driver.dispatchReadyEffectsForTest().catch(() => {});
+
+    const recovered = await makeHarness({
+      script: { model: [], tool: [] },
+      gad,
+      driverSql: host,
+    });
+    await expect(recovered.driver.interruptChannel(CHANNEL)).resolves.toBeUndefined();
+
+    expect((await recovered.driver.loop(CHANNEL)).state.openTurn).toBeNull();
+    expect((await logKinds(gad)).at(-1)).toBe("turn.closed");
     expect(recovered.driver.outbox.all()).toHaveLength(0);
   });
 
