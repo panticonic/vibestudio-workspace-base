@@ -8,7 +8,11 @@ import {
   type SetupAction,
   type SetupPresentationState,
 } from "./catalog";
-import type { CapabilityOnboardingStatusAdapter } from "./status";
+import {
+  createCredentialConnectionStatusAdapter,
+  createStatusAdapters,
+  type CapabilityOnboardingStatusAdapter,
+} from "./status";
 
 interface OnboardingHostTopologySnapshot {
   devices: {
@@ -245,8 +249,6 @@ export async function composeOnboardingSnapshot(
   options: ComposeOnboardingSnapshotOptions = {},
   dependencies: OnboardingSnapshotDependencies = {}
 ): Promise<SetupCapabilitySnapshot[]> {
-  const { createCredentialConnectionStatusAdapter, createStatusAdapters } =
-    await import("./status");
   const observedAt = (dependencies.now?.() ?? new Date()).toISOString();
   const catalog =
     dependencies.catalog ?? (await (dependencies.readCatalog ?? readInstalledOnboardingCatalog)());

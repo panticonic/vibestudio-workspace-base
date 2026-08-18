@@ -1,11 +1,4 @@
-import {
-  browserData,
-  callMain,
-  createDurableObjectServiceClient,
-  credentials,
-  extensions,
-  type StoredCredentialSummary,
-} from "@workspace/runtime";
+import type { StoredCredentialSummary } from "@workspace/runtime";
 import {
   MODEL_SETTINGS_SERVICE_PROTOCOL,
   type ModelSettingsSnapshot,
@@ -48,6 +41,8 @@ interface SkillCatalogEntry {
   skillPath: string;
 }
 
+const loadRuntime = () => import("@workspace/runtime");
+
 function activeCredentials(
   all: readonly StoredCredentialSummary[],
   providerIds: readonly string[]
@@ -61,6 +56,7 @@ function activeCredentials(
 }
 
 async function githubStatus(opts: { verify?: boolean } = {}): Promise<GitHubOnboardingStatus> {
+  const { credentials } = await loadRuntime();
   const primary = activeCredentials(await credentials.listStoredCredentials(), ["github"])[0];
   if (!primary) {
     return { stage: "needs-token", connected: false, verified: false };
@@ -97,6 +93,7 @@ async function githubStatus(opts: { verify?: boolean } = {}): Promise<GitHubOnbo
 }
 
 async function activeSearchProvider(): Promise<"duckduckgo" | "tavily" | "brave" | "exa"> {
+  const { credentials } = await loadRuntime();
   const providers = new Set(
     activeCredentials(await credentials.listStoredCredentials(), ["tavily", "brave", "exa"]).map(
       (credential) => credential.metadata?.["providerId"]
@@ -109,26 +106,39 @@ async function activeSearchProvider(): Promise<"duckduckgo" | "tavily" | "brave"
 }
 
 export function createDefaultStatusDependencies(): OnboardingStatusDependencies {
-  const modelSettings = createDurableObjectServiceClient(MODEL_SETTINGS_SERVICE_PROTOCOL);
+  let modelSettings:
+    | Promise<ReturnType<(typeof import("@workspace/runtime"))["createDurableObjectServiceClient"]>>
+    | undefined;
+  const modelSettingsClient = () =>
+    (modelSettings ??= loadRuntime().then(({ createDurableObjectServiceClient }) =>
+      createDurableObjectServiceClient(MODEL_SETTINGS_SERVICE_PROTOCOL)
+    ));
   let installedSkills: Promise<ReadonlySet<string>> | undefined;
   const skills = () =>
-    (installedSkills ??= callMain<SkillCatalogEntry[]>("workspace.listSkills").then(
-      (entries) => new Set(entries.map((entry) => entry.skillPath))
+    (installedSkills ??= loadRuntime().then(({ callMain }) =>
+      callMain<SkillCatalogEntry[]>("workspace.listSkills").then(
+        (entries) => new Set(entries.map((entry) => entry.skillPath))
+      )
     ));
   return {
     github: githubStatus,
-    modelSettings: () => modelSettings.call<ModelSettingsSnapshot>("getSettings"),
-    localModelsStatus: () =>
-      extensions.invoke(
+    modelSettings: async () =>
+      (await modelSettingsClient()).call<ModelSettingsSnapshot>("getSettings"),
+    localModelsStatus: async () => {
+      const { extensions } = await loadRuntime();
+      return extensions.invoke(
         "@workspace-extensions/local-models",
         "status",
         []
-      ) as Promise<LocalModelsStatus>,
-    localModelsList: () =>
-      extensions.invoke("@workspace-extensions/local-models", "listModels", []) as Promise<
+      ) as Promise<LocalModelsStatus>;
+    },
+    localModelsList: async () => {
+      const { extensions } = await loadRuntime();
+      return extensions.invoke("@workspace-extensions/local-models", "listModels", []) as Promise<
         LocalModelEntry[]
-      >,
-    browserImportJobs: () => browserData.listImportJobs(),
+      >;
+    },
+    browserImportJobs: async () => (await loadRuntime()).browserData.listImportJobs(),
     activeSearchProvider,
     hasSkill: async (skillPath) => (await skills()).has(skillPath),
   };
@@ -148,6 +158,7 @@ export function createCredentialConnectionStatusAdapter(
   title: string
 ): CapabilityOnboardingStatusAdapter {
   return async (opts = {}) => {
+    const { credentials } = await loadRuntime();
     const [config, all] = await Promise.all([
       observer.clientConfigId
         ? credentials.getClientConfigStatus({ configId: observer.clientConfigId })
