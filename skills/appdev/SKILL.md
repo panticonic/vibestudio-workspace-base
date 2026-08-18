@@ -27,10 +27,12 @@ Read only references relevant to the target and change.
 
 - Build production-ready systems. Apps are trusted workspace infrastructure,
   not throwaway prototypes: design for real use from the start with proper state
-  persistence, error handling, principled authority, and tested edge cases. Do
-  not populate apps with hardcoded demo or fake data — build real empty states,
-  real data-entry flows, and real persistence. Do not leave any 'prototype'
-  UI element stubs without implemented functionality.
+  persistence, error handling, principled authority, and tested edge cases.
+- Do not populate apps with hardcoded demo or fake data — build real empty states,
+  real data-entry flows, and real persistence.
+- Do not leave any 'prototype' UI element stubs without implemented functionality.
+  No empty 'share' buttons unless you implement it, no user account badge unless
+  there is an account system, no breadcrumbs if you can't navigate anything.
 - `@workspace-apps/<name>` maps to `apps/<name>`. Identity comes from the
   package manifest and approved build, not display path.
 - Give each app a semantic `vibestudio.icon` per the [icon
