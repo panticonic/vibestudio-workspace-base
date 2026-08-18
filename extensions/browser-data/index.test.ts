@@ -143,6 +143,17 @@ vi.mock("@vibestudio/browser-import", async () => {
   };
 });
 
+vi.mock("@vibestudio/browser-data", async () => {
+  const actual = await vi.importActual<typeof import("@vibestudio/browser-data")>(
+    "@vibestudio/browser-data"
+  );
+  const browserImport = await import("@vibestudio/browser-import");
+  return {
+    ...actual,
+    RemoteBrowserImportProvider: browserImport.LocalBrowserImportProvider,
+  };
+});
+
 import { activate } from "./index.js";
 
 const browserEnvironmentMaterial = browserEnvironmentKeyMaterial("workspace-1", "user-1");
@@ -175,6 +186,15 @@ function makeContext(callerKind: string | null = "shell", callerId = "shell") {
   >();
   const rpcCall = vi.fn(
     async (_targetId: string, method: string, ...args: unknown[]): Promise<unknown> => {
+      if (method === "browserEnvironment.getImportHost") {
+        return {
+          hostId: "server:workspace-1",
+          displayName: "Server",
+          platform: "linux",
+          location: "server",
+          connected: true,
+        };
+      }
       if (method === "addBookmarksBatch") return 1;
       if (method === "addBookmark") return 42;
       if (method === "getBookmarks") return [{ id: 1, title: "Example" }];
@@ -397,10 +417,15 @@ describe("@workspace-extensions/browser-data", () => {
       "service:browserPrivacyPresentation.open",
     ]);
     expect(
-      manifest.vibestudio.authority.requests.filter((request) =>
-        downstreamSensitiveCapabilities.has(request.capability)
-      )
-    ).toEqual([]);
+      manifest.vibestudio.authority.requests
+        .filter((request) => downstreamSensitiveCapabilities.has(request.capability))
+        .map((request) => request.capability)
+    ).toEqual([
+      "service:browserEnvironment.previewSensitiveImport",
+      "service:browserEnvironment.startSensitiveImport",
+      "service:browserEnvironment.observeSensitiveImport",
+      "service:browserEnvironment.cancelSensitiveImport",
+    ]);
     expect(manifest.vibestudio.authority.provides).toEqual([]);
     expect(manifest.vibestudio.extension.methodAuthority).toEqual({});
   });
@@ -523,7 +548,7 @@ describe("@workspace-extensions/browser-data", () => {
       expect.objectContaining({
         sourceId: "opaque-chrome",
         localDataSetCount: 2,
-        supportedDataTypes: ["bookmarks", "history"],
+        supportedDataTypes: ["bookmarks", "history", "cookies"],
       }),
     ]);
     expect(JSON.stringify(sources)).not.toMatch(/profile|[/\\\\]Users[/\\\\]|[/\\\\]home[/\\\\]/i);

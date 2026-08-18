@@ -14,6 +14,10 @@
         {
           "protocol": "vibestudio.browser-data.v1",
           "availability": "required"
+        },
+        {
+          "protocol": "vibestudio.channel.v1",
+          "availability": "required"
         }
       ],
       "requests": [
@@ -46,6 +50,96 @@
         },
         {
           "capability": "service:browserEnvironment.getImportHost",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.listImportSources",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.previewImportSource",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.startImportRead",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.nextImportFrame",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.cancelImportRead",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.listImportOpenTabs",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.previewSensitiveImport",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.startSensitiveImport",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.observeSensitiveImport",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.cancelSensitiveImport",
           "resource": {
             "kind": "prefix",
             "prefix": ""

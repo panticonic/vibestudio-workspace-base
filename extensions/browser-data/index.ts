@@ -1,8 +1,7 @@
 import {
   exportChromiumBookmarks,
   exportNetscapeBookmarks,
-  LocalBrowserImportProvider,
-} from "@vibestudio/browser-import";
+} from "@vibestudio/browser-import/export/bookmarks";
 import {
   BROWSER_ENVIRONMENT_KEY_VERSION,
   BrowserImportCoordinator,
@@ -141,11 +140,9 @@ export async function activate(ctx: ExtensionContextLike) {
     Promise<{ identity: BrowserEnvironmentIdentity; dataTargetId: string }>
   >();
   const targetsByEnvironment = new Map<string, string>();
-  const unregisterServerHosts = new Map<string, () => void>();
-  const desktopHosts = new Map<string, { hostId: string; unregister: () => void }>();
+  const importHosts = new Map<string, { hostId: string; unregister: () => void }>();
   const hostLabels = new Map<string, string>();
   const sourceBrowsers = new Map<string, string>();
-  const provider = new LocalBrowserImportProvider();
 
   const currentIdentity = async (): Promise<{
     identity: BrowserEnvironmentIdentity;
@@ -262,22 +259,7 @@ export async function activate(ctx: ExtensionContextLike) {
     });
   });
 
-  const ensureServerHost = (identity: BrowserEnvironmentIdentity): void => {
-    if (unregisterServerHosts.has(identity.environmentKey)) return;
-    const unregister = coordinator.registerHost({
-      hostId: `server:${identity.workspaceId}`,
-      ownerUserId: identity.ownerUserId,
-      displayName: "Server",
-      platform: normalizedPlatform(),
-      location: "server",
-      connected: true,
-      provider,
-    });
-    unregisterServerHosts.set(identity.environmentKey, unregister);
-    hostLabels.set(`server:${identity.workspaceId}`, "Server");
-  };
-
-  const ensureDesktopHost = async (
+  const ensureImportHost = async (
     identity: BrowserEnvironmentIdentity
   ): Promise<ImportHostSummary | null> => {
     try {
@@ -285,7 +267,7 @@ export async function activate(ctx: ExtensionContextLike) {
         "main",
         "browserEnvironment.getImportHost"
       );
-      const current = desktopHosts.get(identity.environmentKey);
+      const current = importHosts.get(identity.environmentKey);
       if (current?.hostId === summary.hostId) return summary;
       current?.unregister();
       const remoteProvider = new RemoteBrowserImportProvider((method, ...args) =>
@@ -296,22 +278,21 @@ export async function activate(ctx: ExtensionContextLike) {
         ownerUserId: identity.ownerUserId,
         provider: remoteProvider,
       });
-      desktopHosts.set(identity.environmentKey, {
+      importHosts.set(identity.environmentKey, {
         hostId: summary.hostId,
         unregister,
       });
       hostLabels.set(summary.hostId, summary.displayName);
       return summary;
     } catch {
-      desktopHosts.get(identity.environmentKey)?.unregister();
-      desktopHosts.delete(identity.environmentKey);
+      importHosts.get(identity.environmentKey)?.unregister();
+      importHosts.delete(identity.environmentKey);
       return null;
     }
   };
 
   const ensureImportHosts = async (identity: BrowserEnvironmentIdentity): Promise<void> => {
-    ensureServerHost(identity);
-    await ensureDesktopHost(identity);
+    await ensureImportHost(identity);
   };
 
   const guarded =
@@ -360,7 +341,7 @@ export async function activate(ctx: ExtensionContextLike) {
       );
       const host = coordinator.listHosts(identity).find((candidate) => candidate.hostId === hostId);
       const availableSources = sources.map((source) =>
-        withAvailableSensitiveImportPath(source, host?.location === "desktop")
+        withAvailableSensitiveImportPath(source, host !== undefined)
       );
       for (const source of availableSources) {
         sourceBrowsers.set(source.sourceId, source.browser);
@@ -377,8 +358,8 @@ export async function activate(ctx: ExtensionContextLike) {
       "previewSensitiveImport",
       async (request: SensitiveBrowserImportSelection) => {
         const { identity } = await currentIdentity();
-        const host = await ensureDesktopHost(identity);
-        assertSelectedDesktopHost(host, request.hostId);
+        const host = await ensureImportHost(identity);
+        assertSelectedImportHost(host, request.hostId);
         assertSensitiveImportSelection(request);
         return ctx.rpc.call(
           "main",
@@ -403,8 +384,8 @@ export async function activate(ctx: ExtensionContextLike) {
       "startSensitiveImport",
       async (request: SensitiveBrowserImportRequest): Promise<SensitiveBrowserImportStatus> => {
         const { identity } = await currentIdentity();
-        const host = await ensureDesktopHost(identity);
-        assertSelectedDesktopHost(host, request.hostId);
+        const host = await ensureImportHost(identity);
+        assertSelectedImportHost(host, request.hostId);
         assertSensitiveImportRequest(request);
         return ctx.rpc.call<SensitiveBrowserImportStatus>(
           "main",
@@ -419,7 +400,7 @@ export async function activate(ctx: ExtensionContextLike) {
       "observeSensitiveImport",
       async (operationId: string): Promise<SensitiveBrowserImportStatus> => {
         const { identity } = await currentIdentity();
-        await ensureDesktopHost(identity);
+        await ensureImportHost(identity);
         assertSensitiveImportOperationId(operationId);
         return ctx.rpc.call("main", "browserEnvironment.observeSensitiveImport", operationId);
       }
@@ -428,7 +409,7 @@ export async function activate(ctx: ExtensionContextLike) {
       "cancelSensitiveImport",
       async (operationId: string): Promise<SensitiveBrowserImportStatus> => {
         const { identity } = await currentIdentity();
-        await ensureDesktopHost(identity);
+        await ensureImportHost(identity);
         assertSensitiveImportOperationId(operationId);
         return ctx.rpc.call("main", "browserEnvironment.cancelSensitiveImport", operationId);
       }
@@ -608,12 +589,12 @@ function assertSensitiveImportOperationId(operationId: string): void {
   if (!operationId.trim()) throw new Error("Sensitive import operation id is required");
 }
 
-function assertSelectedDesktopHost(
+function assertSelectedImportHost(
   host: ImportHostSummary | null,
   requestedHostId: string
 ): asserts host is ImportHostSummary {
   if (!host || host.hostId !== requestedHostId) {
-    throw new Error("Sensitive browser operations require the selected attached desktop host");
+    throw new Error("Sensitive browser operations require the selected protected import host");
   }
 }
 
@@ -961,11 +942,6 @@ function reportImportHealth(ctx: ExtensionContextLike, job: ImportJobSnapshot): 
   } else {
     ctx.health?.healthy({ summary: "Browser data import completed" });
   }
-}
-
-function normalizedPlatform(): "darwin" | "linux" | "win32" {
-  const platform = (globalThis as { process?: { platform?: string } }).process?.platform;
-  return platform === "darwin" || platform === "win32" ? platform : "linux";
 }
 
 function hostnameFromUrl(raw: string): string | null {

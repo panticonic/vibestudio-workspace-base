@@ -85,14 +85,7 @@ const SENSITIVE_DATA_TYPE_ORDER: SensitiveBrowserImportDataType[] = [
 export function MigrateTab(props: { selection: ImportSourceSelection; now: number }) {
   const selectionKey = `${props.selection.host.hostId}\0${props.selection.source.sourceId}`;
   const supported = props.selection.source.supportedDataTypes;
-  const available = useMemo(
-    () =>
-      supported.filter(
-        (dataType) =>
-          props.selection.host.location === "desktop" || !SENSITIVE_DATA_TYPES.has(dataType)
-      ),
-    [props.selection.host.location, supported]
-  );
+  const available = supported;
   const selectableTypes = useMemo(
     () => DATA_TYPES.filter((item) => available.includes(item.key as never)),
     [available]
@@ -1222,7 +1215,17 @@ function OpenTabs(props: { selection: ImportSourceSelection }) {
         </Flex>
       </Text>
 
-      {tabs.state.status === "loading" && <Spinner size="1" />}
+      {tabs.state.status === "loading" && (
+        <Callout.Root color="blue" size="1" mt="2">
+          <Flex gap="2" align="center">
+            <Spinner size="1" />
+            <Callout.Text>
+              Reading the live session from {props.selection.source.displayName}. Large or active
+              profiles can take a moment; tabs will become selectable when discovery finishes.
+            </Callout.Text>
+          </Flex>
+        </Callout.Root>
+      )}
       {tabs.state.error && (
         <Text color="red" size="1" as="div" mt="2">
           {tabs.state.error}
