@@ -189,6 +189,32 @@ describe("agent tool failure contract", () => {
     expect(renderAgentToolFailure(failure)).toContain("Correct the request");
   });
 
+  it("preserves build-gate source repair semantics instead of inferring a push retry", () => {
+    const failure = agentToolFailureFromUnknown(
+      Object.assign(new Error("Protected main push rejected"), {
+        errorData: {
+          code: "BuildGateFailed",
+          failureKind: "domain",
+          retry: { policy: "none", commandIdPolicy: "not-applicable" },
+          recovery: {
+            action: "repair-source",
+            instruction: "Repair diagnostics and build a new candidate.",
+          },
+        },
+      }),
+      { operation: "tool.vcs", stage: "execute" }
+    );
+
+    expect(failure).toMatchObject({
+      kind: "domain",
+      retry: { policy: "none", commandIdPolicy: "not-applicable" },
+      recovery: {
+        action: "repair-source",
+        instruction: "Repair diagnostics and build a new candidate.",
+      },
+    });
+  });
+
   it("classifies messaging refusals: unresolved addressees are correctable, closed channels are not", () => {
     const unresolved = agentToolFailureFromUnknown(
       Object.assign(new Error('no participant "@scrib" on this channel.'), {

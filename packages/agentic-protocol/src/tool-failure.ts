@@ -176,6 +176,28 @@ function retryFor(
   data: Record<string, unknown> | null
 ): AgentToolFailure["retry"] {
   const explicit = record(data?.["retry"]);
+  const explicitPolicy = nonempty(explicit?.["policy"]);
+  const explicitCommandIdPolicy = nonempty(explicit?.["commandIdPolicy"]);
+  if (
+    AGENT_TOOL_RETRY_POLICIES.includes(
+      explicitPolicy as (typeof AGENT_TOOL_RETRY_POLICIES)[number]
+    ) &&
+    (explicitCommandIdPolicy === undefined ||
+      ["reuse-identical", "use-new-after-reobserve", "not-applicable"].includes(
+        explicitCommandIdPolicy
+      ))
+  ) {
+    return {
+      policy: explicitPolicy as AgentToolRetryPolicy,
+      ...(explicitCommandIdPolicy
+        ? {
+            commandIdPolicy: explicitCommandIdPolicy as NonNullable<
+              AgentToolFailure["retry"]["commandIdPolicy"]
+            >,
+          }
+        : {}),
+    };
+  }
   const policy = explicit?.["commandIdPolicy"];
   if (policy === "reuse-identical-only-if-outcome-uncertain") {
     return { policy: "retry-identical", commandIdPolicy: "reuse-identical" };
@@ -341,7 +363,14 @@ export function agentToolFailureFromUnknown(
   const primary = record(primaryValue);
   const message = primary ? errorMessage(primaryValue) : errorMessage(error);
   const code = errorCode(primaryValue ?? error, primary ?? data);
-  const kind = context.kind ?? kindFor(code, message);
+  const explicitKind = nonempty(data?.["failureKind"]);
+  const kind =
+    context.kind ??
+    (AGENT_TOOL_FAILURE_KINDS.includes(
+      explicitKind as (typeof AGENT_TOOL_FAILURE_KINDS)[number]
+    )
+      ? (explicitKind as AgentToolFailureKind)
+      : kindFor(code, message));
   const retry = context.retry ?? retryFor(kind, data);
   return agentToolFailureSchema.parse({
     protocol: AGENT_TOOL_FAILURE_PROTOCOL,
