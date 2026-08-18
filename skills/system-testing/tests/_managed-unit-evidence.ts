@@ -1,6 +1,6 @@
 import type { InvocationCardPayloadLike } from "./_helpers.js";
 
-export type ManagedUnitSection = "apps" | "extensions" | "panels";
+export type ManagedUnitSection = "apps" | "extensions" | "packages" | "panels";
 
 export interface ManagedMutationEvidence {
   index: number;
