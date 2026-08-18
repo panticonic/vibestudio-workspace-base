@@ -603,6 +603,41 @@ describe("panel runtime topology composition", () => {
     ).rejects.toThrow(/either slug or operationId/);
   });
 
+  it("rejects malformed placement before creating runtime or workspace state", async () => {
+    const { runtime, call } = runtimeHarness();
+
+    await expect(
+      runtime.openPanel("https://example.com/", {
+        placement: "replace" as never,
+      }),
+    ).rejects.toThrow(/placement must be an object/);
+    expect(call).not.toHaveBeenCalled();
+  });
+
+  it("persists only the canonical placement fields", async () => {
+    const { runtime, call } = runtimeHarness();
+
+    await runtime.createPanelSlot("panels/new", {
+      slug: "new",
+      placement: {
+        disposition: "side",
+        preferredWidth: 640,
+        ignored: true,
+      } as never,
+    });
+
+    const createCall = call.mock.calls.find(
+      (entry) => entry[1] === "workspace-state.slot.create",
+    );
+    expect(createCall?.[2][0]).toMatchObject({
+      initialEntry: {
+        options: {
+          placement: { disposition: "side", preferredWidth: 640 },
+        },
+      },
+    });
+  });
+
   it("never retires a reservation when slot creation has an ambiguous failure", async () => {
     const { runtime, call } = runtimeHarness({
       slotCreateError: new Error("transport closed after dispatch"),

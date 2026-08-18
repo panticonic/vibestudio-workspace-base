@@ -19,6 +19,7 @@ import {
   isOpenPanelBrowserUrl,
 } from "@vibestudio/shared/panelChrome";
 import { normalizePanelTitle } from "@vibestudio/shared/panel/title";
+import { sanitizePlacementHint } from "@vibestudio/shared/panelTypes";
 import {
   computePanelId,
   derivePanelOperationIdentity,
@@ -1496,7 +1497,9 @@ export function createPanelRuntime(
   ): Promise<{
     panelHandle: PanelHandle;
     activationSpec?: RuntimeCodePanelEntityCreateSpec;
+    placement?: PanelPlacementHint;
   }> => {
+    const placement = sanitizePlacementHint(openOptions?.placement);
     if (openOptions?.slug && openOptions.operationId) {
       throw new Error(
         "Panel creation accepts either slug or operationId, not both",
@@ -1665,9 +1668,7 @@ export function createPanelRuntime(
             stateArgs,
             options: {
               ...(openOptions?.ref ? { ref: openOptions.ref } : {}),
-              ...(openOptions?.placement
-                ? { placement: openOptions.placement }
-                : {}),
+              ...(placement ? { placement } : {}),
             },
           },
         }),
@@ -1709,6 +1710,7 @@ export function createPanelRuntime(
       options.onOpen?.({ source, id: panelHandle.id, kind: panelHandle.kind });
       return {
         panelHandle,
+        ...(placement ? { placement } : {}),
         ...(!external
           ? { activationSpec: entitySpec as RuntimeCodePanelEntityCreateSpec }
           : {}),
@@ -1749,9 +1751,7 @@ export function createPanelRuntime(
       if (openOptions?.focus !== false) {
         const anchorPanelId = requesterPanelId();
         const focusOptions: PanelFocusOptions = {
-          ...(openOptions?.placement
-            ? { placement: openOptions.placement }
-            : {}),
+          ...(committed.placement ? { placement: committed.placement } : {}),
           ...(anchorPanelId ? { anchorPanelId } : {}),
         };
         if (options.focusPanel)
