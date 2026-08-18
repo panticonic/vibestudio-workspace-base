@@ -14,7 +14,7 @@ import { ledgerTest } from "../../../tests/helpers/ledgerTest.js";
 import { createTestDO } from "@workspace/runtime/worker/test-utils";
 import { ids, type AgentTurnMetadata } from "@workspace/agent-loop";
 import { logIdForChannel } from "@vibestudio/trajectory-identity";
-import { RemoteRpcError, rpc, type RpcClient } from "@vibestudio/rpc";
+import { RemoteRpcError, rpc, rpcMethodAuthority, type RpcClient } from "@vibestudio/rpc";
 import {
   AGENTIC_EVENT_PAYLOAD_KIND,
   AGENTIC_PROTOCOL_VERSION,
@@ -1019,6 +1019,17 @@ describe("AgentVesselBase durable work readiness", () => {
 });
 
 describe("AgentVesselBase activation-local inspection", () => {
+  it("admits the authenticated channel DO before enforcing its exact identity", async () => {
+    const vessel = await makeVessel();
+
+    expect(rpcMethodAuthority(vessel, "readAgentInspection")).toMatchObject({
+      principals: ["host", "code"],
+      effect: { kind: "open" },
+      tier: "open",
+      sensitivity: "read",
+    });
+  });
+
   it("returns a partial snapshot without entering a stalled loop hydration path", async () => {
     const vessel = await makeVessel();
     const hydrateLoop = vi.fn(() => new Promise(() => {}));

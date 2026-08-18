@@ -4495,7 +4495,11 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
    * missing instead of being hydrated through GAD.
    */
   @rpc({
-    principals: ["host"],
+    // PubSubChannel performs the admitted, receiver-gated inspection and then
+    // reaches this endpoint as an authenticated code principal. The method's
+    // exact channel-DO assertion below is the authority boundary for this
+    // internal hop; host access remains available for operational inspection.
+    principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "read",
