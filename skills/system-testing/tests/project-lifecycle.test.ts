@@ -133,7 +133,7 @@ describe("project lifecycle prompts", () => {
           ruleId: "manage-panel-context-boundary",
           capability: { kind: "exact", key: "context.boundary" },
           resource: { kind: "prefix", prefix: "context/" },
-          tier: "gated",
+          tier: "critical",
           decision: "once",
         },
         {
@@ -343,7 +343,7 @@ describe("project lifecycle prompts", () => {
           ruleId: "manage-panel-context-boundary",
           capability: { kind: "exact", key: "context.boundary" },
           resource: { kind: "prefix", prefix: "context/" },
-          tier: "gated",
+          tier: "critical",
           decision: "once",
         },
         {
