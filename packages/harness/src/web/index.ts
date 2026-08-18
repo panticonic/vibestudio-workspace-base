@@ -53,7 +53,7 @@ const FETCH_PARAMETERS = {
         session: {
             type: "string",
             enum: ["public", "browser"],
-            description: "Cookie-free public fetch (default), or approval-gated fetch using your imported browser cookies.",
+            description: "Cookie-free public fetch (default), or an approval-gated normal Chromium page load using your imported browser cookies.",
         },
     },
     required: ["url"],
@@ -134,7 +134,7 @@ export function createWebTools(deps: WebToolsDeps): AgentTool[] {
         pi.registerTool({
             name: "web_fetch",
             label: "Web Fetch",
-            description: "Fetch a URL through managed Chromium, extract its main content as markdown, and cache the full result in the blobstore. Public mode is cookie-free. Browser mode uses imported browser cookies and requires approval. Returns the cleaned title, a head excerpt, and a digest.",
+            description: "Fetch a URL through managed Chromium, extract its main content as markdown, and cache the full result in the blobstore. Public mode is cookie-free. Browser mode loads a normal browser page with imported cookies and requires approval. Returns the cleaned title, a head excerpt, and a digest.",
             parameters: FETCH_PARAMETERS as never,
             execute: async (_toolCallId, params, signal) => {
                 const { url, session = "public" } = params as {
