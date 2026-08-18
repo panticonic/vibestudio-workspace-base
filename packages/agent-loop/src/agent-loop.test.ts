@@ -712,6 +712,46 @@ describe("agent-loop core lifecycle", () => {
     expect(final.causality).toMatchObject({ messageId: msg1, turnId: turn1 });
   });
 
+  it("repairs a missing prompt artifact before a post-tool continuation model call", () => {
+    const s = scenario();
+    prompt(s);
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "a.ts" } }],
+      stopReason: "completed",
+    });
+
+    // Simulate an activation/migration fold that retained the open turn but
+    // lost its materialized prompt hash.
+    s.state = { ...s.state, config: { ...s.state.config, systemPromptHash: "" } };
+    resolveEffect(s, ids.invocationEffect("read-1"), {
+      kind: "tool",
+      result: "file contents",
+      isError: false,
+    });
+
+    const preparation = [...s.effects.values()].find(
+      (effect) => effect.kind === "prompt_artifacts"
+    );
+    expect(preparation).toBeDefined();
+    expect(pendingEffectIds(s)).not.toContain(ids.modelEffect(ids.messageId(turn1, 1)));
+
+    resolveEffect(s, preparation!.effectId, {
+      kind: "prompt-artifacts",
+      patch: { ...s.state.config, systemPromptHash: "blob:repaired" },
+    });
+
+    const continuationId = ids.messageId(turn1, 1);
+    expect(pendingEffectIds(s)).toContain(ids.modelEffect(continuationId));
+    expect(
+      (
+        s.log.find((row) => row.envelopeId === ids.messageStarted(continuationId))!.payload as {
+          modelRequest: { systemPromptHash: string };
+        }
+      ).modelRequest.systemPromptHash
+    ).toBe("blob:repaired");
+  });
+
   it("publishes the completed spawn invocation while the durable task owns child progress", () => {
     const s = scenario();
     prompt(s);

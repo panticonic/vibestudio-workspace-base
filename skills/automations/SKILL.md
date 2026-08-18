@@ -51,15 +51,14 @@ Typical choices are:
    agent work—whether runs should be fresh or continue one exact conversation.
    Also establish what outcome, if any, should naturally complete the recurring
    goal. Prefer an explicit recommendation over a questionnaire.
-2. Reuse an existing suitable worker or agent target. A small exact script can
-   target an existing agent with the `eval` action and does not require a new
-   worker. If no suitable agent/worker exists, use
-   [Workspace development](../workspace-dev/SKILL.md) to create and verify one.
-   Do not put meaningful task code inside the scheduler.
-3. Resolve the target's exact effective version, then call
-   `automations.propose(...)` with the complete charter and least authority
-   needed. Do not call the lower-level mission service directly: the owner
-   binding is what durably institutes the draft in this conversation.
+2. For a prompt or small inline eval, use the current agent through
+   `automations.propose(...)`. The binding atomically stamps this agent's exact
+   source, class, object key, and installed effective version; never discover or
+   reconstruct those values in guest code. For a reusable method job on another
+   worker, use the lower-level Missions API described in [API.md](API.md).
+3. Call `automations.propose(...)` with the behavior, cadence, and least
+   authority needed. Do not call `agent.describe()`, `build.getEffectiveVersion`,
+   or `workers.resolveService` to prepare an agent-owned proposal.
 4. Tell the user what will run and when, and that the inert draft is waiting in
    **Automations** for review. Do not say it is scheduled until the user approves
    it there.
@@ -69,39 +68,20 @@ execution, history, or approval across parallel mechanisms.
 
 ## Propose an automation
 
-Resolve the target's current exact effective version and propose the draft in
-the same eval. The harness unit and execution source must be the same canonical
-workspace repo path.
+The agent-owned helper is deliberately self-targeting. This complete recurring
+notification proposal needs no identity lookup, build RPC, service resolution,
+or manually fabricated object key:
 
 ```ts
-import { rpc } from "@workspace/runtime";
-
-const unit = "workers/daily-report";
-const ev = await rpc.call<string | null>("main", "build.getEffectiveVersion", [unit]);
-if (!ev) throw new Error(`Build ${unit} before proposing its automation`);
-
-return automations.propose({
-  name: "Daily report",
-  charter: {
-    summary: "Collect the daily figures and store a concise report.",
-    harness: { unit, ev },
-    execution: {
-      kind: "method",
-      target: {
-        source: unit,
-        className: "DailyReportDO",
-        objectKey: "daily-report",
-      },
-      method: "buildReport",
-      args: [],
-    },
-    trigger: {
-      kind: "cron",
-      expression: "0 7 * * *",
-      timezone: "America/New_York",
-      maxRuns: 30,
-    },
+return await automations.propose({
+  name: "Machine Learning fun facts",
+  summary: "Every two minutes, send the owner one concise Machine Learning fun fact.",
+  action: {
+    kind: "prompt",
+    text: "Send one accurate Machine Learning fun fact with notify({ to: 'owner', alert: 'inbox', title: 'Machine Learning fun fact', content: '...' }).",
   },
+  trigger: { kind: "schedule", everyMs: 120_000 },
+  conversation: { mode: "fresh" },
   permissions: [],
 });
 ```
@@ -114,113 +94,69 @@ summary card. Do not call `requestReview` for them.
 
 ## Choose conversation behavior deliberately
 
-For an isolated agent and conversation on every run:
+`conversation` accepts `{ mode: "fresh" }` (the default) or
+`{ mode: "continue" }`. Continue automatically binds the current channel and
+context; callers never pass either identifier.
+
+For an isolated agent and conversation on every run, provide the behavior and
+reach directly:
 
 ```ts
-execution: {
-  kind: "agent",
-  target: {
-    source: "workers/research-agent",
-    className: "ResearchAgent",
-    objectKey: "weekly-research",
-  },
-  action: {
-    kind: "prompt",
-    text: "Review this week's project changes and finish with the three most important risks.",
-  },
-  conversation: { mode: "fresh" },
-  toolExposure: {
-    services: ["build.listUnits", "vcs.status"],
-    userlandServices: [],
-    workspaceServiceDiscovery: "bound",
-    evalNetwork: "none",
-    declaredOrigins: [],
-  },
-  declaredLineageClasses: ["none"],
-}
+action: {
+  kind: "prompt",
+  text: "Review this week's project changes and finish with the three most important risks.",
+},
+conversation: { mode: "fresh" },
+toolExposure: {
+  services: ["build.listUnits", "vcs.status"],
+  userlandServices: [],
+  workspaceServiceDiscovery: "bound",
+  evalNetwork: "none",
+  declaredOrigins: [],
+},
+declaredLineageClasses: ["none"],
 ```
 
-For a specific existing agent conversation, use its exact runtime identity and
-channel context:
+For this exact conversation:
 
 ```ts
-execution: {
-  kind: "agent",
-  target: {
-    source: "workers/research-agent",
-    className: "ResearchAgent",
-    objectKey: "project-researcher",
-  },
-  action: { kind: "prompt", text: "Revisit the open risks and report what changed." },
-  conversation: {
-    mode: "continue",
-    channelId: "project-research",
-    contextId: "ctx-project-research",
-  },
-  toolExposure: {
-    services: ["build.listUnits", "vcs.status"],
-    userlandServices: [],
-    workspaceServiceDiscovery: "bound",
-    evalNetwork: "none",
-    declaredOrigins: [],
-  },
-  declaredLineageClasses: ["none"],
-}
+action: { kind: "prompt", text: "Revisit the open risks and report what changed." },
+conversation: { mode: "continue" },
+toolExposure: {
+  services: ["build.listUnits", "vcs.status"],
+  userlandServices: [],
+  workspaceServiceDiscovery: "bound",
+  evalNetwork: "none",
+  declaredOrigins: [],
+},
+declaredLineageClasses: ["none"],
 ```
 
-Continuing one conversation preserves its logical history, but provider-side
-context caching is not durable storage. When that conversation's schedule can
-wait more than one hour between wake-ups, its chat inspector warns that later
-runs may consume additional input tokens to restore context after the provider
-cache TTL expires. Fresh-conversation automations do not show this warning.
-
-When an admitted run begins processing, the shell briefly slides in a compact
-notice naming the automation and run number. It dismisses itself after six
-seconds; dormant schedules and overlap skips do not produce a notice. Its **View
-automation** action deep-links to the exact automation with run history already
-expanded. Durable run history and errors remain in chat and the Automations
-overview after that transient cue is gone.
-
-For an exact small script, keep the code inline and let it run as the selected
-agent in that conversation:
+For a small deterministic script, use an eval action on this same exact agent:
 
 ```ts
-execution: {
-  kind: "agent",
-  target: {
-    source: "workers/agent-worker",
-    className: "AiChatWorker",
-    objectKey: "project-health",
-  },
-  action: {
-    kind: "eval",
-    code: `
-      const status = await services.vcs.status({ contextId: ctx.contextId });
-      const result = { workingHead: status.workingHead, checkedAt: Date.now() };
-      await chat.publish("project.health.checked", result, {
-        idempotencyKey: "health:" + result.checkedAt,
-      });
-      if (status.clean) {
-        return {
-          protocol: "automation-completion.v1",
-          response: "The project is clean; recurring checks are no longer needed.",
-        };
-      }
-      return result;
-    `,
-    syntax: "typescript",
-    timeoutMs: 30_000,
-  },
-  conversation: { mode: "fresh" },
-  toolExposure: {
-    services: ["vcs.status"],
-    userlandServices: [],
-    workspaceServiceDiscovery: "bound",
-    evalNetwork: "none",
-    declaredOrigins: [],
-  },
-  declaredLineageClasses: ["none"],
-}
+action: {
+  kind: "eval",
+  code: `
+    const status = await services.vcs.status({ contextId: ctx.contextId });
+    const result = { workingHead: status.workingHead, checkedAt: Date.now() };
+    await chat.publish("project.health.checked", result, {
+      idempotencyKey: "health:" + result.checkedAt,
+    });
+    return result;
+  `,
+  syntax: "typescript",
+  timeoutMs: 30_000,
+},
+conversation: { mode: "fresh" },
+toolExposure: {
+  services: ["vcs.status"],
+  userlandServices: [],
+  workspaceServiceDiscovery: "bound",
+  evalNetwork: "none",
+  declaredOrigins: [],
+},
+declaredLineageClasses: ["none"],
 ```
 
 Scheduled eval is not an alternate sandbox or message path. The agent loop
@@ -232,8 +168,7 @@ status: it is user-intent ingress and can begin another agent turn.
 
 Use `fresh` when runs should be independent, easily audited, and unaffected by
 old conversation state. Use `continue` when accumulated conversation context is
-part of the task. Do not emulate either mode by generating channel ids or
-submitting messages yourself; the automation owner performs the full lifecycle.
+part of the task.
 
 ## Authority and reach
 

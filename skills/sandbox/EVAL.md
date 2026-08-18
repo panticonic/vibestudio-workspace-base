@@ -283,15 +283,21 @@ use GAD inspectors or the channel DO's read-only `inspectAgent` method.
 ### automations (agent eval)
 
 `automations.propose(input)` is the agent authoring path for recurring work. It
-creates one canonical inert draft through `vibestudio.missions.v1`, then
+accepts behavior (`name`, `summary`, `action`, `trigger`, optional conversation,
+reach, lineage, and permissions), then atomically supplies this agent's exact
+installed identity and effective version. Do not call `agent.describe()`,
+`build.getEffectiveVersion`, or `workers.resolveService` first. It creates one
+canonical inert draft through `vibestudio.missions.v1`, then
 publishes a typed institution event as this agent in `chat.channelId` before the
 call returns. The new definition therefore appears immediately in chat as a
 zero-fetch pill that the user can open to inspect, edit, and review; it does not
 wait for a first run.
 
-The binding deliberately accepts no channel or actor identity. The owning agent
-supplies those facts after verifying this EvalDO, and the mission service remains
-the only scheduler and run-ledger owner. See
+The binding deliberately accepts no channel, actor identity, target, harness,
+or effective version. `{ mode: "continue" }` means this exact channel/context;
+`fresh` is the default. The owning agent supplies those facts after verifying
+this EvalDO, and the mission service remains the only scheduler and run-ledger
+owner. Always await `agent.describe()` and `automations.propose(...)`. See
 [Automations](../automations/SKILL.md) for the charter, cron/interval schedules,
 end policies, completion responses, and supervision workflow.
 

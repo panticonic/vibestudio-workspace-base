@@ -94,7 +94,12 @@ import type { DoAlarmSchedule } from "@vibestudio/shared/doDispatcher";
 import {
   MISSION_COMPLETION_PROTOCOL,
   missionCompletionResponse,
+  type MissionAgentAction,
+  type MissionPermission,
   type MissionRecord,
+  type MissionStandingRestriction,
+  type MissionToolExposure,
+  type MissionTrigger,
 } from "@vibestudio/shared/authority/mission";
 import type {
   ClaimRequest,
@@ -4860,7 +4865,7 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
         const automation = await this.rpc.call<MissionRecord>(
           service.targetId,
           "proposeDraft",
-          [input],
+          [this.selfAutomationProposal(channelId, input)],
           {
             idempotencyKey: `automation:proposal:${this.objectKey}:${sha256HexSyncText(proposalRequestIdentity)}`,
           }
@@ -5004,6 +5009,96 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       default:
         throw new Error(`chatOp: unknown op ${op}`);
     }
+  }
+
+  /** Read-only half of the eval owner surface. Keeping this outside chatOp is
+   * intentional: chatOp contains mutations and is therefore correctly
+   * classified as write, while a self snapshot must remain usable from a
+   * read-only eval. The same own-EvalDO receiver check protects both routes. */
+  @rpc({
+    principals: ["code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "read",
+  })
+  async describeEvalOwner(channelId: string): Promise<Record<string, unknown>> {
+    await this.assertOwnEvalCaller(channelId);
+    return this.describeSelf(channelId);
+  }
+
+  /** Expand the ergonomic agent-owned proposal into the exact reviewed
+   * mission closure. Identity and code version come from this executing
+   * vessel, never from guest-authored strings or a racy build lookup. */
+  private selfAutomationProposal(channelId: string, raw: unknown): {
+    name: string;
+    charter: MissionRecord["charter"];
+    permissions: MissionPermission[];
+    standingRestrictions?: MissionStandingRestriction[];
+  } {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error("automations.propose requires an object");
+    }
+    const input = raw as Record<string, unknown>;
+    const name = typeof input["name"] === "string" ? input["name"].trim() : "";
+    const summary = typeof input["summary"] === "string" ? input["summary"].trim() : "";
+    if (!name || !summary || !input["action"] || !input["trigger"]) {
+      throw new Error("automations.propose requires name, summary, action, and trigger");
+    }
+    const source = String(this.env["WORKER_SOURCE"] ?? "");
+    const className = String(this.env["WORKER_CLASS_NAME"] ?? this.constructor.name);
+    const ev = String(this.env["WORKER_EFFECTIVE_VERSION"] ?? "");
+    if (!source || !className || !/^[0-9a-f]{64}$/u.test(ev)) {
+      throw new Error(
+        "automations.propose cannot bind this agent to an exact installed build; rebuild the agent runtime"
+      );
+    }
+    const conversationInput = input["conversation"] as { mode?: unknown } | undefined;
+    if (
+      conversationInput?.mode !== undefined &&
+      conversationInput.mode !== "fresh" &&
+      conversationInput.mode !== "continue"
+    ) {
+      throw new Error('automations.propose conversation.mode must be "fresh" or "continue"');
+    }
+    const conversation =
+      conversationInput?.mode === "continue"
+        ? {
+            mode: "continue" as const,
+            channelId,
+            contextId: this.subscriptions.getContextId(channelId),
+          }
+        : { mode: "fresh" as const };
+    const defaultToolExposure: MissionToolExposure = {
+      services: [],
+      userlandServices: [],
+      workspaceServiceDiscovery: "bound",
+      evalNetwork: "none",
+      declaredOrigins: [],
+    };
+    return {
+      name,
+      charter: {
+        summary,
+        harness: { unit: source, ev },
+        execution: {
+          kind: "agent",
+          target: { source, className, objectKey: this.objectKey },
+          action: input["action"] as MissionAgentAction,
+          conversation,
+          toolExposure: (input["toolExposure"] ?? defaultToolExposure) as MissionToolExposure,
+          declaredLineageClasses: (input["declaredLineageClasses"] ?? ["none"]) as Array<
+            "none" | "web" | "email" | "channel-external" | "external"
+          >,
+        },
+        trigger: input["trigger"] as MissionTrigger,
+      },
+      permissions: (input["permissions"] ?? []) as MissionPermission[],
+      ...(input["standingRestrictions"] !== undefined
+        ? {
+            standingRestrictions: input["standingRestrictions"] as MissionStandingRestriction[],
+          }
+        : {}),
+    };
   }
 
   /** Re-derive this agent's own EvalDO objectKey (matching evalService's

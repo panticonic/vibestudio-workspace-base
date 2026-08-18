@@ -254,6 +254,32 @@ function promptArtifactsRequestedItem(command: Extract<Command, { kind: "prompt"
   };
 }
 
+/** Re-establish the same durable prerequisite before a post-tool/model
+ * continuation when an activated or migrated fold has lost its prompt hash.
+ * A fresh trigger id makes this a real new effect instead of colliding with
+ * the already-settled ingress preparation. */
+function continuationPromptArtifactsRequestedItem(state: AgentState) {
+  const turnId = state.openTurn!.turnId;
+  const triggerEnvelopeId = `prompt-artifacts:continuation:${turnId}:${state.lastSeq}`;
+  return {
+    envelopeId: ids.promptArtifactsRequested(triggerEnvelopeId),
+    payloadKind: "system.event" as const,
+    payload: {
+      protocol: AGENTIC_PROTOCOL_VERSION,
+      kind: "prompt.artifacts_requested",
+      triggerEnvelopeId,
+      turnTriggerEnvelopeId: triggerEnvelopeId,
+      details: {
+        kind: "prompt.artifacts_requested",
+        triggerEnvelopeId,
+        turnTriggerEnvelopeId: triggerEnvelopeId,
+        reason: "continuation-prompt-artifact-missing",
+      },
+    },
+    publish: false,
+  };
+}
+
 function turnOpenedItem(
   turnId: string,
   metadata?: AgentTurnMetadata,
@@ -917,6 +943,12 @@ function nextModelCall(
 ): StepOutput {
   if (hasCurrentTurnPromptPreparation(state)) return EMPTY;
   const turn = state.openTurn!;
+  if (!state.config.systemPromptHash) {
+    return {
+      append: [continuationPromptArtifactsRequestedItem(state)],
+      effects: [],
+    };
+  }
   if (modelRetryLimitExceeded(turn)) {
     return {
       append: modelRetryLimitItems(turn),
@@ -1778,6 +1810,16 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
         state.steeringQueue.length > 0 &&
         wakeGuardSatisfied(state) &&
         Object.keys(state.pendingInvocations).length === 0
+      ) {
+        return nextModelCall(state, 0, ctx);
+      }
+      if (
+        !state.openTurn.interrupted &&
+        state.deferredPostTurnQueue.length === 0 &&
+        state.steeringQueue.length === 0 &&
+        Object.keys(state.pendingPromptPreparations).length === 0 &&
+        Object.keys(state.pendingInvocations).length === 0 &&
+        wakeGuardSatisfied(state)
       ) {
         return nextModelCall(state, 0, ctx);
       }

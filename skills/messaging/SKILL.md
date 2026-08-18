@@ -93,6 +93,13 @@ notify({
 });
 ```
 
+For a recurring notification, put the same explicit `notify` call in an
+agent-owned automation prompt. Use `alert: "inbox"` in the reviewed prompt even
+though person-addressed messages currently default there: the automation review
+should state the durable delivery behavior it authorizes. See
+[Automations](../automations/SKILL.md); its self-targeting proposal API supplies
+the agent identity and installed version automatically.
+
 ## Etiquette
 
 Notification is cheap. Keep it **rare**.

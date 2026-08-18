@@ -5,19 +5,59 @@ then call the returned Durable Object target with `rpc.call(targetId, method,
 args)`. The service is context-aware and user-scoped.
 
 Agent-authored definitions use the higher-level ambient
-`automations.propose(input)` binding. It calls `proposeDraft` with a transport
-idempotency key and, before returning, publishes one typed
+`automations.propose(input)` binding. The receiver atomically fills the current
+agent's exact source, class, object key, installed effective version, and—when
+continuing—the current channel/context. It then calls `proposeDraft` with a
+transport idempotency key and, before returning, publishes one typed
 `automation.instituted` event as the owning agent in the current channel. This
 is the documented proposal path because it supplies trusted channel provenance
-without putting channel identifiers in the mission API. Direct service calls
-remain the lower-level lifecycle contract for non-chat integrations.
+without making guest code discover or assert runtime identity. Direct service
+calls remain the lower-level lifecycle contract for method jobs and non-chat
+integrations.
 
 This service owns the complete automation lifecycle: definition and human
 review, schedule delivery, non-overlapping execution, durable run history,
 terminal summaries and errors, and agent-conversation identity. Callers must
 not create a second timer, queue, conversation loop, or run ledger around it.
 
-## Charter
+## Agent-owned proposal
+
+```ts
+type AgentAutomationProposal = {
+  name: string;
+  summary: string;
+  action:
+    | { kind: "prompt"; text: string }
+    | {
+        kind: "eval";
+        code: string;
+        syntax?: "javascript" | "typescript" | "jsx" | "tsx";
+        timeoutMs?: number;
+        reset?: boolean;
+      };
+  trigger: MissionTrigger;
+  conversation?: { mode: "fresh" | "continue" }; // default fresh
+  toolExposure?: MissionToolExposure; // default: bound, no services/network
+  declaredLineageClasses?: Array<
+    "none" | "web" | "email" | "channel-external" | "external"
+  >; // default ["none"]
+  permissions?: MissionPermission[]; // default []
+  standingRestrictions?: MissionStandingRestriction[];
+};
+```
+
+Always `await automations.propose(input)`. Do not precede it with
+`agent.describe()`, `build.getEffectiveVersion`, or `workers.resolveService`.
+Those calls are unnecessary and make one proposal depend on several mutable
+observations. The installed vessel supplies one coherent target/version
+snapshot at the receiver boundary.
+
+`conversation: { mode: "continue" }` means this exact conversation; the binding
+fills its channel and context. The input intentionally cannot target a different
+agent. Use the canonical lower-level Missions service when a reviewed method on
+another target is the behavior you actually want.
+
+## Canonical charter (lower-level Missions API)
 
 ```ts
 type Charter = {
@@ -130,7 +170,7 @@ definition, and wins over a count/time boundary reached on that same run.
 | `get`           | `missionId`                                             | definition or `null`                                       | addressed inspection                        |
 | `listRuns`      | `missionId`, `{ limit?, cursor? }`                      | `{ items, nextCursor? }`                                   | paged historical ledger                     |
 | `getRun`        | `runId`                                                 | exact run or `null`                                        | chat tick inspection                        |
-| `proposeDraft`  | `{ name, charter, permissions, standingRestrictions? }` | inert draft                                                | backing operation for `automations.propose` |
+| `proposeDraft`  | `{ name, charter, permissions, standingRestrictions? }` | inert draft                                                | lower-level creation; the owner binding expands its ergonomic input into this contract |
 | `createDraft`   | same as `proposeDraft`                                  | inert draft                                                | trusted user/code tooling                   |
 | `edit`          | `missionId`, changed fields                             | new inert revision                                         | behavior changes                            |
 | `requestReview` | `missionId`                                             | active definition after approval                           | human review surfaces only                  |

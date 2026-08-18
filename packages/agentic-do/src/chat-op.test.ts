@@ -46,6 +46,7 @@ const TEST_AGENT_ENV = {
   __objectKey: "agent-key",
   WORKER_SOURCE: "test",
   WORKER_CLASS_NAME: "TestAgent",
+  WORKER_EFFECTIVE_VERSION: "a".repeat(64),
 } as const;
 
 async function withAlarmGateway<T>(run: (gatewayUrl: string) => Promise<T>): Promise<T> {
@@ -1203,6 +1204,11 @@ describe("AgentVesselBase.chatOp", () => {
     // Per-agent: the model set above is what describeSelf reports.
     expect(snapshot.config.model).toBe("openai:gpt-5.3");
     expect(snapshot.channels.some((c) => c.channelId === CHANNEL)).toBe(true);
+
+    const readSnapshot = (await vessel.describeEvalOwner(CHANNEL)) as {
+      identity: { id: string };
+    };
+    expect(readSnapshot.identity.id).toBe(AGENT_ID);
   });
 
   it("configureAgent validates its patch (rejects an empty model)", async () => {
@@ -1285,7 +1291,13 @@ describe("AgentVesselBase.chatOp", () => {
 
     const input = {
       name: "Daily check",
-      charter: vessel.automationProposalForTest.charter,
+      summary: "Check the project every morning.",
+      action: { kind: "prompt", text: "Check the project." },
+      trigger: {
+        kind: "cron",
+        expression: "5 5 * * THU",
+        timezone: "America/New_York",
+      },
       permissions: [],
     };
     await expect(
@@ -1297,7 +1309,39 @@ describe("AgentVesselBase.chatOp", () => {
 
     expect(vessel.automationProposalCalls).toEqual([
       {
-        args: [input],
+        args: [
+          {
+            name: "Daily check",
+            charter: {
+              summary: "Check the project every morning.",
+              harness: { unit: "test", ev: "a".repeat(64) },
+              execution: {
+                kind: "agent",
+                target: {
+                  source: "test",
+                  className: "TestAgent",
+                  objectKey: "agent-key",
+                },
+                action: { kind: "prompt", text: "Check the project." },
+                conversation: { mode: "fresh" },
+                toolExposure: {
+                  services: [],
+                  userlandServices: [],
+                  workspaceServiceDiscovery: "bound",
+                  evalNetwork: "none",
+                  declaredOrigins: [],
+                },
+                declaredLineageClasses: ["none"],
+              },
+              trigger: {
+                kind: "cron",
+                expression: "5 5 * * THU",
+                timezone: "America/New_York",
+              },
+            },
+            permissions: [],
+          },
+        ],
         options: {
           idempotencyKey: expect.stringMatching(/automation:proposal:.*:[0-9a-f]{64}$/),
         },
