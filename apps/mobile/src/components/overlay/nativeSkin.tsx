@@ -16,7 +16,14 @@
  *    is what keeps this file a translation layer rather than a second design.
  */
 
-import { useMemo, useState, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   ActivityIndicator,
   Image as RNImage,
@@ -103,9 +110,21 @@ function withAlpha(color: string, hex: string): string {
 
 function toneTable(colors: ThemeColors): Record<QuickfireTone | "muted", Tone> {
   return {
-    neutral: { fg: colors.text, wash: colors.surfaceSunken, edge: colors.borderSubtle },
-    muted: { fg: colors.textSecondary, wash: colors.surfaceSunken, edge: colors.borderSubtle },
-    accent: { fg: colors.primary, wash: colors.accentSoft, edge: withAlpha(colors.primary, "55") },
+    neutral: {
+      fg: colors.text,
+      wash: colors.surfaceSunken,
+      edge: colors.borderSubtle,
+    },
+    muted: {
+      fg: colors.textSecondary,
+      wash: colors.surfaceSunken,
+      edge: colors.borderSubtle,
+    },
+    accent: {
+      fg: colors.primary,
+      wash: colors.accentSoft,
+      edge: withAlpha(colors.primary, "55"),
+    },
     success: {
       fg: colors.success,
       wash: colors.successSoft,
@@ -116,8 +135,16 @@ function toneTable(colors: ThemeColors): Record<QuickfireTone | "muted", Tone> {
       wash: colors.warningSoft,
       edge: withAlpha(colors.warning, "55"),
     },
-    danger: { fg: colors.danger, wash: colors.dangerSoft, edge: withAlpha(colors.danger, "55") },
-    info: { fg: colors.info, wash: colors.infoSoft, edge: withAlpha(colors.info, "55") },
+    danger: {
+      fg: colors.danger,
+      wash: colors.dangerSoft,
+      edge: withAlpha(colors.danger, "55"),
+    },
+    info: {
+      fg: colors.info,
+      wash: colors.infoSoft,
+      edge: withAlpha(colors.info, "55"),
+    },
     reasoning: {
       fg: colors.accent,
       wash: withAlpha(colors.accent, "1f"),
@@ -140,10 +167,46 @@ export interface NativeSkinOptions {
   openLink: (href: string) => void;
 }
 
-export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions): QuickfireSkin {
+export function createNativeSkin(
+  colors: ThemeColors,
+  options: NativeSkinOptions,
+): QuickfireSkin {
   const tones = toneTable(colors);
+  const FitExpansionContext = createContext<((open: boolean) => void) | null>(
+    null,
+  );
   const toneOf = (name: QuickfireTone | "muted" | undefined): Tone =>
     tones[name ?? "neutral"] ?? tones.neutral;
+
+  function FitBox({
+    children,
+    style,
+    testId,
+    live,
+  }: {
+    children: ReactNode;
+    style: ViewStyle;
+    testId?: string;
+    live?: boolean;
+  }) {
+    const [expanded, setExpanded] = useState(false);
+    return (
+      <View
+        style={[
+          style,
+          expanded
+            ? { alignSelf: "stretch", width: "100%" }
+            : { alignSelf: "flex-start", maxWidth: "100%" },
+        ]}
+        testID={testId}
+        {...(live ? { accessibilityLiveRegion: "polite" as const } : {})}
+      >
+        <FitExpansionContext.Provider value={setExpanded}>
+          {children}
+        </FitExpansionContext.Provider>
+      </View>
+    );
+  }
 
   function Box({
     children,
@@ -154,6 +217,8 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
     tone,
     align,
     grow,
+    full,
+    fit,
     scroll,
     testId,
     live,
@@ -173,14 +238,27 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
           ? { alignItems: "baseline" }
           : {}),
       ...(grow ? { flex: 1, minWidth: 0 } : {}),
+      ...(full ? { width: "100%" } : {}),
       ...(scroll ? { overflow: "scroll" } : {}),
       ...padding(pad),
-      ...surfaceStyle(surface, resolved, tone),
+      ...surfaceStyle(surface, resolved),
       ...(emphasis
-        ? { borderWidth: 1, borderColor: resolved.edge, borderRadius: radius.md }
+        ? {
+            borderWidth: 1,
+            borderColor: resolved.edge,
+            borderRadius: radius.md,
+          }
         : {}),
     };
-    return (
+    return fit ? (
+      <FitBox
+        style={style}
+        {...(testId ? { testId } : {})}
+        {...(live ? { live: true } : {})}
+      >
+        {children}
+      </FitBox>
+    ) : (
       <View
         style={style}
         testID={testId}
@@ -194,30 +272,38 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
   function padding(pad: QuickfireSpace | undefined): ViewStyle {
     if (!pad || pad === "none") return {};
     if (pad === "xs") return { padding: SPACE.xs };
-    if (pad === "sm") return { paddingVertical: SPACE.sm, paddingHorizontal: SPACE.md };
-    if (pad === "md") return { paddingVertical: SPACE.md, paddingHorizontal: SPACE.lg };
+    if (pad === "sm")
+      return { paddingVertical: SPACE.sm, paddingHorizontal: SPACE.md };
+    if (pad === "md")
+      return { paddingVertical: SPACE.md, paddingHorizontal: SPACE.lg };
     return { padding: SPACE.lg };
   }
 
   function surfaceStyle(
     surface: QuickfireBoxProps["surface"],
     tone: Tone,
-    toneName: QuickfireTone | undefined
   ): ViewStyle {
     switch (surface) {
+      case "answer":
+        return {
+          backgroundColor: tone.wash,
+          borderWidth: hairline,
+          borderLeftWidth: 3,
+          borderColor: tone.edge,
+          borderRadius: radius.md,
+        };
       case "card":
-        // The agent's prose gets no container at all: on a phone, a bubble
-        // around every paragraph costs the width the words needed.
-        return toneName === undefined || toneName === "neutral"
-          ? { paddingVertical: SPACE.xs }
-          : {
-              backgroundColor: tone.wash,
-              borderRadius: radius.md,
-              paddingVertical: spacing.sm,
-              paddingHorizontal: spacing.md,
-            };
+        return {
+          backgroundColor: tone.wash,
+          borderRadius: radius.md,
+          paddingVertical: spacing.sm,
+          paddingHorizontal: spacing.md,
+        };
       case "sunken":
-        return { backgroundColor: colors.surfaceSunken, borderRadius: radius.md };
+        return {
+          backgroundColor: colors.surfaceSunken,
+          borderRadius: radius.md,
+        };
       case "outline":
         return {
           borderWidth: hairline,
@@ -263,7 +349,14 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
     }
   }
 
-  function Text({ children, variant, tone, clamp, selectable, testId }: QuickfireTextProps) {
+  function Text({
+    children,
+    variant,
+    tone,
+    clamp,
+    selectable,
+    testId,
+  }: QuickfireTextProps) {
     return (
       <RNText
         testID={testId}
@@ -273,7 +366,9 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
           textStyle(variant),
           { color: tone ? toneOf(tone).fg : colors.text },
           variant === "label" ? { textTransform: "uppercase" } : null,
-          variant === "code" ? { backgroundColor: colors.codeBackground } : null,
+          variant === "code"
+            ? { backgroundColor: colors.codeBackground }
+            : null,
         ]}
       >
         {children}
@@ -317,7 +412,11 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
         style={({ pressed }) => [
           styles.press,
           variant === "primary"
-            ? { borderWidth: 1, borderColor: resolved.edge, paddingHorizontal: spacing.md }
+            ? {
+                borderWidth: 1,
+                borderColor: resolved.edge,
+                paddingHorizontal: spacing.md,
+              }
             : null,
           pressed ? { backgroundColor: resolved.wash } : null,
           disabled ? { opacity: 0.42 } : null,
@@ -338,14 +437,25 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
   }
 
   function Divider() {
-    return <View style={[styles.rule, { backgroundColor: colors.borderSubtle }]} />;
+    return (
+      <View style={[styles.rule, { backgroundColor: colors.borderSubtle }]} />
+    );
   }
 
-  function Pill({ children, tone }: { children?: ReactNode; tone?: QuickfireTone }) {
+  function Pill({
+    children,
+    tone,
+  }: {
+    children?: ReactNode;
+    tone?: QuickfireTone;
+  }) {
     const resolved = toneOf(tone);
     return (
       <View
-        style={[styles.pill, { backgroundColor: resolved.wash, borderColor: resolved.edge }]}
+        style={[
+          styles.pill,
+          { backgroundColor: resolved.wash, borderColor: resolved.edge },
+        ]}
       >
         <RNText style={[type.micro, { color: resolved.fg }]}>{children}</RNText>
       </View>
@@ -361,6 +471,11 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
     testId,
   }: QuickfireDisclosureProps) {
     const [open, setOpen] = useState(defaultOpen === true);
+    const setFitExpanded = useContext(FitExpansionContext);
+    useEffect(() => {
+      setFitExpanded?.(open);
+      return () => setFitExpanded?.(false);
+    }, [open, setFitExpanded]);
     const resolved = toneOf(tone);
     return (
       <View testID={testId}>
@@ -372,7 +487,9 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
           hitSlop={4}
           style={styles.disclosureSummary}
         >
-          <RNText style={[type.micro, { color: resolved.fg }]}>{open ? "▾" : "▸"}</RNText>
+          <RNText style={[type.micro, { color: resolved.fg }]}>
+            {open ? "▾" : "▸"}
+          </RNText>
           {summary}
         </RNPressable>
         {open ? <View style={styles.disclosureBody}>{children}</View> : null}
@@ -388,8 +505,13 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
     const label = (caption ?? language ?? "").toUpperCase();
     return (
       <View style={[styles.code, { borderColor: colors.borderSubtle }]}>
-        <View style={[styles.codeBar, { borderBottomColor: colors.borderSubtle }]}>
-          <RNText style={[type.micro, { color: colors.textTertiary }]} numberOfLines={1}>
+        <View
+          style={[styles.codeBar, { borderBottomColor: colors.borderSubtle }]}
+        >
+          <RNText
+            style={[type.micro, { color: colors.textTertiary }]}
+            numberOfLines={1}
+          >
             {language === "mermaid" ? "DIAGRAM SOURCE" : label}
           </RNText>
           <RNPressable
@@ -410,7 +532,10 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
         </View>
         <RNText
           selectable
-          style={[styles.codeText, { color: colors.text, backgroundColor: colors.codeBackground }]}
+          style={[
+            styles.codeText,
+            { color: colors.text, backgroundColor: colors.codeBackground },
+          ]}
         >
           {text}
         </RNText>
@@ -428,7 +553,13 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
           style={styles.figureImage}
         />
         {caption ? (
-          <RNText style={[type.micro, styles.figureCaption, { color: colors.textTertiary }]}>
+          <RNText
+            style={[
+              type.micro,
+              styles.figureCaption,
+              { color: colors.textTertiary },
+            ]}
+          >
             {caption}
           </RNText>
         ) : null}
@@ -459,9 +590,15 @@ export function createNativeSkin(colors: ThemeColors, options: NativeSkinOptions
 }
 
 /** Memoized skin for the current palette. */
-export function useNativeSkin(colors: ThemeColors, options: NativeSkinOptions): QuickfireSkin {
+export function useNativeSkin(
+  colors: ThemeColors,
+  options: NativeSkinOptions,
+): QuickfireSkin {
   const openLink = options.openLink;
-  return useMemo(() => createNativeSkin(colors, { openLink }), [colors, openLink]);
+  return useMemo(
+    () => createNativeSkin(colors, { openLink }),
+    [colors, openLink],
+  );
 }
 
 const styles = StyleSheet.create({

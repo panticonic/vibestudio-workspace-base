@@ -74,3 +74,9 @@ export const openQuickfireSheetAtom = atom(
 export const dismissQuickfireSheetAtom = atom(null, (_get, set) => {
   set(quickfireSheetAtom, null);
 });
+
+/** Leave a cleared conversation and restore the ordinary command surface. */
+export const returnToCommandSheetAtom = atom(null, (_get, set) => {
+  set(quickfireSheetAtom, null);
+  set(commandSheetAtom, { mode: "all" });
+});

@@ -15,7 +15,14 @@
  *    the host's window-open handling is what turns a click into a browser panel.
  */
 
-import { lazy, Suspense, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useMemo,
+  useState,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import hljs from "highlight.js/lib/common";
 import {
   Bell,
@@ -72,6 +79,8 @@ function Box({
   tone,
   align,
   grow,
+  full,
+  fit,
   scroll,
   testId,
   live,
@@ -88,6 +97,8 @@ function Box({
       data-tone={tone}
       data-align={align}
       data-grow={grow ? "" : undefined}
+      data-full={full ? "" : undefined}
+      data-fit={fit ? "" : undefined}
       data-scroll={scroll ? "" : undefined}
       data-emphasis={emphasis ? "" : undefined}
       data-hover={hover ? "" : undefined}
@@ -99,7 +110,14 @@ function Box({
   );
 }
 
-function Text({ children, variant, tone, clamp, selectable, testId }: QuickfireTextProps) {
+function Text({
+  children,
+  variant,
+  tone,
+  clamp,
+  selectable,
+  testId,
+}: QuickfireTextProps) {
   const Tag = variant === "code" ? "code" : "span";
   return (
     <Tag
@@ -191,7 +209,13 @@ function Break() {
   return <br />;
 }
 
-function Pill({ children, tone }: { children?: ReactNode; tone?: QuickfireIconProps["tone"] }) {
+function Pill({
+  children,
+  tone,
+}: {
+  children?: ReactNode;
+  tone?: QuickfireIconProps["tone"];
+}) {
   return (
     <span className="qf-pill" data-tone={tone}>
       {children}
@@ -229,7 +253,9 @@ function Disclosure({
  * shell's startup path. Mobile has no DOM to give it and shows the source.
  */
 const Diagram = lazy(() =>
-  import("@workspace/ui/diagram").then((module) => ({ default: module.MermaidDiagram }))
+  import("@workspace/ui/diagram").then((module) => ({
+    default: module.MermaidDiagram,
+  })),
 );
 
 /**
@@ -238,7 +264,10 @@ const Diagram = lazy(() =>
  * Never `highlightAuto`: it is expensive per block, and a wrong guess colours a
  * shell transcript as if it were Ruby, which reads worse than no colour at all.
  */
-function highlighted(text: string, language: string | null | undefined): string | null {
+function highlighted(
+  text: string,
+  language: string | null | undefined,
+): string | null {
   if (!language) return null;
   try {
     if (!hljs.getLanguage(language)) return null;
@@ -323,7 +352,9 @@ function Caret() {
  * to itself a link click produces a bare Electron window, not a browser panel.
  * The chrome owns opening, as it owns every other side effect here.
  */
-export function createDomSkin(options: { openLink: (href: string) => void }): QuickfireSkin {
+export function createDomSkin(options: {
+  openLink: (href: string) => void;
+}): QuickfireSkin {
   return {
     Box,
     Text,

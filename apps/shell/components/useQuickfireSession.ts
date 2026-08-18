@@ -32,7 +32,7 @@ const transport: QuickfireTransport = {
 
 /**
  * Resolve and drive the conversation bound to `source` — a panel slot (the
- * command agent) or an existing channel (a conversation opened from a
+ * Quickfire agent) or an existing channel (a conversation opened from a
  * notification, messaging plan §4.8).
  *
  * Passing `null` (overlay closed, or not in quickfire mode) tears the connection

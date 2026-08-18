@@ -1439,6 +1439,7 @@ describe("chatMessagesFromChannelView", () => {
     expect(card).toMatchObject({
       contentType: "lifecycle",
       content: "Waiting for model credential approval",
+      turnId,
       lifecycle: { status: "waiting", title: "Waiting for model credential approval" },
     });
     // It is a waiting indicator, not an error.

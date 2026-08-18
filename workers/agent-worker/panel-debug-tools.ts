@@ -21,7 +21,7 @@ const panelTarget = {
     Type.String({
       description:
         "Panel slot id. Omit to act on the panel this conversation is attached to.",
-    })
+    }),
   ),
 };
 
@@ -33,10 +33,10 @@ const screenshotParameters = Type.Object(
     format: Type.Optional(
       Type.Union([Type.Literal("png"), Type.Literal("jpeg")], {
         description: "Image format. Defaults to png.",
-      })
+      }),
     ),
   },
-  { additionalProperties: false }
+  { additionalProperties: false },
 );
 
 export type PanelScreenshotParams = Static<typeof screenshotParameters>;
@@ -50,7 +50,7 @@ interface PanelScreenshotResult {
 
 export function createPanelScreenshotTool(
   callMain: CallMain,
-  boundPanelId: string
+  boundPanelId: string,
 ): AgentTool<typeof screenshotParameters> {
   return {
     name: "panel_screenshot",
@@ -60,13 +60,13 @@ export function createPanelScreenshotTool(
     parameters: screenshotParameters,
     execute: async (
       _toolCallId,
-      params: PanelScreenshotParams
+      params: PanelScreenshotParams,
     ): Promise<AgentToolResult<PanelScreenshotResult | null>> => {
       const panelId = params.panelId ?? boundPanelId;
-      const result = await callMain<PanelScreenshotResult>("panelCdp.screenshot", [
-        panelId,
-        params.format ? { format: params.format } : {},
-      ]);
+      const result = await callMain<PanelScreenshotResult>(
+        "panelCdp.screenshot",
+        [panelId, params.format ? { format: params.format } : {}],
+      );
       return {
         content: [
           { type: "image", data: result.data, mimeType: result.mimeType },
@@ -87,18 +87,57 @@ const consoleParameters = Type.Object(
   {
     ...panelTarget,
     limit: Type.Optional(
-      Type.Number({ description: "Maximum console entries to return. Defaults to the host's." })
+      Type.Number({
+        description: "Maximum matching entries to return. Defaults to 100.",
+      }),
     ),
-    errorsOnly: Type.Optional(
-      Type.Boolean({ description: "Return only warnings and errors. Defaults to false." })
+    levels: Type.Optional(
+      Type.Array(
+        Type.Union([
+          Type.Literal("debug"),
+          Type.Literal("info"),
+          Type.Literal("warning"),
+          Type.Literal("error"),
+          Type.Literal("unknown"),
+        ]),
+        { description: "Exact console levels to include." },
+      ),
+    ),
+    sources: Type.Optional(
+      Type.Array(
+        Type.Union([Type.Literal("console"), Type.Literal("lifecycle")]),
+        {
+          description:
+            "Include page console messages, host lifecycle diagnostics, or both.",
+        },
+      ),
+    ),
+    contains: Type.Optional(
+      Type.String({
+        description:
+          "Case-insensitive search across message, URL, source id, and structured fields.",
+      }),
+    ),
+    since: Type.Optional(
+      Type.Number({ description: "Earliest timestamp in epoch milliseconds." }),
+    ),
+    until: Type.Optional(
+      Type.Number({ description: "Latest timestamp in epoch milliseconds." }),
+    ),
+    beforeSeq: Type.Optional(
+      Type.Number({
+        description:
+          "Exclusive paging cursor. Use page.nextBeforeSeq from the previous result to read older matches.",
+      }),
     ),
   },
-  { additionalProperties: false }
+  { additionalProperties: false },
 );
 
 export type PanelConsoleParams = Static<typeof consoleParameters>;
 
 interface ConsoleEntry {
+  seq?: number;
   timestamp: number;
   level: string;
   message: string;
@@ -110,6 +149,7 @@ interface ConsoleEntry {
 interface PanelConsoleResult {
   entries: ConsoleEntry[];
   errors: ConsoleEntry[];
+  page: { nextBeforeSeq: number | null; hasOlder: boolean };
   dropped: { entries: number; errors: number };
   capacity: { entries: number; errors: number };
 }
@@ -117,33 +157,45 @@ interface PanelConsoleResult {
 function renderEntries(label: string, entries: ConsoleEntry[]): string {
   if (entries.length === 0) return `${label}: (none)`;
   const lines = entries.map(
-    (entry) => `  [${entry.level}] ${entry.message}${entry.url ? ` (${entry.url}:${entry.line})` : ""}`
+    (entry) =>
+      `  [${entry.level}] ${entry.message}${entry.url ? ` (${entry.url}:${entry.line})` : ""}`,
   );
   return `${label}:\n${lines.join("\n")}`;
 }
 
 export function createPanelConsoleTool(
   callMain: CallMain,
-  boundPanelId: string
+  boundPanelId: string,
 ): AgentTool<typeof consoleParameters> {
   return {
     name: "panel_console",
     label: "read panel console",
     description:
-      "Read the panel's recorded console history — the actual log and error bodies, not counts. This is the first thing to reach for when something is broken and you do not yet know why.",
+      "Search, filter, and page through the panel's recorded console history—the actual log and error bodies, not counts. Results are newest matching entries in chronological order. For older matches, repeat with page.nextBeforeSeq as beforeSeq. This is the first thing to reach for when something is broken and you do not yet know why.",
     parameters: consoleParameters,
     execute: async (
       _toolCallId,
-      params: PanelConsoleParams
+      params: PanelConsoleParams,
     ): Promise<AgentToolResult<PanelConsoleResult | null>> => {
       const panelId = params.panelId ?? boundPanelId;
-      const result = await callMain<PanelConsoleResult>("panelCdp.consoleHistory", [
-        panelId,
-        {
-          ...(params.limit !== undefined ? { limit: params.limit } : {}),
-          ...(params.errorsOnly === true ? { levels: ["warning", "error"] } : {}),
-        },
-      ]);
+      const result = await callMain<PanelConsoleResult>(
+        "panelCdp.consoleHistory",
+        [
+          panelId,
+          {
+            limit: params.limit ?? 100,
+            errorLimit: 25,
+            ...(params.levels ? { levels: params.levels } : {}),
+            ...(params.sources ? { sources: params.sources } : {}),
+            ...(params.contains ? { contains: params.contains } : {}),
+            ...(params.since !== undefined ? { since: params.since } : {}),
+            ...(params.until !== undefined ? { until: params.until } : {}),
+            ...(params.beforeSeq !== undefined
+              ? { beforeSeq: params.beforeSeq }
+              : {}),
+          },
+        ],
+      );
       const dropped =
         result.dropped.entries > 0 || result.dropped.errors > 0
           ? `\n(${result.dropped.entries} entries and ${result.dropped.errors} errors were dropped before this read — the history is bounded.)`
@@ -154,8 +206,12 @@ export function createPanelConsoleTool(
             type: "text",
             text: `${renderEntries("console", result.entries)}\n\n${renderEntries(
               "errors",
-              result.errors
-            )}${dropped}`,
+              result.errors,
+            )}${
+              result.page.hasOlder
+                ? `\n\nOlder matching entries are available; continue with beforeSeq=${result.page.nextBeforeSeq}.`
+                : ""
+            }${dropped}`,
           },
         ],
         details: result,
@@ -174,7 +230,7 @@ const evalParameters = Type.Object(
         "A JavaScript expression evaluated in the panel's page, exactly as a console would. The value is serialized and returned; a promise is awaited.",
     }),
   },
-  { additionalProperties: false }
+  { additionalProperties: false },
 );
 
 /**
@@ -194,7 +250,7 @@ interface PanelEvaluateResult {
 
 export function createPanelEvalTool(
   callMain: CallMain,
-  boundPanelId: string
+  boundPanelId: string,
 ): AgentTool<typeof evalParameters> {
   return {
     name: "panel_eval",
@@ -204,13 +260,18 @@ export function createPanelEvalTool(
     parameters: evalParameters,
     execute: async (
       _toolCallId,
-      params: PanelEvalParams
+      params: PanelEvalParams,
     ): Promise<AgentToolResult<PanelEvaluateResult | null>> => {
       const panelId = params.panelId ?? boundPanelId;
       const expression = params.expression;
       if (typeof expression !== "string" || expression.length === 0) {
         return {
-          content: [{ type: "text", text: "panel_eval needs an expression to evaluate." }],
+          content: [
+            {
+              type: "text",
+              text: "panel_eval needs an expression to evaluate.",
+            },
+          ],
           isError: true,
           details: null,
         };
@@ -222,15 +283,25 @@ export function createPanelEvalTool(
       ]);
       if (!result.ok) {
         return {
-          content: [{ type: "text", text: `${result.type}: ${result.error ?? "(no detail)"}` }],
+          content: [
+            {
+              type: "text",
+              text: `${result.type}: ${result.error ?? "(no detail)"}`,
+            },
+          ],
           isError: true,
           details: result,
         };
       }
-      const truncated = result.truncated ? "\n(truncated at the host's serialization limit)" : "";
+      const truncated = result.truncated
+        ? "\n(truncated at the host's serialization limit)"
+        : "";
       return {
         content: [
-          { type: "text", text: `${result.type}: ${result.value ?? "(no value)"}${truncated}` },
+          {
+            type: "text",
+            text: `${result.type}: ${result.value ?? "(no value)"}${truncated}`,
+          },
         ],
         details: result,
       };
@@ -240,7 +311,10 @@ export function createPanelEvalTool(
 
 /* ── panel_cdp_endpoint ───────────────────────────────────────────────── */
 
-const cdpEndpointParameters = Type.Object({ ...panelTarget }, { additionalProperties: false });
+const cdpEndpointParameters = Type.Object(
+  { ...panelTarget },
+  { additionalProperties: false },
+);
 
 export type PanelCdpEndpointParams = Static<typeof cdpEndpointParameters>;
 
@@ -251,7 +325,7 @@ interface CdpEndpoint {
 
 export function createPanelCdpEndpointTool(
   callMain: CallMain,
-  boundPanelId: string
+  boundPanelId: string,
 ): AgentTool<typeof cdpEndpointParameters> {
   return {
     name: "panel_cdp_endpoint",
@@ -261,12 +335,19 @@ export function createPanelCdpEndpointTool(
     parameters: cdpEndpointParameters,
     execute: async (
       _toolCallId,
-      params: PanelCdpEndpointParams
+      params: PanelCdpEndpointParams,
     ): Promise<AgentToolResult<CdpEndpoint | null>> => {
       const panelId = params.panelId ?? boundPanelId;
-      const endpoint = await callMain<CdpEndpoint>("panelCdp.getCdpEndpoint", [panelId]);
+      const endpoint = await callMain<CdpEndpoint>("panelCdp.getCdpEndpoint", [
+        panelId,
+      ]);
       return {
-        content: [{ type: "text", text: `CDP endpoint for ${panelId}: ${endpoint.wsEndpoint}` }],
+        content: [
+          {
+            type: "text",
+            text: `CDP endpoint for ${panelId}: ${endpoint.wsEndpoint}`,
+          },
+        ],
         details: endpoint,
       };
     },

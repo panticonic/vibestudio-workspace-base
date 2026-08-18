@@ -362,7 +362,7 @@ services:
     name: quickfire
     title: Command conversations
     action: manage panel-bound command conversations
-    description: Owns durable command-agent conversations attached to panel slots.
+    description: Owns durable Quickfire conversations attached to panel slots.
     notability: everyday
     presentation:
       domain: automation

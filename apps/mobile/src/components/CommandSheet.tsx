@@ -261,7 +261,7 @@ export function CommandSheet({
       if (!slotId) {
         pushToast({
           title: "No panel is open",
-          message: "The command agent is bound to the panel you are looking at.",
+          message: "The Quickfire agent is bound to the panel you are looking at.",
           tone: "warning",
         });
         return;
@@ -284,7 +284,7 @@ export function CommandSheet({
       return [
         {
           key: "quickfire-conversations",
-          label: "Command agent conversations",
+          label: "Quickfire agent conversations",
           rows: conversations.map((row) => ({
             id: `quickfire-slot:${row.slotId}`,
             title: openPanels.find((entry) => entry.id === row.slotId)?.title ?? row.slotId,

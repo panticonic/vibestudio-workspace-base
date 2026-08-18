@@ -18,6 +18,7 @@ type Mutable = {
   messages: Record<string, unknown>;
   turns: Record<string, unknown>;
   invocations: Record<string, unknown>;
+  tasks: Record<string, unknown>;
 };
 
 function stateWith(
@@ -32,9 +33,15 @@ function stateWith(
     blocks?: Array<{ type: "text" | "thinking"; content: string }>;
     retracted?: boolean;
     handle?: string;
+    tier?: "primary" | "secondary";
   }>,
   extras: {
-    turns?: Array<{ turnId: string; status: "open" | "waiting" | "closed" }>;
+    turns?: Array<{
+      turnId: string;
+      status: "open" | "waiting" | "closed";
+      reason?: string;
+      summary?: string;
+    }>;
     invocations?: Array<{
       id: string;
       name: string;
@@ -44,6 +51,15 @@ function stateWith(
       result?: unknown;
       progress?: Array<{ at: string; message?: string }>;
       failure?: unknown;
+      startedAt?: string;
+      updatedAt?: string;
+      completedAt?: string;
+    }>;
+    tasks?: Array<{
+      id: string;
+      title: string;
+      status: "running" | "completed" | "failed";
+      summary?: string;
     }>;
   } = {},
 ): ChannelViewState {
@@ -64,6 +80,7 @@ function stateWith(
       startedAt: new Date((message.seq + 1) * 1000).toISOString(),
       ...(message.turnId ? { turnId: message.turnId } : {}),
       ...(message.retracted ? { retracted: true } : {}),
+      ...(message.tier ? { tier: message.tier } : {}),
     };
   }
   for (const turn of extras.turns ?? []) {
@@ -72,6 +89,8 @@ function stateWith(
       actor: { kind: "agent", id: "agent-1" },
       status: turn.status,
       openedAt: "2026-08-14T00:00:00.000Z",
+      ...(turn.reason ? { reason: turn.reason } : {}),
+      ...(turn.summary ? { summary: turn.summary } : {}),
     };
   }
   for (const invocation of extras.invocations ?? []) {
@@ -89,7 +108,24 @@ function stateWith(
       ...(invocation.failure === undefined
         ? {}
         : { failure: invocation.failure }),
+      ...(invocation.startedAt ? { startedAt: invocation.startedAt } : {}),
+      ...(invocation.updatedAt ? { updatedAt: invocation.updatedAt } : {}),
+      ...(invocation.completedAt
+        ? { completedAt: invocation.completedAt }
+        : {}),
       actor: { kind: "agent", id: "agent-1" },
+    };
+  }
+  for (const task of extras.tasks ?? []) {
+    state.tasks[task.id] = {
+      taskId: task.id,
+      actor: { kind: "agent", id: "agent-1" },
+      taskType: "subagent",
+      title: task.title,
+      status: task.status,
+      progress: [],
+      ...(task.summary ? { summary: task.summary } : {}),
+      startedAt: "2026-08-14T00:00:00.000Z",
     };
   }
   return state as unknown as ChannelViewState;
@@ -127,6 +163,27 @@ describe("projectTranscript", () => {
         text: "because it clamps",
       }),
     ]);
+  });
+
+  it("preserves secondary agent narration so it cannot compete with the final answer", () => {
+    const state = stateWith([
+      {
+        id: "narration",
+        seq: 1,
+        actorId: "agent-1",
+        kind: "agent",
+        text: "Checking the panel state.",
+        tier: "secondary",
+      },
+    ]);
+
+    expect(projectTranscript(state, "shell-1").entries).toContainEqual(
+      expect.objectContaining({
+        id: "narration",
+        kind: "message",
+        tier: "secondary",
+      }),
+    );
   });
 
   it("ships only the tail, so the overlay never carries a whole transcript", () => {
@@ -233,29 +290,72 @@ describe("projectTranscript", () => {
     });
     expect(projectTranscript(usingTools, "shell-1").entries).toEqual([
       expect.objectContaining({
+        kind: "tool",
+        call: { id: "i1", name: "panel_describe", state: "done" },
+      }),
+      expect.objectContaining({
+        kind: "tool",
+        call: { id: "i2", name: "panel_screenshot", state: "running" },
+      }),
+      expect.objectContaining({
         kind: "activity",
         phase: "using-tools",
         label: "using tools",
-        toolCalls: [
-          { id: "i1", name: "panel_describe", state: "done" },
-          { id: "i2", name: "panel_screenshot", state: "running" },
-        ],
       }),
     ]);
   });
 
-  it("renders a waiting turn as an explicit request for the user", () => {
+  it("distinguishes background waits and keeps that turn's tools visible", () => {
     const state = stateWith([], {
-      turns: [{ turnId: "t1", status: "waiting" }],
+      turns: [
+        {
+          turnId: "t1",
+          status: "waiting",
+          reason: "waiting_for_background",
+          summary: "Waiting for delegated diagnostics",
+        },
+      ],
+      invocations: [{ id: "i1", name: "verify", turnId: "t1" }],
     });
-    expect(projectTranscript(state, "shell-1").entries).toContainEqual(
+    const entries = projectTranscript(state, "shell-1").entries;
+    expect(entries).toContainEqual(
       expect.objectContaining({
         kind: "activity",
         state: "waiting",
         phase: "waiting",
-        label: "Waiting for input",
+        waitingFor: "background",
+        label: "Waiting for delegated diagnostics",
       }),
     );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        kind: "tool",
+        call: expect.objectContaining({ id: "i1", name: "verify" }),
+      }),
+    );
+  });
+
+  it("projects background tasks from their typed payload instead of raw JSON", () => {
+    const state = stateWith([], {
+      tasks: [
+        {
+          id: "call-1",
+          title: "Delegated build diagnostics",
+          status: "running",
+          summary: "Checking four compiler diagnostics",
+        },
+      ],
+    });
+    expect(projectTranscript(state, "shell-1").entries).toContainEqual(
+      expect.objectContaining({
+        kind: "notice",
+        title: "Delegated build diagnostics",
+        detail: "Checking four compiler diagnostics",
+      }),
+    );
+    expect(
+      JSON.stringify(projectTranscript(state, "shell-1").entries),
+    ).not.toContain('"taskType"');
   });
 
   it("drops retracted messages and flags failed ones", () => {
@@ -275,7 +375,7 @@ describe("projectTranscript", () => {
     expect(transcript[0]).toMatchObject({ error: true });
   });
 
-  it("renders one chip per distinct tool used in the message's turn", () => {
+  it("renders one entry per invocation without grouping calls onto a message", () => {
     const state = stateWith(
       [
         {
@@ -297,11 +397,13 @@ describe("projectTranscript", () => {
     );
     // Two calls are two pills. Deduping by name hid repeated work — and, with
     // no state carried, hid failures behind an identical-looking chip.
-    const [first] = projectTranscript(state, "shell-1").entries;
-    expect(first?.kind).toBe("message");
-    expect(first?.kind === "message" ? first.toolCalls : undefined).toEqual([
+    const tools = projectTranscript(state, "shell-1").entries.flatMap(
+      (entry) => (entry.kind === "tool" ? [entry.call] : []),
+    );
+    expect(tools).toEqual([
       { id: "i1", name: "panel_describe", state: "done" },
       { id: "i2", name: "panel_describe", state: "done" },
+      { id: "i3", name: "say", state: "done" },
     ]);
   });
 
@@ -330,9 +432,10 @@ describe("projectTranscript", () => {
         ],
       },
     );
-    const [first] = projectTranscript(state, "shell-1").entries;
-    expect(first?.kind).toBe("message");
-    expect(first?.kind === "message" ? first.toolCalls : undefined).toEqual([
+    const tools = projectTranscript(state, "shell-1").entries.flatMap(
+      (entry) => (entry.kind === "tool" ? [entry.call] : []),
+    );
+    expect(tools).toEqual([
       { id: "i1", name: "panel_console", state: "running" },
       { id: "i2", name: "panel_eval", state: "failed" },
       { id: "i3", name: "panel_screenshot", state: "done" },
@@ -370,6 +473,8 @@ describe("projectTranscript", () => {
             request: { expression: "document.title" },
             progress: [{ at: "now", message: "Evaluating" }],
             failure: { message: "Panel closed" },
+            startedAt: new Date(2_500).toISOString(),
+            completedAt: new Date(2_750).toISOString(),
           },
         ],
       },
@@ -380,16 +485,86 @@ describe("projectTranscript", () => {
         text: "Checking **the panel**",
       }),
       expect.objectContaining({
-        kind: "message",
-        toolCalls: [
-          expect.objectContaining({
-            id: "i1",
-            input: expect.stringContaining("document.title"),
-            progress: ["Evaluating"],
-            failure: expect.stringContaining("Panel closed"),
-          }),
-        ],
+        kind: "tool",
+        call: expect.objectContaining({
+          id: "i1",
+          arguments: [
+            expect.objectContaining({
+              name: "expression",
+              value: "document.title",
+              language: "javascript",
+            }),
+          ],
+          progress: ["Evaluating"],
+          failure: expect.stringContaining("Panel closed"),
+        }),
       }),
+      expect.objectContaining({ kind: "message", text: "Done" }),
+    ]);
+  });
+
+  it("intersperses repeated thinking and tools in their recorded chronology", () => {
+    const state = stateWith(
+      [
+        {
+          id: "thought-1",
+          seq: 1,
+          actorId: "agent-1",
+          kind: "agent",
+          text: "",
+          turnId: "t1",
+          blocks: [{ type: "thinking", content: "Inspecting the panel" }],
+        },
+        {
+          id: "thought-2",
+          seq: 3,
+          actorId: "agent-1",
+          kind: "agent",
+          text: "",
+          turnId: "t1",
+          blocks: [{ type: "thinking", content: "Correlating the logs" }],
+        },
+        {
+          id: "answer",
+          seq: 5,
+          actorId: "agent-1",
+          kind: "agent",
+          text: "Found it.",
+          turnId: "t1",
+        },
+      ],
+      {
+        invocations: [
+          {
+            id: "describe",
+            name: "panel_describe",
+            turnId: "t1",
+            startedAt: new Date(2_500).toISOString(),
+            completedAt: new Date(2_750).toISOString(),
+          },
+          {
+            id: "console",
+            name: "panel_console",
+            turnId: "t1",
+            startedAt: new Date(4_500).toISOString(),
+            completedAt: new Date(4_750).toISOString(),
+          },
+        ],
+      },
+    );
+
+    expect(
+      projectTranscript(state, "shell-1").entries.map((entry) =>
+        entry.kind === "tool"
+          ? `tool:${entry.call.name}`
+          : `${entry.kind}:${entry.id}`,
+      ),
+    ).toEqual([
+      "thinking:thinking:thought-1:0",
+      "tool:panel_describe",
+      "thinking:thinking:thought-2:0",
+      "tool:panel_console",
+      "message:answer",
     ]);
   });
 });
@@ -502,20 +677,38 @@ describe("nothing is elided", () => {
       ],
       {
         invocations: [
-          { id: "i1", name: "panel_console", turnId: "t1", status: "completed" },
+          {
+            id: "i1",
+            name: "panel_console",
+            turnId: "t1",
+            status: "completed",
+          },
         ],
       },
     );
-    const invocation = (state as unknown as { invocations: Record<string, Record<string, unknown>> })
-      .invocations["i1"]!;
+    const invocation = (
+      state as unknown as {
+        invocations: Record<string, Record<string, unknown>>;
+      }
+    ).invocations["i1"]!;
     invocation["startedAt"] = "2026-08-14T00:00:00.000Z";
     invocation["completedAt"] = "2026-08-14T00:00:01.500Z";
 
-    const [entry] = projectTranscript(state, "shell-1").entries;
-    expect(entry).toMatchObject({
-      kind: "message",
-      at: Date.parse(new Date(2000).toISOString()),
-      toolCalls: [expect.objectContaining({ name: "panel_console", durationMs: 1500 })],
-    });
+    const entries = projectTranscript(state, "shell-1").entries;
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        kind: "message",
+        at: Date.parse(new Date(2000).toISOString()),
+      }),
+    );
+    expect(entries).toContainEqual(
+      expect.objectContaining({
+        kind: "tool",
+        call: expect.objectContaining({
+          name: "panel_console",
+          durationMs: 1500,
+        }),
+      }),
+    );
   });
 });

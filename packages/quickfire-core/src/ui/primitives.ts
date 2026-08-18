@@ -17,7 +17,12 @@
  * transcript.
  */
 
-import { createContext, useContext, type ComponentType, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import type { QuickfireGlyph, QuickfireTone } from "../cards";
 
 /** Spacing step. Concrete values belong to the skin, not to shared code. */
@@ -31,12 +36,16 @@ export interface QuickfireBoxProps {
   pad?: QuickfireSpace;
   /** Lay children out horizontally, wrapping when they do not fit. */
   row?: boolean;
-  /** Container treatment. `rail` adds a tone-coloured leading edge. */
-  surface?: "none" | "card" | "sunken" | "outline" | "rail";
+  /** Container treatment. `answer` is the primary agent response; `rail` is supporting context. */
+  surface?: "none" | "answer" | "card" | "sunken" | "outline" | "rail";
   tone?: QuickfireTone;
   align?: "start" | "center" | "baseline";
   /** Take the remaining space on the main axis. */
   grow?: boolean;
+  /** Occupy a complete line inside a wrapping row. */
+  full?: boolean;
+  /** Collapse to the content width until disclosed content needs the row. */
+  fit?: boolean;
   /** Scroll internally rather than growing past the surface. */
   scroll?: boolean;
   testId?: string;
@@ -175,7 +184,9 @@ export const QuickfireSkinProvider = SkinContext.Provider;
 export function useSkin(): QuickfireSkin {
   const skin = useContext(SkinContext);
   if (!skin) {
-    throw new Error("Quickfire surfaces must be rendered inside a QuickfireSkinProvider");
+    throw new Error(
+      "Quickfire surfaces must be rendered inside a QuickfireSkinProvider",
+    );
   }
   return skin;
 }

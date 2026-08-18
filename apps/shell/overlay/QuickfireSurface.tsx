@@ -1,6 +1,6 @@
 /**
  * The overlay surface: the palette card floating over the live panel, and the
- * command-agent conversation it turns into (spec §4).
+ * Quickfire conversation it turns into (spec §4).
  *
  * Pure view — props in, intents out, no RPC (`QuickfireOwner` holds every piece
  * of state and performs every call). What *is* new here is where the drawing
@@ -34,21 +34,35 @@ import { splitTextByMatchRanges } from "@vibestudio/shared/panelChrome";
 import type { OverlaySurfaceComponentProps } from "./types";
 import "./quickfire.css";
 
-export function QuickfireSurface({ props, emitIntent }: OverlaySurfaceComponentProps) {
+function fitInputToContent(input: HTMLTextAreaElement) {
+  // Collapse first so deleting text can shrink the composer as well as typing
+  // can grow it. CSS owns the maximum height and supplies scrolling beyond it.
+  input.style.height = "0px";
+  input.style.height = `${input.scrollHeight}px`;
+}
+
+export function QuickfireSurface({
+  props,
+  emitIntent,
+}: OverlaySurfaceComponentProps) {
   const skin = useMemo(
     () =>
       createDomSkin({
-        openLink: (href) => (emitIntent as (intent: QuickfireIntent) => void)({
-          type: "open-link",
-          href,
-        }),
+        openLink: (href) =>
+          (emitIntent as (intent: QuickfireIntent) => void)({
+            type: "open-link",
+            href,
+          }),
       }),
     [emitIntent],
   );
   if (!isQuickfireSurfaceProps(props)) return null;
   return (
     <QuickfireSkinProvider value={skin}>
-      <QuickfireCard {...props} emit={emitIntent as (intent: QuickfireIntent) => void} />
+      <QuickfireCard
+        {...props}
+        emit={emitIntent as (intent: QuickfireIntent) => void}
+      />
     </QuickfireSkinProvider>
   );
 }
@@ -71,7 +85,7 @@ function QuickfireCard(
     compose,
     emit,
   } = props;
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const adoptedEpochRef = useRef<number | null>(null);
 
@@ -85,6 +99,7 @@ function QuickfireCard(
     if (!input) return;
     input.value = inputValue;
     input.setSelectionRange(inputValue.length, inputValue.length);
+    fitInputToContent(input);
   }, [inputEpoch, inputValue]);
 
   // The palette always takes focus on open (§2.3) — main focuses the view, and
@@ -95,11 +110,14 @@ function QuickfireCard(
 
   useEffect(() => {
     if (!selectedId) return;
-    const row = listRef.current?.querySelector(`[data-row-id="${CSS.escape(selectedId)}"]`);
-    if (row && "scrollIntoView" in row) row.scrollIntoView({ block: "nearest" });
+    const row = listRef.current?.querySelector(
+      `[data-row-id="${CSS.escape(selectedId)}"]`,
+    );
+    if (row && "scrollIntoView" in row)
+      row.scrollIntoView({ block: "nearest" });
   }, [selectedId]);
 
-  const onKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
+  const onKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     const input = event.currentTarget;
     const atEnd = input.selectionStart === input.value.length;
     switch (event.key) {
@@ -109,7 +127,11 @@ function QuickfireCard(
         const delta = event.key === "ArrowDown" ? 1 : -1;
         // In a conversation there are no rows to walk, and the thing a person
         // reaches for ↑ to get is what they typed last — the shell habit.
-        emit(compose && !input.value ? { type: "recall", delta } : { type: "move", delta });
+        emit(
+          compose && !input.value
+            ? { type: "recall", delta }
+            : { type: "move", delta },
+        );
         return;
       }
       case "Tab":
@@ -124,15 +146,23 @@ function QuickfireCard(
         return;
       case "Enter": {
         // Shift+Enter is a newline in compose and a no-op elsewhere (§1.3).
-        if (event.shiftKey) return;
+        if (event.shiftKey) {
+          if (!compose) event.preventDefault();
+          return;
+        }
         const promoting = event.metaKey || event.ctrlKey;
         event.preventDefault();
         if (compose) {
           if (compose.disabledReason || compose.promoted) return;
           const text = input.value;
           if (!text.trim()) return;
-          emit(promoting ? { type: "send-and-promote", text } : { type: "send", text });
+          emit(
+            promoting
+              ? { type: "send-and-promote", text }
+              : { type: "send", text },
+          );
           input.value = "";
+          fitInputToContent(input);
           return;
         }
         if (selectedId) emit({ type: "activate", rowId: selectedId });
@@ -152,7 +182,7 @@ function QuickfireCard(
       case "K":
         if (!event.metaKey && !event.ctrlKey) return;
         event.preventDefault();
-        emit({ type: "cycle-mode" });
+        if (!compose) emit({ type: "cycle-mode" });
         return;
       default:
     }
@@ -213,7 +243,7 @@ function QuickfireCard(
       className="quickfire-card"
       data-mode={conversing ? "conversation" : "palette"}
       role="dialog"
-      aria-label={conversing ? "Command agent" : "Command palette"}
+      aria-label={conversing ? "Quickfire agent" : "Command palette"}
     >
       {conversing ? (
         // The overlay floats over the panel it is about; being able to move it
@@ -230,14 +260,18 @@ function QuickfireCard(
       <div className="quickfire-entry">
         {argSession ? (
           <div className="quickfire-breadcrumb">
-            <span className="quickfire-chip quickfire-chip-command">{argSession.commandTitle}</span>
+            <span className="quickfire-chip quickfire-chip-command">
+              {argSession.commandTitle}
+            </span>
             {argSession.chips.map((chip) => (
               <span key={chip.name} className="quickfire-chip">
                 <span className="quickfire-chip-name">{chip.label}</span>
                 {chip.value}
               </span>
             ))}
-            <span className="quickfire-arg-label">{argSession.activeLabel}:</span>
+            <span className="quickfire-arg-label">
+              {argSession.activeLabel}:
+            </span>
           </div>
         ) : (
           <span className="quickfire-entry-icon" aria-hidden="true">
@@ -251,21 +285,26 @@ function QuickfireCard(
               <span className="quickfire-ghost-suffix">{ghostSuffix}</span>
             </span>
           ) : null}
-          <input
+          <textarea
             ref={inputRef}
             className="quickfire-input"
-            type="text"
+            rows={1}
             autoComplete="off"
             spellCheck={false}
             role="combobox"
             aria-expanded={groups.length > 0}
             aria-controls="quickfire-results"
             aria-label={
-              argSession ? argSession.activeLabel : "Run a command, go to a panel, or ask"
+              argSession
+                ? argSession.activeLabel
+                : "Run a command, go to a panel, or ask"
             }
             placeholder={placeholder}
             defaultValue={inputValue}
-            onChange={(event) => emit({ type: "input", value: event.target.value })}
+            onChange={(event) => {
+              fitInputToContent(event.currentTarget);
+              emit({ type: "input", value: event.currentTarget.value });
+            }}
             onKeyDown={onKeyDown}
           />
         </span>
@@ -283,7 +322,9 @@ function QuickfireCard(
         ) : null}
       </div>
 
-      {argSession?.error ? <p className="quickfire-error">{argSession.error}</p> : null}
+      {argSession?.error ? (
+        <p className="quickfire-error">{argSession.error}</p>
+      ) : null}
 
       {argSession || conversing ? null : (
         <div className="quickfire-modes" aria-label="Search scope">
@@ -307,7 +348,8 @@ function QuickfireCard(
           className="quickfire-body"
           ref={bodyRef}
           onScroll={(event) => {
-            if (missedNew && event.currentTarget.scrollTop < 80) setMissedNew(false);
+            if (missedNew && event.currentTarget.scrollTop < 80)
+              setMissedNew(false);
           }}
         >
           <ConversationBody
@@ -339,17 +381,30 @@ function QuickfireCard(
                 </button>
               ) : compose.disabledReason || compose.promoted ? null : (
                 <p className="quickfire-compose-keys">
-                  <kbd>⏎</kbd> send · <kbd>⇧⏎</kbd> newline · <kbd>⌘⏎</kbd> open as chat panel
+                  <kbd>⏎</kbd> send · <kbd>⇧⏎</kbd> newline · <kbd>⌘⏎</kbd> open
+                  as chat panel
                 </p>
               )
             }
           />
         </div>
       ) : groups.length > 0 ? (
-        <div className="quickfire-results" id="quickfire-results" role="listbox" ref={listRef}>
+        <div
+          className="quickfire-results"
+          id="quickfire-results"
+          role="listbox"
+          ref={listRef}
+        >
           {groups.map((group) => (
-            <section key={group.key} role="group" aria-labelledby={`quickfire-group-${group.key}`}>
-              <h2 className="quickfire-group-label" id={`quickfire-group-${group.key}`}>
+            <section
+              key={group.key}
+              role="group"
+              aria-labelledby={`quickfire-group-${group.key}`}
+            >
+              <h2
+                className="quickfire-group-label"
+                id={`quickfire-group-${group.key}`}
+              >
                 {group.label}
               </h2>
               {group.rows.map((row) => (
@@ -383,7 +438,9 @@ function QuickfireCard(
           {context ? (
             <>
               <span aria-hidden="true">{context.icon ?? "▤"}</span>
-              <span className={context.lost ? "quickfire-context-lost" : undefined}>
+              <span
+                className={context.lost ? "quickfire-context-lost" : undefined}
+              >
                 {context.lost ? "panel closed" : context.title}
               </span>
             </>
@@ -475,20 +532,25 @@ function Row({
       </span>
       <span className="quickfire-row-text">
         <span className="quickfire-row-title">
-          {splitTextByMatchRanges(row.title, row.titleRanges).map((part, index) =>
-            part.highlighted ? (
-              <mark key={index} className="quickfire-mark">
-                {part.text}
-              </mark>
-            ) : (
-              <span key={index}>{part.text}</span>
-            ),
+          {splitTextByMatchRanges(row.title, row.titleRanges).map(
+            (part, index) =>
+              part.highlighted ? (
+                <mark key={index} className="quickfire-mark">
+                  {part.text}
+                </mark>
+              ) : (
+                <span key={index}>{part.text}</span>
+              ),
           )}
         </span>
-        {row.meta ? <span className="quickfire-row-meta">{row.meta}</span> : null}
+        {row.meta ? (
+          <span className="quickfire-row-meta">{row.meta}</span>
+        ) : null}
       </span>
       <span className="quickfire-row-trailing">
-        {row.badge ? <span className="quickfire-row-badge">{row.badge}</span> : null}
+        {row.badge ? (
+          <span className="quickfire-row-badge">{row.badge}</span>
+        ) : null}
         {row.accelerator ? <kbd>{row.accelerator}</kbd> : null}
       </span>
     </button>

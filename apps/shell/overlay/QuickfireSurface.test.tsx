@@ -29,6 +29,7 @@ const baseProps: QuickfireSurfaceProps = {
     transcript: [],
     olderCount: 0,
     expandable: false,
+    loadingOlder: false,
     credentialRequest: null,
     resume: null,
     connecting: false,
@@ -53,11 +54,75 @@ function renderSurface(
 }
 
 describe("QuickfireSurface conversation", () => {
+  it("grows the composer with wrapped input while keeping it bounded by CSS", () => {
+    const emitIntent = renderSurface({ streaming: false });
+    const input = screen.getByRole("combobox") as HTMLTextAreaElement;
+    Object.defineProperty(input, "scrollHeight", {
+      configurable: true,
+      value: 66,
+    });
+
+    fireEvent.change(input, {
+      target: { value: "A prompt long enough to wrap over several lines" },
+    });
+
+    expect(input.tagName).toBe("TEXTAREA");
+    expect(input.style.height).toBe("66px");
+    expect(emitIntent).toHaveBeenCalledWith({
+      type: "input",
+      value: "A prompt long enough to wrap over several lines",
+    });
+  });
+
+  it("keeps Shift+Enter available for multiline conversation input", () => {
+    const emitIntent = renderSurface({ streaming: false });
+    const input = screen.getByRole("combobox");
+
+    const accepted = fireEvent.keyDown(input, { key: "Enter", shiftKey: true });
+
+    expect(accepted).toBe(true);
+    expect(emitIntent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "send" }),
+    );
+  });
+
+  it("routes ordinary conversation prose as input without requiring a slash", () => {
+    const emitIntent = renderSurface({ streaming: false });
+    const input = screen.getByRole("combobox");
+
+    fireEvent.change(input, {
+      target: { value: "was that a model provider failure?" },
+    });
+    fireEvent.keyDown(input, { key: "Enter" });
+
+    expect(emitIntent).toHaveBeenNthCalledWith(1, {
+      type: "input",
+      value: "was that a model provider failure?",
+    });
+    expect(emitIntent).toHaveBeenNthCalledWith(2, {
+      type: "send",
+      text: "was that a model provider failure?",
+    });
+  });
+
+  it("does not cycle out of a live conversation with the palette shortcut", () => {
+    const emitIntent = renderSurface({ streaming: false });
+
+    fireEvent.keyDown(screen.getByRole("combobox"), {
+      key: "k",
+      ctrlKey: true,
+    });
+
+    expect(emitIntent).not.toHaveBeenCalledWith({ type: "cycle-mode" });
+  });
+
   it("emits clear on the first click without an armed confirmation state", () => {
     const emitIntent = renderSurface();
 
     fireEvent.click(
-      screen.getByRole("button", { name: "Clear this conversation and start a new one" }),
+      screen.getByRole("button", {
+        name: "Clear this conversation and return to commands",
+      }),
     );
 
     expect(emitIntent).toHaveBeenCalledWith({ type: "clear" });
@@ -72,10 +137,21 @@ describe("QuickfireSurface conversation", () => {
           state: "working",
           phase: "using-tools",
           label: "using tools",
-          toolCalls: [
-            { id: "call-1", name: "panel_describe", state: "done", durationMs: 1_240 },
-            { id: "call-2", name: "panel_screenshot", state: "running" },
-          ],
+        },
+        {
+          kind: "tool",
+          id: "tool:call-1",
+          call: {
+            id: "call-1",
+            name: "panel_describe",
+            state: "done",
+            durationMs: 1_240,
+          },
+        },
+        {
+          kind: "tool",
+          id: "tool:call-2",
+          call: { id: "call-2", name: "panel_screenshot", state: "running" },
         },
       ],
     });
@@ -87,6 +163,14 @@ describe("QuickfireSurface conversation", () => {
     expect(screen.getByText("1.2s")).toBeTruthy();
     expect(screen.getByText("running")).toBeTruthy();
     expect(document.querySelector(".qf-spinner")).not.toBeNull();
+    const transcript = screen.getByTestId("quickfire-transcript");
+    expect(transcript.hasAttribute("data-row")).toBe(true);
+    expect(
+      screen
+        .getByText("panel_describe")
+        .closest('.qf-box[data-surface="outline"]')
+        ?.hasAttribute("data-fit"),
+    ).toBe(true);
   });
 
   it("shows a spinner while the conversation itself is connecting", () => {
@@ -118,6 +202,10 @@ describe("QuickfireSurface conversation", () => {
       ],
     });
 
+    const answer = screen.getByTestId("quickfire-card-message-1");
+    expect(answer.getAttribute("data-surface")).toBe("answer");
+    expect(answer.getAttribute("data-tone")).toBe("accent");
+
     expect(screen.getByText("live state").tagName).toBe("SPAN");
     expect(screen.getByText("live state").dataset["variant"]).toBe("strong");
     expect(screen.getByText("channel-1").tagName).toBe("CODE");
@@ -125,6 +213,44 @@ describe("QuickfireSurface conversation", () => {
     expect(screen.getByText("Chat")).toBeTruthy();
     expect(screen.getByText("☑")).toBeTruthy();
     expect(screen.getByText("☐")).toBeTruthy();
+  });
+
+  it("keeps intermediate agent narration visually subordinate to the answer", () => {
+    renderSurface({
+      transcript: [
+        {
+          kind: "message",
+          id: "narration-1",
+          author: "agent",
+          authorLabel: "agent",
+          tier: "secondary",
+          text: "Checking the panel state.",
+        },
+      ],
+    });
+
+    const narration = screen.getByTestId("quickfire-card-narration-1");
+    expect(narration.getAttribute("data-surface")).toBe("rail");
+    expect(narration.getAttribute("data-tone")).toBe("neutral");
+  });
+
+  it("keeps collapsed reasoning content-sized", () => {
+    renderSurface({
+      transcript: [
+        {
+          kind: "thinking",
+          id: "thought-1",
+          text: "Inspecting the panel before proposing a repair with several implementation details.",
+        },
+      ],
+    });
+
+    const thought = screen.getByTestId("quickfire-card-thought-1");
+    expect(thought.getAttribute("data-fit")).toBe("");
+    expect(
+      screen.getByTestId("quickfire-transcript").hasAttribute("data-row"),
+    ).toBe(true);
+    expect(thought.hasAttribute("data-full")).toBe(false);
   });
 
   it("keeps a failed turn's reason reachable instead of only colouring it", () => {
@@ -147,40 +273,58 @@ describe("QuickfireSurface conversation", () => {
     expect(screen.getByText("provider returned 503")).toBeTruthy();
   });
 
-  it("expands a tool call to its input, output and failure", () => {
+  it("expands a compact tool call into highlighted arguments and failure details", () => {
     renderSurface({
       transcript: [
         {
-          kind: "message",
-          id: "message-1",
-          author: "agent",
-          authorLabel: "agent",
-          text: "Tried to read the page.",
-          toolCalls: [
-            {
-              id: "call-1",
-              name: "panel_eval",
-              state: "failed",
-              input: '{\n  "expression": "window.location.href"\n}',
-              failure: "Panel was unavailable",
-            },
-          ],
+          kind: "tool",
+          id: "tool:call-1",
+          call: {
+            id: "call-1",
+            name: "panel_eval",
+            state: "failed",
+            arguments: [
+              {
+                name: "expression",
+                value: "window.location.href",
+                language: "javascript",
+              },
+            ],
+            failure: "Panel was unavailable",
+          },
         },
       ],
     });
 
     fireEvent.click(screen.getByLabelText("panel_eval — failed"));
-    expect(screen.getByText("Input")).toBeTruthy();
+    const work = screen.getByTestId(
+      "quickfire-detail-panel_eval — failed",
+    ).parentElement;
+    expect(work?.getAttribute("data-fit")).toBe("");
+    const argument = document.querySelector(
+      '.qf-code[data-language="javascript"]',
+    );
+    expect(argument).not.toBeNull();
+    expect(argument?.querySelector('pre [class^="hljs-"]')).not.toBeNull();
     expect(screen.getByText("Panel was unavailable")).toBeTruthy();
   });
 
   it("announces a card it cannot run, and offers the surface that can", () => {
     const emitIntent = renderSurface({
-      transcript: [{ kind: "rich", id: "rich-1", title: "Card · chart", detail: "Q3 revenue" }],
+      transcript: [
+        {
+          kind: "rich",
+          id: "rich-1",
+          title: "Card · chart",
+          detail: "Q3 revenue",
+        },
+      ],
     });
 
     expect(screen.getByText("Card · chart")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open it in the chat panel" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open it in the chat panel" }),
+    );
     expect(emitIntent).toHaveBeenCalledWith({ type: "promote" });
   });
 
@@ -189,13 +333,36 @@ describe("QuickfireSurface conversation", () => {
       olderCount: 12,
       expandable: true,
       transcript: [
-        { kind: "message", id: "m", author: "you", authorLabel: "you", text: "hello" },
+        {
+          kind: "message",
+          id: "m",
+          author: "you",
+          authorLabel: "you",
+          text: "hello",
+        },
       ],
     });
 
     expect(screen.getByText("12 earlier entries")).toBeTruthy();
     fireEvent.click(
-      screen.getByRole("button", { name: "Show earlier entries in this conversation" }),
+      screen.getByRole("button", {
+        name: "Show earlier entries in this conversation",
+      }),
+    );
+    expect(emitIntent).toHaveBeenCalledWith({ type: "show-older" });
+  });
+
+  it("keeps durable history paging available after the buffered entries are exhausted", () => {
+    const emitIntent = renderSurface({
+      olderCount: 0,
+      expandable: true,
+    });
+
+    expect(screen.getByText("Earlier history is available")).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Show earlier entries in this conversation",
+      }),
     );
     expect(emitIntent).toHaveBeenCalledWith({ type: "show-older" });
   });
@@ -203,7 +370,9 @@ describe("QuickfireSurface conversation", () => {
   it("puts a stop control next to the input while a turn is in flight", () => {
     const emitIntent = renderSurface({ streaming: true });
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop the turn in flight" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stop the turn in flight" }),
+    );
     expect(emitIntent).toHaveBeenCalledWith({ type: "stop" });
   });
 });
@@ -213,45 +382,55 @@ describe("QuickfireSurface screenshots and actions", () => {
     id: "call-1",
     name: "panel_screenshot",
     state: "done" as const,
-    images: [{ id: "call-1:0", mimeType: "image/png", width: 1280, height: 800, bytes: 402_931 }],
+    images: [
+      {
+        id: "call-1:0",
+        mimeType: "image/png",
+        width: 1280,
+        height: 800,
+        bytes: 402_931,
+      },
+    ],
   };
 
   it("offers a screenshot's bytes rather than shipping them on every push", () => {
     const emitIntent = renderSurface({
       transcript: [
         {
-          kind: "message",
-          id: "m1",
-          author: "agent",
-          authorLabel: "agent",
-          text: "Here is the panel.",
-          toolCalls: [screenshotCall],
+          kind: "tool",
+          id: "tool:call-1",
+          call: screenshotCall,
         },
       ],
     });
 
     fireEvent.click(screen.getByLabelText("panel_screenshot — done"));
     fireEvent.click(
-      screen.getByRole("button", { name: "Show Image from panel_screenshot, 1280×800 · 393 KB" }),
+      screen.getByRole("button", {
+        name: "Show Image from panel_screenshot, 1280×800 · 393 KB",
+      }),
     );
-    expect(emitIntent).toHaveBeenCalledWith({ type: "reveal-image", imageId: "call-1:0" });
+    expect(emitIntent).toHaveBeenCalledWith({
+      type: "reveal-image",
+      imageId: "call-1:0",
+    });
   });
 
   it("draws the screenshot once the chrome has carried it over", () => {
     renderSurface({
       transcript: [
         {
-          kind: "message",
-          id: "m1",
-          author: "agent",
-          authorLabel: "agent",
-          text: "Here is the panel.",
-          toolCalls: [
-            {
-              ...screenshotCall,
-              images: [{ ...screenshotCall.images[0]!, dataUrl: "data:image/png;base64,aGk=" }],
-            },
-          ],
+          kind: "tool",
+          id: "tool:call-1",
+          call: {
+            ...screenshotCall,
+            images: [
+              {
+                ...screenshotCall.images[0]!,
+                dataUrl: "data:image/png;base64,aGk=",
+              },
+            ],
+          },
         },
       ],
     });
@@ -263,7 +442,15 @@ describe("QuickfireSurface screenshots and actions", () => {
 
   it("recalls your last message into an empty compose", () => {
     const emitIntent = renderSurface({
-      transcript: [{ kind: "message", id: "m1", author: "you", authorLabel: "you", text: "hello" }],
+      transcript: [
+        {
+          kind: "message",
+          id: "m1",
+          author: "you",
+          authorLabel: "you",
+          text: "hello",
+        },
+      ],
     });
 
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "ArrowUp" });
@@ -273,7 +460,9 @@ describe("QuickfireSurface screenshots and actions", () => {
   it("lets you re-aim the overlay at another panel from the context strip", () => {
     const emitIntent = renderSurface();
 
-    fireEvent.click(screen.getByRole("button", { name: "Choose which panel this acts on" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose which panel this acts on" }),
+    );
     expect(emitIntent).toHaveBeenCalledWith({ type: "retarget" });
   });
 
@@ -281,11 +470,20 @@ describe("QuickfireSurface screenshots and actions", () => {
     const emitIntent = renderSurface({
       transcript: [],
       suggestions: [
-        { id: "explain", label: "What is this panel doing?", prompt: "Describe this panel." },
+        {
+          id: "explain",
+          label: "What is this panel doing?",
+          prompt: "Describe this panel.",
+        },
       ],
     });
 
-    fireEvent.click(screen.getByRole("button", { name: "Describe this panel." }));
-    expect(emitIntent).toHaveBeenCalledWith({ type: "send", text: "Describe this panel." });
+    fireEvent.click(
+      screen.getByRole("button", { name: "Describe this panel." }),
+    );
+    expect(emitIntent).toHaveBeenCalledWith({
+      type: "send",
+      text: "Describe this panel.",
+    });
   });
 });

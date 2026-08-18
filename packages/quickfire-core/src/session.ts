@@ -13,9 +13,9 @@
  *    hover or focus change. Binding a slot creates an agent; that must be
  *    something the user did.
  *  - Only the last `TRANSCRIPT_LIMIT` entries are projected at a time, over a
- *    deliberately wider `REPLAY_LIMIT` join. `showOlder` widens the window
- *    against the replay already held; "show all" still promotes to a chat panel
- *    rather than turning this venue into one.
+ *    deliberately wider `REPLAY_LIMIT` join. `showOlder` first widens that
+ *    local window, then pages backward through the durable channel when the
+ *    buffered replay is exhausted.
  *  - Reduction is throttled to ~30 Hz. A streaming turn emits far more events
  *    than either client can usefully repaint.
  */
@@ -28,7 +28,7 @@ import {
   pubsubChannelEventToEnvelope,
   pubsubAgenticEventToEnvelope,
   reduceChannelView,
-  type ChannelViewState
+  type ChannelViewState,
 } from "@workspace/agentic-protocol";
 import type { PubSubClient } from "@workspace/pubsub";
 import type { QuickfireResumeChip, QuickfireTranscriptEntry } from "./model";
@@ -36,7 +36,7 @@ import {
   hasOpenTurn,
   projectTranscript,
   TRANSCRIPT_LIMIT,
-  type TranscriptOrder
+  type TranscriptOrder,
 } from "./transcript";
 
 export { hasOpenTurn, projectTranscript, TRANSCRIPT_LIMIT };
@@ -68,6 +68,36 @@ interface PubSubAgenticWireEvent {
   payload?: unknown;
 }
 
+function reduceWireEvent(
+  state: ChannelViewState,
+  channelId: string,
+  wire: PubSubAgenticWireEvent,
+): ChannelViewState {
+  if (!wire.payload) return state;
+  if (wire.type === CREDENTIAL_CONNECT_PAYLOAD_KIND) {
+    return reduceChannelView(
+      state,
+      pubsubChannelEventToEnvelope(channelId, CREDENTIAL_CONNECT_PAYLOAD_KIND, {
+        ...wire,
+        payload: wire.payload,
+      }),
+    );
+  }
+  if (wire.type !== AGENTIC_EVENT_PAYLOAD_KIND) return state;
+  return reduceChannelView(
+    state,
+    pubsubAgenticEventToEnvelope(channelId, {
+      ...(wire.pubsubId === undefined ? {} : { pubsubId: wire.pubsubId }),
+      ...(wire.senderId === undefined ? {} : { senderId: wire.senderId }),
+      ...(wire.ts === undefined ? {} : { ts: wire.ts }),
+      ...(wire.senderMetadata === undefined
+        ? {}
+        : { senderMetadata: wire.senderMetadata }),
+      payload: wire.payload as { actor: { id: string } },
+    }) as never,
+  );
+}
+
 /** ~30 Hz. Streaming deltas arrive far faster than a surface can repaint. */
 const PUSH_INTERVAL_MS = 33;
 
@@ -75,10 +105,9 @@ const PUSH_INTERVAL_MS = 33;
  * How much of the durable log the client asks for on join.
  *
  * Deliberately larger than what is rendered. The surface still shows a tail —
- * a compact venue that dumps 200 entries is not compact — but "12 earlier
- * entries" used to be a dead end, because the client had asked for exactly what
- * it displayed and had nothing to expand into. Holding the wider replay makes
- * "show them" a local decision instead of a promotion.
+ * a compact venue that dumps 200 entries is not compact — and can reveal most
+ * nearby history without a round trip. Earlier durable pages remain available
+ * through `getReplayBefore`; this is a warm buffer, not a history ceiling.
  */
 export const REPLAY_LIMIT = 200;
 
@@ -130,7 +159,10 @@ export type QuickfireSessionSource =
 
 /** Everything the core needs from its host client. */
 export interface QuickfireTransport {
-  sessionFor: (slotId: string, options?: { fresh?: boolean }) => Promise<QuickfireSessionFacts>;
+  sessionFor: (
+    slotId: string,
+    options?: { fresh?: boolean },
+  ) => Promise<QuickfireSessionFacts>;
   clear: (slotId: string) => Promise<unknown>;
   promote: (slotId: string) => Promise<QuickfireSessionFacts | null>;
   /**
@@ -144,7 +176,7 @@ export interface QuickfireTransport {
   connectToChannel: (
     channelId: string,
     contextId: string,
-    options: { clientId?: string; replayMessageLimit?: number }
+    options: { clientId?: string; replayMessageLimit?: number },
   ) => PubSubClient;
 }
 
@@ -161,8 +193,10 @@ export interface QuickfireSessionView {
   resume: QuickfireResumeChip | null;
   transcript: QuickfireTranscriptEntry[];
   olderCount: number;
-  /** Older entries are held here and can be revealed without leaving. */
+  /** Older entries are buffered or durably pageable and can be revealed here. */
   expandable: boolean;
+  /** A durable history page is currently being fetched. */
+  loadingOlder: boolean;
   /** Unresolved model credential request carried by the conversation channel. */
   credentialRequest: {
     providerId: string;
@@ -184,8 +218,8 @@ export interface QuickfireSessionController {
   promote: () => Promise<QuickfireSessionFacts | null>;
   /** Slot mode only; throws for a conversation. */
   startFresh: () => Promise<void>;
-  /** Widen the rendered window over the replay this client already holds. */
-  showOlder: () => void;
+  /** Reveal buffered history or fetch the preceding durable page. */
+  showOlder: () => Promise<void>;
   /**
    * Carry one image's bytes to the surface (see `QuickfireImage`). A no-op for
    * clients that deliver images inline.
@@ -205,24 +239,30 @@ const IDLE: QuickfireSessionView = {
   transcript: [],
   olderCount: 0,
   expandable: false,
+  loadingOlder: false,
   credentialRequest: null,
   streaming: false,
-  error: null
+  error: null,
 };
 
-function durableResponseObservedAfter(state: ChannelViewState, afterCursor: number): boolean {
+function durableResponseObservedAfter(
+  state: ChannelViewState,
+  afterCursor: number,
+): boolean {
   const agentMessageObserved = Object.values(state.messages).some(
     (message) =>
       (message.actor.kind === "agent" || message.role === "assistant") &&
-      (message.lastContentSeq ?? message.seq ?? 0) > afterCursor
+      (message.lastContentSeq ?? message.seq ?? 0) > afterCursor,
   );
   if (agentMessageObserved) return true;
-  return Object.values(state.turns).some((turn) => (turn.lastSeq ?? 0) > afterCursor);
+  return Object.values(state.turns).some(
+    (turn) => (turn.lastSeq ?? 0) > afterCursor,
+  );
 }
 
 /** Accept the historical `slotId` string form as well as a source object. */
 function normalizeSource(
-  input: string | QuickfireSessionSource | null | undefined
+  input: string | QuickfireSessionSource | null | undefined,
 ): QuickfireSessionSource | null {
   if (!input) return null;
   return typeof input === "string" ? { kind: "slot", slotId: input } : input;
@@ -249,7 +289,7 @@ function sourceKey(source: QuickfireSessionSource | null): string {
 export function useQuickfireSessionCore(
   input: string | QuickfireSessionSource | null,
   transport: QuickfireTransport,
-  options: QuickfireSessionOptions = {}
+  options: QuickfireSessionOptions = {},
 ): QuickfireSessionController {
   const transcriptOrder = options.transcriptOrder ?? "oldest-first";
   const imageDelivery = options.imageDelivery ?? "inline";
@@ -278,6 +318,12 @@ export function useQuickfireSessionCore(
   const awaitingResponseRef = useRef<{ afterCursor: number } | null>(null);
   /** How many entries the surface is currently showing; grown by `showOlder`. */
   const visibleLimitRef = useRef(TRANSCRIPT_LIMIT);
+  /** Hidden entries already reduced into the local channel view. */
+  const localOlderCountRef = useRef(0);
+  /** Cursor and continuation state for history preceding the join replay. */
+  const oldestEnvelopeSeqRef = useRef<number | null>(null);
+  const hasMoreHistoryRef = useRef(false);
+  const loadingOlderRef = useRef(false);
   /** Images the user has asked to see; only meaningful for `on-demand`. */
   const revealedImagesRef = useRef<Set<string>>(new Set());
 
@@ -294,8 +340,9 @@ export function useQuickfireSessionCore(
       imageDelivery,
       revealedImageIds: revealedImagesRef.current,
       pendingTexts: queuedRef.current,
-      awaitingResponse: awaitingResponseRef.current !== null
+      awaitingResponse: awaitingResponseRef.current !== null,
     });
+    localOlderCountRef.current = projection.olderCount;
     const credentialRequest = Object.values(state.credentialRequests)
       .sort((left, right) => left.seq - right.seq)
       .slice(-1)[0];
@@ -303,7 +350,7 @@ export function useQuickfireSessionCore(
       ...current,
       transcript: projection.entries,
       olderCount: projection.olderCount,
-      expandable: projection.olderCount > 0,
+      expandable: projection.olderCount > 0 || hasMoreHistoryRef.current,
       // A waiting turn needs an interaction, not a stop spinner. Only an
       // actively executing turn is presented as streaming.
       streaming:
@@ -312,9 +359,9 @@ export function useQuickfireSessionCore(
       credentialRequest: credentialRequest
         ? {
             providerId: credentialRequest.providerId,
-            reason: credentialRequest.reason ?? null
+            reason: credentialRequest.reason ?? null,
           }
-        : null
+        : null,
     }));
   }, [imageDelivery, transcriptOrder]);
 
@@ -324,39 +371,42 @@ export function useQuickfireSessionCore(
   }, [flush]);
 
   /** Put one message on the wire, surfacing a failure inline rather than throwing. */
-  const deliver = useCallback(async (client: PubSubClient, text: string): Promise<boolean> => {
-    const bound = sourceRef.current;
-    try {
-      if (bound?.kind === "conversation") {
-        // A reply into an existing conversation: threaded under the envelope
-        // this surface opened on and addressed to whoever sent it, so a
-        // directed channel wakes exactly that agent and nobody else.
-        await client.send(text, {
-          ...(bound.focusMessageId ? { replyTo: bound.focusMessageId } : {}),
-          ...(bound.replyTo
-            ? {
-                mentions: [bound.replyTo.participantId],
-                to: [
-                  {
-                    kind: "participant" as const,
-                    participantId: bound.replyTo.participantId
-                  }
-                ]
-              }
-            : {})
-        });
-      } else {
-        await client.send(text, { mentions: ["quickfire"] });
+  const deliver = useCallback(
+    async (client: PubSubClient, text: string): Promise<boolean> => {
+      const bound = sourceRef.current;
+      try {
+        if (bound?.kind === "conversation") {
+          // A reply into an existing conversation: threaded under the envelope
+          // this surface opened on and addressed to whoever sent it, so a
+          // directed channel wakes exactly that agent and nobody else.
+          await client.send(text, {
+            ...(bound.focusMessageId ? { replyTo: bound.focusMessageId } : {}),
+            ...(bound.replyTo
+              ? {
+                  mentions: [bound.replyTo.participantId],
+                  to: [
+                    {
+                      kind: "participant" as const,
+                      participantId: bound.replyTo.participantId,
+                    },
+                  ],
+                }
+              : {}),
+          });
+        } else {
+          await client.send(text, { mentions: ["quickfire"] });
+        }
+        return true;
+      } catch (error) {
+        setView((current) => ({
+          ...current,
+          error: error instanceof Error ? error.message : String(error),
+        }));
+        return false;
       }
-      return true;
-    } catch (error) {
-      setView((current) => ({
-        ...current,
-        error: error instanceof Error ? error.message : String(error)
-      }));
-      return false;
-    }
-  }, []);
+    },
+    [],
+  );
 
   const closeClient = useCallback(() => {
     if (pushTimerRef.current !== null) {
@@ -380,7 +430,11 @@ export function useQuickfireSessionCore(
    * subscribed to events at all).
    */
   const bind = useCallback(
-    async (bound: QuickfireSessionSource, generation: number, fresh: boolean) => {
+    async (
+      bound: QuickfireSessionSource,
+      generation: number,
+      fresh: boolean,
+    ) => {
       const live = () => generationRef.current === generation;
       try {
         const session: QuickfireSessionFacts =
@@ -391,7 +445,7 @@ export function useQuickfireSessionCore(
                 contextId: bound.contextId,
                 state: "resumed",
                 messageCount: null,
-                lastActivityAt: null
+                lastActivityAt: null,
               };
         if (!live()) return;
         setView((current) => ({
@@ -406,18 +460,22 @@ export function useQuickfireSessionCore(
             bound.kind === "slot" && session.state === "resumed"
               ? {
                   messageCount: session.messageCount,
-                  lastActivityAt: session.lastActivityAt
+                  lastActivityAt: session.lastActivityAt,
                 }
               : null,
-          connecting: session.state !== "promoted"
+          connecting: session.state !== "promoted",
         }));
         // A promoted slot conversation is read from its chat panel, not here.
         if (session.state === "promoted") return;
 
-        const client = transportRef.current.connectToChannel(session.channelId, session.contextId, {
-          clientId: bound.kind === "slot" ? bound.slotId : bound.clientId,
-          replayMessageLimit: REPLAY_LIMIT
-        });
+        const client = transportRef.current.connectToChannel(
+          session.channelId,
+          session.contextId,
+          {
+            clientId: bound.kind === "slot" ? bound.slotId : bound.clientId,
+            replayMessageLimit: REPLAY_LIMIT,
+          },
+        );
         clientRef.current = client;
         selfKeyRef.current = client.clientId ?? null;
         void (async () => {
@@ -430,29 +488,16 @@ export function useQuickfireSessionCore(
               // healthy subscription and no error anywhere — the exact failure
               // this conversion existed to prevent in the chat client.
               const wire = event as PubSubAgenticWireEvent;
-              if (wire.type === CREDENTIAL_CONNECT_PAYLOAD_KIND && wire.payload) {
-                stateRef.current = reduceChannelView(
-                  stateRef.current,
-                  pubsubChannelEventToEnvelope(session.channelId, CREDENTIAL_CONNECT_PAYLOAD_KIND, {
-                    ...wire,
-                    payload: wire.payload
-                  })
+              if (wire.pubsubId !== undefined) {
+                oldestEnvelopeSeqRef.current = Math.min(
+                  oldestEnvelopeSeqRef.current ?? wire.pubsubId,
+                  wire.pubsubId,
                 );
-                schedulePush();
-                continue;
               }
-              if (wire.type !== AGENTIC_EVENT_PAYLOAD_KIND || !wire.payload) continue;
-              stateRef.current = reduceChannelView(
+              stateRef.current = reduceWireEvent(
                 stateRef.current,
-                pubsubAgenticEventToEnvelope(session.channelId, {
-                  ...(wire.pubsubId === undefined ? {} : { pubsubId: wire.pubsubId }),
-                  ...(wire.senderId === undefined ? {} : { senderId: wire.senderId }),
-                  ...(wire.ts === undefined ? {} : { ts: wire.ts }),
-                  ...(wire.senderMetadata === undefined
-                    ? {}
-                    : { senderMetadata: wire.senderMetadata }),
-                  payload: wire.payload as { actor: { id: string } }
-                }) as never
+                session.channelId,
+                wire,
               );
               schedulePush();
             }
@@ -460,12 +505,15 @@ export function useQuickfireSessionCore(
             if (!live()) return;
             setView((current) => ({
               ...current,
-              error: error instanceof Error ? error.message : String(error)
+              error: error instanceof Error ? error.message : String(error),
             }));
           }
         })();
         await client.ready();
         if (!live()) return;
+        oldestEnvelopeSeqRef.current =
+          client.firstEnvelopeSeq ?? oldestEnvelopeSeqRef.current;
+        hasMoreHistoryRef.current = client.hasMoreBefore === true;
         selfKeyRef.current = client.clientId ?? selfKeyRef.current;
         setView((current) => ({ ...current, connecting: false }));
         flush();
@@ -473,12 +521,15 @@ export function useQuickfireSessionCore(
         // (messaging plan §4.5.4/§4.10.6): the ordinary read receipt goes out,
         // so the notifying agent sees "read" through the mechanism it has.
         if (bound.kind === "conversation" && bound.focusMessageId) {
-          void client.recordReadReceipt(bound.focusMessageId).catch(() => undefined);
+          void client
+            .recordReadReceipt(bound.focusMessageId)
+            .catch(() => undefined);
         }
         const queued = queuedRef.current;
         queuedRef.current = [];
         for (const text of queued) {
-          if (!(await deliver(client, text))) awaitingResponseRef.current = null;
+          if (!(await deliver(client, text)))
+            awaitingResponseRef.current = null;
           if (!live()) return;
         }
         flush();
@@ -487,11 +538,11 @@ export function useQuickfireSessionCore(
         setView((current) => ({
           ...current,
           connecting: false,
-          error: error instanceof Error ? error.message : String(error)
+          error: error instanceof Error ? error.message : String(error),
         }));
       }
     },
-    [deliver, flush, schedulePush]
+    [deliver, flush, schedulePush],
   );
 
   useEffect(() => {
@@ -509,10 +560,14 @@ export function useQuickfireSessionCore(
       ...IDLE,
       source: bound,
       slotId: bound.kind === "slot" ? bound.slotId : null,
-      connecting: true
+      connecting: true,
     });
     stateRef.current = createInitialChannelViewState();
     visibleLimitRef.current = TRANSCRIPT_LIMIT;
+    localOlderCountRef.current = 0;
+    oldestEnvelopeSeqRef.current = null;
+    hasMoreHistoryRef.current = false;
+    loadingOlderRef.current = false;
     void bind(bound, generation, false);
     return () => {
       generationRef.current += 1;
@@ -528,7 +583,7 @@ export function useQuickfireSessionCore(
       if (!trimmed) return;
       const client = clientRef.current;
       awaitingResponseRef.current = {
-        afterCursor: stateRef.current.cursor ?? 0
+        afterCursor: stateRef.current.cursor ?? 0,
       };
       setView((current) => ({ ...current, error: null, streaming: true }));
       flush();
@@ -546,7 +601,7 @@ export function useQuickfireSessionCore(
         flush();
       }
     },
-    [deliver, flush]
+    [deliver, flush],
   );
 
   const stop = useCallback(async () => {
@@ -555,13 +610,15 @@ export function useQuickfireSessionCore(
     const client = clientRef.current;
     if (!client) return;
     const agents = Object.values(stateRef.current.roster).filter(
-      (entry) => entry.leftAt === undefined && entry.participant.kind === "agent"
+      (entry) =>
+        entry.leftAt === undefined && entry.participant.kind === "agent",
     );
     for (const agent of agents) {
-      const participantId = agent.participant.participantId ?? agent.participant.id;
+      const participantId =
+        agent.participant.participantId ?? agent.participant.id;
       try {
         await client.callMethod(participantId, "pause", {
-          reason: "User interrupted quickfire"
+          reason: "User interrupted quickfire",
         }).result;
       } catch {
         // Pausing is advisory: a vessel that is already idle rejects, and that
@@ -574,56 +631,115 @@ export function useQuickfireSessionCore(
     const bound = sourceRef.current;
     if (!bound) return;
     if (bound.kind !== "slot") {
-      throw new Error("A conversation opened from a notification cannot be cleared here");
+      throw new Error(
+        "A conversation opened from a notification cannot be cleared here",
+      );
     }
     await transportRef.current.clear(bound.slotId);
-    const generation = (generationRef.current += 1);
+    generationRef.current += 1;
     closeClient();
     queuedRef.current = [];
     stateRef.current = createInitialChannelViewState();
     visibleLimitRef.current = TRANSCRIPT_LIMIT;
-    setView({ ...IDLE, source: bound, slotId: bound.slotId, connecting: true });
-    await bind(bound, generation, true);
-  }, [bind, closeClient]);
+    localOlderCountRef.current = 0;
+    oldestEnvelopeSeqRef.current = null;
+    hasMoreHistoryRef.current = false;
+    loadingOlderRef.current = false;
+    setView({ ...IDLE, source: bound, slotId: bound.slotId });
+  }, [closeClient]);
 
-  const promote = useCallback(async (): Promise<QuickfireSessionFacts | null> => {
-    const bound = sourceRef.current;
-    if (!bound) return null;
-    if (bound.kind === "conversation") {
-      // Nothing to mint: the conversation already has a home. The caller opens
-      // its chat panel from these facts (find-or-open, messaging plan §4.8).
-      return {
-        channelId: bound.channelId,
-        contextId: bound.contextId,
-        state: "promoted",
-        messageCount: null,
-        lastActivityAt: null
-      };
-    }
-    const promoted = await transportRef.current.promote(bound.slotId);
-    if (!promoted) return null;
-    setView((current) => ({ ...current, promoted: true }));
-    return promoted;
-  }, []);
+  const promote =
+    useCallback(async (): Promise<QuickfireSessionFacts | null> => {
+      const bound = sourceRef.current;
+      if (!bound) return null;
+      if (bound.kind === "conversation") {
+        // Nothing to mint: the conversation already has a home. The caller opens
+        // its chat panel from these facts (find-or-open, messaging plan §4.8).
+        return {
+          channelId: bound.channelId,
+          contextId: bound.contextId,
+          state: "promoted",
+          messageCount: null,
+          lastActivityAt: null,
+        };
+      }
+      const promoted = await transportRef.current.promote(bound.slotId);
+      if (!promoted) return null;
+      setView((current) => ({ ...current, promoted: true }));
+      return promoted;
+    }, []);
 
   const revealImage = useCallback(
     (imageId: string) => {
       revealedImagesRef.current.add(imageId);
       flush();
     },
-    [flush]
+    [flush],
   );
 
-  const showOlder = useCallback(() => {
-    visibleLimitRef.current += EXPAND_STEP;
-    flush();
+  const showOlder = useCallback(async () => {
+    if (loadingOlderRef.current) return;
+    if (localOlderCountRef.current > 0) {
+      visibleLimitRef.current += EXPAND_STEP;
+      flush();
+      return;
+    }
+
+    const client = clientRef.current;
+    const before = oldestEnvelopeSeqRef.current;
+    if (
+      !client ||
+      !hasMoreHistoryRef.current ||
+      before === null ||
+      before <= 1
+    ) {
+      hasMoreHistoryRef.current = false;
+      flush();
+      return;
+    }
+
+    loadingOlderRef.current = true;
+    setView((current) => ({ ...current, loadingOlder: true, error: null }));
+    try {
+      const page = await client.getReplayBefore(before, 500);
+      let nextOldest = before;
+      for (const raw of page.logEvents) {
+        nextOldest = Math.min(nextOldest, raw.id);
+        stateRef.current = reduceWireEvent(stateRef.current, client.channelId, {
+          type: raw.type,
+          pubsubId: raw.id,
+          senderId: raw.senderId,
+          ts: raw.ts,
+          senderMetadata:
+            raw.senderMetadata as PubSubAgenticWireEvent["senderMetadata"],
+          payload: raw.payload,
+        });
+      }
+      if (page.ready.hasMoreBefore && nextOldest >= before) {
+        throw new Error("Channel history page did not advance its cursor");
+      }
+      oldestEnvelopeSeqRef.current = nextOldest;
+      hasMoreHistoryRef.current = page.ready.hasMoreBefore === true;
+      visibleLimitRef.current += EXPAND_STEP;
+    } catch (error) {
+      setView((current) => ({
+        ...current,
+        error: error instanceof Error ? error.message : String(error),
+      }));
+    } finally {
+      loadingOlderRef.current = false;
+      setView((current) => ({ ...current, loadingOlder: false }));
+      flush();
+    }
   }, [flush]);
 
   const startFresh = useCallback(async () => {
     const bound = sourceRef.current;
     if (!bound) return;
     if (bound.kind !== "slot") {
-      throw new Error("A conversation opened from a notification cannot be restarted here");
+      throw new Error(
+        "A conversation opened from a notification cannot be restarted here",
+      );
     }
     // Rebind against the same slot through the ONE binding path, so the fresh
     // session gets its live event stream like any other.
@@ -632,6 +748,10 @@ export function useQuickfireSessionCore(
     queuedRef.current = [];
     stateRef.current = createInitialChannelViewState();
     visibleLimitRef.current = TRANSCRIPT_LIMIT;
+    localOlderCountRef.current = 0;
+    oldestEnvelopeSeqRef.current = null;
+    hasMoreHistoryRef.current = false;
+    loadingOlderRef.current = false;
     setView({ ...IDLE, source: bound, slotId: bound.slotId, connecting: true });
     await bind(bound, generation, true);
   }, [bind, closeClient]);
@@ -646,8 +766,18 @@ export function useQuickfireSessionCore(
       promote,
       startFresh,
       showOlder,
-      revealImage
+      revealImage,
     }),
-    [clear, promote, revealImage, send, showOlder, source, startFresh, stop, view]
+    [
+      clear,
+      promote,
+      revealImage,
+      send,
+      showOlder,
+      source,
+      startFresh,
+      stop,
+      view,
+    ],
   );
 }

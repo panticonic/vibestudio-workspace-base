@@ -199,7 +199,7 @@ services:
         - host
         - user
         - code
-    description: Owns durable command-agent conversations attached to panel slots.
+    description: Owns durable Quickfire conversations attached to panel slots.
     durableObject:
       className: QuickfireSessionsDO
     name: quickfire

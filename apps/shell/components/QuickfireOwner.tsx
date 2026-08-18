@@ -27,7 +27,10 @@ import {
   type OpenPanelEntry,
   type SurfaceContext,
 } from "@workspace/omnibox-core";
-import { classifyQuickfireLink, suggestedOpeners } from "@workspace/quickfire-core";
+import {
+  classifyQuickfireLink,
+  suggestedOpeners,
+} from "@workspace/quickfire-core";
 import {
   QUICKFIRE_MODE_PLACEHOLDER,
   buildPaletteRows,
@@ -43,10 +46,25 @@ import type {
   BrowserAddressSuggestion,
   PanelChromeState,
 } from "@vibestudio/shared/panelChrome";
-import { app, hostCommands, panel, quickfire, userNotifications, workspace } from "../shell/client";
+import {
+  app,
+  hostCommands,
+  panel,
+  quickfire,
+  userNotifications,
+  workspace,
+} from "../shell/client";
 import { useShellEvent } from "../shell/useShellEvent";
-import { useShellContentOverlay, type ContentOverlayBounds } from "../shell/useShellContentOverlay";
-import { effectiveThemeAtom, themeConfigAtom, setThemeModeAtom, setThemeConfigAtom } from "../state/themeAtoms";
+import {
+  useShellContentOverlay,
+  type ContentOverlayBounds,
+} from "../shell/useShellContentOverlay";
+import {
+  effectiveThemeAtom,
+  themeConfigAtom,
+  setThemeModeAtom,
+  setThemeConfigAtom,
+} from "../state/themeAtoms";
 import { workspaceChooserDialogOpenAtom } from "../state/appModeAtoms";
 import {
   commandAgentRequestAtom,
@@ -72,7 +90,10 @@ import {
 } from "../overlay/quickfireSurfaceModel";
 import type { QuickfireSessionSummary } from "@workspace/quickfire-core/service";
 import type { OverlayThemeInfo } from "../overlay/types";
-import { useQuickfireSession, type QuickfireSessionSource } from "./useQuickfireSession";
+import {
+  useQuickfireSession,
+  type QuickfireSessionSource,
+} from "./useQuickfireSession";
 
 /**
  * Id of the panel-region div (rendered by `PanelApp`) whose rect anchors the
@@ -113,7 +134,7 @@ interface OverlayState {
   /**
    * Set when the overlay is a conversation surface (messaging plan §4.8): the
    * quickfire card bound to an EXISTING channel rather than the focused panel's
-   * slot. Null for the command agent / palette.
+   * slot. Null for the Quickfire agent / palette.
    */
   conversation: Omit<ConversationSurfaceRequest, "sequence"> | null;
   /**
@@ -154,7 +175,9 @@ export function QuickfireOwner() {
   const [history, setHistory] = useState<BrowserAddressSuggestion[]>([]);
   const [workspaceNames, setWorkspaceNames] = useState<string[]>([]);
   const [contributed, setContributed] = useState<CommandSpec[]>([]);
-  const [anchorBounds, setAnchorBounds] = useState<ContentOverlayBounds | null>(null);
+  const [anchorBounds, setAnchorBounds] = useState<ContentOverlayBounds | null>(
+    null,
+  );
   const [panelLost, setPanelLost] = useState(false);
   const [focusRequest, setFocusRequest] = useState(0);
   /** Rows for the `quickfire.list` picker; non-null only while it is showing. */
@@ -189,13 +212,22 @@ export function QuickfireOwner() {
       workspaceNames: () => workspaceNamesRef.current,
       showQuickfireConversations: setQuickfireConversations,
     }),
-    [navigateToId, setAddressBarVisible, setThemeConfig, setThemeMode, setWorkspaceChooserOpen]
+    [
+      navigateToId,
+      setAddressBarVisible,
+      setThemeConfig,
+      setThemeMode,
+      setWorkspaceChooserOpen,
+    ],
   );
 
   const slate = useMemo(() => buildSlate(deps), [deps]);
   const slateById = useMemo(
-    () => new Map<string, SlateCommand>(slate.map((command) => [command.id, command])),
-    [slate]
+    () =>
+      new Map<string, SlateCommand>(
+        slate.map((command) => [command.id, command]),
+      ),
+    [slate],
   );
 
   // --- Context assembled from the focused panel -----------------------------
@@ -209,7 +241,10 @@ export function QuickfireOwner() {
               panelId: chromeState.panelId,
               title: chromeState.title,
               source: chromeState.source,
-              kind: chromeState.kind === "browser" ? ("browser" as const) : ("workspace" as const),
+              kind:
+                chromeState.kind === "browser"
+                  ? ("browser" as const)
+                  : ("workspace" as const),
               canGoBack: chromeState.canGoBack,
               canGoForward: chromeState.canGoForward,
               pinned: pinnedPanelIds.includes(chromeState.panelId),
@@ -218,10 +253,13 @@ export function QuickfireOwner() {
           }
         : {}),
     }),
-    [chromeState, openPanels, pinnedPanelIds, treeHits]
+    [chromeState, openPanels, pinnedPanelIds, treeHits],
   );
 
-  const commands = useMemo(() => [...slate, ...contributed], [contributed, slate]);
+  const commands = useMemo(
+    () => [...slate, ...contributed],
+    [contributed, slate],
+  );
 
   // --- Opening --------------------------------------------------------------
   /**
@@ -229,6 +267,32 @@ export function QuickfireOwner() {
    * scope without waiting for a round trip. Refreshed on every open.
    */
   const conversationSlotsRef = useRef<Set<string>>(new Set());
+  /** Invalidates an in-flight list snapshot when a local clear changes truth. */
+  const conversationIndexEpochRef = useRef(0);
+
+  const refreshConversationSlots =
+    useCallback(async (): Promise<Set<string> | null> => {
+      const epoch = conversationIndexEpochRef.current;
+      try {
+        const rows = await quickfire.list();
+        if (epoch !== conversationIndexEpochRef.current) return null;
+        const slots = new Set(
+          rows
+            .filter((row) => row.promotedAt === null)
+            .map((row) => row.slotId),
+        );
+        conversationSlotsRef.current = slots;
+        return slots;
+      } catch {
+        return null;
+      }
+    }, []);
+
+  // Warm the resume index before the first accelerator press. Opening the
+  // palette must not be the operation that first discovers durable state.
+  useEffect(() => {
+    void refreshConversationSlots();
+  }, [refreshConversationSlots]);
 
   /**
    * One key, resume-aware: opening over a panel that already has a conversation
@@ -239,31 +303,36 @@ export function QuickfireOwner() {
    * behind it only switches scope while the input is still untouched, so it can
    * never rewrite something the user has started typing.
    */
-  const resumeIntoConversation = useCallback((slotId: string) => {
-    const enter = () =>
-      setState((current) =>
-        current.open && current.mode === "all" && !current.argSession && current.query === ""
-          ? { ...current, mode: "quickfire", inputEpoch: current.inputEpoch + 1 }
-          : current
-      );
-    if (conversationSlotsRef.current.has(slotId)) enter();
-    void quickfire
-      .list()
-      .then((rows) => {
-        conversationSlotsRef.current = new Set(
-          rows.filter((row) => row.promotedAt === null).map((row) => row.slotId)
+  const resumeIntoConversation = useCallback(
+    (slotId: string) => {
+      const enter = () =>
+        setState((current) =>
+          current.open &&
+          current.mode === "all" &&
+          !current.argSession &&
+          current.query === ""
+            ? {
+                ...current,
+                mode: "quickfire",
+                inputEpoch: current.inputEpoch + 1,
+              }
+            : current,
         );
-        if (conversationSlotsRef.current.has(slotId)) enter();
-      })
-      .catch(() => {
-        // Not knowing means opening the palette, which is the honest default.
+      if (conversationSlotsRef.current.has(slotId)) enter();
+      void refreshConversationSlots().then((slots) => {
+        if (slots?.has(slotId)) enter();
       });
-  }, []);
+    },
+    [refreshConversationSlots],
+  );
 
   const open = useCallback(
     (
       mode: QuickfireMode,
-      options?: { panelId?: string; conversation?: Omit<ConversationSurfaceRequest, "sequence"> }
+      options?: {
+        panelId?: string;
+        conversation?: Omit<ConversationSurfaceRequest, "sequence">;
+      },
     ) => {
       setPanelLost(false);
       setState((current) => ({
@@ -299,24 +368,28 @@ export function QuickfireOwner() {
             setContributed(
               contributions.flatMap((contribution) =>
                 contribution.commands.map((command) =>
-                  commandSpecFromWire(command, { panelId: contribution.panelId })
-                )
-              )
-            )
+                  commandSpecFromWire(command, {
+                    panelId: contribution.panelId,
+                  }),
+                ),
+              ),
+            ),
           )
           .catch(() => setContributed([]));
         void workspace
           .list()
-          .then((entries) => setWorkspaceNames(entries.map((entry) => entry.name)))
+          .then((entries) =>
+            setWorkspaceNames(entries.map((entry) => entry.name)),
+          )
           .catch(() => setWorkspaceNames([]));
       })();
     },
-    [resumeIntoConversation]
+    [resumeIntoConversation],
   );
 
   useShellEvent(
     "open-command-palette",
-    useCallback(() => open("all"), [open])
+    useCallback(() => open("all"), [open]),
   );
   // Chrome-side requests (tree button, breadcrumb and tree context menus) come
   // through an atom because a renderer cannot emit shell events.
@@ -324,7 +397,9 @@ export function QuickfireOwner() {
   useEffect(() => {
     if (!commandAgentRequest) return;
     open(commandAgentRequest.mode, {
-      ...(commandAgentRequest.panelId ? { panelId: commandAgentRequest.panelId } : {}),
+      ...(commandAgentRequest.panelId
+        ? { panelId: commandAgentRequest.panelId }
+        : {}),
     });
     // `sequence` is the identity of the request: repeating the same ask reopens.
   }, [commandAgentRequest, open]);
@@ -363,7 +438,7 @@ export function QuickfireOwner() {
         .getChromeState(panelId)
         .then((next) => setChromeState(next))
         .catch(() => setPanelLost(true));
-    }, [chromeState?.panelId, state.open])
+    }, [chromeState?.panelId, state.open]),
   );
 
   /**
@@ -375,7 +450,8 @@ export function QuickfireOwner() {
     state.open && state.mode === "quickfire" && !state.argSession && !panelLost
       ? (chromeState?.panelId ?? null)
       : null;
-  const conversationBinding = state.open && state.mode === "quickfire" ? state.conversation : null;
+  const conversationBinding =
+    state.open && state.mode === "quickfire" ? state.conversation : null;
   const quickfireSource = useMemo<QuickfireSessionSource | null>(() => {
     if (conversationBinding) {
       return {
@@ -387,7 +463,11 @@ export function QuickfireOwner() {
           ? { focusMessageId: conversationBinding.focusMessageId }
           : {}),
         ...(conversationBinding.replyTo
-          ? { replyTo: { participantId: conversationBinding.replyTo.participantId } }
+          ? {
+              replyTo: {
+                participantId: conversationBinding.replyTo.participantId,
+              },
+            }
           : {}),
       };
     }
@@ -395,7 +475,25 @@ export function QuickfireOwner() {
   }, [conversationBinding, quickfireSlotId]);
   const quickfireSession = useQuickfireSession(quickfireSource);
 
-  const searchQuery = state.argSession ? state.query : stripModePrefix(state.query, state.mode);
+  // A send can create the first durable conversation after the open-time
+  // snapshot. Remember it immediately so the next open resumes synchronously.
+  useEffect(() => {
+    if (!quickfireSlotId) return;
+    if (
+      quickfireSession.view.hasConversation &&
+      !quickfireSession.view.promoted
+    ) {
+      conversationSlotsRef.current.add(quickfireSlotId);
+    }
+  }, [
+    quickfireSession.view.hasConversation,
+    quickfireSession.view.promoted,
+    quickfireSlotId,
+  ]);
+
+  const searchQuery = state.argSession
+    ? state.query
+    : stripModePrefix(state.query, state.mode);
 
   // --- Open-panel index for the `@` scope and `panel` arguments -------------
   // Collected once per open and filtered locally: the durable tree search
@@ -421,7 +519,10 @@ export function QuickfireOwner() {
   // before the replacement lands, so the list does not flicker while typing.
   const panelSearchQuery =
     !state.argSession && (state.mode === "all" || state.mode === "goto")
-      ? (state.mode === "goto" ? parseGotoScope(searchQuery).query : searchQuery).trim()
+      ? (state.mode === "goto"
+          ? parseGotoScope(searchQuery).query
+          : searchQuery
+        ).trim()
       : "";
   useEffect(() => {
     if (!state.open || !panelSearchQuery) {
@@ -444,7 +545,7 @@ export function QuickfireOwner() {
                 ...(hit.node.icon ? { icon: hit.node.icon } : {}),
                 ...(parent ? { location: parent.title } : {}),
               };
-            })
+            }),
           );
         })
         .catch(() => {
@@ -469,7 +570,8 @@ export function QuickfireOwner() {
   // tells the user.
   const historyQuery =
     state.mode === "goto" ? parseGotoScope(searchQuery).query : searchQuery;
-  const wantsHistory = !state.argSession && (state.mode === "all" || state.mode === "goto");
+  const wantsHistory =
+    !state.argSession && (state.mode === "all" || state.mode === "goto");
   useEffect(() => {
     if (!state.open || !wantsHistory) {
       setHistory([]);
@@ -481,7 +583,11 @@ export function QuickfireOwner() {
         .getBrowserAddressOptions(historyQuery)
         .then((options) => {
           if (live) {
-            setHistory(options.suggestions.filter((item) => item.source !== "search-engine"));
+            setHistory(
+              options.suggestions.filter(
+                (item) => item.source !== "search-engine",
+              ),
+            );
           }
         })
         .catch(() => {
@@ -512,20 +618,36 @@ export function QuickfireOwner() {
     return [
       {
         key: "quickfire-conversations",
-        label: "Command agent conversations",
+        label: "Quickfire agent conversations",
         rows: quickfireConversations.map((row) => ({
           id: `quickfire-slot:${row.slotId}`,
-          title: openPanels.find((entry) => entry.id === row.slotId)?.title ?? row.slotId,
-          meta: row.promotedAt === null ? "conversation" : "continued in a chat panel",
+          title:
+            openPanels.find((entry) => entry.id === row.slotId)?.title ??
+            row.slotId,
+          meta:
+            row.promotedAt === null
+              ? "conversation"
+              : "continued in a chat panel",
           icon: "✦",
         })),
       },
     ];
-  }, [commands, ctx, history, openPanels, quickfireConversations, searchQuery, state]);
+  }, [
+    commands,
+    ctx,
+    history,
+    openPanels,
+    quickfireConversations,
+    searchQuery,
+    state,
+  ]);
 
   const selectedId = useMemo(() => {
     const flat = rows.flatMap((group) => group.rows);
-    if (state.selectionTouched && flat.some((row) => row.id === state.selectedId)) {
+    if (
+      state.selectionTouched &&
+      flat.some((row) => row.id === state.selectedId)
+    ) {
       return state.selectedId;
     }
     return flat.find((row) => !row.disabled)?.id ?? flat[0]?.id ?? null;
@@ -533,12 +655,15 @@ export function QuickfireOwner() {
 
   const ghostSuffix = useMemo(() => {
     if (state.argSession) return null;
-    const selected = rows.flatMap((group) => group.rows).find((row) => row.id === selectedId);
+    const selected = rows
+      .flatMap((group) => group.rows)
+      .find((row) => row.id === selectedId);
     if (!selected) return null;
     const completion = completionForRow(selected);
     if (!completion) return null;
     const typed = stripModePrefix(state.query, state.mode).trim();
-    if (!typed || !completion.toLowerCase().startsWith(typed.toLowerCase())) return null;
+    if (!typed || !completion.toLowerCase().startsWith(typed.toLowerCase()))
+      return null;
     const suffix = completion.slice(typed.length);
     return suffix || null;
   }, [rows, selectedId, state.argSession, state.mode, state.query]);
@@ -558,14 +683,19 @@ export function QuickfireOwner() {
       // top-aligned card without a second placement mode in main.
       // Clamp to the panel viewport so a narrow window never clips the card
       // (§4: width 640, clamped to anchor rect − 48px).
-      const viewWidth = Math.min(CARD_WIDTH + SURFACE_MARGIN * 2, rect.width - ANCHOR_MARGIN * 2);
+      const viewWidth = Math.min(
+        CARD_WIDTH + SURFACE_MARGIN * 2,
+        rect.width - ANCHOR_MARGIN * 2,
+      );
       const width = viewWidth + ANCHOR_MARGIN * 2;
       const centeredX = rect.left + rect.width / 2 - viewWidth / 2;
       const next = {
         x: Math.round(Math.max(rect.left, centeredX) - ANCHOR_MARGIN),
         y: Math.round(rect.top + rect.height * TOP_FRACTION - ANCHOR_MARGIN),
         width: Math.round(width),
-        height: Math.round(rect.height * MAX_HEIGHT_FRACTION + ANCHOR_MARGIN * 2),
+        height: Math.round(
+          rect.height * MAX_HEIGHT_FRACTION + ANCHOR_MARGIN * 2,
+        ),
       };
       setAnchorBounds((prev) =>
         prev &&
@@ -574,13 +704,15 @@ export function QuickfireOwner() {
         prev.width === next.width &&
         prev.height === next.height
           ? prev
-          : next
+          : next,
       );
     };
     measure();
     const host = document.getElementById(QUICKFIRE_OVERLAY_HOST_ID);
     const observer =
-      host && typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+      host && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(measure)
+        : null;
     observer?.observe(host as Element);
     window.addEventListener("resize", measure);
     return () => {
@@ -622,7 +754,7 @@ export function QuickfireOwner() {
       setState((current) => ({ ...current, argSession: null }));
       flashRow(rowId);
     },
-    [close, flashRow]
+    [close, flashRow],
   );
 
   const execute = useCallback(
@@ -631,7 +763,10 @@ export function QuickfireOwner() {
       const operation = runner
         ? Promise.resolve(runner.run(args, deps))
         : command.panelId
-          ? runContributedCommand(command.panelId, command.id.slice(command.panelId.length + 1))
+          ? runContributedCommand(
+              command.panelId,
+              command.id.slice(command.panelId.length + 1),
+            )
           : null;
       if (!operation) return;
       void operation
@@ -641,15 +776,21 @@ export function QuickfireOwner() {
           close();
         });
     },
-    [applyOutcome, close, deps, slateById]
+    [applyOutcome, close, deps, slateById],
   );
 
   /** Enter a command: run it, or open its argument session. */
   const activateCommand = useCallback(
     (command: CommandSpec, rowId: string) => {
-      const inline = parseInlineCommand(stripModePrefix(state.query, state.mode), [command], ctx);
+      const inline = parseInlineCommand(
+        stripModePrefix(state.query, state.mode),
+        [command],
+        ctx,
+      );
       const outcome = startArgSession(command, {
-        ...(inline ? { prefilled: inline.filled, seedQuery: inline.residual } : {}),
+        ...(inline
+          ? { prefilled: inline.filled, seedQuery: inline.residual }
+          : {}),
         restoreQuery: state.query,
       });
       if (outcome.kind === "execute") {
@@ -667,12 +808,12 @@ export function QuickfireOwner() {
         }));
       }
     },
-    [ctx, execute, state.mode, state.query]
+    [ctx, execute, state.mode, state.query],
   );
 
   const rowTargets = useMemo(
     () => buildRowTargets(rows, commands, { argSession: state.argSession }),
-    [commands, rows, state.argSession]
+    [commands, rows, state.argSession],
   );
 
   const applySessionOutcome = useCallback(
@@ -701,7 +842,7 @@ export function QuickfireOwner() {
         selectionTouched: false,
       }));
     },
-    [execute]
+    [execute],
   );
 
   const activateRow = useCallback(
@@ -718,7 +859,10 @@ export function QuickfireOwner() {
         case "option": {
           const session = state.argSession;
           if (!session) return;
-          const outcome = reduceArgSession(session, { type: "enter", value: target.value });
+          const outcome = reduceArgSession(session, {
+            type: "enter",
+            value: target.value,
+          });
           applySessionOutcome(outcome, rowId);
           return;
         }
@@ -753,7 +897,9 @@ export function QuickfireOwner() {
           open("quickfire");
           return;
         case "url":
-          void panel.createBrowser(target.url, { focus: true }).catch(reportCommandFailure);
+          void panel
+            .createBrowser(target.url, { focus: true })
+            .catch(reportCommandFailure);
           close({ restoreFocus: false });
           return;
         case "quickfire-ask":
@@ -775,7 +921,10 @@ export function QuickfireOwner() {
           return;
         case "chat":
           void panel
-            .createPanel("panels/chat", { focus: true, stateArgs: { initialPrompt: target.prompt } })
+            .createPanel("panels/chat", {
+              focus: true,
+              stateArgs: { initialPrompt: target.prompt },
+            })
             .catch(reportCommandFailure);
           close({ restoreFocus: false });
           return;
@@ -791,7 +940,7 @@ export function QuickfireOwner() {
       rowTargets,
       rows,
       state.argSession,
-    ]
+    ],
   );
 
   // --- Intents --------------------------------------------------------------
@@ -860,7 +1009,12 @@ export function QuickfireOwner() {
     });
     if (opened?.id) promotedPanelIdsRef.current.set(channelId, opened.id);
     close({ restoreFocus: false });
-  }, [close, navigateToId, quickfireSession.view.channelId, quickfireSession.view.contextId]);
+  }, [
+    close,
+    navigateToId,
+    quickfireSession.view.channelId,
+    quickfireSession.view.contextId,
+  ]);
 
   /**
    * Open a link the agent wrote.
@@ -911,13 +1065,18 @@ export function QuickfireOwner() {
       // Opening moved focus deliberately; restoring the old panel would race it.
       close({ restoreFocus: false });
     },
-    [chromeState?.panelId, close]
+    [chromeState?.panelId, close],
   );
 
   const handleIntent = useCallback(
     (payload: unknown) => {
       const intent = payload as QuickfireIntent | null;
-      if (!intent || typeof intent !== "object" || typeof intent.type !== "string") return;
+      if (
+        !intent ||
+        typeof intent !== "object" ||
+        typeof intent.type !== "string"
+      )
+        return;
       switch (intent.type) {
         case "input":
           recallRef.current = -1;
@@ -925,12 +1084,24 @@ export function QuickfireOwner() {
           setState((current) => ({
             ...current,
             query: intent.value,
-            // A mode prefix typed into the input is a mode switch.
-            mode: current.argSession ? current.mode : modeForInput(intent.value, current.mode),
+            // A conversation is a durable interaction mode, not a query
+            // prefix. Once entered, ordinary prose (including prose beginning
+            // with `@`, `>` or `/`) is a reply until Clear explicitly returns
+            // to commands.
+            mode:
+              current.mode === "quickfire" || current.argSession
+                ? current.mode
+                : modeForInput(intent.value, current.mode),
             selectedId: null,
             selectionTouched: false,
             ...(current.argSession
-              ? { argSession: { ...current.argSession, query: intent.value, error: null } }
+              ? {
+                  argSession: {
+                    ...current.argSession,
+                    query: intent.value,
+                    error: null,
+                  },
+                }
               : {}),
           }));
           return;
@@ -949,7 +1120,7 @@ export function QuickfireOwner() {
           if (!flat.length) return;
           const index = Math.max(
             0,
-            flat.findIndex((row) => row.id === selectedId)
+            flat.findIndex((row) => row.id === selectedId),
           );
           const next = (index + intent.delta + flat.length) % flat.length;
           setState((current) => ({
@@ -972,10 +1143,12 @@ export function QuickfireOwner() {
           setState((current) => setMode(current, intent.mode));
           return;
         case "cycle-mode":
+          if (state.mode === "quickfire" && !state.argSession) return;
           setState((current) => {
             const next =
               QUICKFIRE_MODE_CYCLE[
-                (QUICKFIRE_MODE_CYCLE.indexOf(current.mode) + 1) % QUICKFIRE_MODE_CYCLE.length
+                (QUICKFIRE_MODE_CYCLE.indexOf(current.mode) + 1) %
+                  QUICKFIRE_MODE_CYCLE.length
               ]!;
             return setMode(current, next);
           });
@@ -984,13 +1157,14 @@ export function QuickfireOwner() {
           if (state.argSession) {
             applySessionOutcome(
               reduceArgSession(state.argSession, { type: "backspace" }),
-              selectedId ?? ""
+              selectedId ?? "",
             );
             return;
           }
+          if (state.mode === "quickfire") return;
           // Dropping the prefix is the palette's other "one step back".
           setState((current) =>
-            current.mode === "all" ? current : setMode(current, "all")
+            current.mode === "all" ? current : setMode(current, "all"),
           );
           return;
         case "escape":
@@ -1003,7 +1177,7 @@ export function QuickfireOwner() {
           if (state.argSession) {
             applySessionOutcome(
               reduceArgSession(state.argSession, { type: "escape" }),
-              selectedId ?? ""
+              selectedId ?? "",
             );
             return;
           }
@@ -1041,14 +1215,14 @@ export function QuickfireOwner() {
           const mine = quickfireSession.view.transcript
             .filter(
               (entry): entry is Extract<typeof entry, { kind: "message" }> =>
-                entry.kind === "message" && entry.author === "you"
+                entry.kind === "message" && entry.author === "you",
             )
             .map((entry) => entry.text)
             .filter((text) => text.trim().length > 0);
           if (mine.length === 0) return;
           const next = Math.min(
             mine.length - 1,
-            Math.max(-1, recallRef.current + (intent.delta < 0 ? 1 : -1))
+            Math.max(-1, recallRef.current + (intent.delta < 0 ? 1 : -1)),
           );
           recallRef.current = next;
           setState((current) => ({
@@ -1070,7 +1244,7 @@ export function QuickfireOwner() {
           }));
           return;
         case "show-older":
-          quickfireSession.showOlder();
+          void quickfireSession.showOlder();
           return;
         case "open-link":
           void openLink(intent.href).catch(reportCommandFailure);
@@ -1079,10 +1253,27 @@ export function QuickfireOwner() {
           quickfireSession.revealImage(intent.imageId);
           return;
         case "clear":
-          // A conversation surface has no clear (plan §4.8); the button is not
-          // rendered, so this is only a stray keyboard path.
+          // A notification-bound conversation cannot be destroyed from this
+          // borrowed surface. Slot conversations clear and return to commands.
           if (state.conversation) return;
-          void quickfireSession.clear().catch(reportCommandFailure);
+          void quickfireSession
+            .clear()
+            .then(() => {
+              conversationIndexEpochRef.current += 1;
+              if (quickfireSlotId)
+                conversationSlotsRef.current.delete(quickfireSlotId);
+              setQuickfireConversations(null);
+              setState((current) => ({
+                ...current,
+                mode: "all",
+                query: "",
+                inputEpoch: current.inputEpoch + 1,
+                argSession: null,
+                selectedId: null,
+                selectionTouched: false,
+              }));
+            })
+            .catch(reportCommandFailure);
           return;
         case "promote":
           void promoteToChatPanel().catch(reportCommandFailure);
@@ -1106,12 +1297,13 @@ export function QuickfireOwner() {
       openLink,
       promoteToChatPanel,
       quickfireSession,
+      quickfireSlotId,
       rows,
       selectedId,
       state.argSession,
       state.mode,
       state.retargeting,
-    ]
+    ],
   );
 
   // --- Props ----------------------------------------------------------------
@@ -1131,7 +1323,7 @@ export function QuickfireOwner() {
       themeConfig.panelBackground,
       themeConfig.radius,
       themeConfig.scaling,
-    ]
+    ],
   );
 
   const surfaceProps = useMemo<QuickfireSurfaceProps>(() => {
@@ -1143,7 +1335,9 @@ export function QuickfireOwner() {
       mode: state.mode,
       inputValue: state.query,
       inputEpoch: state.inputEpoch,
-      placeholder: session ? (arg?.label ?? "") : QUICKFIRE_MODE_PLACEHOLDER[state.mode],
+      placeholder: session
+        ? (arg?.label ?? "")
+        : QUICKFIRE_MODE_PLACEHOLDER[state.mode],
       ghostSuffix,
       groups: rows,
       selectedId,
@@ -1166,12 +1360,16 @@ export function QuickfireOwner() {
             ...(panelLost ? { lost: true } : {}),
           }
         : null,
-      emptyMessage: rows.length ? null : emptyMessageFor({ argSession: state.argSession, query: searchQuery }),
+      emptyMessage: rows.length
+        ? null
+        : emptyMessageFor({ argSession: state.argSession, query: searchQuery }),
       flashRowId: state.flashRowId,
       compose:
         state.mode === "quickfire" && !session
           ? {
-              kind: state.conversation ? ("conversation" as const) : ("slot" as const),
+              kind: state.conversation
+                ? ("conversation" as const)
+                : ("slot" as const),
               panelTitle: state.conversation
                 ? (state.conversation.title ??
                   (state.conversation.replyTo?.handle
@@ -1190,13 +1388,14 @@ export function QuickfireOwner() {
               disabledReason: state.conversation
                 ? conversation.view.error
                 : panelLost
-                  ? "That panel closed. Reopen the command agent over another panel to keep going."
+                  ? "That panel closed. Reopen the Quickfire agent over another panel to keep going."
                   : !chromeState
                     ? "No panel is focused, so there is nothing to ask about."
                     : conversation.view.error,
               transcript: conversation.view.transcript,
               olderCount: conversation.view.olderCount,
               expandable: conversation.view.expandable,
+              loadingOlder: conversation.view.loadingOlder,
               credentialRequest: conversation.view.credentialRequest,
               resume: conversation.view.resume,
               // The envelope this surface was opened on, so the notification the
@@ -1215,7 +1414,10 @@ export function QuickfireOwner() {
                 : {
                     suggestions: suggestedOpeners({
                       title: chromeState?.title ?? null,
-                      kind: chromeState?.kind === "browser" ? "browser" : "workspace",
+                      kind:
+                        chromeState?.kind === "browser"
+                          ? "browser"
+                          : "workspace",
                     }),
                   }),
             }
@@ -1244,7 +1446,7 @@ export function QuickfireOwner() {
           props: surfaceProps,
         }
       : null,
-    handleIntent
+    handleIntent,
   );
 
   return null;
@@ -1263,7 +1465,7 @@ export function QuickfireOwner() {
  */
 function mergePanelEntries(
   walked: OpenPanelEntry[],
-  found: OpenPanelEntry[]
+  found: OpenPanelEntry[],
 ): OpenPanelEntry[] {
   if (found.length === 0) return walked;
   const seen = new Set(walked.map((entry) => entry.id));
@@ -1274,9 +1476,13 @@ function mergePanelEntries(
 async function collectOpenPanels(): Promise<OpenPanelEntry[]> {
   const entries: OpenPanelEntry[] = [];
   const titles = new Map<string, string>();
-  const pending: Array<{ kind: "roots"; ownerUserId: string | null } | { kind: "children"; parentSlotId: string }> = [];
+  const pending: Array<
+    | { kind: "roots"; ownerUserId: string | null }
+    | { kind: "children"; parentSlotId: string }
+  > = [];
   const groups = await panel.getRootGroups({ limit: 50 });
-  for (const group of groups.groups) pending.push({ kind: "roots", ownerUserId: group.ownerUserId });
+  for (const group of groups.groups)
+    pending.push({ kind: "roots", ownerUserId: group.ownerUserId });
   while (pending.length && entries.length < MAX_OPEN_PANELS) {
     const group = pending.shift()!;
     let cursor: string | undefined;
@@ -1288,7 +1494,9 @@ async function collectOpenPanels(): Promise<OpenPanelEntry[]> {
       });
       for (const node of page.nodes) {
         titles.set(node.slotId, node.title);
-        const parentTitle = node.parentSlotId ? titles.get(node.parentSlotId) : undefined;
+        const parentTitle = node.parentSlotId
+          ? titles.get(node.parentSlotId)
+          : undefined;
         entries.push({
           id: node.slotId,
           title: node.title,
@@ -1296,7 +1504,8 @@ async function collectOpenPanels(): Promise<OpenPanelEntry[]> {
           ...(node.icon ? { icon: node.icon } : {}),
           ...(parentTitle ? { location: parentTitle } : {}),
         });
-        if (node.childCount > 0) pending.push({ kind: "children", parentSlotId: node.slotId });
+        if (node.childCount > 0)
+          pending.push({ kind: "children", parentSlotId: node.slotId });
       }
       cursor = page.nextCursor ?? undefined;
     } while (cursor && entries.length < MAX_OPEN_PANELS);

@@ -6,7 +6,10 @@
 import type { ZodType } from "zod";
 import type { CdpPage } from "@workspace/cdp-client";
 import type * as Rpc from "./rpc.js";
-import type { PanelLifecycleResult, PanelPlacementHint } from "@vibestudio/shared/types";
+import type {
+  PanelLifecycleResult,
+  PanelPlacementHint,
+} from "@vibestudio/shared/types";
 import type { PanelTreePlacement } from "@vibestudio/shared/panel/treeIndex";
 import type {
   PanelDiagnosticPacket,
@@ -162,6 +165,12 @@ export interface PanelConsoleHistoryOptions {
   limit?: number;
   errorLimit?: number;
   levels?: PanelConsoleHistoryLevel[];
+  sources?: Array<"console" | "lifecycle">;
+  contains?: string;
+  since?: number;
+  until?: number;
+  /** Exclusive stable cursor for reading the next older page. */
+  beforeSeq?: number;
 }
 
 export type PanelDiagnosticsResult = PanelDiagnosticPacket;
@@ -177,7 +186,9 @@ export interface CdpAutomation {
    * array; use `result.errors` or filter `result.entries`. This is separate
    * from the live array returned by `page.consoleEvents()`.
    */
-  consoleHistory(options?: PanelConsoleHistoryOptions): Promise<PanelConsoleHistoryResult>;
+  consoleHistory(
+    options?: PanelConsoleHistoryOptions,
+  ): Promise<PanelConsoleHistoryResult>;
   getCdpEndpoint(): Promise<CdpEndpoint>;
   navigate(url: string): Promise<void>;
   goBack(): Promise<void>;
@@ -273,7 +284,9 @@ export interface PanelHandle<
   readonly stateArgs: {
     get<TState = Record<string, unknown>>(): Promise<TState>;
     /** Merge a patch; use null to remove a key. Returns the full resulting state. */
-    set<TState = Record<string, unknown>>(updates: Record<string, unknown>): Promise<TState>;
+    set<TState = Record<string, unknown>>(
+      updates: Record<string, unknown>,
+    ): Promise<TState>;
   };
 
   /**
@@ -282,7 +295,7 @@ export interface PanelHandle<
    */
   emit<EventName extends Extract<keyof EmitE, string>>(
     event: EventName,
-    payload: EmitE[EventName]
+    payload: EmitE[EventName],
   ): Promise<void>;
 
   /**
@@ -297,7 +310,7 @@ export interface PanelHandle<
    */
   on<EventName extends Extract<keyof E, string>>(
     event: EventName,
-    listener: (payload: E[EventName]) => void
+    listener: (payload: E[EventName]) => void,
   ): () => void;
 
   /**
@@ -308,11 +321,14 @@ export interface PanelHandle<
 
   withContract<C extends PanelContract, Role extends PanelHandleContractRole>(
     contract: C,
-    role: Role
+    role: Role,
   ): PanelHandleFromContract<C, Role>;
 
   parent(): PanelHandle | null;
-  navigate(source: string, options?: PanelNavigateOptions): Promise<PanelObservation>;
+  navigate(
+    source: string,
+    options?: PanelNavigateOptions,
+  ): Promise<PanelObservation>;
   reload(options?: PanelWaitOptions): Promise<PanelObservation>;
   /** One bounded post-mortem packet: observation, console history, and ready document. */
   diagnose(): Promise<PanelDiagnosticsResult>;
@@ -321,7 +337,10 @@ export interface PanelHandle<
   unload(): Promise<PanelLifecycleResult>;
   /** Set this slot's display title without loading its runtime. */
   setTitle(title: string, options?: PanelSetTitleOptions): Promise<void>;
-  movePanel(newParentId: string | null, placement?: PanelTreePlacement): Promise<void>;
+  movePanel(
+    newParentId: string | null,
+    placement?: PanelTreePlacement,
+  ): Promise<void>;
   takeOver(): Promise<void>;
   openDevTools(mode?: "detach" | "right" | "bottom"): Promise<void>;
   /** Transactionally prepare and activate a new immutable attempt from source. */
@@ -368,7 +387,10 @@ export interface PanelContract<
 /**
  * Extract a typed PanelHandle from a contract for one side of the relationship.
  */
-export type PanelHandleFromContract<C extends PanelContract, Role extends PanelHandleContractRole> =
+export type PanelHandleFromContract<
+  C extends PanelContract,
+  Role extends PanelHandleContractRole,
+> =
   C extends PanelContract<
     infer _ChildMethods,
     infer ChildEmits,
@@ -376,8 +398,16 @@ export type PanelHandleFromContract<C extends PanelContract, Role extends PanelH
     infer ParentEmits
   >
     ? Role extends "parent"
-      ? PanelHandle<ParentMethods, InferEventMap<ParentEmits>, InferEventMap<ChildEmits>>
-      : PanelHandle<_ChildMethods, InferEventMap<ChildEmits>, InferEventMap<ParentEmits>>
+      ? PanelHandle<
+          ParentMethods,
+          InferEventMap<ParentEmits>,
+          InferEventMap<ChildEmits>
+        >
+      : PanelHandle<
+          _ChildMethods,
+          InferEventMap<ChildEmits>,
+          InferEventMap<ParentEmits>
+        >
     : never;
 
 // =============================================================================

@@ -74,7 +74,7 @@ export interface TranscriptProjection {
  * Content types this venue renders through some *other* record, so projecting
  * them again would double up rather than add anything.
  *
- * Invocation and progress cards are the per-turn tool records; the credential
+ * Progress cards are represented by their invocation record; the credential
  * request is the compose row's own banner; a typing pill is the activity row.
  * Note what is NOT here any more: `inline_ui` and `custom` used to be dropped
  * outright, which turned an agent's card into a hole in the conversation. This
@@ -82,7 +82,6 @@ export interface TranscriptProjection {
  * that can (see `projectRichContent`).
  */
 const REPRESENTED_ELSEWHERE = new Set([
-  "invocation",
   "toolcall-progress",
   "credential-connect",
   "typing",
@@ -109,7 +108,7 @@ export function projectTranscript(
     revealedImageIds,
   } = options;
   const merged = chatMessagesFromChannelView(state);
-  const toolCallsByTurn = toolCallsByTurnId(state, {
+  const toolCalls = projectToolCalls(state, {
     imageDelivery,
     ...(revealedImageIds ? { revealedImageIds } : {}),
   });
@@ -122,7 +121,7 @@ export function projectTranscript(
     const entry = projectChatMessage(
       message,
       selfParticipantKey,
-      toolCallsByTurn,
+      toolCalls,
       messageTimeOf(state, message.id),
     );
     if (entry) projected.push(entry);
@@ -144,7 +143,7 @@ export function projectTranscript(
 
   // A turn that is open but has produced nothing yet is the case the overlay
   // most needed and least had: the user pressed Enter and the card sat blank.
-  const activity = currentActivity(state, toolCallsByTurn, awaitingResponse);
+  const activity = currentActivity(state, awaitingResponse);
   if (activity) projected.push(activity);
 
   // Truncate before reordering: the bound is on WHICH entries are kept (the
@@ -160,7 +159,7 @@ export function projectTranscript(
 function projectChatMessage(
   message: ChatMessage,
   selfParticipantKey: string | null,
-  toolCallsByTurn: Map<string, QuickfireToolCall[]>,
+  toolCalls: ToolCallProjection,
   at: number | undefined,
 ): QuickfireTranscriptEntry | null {
   const { contentType } = message;
@@ -168,6 +167,11 @@ function projectChatMessage(
 
   if (contentType === "inline_ui" || contentType === "custom") {
     return projectRichContent(message, when);
+  }
+
+  if (contentType === "invocation" && message.invocation) {
+    const call = toolCalls.byId.get(message.invocation.id);
+    return call ? { kind: "tool", id: message.id, call } : null;
   }
 
   if (contentType === "thinking") {
@@ -235,6 +239,7 @@ function projectChatMessage(
         id: message.id,
         state: "waiting",
         phase: "waiting",
+        waitingFor: waitingTarget(message.lifecycle.reason),
         label: message.lifecycle.title,
       };
     }
@@ -251,11 +256,18 @@ function projectChatMessage(
   }
 
   if (contentType === "task" && message.task) {
+    const task = message.task;
+    const status = task.execution.status;
     return {
       kind: "notice",
       id: message.id,
-      severity: "info",
-      title: message.content || "Background task",
+      severity: status === "error" ? "error" : "info",
+      title: task.title || "Background task",
+      ...(task.execution.description
+        ? { detail: task.execution.description }
+        : status === "running" || status === "pending"
+          ? { detail: "In progress" }
+          : {}),
       ...when,
     };
   }
@@ -292,19 +304,10 @@ function projectChatMessage(
   const isAgent = senderType === "agent";
   const isSelf =
     selfParticipantKey !== null && message.senderId === selfParticipantKey;
-  const toolCalls = message.turnId
-    ? toolCallsByTurn.get(message.turnId)
-    : undefined;
   const streaming = message.complete === false && !message.error;
 
   // A bodiless message with no tool records, errors, or attachments is noise.
-  if (
-    !hasBody &&
-    !message.error &&
-    !toolCalls?.length &&
-    !message.attachments?.length
-  )
-    return null;
+  if (!hasBody && !message.error && !message.attachments?.length) return null;
 
   const projectedMessage: QuickfireTranscriptMessage = {
     kind: "message",
@@ -314,8 +317,8 @@ function projectChatMessage(
       ? "you"
       : (message.senderMetadata?.name ?? (isAgent ? "agent" : "someone")),
     text,
+    ...(message.tier === "secondary" ? { tier: "secondary" as const } : {}),
     ...(streaming ? { streaming: true } : {}),
-    ...(toolCalls?.length ? { toolCalls } : {}),
     ...(message.error ? { error: true, errorText: message.error } : {}),
     ...(message.pending ? { pending: true } : {}),
     ...(message.model?.displayName || message.model?.ref
@@ -350,6 +353,20 @@ function projectChatMessage(
     ...when,
   };
   return projectedMessage;
+}
+
+function waitingTarget(
+  reason: string | undefined,
+): "user" | "background" | "external" {
+  if (reason === "waiting_for_background") return "background";
+  if (
+    reason === "input_required" ||
+    reason === "model_credential_required" ||
+    reason === "model_credential_reconnect_required"
+  ) {
+    return "user";
+  }
+  return "external";
 }
 
 /**
@@ -398,18 +415,22 @@ function messageTimeOf(
 }
 
 /**
- * Every call in a turn, in order, each carrying how it ended. Not deduped: five
- * console reads are five calls, and collapsing them hides both the work and its
- * failures.
+ * Full display data for each invocation, keyed by the canonical invocation id.
+ * Ordering is deliberately not decided here: the channel merge intersperses
+ * invocation and reasoning messages by their recorded lifecycle timestamps.
  */
-function toolCallsByTurnId(
+interface ToolCallProjection {
+  byId: Map<string, QuickfireToolCall>;
+}
+
+function projectToolCalls(
   state: ChannelViewState,
   images: {
     imageDelivery: "inline" | "on-demand";
     revealedImageIds?: ReadonlySet<string>;
   },
-): Map<string, QuickfireToolCall[]> {
-  const byTurn = new Map<string, QuickfireToolCall[]>();
+): ToolCallProjection {
+  const byId = new Map<string, QuickfireToolCall>();
   for (const invocation of Object.values(state.invocations)) {
     if (!invocation.turnId) continue;
     if (typeof invocation.name !== "string" || invocation.name.length === 0)
@@ -428,7 +449,8 @@ function toolCallsByTurnId(
     ).map((image, index) => {
       const id = `${invocation.invocationId}:${index}`;
       const visible =
-        images.imageDelivery === "inline" || images.revealedImageIds?.has(id) === true;
+        images.imageDelivery === "inline" ||
+        images.revealedImageIds?.has(id) === true;
       return {
         id,
         mimeType: image.mimeType,
@@ -455,7 +477,7 @@ function toolCallsByTurnId(
             : "running",
       ...(invocation.request === undefined
         ? {}
-        : { input: formatDetail(invocation.request) }),
+        : { arguments: formatToolArguments(invocation.request) }),
       ...(invocation.result === undefined && invocation.outputs.length === 0
         ? {}
         : {
@@ -473,16 +495,13 @@ function toolCallsByTurnId(
         : {}),
       ...(resultImages.length > 0 ? { images: resultImages } : {}),
     };
-    const calls = byTurn.get(invocation.turnId);
-    if (calls) calls.push(call);
-    else byTurn.set(invocation.turnId, [call]);
+    byId.set(invocation.invocationId, call);
   }
-  return byTurn;
+  return { byId };
 }
 
 function currentActivity(
   state: ChannelViewState,
-  toolCallsByTurn: Map<string, QuickfireToolCall[]>,
   awaitingResponse: boolean,
 ): QuickfireTranscriptEntry | null {
   const turns = Object.values(state.turns).sort(
@@ -513,8 +532,11 @@ function currentActivity(
       : null;
   }
 
-  const toolCalls = toolCallsByTurn.get(turnId) ?? [];
-  const hasRunningTool = toolCalls.some((call) => call.state === "running");
+  const hasRunningTool = Object.values(state.invocations).some(
+    (invocation) =>
+      invocation.turnId === turnId &&
+      (invocation.status === "running" || invocation.status === "started"),
+  );
   const turnMessages = Object.values(state.messages).filter(
     (message) =>
       message.turnId === turnId &&
@@ -543,7 +565,6 @@ function currentActivity(
         : phase === "responding"
           ? "responding"
           : "thinking",
-    ...(toolCalls.length > 0 ? { toolCalls } : {}),
   };
 }
 
@@ -599,6 +620,46 @@ function formatDetail(value: unknown): string {
   return rendered.length > 6_000
     ? `${rendered.slice(0, 6_000)}\n… detail truncated`
     : rendered;
+}
+
+function formatToolArguments(
+  value: unknown,
+): NonNullable<QuickfireToolCall["arguments"]> {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.entries(value as Record<string, unknown>).map(
+      ([name, argument]) => ({
+        name,
+        value: typeof argument === "string" ? argument : formatDetail(argument),
+        ...argumentLanguage(name, argument),
+      }),
+    );
+  }
+  return [
+    {
+      name: "input",
+      value: formatDetail(value),
+      ...argumentLanguage("input", value),
+    },
+  ];
+}
+
+function argumentLanguage(name: string, value: unknown): { language?: string } {
+  const key = name.toLowerCase();
+  if (typeof value !== "string") return { language: "json" };
+  if (/^(?:code|expression|javascript|js|script|source)$/u.test(key)) {
+    return { language: "javascript" };
+  }
+  if (/^(?:typescript|ts)$/u.test(key)) return { language: "typescript" };
+  if (/^(?:command|cmd|shell|bash)$/u.test(key)) return { language: "shell" };
+  if (/^(?:css|html|xml|sql|json|markdown)$/u.test(key))
+    return { language: key };
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === "object") return { language: "json" };
+  } catch {
+    // Ordinary prose/path arguments stay monospace without pretend highlighting.
+  }
+  return {};
 }
 
 /** A turn is in flight while any turn is open or waiting on the user. */

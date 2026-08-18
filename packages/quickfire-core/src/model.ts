@@ -36,7 +36,7 @@ export const QUICKFIRE_MODE_CHIPS: Array<{
   { mode: "all", label: "All" },
   { mode: "commands", label: "Commands" },
   { mode: "goto", label: "Go to" },
-  { mode: "quickfire", label: "Command agent" },
+  { mode: "quickfire", label: "Quickfire agent" },
 ];
 
 /** Cycle order for repeating the palette accelerator while open (§1.3). */
@@ -73,8 +73,8 @@ export interface QuickfireToolCall {
   name: string;
   /** Running work, finished work, and work that ended badly must look different. */
   state: "running" | "done" | "failed";
-  /** Bounded, human-readable snapshots of the canonical invocation record. */
-  input?: string;
+  /** Named, bounded arguments from the canonical invocation request. */
+  arguments?: QuickfireToolArgument[];
   output?: string;
   progress?: string[];
   failure?: string;
@@ -85,6 +85,13 @@ export interface QuickfireToolCall {
   /** Images the call produced. A screenshot tool that shows no screenshot is a
    *  tool the user has to take on faith. */
   images?: QuickfireImage[];
+}
+
+export interface QuickfireToolArgument {
+  name: string;
+  value: string;
+  /** Known syntax only; renderers must not guess a grammar. */
+  language?: string | null;
 }
 
 /**
@@ -154,19 +161,12 @@ export interface QuickfireTranscriptMessage {
   /** "you" for this device's own messages, otherwise the agent handle. */
   author: "you" | "agent" | "other";
   authorLabel: string;
+  /** Primary replies lead; intermediate narration remains supporting context. */
+  tier?: "primary" | "secondary";
   /** Flattened plain text. Still the whole content for compact renderers. */
   text: string;
   /** Still streaming: render the live delta treatment. */
   streaming?: boolean;
-  /**
-   * Inspectable tool records, in call order.
-   *
-   * Carrying `state` is the difference between a transcript that shows work and
-   * one that only shows names: a deduped list of names renders a running call,
-   * a finished one, a failure and an interruption identically, which is what
-   * made "is the agent doing anything?" unanswerable from the overlay.
-   */
-  toolCalls?: QuickfireToolCall[];
   error?: boolean;
   /**
    * The failure text itself. `error` alone says a turn broke without saying
@@ -236,8 +236,9 @@ export interface QuickfireTranscriptActivity {
   id: string;
   state: "working" | "waiting";
   phase: "starting" | "thinking" | "using-tools" | "responding" | "waiting";
+  /** What can make a parked turn runnable again. */
+  waitingFor?: "user" | "background" | "external";
   label: string;
-  toolCalls?: QuickfireToolCall[];
 }
 
 /** A model reasoning record, intentionally distinct from its eventual reply. */
@@ -246,6 +247,13 @@ export interface QuickfireTranscriptThinking {
   id: string;
   text: string;
   streaming?: boolean;
+}
+
+/** One invocation at its canonical position in channel history. */
+export interface QuickfireTranscriptTool {
+  kind: "tool";
+  id: string;
+  call: QuickfireToolCall;
 }
 
 /** A user decision the compact venue cannot answer inline. */
@@ -262,6 +270,7 @@ export interface QuickfireTranscriptApproval {
 
 export type QuickfireTranscriptEntry =
   | QuickfireTranscriptMessage
+  | QuickfireTranscriptTool
   | QuickfireTranscriptNotice
   | QuickfireTranscriptActivity
   | QuickfireTranscriptThinking
@@ -283,7 +292,7 @@ export interface QuickfireResumeChip {
 export interface QuickfireComposeView {
   /**
    * What the conversation is bound to (messaging plan §4.8). `slot` is the
-   * command agent over a panel; `conversation` is an existing channel opened
+   * Quickfire agent over a panel; `conversation` is an existing channel opened
    * from a notification — no clear, no fresh, and "promote" means "open its
    * chat panel". Absent ⇒ `slot`.
    */
@@ -314,6 +323,8 @@ export interface QuickfireComposeView {
    * have; the replay the client already holds is enough to widen the window.
    */
   expandable: boolean;
+  /** True while the preceding durable history page is being fetched. */
+  loadingOlder: boolean;
   /** A model credential request the compact surface cannot complete inline. */
   credentialRequest: { providerId: string; reason: string | null } | null;
   /** Non-null only when this open resumed an existing conversation. */

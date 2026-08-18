@@ -190,7 +190,7 @@ const DESKTOP_RUNS: Record<string, SlateRun> = {
   },
   "quickfire.list": async (_args, deps) => {
     const rows = await quickfire.list();
-    if (rows.length === 0) return { message: "No panel has a command agent conversation yet" };
+    if (rows.length === 0) return { message: "No panel has a Quickfire agent conversation yet" };
     deps.showQuickfireConversations(rows);
     return {};
   },

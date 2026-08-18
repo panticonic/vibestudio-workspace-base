@@ -32,7 +32,7 @@ export type PanelDescribeParams = Static<typeof panelDescribeParameters>;
 export function formatPanelContext(snapshot: PanelContextSnapshot): string {
   const lines: string[] = [];
   lines.push(
-    "relationship: panel the user was viewing when they opened this command-agent conversation; it may be the subject of their request",
+    "relationship: panel the user was viewing when they opened this Quickfire conversation; it may be the subject of their request",
   );
   lines.push(`slot: ${snapshot.tree.slotId}`);
   lines.push(`title: ${snapshot.tree.title ?? "(untitled)"}`);

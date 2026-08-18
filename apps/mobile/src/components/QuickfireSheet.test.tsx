@@ -1,7 +1,7 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import { QuickfireSheet } from "./QuickfireSheet";
-import { quickfireSheetAtom } from "../state/commandSheetAtoms";
+import { commandSheetAtom, quickfireSheetAtom } from "../state/commandSheetAtoms";
 import type { QuickfireSessionFacts, QuickfireTransport } from "@workspace/quickfire-core/session";
 
 jest.mock("react-native-safe-area-context", () => {
@@ -125,17 +125,19 @@ describe("QuickfireSheet", () => {
     expect(await findByText("starting")).toBeTruthy();
   });
 
-  it("clears and binds a fresh conversation on the first press", async () => {
+  it("clears and returns to the command sheet on the first press", async () => {
     const { transport } = transportFor();
     const { store, getByLabelText } = renderSheet(transport);
     act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
-    await waitFor(() => getByLabelText("Clear this conversation and start a new one"));
+    await waitFor(() => getByLabelText("Clear this conversation and return to commands"));
 
     await act(async () => {
-      fireEvent.press(getByLabelText("Clear this conversation and start a new one"));
+      fireEvent.press(getByLabelText("Clear this conversation and return to commands"));
     });
     expect(transport.clear).toHaveBeenCalledWith("slot");
-    expect(transport.sessionFor).toHaveBeenLastCalledWith("slot", { fresh: true });
+    expect(transport.sessionFor).toHaveBeenCalledTimes(1);
+    expect(store.get(quickfireSheetAtom)).toBeNull();
+    expect(store.get(commandSheetAtom)).toEqual({ mode: "all" });
   });
 
   it("shows the resume chip for a conversation that already existed", async () => {

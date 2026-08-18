@@ -13,14 +13,22 @@
  */
 
 import { useState, type ReactNode } from "react";
-import type { QuickfireCard, QuickfireCardActionId, QuickfireDetail } from "../cards";
+import type {
+  QuickfireCard,
+  QuickfireCardActionId,
+  QuickfireDetail,
+} from "../cards";
 import { Markdown } from "./Markdown";
 import { useSkin } from "./primitives";
 
 export interface TranscriptProps {
   cards: readonly QuickfireCard[];
   /** Invoked when a card offers something this venue cannot do itself. */
-  onAction?: (action: QuickfireCardActionId, card: QuickfireCard, value?: string) => void;
+  onAction?: (
+    action: QuickfireCardActionId,
+    card: QuickfireCard,
+    value?: string,
+  ) => void;
   /**
    * Rendered above the list when older entries were trimmed. The surface owns
    * the affordance because only it knows whether they can be pulled in.
@@ -29,15 +37,24 @@ export interface TranscriptProps {
   footer?: ReactNode;
 }
 
-export function Transcript({ cards, onAction, header, footer }: TranscriptProps) {
+export function Transcript({
+  cards,
+  onAction,
+  header,
+  footer,
+}: TranscriptProps) {
   const { Box } = useSkin();
   return (
-    <Box gap="md" testId="quickfire-transcript">
-      {header}
+    <Box row gap="md" testId="quickfire-transcript">
+      {header ? <Box full>{header}</Box> : null}
       {cards.map((card) => (
-        <TranscriptCard key={card.id} card={card} {...(onAction ? { onAction } : {})} />
+        <TranscriptCard
+          key={card.id}
+          card={card}
+          {...(onAction ? { onAction } : {})}
+        />
       ))}
-      {footer}
+      {footer ? <Box full>{footer}</Box> : null}
     </Box>
   );
 }
@@ -47,21 +64,47 @@ export function TranscriptCard({
   onAction,
 }: {
   card: QuickfireCard;
-  onAction?: (action: QuickfireCardActionId, card: QuickfireCard, value?: string) => void;
+  onAction?: (
+    action: QuickfireCardActionId,
+    card: QuickfireCard,
+    value?: string,
+  ) => void;
 }) {
   const { Box, Text, Icon, Spinner, Pill } = useSkin();
   const speech = card.layout === "speech";
+  const agentMessage = card.kind === "message" && card.role === "agent";
+  const answer = agentMessage && card.tier !== "secondary";
+  const supportingSpeech = agentMessage && card.tier === "secondary";
+  const presentationTone =
+    answer && card.tone === "neutral" ? "accent" : card.tone;
+  const standaloneWork = card.kind === "tool" ? card.work[0] : undefined;
+  if (standaloneWork) {
+    return (
+      <WorkRecord
+        record={standaloneWork}
+        card={card}
+        {...(onAction ? { onAction } : {})}
+        testId={`quickfire-card-${card.id}`}
+      />
+    );
+  }
+  const compact = card.kind === "thinking" || card.kind === "activity";
   // Reasoning is a heading *and* a disclosure — it has nothing else in it. Two
   // rows for one idea read as a stutter, so the heading is the summary.
-  const headerIsDisclosure = card.kind === "thinking" && card.details.length === 1;
+  const headerIsDisclosure =
+    card.kind === "thinking" && card.details.length === 1;
   const header = (
     <Box row gap="xs" align="center">
-      {card.busy ? <Spinner tone={card.tone} /> : <Icon name={card.glyph} tone={card.tone} />}
+      {card.busy ? (
+        <Spinner tone={presentationTone} />
+      ) : (
+        <Icon name={card.glyph} tone={presentationTone} />
+      )}
       {/* A speaker's name is a label; a thought is a sentence, and setting one
           in small caps makes it unreadable at exactly the size it is shown. */}
       <Text
         variant={card.kind === "thinking" ? "caption" : "label"}
-        tone={speech ? "muted" : card.tone}
+        tone={answer ? presentationTone : speech ? "muted" : card.tone}
         clamp
       >
         {card.title}
@@ -81,9 +124,12 @@ export function TranscriptCard({
   );
   return (
     <Box
-      surface={speech ? "card" : "rail"}
-      tone={card.tone}
-      pad={speech ? "sm" : "sm"}
+      surface={
+        answer ? "answer" : supportingSpeech || !speech ? "rail" : "card"
+      }
+      tone={answer ? presentationTone : card.tone}
+      pad={answer ? "md" : "sm"}
+      {...(compact ? { fit: true } : { full: true })}
       gap="xs"
       testId={`quickfire-card-${card.id}`}
       {...(card.busy ? { live: true } : {})}
@@ -111,49 +157,22 @@ export function TranscriptCard({
           key={detail.id}
           detail={detail}
           tone={card.tone}
-          {...(headerIsDisclosure ? { summary: header, label: card.title } : {})}
+          {...(headerIsDisclosure
+            ? { summary: header, label: card.title }
+            : {})}
           defaultOpen={card.kind === "thinking" && card.busy}
         />
       ))}
 
       {card.work.length > 0 ? (
-        <Box gap="xs">
+        <Box row gap="xs">
           {card.work.map((record) => (
-            <Box
+            <WorkRecord
               key={record.id}
-              surface="outline"
-              // A green frame around every completed call shouts about the
-              // ordinary case; the glyph already says it went fine.
-              {...(record.state === "done" ? {} : { tone: record.tone })}
-              gap="none"
-            >
-              <Detail
-                tone={record.tone}
-                summary={
-                  <Box row gap="xs" align="center">
-                    {record.busy ? (
-                      <Spinner tone={record.tone} />
-                    ) : (
-                      <Icon name={record.glyph} tone={record.tone} size="sm" />
-                    )}
-                    <Text variant="strong" tone={record.tone}>
-                      {record.name}
-                    </Text>
-                    <Text variant="caption" tone="muted">
-                      {record.statusLabel}
-                    </Text>
-                  </Box>
-                }
-                label={`${record.name} — ${record.statusLabel}`}
-                detail={null}
-                sections={record.details}
-                extra={
-                  record.images.length > 0 ? (
-                    <Images images={record.images} {...(onAction ? { onAction } : {})} card={card} />
-                  ) : null
-                }
-              />
-            </Box>
+              record={record}
+              card={card}
+              {...(onAction ? { onAction } : {})}
+            />
           ))}
         </Box>
       ) : null}
@@ -165,6 +184,66 @@ export function TranscriptCard({
   );
 }
 
+function WorkRecord({
+  record,
+  card,
+  onAction,
+  testId,
+}: {
+  record: QuickfireCard["work"][number];
+  card: QuickfireCard;
+  onAction?: (
+    action: QuickfireCardActionId,
+    card: QuickfireCard,
+    value?: string,
+  ) => void;
+  testId?: string;
+}) {
+  const { Box, Text, Icon, Spinner } = useSkin();
+  return (
+    <Box
+      surface="outline"
+      fit
+      // A green frame around every completed call shouts about the ordinary
+      // case; the glyph already says it went fine.
+      {...(record.state === "done" ? {} : { tone: record.tone })}
+      gap="none"
+      {...(testId ? { testId } : {})}
+    >
+      <Detail
+        tone={record.tone}
+        summary={
+          <Box row gap="xs" align="center">
+            {record.busy ? (
+              <Spinner tone={record.tone} />
+            ) : (
+              <Icon name={record.glyph} tone={record.tone} size="sm" />
+            )}
+            <Text variant="strong" tone={record.tone}>
+              {record.name}
+            </Text>
+            <Text variant="caption" tone="muted">
+              {record.statusLabel}
+            </Text>
+          </Box>
+        }
+        label={`${record.name} — ${record.statusLabel}`}
+        detail={null}
+        sections={record.details}
+        extra={
+          record.images.length > 0 ? (
+            <Images
+              images={record.images}
+              {...(onAction ? { onAction } : {})}
+              card={card}
+            />
+          ) : null
+        }
+      />
+    </Box>
+  );
+}
+
 function Images({
   images,
   card,
@@ -172,14 +251,23 @@ function Images({
 }: {
   images: QuickfireCard["work"][number]["images"];
   card: QuickfireCard;
-  onAction?: (action: QuickfireCardActionId, card: QuickfireCard, value?: string) => void;
+  onAction?: (
+    action: QuickfireCardActionId,
+    card: QuickfireCard,
+    value?: string,
+  ) => void;
 }) {
   const { Box, Text, Figure, Pressable } = useSkin();
   return (
     <Box gap="sm" pad="sm" testId="quickfire-images">
       {images.map((image) =>
         image.dataUrl ? (
-          <Figure key={image.id} src={image.dataUrl} alt={image.alt} caption={image.label} />
+          <Figure
+            key={image.id}
+            src={image.dataUrl}
+            alt={image.alt}
+            caption={image.label}
+          />
         ) : (
           // Desktop keeps the bytes out of its props until they are wanted, so
           // the offer has to say what is behind it.
@@ -194,7 +282,7 @@ function Images({
               Show image · {image.label}
             </Text>
           </Pressable>
-        )
+        ),
       )}
     </Box>
   );
@@ -212,7 +300,11 @@ function CardActions({
   onAction,
 }: {
   card: QuickfireCard;
-  onAction?: (action: QuickfireCardActionId, card: QuickfireCard, value?: string) => void;
+  onAction?: (
+    action: QuickfireCardActionId,
+    card: QuickfireCard,
+    value?: string,
+  ) => void;
 }) {
   const { Box, Text, Pressable, copy } = useSkin();
   const [copied, setCopied] = useState(false);
@@ -234,7 +326,11 @@ function CardActions({
           }}
         >
           <Text variant="caption" tone="accent">
-            {action.id === "copy" ? (copied ? "Copied" : "Copy") : `${action.label} →`}
+            {action.id === "copy"
+              ? copied
+                ? "Copied"
+                : "Copy"
+              : `${action.label} →`}
           </Text>
         </Pressable>
       ))}
@@ -296,16 +392,30 @@ function Detail({
           {payload.map((section) =>
             section.format === "markdown" ? (
               <Box key={section.id} gap="xs">
-                {sections ? <Text variant="label" tone="muted">{section.label}</Text> : null}
+                {sections ? (
+                  <Text variant="label" tone="muted">
+                    {section.label}
+                  </Text>
+                ) : null}
                 <Markdown source={section.text} />
+              </Box>
+            ) : section.format === "text" ? (
+              <Box key={section.id} gap="xs">
+                {sections ? (
+                  <Text variant="label" tone="muted">
+                    {section.label}
+                  </Text>
+                ) : null}
+                <Text selectable>{section.text}</Text>
               </Box>
             ) : (
               <Code
                 key={section.id}
                 text={section.text}
+                language={section.language}
                 caption={section.label}
               />
-            )
+            ),
           )}
         </Box>
       )}

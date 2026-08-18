@@ -398,15 +398,15 @@ function automationSnapshot(value: unknown): AutomationActivitySnapshot | null {
 }
 
 /**
- * A turn that parked on an out-of-band wait (e.g. a deferred model-credential
- * approval) projects to a first-class "Waiting" lifecycle notice — the agent's
- * failure message for the pause is suppressed upstream, so this is the user's
- * "waiting for approval" signal (with the right call-to-action via the reason).
+ * A turn parked on an out-of-band condition projects to a first-class waiting
+ * lifecycle notice. The reason distinguishes work continuing elsewhere from a
+ * genuine request for user action; presentation must not guess that distinction
+ * from the mere fact that the turn is parked.
  */
 function projectedWaitingTurnMessage(turn: ProjectedTurn): ChatMessage[] {
   if (turn.status !== "waiting") return [];
   if (turn.actor.kind !== "agent") return [];
-  const title = turn.summary ?? "Waiting for input";
+  const title = turn.summary ?? "Waiting";
   const lifecycle: LifecycleNotice = {
     status: "waiting",
     title,
@@ -419,6 +419,7 @@ function projectedWaitingTurnMessage(turn: ProjectedTurn): ChatMessage[] {
       content: title,
       contentType: "lifecycle",
       kind: "system",
+      turnId: turn.turnId,
       complete: false,
       lifecycle,
       senderMetadata: {

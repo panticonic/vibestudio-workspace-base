@@ -17,7 +17,7 @@
  * Lifecycle rules that matter here (§1.4):
  *  - Opening over a slot is what binds the conversation. Swiping the sheet away
  *    is a view change only — the conversation persists.
- *  - Clearing immediately archives the old conversation and binds a fresh one.
+ *  - Clearing archives the old conversation and returns to the command sheet.
  *  - Promotion transfers ownership to a chat panel, after which this sheet
  *    offers "continued in chat panel →" plus "start a new conversation here"
  *    instead of a compose row.
@@ -37,7 +37,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import ReactNativeHapticFeedback from "react-native-haptic-feedback";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
@@ -61,6 +64,7 @@ import { pushToastAtom } from "../state/toastAtoms";
 import {
   dismissQuickfireSheetAtom,
   quickfireSheetAtom,
+  returnToCommandSheetAtom,
   type QuickfireSheetRequest,
 } from "../state/commandSheetAtoms";
 import { hairline, radius, shadow, spacing, type } from "../design/tokens";
@@ -97,6 +101,7 @@ export function QuickfireSheet({
 }: QuickfireSheetProps) {
   const request = useAtomValue(quickfireSheetAtom);
   const dismiss = useSetAtom(dismissQuickfireSheetAtom);
+  const returnToCommands = useSetAtom(returnToCommandSheetAtom);
   const pushToast = useSetAtom(pushToastAtom);
   const colors = useAtomValue(themeColorsAtom);
   const insets = useSafeAreaInsets();
@@ -110,7 +115,9 @@ export function QuickfireSheet({
         channelId: conversation.channelId,
         contextId: conversation.contextId,
         clientId: `conversation:${conversation.channelId}`,
-        ...(conversation.focusMessageId ? { focusMessageId: conversation.focusMessageId } : {}),
+        ...(conversation.focusMessageId
+          ? { focusMessageId: conversation.focusMessageId }
+          : {}),
         ...(conversation.replyTo
           ? { replyTo: { participantId: conversation.replyTo.participantId } }
           : {}),
@@ -188,7 +195,10 @@ export function QuickfireSheet({
 
   useEffect(() => {
     if (view.transcript.length === 0) return;
-    const timer = setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 32);
+    const timer = setTimeout(
+      () => scrollRef.current?.scrollToEnd({ animated: true }),
+      32,
+    );
     return () => clearTimeout(timer);
   }, [view.transcript]);
 
@@ -212,7 +222,7 @@ export function QuickfireSheet({
           }
         },
       }),
-    [close, translateY]
+    [close, translateY],
   );
 
   /**
@@ -231,7 +241,7 @@ export function QuickfireSheet({
       openLink(href);
       close();
     },
-    [close, openLink]
+    [close, openLink],
   );
   const skin = useNativeSkin(colors, { openLink: handleLink });
 
@@ -242,7 +252,7 @@ export function QuickfireSheet({
         message: error instanceof Error ? error.message : String(error),
         tone: "danger",
       }),
-    [pushToast]
+    [pushToast],
   );
 
   /**
@@ -309,6 +319,7 @@ export function QuickfireSheet({
       transcript: view.transcript,
       olderCount: view.olderCount,
       expandable: view.expandable,
+      loadingOlder: view.loadingOlder,
       credentialRequest: view.credentialRequest,
       resume: view.resume,
       focusMessageId: request?.conversation?.focusMessageId ?? null,
@@ -319,16 +330,30 @@ export function QuickfireSheet({
       error: view.error,
       ...(isConversation
         ? {}
-        : { suggestions: suggestedOpeners({ title: panelTitle, kind: "workspace" }) }),
+        : {
+            suggestions: suggestedOpeners({
+              title: panelTitle,
+              kind: "workspace",
+            }),
+          }),
     }),
-    [headerTitle, isConversation, panelTitle, request?.conversation?.focusMessageId, view]
+    [
+      headerTitle,
+      isConversation,
+      panelTitle,
+      request?.conversation?.focusMessageId,
+      view,
+    ],
   );
 
   const onIntent = useCallback(
     (intent: ConversationIntent) => {
       switch (intent.kind) {
         case "clear":
-          void session.clear().catch(report("Could not clear the conversation"));
+          void session
+            .clear()
+            .then(() => returnToCommands())
+            .catch(report("Could not clear the conversation"));
           return;
         case "promote":
           handlePromote();
@@ -337,10 +362,12 @@ export function QuickfireSheet({
           handleFocusPromoted();
           return;
         case "start-fresh":
-          void session.startFresh().catch(report("Could not start a conversation"));
+          void session
+            .startFresh()
+            .catch(report("Could not start a conversation"));
           return;
         case "show-older":
-          session.showOlder();
+          void session.showOlder();
           return;
         case "stop":
           void session.stop().catch(report("Could not stop the turn"));
@@ -354,7 +381,7 @@ export function QuickfireSheet({
           return;
       }
     },
-    [handleFocusPromoted, handlePromote, report, session]
+    [handleFocusPromoted, handlePromote, report, returnToCommands, session],
   );
 
   if (!request) return null;
@@ -373,12 +400,15 @@ export function QuickfireSheet({
       <QuickfireSkinProvider value={skin}>
         <View style={styles.root}>
           <Animated.View
-            style={[styles.backdrop, { backgroundColor: colors.overlay, opacity: backdropOpacity }]}
+            style={[
+              styles.backdrop,
+              { backgroundColor: colors.overlay, opacity: backdropOpacity },
+            ]}
           >
             <Pressable
               style={StyleSheet.absoluteFill}
               onPress={close}
-              accessibilityLabel="Dismiss the command agent"
+              accessibilityLabel="Dismiss the Quickfire agent"
               testID="quickfire-backdrop"
             />
           </Animated.View>
@@ -387,7 +417,11 @@ export function QuickfireSheet({
             style={styles.avoider}
             pointerEvents="box-none"
           >
-            <SafeAreaView edges={["bottom"]} style={styles.safeArea} pointerEvents="box-none">
+            <SafeAreaView
+              edges={["bottom"]}
+              style={styles.safeArea}
+              pointerEvents="box-none"
+            >
               <Animated.View
                 testID="quickfire-sheet"
                 accessibilityViewIsModal
@@ -404,10 +438,17 @@ export function QuickfireSheet({
                 ]}
               >
                 <View {...panResponder.panHandlers} style={styles.grabArea}>
-                  <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+                  <View
+                    style={[styles.grabber, { backgroundColor: colors.border }]}
+                  />
                 </View>
 
-                <View style={[styles.header, { borderBottomColor: colors.borderSubtle }]}>
+                <View
+                  style={[
+                    styles.header,
+                    { borderBottomColor: colors.borderSubtle },
+                  ]}
+                >
                   <ConversationHeader compose={compose} onIntent={onIntent} />
                 </View>
 
@@ -425,7 +466,9 @@ export function QuickfireSheet({
                       // Images arrive inline here (no process boundary), so the
                       // only card actions left are promotion and resending.
                       if (action === "retry" && value) {
-                        void session.send(value).catch(report("Could not send"));
+                        void session
+                          .send(value)
+                          .catch(report("Could not send"));
                       } else if (action === "open-chat") {
                         handlePromote();
                       }
@@ -437,13 +480,18 @@ export function QuickfireSheet({
                   <View
                     style={[
                       styles.compose,
-                      { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
+                      {
+                        backgroundColor: colors.surfaceSunken,
+                        borderColor: colors.borderSubtle,
+                      },
                     ]}
                   >
                     <TextInput
                       testID="quickfire-compose"
                       accessibilityLabel={
-                        isConversation ? "Reply to this conversation" : "Ask about this panel"
+                        isConversation
+                          ? "Reply to this conversation"
+                          : "Ask about this panel"
                       }
                       value={draft}
                       onChangeText={setDraft}
@@ -453,7 +501,9 @@ export function QuickfireSheet({
                       returnKeyType="send"
                       blurOnSubmit
                       style={[styles.composeInput, { color: colors.text }]}
-                      placeholder={isConversation ? "Reply…" : "Ask about this panel…"}
+                      placeholder={
+                        isConversation ? "Reply…" : "Ask about this panel…"
+                      }
                       placeholderTextColor={colors.textTertiary}
                     />
                     {view.streaming ? (
@@ -469,7 +519,10 @@ export function QuickfireSheet({
                         icon={SendHorizontal}
                         label="Send"
                         onPress={handleSend}
-                        disabled={draft.trim().length === 0 || composeDisabledReason !== null}
+                        disabled={
+                          draft.trim().length === 0 ||
+                          composeDisabledReason !== null
+                        }
                         color={colors.primary}
                         size={17}
                       />
@@ -478,7 +531,13 @@ export function QuickfireSheet({
                 )}
 
                 {composeDisabledReason ? (
-                  <Text style={[type.caption, styles.error, { color: colors.danger }]}>
+                  <Text
+                    style={[
+                      type.caption,
+                      styles.error,
+                      { color: colors.danger },
+                    ]}
+                  >
                     {composeDisabledReason}
                   </Text>
                 ) : null}

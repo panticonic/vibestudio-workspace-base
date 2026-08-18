@@ -11,7 +11,11 @@
  */
 
 import type { ReactNode } from "react";
-import { resumeLabel, transcriptCards, type QuickfireCardActionId } from "../cards";
+import {
+  resumeLabel,
+  transcriptCards,
+  type QuickfireCardActionId,
+} from "../cards";
 import type { QuickfireComposeView } from "../model";
 import { useSkin } from "./primitives";
 import { Transcript } from "./Transcript";
@@ -41,7 +45,10 @@ export interface ConversationProps {
  * Who you are talking to, and the two ways out of the conversation: throw it
  * away, or move it somewhere it can grow.
  */
-export function ConversationHeader({ compose, onIntent }: Omit<ConversationProps, "now">) {
+export function ConversationHeader({
+  compose,
+  onIntent,
+}: Omit<ConversationProps, "now">) {
   const { Box, Text, Icon, Pressable } = useSkin();
   const bound = compose.kind === "conversation";
   return (
@@ -54,7 +61,7 @@ export function ConversationHeader({ compose, onIntent }: Omit<ConversationProps
       {bound ? null : (
         <Pressable
           variant="ghost"
-          label="Clear this conversation and start a new one"
+          label="Clear this conversation and return to commands"
           disabled={!compose.hasConversation}
           onPress={() => onIntent({ kind: "clear" })}
         >
@@ -101,7 +108,9 @@ export function ConversationBody({
   if (compose.promoted) {
     return (
       <Box gap="md" pad="md" testId="quickfire-promoted">
-        <Text tone="muted">This conversation continues in a chat panel, which now owns it.</Text>
+        <Text tone="muted">
+          This conversation continues in a chat panel, which now owns it.
+        </Text>
         <Box row gap="sm">
           <Pressable
             variant="primary"
@@ -133,12 +142,21 @@ export function ConversationBody({
     ...(compose.focusMessageId ? { focusId: compose.focusMessageId } : {}),
   });
   const older =
-    compose.olderCount > 0 ? (
+    compose.olderCount > 0 || compose.expandable || compose.loadingOlder ? (
       <Box row gap="sm" align="center" testId="quickfire-older">
         <Text variant="caption" tone="muted">
-          {compose.olderCount} earlier {compose.olderCount === 1 ? "entry" : "entries"}
+          {compose.olderCount > 0
+            ? `${compose.olderCount} earlier ${compose.olderCount === 1 ? "entry" : "entries"}`
+            : "Earlier history is available"}
         </Text>
-        {compose.expandable ? (
+        {compose.loadingOlder ? (
+          <Box row gap="xs" align="center">
+            <Spinner tone="accent" />
+            <Text variant="caption" tone="muted">
+              loading
+            </Text>
+          </Box>
+        ) : compose.expandable ? (
           <Pressable
             variant="ghost"
             tone="accent"
@@ -169,7 +187,14 @@ export function ConversationBody({
       {leading}
 
       {compose.resume ? (
-        <Box row gap="sm" align="center" surface="sunken" pad="sm" testId="quickfire-resume-chip">
+        <Box
+          row
+          gap="sm"
+          align="center"
+          surface="sunken"
+          pad="sm"
+          testId="quickfire-resume-chip"
+        >
           <Text variant="caption" tone="muted">
             {resumeLabel(compose.resume, now)}
           </Text>
@@ -188,7 +213,13 @@ export function ConversationBody({
       ) : null}
 
       {compose.credentialRequest ? (
-        <Box surface="rail" tone="warning" pad="sm" gap="xs" testId="quickfire-credential">
+        <Box
+          surface="rail"
+          tone="warning"
+          pad="sm"
+          gap="xs"
+          testId="quickfire-credential"
+        >
           <Text variant="label" tone="warning">
             Model credential needed
           </Text>
@@ -213,37 +244,46 @@ export function ConversationBody({
         <Transcript
           cards={cards}
           {...(older ? { header: older } : {})}
-          {...(onCardAction ? { onAction: (action, _card, value) => onCardAction(action, value) } : {})}
+          {...(onCardAction
+            ? {
+                onAction: (action, _card, value) => onCardAction(action, value),
+              }
+            : {})}
         />
       ) : (
-        <Box gap="sm" pad="md" testId="quickfire-empty">
-          <Box row gap="sm" align="center" live>
-            {compose.connecting ? <Spinner tone="accent" /> : null}
-            <Text tone="muted">
-              {compose.connecting
-                ? compose.kind === "conversation"
-                  ? "Opening the conversation…"
-                  : "Starting a conversation about this panel…"
-                : compose.hint}
-            </Text>
-          </Box>
-          {compose.suggestions?.length ? (
-            <Box row gap="sm" testId="quickfire-suggestions">
-              {compose.suggestions.map((suggestion) => (
-                <Pressable
-                  key={suggestion.id}
-                  variant="primary"
-                  tone="accent"
-                  label={suggestion.prompt}
-                  onPress={() => onIntent({ kind: "send", text: suggestion.prompt })}
-                >
-                  <Text variant="caption" tone="accent">
-                    {suggestion.label}
-                  </Text>
-                </Pressable>
-              ))}
+        <Box gap="sm">
+          {older}
+          <Box gap="sm" pad="md" testId="quickfire-empty">
+            <Box row gap="sm" align="center" live>
+              {compose.connecting ? <Spinner tone="accent" /> : null}
+              <Text tone="muted">
+                {compose.connecting
+                  ? compose.kind === "conversation"
+                    ? "Opening the conversation…"
+                    : "Starting a conversation about this panel…"
+                  : compose.hint}
+              </Text>
             </Box>
-          ) : null}
+            {compose.suggestions?.length ? (
+              <Box row gap="sm" testId="quickfire-suggestions">
+                {compose.suggestions.map((suggestion) => (
+                  <Pressable
+                    key={suggestion.id}
+                    variant="primary"
+                    tone="accent"
+                    label={suggestion.prompt}
+                    onPress={() =>
+                      onIntent({ kind: "send", text: suggestion.prompt })
+                    }
+                  >
+                    <Text variant="caption" tone="accent">
+                      {suggestion.label}
+                    </Text>
+                  </Pressable>
+                ))}
+              </Box>
+            ) : null}
+          </Box>
         </Box>
       )}
 

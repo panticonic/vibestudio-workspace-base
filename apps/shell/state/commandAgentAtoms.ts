@@ -1,5 +1,5 @@
 /**
- * In-renderer request channel for opening the command agent overlay.
+ * In-renderer request channel for opening the Quickfire agent overlay.
  *
  * The accelerators arrive as shell events from the main process, but chrome UI
  * (the panel tree's button, the breadcrumb and tree context menus) lives in this

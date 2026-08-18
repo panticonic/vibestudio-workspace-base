@@ -66,6 +66,8 @@ export interface QuickfireDetail {
   /** `code` is monospace and pre-wrapped; `markdown` goes through the parser. */
   format: "code" | "markdown" | "text";
   text: string;
+  /** Optional grammar for code presentation and syntax highlighting. */
+  language?: string | null;
 }
 
 /**
@@ -122,6 +124,8 @@ export interface QuickfireCard {
   /** Speech reads as a bubble; the rest read as annotations on the conversation. */
   layout: "speech" | "note";
   role: "you" | "agent" | "person" | "system";
+  /** Mirrors conversational message hierarchy; absent for non-message records. */
+  tier?: "primary" | "secondary";
   tone: QuickfireTone;
   glyph: QuickfireGlyph;
   /** Heading: who spoke, or what happened. */
@@ -158,7 +162,7 @@ export interface QuickfireCardOptions {
 
 export function transcriptCards(
   entries: readonly QuickfireTranscriptEntry[],
-  options: QuickfireCardOptions
+  options: QuickfireCardOptions,
 ): QuickfireCard[] {
   const chronological =
     options.order === "newest-first" ? [...entries].reverse() : entries;
@@ -176,7 +180,7 @@ export function transcriptCards(
 function cardFor(
   entry: QuickfireTranscriptEntry,
   previous: QuickfireTranscriptEntry | undefined,
-  now: number
+  now: number,
 ): Omit<QuickfireCard, "focused"> {
   const card = buildCard(entry, now);
   return {
@@ -199,6 +203,8 @@ function buildCard(entry: QuickfireTranscriptEntry, now: number): CardCore {
       return messageCard(entry, now);
     case "thinking":
       return thinkingCard(entry);
+    case "tool":
+      return toolCard(entry);
     case "activity":
       return activityCard(entry);
     case "notice":
@@ -210,14 +216,40 @@ function buildCard(entry: QuickfireTranscriptEntry, now: number): CardCore {
   }
 }
 
+function toolCard(
+  entry: Extract<QuickfireTranscriptEntry, { kind: "tool" }>,
+): CardCore {
+  const [record] = workRecords([entry.call]);
+  return {
+    id: entry.id,
+    kind: "tool",
+    layout: "note",
+    role: "agent",
+    tone: record?.tone ?? "neutral",
+    glyph: record?.glyph ?? "tool",
+    title: record?.name ?? entry.call.name,
+    meta: record?.statusLabel ?? null,
+    badges: [],
+    body: null,
+    details: [],
+    work: record ? [record] : [],
+    actions: [],
+    busy: record?.busy ?? false,
+    plainText: `${entry.call.name} — ${record?.statusLabel ?? entry.call.state}`,
+  };
+}
+
 function messageCard(
   entry: Extract<QuickfireTranscriptEntry, { kind: "message" }>,
-  now: number
+  now: number,
 ): CardCore {
   const badges: QuickfireBadge[] = [];
-  if (entry.pending) badges.push({ id: "pending", label: "sending", tone: "neutral" });
-  if (entry.error) badges.push({ id: "error", label: "failed", tone: "danger" });
-  if (entry.edited) badges.push({ id: "edited", label: "edited", tone: "neutral" });
+  if (entry.pending)
+    badges.push({ id: "pending", label: "sending", tone: "neutral" });
+  if (entry.error)
+    badges.push({ id: "error", label: "failed", tone: "danger" });
+  if (entry.edited)
+    badges.push({ id: "edited", label: "edited", tone: "neutral" });
   if (entry.escalation) {
     badges.push({
       id: "escalation",
@@ -251,39 +283,62 @@ function messageCard(
     entry.modelLabel ?? null,
     entry.at === undefined ? null : relativeTime(entry.at, now),
   ]);
-  const body = entry.text.trim() ? { format: "markdown" as const, text: entry.text } : null;
+  const body = entry.text.trim()
+    ? { format: "markdown" as const, text: entry.text }
+    : null;
   const plainText = body ? markdownToPlainText(parseMarkdown(body.text)) : "";
   return {
     id: entry.id,
     kind: "message",
     layout: "speech",
-    role: entry.author === "you" ? "you" : entry.author === "agent" ? "agent" : "person",
-    tone: entry.error ? "danger" : entry.author === "you" ? "accent" : "neutral",
-    glyph: entry.author === "you" ? "you" : entry.author === "agent" ? "spark" : "person",
+    role:
+      entry.author === "you"
+        ? "you"
+        : entry.author === "agent"
+          ? "agent"
+          : "person",
+    tier: entry.tier ?? "primary",
+    tone: entry.error
+      ? "danger"
+      : entry.author === "you"
+        ? "accent"
+        : "neutral",
+    glyph:
+      entry.author === "you"
+        ? "you"
+        : entry.author === "agent"
+          ? "spark"
+          : "person",
     title: entry.authorLabel,
     meta,
     badges,
     body,
     details,
-    work: workRecords(entry.toolCalls),
+    work: [],
     actions: [
       ...(entry.error && entry.author === "you"
         ? [{ id: "retry" as const, label: "Send again", value: entry.text }]
         : entry.error
           ? [openChat("Pick this up in the chat panel")]
           : []),
-      ...(entry.text.trim() ? [{ id: "copy" as const, label: "Copy", value: entry.text }] : []),
+      ...(entry.text.trim()
+        ? [{ id: "copy" as const, label: "Copy", value: entry.text }]
+        : []),
     ],
     busy: entry.streaming === true,
-    plainText: [entry.authorLabel, plainText, entry.errorText ?? ""].filter(Boolean).join("\n"),
+    plainText: [entry.authorLabel, plainText, entry.errorText ?? ""]
+      .filter(Boolean)
+      .join("\n"),
   };
 }
 
 function thinkingCard(
-  entry: Extract<QuickfireTranscriptEntry, { kind: "thinking" }>
+  entry: Extract<QuickfireTranscriptEntry, { kind: "thinking" }>,
 ): CardCore {
   const plain = markdownToPlainText(parseMarkdown(entry.text));
-  const heading = abbreviate(entry.streaming ? lastLine(plain) : firstLine(plain));
+  const heading = abbreviate(
+    entry.streaming ? lastLine(plain) : firstLine(plain),
+  );
   // When the whole thought fits in the heading, a disclosure would open onto a
   // copy of what you just read.
   const complete = heading === plain.trim();
@@ -307,7 +362,14 @@ function thinkingCard(
     // streaming the renderer opens it so the user can watch.
     details: complete
       ? []
-      : [{ id: "reasoning", label: "Reasoning", format: "markdown", text: entry.text }],
+      : [
+          {
+            id: "reasoning",
+            label: "Reasoning",
+            format: "markdown",
+            text: entry.text,
+          },
+        ],
     work: [],
     actions: [],
     busy: entry.streaming === true,
@@ -316,34 +378,47 @@ function thinkingCard(
 }
 
 function activityCard(
-  entry: Extract<QuickfireTranscriptEntry, { kind: "activity" }>
+  entry: Extract<QuickfireTranscriptEntry, { kind: "activity" }>,
 ): CardCore {
   const working = entry.state === "working";
+  const background =
+    entry.state === "waiting" && entry.waitingFor === "background";
+  const title = working
+    ? "Working"
+    : background
+      ? "Working in background"
+      : entry.waitingFor === "user"
+        ? "Waiting for you"
+        : "Waiting";
   return {
     id: entry.id,
     kind: "activity",
     layout: "note",
     role: "agent",
-    tone: working ? "accent" : "warning",
-    glyph: working ? "spark" : "clock",
-    title: working ? "Working" : "Waiting on you",
+    tone: working || background ? "accent" : "warning",
+    glyph: working || background ? "spark" : "clock",
+    title,
     meta: entry.label,
     badges: [],
     body: null,
     details: [],
-    work: workRecords(entry.toolCalls),
+    work: [],
     actions: [],
-    busy: working,
-    plainText: `${working ? "Working" : "Waiting on you"} — ${entry.label}`,
+    busy: working || background,
+    plainText: `${title} — ${entry.label}`,
   };
 }
 
 function noticeCard(
   entry: Extract<QuickfireTranscriptEntry, { kind: "notice" }>,
-  now: number
+  now: number,
 ): CardCore {
   const tone: QuickfireTone =
-    entry.severity === "error" ? "danger" : entry.severity === "warning" ? "warning" : "info";
+    entry.severity === "error"
+      ? "danger"
+      : entry.severity === "warning"
+        ? "warning"
+        : "info";
   return {
     id: entry.id,
     kind: "notice",
@@ -370,7 +445,7 @@ function noticeCard(
 
 function approvalCard(
   entry: Extract<QuickfireTranscriptEntry, { kind: "approval" }>,
-  now: number
+  now: number,
 ): CardCore {
   const pending = entry.status === "pending";
   return {
@@ -378,7 +453,11 @@ function approvalCard(
     kind: "approval",
     layout: "note",
     role: "system",
-    tone: pending ? "warning" : entry.status === "granted" ? "success" : "danger",
+    tone: pending
+      ? "warning"
+      : entry.status === "granted"
+        ? "success"
+        : "danger",
     glyph: "gavel",
     title: pending
       ? "Waiting for your decision"
@@ -396,22 +475,38 @@ function approvalCard(
     body: { format: "markdown", text: entry.question },
     details: [
       ...(entry.reason
-        ? [{ id: "reason", label: "Why", format: "markdown" as const, text: entry.reason }]
+        ? [
+            {
+              id: "reason",
+              label: "Why",
+              format: "markdown" as const,
+              text: entry.reason,
+            },
+          ]
         : []),
       ...(entry.detail
-        ? [{ id: "detail", label: "Request", format: "code" as const, text: entry.detail }]
+        ? [
+            {
+              id: "detail",
+              label: "Request",
+              format: "code" as const,
+              text: entry.detail,
+            },
+          ]
         : []),
     ],
     work: [],
     actions: [],
     busy: false,
-    plainText: [entry.question, entry.reason ?? "", entry.detail ?? ""].filter(Boolean).join("\n"),
+    plainText: [entry.question, entry.reason ?? "", entry.detail ?? ""]
+      .filter(Boolean)
+      .join("\n"),
   };
 }
 
 function richCard(
   entry: Extract<QuickfireTranscriptEntry, { kind: "rich" }>,
-  now: number
+  now: number,
 ): CardCore {
   return {
     id: entry.id,
@@ -437,7 +532,12 @@ function richCard(
 
 /** First non-empty line — a thought's topic sentence. */
 function firstLine(text: string): string {
-  return text.split("\n").find((line) => line.trim())?.trim() ?? "";
+  return (
+    text
+      .split("\n")
+      .find((line) => line.trim())
+      ?.trim() ?? ""
+  );
 }
 
 /** Last non-empty line — where a thought currently is, while it streams. */
@@ -469,14 +569,26 @@ function openChat(label: string): QuickfireCardAction {
   return { id: "open-chat", label };
 }
 
-function workRecords(calls: readonly QuickfireToolCall[] | undefined): QuickfireWorkRecord[] {
+function workRecords(
+  calls: readonly QuickfireToolCall[] | undefined,
+): QuickfireWorkRecord[] {
   if (!calls?.length) return [];
   return calls.map((call) => ({
     id: call.id,
     name: call.name,
     state: call.state,
-    tone: call.state === "failed" ? "danger" : call.state === "running" ? "accent" : "success",
-    glyph: call.state === "failed" ? "cross" : call.state === "running" ? "tool" : "check",
+    tone:
+      call.state === "failed"
+        ? "danger"
+        : call.state === "running"
+          ? "accent"
+          : "success",
+    glyph:
+      call.state === "failed"
+        ? "cross"
+        : call.state === "running"
+          ? "tool"
+          : "check",
     statusLabel: workStatusLabel(call),
     busy: call.state === "running",
     details: workDetails(call),
@@ -487,15 +599,27 @@ function workRecords(calls: readonly QuickfireToolCall[] | undefined): Quickfire
 function workStatusLabel(call: QuickfireToolCall): string {
   if (call.awaitingApproval) return "waiting for approval";
   if (call.state === "running") {
-    return call.progress?.length ? (call.progress.at(-1) ?? "running") : "running";
+    return call.progress?.length
+      ? (call.progress.at(-1) ?? "running")
+      : "running";
   }
   if (call.state === "failed") return "failed";
-  return call.durationMs === undefined ? "done" : formatDuration(call.durationMs);
+  return call.durationMs === undefined
+    ? "done"
+    : formatDuration(call.durationMs);
 }
 
 function workDetails(call: QuickfireToolCall): QuickfireDetail[] {
   const details: QuickfireDetail[] = [];
-  if (call.input) details.push({ id: "input", label: "Input", format: "code", text: call.input });
+  for (const [index, argument] of (call.arguments ?? []).entries()) {
+    details.push({
+      id: `argument:${argument.name}:${index}`,
+      label: argument.name,
+      format: "code",
+      text: argument.value,
+      ...(argument.language ? { language: argument.language } : {}),
+    });
+  }
   if (call.progress?.length) {
     details.push({
       id: "progress",
@@ -505,15 +629,28 @@ function workDetails(call: QuickfireToolCall): QuickfireDetail[] {
     });
   }
   if (call.output) {
-    details.push({ id: "output", label: "Output", format: "code", text: call.output });
+    details.push({
+      id: "output",
+      label: "Output",
+      format: "code",
+      text: call.output,
+    });
   }
   if (call.failure) {
-    details.push({ id: "failure", label: "Failure", format: "code", text: call.failure });
+    details.push({
+      id: "failure",
+      label: "Failure",
+      format: "code",
+      text: call.failure,
+    });
   }
   return details;
 }
 
-function imageView(image: QuickfireImage, toolName: string): QuickfireImageView {
+function imageView(
+  image: QuickfireImage,
+  toolName: string,
+): QuickfireImageView {
   const size = [
     image.width && image.height ? `${image.width}×${image.height}` : null,
     formatBytes(image.bytes),
@@ -529,14 +666,19 @@ function imageView(image: QuickfireImage, toolName: string): QuickfireImageView 
 }
 
 function describeAttachment(attachment: QuickfireAttachment): string {
-  const facts = [attachment.kind, attachment.size === undefined ? null : formatBytes(attachment.size)]
+  const facts = [
+    attachment.kind,
+    attachment.size === undefined ? null : formatBytes(attachment.size),
+  ]
     .filter(Boolean)
     .join(" · ");
   return facts ? `${attachment.name} (${facts})` : attachment.name;
 }
 
 function joinMeta(parts: ReadonlyArray<string | null>): string | null {
-  const kept = parts.filter((part): part is string => Boolean(part && part.trim()));
+  const kept = parts.filter((part): part is string =>
+    Boolean(part && part.trim()),
+  );
   return kept.length > 0 ? kept.join(" · ") : null;
 }
 
@@ -572,12 +714,15 @@ export function relativeTime(epochMs: number, now: number): string {
 /** "Resumed · 3 messages · 2h ago"; each segment is omitted when unknown. */
 export function resumeLabel(
   resume: { messageCount: number | null; lastActivityAt: number | null },
-  now: number
+  now: number,
 ): string {
   const parts = ["Resumed"];
   if (resume.messageCount !== null) {
-    parts.push(`${resume.messageCount} message${resume.messageCount === 1 ? "" : "s"}`);
+    parts.push(
+      `${resume.messageCount} message${resume.messageCount === 1 ? "" : "s"}`,
+    );
   }
-  if (resume.lastActivityAt !== null) parts.push(relativeTime(resume.lastActivityAt, now));
+  if (resume.lastActivityAt !== null)
+    parts.push(relativeTime(resume.lastActivityAt, now));
   return parts.join(" · ");
 }

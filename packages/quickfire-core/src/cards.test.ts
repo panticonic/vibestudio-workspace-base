@@ -24,10 +24,15 @@ describe("transcript cards", () => {
     expect(card?.tone).toBe("danger");
     expect(card?.badges.map((badge) => badge.label)).toContain("failed");
     expect(card?.details).toContainEqual(
-      expect.objectContaining({ label: "What went wrong", text: "rate limited until 12:30" })
+      expect.objectContaining({
+        label: "What went wrong",
+        text: "rate limited until 12:30",
+      }),
     );
     // The venue cannot retry, so it names the surface that can.
-    expect(card?.actions).toEqual([expect.objectContaining({ id: "open-chat" })]);
+    expect(card?.actions).toEqual([
+      expect.objectContaining({ id: "open-chat" }),
+    ]);
   });
 
   it("names attachments rather than counting them", () => {
@@ -38,7 +43,9 @@ describe("transcript cards", () => {
         author: "you",
         authorLabel: "you",
         text: "look at this",
-        attachments: [{ id: "a1", name: "screenshot.png", kind: "image/png", size: 4096 }],
+        attachments: [
+          { id: "a1", name: "screenshot.png", kind: "image/png", size: 4096 },
+        ],
       },
     ]);
     expect(card?.details[0]?.text).toBe("screenshot.png (image/png · 4 KB)");
@@ -56,7 +63,9 @@ describe("transcript cards", () => {
       },
     ]);
     expect(card?.title).toBe("Model unavailable");
-    expect(card?.body?.text).toBe("The provider returned 503. It usually clears within a minute.");
+    expect(card?.body?.text).toBe(
+      "The provider returned 503. It usually clears within a minute.",
+    );
     expect(card?.actions[0]?.id).toBe("open-chat");
   });
 
@@ -66,7 +75,10 @@ describe("transcript cards", () => {
     ]);
     expect(card?.title).toBe("Card · chart");
     expect(card?.actions).toEqual([
-      expect.objectContaining({ id: "open-chat", label: "Open it in the chat panel" }),
+      expect.objectContaining({
+        id: "open-chat",
+        label: "Open it in the chat panel",
+      }),
     ]);
   });
 
@@ -81,44 +93,117 @@ describe("transcript cards", () => {
       },
     ]);
     expect(card?.meta).toContain("approval card");
-    expect(card?.details).toContainEqual(expect.objectContaining({ label: "Why" }));
+    expect(card?.details).toContainEqual(
+      expect.objectContaining({ label: "Why" }),
+    );
   });
 
   it("gives each tool call its own state, duration and details", () => {
     const [card] = cards([
       {
-        kind: "activity",
-        id: "act",
-        state: "working",
-        phase: "using-tools",
-        label: "using tools",
-        toolCalls: [
-          { id: "c1", name: "panel_console", state: "done", durationMs: 1_240, output: "[]" },
-          { id: "c2", name: "panel_eval", state: "running", awaitingApproval: true },
-        ],
+        kind: "tool",
+        id: "tool:c1",
+        call: {
+          id: "c1",
+          name: "panel_console",
+          state: "done",
+          durationMs: 1_240,
+          output: "[]",
+        },
+      },
+      {
+        kind: "tool",
+        id: "tool:c2",
+        call: {
+          id: "c2",
+          name: "panel_eval",
+          state: "running",
+          awaitingApproval: true,
+        },
       },
     ]);
-    expect(card?.busy).toBe(true);
-    expect(card?.work.map((record) => record.statusLabel)).toEqual([
-      "1.2s",
-      "waiting for approval",
+    expect(card?.busy).toBe(false);
+    expect(card?.work.map((record) => record.statusLabel)).toEqual(["1.2s"]);
+    expect(card?.work[0]?.details).toContainEqual(
+      expect.objectContaining({ label: "Output" }),
+    );
+    expect(
+      cards([
+        {
+          kind: "tool",
+          id: "tool:c2",
+          call: {
+            id: "c2",
+            name: "panel_eval",
+            state: "running",
+            awaitingApproval: true,
+          },
+        },
+      ])[0]?.work[0]?.statusLabel,
+    ).toBe("waiting for approval");
+  });
+
+  it("does not tell the user a background wait is waiting on them", () => {
+    const [background] = cards([
+      {
+        kind: "activity",
+        id: "background",
+        state: "waiting",
+        phase: "waiting",
+        waitingFor: "background",
+        label: "Waiting for delegated diagnostics",
+      },
     ]);
-    expect(card?.work[0]?.details).toContainEqual(expect.objectContaining({ label: "Output" }));
+    const [input] = cards([
+      {
+        kind: "activity",
+        id: "input",
+        state: "waiting",
+        phase: "waiting",
+        waitingFor: "user",
+        label: "Choose a migration source",
+      },
+    ]);
+    expect(background?.title).toBe("Working in background");
+    expect(background?.busy).toBe(true);
+    expect(input?.title).toBe("Waiting for you");
   });
 
   it("groups consecutive turns by the same speaker in either reading order", () => {
     const entries: QuickfireTranscriptEntry[] = [
-      { kind: "message", id: "m1", author: "agent", authorLabel: "agent", text: "one" },
-      { kind: "message", id: "m2", author: "agent", authorLabel: "agent", text: "two" },
-      { kind: "message", id: "m3", author: "you", authorLabel: "you", text: "three" },
+      {
+        kind: "message",
+        id: "m1",
+        author: "agent",
+        authorLabel: "agent",
+        text: "one",
+      },
+      {
+        kind: "message",
+        id: "m2",
+        author: "agent",
+        authorLabel: "agent",
+        text: "two",
+      },
+      {
+        kind: "message",
+        id: "m3",
+        author: "you",
+        authorLabel: "you",
+        text: "three",
+      },
     ];
-    expect(cards(entries).map((card) => card.continues)).toEqual([false, true, false]);
-    // Newest-first is a rendering choice; who follows whom is not.
-    expect(cards([...entries].reverse(), "newest-first").map((card) => card.continues)).toEqual([
+    expect(cards(entries).map((card) => card.continues)).toEqual([
       false,
       true,
       false,
     ]);
+    // Newest-first is a rendering choice; who follows whom is not.
+    expect(
+      cards([...entries].reverse(), "newest-first").map(
+        (card) => card.continues,
+      ),
+    ).toEqual([false, true, false]);
   });
 
   it("carries model and time on the heading's second line", () => {
@@ -153,7 +238,12 @@ describe("reasoning cards", () => {
 
   it("follows a streaming thought to where it currently is", () => {
     const [card] = cards([
-      { kind: "thinking", id: "t1", text: "First I check.\nNow I am reading the console.", streaming: true },
+      {
+        kind: "thinking",
+        id: "t1",
+        text: "First I check.\nNow I am reading the console.",
+        streaming: true,
+      },
     ]);
     expect(card?.title).toBe("Now I am reading the console.");
   });

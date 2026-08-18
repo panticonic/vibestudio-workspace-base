@@ -14,9 +14,9 @@
  *
  * The redesign's rules of thumb, so later edits keep the same voice:
  *   · Tone is carried by a rail and a wash, not by a heavy border or a fill.
- *   · The agent's prose is plain typography on the card — no bubble, no box.
- *     Only the user's own words, and non-conversational annotations, get a
- *     container, so a long answer reads like a document and not like a receipt.
+ *   · The agent's answer is the transcript's visual anchor: a restrained raised
+ *     surface, not a speech bubble. User speech is softer; reasoning and tools
+ *     remain supporting annotations.
  *   · Structure is quiet until you ask: every disclosure is a hairline until it
  *     is opened, and then it earns its background.
  *   · Nothing important is ever conveyed by colour alone — every tone pairs with
@@ -84,7 +84,7 @@
 .quickfire-entry {
   flex-shrink: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 8px;
   padding: 12px 14px 10px;
 }
@@ -96,6 +96,7 @@
 .quickfire-entry-icon {
   flex-shrink: 0;
   width: 16px;
+  margin-top: 4px;
   text-align: center;
   color: var(--gray-9);
   font-size: 14px;
@@ -122,9 +123,14 @@
 }
 
 .quickfire-input {
+  display: block;
   width: 100%;
+  min-height: 22px;
+  max-height: 132px;
   border: 0;
   padding: 0;
+  resize: none;
+  overflow-y: auto;
   background: transparent;
   color: var(--gray-12);
   outline: none;
@@ -551,6 +557,24 @@
   min-width: 0;
 }
 
+.qf-box[data-full] {
+  flex-basis: 100%;
+  width: 100%;
+}
+
+/* Reasoning and tool records read as compact pills while closed. Once their
+   disclosure opens, the payload gets the full measure needed for code. */
+.qf-box[data-fit] {
+  align-self: flex-start;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.qf-box[data-fit]:has(.qf-disclosure[open]) {
+  align-self: stretch;
+  width: 100%;
+}
+
 .qf-box[data-scroll] {
   overflow-y: auto;
   min-height: 0;
@@ -630,17 +654,24 @@
   --qf-tone: var(--gray-10);
 }
 
-/* A speech card: the user's own words get a soft accent block; the agent's get
-   the card itself, because prose should not live in a receipt. */
+/* The answer is the point of the interaction. Give it a quiet frame and raised
+   reading surface so it wins over reasoning rails and tool disclosures without
+   turning long-form prose into a novelty chat bubble. */
+.qf-box[data-surface="answer"] {
+  border: 1px solid var(--qf-tone-edge);
+  border-left-width: 3px;
+  border-radius: var(--radius-4);
+  background:
+    linear-gradient(135deg, var(--qf-tone-wash), transparent 72%),
+    color-mix(in srgb, var(--surface-raised) 92%, var(--qf-tone-wash));
+  box-shadow: 0 2px 8px color-mix(in srgb, var(--qf-tone-edge) 14%, transparent);
+}
+
+/* User and participant speech remains compact and clearly conversational. */
 .qf-box[data-surface="card"] {
   border-radius: var(--radius-4);
   padding: 7px 10px;
   background: var(--qf-tone-wash);
-}
-
-.qf-box[data-surface="card"][data-tone="neutral"] {
-  background: transparent;
-  padding: 2px 0;
 }
 
 .qf-box[data-surface="sunken"] {

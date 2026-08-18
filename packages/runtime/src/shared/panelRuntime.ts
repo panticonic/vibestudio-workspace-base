@@ -1251,6 +1251,7 @@ export function createPanelRuntime(
       const history = await options.rpc.call<{
         entries: never[];
         errors: never[];
+        page: { nextBeforeSeq: number | null; hasOlder: boolean };
         dropped: { entries: number; errors: number };
         capacity: { entries: number; errors: number };
       }>("main", "panelCdp.consoleHistory", [

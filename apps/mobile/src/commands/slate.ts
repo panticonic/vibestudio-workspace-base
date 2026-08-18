@@ -214,7 +214,7 @@ const MOBILE_RUNS: Record<string, MobileSlateRun> = {
   "quickfire.list": async (_args, deps) => {
     const rows = await deps.quickfire.list();
     if (rows.length === 0) {
-      return { message: "No panel has a command agent conversation yet" };
+      return { message: "No panel has a Quickfire agent conversation yet" };
     }
     deps.showQuickfireConversations(rows);
     return {};

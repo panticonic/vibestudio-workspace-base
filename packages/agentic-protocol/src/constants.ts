@@ -60,6 +60,11 @@ export const TURN_REASON_CODES = [
   "model_credential_reconnect_required",
   "model_usage_limit_reset",
   "model_retry_limit_exceeded",
+  "waiting_for_background",
+  "no_foreground_work",
+  "not_addressed",
+  "already_handled",
+  "input_required",
   "forked",
 ] as const;
 

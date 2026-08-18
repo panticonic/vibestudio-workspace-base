@@ -87,7 +87,8 @@ describe("QuickfireSessionsDO", () => {
       state: "fresh",
     });
     expect(spec.stateArgs.agentConfig).toMatchObject({
-      thinkingLevel: "low",
+      model: "openai-codex:gpt-5.6-luna",
+      thinkingLevel: "high",
       systemPromptMode: "append",
       features: {
         resources: { subject: { kind: "panel-slot", id: "slot-a" } },
