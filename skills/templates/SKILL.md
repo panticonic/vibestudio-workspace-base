@@ -61,6 +61,33 @@ For `add`, pass either the exact catalog selection or a direct URL with a fresh
 command ID. Refresh the catalog only on explicit request. Never preflight the
 same release unless the user asked for a read-only comparison.
 
+For a named catalog entry, the cache-only `catalog` call is selection—not a
+release preflight. Match the returned display name to its opaque `id`, then run
+the single mutation:
+
+```js
+const composer = "@workspace-extensions/template-composer";
+const catalog = await extensions.invoke(composer, "catalog", []);
+const selected = catalog.entries.find((entry) => entry.name === requestedName);
+if (!selected) throw new Error(`No verified template named ${requestedName}`);
+return extensions.invoke(composer, "add", [
+  {
+    commandId: `template-add-${crypto.randomUUID()}`,
+    source: { catalogId: selected.id },
+  },
+]);
+```
+
+Do not inspect composer source code to discover this call shape. The public
+contract above and this workflow are the operative interface.
+
+If `add` returns `pending`, leave eval and merge each returned
+`review.items[].sourceDeltaId` in `review.contextId` with the ordinary `vcs`
+tool, then call
+`extensions.invoke(composer, "resume", [{ operationId: result.operationId }])`.
+Repeat only for a newly returned typed review or repair state; stop at `applied`
+and honor `contextIntegration`.
+
 Use `adopt` only when the user asserts the workspace already descends from the
 inspected exact release. Adoption records lineage without importing that
 release's repository state — it is not a shortcut around an add conflict.
