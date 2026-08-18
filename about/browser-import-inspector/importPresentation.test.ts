@@ -9,6 +9,7 @@ vi.mock("@workspace/runtime", () => ({
 }));
 import type { ImportJobSnapshot } from "@vibestudio/browser-data/client";
 import {
+  areSelectedImportsComplete,
   categoryProgressPresentation,
   importStatusPresentation,
   isMigrationStepComplete,
@@ -138,6 +139,18 @@ describe("import state presentation", () => {
       color: "green",
     });
     expect(importStatusPresentation("complete").note).toContain("not work left to finish");
+  });
+
+  it("does not claim the whole import is complete when only one sub-job is complete", () => {
+    expect(importStatusPresentation("complete", "protected")).toMatchObject({
+      heading: "Protected data complete",
+      note: expect.stringContaining("Other browser records may still be importing"),
+    });
+    expect(areSelectedImportsComplete(true, "storing", true, "complete")).toBe(false);
+    expect(areSelectedImportsComplete(true, "complete", true, "running")).toBe(false);
+    expect(areSelectedImportsComplete(true, "complete", true, "complete")).toBe(true);
+    expect(areSelectedImportsComplete(true, "complete", false, null)).toBe(true);
+    expect(areSelectedImportsComplete(true, null, true, "complete")).toBe(false);
   });
 
   it("distinguishes terminal and successful phases", () => {

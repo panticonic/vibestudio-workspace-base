@@ -35,13 +35,28 @@ export interface ImportStatusPresentation {
   color: "green" | "red" | "amber" | "blue";
 }
 
-export function importStatusPresentation(phase: ImportJobPhase): ImportStatusPresentation {
+export type ImportProgressScope = "all" | "public" | "protected";
+
+export function importStatusPresentation(
+  phase: ImportJobPhase,
+  scope: ImportProgressScope = "all"
+): ImportStatusPresentation {
   switch (phase) {
     case "complete":
       return {
-        heading: "Import complete",
+        heading:
+          scope === "protected"
+            ? "Protected data complete"
+            : scope === "public"
+              ? "Browser records complete"
+              : "Import complete",
         badge: "complete",
-        note: "All selected browser data has been processed. Skipped records are part of the outcome, not work left to finish.",
+        note:
+          scope === "protected"
+            ? "All selected protected categories have been processed. Other browser records may still be importing."
+            : scope === "public"
+              ? "All selected public browser records have been processed. Protected categories may have a separate status."
+              : "All selected browser data has been processed. Skipped records are part of the outcome, not work left to finish.",
         color: "green",
       };
     case "partial":
@@ -72,6 +87,19 @@ export function importStatusPresentation(phase: ImportJobPhase): ImportStatusPre
         color: "blue",
       };
   }
+}
+
+export function areSelectedImportsComplete(
+  publicRequested: boolean,
+  publicPhase: ImportJobPhase | null,
+  protectedRequested: boolean,
+  protectedState: "running" | "complete" | "cancelled" | "failed" | null
+): boolean {
+  if (!publicRequested && !protectedRequested) return false;
+  return (
+    (!publicRequested || (publicPhase !== null && isSuccessfulImportPhase(publicPhase))) &&
+    (!protectedRequested || protectedState === "complete")
+  );
 }
 
 export interface CategoryProgressPresentation {

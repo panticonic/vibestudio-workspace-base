@@ -55,6 +55,7 @@ import {
   useAsync,
 } from "../useBrowserData";
 import {
+  areSelectedImportsComplete,
   categoryProgressPresentation,
   importStatusPresentation,
   isMigrationStepComplete,
@@ -290,14 +291,16 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
       entry.hostId === props.selection.host.hostId &&
       (entry.phase === "complete" || entry.phase === "partial")
   );
-  const imported =
-    (job !== null && isSuccessfulImportPhase(job.phase)) ||
-    sensitiveStatus?.state === "complete" ||
-    importedBefore;
   const running =
     (job !== null && !isTerminalImportPhase(job.phase)) || sensitiveStatus?.state === "running";
-  const hasCurrentResult =
-    (job !== null && isSuccessfulImportPhase(job.phase)) || sensitiveStatus?.state === "complete";
+  const currentImportComplete = areSelectedImportsComplete(
+    publicDataTypes().length > 0,
+    job?.phase ?? null,
+    sensitiveDataTypes().length > 0,
+    sensitiveStatus?.state ?? null
+  );
+  const imported = running ? false : currentImportComplete || importedBefore;
+  const hasCurrentResult = currentImportComplete;
   const showImportOptions =
     sensitiveStatus !== null &&
     sensitiveStatus.state !== "failed" &&
@@ -389,10 +392,11 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
             />
           )}
           {showImportOptions && preview && <BreakdownCard breakdowns={preview.breakdowns} />}
-          {job && <ProgressCard mode="import" job={job} />}
+          {job && <ProgressCard mode="import" scope="public" job={job} />}
           {sensitiveStatus && (
             <ProgressCard
               mode="import"
+              scope="protected"
               job={sensitiveStatusAsJob(
                 sensitiveStatus,
                 readSensitiveImportCheckpoint()?.request,
@@ -893,9 +897,10 @@ function ProgressCard(props: {
   mode: "preview" | "import";
   job: ImportJobSnapshot;
   detail?: string;
+  scope?: "all" | "public" | "protected";
 }) {
   const running = !isTerminalImportPhase(props.job.phase);
-  const status = importStatusPresentation(props.job.phase);
+  const status = importStatusPresentation(props.job.phase, props.scope);
   const title = props.mode === "preview" ? "Review" : status.heading;
   const surfaceTone =
     props.mode !== "import"
