@@ -461,12 +461,17 @@ export async function activate(ctx: ExtensionContextLike) {
     }),
     getImportJob: guarded("getImportJob", async (jobId: string) => {
       const { identity } = await currentIdentity();
-      return coordinator.getJob(identity, jobId) ?? callStore("getImportJob", jobId);
+      const live = coordinator.getJob(identity, jobId);
+      if (live) return live;
+      const persisted = await callStore<ImportJobSnapshot | null>("getImportJob", jobId);
+      return persisted ? orphanedImportJob(persisted) : null;
     }),
     listImportJobs: guarded("listImportJobs", async () => {
       const { identity } = await currentIdentity();
       const live = coordinator.listJobs(identity);
-      return live.length > 0 ? live : callStore("listImportJobs");
+      return live.length > 0
+        ? live
+        : (await callStore<ImportJobSnapshot[]>("listImportJobs")).map(orphanedImportJob);
     }),
     listOpenTabs: guarded("listOpenTabs", async (request: { hostId: string; sourceId: string }) => {
       const { identity } = await currentIdentity();
@@ -540,6 +545,17 @@ async function storeImportBatch(
 
 function assertNonSensitiveImportSelection(selection: BrowserImportSelection): void {
   assertNonSensitiveImportDataTypes(selection.dataTypes);
+}
+
+function orphanedImportJob(job: ImportJobSnapshot): ImportJobSnapshot {
+  if (["complete", "cancelled", "failed", "partial"].includes(job.phase)) return job;
+  return {
+    ...job,
+    phase: "failed",
+    finishedAt: job.updatedAt,
+    error: "The browser import stopped before it completed. Start the import again to retry.",
+    resumable: true,
+  };
 }
 
 function withAvailableSensitiveImportPath(

@@ -480,6 +480,40 @@ describe("@workspace-extensions/browser-data", () => {
     });
   });
 
+  it("surfaces persisted nonterminal jobs as orphaned after an extension restart", async () => {
+    const { ctx, rpcCall } = makeContext();
+    const orphaned = {
+      jobId: "orphaned-job",
+      hostId: "server:workspace-1",
+      hostLabel: "Server",
+      sourceId: "opaque-chrome",
+      browser: "chrome",
+      phase: "discovering",
+      requestedDataTypes: ["bookmarks"],
+      startedAt: 1,
+      updatedAt: 2,
+      progress: [],
+      warnings: [],
+      resumable: true,
+    };
+    rpcCall.mockImplementation(async (_targetId: string, method: string) => {
+      if (method === "getImportJob") return orphaned;
+      if (method === "listImportJobs") return [orphaned];
+      return [];
+    });
+    const api = (await activate(ctx as never)).providerContracts.browserData;
+
+    await expect(api.getImportJob(orphaned.jobId)).resolves.toMatchObject({
+      phase: "failed",
+      finishedAt: 2,
+      resumable: true,
+      error: "The browser import stopped before it completed. Start the import again to retry.",
+    });
+    await expect(api.listImportJobs()).resolves.toEqual([
+      expect.objectContaining({ jobId: orphaned.jobId, phase: "failed" }),
+    ]);
+  });
+
   it("discovers opaque sources without returning paths or profiles", async () => {
     const { ctx } = makeContext();
     const api = (await activate(ctx as never)).providerContracts.browserData;
