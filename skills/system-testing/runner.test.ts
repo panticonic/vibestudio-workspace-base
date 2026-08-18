@@ -3,8 +3,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   messageListeners: [] as Array<(message: Record<string, unknown>) => void>,
   createWithAgent: vi.fn(async (config: unknown) => {
+    const input = config as { contextId?: string };
+    const sequence = mocks.createWithAgent.mock.calls.length;
     const session = {
       config,
+      entityId: `agent:${sequence}`,
+      contextId: input.contextId ?? `context:isolated:${sequence}`,
       onMessage(listener: (message: Record<string, unknown>) => void) {
         mocks.messageListeners.push(listener);
         return () => undefined;
@@ -101,6 +105,101 @@ describe("HeadlessRunner", () => {
     expect(config.extraConfig["fallbackModel"]).toBeUndefined();
     expect(config.extraConfig).not.toHaveProperty("modelStreamIdleTimeoutMs");
     expect(config.extraConfig).not.toHaveProperty("maxModelCallsPerTurn");
+  });
+
+  it("forks each ordinary fixture task session from one unchanged task basis", async () => {
+    const runner = new HeadlessRunner("ctx-test").forTest("forked-phases", {
+      workspaceRepoFixture: CONTENT_WORKSPACE_REPO_FIXTURE,
+    });
+    let child = 0;
+    let imported: Record<string, unknown> | undefined;
+    mocks.rpc.call.mockImplementation(async (_target, method) => {
+      if (method === "runtime.createContext") return { contextId: "context:fixture" };
+      if (method === "runtime.createSubagentContext") {
+        child += 1;
+        return { contextId: `context:child:${child}` };
+      }
+      throw new Error(`Unexpected method ${method}`);
+    });
+    mocks.vcs.status.mockResolvedValue({
+      contextId: "context:fixture",
+      committed: { kind: "event", eventId: "event:main" },
+      workingHead: { kind: "event", eventId: "event:main" },
+      clean: true,
+      mainEventId: "event:main",
+      mainRelation: "at",
+      workingCounts: { applications: 0, workUnits: 0, changes: 0 },
+      integrating: [],
+    });
+    mocks.vcs.importSnapshot.mockImplementation(async (input) => {
+      imported = input as Record<string, unknown>;
+      const source = (input as { source: Record<string, string> }).source;
+      return {
+        contextId: "context:fixture",
+        eventId: "event:fixture",
+        workUnitId: "work:fixture",
+        applicationId: "application:fixture",
+        importedRepositoryIds: ["repository:fixture"],
+        externalSnapshot: {
+          sourceKind: source["kind"],
+          sourceUri: source["uri"],
+          snapshotRevision: source["snapshotRevision"],
+          snapshotDigest: `snapshot:${"a".repeat(64)}`,
+          targetRepositoryIds: ["repository:fixture"],
+        },
+      };
+    });
+    mocks.vcs.inspect.mockImplementation(async () => {
+      const source = imported?.["source"] as Record<string, string>;
+      return {
+        root: { kind: "work-unit", workUnitId: "work:fixture" },
+        node: {
+          kind: "work-unit",
+          value: {
+            workUnitId: "work:fixture",
+            kind: "import",
+            commandId: imported?.["commandId"],
+            authoredChangeIds: ["change:fixture"],
+            externalSnapshot: {
+              sourceKind: source["kind"],
+              sourceUri: source["uri"],
+              snapshotRevision: source["snapshotRevision"],
+              targetRepositoryIds: ["repository:fixture"],
+            },
+          },
+        },
+        edges: [],
+        hasMoreEdges: false,
+      };
+    });
+
+    await runner.prepareWorkspaceRepoFixture();
+    await runner.spawn({ context: "fork" });
+    await runner.spawn({ context: "fork" });
+
+    const spawned = mocks.createWithAgent.mock.calls.map(
+      ([config]) => (config as { contextId?: string }).contextId,
+    );
+    expect(spawned).toEqual([
+      "context:fixture",
+      "context:child:1",
+      "context:child:2",
+    ]);
+    const forks = mocks.rpc.call.mock.calls.filter(
+      ([, method]) => method === "runtime.createSubagentContext",
+    );
+    expect(forks).toHaveLength(2);
+    expect(forks[0]?.[2]?.[0]).toMatchObject({
+      parentContextId: "context:fixture",
+      ownerEntityId: "agent:1",
+    });
+    expect(forks[1]?.[2]?.[0]).toMatchObject({
+      parentContextId: "context:fixture",
+      ownerEntityId: "agent:1",
+    });
+    expect((forks[0]?.[2]?.[0] as { targetKey: string }).targetKey).not.toBe(
+      (forks[1]?.[2]?.[0] as { targetKey: string }).targetKey,
+    );
   });
 
   it("falls back from Spark to low-effort Luna only for terminal usage limits", async () => {

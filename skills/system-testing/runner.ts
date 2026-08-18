@@ -204,6 +204,7 @@ export class HeadlessRunner {
   private readonly workspaceRepoFixtureLifecycle: WorkspaceRepoFixtureLifecycle | null;
   private readonly testAuthorityPolicy: AgentExecutionTestPolicySpec | null;
   private developmentTargetPromise: Promise<string> | null = null;
+  private fixtureForkOwnerPromise: Promise<HeadlessSession> | null = null;
   private readonly sessionRpcFaultEvidence = new WeakMap<
     HeadlessSession,
     SystemTestRpcFaultEvidence[]
@@ -476,11 +477,12 @@ export class HeadlessRunner {
     source?: string;
     className?: string;
     /**
-     * System tests default to isolated agent contexts so VCS state cannot leak
-     * across tests or through the orchestrating panel. Use "parent" only when a
-     * test explicitly needs the orchestrator's context.
+     * System tests default to the fixture task context. `fork` creates a fresh
+     * child from that unchanged fixture basis for each spawn; use `task` only
+     * when multiple sessions deliberately share one working line, and `parent`
+     * only when a test explicitly needs the orchestrator's context.
      */
-    context?: "isolated" | "task" | "parent";
+    context?: "isolated" | "task" | "fork" | "parent";
     /**
      * Test-only harness mode: advertise panel-local UI methods from the
      * headless client so spawned agents can exercise inline_ui/action-bar tool
@@ -505,19 +507,36 @@ export class HeadlessRunner {
     const model = policy.activeModel;
     const contextMode =
       opts?.context ?? (this.workspaceRepoFixture ? "task" : "isolated");
-    const taskContextId =
-      this.workspaceRepoFixtureLifecycle?.taskContextId ?? null;
-    if (contextMode === "task" && !taskContextId) {
+    const taskContextId = this.workspaceRepoFixtureLifecycle?.taskContextId ?? null;
+    if ((contextMode === "task" || contextMode === "fork") && !taskContextId) {
       throw new Error(
         "Workspace repository fixture must be prepared before spawning its task agent",
       );
+    }
+    let forkContextId: string | null = null;
+    if (contextMode === "fork") {
+      const owner = await this.fixtureForkOwner();
+      const fork = await rpc.call<{ contextId: string }>(
+        "main",
+        "runtime.createSubagentContext",
+        [
+          {
+            parentContextId: taskContextId!,
+            ownerEntityId: owner.entityId,
+            targetKey: `system-test-fixture-fork:${this.testName ?? "unknown"}:${crypto.randomUUID()}`,
+          },
+        ],
+      );
+      forkContextId = fork.contextId;
     }
     const agentContextId =
       contextMode === "parent"
         ? this.contextId
         : contextMode === "task"
           ? taskContextId
-          : undefined;
+          : contextMode === "fork"
+            ? forkContextId
+            : undefined;
     const fixturePrompt = this.workspaceRepoFixture
       ? this.workspaceRepoFixture.kind === "created-repository"
         ? `\n\nHarness-owned test scope: this task owns exactly one repository that it creates under ${JSON.stringify(
@@ -682,6 +701,17 @@ export class HeadlessRunner {
     };
     this.shared.sessionPolicies.set(session, sessionPolicy);
     return session;
+  }
+
+  /**
+   * Keep one inert harness-owned runtime in the fixture context so ordinary
+   * task forks have a real lifecycle owner. Each `context: "fork"` spawn then
+   * starts from the fixture's unchanged working head in its own child context;
+   * sibling uncommitted work is neither shared nor copied.
+   */
+  private fixtureForkOwner(): Promise<HeadlessSession> {
+    this.fixtureForkOwnerPromise ??= this.spawn({ context: "task" });
+    return this.fixtureForkOwnerPromise;
   }
 
   rpcFaultEvidence(

@@ -278,7 +278,10 @@ interface Phase {
   readonly note: string;
 }
 
-function orchestratePhases(phases: readonly Phase[]) {
+function orchestratePhases(
+  phases: readonly Phase[],
+  phaseContext: "fork" | "task" = "fork",
+) {
   return async function orchestrate(
     context: TestOrchestrationContext
   ): Promise<TestExecutionResult> {
@@ -293,7 +296,7 @@ function orchestratePhases(phases: readonly Phase[]) {
 
     try {
       for (const phase of phases) {
-        const session = await context.runner.spawn({ context: "task" });
+        const session = await context.runner.spawn({ context: phaseContext });
         sessions.push({ role: phase.role, session });
         await context.sendAndWait(session, phase.prompt(repoPath), phase.note);
         messages.push(...(session.messages as ChatMessage[]));
@@ -369,25 +372,31 @@ const CANONICAL_QUESTION_CASES: TestCase[] = [
     prompt: "Harness-orchestrated recovery of an originating request.",
     // The only case that still needs a live author: the chain under test ends
     // at a trajectory message, and a seeded import has no human turn to reach.
-    orchestrate: orchestratePhases([
-      {
-        role: "author",
-        note: "author records a constrained batch size",
-        prompt: (repoPath) =>
-          [
-            `In ${repoPath}, create src/export-batching.ts with a small exported exportBatchSize constant set to 64.`,
-            `Please keep it at 64 because ${RELAY_REASON}.`,
-            BARE_FILE,
-            "Commit that change and report the path and the resulting clean state.",
-          ].join(" "),
-      },
-      {
-        role: "reader",
-        note: "cold reader recovers the request behind the constant",
-        prompt: (repoPath) =>
-          `Someone set exportBatchSize in ${repoPath}/src/export-batching.ts. I need to know what they were actually asked to do — the original request behind that value, not just who touched the line. Tell me what was being attempted and how far back the recorded evidence actually reaches.`,
-      },
-    ]),
+    orchestrate: orchestratePhases(
+      [
+        {
+          role: "author",
+          note: "author records a constrained batch size",
+          prompt: (repoPath) =>
+            [
+              `In ${repoPath}, create src/export-batching.ts with a small exported exportBatchSize constant set to 64.`,
+              `Please keep it at 64 because ${RELAY_REASON}.`,
+              BARE_FILE,
+              "Commit that change and report the path and the resulting clean state.",
+            ].join(" "),
+        },
+        {
+          role: "reader",
+          note: "cold reader recovers the request behind the constant",
+          prompt: (repoPath) =>
+            `Someone set exportBatchSize in ${repoPath}/src/export-batching.ts. I need to know what they were actually asked to do — the original request behind that value, not just who touched the line. Tell me what was being attempted and how far back the recorded evidence actually reaches.`,
+        },
+      ],
+      // This scenario deliberately asks a second session to inspect work the
+      // first session committed on the same local line. The visibility-boundary
+      // scenario below uses the ordinary forked phase contexts instead.
+      "task",
+    ),
     validate: (result) =>
       all(
         provenanceSurfacesAreLive(result),

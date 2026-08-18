@@ -52,6 +52,9 @@ const causeCase = provenanceQuestionTests.find(
 const queryCase = provenanceQuestionTests.find(
   (test) => test.name === "provenance-answers-a-set-shaped-question"
 )!;
+const visibilityCase = provenanceQuestionTests.find(
+  (test) => test.name === "provenance-holds-the-visibility-boundary"
+)!;
 
 const GOOD_CAUSE_BLOCK =
   'cause · work-unit @r2-b0c2\n  stated "keep it at 64 because the Pelagic relay drops any export payload above 512 KiB"\n  human statement · turn @r4-a4c9\ncontinue: pass any @ref back as target';
@@ -60,6 +63,32 @@ const GOOD_ANSWER =
   "It was set to 64 because the Pelagic relay drops export payloads above 512 KiB.";
 
 describe("provenance question scenarios", () => {
+  it("forks ordinary phases while keeping deliberate local-history continuity explicit", async () => {
+    const contexts: string[] = [];
+    const session = () => ({
+      messages: [],
+      close: async () => undefined,
+      snapshot: () => ({ messages: [], invocations: [], cleanupErrors: [] }),
+    });
+    const orchestration = {
+      runner: {
+        workspaceRepoName: "fixture",
+        spawn: async ({ context }: { context: string }) => {
+          contexts.push(context);
+          return session();
+        },
+      },
+      sendAndWait: async () => undefined,
+    };
+
+    await visibilityCase.orchestrate!(orchestration as never);
+    expect(contexts).toEqual(["fork", "fork"]);
+
+    contexts.length = 0;
+    await causeCase.orchestrate!(orchestration as never);
+    expect(contexts).toEqual(["task", "task"]);
+  });
+
   it("declares user goals rather than call choreography", () => {
     for (const test of provenanceQuestionTests) {
       expect(() => assertSystemTestDeclaration(test)).not.toThrow();
