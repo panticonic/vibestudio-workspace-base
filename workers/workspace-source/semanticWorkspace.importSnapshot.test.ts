@@ -275,6 +275,44 @@ describe("SemanticWorkspace snapshot import", () => {
     expect(store.pendingEffects("command:attach-runtime")).toEqual([]);
   });
 
+  it("keeps semantic mutations projection-free until a filesystem consumer upgrades them", async () => {
+    const { semantic, store } = await authorityFixture();
+    const ingress: SemanticDispatchRequest["ingress"] = {
+      causalParent: null,
+      contextIntegrity: { class: "internal", externalKeys: [] },
+    };
+    semantic.ensureContextCoordinate(
+      {
+        contextId: "context:semantic-only",
+        commandId: "command:attach-semantic-only",
+      },
+      ingress
+    );
+    const working = store.contextRequired("context:semantic-only").working.ref;
+
+    const discarded = await semantic.dispatch("discard", {
+      ingress,
+      input: {
+        contextId: "context:semantic-only",
+        commandId: "command:semantic-discard",
+        expectedWorkingHead: working,
+      },
+    });
+
+    expect(discarded).toMatchObject({ kind: "complete" });
+    expect(store.pendingEffects("command:semantic-discard")).toEqual([]);
+    expect(store.contextProjectionRequired("context:semantic-only")).toBe(false);
+
+    semantic.ensureContext(
+      {
+        contextId: "context:semantic-only",
+        commandId: "command:require-projection",
+      },
+      ingress
+    );
+    expect(store.contextProjectionRequired("context:semantic-only")).toBe(true);
+  });
+
   it("does not initialize a forked context again when a runtime attaches to it", async () => {
     const { semantic, store, initial } = await authorityFixture();
     const forked = semantic.forkContext(

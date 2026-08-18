@@ -32,6 +32,7 @@ export const SEMANTIC_VCS_REQUIRED_TABLES = [
   "gad_persistent_radix_nodes",
   "gad_persistent_radix_edges",
   "vcs_contexts",
+  "vcs_context_projection_policies",
   "vcs_workspace_heads",
   "gad_workspace_events",
   "gad_workspace_event_parents",
@@ -198,6 +199,15 @@ export function createSemanticVcsSchema(sql: SqlStorage): void {
       ON vcs_contexts(committed_event_id, context_id);
     CREATE INDEX IF NOT EXISTS idx_vcs_contexts_working_head
       ON vcs_contexts(working_head_application_id, context_id);
+
+    -- Projection intent is operational state, not semantic history. A
+    -- coordinate-only context remains entirely inside the semantic workspace
+    -- until an explicit filesystem consumer upgrades it to required.
+    CREATE TABLE IF NOT EXISTS vcs_context_projection_policies (
+      context_id TEXT PRIMARY KEY,
+      projection TEXT NOT NULL CHECK (projection IN ('required', 'deferred')),
+      updated_at TEXT NOT NULL
+    );
 
     CREATE TABLE IF NOT EXISTS vcs_workspace_heads (
       head TEXT PRIMARY KEY,

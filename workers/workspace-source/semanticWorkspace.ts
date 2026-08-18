@@ -1469,6 +1469,14 @@ export class SemanticWorkspace {
           result,
         });
         this.deps.store.compactAppliedObservation(pending.effectId);
+        if (!projection) {
+          this.deps.store.finishEffectPendingCommand({
+            scopeKind: "context",
+            scopeId: String(commandInput["contextId"]),
+            commandId: pending.commandId,
+          });
+          return { kind: "complete", result };
+        }
         return { kind: "effects-pending", result, effects: [projection] };
       });
     }
@@ -1654,6 +1662,9 @@ export class SemanticWorkspace {
       const existingContext = this.deps.store.context(input.contextId);
       const context =
         existingContext ?? this.deps.store.ensureContext(input.contextId, input.commandId);
+      if (!existingContext || projection === "required") {
+        this.deps.store.setContextProjection(input.contextId, projection);
+      }
       if (existingContext || projection === "deferred") {
         this.deps.store.finishCommand({
           scopeKind: "context",
@@ -1671,6 +1682,12 @@ export class SemanticWorkspace {
         context.working.ref,
         []
       );
+      if (!effect) {
+        throw new SemanticVcsError(
+          "IntegrityFailure",
+          `Required context ${input.contextId} did not request materialization`
+        );
+      }
       this.deps.store.finishCommand({
         scopeKind: "context",
         scopeId: input.contextId,
@@ -1730,6 +1747,12 @@ export class SemanticWorkspace {
         context.working.ref,
         []
       );
+      if (!effect) {
+        throw new SemanticVcsError(
+          "IntegrityFailure",
+          `Forked context ${input.targetContextId} did not request materialization`
+        );
+      }
       this.deps.store.finishCommand({
         scopeKind: "context",
         scopeId: input.targetContextId,
@@ -1893,9 +1916,11 @@ export class SemanticWorkspace {
         scopeId: input.contextId,
         commandId: input.commandId,
         result,
-        effectPending: true,
+        effectPending: effect !== null,
       });
-      return { kind: "effects-pending", result, effects: [effect] };
+      return effect
+        ? { kind: "effects-pending", result, effects: [effect] }
+        : { kind: "complete", result };
     });
   }
 
@@ -2384,9 +2409,11 @@ export class SemanticWorkspace {
         scopeId: input.contextId,
         commandId: input.commandId,
         result,
-        effectPending: true,
+        effectPending: effect !== null,
       });
-      return { kind: "effects-pending", result, effects: [effect] };
+      return effect
+        ? { kind: "effects-pending", result, effects: [effect] }
+        : { kind: "complete", result };
     });
   }
 
@@ -2489,9 +2516,11 @@ export class SemanticWorkspace {
         scopeId: input.contextId,
         commandId: input.commandId,
         result,
-        effectPending: true,
+        effectPending: effect !== null,
       });
-      return { kind: "effects-pending", result, effects: [effect] };
+      return effect
+        ? { kind: "effects-pending", result, effects: [effect] }
+        : { kind: "complete", result };
     });
   }
 
@@ -3110,9 +3139,11 @@ export class SemanticWorkspace {
         scopeId: input.contextId,
         commandId: input.commandId,
         result: publicResult,
-        effectPending: true,
+        effectPending: effect !== null,
       });
-      return { kind: "effects-pending", result: publicResult, effects: [effect] };
+      return effect
+        ? { kind: "effects-pending", result: publicResult, effects: [effect] }
+        : { kind: "complete", result: publicResult };
     };
     if (observed) {
       return this.deps.transaction(() => {
@@ -3491,9 +3522,11 @@ export class SemanticWorkspace {
         scopeId: input.contextId,
         commandId: input.commandId,
         result,
-        effectPending: true,
+        effectPending: effect !== null,
       });
-      return { kind: "effects-pending", result, effects: [effect] };
+      return effect
+        ? { kind: "effects-pending", result, effects: [effect] }
+        : { kind: "complete", result };
     });
   }
 
@@ -3607,9 +3640,11 @@ export class SemanticWorkspace {
         scopeId: input.contextId,
         commandId: input.commandId,
         result,
-        effectPending: true,
+        effectPending: effect !== null,
       });
-      return { kind: "effects-pending", result, effects: [effect] };
+      return effect
+        ? { kind: "effects-pending", result, effects: [effect] }
+        : { kind: "complete", result };
     });
   }
 
@@ -3643,9 +3678,11 @@ export class SemanticWorkspace {
         scopeId: input.contextId,
         commandId: input.commandId,
         result,
-        effectPending: true,
+        effectPending: effect !== null,
       });
-      return { kind: "effects-pending", result, effects: [effect] };
+      return effect
+        ? { kind: "effects-pending", result, effects: [effect] }
+        : { kind: "complete", result };
     });
   }
 
@@ -7702,7 +7739,8 @@ export class SemanticWorkspace {
     blobs: readonly { contentHash: string; base64: string }[],
     draft?: MutationDraft,
     affectedRepositoryIds?: readonly string[]
-  ): SemanticEffect {
+  ): SemanticEffect | null {
+    if (!this.deps.store.contextProjectionRequired(contextId)) return null;
     const command = this.buildMaterializationCommand(
       contextId,
       commandId,

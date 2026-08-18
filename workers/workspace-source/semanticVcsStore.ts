@@ -445,6 +445,47 @@ export class SemanticVcsStore {
     return this.contextRequired(contextId);
   }
 
+  setContextProjection(
+    contextId: string,
+    projection: "required" | "deferred"
+  ): void {
+    const current = this.sql
+      .exec(
+        `SELECT projection
+           FROM vcs_context_projection_policies
+          WHERE context_id = ?`,
+        contextId
+      )
+      .toArray()[0] as { projection?: unknown } | undefined;
+    // Filesystem demand is monotone for the lifetime of a context. A later
+    // runtime attachment must not downgrade an already materialized fork.
+    const next = current?.projection === "required" ? "required" : projection;
+    this.sql.exec(
+      `INSERT INTO vcs_context_projection_policies
+       (context_id, projection, updated_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(context_id) DO UPDATE SET
+         projection = excluded.projection,
+         updated_at = excluded.updated_at`,
+      contextId,
+      next,
+      this.now()
+    );
+  }
+
+  contextProjectionRequired(contextId: string): boolean {
+    const row = this.sql
+      .exec(
+        `SELECT projection
+           FROM vcs_context_projection_policies
+          WHERE context_id = ?`,
+        contextId
+      )
+      .toArray()[0] as { projection?: unknown } | undefined;
+    // Contexts predating the explicit policy were always projected.
+    return row?.projection !== "deferred";
+  }
+
   forkContext(sourceContextId: string, targetContextId: string): ContextRecord {
     if (this.context(targetContextId)) {
       throw new SemanticVcsError("RevisionChanged", `Context ${targetContextId} already exists`);
@@ -459,6 +500,7 @@ export class SemanticVcsStore {
       source.workingHeadApplicationId,
       this.now()
     );
+    this.setContextProjection(targetContextId, "required");
     return this.contextRequired(targetContextId);
   }
 
@@ -469,6 +511,10 @@ export class SemanticVcsStore {
     // whose context row no longer exists.
     this.sql.exec(
       `DELETE FROM gad_effect_intents WHERE scope_kind = 'context' AND scope_id = ?`,
+      contextId
+    );
+    this.sql.exec(
+      `DELETE FROM vcs_context_projection_policies WHERE context_id = ?`,
       contextId
     );
     this.sql.exec(
