@@ -304,6 +304,39 @@ describe("useQuickfireSessionCore", () => {
     expect(transport.clear).not.toHaveBeenCalled();
   });
 
+  it("finishes leaving a slot before reopening its subscription", async () => {
+    let finishClose: (() => void) | null = null;
+    const first = fakeChannelClient();
+    first.close.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishClose = resolve;
+        }),
+    );
+    const second = fakeChannelClient();
+    const connectToChannel = vi
+      .fn()
+      .mockReturnValueOnce(first as never)
+      .mockReturnValueOnce(second as never);
+    const { transport } = transportFor(fresh, { connectToChannel });
+    const { result, rerender } = renderHook(
+      ({ slotId }: { slotId: string | null }) =>
+        useQuickfireSessionCore(slotId, transport),
+      { initialProps: { slotId: "slot" as string | null } },
+    );
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+
+    rerender({ slotId: null });
+    rerender({ slotId: "slot" });
+    await waitFor(() => expect(first.close).toHaveBeenCalledTimes(1));
+    expect(connectToChannel).toHaveBeenCalledTimes(1);
+
+    await act(async () => finishClose?.());
+    await waitFor(() => expect(connectToChannel).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+    expect(result.current.view.error).toBeNull();
+  });
+
   it("returns the promoted channel and context so the chat panel can attach to both", async () => {
     const { transport } = transportFor(fresh);
     const { result } = renderHook(() =>
@@ -319,6 +352,35 @@ describe("useQuickfireSessionCore", () => {
       contextId: "ctx-1",
     });
     expect(result.current.view.promoted).toBe(true);
+  });
+
+  it("leaves the overlay subscription before promoting its conversation", async () => {
+    let finishClose: (() => void) | null = null;
+    const { transport, client } = transportFor(fresh);
+    client.close.mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          finishClose = resolve;
+        }),
+    );
+    const { result } = renderHook(() =>
+      useQuickfireSessionCore("slot", transport),
+    );
+    await waitFor(() => expect(result.current.view.connecting).toBe(false));
+
+    let promotion: Promise<QuickfireSessionFacts | null> | null = null;
+    act(() => {
+      promotion = result.current.promote();
+    });
+    await waitFor(() => expect(client.close).toHaveBeenCalledTimes(1));
+    expect(transport.promote).not.toHaveBeenCalled();
+
+    await act(async () => finishClose?.());
+    await expect(promotion).resolves.toMatchObject({
+      channelId: "channel-1",
+      contextId: "ctx-1",
+    });
+    expect(transport.promote).toHaveBeenCalledWith("slot");
   });
 
   it("clearing archives and disconnects without creating another conversation", async () => {

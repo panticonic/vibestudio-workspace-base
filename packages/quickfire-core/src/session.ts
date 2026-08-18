@@ -301,6 +301,16 @@ export function useQuickfireSessionCore(
   const sourceRef = useRef(source);
   sourceRef.current = source;
   const clientRef = useRef<PubSubClient | null>(null);
+  /**
+   * Teardown is part of the subscription lifecycle, not background cleanup.
+   *
+   * A slot deliberately reuses its delivery identity when the overlay is
+   * reopened. Starting that replacement before the prior stream has closed
+   * lets the old unsubscribe retire the new stream before its ACK. Keep one
+   * serial teardown barrier so dismiss/reopen, start-fresh, and promotion all
+   * transfer that identity without overlapping generations.
+   */
+  const clientTeardownRef = useRef<Promise<void>>(Promise.resolve());
   const stateRef = useRef<ChannelViewState>(createInitialChannelViewState());
   const selfKeyRef = useRef<string | null>(null);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -408,7 +418,7 @@ export function useQuickfireSessionCore(
     [],
   );
 
-  const closeClient = useCallback(() => {
+  const closeClient = useCallback((): Promise<void> => {
     if (pushTimerRef.current !== null) {
       clearTimeout(pushTimerRef.current);
       pushTimerRef.current = null;
@@ -419,7 +429,15 @@ export function useQuickfireSessionCore(
     awaitingResponseRef.current = null;
     // Leaving the channel is a view change only; the durable conversation
     // survives until an explicit lifecycle event ends it.
-    void client?.close().catch(() => undefined);
+    const teardown = clientTeardownRef.current
+      .catch(() => undefined)
+      .then(() => client?.close())
+      .then(
+        () => undefined,
+        () => undefined,
+      );
+    clientTeardownRef.current = teardown;
+    return teardown;
   }, []);
 
   /**
@@ -437,6 +455,10 @@ export function useQuickfireSessionCore(
     ) => {
       const live = () => generationRef.current === generation;
       try {
+        // Reusing a slot's delivery identity is safe only after its previous
+        // subscription has fully left the channel.
+        await clientTeardownRef.current;
+        if (!live()) return;
         const session: QuickfireSessionFacts =
           bound.kind === "slot"
             ? await transportRef.current.sessionFor(bound.slotId, { fresh })
@@ -635,9 +657,9 @@ export function useQuickfireSessionCore(
         "A conversation opened from a notification cannot be cleared here",
       );
     }
-    await transportRef.current.clear(bound.slotId);
     generationRef.current += 1;
-    closeClient();
+    await closeClient();
+    await transportRef.current.clear(bound.slotId);
     queuedRef.current = [];
     stateRef.current = createInitialChannelViewState();
     visibleLimitRef.current = TRANSCRIPT_LIMIT;
@@ -663,11 +685,16 @@ export function useQuickfireSessionCore(
           lastActivityAt: null,
         };
       }
+      // Promotion transfers presentation ownership to a chat panel. Finish
+      // leaving the overlay subscription before releasing the panel-scoped
+      // bindings or allowing the chat panel to claim the same conversation.
+      generationRef.current += 1;
+      await closeClient();
       const promoted = await transportRef.current.promote(bound.slotId);
       if (!promoted) return null;
       setView((current) => ({ ...current, promoted: true }));
       return promoted;
-    }, []);
+    }, [closeClient]);
 
   const revealImage = useCallback(
     (imageId: string) => {
@@ -744,7 +771,7 @@ export function useQuickfireSessionCore(
     // Rebind against the same slot through the ONE binding path, so the fresh
     // session gets its live event stream like any other.
     const generation = (generationRef.current += 1);
-    closeClient();
+    await closeClient();
     queuedRef.current = [];
     stateRef.current = createInitialChannelViewState();
     visibleLimitRef.current = TRANSCRIPT_LIMIT;
