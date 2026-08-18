@@ -1,4 +1,3 @@
-import { callMain, gatewayConfig } from "@workspace/runtime";
 import {
   composeOnboardingCatalog,
   type OnboardingCapabilityDefinition,
@@ -9,11 +8,7 @@ import {
   type SetupAction,
   type SetupPresentationState,
 } from "./catalog";
-import {
-  createCredentialConnectionStatusAdapter,
-  createStatusAdapters,
-  type CapabilityOnboardingStatusAdapter,
-} from "./status";
+import type { CapabilityOnboardingStatusAdapter } from "./status";
 
 interface OnboardingHostTopologySnapshot {
   devices: {
@@ -35,6 +30,9 @@ interface AuthorityPreflightResult {
 interface SkillCatalogEntry {
   skillPath: string;
 }
+
+type RuntimeCallMain = (typeof import("@workspace/runtime"))["callMain"];
+type RuntimeModule = typeof import("@workspace/runtime");
 
 export interface SetupCapabilitySnapshot {
   id: string;
@@ -67,9 +65,9 @@ export interface OnboardingSnapshotDependencies {
   now?: () => Date;
 }
 
-function currentConnectionRoute(): "local" | "remote" {
+function currentConnectionRoute(serverUrl: string): "local" | "remote" {
   try {
-    const hostname = new URL(gatewayConfig.serverUrl).hostname;
+    const hostname = new URL(serverUrl).hostname;
     return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1"
       ? "local"
       : "remote";
@@ -78,7 +76,10 @@ function currentConnectionRoute(): "local" | "remote" {
   }
 }
 
-async function canReadHubControl(method: "listDevices" | "listWorkspaces"): Promise<boolean> {
+async function canReadHubControl(
+  callMain: RuntimeCallMain,
+  method: "listDevices" | "listWorkspaces"
+): Promise<boolean> {
   try {
     const result = await callMain<AuthorityPreflightResult>("authority.preflight", {
       service: "hubControl",
@@ -91,14 +92,15 @@ async function canReadHubControl(method: "listDevices" | "listWorkspaces"): Prom
   }
 }
 
-async function readHostTopology(): Promise<OnboardingHostTopologySnapshot> {
+async function readHostTopology(runtime: RuntimeModule): Promise<OnboardingHostTopologySnapshot> {
   // These are intentionally optional setup reads. Preflight avoids sending a
   // gated call that is guaranteed to fail (and would be noisy over Electron's
   // IPC handler) while preserving the honest Unknown state until the user has
   // explicitly granted access through the relevant workflow.
+  const { callMain, gatewayConfig } = runtime;
   const [canReadDevices, canReadWorkspaces] = await Promise.all([
-    canReadHubControl("listDevices"),
-    canReadHubControl("listWorkspaces"),
+    canReadHubControl(callMain, "listDevices"),
+    canReadHubControl(callMain, "listWorkspaces"),
   ]);
   const [devices, workspaces] = await Promise.all([
     canReadDevices
@@ -118,20 +120,21 @@ async function readHostTopology(): Promise<OnboardingHostTopologySnapshot> {
     },
     remote: {
       availability: workspaceList ? "available" : "unknown",
-      route: currentConnectionRoute(),
+      route: currentConnectionRoute(gatewayConfig.serverUrl),
       workspaceCount: workspaceList?.length ?? 0,
     },
   };
 }
 
-async function hasSkill(skillPath: string): Promise<boolean> {
-  const entries = await callMain<SkillCatalogEntry[]>("workspace.listSkills");
+async function hasSkill(runtime: RuntimeModule, skillPath: string): Promise<boolean> {
+  const entries = await runtime.callMain<SkillCatalogEntry[]>("workspace.listSkills");
   return entries.some((entry) => entry.skillPath === skillPath);
 }
 
 export async function readInstalledOnboardingCatalog(): Promise<
   readonly OnboardingCapabilityDefinition[]
 > {
+  const { callMain } = await import("@workspace/runtime");
   const entries = await callMain<OnboardingSkillEntry[]>("workspace.listSkills");
   return composeOnboardingCatalog(entries);
 }
@@ -242,6 +245,8 @@ export async function composeOnboardingSnapshot(
   options: ComposeOnboardingSnapshotOptions = {},
   dependencies: OnboardingSnapshotDependencies = {}
 ): Promise<SetupCapabilitySnapshot[]> {
+  const { createCredentialConnectionStatusAdapter, createStatusAdapters } =
+    await import("./status");
   const observedAt = (dependencies.now?.() ?? new Date()).toISOString();
   const catalog =
     dependencies.catalog ?? (await (dependencies.readCatalog ?? readInstalledOnboardingCatalog)());
@@ -286,9 +291,16 @@ export async function composeOnboardingSnapshot(
 
   let host: SetupCapabilitySnapshot[];
   try {
+    let readTopology = dependencies.readHostTopology;
+    let readSkill = dependencies.hasSkill;
+    if (!readTopology || !readSkill) {
+      const runtime = await import("@workspace/runtime");
+      readTopology ??= () => readHostTopology(runtime);
+      readSkill ??= (skillPath: string) => hasSkill(runtime, skillPath);
+    }
     const [topology, mobileOwnerAvailable] = await Promise.all([
-      (dependencies.readHostTopology ?? readHostTopology)(),
-      (dependencies.hasSkill ?? hasSkill)("skills/phone-setup/SKILL.md"),
+      readTopology(),
+      readSkill("skills/phone-setup/SKILL.md"),
     ]);
     host = hostSnapshots(catalog, topology, mobileOwnerAvailable, observedAt);
   } catch {

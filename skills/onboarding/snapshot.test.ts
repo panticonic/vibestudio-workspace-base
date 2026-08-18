@@ -3,9 +3,11 @@ import { callMain } from "@workspace/runtime";
 
 vi.mock("@workspace/runtime", () => ({
   callMain: vi.fn(),
+  gatewayConfig: { serverUrl: "http://127.0.0.1:8787" },
 }));
 
 vi.mock("./status.js", () => ({
+  createCredentialConnectionStatusAdapter: vi.fn(),
   createStatusAdapters: vi.fn(() => ({})),
 }));
 
