@@ -60,7 +60,10 @@ import {
   subscribeHeadlessAgent,
   unsubscribeHeadlessAgent,
 } from "./channel.js";
-import { HeadlessTurnObserver, type HeadlessTurnSnapshot } from "./turn-observer.js";
+import {
+  HeadlessTurnObserver,
+  type HeadlessTurnSnapshot,
+} from "./turn-observer.js";
 
 // ===========================================================================
 // Types
@@ -98,7 +101,10 @@ export interface SessionSnapshot {
   /** Live/terminal state of the one acknowledged session teardown path. */
   cleanup: SessionCleanupState;
   cleanupErrors: readonly SessionCleanupError[];
-  participants: Record<string, { name: string; type: string; handle: string; connected: boolean }>;
+  participants: Record<
+    string,
+    { name: string; type: string; handle: string; connected: boolean }
+  >;
   localMethodNames: readonly string[];
   connected: boolean;
   duration: number;
@@ -142,7 +148,7 @@ export interface HeadlessWithAgentConfig extends HeadlessSessionConfig {
     target: string,
     method: string,
     args: unknown[],
-    options?: { timeoutMs?: number; signal?: AbortSignal }
+    options?: { timeoutMs?: number; signal?: AbortSignal },
   ) => Promise<unknown>;
   source: string;
   className: string;
@@ -199,7 +205,8 @@ function invocationErrorMessage(value: unknown, fallback: string): string {
     const protocolContent = record["protocolContent"];
     if (Array.isArray(protocolContent)) {
       const text = protocolContent.find(
-        (item) => item && typeof item === "object" && typeof item["text"] === "string"
+        (item) =>
+          item && typeof item === "object" && typeof item["text"] === "string",
       )?.["text"];
       if (typeof text === "string") return text;
     }
@@ -250,7 +257,8 @@ export class HeadlessSession {
   private _chatMessageOrder: string[] = [];
   private _channelView: ChannelViewState = createInitialChannelViewState();
   private _hasIncomplete = false;
-  private _participants: Record<string, Participant<ChatParticipantMetadata>> = {};
+  private _participants: Record<string, Participant<ChatParticipantMetadata>> =
+    {};
   private _debugEvents: Array<AgentDebugPayload & { ts: number }> = [];
   private _cleanupErrors: SessionCleanupError[] = [];
   private _cleanupFailureCauses: unknown[] = [];
@@ -273,7 +281,10 @@ export class HeadlessSession {
 
   private constructor(config: HeadlessSessionConfig) {
     this._config = config;
-    this._hotPathTrace.push({ phase: "session.created", startedAt: Date.now() });
+    this._hotPathTrace.push({
+      phase: "session.created",
+      startedAt: Date.now(),
+    });
     this._clientId = config.config.clientId;
 
     this._connection = new ConnectionManager({
@@ -315,7 +326,9 @@ export class HeadlessSession {
     };
   }
 
-  private participantKind(type: string | undefined): "user" | "agent" | "panel" | "external" {
+  private participantKind(
+    type: string | undefined,
+  ): "user" | "agent" | "panel" | "external" {
     if (type === "agent" || type === "headless") return "agent";
     if (type === "panel" || type === "client") return "panel";
     return "external";
@@ -329,7 +342,9 @@ export class HeadlessSession {
   /**
    * Convenience: create a channel, subscribe a DO agent, connect, all in one.
    */
-  static async createWithAgent(config: HeadlessWithAgentConfig): Promise<HeadlessSession> {
+  static async createWithAgent(
+    config: HeadlessWithAgentConfig,
+  ): Promise<HeadlessSession> {
     const channelId = config.channelId ?? `headless-${crypto.randomUUID()}`;
     const objectKey = config.objectKey ?? `headless-${crypto.randomUUID()}`;
     const session = new HeadlessSession(config);
@@ -415,7 +430,7 @@ export class HeadlessSession {
         } catch (cleanupError) {
           throw new AggregateError(
             [err, cleanupError],
-            "Headless agent setup failed and its isolated context could not be reclaimed"
+            "Headless agent setup failed and its isolated context could not be reclaimed",
           );
         }
       }
@@ -434,7 +449,12 @@ export class HeadlessSession {
   }
 
   private actorKindFromMetadata(type: string | undefined): ActorKind {
-    if (type === "agent" || type === "system" || type === "panel" || type === "external") {
+    if (
+      type === "agent" ||
+      type === "system" ||
+      type === "panel" ||
+      type === "external"
+    ) {
       return type;
     }
     return "user";
@@ -442,7 +462,8 @@ export class HeadlessSession {
 
   private localActor() {
     const metadata = this._config.metadata ?? DEFAULT_METADATA;
-    const id = this._client?.clientId ?? this._clientId ?? metadata.handle ?? "headless";
+    const id =
+      this._client?.clientId ?? this._clientId ?? metadata.handle ?? "headless";
     return {
       kind: this.actorKindFromMetadata(metadata.type),
       id,
@@ -453,11 +474,13 @@ export class HeadlessSession {
 
   private async publishSyntheticPanelUiEvent(
     event: AgenticEvent<"ui.inline_rendered" | "ui.action_bar.updated">,
-    idempotencyKey: string
+    idempotencyKey: string,
   ): Promise<number | undefined> {
     const client = this._client;
     if (!client) return undefined;
-    return client.publish(AGENTIC_EVENT_PAYLOAD_KIND, event, { idempotencyKey });
+    return client.publish(AGENTIC_EVENT_PAYLOAD_KIND, event, {
+      idempotencyKey,
+    });
   }
 
   private buildSyntheticPanelUiMethods(): Record<string, MethodDefinition> {
@@ -488,7 +511,8 @@ export class HeadlessSession {
           props?: Record<string, unknown>;
         };
         const trimmedPath = path?.trim();
-        if (!trimmedPath && !code) return { ok: false, error: "Missing code or path" };
+        if (!trimmedPath && !code)
+          return { ok: false, error: "Missing code or path" };
 
         const id = requestedId?.trim() || crypto.randomUUID();
         const source = trimmedPath
@@ -509,7 +533,7 @@ export class HeadlessSession {
             payload: eventPayload,
             createdAt: new Date().toISOString(),
           },
-          `synthetic-ui:inline:${id}:${crypto.randomUUID()}`
+          `synthetic-ui:inline:${id}:${crypto.randomUUID()}`,
         );
         return { ok: true, id };
       },
@@ -546,7 +570,7 @@ export class HeadlessSession {
               },
               createdAt: new Date().toISOString(),
             },
-            `synthetic-ui:action-bar:clear:${crypto.randomUUID()}`
+            `synthetic-ui:action-bar:clear:${crypto.randomUUID()}`,
           );
           return { ok: true, cleared: true };
         }
@@ -572,7 +596,7 @@ export class HeadlessSession {
             payload: eventPayload,
             createdAt: new Date().toISOString(),
           },
-          `synthetic-ui:action-bar:${id}`
+          `synthetic-ui:action-bar:${id}`,
         );
         return { ok: true, id };
       },
@@ -596,7 +620,7 @@ export class HeadlessSession {
           if (!rejectedFirstCall) {
             rejectedFirstCall = true;
             throw new Error(
-              "Invalid arguments for tool validation_retry_probe: injected first-call argument rejection"
+              "Invalid arguments for tool validation_retry_probe: injected first-call argument rejection",
             );
           }
           return { ok: true, recovered: true, value };
@@ -613,7 +637,7 @@ export class HeadlessSession {
     if (event.type === AGENTIC_EVENT_PAYLOAD_KIND) {
       this._channelView = reduceChannelView(
         this._channelView,
-        this.pubsubAgenticEventToEnvelope(event)
+        this.pubsubAgenticEventToEnvelope(event),
       );
       this._chatMessages.clear();
       this._chatMessageOrder = [];
@@ -626,7 +650,8 @@ export class HeadlessSession {
     }
 
     if (event.type === "agent-debug") {
-      const payload = (event as IncomingEvent & { payload: AgentDebugPayload }).payload;
+      const payload = (event as IncomingEvent & { payload: AgentDebugPayload })
+        .payload;
       const ts = (event as IncomingEvent & { ts: number }).ts ?? Date.now();
       this._debugEvents.push({ ...payload, ts });
 
@@ -655,7 +680,7 @@ export class HeadlessSession {
       channelConfig?: ChannelConfig;
       contextId?: string;
       methods?: Record<string, MethodDefinition>;
-    }
+    },
   ): Promise<void> {
     const startedAt = Date.now();
     const methods = options?.methods ?? this.buildDefaultMethods();
@@ -663,9 +688,13 @@ export class HeadlessSession {
 
     this._client = await this._connection.connect({
       channelId,
-      ...(options?.channelTargetId ? { channelTargetId: options.channelTargetId } : {}),
+      ...(options?.channelTargetId
+        ? { channelTargetId: options.channelTargetId }
+        : {}),
       methods,
-      ...(options?.channelConfig ? { channelConfig: options.channelConfig } : {}),
+      ...(options?.channelConfig
+        ? { channelConfig: options.channelConfig }
+        : {}),
       ...(options?.contextId ? { contextId: options.contextId } : {}),
     });
     this._channelId = channelId;
@@ -674,7 +703,8 @@ export class HeadlessSession {
       const title = channelConfig.title?.trim();
       this._title = title || null;
     };
-    if (this._client.channelConfig) applyChannelTitle(this._client.channelConfig);
+    if (this._client.channelConfig)
+      applyChannelTitle(this._client.channelConfig);
     this._client.onConfigChange(applyChannelTitle);
 
     // Roster subscription
@@ -732,7 +762,7 @@ export class HeadlessSession {
       attachments?: AttachmentInput[];
       idempotencyKey?: string;
       metadata?: Record<string, unknown>;
-    }
+    },
   ): Promise<string> {
     if (!this._client) throw new Error("Not connected");
     const startedAt = Date.now();
@@ -747,13 +777,20 @@ export class HeadlessSession {
 
   async interrupt(
     agentId: string,
-    options?: { timeoutMs?: number; signal?: AbortSignal }
+    options?: { timeoutMs?: number; signal?: AbortSignal },
   ): Promise<void> {
     if (this._agentRpcCall && this._channelId) {
       if (options) {
-        await this._agentRpcCall(agentId, "interruptChannel", [this._channelId], options);
+        await this._agentRpcCall(
+          agentId,
+          "interruptChannel",
+          [this._channelId],
+          options,
+        );
       } else {
-        await this._agentRpcCall(agentId, "interruptChannel", [this._channelId]);
+        await this._agentRpcCall(agentId, "interruptChannel", [
+          this._channelId,
+        ]);
       }
       return;
     }
@@ -762,17 +799,22 @@ export class HeadlessSession {
     unwrapChatMethodResult(await handle.result);
   }
 
-  async callMethod(participantId: string, method: string, args: unknown): Promise<unknown> {
+  async callMethod(
+    participantId: string,
+    method: string,
+    args: unknown,
+  ): Promise<unknown> {
     if (!this._client) throw new Error("Not connected");
     const handle = this._client.callMethod(participantId, method, args);
-    const result = await (handle as { result: Promise<ChatMethodResult> }).result;
+    const result = await (handle as { result: Promise<ChatMethodResult> })
+      .result;
     return unwrapChatMethodResult(result);
   }
 
   async callMethodResult(
     participantId: string,
     method: string,
-    args: unknown
+    args: unknown,
   ): Promise<ChatMethodResult> {
     if (!this._client) throw new Error("Not connected");
     const handle = this._client.callMethod(participantId, method, args);
@@ -789,18 +831,28 @@ export class HeadlessSession {
     signal?: AbortSignal;
   }): Promise<unknown> {
     const targetId = this._agentTargetId;
-    if (!targetId) throw new Error("No subscribed agent is available for model execution evidence");
+    if (!targetId)
+      throw new Error(
+        "No subscribed agent is available for model execution evidence",
+      );
     const channelId = this._channelId;
-    if (!channelId) throw new Error("No channel is available for model execution evidence");
+    if (!channelId)
+      throw new Error("No channel is available for model execution evidence");
     try {
       const evidence = this._agentRpcCall
-        ? await this._agentRpcCall(targetId, "getModelExecutionEvidence", [channelId], options)
+        ? await this._agentRpcCall(
+            targetId,
+            "getModelExecutionEvidence",
+            [channelId],
+            options,
+          )
         : await this.callMethod(targetId, "getModelExecutionEvidence", {});
       this._modelExecutionEvidence = evidence;
       this._modelExecutionEvidenceError = undefined;
       return evidence;
     } catch (error) {
-      this._modelExecutionEvidenceError = error instanceof Error ? error.message : String(error);
+      this._modelExecutionEvidenceError =
+        error instanceof Error ? error.message : String(error);
       throw error;
     }
   }
@@ -833,7 +885,9 @@ export class HeadlessSession {
     this._messageListeners.clear();
   }
 
-  close(options?: { onPhase?: (state: SessionCleanupState) => void }): Promise<void> {
+  close(options?: {
+    onPhase?: (state: SessionCleanupState) => void;
+  }): Promise<void> {
     if (!this._closePromise) {
       this._closePromise = this.closeOnce(options);
     } else if (options?.onPhase) {
@@ -844,7 +898,7 @@ export class HeadlessSession {
 
   private setCleanupPhase(
     phase: SessionCleanupPhase,
-    onPhase?: (state: SessionCleanupState) => void
+    onPhase?: (state: SessionCleanupState) => void,
   ): void {
     const now = Date.now();
     this._cleanupState = {
@@ -867,7 +921,9 @@ export class HeadlessSession {
     const rpcCall = this._agentRpcCall;
     const lifecycleRpcCall = rpcCall
       ? (target: string, method: string, args: unknown[]) =>
-          rpcCall(target, method, args, { timeoutMs: HEADLESS_LIFECYCLE_RPC_TIMEOUT_MS })
+          rpcCall(target, method, args, {
+            timeoutMs: HEADLESS_LIFECYCLE_RPC_TIMEOUT_MS,
+          })
       : null;
 
     const unsubscribe = async () => {
@@ -886,7 +942,10 @@ export class HeadlessSession {
       // recursively retires the root and descendants, so it has one owner and
       // no entity-level fallback path.
       if (ownsContext && contextId) {
-        await destroyHeadlessAgentContext({ rpcCall: lifecycleRpcCall, contextId }).catch((err) => {
+        await destroyHeadlessAgentContext({
+          rpcCall: lifecycleRpcCall,
+          contextId,
+        }).catch((err) => {
           this.recordCleanupError("destroyHeadlessAgentContext", err);
         });
         return;
@@ -895,9 +954,11 @@ export class HeadlessSession {
       // In a caller-owned context, the session owns only its entity after the
       // subscription has been closed. Retirement observes the terminal result.
       if (!entityId) return;
-      await retireHeadlessAgent({ rpcCall: lifecycleRpcCall, entityId }).catch((err) => {
-        this.recordCleanupError("retireHeadlessAgent", err);
-      });
+      await retireHeadlessAgent({ rpcCall: lifecycleRpcCall, entityId }).catch(
+        (err) => {
+          this.recordCleanupError("retireHeadlessAgent", err);
+        },
+      );
     };
     // Stop the agent's subscription before disconnecting the headless peer.
     // A participant-left envelope is ordinary channel input; leaving the agent
@@ -909,7 +970,11 @@ export class HeadlessSession {
     // diagnostics. A final transcript message is visible slightly before its
     // durable turn is fully quiescent; probing first left that window open for
     // a queued continuation to begin just as the owning context was retired.
-    if (targetId && this._client && this._modelExecutionEvidence === undefined) {
+    if (
+      targetId &&
+      this._client &&
+      this._modelExecutionEvidence === undefined
+    ) {
       this.setCleanupPhase("capturing-model-evidence", options?.onPhase);
       await this.captureModelExecutionEvidence({
         timeoutMs: HEADLESS_LIFECYCLE_RPC_TIMEOUT_MS,
@@ -924,7 +989,7 @@ export class HeadlessSession {
     await this.dispose();
     this.setCleanupPhase(
       ownsContext && contextId ? "destroying-agent-context" : "retiring-agent",
-      options?.onPhase
+      options?.onPhase,
     );
     await cleanupRemote();
     this.setCleanupPhase("complete", options?.onPhase);
@@ -932,7 +997,7 @@ export class HeadlessSession {
     if (failures.length > 0) {
       throw new AggregateError(
         failures,
-        `Headless session cleanup failed in ${failures.length} phase(s)`
+        `Headless session cleanup failed in ${failures.length} phase(s)`,
       );
     }
   }
@@ -949,11 +1014,15 @@ export class HeadlessSession {
     return this._chatMessageOrder.map((id) => this._chatMessages.get(id)!);
   }
 
-  get participants(): Readonly<Record<string, Participant<ChatParticipantMetadata>>> {
+  get participants(): Readonly<
+    Record<string, Participant<ChatParticipantMetadata>>
+  > {
     return this._participants;
   }
 
-  get allParticipants(): Readonly<Record<string, Participant<ChatParticipantMetadata>>> {
+  get allParticipants(): Readonly<
+    Record<string, Participant<ChatParticipantMetadata>>
+  > {
     return this._participants;
   }
 
@@ -1029,7 +1098,7 @@ export class HeadlessSession {
         error: message.invocation!.execution.isError
           ? invocationErrorMessage(
               message.invocation!.execution.result,
-              message.invocation!.execution.description || "Invocation failed"
+              message.invocation!.execution.description || "Invocation failed",
             )
           : undefined,
       }));
@@ -1080,7 +1149,10 @@ export class HeadlessSession {
   /**
    * Wait for a message from an agent (any non-self participant).
    */
-  waitForAgentMessage(opts?: { timeoutMs?: number; signal?: AbortSignal }): Promise<ChatMessage> {
+  waitForAgentMessage(opts?: {
+    timeoutMs?: number;
+    signal?: AbortSignal;
+  }): Promise<ChatMessage> {
     return this.waitForTurn("response", opts);
   }
 
@@ -1097,13 +1169,17 @@ export class HeadlessSession {
 
   private waitForTurn(
     completion: "response" | "settled",
-    opts?: HeadlessWaitOptions
+    opts?: HeadlessWaitOptions,
   ): Promise<ChatMessage> {
-    const observer = new HeadlessTurnObserver(this._clientId, this.turnSnapshot(), {
-      ...(opts?.terminalWaitingReasons
-        ? { terminalWaitingReasons: opts.terminalWaitingReasons }
-        : {}),
-    });
+    const observer = new HeadlessTurnObserver(
+      this._clientId,
+      this.turnSnapshot(),
+      {
+        ...(opts?.terminalWaitingReasons
+          ? { terminalWaitingReasons: opts.terminalWaitingReasons }
+          : {}),
+      },
+    );
     const debounceMs = opts?.debounce ?? 3_000;
     const label = completion === "response" ? "agent message" : "idle";
 
@@ -1137,11 +1213,26 @@ export class HeadlessSession {
           succeed(observation.response);
           return;
         }
-        if (completion === "response" && observation.terminal?.kind === "failed") {
+        if (
+          completion === "response" &&
+          observation.terminal?.kind === "failed"
+        ) {
           fail(observation.terminal.reason);
           return;
         }
         if (completion === "settled" && observation.terminal) {
+          const observedTurn = observation.turnId
+            ? this._channelView.turns[observation.turnId]
+            : undefined;
+          if (
+            observedTurn?.status === "closed" ||
+            observedTurn?.status === "waiting"
+          ) {
+            if (observation.terminal.kind === "failed")
+              fail(observation.terminal.reason);
+            else succeed(observation.terminal.message);
+            return;
+          }
           if (debounceTimer === undefined) {
             debounceTimer = setTimeout(() => {
               debounceTimer = undefined;
@@ -1157,7 +1248,11 @@ export class HeadlessSession {
         if (finished) return;
         finished = true;
         cleanup();
-        reject(new Error(`waitFor${completion === "response" ? "AgentMessage" : "Idle"} aborted`));
+        reject(
+          new Error(
+            `waitFor${completion === "response" ? "AgentMessage" : "Idle"} aborted`,
+          ),
+        );
       };
 
       this._messageListeners.add(listener);
@@ -1171,7 +1266,11 @@ export class HeadlessSession {
           if (finished) return;
           finished = true;
           cleanup();
-          reject(new Error(`Timed out waiting for ${label} after ${opts.timeoutMs}ms`));
+          reject(
+            new Error(
+              `Timed out waiting for ${label} after ${opts.timeoutMs}ms`,
+            ),
+          );
         }, opts.timeoutMs);
       }
       // Close the race between the baseline snapshot and listener registration.
@@ -1179,7 +1278,10 @@ export class HeadlessSession {
     });
   }
 
-  async sendAndWait(text: string, opts?: HeadlessWaitOptions): Promise<ChatMessage> {
+  async sendAndWait(
+    text: string,
+    opts?: HeadlessWaitOptions,
+  ): Promise<ChatMessage> {
     const wait = this.waitForIdle(opts);
     await this.send(text);
     return wait;

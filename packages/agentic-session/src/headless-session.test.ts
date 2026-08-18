@@ -67,7 +67,11 @@ describe("HeadlessSession", () => {
         actor,
         turnId,
         causality: { messageId: "message-1" },
-        payload: { protocol: AGENTIC_PROTOCOL_VERSION, role: "assistant", blocks: [] },
+        payload: {
+          protocol: AGENTIC_PROTOCOL_VERSION,
+          role: "assistant",
+          blocks: [],
+        },
         createdAt: "2026-08-09T00:00:00.000Z",
       },
     });
@@ -82,7 +86,9 @@ describe("HeadlessSession", () => {
         payload: {
           protocol: AGENTIC_PROTOCOL_VERSION,
           role: "assistant",
-          blocks: [{ blockId: "message-1:block:0", type: "text", content: "ready" }],
+          blocks: [
+            { blockId: "message-1:block:0", type: "text", content: "ready" },
+          ],
           outcome: "completed",
         },
         createdAt: "2026-08-09T00:00:01.000Z",
@@ -90,7 +96,11 @@ describe("HeadlessSession", () => {
     });
 
     expect(session.messages).toEqual([
-      expect.objectContaining({ senderId: "agent-1", content: "ready", complete: true }),
+      expect.objectContaining({
+        senderId: "agent-1",
+        content: "ready",
+        complete: true,
+      }),
     ]);
   });
 
@@ -122,7 +132,9 @@ describe("HeadlessSession", () => {
       _chatMessages: Map<string, ChatMessage>;
       _chatMessageOrder: string[];
     };
-    internals._chatMessages = new Map([[invocationMessage.id, invocationMessage]]);
+    internals._chatMessages = new Map([
+      [invocationMessage.id, invocationMessage],
+    ]);
     internals._chatMessageOrder = [invocationMessage.id];
     (session as any)._participants = {
       "agent-1": {
@@ -155,7 +167,12 @@ describe("HeadlessSession", () => {
       },
     ]);
     expect(snap.participants).toEqual({
-      "agent-1": { name: "Agent", type: "agent", handle: "agent", connected: true },
+      "agent-1": {
+        name: "Agent",
+        type: "agent",
+        handle: "agent",
+        connected: true,
+      },
     });
     expect(snap.debugEvents).toEqual([
       {
@@ -197,7 +214,9 @@ describe("HeadlessSession", () => {
       _chatMessages: Map<string, ChatMessage>;
       _chatMessageOrder: string[];
     };
-    internals._chatMessages = new Map([[invocationMessage.id, invocationMessage]]);
+    internals._chatMessages = new Map([
+      [invocationMessage.id, invocationMessage],
+    ]);
     internals._chatMessageOrder = [invocationMessage.id];
 
     expect(session.snapshot().invocations[0]?.error).toBe("boom");
@@ -210,14 +229,16 @@ describe("HeadlessSession", () => {
 
   it("provides a deterministic one-rejection validation recovery seam", async () => {
     const session = HeadlessSession.create({ config: createConfig() });
-    const methods = (session as any).buildValidationRetryProbeMethods() as Record<
+    const methods = (
+      session as any
+    ).buildValidationRetryProbeMethods() as Record<
       string,
       { execute: (args: unknown) => Promise<unknown> }
     >;
     const probe = methods["validation_retry_probe"]!;
 
     await expect(probe.execute({ value: "first" })).rejects.toThrow(
-      "Invalid arguments for tool validation_retry_probe"
+      "Invalid arguments for tool validation_retry_probe",
     );
     await expect(probe.execute({ value: "corrected" })).resolves.toEqual({
       ok: true,
@@ -238,7 +259,9 @@ describe("HeadlessSession", () => {
   it("awaits the agent pause terminal before interrupt returns", async () => {
     const session = HeadlessSession.create({ config: createConfig() });
     let settle!: (value: { result: unknown }) => void;
-    const result = new Promise<{ result: unknown }>((resolve) => (settle = resolve));
+    const result = new Promise<{ result: unknown }>(
+      (resolve) => (settle = resolve),
+    );
     const callMethod = vi.fn(() => ({ result }));
     (session as any)._client = { callMethod };
 
@@ -249,7 +272,12 @@ describe("HeadlessSession", () => {
     await Promise.resolve();
 
     expect(completed).toBe(false);
-    expect(callMethod).toHaveBeenCalledWith("agent-1", "pause", {}, { timeoutMs: 10_000 });
+    expect(callMethod).toHaveBeenCalledWith(
+      "agent-1",
+      "pause",
+      {},
+      { timeoutMs: 10_000 },
+    );
 
     settle({ result: { paused: true } });
     await interrupt;
@@ -265,7 +293,9 @@ describe("HeadlessSession", () => {
 
     await session.interrupt("agent-direct");
 
-    expect(rpcCall).toHaveBeenCalledWith("agent-direct", "interruptChannel", ["ch-direct"]);
+    expect(rpcCall).toHaveBeenCalledWith("agent-direct", "interruptChannel", [
+      "ch-direct",
+    ]);
     expect((session as any)._client.callMethod).not.toHaveBeenCalled();
   });
 
@@ -278,28 +308,38 @@ describe("HeadlessSession", () => {
 
     await session.interrupt("agent-direct", { timeoutMs: 2_000, signal });
 
-    expect(rpcCall).toHaveBeenCalledWith("agent-direct", "interruptChannel", ["ch-direct"], {
-      timeoutMs: 2_000,
-      signal,
-    });
+    expect(rpcCall).toHaveBeenCalledWith(
+      "agent-direct",
+      "interruptChannel",
+      ["ch-direct"],
+      {
+        timeoutMs: 2_000,
+        signal,
+      },
+    );
   });
 
   it("finishes shared-context unsubscribe before retiring the agent entity", async () => {
     const session = HeadlessSession.create({
       config: createConfig(),
     });
-    const calls: Array<{ target: string; method: string; args: unknown[] }> = [];
+    const calls: Array<{ target: string; method: string; args: unknown[] }> =
+      [];
     let finishUnsubscribe!: () => void;
-    const unsubscribeFinished = new Promise<void>((resolve) => (finishUnsubscribe = resolve));
-    (session as any)._agentEntityId = "do:workers/agent-worker:AiChatWorker:obj-1";
-    (session as any)._agentTargetId = "do:workers/agent-worker:AiChatWorker:obj-1";
+    const unsubscribeFinished = new Promise<void>(
+      (resolve) => (finishUnsubscribe = resolve),
+    );
+    (session as any)._agentEntityId =
+      "do:workers/agent-worker:AiChatWorker:obj-1";
+    (session as any)._agentTargetId =
+      "do:workers/agent-worker:AiChatWorker:obj-1";
     (session as any)._channelId = "ch-1";
     (session as any)._agentRpcCall = vi.fn(
       async (target: string, method: string, args: unknown[]) => {
         calls.push({ target, method, args });
         if (method === "unsubscribeChannel") await unsubscribeFinished;
         return undefined;
-      }
+      },
     );
 
     const phases: string[] = [];
@@ -367,9 +407,12 @@ describe("HeadlessSession", () => {
 
   it("unsubscribes before recursively destroying an isolated headless context", async () => {
     const session = HeadlessSession.create({ config: createConfig() });
-    const calls: Array<{ target: string; method: string; args: unknown[] }> = [];
-    (session as any)._agentEntityId = "do:workers/agent-worker:AiChatWorker:obj-1";
-    (session as any)._agentTargetId = "do:workers/agent-worker:AiChatWorker:obj-1";
+    const calls: Array<{ target: string; method: string; args: unknown[] }> =
+      [];
+    (session as any)._agentEntityId =
+      "do:workers/agent-worker:AiChatWorker:obj-1";
+    (session as any)._agentTargetId =
+      "do:workers/agent-worker:AiChatWorker:obj-1";
     (session as any)._agentContextId = "ctx-isolated";
     (session as any)._ownsAgentContext = true;
     (session as any)._channelId = "ch-1";
@@ -377,7 +420,7 @@ describe("HeadlessSession", () => {
       async (target: string, method: string, args: unknown[]) => {
         calls.push({ target, method, args });
         return undefined;
-      }
+      },
     );
 
     await session.close();
@@ -399,34 +442,46 @@ describe("HeadlessSession", () => {
   it("unsubscribes the agent before disconnecting the headless participant", async () => {
     const session = HeadlessSession.create({ config: createConfig() });
     const order: string[] = [];
-    (session as any)._agentEntityId = "do:workers/agent-worker:AiChatWorker:obj-1";
-    (session as any)._agentTargetId = "do:workers/agent-worker:AiChatWorker:obj-1";
+    (session as any)._agentEntityId =
+      "do:workers/agent-worker:AiChatWorker:obj-1";
+    (session as any)._agentTargetId =
+      "do:workers/agent-worker:AiChatWorker:obj-1";
     (session as any)._channelId = "ch-1";
-    (session as any)._agentRpcCall = vi.fn(async (_target: string, method: string) => {
-      order.push(method);
-      return undefined;
-    });
+    (session as any)._agentRpcCall = vi.fn(
+      async (_target: string, method: string) => {
+        order.push(method);
+        return undefined;
+      },
+    );
     vi.spyOn(session, "disconnect").mockImplementation(async () => {
       order.push("disconnect");
     });
 
     await session.close();
 
-    expect(order).toEqual(["unsubscribeChannel", "disconnect", "runtime.retireEntity"]);
+    expect(order).toEqual([
+      "unsubscribeChannel",
+      "disconnect",
+      "runtime.retireEntity",
+    ]);
   });
 
   it("closes effect admission before collecting terminal model evidence", async () => {
     const session = HeadlessSession.create({ config: createConfig() });
     const order: string[] = [];
-    (session as any)._agentEntityId = "do:workers/agent-worker:AiChatWorker:obj-1";
-    (session as any)._agentTargetId = "do:workers/agent-worker:AiChatWorker:obj-1";
+    (session as any)._agentEntityId =
+      "do:workers/agent-worker:AiChatWorker:obj-1";
+    (session as any)._agentTargetId =
+      "do:workers/agent-worker:AiChatWorker:obj-1";
     (session as any)._channelId = "ch-1";
     (session as any)._client = {};
-    (session as any)._agentRpcCall = vi.fn(async (_target: string, method: string) => {
-      order.push(method);
-      if (method === "getModelExecutionEvidence") return { totalCalls: 1 };
-      return undefined;
-    });
+    (session as any)._agentRpcCall = vi.fn(
+      async (_target: string, method: string) => {
+        order.push(method);
+        if (method === "getModelExecutionEvidence") return { totalCalls: 1 };
+        return undefined;
+      },
+    );
     vi.spyOn(session, "disconnect").mockResolvedValue();
 
     await session.close();
@@ -447,13 +502,18 @@ describe("HeadlessSession", () => {
     (session as any)._agentContextId = "ctx-isolated";
     (session as any)._ownsAgentContext = true;
     (session as any)._channelId = "ch-1";
-    (session as any)._agentRpcCall = vi.fn(async (target: string, method: string) => {
-      calls.push({ target, method });
-      if (method === "runtime.destroyContext") throw new Error("destroy failed");
-      return undefined;
-    });
+    (session as any)._agentRpcCall = vi.fn(
+      async (target: string, method: string) => {
+        calls.push({ target, method });
+        if (method === "runtime.destroyContext")
+          throw new Error("destroy failed");
+        return undefined;
+      },
+    );
 
-    await expect(session.close()).rejects.toThrow(/Headless session cleanup failed in 1 phase/);
+    await expect(session.close()).rejects.toThrow(
+      /Headless session cleanup failed in 1 phase/,
+    );
 
     expect(session.snapshot().cleanupErrors).toEqual([
       expect.objectContaining({
@@ -472,10 +532,13 @@ describe("HeadlessSession", () => {
     const session = HeadlessSession.create({
       config: createConfig(),
     });
-    const calls: Array<{ target: string; method: string; args: unknown[] }> = [];
+    const calls: Array<{ target: string; method: string; args: unknown[] }> =
+      [];
     let releaseUnsubscribe: (() => void) | undefined;
-    (session as any)._agentEntityId = "do:workers/agent-worker:AiChatWorker:obj-1";
-    (session as any)._agentTargetId = "do:workers/agent-worker:AiChatWorker:obj-1";
+    (session as any)._agentEntityId =
+      "do:workers/agent-worker:AiChatWorker:obj-1";
+    (session as any)._agentTargetId =
+      "do:workers/agent-worker:AiChatWorker:obj-1";
     (session as any)._channelId = "ch-1";
     (session as any)._agentRpcCall = vi.fn(
       async (target: string, method: string, args: unknown[]) => {
@@ -486,7 +549,7 @@ describe("HeadlessSession", () => {
           });
         }
         return undefined;
-      }
+      },
     );
 
     let settled = false;
@@ -500,7 +563,7 @@ describe("HeadlessSession", () => {
           method: "unsubscribeChannel",
           args: ["ch-1"],
         },
-      ])
+      ]),
     );
     expect(settled).toBe(false);
 
@@ -525,8 +588,10 @@ describe("HeadlessSession", () => {
   it("waits for owned-context unsubscription before destroying the context", async () => {
     const session = HeadlessSession.create({ config: createConfig() });
     const calls: string[] = [];
-    (session as any)._agentEntityId = "do:workers/agent-worker:AiChatWorker:obj-owned";
-    (session as any)._agentTargetId = "do:workers/agent-worker:AiChatWorker:obj-owned";
+    (session as any)._agentEntityId =
+      "do:workers/agent-worker:AiChatWorker:obj-owned";
+    (session as any)._agentTargetId =
+      "do:workers/agent-worker:AiChatWorker:obj-owned";
     (session as any)._agentContextId = "ctx-owned";
     (session as any)._ownsAgentContext = true;
     (session as any)._channelId = "ch-owned";
@@ -534,7 +599,7 @@ describe("HeadlessSession", () => {
       async (_target: string, method: string, _args: unknown[]) => {
         calls.push(method);
         return undefined;
-      }
+      },
     );
     (session as any)._agentRpcCall = rpcCall;
 
@@ -546,14 +611,14 @@ describe("HeadlessSession", () => {
       "do:workers/agent-worker:AiChatWorker:obj-owned",
       "unsubscribeChannel",
       ["ch-owned"],
-      { timeoutMs: 30_000 }
+      { timeoutMs: 30_000 },
     );
     expect(rpcCall).toHaveBeenNthCalledWith(
       2,
       "main",
       "runtime.destroyContext",
       [{ contextId: "ctx-owned", recursive: true }],
-      { timeoutMs: 30_000 }
+      { timeoutMs: 30_000 },
     );
     expect(session.snapshot().cleanupErrors).toEqual([]);
   });
@@ -566,11 +631,14 @@ describe("HeadlessSession", () => {
     (session as any)._agentEntityId = "entity-1";
     (session as any)._agentTargetId = "agent-target";
     (session as any)._channelId = "ch-1";
-    (session as any)._agentRpcCall = vi.fn(async (_target: string, method: string) => {
-      if (method === "unsubscribeChannel") throw new Error("unsubscribe failed");
-      if (method === "runtime.retireEntity") throw new Error("retire failed");
-      return undefined;
-    });
+    (session as any)._agentRpcCall = vi.fn(
+      async (_target: string, method: string) => {
+        if (method === "unsubscribeChannel")
+          throw new Error("unsubscribe failed");
+        if (method === "runtime.retireEntity") throw new Error("retire failed");
+        return undefined;
+      },
+    );
 
     const cleanupError = await session.close().catch((error: unknown) => error);
     expect(cleanupError).toBeInstanceOf(AggregateError);
@@ -580,16 +648,22 @@ describe("HeadlessSession", () => {
     ]);
 
     expect(session.snapshot().cleanupErrors).toEqual([
-      expect.objectContaining({ phase: "unsubscribeHeadlessAgent", message: "unsubscribe failed" }),
-      expect.objectContaining({ phase: "retireHeadlessAgent", message: "retire failed" }),
+      expect.objectContaining({
+        phase: "unsubscribeHeadlessAgent",
+        message: "unsubscribe failed",
+      }),
+      expect.objectContaining({
+        phase: "retireHeadlessAgent",
+        message: "retire failed",
+      }),
     ]);
     expect(warn).toHaveBeenCalledWith(
       "[HeadlessSession] unsubscribeHeadlessAgent failed:",
-      expect.any(Error)
+      expect.any(Error),
     );
     expect(warn).toHaveBeenCalledWith(
       "[HeadlessSession] retireHeadlessAgent failed:",
-      expect.any(Error)
+      expect.any(Error),
     );
     warn.mockRestore();
   });
@@ -602,36 +676,44 @@ describe("HeadlessSession", () => {
       .mockImplementation(async function (
         this: HeadlessSession,
         channelId: string,
-        options?: Parameters<HeadlessSession["connect"]>[1]
+        options?: Parameters<HeadlessSession["connect"]>[1],
       ) {
         order.push(
           `connect:${channelId}:${Object.keys(options?.methods ?? {})
             .sort()
-            .join(",")}`
+            .join(",")}`,
         );
-        (this as unknown as { _channelId: string; _client: unknown })._channelId = channelId;
+        (
+          this as unknown as { _channelId: string; _client: unknown }
+        )._channelId = channelId;
         (this as unknown as { _client: unknown })._client = { close: vi.fn() };
       });
-    const rpcCall = vi.fn(async (target: string, method: string, args: unknown[]) => {
-      order.push(`rpc:${target}:${method}`);
-      if (target === "main" && method === "runtime.createEntity") {
-        if (
-          (args[0] as { execution?: { source?: string } }).execution?.source ===
-          "workers/pubsub-channel"
-        ) {
+    const rpcCall = vi.fn(
+      async (target: string, method: string, args: unknown[]) => {
+        order.push(`rpc:${target}:${method}`);
+        if (target === "main" && method === "runtime.createEntity") {
+          if (
+            (args[0] as { execution?: { source?: string } }).execution
+              ?.source === "workers/pubsub-channel"
+          ) {
+            return {
+              id: "channel-entity",
+              targetId: "channel-target",
+              contextId: "ctx-1",
+            };
+          }
           return {
-            id: "channel-entity",
-            targetId: "channel-target",
+            id: "entity-1",
+            targetId: "agent-target",
             contextId: "ctx-1",
           };
         }
-        return { id: "entity-1", targetId: "agent-target", contextId: "ctx-1" };
-      }
-      if (target === "agent-target" && method === "subscribeChannel") {
-        return { ok: true, participantId: "do:agent" };
-      }
-      throw new Error(`unexpected RPC ${target}.${method}`);
-    });
+        if (target === "agent-target" && method === "subscribeChannel") {
+          return { ok: true, participantId: "do:agent" };
+        }
+        throw new Error(`unexpected RPC ${target}.${method}`);
+      },
+    );
 
     let session: HeadlessSession | undefined;
     try {
@@ -673,10 +755,12 @@ describe("HeadlessSession", () => {
       .mockImplementation(async function (
         this: HeadlessSession,
         channelId: string,
-        options?: Parameters<HeadlessSession["connect"]>[1]
+        options?: Parameters<HeadlessSession["connect"]>[1],
       ) {
         registeredMethods = options?.methods ?? {};
-        (this as unknown as { _channelId: string; _client: unknown })._channelId = channelId;
+        (
+          this as unknown as { _channelId: string; _client: unknown }
+        )._channelId = channelId;
         (this as unknown as { _client: unknown })._client = {
           clientId: "headless-panel",
           publish,
@@ -704,22 +788,28 @@ describe("HeadlessSession", () => {
         includeSyntheticPanelUiMethods: true,
       });
 
-      expect(Object.keys(registeredMethods).sort()).toEqual(["inline_ui", "load_action_bar"]);
+      expect(Object.keys(registeredMethods).sort()).toEqual([
+        "inline_ui",
+        "load_action_bar",
+      ]);
 
       await registeredMethods["inline_ui"]!.execute(
         {
           id: "setup-overview",
           code: "export default function App() { return null; }",
         },
-        {} as never
+        {} as never,
       );
       await registeredMethods["load_action_bar"]!.execute(
         {
           path: "skills/test/ActionBar.tsx",
         },
-        {} as never
+        {} as never,
       );
-      await registeredMethods["load_action_bar"]!.execute({ clear: true }, {} as never);
+      await registeredMethods["load_action_bar"]!.execute(
+        { clear: true },
+        {} as never,
+      );
     } finally {
       connect.mockRestore();
       HeadlessSession.prototype.connect = originalConnect;
@@ -733,11 +823,16 @@ describe("HeadlessSession", () => {
         payload: expect.objectContaining({
           uiType: "inline",
           id: "setup-overview",
-          source: { type: "code", code: "export default function App() { return null; }" },
+          source: {
+            type: "code",
+            code: "export default function App() { return null; }",
+          },
         }),
       }),
       expect.objectContaining({
-        idempotencyKey: expect.stringContaining("synthetic-ui:inline:setup-overview:"),
+        idempotencyKey: expect.stringContaining(
+          "synthetic-ui:inline:setup-overview:",
+        ),
       }),
     ]);
     expect(publish.mock.calls[1]).toEqual([
@@ -764,7 +859,9 @@ describe("HeadlessSession", () => {
         }),
       }),
       expect.objectContaining({
-        idempotencyKey: expect.stringContaining("synthetic-ui:action-bar:clear:"),
+        idempotencyKey: expect.stringContaining(
+          "synthetic-ui:action-bar:clear:",
+        ),
       }),
     ]);
   });
@@ -777,46 +874,57 @@ describe("HeadlessSession", () => {
       .mockImplementation(async function (
         this: HeadlessSession,
         channelId: string,
-        options?: { contextId?: string; methods?: Record<string, unknown> }
+        options?: { contextId?: string; methods?: Record<string, unknown> },
       ) {
         order.push(`connect:${channelId}:${options?.contextId ?? "missing"}`);
-        (this as unknown as { _channelId: string; _client: unknown })._channelId = channelId;
+        (
+          this as unknown as { _channelId: string; _client: unknown }
+        )._channelId = channelId;
         (this as unknown as { _client: unknown })._client = { close: vi.fn() };
       });
-    const rpcCall = vi.fn(async (target: string, method: string, args: unknown[]) => {
-      order.push(`rpc:${target}:${method}`);
-      if (target === "main" && method === "runtime.createContext") {
-        return { contextId: "ctx-isolated" };
-      }
-      if (target === "main" && method === "runtime.createEntity") {
-        expect(args[0]).toHaveProperty("contextId", "ctx-isolated");
-        if (
-          (args[0] as { execution?: { source?: string } }).execution?.source ===
-          "workers/pubsub-channel"
-        ) {
-          expect(args[0]).toMatchObject({
-            kind: "do",
-            execution: {
-              surface: "code",
-              source: "workers/pubsub-channel",
-            },
-            className: "PubSubChannel",
-            key: "headless-1",
-          });
+    const rpcCall = vi.fn(
+      async (target: string, method: string, args: unknown[]) => {
+        order.push(`rpc:${target}:${method}`);
+        if (target === "main" && method === "runtime.createContext") {
+          return { contextId: "ctx-isolated" };
+        }
+        if (target === "main" && method === "runtime.createEntity") {
+          expect(args[0]).toHaveProperty("contextId", "ctx-isolated");
+          if (
+            (args[0] as { execution?: { source?: string } }).execution
+              ?.source === "workers/pubsub-channel"
+          ) {
+            expect(args[0]).toMatchObject({
+              kind: "do",
+              execution: {
+                surface: "code",
+                source: "workers/pubsub-channel",
+              },
+              className: "PubSubChannel",
+              key: "headless-1",
+            });
+            return {
+              id: "channel-entity",
+              targetId: "channel-target",
+              contextId: "ctx-isolated",
+            };
+          }
           return {
-            id: "channel-entity",
-            targetId: "channel-target",
+            id: "entity-1",
+            targetId: "agent-target",
             contextId: "ctx-isolated",
           };
         }
-        return { id: "entity-1", targetId: "agent-target", contextId: "ctx-isolated" };
-      }
-      if (target === "agent-target" && method === "subscribeChannel") {
-        expect(args[0]).toMatchObject({ channelId: "headless-1", contextId: "ctx-isolated" });
-        return { ok: true, participantId: "do:agent" };
-      }
-      throw new Error(`unexpected RPC ${target}.${method}`);
-    });
+        if (target === "agent-target" && method === "subscribeChannel") {
+          expect(args[0]).toMatchObject({
+            channelId: "headless-1",
+            contextId: "ctx-isolated",
+          });
+          return { ok: true, participantId: "do:agent" };
+        }
+        throw new Error(`unexpected RPC ${target}.${method}`);
+      },
+    );
 
     let session: HeadlessSession | undefined;
     try {
@@ -858,8 +966,12 @@ describe("HeadlessSession", () => {
       callMethod: vi.fn(() => ({ result: Promise.resolve(envelope) })),
     };
 
-    await expect(session.callMethod("agent-1", "work", {})).resolves.toEqual({ ok: true });
-    await expect(session.callMethodResult("agent-1", "work", {})).resolves.toEqual(envelope);
+    await expect(session.callMethod("agent-1", "work", {})).resolves.toEqual({
+      ok: true,
+    });
+    await expect(
+      session.callMethodResult("agent-1", "work", {}),
+    ).resolves.toEqual(envelope);
   });
 
   it("sendAndWait starts waiting before publishing the prompt", async () => {
@@ -940,7 +1052,6 @@ describe("HeadlessSession", () => {
       },
     };
     (session as any).notifyListeners();
-    await vi.advanceTimersByTimeAsync(5);
 
     await expect(wait).resolves.toBe(idleMessage);
     vi.useRealTimers();
@@ -965,9 +1076,9 @@ describe("HeadlessSession", () => {
     await expect(
       session.waitForIdle({
         terminalWaitingReasons: ["model_credential_reconnect_required"],
-      })
+      }),
     ).rejects.toThrow(
-      "Agent turn requires unavailable external action (model_credential_reconnect_required)"
+      "Agent turn requires unavailable external action (model_credential_reconnect_required)",
     );
   });
 
@@ -1065,7 +1176,9 @@ describe("HeadlessSession", () => {
     };
 
     const wait = session.waitForIdle({ debounce: 5, timeoutMs: 1000 });
-    (session as any)._chatMessages = new Map([[failureMessage.id, failureMessage]]);
+    (session as any)._chatMessages = new Map([
+      [failureMessage.id, failureMessage],
+    ]);
     (session as any)._chatMessageOrder = [failureMessage.id];
     (session as any).notifyListeners();
 
@@ -1076,7 +1189,7 @@ describe("HeadlessSession", () => {
       },
       () => {
         settled = true;
-      }
+      },
     );
     await Promise.resolve();
     expect(settled).toBe(false);
@@ -1093,7 +1206,9 @@ describe("HeadlessSession", () => {
     };
     (session as any).notifyListeners();
 
-    await expect(wait).rejects.toThrow("Agent failed: Codex error: server_error");
+    await expect(wait).rejects.toThrow(
+      "Agent failed: Codex error: server_error",
+    );
   });
 
   it("waitForIdle treats a failed model attempt followed by a successful fallback as one turn", async () => {
@@ -1131,7 +1246,9 @@ describe("HeadlessSession", () => {
     };
 
     const wait = session.waitForIdle({ debounce: 5, timeoutMs: 1_000 });
-    (session as any)._chatMessages = new Map([[failureMessage.id, failureMessage]]);
+    (session as any)._chatMessages = new Map([
+      [failureMessage.id, failureMessage],
+    ]);
     (session as any)._chatMessageOrder = [failureMessage.id];
     (session as any).notifyListeners();
 
@@ -1144,13 +1261,12 @@ describe("HeadlessSession", () => {
       closedAt: "2026-05-27T00:00:01.000Z",
     };
     (session as any).notifyListeners();
-    await vi.advanceTimersByTimeAsync(5);
 
     await expect(wait).resolves.toBe(successMessage);
     vi.useRealTimers();
   });
 
-  it("waitForIdle does not publish a transient closed failure before fallback projection settles", async () => {
+  it("waitForIdle treats a durable closed failure as terminal", async () => {
     vi.useFakeTimers();
     const session = HeadlessSession.create({ config: createConfig() });
     const turnId = brandId<TurnId>("turn-transient-fallback-close");
@@ -1162,13 +1278,6 @@ describe("HeadlessSession", () => {
       kind: "system" as const,
       complete: true,
       error: "Codex error: usage limit",
-    } satisfies ChatMessage;
-    const successMessage = {
-      id: "transient-close-fallback-success",
-      senderId: "agent-1",
-      content: "fallback succeeded",
-      kind: "message" as const,
-      complete: true,
     } satisfies ChatMessage;
     (session as any)._channelId = "ch-1";
     (session as any)._channelView = {
@@ -1184,7 +1293,9 @@ describe("HeadlessSession", () => {
     };
 
     const wait = session.waitForIdle({ debounce: 5, timeoutMs: 1_000 });
-    (session as any)._chatMessages = new Map([[failureMessage.id, failureMessage]]);
+    (session as any)._chatMessages = new Map([
+      [failureMessage.id, failureMessage],
+    ]);
     (session as any)._chatMessageOrder = [failureMessage.id];
     (session as any)._channelView.turns[turnId] = {
       ...(session as any)._channelView.turns[turnId],
@@ -1193,19 +1304,9 @@ describe("HeadlessSession", () => {
     };
     (session as any).notifyListeners();
 
-    let settled = false;
-    void wait.finally(() => {
-      settled = true;
-    });
-    await vi.advanceTimersByTimeAsync(4);
-    expect(settled).toBe(false);
-
-    (session as any)._chatMessages.set(successMessage.id, successMessage);
-    (session as any)._chatMessageOrder.push(successMessage.id);
-    (session as any).notifyListeners();
-    await vi.advanceTimersByTimeAsync(1);
-
-    await expect(wait).resolves.toBe(successMessage);
+    await expect(wait).rejects.toThrow(
+      "Agent failed: Codex error: usage limit",
+    );
     vi.useRealTimers();
   });
 
@@ -1231,7 +1332,9 @@ describe("HeadlessSession", () => {
     } satisfies ChatMessage;
 
     const wait = session.waitForIdle({ debounce: 5, timeoutMs: 1_000 });
-    (session as any)._chatMessages = new Map([[failureMessage.id, failureMessage]]);
+    (session as any)._chatMessages = new Map([
+      [failureMessage.id, failureMessage],
+    ]);
     (session as any)._chatMessageOrder = [failureMessage.id];
     (session as any).notifyListeners();
     let settled = false;
@@ -1241,7 +1344,7 @@ describe("HeadlessSession", () => {
       },
       () => {
         settled = true;
-      }
+      },
     );
     await Promise.resolve();
     expect(settled).toBe(false);
@@ -1265,7 +1368,6 @@ describe("HeadlessSession", () => {
       closedAt: "2026-05-27T00:00:01.000Z",
     };
     (session as any).notifyListeners();
-    await vi.advanceTimersByTimeAsync(5);
 
     await expect(wait).resolves.toBe(successMessage);
     vi.useRealTimers();
@@ -1292,7 +1394,9 @@ describe("HeadlessSession", () => {
         },
       },
     };
-    (session as any)._chatMessages = new Map([[streamingMessage.id, streamingMessage]]);
+    (session as any)._chatMessages = new Map([
+      [streamingMessage.id, streamingMessage],
+    ]);
     (session as any)._chatMessageOrder = [streamingMessage.id];
 
     const wait = session.waitForAgentMessage({ timeoutMs: 1_000 });
@@ -1339,7 +1443,9 @@ describe("HeadlessSession", () => {
     };
 
     const wait = session.waitForAgentMessage({ timeoutMs: 1_000 });
-    (session as any)._chatMessages = new Map([[failureMessage.id, failureMessage]]);
+    (session as any)._chatMessages = new Map([
+      [failureMessage.id, failureMessage],
+    ]);
     (session as any)._chatMessageOrder = [failureMessage.id];
     (session as any).notifyListeners();
 
@@ -1373,7 +1479,9 @@ describe("HeadlessSession", () => {
     };
 
     const wait = session.waitForIdle({ debounce: 5, timeoutMs: 1_000 });
-    (session as any)._chatMessages = new Map([[successMessage.id, successMessage]]);
+    (session as any)._chatMessages = new Map([
+      [successMessage.id, successMessage],
+    ]);
     (session as any)._chatMessageOrder = [successMessage.id];
     (session as any).notifyListeners();
     (session as any)._channelView = {
@@ -1398,7 +1506,7 @@ describe("HeadlessSession", () => {
     (session as any).notifyListeners();
 
     await expect(wait).rejects.toThrow(
-      "Agent turn closed with nonterminal message still-streaming (streaming)"
+      "Agent turn closed with nonterminal message still-streaming (streaming)",
     );
   });
 });
