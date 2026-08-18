@@ -48,6 +48,7 @@ import {
   DurableDirectRpcNonceLedger,
   directRpcInvalidAttestationFailure,
   directRpcDenial,
+  directRpcInvocationResourceKey,
   eventIntakeAuthority,
   hostControlDenial,
   type DirectRpcDenial,
@@ -1418,14 +1419,12 @@ export abstract class DurableObjectBase {
     const declaration = this.rpcAuthorityDeclaration(method, wireMethod);
     const audience = this.directAuthorityAudience();
     const attestation = caller?.authorization ?? null;
-    const resourceKey =
-      declaration?.effect.kind === "userland-capability" &&
-      declaration.effect.resource.kind === "opaque-handle" &&
-      attestation?.resourceSelector !== undefined &&
-      args[declaration.effect.resource.argument] ===
-        attestation.resourceSelector
-        ? attestation.resourceKey
-        : this.directAuthorityResource();
+    const resourceKey = directRpcInvocationResourceKey({
+      audience,
+      declaration,
+      attestation,
+      args,
+    });
     return directRpcDenial({
       kind: "call",
       method,
@@ -1441,10 +1440,6 @@ export abstract class DurableObjectBase {
 
   private directAuthorityAudience(): string {
     return `do:${String(this.env["WORKER_SOURCE"])}:${String(this.env["WORKER_CLASS_NAME"])}:${this.objectKey}`;
-  }
-
-  private directAuthorityResource(): string {
-    return this.directAuthorityAudience();
   }
 
   private inboundHostControlDenial(
