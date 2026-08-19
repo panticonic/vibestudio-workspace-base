@@ -43,7 +43,12 @@ import {
   pinnedPanelIdsAtom,
   pinsHydratedAtom,
 } from "../state/navigationAtoms";
-import { addWebViewEntry, sweepIdleWebViews, type WebViewEntry } from "./webViewStack";
+import {
+  addWebViewEntry,
+  sweepIdleWebViews,
+  webViewUnmountNeedsUnload,
+  type WebViewEntry,
+} from "./webViewStack";
 import { loadPinnedPanelIds, savePinnedPanelIds } from "../shellCore/pinnedPanels";
 import { resolveMobileBackAction } from "../shellCore/mobileBackNavigation";
 import { mobileNavigationLayout } from "../shellCore/mobileLayout";
@@ -387,7 +392,7 @@ export function MainScreen() {
       webViewRefsMap.current.delete(panelId);
       webViewThemeSignaturesRef.current.delete(panelId);
       shellClient?.hostCommands.clear(panelId);
-      if (shellClient) {
+      if (shellClient && webViewUnmountNeedsUnload(webViewStackRef.current, panelId)) {
         void shellClient.panels.unload(panelId).catch((error: unknown) =>
           pushToast({
             title: "Could not unload panel",

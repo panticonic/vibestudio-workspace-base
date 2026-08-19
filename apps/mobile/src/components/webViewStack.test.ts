@@ -1,4 +1,9 @@
-import { addWebViewEntry, sweepIdleWebViews, type WebViewEntry } from "./webViewStack";
+import {
+  addWebViewEntry,
+  sweepIdleWebViews,
+  webViewUnmountNeedsUnload,
+  type WebViewEntry,
+} from "./webViewStack";
 import { PANEL_UI_IDLE_UNLOAD_MS } from "@vibestudio/shared/constants";
 
 const NONE = {
@@ -16,6 +21,16 @@ function entry(panelId: string, lastActive: number): WebViewEntry {
     lastActive,
   };
 }
+
+describe("webViewUnmountNeedsUnload", () => {
+  it("keeps the lease while the presentation slot is retained", () => {
+    expect(webViewUnmountNeedsUnload([entry("chat", 1)], "chat")).toBe(false);
+  });
+
+  it("releases the lease after the presentation slot is removed", () => {
+    expect(webViewUnmountNeedsUnload([], "chat")).toBe(true);
+  });
+});
 
 describe("addWebViewEntry", () => {
   it("inserts under cap without evicting", () => {

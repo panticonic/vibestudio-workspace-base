@@ -29,6 +29,19 @@ export interface StackPredicates {
   isKeepLoaded: (id: string) => boolean;
 }
 
+/**
+ * A native WebView can unmount while its presentation slot is still retained
+ * (for example, while React replaces an error boundary or a host condition
+ * briefly hides the stack). Only a slot that has actually left the owning
+ * stack should release its runtime lease.
+ */
+export function webViewUnmountNeedsUnload(
+  entries: readonly WebViewEntry[],
+  panelId: string
+): boolean {
+  return !entries.some((entry) => entry.panelId === panelId);
+}
+
 function toSnapshots(entries: WebViewEntry[]): LoadedPanelSnapshot[] {
   return entries.map((entry) => ({ panelId: entry.panelId, lastActive: entry.lastActive }));
 }
