@@ -288,7 +288,7 @@ export const unitDiagnosticsTests: TestCase[] = [
           capability: { kind: "exact", key: "workspace-service:missions" },
           resource: {
             kind: "prefix",
-            prefix: "do:vibestudio/internal:MissionsDO:",
+            prefix: "do:workers/missions:MissionsDO:",
           },
           tier: "gated",
           decision: "once",
@@ -310,7 +310,7 @@ export const unitDiagnosticsTests: TestCase[] = [
           capability: { kind: "exact", key: "workspace-service:missions" },
           resource: {
             kind: "prefix",
-            prefix: "do:vibestudio/internal:MissionsDO:",
+            prefix: "do:workers/missions:MissionsDO:",
           },
           tier: "gated",
           decision: "once",

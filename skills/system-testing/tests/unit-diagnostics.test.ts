@@ -69,7 +69,7 @@ describe("automation overview system test validator", () => {
           capability: { kind: "exact", key: "workspace-service:missions" },
           resource: {
             kind: "prefix",
-            prefix: "do:vibestudio/internal:MissionsDO:",
+            prefix: "do:workers/missions:MissionsDO:",
           },
           tier: "gated",
           decision: "once",
@@ -152,6 +152,23 @@ describe("automation inline eval system test validator", () => {
       },
     },
   };
+
+  it("pregrants the installed Missions worker that owns draft proposals", () => {
+    expect(automationDraftTest.authorityPolicy).toEqual({
+      authority: [
+        {
+          ruleId: "propose-automation-draft",
+          capability: { kind: "exact", key: "workspace-service:missions" },
+          resource: {
+            kind: "prefix",
+            prefix: "do:workers/missions:MissionsDO:",
+          },
+          tier: "gated",
+          decision: "once",
+        },
+      ],
+    });
+  });
 
   it("accepts a returned inert draft with the requested exact lightweight behavior", () => {
     expect(
