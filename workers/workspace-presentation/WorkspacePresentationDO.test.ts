@@ -64,6 +64,39 @@ describe("WorkspacePresentationDO", () => {
     db.close();
   });
 
+  it("names a slot from the title the binder knew, without ever presenting a slot id", () => {
+    const { instance, db } = createPresentation();
+    // A panel is bound the moment it is created, long before its document has
+    // loaded and reported a title of its own.
+    instance.bindSlot("slot-1", "entity-1", "about/adblock", "Ad Blocking");
+    expect(instance.titlesForSlots(["slot-1"])).toEqual({
+      "slot-1": "Ad Blocking",
+    });
+    expect(instance.listEntityTitles()).toEqual([
+      { id: "entity-1", title: "Ad Blocking", explicit: false },
+    ]);
+
+    // A better title arriving later still wins, and re-binding cannot undo it.
+    instance.updatePanelTitle("slot-1", "entity-1", "Ad Blocking — rules");
+    instance.bindSlot("slot-1", "entity-1", "about/adblock", "Ad Blocking");
+    expect(instance.titlesForSlots(["slot-1"])).toEqual({
+      "slot-1": "Ad Blocking — rules",
+    });
+
+    // An explicit human title is never displaced by a binder's default.
+    instance.setEntityTitle("entity-2", "My inbox", { explicit: true });
+    instance.bindSlot("slot-2", "entity-2", "panels/chat", "Agentic Chat");
+    expect(instance.titlesForSlots(["slot-2"])).toEqual({
+      "slot-2": "My inbox",
+    });
+
+    // No title anywhere: the slot stays unnamed rather than being named after
+    // itself; naming the fallback is the presenter's job, not the store's.
+    instance.bindSlot("slot-3", "entity-3", "panels/chat");
+    expect(instance.titlesForSlots(["slot-3"])).toEqual({});
+    db.close();
+  });
+
   it("keeps durable search facts and rebuilds only the derived FTS projection", async () => {
     const { instance, db } = createPresentation();
     instance.indexPanel(

@@ -82,9 +82,26 @@ export class WorkspacePresentationDO extends DurableObjectBase {
     return ["entity_titles", "panels", "source_usage", "panel_fts"];
   }
 
+  /**
+   * Bind a shell slot to the presented panel and entity.
+   *
+   * `title` is the display title the binder already knows — a manifest title,
+   * or the one the opener asked for. Recording it here is what keeps a slot
+   * from being presented as its own slot id: the tree reads titles from this
+   * table the moment the node exists, which is long before a panel document
+   * has loaded and reported one of its own. A title already stored for the
+   * entity still wins, so this can never undo a later, better name.
+   */
   @schemaRpc()
-  bindSlot(slotId: string, entityId: string, source: string): void {
-    const title = this.entityTitle(entityId);
+  bindSlot(
+    slotId: string,
+    entityId: string,
+    source: string,
+    title?: string | null,
+  ): void {
+    const stored = this.entityTitle(entityId);
+    const known = stored ?? normalizePanelTitle(title) ?? null;
+    if (stored === null && known !== null) this.setEntityTitle(entityId, known);
     this.sql.exec(
       `INSERT INTO panels(slot_id, entity_id, source, searchable_title, last_indexed_at)
        VALUES (?, ?, ?, ?, ?)
@@ -99,7 +116,7 @@ export class WorkspacePresentationDO extends DurableObjectBase {
       slotId,
       entityId,
       source,
-      title ?? "",
+      known ?? "",
       Date.now(),
     );
   }
