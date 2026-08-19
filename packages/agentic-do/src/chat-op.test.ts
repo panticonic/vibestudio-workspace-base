@@ -2879,7 +2879,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
   });
 
-  it("lets explicit Pi child config override inherited behavior", async () => {
+  it("lets explicit Pi child config override inherited approval behavior", async () => {
     const probe = await makeSubagentSpawnProbe();
     probe.callerIdForTest = await expectedEvalCaller();
     await probe.chatOp(CHANNEL, "configureAgent", [
@@ -2889,14 +2889,14 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const out = await probe.spawnForTest(CHANNEL, "inv-override", {
       mode: "fresh",
       task: "exercise an explicit child override",
-      config: { model: "openai:gpt-5.3", approvalLevel: 1 },
+      config: { model: "openai-codex:gpt-5.3-codex-spark", approvalLevel: 1 },
     });
 
     expect(out).toMatchObject({
       isError: false,
       result: {
         details: {
-          launchConfig: { model: "openai:gpt-5.3", approvalLevel: 1 },
+          launchConfig: { model: "openai-codex:gpt-5.3-codex-spark", approvalLevel: 1 },
         },
       },
     });
@@ -2905,9 +2905,34 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     );
     expect(create?.args[0]).toMatchObject({
       stateArgs: {
-        agentConfig: { model: "openai:gpt-5.3", approvalLevel: 1 },
+        agentConfig: { model: "openai-codex:gpt-5.3-codex-spark", approvalLevel: 1 },
       },
     });
+  });
+
+  it("rejects an unavailable Pi model before creating child lifecycle state", async () => {
+    const probe = await makeSubagentSpawnProbe();
+
+    const out = await probe.spawnForTest(CHANNEL, "inv-invalid-model", {
+      mode: "fresh",
+      task: "exercise invalid child model admission",
+      config: { model: "pi" },
+    });
+
+    expect(out).toEqual({
+      result:
+        'Agent model "pi" could not be materialized; select a model present in the current catalog before starting the agent',
+      isError: true,
+    });
+    expect(
+      probe.rpcCalls.some(
+        (call) =>
+          call.target === "main" &&
+          (call.method === "runtime.createSubagentContext" ||
+            call.method === "runtime.createEntity" ||
+            call.method === "runtime.destroyContext")
+      )
+    ).toBe(false);
   });
 
   ledgerTest("execution.agent-spawn", async () => {

@@ -6589,6 +6589,35 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
               ...(requestedChildConfig ?? {}),
             }
           : requestedChildConfig;
+      // Validate the effective Pi model configuration before minting any
+      // context or entity. A caller typo is a local argument error, not a
+      // partially-created lifecycle that must be repaired through teardown.
+      // This uses the same materialization boundary as loopConfig(), so child
+      // admission and execution cannot disagree about catalog availability.
+      if (agentKind === "pi") {
+        const childModel = childConfig?.["model"];
+        if (typeof childModel !== "string" || !this.materializedModel(channelId, childModel)) {
+          return {
+            result:
+              `Agent model ${JSON.stringify(childModel)} could not be materialized; ` +
+              "select a model present in the current catalog before starting the agent",
+            isError: true,
+          };
+        }
+        const childFallbackModel = childConfig?.["fallbackModel"];
+        if (
+          childFallbackModel !== undefined &&
+          (typeof childFallbackModel !== "string" ||
+            !this.materializedModel(channelId, childFallbackModel))
+        ) {
+          return {
+            result:
+              `Agent fallback model ${JSON.stringify(childFallbackModel)} could not be materialized; ` +
+              "select a fallback model present in the current catalog before starting the agent",
+            isError: true,
+          };
+        }
+      }
       // A Pi child inherits the parent's executable identity. Letting model
       // arguments choose an arbitrary package here conflates the task's source
       // repository with a runtime worker and can launch the wrong code (or a
