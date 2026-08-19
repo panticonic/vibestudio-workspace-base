@@ -27,13 +27,15 @@ export interface TrackedRuntimeLeaseReconciliation {
  * route.
  */
 export function trackedRuntimeLeaseWasLost(input: {
-  tracked: { runtimeEntityId: PanelEntityId } | undefined;
-  event: Pick<PanelRuntimeLeaseChangedEvent, "runtimeEntityId" | "next">;
+  tracked: { runtimeEntityId: PanelEntityId; connectionId: string } | undefined;
+  event: Pick<PanelRuntimeLeaseChangedEvent, "runtimeEntityId" | "previous" | "next">;
   clientSessionId: string;
 }): boolean {
+  if (input.tracked?.runtimeEntityId !== input.event.runtimeEntityId) return false;
+  if (input.event.next) return input.event.next.clientSessionId !== input.clientSessionId;
   return (
-    input.tracked?.runtimeEntityId === input.event.runtimeEntityId &&
-    input.event.next?.clientSessionId !== input.clientSessionId
+    input.event.previous?.runtimeEntityId === input.tracked.runtimeEntityId &&
+    input.event.previous.connectionId === input.tracked.connectionId
   );
 }
 

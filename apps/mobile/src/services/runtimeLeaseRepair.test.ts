@@ -105,6 +105,10 @@ describe("trackedRuntimeLeaseWasLost", () => {
         tracked: current,
         event: {
           runtimeEntityId: asPanelEntityId("panel:nav-replaced"),
+          previous: lease({
+            slot: "a",
+            runtimeEntityId: asPanelEntityId("panel:nav-replaced"),
+          }),
           next: null,
         },
         clientSessionId: DEVICE,
@@ -116,7 +120,7 @@ describe("trackedRuntimeLeaseWasLost", () => {
     expect(
       trackedRuntimeLeaseWasLost({
         tracked: current,
-        event: { runtimeEntityId: current.runtimeEntityId, next: null },
+        event: { runtimeEntityId: current.runtimeEntityId, previous: current, next: null },
         clientSessionId: DEVICE,
       })
     ).toBe(true);
@@ -125,6 +129,7 @@ describe("trackedRuntimeLeaseWasLost", () => {
         tracked: current,
         event: {
           runtimeEntityId: current.runtimeEntityId,
+          previous: current,
           next: lease({
             slot: "a",
             runtimeEntityId: current.runtimeEntityId,
@@ -140,7 +145,21 @@ describe("trackedRuntimeLeaseWasLost", () => {
     expect(
       trackedRuntimeLeaseWasLost({
         tracked: current,
-        event: { runtimeEntityId: current.runtimeEntityId, next: current },
+        event: { runtimeEntityId: current.runtimeEntityId, previous: current, next: current },
+        clientSessionId: DEVICE,
+      })
+    ).toBe(false);
+  });
+
+  it("ignores a delayed release for the previous connection of the current entity", () => {
+    expect(
+      trackedRuntimeLeaseWasLost({
+        tracked: current,
+        event: {
+          runtimeEntityId: current.runtimeEntityId,
+          previous: { ...current, connectionId: "conn-before-relaunch" },
+          next: null,
+        },
         clientSessionId: DEVICE,
       })
     ).toBe(false);
