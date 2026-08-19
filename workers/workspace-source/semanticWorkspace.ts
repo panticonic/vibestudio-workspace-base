@@ -1377,7 +1377,7 @@ export class SemanticWorkspace {
           }
           const materialization =
             projection === "required"
-              ? this.queueMaterialization(
+              ? this.queueRealization(
                   importInput.contextId,
                   pending.commandId,
                   asState(importInput.expectedWorkingHead),
@@ -1454,7 +1454,7 @@ export class SemanticWorkspace {
           pending.commandId,
           persistedEffectIntegrity(pending.payload)
         );
-        const projection = this.queueMaterialization(
+        const projection = this.queueRealization(
           commandInput["contextId"] as string,
           pending.commandId,
           asState((commandInput as unknown as VcsEditInput).expectedWorkingHead),
@@ -1480,8 +1480,44 @@ export class SemanticWorkspace {
         return { kind: "effects-pending", result, effects: [projection] };
       });
     }
+    const contentOnlyMaterialization =
+      pending.kind === "materialize-context" && pending.payload["mode"] === "content-only";
+    if (contentOnlyMaterialization) {
+      const payloadBlobs = pending.payload["blobs"];
+      const receiptVersion = input.receipt["version"];
+      const receiptHashes = input.receipt["contentHashes"];
+      if (!Array.isArray(payloadBlobs) || payloadBlobs.length === 0) {
+        throw internalSemanticIntegrityFailure(
+          "EffectMismatch",
+          "Content persistence effect lacks blobs",
+          { effectId: pending.effectId, contract: "content-persistence-receipt" }
+        );
+      }
+      const expected = payloadBlobs
+        .map((value) => {
+          if (!value || typeof value !== "object" || Array.isArray(value)) return "";
+          return String((value as Row)["contentHash"] ?? "");
+        })
+        .sort(compareUtf16CodeUnits);
+      const received = Array.isArray(receiptHashes)
+        ? receiptHashes.map(String).sort(compareUtf16CodeUnits)
+        : [];
+      if (
+        receiptVersion !== 1 ||
+        expected.some((contentHash) => !/^[0-9a-f]{64}$/u.test(contentHash)) ||
+        new Set(expected).size !== expected.length ||
+        canonicalJson(received) !== canonicalJson(expected)
+      ) {
+        throw internalSemanticIntegrityFailure(
+          "EffectMismatch",
+          `Receipt does not prove content persistence effect ${pending.effectId}`,
+          { effectId: pending.effectId, contract: "content-persistence-receipt" }
+        );
+      }
+    }
     if (
       pending.kind === "materialize-context" &&
+      !contentOnlyMaterialization &&
       !contextMaterializationReceiptProves(
         pending.payload as unknown as ContextMaterializationCommand,
         input.receipt as unknown as ContextMaterializationReceipt
@@ -1675,7 +1711,7 @@ export class SemanticWorkspace {
         });
         return { kind: "complete", result: context };
       }
-      const effect = this.queueMaterialization(
+      const effect = this.queueRealization(
         input.contextId,
         input.commandId,
         null,
@@ -1740,7 +1776,7 @@ export class SemanticWorkspace {
           : { kind: "complete", result: existing.result };
       }
       const context = this.deps.store.forkContext(input.sourceContextId, input.targetContextId);
-      const effect = this.queueMaterialization(
+      const effect = this.queueRealization(
         input.targetContextId,
         input.commandId,
         null,
@@ -1903,7 +1939,7 @@ export class SemanticWorkspace {
         input.commandId,
         request.ingress.contextIntegrity
       );
-      const effect = this.queueMaterialization(
+      const effect = this.queueRealization(
         input.contextId,
         input.commandId,
         asState(input.expectedWorkingHead),
@@ -2396,7 +2432,7 @@ export class SemanticWorkspace {
         input.commandId,
         request.ingress.contextIntegrity
       );
-      const effect = this.queueMaterialization(
+      const effect = this.queueRealization(
         input.contextId,
         input.commandId,
         asState(input.expectedWorkingHead),
@@ -2503,7 +2539,7 @@ export class SemanticWorkspace {
         input.commandId,
         request.ingress.contextIntegrity
       );
-      const effect = this.queueMaterialization(
+      const effect = this.queueRealization(
         input.contextId,
         input.commandId,
         asState(input.expectedWorkingHead),
@@ -3126,7 +3162,7 @@ export class SemanticWorkspace {
           selectedCoordinateCount: selected.length,
         });
       }
-      const effect = this.queueMaterialization(
+      const effect = this.queueRealization(
         input.contextId,
         input.commandId,
         asState(input.expectedWorkingHead),
@@ -3509,7 +3545,7 @@ export class SemanticWorkspace {
         input.commandId,
         request.ingress.contextIntegrity
       );
-      const effect = this.queueMaterialization(
+      const effect = this.queueRealization(
         input.contextId,
         input.commandId,
         asState(input.expectedWorkingHead),
@@ -3628,7 +3664,7 @@ export class SemanticWorkspace {
         integrationSourceEventIds,
         integrationSourceDeltaIds: derivedDeltaSources,
       };
-      const effect = this.queueMaterialization(
+      const effect = this.queueRealization(
         input.contextId,
         input.commandId,
         asState(input.expectedWorkingHead),
@@ -3664,7 +3700,7 @@ export class SemanticWorkspace {
         workingHead: context.working.ref,
         discardedApplicationIds: chain.applicationIds,
       };
-      const effect = this.queueMaterialization(
+      const effect = this.queueRealization(
         input.contextId,
         input.commandId,
         asState(input.expectedWorkingHead),
@@ -7731,7 +7767,7 @@ export class SemanticWorkspace {
     return planned.changeSet;
   }
 
-  private queueMaterialization(
+  private queueRealization(
     contextId: string,
     commandId: string,
     previousState: StateNodeRef | null,
@@ -7740,7 +7776,22 @@ export class SemanticWorkspace {
     draft?: MutationDraft,
     affectedRepositoryIds?: readonly string[]
   ): SemanticEffect | null {
-    if (!this.deps.store.contextProjectionRequired(contextId)) return null;
+    if (!this.deps.store.contextProjectionRequired(contextId)) {
+      if (blobs.length === 0) return null;
+      return this.deps.store.queueEffect({
+        scopeKind: "context",
+        scopeId: contextId,
+        commandId,
+        kind: "materialize-context",
+        payload: {
+          version: 1,
+          mode: "content-only",
+          contextId,
+          targetState,
+          blobs: [...blobs],
+        },
+      });
+    }
     const command = this.buildMaterializationCommand(
       contextId,
       commandId,

@@ -290,12 +290,68 @@ describe("SemanticWorkspace snapshot import", () => {
     );
     const working = store.contextRequired("context:semantic-only").working.ref;
 
+    const operationRecordText = '{"operationId":"template-add-google-workspace"}\n';
+    const operationRecordHash = sha256Hex(new TextEncoder().encode(operationRecordText));
+    const edited = await semantic.dispatch("edit", {
+      ingress,
+      input: {
+        contextId: "context:semantic-only",
+        commandId: "command:semantic-edit",
+        expectedWorkingHead: working,
+        intentSummary: "Record a resumable semantic-only operation",
+        changes: [
+          {
+            kind: "repository-create",
+            repoPath: "meta",
+            files: [
+              {
+                path: "template-operations/record.json",
+                content: { kind: "text", text: operationRecordText },
+                mode: 0o644,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    expect(edited).toMatchObject({
+      kind: "effects-pending",
+      effects: [
+        {
+          kind: "materialize-context",
+          payload: {
+            version: 1,
+            mode: "content-only",
+            contextId: "context:semantic-only",
+            blobs: [
+              {
+                contentHash: operationRecordHash,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    if (edited.kind !== "effects-pending") throw new Error("semantic edit did not persist content");
+    const persistence = edited.effects[0]!;
+    const persisted = semantic.acknowledgeEffect({
+      effectId: persistence.effectId,
+      payloadDigest: persistence.payloadDigest,
+      receipt: {
+        version: 1,
+        contentHashes: [operationRecordHash],
+      },
+    });
+    expect(persisted).toMatchObject({ kind: "complete" });
+    expect(semantic.contentGcRoots().contentHashes).toContain(operationRecordHash);
+    const editedWorking = store.contextRequired("context:semantic-only").working.ref;
+
     const discarded = await semantic.dispatch("discard", {
       ingress,
       input: {
         contextId: "context:semantic-only",
         commandId: "command:semantic-discard",
-        expectedWorkingHead: working,
+        expectedWorkingHead: editedWorking,
       },
     });
 

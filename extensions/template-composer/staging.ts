@@ -199,23 +199,11 @@ export async function readTemplateOperationRecordInContext(
   contextId: string,
 ): Promise<TemplateOperationRecord | null> {
   const current = await status(ctx, contextId);
-  const meta = await resolveRepository(
-    ctx,
-    current.workingHead,
-    META_REPOSITORY,
-  );
-  if (meta) {
-    const file = await readFile(
-      ctx,
-      current.workingHead,
-      meta.repositoryId,
-      operationRecordPath(),
-    );
-    if (file) {
-      const record = JSON.parse(text(file)) as TemplateOperationRecord;
-      if (operationContextId(record.operationId) === contextId) return record;
-    }
-  }
+  // Every committed operation record is duplicated in immutable event
+  // attribution specifically so recovery does not depend on a working-tree
+  // projection or its content objects. Prefer that durable authority. The
+  // temporary file remains the fallback for the interval before its first
+  // commit has completed.
   let cursor: string | undefined;
   do {
     const page = await ctx.rpc.call<{
@@ -241,6 +229,24 @@ export async function readTemplateOperationRecordInContext(
     }
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
+
+  const meta = await resolveRepository(
+    ctx,
+    current.workingHead,
+    META_REPOSITORY,
+  );
+  if (meta) {
+    const file = await readFile(
+      ctx,
+      current.workingHead,
+      meta.repositoryId,
+      operationRecordPath(),
+    );
+    if (file) {
+      const record = JSON.parse(text(file)) as TemplateOperationRecord;
+      if (operationContextId(record.operationId) === contextId) return record;
+    }
+  }
   return null;
 }
 

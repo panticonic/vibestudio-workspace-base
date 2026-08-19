@@ -29,6 +29,7 @@ import {
   isTemplateOperationCancelled,
   mergeTemplateContributions,
   readTemplateOperationRecord,
+  readTemplateOperationRecordInContext,
   TemplateOperationMainAdvanced,
   TemplateReviewRequired,
   updateTemplateOperationRecord,
@@ -65,6 +66,60 @@ describe("template composer staging", () => {
       "runtime.createContext",
       expect.anything(),
     );
+  });
+
+  it("recovers a committed operation from durable attribution before reading its temporary file", async () => {
+    const operationId = "template-add-google-workspace";
+    const contextId = `template-composer-operation-${Buffer.from(
+      await crypto.subtle.digest("SHA-256", new TextEncoder().encode(operationId)),
+    )
+      .toString("hex")
+      .slice(0, 32)}`;
+    const record = {
+      version: 1,
+      operationId,
+      kind: "add",
+      initiator: "user",
+      fingerprint: `v1-sha256:${"a".repeat(64)}`,
+      intent: { kind: "add", catalogId: "google-workspace" },
+      pins: [],
+      affectedParts: [],
+    };
+    const message = `template-composer-intent:v1:${Buffer.from(
+      JSON.stringify(record),
+      "utf8",
+    ).toString("base64url")}`;
+    const call = vi.fn(
+      async (_target: string, method: string, input: Record<string, unknown>) => {
+        if (method === "vcs.status") {
+          return { committed: BASE, workingHead: BASE, clean: true };
+        }
+        if (method === "vcs.history") {
+          return {
+            entries: [{ node: { kind: "event", eventId: "event:operation-record" } }],
+            nextCursor: null,
+          };
+        }
+        if (method === "vcs.inspect") {
+          expect(input["node"]).toEqual({
+            kind: "event",
+            eventId: "event:operation-record",
+          });
+          return { node: { kind: "event", value: { message } } };
+        }
+        if (method === "vcs.resolveRepository" || method === "vcs.readFile") {
+          throw new Error("temporary operation file must not be read during committed recovery");
+        }
+        throw new Error(`unexpected RPC ${method}`);
+      },
+    );
+
+    await expect(
+      readTemplateOperationRecordInContext(
+        { rpc: { call } } as never,
+        contextId,
+      ),
+    ).resolves.toEqual(record);
   });
 
   it("reads a durable cancellation from the exact protected-main event", async () => {
