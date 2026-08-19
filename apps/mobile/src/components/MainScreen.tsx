@@ -382,6 +382,7 @@ export function MainScreen() {
         if (!entry.managed) continue;
         const panel = shellClient.panels.registry.getPanel(entry.panelId);
         if (panel && mobilePanelMaterializationState(panel, entry) === "current") {
+          shellClient.panels.resetBridgeSessionForReload(entry.panelId);
           webViewRefsMap.current.get(entry.panelId)?.reload();
         }
       }

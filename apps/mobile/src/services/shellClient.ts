@@ -899,6 +899,14 @@ class MobilePanels implements PanelHost {
   async updateTheme(theme: ThemeAppearance): Promise<void> {
     this.requireManager().setCurrentTheme(theme);
   }
+  /**
+   * End the page-scoped relay session without releasing its runtime lease.
+   * A WebView reload creates a new RPC client, so it must not inherit the
+   * previous document's recovered logical session or its in-flight streams.
+   */
+  resetBridgeSessionForReload(panelId: string): void {
+    this.bridgeAdapterInstance?.closePanelSession(panelId);
+  }
   async unload(panelId: string): Promise<void> {
     // Tear down the panel's dedicated relay session (closed regardless of whether
     // it held a runtime lease).
