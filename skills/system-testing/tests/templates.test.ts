@@ -49,6 +49,48 @@ function execution(
 }
 
 describe("template agentic validator", () => {
+  it("requires exact applied evidence for the Examples installation", () => {
+    const test = templateTests.find(({ name }) => name === "templates-install-examples")!;
+    expect(test.validation).toBe("agent-evidence");
+    expect(
+      test.validate(
+        execution(
+          {
+            operationId: "template-add-success",
+            state: "applied",
+            affectedParts: ["panels/hello-svelte"],
+          },
+          "The Examples template was installed successfully.",
+          {
+            code:
+              'return await extensions.invoke("@workspace-extensions/template-composer", "add", [{ commandId: "template-add-success", source: { catalogId: "examples" } }]);',
+          }
+        )
+      )
+    ).toEqual({ passed: true, reason: undefined });
+  });
+
+  it("rejects a completed turn when the Examples installation returned an error", () => {
+    const test = templateTests.find(({ name }) => name === "templates-install-examples")!;
+    expect(
+      test.validate(
+        execution(
+          {
+            operationId: "template-add-failed",
+            state: "error",
+            affectedParts: ["panels/hello-svelte"],
+            blocker: { code: "TemplateBuildFailed" },
+          },
+          "The Examples template install did not complete.",
+          {
+            code:
+              'return await extensions.invoke("@workspace-extensions/template-composer", "add", [{ commandId: "template-add-failed", source: { catalogId: "examples" } }]);',
+          }
+        )
+      )
+    ).toMatchObject({ passed: false });
+  });
+
   it("accepts a fresh workspace with no connected or featured templates", () => {
     const test = templateTests.find(({ name }) => name === "templates-status-catalog")!;
     expect(

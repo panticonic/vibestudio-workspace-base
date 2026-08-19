@@ -270,6 +270,7 @@ export const templateTests: TestCase[] = [
     name: "templates-install-examples",
     description: "Install one official template through the single reviewed transaction",
     category: "templates",
+    validation: "agent-evidence",
     prompt:
       "Use the shipped Templates skill to add the Examples template from the verified catalog. Complete the canonical install transaction and report the outcome. Do not perform a separate read-only inspection unless the install reports an actionable conflict or validation failure.",
     validate: templateInstalledThroughSingleTransaction,
