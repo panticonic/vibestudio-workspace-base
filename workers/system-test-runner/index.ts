@@ -75,7 +75,10 @@ function systemTestEvalCode(options: SystemTestRunConfig): string {
     const options = ${JSON.stringify(options)};
     const progressKey = options.runId;
     const recordScopeKey = "$systemTestRecord:" + progressKey;
-    const durableHeartbeatLimit = 220 * 1024;
+    // EvalDO durably stores each progress payload with a 64 KiB ceiling. Leave
+    // room for its event envelope and encoded strings instead of measuring
+    // against the larger transient RPC transport limit.
+    const durableHeartbeatLimit = 48 * 1024;
     let lastProgress = null;
     const publishProgress = (progress) => {
       let durable = { ...progress, updatedAt: new Date().toISOString() };
