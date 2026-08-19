@@ -14,7 +14,10 @@
  */
 
 import type { ChatMessage } from "@workspace/agentic-core";
-import type { HeadlessSession, SessionSnapshot } from "@workspace/agentic-session";
+import type {
+  HeadlessSession,
+  SessionSnapshot,
+} from "@workspace/agentic-session";
 import {
   CONTENT_WORKSPACE_REPO_FIXTURE,
   PROVENANCE_RECORD_WORKSPACE_REPO_FIXTURE,
@@ -23,7 +26,11 @@ import {
   type TestOrchestrationContext,
   type TestResult,
 } from "../types.js";
-import { findLastAgentMessage, getToolCalls, hasAgentResponse } from "./_helpers.js";
+import {
+  findLastAgentMessage,
+  getToolCalls,
+  hasAgentResponse,
+} from "./_helpers.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -32,11 +39,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 type ToolCall = ReturnType<typeof getToolCalls>[number];
 
 function protocolText(call: ToolCall): string {
-  const envelope = isRecord(call.execution?.result) ? call.execution.result : null;
+  const envelope = isRecord(call.execution?.result)
+    ? call.execution.result
+    : null;
   return Array.isArray(envelope?.["protocolContent"])
     ? envelope["protocolContent"]
         .filter(isRecord)
-        .map((content) => (typeof content["text"] === "string" ? content["text"] : ""))
+        .map((content) =>
+          typeof content["text"] === "string" ? content["text"] : "",
+        )
         .join("\n")
     : "";
 }
@@ -56,7 +67,7 @@ function provenanceDetails(call: ToolCall): Record<string, unknown> | null {
 
 /** Completed provenance calls, paired with their rendered block. */
 function provenanceCalls(
-  result: TestExecutionResult
+  result: TestExecutionResult,
 ): Array<{ call: ToolCall; details: Record<string, unknown>; text: string }> {
   return getToolCalls(result).flatMap((call) => {
     const details = provenanceDetails(call);
@@ -82,13 +93,15 @@ function provenanceSurfacesAreLive(result: TestExecutionResult): TestResult {
   const broken = getToolCalls(result).filter(
     (call) =>
       call.name === "provenance" &&
-      (call.execution?.status === "error" || call.execution?.isError === true)
+      (call.execution?.status === "error" || call.execution?.isError === true),
   );
   if (broken.length > 0) {
     return {
       passed: false,
       reason: `The provenance surface failed rather than answered or refused: ${broken
-        .map((call) => String(call.execution?.error ?? "unknown failure").slice(0, 200))
+        .map((call) =>
+          String(call.execution?.error ?? "unknown failure").slice(0, 200),
+        )
         .join(" | ")}`,
     };
   }
@@ -98,9 +111,12 @@ function provenanceSurfacesAreLive(result: TestExecutionResult): TestResult {
   // and not a dead mechanism. `plan-unavailable` on everything is the shape a
   // genuinely dead query surface has, and it is the one worth failing on.
   const queries = provenanceCalls(result).filter(
-    (entry) => entry.details["rowCount"] !== undefined
+    (entry) => entry.details["rowCount"] !== undefined,
   );
-  if (queries.length > 0 && queries.every((entry) => entry.details["refused"] === "plan-unavailable")) {
+  if (
+    queries.length > 0 &&
+    queries.every((entry) => entry.details["refused"] === "plan-unavailable")
+  ) {
     return {
       passed: false,
       reason:
@@ -120,7 +136,8 @@ function consultedNegativeEvidence(result: TestExecutionResult): TestResult {
   const consulted = provenanceCalls(result).some((entry) => {
     if (entry.details["walk"] === "rejections") return true;
     const query = entry.call.arguments?.["query"];
-    if (typeof query === "string" && /prov_counteractions/u.test(query)) return true;
+    if (typeof query === "string" && /prov_counteractions/u.test(query))
+      return true;
     // A `cause` walk over a coordinate whose history contains the undoing
     // surfaces the same evidence. The criterion is that the agent reached the
     // record of what was undone, not that it reached it by one route.
@@ -149,10 +166,10 @@ function consultedNegativeEvidence(result: TestExecutionResult): TestResult {
 function walkDelivered(
   result: TestExecutionResult,
   walk: "cause" | "cohort" | "rejections",
-  carried: RegExp
+  carried: RegExp,
 ): TestResult {
   const delivered = provenanceCalls(result).some(
-    (entry) => entry.details["walk"] === walk && carried.test(entry.text)
+    (entry) => entry.details["walk"] === walk && carried.test(entry.text),
   );
   return delivered
     ? { passed: true }
@@ -168,7 +185,12 @@ function cohortBreadth(result: TestExecutionResult): number {
     0,
     ...provenanceCalls(result)
       .filter((entry) => entry.details["walk"] === "cohort")
-      .map((entry) => entry.text.split("\n").filter((line) => /·\s*\d+\s*change/u.test(line)).length)
+      .map(
+        (entry) =>
+          entry.text
+            .split("\n")
+            .filter((line) => /·\s*\d+\s*change/u.test(line)).length,
+      ),
   );
 }
 
@@ -176,12 +198,15 @@ function cohortBreadth(result: TestExecutionResult): number {
  * Entry by content is graded on what the surface returned, not on the wording
  * of the sentence the agent wrapped around it.
  */
-function foundTheSubject(result: TestExecutionResult, subject: RegExp): TestResult {
+function foundTheSubject(
+  result: TestExecutionResult,
+  subject: RegExp,
+): TestResult {
   const hit = provenanceCalls(result).find(
     (entry) =>
       typeof entry.details["hitCount"] === "number" &&
       Number(entry.details["hitCount"]) > 0 &&
-      subject.test(entry.text)
+      subject.test(entry.text),
   );
   return hit
     ? { passed: true }
@@ -203,7 +228,7 @@ function foundTheSubject(result: TestExecutionResult, subject: RegExp): TestResu
 function namedAtLeast(
   result: TestExecutionResult,
   candidates: readonly RegExp[],
-  atLeast: number
+  atLeast: number,
 ): TestResult {
   const final = findLastAgentMessage(result);
   const named = candidates.filter((candidate) => candidate.test(final)).length;
@@ -216,32 +241,44 @@ function namedAtLeast(
 }
 
 /** An inventory that never says how much there is has not inventoried. */
-function reportedTheSize(result: TestExecutionResult, size: RegExp): TestResult {
+function reportedTheSize(
+  result: TestExecutionResult,
+  size: RegExp,
+): TestResult {
   return size.test(findLastAgentMessage(result))
     ? { passed: true }
     : {
         passed: false,
-        reason: "The inventory never reported how much work the record actually holds",
+        reason:
+          "The inventory never reported how much work the record actually holds",
       };
 }
 
 /** Nothing outside the caller's basis may appear, in an answer or in a block. */
 function withheld(result: TestExecutionResult, secret: RegExp): TestResult {
   if (secret.test(findLastAgentMessage(result))) {
-    return { passed: false, reason: "The answer disclosed work outside the caller's visible basis" };
+    return {
+      passed: false,
+      reason: "The answer disclosed work outside the caller's visible basis",
+    };
   }
-  const leaked = provenanceCalls(result).find((entry) => secret.test(entry.text));
+  const leaked = provenanceCalls(result).find((entry) =>
+    secret.test(entry.text),
+  );
   return leaked
     ? {
         passed: false,
-        reason: "A provenance block disclosed work outside the caller's visible basis",
+        reason:
+          "A provenance block disclosed work outside the caller's visible basis",
       }
     : { passed: true };
 }
 
 /** No provenance surface may spell a content-addressed identity at the model. */
 function identityHygieneHolds(result: TestExecutionResult): TestResult {
-  const leaking = provenanceCalls(result).find((entry) => RENDERED_IDENTITY.test(entry.text));
+  const leaking = provenanceCalls(result).find((entry) =>
+    RENDERED_IDENTITY.test(entry.text),
+  );
   return leaking
     ? {
         passed: false,
@@ -252,10 +289,15 @@ function identityHygieneHolds(result: TestExecutionResult): TestResult {
     : { passed: true };
 }
 
-function answered(result: TestExecutionResult, patterns: readonly RegExp[]): TestResult {
-  if (!hasAgentResponse(result)) return { passed: false, reason: "No agent response received" };
+function answered(
+  result: TestExecutionResult,
+  patterns: readonly RegExp[],
+): TestResult {
+  if (!hasAgentResponse(result))
+    return { passed: false, reason: "No agent response received" };
   const final = findLastAgentMessage(result);
-  if (!final.trim()) return { passed: false, reason: "The final agent response was empty" };
+  if (!final.trim())
+    return { passed: false, reason: "The final agent response was empty" };
   const missing = patterns.filter((pattern) => !pattern.test(final));
   return missing.length === 0
     ? { passed: true }
@@ -283,14 +325,14 @@ function orchestratePhases(
   phaseContext: "fork" | "task" = "fork",
 ) {
   return async function orchestrate(
-    context: TestOrchestrationContext
+    context: TestOrchestrationContext,
   ): Promise<TestExecutionResult> {
     const startedAt = Date.now();
     const fixtureName = context.runner.workspaceRepoName;
-    if (!fixtureName) throw new Error("this provenance scenario requires a repository fixture");
+    if (!fixtureName)
+      throw new Error("this provenance scenario requires a repository fixture");
     const repoPath = `projects/${fixtureName}`;
     const sessions: Array<{ role: string; session: HeadlessSession }> = [];
-    const messages: ChatMessage[] = [];
     const cleanupErrors: string[] = [];
     let error: string | undefined;
 
@@ -299,13 +341,18 @@ function orchestratePhases(
         const session = await context.runner.spawn({ context: phaseContext });
         sessions.push({ role: phase.role, session });
         await context.sendAndWait(session, phase.prompt(repoPath), phase.note);
-        messages.push(...(session.messages as ChatMessage[]));
       }
     } catch (cause) {
       error = cause instanceof Error ? cause.message : String(cause);
     }
 
     const last = sessions.at(-1)?.session;
+    // Earlier phases establish the fixture observed by the final actor. Their
+    // transcripts are not part of that actor's observable result: combining
+    // them here lets validators "see" private setup that the final context
+    // correctly cannot reach. Grade the final phase, while retaining bounded
+    // phase metadata for orchestration diagnostics.
+    const messages = (last?.messages ?? []) as ChatMessage[];
     let snapshot: SessionSnapshot | undefined;
     try {
       snapshot = last?.snapshot();
@@ -322,6 +369,10 @@ function orchestratePhases(
         orchestrated: true,
         repoPath,
         phases: sessions.map(({ role }) => role),
+        phaseMessageCounts: sessions.map(({ role, session }) => ({
+          role,
+          count: session.messages.length,
+        })),
       },
     };
 
@@ -331,10 +382,14 @@ function orchestratePhases(
         cleanupErrors.push(
           ...session
             .snapshot()
-            .cleanupErrors.map((entry) => `${role} ${entry.phase}: ${entry.message}`)
+            .cleanupErrors.map(
+              (entry) => `${role} ${entry.phase}: ${entry.message}`,
+            ),
         );
       } catch (cause) {
-        cleanupErrors.push(`${role}: ${cause instanceof Error ? cause.message : String(cause)}`);
+        cleanupErrors.push(
+          `${role}: ${cause instanceof Error ? cause.message : String(cause)}`,
+        );
       }
     }
     if (cleanupErrors.length > 0) {
@@ -358,7 +413,8 @@ function orchestratePhases(
 const RELAY_REASON =
   "the Pelagic relay drops any export payload above 512 KiB, so batches must stay small";
 
-const BARE_FILE = "Keep the file to just that one exported constant — no comments and no notes file.";
+const BARE_FILE =
+  "Keep the file to just that one exported constant — no comments and no notes file.";
 
 const CANONICAL_QUESTION_CASES: TestCase[] = [
   {
@@ -405,12 +461,13 @@ const CANONICAL_QUESTION_CASES: TestCase[] = [
         walkDelivered(result, "cause", /512\s*KiB|512KiB/iu),
         // The agent must then actually use it. One token, not a phrasing.
         answered(result, [/512|pelagic|relay/iu]),
-        identityHygieneHolds(result)
+        identityHygieneHolds(result),
       ),
   },
   {
     name: "provenance-recovers-the-cohort-of-one-request",
-    description: "A fresh agent lists everything else that changed under one prior request",
+    description:
+      "A fresh agent lists everything else that changed under one prior request",
     category: "provenance-questions",
     workspaceRepoFixture: PROVENANCE_RECORD_WORKSPACE_REPO_FIXTURE,
     validation: "agent-evidence",
@@ -430,8 +487,12 @@ const CANONICAL_QUESTION_CASES: TestCase[] = [
         };
       }
       return all(
-        namedAtLeast(result, [/retry-policy/iu, /upload-policy/iu, /socket-policy/iu], 2),
-        identityHygieneHolds(result)
+        namedAtLeast(
+          result,
+          [/retry-policy/iu, /upload-policy/iu, /socket-policy/iu],
+          2,
+        ),
+        identityHygieneHolds(result),
       );
     },
   },
@@ -456,12 +517,13 @@ const CANONICAL_QUESTION_CASES: TestCase[] = [
           /(?:revert|undone|undid|counteract|rolled back|put back)/iu,
           /staging|cut the link|before the retry/iu,
         ]),
-        identityHygieneHolds(result)
+        identityHygieneHolds(result),
       ),
   },
   {
     name: "provenance-finds-a-subject-by-its-prose",
-    description: "A fresh agent finds recorded reasoning it cannot name, starting from a hunch",
+    description:
+      "A fresh agent finds recorded reasoning it cannot name, starting from a hunch",
     category: "provenance-questions",
     workspaceRepoFixture: PROVENANCE_RECORD_WORKSPACE_REPO_FIXTURE,
     validation: "agent-evidence",
@@ -475,7 +537,7 @@ const CANONICAL_QUESTION_CASES: TestCase[] = [
         // spells the finding in prose is not the capability under test.
         foundTheSubject(result, /staging|cut the link|backoff/iu),
         answered(result, [/backoff|retry|30|300/iu]),
-        identityHygieneHolds(result)
+        identityHygieneHolds(result),
       ),
   },
   {
@@ -490,9 +552,18 @@ const CANONICAL_QUESTION_CASES: TestCase[] = [
     validate: (result) =>
       all(
         provenanceSurfacesAreLive(result),
-        namedAtLeast(result, [/retry-policy/iu, /socket-policy/iu, /upload-policy/iu, /cache-policy/iu], 2),
+        namedAtLeast(
+          result,
+          [
+            /retry-policy/iu,
+            /socket-policy/iu,
+            /upload-policy/iu,
+            /cache-policy/iu,
+          ],
+          2,
+        ),
         reportedTheSize(result, /\b(?:4|four|5|five)\b/iu),
-        identityHygieneHolds(result)
+        identityHygieneHolds(result),
       ),
   },
 ];
@@ -529,7 +600,7 @@ const EXTENDED_CASES: TestCase[] = [
           /ten minutes|10 minutes|600 seconds|long[- ]lived|keep(?:ing|s)? (?:the |one )?connection open|keepalive/iu,
           /(?:drop|dropped|cut|kill|killed|sever|terminat|die|died|closed|reconnect)/iu,
         ]),
-        identityHygieneHolds(result)
+        identityHygieneHolds(result),
       ),
   },
   {
@@ -572,9 +643,9 @@ const EXTENDED_CASES: TestCase[] = [
         // and a search must not return either.
         withheld(result, /halberd|quarantineHours|72\s*hours/iu),
         provenanceSurfacesAreLive(result),
-        identityHygieneHolds(result)
+        identityHygieneHolds(result),
       ),
-  }
+  },
 ];
 
 export const provenanceQuestionTests: TestCase[] = [

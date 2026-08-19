@@ -11,7 +11,10 @@ interface ProvenanceStep {
   error?: string;
 }
 
-function execution(finalMessage: string, steps: readonly ProvenanceStep[]): TestExecutionResult {
+function execution(
+  finalMessage: string,
+  steps: readonly ProvenanceStep[],
+): TestExecutionResult {
   const messages = steps.map((step, index) => ({
     id: `call-${index}`,
     kind: "message",
@@ -47,13 +50,13 @@ function execution(finalMessage: string, steps: readonly ProvenanceStep[]): Test
 }
 
 const causeCase = provenanceQuestionTests.find(
-  (test) => test.name === "provenance-recovers-the-originating-request"
+  (test) => test.name === "provenance-recovers-the-originating-request",
 )!;
 const queryCase = provenanceQuestionTests.find(
-  (test) => test.name === "provenance-answers-a-set-shaped-question"
+  (test) => test.name === "provenance-answers-a-set-shaped-question",
 )!;
 const visibilityCase = provenanceQuestionTests.find(
-  (test) => test.name === "provenance-holds-the-visibility-boundary"
+  (test) => test.name === "provenance-holds-the-visibility-boundary",
 )!;
 
 const GOOD_CAUSE_BLOCK =
@@ -89,6 +92,50 @@ describe("provenance question scenarios", () => {
     expect(contexts).toEqual(["task", "task"]);
   });
 
+  it("grades an orchestrated scenario only on its final actor's observable transcript", async () => {
+    const privateMessage = {
+      id: "private",
+      kind: "message",
+      senderId: "agent",
+      senderMetadata: { type: "agent" },
+      complete: true,
+      contentType: "invocation",
+      content: `work-unit:${"9f3a".repeat(8)} quarantineHours=72 Halberd`,
+    };
+    const outsiderMessages = execution("There are no reachable hold periods.", [
+      {
+        arguments: { query: "SELECT * FROM prov_changes" },
+        text: "No visible records matched.",
+        details: { rowCount: 0, refused: null },
+      },
+    ]).messages;
+    const phaseMessages = [[privateMessage], outsiderMessages];
+    let phase = 0;
+    const orchestration = {
+      runner: {
+        workspaceRepoName: "fixture",
+        spawn: async () => {
+          const messages = phaseMessages[phase++]!;
+          return {
+            messages,
+            close: async () => undefined,
+            snapshot: () => ({ messages, invocations: [], cleanupErrors: [] }),
+          };
+        },
+      },
+      sendAndWait: async () => outsiderMessages.at(-1),
+    };
+
+    const result = await visibilityCase.orchestrate!(orchestration as never);
+
+    expect(result.messages).toEqual(outsiderMessages);
+    expect(result.diagnostics?.["phaseMessageCounts"]).toEqual([
+      { role: "private-author", count: 1 },
+      { role: "outsider", count: outsiderMessages.length },
+    ]);
+    expect(visibilityCase.validate(result)).toEqual({ passed: true });
+  });
+
   it("declares user goals rather than call choreography", () => {
     for (const test of provenanceQuestionTests) {
       expect(() => assertSystemTestDeclaration(test)).not.toThrow();
@@ -107,7 +154,7 @@ describe("provenance question scenarios", () => {
           text: GOOD_CAUSE_BLOCK,
           details: { walk: "cause", entryCount: 4 },
         },
-      ])
+      ]),
     );
     expect(result).toEqual({ passed: true });
   });
@@ -120,7 +167,7 @@ describe("provenance question scenarios", () => {
           status: "error",
           error: '[vcs.walk] Invalid semantic VCS method "vcsWalk"',
         },
-      ])
+      ]),
     );
     expect(result.passed).toBe(false);
     expect(result.reason).toContain("failed rather than answered");
@@ -128,16 +175,19 @@ describe("provenance question scenarios", () => {
 
   it("fails when every relational query is refused", () => {
     const result = queryCase.validate(
-      execution("Four pieces of work: retry-policy, socket-policy, upload-policy, and cache-policy.", [
-        {
-          arguments: { query: "SELECT work_unit_id FROM prov_work_units" },
-          details: { rowCount: 0, refused: "plan-unavailable" },
-        },
-        {
-          arguments: { query: "SELECT change_id FROM prov_changes" },
-          details: { rowCount: 0, refused: "plan-unavailable" },
-        },
-      ])
+      execution(
+        "Four pieces of work: retry-policy, socket-policy, upload-policy, and cache-policy.",
+        [
+          {
+            arguments: { query: "SELECT work_unit_id FROM prov_work_units" },
+            details: { rowCount: 0, refused: "plan-unavailable" },
+          },
+          {
+            arguments: { query: "SELECT change_id FROM prov_changes" },
+            details: { rowCount: 0, refused: "plan-unavailable" },
+          },
+        ],
+      ),
     );
     expect(result.passed).toBe(false);
     expect(result.reason).toContain("indistinguishable from a dead one");
@@ -145,16 +195,19 @@ describe("provenance question scenarios", () => {
 
   it("accepts a refusal as long as the surface also executed", () => {
     const result = queryCase.validate(
-      execution("Four pieces of work: retry-policy, socket-policy, upload-policy, and cache-policy.", [
-        {
-          arguments: { query: "SELECT * FROM prov_changes, prov_work_units" },
-          details: { rowCount: 0, refused: "unknown-relation" },
-        },
-        {
-          arguments: { query: "SELECT work_unit_id FROM prov_work_units" },
-          details: { rowCount: 3, refused: null },
-        },
-      ])
+      execution(
+        "Four pieces of work: retry-policy, socket-policy, upload-policy, and cache-policy.",
+        [
+          {
+            arguments: { query: "SELECT * FROM prov_changes, prov_work_units" },
+            details: { rowCount: 0, refused: "unknown-relation" },
+          },
+          {
+            arguments: { query: "SELECT work_unit_id FROM prov_work_units" },
+            details: { rowCount: 3, refused: null },
+          },
+        ],
+      ),
     );
     expect(result).toEqual({ passed: true });
   });
@@ -167,7 +220,7 @@ describe("provenance question scenarios", () => {
           text: `cause · work-unit:${"9f3a".repeat(8)}\n  stated "512 KiB Pelagic relay"`,
           details: { walk: "cause", entryCount: 1 },
         },
-      ])
+      ]),
     );
     expect(result.passed).toBe(false);
     expect(result.reason).toContain("content-addressed identity");
@@ -181,7 +234,7 @@ describe("provenance question scenarios", () => {
           text: GOOD_CAUSE_BLOCK,
           details: { walk: "cause", entryCount: 4 },
         },
-      ])
+      ]),
     );
     expect(result.passed).toBe(false);
     expect(result.reason).toContain("did not establish");
@@ -190,25 +243,30 @@ describe("provenance question scenarios", () => {
 
 describe("diagnosis, not just a verdict", () => {
   const flagship = provenanceQuestionTests.find(
-    (test) => test.name === "provenance-recovers-an-unstated-constraint"
+    (test) => test.name === "provenance-recovers-an-unstated-constraint",
   )!;
   const rejectionBlock =
-    'prov rejections · @r1-0000 · what was tried and rejected here\n' +
-    '  counteractions (1)\n' +
+    "prov rejections · @r1-0000 · what was tried and rejected here\n" +
+    "  counteractions (1)\n" +
     '    stated: "staging cut the link before the retry fired" · undone · edit src/retry-policy.ts · @r2-0000';
 
   it("blames the mechanism when the evidence never arrived", () => {
     const result = flagship.validate(
-      execution("Looks fine, added a ten minute keepalive; nothing was dropped before.", [
-        {
-          arguments: { target: "src/retry-policy.ts", walk: "rejections" },
-          text: "prov rejections · @r1-0000 · what was tried and rejected here\n  note · Nothing has been rejected at this coordinate in your visible basis.",
-          details: { walk: "rejections", entryCount: 0 },
-        },
-      ])
+      execution(
+        "Looks fine, added a ten minute keepalive; nothing was dropped before.",
+        [
+          {
+            arguments: { target: "src/retry-policy.ts", walk: "rejections" },
+            text: "prov rejections · @r1-0000 · what was tried and rejected here\n  note · Nothing has been rejected at this coordinate in your visible basis.",
+            details: { walk: "rejections", entryCount: 0 },
+          },
+        ],
+      ),
     );
     expect(result.passed).toBe(false);
-    expect(result.reason).toContain("the mechanism failed before the agent's reasoning was tested");
+    expect(result.reason).toContain(
+      "the mechanism failed before the agent's reasoning was tested",
+    );
   });
 
   it("blames the reasoning when the evidence did arrive and was ignored", () => {
@@ -216,13 +274,16 @@ describe("diagnosis, not just a verdict", () => {
     // repeated the rejected work. The validator has to say so specifically,
     // otherwise the flagship reads as a broken surface every time it fails.
     const result = flagship.validate(
-      execution("This project configures policy by constants, so a keepalive fits well here.", [
-        {
-          arguments: { target: "src/retry-policy.ts", walk: "rejections" },
-          text: rejectionBlock,
-          details: { walk: "rejections", entryCount: 1 },
-        },
-      ])
+      execution(
+        "This project configures policy by constants, so a keepalive fits well here.",
+        [
+          {
+            arguments: { target: "src/retry-policy.ts", walk: "rejections" },
+            text: rejectionBlock,
+            details: { walk: "rejections", entryCount: 1 },
+          },
+        ],
+      ),
     );
     expect(result.passed).toBe(false);
     expect(result.reason).toContain("did not establish");
@@ -238,8 +299,8 @@ describe("diagnosis, not just a verdict", () => {
             text: rejectionBlock,
             details: { walk: "rejections", entryCount: 1 },
           },
-        ]
-      )
+        ],
+      ),
     );
     expect(result).toEqual({ passed: true });
   });
