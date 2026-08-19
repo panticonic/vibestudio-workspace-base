@@ -200,6 +200,55 @@ const IDENTITY_COLUMN_NODES: Record<string, (value: string) => VcsSemanticNodeRe
   source_delta_id: (deltaId) => ({ kind: "external-delta", deltaId }),
 };
 
+const POLYMORPHIC_IDENTITY_NODES: Partial<
+  Record<VcsSemanticNodeRef["kind"], (value: string) => VcsSemanticNodeRef>
+> = {
+  "work-unit": (workUnitId) => ({ kind: "work-unit", workUnitId }),
+  change: (changeId) => ({ kind: "change", changeId }),
+  "applied-change": (appliedChangeId) => ({ kind: "applied-change", appliedChangeId }),
+  application: (applicationId) => ({ kind: "application", applicationId }),
+  event: (eventId) => ({ kind: "event", eventId }),
+  decision: (decisionId) => ({ kind: "decision", decisionId }),
+  command: (commandId) => ({ kind: "command", commandId }),
+  "external-delta": (deltaId) => ({ kind: "external-delta", deltaId }),
+};
+
+const SELF_CONTAINED_IDENTITY_PREFIXES: ReadonlyArray<
+  readonly [string, (value: string) => VcsSemanticNodeRef]
+> = [
+  ["workspace-event:", (eventId) => ({ kind: "event", eventId })],
+  ["event:", (eventId) => ({ kind: "event", eventId })],
+  ["external-delta:", (deltaId) => ({ kind: "external-delta", deltaId })],
+  ["applied-change:", (appliedChangeId) => ({ kind: "applied-change", appliedChangeId })],
+  ["application:", (applicationId) => ({ kind: "application", applicationId })],
+  ["work-unit:", (workUnitId) => ({ kind: "work-unit", workUnitId })],
+  ["change:", (changeId) => ({ kind: "change", changeId })],
+  ["decision:", (decisionId) => ({ kind: "decision", decisionId })],
+];
+
+function queryIdentityNode(
+  column: string,
+  value: string,
+  row: readonly (string | number | boolean | null)[],
+  columns: readonly string[]
+): VcsSemanticNodeRef | null {
+  const fixed = IDENTITY_COLUMN_NODES[column];
+  if (fixed) return fixed(value);
+
+  const inferred = SELF_CONTAINED_IDENTITY_PREFIXES.find(
+    ([prefix]) =>
+      value.startsWith(prefix) && /^[0-9a-f]{32,}$/u.test(value.slice(prefix.length))
+  );
+  if (inferred) return inferred[1](value);
+  if (!column.endsWith("_id")) return null;
+
+  const kindColumn = `${column.slice(0, -"_id".length)}_kind`;
+  const kindIndex = columns.indexOf(kindColumn);
+  const kind = kindIndex >= 0 ? row[kindIndex] : null;
+  if (typeof kind !== "string") return null;
+  return POLYMORPHIC_IDENTITY_NODES[kind as VcsSemanticNodeRef["kind"]]?.(value) ?? null;
+}
+
 /**
  * Bind compact refs inside query text to their exact identities. The model
  * never transcribes a content-addressed identity in either direction: it pastes
@@ -484,9 +533,9 @@ export function createProvenanceTool(
                 type: "text" as const,
                 text: renderQueryBlock({
                   result,
-                  identityColumns: (column, value) => {
-                    const build = IDENTITY_COLUMN_NODES[column];
-                    return build ? reference(build(value)) : null;
+                  identityColumns: (column, value, row, columns) => {
+                    const node = queryIdentityNode(column, value, row, columns);
+                    return node ? reference(node) : null;
                   },
                 }),
               },

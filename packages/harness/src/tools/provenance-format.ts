@@ -491,7 +491,12 @@ const tableCell = (value: string | number | boolean | null): string =>
 /** Sets render as tables; narrative prose is reserved for causal chains. */
 export function renderQueryBlock(input: {
   result: VcsQueryResult;
-  identityColumns?: (column: string, value: string) => string | null;
+  identityColumns?: (
+    column: string,
+    value: string,
+    row: VcsQueryResult["rows"][number],
+    columns: VcsQueryResult["columns"]
+  ) => string | null;
 }): string {
   const { result } = input;
   if (result.refusal) {
@@ -516,7 +521,12 @@ export function renderQueryBlock(input: {
 
 function renderRows(
   result: VcsQueryResult,
-  identityColumns?: (column: string, value: string) => string | null
+  identityColumns?: (
+    column: string,
+    value: string,
+    row: VcsQueryResult["rows"][number],
+    columns: VcsQueryResult["columns"]
+  ) => string | null
 ): string[] {
   if (result.columns.length === 0) return ["  (no columns)"];
   const header = `| ${result.columns.join(" | ")} |`;
@@ -525,7 +535,9 @@ function renderRows(
     const cells = row.map((value, index) => {
       const column = result.columns[index]!;
       const replaced =
-        typeof value === "string" ? (identityColumns?.(column, value) ?? null) : null;
+        typeof value === "string"
+          ? (identityColumns?.(column, value, row, result.columns) ?? null)
+          : null;
       return tableCell(replaced ?? value);
     });
     return `| ${cells.join(" | ")} |`;

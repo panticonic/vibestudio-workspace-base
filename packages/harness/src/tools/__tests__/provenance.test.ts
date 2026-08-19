@@ -1078,6 +1078,28 @@ describe("question-shaped provenance surfaces", () => {
     expect(detailsOf(result)).toMatchObject({ rowCount: 1, refused: null });
   });
 
+  it("renders polymorphic query identities as refs without requiring a kind column", async () => {
+    const f = fixture();
+    const workUnitId = `work-unit:${"a".repeat(64)}`;
+    f.query.mockResolvedValueOnce({
+      schemaVersion: 1,
+      columns: ["subject_id", "text"],
+      rows: [[workUnitId, "Create the fixture"]],
+      rowsRead: 1,
+      truncated: false,
+      refusal: null,
+    });
+    const tool = createProvenanceTool("/", f.value);
+    const result = await tool.execute("call:polymorphic-query", {
+      query: "SELECT subject_kind, subject_id, text FROM prov_search",
+    });
+    const text = textOf(result);
+
+    expect(text).toContain("| subject_id | text |");
+    expect(text).toMatch(/\| @r[0-9a-z]+-[0-9a-f]{4} \| Create the fixture \|/u);
+    expect(text).not.toContain(workUnitId);
+  });
+
   it("binds a returned ref inside query text to its exact identity", async () => {
     const f = fixture();
     const references = createMemoryAgentReferenceStore();
