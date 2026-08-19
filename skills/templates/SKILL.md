@@ -52,8 +52,12 @@ release operations must be repaired or resumed. A retained operation is not an
 approval card; publication still crosses its normal review boundary.
 
 After an applied result, honor `contextIntegration`: continue immediately after
-`integrated`, merge the exact publication event after `needs-merge`, and avoid
-claiming the current conversation observes it after `unavailable`.
+`integrated`, merge the exact `publicationEventId` into the returned context
+after `needs-merge`, and avoid claiming the current conversation observes it
+after `unavailable`. That final publication merge takes only the context, source
+event, and intent. Do not pass `coordinates`: coordinate decisions belong only
+to unresolved `review.items[].sourceDeltaId` merges, and an applied publication
+event has already concluded them.
 
 ## Add, adopt, update, and remove
 
