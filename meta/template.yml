@@ -71,6 +71,7 @@ template:
     - packages/vcs-engine
     - panels/chat
     - panels/terminal
+    - panels/tour
     - projects/default
     - skills/agents
     - skills/api-integrations

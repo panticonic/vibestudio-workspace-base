@@ -1,0 +1,73 @@
+{
+  "name": "@workspace-panels/tour",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.tsx",
+    "./deck": "./deck.ts"
+  },
+  "vibestudio": {
+    "title": "Vibestudio Tour",
+    "icon": "./assets/icon.svg",
+    "entry": "index.tsx",
+    "description": "An explorable presentation of how Vibestudio works and why",
+    "exposeModules": [
+      "react",
+      "react/jsx-runtime",
+      "react/jsx-dev-runtime",
+      "@radix-ui/themes",
+      "@workspace/react",
+      "@workspace/runtime"
+    ],
+    "stateArgs": {
+      "type": "object",
+      "properties": {
+        "scene": {
+          "type": "string",
+          "description": "Scene id from panels/tour/deck.ts"
+        },
+        "notes": {
+          "type": "boolean",
+          "description": "Presenter notes drawer open"
+        }
+      },
+      "additionalProperties": false
+    },
+    "authority": {
+      "provides": [],
+      "requests": [
+        {
+          "capability": "context.boundary",
+          "resource": {
+            "kind": "prefix",
+            "prefix": "context"
+          },
+          "tier": "critical",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "workspace.runtime-state.manage",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        }
+      ]
+    }
+  },
+  "dependencies": {
+    "@radix-ui/themes": "3.3.0",
+    "@vibestudio/shared": "workspace:*",
+    "@workspace/react": "workspace:*",
+    "@workspace/runtime": "workspace:*",
+    "@workspace/ui": "workspace:*",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "vitest": "3.2.7"
+  }
+}
