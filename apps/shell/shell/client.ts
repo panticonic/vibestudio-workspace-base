@@ -11,6 +11,10 @@ import {
   type RpcEnvelope,
 } from "@vibestudio/rpc";
 import { appMethods } from "@vibestudio/service-schemas/app";
+import type {
+  ShellSurfaceDescriptor,
+  ShellSurfaceTarget,
+} from "@vibestudio/shared/shellSurface";
 import {
   accountMethods,
   type AccountProfile,
@@ -110,10 +114,14 @@ type IncomingPanelLocationBridge = {
   onLocation: (handler: (location: PanelLocation) => void) => () => void;
   prepareWorkspaceRelaunch: (location: PanelLocation | null) => Promise<void>;
 };
+type IncomingShellSurfaceBridge = {
+  getPending: () => Promise<ShellSurfaceDescriptor | null>;
+};
 const g = globalThis as unknown as {
   __vibestudioTransport?: ShellTransportBridge;
   __vibestudioIncomingPairLink?: IncomingPairLinkBridge;
   __vibestudioIncomingPanelLocation?: IncomingPanelLocationBridge;
+  __vibestudioIncomingShellSurface?: IncomingShellSurfaceBridge;
 };
 if (!g.__vibestudioTransport) throw new Error("Shell transport not available");
 const transport: EnvelopeRpcTransport = {
@@ -287,6 +295,8 @@ export const app = {
   clearBuildCache: () => appClient.clearBuildCache(),
   applyUpdate: (appId: string) => appClient.applyUpdate(appId),
   listPendingUpdates: () => appClient.listPendingUpdates(),
+  openShellSurface: (target: ShellSurfaceTarget) => appClient.openShellSurface(target),
+  describeShellSurfaces: () => appClient.describeShellSurfaces(),
 };
 
 async function collectBrowserSessionRows(): Promise<
@@ -896,6 +906,15 @@ export const incomingPairLink = {
     g.__vibestudioIncomingPairLink?.getPending() ?? Promise.resolve(null),
   onLink: (handler: (link: ConnectPairing) => void) =>
     g.__vibestudioIncomingPairLink?.onLink(handler) ?? (() => {}),
+};
+/**
+ * A `vibestudio://ask|about|command|surface` deep link that arrived before this
+ * shell mounted. The shell re-enters it through `app.openShellSurface`, so the
+ * launch-time path and the live path converge on the host's one dispatcher.
+ */
+export const incomingShellSurface = {
+  getPending: () =>
+    g.__vibestudioIncomingShellSurface?.getPending() ?? Promise.resolve(null),
 };
 export const incomingPanelLocation = {
   getPending: () =>

@@ -13,7 +13,15 @@ import {
 } from "../state/themeAtoms";
 import { useAtomValue } from "jotai";
 import { useShellEvent } from "../shell/useShellEvent";
-import { app, notification, panel, workspace, shellNetwork } from "../shell/client";
+import {
+  app,
+  hostCommands,
+  incomingShellSurface,
+  notification,
+  panel,
+  workspace,
+  shellNetwork,
+} from "../shell/client";
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 
 // Lazy-load MainMode — this creates a separate chunk containing PanelApp,
@@ -115,6 +123,32 @@ export function App() {
     }
   }, []);
   useShellEvent("navigate-about", handleNavigateAbout);
+
+  // A panel's contributed host command, invoked from outside the palette
+  // (`app.openShellSurface({ kind: "panel-command" })` or its deep link). Same
+  // routing as a palette selection; the panel decides what the id means.
+  const handleRunPanelCommand = useCallback(
+    (payload: { panelId: string; commandId: string }) => {
+      void hostCommands.run(payload.panelId, payload.commandId);
+    },
+    []
+  );
+  useShellEvent("run-panel-command", handleRunPanelCommand);
+
+  // A surface deep link that reached the host before this shell was listening:
+  // drain it once and send it back through the host's dispatcher.
+  useEffect(() => {
+    void incomingShellSurface.getPending().then((target) => {
+      if (!target) return;
+      app.openShellSurface(target).catch((error: unknown) => {
+        void notification.show({
+          type: "error",
+          title: "Couldn't open that link",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+    });
+  }, []);
 
   return (
     <Theme appearance={effectiveTheme} {...themeConfig} className="app-shell-theme">

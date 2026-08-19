@@ -332,6 +332,8 @@ export function QuickfireOwner() {
       options?: {
         panelId?: string;
         conversation?: Omit<ConversationSurfaceRequest, "sequence">;
+        /** Pre-filled compose text (without the mode prefix); the user sends. */
+        prompt?: string;
       },
     ) => {
       setPanelLost(false);
@@ -339,6 +341,9 @@ export function QuickfireOwner() {
         ...CLOSED,
         open: true,
         mode,
+        query: options?.prompt
+          ? `${QUICKFIRE_MODE_PREFIX[mode]}${options.prompt}`
+          : "",
         inputEpoch: current.inputEpoch + 1,
         conversation: options?.conversation ?? null,
       }));
@@ -390,6 +395,36 @@ export function QuickfireOwner() {
   useShellEvent(
     "open-command-palette",
     useCallback(() => open("all"), [open]),
+  );
+  // A panel or skill handing the user to the agent that sees a panel
+  // (`app.openShellSurface({ kind: "command-agent", … })`). A prompt lands in
+  // the compose box of the `/` surface; nothing is sent on the caller's behalf.
+  useShellEvent(
+    "open-command-agent",
+    useCallback(
+      (request) => {
+        const mode = request?.mode ?? (request?.prompt ? "quickfire" : "all");
+        const options = {
+          ...(request?.panelId ? { panelId: request.panelId } : {}),
+          ...(request?.prompt ? { prompt: request.prompt } : {}),
+        };
+        if (!request?.panelId) {
+          open(mode, options);
+          return;
+        }
+        // Coherence: the overlay is bound to the named panel, so that panel
+        // must be the one the user is looking at — otherwise the conversation
+        // would be "about" a panel they cannot see, and dismissal would return
+        // them to the wrong place. Focus first, then open; a panel that cannot
+        // be focused (gone, or not ours to focus) still gets the overlay bound
+        // to it, which the header names explicitly.
+        void panel
+          .focus(request.panelId)
+          .catch(() => {})
+          .then(() => open(mode, options));
+      },
+      [open],
+    ),
   );
   // Chrome-side requests (tree button, breadcrumb and tree context menus) come
   // through an atom because a renderer cannot emit shell events.

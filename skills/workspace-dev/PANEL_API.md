@@ -326,6 +326,42 @@ Shell routing tests belong to the host and should prove that every
 `target: "shell"` envelope remains local and cannot fall through to a
 server-backed panel session.
 
+### Handing the user to the panel's agent
+
+The inverse of a host command: a panel can open the shell's command overlay
+bound to itself, optionally with the compose box pre-filled. Nothing is sent on
+the panel's behalf — the user reads the request and presses send.
+
+```ts
+import { panel } from "@workspace/runtime";
+
+await panel.openCommandAgent({
+  prompt: "Make the due-date column sortable, then rebuild this panel.",
+});
+```
+
+Under the hood this is the open host method `app.openShellSurface(target)`
+(also `panel.openShellSurface(target)`), whose targets are:
+
+| Target | Opens |
+| --- | --- |
+| `{ kind: "command-agent", panelId?, mode?, prompt? }` | the command overlay about a panel; the shell focuses that panel first so the overlay, the focused panel and the bound conversation agree |
+| `{ kind: "about", page }` | an About page by id (`permissions`, `credentials`, `automations`, …) |
+| `{ kind: "panel-command", panelId, commandId }` | a host command that panel contributed — routed exactly like a palette selection |
+| `"connection-settings"`, `"workspace-chooser"` | management chrome |
+
+`panel.describeShellSurfaces()` lists the kinds this host can open; offer only
+those instead of probing. Hosts without shell chrome (headless server, some
+clients) reject `openShellSurface` — treat that as an ordinary unavailable
+feature, not a failure of the panel.
+
+Every target also has a deep link for the same thing from outside a session —
+`createShellSurfaceLink(target)` in `@vibestudio/shared/shellSurface` gives
+`vibestudio://ask?…`, `vibestudio://about?…`, `vibestudio://command?…`,
+`vibestudio://surface?…` (or the `https://vibestudio.app/…` share carrier).
+Panels with state are reached by the sibling `vibestudio://panel?source=…`
+link (`@vibestudio/shared/panelLocation`).
+
 ## One observation model
 
 `await handle.observe()` is the cheap canonical status read:

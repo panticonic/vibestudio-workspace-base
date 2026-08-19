@@ -73,6 +73,7 @@ const {
 // --- Panel handle bridge: openPanel/getPanelHandle/panelTree/
 // openExternal/onChildCreated all resolve through this singleton. ---
 import { _initPanelHandleBridge } from "./handle.js";
+import type { ShellSurfaceKind, ShellSurfaceTarget } from "@vibestudio/shared/shellSurface";
 _initPanelHandleBridge(rpc, {
   selfId: _slotId,
   selfRpcTargetId: _entityId,
@@ -219,6 +220,35 @@ export const panel = helpfulNamespace("panel", {
       explicit?: boolean;
     }
   ) => callMain<void>("runtime.setTitle", title, options),
+  /**
+   * Hand the user to the agent that sees this panel: open the shell's command
+   * overlay bound to this panel's slot, optionally with the compose box
+   * pre-filled. Nothing is sent on the panel's behalf — the user presses send.
+   * Rejects on hosts without a command overlay (headless, some clients).
+   */
+  /**
+   * Open a shell-owned surface: an About page, the command overlay about any
+   * panel, a panel's contributed host command, or management chrome. The host
+   * validates the target and rejects kinds it cannot open — check
+   * `describeShellSurfaces()` first to offer only what works on this host.
+   * `createShellSurfaceLink` from `@vibestudio/shared/shellSurface` builds the
+   * matching `vibestudio://…` deep link for the same target.
+   */
+  openShellSurface: (target: ShellSurfaceTarget) =>
+    callMain<void>("app.openShellSurface", target),
+  describeShellSurfaces: () =>
+    callMain<{ surfaces: ShellSurfaceKind[] }>("app.describeShellSurfaces"),
+  openCommandAgent: (options?: {
+    /** Pre-filled compose text; implies the `/` conversation surface. */
+    prompt?: string;
+    mode?: "all" | "commands" | "goto" | "quickfire";
+  }) =>
+    callMain<void>("app.openShellSurface", {
+      kind: "command-agent",
+      panelId: _slotId,
+      ...(options?.mode ? { mode: options.mode } : {}),
+      ...(options?.prompt ? { prompt: options.prompt } : {}),
+    }),
   getInfo: bootstrapRuntime.getInfo,
   focusPanel: bootstrapRuntime.focusPanel,
   getTheme: bootstrapRuntime.getTheme,
