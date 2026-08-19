@@ -22,6 +22,12 @@ preview, warnings, progress, cancellation, retry, and history. Do not recreate
 it as chat questions or chained feedback forms. Do not ask users for internal
 host IDs, source IDs, profile paths, or import job IDs.
 
+When opening that inspector only to automate, diagnose, or verify it, treat the
+panel as an owned temporary resource: retain its handle, archive it after the
+observation (including on failure), and do not leave it in the user's panel
+tree. A panel opened for the user's ongoing migration is not temporary and
+should remain available.
+
 Use the API sequence below for automation, diagnostics, or code that already
 has a complete user-approved selection:
 

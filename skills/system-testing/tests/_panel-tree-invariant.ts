@@ -18,6 +18,17 @@ export interface PanelTreeInvariantEvidence {
   removedPreexistingIds: string[];
   harnessArchivedRootIds: string[];
   remainingCreatedIds: string[];
+  expectedCreatedRootCount: number;
+}
+
+export interface PanelGoalTreePolicy {
+  /**
+   * Number of new top-level panel subtrees that are part of the requested
+   * deliverable. The harness still archives them after capturing evidence so
+   * the test remains isolated. All other newly visible roots are leaks.
+   */
+  expectedCreatedRootCount?: number;
+  tree?: TreeReader;
 }
 
 export interface SeededPanelGoalEvidence {
@@ -121,6 +132,7 @@ async function runPanelGoalWithSession(
   session: HeadlessSession,
   before: ReadonlyMap<string, VisiblePanelNode>,
   tree: TreeReader,
+  expectedCreatedRootCount: number,
   startedAt: number
 ): Promise<TestExecutionResult> {
   const cleanupErrors: string[] = [];
@@ -142,8 +154,13 @@ async function runPanelGoalWithSession(
     afterTurn = await snapshotVisiblePanelTree(tree);
     ({ createdIds, removedPreexistingIds } = panelTreeDifference(before, afterTurn));
 
-    if (createdIds.length > 0) {
-      failures.push(`Agent left temporary panels in the tree: ${createdIds.join(", ")}`);
+    const createdRoots = createdPanelRoots(createdIds, afterTurn);
+    if (createdRoots.length !== expectedCreatedRootCount) {
+      failures.push(
+        expectedCreatedRootCount === 0
+          ? `Agent left temporary panels in the tree: ${createdIds.join(", ")}`
+          : `Expected ${expectedCreatedRootCount} deliverable panel root(s), but found ${createdRoots.length}: ${createdIds.join(", ")}`
+      );
     }
     if (removedPreexistingIds.length > 0) {
       failures.push(
@@ -151,7 +168,7 @@ async function runPanelGoalWithSession(
       );
     }
 
-    for (const node of createdPanelRoots(createdIds, afterTurn)) {
+    for (const node of createdRoots) {
       try {
         await tree.get(node.id, node.kind).archive();
         harnessArchivedRootIds.push(node.id);
@@ -193,6 +210,7 @@ async function runPanelGoalWithSession(
         removedPreexistingIds,
         harnessArchivedRootIds,
         remainingCreatedIds,
+        expectedCreatedRootCount,
       } satisfies PanelTreeInvariantEvidence,
     },
   };
@@ -221,9 +239,14 @@ export async function orchestratePanelGoal(
   context: TestOrchestrationContext,
   prompt: string,
   phase: string,
-  tree: TreeReader = context.runner.panelTreeClient
+  policy: PanelGoalTreePolicy = {}
 ): Promise<TestExecutionResult> {
   const startedAt = Date.now();
+  const tree = policy.tree ?? context.runner.panelTreeClient;
+  const expectedCreatedRootCount = policy.expectedCreatedRootCount ?? 0;
+  if (!Number.isSafeInteger(expectedCreatedRootCount) || expectedCreatedRootCount < 0) {
+    throw new Error("expectedCreatedRootCount must be a non-negative safe integer");
+  }
   const before = await snapshotVisiblePanelTree(tree);
   const session = await context.runner.spawn();
   const execution = await runPanelGoalWithSession(
@@ -233,6 +256,7 @@ export async function orchestratePanelGoal(
     session,
     before,
     tree,
+    expectedCreatedRootCount,
     startedAt
   );
   await closePanelGoalSession(session, execution);
@@ -291,6 +315,7 @@ export async function orchestrateSeededPanelGoal(
       session,
       before,
       tree,
+      0,
       startedAt
     );
 

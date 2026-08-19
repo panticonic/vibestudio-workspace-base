@@ -502,7 +502,8 @@ export const developerErgonomicsTests: TestCase[] = [
       orchestratePanelGoal(
         context,
         PANEL_REBUILD_PROMPT,
-        "rebuild and interact with one panel runtime"
+        "rebuild and interact with one panel runtime",
+        { expectedCreatedRootCount: 1 }
       ),
     validate: validatePanelGenerationRecovery,
   },

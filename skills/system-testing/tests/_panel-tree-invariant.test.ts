@@ -4,6 +4,7 @@ import {
   orchestratePanelGoal,
   orchestrateSeededPanelGoal,
   panelTreeDifference,
+  type PanelGoalTreePolicy,
   type VisiblePanelNode,
 } from "./_panel-tree-invariant.js";
 import { validateAgentCompletionReport } from "../test-runner.js";
@@ -85,7 +86,7 @@ describe("panel-tree invariant", () => {
           removeSubtree(id);
         },
       })),
-    } as unknown as NonNullable<Parameters<typeof orchestratePanelGoal>[3]>;
+    } as unknown as NonNullable<PanelGoalTreePolicy["tree"]>;
     const completion = {
       id: "agent-completion",
       senderId: "agent",
@@ -125,7 +126,7 @@ describe("panel-tree invariant", () => {
       context,
       "Inspect that browser view.",
       "inspect vague panel reference",
-      panelTree
+      { tree: panelTree }
     );
 
     expect(execution.error).toContain(
@@ -135,6 +136,7 @@ describe("panel-tree invariant", () => {
       createdIds: ["leaked-child", "leaked-grandchild"],
       harnessArchivedRootIds: ["leaked-child"],
       remainingCreatedIds: [],
+      expectedCreatedRootCount: 0,
     });
     expect(archived).toEqual(["leaked-child"]);
     expect([...visible.keys()]).toEqual(["existing-root"]);
@@ -142,6 +144,75 @@ describe("panel-tree invariant", () => {
       passed: false,
       reason: expect.stringContaining("Agent left temporary panels"),
     });
+  });
+
+  it("accepts an exact deliverable root while retaining harness isolation", async () => {
+    const visible = tree();
+    const archived: string[] = [];
+    const panelTree = {
+      roots: vi.fn(async () => ({
+        revision: 1,
+        group: "roots",
+        entries: [...visible.values()].map((node) => ({
+          node: { slotId: node.id, parentSlotId: node.parentId, kind: node.kind },
+          handle: {},
+        })),
+        nextCursor: null,
+      })),
+      children: vi.fn(async () => ({
+        revision: 1,
+        group: "children",
+        entries: [],
+        nextCursor: null,
+      })),
+      get: vi.fn((id: string) => ({
+        archive: async () => {
+          archived.push(id);
+          visible.delete(id);
+        },
+      })),
+    } as unknown as NonNullable<PanelGoalTreePolicy["tree"]>;
+    const completion = {
+      id: "agent-completion",
+      senderId: "agent",
+      senderMetadata: { type: "agent" as const },
+      kind: "message" as const,
+      contentType: "text" as const,
+      content: "The requested panel is built and working.",
+      complete: true,
+    };
+    const session = {
+      messages: [completion],
+      snapshot: () => ({}),
+      close: vi.fn(async () => undefined),
+    };
+    const context = {
+      runner: { panelTreeClient: panelTree, spawn: vi.fn(async () => session) },
+      remainingTimeMs: () => 1_000,
+      sendAndWait: vi.fn(async () => {
+        visible.set("deliverable-panel", {
+          id: "deliverable-panel",
+          parentId: null,
+          kind: "workspace",
+        });
+        return completion;
+      }),
+    } as unknown as TestOrchestrationContext;
+
+    const execution = await orchestratePanelGoal(context, "Build it.", "build panel", {
+      tree: panelTree,
+      expectedCreatedRootCount: 1,
+    });
+
+    expect(execution.error).toBeUndefined();
+    expect(execution.diagnostics?.["panelTreeInvariant"]).toMatchObject({
+      createdIds: ["deliverable-panel"],
+      expectedCreatedRootCount: 1,
+      harnessArchivedRootIds: ["deliverable-panel"],
+      remainingCreatedIds: [],
+    });
+    expect(archived).toEqual(["deliverable-panel"]);
+    expect(visible.size).toBe(0);
   });
 
   it("seeds a real vague-reference target, observes same-panel navigation, then owns cleanup", async () => {
