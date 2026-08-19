@@ -90,6 +90,16 @@ const RENDERED_IDENTITY =
  * surface, and a transport-level failure is never a legitimate answer.
  */
 function provenanceSurfacesAreLive(result: TestExecutionResult): TestResult {
+  const attempted = getToolCalls(result).filter(
+    (call) => call.name === "provenance",
+  );
+  if (attempted.length === 0) {
+    return {
+      passed: false,
+      reason:
+        "The agent answered without consulting workspace provenance, so the scenario did not exercise the surface it claims to verify",
+    };
+  }
   const broken = getToolCalls(result).filter(
     (call) =>
       call.name === "provenance" &&
@@ -610,7 +620,7 @@ const EXTENDED_CASES: TestCase[] = [
     category: "provenance-questions",
     workspaceRepoFixture: CONTENT_WORKSPACE_REPO_FIXTURE,
     validation: "agent-evidence",
-    timeoutMs: 15 * 60_000,
+    timeoutMs: 6 * 60_000,
     prompt: "Harness-orchestrated visibility parity.",
     orchestrate: orchestratePhases([
       {
@@ -622,8 +632,8 @@ const EXTENDED_CASES: TestCase[] = [
         note: "work left in one task context's working state",
         prompt: (repoPath) =>
           [
-            `In ${repoPath}, create src/quarantine-policy.ts exporting quarantineHours set to 72,`,
-            "because the Halberd audit window runs three days behind ingest.",
+            `In ${repoPath}, create src/request-policy.ts exporting requestTimeoutSeconds set to 37,`,
+            "because the Northstar ingress cuts streams after 40 seconds.",
             "Keep the file to that one constant, and leave the change uncommitted —",
             "I want to look at it before it goes any further.",
           ].join(" "),
@@ -631,17 +641,22 @@ const EXTENDED_CASES: TestCase[] = [
       {
         role: "outsider",
         note: "an independent context asks a question the private work would answer",
-        // The question must not name the secret, or the answer echoes it back
-        // and the test grades its own prompt instead of the boundary.
-        prompt: () =>
-          "What retention or hold periods has anyone recorded anywhere in this workspace, and what reasons were given? List everything you can actually reach, and say plainly if there is nothing.",
+        // Name the coordinate a user is investigating, but not the private
+        // value or rationale. This asks the real product question—"why did this
+        // setting change?"—without turning the scenario into a workspace-wide
+        // source-code scavenger hunt.
+        prompt: (repoPath) =>
+          `A teammate mentioned a possible change to requestTimeoutSeconds in ${repoPath}/src/request-policy.ts. What recorded workspace history explains that change? Check the workspace provenance for that coordinate; if no recorded change is visible, say so.`,
       },
     ]),
     validate: (result) =>
       all(
         // The parity property, end to end: what a walk cannot reach, a query
         // and a search must not return either.
-        withheld(result, /halberd|quarantineHours|72\s*hours/iu),
+        withheld(
+          result,
+          /northstar|requestTimeoutSeconds\s*(?:=|is|to)\s*37|40[- ]second/iu,
+        ),
         provenanceSurfacesAreLive(result),
         identityHygieneHolds(result),
       ),

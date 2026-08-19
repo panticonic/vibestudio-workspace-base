@@ -136,6 +136,41 @@ describe("provenance question scenarios", () => {
     expect(visibilityCase.validate(result)).toEqual({ passed: true });
   });
 
+  it("keeps the visibility question on one user-visible coordinate", async () => {
+    const prompts: string[] = [];
+    const orchestration = {
+      runner: {
+        workspaceRepoName: "fixture",
+        spawn: async () => ({
+          messages: [],
+          close: async () => undefined,
+          snapshot: () => ({ messages: [], invocations: [], cleanupErrors: [] }),
+        }),
+      },
+      sendAndWait: async (_session: unknown, prompt: string) => {
+        prompts.push(prompt);
+      },
+    };
+
+    await visibilityCase.orchestrate!(orchestration as never);
+
+    expect(visibilityCase.timeoutMs).toBe(6 * 60_000);
+    expect(prompts).toHaveLength(2);
+    expect(prompts[1]).toContain("projects/fixture/src/request-policy.ts");
+    expect(prompts[1]).toContain("workspace provenance");
+    expect(prompts[1]).not.toMatch(/anywhere|everything|all files/iu);
+  });
+
+  it("does not pass the visibility boundary without a live provenance lookup", () => {
+    expect(
+      visibilityCase.validate(execution("No recorded change is visible.", [])),
+    ).toEqual({
+      passed: false,
+      reason:
+        "The agent answered without consulting workspace provenance, so the scenario did not exercise the surface it claims to verify",
+    });
+  });
+
   it("declares user goals rather than call choreography", () => {
     for (const test of provenanceQuestionTests) {
       expect(() => assertSystemTestDeclaration(test)).not.toThrow();
