@@ -467,7 +467,7 @@
     "@react-native-firebase/app": "23.8.8",
     "@react-native-firebase/messaging": "23.8.8",
     "@react-navigation/drawer": "7.9.8",
-    "@react-navigation/native": "7.3.16",
+    "@react-navigation/native": "7.3.17",
     "@react-navigation/stack": "7.8.9",
     "jotai": "2.20.2",
     "lucide-react-native": "1.14.0",
