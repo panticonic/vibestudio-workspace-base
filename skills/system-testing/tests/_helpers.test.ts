@@ -8,11 +8,13 @@ import {
   finalMessageHasMarkerCount,
   finalMessageHasNumericField,
   findLastAgentMessage,
+  getToolCalls,
   incompleteToolCalls,
   noFailedInvocations,
   requireEvalResultEvidence,
   requireVcsEvidence,
   successfulEvalCode,
+  successfulEvalReturnValues,
   successfulEvalObservedValues,
 } from "./_helpers.js";
 
@@ -316,6 +318,59 @@ describe("system-testing validation helpers", () => {
     } as TestExecutionResult;
 
     expect(successfulEvalCode(result)).toContain("git.commitMapping");
+  });
+
+  it("prefers full session invocation results over bounded message cards", () => {
+    const result = {
+      duration: 0,
+      messages: [
+        {
+          kind: "message",
+          senderId: "agent",
+          senderMetadata: { type: "agent" },
+          complete: true,
+          contentType: "invocation",
+          invocation: {
+            id: "template-add",
+            name: "eval",
+            arguments: { code: "return await addTemplate();" },
+            execution: {
+              status: "complete",
+              isError: false,
+              result: { details: { returnValue: "{Object(3)}" } },
+            },
+          },
+        },
+      ],
+      snapshot: {
+        invocations: [
+          {
+            id: "template-add",
+            name: "eval",
+            status: "complete",
+            args: { code: "return await addTemplate();" },
+            result: {
+              details: {
+                returnValue: {
+                  operationId: "template-add-1",
+                  state: "applied",
+                  affectedParts: ["panels/example"],
+                },
+              },
+            },
+          },
+        ],
+      },
+    } as unknown as TestExecutionResult;
+
+    expect(getToolCalls(result)).toHaveLength(1);
+    expect(successfulEvalReturnValues(result)).toEqual([
+      {
+        operationId: "template-add-1",
+        state: "applied",
+        affectedParts: ["panels/example"],
+      },
+    ]);
   });
 
   it("treats structured eval console output as observed runtime evidence", () => {

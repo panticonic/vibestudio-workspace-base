@@ -264,7 +264,38 @@ export function getToolCalls(result: TestExecutionResult): InvocationCardPayload
       // Ignore malformed invocation content; validation can fail on missing calls.
     }
   }
-  return calls;
+  const snapshotById = new Map(
+    (result.snapshot?.invocations ?? []).map((invocation) => [invocation.id, invocation] as const)
+  );
+  const merged = calls.map((call) => {
+    const snapshot = snapshotById.get(call.id);
+    if (!snapshot) return call;
+    snapshotById.delete(call.id);
+    const snapshotArguments = isRecord(snapshot.args) ? snapshot.args : undefined;
+    return {
+      ...call,
+      ...(snapshotArguments ? { arguments: snapshotArguments } : {}),
+      execution: {
+        ...(call.execution ?? {}),
+        status: snapshot.status || call.execution?.status,
+        ...(snapshot.result !== undefined ? { result: snapshot.result } : {}),
+        ...(snapshot.error !== undefined ? { error: snapshot.error } : {}),
+      },
+    } satisfies InvocationCardPayloadLike;
+  });
+  for (const snapshot of snapshotById.values()) {
+    merged.push(
+      normalizeInvocationCard({
+        id: snapshot.id,
+        name: snapshot.name,
+        ...(isRecord(snapshot.args) ? { arguments: snapshot.args } : {}),
+        status: snapshot.status,
+        ...(snapshot.result !== undefined ? { result: snapshot.result } : {}),
+        ...(snapshot.error !== undefined ? { error: snapshot.error } : {}),
+      })
+    );
+  }
+  return merged;
 }
 
 /** A skill may be opened through the generated docs catalog or read from its
