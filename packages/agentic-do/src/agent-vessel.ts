@@ -5473,6 +5473,16 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
         isError: true,
       };
     }
+    let authority;
+    try {
+      authority =
+        p.authority === undefined ? undefined : evalAuthorityInputSchema.parse(p.authority);
+    } catch (error) {
+      return {
+        result: `[eval] Invalid authority: ${error instanceof Error ? error.message : String(error)}`,
+        isError: true,
+      };
+    }
     this.trackDeferredEval(channelId, runId);
     const executeDeferred = createDeferredEvalExecutor(
       <T>(method: string, callArgs: unknown[]) => scopedRpc.call<T>("main", method, callArgs),
@@ -5500,8 +5510,7 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
         source,
         imports: p.imports,
         timeoutMs: p.timeoutMs,
-        authority:
-          p.authority === undefined ? undefined : evalAuthorityInputSchema.parse(p.authority),
+        authority,
         runId,
       });
     } catch (error) {

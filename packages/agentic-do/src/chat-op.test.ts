@@ -2704,6 +2704,28 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     expect(probe.rpcCalls.some((call) => call.method === "eval.start")).toBe(false);
   });
 
+  it("settles invalid cross-field authority before fencing a deferred run", async () => {
+    const probe = await makeGateProbe();
+
+    await expect(
+      probe.callGate(CHANNEL, "inv-bad-authority", {
+        code: "return 1",
+        authority: {
+          effects: "read-write",
+          approvals: "pregranted-only",
+          preauthorize: [{ service: "missions", method: "create", args: [{}] }],
+        },
+      })
+    ).resolves.toMatchObject({
+      isError: true,
+      result: expect.stringContaining(
+        "preauthorize is valid only when authority.approvals is prompt"
+      ),
+    });
+    expect(probe.rpcCalls.some((call) => call.method === "eval.start")).toBe(false);
+    expect(probe.rpcCalls.some((call) => call.method === "eval.get")).toBe(false);
+  });
+
   it("F4: PARKS (deferred) when the getRun poll throws AFTER startRun succeeded — never a spurious error", async () => {
     // The run is already in flight server-side (startRun returned). A transient getRun hiccup must
     // NOT surface as the tool result (that would settle the invocation with a fake error AND drop the
