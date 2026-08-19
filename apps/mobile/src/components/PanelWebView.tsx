@@ -660,11 +660,15 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(funct
     [dispatchHostEvent, deliverEnvelope, reloadPanel]
   );
 
+  const onUnmountRef = useRef(onUnmount);
+  useEffect(() => {
+    onUnmountRef.current = onUnmount;
+  }, [onUnmount]);
   useEffect(() => {
     return () => {
-      onUnmount?.(panelId);
+      onUnmountRef.current?.(panelId);
     };
-  }, [panelId, onUnmount]);
+  }, [panelId]);
 
   useEffect(() => {
     currentUrlRef.current = url;
