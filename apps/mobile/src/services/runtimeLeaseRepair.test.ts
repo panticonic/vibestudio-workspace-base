@@ -1,6 +1,9 @@
 import { asPanelEntityId, asPanelSlotId } from "@vibestudio/shared/panel/ids";
 import type { PanelRuntimeLease, RuntimeLeaseSnapshot } from "@vibestudio/shared/panel/panelLease";
-import { reconcileTrackedRuntimeLeases } from "./runtimeLeaseRepair";
+import {
+  reconcileTrackedRuntimeLeases,
+  trackedRuntimeLeaseWasLost,
+} from "./runtimeLeaseRepair";
 
 const DEVICE = "device-1";
 
@@ -90,5 +93,56 @@ describe("reconcileTrackedRuntimeLeases", () => {
     });
     expect(result.lost).toEqual([]);
     expect(result.orphaned).toEqual([]);
+  });
+});
+
+describe("trackedRuntimeLeaseWasLost", () => {
+  const current = lease({ slot: "a", runtimeEntityId: asPanelEntityId("panel:nav-current") });
+
+  it("ignores a late release for the slot's replaced runtime entity", () => {
+    expect(
+      trackedRuntimeLeaseWasLost({
+        tracked: current,
+        event: {
+          runtimeEntityId: asPanelEntityId("panel:nav-replaced"),
+          next: null,
+        },
+        clientSessionId: DEVICE,
+      })
+    ).toBe(false);
+  });
+
+  it("clears the tracked route when its current entity is released or taken over", () => {
+    expect(
+      trackedRuntimeLeaseWasLost({
+        tracked: current,
+        event: { runtimeEntityId: current.runtimeEntityId, next: null },
+        clientSessionId: DEVICE,
+      })
+    ).toBe(true);
+    expect(
+      trackedRuntimeLeaseWasLost({
+        tracked: current,
+        event: {
+          runtimeEntityId: current.runtimeEntityId,
+          next: lease({
+            slot: "a",
+            runtimeEntityId: current.runtimeEntityId,
+            clientSessionId: "other-device",
+          }),
+        },
+        clientSessionId: DEVICE,
+      })
+    ).toBe(true);
+  });
+
+  it("keeps the tracked route when its current entity is renewed for this device", () => {
+    expect(
+      trackedRuntimeLeaseWasLost({
+        tracked: current,
+        event: { runtimeEntityId: current.runtimeEntityId, next: current },
+        clientSessionId: DEVICE,
+      })
+    ).toBe(false);
   });
 });

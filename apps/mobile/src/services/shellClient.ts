@@ -26,7 +26,10 @@ import type {
   RuntimeLeaseSnapshot,
 } from "@vibestudio/shared/panel/panelLease";
 import type { PanelPageObservation } from "@vibestudio/shared/panel/observation";
-import { reconcileTrackedRuntimeLeases } from "./runtimeLeaseRepair";
+import {
+  reconcileTrackedRuntimeLeases,
+  trackedRuntimeLeaseWasLost,
+} from "./runtimeLeaseRepair";
 import type { PanelTreeInvalidation } from "@vibestudio/shared/panel/treeIndex";
 import {
   createPanelHostRegistration,
@@ -978,8 +981,11 @@ class MobilePanels implements PanelHost {
     if (event.next?.clientSessionId === this.deps.clientSessionId) {
       this.trackRuntimeLease(event.next);
     } else if (
-      event.previous?.clientSessionId === this.deps.clientSessionId ||
-      this.runtimeConnectionBySlot.has(String(event.slotId))
+      trackedRuntimeLeaseWasLost({
+        tracked: this.runtimeConnectionBySlot.get(String(event.slotId)),
+        event,
+        clientSessionId: this.deps.clientSessionId,
+      })
     ) {
       this.clearTrackedRuntimeLease(String(event.slotId));
     }

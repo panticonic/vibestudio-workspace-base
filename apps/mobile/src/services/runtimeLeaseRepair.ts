@@ -1,4 +1,9 @@
-import type { PanelRuntimeLease, RuntimeLeaseSnapshot } from "@vibestudio/shared/panel/panelLease";
+import type {
+  PanelRuntimeLease,
+  PanelRuntimeLeaseChangedEvent,
+  RuntimeLeaseSnapshot,
+} from "@vibestudio/shared/panel/panelLease";
+import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 
 export interface TrackedRuntimeLeaseReconciliation {
   /** Leases the server records as ours — adopt them as the tracked route. */
@@ -10,6 +15,26 @@ export interface TrackedRuntimeLeaseReconciliation {
    * at all — re-acquire the route rather than dropping it.
    */
   readonly orphaned: string[];
+}
+
+/**
+ * Whether a lease event invalidates the route this process currently tracks.
+ *
+ * Lease events are scoped to an immutable runtime entity, while the mobile map
+ * is keyed by the presentation slot. Navigation can therefore deliver a late
+ * release for the slot's previous entity after the replacement entity has
+ * already been acquired. Only an event for the tracked entity may clear that
+ * route.
+ */
+export function trackedRuntimeLeaseWasLost(input: {
+  tracked: { runtimeEntityId: PanelEntityId } | undefined;
+  event: Pick<PanelRuntimeLeaseChangedEvent, "runtimeEntityId" | "next">;
+  clientSessionId: string;
+}): boolean {
+  return (
+    input.tracked?.runtimeEntityId === input.event.runtimeEntityId &&
+    input.event.next?.clientSessionId !== input.clientSessionId
+  );
 }
 
 /**
