@@ -1,11 +1,15 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { useDroppable } from "@dnd-kit/core";
-import { Box, Flex } from "@radix-ui/themes";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Flex } from "@radix-ui/themes";
 
-import { MIN_COLUMN_WIDTH, type LayoutColumn, type PanelLayout } from "../layout/types";
+import {
+  MIN_COLUMN_WIDTH,
+  type LayoutColumn,
+  type LayoutDropTarget,
+  type PanelLayout,
+} from "../layout/types";
 import { usePanelTree } from "../shell/hooks/PanelTreeContext";
-import { usePanelDndDrag } from "../shell/hooks/PanelDndContext";
-import { viewportDropId, type ViewportDropPosition } from "../layout/dropTargets";
+import { useLayoutDrag } from "../shell/hooks/LayoutDragContext";
+import { LayoutBlueprint } from "./LayoutBlueprint";
 import { PaneColumn } from "./PaneColumn";
 import { ResizableDivider } from "./ResizableDivider";
 import { minWidthOfPanel } from "../layout/treeEnv";
@@ -22,58 +26,15 @@ interface ColumnRowProps {
   onResizePanes: (columnId: string, paneFrs: number[]) => void;
   /** Called when a residency transition settles, to force a surface resync (§5.4). */
   onTransitionSettled: () => void;
+  /** Apply a drag placement; the engine owns what the coordinate means. */
+  onPlacePanel: (panelId: string, target: LayoutDropTarget) => void;
+  /** Engine's chance to downgrade a target the layout cannot honor. */
+  onRefineDropTarget: (target: LayoutDropTarget, panelId: string) => LayoutDropTarget;
+  /** Keyboard placement from a pane's grip. */
+  onMovePane: (paneId: string, direction: "left" | "right" | "up" | "down") => void;
 }
 
 const COLUMN_TRANSITION_MS = 150;
-
-const DROP_POSITIONS: ViewportDropPosition[] = ["left", "full", "right"];
-
-function ViewportDropZone({ position }: { position: ViewportDropPosition }) {
-  const { setNodeRef, isOver } = useDroppable({ id: viewportDropId(position) });
-  const coverage =
-    position === "full"
-      ? { inset: 4 }
-      : position === "left"
-        ? { left: 4, top: 4, bottom: 4, width: "calc(50% - 6px)" }
-        : { right: 4, top: 4, bottom: 4, width: "calc(50% - 6px)" };
-  return (
-    <Box
-      ref={setNodeRef}
-      data-layout-drop-position={position}
-      role="button"
-      aria-label={position === "full" ? "Use full viewport" : `Place panel on the ${position}`}
-      style={{
-        position: "absolute",
-        ...coverage,
-        pointerEvents: "none",
-        borderRadius: "var(--radius-3)",
-        border: `1px solid ${isOver ? "var(--gray-a8)" : "transparent"}`,
-        backgroundColor: isOver ? "var(--gray-a4)" : "transparent",
-        boxShadow: isOver ? "inset 0 0 0 1px var(--gray-a3)" : "none",
-        transition: "background-color 80ms ease-out, border-color 80ms ease-out",
-      }}
-    />
-  );
-}
-
-function ViewportDropOverlay() {
-  return (
-    <Box
-      data-layout-drop-overlay="true"
-      style={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 10,
-        pointerEvents: "none",
-        backgroundColor: "transparent",
-      }}
-    >
-      {DROP_POSITIONS.map((position) => (
-        <ViewportDropZone key={position} position={position} />
-      ))}
-    </Box>
-  );
-}
 
 /**
  * Flex row of the viewport-resident columns interleaved with dividers. Columns
@@ -94,9 +55,17 @@ export function ColumnRow({
   onResizeColumns,
   onResizePanes,
   onTransitionSettled,
+  onPlacePanel,
+  onRefineDropTarget,
+  onMovePane,
 }: ColumnRowProps) {
   const { panelMap, parentMap } = usePanelTree();
-  const { activeId: treeDragActiveId } = usePanelDndDrag();
+  const {
+    source: dragSource,
+    target: dropTarget,
+    geometry: dragGeometry,
+    registerPlacementHost,
+  } = useLayoutDrag();
   const residentSet = useMemo(() => new Set(residentColumnIds), [residentColumnIds]);
   const residentColumns = layout.columns.filter((column) => residentSet.has(column.id));
   const layoutPaneCount = layout.columns.reduce((total, column) => total + column.panes.length, 0);
@@ -104,6 +73,15 @@ export function ColumnRow({
   // distinguish it from, so it would be decoration on every panel.
   const showPaneFocus =
     residentColumns.reduce((total, column) => total + column.panes.length, 0) > 1;
+  const paneTitles = useMemo(() => {
+    const titles = new Map<string, string>();
+    for (const column of layout.columns) {
+      for (const pane of column.panes) {
+        titles.set(pane.panelId, panelMap.get(pane.panelId)?.title ?? "Panel");
+      }
+    }
+    return titles;
+  }, [layout, panelMap]);
   const columnMinWidths = residentColumns.map((column) =>
     column.panes.reduce(
       (minimum, pane) =>
@@ -135,6 +113,28 @@ export function ColumnRow({
   const [liveFrs, setLiveFrs] = useState<number[] | null>(null);
   const liveFrsRef = useRef<number[] | null>(null);
   const rowRef = useRef<HTMLDivElement | null>(null);
+  const viewportRef = useRef<HTMLDivElement | null>(null);
+
+  // The column row is what a placement drag is measured and drawn against.
+  const placeRef = useRef(onPlacePanel);
+  placeRef.current = onPlacePanel;
+  const refineRef = useRef(onRefineDropTarget);
+  refineRef.current = onRefineDropTarget;
+  const attachViewport = useCallback(
+    (element: HTMLDivElement | null) => {
+      viewportRef.current = element;
+      registerPlacementHost(
+        element
+          ? {
+              root: element,
+              refine: (target, panelId) => refineRef.current(target, panelId),
+              commit: (panelId, target) => placeRef.current(panelId, target),
+            }
+          : null
+      );
+    },
+    [registerPlacementHost]
+  );
   const dragColumnWidthsRef = useRef<number[] | null>(null);
 
   const frs = liveFrs ?? residentColumns.map((column) => column.widthFr);
@@ -194,10 +194,19 @@ export function ColumnRow({
 
   return (
     <Flex
+      ref={attachViewport}
       direction="column"
       style={{ flex: "1 1 0", minHeight: 0, minWidth: 0, position: "relative" }}
     >
-      {treeDragActiveId !== null && <ViewportDropOverlay />}
+      {dragSource && dragGeometry && (
+        <LayoutBlueprint
+          geometry={dragGeometry}
+          target={dropTarget}
+          sourcePaneId={dragSource.fromPaneId}
+          sourcePanelId={dragSource.panelId}
+          sourceTitle={dragSource.title}
+        />
+      )}
       <Flex ref={rowRef} gap="0" style={{ flex: "1 1 0", minHeight: 0, minWidth: 0 }}>
         {residentColumns.map((column, index) => (
           <Fragment key={column.id}>
@@ -222,12 +231,14 @@ export function ColumnRow({
               minWidth={columnMinWidths[index] ?? MIN_COLUMN_WIDTH}
               focusedPaneId={layout.focusedPaneId}
               showPaneFocus={showPaneFocus}
-              resident={!transitioning && treeDragActiveId === null}
+              paneTitles={paneTitles}
+              resident={!transitioning}
               layoutEpoch={layoutEpoch}
               unresponsivePanels={unresponsivePanels}
               onDismissUnresponsive={onDismissUnresponsive}
               onFocusPane={onFocusPane}
               onClosePane={layoutPaneCount > 1 ? onClosePane : undefined}
+              onMovePane={onMovePane}
               onResizePanes={onResizePanes}
             />
           </Fragment>

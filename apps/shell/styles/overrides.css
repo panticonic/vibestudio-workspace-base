@@ -232,13 +232,17 @@ body,
 
 .app-panel-tree-command:hover {
   border-color: var(--violet-a6);
-  box-shadow: 0 3px 10px var(--violet-a3), inset 0 0 0 1px var(--violet-a6);
+  box-shadow:
+    0 3px 10px var(--violet-a3),
+    inset 0 0 0 1px var(--violet-a6);
   transform: translateY(-1px);
 }
 
 .app-panel-tree-new:hover {
   border-color: var(--cyan-a6);
-  box-shadow: 0 3px 10px var(--cyan-a3), inset 0 0 0 1px var(--cyan-a6);
+  box-shadow:
+    0 3px 10px var(--cyan-a3),
+    inset 0 0 0 1px var(--cyan-a6);
   transform: translateY(-1px);
 }
 
@@ -1322,4 +1326,122 @@ html[data-overlay-dragging] * {
   .approval-card[data-layout="dialog"] .approval-card-main {
     overflow: visible;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Placement blueprint — what the viewport becomes while a panel is being
+   dragged into position.
+
+   Panel views are native and composite above every shell pixel, so they are
+   hidden for the length of the gesture and this stands in for them. It is
+   built out of translucency rather than flat fills: the chrome below stays
+   readable through the scrim, each pane reads as a pane of glass at its own
+   geometry, and the drop highlight is the only saturated thing on screen.
+   --------------------------------------------------------------------------- */
+
+@keyframes layout-blueprint-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes layout-blueprint-pane-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.layout-blueprint {
+  animation: layout-blueprint-in 130ms ease-out both;
+  padding: 4px;
+  /* Radix's own dim + glass pairing: the workspace recedes behind an overlay
+     veil, and each pane comes forward as a translucent panel. Flat greys were
+     the previous look and they read as "the panels are gone", not "the panels
+     are being arranged". */
+  background:
+    radial-gradient(120% 90% at 50% 0%, var(--accent-a4), transparent 64%), var(--color-overlay);
+  backdrop-filter: blur(18px) saturate(140%);
+  -webkit-backdrop-filter: blur(18px) saturate(140%);
+}
+
+.layout-blueprint__pane {
+  animation: layout-blueprint-pane-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  border: 1px solid var(--gray-a5);
+  border-radius: var(--radius-4);
+  background: linear-gradient(180deg, var(--white-a3), transparent 46%), var(--gray-a3);
+  box-shadow:
+    0 1px 2px var(--black-a3),
+    0 8px 24px -16px var(--black-a6),
+    inset 0 1px 0 var(--white-a3);
+  transition:
+    opacity 140ms ease-out,
+    border-color 140ms ease-out;
+}
+
+/* The pane the gesture picked up: an empty socket, not a card. */
+.layout-blueprint__pane[data-lifted="true"] {
+  opacity: 0.4;
+  background: none;
+  border-style: dashed;
+  box-shadow: none;
+}
+
+/* Everything that is not the answer recedes once there is an answer. */
+.layout-blueprint__pane[data-dimmed="true"] {
+  opacity: 0.5;
+}
+
+.layout-blueprint__preview {
+  border-radius: var(--radius-4);
+  border: 1.5px solid var(--accent-a8);
+  background: linear-gradient(180deg, var(--accent-a6), var(--accent-a3) 70%);
+  box-shadow:
+    0 0 0 1px var(--accent-a4),
+    0 24px 60px -20px var(--accent-a9),
+    inset 0 1px 0 var(--white-a4);
+  backdrop-filter: blur(2px) saturate(120%);
+  -webkit-backdrop-filter: blur(2px) saturate(120%);
+  transition:
+    left 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    top 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 140ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    height 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.layout-blueprint__insertion {
+  border-radius: 999px;
+  background: linear-gradient(
+    180deg,
+    var(--accent-a6),
+    var(--accent-9) 18%,
+    var(--accent-9) 82%,
+    var(--accent-a6)
+  );
+  box-shadow:
+    0 0 0 1px var(--accent-a5),
+    0 0 18px var(--accent-a8);
+  transition: left 140ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Title chip carried by the highlight, so the preview says what lands there. */
+.layout-blueprint__label {
+  max-width: calc(100% - 24px);
+  border-radius: 999px;
+  padding: 4px 12px;
+  background: color-mix(in oklab, var(--accent-9) 26%, transparent);
+  border: 1px solid var(--accent-a8);
+  box-shadow:
+    0 6px 18px -10px var(--black-a8),
+    inset 0 1px 0 var(--white-a5);
+  backdrop-filter: blur(8px) saturate(140%);
+  -webkit-backdrop-filter: blur(8px) saturate(140%);
+  color: var(--accent-12);
 }

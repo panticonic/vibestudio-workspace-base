@@ -39,18 +39,37 @@ export interface PersistedLayout {
   updatedAt: string;
 }
 
+/**
+ * Where a dragged panel is being placed, expressed in layout coordinates rather
+ * than pixels or indices. Ids, not indices: a drop that moves an existing pane
+ * first detaches it, which can delete a column and shift every index after it.
+ */
+export type PaneEdge = "left" | "right" | "top" | "bottom";
+
+export type LayoutDropTarget =
+  /** A new column immediately after this one; null means before the first. */
+  | { kind: "new-column"; afterColumnId: string | null }
+  /** Split this pane: left/right open a new column, top/bottom stack in place. */
+  | { kind: "pane-edge"; paneId: string; edge: PaneEdge }
+  /** Take over this pane — swap with it when the drag came from another pane. */
+  | { kind: "pane-center"; paneId: string };
+
 export const MIN_COLUMN_WIDTH = 460;
 export const PREFERRED_COLUMN_WIDTH = 560;
 export const MIN_PANE_HEIGHT = 160;
 export const COLUMN_DIVIDER_WIDTH = 7;
-/** Quiet focus rail used when there is no other pane to close. */
-export const PANE_FOCUS_RAIL_HEIGHT = 5;
-/** Compact action rail used while the layout contains multiple panes. */
-export const PANE_ACTION_RAIL_HEIGHT = 14;
+/**
+ * Resting thickness of a pane's top rail: a seam, not a bar. It carries the
+ * focus mark and nothing else, and it is the only shell DOM a pointer can reach
+ * above a natively composited panel view — so it cannot go to zero.
+ */
+export const PANE_RAIL_REST_HEIGHT = 4;
+/** Thickness the rail takes while it is showing the pane header. */
+export const PANE_RAIL_EXPANDED_HEIGHT = 22;
 /** A horizontal pane divider uses the same hit-target thickness as column dividers. */
 export const PANE_DIVIDER_HEIGHT = COLUMN_DIVIDER_WIDTH;
 /** Per-pane vertical overhead used by the placement engine's fit calculation. */
-export const PANE_VERTICAL_CHROME_HEIGHT = PANE_ACTION_RAIL_HEIGHT + PANE_DIVIDER_HEIGHT;
+export const PANE_VERTICAL_CHROME_HEIGHT = PANE_RAIL_REST_HEIGHT + PANE_DIVIDER_HEIGHT;
 
 function mintId(prefix: string): string {
   return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;

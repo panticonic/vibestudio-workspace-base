@@ -4,7 +4,7 @@ import { Box, Flex } from "@radix-ui/themes";
 
 import { effectiveThemeAtom, loadThemePreferenceAtom } from "../state/themeAtoms";
 import { NavigationProvider, useNavigationActions, useNavigationLayout } from "./NavigationContext";
-import { PanelTreeProvider, PanelDndProvider } from "../shell/hooks/index.js";
+import { PanelTreeProvider, PanelDndProvider, LayoutDragProvider } from "../shell/hooks/index.js";
 import { useShellEvent } from "../shell/useShellEvent";
 import { app, incomingPanelLocation, notification, panel, workspace } from "../shell/client";
 import type { PanelLocation } from "@vibestudio/shared/panelLocation";
@@ -21,11 +21,13 @@ import type { FocusedPaneChromeState, PaneChromeCommand } from "./paneChrome";
 export function PanelApp() {
   return (
     <PanelTreeProvider>
-      <PanelDndProvider>
-        <NavigationProvider>
-          <PanelAppContent />
-        </NavigationProvider>
-      </PanelDndProvider>
+      <LayoutDragProvider>
+        <PanelDndProvider>
+          <NavigationProvider>
+            <PanelAppContent />
+          </NavigationProvider>
+        </PanelDndProvider>
+      </LayoutDragProvider>
     </PanelTreeProvider>
   );
 }

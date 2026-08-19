@@ -25,6 +25,14 @@ export {
   type FlattenedPanel,
 } from "./PanelTreeContext.js";
 
+// Placement drags: one owner for "a panel is being dragged into a position"
+export {
+  LayoutDragProvider,
+  useLayoutDrag,
+  type PanelDragSource,
+  type PlacementHost,
+} from "./LayoutDragContext.js";
+
 // Drag-and-drop context for panel tree
 export {
   PanelDndProvider,

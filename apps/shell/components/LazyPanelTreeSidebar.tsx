@@ -495,6 +495,7 @@ const SortableTreeItem = memo(
           role="treeitem"
           aria-expanded={hasChildren ? !collapsed : undefined}
           data-panel-tree-row="true"
+          data-panel-id={panel.id}
           aria-label={`Select panel ${panel.title}`}
           style={rowStyle}
           data-active={isSelected ? "true" : "false"}

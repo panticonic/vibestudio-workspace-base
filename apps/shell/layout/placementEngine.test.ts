@@ -6,6 +6,7 @@ import {
   findPane,
   normalizeLayout,
   paneForPanel,
+  refineDropTarget,
   validateRestoredLayout,
   type LayoutAction,
   type LayoutEnv,
@@ -17,6 +18,7 @@ import {
   mintColumnId,
   mintPaneId,
   nativeSlotIdForPane,
+  type LayoutDropTarget,
   type PanelLayout,
 } from "./types";
 
@@ -1115,13 +1117,22 @@ describe("property: random action sequences preserve invariants", () => {
       }
       case 6:
         return { type: "focus-pane", paneId: anyPaneId };
-      case 7:
-        return {
-          type: "place-from-tree",
-          panelId,
-          anchorPaneId: anyPaneId,
-          position: pick(["left", "full", "right"] as const),
-        };
+      case 7: {
+        const targets: LayoutDropTarget[] = [
+          { kind: "pane-center", paneId: anyPaneId },
+          {
+            kind: "pane-edge",
+            paneId: anyPaneId,
+            edge: pick(["left", "right", "top", "bottom"] as const),
+          },
+          {
+            kind: "new-column",
+            afterColumnId:
+              layout.columns.length > 0 && rand() < 0.8 ? pick(layout.columns).id : null,
+          },
+        ];
+        return { type: "place-panel", panelId, target: pick(targets) };
+      }
       default:
         return rand() < 0.5
           ? { type: "resize-columns", columnFrs: layout.columns.map(() => rand() * 4) }
@@ -1163,56 +1174,159 @@ describe("property: random action sequences preserve invariants", () => {
   });
 });
 
-describe("place-from-tree", () => {
-  it("uses a dropped hidden panel as the only full-width presentation", () => {
-    const layout = layoutOf(["A"], ["D"]);
-    const next = applyLayoutAction(
-      layout,
-      { type: "place-from-tree", panelId: "B", anchorPaneId: "pane-0-0", position: "full" },
-      makeEnv()
-    );
+describe("place-panel (drag placement)", () => {
+  const place = (
+    layout: PanelLayout,
+    panelId: string,
+    target: LayoutDropTarget,
+    env = makeEnv()
+  ): PanelLayout => applyLayoutAction(layout, { type: "place-panel", panelId, target }, env);
 
-    expect(next.columns.map((column) => column.panes.map((pane) => pane.panelId))).toEqual([["B"]]);
+  const shape = (layout: PanelLayout): string[][] =>
+    layout.columns.map((column) => column.panes.map((pane) => pane.panelId));
+
+  it("opens a hidden panel as a new column on the side of the pane it was dropped on", () => {
+    const next = place(layoutOf(["A"], ["D"]), "B", {
+      kind: "pane-edge",
+      paneId: "pane-1-0",
+      edge: "right",
+    });
+
+    expect(shape(next)).toEqual([["A"], ["D"], ["B"]]);
     expect(findPane(next, next.focusedPaneId as string)?.pane.panelId).toBe("B");
     assertInvariants(next);
   });
 
-  it("isolates an already-visible panel at full width without changing its pane id", () => {
+  it("places relative to the dropped pane, not to the focused one", () => {
     const layout = layoutOf(["A"], ["D"]);
-    const next = applyLayoutAction(
-      layout,
-      { type: "place-from-tree", panelId: "D", anchorPaneId: "pane-0-0", position: "full" },
-      makeEnv()
-    );
+    // Focus is on the first column; the drop is on the far side of the second.
+    expect(layout.focusedPaneId).toBe("pane-0-0");
+    const next = place(layout, "B", { kind: "pane-edge", paneId: "pane-1-0", edge: "left" });
 
-    expect(visiblePanelIds(next)).toEqual(["D"]);
+    expect(shape(next)).toEqual([["A"], ["B"], ["D"]]);
+    assertInvariants(next);
+  });
+
+  it("stacks a hidden panel below the pane it was dropped on", () => {
+    const next = place(layoutOf(["A"], ["D"]), "B", {
+      kind: "pane-edge",
+      paneId: "pane-0-0",
+      edge: "bottom",
+    });
+
+    expect(shape(next)).toEqual([["A", "B"], ["D"]]);
+    assertInvariants(next);
+  });
+
+  it("stacks above when the drop landed on the pane's top edge", () => {
+    const next = place(layoutOf(["A"]), "B", {
+      kind: "pane-edge",
+      paneId: "pane-0-0",
+      edge: "top",
+    });
+
+    expect(shape(next)).toEqual([["B", "A"]]);
+    assertInvariants(next);
+  });
+
+  it("inserts a new column at the gutter it was dropped in", () => {
+    const first = place(layoutOf(["A"], ["D"]), "B", { kind: "new-column", afterColumnId: null });
+    expect(shape(first)).toEqual([["B"], ["A"], ["D"]]);
+
+    const middle = place(layoutOf(["A"], ["D"]), "B", {
+      kind: "new-column",
+      afterColumnId: "col-0",
+    });
+    expect(shape(middle)).toEqual([["A"], ["B"], ["D"]]);
+    assertInvariants(middle);
+  });
+
+  it("replaces the occupant when a tree panel is dropped on a pane's centre", () => {
+    const next = place(layoutOf(["A"], ["D"]), "B", { kind: "pane-center", paneId: "pane-1-0" });
+
+    expect(shape(next)).toEqual([["A"], ["B"]]);
+    // The slot itself survives, so the bound native view is re-used.
     expect(next.focusedPaneId).toBe("pane-1-0");
     assertInvariants(next);
   });
 
-  it.each([
-    ["left", ["B", "A"]],
-    ["right", ["A", "B"]],
-  ] as const)("opens a hidden panel on the %s of the anchor", (position, expected) => {
-    const next = applyLayoutAction(
-      layoutOf(["A"]),
-      { type: "place-from-tree", panelId: "B", anchorPaneId: "pane-0-0", position },
-      makeEnv()
-    );
+  it("swaps two on-screen panels when one pane is dropped on another's centre", () => {
+    const next = place(layoutOf(["A"], ["D"]), "A", { kind: "pane-center", paneId: "pane-1-0" });
 
-    expect(next.columns.map((column) => column.panes[0]?.panelId)).toEqual(expected);
+    expect(shape(next)).toEqual([["D"], ["A"]]);
+    expect(next.focusedPaneId).toBe("pane-1-0");
     assertInvariants(next);
   });
 
-  it("moves an already-visible panel to the requested side of the anchor", () => {
-    const next = applyLayoutAction(
-      layoutOf(["A"], ["D"]),
-      { type: "place-from-tree", panelId: "D", anchorPaneId: "pane-0-0", position: "left" },
-      makeEnv()
-    );
+  it("moves an on-screen pane and keeps its pane id, so its native slot survives", () => {
+    const next = place(layoutOf(["A", "B"], ["D"]), "B", {
+      kind: "pane-edge",
+      paneId: "pane-1-0",
+      edge: "bottom",
+    });
 
-    expect(next.columns.map((column) => column.panes[0]?.panelId)).toEqual(["D", "A"]);
-    expect(next.focusedPaneId).toBe("pane-1-0");
+    expect(shape(next)).toEqual([["A"], ["D", "B"]]);
+    expect(paneForPanel(next, "B")?.pane.id).toBe("pane-0-1");
+    expect(nativeSlotIdForPane("pane-0-1")).toBe(nativeSlotIdForPane("pane-0-1"));
     assertInvariants(next);
+  });
+
+  it("collapses the column a moved pane emptied", () => {
+    const next = place(layoutOf(["A"], ["D"]), "A", {
+      kind: "pane-edge",
+      paneId: "pane-1-0",
+      edge: "bottom",
+    });
+
+    expect(shape(next)).toEqual([["D", "A"]]);
+    assertInvariants(next);
+  });
+
+  it("treats a drop that changes nothing as a focus", () => {
+    const layout = layoutOf(["A"], ["D"]);
+    const onSelf = place(layout, "A", { kind: "pane-center", paneId: "pane-0-0" });
+    expect(shape(onSelf)).toEqual([["A"], ["D"]]);
+
+    // "New column right of A" is where A's own single-pane column already is.
+    const beside = place(layout, "A", { kind: "pane-edge", paneId: "pane-0-0", edge: "right" });
+    expect(shape(beside)).toEqual([["A"], ["D"]]);
+
+    const gutter = place(layout, "D", { kind: "new-column", afterColumnId: "col-0" });
+    expect(shape(gutter)).toEqual([["A"], ["D"]]);
+    assertInvariants(gutter);
+  });
+
+  it("falls back to ordinary show rules when the dropped-on pane is gone", () => {
+    const next = place(layoutOf(["A"]), "B", {
+      kind: "pane-edge",
+      paneId: "pane-9-9",
+      edge: "top",
+    });
+
+    expect(visiblePanelIds(next)).toEqual(["B"]);
+    assertInvariants(next);
+  });
+});
+
+describe("refineDropTarget", () => {
+  const env = { viewportHeight: 400, paneChromeHeight: 11 };
+
+  it("keeps a vertical split when the column has room for another pane", () => {
+    const target: LayoutDropTarget = { kind: "pane-edge", paneId: "pane-0-0", edge: "bottom" };
+    expect(refineDropTarget(layoutOf(["A"]), target, "B", env)).toEqual(target);
+  });
+
+  it("downgrades a vertical split the column cannot fit into a side column", () => {
+    const target: LayoutDropTarget = { kind: "pane-edge", paneId: "pane-0-0", edge: "bottom" };
+    expect(
+      refineDropTarget(layoutOf(["A", "D"]), target, "B", { ...env, viewportHeight: 300 })
+    ).toEqual({ kind: "pane-edge", paneId: "pane-0-0", edge: "right" });
+  });
+
+  it("always allows restacking inside the pane's own column", () => {
+    const target: LayoutDropTarget = { kind: "pane-edge", paneId: "pane-0-0", edge: "top" };
+    expect(
+      refineDropTarget(layoutOf(["A", "D"]), target, "D", { ...env, viewportHeight: 200 })
+    ).toEqual(target);
   });
 });

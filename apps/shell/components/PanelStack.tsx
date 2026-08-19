@@ -54,10 +54,18 @@ import { SavePasswordBar } from "./SavePasswordBar";
 import { assertPresent } from "../utils/assertPresent";
 import { ColumnRow } from "./ColumnRow";
 import { usePanelLayout } from "../layout/usePanelLayout";
-import { canSplitColumnVertically, findPane, paneForPanel } from "../layout/placementEngine";
+import {
+  canSplitColumnVertically,
+  findPane,
+  paneForPanel,
+  refineDropTarget,
+} from "../layout/placementEngine";
 import { openInNewColumnAction, panelCreatedLayoutAction } from "../layout/panelPresentation";
-import { LAYOUT_DROP_EVENT, type LayoutDropDetail } from "../layout/dropTargets";
-import { PANE_VERTICAL_CHROME_HEIGHT, type PanelPlacementHint } from "../layout/types";
+import {
+  PANE_VERTICAL_CHROME_HEIGHT,
+  type LayoutDropTarget,
+  type PanelPlacementHint,
+} from "../layout/types";
 import type { FocusedPaneChromeState, PaneChromeCommand } from "./paneChrome";
 
 interface PanelStackProps {
@@ -406,24 +414,6 @@ export const PanelStack = memo(function PanelStack({
       [dispatchIntent]
     )
   );
-
-  // Tree→viewport drops are explicit presentation commands. Full width
-  // isolates the panel; left/right place it beside the currently focused pane.
-  useEffect(() => {
-    const handleLayoutDrop = (event: Event) => {
-      const detail = (event as CustomEvent<LayoutDropDetail>).detail;
-      const anchorPaneId = layout.focusedPaneId;
-      if (!detail?.panelId || !anchorPaneId) return;
-      dispatch({
-        type: "place-from-tree",
-        panelId: detail.panelId,
-        anchorPaneId,
-        position: detail.target.position,
-      });
-    };
-    window.addEventListener(LAYOUT_DROP_EVENT, handleLayoutDrop);
-    return () => window.removeEventListener(LAYOUT_DROP_EVENT, handleLayoutDrop);
-  }, [dispatch, layout.focusedPaneId]);
 
   // Native focus feedback (§5.2): when a native view gains focus by a route the
   // shell didn't initiate, follow it with layout focus.
@@ -1296,6 +1286,68 @@ export const PanelStack = memo(function PanelStack({
     (columnId: string, paneFrs: number[]) => dispatch({ type: "resize-panes", columnId, paneFrs }),
     [dispatch]
   );
+  // A drop is one engine action; the drag layer never edits the layout itself.
+  const placePanel = useCallback(
+    (panelId: string, target: LayoutDropTarget) =>
+      dispatch({ type: "place-panel", panelId, target }),
+    [dispatch]
+  );
+  /**
+   * Keyboard equivalent of a placement drag, driven from the pane's own grip so
+   * it needs no global chord: focus the grip, then arrow the pane around.
+   */
+  const movePane = useCallback(
+    (paneId: string, direction: "left" | "right" | "up" | "down") => {
+      const location = findPane(layout, paneId);
+      if (!location) return;
+      const panelId = location.pane.panelId;
+      if (direction === "up" || direction === "down") {
+        const neighbor = location.column.panes[location.paneIndex + (direction === "up" ? -1 : 1)];
+        if (!neighbor) return;
+        dispatch({
+          type: "place-panel",
+          panelId,
+          target: {
+            kind: "pane-edge",
+            paneId: neighbor.id,
+            edge: direction === "up" ? "top" : "bottom",
+          },
+        });
+        return;
+      }
+      // A pane that is its column's only occupant has to leapfrog the neighbour
+      // column to move at all; one that shares a column just leaves it.
+      const alone = location.column.panes.length === 1;
+      if (direction === "right") {
+        const anchor = alone ? layout.columns[location.columnIndex + 1] : location.column;
+        if (!anchor) return;
+        dispatch({
+          type: "place-panel",
+          panelId,
+          target: { kind: "new-column", afterColumnId: anchor.id },
+        });
+        return;
+      }
+      if (location.columnIndex === 0 && alone) return;
+      const anchorId = alone
+        ? (layout.columns[location.columnIndex - 2]?.id ?? null)
+        : (layout.columns[location.columnIndex - 1]?.id ?? null);
+      dispatch({
+        type: "place-panel",
+        panelId,
+        target: { kind: "new-column", afterColumnId: anchorId },
+      });
+    },
+    [layout, dispatch]
+  );
+  const refineTarget = useCallback(
+    (target: LayoutDropTarget, panelId: string) =>
+      refineDropTarget(layout, target, panelId, {
+        viewportHeight: contentSize.height,
+        paneChromeHeight: PANE_VERTICAL_CHROME_HEIGHT,
+      }),
+    [layout, contentSize.height]
+  );
 
   // Show loading state while initializing
   if ((rootLoading && rootPanels.length === 0) || !restored) {
@@ -1530,6 +1582,9 @@ export const PanelStack = memo(function PanelStack({
                   onResizeColumns={resizeColumns}
                   onResizePanes={resizePanes}
                   onTransitionSettled={bumpLayoutEpoch}
+                  onPlacePanel={placePanel}
+                  onRefineDropTarget={refineTarget}
+                  onMovePane={movePane}
                 />
               )}
             </Box>

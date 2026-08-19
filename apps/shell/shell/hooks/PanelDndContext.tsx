@@ -41,7 +41,6 @@ import {
   verticalListSortingStrategy,
   sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
-import { Box, Text } from "@radix-ui/themes";
 import { panel as panelService } from "../client.js";
 import {
   usePanelTree,
@@ -65,7 +64,8 @@ function placementAt(
   };
 }
 import { assertPresent } from "../../utils/assertPresent";
-import { dispatchLayoutDrop, parseLayoutDropId } from "../../layout/dropTargets";
+import { DraggedPanelChip } from "../../components/DraggedPanelChip";
+import { useLayoutDrag } from "./LayoutDragContext";
 
 // ============================================================================
 // Constants
@@ -142,38 +142,6 @@ export function usePanelDndDrag(): PanelDndDragContextValue {
 }
 
 // ============================================================================
-// Dragged Panel Preview (shown in DragOverlay)
-// ============================================================================
-
-function DraggedPanelPreview({ title, childCount }: { title: string; childCount: number }) {
-  return (
-    <Box
-      style={{
-        padding: "2px 8px",
-        backgroundColor: "var(--gray-a2)",
-        border: "1px dashed var(--accent-8)",
-        borderRadius: "var(--radius-2)",
-        opacity: 0.9,
-        maxWidth: "150px",
-      }}
-    >
-      <Text
-        size="1"
-        style={{
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-          color: "var(--gray-11)",
-        }}
-      >
-        {title}
-        {childCount > 1 && ` (+${childCount - 1})`}
-      </Text>
-    </Box>
-  );
-}
-
-// ============================================================================
 // Provider
 // ============================================================================
 
@@ -183,6 +151,12 @@ interface PanelDndProviderProps {
 
 export function PanelDndProvider({ children }: PanelDndProviderProps) {
   const { allRootPanels, panelMap, loadChildren } = usePanelTree();
+  const {
+    beginDrag: beginLayoutDrag,
+    endDrag: endLayoutDrag,
+    cancelDrag: cancelLayoutDrag,
+    target: layoutTarget,
+  } = useLayoutDrag();
 
   const [activeId, setActiveId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
@@ -429,23 +403,34 @@ export function PanelDndProvider({ children }: PanelDndProviderProps) {
     });
   }, []);
 
-  const handleDragStart = useCallback((event: DragStartEvent) => {
-    const id = event.active.id as string;
-    setActiveId(id);
-    setOverId(id);
-    setOffsetLeft(0);
+  const handleDragStart = useCallback(
+    (event: DragStartEvent) => {
+      const id = event.active.id as string;
+      setActiveId(id);
+      setOverId(id);
+      setOffsetLeft(0);
+      // The same gesture can end as a tree move or as a placement; the layout
+      // needs to be ready for it from the first pixel, because it cannot see the
+      // pointer until it has taken the viewport.
+      beginLayoutDrag({
+        panelId: id,
+        title: panelMap.get(id)?.title ?? "Panel",
+        fromPaneId: null,
+      });
 
-    // Store initial X position - handle different event types
-    const activatorEvent = event.activatorEvent;
-    if (activatorEvent instanceof MouseEvent || activatorEvent instanceof PointerEvent) {
-      dragStartXRef.current = activatorEvent.clientX;
-    } else if (activatorEvent instanceof TouchEvent && activatorEvent.touches[0]) {
-      dragStartXRef.current = activatorEvent.touches[0].clientX;
-    } else {
-      // Keyboard or unknown - use 0 (no horizontal offset for keyboard navigation)
-      dragStartXRef.current = 0;
-    }
-  }, []);
+      // Store initial X position - handle different event types
+      const activatorEvent = event.activatorEvent;
+      if (activatorEvent instanceof MouseEvent || activatorEvent instanceof PointerEvent) {
+        dragStartXRef.current = activatorEvent.clientX;
+      } else if (activatorEvent instanceof TouchEvent && activatorEvent.touches[0]) {
+        dragStartXRef.current = activatorEvent.touches[0].clientX;
+      } else {
+        // Keyboard or unknown - use 0 (no horizontal offset for keyboard navigation)
+        dragStartXRef.current = 0;
+      }
+    },
+    [beginLayoutDrag, panelMap]
+  );
 
   const handleDragMove = useCallback((event: DragMoveEvent) => {
     // Calculate horizontal offset from drag start
@@ -481,15 +466,12 @@ export function PanelDndProvider({ children }: PanelDndProviderProps) {
       setOverId(null);
       setOffsetLeft(0);
 
-      if (!over) {
-        return;
-      }
+      // Where the pointer is decides which grammar applies: over the layout it
+      // is a placement, over the tree it is a move. `endDrag` commits the live
+      // placement if there is one and reports that it did.
+      if (endLayoutDrag()) return;
 
-      // A drop on a layout target (pane header / column gutter) is explicit
-      // placement (D8), not a tree move — hand it to the layout engine host.
-      const layoutTarget = parseLayoutDropId(String(over.id));
-      if (layoutTarget) {
-        dispatchLayoutDrop(String(active.id), layoutTarget);
+      if (!over) {
         return;
       }
 
@@ -630,14 +612,15 @@ export function PanelDndProvider({ children }: PanelDndProviderProps) {
         });
       }
     },
-    [flattenedItems, panelMap, projection]
+    [flattenedItems, panelMap, projection, endLayoutDrag]
   );
 
   const handleDragCancel = useCallback(() => {
     setActiveId(null);
     setOverId(null);
     setOffsetLeft(0);
-  }, []);
+    cancelLayoutDrag();
+  }, [cancelLayoutDrag]);
 
   // Split context values for selective re-renders
   const treeContextValue = useMemo<PanelDndTreeContextValue>(
@@ -657,10 +640,12 @@ export function PanelDndProvider({ children }: PanelDndProviderProps) {
       activeId,
       overId,
       projectedDepth: projection?.depth ?? null,
-      indicatorItemId,
+      // Aiming at the layout is not aiming at the tree: two insertion marks for
+      // one pointer is the ambiguity this redesign exists to remove.
+      indicatorItemId: layoutTarget ? null : indicatorItemId,
       showIndicatorBelow,
     }),
-    [activeId, overId, projection, indicatorItemId, showIndicatorBelow]
+    [activeId, overId, projection, indicatorItemId, showIndicatorBelow, layoutTarget]
   );
 
   return (
@@ -683,8 +668,10 @@ export function PanelDndProvider({ children }: PanelDndProviderProps) {
           <PanelDndDragCtx.Provider value={dragContextValue}>
             {children}
             <DragOverlay dropAnimation={null}>
-              {activeId && (
-                <DraggedPanelPreview title={activeTitle} childCount={activeChildCount + 1} />
+              {/* While the pointer is aimed at the layout the highlight already
+                  names the panel; two labels under one cursor is noise. */}
+              {activeId && layoutTarget === null && (
+                <DraggedPanelChip title={activeTitle} childCount={activeChildCount + 1} />
               )}
             </DragOverlay>
           </PanelDndDragCtx.Provider>

@@ -11,12 +11,15 @@ interface PaneColumnProps {
   focusedPaneId: string | null;
   /** False when only one pane is on screen: nothing to distinguish focus from. */
   showPaneFocus: boolean;
+  /** Panel titles by panel id, for the drag chip a pane hands to the drag. */
+  paneTitles: Map<string, string>;
   resident: boolean;
   layoutEpoch: number;
   unresponsivePanels: Set<string>;
   onDismissUnresponsive: (panelId: string) => void;
   onFocusPane: (paneId: string) => void;
   onClosePane?: (paneId: string) => void;
+  onMovePane: (paneId: string, direction: "left" | "right" | "up" | "down") => void;
   onResizePanes: (columnId: string, paneFrs: number[]) => void;
 }
 
@@ -26,12 +29,14 @@ export function PaneColumn({
   minWidth,
   focusedPaneId,
   showPaneFocus,
+  paneTitles,
   resident,
   layoutEpoch,
   unresponsivePanels,
   onDismissUnresponsive,
   onFocusPane,
   onClosePane,
+  onMovePane,
   onResizePanes,
 }: PaneColumnProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -115,12 +120,14 @@ export function PaneColumn({
             pane={{ ...pane, heightFr: frs[index] ?? pane.heightFr }}
             focused={focusedPaneId === pane.id}
             showPaneFocus={showPaneFocus}
+            title={paneTitles.get(pane.panelId) ?? "Panel"}
             resident={resident}
             layoutEpoch={layoutEpoch}
             unresponsive={unresponsivePanels.has(pane.panelId)}
             onDismissUnresponsive={onDismissUnresponsive}
             onFocusPane={onFocusPane}
             onClosePane={onClosePane}
+            onMovePane={onMovePane}
           />
         </Fragment>
       ))}

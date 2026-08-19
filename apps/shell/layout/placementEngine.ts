@@ -12,6 +12,7 @@ import {
 } from "./types";
 import type {
   LayoutColumn,
+  LayoutDropTarget,
   LayoutPane,
   PanelLayout,
   PanelPlacementHint,
@@ -35,12 +36,7 @@ export type LayoutAction =
       hint: PanelPlacementHint;
     }
   | { type: "open-beside"; panelId: string; anchorPaneId: string }
-  | {
-      type: "place-from-tree";
-      panelId: string;
-      anchorPaneId: string;
-      position: "left" | "full" | "right";
-    }
+  | { type: "place-panel"; panelId: string; target: LayoutDropTarget }
   | { type: "move-pane-to-new-column"; paneId: string }
   | { type: "split-below"; panelId: string; anchorPaneId: string }
   | { type: "close-pane"; paneId: string }
@@ -342,14 +338,8 @@ export function applyLayoutAction(
       );
     case "open-beside":
       return applyOpenBeside(cloneLayout(layout), action.panelId, action.anchorPaneId, env);
-    case "place-from-tree":
-      return applyTreeViewportPlacement(
-        cloneLayout(layout),
-        action.panelId,
-        action.anchorPaneId,
-        action.position,
-        env
-      );
+    case "place-panel":
+      return applyPlacePanel(cloneLayout(layout), action.panelId, action.target, env);
     case "move-pane-to-new-column":
       return applyMovePaneToNewColumn(layout, action.paneId);
     case "split-below":
@@ -531,46 +521,175 @@ function applyOpenBeside(
   return insertColumnAfter(next, anchor.columnIndex, panelId);
 }
 
-/** Direct tree drop: isolate full-width, or move/open beside the focused pane. */
-function applyTreeViewportPlacement(
+/**
+ * Rule 3b: drag placement. One transition for every drop the pointer can
+ * express — detach (when the panel is already on screen), then insert at the
+ * dropped coordinate.
+ *
+ * A moved pane keeps its identity: the same `LayoutPane` object is re-inserted,
+ * so its pane id — and with it the native slot the host has already bound —
+ * survives the move, and the panel is re-bounded rather than torn down and
+ * reloaded somewhere else.
+ */
+function applyPlacePanel(
   next: PanelLayout,
   panelId: string,
-  anchorPaneId: string,
-  position: "left" | "full" | "right",
+  target: LayoutDropTarget,
   env: LayoutEnv
 ): PanelLayout {
-  const existing = paneForPanel(next, panelId);
-  if (position === "full") {
-    return isolatePanel(next, panelId);
-  }
+  const source = paneForPanel(next, panelId);
 
-  if (existing?.pane.id === anchorPaneId) {
-    next.focusedPaneId = anchorPaneId;
-    return next;
-  }
-
-  let pane: LayoutPane;
-  if (existing) {
-    pane = existing.pane;
-    existing.column.panes.splice(existing.paneIndex, 1);
-    if (existing.column.panes.length === 0) {
-      next.columns.splice(existing.columnIndex, 1);
+  if (target.kind === "pane-center") {
+    const destination = findPane(next, target.paneId);
+    if (!destination) return applyShowPanel(next, panelId, "navigate-event", env);
+    if (source && source.pane.id === destination.pane.id) {
+      return applyFocusPane(next, destination.pane.id);
     }
-  } else {
-    pane = newPane(panelId);
+    if (source) {
+      // Both panels stay on screen: the two panes exchange occupants. Nothing
+      // is evicted by a gesture the user reads as "put this here".
+      const displacedPanelId = destination.pane.panelId;
+      const displacedMinWidth = destination.pane.minWidthOverride;
+      setPanePanel(destination.pane, panelId);
+      setPaneMinWidth(destination.pane, source.pane.minWidthOverride);
+      setPanePanel(source.pane, displacedPanelId);
+      setPaneMinWidth(source.pane, displacedMinWidth);
+    } else {
+      // From the tree: the pane is a slot, and this is the same replacement a
+      // tree click performs — the displaced panel stays in the tree.
+      setPanePanel(destination.pane, panelId);
+    }
+    next.focusedPaneId = destination.pane.id;
+    return normalizeLayout(next);
   }
-  pane.heightFr = 1;
 
-  const anchor = findPane(next, anchorPaneId);
-  if (!anchor) return applyShowPanel(next, panelId, "navigate-event", env);
-  const column: LayoutColumn = {
+  if (target.kind === "pane-edge") {
+    const destination = findPane(next, target.paneId);
+    if (!destination) return applyShowPanel(next, panelId, "navigate-event", env);
+    if (source && isPlacementNoop(next, source, target, destination, destination.column)) {
+      return applyFocusPane(next, source.pane.id);
+    }
+    // Held before the detach: the object survives index renumbering.
+    const destinationColumn = destination.column;
+    const destinationPane = destination.pane;
+    const pane = detachOrMintPane(next, source, panelId);
+    if (target.edge === "top" || target.edge === "bottom") {
+      const paneIndex = destinationColumn.panes.indexOf(destinationPane);
+      destinationColumn.panes.splice(paneIndex + (target.edge === "bottom" ? 1 : 0), 0, pane);
+      next.focusedPaneId = pane.id;
+      return normalizeLayout(next);
+    }
+    const columnIndex = next.columns.indexOf(destinationColumn);
+    return insertColumnWithPane(
+      next,
+      columnIndex + (target.edge === "right" ? 1 : 0),
+      pane,
+      destinationColumn.widthFr
+    );
+  }
+
+  const anchorColumn =
+    target.afterColumnId === null
+      ? null
+      : (next.columns.find((column) => column.id === target.afterColumnId) ?? null);
+  if (target.afterColumnId !== null && anchorColumn === null) {
+    return applyShowPanel(next, panelId, "navigate-event", env);
+  }
+  if (source && isPlacementNoop(next, source, target, null, anchorColumn)) {
+    return applyFocusPane(next, source.pane.id);
+  }
+  const anchorWidthFr = anchorColumn?.widthFr ?? 1;
+  const pane = detachOrMintPane(next, source, panelId);
+  const insertIndex = anchorColumn === null ? 0 : next.columns.indexOf(anchorColumn) + 1;
+  return insertColumnWithPane(next, insertIndex, pane, anchorWidthFr);
+}
+
+/** Remove the dragged pane from its current position, or mint one for a panel that has none. */
+function detachOrMintPane(
+  next: PanelLayout,
+  source: PaneLocation | null,
+  panelId: string
+): LayoutPane {
+  if (!source) return newPane(panelId);
+  source.column.panes.splice(source.paneIndex, 1);
+  if (source.column.panes.length === 0) {
+    const emptyIndex = next.columns.indexOf(source.column);
+    if (emptyIndex >= 0) next.columns.splice(emptyIndex, 1);
+  }
+  source.pane.heightFr = 1;
+  return source.pane;
+}
+
+function insertColumnWithPane(
+  next: PanelLayout,
+  index: number,
+  pane: LayoutPane,
+  widthFr: number
+): PanelLayout {
+  next.columns.splice(Math.max(0, Math.min(index, next.columns.length)), 0, {
     id: mintColumnId(),
-    widthFr: anchor.column.widthFr,
+    widthFr,
     panes: [pane],
-  };
-  next.columns.splice(anchor.columnIndex + (position === "right" ? 1 : 0), 0, column);
+  });
   next.focusedPaneId = pane.id;
   return normalizeLayout(next);
+}
+
+/** Drops that would put the pane back exactly where it already is. */
+function isPlacementNoop(
+  layout: PanelLayout,
+  source: PaneLocation,
+  target: LayoutDropTarget,
+  destination: PaneLocation | null,
+  anchorColumn: LayoutColumn | null
+): boolean {
+  if (target.kind === "pane-edge") {
+    if (destination === null) return false;
+    if (destination.pane.id === source.pane.id) return true;
+    if (target.edge === "top" || target.edge === "bottom") {
+      if (destination.column !== source.column) return false;
+      const offset = target.edge === "bottom" ? 1 : -1;
+      return destination.paneIndex + offset === source.paneIndex;
+    }
+    // A side split off a column this pane alone occupies lands it back where it
+    // started.
+    if (source.column.panes.length > 1) return false;
+    const sourceIndex = layout.columns.indexOf(source.column);
+    const anchorIndex = layout.columns.indexOf(destination.column);
+    return target.edge === "right"
+      ? anchorIndex + 1 === sourceIndex
+      : anchorIndex - 1 === sourceIndex;
+  }
+  if (source.column.panes.length > 1) return false;
+  const sourceIndex = layout.columns.indexOf(source.column);
+  if (anchorColumn === null) return sourceIndex === 0;
+  if (anchorColumn === source.column) return true;
+  return layout.columns.indexOf(anchorColumn) + 1 === sourceIndex;
+}
+
+/**
+ * A vertical split needs room the column may not have. Rule 3's documented
+ * fallback (split-below degrades to a side column) applies to drags too, and it
+ * has to happen before the preview is drawn, not after the drop — otherwise the
+ * highlight promises a stacked pane and the engine produces a column.
+ */
+export function refineDropTarget(
+  layout: PanelLayout,
+  target: LayoutDropTarget,
+  draggedPanelId: string,
+  env: Pick<LayoutEnv, "viewportHeight" | "paneChromeHeight">
+): LayoutDropTarget {
+  if (target.kind !== "pane-edge") return target;
+  if (target.edge !== "top" && target.edge !== "bottom") return target;
+  const destination = findPane(layout, target.paneId);
+  if (!destination) return target;
+  const source = paneForPanel(layout, draggedPanelId);
+  // Restacking inside its own column adds no pane, so it is always allowed.
+  if (source && source.column === destination.column) return target;
+  if (canSplitColumnVertically(destination.column, env.viewportHeight, env.paneChromeHeight)) {
+    return target;
+  }
+  return { kind: "pane-edge", paneId: target.paneId, edge: "right" };
 }
 
 /** Move an existing pane as one state transition, preserving its position id. */
