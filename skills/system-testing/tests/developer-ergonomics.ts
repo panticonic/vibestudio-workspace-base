@@ -264,9 +264,17 @@ function validatePanelGenerationRecovery(result: TestExecutionResult) {
     };
   }
   const evalCalls = getToolCalls(result).filter((call) => call.name === "eval" && isComplete(call));
-  const initial = evalCalls.findIndex((call) =>
-    String(call.arguments?.["code"] ?? "").includes("cdp.session")
-  );
+  const hasObservedInteraction = (call: InvocationCardPayloadLike): boolean =>
+    records(call).some((record) => {
+      const effect = record["effect"];
+      return (
+        record["protocol"] === "cdp-interaction-outcome.v1" &&
+        record["delivery"] === "dispatched" &&
+        isRecord(effect) &&
+        effect["status"] === "observed"
+      );
+    });
+  const initial = evalCalls.findIndex(hasObservedInteraction);
   const refresh = evalCalls.findIndex((call, index) => {
     if (index <= initial) return false;
     const code = String(call.arguments?.["code"] ?? "");
@@ -279,23 +287,18 @@ function validatePanelGenerationRecovery(result: TestExecutionResult) {
       )
     );
   });
-  const observedInteraction = evalCalls.slice(Math.max(0, refresh)).some((call) =>
-    records(call).some((record) => {
-      const effect = record["effect"];
-      const canonicalOutcome =
-        record["protocol"] === "cdp-interaction-outcome.v1" &&
-        record["delivery"] === "dispatched" &&
-        isRecord(effect) &&
-        effect["status"] === "observed";
+  const observedInteraction = evalCalls.slice(Math.max(0, refresh)).some((call) => {
+    if (hasObservedInteraction(call)) return true;
+    return records(call).some((record) => {
       const compactOutcome =
         record["sessionStatus"] === "replaced" &&
         record["clickStatus"] === "observed" &&
         typeof record["before"] === "string" &&
         typeof record["after"] === "string" &&
         record["before"] !== record["after"];
-      return canonicalOutcome || compactOutcome;
-    })
-  );
+      return compactOutcome;
+    });
+  });
   return initial >= 0 && refresh > initial && observedInteraction
     ? { passed: true, reason: undefined }
     : {

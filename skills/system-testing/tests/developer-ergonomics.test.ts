@@ -360,7 +360,16 @@ describe("developer ergonomics scenarios", () => {
       "open",
       "eval",
       { code: "scope.session = await scope.panel.cdp.session();" },
-      { returnValue: { protocol: "panel-cdp-session.v1" } }
+      {
+        returnValue: {
+          session: { protocol: "panel-cdp-session.v1" },
+          interaction: {
+            protocol: "cdp-interaction-outcome.v1",
+            delivery: "dispatched",
+            effect: { status: "observed", state: "visible" },
+          },
+        },
+      }
     );
     const verify = call(
       "verify",
@@ -431,6 +440,18 @@ describe("developer ergonomics scenarios", () => {
         execution([open, verify, targetedEdit, compactRebuild])
       )
     ).toEqual({ passed: true, reason: undefined });
+
+    const sessionOnly = call(
+      "session-only",
+      "eval",
+      { code: "scope.session = await scope.panel.cdp.session();" },
+      { returnValue: { protocol: "panel-cdp-session.v1" } }
+    );
+    expect(
+      scenario("panel-rebuild-reacquire-and-interact").validate(
+        execution([sessionOnly, verify, targetedEdit, rebuild])
+      ).passed
+    ).toBe(false);
   });
 
   it("requires a stale receipt refusal with fresh evidence before the corrected patch", () => {

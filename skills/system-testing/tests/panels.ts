@@ -17,7 +17,7 @@ const PANEL_TREE_NAVIGATION_PROMPT =
   "I lost track of that browser view in the panel tree. Compare https://example.com/ with https://example.org/ there, then tell me where the investigation lived and which destination it ended on.";
 
 const BROWSER_IMPORT_PROMPT =
-  "Check the Browser Import inspector itself and tell me its exact panel identity, source, and lifecycle phase once it is usable.";
+  "Check the Browser Import inspector that is already open and tell me its exact panel identity, source, and lifecycle phase once it is usable.";
 
 function validateSeededPanelNavigation(result: Parameters<TestCase["validate"]>[0]) {
   const evidence = result.diagnostics?.["seededPanelGoal"] as
@@ -36,6 +36,23 @@ function validateSeededPanelNavigation(result: Parameters<TestCase["validate"]>[
         passed: false,
         reason:
           "The harness did not observe the same pre-existing panel-tree target navigate from example.com to example.org",
+      };
+}
+
+function validateSeededBrowserImportPanel(result: Parameters<TestCase["validate"]>[0]) {
+  const evidence = result.diagnostics?.["seededPanelGoal"] as
+    | Partial<SeededPanelGoalEvidence>
+    | undefined;
+  return evidence?.finalSource === "about/browser-import-inspector" &&
+    evidence.finalPhase === "ready" &&
+    evidence.targetPreserved === true &&
+    evidence.reachedExpectedDestination === true &&
+    evidence.finalPathIds?.includes(evidence.panelId ?? "")
+    ? { passed: true, reason: undefined }
+    : {
+        passed: false,
+        reason:
+          "The harness did not observe the seeded Browser Import panel remain ready at its exact source",
       };
 }
 
@@ -76,7 +93,7 @@ export const panelTests: TestCase[] = [
         PANEL_TREE_NAVIGATION_PROMPT,
         "locate and navigate the browser investigation",
         "https://example.com/",
-        "https://example.org/"
+        { finalUrl: "https://example.org/" }
       ),
     validate: validateSeededPanelNavigation,
   },
@@ -92,11 +109,18 @@ export const panelTests: TestCase[] = [
     name: "browser-import-panel-lifecycle",
     description: "Inspect the first-party Browser Import panel through its real lifecycle",
     category: "panels",
+    validation: "agent-evidence",
     authorityPolicy: panelControlAuthorityPolicy("inspect-browser-import-panel"),
     resources: [PANEL_AUTOMATION_RESOURCE],
     prompt: BROWSER_IMPORT_PROMPT,
     orchestrate: (context) =>
-      orchestratePanelGoal(context, BROWSER_IMPORT_PROMPT, "inspect the Browser Import lifecycle"),
-    validate: validateAgentCompletionReport,
+      orchestrateSeededPanelGoal(
+        context,
+        BROWSER_IMPORT_PROMPT,
+        "inspect the Browser Import lifecycle",
+        "about/browser-import-inspector",
+        { finalSource: "about/browser-import-inspector", finalPhase: "ready" }
+      ),
+    validate: validateSeededBrowserImportPanel,
   },
 ];

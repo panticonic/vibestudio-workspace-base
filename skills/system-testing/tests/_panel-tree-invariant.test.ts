@@ -311,7 +311,7 @@ describe("panel-tree invariant", () => {
       "Where did that browser view end up?",
       "resolve a vague panel reference",
       "https://example.com/",
-      "https://example.org/",
+      { finalUrl: "https://example.org/" },
       panelTree as never
     );
 
@@ -319,6 +319,8 @@ describe("panel-tree invariant", () => {
     expect(execution.diagnostics?.["seededPanelGoal"]).toEqual({
       panelId: "seeded-browser",
       expectedFinalUrl: "https://example.org/",
+      expectedFinalSource: null,
+      expectedFinalPhase: null,
       initialSource: "browser:https://example.com/",
       initialUrl: "https://example.com/",
       initialPhase: "ready",
@@ -375,7 +377,7 @@ describe("panel-tree invariant", () => {
       "Where did that browser view end up?",
       "resolve a vague panel reference",
       "https://example.com/",
-      "https://example.org/",
+      { finalUrl: "https://example.org/" },
       {} as never
     );
 

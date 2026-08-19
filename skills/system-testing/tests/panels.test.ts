@@ -93,4 +93,36 @@ describe("panel system-test declarations", () => {
       })
     ).toMatchObject({ passed: false });
   });
+
+  it("seeds Browser Import and requires independent ready-phase evidence", () => {
+    const browserImport = panelTests.find(
+      (test) => test.name === "browser-import-panel-lifecycle"
+    )!;
+    const evidence = {
+      panelId: "seeded-browser-import",
+      finalSource: "about/browser-import-inspector",
+      finalPhase: "ready",
+      finalPathIds: ["seeded-browser-import"],
+      targetPreserved: true,
+      reachedExpectedDestination: true,
+    };
+
+    expect(browserImport.validation).toBe("agent-evidence");
+    expect(
+      browserImport.validate({
+        messages: [],
+        duration: 1,
+        diagnostics: { seededPanelGoal: evidence },
+      })
+    ).toEqual({ passed: true, reason: undefined });
+    expect(
+      browserImport.validate({
+        messages: [],
+        duration: 1,
+        diagnostics: {
+          seededPanelGoal: { ...evidence, finalPhase: "failed" },
+        },
+      })
+    ).toMatchObject({ passed: false });
+  });
 });

@@ -33,7 +33,9 @@ export interface PanelGoalTreePolicy {
 
 export interface SeededPanelGoalEvidence {
   panelId: string;
-  expectedFinalUrl: string;
+  expectedFinalUrl: string | null;
+  expectedFinalSource: string | null;
+  expectedFinalPhase: string | null;
   initialSource: string | null;
   initialUrl: string | null;
   initialPhase: string | null;
@@ -45,6 +47,10 @@ export interface SeededPanelGoalEvidence {
   targetPreserved: boolean;
   reachedExpectedDestination: boolean;
 }
+
+export type SeededPanelGoalExpectation =
+  | { finalUrl: string }
+  | { finalSource: string; finalPhase: string };
 
 type TreeReader = Pick<
   TestOrchestrationContext["runner"]["panelTreeClient"],
@@ -283,7 +289,7 @@ export async function orchestrateSeededPanelGoal(
   prompt: string,
   phase: string,
   initialSource: string,
-  expectedFinalUrl: string,
+  expectation: SeededPanelGoalExpectation,
   tree: FixtureTreeReader = context.runner.panelTreeClient
 ): Promise<TestExecutionResult> {
   const startedAt = Date.now();
@@ -334,7 +340,9 @@ export async function orchestrateSeededPanelGoal(
 
     const evidence: SeededPanelGoalEvidence = {
       panelId: fixture.id,
-      expectedFinalUrl,
+      expectedFinalUrl: "finalUrl" in expectation ? expectation.finalUrl : null,
+      expectedFinalSource: "finalSource" in expectation ? expectation.finalSource : null,
+      expectedFinalPhase: "finalPhase" in expectation ? expectation.finalPhase : null,
       initialSource: initialObservation.source ?? null,
       initialUrl: initialObservation.host?.view.url ?? null,
       initialPhase: initialObservation.phase ?? null,
@@ -344,7 +352,11 @@ export async function orchestrateSeededPanelGoal(
       finalPhase: finalObservation?.phase ?? null,
       finalPathIds: finalPath?.entries.map((entry) => entry.node.slotId) ?? [],
       targetPreserved: fixtureStillVisible && finalObservation?.panelId === fixture.id,
-      reachedExpectedDestination: finalObservation?.host?.view.url === expectedFinalUrl,
+      reachedExpectedDestination:
+        "finalUrl" in expectation
+          ? finalObservation?.host?.view.url === expectation.finalUrl
+          : finalObservation?.source === expectation.finalSource &&
+            finalObservation?.phase === expectation.finalPhase,
     };
     execution.diagnostics = {
       ...(execution.diagnostics ?? {}),
@@ -357,7 +369,9 @@ export async function orchestrateSeededPanelGoal(
     if (!evidence.reachedExpectedDestination) {
       appendExecutionError(
         execution,
-        `Seeded panel rendered ${evidence.finalUrl ?? "an unavailable URL"}, expected ${expectedFinalUrl}`
+        "finalUrl" in expectation
+          ? `Seeded panel rendered ${evidence.finalUrl ?? "an unavailable URL"}, expected ${expectation.finalUrl}`
+          : `Seeded panel reported source ${evidence.finalSource ?? "unavailable"} in phase ${evidence.finalPhase ?? "unavailable"}, expected ${expectation.finalSource} in phase ${expectation.finalPhase}`
       );
     }
   } catch (error) {
