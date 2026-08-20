@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Figure, SceneFrame } from "../lib/Scene";
 import { LiveLink } from "../lib/live";
 
-type UnitKind = "panel" | "worker" | "extension" | "app" | "agent";
+type UnitKind = "panel" | "worker" | "extension" | "app";
 
 const UNITS: Record<
   UnitKind,
@@ -13,35 +13,28 @@ const UNITS: Record<
     dir: "panels/*",
     runsIn: "An isolated webview. Talks to the server over WebSocket RPC.",
     trust: "sandboxed",
-    reach: "Renders UI. Every effect is an RPC to the host, checked like any other caller's.",
+    reach: "Renders UI. Every side effect is an RPC to the host, checked like any other caller.",
   },
   worker: {
-    title: "Worker / Durable Object",
+    title: "Workers",
     dir: "workers/*",
-    runsIn: "A workerd V8 isolate. A DO owns its own SQLite (this.sql) — the app-database primitive.",
+    runsIn: "Workerd V8 isolates. Each Durable Object owns its own SQLite. Agents are also DOs — the agent engine runs in-process, with its eval tool in a separate isolate.",
     trust: "sandboxed",
-    reach: "Server-side logic and durable state. Offers services by protocol. Never touches the host process.",
-  },
-  agent: {
-    title: "Agent",
-    dir: "workers/agent-worker",
-    runsIn: "Also a Durable Object: the coding-agent engine (Pi) runs in-process inside an isolate. Its eval tool runs in its own EvalDO.",
-    trust: "sandboxed",
-    reach: "Exactly what any DO can reach, through the same gates. No special privileges.",
+    reach: "Server-side logic, durable state, and agents. Agents reach exactly what any other DO can, through the same gates. No special privileges.",
   },
   extension: {
     title: "Extension",
     dir: "extensions/*",
-    runsIn: "A forked Node process with full Node access.",
+    runsIn: "A forked Node process with full native access.",
     trust: "trusted",
-    reach: "Native dependencies and long-lived services. Crosses the trust line, so install and update get a stricter review.",
+    reach: "Native dependencies and long-lived services. Crosses the trust boundary, so install and update get stricter review.",
   },
   app: {
     title: "App",
     dir: "apps/*",
-    runsIn: "A trusted client runtime: the Electron shell view, a signed React Native bundle, or a terminal artifact.",
+    runsIn: "A trusted client runtime: the Electron shell, a signed React Native bundle, or a terminal artifact.",
     trust: "trusted",
-    reach: "Client software for desktop, phone or terminal. Approved as an exact unit.",
+    reach: "Client software for desktop, phone, or terminal. Approved as an exact unit.",
   },
 };
 
@@ -49,20 +42,19 @@ const HOST_DUTIES = [
   ["Identity & pairing", "tokens, device credentials"],
   ["Permissions", "grants, approval prompts"],
   ["Credentials", "storage + injection at egress"],
-  ["Protected main", "approval-gated compare-and-swap"],
-  ["Builds & blobs", "content-addressed stores"],
-  ["Disk projection", "materializing contexts"],
-  ["Supervision", "workerd, extensions, webviews"],
+  ["Build system", "build, type check, resolve internal code"],
+  ["Workspace state", "shared data and per-agent versions"],
+  ["Supervision", "manage / limit compute and storage"],
 ] as const;
 
 export function TwoTiers() {
-  const [selected, setSelected] = useState<UnitKind>("agent");
+  const [selected, setSelected] = useState<UnitKind>("worker");
   const [agentLens, setAgentLens] = useState(false);
   const unit = UNITS[selected];
 
   return (
     <SceneFrame
-      eyebrow="02 · Topology"
+      eyebrow="03 · Topology"
       title={
         <>
           A small <em>host</em>, a large <em>userland</em>
@@ -77,15 +69,13 @@ export function TwoTiers() {
             <li>extensions</li>
             <li>the agents themselves</li>
           </ul>
-          <p>Agents can write any of it. The boundary keeps that safe, not limits on what they write.</p>
+          <p>Agents can write and change any of it. Safety comes from the boundary, not from limits on what they write.</p>
         </>
       }
     >
       <div className="scene__grid" style={{ gridTemplateColumns: "minmax(200px, 1fr) minmax(320px, 3fr)" }}>
-        <Figure caption="The whole host. If it isn't on this list, it lives in userland.">
+        <Figure caption="This is the entire host. If something isn't on this list, it lives in userland.">
           <div className="wall" style={{ paddingLeft: 10 }}>
-          <div className="box__title" style={{ marginBottom: 2 }}>Trusted host</div>
-          <div className="box__sub mono" style={{ marginBottom: 10 }}>electron shell · workspace server</div>
           <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "grid", gap: 10 }}>
             {HOST_DUTIES.map(([k, v]) => (
               <li key={k}>
@@ -100,7 +90,7 @@ export function TwoTiers() {
         <Figure
           caption={
             <>
-              Click a unit kind. Trust comes from the declared package and its review, not from the folder.
+              Click a unit kind. Trust follows the declared package and its review, not the folder.
             </>
           }
         >
@@ -125,7 +115,7 @@ export function TwoTiers() {
           >
             {(Object.keys(UNITS) as UnitKind[]).map((kind) => {
               const u = UNITS[kind];
-              const dim = agentLens && kind !== "agent" && u.trust === "trusted";
+              const dim = agentLens && u.trust === "trusted";
               return (
                 <button
                   key={kind}
@@ -152,12 +142,12 @@ export function TwoTiers() {
               <dt>Runs in</dt>
               <dd>{unit.runsIn}</dd>
               <dt>Reach</dt>
-              <dd>{agentLens && selected !== "agent" ? `${unit.reach} An agent reaches this only through the same typed calls.` : unit.reach}</dd>
+              <dd>{agentLens && selected !== "worker" ? `${unit.reach} An agent reaches this only through the same typed calls.` : unit.reach}</dd>
             </dl>
             {agentLens ? (
               <p className="box__sub" style={{ marginTop: 10, marginBottom: 0 }}>
-                “What can the agent do?” is always “what can this caller do through the permission system?”
-                Trusted units (amber) are reached through typed receivers, never by running inside them.
+                “What can the agent do?” reduces to “what can this caller do through the permission system?”
+                Trusted units (amber) are reached through typed calls, never by running code inside them.
               </p>
             ) : null}
           </div>

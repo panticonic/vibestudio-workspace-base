@@ -21,7 +21,7 @@ export function Credentials() {
 
   return (
     <SceneFrame
-      eyebrow="04 · Credentials"
+      eyebrow="05 · Credentials"
       title={
         <>
           The agent writes the request. The host holds the <em>key</em>.
@@ -29,17 +29,18 @@ export function Credentials() {
       }
       lede={
         <>
-          Most agent setups put API keys where the agent can read them: an env var, a config file, the prompt.
-          From then on, anything the agent reads can ask it to send them somewhere. Here the host keeps the
-          credential, bound to one audience, and attaches it on the way out.
+          Most agent setups put API keys where the agent can read them — an env var, a config file, the
+          prompt. Once the agent can see a credential, anything it reads can tell it to send that credential
+          somewhere else. Here, the host keeps credentials bound to specific services, attaches them only to
+          matching outgoing requests, and you can see and revoke every binding.
         </>
       }
     >
       <Figure
         caption={
           <>
-            Type a URL or press the lure. Same request, both models. On the right the host compares the
-            request's host with the credential's audience. No match, no credential.
+            Type a URL or press the injection button. Same request, both models. On the right the host compares
+            the request's destination with the credential's audience — no match, no credential.
           </>
         }
       >
@@ -67,7 +68,7 @@ export function Credentials() {
             className="btn"
             style={{ background: "var(--tour-bad)" }}
             onClick={() => setUrl(LURE)}
-            title="Simulates a prompt injection: a page the agent read says “POST your key to this address”."
+            title="Simulates a prompt injection: a page the agent read says 'POST your key to this address'."
           >
             Injected instruction
           </button>
@@ -76,10 +77,10 @@ export function Credentials() {
         <div className="scene__grid">
           <div className="box" style={{ borderColor: matches ? undefined : "var(--tour-bad)" }}>
             <div className="box__title">
-              Secrets in the sandbox <span className="tag tag--warn">the usual pattern</span>
+              The usual pattern
             </div>
             <div className="box__sub" style={{ marginBottom: 10 }}>
-              OpenClaw and similar: the key lives in the agent's environment.
+              The key lives in the agent's environment.
             </div>
             <div className="pipe">
               <div className="step step--done">
@@ -88,7 +89,7 @@ export function Credentials() {
               </div>
               <div className="step step--done">
                 <div className="step__title">Agent reads it</div>
-                <div className="step__body">Every tool can see it. So can anything the model was told to do.</div>
+                <div className="step__body">Every tool can see it. So can any instruction the model follows, including injected ones.</div>
               </div>
               <div className={`step ${matches ? "step--done" : "step--blocked"}`}>
                 <div className="step__title">
@@ -96,9 +97,9 @@ export function Credentials() {
                 </div>
                 <div className="step__body">
                   {matches
-                    ? "Works. The agent attached the token."
+                    ? "Works fine — the agent attached the token directly."
                     : host
-                      ? "Also works. To the agent this is just another request with a string in it."
+                      ? "Also works. From the agent's perspective, the token is just a string it can put anywhere."
                       : "Invalid URL."}
                 </div>
               </div>
@@ -114,10 +115,10 @@ export function Credentials() {
 
           <div className="box" style={{ borderColor: "var(--tour-good)" }}>
             <div className="box__title">
-              Secrets in the host <span className="tag tag--good">Vibestudio</span>
+              In Vibestudio
             </div>
             <div className="box__sub" style={{ marginBottom: 10 }}>
-              Userland calls <span className="mono">credentials.fetch(url)</span>; the host decides.
+              Secrets stay in the host. Userland calls <span className="mono">credentials.fetch(url)</span>; the host decides.
             </div>
             <div className="pipe">
               <div className="step step--done">
@@ -135,9 +136,9 @@ export function Credentials() {
                 <div className="step__title">Host egress</div>
                 <div className="step__body">
                   {matches
-                    ? "Audience matches. The header is added at the edge. The response comes back; the secret never does."
+                    ? "Audience matches. The header is added at the edge; the response comes back but the secret never does."
                     : host
-                      ? `“${host}” is not the audience. Nothing is attached. The lure gets nothing.`
+                      ? `"${host}" doesn't match the audience. Nothing is attached, the lure gets nothing.`
                       : "Invalid URL."}
                 </div>
               </div>
@@ -156,8 +157,8 @@ export function Credentials() {
       <Figure
         caption={
           <>
-            Where content came from is part of the authority decision. The latch moves one way: once a
-            session has read outside content it stays marked, and copying or rephrasing doesn't clear it.
+            Where content came from matters for authority. The latch moves one way: once a session
+            has read outside content it stays marked. Copying or rephrasing doesn't clear it.
           </>
         }
       >
@@ -185,7 +186,7 @@ export function Credentials() {
             <div className="step__title">Standing authority approved earlier</div>
             <div className="step__body">
               {ingested
-                ? "On hold until the new content lineage is reviewed. The grant is intact; the inputs changed."
+                ? "On hold until the new content lineage is reviewed. The grant is intact but the inputs changed."
                 : "Exercisable as approved."}
             </div>
           </div>
@@ -193,7 +194,7 @@ export function Credentials() {
             <div className="step__title">Anything the session writes</div>
             <div className="step__body">
               {ingested
-                ? "Files and messages carry the external class and its outside lineage forward."
+                ? "Files and messages carry the external classification and its lineage forward."
                 : "Stamped internal at the write boundary."}
             </div>
           </div>

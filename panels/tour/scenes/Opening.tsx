@@ -9,22 +9,22 @@ const CLAIMS = [
   {
     id: "tiers",
     title: "A small host, a large sandbox",
-    body: "The host holds keys and gates. Everything else, agents included, runs in isolates and webviews.",
+    body: "A thin trusted layer handles keys and gates. Everything else — agents included — runs in isolates and webviews.",
   },
   {
     id: "credentials",
     title: "Agents never see credentials",
-    body: "The host keeps them, bound to one audience, and attaches them only on the way out.",
+    body: "Secrets stay in the host, each bound to a specific service. The agent says where; the host decides whether to attach the key.",
   },
   {
     id: "continuum",
     title: "Apps and conversations blend",
-    body: "An agent builds an app, you reshape it, agents work inside it, UI shows up in the chat. One substrate.",
+    body: "An agent builds an app, you reshape it mid-use, agents work inside it, and UI shows up right in the conversation — all in the same substrate.",
   },
   {
     id: "runtime",
     title: "No containers",
-    body: "Webviews and V8 isolates, one TypeScript toolchain, builds in seconds.",
+    body: "Webviews and V8 isolates instead. One TypeScript toolchain, builds in seconds, runs on a laptop.",
   },
 ];
 
@@ -36,24 +36,19 @@ export function Opening({ goTo }: OpeningProps) {
         <span style={{ display: "grid", gap: 18 }}>
           <VibestudioLogo size={64} variant="symbol" />
           <span>
-            An <em>integrated</em> personal software environment
+            A <em>personal</em> vibe computer
           </span>
         </span>
       }
       lede={
         <>
-          <p>One environment where these live together, built and changed in place:</p>
+          <p>An integrated personal software environment where:</p>
           <ul>
-            <li>your apps</li>
-            <li>your agents</li>
-            <li>your automations</li>
-            <li>your data and its history</li>
+            <li>agents build and customize apps for you</li>
+            <li>you can build apps that integrate with your agent</li>
+            <li>you control all agent access to sensitive data</li>
+            <li>you can customize the entire system</li>
           </ul>
-          <p>
-            Agents can write software now. What's hard is running it without handing them your keys, and
-            changing the software you're using while you're using it. Vibestudio is built around those two
-            problems.
-          </p>
         </>
       }
     >

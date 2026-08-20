@@ -7,22 +7,27 @@ const ANCHORS = [
   {
     title: "An agent builds an app",
     mechanism: "createProjects · runtime builds · Durable Object SQLite · semantic VCS publish",
-    body: "You describe it. The agent scaffolds a panel and a worker, the build runs, the panel opens. Data lives in a Durable Object, source in the workspace VCS, and publishing to main is an approved step.",
+    body: "You describe what you want. The agent scaffolds a panel and a worker, the build runs, and the panel opens. Data lives in a Durable Object, source in the workspace VCS, and publishing to main requires approval.",
   },
   {
     title: "You reshape it while using it",
     mechanism: "Quickfire conversation on any panel · context-local edits · rebuild in place · provenance",
-    body: "Every panel has its own command conversation. Say “make this sortable”. The agent edits the source in its context and rebuilds, and the panel you're looking at changes. The history keeps why.",
+    body: "Every panel has its own command conversation. Say “make this sortable” — the agent edits the source in its context, rebuilds, and the panel you’re looking at updates. The history records why each change happened.",
   },
   {
     title: "Agents live inside the app",
     mechanism: "channel DO · agent worker DO · useAgentState / parent.state() · participant methods as tools",
-    body: "An app can embed agents as ordinary participants: a channel, a worker running the model, and the panel exposing its state so the agent sees what you see. The app's functions become tools, behind the same gates.",
+    body: "An app can embed agents as participants: a channel, a worker running the model, and the panel exposing its state so the agent sees what you see. The app's own functions become tools, behind the same gates.",
+  },
+  {
+    title: "Agents reach the app's data directly",
+    mechanism: "DO SQL queries · managed file reads · VCS context access · authority-gated, no user present",
+    body: "An agent can query a Durable Object's SQLite or read managed files without the user being present. The same authority gates apply — but the data is accessible, not locked behind a UI.",
   },
   {
     title: "UI appears inside the conversation",
     mechanism: "inline_ui · skills shipping TSX · exposeModules · persistent transcript components",
-    body: "The agent writes a component and renders it into the transcript: a setup form, a chart, a review card. It stays there, with state, as part of the conversation. Skills ship components; panels expose modules for them.",
+    body: "The agent writes a component and renders it into the transcript — a setup form, a chart, a review card. It persists there with state as part of the conversation. Skills ship components; panels expose modules for them.",
   },
 ] as const;
 
@@ -50,13 +55,13 @@ export function Continuum() {
   const anchor = Math.min(ANCHORS.length - 1, Math.round(t));
   const current = ANCHORS[anchor]!;
 
-  // App/chat proportions along the continuum.
-  const appShare = t <= 1 ? 1 : t <= 2 ? lerp(1, 0.58, t - 1) : lerp(0.58, 0, t - 2);
+  // App/chat proportions along the continuum (5 anchors: 0–4).
+  const appShare = t <= 1 ? 1 : t <= 2 ? lerp(1, 0.58, t - 1) : t <= 3 ? lerp(0.58, 0.4, t - 2) : lerp(0.4, 0, t - 3);
   const chatShare = 1 - appShare;
   const showQuickfire = t >= 0.5 && t < 2.2;
-  const bubbles = Math.max(0, Math.round(lerp(0, 4, Math.min(1, Math.max(0, (t - 1.2) / 1.8)))));
-  const inlineWidgets = t >= 2.4 ? Math.round(lerp(0, 2, Math.min(1, (t - 2.4) / 0.6))) : 0;
-  const widgets = Math.max(0, Math.round(lerp(6, 2, Math.min(1, Math.max(0, (t - 1) / 2)))));
+  const bubbles = Math.max(0, Math.round(lerp(0, 4, Math.min(1, Math.max(0, (t - 1.2) / 2.3)))));
+  const inlineWidgets = t >= 3.4 ? Math.round(lerp(0, 2, Math.min(1, (t - 3.4) / 0.6))) : 0;
+  const widgets = Math.max(0, Math.round(lerp(6, 2, Math.min(1, Math.max(0, (t - 1) / 3)))));
 
   const columns =
     appShare <= 0.02
@@ -67,25 +72,25 @@ export function Continuum() {
 
   return (
     <SceneFrame
-      eyebrow="05 · The continuum"
+      eyebrow="02 · The continuum"
       title={
         <>
-          Building, reshaping, embedding, and <em>just-in-time</em> UI are one thing
+          No boundary between your agents and your <em>software</em>
         </>
       }
       lede={
         <>
-          Today an app and a conversation with an agent are different things, made by different people in
-          different places. We want that boundary to be soft: an agent builds software, you change it, agents
-          work inside it, and UI appears inside the conversation, all on the same footing.
+          Building an app, reshaping it while you use it, embedding agents inside it, agents reading its
+          data on their own, and UI appearing in the conversation — these blur into one continuum. Same
+          source, same VCS, same authority at every point.
         </>
       }
     >
       <Figure
         caption={
           <>
-            Drag the slider. It's one continuum because it's one substrate: the same source, VCS, builds,
-            channels and authority at every point.
+            Drag the slider. One substrate — same source, VCS, builds, channels, and authority — so these
+            aren't separate features, they're points on a continuum.
           </>
         }
       >
@@ -94,7 +99,7 @@ export function Continuum() {
             className="slider"
             type="range"
             min={0}
-            max={3}
+            max={4}
             step={0.01}
             value={t}
             onChange={(event) => setT(Number(event.target.value))}
@@ -104,7 +109,7 @@ export function Continuum() {
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+              gridTemplateColumns: "repeat(5, minmax(0, 1fr))",
               gap: 6,
               fontSize: 12.5,
             }}

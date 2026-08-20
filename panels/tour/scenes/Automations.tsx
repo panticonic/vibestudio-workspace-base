@@ -51,17 +51,17 @@ export function Automations() {
       eyebrow="06 · Automations"
       title={
         <>
-          Recurring work is <em>reviewed</em>, not a cron line in a config file
+          Recurring work is <em>reviewed</em>, not buried in a config file
         </>
       }
       lede={
         <>
-          <p>An agent can propose an automation. Only you can approve it, and until then it does nothing. What you approve is exact:</p>
+          <p>An agent can propose an automation, but only you can approve it — until then it does nothing. What you approve is specific:</p>
           <ul>
-            <li>what runs, and where</li>
+            <li>what runs and where</li>
             <li>on what trigger</li>
             <li>in which conversation</li>
-            <li>with which standing authority while nobody is watching</li>
+            <li>with what standing authority while nobody is watching</li>
           </ul>
         </>
       }
@@ -129,8 +129,8 @@ export function Automations() {
             </div>
           ) : (
             <p className="box__sub" style={{ marginTop: 14 }}>
-              The agent says what would run and when, and that the draft is waiting. It doesn't say
-              “scheduled”, because it isn't.
+              The agent reports what would run and when, and that the draft is waiting. It doesn't say
+              “scheduled” — because it isn't.
             </p>
           )}
         </Figure>

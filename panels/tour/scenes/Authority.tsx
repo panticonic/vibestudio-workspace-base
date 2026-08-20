@@ -132,31 +132,31 @@ export function Authority() {
 
   return (
     <SceneFrame
-      eyebrow="03 · Authority"
+      eyebrow="04 · Authority"
       title={
         <>
-          Tokens say who. Decisions say <em>what</em>.
+          Identity says <em>who</em>. The host decides <em>what</em>.
         </>
       }
       lede={
         <>
-          <p>A token identifies the caller and grants nothing. The host decides each effect from:</p>
+          <p>Knowing who is calling doesn't grant any capabilities. Every action is decided by the host, based on:</p>
           <ul>
             <li>who is calling</li>
             <li>which exact code</li>
             <li>in which session</li>
             <li>on which resource</li>
           </ul>
-          <p>Userland can show a prompt. It cannot approve itself.</p>
+          <p>Userland can show a prompt, but it can never approve itself.</p>
         </>
       }
     >
       <Figure
         caption={
           <>
-            Simplified, but this is the shape: <strong>open</strong> needs no grant, <strong>gated</strong> needs
-            a stored grant matching the unit's declared request, <strong>critical</strong> needs a fresh decision
-            every time.
+            Simplified: <strong>open</strong> needs no grant, <strong>gated</strong> needs
+            a stored grant matching the unit's declared request, <strong>critical</strong> always needs a fresh
+            human decision.
           </>
         }
       >
@@ -203,7 +203,7 @@ export function Authority() {
                 {stage === "prompt" ? (
                   caller === "mission" ? (
                     <>
-                      Nobody is watching this run, so it <strong>waits</strong> for a human. No timeout, no
+                      Nobody is watching this run, so it <strong>waits</strong> for a human — no timeout, no
                       auto-approve. Standing authority comes only from a reviewed revision of the mission.
                       <div style={{ display: "flex", gap: 6, marginTop: 8, flexWrap: "wrap" }}>
                         <button type="button" className="btn" onClick={() => decide("once")}>Owner approves later</button>
@@ -226,7 +226,7 @@ export function Authority() {
                     </>
                   )
                 ) : (
-                  "A fresh human decision, when the store can't answer."
+                  "When no stored grant covers it, a fresh human decision is needed."
                 )}
               </div>
             </div>
@@ -239,7 +239,7 @@ export function Authority() {
               </div>
               <div className="step__body">
                 {effect === "publish-main" && outcome === "allowed"
-                  ? "Main advanced after the gate checked ancestry, integration and the exact candidate build."
+                  ? "Main advanced — the gate verified ancestry, integration, and the exact candidate build."
                   : "The host performs the effect. Userland never holds the authority itself."}
               </div>
             </div>
@@ -294,9 +294,9 @@ export function Authority() {
         hint="The rows you just simulated exist for real in Permissions."
       />
       <p className="scene__aside">
-        Grants are rows in one ledger, bound to the repository and exact version that asked. Catalogs, builds
-        and docs never create rows. A denial comes with a reason and a remediation, and the remediation is
-        never “try another caller.”
+        Grants are rows in one ledger, bound to the repository and exact version that asked. Catalogs, builds,
+        and docs never create rows. A denial includes a reason and a remediation — and the remediation is
+        never "try from a different caller."
       </p>
     </SceneFrame>
   );

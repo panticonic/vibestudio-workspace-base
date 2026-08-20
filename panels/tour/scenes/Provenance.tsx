@@ -113,21 +113,22 @@ export function Provenance() {
       eyebrow="07 · Provenance & VCS"
       title={
         <>
-          Every line knows <em>why</em> it exists
+          A semantic <em>git blame</em> for agentic work
         </>
       }
       lede={
         <>
           <p>
-            Managed source is semantic history, not a Git worktree. Each edit, move, copy and merge decision is a
-            typed fact linked to:
+            Agents produce code, but they also need to understand existing code before changing it.
+            Managed source tracks semantic history — a structured record of intent, not just file diffs.
+            Each edit, move, copy, and merge decision is linked to:
           </p>
           <ul>
             <li>the tool call that made it</li>
             <li>the turn it happened in</li>
             <li>the human message behind it</li>
           </ul>
-          <p>That is not for audit. It's how an agent finds out why something is the way it is before changing it.</p>
+          <p>This gives agents memory across sessions: the reasoning behind existing code is always recoverable.</p>
         </>
       }
     >
@@ -170,7 +171,7 @@ export function Provenance() {
           caption={
             <>
               One call: <code>provenance({"{"} target, walk: "{walk}" {"}"})</code>. Intent first, mechanics
-              after. Where the record stops (a subagent brief, an import, something outside your view) it says
+              after. Where the record ends — a subagent brief, an import, something outside view — it says
               so rather than guessing.
             </>
           }
@@ -194,24 +195,24 @@ export function Provenance() {
       </div>
 
       <Figure
-        caption="Files merge by coordinate and net effect, not by replaying edits. Two contexts that touched the same file reconcile by what they changed, not by who typed first."
+        caption="Merging works by coordinate and net effect, not by replaying edits. Two contexts that touched the same file reconcile by what changed, not who typed first."
       >
         <div className="flow flow--wrap">
           <div className="step step--done">
             <div className="step__title">Contexts</div>
-            <div className="step__body">Each agent works in its own context, with a working head and a committed boundary.</div>
+            <div className="step__body">Each agent works in its own context with a working head and a committed boundary.</div>
           </div>
           <div className="step step--done">
             <div className="step__title">Commit</div>
-            <div className="step__body">Turns the whole local chain into one event. No partial commits.</div>
+            <div className="step__body">Turns the local chain into one event. No partial commits.</div>
           </div>
           <div className="step step--done">
             <div className="step__title">Net-effect merge</div>
-            <div className="step__body">Per coordinate. Conflicts become recorded decisions with a reason, which provenance later shows as rejections.</div>
+            <div className="step__body">Per coordinate. Conflicts become recorded decisions with reasons — provenance later surfaces these as rejections.</div>
           </div>
           <div className="step step--done">
             <div className="step__title">Protected main</div>
-            <div className="step__body">Advances only with approval, after the exact candidate builds and typechecks. Git is a projection of it.</div>
+            <div className="step__body">Advances only with approval, after the exact candidate builds and typechecks. Git is a projection.</div>
           </div>
         </div>
       </Figure>

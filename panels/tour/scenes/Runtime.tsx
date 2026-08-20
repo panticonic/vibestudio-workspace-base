@@ -71,17 +71,18 @@ export function Runtime() {
       }
       lede={
         <>
-          Userland runs in the sandboxes browsers and edge runtimes already have: panels are webviews, workers
-          and agents are V8 isolates in workerd. One TypeScript toolchain builds both, on demand, into a
-          content-addressed store. No Docker, no VM, no image to pull. A laptop runs it; a phone pairs to it.
+          Userland runs in the sandboxes browsers and edge runtimes already provide: panels are webviews,
+          workers and agents are V8 isolates in workerd. Idle agents hibernate and panels are offloaded —
+          nothing stays resident that isn't actively working. One TypeScript toolchain, no Docker, no VM.
+          Runs on a laptop; a phone pairs to it.
         </>
       }
     >
       <Figure
         caption={
           <>
-            The defaults are rough placeholders. Drag them to your own numbers. The point is not a benchmark:
-            it's that a sandbox per task, per subagent, per panel is cheap enough not to think about.
+            Defaults are rough placeholders — drag them to your own numbers. The interesting thing isn't the
+            benchmark: it's that a sandbox per task, per subagent, per panel is cheap enough to stop thinking about.
           </>
         }
       >
@@ -167,23 +168,32 @@ export function Runtime() {
         )}
       </Figure>
 
-      <div className="scene__grid">
+      <div className="scene__grid" style={{ gridTemplateColumns: "repeat(3, minmax(200px, 1fr))" }}>
         <div className="box">
           <div className="box__title">Builds</div>
           <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 14 }}>
-            <li>Run from the exact working head of a context, so unpublished code can be tried before commit.</li>
-            <li>Keyed by content. Artifacts are disposable projections in a content-addressed store.</li>
-            <li>Publication builds and typechecks the exact candidate before main advances.</li>
-            <li>A bad build keeps the last runnable artifact live.</li>
+            <li>Run from the exact working head, so unpublished code can be tried before commit.</li>
+            <li>Keyed by content — artifacts are disposable projections in a content-addressed store.</li>
+            <li>Publishing builds and typechecks the exact candidate before main advances.</li>
+            <li>A broken build keeps the last working artifact live.</li>
+          </ul>
+        </div>
+        <div className="box">
+          <div className="box__title">Hibernation</div>
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 14 }}>
+            <li>Idle agents hibernate — their state persists in the DO, but the isolate is reclaimed.</li>
+            <li>Panels are offloaded when not visible; reopening restores them from state.</li>
+            <li>No long-running processes leaking memory or holding connections open.</li>
+            <li>Wake-up is fast: the isolate restarts, the state is already there.</li>
           </ul>
         </div>
         <div className="box">
           <div className="box__title">What that buys</div>
           <ul style={{ margin: "6px 0 0", paddingLeft: 18, fontSize: 14 }}>
             <li>Edit, rebuild, and the panel you're looking at updates in seconds.</li>
-            <li>A subagent gets a context, an isolate and a channel, not a machine.</li>
-            <li>Every app gets a SQLite database through its Durable Object.</li>
-            <li>One language and one module graph for UI, services and agents.</li>
+            <li>A subagent gets a context, an isolate, and a channel — not a machine.</li>
+            <li>Run many agents without resource leaks accumulating over time.</li>
+            <li>One language, one module graph for UI, services, and agents.</li>
           </ul>
         </div>
       </div>
