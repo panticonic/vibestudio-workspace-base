@@ -133,6 +133,7 @@
       "@workspace/ui/command": ["./packages/ui/src/command.ts"],
       "@workspace/ui/diff": ["./packages/ui/src/diff.ts"],
       "@workspace/ui/feedback": ["./packages/ui/src/kit/feedback.tsx"],
+      "@workspace/ui/icons": ["./packages/ui/src/icons.ts"],
       "@workspace/ui/foundation.css": ["./packages/ui/src/foundation.css"],
       "@workspace/ui/layout": ["./packages/ui/src/kit/layout.tsx"],
       "@workspace/ui/overlay": ["./packages/ui/src/kit/overlay.tsx"],
