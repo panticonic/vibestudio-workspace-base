@@ -132,14 +132,16 @@ export interface MobileFetchedResponse {
  * error anywhere — observed on device. A small window keeps the anti-burst
  * property while leaving the panel alive when one fetch misbehaves.
  *
- * Now that lost bulk messages announce themselves (the mux's sequence gap),
- * this is measurable rather than guessed: raise it, and a gap says the bridge
- * could not keep up.
+ * Now that lost bulk messages announce themselves (the mux's sequence gap or a
+ * response-HEAD timeout), this is measurable rather than guessed. Four is
+ * still too wide: an Android smoke run lost the response heads for all four
+ * occupied slots even though the server completed every fetch. Two preserves
+ * an independent lane when one stream stalls without recreating that burst.
  *
  * Store hits never take the gate: they cost zero pipe bytes, so a warm panel
  * still loads fully parallel.
  */
-const MAX_CONCURRENT_PIPE_FETCHES = 4;
+const MAX_CONCURRENT_PIPE_FETCHES = 2;
 
 /**
  * Start the loopback panel-asset façade. Resolves once the port is bound; point
