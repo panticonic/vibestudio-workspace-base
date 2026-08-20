@@ -155,6 +155,18 @@ export function TerminalApp() {
     [sessionStore]
   );
   const actions = usePanelActions({ shell, state, sessions, setState, setSessions });
+  const refreshShellUnit = useCallback(async (): Promise<ShellUnitStatus | null> => {
+    const units = await runtime.supervision.list({ kind: "extension" });
+    const match = units.find(
+      (unit) =>
+        unit.identity.entityId === "@workspace-extensions/shell" ||
+        unit.source === "extensions/shell" ||
+        unit.source.endsWith("/extensions/shell")
+    );
+    const next = match ?? null;
+    setShellUnit(next);
+    return next;
+  }, []);
 
   const openScratch = useCallback(() => {
     setState((prev) => {
@@ -361,11 +373,17 @@ export function TerminalApp() {
       setInitialOpenStartedAt(Date.now());
       setInitialOpenStatus("opening");
       setInitialOpenError(null);
-      if (initialOpenHintTimerRef.current) window.clearTimeout(initialOpenHintTimerRef.current);
-      initialOpenHintTimerRef.current = window.setTimeout(() => {
-        setInitialOpenStatus("waitingApproval");
-      }, 1000);
       try {
+        const unit = await refreshShellUnit();
+        if (unit?.status !== "running") {
+          initialOpenPendingRef.current = true;
+          setInitialOpenStatus("waitingApproval");
+          return undefined;
+        }
+        if (initialOpenHintTimerRef.current) window.clearTimeout(initialOpenHintTimerRef.current);
+        initialOpenHintTimerRef.current = window.setTimeout(() => {
+          setInitialOpenStatus("waitingApproval");
+        }, 1000);
         const sessionId = await actions.openSession();
         initialOpenPendingRef.current = false;
         setInitialOpenStatus("idle");
@@ -397,7 +415,7 @@ export function TerminalApp() {
         initialOpenInFlightRef.current = false;
       }
     },
-    [actions]
+    [actions, refreshShellUnit]
   );
 
   const runInteractiveOpen = useCallback(
@@ -483,24 +501,9 @@ export function TerminalApp() {
   }, [anyOpenPending]);
 
   useEffect(() => {
-    let cancelled = false;
-    function pickShellUnit(units: RuntimeSupervisionDescription[]) {
-      const match = units.find(
-        (unit) =>
-          unit.identity.entityId === "@workspace-extensions/shell" ||
-          unit.source === "extensions/shell" ||
-          unit.source.endsWith("/extensions/shell")
-      );
-      if (!cancelled) setShellUnit(match ?? null);
-    }
-    void runtime.supervision
-      .list({ kind: "extension" })
-      .then(pickShellUnit)
+    void refreshShellUnit()
       .catch((error) => console.warn("[TerminalApp] Failed to load shell unit status:", error));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  }, [refreshShellUnit]);
 
   useEffect(() => {
     for (const session of Object.values(sessions)) {
