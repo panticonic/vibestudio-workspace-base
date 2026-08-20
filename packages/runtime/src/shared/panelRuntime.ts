@@ -868,9 +868,21 @@ export function createPanelRuntime(
       "runtime.createEntity",
       [entitySpec],
     );
+    // Known before the commit, so it travels with the binding: the destination
+    // entity is brand new, and until something names it the tree would have to
+    // present the slot id.
+    const title =
+      normalizePanelTitle(
+        external
+          ? new URL(source).hostname ||
+              new URL(source).protocol.replace(/:$/, "") ||
+              "browser"
+          : (panelMetadata?.title ?? source),
+      ) ?? "panel";
     const transition = await commitPreparedPanelNavigation(navigationClients, {
       slotId: asPanelSlotId(id),
       expectedCurrentEntityId: asPanelEntityId(current.entity.id),
+      title,
       mutation: {
         kind: historyMode,
         entry: {
@@ -887,14 +899,6 @@ export function createPanelRuntime(
       },
     });
     reportNavigationCleanup(transition);
-    const title =
-      normalizePanelTitle(
-        external
-          ? new URL(source).hostname ||
-              new URL(source).protocol.replace(/:$/, "") ||
-              "browser"
-          : (panelMetadata?.title ?? source),
-      ) ?? "panel";
     await callState("panel.updateTitle", [id, title, { explicit: false }]);
     const attempt = await ensurePanelMaterialized(id);
     const observation = await observePanel(id);
