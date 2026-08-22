@@ -5,18 +5,27 @@ import {
   consumeConnectLinkReplay,
   parseConnectLink,
 } from "@vibestudio/mobile-webrtc/connectLink";
+import {
+  createConnectDeepLink,
+  derivePairingRoom,
+  PAIRING_PROTOCOL_VERSION,
+} from "@vibestudio/shared/connect";
 
 const storage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 
-// A structurally-valid v2 pairing link (scheme carrier). `exp` is required —
+// A structurally-valid compact-v3 pairing link (scheme carrier). `exp` is required —
 // pairing links expire — and is kept relative to now so the fixture cannot
 // start failing on a fixed date.
-const LINK_EXPIRY = Date.now() + 10 * 60 * 1000;
-const VALID_LINK =
-  "vibestudio://connect?room=room-1234-5678&fp=" +
-  "a".repeat(64) +
-  "&code=abcdefghijklmnopqrstuvwxyzABCDEF&sig=wss%3A%2F%2Fsignal.example%2F&v=2&ice=all" +
-  `&exp=${LINK_EXPIRY}`;
+const CODE = "abcdefghijklmnopqrstuvwxyzABCDEF";
+const VALID_LINK = createConnectDeepLink({
+  room: derivePairingRoom(CODE),
+  fp: "a".repeat(64),
+  code: CODE,
+  sig: "wss://signal.example/",
+  v: PAIRING_PROTOCOL_VERSION,
+  ice: "all",
+  exp: Date.now() + 10 * 60 * 1000,
+});
 
 describe("connectLink", () => {
   beforeEach(() => {
@@ -27,8 +36,8 @@ describe("connectLink", () => {
 
   describe("isConnectLink", () => {
     it("recognizes both pairing-link carrier forms", () => {
-      expect(isConnectLink("vibestudio://connect?room=x")).toBe(true);
-      expect(isConnectLink("https://vibestudio.app/pair#room=x")).toBe(true);
+      expect(isConnectLink("vibestudio://connect/compact")).toBe(true);
+      expect(isConnectLink("https://vibestudio.app/p#compact")).toBe(true);
     });
     it("rejects clipboard garbage and other links", () => {
       expect(isConnectLink("https://example.com/pair")).toBe(false);
@@ -40,12 +49,12 @@ describe("connectLink", () => {
   });
 
   describe("parseConnectLink (shared parser re-export)", () => {
-    it("parses a valid v2 link", () => {
+    it("parses a valid compact-v3 link", () => {
       const parsed = parseConnectLink(VALID_LINK);
       expect(parsed.kind).toBe("ok");
     });
     it("rejects a stale/old-version link", () => {
-      const stale = VALID_LINK.replace("v=2", "v=1");
+      const stale = "vibestudio://connect?room=old-query-format&v=2";
       const parsed = parseConnectLink(stale);
       expect(parsed.kind).toBe("error");
     });
@@ -56,38 +65,52 @@ describe("connectLink", () => {
       await markConnectLinkConsumed(VALID_LINK, 1_000);
       expect(storage.setItem).toHaveBeenCalledWith(
         "vibestudio:connect:consumed-url",
-        JSON.stringify({ url: VALID_LINK, consumedAt: 1_000 })
+        JSON.stringify({ url: VALID_LINK, consumedAt: 1_000 }),
       );
 
-      storage.getItem.mockResolvedValueOnce(JSON.stringify({ url: VALID_LINK, consumedAt: 1_000 }));
-      await expect(consumeConnectLinkReplay(VALID_LINK, 2_000)).resolves.toBe(true);
+      storage.getItem.mockResolvedValueOnce(
+        JSON.stringify({ url: VALID_LINK, consumedAt: 1_000 }),
+      );
+      await expect(consumeConnectLinkReplay(VALID_LINK, 2_000)).resolves.toBe(
+        true,
+      );
       expect(storage.removeItem).not.toHaveBeenCalled();
     });
 
     it("does not suppress a different link", async () => {
-      storage.getItem.mockResolvedValueOnce(JSON.stringify({ url: VALID_LINK, consumedAt: 1_000 }));
+      storage.getItem.mockResolvedValueOnce(
+        JSON.stringify({ url: VALID_LINK, consumedAt: 1_000 }),
+      );
       await expect(
-        consumeConnectLinkReplay("vibestudio://connect?room=other", 2_000)
+        consumeConnectLinkReplay("vibestudio://connect/other", 2_000),
       ).resolves.toBe(false);
     });
 
     it("does not suppress (and clears) a stale consumed link", async () => {
-      storage.getItem.mockResolvedValueOnce(JSON.stringify({ url: VALID_LINK, consumedAt: 1_000 }));
-      await expect(consumeConnectLinkReplay(VALID_LINK, 1_000 + 11 * 60 * 1_000)).resolves.toBe(
-        false
+      storage.getItem.mockResolvedValueOnce(
+        JSON.stringify({ url: VALID_LINK, consumedAt: 1_000 }),
       );
-      expect(storage.removeItem).toHaveBeenCalledWith("vibestudio:connect:consumed-url");
+      await expect(
+        consumeConnectLinkReplay(VALID_LINK, 1_000 + 11 * 60 * 1_000),
+      ).resolves.toBe(false);
+      expect(storage.removeItem).toHaveBeenCalledWith(
+        "vibestudio:connect:consumed-url",
+      );
     });
 
     it("ignores non-connect links entirely", async () => {
       await markConnectLinkConsumed("https://example.com", 1_000);
       expect(storage.setItem).not.toHaveBeenCalled();
-      await expect(consumeConnectLinkReplay("https://example.com", 2_000)).resolves.toBe(false);
+      await expect(
+        consumeConnectLinkReplay("https://example.com", 2_000),
+      ).resolves.toBe(false);
     });
 
     it("fails closed when the store read throws", async () => {
       storage.getItem.mockRejectedValueOnce(new Error("store unavailable"));
-      await expect(consumeConnectLinkReplay(VALID_LINK, 2_000)).resolves.toBe(false);
+      await expect(consumeConnectLinkReplay(VALID_LINK, 2_000)).resolves.toBe(
+        false,
+      );
     });
   });
 });

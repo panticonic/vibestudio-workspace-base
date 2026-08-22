@@ -21,8 +21,8 @@ pairing.
 
 ## Pairing And Re-Pair
 
-- Accept both `https://vibestudio.app/pair#...` and
-  `vibestudio://connect?...` links through the shared parser.
+- Accept both `https://vibestudio.app/p#...` and
+  `vibestudio://connect/...` links through the shared compact-v3 parser.
 - The login/recovery surface should offer paste-link and scanner entry points
   that delegate to native host capabilities.
 - Consumed or stale links must fail visibly and leave the recovery UI usable.

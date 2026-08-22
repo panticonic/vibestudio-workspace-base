@@ -258,7 +258,7 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
               </Flex>
               <TextField.Root
                 aria-label="Pairing link"
-                placeholder="vibestudio://connect?room=…"
+                placeholder="https://vibestudio.app/p#…"
                 value={pairLink}
                 onChange={(e) => setPairLink(e.target.value)}
               />

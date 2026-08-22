@@ -23,8 +23,8 @@ Remote startup is a two-step WebRTC flow:
 2. Select a workspace through `hubControl.routeWorkspace`, which returns that
    child's current WebRTC reach information without minting another identity.
 
-`vibestudio remote pair "https://vibestudio.app/pair#room=...&fp=...&code=...&sig=...&v=2&ice=all"`
-or the equivalent `vibestudio://connect?...` link exchanges a pairing invite
+`vibestudio remote pair "https://vibestudio.app/p#<compact-payload>"`
+or the equivalent `vibestudio://connect/<compact-payload>` link exchanges a pairing invite
 over the pipe and stores the device credential.
 `vibestudio remote select <name>` switches the selected child's reach while
 keeping that same credential for later workspace listing/selection.
@@ -103,8 +103,8 @@ the authenticated shell's account; `inviteUser` is root/admin-gated.
   fingerprint pinning. Do not add public-ingress, VPN, or cleartext-host
   exceptions for RPC reachability.
 - Pairing QR codes should use the HTTPS carrier
-  `https://vibestudio.app/pair#...`; machine/CLI surfaces may keep the
-  `vibestudio://connect?...` carrier. Both use the same parser and payload.
+  `https://vibestudio.app/p#...`; native carriers use
+  `vibestudio://connect/...`. Both use the same compact-v3 parser and payload.
 - Pairing invites are complete artifacts: `deepLink`, `pairUrl`, `room`, `fp`,
   `code`, and `sig` are non-null. Do not reintroduce bare-code or nullable-link
   handling.

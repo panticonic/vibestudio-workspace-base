@@ -82,7 +82,7 @@ function renderSettings() {
       routeWorkspace: jest.fn(),
       pairDevice: jest.fn(async () => ({
         pairing: {
-          pairUrl: "https://vibestudio.app/pair#device-invite",
+          pairUrl: "https://vibestudio.app/p#device-invite",
           expiresAt: Date.now() + 60_000,
         },
       })),
@@ -130,14 +130,14 @@ describe("SettingsScreen workspace selector", () => {
         room: "control-1111",
         fp: "AA".repeat(32),
         sig: "wss://signal.example/",
-        v: 2,
+        v: 3,
         ice: "all",
       },
       workspacePairing: {
         room: "workspace-a-1111",
         fp: "BB".repeat(32),
         sig: "wss://signal.example/",
-        v: 2,
+        v: 3,
         ice: "all",
       },
       selectedWorkspaceId: "ws-a",
@@ -277,12 +277,12 @@ describe("SettingsScreen workspace selector", () => {
       }),
     );
     expect(
-      view.getByText("https://vibestudio.app/pair#device-invite"),
+      view.getByText("https://vibestudio.app/p#device-invite"),
     ).toBeTruthy();
 
     fireEvent.press(view.getByText("Copy link"));
     expect(Clipboard.setString).toHaveBeenCalledWith(
-      "https://vibestudio.app/pair#device-invite",
+      "https://vibestudio.app/p#device-invite",
     );
   });
 

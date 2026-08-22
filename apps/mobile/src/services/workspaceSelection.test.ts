@@ -43,21 +43,21 @@ const CONTROL_PAIRING = {
   room: "control-1111",
   fp: "AA".repeat(32),
   sig: "wss://signal.example/",
-  v: 2 as const,
+  v: 3 as const,
   ice: "all" as const,
 };
 const WORKSPACE_A_PAIRING = {
   room: "workspace-a-1111",
   fp: "BB".repeat(32),
   sig: "wss://signal.example/",
-  v: 2 as const,
+  v: 3 as const,
   ice: "all" as const,
 };
 const WORKSPACE_B_PAIRING = {
   room: "workspace-b-2222",
   fp: "CC".repeat(32),
   sig: "wss://signal.example/",
-  v: 2 as const,
+  v: 3 as const,
   ice: "relay" as const,
 };
 const storedA: StoredRoutedMobileConnection = {

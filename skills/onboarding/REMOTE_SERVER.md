@@ -45,7 +45,7 @@ For a foreground session instead:
 
 ```
 vibestudio remote serve --port 3030
-# → Root Pair URL: https://vibestudio.app/pair#room=…&fp=…&code=…&sig=…&v=2&ice=all
+# → Root Pair URL: https://vibestudio.app/p#<compact-payload>
 ```
 
 On an empty identity database the hub starts the default workspace child and
@@ -72,8 +72,11 @@ When the remote server is meant to edit Vibestudio itself, start it with `pnpm d
 
 ## 2. Pair a client
 
-The pairing link / QR carries everything needed to reach its hub invite room
-(`room`, `fp`, `code`, `sig`). On first boot, the first valid root invite
+The compact v3 pairing link / QR carries everything needed to reach its hub
+invite room: one-time secret, DTLS fingerprint pin, expiry, ICE policy, and any
+non-default signaling endpoint. The room is derived one-way from the secret,
+and the hosted-default URL contains no shell metacharacters or remote lookup.
+On first boot, the first valid root invite
 redemption creates the root account. Later, root/admin uses `invite-user` for a
 new person, while any member uses `pair-device` for another device they own.
 
@@ -83,9 +86,9 @@ exact one-time `PairingContext.workspaceId` selected by the invite. The client
 routes that ID over the same hub connection and saves the returned child
 `workspaceReach`. No process token leaves the server.
 
-- **CLI** — run `vibestudio remote pair "https://vibestudio.app/pair#…"` to pair over WebRTC. The CLI stores the device credential, stable hub control pairing, exact selected workspace ID, and current workspace pairing; later workspace switches preserve the control pairing.
-- **Desktop (Electron)** — open the `vibestudio://connect?…` link (or scan the QR); the shell pairs over WebRTC and stores the device credential in the OS keychain. Use the connection badge → **Paired devices** → **Connect a device**, or `vibestudio remote pair-device`, for another device on your account; root/admin uses `vibestudio remote invite-user --handle <handle> --workspace <name>` for another person. Selecting another remote workspace reuses this identity without pairing again.
-- **Mobile** — scan the QR or follow a `vibestudio://connect?…` link. Once connected, use **Settings** → **Devices** → **Connect another device** to share a new one-time link with another phone or desktop. The native host stores its own credential via `react-native-keychain`.
+- **CLI** — run `vibestudio remote pair "https://vibestudio.app/p#…"` to pair over WebRTC. The CLI stores the device credential, stable hub control pairing, exact selected workspace ID, and current workspace pairing; later workspace switches preserve the control pairing.
+- **Desktop (Electron)** — run `vibestudio open https://vibestudio.app/p#…` (or open the compact URL directly); the shell pairs over WebRTC and stores the device credential in the OS keychain. Use the connection badge → **Paired devices** → **Connect a device**, or `vibestudio remote pair-device`, for another device on your account; root/admin uses `vibestudio remote invite-user --handle <handle> --workspace <name>` for another person. Selecting another remote workspace reuses this identity without pairing again.
+- **Mobile** — scan the QR or follow a `https://vibestudio.app/p#…` link. Once connected, use **Settings** → **Devices** → **Connect another device** to share a new one-time link with another phone or desktop. The native host stores its own credential via `react-native-keychain`.
 
 The QR `code` is the one-time pairing secret; the `fp` is the pinned hub DTLS
 fingerprint. A workspace route returns only `workspaceReach`, never a new

@@ -142,7 +142,7 @@ Useful smoke path:
 
 1. Start a pairable server.
 2. Install or launch a clean mobile host.
-3. Open a `https://vibestudio.app/pair#...` or `vibestudio://connect?...` link.
+3. Open a `https://vibestudio.app/p#...` or `vibestudio://connect/...` link.
 4. Verify native bootstrap completes pairing.
 5. Verify the host fetches the current platform bundle and reloads into the
    workspace app.
