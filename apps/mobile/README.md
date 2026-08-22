@@ -10,6 +10,11 @@ live in the repository's native `apps/mobile` package. Native modules, signing,
 release packaging, and OS-level integration belong there; product UI and
 workspace behavior belong here.
 
+The connected product exposes **Settings** → **Devices** → **Connect another
+device**. It asks hub control for a complete, workspace-targeted invitation and
+offers copy/share actions; first pairing and recovery remain native-host
+responsibilities.
+
 ## Checks
 
 Run the native package's commands from the repository root; its Jest and

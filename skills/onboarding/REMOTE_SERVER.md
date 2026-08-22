@@ -22,12 +22,34 @@ attributed to the acting user.
 
 ## 1. Start the server as a WebRTC answerer
 
-The hub needs a **signaling endpoint** (a tiny Cloudflare Worker/DO that brokers the WebRTC offer/answer — it never sees your data). On an empty identity database it starts the default workspace child and prints root-bootstrap pairing links:
+The hub needs a **signaling endpoint** (a tiny Cloudflare Worker/DO that brokers
+the WebRTC offer/answer — it never sees your data). For an always-on Linux
+server on this computer, install and deploy the server through its owned user
+service:
+
+```
+npm install -g @panticonic/vibestudio-server
+vibestudio remote deploy local
+```
+
+Use `vibestudio remote deploy user@host` when the server is a different
+computer. The target is the only difference: both forms install the same
+loopback-only systemd service, enable linger, validate the hub and default
+workspace reaches, and surface the current root pairing QR from the service
+journal. Manage the same target with `remote deploy status`, `logs`, `update`,
+and `remove`.
+
+For a foreground session instead:
 
 ```
 vibestudio remote serve --port 3030
 # → Root Pair URL: https://vibestudio.app/pair#room=…&fp=…&code=…&sig=…&v=2&ice=all
 ```
+
+On an empty identity database the hub starts the default workspace child and
+owns one live root-bootstrap invite at a time. If it expires before a device
+claims it, the hub replaces it and publishes the new QR/link; a fresh server
+does not require a restart merely because the operator stepped away.
 
 - Signaling resolves as `--signal-url` > `VIBESTUDIO_WEBRTC_SIGNAL_URL` > hosted default (`wss://signal.vibestudio.app`).
 - The QR reaches the hub's persistent control identity at
@@ -60,8 +82,8 @@ routes that ID over the same hub connection and saves the returned child
 `workspaceReach`. No process token leaves the server.
 
 - **CLI** — run `vibestudio remote pair "https://vibestudio.app/pair#…"` to pair over WebRTC. The CLI stores the device credential, stable hub control pairing, exact selected workspace ID, and current workspace pairing; later workspace switches preserve the control pairing.
-- **Desktop (Electron)** — open the `vibestudio://connect?…` link (or scan the QR); the shell pairs over WebRTC and stores the device credential in the OS keychain. Use **Connect a device** or `vibestudio remote pair-device` for another device on your account; root/admin uses `vibestudio remote invite-user --handle <handle> --workspace <name>` for another person.
-- **Mobile** — scan the QR or follow a `vibestudio://connect?…` link from `vibestudio mobile pair` / **Pair another device**; the native host stores the credential via `react-native-keychain`.
+- **Desktop (Electron)** — open the `vibestudio://connect?…` link (or scan the QR); the shell pairs over WebRTC and stores the device credential in the OS keychain. Use the connection badge → **Paired devices** → **Connect a device**, or `vibestudio remote pair-device`, for another device on your account; root/admin uses `vibestudio remote invite-user --handle <handle> --workspace <name>` for another person. Selecting another remote workspace reuses this identity without pairing again.
+- **Mobile** — scan the QR or follow a `vibestudio://connect?…` link. Once connected, use **Settings** → **Devices** → **Connect another device** to share a new one-time link with another phone or desktop. The native host stores its own credential via `react-native-keychain`.
 
 The QR `code` is the one-time pairing secret; the `fp` is the pinned hub DTLS
 fingerprint. A workspace route returns only `workspaceReach`, never a new
@@ -74,9 +96,10 @@ When you trigger an OAuth flow from a remotely-connected client, the flow opens 
 
 ## 4. Verifying the connection
 
-The Electron connection badge in the title bar indicates:
+The Electron connection badge is always visible because it is also the stable
+entry point for connection settings and device pairing. It indicates:
 
-- **Hidden** — local (co-located) mode, everything healthy.
+- **Gray globe** — connected to the co-located server.
 - **Green globe with hostname** — connected to a remote server over WebRTC.
 - **Amber "reconnecting"** — the pipe dropped and the client is re-establishing (full ICE re-establish, not a socket retry).
 - **Red "disconnected"** — recovery exhausted.
@@ -85,22 +108,22 @@ Clicking the badge opens the connection dialog.
 
 ## 5. What lives where
 
-| On the server (host machine)                                                                            | On the client                                                                     |
-| ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| Hub identity/membership (`server-auth/identity.db`) and workspaces (`~/.config/vibestudio/workspaces/`) | Global device credential + stable hub control reach + selected workspace ID and child reach |
-| Credentials + consent state (`~/.config/vibestudio/credentials/`, `credentials-consent.sqlite`)         | Theme / local UI preferences                                                      |
-| Hub control identity (`server-auth/webrtc/identity.pem`) and per-child identities (`reach/webrtc/identity.pem`) | Electron userData cache for remote mode                                      |
-| Durable Object state (`.databases/workerd-do/`)                                                         |                                                                                   |
-| Agent/worker execution                                                                                  |                                                                                   |
+| On the server (host machine)                                                                                    | On the client                                                                               |
+| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Hub identity/membership (`server-auth/identity.db`) and workspaces (`~/.config/vibestudio/workspaces/`)         | Global device credential + stable hub control reach + selected workspace ID and child reach |
+| Credentials + consent state (`~/.config/vibestudio/credentials/`, `credentials-consent.sqlite`)                 | Theme / local UI preferences                                                                |
+| Hub control identity (`server-auth/webrtc/identity.pem`) and per-child identities (`reach/webrtc/identity.pem`) | Electron userData cache for remote mode                                                     |
+| Durable Object state (`.databases/workerd-do/`)                                                                 |                                                                                             |
+| Agent/worker execution                                                                                          |                                                                                             |
 
 Back up the server side; the client is disposable.
 
 ## 6. Troubleshooting
 
-| Symptom                               | Likely cause                                                                                                                                                       |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Pairing link never appears            | The server couldn't reach signaling, or `node-datachannel` isn't built — run `pnpm rebuild node-datachannel` once on the server.                                   |
+| Symptom                               | Likely cause                                                                                                                                                                                                            |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pairing link never appears or renews  | Follow `remote deploy logs <target>`. The server may not reach signaling, or `node-datachannel` is not built — run `pnpm rebuild node-datachannel` once on the server.                                                  |
 | `fingerprint mismatch` on hub control | The saved control `fp` no longer matches the hub cert — restore the expected hub identity from its exact backup and investigate possible signaling attack. In-place hub identity rotation is intentionally unsupported. |
-| `fingerprint mismatch` on a workspace | The saved workspace `fp` no longer matches that child. Re-route its exact workspace ID through the still-pinned hub control connection; do not replace the device credential. |
-| Client connects then drops repeatedly | Symmetric NAT with no TURN — set `VIBESTUDIO_WEBRTC_ICE=relay` on the server and TURN secrets on the signaling worker.                                             |
-| OAuth dialog never opens a browser    | Check the badge: is the client actually connected? The event only fires to subscribers.                                                                            |
+| `fingerprint mismatch` on a workspace | The saved workspace `fp` no longer matches that child. Re-route its exact workspace ID through the still-pinned hub control connection; do not replace the device credential.                                           |
+| Client connects then drops repeatedly | Symmetric NAT with no TURN — set `VIBESTUDIO_WEBRTC_ICE=relay` on the server and TURN secrets on the signaling worker.                                                                                                  |
+| OAuth dialog never opens a browser    | Check the badge: is the client actually connected? The event only fires to subscribers.                                                                                                                                 |

@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { Button, Dialog, Flex, Text, TextField, Callout, Box, Separator } from "@radix-ui/themes";
+import {
+  Button,
+  Dialog,
+  Flex,
+  Text,
+  TextField,
+  Callout,
+  Box,
+  Separator,
+} from "@radix-ui/themes";
 import { ExclamationTriangleIcon } from "@radix-ui/react-icons";
 import { AppDialog } from "@workspace/ui/overlay";
 import {
@@ -7,7 +16,12 @@ import {
   parseConnectLink,
   type ConnectPairing,
 } from "@vibestudio/shared/connect";
-import { app, incomingPairLink, remoteCred, type RemoteCredCurrent } from "../shell/client";
+import {
+  app,
+  incomingPairLink,
+  remoteCred,
+  type RemoteCredCurrent,
+} from "../shell/client";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
 import { PairedDevicesSection } from "./PairedDevicesSection";
@@ -32,6 +46,7 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmingDisconnect, setConfirmingDisconnect] = useState(false);
+  const [showPairingForm, setShowPairingForm] = useState(false);
   const [live, setLive] = useState<LiveConnection | null>(null);
 
   useEffect(() => {
@@ -42,7 +57,7 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
         setLive({
           status: info.connectionStatus ?? "connected",
           isRemote: (info.connectionMode ?? "local") === "remote",
-        })
+        }),
       )
       .catch((error) => {
         setError(error instanceof Error ? error.message : String(error));
@@ -61,11 +76,12 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
           status: payload.status,
           isRemote: payload.isRemote,
           reconnect:
-            payload.reconnect ?? (payload.status === "connecting" ? current?.reconnect : undefined),
+            payload.reconnect ??
+            (payload.status === "connecting" ? current?.reconnect : undefined),
         }));
       },
-      []
-    )
+      [],
+    ),
   );
 
   useEffect(() => {
@@ -85,6 +101,7 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
     if (!open) return;
     setError(null);
     setConfirmingDisconnect(false);
+    setShowPairingForm(false);
     remoteCred
       .getCurrent()
       .then((c) => {
@@ -143,7 +160,7 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
       onOpenChange={onOpenChange}
       maxWidth="680px"
       title="Connections & paired devices"
-      description="Connect this desktop to a server, or pair phones and other devices with the current workspace."
+      description="Manage this device's server connection and connect other devices to the same workspace."
     >
       <Box mt="3">
         <AccountProfileSection active={open} />
@@ -155,21 +172,30 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
           <Callout.Root size="1" color="green" mb="3">
             <Callout.Text>
               Currently connected to{" "}
-              {current.workspaceName ?? `your server (device ${current.deviceId})`}
+              {current.workspaceName ??
+                `your server (device ${current.deviceId})`}
             </Callout.Text>
           </Callout.Root>
-        ) : current?.configured && live?.isRemote && live.status === "connecting" ? (
+        ) : current?.configured &&
+          live?.isRemote &&
+          live.status === "connecting" ? (
           // A transient blip — calm, reassuring, NOT the scary re-pair banner.
           <Callout.Root size="1" color="blue" mb="3">
             <Callout.Text>
               Reconnecting to your server
-              {live.reconnect?.attempt ? ` — attempt ${live.reconnect.attempt}` : ""}…
+              {live.reconnect?.attempt
+                ? ` — attempt ${live.reconnect.attempt}`
+                : ""}
+              …
             </Callout.Text>
           </Callout.Root>
-        ) : current?.configured && live?.isRemote && live.status === "disconnected" ? (
+        ) : current?.configured &&
+          live?.isRemote &&
+          live.status === "disconnected" ? (
           <Callout.Root size="1" color="amber" mb="3">
             <Callout.Text>
-              Disconnected — Vibestudio will reconnect automatically when your server is reachable.
+              Disconnected — Vibestudio will reconnect automatically when your
+              server is reachable.
             </Callout.Text>
           </Callout.Root>
         ) : current?.configured ? (
@@ -178,29 +204,67 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
               <ExclamationTriangleIcon />
             </Callout.Icon>
             <Callout.Text>
-              The stored device credential is inactive or rejected. Create a fresh pairing link on
-              the server and pair again.
+              The stored device credential is inactive or rejected. Create a
+              fresh pairing link on the server and pair again.
             </Callout.Text>
           </Callout.Root>
         ) : null}
 
-        <Flex direction="column" gap="3">
-          <Box>
-            <Flex justify="between" align="end">
-              <Text as="label" size="2" weight="medium">
-                Pairing link
+        {current?.configured && !showPairingForm ? (
+          <Flex justify="between" align="center" gap="3">
+            <Text size="2" color="gray">
+              This device will reconnect automatically with its saved, revocable
+              device identity.
+            </Text>
+            <Button
+              size="1"
+              variant="soft"
+              onClick={() => setShowPairingForm(true)}
+            >
+              Connect to a different server…
+            </Button>
+          </Flex>
+        ) : current ? (
+          <Flex direction="column" gap="3">
+            {current.configured ? (
+              <Callout.Root size="1" color="amber">
+                <Callout.Icon>
+                  <ExclamationTriangleIcon />
+                </Callout.Icon>
+                <Callout.Text>
+                  Pairing with another server replaces this device&apos;s saved
+                  connection after confirmation and relaunch.
+                </Callout.Text>
+              </Callout.Root>
+            ) : (
+              <Text size="2" color="gray">
+                On the server computer, start Vibestudio and scan its QR or
+                paste the complete pairing link below.
               </Text>
-              <Button size="1" variant="soft" disabled={busy} onClick={onPasteLink}>
-                Paste link
-              </Button>
-            </Flex>
-            <TextField.Root
-              placeholder="vibestudio://connect?room=…"
-              value={pairLink}
-              onChange={(e) => setPairLink(e.target.value)}
-            />
-          </Box>
-        </Flex>
+            )}
+            <Box>
+              <Flex justify="between" align="end">
+                <Text as="label" size="2" weight="medium">
+                  Pairing link
+                </Text>
+                <Button
+                  size="1"
+                  variant="soft"
+                  disabled={busy}
+                  onClick={onPasteLink}
+                >
+                  Paste link
+                </Button>
+              </Flex>
+              <TextField.Root
+                aria-label="Pairing link"
+                placeholder="vibestudio://connect?room=…"
+                value={pairLink}
+                onChange={(e) => setPairLink(e.target.value)}
+              />
+            </Box>
+          </Flex>
+        ) : null}
 
         {error ? (
           <Callout.Root size="1" color="red" mt="3">
@@ -232,7 +296,11 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
                   setError(null);
                   void remoteCred
                     .reconnectNow()
-                    .catch((err) => setError(err instanceof Error ? err.message : String(err)));
+                    .catch((err) =>
+                      setError(
+                        err instanceof Error ? err.message : String(err),
+                      ),
+                    );
                 }}
               >
                 Reconnect now
@@ -268,12 +336,17 @@ export function ConnectionSettingsDialog({ open, onOpenChange }: Props) {
           <Flex gap="3">
             <Dialog.Close>
               <Button variant="soft" color="gray" disabled={busy}>
-                Cancel
+                Close
               </Button>
             </Dialog.Close>
-            <Button onClick={savePairing} disabled={busy}>
-              {busy ? "Pairing…" : "Pair & relaunch"}
-            </Button>
+            {current && (!current.configured || showPairingForm) ? (
+              <Button
+                onClick={savePairing}
+                disabled={busy || pairLink.trim().length === 0}
+              >
+                {busy ? "Pairing…" : "Pair & relaunch"}
+              </Button>
+            ) : null}
           </Flex>
         </Flex>
       </Box>

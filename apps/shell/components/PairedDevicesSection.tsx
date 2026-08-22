@@ -1,5 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
-import { Badge, Box, Button, Callout, Code, Dialog, Flex, Table, Text } from "@radix-ui/themes";
+import {
+  Badge,
+  Box,
+  Button,
+  Callout,
+  Code,
+  Dialog,
+  Flex,
+  Table,
+  Text,
+} from "@radix-ui/themes";
 import { ExclamationTriangleIcon } from "@radix-ui/react-icons";
 import { panel } from "../shell/client";
 import QRCode from "qrcode-terminal/vendor/QRCode/index.js";
@@ -40,7 +50,11 @@ export function PairedDevicesSection({
       setError(null);
       const { devices: next } = await hubControl.listDevices();
       setDevices(next);
-      setOwners(await account.resolveProfiles([...new Set(next.map((device) => device.userId))]));
+      setOwners(
+        await account.resolveProfiles([
+          ...new Set(next.map((device) => device.userId)),
+        ]),
+      );
     } catch (err) {
       setError((err as Error).message);
     }
@@ -57,7 +71,13 @@ export function PairedDevicesSection({
   }, [connectOpen, invite]);
 
   useEffect(() => {
-    if (!connectOpen || !invite || pairedDevice || Date.now() >= invite.expiresAt) return;
+    if (
+      !connectOpen ||
+      !invite ||
+      pairedDevice ||
+      Date.now() >= invite.expiresAt
+    )
+      return;
     let cancelled = false;
     const poll = async () => {
       // Stop polling once the invite has expired — the QR is no longer scannable,
@@ -67,7 +87,9 @@ export function PairedDevicesSection({
         const { devices: next } = await hubControl.listDevices();
         if (cancelled) return;
         setDevices(next);
-        const joined = next.find((device) => !knownDeviceIds.has(device.deviceId));
+        const joined = next.find(
+          (device) => !knownDeviceIds.has(device.deviceId),
+        );
         if (joined) setPairedDevice(joined);
       } catch {
         // The main error callout already covers explicit user-triggered failures.
@@ -107,7 +129,7 @@ export function PairedDevicesSection({
       setError(null);
       setKnownDeviceIds(new Set(devices.map((device) => device.deviceId)));
       const result = await hubControl.pairDevice(
-        workspaceName ? { workspace: workspaceName } : undefined
+        workspaceName ? { workspace: workspaceName } : undefined,
       );
       setInvite(result.pairing);
       setNow(Date.now());
@@ -127,10 +149,9 @@ export function PairedDevicesSection({
 
   const remainingMs = invite ? Math.max(0, invite.expiresAt - now) : 0;
   const remainingSeconds = Math.ceil(remainingMs / 1000);
-  const remaining = `${Math.floor(remainingSeconds / 60)}:${String(remainingSeconds % 60).padStart(
-    2,
-    "0"
-  )}`;
+  const remaining = `${Math.floor(remainingSeconds / 60)}:${String(
+    remainingSeconds % 60,
+  ).padStart(2, "0")}`;
   // Expired = the countdown reached 0 with nobody paired yet. The QR is stale, so
   // present a clear "Expired — regenerate" instead of a dead-but-scannable code.
   const expired = !!invite && remainingMs <= 0 && !pairedDevice;
@@ -162,8 +183,13 @@ export function PairedDevicesSection({
           >
             Set up a phone
           </Button>
-          <Button size="1" variant="soft" disabled={inviteBusy} onClick={() => void createInvite()}>
-            {inviteBusy ? "Creating…" : "Show pairing QR"}
+          <Button
+            size="1"
+            variant="soft"
+            disabled={inviteBusy}
+            onClick={() => void createInvite()}
+          >
+            {inviteBusy ? "Creating…" : "Connect a device"}
           </Button>
           <Button size="1" variant="soft" onClick={() => void load()}>
             Refresh
@@ -182,24 +208,38 @@ export function PairedDevicesSection({
                       <ExclamationTriangleIcon />
                     </Callout.Icon>
                     <Callout.Text>
-                      This pairing link expired. Generate a new link before connecting the device.
+                      This pairing link expired. Generate a new link before
+                      connecting the device.
                     </Callout.Text>
                   </Callout.Root>
                 ) : (
                   <PairingQrCode value={invite.pairUrl} size={248} />
                 )}
-                <Flex direction="column" gap="3" style={{ minWidth: 0, flex: "1 1 220px" }}>
+                <Flex
+                  direction="column"
+                  gap="3"
+                  style={{ minWidth: 0, flex: "1 1 220px" }}
+                >
                   <Text size="2">
-                    Scan this QR with a phone camera, or open the link on another desktop. No app
-                    yet? Install Vibestudio first, then open the link again.
+                    Scan this QR with a phone camera, or open the link on
+                    another desktop. No app yet? Install Vibestudio first, then
+                    open the link again.
                   </Text>
                   <Text size="2">
                     Server <Code>{invite.serverId}</Code>
                   </Text>
                   {expired ? (
-                    <Flex direction="column" gap="2" style={{ width: "fit-content" }}>
+                    <Flex
+                      direction="column"
+                      gap="2"
+                      style={{ width: "fit-content" }}
+                    >
                       <Badge color="amber">Expired</Badge>
-                      <Button size="1" disabled={inviteBusy} onClick={() => void createInvite()}>
+                      <Button
+                        size="1"
+                        disabled={inviteBusy}
+                        onClick={() => void createInvite()}
+                      >
                         {inviteBusy ? "Regenerating..." : "Regenerate"}
                       </Button>
                     </Flex>
@@ -265,7 +305,8 @@ export function PairedDevicesSection({
             <ExclamationTriangleIcon />
           </Callout.Icon>
           <Callout.Text>
-            Revoking this device will sign you out and relaunch Vibestudio in local mode.
+            Revoking this device will sign you out and relaunch Vibestudio in
+            local mode.
           </Callout.Text>
         </Callout.Root>
       ) : null}
@@ -289,7 +330,9 @@ export function PairedDevicesSection({
               <Table.Row key={device.deviceId}>
                 <Table.Cell>{device.label}</Table.Cell>
                 <Table.Cell>
-                  {owners[device.userId] ? `@${owners[device.userId]!.handle}` : device.userId}
+                  {owners[device.userId]
+                    ? `@${owners[device.userId]!.handle}`
+                    : device.userId}
                 </Table.Cell>
                 <Table.Cell>{device.platform ?? "unknown"}</Table.Cell>
                 <Table.Cell>{formatTime(device.createdAt)}</Table.Cell>
@@ -310,7 +353,11 @@ export function PairedDevicesSection({
                       >
                         Confirm
                       </Button>
-                      <Button size="1" variant="soft" onClick={() => setConfirmId(null)}>
+                      <Button
+                        size="1"
+                        variant="soft"
+                        onClick={() => setConfirmId(null)}
+                      >
                         Cancel
                       </Button>
                     </Flex>
@@ -340,15 +387,21 @@ function formatTime(value: number | undefined): string {
   return new Date(value).toLocaleString();
 }
 
-function PairingQrCode({ value, size = 176 }: { value: string; size?: number }) {
+function PairingQrCode({
+  value,
+  size = 176,
+}: {
+  value: string;
+  size?: number;
+}) {
   const matrix = useMemo(() => createQrMatrix(value), [value]);
   const quietZone = 4;
   const viewSize = matrix.length + quietZone * 2;
   const path = matrix
     .flatMap((row, rowIndex) =>
       row.map((dark, colIndex) =>
-        dark ? `M${colIndex + quietZone} ${rowIndex + quietZone}h1v1h-1z` : ""
-      )
+        dark ? `M${colIndex + quietZone} ${rowIndex + quietZone}h1v1h-1z` : "",
+      ),
     )
     .join("");
 
@@ -386,6 +439,8 @@ function createQrMatrix(value: string): boolean[][] {
 
   const moduleCount = qrcode.getModuleCount();
   return Array.from({ length: moduleCount }, (_unused, row) =>
-    Array.from({ length: moduleCount }, (_unusedColumn, col) => qrcode.isDark(row, col))
+    Array.from({ length: moduleCount }, (_unusedColumn, col) =>
+      qrcode.isDark(row, col),
+    ),
   );
 }
