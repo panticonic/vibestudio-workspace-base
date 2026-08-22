@@ -35,9 +35,11 @@ vibestudio remote deploy local
 Use `vibestudio remote deploy user@host` when the server is a different
 computer. The target is the only difference: both forms install the same
 loopback-only systemd service, enable linger, validate the hub and default
-workspace reaches, and surface the current root pairing QR from the service
-journal. Manage the same target with `remote deploy status`, `logs`, `update`,
-and `remove`.
+workspace runtime, and surface the current root pairing QR from protected
+managed ready state. Retrieve it directly with `remote deploy pairing <target>`.
+Manage the same target with `remote deploy status`, `logs`, `update`, and
+`remove`; the service does not write pairing secrets to its journal, and logs
+are diagnostics rather than the pairing interface.
 
 For a foreground session instead:
 
@@ -120,10 +122,10 @@ Back up the server side; the client is disposable.
 
 ## 6. Troubleshooting
 
-| Symptom                               | Likely cause                                                                                                                                                                                                            |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pairing link never appears or renews  | Follow `remote deploy logs <target>`. The server may not reach signaling, or `node-datachannel` is not built — run `pnpm rebuild node-datachannel` once on the server.                                                  |
-| `fingerprint mismatch` on hub control | The saved control `fp` no longer matches the hub cert — restore the expected hub identity from its exact backup and investigate possible signaling attack. In-place hub identity rotation is intentionally unsupported. |
-| `fingerprint mismatch` on a workspace | The saved workspace `fp` no longer matches that child. Re-route its exact workspace ID through the still-pinned hub control connection; do not replace the device credential.                                           |
-| Client connects then drops repeatedly | Symmetric NAT with no TURN — set `VIBESTUDIO_WEBRTC_ICE=relay` on the server and TURN secrets on the signaling worker.                                                                                                  |
-| OAuth dialog never opens a browser    | Check the badge: is the client actually connected? The event only fires to subscribers.                                                                                                                                 |
+| Symptom                               | Likely cause                                                                                                                                                                                                                                                  |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pairing link is unavailable           | Run `remote deploy pairing <target>` first; it validates the live hub, protected ready state, and default workspace health. If it reports a failure, use `remote deploy status <target>`, `remote deploy logs <target>`, and `remote doctor` for diagnostics. |
+| `fingerprint mismatch` on hub control | The saved control `fp` no longer matches the hub cert — restore the expected hub identity from its exact backup and investigate possible signaling attack. In-place hub identity rotation is intentionally unsupported.                                       |
+| `fingerprint mismatch` on a workspace | The saved workspace `fp` no longer matches that child. Re-route its exact workspace ID through the still-pinned hub control connection; do not replace the device credential.                                                                                 |
+| Client connects then drops repeatedly | Symmetric NAT with no TURN — set `VIBESTUDIO_WEBRTC_ICE=relay` on the server and TURN secrets on the signaling worker.                                                                                                                                        |
+| OAuth dialog never opens a browser    | Check the badge: is the client actually connected? The event only fires to subscribers.                                                                                                                                                                       |

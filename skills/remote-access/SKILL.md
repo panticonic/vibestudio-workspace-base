@@ -34,10 +34,12 @@ arguments and return types.
 Use `vibestudio remote deploy local` when the current computer is the server, or
 `vibestudio remote deploy <user@host>` for a different machine. Both targets use
 the same systemd user-service lifecycle, exact artifact/version, hub plus
-default-workspace diagnostics, and status/logs/update/remove commands. The
-deployment output includes the fresh server's current root QR through its
-service journal; follow `remote deploy logs <target>` if it renews before being
-claimed.
+default-workspace diagnostics, and pairing/status/logs/update/remove commands.
+The deployment output includes the fresh server's current root QR through its
+protected managed ready state. Run `vibestudio remote deploy pairing <target>`
+at any time before it is claimed to display the current renewed link and QR;
+the service does not write that secret to its journal. Logs are diagnostic
+output, not a pairing-secret interface.
 
 After pairing, select another workspace through the retained hub-control
 identity; workspace switching replaces only child reach and never requires a
