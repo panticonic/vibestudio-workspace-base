@@ -344,7 +344,7 @@ export async function activate(ctx: ExtensionContext) {
   async function writeJson(key: string, value: unknown): Promise<void> {
     const dir = path.posix.dirname(key);
     await ctx.storage.mkdir(dir, { recursive: true });
-    await ctx.storage.writeFile(key, JSON.stringify(value, null, 2));
+    await ctx.storage.replaceFile(key, JSON.stringify(value, null, 2));
   }
 
   async function readLaunchRecord(key: string): Promise<ClaudeLaunchRecord | null> {
@@ -483,11 +483,21 @@ export async function activate(ctx: ExtensionContext) {
       if (!record || record.phase === "released") {
         continue;
       }
-      if (record.ownerKind === "external-cli" && record.phase === "active") {
+      const current = await readLaunchRecord(channelKey(record.channelId));
+      if (
+        record.ownerKind === "external-cli" &&
+        record.phase === "active" &&
+        current?.launchId === record.launchId &&
+        current.phase === "active"
+      ) {
+        // The launch record is the canonical effect receipt. Once its matching
+        // pointer is durable, the lookup indexes can be reconstructed after a
+        // crash between their independent file commits.
+        await writeJson(entityKey(record.entityId), { channelId: record.channelId });
+        await writeJson(contextKey(record.contextId), { channelId: record.channelId });
         continue;
       }
       await finalizeRecord(record);
-      const current = await readLaunchRecord(channelKey(record.channelId));
       if (current?.launchId === record.launchId) {
         const released = await readLaunchRecord(launchKey(record.launchId));
         if (released) await writeJson(channelKey(record.channelId), released);

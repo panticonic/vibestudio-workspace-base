@@ -161,7 +161,7 @@ function makeCtx(
         if (!storage.has(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
         return storage.get(p)!;
       }),
-      writeFile: vi.fn(async (p: string, data: string) => {
+      replaceFile: vi.fn(async (p: string, data: string) => {
         storage.set(p, data);
         const parsed = JSON.parse(data) as { phase?: string; launchId?: string };
         lifecycleEvents.push(`write:${p}:${parsed.phase ?? "mapping"}:${parsed.launchId ?? ""}`);
