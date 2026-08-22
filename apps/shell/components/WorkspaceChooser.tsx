@@ -11,7 +11,11 @@ import {
   Spinner,
   Text,
 } from "@radix-ui/themes";
-import { ExclamationTriangleIcon, PlusIcon, TrashIcon } from "@radix-ui/react-icons";
+import {
+  ExclamationTriangleIcon,
+  PlusIcon,
+  TrashIcon,
+} from "@radix-ui/react-icons";
 import { VibestudioLogo } from "@workspace/ui/brand";
 import { Surface } from "@workspace/ui/layout";
 
@@ -68,12 +72,6 @@ export function WorkspaceChooser() {
   const handleChooseWorkspace = async (ws: WorkspaceEntry) => {
     if (ws.name === activeWorkspaceName) {
       setWorkspaceChooserOpen(false);
-      return;
-    }
-    if (remoteWorkspaceMode) {
-      setWorkspaceError(
-        "Switch workspaces on the remote host, then pair this desktop with the target workspace."
-      );
       return;
     }
     try {
@@ -171,7 +169,11 @@ export function WorkspaceChooser() {
                 align="center"
                 justify="center"
                 gap="2"
-                style={{ height: "100%", minHeight: "160px", textAlign: "center" }}
+                style={{
+                  height: "100%",
+                  minHeight: "160px",
+                  textAlign: "center",
+                }}
               >
                 {isLoading ? (
                   <>
@@ -185,10 +187,16 @@ export function WorkspaceChooser() {
                   <>
                     <VibestudioLogo size={44} variant="symbol" />
                     <Text size="2" color="gray">
-                      {workspaceError ? "Could not load workspaces" : "No workspaces available"}
+                      {workspaceError
+                        ? "Could not load workspaces"
+                        : "No workspaces available"}
                     </Text>
                     {workspaceError ? (
-                      <Button size="1" variant="soft" onClick={() => void loadRecentWorkspaces()}>
+                      <Button
+                        size="1"
+                        variant="soft"
+                        onClick={() => void loadRecentWorkspaces()}
+                      >
                         Retry
                       </Button>
                     ) : null}
@@ -205,7 +213,7 @@ export function WorkspaceChooser() {
                     onSelect={() => handleChooseWorkspace(ws)}
                     onRemove={(e) => handleRemoveWorkspace(e, ws.name)}
                     canDelete={!remoteWorkspaceMode}
-                    canSelect={!remoteWorkspaceMode || ws.name === activeWorkspaceName}
+                    canSelect
                   />
                 ))}
               </Flex>
@@ -218,8 +226,8 @@ export function WorkspaceChooser() {
       {remoteWorkspaceMode ? (
         <Callout.Root color="blue" mt="4">
           <Callout.Text>
-            Workspace creation, deletion, and switching are managed on the remote host. Pair this
-            desktop with the target workspace to open it here.
+            Choose another workspace to reconnect this device without pairing
+            again. Create and delete workspaces from the server host.
           </Callout.Text>
         </Callout.Root>
       ) : (
@@ -248,8 +256,8 @@ export function WorkspaceChooser() {
         <AlertDialog.Content maxWidth="400px">
           <AlertDialog.Title>Delete workspace</AlertDialog.Title>
           <AlertDialog.Description>
-            Permanently delete &ldquo;{pendingDelete}&rdquo;? All panels, packages, agents, and data
-            will be removed. This cannot be undone.
+            Permanently delete &ldquo;{pendingDelete}&rdquo;? All panels,
+            packages, agents, and data will be removed. This cannot be undone.
           </AlertDialog.Description>
           <Flex gap="3" mt="4" justify="end">
             <AlertDialog.Cancel>

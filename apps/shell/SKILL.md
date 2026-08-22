@@ -26,6 +26,12 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
   desktop filesystem.
 - Pairing URLs can arrive through the desktop protocol handler or as typed URLs;
   both carriers must feed the shared parser.
+- A paired desktop keeps one stable hub-control identity. Remote workspace
+  selection routes another exact child through that identity; never tell the
+  user to pair again merely to switch workspaces.
+- Connection settings show the saved automatic-reconnect identity as the happy
+  path. The pairing form is progressive disclosure for deliberately replacing
+  the server, with explicit overwrite/relaunch copy.
 
 ## Mobile Parity
 
@@ -38,15 +44,15 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
   affected client; explicitly state when a surface has no mobile equivalent
   instead of silently omitting it.
 - Command palette and quickfire: the desktop overlay (`components/QuickfireOwner`
-  + `overlay/QuickfireSurface`) and the mobile `CommandSheet` / `QuickfireSheet`
+  and `overlay/QuickfireSurface`) and the mobile `CommandSheet` / `QuickfireSheet`
   are two renderers over one model. Ranking lives in `@workspace/omnibox-core`;
-  the slate's *definitions*, the row projection, the transcript projection and
+  the slate's _definitions_, the row projection, the transcript projection and
   the session lifecycle live in `@workspace/quickfire-core`. Each client owns
   only its `run` implementations and its renderer, so a new command is a
   definition plus two runs — never a second definition.
 - **The conversation is the exception: its component tree is shared.**
   `@workspace/quickfire-core/ui` renders the heading, transcript, tool records
-  and Markdown once, against a *skin* — a small set of semantic primitives
+  and Markdown once, against a _skin_ — a small set of semantic primitives
   (`Box`/`Text`/`Pressable`/`Disclosure`/`Code`/…) each client implements in its
   own idiom (`apps/shell/overlay/domSkin.tsx`,
   `apps/mobile/src/components/overlay/nativeSkin.tsx`). Two hand-written
@@ -57,7 +63,7 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
   Native view, no colour and no font; a skin decides nothing about product
   meaning. If a style rule needs to know it is styling a transcript message, or a
   shared component needs a `Platform.OS` check, the split is in the wrong place.
-- The palette itself is *not* shared, and should not be: a keyboard-driven card
+- The palette itself is _not_ shared, and should not be: a keyboard-driven card
   with ghost completion and a bottom-anchored sheet with no keyboard are
   genuinely different objects over the same row model.
 - Surface flags are the honest record of parity. A command whose `surfaces`
@@ -70,7 +76,7 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
   rendering inline.
 - One omnibox, one ranking path. `@workspace/omnibox-core` ranks `about/new`,
   the palette's `@` scope, the title bar's address autocomplete and the mobile
-  address field. `@vibestudio/shared/panelChrome` keeps only chrome *facts*
+  address field. `@vibestudio/shared/panelChrome` keeps only chrome _facts_
   (address parsing, history/bookmark normalization and merging); it must not
   grow a second row builder. The prefix grammar is uniform: `>` commands, `@`
   go to, `/` quickfire, bare mixed. `about/new` has no command slate, so its

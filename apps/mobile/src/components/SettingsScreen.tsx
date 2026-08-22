@@ -1,5 +1,12 @@
 import React from "react";
-import { View, Text, StyleSheet, Pressable, ScrollView, Alert } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ScrollView,
+  Alert,
+} from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import type { StackNavigationProp } from "@react-navigation/stack";
 import { useAtomValue, useSetAtom } from "jotai";
@@ -16,14 +23,27 @@ import {
   mobileWorkspaceSelectionDependencies,
   selectMobileWorkspace,
 } from "../services/workspaceSelection";
-import { panelTreeRevisionAtom, shellClientAtom } from "../state/shellClientAtom";
+import {
+  panelTreeRevisionAtom,
+  shellClientAtom,
+} from "../state/shellClientAtom";
 import { isAuthenticatedAtom } from "../state/authAtoms";
 import { activePanelIdAtom } from "../state/navigationAtoms";
 import { connectionStatusAtom } from "../state/connectionAtoms";
-import { themeColorsAtom, themePreferenceAtom, type ThemePreference } from "../state/themeAtoms";
+import {
+  themeColorsAtom,
+  themePreferenceAtom,
+  type ThemePreference,
+} from "../state/themeAtoms";
 import { pushToastAtom } from "../state/toastAtoms";
-import { copyToClipboard } from "../services/nativeCapabilities";
-import { spacing, radius, type, pressedOpacity, touchTarget } from "../design/tokens";
+import { copyToClipboard, shareText } from "../services/nativeCapabilities";
+import {
+  spacing,
+  radius,
+  type,
+  pressedOpacity,
+  touchTarget,
+} from "../design/tokens";
 import {
   ArrowLeft,
   Copy,
@@ -33,17 +53,30 @@ import {
   Unplug,
   type IconComponent,
 } from "../design/icons";
-import { Card, SectionHeader, Badge, Button, IconButton } from "./ui/primitives";
+import {
+  Card,
+  SectionHeader,
+  Badge,
+  Button,
+  IconButton,
+} from "./ui/primitives";
 import { ConnectionBar } from "./ConnectionBar";
 import { MobileAccountProfileSection } from "./MobileAccountProfileSection";
 
-type SettingsScreenNavigationProp = StackNavigationProp<RootStackParamList, "Settings">;
+type SettingsScreenNavigationProp = StackNavigationProp<
+  RootStackParamList,
+  "Settings"
+>;
 
 interface SettingsScreenProps {
   navigation: SettingsScreenNavigationProp;
 }
 
-const APPEARANCE_OPTIONS: { value: ThemePreference; label: string; icon: IconComponent }[] = [
+const APPEARANCE_OPTIONS: {
+  value: ThemePreference;
+  label: string;
+  icon: IconComponent;
+}[] = [
   { value: "system", label: "System", icon: Smartphone },
   { value: "light", label: "Light", icon: Sun },
   { value: "dark", label: "Dark", icon: Moon },
@@ -62,12 +95,26 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
   const pushToast = useSetAtom(pushToastAtom);
   const [workspaces, setWorkspaces] = React.useState<MobileHubWorkspace[]>([]);
   const [workspacesLoading, setWorkspacesLoading] = React.useState(true);
-  const [workspaceError, setWorkspaceError] = React.useState<string | null>(null);
-  const [switchingWorkspace, setSwitchingWorkspace] = React.useState<string | null>(null);
+  const [workspaceError, setWorkspaceError] = React.useState<string | null>(
+    null,
+  );
+  const [switchingWorkspace, setSwitchingWorkspace] = React.useState<
+    string | null
+  >(null);
+  const [pairingInvite, setPairingInvite] = React.useState<{
+    pairUrl: string;
+    expiresAt: number;
+  } | null>(null);
+  const [pairingBusy, setPairingBusy] = React.useState(false);
+  const [pairingError, setPairingError] = React.useState<string | null>(null);
+  const [now, setNow] = React.useState(Date.now());
   const mountedRef = React.useRef(true);
   const workspaceSelection = React.useMemo(
-    () => (shellClient ? mobileWorkspaceSelectionDependencies(shellClient.hubControl) : null),
-    [shellClient]
+    () =>
+      shellClient
+        ? mobileWorkspaceSelectionDependencies(shellClient.hubControl)
+        : null,
+    [shellClient],
   );
 
   React.useEffect(() => {
@@ -81,13 +128,16 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
     setWorkspacesLoading(true);
     setWorkspaceError(null);
     try {
-      if (!workspaceSelection) throw new Error("The mobile session is not connected.");
+      if (!workspaceSelection)
+        throw new Error("The mobile session is not connected.");
       const next = await listMobileWorkspaces(workspaceSelection);
       if (mountedRef.current) setWorkspaces(next);
     } catch (error) {
       if (mountedRef.current) {
         setWorkspaceError(
-          error instanceof Error ? error.message : "Could not load your workspaces."
+          error instanceof Error
+            ? error.message
+            : "Could not load your workspaces.",
         );
       }
     } finally {
@@ -99,26 +149,39 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
     void loadWorkspaces();
   }, [loadWorkspaces]);
 
+  React.useEffect(() => {
+    if (!pairingInvite) return;
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [pairingInvite]);
+
   const handleWorkspaceSelection = React.useCallback(
     async (workspace: MobileHubWorkspace) => {
-      if (workspace.workspaceId === shellClient?.workspaceId || switchingWorkspace) return;
+      if (
+        workspace.workspaceId === shellClient?.workspaceId ||
+        switchingWorkspace
+      )
+        return;
       setSwitchingWorkspace(workspace.name);
       setWorkspaceError(null);
       try {
-        if (!workspaceSelection) throw new Error("The mobile session is not connected.");
+        if (!workspaceSelection)
+          throw new Error("The mobile session is not connected.");
         await selectMobileWorkspace(workspace.workspaceId, workspaceSelection);
         // Success schedules a native reload. Keep the pending state visible until
         // React Native tears this workspace tree down.
       } catch (error) {
         if (mountedRef.current) {
           setWorkspaceError(
-            error instanceof Error ? error.message : "Could not switch workspaces."
+            error instanceof Error
+              ? error.message
+              : "Could not switch workspaces.",
           );
           setSwitchingWorkspace(null);
         }
       }
     },
-    [shellClient?.workspaceId, switchingWorkspace, workspaceSelection]
+    [shellClient?.workspaceId, switchingWorkspace, workspaceSelection],
   );
 
   const performDisconnect = async () => {
@@ -129,29 +192,37 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
     } catch (error) {
       Alert.alert(
         "Could not disconnect securely",
-        error instanceof Error ? error.message : "The device credential could not be cleared."
+        error instanceof Error
+          ? error.message
+          : "The device credential could not be cleared.",
       );
       return;
     }
 
     try {
       const reset = await resetToNativeBootstrap();
-      if (!reset.reloading) throw new Error("The native host did not start the pairing reload.");
+      if (!reset.reloading)
+        throw new Error("The native host did not start the pairing reload.");
     } catch (error) {
       try {
-        if (previousCredential) await persistStoredMobileConnection(previousCredential);
+        if (previousCredential)
+          await persistStoredMobileConnection(previousCredential);
       } catch (rollbackError) {
         Alert.alert(
           "Disconnect needs attention",
           `The native reload failed and the prior credential could not be restored: ${
-            rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
-          }`
+            rollbackError instanceof Error
+              ? rollbackError.message
+              : String(rollbackError)
+          }`,
         );
         return;
       }
       Alert.alert(
         "Could not open pairing",
-        error instanceof Error ? error.message : "The native host could not reload."
+        error instanceof Error
+          ? error.message
+          : "The native host could not reload.",
       );
       return;
     }
@@ -171,9 +242,13 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
       "This clears the stored pairing and returns to the native pairing screen.",
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Disconnect", style: "destructive", onPress: () => void performDisconnect() },
+        {
+          text: "Disconnect",
+          style: "destructive",
+          onPress: () => void performDisconnect(),
+        },
       ],
-      { cancelable: true }
+      { cancelable: true },
     );
   };
 
@@ -187,6 +262,54 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
     if (!deviceId) return;
     copyToClipboard(deviceId);
     pushToast({ message: "Device ID copied", tone: "success" });
+  };
+
+  const currentWorkspace = workspaces.find(
+    (workspace) => workspace.workspaceId === shellClient?.workspaceId,
+  );
+  const pairingExpired = !!pairingInvite && pairingInvite.expiresAt <= now;
+
+  const handleCreatePairingInvite = async () => {
+    if (!shellClient || !currentWorkspace) return;
+    setPairingBusy(true);
+    setPairingError(null);
+    try {
+      const result = await shellClient.hubControl.pairDevice({
+        workspace: currentWorkspace.name,
+      });
+      if (!mountedRef.current) return;
+      setPairingInvite(result.pairing);
+      setNow(Date.now());
+    } catch (error) {
+      if (mountedRef.current) {
+        setPairingError(
+          error instanceof Error
+            ? error.message
+            : "Could not create a pairing link.",
+        );
+      }
+    } finally {
+      if (mountedRef.current) setPairingBusy(false);
+    }
+  };
+
+  const handleCopyPairingLink = () => {
+    if (!pairingInvite || pairingExpired) return;
+    copyToClipboard(pairingInvite.pairUrl);
+    pushToast({ message: "Pairing link copied", tone: "success" });
+  };
+
+  const handleSharePairingLink = async () => {
+    if (!pairingInvite || pairingExpired) return;
+    try {
+      await shareText(pairingInvite.pairUrl, "Vibestudio pairing link");
+    } catch (error) {
+      setPairingError(
+        error instanceof Error
+          ? error.message
+          : "Could not share the pairing link.",
+      );
+    }
   };
 
   const statusLabel =
@@ -204,7 +327,9 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
         : "danger";
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <ConnectionBar onRepair={handleDisconnect} />
 
       <ScrollView
@@ -215,7 +340,9 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
       >
         <View style={styles.headerRow}>
           <IconButton icon={ArrowLeft} label="Back" onPress={handleBack} />
-          <Text style={[type.title, styles.title, { color: colors.text }]}>Settings</Text>
+          <Text style={[type.title, styles.title, { color: colors.text }]}>
+            Settings
+          </Text>
           <View style={styles.headerSpacer} />
         </View>
 
@@ -224,11 +351,19 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
         <SectionHeader label="Connection" />
         <Card>
           <View style={styles.connectionRow}>
-            <Text style={[type.body, { color: colors.textSecondary }]}>Status</Text>
+            <Text style={[type.body, { color: colors.textSecondary }]}>
+              Status
+            </Text>
             <Badge label={statusLabel} tone={statusTone} />
           </View>
           <View style={[styles.connectionRow, styles.deviceRow]}>
-            <Text style={[type.body, styles.deviceLabel, { color: colors.textSecondary }]}>
+            <Text
+              style={[
+                type.body,
+                styles.deviceLabel,
+                { color: colors.textSecondary },
+              ]}
+            >
               Device
             </Text>
             <Text
@@ -239,18 +374,114 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
               {deviceId ?? "not connected"}
             </Text>
             {deviceId ? (
-              <IconButton icon={Copy} label="Copy device ID" onPress={handleCopyDeviceId} />
+              <IconButton
+                icon={Copy}
+                label="Copy device ID"
+                onPress={handleCopyDeviceId}
+              />
             ) : null}
           </View>
         </Card>
 
+        <SectionHeader label="Devices" />
+        <Card>
+          <Text
+            style={[
+              type.caption,
+              styles.devicePairingHelp,
+              { color: colors.textSecondary },
+            ]}
+          >
+            Connect another phone or desktop to{" "}
+            {currentWorkspace?.name ?? "this workspace"}. The one-time link
+            gives the new device its own revocable identity.
+          </Text>
+          {pairingError ? (
+            <Text
+              accessibilityRole="alert"
+              style={[
+                type.caption,
+                styles.pairingError,
+                { color: colors.danger },
+              ]}
+            >
+              {pairingError}
+            </Text>
+          ) : null}
+          {pairingInvite ? (
+            <View style={styles.pairingInvite}>
+              <Text
+                selectable
+                numberOfLines={3}
+                style={[styles.pairingLink, { color: colors.text }]}
+              >
+                {pairingInvite.pairUrl}
+              </Text>
+              <Badge
+                label={
+                  pairingExpired
+                    ? "Expired"
+                    : `Expires ${new Date(
+                        pairingInvite.expiresAt,
+                      ).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}`
+                }
+                tone={pairingExpired ? "warning" : "neutral"}
+              />
+              <View style={styles.pairingActions}>
+                {pairingExpired ? null : (
+                  <>
+                    <Button
+                      label="Copy link"
+                      variant="outline"
+                      onPress={handleCopyPairingLink}
+                    />
+                    <Button
+                      label="Share link"
+                      variant="filled"
+                      onPress={() => void handleSharePairingLink()}
+                    />
+                  </>
+                )}
+                {pairingExpired ? (
+                  <Button
+                    label="Create new link"
+                    variant="filled"
+                    loading={pairingBusy}
+                    onPress={() => void handleCreatePairingInvite()}
+                  />
+                ) : null}
+              </View>
+            </View>
+          ) : (
+            <Button
+              label="Connect another device"
+              variant="outline"
+              loading={pairingBusy}
+              disabled={!currentWorkspace || workspacesLoading}
+              onPress={() => void handleCreatePairingInvite()}
+            />
+          )}
+        </Card>
+
         <SectionHeader label="Appearance" />
         <Card>
-          <Text style={[type.caption, styles.appearanceHelp, { color: colors.textSecondary }]}>
+          <Text
+            style={[
+              type.caption,
+              styles.appearanceHelp,
+              { color: colors.textSecondary },
+            ]}
+          >
             Choose how Vibestudio looks on this device.
           </Text>
           <View
-            style={[styles.segmentGroup, { backgroundColor: colors.surfaceSunken }]}
+            style={[
+              styles.segmentGroup,
+              { backgroundColor: colors.surfaceSunken },
+            ]}
             accessibilityRole="radiogroup"
           >
             {APPEARANCE_OPTIONS.map((option) => {
@@ -270,12 +501,17 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
                     pressed && !selected && { opacity: pressedOpacity },
                   ]}
                 >
-                  <Icon size={16} color={selected ? colors.primary : colors.textSecondary} />
+                  <Icon
+                    size={16}
+                    color={selected ? colors.primary : colors.textSecondary}
+                  />
                   <Text
                     style={[
                       type.bodyStrong,
                       styles.segmentLabel,
-                      { color: selected ? colors.primary : colors.textSecondary },
+                      {
+                        color: selected ? colors.primary : colors.textSecondary,
+                      },
                     ]}
                   >
                     {option.label}
@@ -295,7 +531,13 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
                 onPress={() => void loadWorkspaces()}
                 style={styles.retryButton}
               >
-                <Text style={[type.caption, styles.retryText, { color: colors.primary }]}>
+                <Text
+                  style={[
+                    type.caption,
+                    styles.retryText,
+                    { color: colors.primary },
+                  ]}
+                >
                   Retry
                 </Text>
               </Pressable>
@@ -303,9 +545,15 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
           }
         />
         <Card>
-          <Text style={[type.caption, styles.workspaceHelp, { color: colors.textSecondary }]}>
-            Choose where this device opens. Switching reloads the approved mobile app for that
-            workspace.
+          <Text
+            style={[
+              type.caption,
+              styles.workspaceHelp,
+              { color: colors.textSecondary },
+            ]}
+          >
+            Choose where this device opens. Switching reloads the approved
+            mobile app for that workspace.
           </Text>
 
           {workspacesLoading ? (
@@ -319,7 +567,11 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
           {workspaceError ? (
             <Text
               accessibilityRole="alert"
-              style={[type.caption, styles.workspaceError, { color: colors.danger }]}
+              style={[
+                type.caption,
+                styles.workspaceError,
+                { color: colors.danger },
+              ]}
             >
               {workspaceError}
             </Text>
@@ -334,30 +586,45 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
           {workspaces.map((workspace) => {
             const current = workspace.workspaceId === shellClient?.workspaceId;
             const switching = switchingWorkspace === workspace.name;
-            const disabled = current || switchingWorkspace !== null || workspacesLoading;
+            const disabled =
+              current || switchingWorkspace !== null || workspacesLoading;
             return (
               <Pressable
                 key={workspace.workspaceId}
                 testID={`workspace-option-${workspace.workspaceId}`}
                 accessibilityRole="button"
                 accessibilityLabel={`${workspace.name}${current ? ", current workspace" : ""}`}
-                accessibilityState={{ disabled, selected: current, busy: switching }}
+                accessibilityState={{
+                  disabled,
+                  selected: current,
+                  busy: switching,
+                }}
                 disabled={disabled}
                 onPress={() => void handleWorkspaceSelection(workspace)}
                 style={({ pressed }) => [
                   styles.workspaceRow,
                   {
                     borderColor: current ? colors.primary : colors.border,
-                    backgroundColor: current ? colors.accentSoft : colors.surfaceSunken,
+                    backgroundColor: current
+                      ? colors.accentSoft
+                      : colors.surfaceSunken,
                   },
-                  disabled && !current && !switching ? styles.disabledWorkspace : null,
+                  disabled && !current && !switching
+                    ? styles.disabledWorkspace
+                    : null,
                   pressed && !disabled ? { opacity: pressedOpacity } : null,
                 ]}
               >
                 <View style={styles.workspaceCopy}>
-                  <Text style={[type.bodyStrong, { color: colors.text }]}>{workspace.name}</Text>
+                  <Text style={[type.bodyStrong, { color: colors.text }]}>
+                    {workspace.name}
+                  </Text>
                   <Text
-                    style={[type.caption, styles.workspaceMeta, { color: colors.textSecondary }]}
+                    style={[
+                      type.caption,
+                      styles.workspaceMeta,
+                      { color: colors.textSecondary },
+                    ]}
                   >
                     {current
                       ? "Current workspace"
@@ -368,7 +635,13 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
                 </View>
                 {switching ? (
                   <View style={styles.switchingState}>
-                    <Text style={[type.caption, styles.switchingText, { color: colors.primary }]}>
+                    <Text
+                      style={[
+                        type.caption,
+                        styles.switchingText,
+                        { color: colors.primary },
+                      ]}
+                    >
                       Switching…
                     </Text>
                   </View>
@@ -377,7 +650,13 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
                     <Badge label="Current" tone="primary" />
                   </View>
                 ) : (
-                  <Text style={[type.bodyStrong, styles.openText, { color: colors.primary }]}>
+                  <Text
+                    style={[
+                      type.bodyStrong,
+                      styles.openText,
+                      { color: colors.primary },
+                    ]}
+                  >
                     Open
                   </Text>
                 )}
@@ -442,6 +721,23 @@ const styles = StyleSheet.create({
   },
   appearanceHelp: {
     marginBottom: spacing.md,
+  },
+  devicePairingHelp: {
+    marginBottom: spacing.md,
+  },
+  pairingError: {
+    marginBottom: spacing.md,
+  },
+  pairingInvite: {
+    gap: spacing.md,
+  },
+  pairingLink: {
+    fontFamily: "Courier",
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  pairingActions: {
+    gap: spacing.sm,
   },
   segmentGroup: {
     flexDirection: "row",

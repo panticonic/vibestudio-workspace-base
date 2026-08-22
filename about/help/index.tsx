@@ -15,12 +15,17 @@ import {
 } from "@radix-ui/react-icons";
 import { buildPanelLink } from "@workspace/runtime";
 import { useIsMobile } from "@workspace/react";
-import { AboutThemeRoot, AboutPage, BRAND_GRADIENT } from "@workspace/about-shared/ui";
+import {
+  AboutThemeRoot,
+  AboutPage,
+  BRAND_GRADIENT,
+} from "@workspace/about-shared/ui";
 
 interface HelpSection {
   title: string;
   icon: ReactNode;
   content: string;
+  mobileContent?: string;
   link?: { label: string; panel: string };
 }
 
@@ -74,6 +79,8 @@ const helpSections: HelpSection[] = [
     icon: <MobileIcon />,
     content:
       "Click the connection status badge in the title bar, then use Paired devices → Connect a device. Pairing links expire quickly; each paired device gets its own revocable identity.",
+    mobileContent:
+      "Open Settings → Devices → Connect another device, then share the one-time link with the new phone or desktop. Each paired device gets its own revocable identity.",
   },
 ];
 
@@ -111,7 +118,9 @@ function HelpPage() {
             <Heading size="4">{section.title}</Heading>
           </Flex>
           <Text as="p" size="2" color="gray" style={{ lineHeight: 1.65 }}>
-            {section.content}
+            {isMobile
+              ? (section.mobileContent ?? section.content)
+              : section.content}
           </Text>
           {section.link ? (
             <Link
@@ -132,14 +141,16 @@ function HelpPage() {
         </Heading>
         <Flex direction="column" gap="2">
           <Text size="2" color="gray">
-            Press <Kbd>Cmd/Ctrl + /</Kbd> for the full list of keyboard shortcuts.
+            Press <Kbd>Cmd/Ctrl + /</Kbd> for the full list of keyboard
+            shortcuts.
           </Text>
           <Text size="2" color="gray">
-            Press <Kbd>Cmd/Ctrl + T</Kbd> to open the panel launcher and <Kbd>Cmd/Ctrl + W</Kbd> to
-            close the current panel.
+            Press <Kbd>Cmd/Ctrl + T</Kbd> to open the panel launcher and{" "}
+            <Kbd>Cmd/Ctrl + W</Kbd> to close the current panel.
           </Text>
           <Text size="2" color="gray">
-            Press <Kbd>Cmd/Ctrl + K</Kbd> to search actions for the app and current panel.
+            Press <Kbd>Cmd/Ctrl + K</Kbd> to search actions for the app and
+            current panel.
           </Text>
         </Flex>
       </Card>
