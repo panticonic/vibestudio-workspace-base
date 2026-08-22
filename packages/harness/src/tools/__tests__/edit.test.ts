@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEditTool } from "../edit.js";
+import { createMemoryWorkspaceFileObservationStore } from "../file-observations.js";
 import { StubFs } from "./stub-fs.js";
 import { StubVcs } from "./stub-vcs.js";
 
@@ -47,7 +48,12 @@ describe("canonical edit tool", () => {
     expect(result.details).toMatchObject({
       status: "conflict",
       conflicts: [
-        { reason: "ambiguous", matchMode: "exact", matchCount: 2, candidateLines: [1, 2] },
+        {
+          reason: "ambiguous",
+          matchMode: "exact",
+          matchCount: 2,
+          candidateLines: [1, 2],
+        },
       ],
     });
     expect(vcs.lastEditInput).toBeUndefined();
@@ -117,40 +123,36 @@ describe("canonical edit tool", () => {
     expect(result.details.storage).toBe("scratch");
   });
 
-  it("rejects a stale read receipt without mutating and returns current evidence", async () => {
+  it("rejects a stale trusted observation without exposing hashes", async () => {
     const vcs = new StubVcs({
       files: { "meta/a.ts": "export const currentValue = 2;\n" },
     });
-    const tool = createEditTool(CWD, vcs, authority);
+    const observations = createMemoryWorkspaceFileObservationStore();
+    observations.record("meta/a.ts", "f".repeat(64));
+    const tool = createEditTool(CWD, vcs, authority, undefined, observations);
 
-    const result = await tool.execute("invocation:stale-receipt", {
+    const result = await tool.execute("invocation:stale-observation", {
       path: "meta/a.ts",
       oldText: "currentValue = 1",
       newText: "currentValue = 3",
-      receipt: {
-        protocol: "workspace-read-receipt.v1",
-        path: "meta/a.ts",
-        contentHash: "f".repeat(64),
-        byteLength: 31,
-      },
-    } as never);
+    });
 
     expect(result.details).toMatchObject({
       status: "conflict",
       conflicts: [
         {
           reason: "content-changed",
-          currentReceipt: {
-            protocol: "workspace-read-receipt.v1",
-            path: "meta/a.ts",
-          },
           closestCurrentExcerpts: [
-            expect.objectContaining({ text: expect.stringContaining("currentValue = 2") }),
+            expect.objectContaining({
+              text: expect.stringContaining("currentValue = 2"),
+            }),
           ],
           recovery: { action: "reobserve" },
         },
       ],
     });
+    expect(JSON.stringify(result)).not.toContain("contentHash");
+    expect(JSON.stringify(result)).not.toContain("receipt");
     expect(vcs.lastEditInput).toBeUndefined();
   });
 });

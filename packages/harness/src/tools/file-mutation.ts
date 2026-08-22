@@ -32,21 +32,19 @@ import {
   type ToolEditingVcs,
   type ToolMutationContext,
 } from "./tool-vcs.js";
-import { createWorkspaceReadReceipt, type WorkspaceReadReceipt } from "./workspace-read-receipt.js";
+import type { WorkspaceFileObservationStore } from "./file-observations.js";
 import type { RuntimeFs } from "./runtime-fs.js";
 
 export type SemanticFileMutationOperation =
   | {
       kind: "replace";
       path: string;
-      receipt?: WorkspaceReadReceipt;
       mode?: number;
       replacements: Array<{ oldText: string; newText: string }>;
     }
   | {
       kind: "write";
       path: string;
-      receipt?: WorkspaceReadReceipt;
       createOnly?: boolean;
       mode?: number;
       content: string;
@@ -54,20 +52,18 @@ export type SemanticFileMutationOperation =
   | {
       kind: "write_binary";
       path: string;
-      receipt?: WorkspaceReadReceipt;
       createOnly?: boolean;
       mode?: number;
       base64: string;
     }
-  | { kind: "delete"; path: string; receipt?: WorkspaceReadReceipt }
-  | { kind: "chmod"; path: string; receipt?: WorkspaceReadReceipt; mode: number };
+  | { kind: "delete"; path: string }
+  | { kind: "chmod"; path: string; mode: number };
 
 export type FileMutationConflictReason =
   | "missing-file"
   | "binary-file"
   | "not-found"
   | "ambiguous"
-  | "path-mismatch"
   | "content-changed"
   | "file-missing"
   | "file-exists"
@@ -89,7 +85,6 @@ export interface FileMutationConflict {
   matchCount?: number;
   candidateLines?: number[];
   requestedText?: string;
-  currentReceipt?: WorkspaceReadReceipt | null;
   closestCurrentExcerpts?: FileMutationExcerpt[];
   suggestedScratchPath?: string;
   recovery: {
@@ -201,55 +196,33 @@ function closestCurrentExcerpts(content: string, requested: string): FileMutatio
     .map(({ startLine, endLine, text }) => ({ startLine, endLine, text }));
 }
 
-function currentReceipt(
-  path: string,
-  file: {
-    contentHash: string;
-    content: { kind: "text"; text: string } | { kind: "bytes"; base64: string };
-  }
-): WorkspaceReadReceipt {
-  return createWorkspaceReadReceipt(
-    path,
-    file.contentHash,
-    file.content.kind === "text"
-      ? utf8ByteLength(file.content.text)
-      : base64ToBytes(file.content.base64).byteLength
-  );
-}
-
-function receiptConflict(
+function observationConflict(
   operation: number,
   path: string,
-  receipt: WorkspaceReadReceipt,
+  observedContentHash: string,
   file: {
     contentHash: string;
     content: { kind: "text"; text: string } | { kind: "bytes"; base64: string };
   } | null,
   anchors: string[]
 ): FileMutationConflict | null {
-  const current = file ? currentReceipt(path, file) : null;
-  if (receipt.path === path && current && receipt.contentHash === current.contentHash) return null;
-  const reason: FileMutationConflictReason =
-    receipt.path !== path ? "path-mismatch" : current ? "content-changed" : "file-missing";
+  if (file?.contentHash === observedContentHash) return null;
+  const reason: FileMutationConflictReason = file ? "content-changed" : "file-missing";
   const message =
-    reason === "path-mismatch"
-      ? `Read receipt names ${receipt.path}, not ${path}.`
-      : reason === "file-missing"
-        ? `File read as ${receipt.path} no longer exists.`
-        : `File changed after it was read: ${path}.`;
+    reason === "file-missing"
+      ? `File no longer exists after it was read: ${path}.`
+      : `File changed after it was read: ${path}.`;
   return {
     operation,
     path,
     reason,
     message,
-    currentReceipt: current,
     ...(file?.content.kind === "text"
       ? { closestCurrentExcerpts: closestCurrentExcerpts(file.content.text, anchors.join("\n")) }
       : {}),
     recovery: {
       action: "reobserve",
-      instruction:
-        "Read the current file, then form a new exact operation using the returned receipt and current text.",
+      instruction: "Read the current file, then form a new exact operation from its current text.",
     },
   };
 }
@@ -282,8 +255,7 @@ function planTextReplacements(
   source: string,
   replacements: Array<{ oldText: string; newText: string }>,
   operation: number,
-  path: string,
-  receipt: WorkspaceReadReceipt
+  path: string
 ): { plan: TextReplacementPlan } | { conflict: FileMutationConflict } {
   let next = source;
   const matches: TextReplacementPlan["matches"] = [];
@@ -298,7 +270,6 @@ function planTextReplacements(
           replacement: replacementIndex,
           message: `The requested text was not found in ${path}.`,
           requestedText: boundedText(replacement.oldText, 500),
-          currentReceipt: receipt,
           closestCurrentExcerpts: closestCurrentExcerpts(next, replacement.oldText),
           recovery: {
             action: "reobserve",
@@ -320,7 +291,6 @@ function planTextReplacements(
           candidateLines: match.candidateLines,
           message: `The requested text occurs ${match.matchCount} times in ${path}.`,
           requestedText: boundedText(replacement.oldText, 500),
-          currentReceipt: receipt,
           recovery: {
             action: "reobserve",
             instruction:
@@ -374,7 +344,8 @@ export async function mutateSemanticFiles(
   vcs: ToolEditingVcs,
   context: ToolMutationContext,
   input: SemanticFileMutationInput,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  observations?: WorkspaceFileObservationStore
 ): Promise<SemanticFileMutationDetails> {
   if (signal?.aborted) throw new Error("Operation aborted");
   const intent = input.intent?.trim() || undefined;
@@ -489,11 +460,12 @@ export async function mutateSemanticFiles(
   >();
   for (const item of ready) {
     const { operation, operationIndex, canonicalPath, file } = item;
-    if (operation.receipt) {
-      const conflict = receiptConflict(
+    const observedContentHash = observations?.get(canonicalPath);
+    if (observedContentHash) {
+      const conflict = observationConflict(
         operationIndex,
         canonicalPath,
-        operation.receipt,
+        observedContentHash,
         file,
         operation.kind === "replace"
           ? operation.replacements.map((replacement) => replacement.oldText)
@@ -514,7 +486,6 @@ export async function mutateSemanticFiles(
         path: canonicalPath,
         reason: "file-exists",
         message: `Cannot create ${canonicalPath} because it already exists.`,
-        currentReceipt: currentReceipt(canonicalPath, file),
         recovery: {
           action: "reobserve",
           instruction: "Read the current file, then decide whether an overwrite is intended.",
@@ -529,7 +500,6 @@ export async function mutateSemanticFiles(
           path: canonicalPath,
           reason: "missing-file",
           message: `Cannot edit missing file ${canonicalPath}.`,
-          currentReceipt: null,
           recovery: {
             action: "reobserve",
             instruction:
@@ -544,7 +514,6 @@ export async function mutateSemanticFiles(
           path: canonicalPath,
           reason: "binary-file",
           message: `Cannot text-edit binary file ${canonicalPath}.`,
-          currentReceipt: currentReceipt(canonicalPath, file),
           recovery: {
             action: "reobserve",
             instruction:
@@ -557,8 +526,7 @@ export async function mutateSemanticFiles(
         file.content.text,
         operation.replacements,
         operationIndex,
-        canonicalPath,
-        currentReceipt(canonicalPath, file)
+        canonicalPath
       );
       if ("conflict" in planned) conflicts.push(planned.conflict);
       else replacementPlans.set(operationIndex, planned.plan);
@@ -568,7 +536,6 @@ export async function mutateSemanticFiles(
         path: canonicalPath,
         reason: "missing-file",
         message: `${canonicalPath} does not exist.`,
-        currentReceipt: null,
         recovery: {
           action: "reobserve",
           instruction:
@@ -590,6 +557,7 @@ export async function mutateSemanticFiles(
 
   const changes: VcsEditChange[] = [];
   const operationResults: FileMutationOperationResult[] = [];
+  const resultingContentHashes = new Map<string, string | null>();
   const diffBudget: DiffBudget = { remaining: RESULT_DIFF_BUDGET_CHARS };
   for (const item of ready) {
     const { operation, operationIndex, canonicalPath, route, repository, file } = item;
@@ -597,6 +565,7 @@ export async function mutateSemanticFiles(
       const source = file!.content.kind === "text" ? file!.content.text : "";
       const plan = replacementPlans.get(operationIndex)!;
       const next = plan.next;
+      resultingContentHashes.set(canonicalPath, sha256Hex(encodeUtf8(next)));
       const diffResult = generateDiffString(source, next);
       if (next !== source) {
         changes.push({
@@ -638,6 +607,12 @@ export async function mutateSemanticFiles(
         content.kind === "text"
           ? utf8ByteLength(content.text)
           : base64ToBytes(content.base64).byteLength;
+      resultingContentHashes.set(
+        canonicalPath,
+        content.kind === "text"
+          ? sha256Hex(encodeUtf8(content.text))
+          : sha256Hex(base64ToBytes(content.base64))
+      );
       let status: FileMutationOperationResult["status"];
       let diffResult: ReturnType<typeof generateDiffString> | undefined;
       if (!file) {
@@ -698,6 +673,7 @@ export async function mutateSemanticFiles(
       continue;
     }
     if (operation.kind === "delete") {
+      resultingContentHashes.set(canonicalPath, null);
       changes.push({ kind: "file-delete", repositoryId: file!.repositoryId, fileId: file!.fileId });
       operationResults.push({
         operation: operationIndex,
@@ -708,6 +684,7 @@ export async function mutateSemanticFiles(
       continue;
     }
     const changed = operation.mode !== file!.mode;
+    resultingContentHashes.set(canonicalPath, file!.contentHash);
     if (changed) {
       changes.push({
         kind: "file-mode",
@@ -725,6 +702,7 @@ export async function mutateSemanticFiles(
   }
 
   if (changes.length === 0) {
+    applyResultingObservations(observations, resultingContentHashes);
     return {
       protocol: "file-mutation.v1",
       status: "unchanged",
@@ -742,6 +720,7 @@ export async function mutateSemanticFiles(
     ...(intent ? { intentSummary: intent } : {}),
     changes,
   });
+  applyResultingObservations(observations, resultingContentHashes);
   return {
     protocol: "file-mutation.v1",
     status: "applied",
@@ -751,6 +730,17 @@ export async function mutateSemanticFiles(
     conflicts: [],
     vcsResult,
   };
+}
+
+function applyResultingObservations(
+  observations: WorkspaceFileObservationStore | undefined,
+  resultingContentHashes: ReadonlyMap<string, string | null>
+): void {
+  if (!observations) return;
+  for (const [path, contentHash] of resultingContentHashes) {
+    if (contentHash === null) observations.forget(path);
+    else observations.record(path, contentHash);
+  }
 }
 
 function isMissingFileError(error: unknown): boolean {
@@ -774,14 +764,15 @@ export async function mutateFiles(
   context: ToolMutationContext,
   input: SemanticFileMutationInput,
   signal?: AbortSignal,
-  fs?: Pick<RuntimeFs, "readFile" | "writeFile">
+  fs?: Pick<RuntimeFs, "readFile" | "writeFile">,
+  observations?: WorkspaceFileObservationStore
 ): Promise<SemanticFileMutationDetails> {
   const canonicalPaths = input.operations.map((operation) =>
     canonicalizeWorkspaceFilePath(toVcsPath(operation.path, cwd))
   );
   const managed = canonicalPaths.map((path) => Boolean(splitRepoPath(path)?.repoRelPath));
   if (managed.every(Boolean)) {
-    return mutateSemanticFiles(cwd, vcs, context, input, signal);
+    return mutateSemanticFiles(cwd, vcs, context, input, signal, observations);
   }
   if (managed.some(Boolean) || input.operations.length !== 1) {
     throw Object.assign(new Error("One mutation cannot mix managed VCS files with scratch files"), {
@@ -832,11 +823,12 @@ export async function mutateFiles(
           contentHash: sha256Hex(encodeUtf8(source)),
           content: { kind: "text" as const, text: source },
         };
-  if (operation.receipt) {
-    const conflict = receiptConflict(
+  const observedContentHash = observations?.get(path);
+  if (observedContentHash) {
+    const conflict = observationConflict(
       0,
       path,
-      operation.receipt,
+      observedContentHash,
       syntheticFile,
       operation.kind === "replace"
         ? operation.replacements.map((replacement) => replacement.oldText)
@@ -870,7 +862,6 @@ export async function mutateFiles(
           path,
           reason: "file-exists",
           message: `Cannot create ${path} because it already exists.`,
-          currentReceipt: currentReceipt(path, syntheticFile!),
           recovery: {
             action: "reobserve",
             instruction:
@@ -887,6 +878,7 @@ export async function mutateFiles(
       if (signal?.aborted) throw new Error("Operation aborted");
       await fs.writeFile(path, operation.content);
     }
+    observations?.record(path, sha256Hex(encodeUtf8(operation.content)));
     const diffResult =
       source !== null && source !== operation.content
         ? generateDiffString(source, operation.content)
@@ -923,7 +915,6 @@ export async function mutateFiles(
             path,
             reason: "missing-file",
             message: `Cannot edit missing file ${path}.`,
-            currentReceipt: null,
             recovery: {
               action: "reobserve",
               instruction: "Create the scratch file with write, or use its current path.",
@@ -932,12 +923,7 @@ export async function mutateFiles(
         ],
       };
     }
-    const receipt = createWorkspaceReadReceipt(
-      path,
-      sha256Hex(encodeUtf8(source)),
-      utf8ByteLength(source)
-    );
-    const planned = planTextReplacements(source, operation.replacements, 0, path, receipt);
+    const planned = planTextReplacements(source, operation.replacements, 0, path);
     if ("conflict" in planned) {
       return {
         protocol: "file-mutation.v1",
@@ -954,6 +940,7 @@ export async function mutateFiles(
       if (signal?.aborted) throw new Error("Operation aborted");
       await fs.writeFile(path, planned.plan.next);
     }
+    observations?.record(path, sha256Hex(encodeUtf8(planned.plan.next)));
     return {
       protocol: "file-mutation.v1",
       status: status === "unchanged" ? "unchanged" : "applied",

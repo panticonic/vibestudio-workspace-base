@@ -8,10 +8,9 @@ import {
   type SemanticFileMutationDetails,
   type SemanticFileMutationOperation,
 } from "./file-mutation.js";
-import { workspaceReadReceiptSchema, type WorkspaceReadReceipt } from "./workspace-read-receipt.js";
+import type { WorkspaceFileObservationStore } from "./file-observations.js";
 import type { ToolEditingVcs, ToolMutationContext } from "./tool-vcs.js";
 
-const receipt = Type.Optional(workspaceReadReceiptSchema);
 const mode = Type.Optional(
   Type.Integer({
     minimum: 0,
@@ -29,7 +28,6 @@ const patchOperationSchema = Type.Union([
     {
       kind: Type.Literal("replace"),
       path,
-      receipt,
       mode,
       replacements: Type.Array(
         Type.Object(
@@ -57,7 +55,6 @@ const patchOperationSchema = Type.Union([
     {
       kind: Type.Literal("write"),
       path,
-      receipt,
       createOnly: Type.Optional(Type.Boolean()),
       mode,
       content: Type.String(),
@@ -68,19 +65,17 @@ const patchOperationSchema = Type.Union([
     {
       kind: Type.Literal("write_binary"),
       path,
-      receipt,
       createOnly: Type.Optional(Type.Boolean()),
       mode,
       base64: Type.String({ description: "Complete file bytes encoded as canonical base64." }),
     },
     { additionalProperties: false }
   ),
-  Type.Object({ kind: Type.Literal("delete"), path, receipt }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("delete"), path }, { additionalProperties: false }),
   Type.Object(
     {
       kind: Type.Literal("chmod"),
       path,
-      receipt,
       mode: Type.Integer({ minimum: 0, maximum: 0o777 }),
     },
     { additionalProperties: false }
@@ -117,13 +112,14 @@ export type ApplyPatchToolDetails = SemanticFileMutationDetails;
 export function createApplyPatchTool(
   cwd: string,
   vcs: ToolEditingVcs,
-  context: ToolMutationContext
+  context: ToolMutationContext,
+  observations?: WorkspaceFileObservationStore
 ): AgentTool<typeof applyPatchSchema, ApplyPatchToolDetails> {
   return {
     name: "apply_patch",
     label: "Apply patch",
     description:
-      'Atomically author multiple managed workspace file changes in one semantic VCS work unit. A replace operation has {"kind":"replace","path":"...","replacements":[{"oldText":"...","newText":"..."}]}; intent belongs only at the top level, beside operations. Every path includes its top-level section and repository name, for example projects/app/README.md; workspace-root files are not managed repositories. Replacement matching is deterministic and shared with edit: one exact occurrence wins; if exact bytes are absent, one normalized occurrence may match across line endings, trailing whitespace, smart punctuation, Unicode spaces, and BOM-preserving text. Missing, stale, or ambiguous preconditions return a structured conflict with no mutation. Pass receipts from read without reconstructing hashes for optimistic concurrency. Use write or edit for the ergonomic single-file forms, and move_file/copy_file for identity-preserving transfers.',
+      'Atomically author multiple managed workspace file changes in one semantic VCS work unit. A replace operation has {"kind":"replace","path":"...","replacements":[{"oldText":"...","newText":"..."}]}; intent belongs only at the top level, beside operations. Every path includes its top-level section and repository name, for example projects/app/README.md; workspace-root files are not managed repositories. Replacement matching is deterministic and shared with edit: one exact occurrence wins; if exact bytes are absent, one normalized occurrence may match across line endings, trailing whitespace, smart punctuation, Unicode spaces, and BOM-preserving text. Files read earlier are protected against stale mutations automatically. Missing, stale, or ambiguous preconditions return a structured conflict with no mutation. Use write or edit for the ergonomic single-file forms, and move_file/copy_file for identity-preserving transfers.',
     parameters: applyPatchSchema,
     cancellationMode: "settle",
     execute: async (
@@ -136,11 +132,10 @@ export function createApplyPatchTool(
         vcs,
         context,
         rawInput as ApplyPatchToolInput,
-        signal
+        signal,
+        observations
       );
       return { content: [{ type: "text", text: mutationResultText(details) }], details };
     },
   };
 }
-
-export type { WorkspaceReadReceipt };

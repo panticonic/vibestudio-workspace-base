@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { Value } from "@sinclair/typebox/value";
 import { createReadBinaryTool, createReadTool } from "../read.js";
+import { createMemoryWorkspaceFileObservationStore } from "../file-observations.js";
 import { StubFs } from "./stub-fs.js";
 
 const CWD = "/work/ctx";
@@ -35,20 +36,18 @@ describe("createReadTool", () => {
   it("reads a small text file", async () => {
     const fs = new StubFs({ files: { [`${CWD}/hello.txt`]: "hello\nworld" } });
     const readFile = vi.spyOn(fs, "readFile");
-    const tool = createReadTool(CWD, fs);
+    const observations = createMemoryWorkspaceFileObservationStore();
+    const tool = createReadTool(CWD, fs, { observations });
     const result = await tool.execute("call-1", { path: "hello.txt" });
-    expect(result.content[0]).toMatchObject({ type: "text", text: "hello\nworld" });
-    expect(result.details.path).toBe("hello.txt");
-    expect(result.details.receipt).toEqual({
-      protocol: "workspace-read-receipt.v1",
-      path: "hello.txt",
-      contentHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
-      byteLength: 11,
-    });
-    expect(result.content[1]).toMatchObject({
+    expect(result.content[0]).toMatchObject({
       type: "text",
-      text: expect.stringContaining('"protocol":"workspace-read-receipt.v1","path":"hello.txt"'),
+      text: "hello\nworld",
     });
+    expect(result.details.path).toBe("hello.txt");
+    expect(result.content).toHaveLength(1);
+    expect(JSON.stringify(result)).not.toContain("contentHash");
+    expect(JSON.stringify(result)).not.toContain("workspace-read-receipt");
+    expect(observations.get("hello.txt")).toMatch(/^[0-9a-f]{64}$/u);
     expect(readFile).toHaveBeenCalledWith(`${CWD}/hello.txt`, "utf8");
   });
 
@@ -75,11 +74,17 @@ describe("createReadTool", () => {
             kind: "applied-change" as const,
             appliedChangeId: "applied-change:value",
           },
-          workUnit: { kind: "work-unit" as const, workUnitId: "work-unit:value" },
+          workUnit: {
+            kind: "work-unit" as const,
+            workUnitId: "work-unit:value",
+          },
           command: { kind: "command" as const, commandId: "command:value" },
           changeKind: "text-edit" as const,
           counteractsChangeIds: [],
-          intent: { text: "Keep the retry budget owned by the caller", tier: "stated" as const },
+          intent: {
+            text: "Keep the retry budget owned by the caller",
+            tier: "stated" as const,
+          },
           authorContextId: "context:author",
           createdAt: "2026-07-01T10:00:00.000Z",
           externalSnapshot: null,
@@ -129,26 +134,20 @@ describe("createReadTool", () => {
       type: "text",
       text: expect.stringMatching(/^second(?:\n|$)/u),
     });
-    expect(result.content[2]).toMatchObject({
+    expect(result.content[1]).toMatchObject({
       type: "text",
       text: expect.stringContaining(
         "workspace memory · why packages/example/src/value.ts lines 2-2 exist"
       ),
     });
-    expect((result.content[2] as { text: string }).text).toContain(
+    expect((result.content[1] as { text: string }).text).toContain(
       'stated: "Keep the retry budget owned by the caller"'
     );
     // Without a reference store the renderer names the kind and nothing else:
     // a content-addressed identity is never rendered to the model.
-    expect((result.content[2] as { text: string }).text).toContain("change change");
-    expect((result.content[2] as { text: string }).text).not.toContain("change:value");
+    expect((result.content[1] as { text: string }).text).toContain("change change");
+    expect((result.content[1] as { text: string }).text).not.toContain("change:value");
     expect(result.details).toMatchObject({
-      receipt: {
-        protocol: "workspace-read-receipt.v1",
-        path: "packages/example/src/value.ts",
-        contentHash: "b".repeat(64),
-        byteLength: 18,
-      },
       displayedRange: {
         coordinateKind: "utf16",
         start: 6,
@@ -184,7 +183,7 @@ describe("createReadTool", () => {
       type: "text",
       text: "export const value = 1;",
     });
-    expect(result.content).toHaveLength(2);
+    expect(result.content).toHaveLength(1);
     expect(result.details.provenance).toEqual({
       status: "unavailable",
       path: "packages/example/src/value.ts",
@@ -206,10 +205,7 @@ describe("createReadTool", () => {
     const tool = createReadTool(CWD, fs);
 
     await expect(tool.execute("call-1", { path: "hello.txt" })).resolves.toMatchObject({
-      content: [
-        { type: "text", text: "hello" },
-        { type: "text", text: expect.stringContaining("workspace-read-receipt.v1") },
-      ],
+      content: [{ type: "text", text: "hello" }],
     });
     expect(readFile).toHaveBeenCalledTimes(2);
   });
@@ -294,7 +290,10 @@ describe("createReadTool", () => {
       path: "skills/git-bridge/SKILL.md",
     });
 
-    expect(result.content[0]).toMatchObject({ type: "text", text: "# Git Bridge\n" });
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: "# Git Bridge\n",
+    });
     expect(result.details).toMatchObject({
       path: "extensions/git-bridge/SKILL.md",
       extensionFallback: "workspace-skill-alias:skills/git-bridge/SKILL.md",
@@ -308,7 +307,10 @@ describe("createReadTool", () => {
 
     expect(Value.Check(tool.parameters, input)).toBe(true);
     const result = await tool.execute("call-1", input);
-    expect(result.content[0]).toMatchObject({ type: "text", text: "hello\nworld" });
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: "hello\nworld",
+    });
   });
 
   it("advertises all read locations through one provider-friendly object schema", () => {
@@ -351,7 +353,10 @@ describe("createReadTool", () => {
 
     expect(Value.Check(tool.parameters, input)).toBe(true);
     const result = await tool.execute("call-1", input);
-    expect(result.content[0]).toMatchObject({ type: "text", text: "hello\nworld" });
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: "hello\nworld",
+    });
     expect(result.details.path).toBe("hello.txt");
   });
 
@@ -373,7 +378,9 @@ describe("createReadTool", () => {
         return '{"status":"failed"}';
       }),
     };
-    const tool = createReadTool(CWD, new StubFs({ files: {} }), { rpc: rpc as never });
+    const tool = createReadTool(CWD, new StubFs({ files: {} }), {
+      rpc: rpc as never,
+    });
 
     const result = await tool.execute("call-artifact", { resource });
 
@@ -412,11 +419,16 @@ describe("createReadTool", () => {
     expect((result.content[0] as { text: string }).text).toContain(
       "Offset 615 is beyond end of file (2 lines total)"
     );
-    expect(result.details).toMatchObject({ path: "small.txt", engine: "runtime-fs" });
+    expect(result.details).toMatchObject({
+      path: "small.txt",
+      engine: "runtime-fs",
+    });
   });
 
   it("reads a bounded text range through the host service when context rpc is available", async () => {
-    const fs = new StubFs({ files: { [`${CWD}/big.txt`]: "line 1\nline 2\nline 3\nline 4" } });
+    const fs = new StubFs({
+      files: { [`${CWD}/big.txt`]: "line 1\nline 2\nline 3\nline 4" },
+    });
     const readFile = vi.spyOn(fs, "readFile");
     const stat = vi.spyOn(fs, "stat");
     const access = vi.spyOn(fs, "access");
@@ -437,7 +449,10 @@ describe("createReadTool", () => {
     });
 
     expect((result.content[0] as { text: string }).text).toBe("line 3\nline 4");
-    expect(result.details).toMatchObject({ path: "big.txt", engine: "runtime-fs" });
+    expect(result.details).toMatchObject({
+      path: "big.txt",
+      engine: "runtime-fs",
+    });
     expect(readFile).not.toHaveBeenCalled();
     expect(stat).not.toHaveBeenCalled();
     expect(access).not.toHaveBeenCalled();
@@ -487,18 +502,11 @@ describe("createReadTool", () => {
     expect(JSON.parse((result.content[0] as { text: string }).text)).toEqual({
       path: "value.bin",
       encoding: "base64",
-      contentHash: "c".repeat(64),
       range: { start: 1, end: 4, totalBytes: 6, nextOffset: 4 },
       base64: bytes.subarray(1, 4).toString("base64"),
     });
     expect(result.details).toMatchObject({
       encoding: "base64",
-      receipt: {
-        protocol: "workspace-read-receipt.v1",
-        path: "value.bin",
-        contentHash: "c".repeat(64),
-        byteLength: 6,
-      },
       size: 3,
       originalSize: 6,
       byteRange: { start: 1, end: 4, totalBytes: 6, nextOffset: 4 },
@@ -563,10 +571,7 @@ describe("createReadTool", () => {
     const tool = createReadTool(CWD, fs, { rpc });
 
     await expect(tool.execute("call-1", { path: "guide.md" })).resolves.toMatchObject({
-      content: [
-        { type: "text", text: "approval guide" },
-        { type: "text", text: expect.stringContaining("workspace-read-receipt.v1") },
-      ],
+      content: [{ type: "text", text: "approval guide" }],
       details: { path: "guide.md", engine: "runtime-fs" },
     });
     expect(rpc.call).not.toHaveBeenCalledWith(
@@ -606,7 +611,10 @@ describe("createReadTool", () => {
 
     const result = await tool.execute("call-1", { path: "pic.png" });
 
-    const last = result.content[result.content.length - 1] as { type: string; mimeType: string };
+    const last = result.content[result.content.length - 1] as {
+      type: string;
+      mimeType: string;
+    };
     expect(last.type).toBe("image");
     expect(last.mimeType).toBe("image/png");
     expect(readFile).toHaveBeenCalledWith(`${CWD}/pic.png`, undefined);
@@ -660,12 +668,6 @@ describe("createReadTool", () => {
       path: screenshotPath,
       mimeType: "image/png",
       originalSize: pngBytes.length,
-      receipt: {
-        protocol: "workspace-read-receipt.v1",
-        path: ".tmp/panel-capture-123",
-        contentHash: expect.stringMatching(/^[0-9a-f]{64}$/u),
-        byteLength: pngBytes.length,
-      },
     });
     expect(readFile).toHaveBeenCalledWith(screenshotPath, undefined);
   });
@@ -705,7 +707,10 @@ describe("createReadTool", () => {
     };
     const tool = createReadTool(CWD, fs, { rpc });
     const result = await tool.execute("call-1", { path: "pic.png" });
-    const last = result.content[result.content.length - 1] as { type: string; mimeType: string };
+    const last = result.content[result.content.length - 1] as {
+      type: string;
+      mimeType: string;
+    };
     expect(last.type).toBe("image");
     expect(last.mimeType).toBe("image/png");
   });

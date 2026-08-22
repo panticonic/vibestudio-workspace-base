@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createWriteTool } from "../write.js";
+import { createReadTool } from "../read.js";
+import { createMemoryWorkspaceFileObservationStore } from "../file-observations.js";
+import { sha256Hex } from "@vibestudio/content-addressing";
 import { StubFs } from "./stub-fs.js";
 import { StubVcs } from "./stub-vcs.js";
 
@@ -7,6 +10,56 @@ const CWD = "/";
 const authority = { contextId: "context:test", commandId: "command:write" };
 
 describe("canonical write tool", () => {
+  it("automatically carries a read observation into a later write", async () => {
+    const observations = createMemoryWorkspaceFileObservationStore();
+    const fs = new StubFs({ files: { "/meta/out.txt": "before" } });
+    await createReadTool(CWD, fs, { observations }).execute("invocation:read", {
+      path: "meta/out.txt",
+    });
+    const vcs = new StubVcs({ files: { "meta/out.txt": "before" } });
+    vcs.files.set("meta/out.txt", "changed elsewhere");
+
+    const result = await createWriteTool(
+      CWD,
+      vcs,
+      authority,
+      undefined,
+      observations
+    ).execute("invocation:write", { path: "meta/out.txt", content: "replacement" });
+
+    expect(result.details).toMatchObject({
+      status: "conflict",
+      conflicts: [{ path: "meta/out.txt", reason: "content-changed" }],
+    });
+    expect(JSON.stringify(result)).not.toContain("contentHash");
+    expect(JSON.stringify(result)).not.toContain("receipt");
+    expect(vcs.read("meta/out.txt")).toBe("changed elsewhere");
+  });
+
+  it("keeps stale-write state inside the harness and advances it after writes", async () => {
+    const vcs = new StubVcs({ files: { "meta/out.txt": "before" } });
+    const observations = createMemoryWorkspaceFileObservationStore();
+    observations.record("meta/out.txt", sha256Hex(new TextEncoder().encode("before")));
+    const tool = createWriteTool(CWD, vcs, authority, undefined, observations);
+
+    expect(JSON.stringify(tool.parameters)).not.toContain("receipt");
+    expect(JSON.stringify(tool.parameters)).not.toContain("contentHash");
+    await expect(
+      tool.execute("invocation:first", {
+        path: "meta/out.txt",
+        content: "after",
+      })
+    ).resolves.toMatchObject({ details: { status: "applied" } });
+    expect(observations.get("meta/out.txt")).toBe(sha256Hex(new TextEncoder().encode("after")));
+    await expect(
+      tool.execute("invocation:second", {
+        path: "meta/out.txt",
+        content: "final",
+      })
+    ).resolves.toMatchObject({ details: { status: "applied" } });
+    expect(vcs.read("meta/out.txt")).toBe("final");
+  });
+
   it("declares an admitted mutation as a cancellation settlement boundary", () => {
     expect(createWriteTool(CWD, new StubVcs(), authority).cancellationMode).toBe("settle");
   });
@@ -38,7 +91,10 @@ describe("canonical write tool", () => {
   it("guards an overwrite with the exact state and file identity", async () => {
     const vcs = new StubVcs({ files: { "meta/out.txt": "old" } });
     const tool = createWriteTool(CWD, vcs, authority);
-    await tool.execute("invocation:2", { path: "meta/out.txt", content: "new" });
+    await tool.execute("invocation:2", {
+      path: "meta/out.txt",
+      content: "new",
+    });
     expect(vcs.lastEditInput).toMatchObject({
       expectedWorkingHead: { kind: "event", eventId: "event:committed" },
       changes: [
@@ -64,7 +120,14 @@ describe("canonical write tool", () => {
       protocol: "file-mutation.v1",
       status: "unchanged",
       storage: "vcs",
-      operations: [{ path: "meta/out.txt", kind: "write", status: "unchanged", bytesWritten: 4 }],
+      operations: [
+        {
+          path: "meta/out.txt",
+          kind: "write",
+          status: "unchanged",
+          bytesWritten: 4,
+        },
+      ],
       conflicts: [],
     });
     expect(result.content).toEqual([
@@ -81,7 +144,10 @@ describe("canonical write tool", () => {
     const vcs = new StubVcs();
     const fs = new StubFs();
     const tool = createWriteTool(CWD, vcs, authority, fs);
-    const result = await tool.execute("invocation:3", { path: ".tmp/out.txt", content: "scratch" });
+    const result = await tool.execute("invocation:3", {
+      path: ".tmp/out.txt",
+      content: "scratch",
+    });
     await expect(fs.readFile(".tmp/out.txt", "utf8")).resolves.toBe("scratch");
     expect(result.details.storage).toBe("scratch");
     expect(vcs.lastEditInput).toBeUndefined();
@@ -155,7 +221,7 @@ describe("canonical write tool", () => {
     expect(vcs.lastEditInput).toBeUndefined();
   });
 
-  it("returns a create-only conflict with the current receipt instead of overwriting", async () => {
+  it("returns a create-only conflict without exposing internal file state", async () => {
     const vcs = new StubVcs({ files: { "meta/out.txt": "existing" } });
     const result = await createWriteTool(CWD, vcs, authority).execute("invocation:create-only", {
       path: "meta/out.txt",
@@ -165,13 +231,10 @@ describe("canonical write tool", () => {
 
     expect(result.details).toMatchObject({
       status: "conflict",
-      conflicts: [
-        {
-          reason: "file-exists",
-          currentReceipt: { protocol: "workspace-read-receipt.v1", path: "meta/out.txt" },
-        },
-      ],
+      conflicts: [{ reason: "file-exists" }],
     });
+    expect(JSON.stringify(result)).not.toContain("contentHash");
+    expect(JSON.stringify(result)).not.toContain("receipt");
     expect(vcs.read("meta/out.txt")).toBe("existing");
     expect(vcs.lastEditInput).toBeUndefined();
   });
@@ -187,7 +250,10 @@ describe("canonical write tool", () => {
 
     expect(tool.parameters.properties).toHaveProperty("path");
     await expect(
-      tool.execute("untrusted-tool-call-id", { path: "meta/out.txt", content: "hello" })
+      tool.execute("untrusted-tool-call-id", {
+        path: "meta/out.txt",
+        content: "hello",
+      })
     ).rejects.toThrow(/no bound trajectory invocation/);
     expect(vcs.lastEditInput).toBeUndefined();
   });

@@ -10,7 +10,14 @@
 
 export { createReadTool, createReadBinaryTool } from "./read.js";
 export type { ReadToolInput, ReadBinaryToolInput, ReadToolDetails, ReadToolDeps } from "./read.js";
-export type { WorkspaceReadReceipt } from "./workspace-read-receipt.js";
+export {
+  createWorkspaceFileObservationStore,
+  createMemoryWorkspaceFileObservationStore,
+} from "./file-observations.js";
+export type {
+  WorkspaceFileObservationPersistence,
+  WorkspaceFileObservationStore,
+} from "./file-observations.js";
 
 export { createProvenanceTool } from "./provenance.js";
 export type {

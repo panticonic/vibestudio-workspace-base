@@ -28,7 +28,6 @@ interface MutationConflict {
   candidateLines?: number[];
   requestedText?: string;
   suggestedScratchPath?: string;
-  currentReceipt?: unknown;
   closestCurrentExcerpts?: Array<{ startLine: number; endLine: number; text: string }>;
   recovery?: { action?: string; instruction?: string };
 }
@@ -134,11 +133,6 @@ function WriteArguments({ args }: { args: RecordValue }) {
             mode {args["mode"]}
           </Badge>
         )}
-        {args["receipt"] !== undefined && args["receipt"] !== null && (
-          <Badge size="1" color="blue">
-            read receipt
-          </Badge>
-        )}
       </Flex>
       <CodePreview code={content} language={languageForPath(path)} label="Complete file content" />
     </Flex>
@@ -152,11 +146,6 @@ function EditArguments({ args }: { args: RecordValue }) {
   return (
     <Flex direction="column" gap="2" data-testid="file-mutation-arguments">
       <ArgumentSummary args={args} />
-      {args["receipt"] !== undefined && args["receipt"] !== null && (
-        <Badge size="1" color="blue" style={{ alignSelf: "flex-start" }}>
-          read receipt
-        </Badge>
-      )}
       <CodePreview code={oldText} language={languageForPath(path)} label="Find one occurrence" />
       <CodePreview code={newText} language={languageForPath(path)} label="Replace with" />
     </Flex>
@@ -189,11 +178,6 @@ function PatchArguments({ args }: { args: RecordValue }) {
                 {kind}
               </Badge>
               <Code size="1">{path}</Code>
-              {operation["receipt"] !== undefined && operation["receipt"] !== null && (
-                <Badge size="1" color="blue">
-                  receipt
-                </Badge>
-              )}
             </Flex>
             {typeof operation["content"] === "string" && (
               <CollapsibleSection

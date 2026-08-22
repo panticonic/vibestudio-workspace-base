@@ -7,7 +7,7 @@ import {
   mutationResultText,
   type SemanticFileMutationDetails,
 } from "./file-mutation.js";
-import { isWorkspaceReadReceipt, workspaceReadReceiptSchema } from "./workspace-read-receipt.js";
+import type { WorkspaceFileObservationStore } from "./file-observations.js";
 import type { RuntimeFs } from "./runtime-fs.js";
 import type { ToolEditingVcs, ToolMutationContext } from "./tool-vcs.js";
 
@@ -24,13 +24,6 @@ const editSchema = Type.Object(
         "Text identifying exactly one site. Exact bytes are preferred; when absent, one normalized match may bridge line endings, trailing whitespace, smart punctuation, Unicode spaces, and BOM-preserving text.",
     }),
     newText: Type.String({ description: "Replacement text." }),
-    receipt: Type.Optional(
-      Type.Object(workspaceReadReceiptSchema.properties, {
-        additionalProperties: false,
-        description:
-          "Optimistic precondition returned by read. Pass the complete receipt object unchanged.",
-      })
-    ),
     intent: Type.Optional(
       Type.String({
         minLength: 1,
@@ -49,7 +42,8 @@ export function createEditTool(
   cwd: string,
   vcs: ToolEditingVcs,
   context: ToolMutationContext,
-  fs?: Pick<RuntimeFs, "readFile" | "writeFile">
+  fs?: Pick<RuntimeFs, "readFile" | "writeFile">,
+  observations?: WorkspaceFileObservationStore
 ): AgentTool<typeof editSchema, EditToolDetails> {
   return {
     name: "edit",
@@ -65,14 +59,6 @@ export function createEditTool(
           code: "InvalidFileMutation",
         });
       }
-      if (input.receipt !== undefined && !isWorkspaceReadReceipt(input.receipt)) {
-        throw Object.assign(
-          new Error("edit receipt must be the complete object returned by read"),
-          {
-            code: "InvalidWorkspaceReadReceipt",
-          }
-        );
-      }
       const details = await mutateFiles(
         cwd,
         vcs,
@@ -83,13 +69,13 @@ export function createEditTool(
               kind: "replace",
               path,
               replacements: [{ oldText, newText }],
-              ...(input.receipt !== undefined ? { receipt: input.receipt } : {}),
             },
           ],
           ...(input.intent ? { intent: input.intent } : {}),
         },
         signal,
-        fs
+        fs,
+        observations
       );
       return { content: [{ type: "text", text: mutationResultText(details) }], details };
     },

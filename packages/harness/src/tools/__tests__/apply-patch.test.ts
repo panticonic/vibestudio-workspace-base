@@ -1,6 +1,7 @@
 import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import { createApplyPatchTool } from "../apply-patch.js";
+import { createMemoryWorkspaceFileObservationStore } from "../file-observations.js";
 import { StubVcs } from "./stub-vcs.js";
 
 const authority = { contextId: "context:test", commandId: "command:patch" };
@@ -14,7 +15,9 @@ describe("apply_patch", () => {
     expect(tool.description).toContain("workspace-root files");
     expect(tool.description).toContain("one normalized occurrence");
     expect(tool.description).toContain("structured conflict");
-    expect(tool.description).toContain("without reconstructing hashes");
+    expect(tool.description).toContain("protected against stale mutations automatically");
+    expect(JSON.stringify(tool.parameters)).not.toContain("receipt");
+    expect(JSON.stringify(tool.parameters)).not.toContain("contentHash");
   });
 
   it("applies a multi-file content, presence, and mode transaction", async () => {
@@ -83,9 +86,13 @@ describe("apply_patch", () => {
     expect(vcs.modes.get("meta/asset.bin")).toBe(0o600);
   });
 
-  it("rejects every operation before mutation when a read receipt is stale", async () => {
-    const vcs = new StubVcs({ files: { "meta/a.ts": "old", "meta/b.ts": "old" } });
-    const tool = createApplyPatchTool("/", vcs, authority);
+  it("rejects every operation before mutation when a trusted observation is stale", async () => {
+    const vcs = new StubVcs({
+      files: { "meta/a.ts": "old", "meta/b.ts": "old" },
+    });
+    const observations = createMemoryWorkspaceFileObservationStore();
+    observations.record("meta/b.ts", "f".repeat(64));
+    const tool = createApplyPatchTool("/", vcs, authority, observations);
     const result = await tool.execute("invocation:stale", {
       operations: [
         { kind: "write", path: "meta/a.ts", content: "new" },
@@ -93,12 +100,6 @@ describe("apply_patch", () => {
           kind: "write",
           path: "meta/b.ts",
           content: "new",
-          receipt: {
-            protocol: "workspace-read-receipt.v1",
-            path: "meta/b.ts",
-            contentHash: "f".repeat(64),
-            byteLength: 3,
-          },
         },
       ],
     } as never);
@@ -153,9 +154,10 @@ describe("apply_patch", () => {
         {
           reason: "not-found",
           requestedText: "return submitOldValue();",
-          currentReceipt: { protocol: "workspace-read-receipt.v1", path: "meta/a.ts" },
           closestCurrentExcerpts: [
-            expect.objectContaining({ text: expect.stringContaining("submitCurrentValue") }),
+            expect.objectContaining({
+              text: expect.stringContaining("submitCurrentValue"),
+            }),
           ],
           recovery: { action: "reobserve" },
         },
@@ -164,14 +166,16 @@ describe("apply_patch", () => {
     expect(vcs.lastEditInput).toBeUndefined();
   });
 
-  it("validates every read receipt before applying any operation", async () => {
+  it("validates every trusted observation before applying any operation", async () => {
     const vcs = new StubVcs({
       files: {
         "meta/a.ts": "export const currentValue = 2;\n",
         "meta/b.ts": "unchanged\n",
       },
     });
-    const tool = createApplyPatchTool("/", vcs, authority);
+    const observations = createMemoryWorkspaceFileObservationStore();
+    observations.record("meta/a.ts", "f".repeat(64));
+    const tool = createApplyPatchTool("/", vcs, authority, observations);
 
     const result = await tool.execute("invocation:receipt-conflict", {
       operations: [
@@ -179,12 +183,6 @@ describe("apply_patch", () => {
         {
           kind: "replace",
           path: "meta/a.ts",
-          receipt: {
-            protocol: "workspace-read-receipt.v1",
-            path: "meta/a.ts",
-            contentHash: "f".repeat(64),
-            byteLength: 31,
-          },
           replacements: [{ oldText: "currentValue = 1", newText: "currentValue = 3" }],
         },
       ],
@@ -195,17 +193,17 @@ describe("apply_patch", () => {
       conflicts: [
         {
           reason: "content-changed",
-          currentReceipt: {
-            protocol: "workspace-read-receipt.v1",
-            path: "meta/a.ts",
-          },
           closestCurrentExcerpts: [
-            expect.objectContaining({ text: expect.stringContaining("currentValue = 2") }),
+            expect.objectContaining({
+              text: expect.stringContaining("currentValue = 2"),
+            }),
           ],
           recovery: { action: "reobserve" },
         },
       ],
     });
+    expect(JSON.stringify(result)).not.toContain("contentHash");
+    expect(JSON.stringify(result)).not.toContain("receipt");
     expect(vcs.lastEditInput).toBeUndefined();
     expect(vcs.read("meta/b.ts")).toBe("unchanged\n");
   });
@@ -225,7 +223,10 @@ describe("apply_patch", () => {
             kind: "replace",
             path: "meta/a.ts",
             replacements: [
-              { oldText: 'const title = "Current";\n', newText: 'const title = "Next";\n' },
+              {
+                oldText: 'const title = "Current";\n',
+                newText: 'const title = "Next";\n',
+              },
             ],
           },
           { kind: "write", path: "meta/b.ts", content: "after\n" },
@@ -247,7 +248,9 @@ describe("apply_patch", () => {
   it("bounds diff evidence across the whole atomic result", async () => {
     const oldText = `old:${"a".repeat(30_000)}\n`;
     const newText = `new:${"b".repeat(30_000)}\n`;
-    const vcs = new StubVcs({ files: { "meta/a.txt": oldText, "meta/b.txt": oldText } });
+    const vcs = new StubVcs({
+      files: { "meta/a.txt": oldText, "meta/b.txt": oldText },
+    });
 
     const result = await createApplyPatchTool("/", vcs, authority).execute(
       "invocation:bounded-diff",

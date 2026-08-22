@@ -43,10 +43,9 @@ import {
   type TruncationResult,
 } from "./truncate.js";
 import {
-  canonicalReceiptPath,
-  createWorkspaceReadReceipt,
-  type WorkspaceReadReceipt,
-} from "./workspace-read-receipt.js";
+  canonicalObservationPath,
+  type WorkspaceFileObservationStore,
+} from "./file-observations.js";
 const readSchema = Type.Object(
   {
     path: Type.Optional(
@@ -137,9 +136,6 @@ export interface ReadToolDetails {
   missing?: boolean;
   suggestions?: string[];
   encoding?: "text" | "base64";
-  contentHash?: string;
-  /** Exact whole-file state that edit/apply_patch can use as an optimistic precondition. */
-  receipt?: WorkspaceReadReceipt;
   byteRange?: {
     start: number;
     end: number;
@@ -226,6 +222,8 @@ export interface ReadToolDeps {
   };
   agentReferences?: AgentReferenceStore;
   visibility?: AgentFileVisibility;
+  /** Trusted state shared with mutation tools; never rendered into model output. */
+  observations?: WorkspaceFileObservationStore;
 }
 export function createReadTool(
   cwd: string,
@@ -448,12 +446,12 @@ export function createReadTool(
             ],
             signal ? { signal } : undefined
           );
-          const result = withReadReceipt(
+          const result = recordReadObservation(
             formatBoundedTextResult(bounded, path),
             path,
             cwd,
             bounded.contentHash,
-            bounded.totalBytes
+            deps?.observations
           );
           return attachReadMemory(
             result,
@@ -508,6 +506,7 @@ export function createReadTool(
           if (resized.dimensionNote) {
             content.unshift({ type: "text", text: resized.dimensionNote });
           }
+          deps?.observations?.record(canonicalObservationPath(path, cwd), sha256Hex(raw));
           return {
             content,
             details: {
@@ -518,11 +517,6 @@ export function createReadTool(
               originalDimensions: { width: resized.originalWidth, height: resized.originalHeight },
               dimensions: { width: resized.width, height: resized.height },
               wasResized: resized.wasResized,
-              receipt: createWorkspaceReadReceipt(
-                canonicalReceiptPath(path, cwd),
-                sha256Hex(raw),
-                raw.byteLength
-              ),
             },
           };
         }
@@ -530,12 +524,12 @@ export function createReadTool(
       // --- Text branch -------------------------------------------------------------------
       const textContent = typeof raw === "string" ? raw : decodeUtf8(raw);
       return attachReadMemory(
-        withReadReceipt(
+        recordReadObservation(
           formatTextResult(textContent, path, offset, limit),
           path,
           cwd,
           sha256Hex(typeof raw === "string" ? encodeUtf8(raw) : raw),
-          typeof raw === "string" ? utf8ByteLength(raw) : raw.byteLength
+          deps?.observations
         ),
         textContent,
         sha256Hex(new TextEncoder().encode(textContent)),
@@ -552,7 +546,7 @@ export function createReadTool(
 export function createReadBinaryTool(
   cwd: string,
   fs: RuntimeFs,
-  deps?: Pick<ReadToolDeps, "rpc" | "visibility">
+  deps?: Pick<ReadToolDeps, "rpc" | "visibility" | "observations">
 ): AgentTool<typeof readBinarySchema, ReadToolDetails> {
   const runtimeRpc = deps?.rpc ?? null;
   return {
@@ -597,12 +591,12 @@ export function createReadBinaryTool(
             ],
             signal ? { signal } : undefined
           );
-          return withReadReceipt(
+          return recordReadObservation(
             formatBoundedBytesResult(bounded, path),
             path,
             cwd,
             bounded.contentHash,
-            bounded.totalBytes
+            deps?.observations
           );
         }
         const raw = await retryTransientRuntimeFs(() => fs.readFile(absolutePath), signal);
@@ -610,7 +604,7 @@ export function createReadBinaryTool(
         const start = Math.min(input.offset ?? 0, bytes.length);
         const selected = bytes.subarray(start, start + (input.limit ?? DEFAULT_MAX_BYTES));
         const end = start + selected.length;
-        return withReadReceipt(
+        return recordReadObservation(
           formatBoundedBytesResult(
             {
               base64: bytesToBase64(selected),
@@ -627,7 +621,7 @@ export function createReadBinaryTool(
           path,
           cwd,
           sha256Hex(bytes),
-          bytes.length
+          deps?.observations
         );
       } catch (error) {
         const recovered = await recoverReadFailure(fs, path, absolutePath, signal);
@@ -649,33 +643,15 @@ export function createReadBinaryTool(
   };
 }
 
-function withReadReceipt(
+function recordReadObservation(
   result: ReadResult,
   path: string,
   cwd: string,
   contentHash: string,
-  byteLength: number
+  observations: WorkspaceFileObservationStore | undefined
 ): ReadResult {
-  const receipt = createWorkspaceReadReceipt(
-    canonicalReceiptPath(path, cwd),
-    contentHash,
-    byteLength
-  );
-  return {
-    ...result,
-    content: [
-      ...result.content,
-      {
-        type: "text",
-        text: `Read receipt (pass this exact object as receipt to edit, write, or the matching apply_patch operation): ${JSON.stringify(receipt)}`,
-      },
-    ],
-    details: {
-      ...result.details,
-      contentHash,
-      receipt,
-    },
-  };
+  observations?.record(canonicalObservationPath(path, cwd), contentHash);
+  return result;
 }
 
 async function recoverReadFailure(
@@ -854,7 +830,6 @@ function formatBoundedBytesResult(bounded: FsReadBytesResult, displayPath: strin
   const payload = {
     path: displayPath,
     encoding: "base64" as const,
-    contentHash: bounded.contentHash,
     range,
     base64: bounded.base64,
   };
@@ -864,7 +839,6 @@ function formatBoundedBytesResult(bounded: FsReadBytesResult, displayPath: strin
       path: displayPath,
       engine: "runtime-fs",
       encoding: "base64",
-      contentHash: bounded.contentHash,
       size: bounded.end - bounded.start,
       originalSize: bounded.totalBytes,
       byteRange: range,

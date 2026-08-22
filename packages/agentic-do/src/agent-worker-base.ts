@@ -264,6 +264,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       createWebTools,
       createToolVcs,
       createAgentFileVisibility,
+      createWorkspaceFileObservationStore,
     } = await import("@workspace/harness/standard-tools");
     const toolRpc = execution?.rpc ?? this.rpc;
     const fs = createRpcFs(toolRpc as never);
@@ -281,6 +282,12 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       get: (key) => this.getStateValue(`agent:refs:${channelId}:${key}`),
       set: (key, value) => this.setStateValue(`agent:refs:${channelId}:${key}`, value),
       delete: (key) => this.deleteStateValue(`agent:refs:${channelId}:${key}`),
+    });
+    const fileObservations = createWorkspaceFileObservationStore({
+      get: (path) => this.getStateValue(`agent:file-observation:${channelId}:${path}`),
+      set: (path, contentHash) =>
+        this.setStateValue(`agent:file-observation:${channelId}:${path}`, contentHash),
+      delete: (path) => this.deleteStateValue(`agent:file-observation:${channelId}:${path}`),
     });
     // Tool registries are also built without an invocation to expose schemas
     // to the model. Defer the fail-closed check until a mutation executes.
@@ -319,8 +326,13 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         provenance: { vcs, context: { contextId } },
         agentReferences,
         visibility,
+        observations: fileObservations,
       }),
-      createReadBinaryTool(cwd, fs, { rpc: toolRpc, visibility }),
+      createReadBinaryTool(cwd, fs, {
+        rpc: toolRpc,
+        visibility,
+        observations: fileObservations,
+      }),
       createProvenanceTool(
         cwd,
         {
@@ -330,12 +342,12 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         },
         agentReferences
       ),
-      createWriteTool(cwd, vcs, mutationContext, fs),
-      createEditTool(cwd, vcs, mutationContext, fs),
+      createWriteTool(cwd, vcs, mutationContext, fs, fileObservations),
+      createEditTool(cwd, vcs, mutationContext, fs, fileObservations),
       createLsTool(cwd, fs, visibility),
       createGrepTool(cwd, fs, { rpc: toolRpc, visibility }),
       createFindTool(cwd, fs, { rpc: toolRpc, visibility }),
-      createApplyPatchTool(cwd, vcs, mutationContext),
+      createApplyPatchTool(cwd, vcs, mutationContext, fileObservations),
       createMoveFileTool(cwd, vcs, mutationContext, fs),
       createCopyFileTool(cwd, vcs, mutationContext, fs),
       createWorkspaceVcsTool(cwd, vcs, mutationContext, agentReferences),

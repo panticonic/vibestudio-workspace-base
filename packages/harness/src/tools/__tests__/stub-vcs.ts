@@ -5,6 +5,8 @@ import type {
   VcsStateNodeRef,
 } from "@vibestudio/service-schemas/vcs";
 import type { ToolEditingVcs } from "../tool-vcs.js";
+import { sha256Hex } from "@vibestudio/content-addressing";
+import { base64ToBytes } from "../portable-bytes.js";
 
 export interface StubVcsInit {
   files?: Record<string, string>;
@@ -74,7 +76,11 @@ export class StubVcs implements ToolEditingVcs {
       clean: this.version === 0,
       mainEventId: "event:main",
       mainRelation: "at" as const,
-      workingCounts: { applications: this.version, workUnits: this.version, changes: this.version },
+      workingCounts: {
+        applications: this.version,
+        workUnits: this.version,
+        changes: this.version,
+      },
       integrating: [],
     };
   }
@@ -109,7 +115,9 @@ export class StubVcs implements ToolEditingVcs {
       fileId: `file:${fullPath}`,
       repoPath,
       path: requestedPath,
-      contentHash: `blob:${this.version}:${fullPath}`,
+      contentHash: sha256Hex(
+        text !== undefined ? new TextEncoder().encode(text) : base64ToBytes(base64!)
+      ),
       authoredChangeId: `change:${this.version}:${fullPath}`,
       authoredByWorkUnitId: `work:${this.version}`,
       contentClass: "internal" as const,
