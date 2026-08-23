@@ -440,7 +440,7 @@ services:
     name: missions
     title: Automated tasks
     action: manage automated tasks
-    description: Create and run automated tasks that you review before they start.
+    description: Launch automated tasks immediately, then inspect and control their running definitions.
     notability: headline
     presentation:
       domain: automation

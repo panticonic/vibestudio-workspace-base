@@ -29,7 +29,7 @@ class IdentityMissionsDO extends MissionsDO {
 
 const charter = (): MissionCharter => ({
   summary: "Prepare a daily summary",
-  harness: { unit: "workers/summary", ev: "a".repeat(64) },
+  harness: { unit: "workers/summary", ev: "a".repeat(64), ref: `state:${"b".repeat(64)}` },
   execution: {
     kind: "agent",
     target: {
@@ -53,7 +53,7 @@ const charter = (): MissionCharter => ({
 
 const methodCharter = (resultLimit?: number): MissionCharter => ({
   summary: "Check whether the rollout is complete",
-  harness: { unit: "workers/rollout", ev: "d".repeat(64) },
+  harness: { unit: "workers/rollout", ev: "d".repeat(64), ref: `state:${"e".repeat(64)}` },
   execution: {
     kind: "method",
     target: {
@@ -363,7 +363,7 @@ describe("MissionsDO", () => {
     ]);
   });
 
-  it("compiles only eligible gated permissions into standing grants", async () => {
+  it("compiles automatic harness grants and declared gated action authority", async () => {
     const { instance, callAs } = await missions();
     const created = await callAs<MissionRecord>(
       { callerId: "panel:alice", callerKind: "panel", userId: "alice" },
@@ -377,11 +377,6 @@ describe("MissionsDO", () => {
             resource: { kind: "prefix", prefix: "docs/" },
             tier: "gated",
           },
-          {
-            capability: "workspace.storage.delete",
-            resource: { kind: "exact", key: "workspace" },
-            tier: "critical",
-          },
         ],
       }
     );
@@ -393,10 +388,36 @@ describe("MissionsDO", () => {
       }
     ).compileClosure(created);
 
-    expect(compiled.body.grants).toEqual([
-      expect.objectContaining({ capability: "docs.read", tier: "gated" }),
-    ]);
+    expect(compiled.body.grants).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ capability: "workspace-service:channel", tier: "gated" }),
+        expect.objectContaining({ capability: "workspace-service:gad.workspace", tier: "gated" }),
+        expect.objectContaining({ capability: "workspace-service:workspace.state", tier: "gated" }),
+        expect.objectContaining({ capability: "docs.read", tier: "gated" }),
+      ])
+    );
     expect(compiled.body.grantDependencies).toEqual([]);
+  });
+
+  it("rejects authority that cannot become a standing automation grant", async () => {
+    const { callAs } = await missions();
+    await expect(
+      callAs<MissionRecord>(
+        { callerId: "panel:alice", callerKind: "panel", userId: "alice" },
+        "launch",
+        {
+          name: "Unsafe cleanup",
+          charter: charter(),
+          permissions: [
+            {
+              capability: "workspace.storage.delete",
+              resource: { kind: "exact", key: "workspace" },
+              tier: "critical",
+            },
+          ],
+        }
+      )
+    ).rejects.toThrow(/cannot be installed as standing automation authority/);
   });
 
   it("returns one bounded supervision overview and cursor-pages older runs", async () => {
@@ -641,26 +662,28 @@ describe("MissionsDO", () => {
       status: "succeeded",
       completionResponse: "The rollout reached 100% and passed its health checks.",
     });
-    expect(rpcCall).toHaveBeenCalledWith("main", "notification.showToUser", [
-      "alice",
+    expect(rpcCall).toHaveBeenCalledWith("main", "runtime.createEntity", [
       expect.objectContaining({
-        type: "info",
-        title: "Running Rollout watcher",
-        message: "Run #1 is being processed.",
-        ttl: 6_000,
-        actions: [
-          expect.objectContaining({
-            id: "view-automation",
-            label: "View automation",
-            command: expect.objectContaining({
-              type: "panel.open",
-              source: "about/automations",
-              stateArgs: { missionId: active.missionId },
-            }),
-          }),
-        ],
+        execution: {
+          surface: "code",
+          source: "workers/rollout",
+          ref: `state:${"e".repeat(64)}`,
+        },
       }),
     ]);
+    const bindOrder = rpcCall.mock.calls.findIndex(
+      ([target, method]) => target === "main" && method === "reviewedClosure.bindSession"
+    );
+    const activationOrder = rpcCall.mock.calls.findIndex(
+      ([target, method]) => target === "main" && method === "runtime.createEntity"
+    );
+    expect(bindOrder).toBeGreaterThanOrEqual(0);
+    expect(activationOrder).toBeGreaterThan(bindOrder);
+    expect(rpcCall).not.toHaveBeenCalledWith(
+      "main",
+      "notification.showToUser",
+      expect.anything()
+    );
     const completed = await callAs<MissionRecord>(alice, "get", active.missionId);
     expect(completed).toMatchObject({
       state: "completed",
@@ -683,7 +706,7 @@ describe("MissionsDO", () => {
     expect(revised.completionResponse).toBeUndefined();
   });
 
-  it("shows one transient notice only when a scheduled run is admitted", async () => {
+  it("does not substitute a transient start notice for the automation's result", async () => {
     vi.useFakeTimers();
     try {
       const now = Date.UTC(2026, 7, 12, 12);
@@ -728,33 +751,7 @@ describe("MissionsDO", () => {
         rpcCall.mock.calls.filter(
           ([target, method]) => target === "main" && method === "notification.showToUser"
         )
-      ).toEqual([
-        [
-          "main",
-          "notification.showToUser",
-          [
-            "alice",
-            {
-              type: "info",
-              title: "Running Minute watcher",
-              message: "Scheduled wake-up #1 is being processed.",
-              ttl: 6_000,
-              actions: [
-                {
-                  id: "view-automation",
-                  label: "View automation",
-                  variant: "soft",
-                  command: {
-                    type: "panel.open",
-                    source: "about/automations",
-                    stateArgs: { missionId: launched.missionId },
-                  },
-                },
-              ],
-            },
-          ],
-        ],
-      ]);
+      ).toHaveLength(0);
       await expect(callAs<MissionRecord>(alice, "get", launched.missionId)).resolves.toMatchObject({
         state: "active",
         runCount: 1,
@@ -779,13 +776,149 @@ describe("MissionsDO", () => {
         rpcCall.mock.calls.filter(
           ([target, method]) => target === "main" && method === "notification.showToUser"
         )
-      ).toHaveLength(1);
+      ).toHaveLength(0);
       await expect(callAs<MissionRecord>(alice, "get", launched.missionId)).resolves.toMatchObject({
         runCount: 1,
       });
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("pauses a schedule and surfaces an inspectable error when agent activation fails", async () => {
+    const { instance, callAs } = await missions();
+    const alice = {
+      callerId: "panel:alice",
+      callerKind: "panel" as const,
+      userId: "alice",
+    };
+    const rpcCall = vi.fn(async (target: string, method: string, _args?: unknown[]) => {
+      if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+      if (target === "main" && method.startsWith("reviewedClosure.")) return undefined;
+      if (target === "main" && method === "runtime.createContext") {
+        return { contextId: "ctx-failed-run" };
+      }
+      if (target === "main" && method === "runtime.createEntity") {
+        const spec = (_args?.[0] ?? {}) as { className?: string };
+        if (spec.className === "PubSubChannel") return { id: "channel", targetId: "channel" };
+        throw new Error("source snapshot is unavailable");
+      }
+      if (target === "main" && method === "notification.showToUser") return "notif-failed";
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    Object.defineProperty(instance, "rpc", {
+      value: { call: rpcCall },
+      configurable: true,
+    });
+    const scheduled = charter();
+    scheduled.trigger = { kind: "schedule", everyMs: 60_000 };
+    const launched = await callAs<MissionRecord>(alice, "launch", {
+      name: "Minute watcher",
+      charter: scheduled,
+      permissions: [],
+    });
+
+    const run = await callAs<MissionRunRecord>(alice, "runNow", launched.missionId);
+
+    expect(run).toMatchObject({ status: "failed", error: "source snapshot is unavailable" });
+    const paused = await callAs<MissionRecord>(alice, "get", launched.missionId);
+    expect(paused).toMatchObject({
+      state: "paused",
+      runCount: 1,
+    });
+    expect(paused.nextRunAt).toBeUndefined();
+    const bindOrder = rpcCall.mock.calls.findIndex(
+      ([target, method]) => target === "main" && method === "reviewedClosure.bindSession"
+    );
+    const channelActivationOrder = rpcCall.mock.calls.findIndex(
+      ([target, method, args]) =>
+        target === "main" &&
+        method === "runtime.createEntity" &&
+        ((args?.[0] as { className?: string } | undefined)?.className ?? "") === "PubSubChannel"
+    );
+    const activationOrder = rpcCall.mock.calls.findIndex(
+      ([target, method, args]) =>
+        target === "main" &&
+        method === "runtime.createEntity" &&
+        ((args?.[0] as { className?: string } | undefined)?.className ?? "") !== "PubSubChannel"
+    );
+    expect(bindOrder).toBeGreaterThanOrEqual(0);
+    expect(channelActivationOrder).toBeGreaterThan(bindOrder);
+    expect(activationOrder).toBeGreaterThan(bindOrder);
+    expect(rpcCall).toHaveBeenCalledWith("main", "reviewedClosure.finishSession", [
+      { sessionId: expect.stringMatching(/^automation-/u) },
+    ]);
+    expect(rpcCall).toHaveBeenCalledWith("main", "notification.showToUser", [
+      "alice",
+      expect.objectContaining({
+        type: "error",
+        title: "Minute watcher paused",
+        message: "The automation could not start its agent: source snapshot is unavailable",
+        actions: [
+          expect.objectContaining({
+            id: "view-automation",
+            command: expect.objectContaining({
+              type: "panel.open",
+              source: "about/automations",
+              stateArgs: { missionId: launched.missionId },
+            }),
+          }),
+        ],
+      }),
+    ]);
+  });
+
+  it("continues with the exact installed channel and context without allocating a second conversation", async () => {
+    const { instance, callAs } = await missions();
+    const alice = {
+      callerId: "panel:alice",
+      callerKind: "panel" as const,
+      userId: "alice",
+    };
+    const rpcCall = vi.fn(async (target: string, method: string, args?: unknown[]) => {
+      if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+      if (target === "main" && method.startsWith("reviewedClosure.")) return undefined;
+      if (target === "main" && method === "runtime.createEntity") {
+        const spec = args?.[0] as { contextId?: string; agentChannelId?: string };
+        expect(spec).toMatchObject({
+          contextId: "ctx-existing",
+          agentChannelId: "channel-existing",
+        });
+        return { id: "existing-agent", targetId: "do:existing-agent", contextId: "ctx-existing" };
+      }
+      if (target === "do:existing-agent" && method === "runAutomationTurn") return undefined;
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    Object.defineProperty(instance, "rpc", {
+      value: { call: rpcCall },
+      configurable: true,
+    });
+    const continuing = charter();
+    if (continuing.execution.kind !== "agent") throw new Error("Expected agent charter");
+    continuing.execution.conversation = {
+      mode: "continue",
+      channelId: "channel-existing",
+      contextId: "ctx-existing",
+    };
+    const launched = await callAs<MissionRecord>(alice, "launch", {
+      name: "Conversation follow-up",
+      charter: continuing,
+      permissions: [],
+    });
+
+    const run = await callAs<MissionRunRecord>(alice, "runNow", launched.missionId);
+
+    expect(run).toMatchObject({
+      status: "running",
+      channelId: "channel-existing",
+      contextId: "ctx-existing",
+      executorId: "do:existing-agent",
+    });
+    expect(rpcCall.mock.calls.some(([, method]) => method === "runtime.createContext")).toBe(false);
+    expect(rpcCall.mock.calls.some(([, method]) => method === "subscribeChannel")).toBe(false);
+    expect(rpcCall).toHaveBeenCalledWith("do:existing-agent", "runAutomationTurn", [
+      expect.objectContaining({ channelId: "channel-existing" }),
+    ]);
   });
 
   it("completes after the configured maximum even when the terminal run fails", async () => {

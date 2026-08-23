@@ -18,6 +18,7 @@ import { missionClosureDigest, missionNextRunAt } from "@vibestudio/shared/autho
 import { missionCompletionResponse } from "@vibestudio/shared/authority/mission";
 import {
   compileMissionExposure,
+  compileMissionHarnessGrants,
   reviewedExecutionClosureDigest,
   type ReviewedExecutionClosureBody,
 } from "@vibestudio/shared/authority/reviewedExecutionClosure";
@@ -32,7 +33,6 @@ const OVERVIEW_RUN_LIMIT = 5;
 const ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1_000;
 const ATTENTION_LIMIT = 8;
 const DEFAULT_OVERVIEW_LIMIT = 30;
-const RUN_STARTED_NOTIFICATION_TTL_MS = 6_000;
 
 type OverviewFilter = "all" | "attention" | "active" | "paused" | "completed";
 interface OverviewCursor {
@@ -775,7 +775,6 @@ export class MissionsDO extends DurableObjectBase {
       );
       if (trigger === "scheduled") this.advanceSchedule(mission, now, runNumber);
     });
-    this.scheduleRunStartedNotification(mission, trigger, runNumber);
     try {
       if (mission.charter.execution.kind === "method") {
         await this.executeMethod(mission, runId, subject, closureDigest);
@@ -788,47 +787,6 @@ export class MissionsDO extends DurableObjectBase {
     return this.requireRun(runId);
   }
 
-  private scheduleRunStartedNotification(
-    mission: MissionRecord,
-    trigger: "manual" | "scheduled",
-    runNumber: number
-  ): void {
-    const pending = (async () => {
-      try {
-        await this.rpc.call("main", "notification.showToUser", [
-          mission.owner.userId,
-          {
-            type: "info",
-            title: `Running ${mission.name}`,
-            message:
-              trigger === "scheduled"
-                ? `Scheduled wake-up #${runNumber} is being processed.`
-                : `Run #${runNumber} is being processed.`,
-            ttl: RUN_STARTED_NOTIFICATION_TTL_MS,
-            actions: [
-              {
-                id: "view-automation",
-                label: "View automation",
-                variant: "soft",
-                command: {
-                  type: "panel.open",
-                  source: "about/automations",
-                  stateArgs: { missionId: mission.missionId },
-                },
-              },
-            ],
-          },
-        ]);
-      } catch (error) {
-        console.warn(
-          `[MissionsDO] Could not show the transient run notice for ${mission.missionId}:`,
-          error
-        );
-      }
-    })();
-    this.ctx.waitUntil?.(pending);
-  }
-
   private async executeMethod(
     mission: MissionRecord,
     runId: string,
@@ -837,9 +795,10 @@ export class MissionsDO extends DurableObjectBase {
   ): Promise<void> {
     const execution = mission.charter.execution;
     if (execution.kind !== "method") throw new Error("Expected method automation");
-    const handle = await this.activateTarget(execution, mission.charter.harness.ev);
     const sessionId = runId;
     await this.bindRun(subject, closureDigest, sessionId, runId);
+    this.markStartingSession(runId, { sessionId });
+    const handle = await this.activateTarget(execution, this.executionRef(mission));
     this.markRunning(runId, {
       sessionId,
       executorId: handle.targetId,
@@ -868,15 +827,21 @@ export class MissionsDO extends DurableObjectBase {
   ): Promise<void> {
     const execution = mission.charter.execution;
     if (execution.kind !== "agent") throw new Error("Expected agent automation");
+    // Resolve the immutable source before allocating fresh conversation state.
+    // Historical definitions without a source ref must fail without leaving an
+    // otherwise unusable context and channel behind.
+    const ref = this.executionRef(mission);
     let channelId: string;
     let contextId: string;
     let targetId: string;
     if (execution.conversation.mode === "continue") {
       channelId = execution.conversation.channelId;
       contextId = execution.conversation.contextId;
+      await this.bindRun(subject, closureDigest, channelId, runId);
+      this.markStartingSession(runId, { sessionId: channelId, channelId, contextId });
       const handle = await this.activateTarget(
         execution,
-        mission.charter.harness.ev,
+        ref,
         contextId,
         channelId
       );
@@ -884,6 +849,11 @@ export class MissionsDO extends DurableObjectBase {
     } else {
       channelId = `automation-${mission.missionId}-${runId}`;
       contextId = await this.createContext();
+      await this.bindRun(subject, closureDigest, channelId, runId);
+      this.markStartingSession(runId, { sessionId: channelId, channelId, contextId });
+      // The channel is part of the reviewed execution harness. Bind the
+      // closure before activating it so its first provider call observes the
+      // same standing grants as the agent and EvalDO that follow.
       await this.activateChannel(channelId, contextId);
       const freshExecution: Extract<MissionExecution, { kind: "agent" }> = {
         ...execution,
@@ -894,7 +864,7 @@ export class MissionsDO extends DurableObjectBase {
       };
       const handle = await this.activateTarget(
         freshExecution,
-        mission.charter.harness.ev,
+        ref,
         contextId,
         channelId
       );
@@ -903,7 +873,6 @@ export class MissionsDO extends DurableObjectBase {
         { channelId, contextId, replay: false, delivery: "all" },
       ]);
     }
-    await this.bindRun(subject, closureDigest, channelId, runId);
     this.markRunning(runId, {
       sessionId: channelId,
       channelId,
@@ -965,6 +934,16 @@ export class MissionsDO extends DurableObjectBase {
     };
   }
 
+  private executionRef(mission: MissionRecord): string {
+    const ref = mission.charter.harness.ref;
+    if (!ref) {
+      throw new Error(
+        "This automation predates immutable source references; recreate it before resuming"
+      );
+    }
+    return ref;
+  }
+
   private async createContext(): Promise<string> {
     const value = (await this.rpc.call("main", "runtime.createContext", [{}])) as {
       contextId?: unknown;
@@ -1018,6 +997,20 @@ export class MissionsDO extends DurableObjectBase {
     );
   }
 
+  private markStartingSession(
+    runId: string,
+    input: { sessionId: string; channelId?: string; contextId?: string }
+  ): void {
+    this.sql.exec(
+      `UPDATE mission_runs SET session_id=?,channel_id=?,context_id=?
+       WHERE run_id=? AND status='starting'`,
+      input.sessionId,
+      input.channelId ?? null,
+      input.contextId ?? null,
+      runId
+    );
+  }
+
   private async finishOwnedRun(
     runId: string,
     sessionId: string,
@@ -1044,7 +1037,55 @@ export class MissionsDO extends DurableObjectBase {
     if (row.session_id) {
       await this.rpc.call("main", "reviewedClosure.finishSession", [{ sessionId: row.session_id }]);
     }
-    await this.terminalizeRun(row, "failed", { error: describeError(error) });
+    const detail = describeError(error);
+    await this.terminalizeRun(row, "failed", { error: detail });
+    const mission = this.requireMission(row.mission_id, true);
+    const subject = this.activeSubject(mission);
+    const now = Date.now();
+    this.sql.exec(
+      "UPDATE missions SET state='paused',next_run_at=NULL,updated_at=? WHERE mission_id=? AND state='active'",
+      now,
+      mission.missionId
+    );
+    if (subject) {
+      try {
+        await this.rpc.call("main", "reviewedClosure.suspend", [subject]);
+      } catch (suspendError) {
+        console.warn(
+          `[MissionsDO] Automation ${mission.missionId} is paused but its closure could not be suspended:`,
+          suspendError
+        );
+      }
+    }
+    const terminalMission = this.requireMission(mission.missionId, true);
+    try {
+      await this.rpc.call("main", "notification.showToUser", [
+        mission.owner.userId,
+        {
+          type: "error",
+          title:
+            terminalMission.state === "paused" ? `${mission.name} paused` : `${mission.name} failed`,
+          message: `The automation could not start its agent: ${detail.slice(0, 2_000) || "Unknown error"}`,
+          actions: [
+            {
+              id: "view-automation",
+              label: "View automation",
+              variant: "soft",
+              command: {
+                type: "panel.open",
+                source: "about/automations",
+                stateArgs: { missionId: mission.missionId },
+              },
+            },
+          ],
+        },
+      ]);
+    } catch (notificationError) {
+      console.warn(
+        `[MissionsDO] Could not show the run failure for ${mission.missionId}:`,
+        notificationError
+      );
+    }
   }
 
   private async terminalizeRun(
@@ -1216,6 +1257,7 @@ export class MissionsDO extends DurableObjectBase {
       exposure: compileMissionExposure(mission.charter, Object.keys(HOST_AUTHORITY_METHODS)),
       harness: { ...mission.charter.harness },
       grants: [
+        ...compileMissionHarnessGrants(mission.charter),
         ...standingPermissions.map((permission) => ({
           effect: "allow" as const,
           capability: permission.capability,
@@ -1513,6 +1555,18 @@ function assertExecutionPermissions(
     throw new Error(
       "Method automations use the target code's installed authority and cannot declare agent grants"
     );
+  }
+  for (const permission of permissions) {
+    if (permission.tier === "critical") {
+      throw new Error(
+        `Critical capability ${permission.capability} cannot be installed as standing automation authority; omit it so each run requests approval`
+      );
+    }
+    if (!receiverAuthorityPolicy(permission.capability).missionGrant) {
+      throw new Error(
+        `Capability ${permission.capability} does not support standing automation authority; omit it so the run requests approval`
+      );
+    }
   }
 }
 

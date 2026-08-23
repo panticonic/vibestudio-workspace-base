@@ -56,9 +56,16 @@ Typical choices are:
    source, class, object key, and installed effective version; never discover or
    reconstruct those values in guest code. For a reusable method job on another
    worker, use the lower-level Missions API described in [API.md](API.md).
-3. Call `launch_automation` with the behavior, cadence, and least
-   authority needed. Do not call `agent.describe()`, `build.getEffectiveVersion`,
-   or `workers.resolveService` to prepare an agent-owned launch.
+3. Call `launch_automation` with the behavior, cadence, and least authority
+   needed. For every operation the action may call, put its exact method in
+   `toolExposure.services` (or its reviewed provider binding in
+   `toolExposure.userlandServices`). If its authority metadata is gated and
+   mission-grantable, also copy that exact capability, resource scope, and
+   `tier: "gated"` into `permissions`. Open operations need no permission row.
+   Critical and non-mission-grantable operations cannot be standing grants;
+   omit them and the run will ask the user when it reaches them. Do not call
+   `agent.describe()`, `build.getEffectiveVersion`, or
+   `workers.resolveService` to prepare an agent-owned launch.
 4. Tell the user what is running and when it will run next. Point to the chat
    pill when its exact behavior or controls would be useful.
 
@@ -162,10 +169,14 @@ declaredLineageClasses: ["none"],
 
 Scheduled eval is not an alternate sandbox or message path. The agent loop
 journals the exact source as a normal `eval` tool invocation, EvalDO executes
-it with `approvals: "pregranted-only"` under the installed mission closure, and
-the invocation result closes the exact run. Ambient `chat` can publish typed or
-custom channel messages with the agent's identity. Do not use `chat.send` for
-status: it is user-intent ingress and can begin another agent turn.
+it under the installed mission closure, and the invocation result closes the
+exact run. Eval uses the ordinary approval-capable authority path: installed
+standing grants settle first without interruption; if a needed grant was
+missed or cannot be standing authority, the run parks on the normal durable
+approval and resumes after the user's decision. Ambient `chat` can publish
+typed or custom channel messages with the agent's identity. Do not use
+`chat.send` for status: it is user-intent ingress and can begin another agent
+turn.
 
 Use `fresh` when runs should be independent, easily audited, and unaffected by
 old conversation state. Use `continue` when accumulated conversation context is
@@ -186,12 +197,22 @@ part of the task.
 - `declaredLineageClasses` states the outside-content classes expected by the
   work. It must be non-empty and contain no duplicates.
 
-`permissions` contains the exact standing gated/critical capability rows shown
-in the inspector. A method automation must use `permissions: []`: its installed code
-authority remains the only authority for that method. Do not widen exposure or
-permissions to make a denial disappear. A standing-authority denial pauses the
-automation; edit its declared authority only when that accurately describes the
-task, then save to install and resume the new revision.
+`permissions` contains the exact standing gated capability rows shown in the
+inspector. Treat it as required launch work, not an optional optimization:
+pregrant every eligible gated operation the action is expected to perform.
+`toolExposure` only makes a tool addressable; it does not grant authority.
+Conversely, a permission does not expose a tool. The platform automatically
+installs the sealed agent/channel/workspace harness grants; do not duplicate
+those internal dependencies in `permissions`.
+
+A method automation must use `permissions: []`: its installed code authority
+remains the only authority for that method. Critical and policy-ineligible
+capabilities cannot become standing automation grants and are rejected at
+launch if placed in `permissions`; omit them so the run uses the normal
+approval flow. A missing eligible permission also falls back to that same
+approval flow and leaves the run pending rather than converting the miss into
+an opaque automation failure. Do not widen exposure or permissions merely to
+make a denial disappear.
 
 ## Scheduling semantics
 

@@ -276,7 +276,7 @@ services:
         - host
         - user
         - code
-    description: Create and run automated tasks that you review before they start.
+    description: Launch automated tasks immediately, then inspect and control their running definitions.
     durableObject:
       className: MissionsDO
     name: missions

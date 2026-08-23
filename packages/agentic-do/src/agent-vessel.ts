@@ -2685,7 +2685,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       name: "launch_automation",
       label: "launch_automation",
       description:
-        "Create and immediately start one recurring or manual automation. The running automation is added to this chat as an inspectable pill before the tool returns.",
+        "Create and immediately start one recurring or manual automation. Declare every action tool in toolExposure and pregrant its eligible gated capability in permissions. Missing authority falls back to a user approval during the run. The running automation is added to this chat as an inspectable pill before the tool returns.",
       parameters: {
         type: "object",
         properties: {
@@ -2767,7 +2767,54 @@ export abstract class AgentVesselBase extends DurableObjectBase {
               enum: ["none", "web", "email", "channel-external", "external"],
             },
           },
-          permissions: { type: "array", items: { type: "object" } },
+          permissions: {
+            type: "array",
+            description:
+              "Standing gated authority required by the action. Use exact capability, resource scope, and tier from each exposed operation's authority metadata. Omit open capabilities. Critical or non-mission-grantable capabilities cannot be pregranted and must be omitted; a run that reaches one requests user approval.",
+            items: {
+              type: "object",
+              properties: {
+                capability: { type: "string" },
+                resource: {
+                  oneOf: [
+                    {
+                      type: "object",
+                      properties: { kind: { const: "exact" }, key: { type: "string" } },
+                      required: ["kind", "key"],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: "object",
+                      properties: { kind: { const: "prefix" }, prefix: { type: "string" } },
+                      required: ["kind", "prefix"],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: "object",
+                      properties: { kind: { const: "origin" }, origin: { type: "string" } },
+                      required: ["kind", "origin"],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: "object",
+                      properties: { kind: { const: "domain" }, domain: { type: "string" } },
+                      required: ["kind", "domain"],
+                      additionalProperties: false,
+                    },
+                    {
+                      type: "object",
+                      properties: { kind: { const: "network" }, value: { const: "*" } },
+                      required: ["kind", "value"],
+                      additionalProperties: false,
+                    },
+                  ],
+                },
+                tier: { const: "gated" },
+              },
+              required: ["capability", "resource", "tier"],
+              additionalProperties: false,
+            },
+          },
           standingRestrictions: { type: "array", items: { type: "object" } },
         },
         required: ["name", "summary", "action", "trigger"],
@@ -3097,7 +3144,7 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
           ...(input.eval.syntax ? { syntax: input.eval.syntax } : {}),
           ...(input.eval.timeoutMs ? { timeoutMs: input.eval.timeoutMs } : {}),
           ...(input.eval.reset === true ? { reset: true } : {}),
-          authority: { approvals: "pregranted-only" },
+          authority: { approvals: "prompt" },
         },
         metadata: {
           origin: "scheduled",
@@ -5277,7 +5324,13 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     const source = String(this.env["WORKER_SOURCE"] ?? "");
     const className = String(this.env["WORKER_CLASS_NAME"] ?? this.constructor.name);
     const ev = String(this.env["WORKER_EFFECTIVE_VERSION"] ?? "");
-    if (!source || !className || !/^[0-9a-f]{64}$/u.test(ev)) {
+    const ref = String(this.env["WORKER_SOURCE_REF"] ?? "");
+    if (
+      !source ||
+      !className ||
+      !/^[0-9a-f]{64}$/u.test(ev) ||
+      !/^state:[0-9a-f]{64}$/u.test(ref)
+    ) {
       throw new Error(
         "launch_automation cannot bind this agent to an exact installed build; rebuild the agent runtime"
       );
@@ -5309,7 +5362,7 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       name,
       charter: {
         summary,
-        harness: { unit: source, ev },
+        harness: { unit: source, ev, ref },
         execution: {
           kind: "agent",
           target: { source, className, objectKey: this.objectKey },

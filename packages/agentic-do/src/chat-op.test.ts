@@ -47,6 +47,7 @@ const TEST_AGENT_ENV = {
   WORKER_SOURCE: "test",
   WORKER_CLASS_NAME: "TestAgent",
   WORKER_EFFECTIVE_VERSION: "a".repeat(64),
+  WORKER_SOURCE_REF: `state:${"b".repeat(64)}`,
 } as const;
 
 async function withAlarmGateway<T>(run: (gatewayUrl: string) => Promise<T>): Promise<T> {
@@ -737,7 +738,7 @@ describe("AgentVesselBase automation ingress", () => {
     schedule: { kind: "interval" as const, everyMs: 3_600_000 },
   };
 
-  it("journals scheduled eval source as a direct pregranted eval invocation", async () => {
+  it("journals scheduled eval source with ordinary approval fallback", async () => {
     const vessel = await makePromptProbe();
 
     await vessel.runAutomationEval({
@@ -756,7 +757,7 @@ describe("AgentVesselBase automation ingress", () => {
         args: {
           code: "return await chat.getParticipants()",
           timeoutMs: 30_000,
-          authority: { approvals: "pregranted-only" },
+          authority: { approvals: "prompt" },
         },
         metadata: {
           origin: "scheduled",
@@ -1307,7 +1308,11 @@ describe("AgentVesselBase.chatOp", () => {
       revision: 1,
       charter: {
         summary: "Check the project every morning.",
-        harness: { unit: "workers/agent", ev: "a".repeat(64) },
+        harness: {
+          unit: "workers/agent",
+          ev: "a".repeat(64),
+          ref: `state:${"b".repeat(64)}`,
+        },
         execution: {
           kind: "agent",
           target: {
@@ -1373,7 +1378,11 @@ describe("AgentVesselBase.chatOp", () => {
             name: "Daily check",
             charter: {
               summary: "Check the project every morning.",
-              harness: { unit: "test", ev: "a".repeat(64) },
+              harness: {
+                unit: "test",
+                ev: "a".repeat(64),
+                ref: `state:${"b".repeat(64)}`,
+              },
               execution: {
                 kind: "agent",
                 target: {

@@ -43,6 +43,17 @@ type AgentAutomationLaunch = {
   permissions?: MissionPermission[]; // default []
   standingRestrictions?: MissionStandingRestriction[];
 };
+
+type MissionPermission = {
+  capability: string;
+  resource:
+    | { kind: "exact"; key: string }
+    | { kind: "prefix"; prefix: string }
+    | { kind: "origin"; origin: string }
+    | { kind: "domain"; domain: string }
+    | { kind: "network"; value: "*" };
+  tier: "gated";
+};
 ```
 
 Call the `launch_automation` tool directly. Do not wrap it in eval or precede it with
@@ -51,6 +62,24 @@ Those calls are unnecessary and make one launch depend on several mutable
 observations. The installed vessel supplies one coherent target/version
 snapshot at the receiver boundary. The tool returns only after the active
 mission and its idempotent running pill are durable.
+
+Before launch, walk every operation reachable from the action:
+
+1. Add the exact host method to `toolExposure.services`, or add the exact
+   reviewed binding to `toolExposure.userlandServices`.
+2. Read that operation's authority metadata. Open operations need no
+   permission. For a gated operation whose grant scopes include `mission`, add
+   its exact capability and least resource scope to `permissions`.
+3. Do not put critical or non-mission-grantable authority in `permissions`;
+   launch rejects it because it cannot truthfully become standing authority.
+
+Exposure and authority are independent attenuation terms: neither substitutes
+for the other. The platform adds the sealed agent/channel/workspace harness
+exposure and grants automatically. At runtime, installed standing grants are
+used first. If the author missed a grant—or the operation can only be approved
+per invocation—the ordinary approval flow presents a durable approval and
+parks the run until the user decides. The fallback is recovery, not the normal
+authoring strategy.
 
 `conversation: { mode: "continue" }` means this exact conversation; the binding
 fills its channel and context. The input intentionally cannot target a different
@@ -62,7 +91,11 @@ another target is the behavior you actually want.
 ```ts
 type Charter = {
   summary: string;
-  harness: { unit: string; ev: string }; // exact 64-hex EV
+  harness: {
+    unit: string;
+    ev: string; // exact 64-hex compiled effective version
+    ref: `state:${string}`; // immutable source snapshot used to recreate the target
+  };
   execution:
     | {
         kind: "method";
@@ -121,8 +154,11 @@ type Charter = {
 };
 ```
 
-The harness unit must equal the execution target source. Every behavior-bearing
-field participates in the installed closure digest. `agent/eval` stores exact
+The harness unit must equal the execution target source. The EV identifies the
+compiled installed unit; the state ref independently identifies the immutable
+source snapshot from which a future target is recreated. Neither hash is a
+substitute for the other. Every behavior-bearing field participates in the
+installed closure digest. `agent/eval` stores exact
 inline EvalDO source in that closure and is the happy path for a small script
 that should run as an existing agent/channel participant. It deliberately does
 not accept a mutable context-file path or npm import map. Use ambient runtime
@@ -131,10 +167,13 @@ dependency-heavy job into a reviewed method worker.
 
 The eval action is model-free. AgentDO journals `message.completed` with the
 tool call, `invocation.started`, the terminal eval result, and `turn.closed` in
-the ordinary channel trajectory. EvalDO receives `approvals:
-"pregranted-only"`; the run cannot stall on an unattended approval card. Code
-may use ambient `chat` to publish typed/custom messages with the agent's
-identity. The mission service remains the only schedule and run-ledger owner.
+the ordinary channel trajectory. EvalDO uses the ordinary prompt-capable
+authority policy under the installed mission closure. Standing grants are
+tried first; missing or non-standing authority creates the same durable
+approval as an interactive eval, parks the run, and resumes it after the user
+decides. Code may use ambient `chat` to publish typed/custom messages with the
+agent's identity. The mission service remains the only schedule and run-ledger
+owner.
 
 Interval schedules are elapsed-time cadences with an optional alignment anchor
 and jitter. Cron schedules are wall-clock cadences evaluated in the reviewed

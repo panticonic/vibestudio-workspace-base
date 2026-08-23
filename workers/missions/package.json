@@ -92,33 +92,6 @@
           },
           "tier": "gated",
           "evidence": "bounded-dynamic"
-        },
-        {
-          "capability": "reviewed-closure.suspend",
-          "resource": {
-            "kind": "prefix",
-            "prefix": "mission:"
-          },
-          "tier": "gated",
-          "evidence": "bounded-dynamic"
-        },
-        {
-          "capability": "reviewed-closure.retire",
-          "resource": {
-            "kind": "prefix",
-            "prefix": "mission:"
-          },
-          "tier": "critical",
-          "evidence": "bounded-dynamic"
-        },
-        {
-          "capability": "reviewed-closure.bind-session",
-          "resource": {
-            "kind": "prefix",
-            "prefix": "mission:"
-          },
-          "tier": "gated",
-          "evidence": "bounded-dynamic"
         }
       ]
     }
