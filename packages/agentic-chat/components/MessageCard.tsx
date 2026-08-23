@@ -249,7 +249,11 @@ export const MessageCard = React.memo(function MessageCard({
   const inputActions = useOptionalChatInputActions();
   const messageActions = useOptionalChatMessageActions();
   const automationClient = useMemo(() => {
-    if (msg.contentType !== "automation" || !msg.automation) return null;
+    if (
+      msg.contentType !== "automation" ||
+      (!msg.automation && !msg.automationDefinition)
+    )
+      return null;
     const bridge = chat["rpc"] as
       | {
           call?: (
@@ -263,7 +267,7 @@ export const MessageCard = React.memo(function MessageCard({
     return createAutomationUiClient(
       bridge as { call: NonNullable<typeof bridge.call> },
     );
-  }, [chat, msg.automation, msg.contentType]);
+  }, [chat, msg.automation, msg.automationDefinition, msg.contentType]);
   const callMethod = chatCallMethod(chat);
   const sendFromChat = chatSend(chat);
   const providerLevelModelFailure =

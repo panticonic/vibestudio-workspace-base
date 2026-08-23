@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { PubSubClient } from "@workspace/pubsub";
 import { Theme } from "@radix-ui/themes";
@@ -194,6 +194,105 @@ describe("transcript delivery markers", () => {
       </Theme>
     );
   }
+
+  it("renders a newly instituted automation as an inspectable pill", async () => {
+    const createdAt = 1_700_000_000_000;
+    const call = vi.fn(async (_target: string, method: string) => {
+      if (method === "workers.resolveService") {
+        return { kind: "durable-object", targetId: "do:missions" };
+      }
+      if (method === "get") {
+        return {
+          missionId: "mission-talk-timer",
+          name: "Talk timer",
+          revision: 1,
+          charter: {
+            summary: "Notify me every minute.",
+            harness: { unit: "workers/agent-worker", ev: "a".repeat(64) },
+            execution: {
+              kind: "agent",
+              target: {
+                source: "workers/agent-worker",
+                className: "AiChatWorker",
+                objectKey: "talk-timer",
+              },
+              action: { kind: "prompt", text: "Notify me." },
+              conversation: { mode: "fresh" },
+              toolExposure: {
+                services: [],
+                userlandServices: [],
+                workspaceServiceDiscovery: "bound",
+                evalNetwork: "none",
+                declaredOrigins: [],
+              },
+              declaredLineageClasses: ["none"],
+            },
+            trigger: { kind: "schedule", everyMs: 60_000 },
+          },
+          owner: { userId: "alice", deviceId: "panel:alice" },
+          state: "active",
+          revisionDigest: "b".repeat(64),
+          createdAt,
+          updatedAt: createdAt,
+          activatedAt: createdAt,
+          runCount: 0,
+          permissions: [],
+          standingRestrictions: [],
+        };
+      }
+      throw new Error(`Unexpected automation RPC ${method}`);
+    });
+
+    render(
+      <Theme>
+        <MessageCard
+          msg={{
+            id: "automation:instituted:mission-talk-timer",
+            senderId: "agent:alice",
+            content: "Talk timer",
+            contentType: "automation",
+            kind: "system",
+            complete: true,
+            automationDefinition: {
+              snapshot: {
+                missionId: "mission-talk-timer",
+                name: "Talk timer",
+                summary: "Notify me every minute.",
+                revision: 1,
+                action: "prompt",
+                state: "active",
+                createdAt,
+                schedule: { kind: "interval", everyMs: 60_000 },
+              },
+              institutedAt: new Date(createdAt).toISOString(),
+            },
+          }}
+          index={0}
+          selfId={SELF}
+          senderType="agent"
+          senderInfo={{ name: "AI Chat", type: "agent", handle: "ai-chat" }}
+          mentionLabels={[]}
+          isStreaming={false}
+          isCopied={false}
+          chat={{ rpc: { call } }}
+          onInterrupt={noop}
+          onCopy={noop}
+          onClearCopied={noop}
+        />
+      </Theme>
+    );
+
+    const pill = screen.getByRole("button", {
+      name: "Inspect automation Talk timer",
+    });
+    expect(screen.getByText("Active")).toBeTruthy();
+    expect(screen.getByText(/Every 1 minute · created/)).toBeTruthy();
+    fireEvent.click(pill);
+    expect(
+      await screen.findByText("Automation definition created in this conversation")
+    ).toBeTruthy();
+    expect(call).toHaveBeenCalledWith("do:missions", "get", ["mission-talk-timer"]);
+  });
 
   it("shows a compact ack badge for self-authored non-retracted messages", () => {
     renderCard(
