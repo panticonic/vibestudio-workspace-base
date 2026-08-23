@@ -95,6 +95,13 @@ fingerprint. A workspace route returns only `workspaceReach`, never a new
 control reach. There is no child pairing activation, proposed credential, or
 legacy pairing shape.
 
+One-time use prevents replay by anyone who copied or photographed the bearer
+link. Desktop clients check OS-backed credential storage before redemption: an
+error that says **the pairing link was not used** can be fixed and retried with
+the same link. Once the server accepts a link, it cannot be reused; an
+already-used-or-expired error requires a fresh invite from the server or a
+paired administrator.
+
 ## 3. OAuth from a remote client
 
 When you trigger an OAuth flow from a remotely-connected client, the flow opens through `externalOpen.openExternal` and **the client that started it** opens the URL in its local browser (desktop `shell.openExternal`, mobile `Linking.openURL`). Provider redirect URIs that need a public HTTPS endpoint resolve through the **callback relay** (`VIBESTUDIO_RELAY_URL`, plan §7), which backhauls the callback to your loopback server over the pipe — no public server URL or tunnel required.
