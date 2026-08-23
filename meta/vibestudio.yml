@@ -313,7 +313,7 @@ singletonObjects:
   - className: MissionsDO
     key: workspace-missions
     source: workers/missions
-systemEpoch: 60
+systemEpoch: 61
 trust:
   chromeApps:
     - apps/shell
