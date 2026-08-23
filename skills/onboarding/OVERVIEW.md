@@ -67,7 +67,7 @@ The chat panel hosts an AI agent that can:
 - **Tune its own model defaults** — the host chat agent's provider, effort, approval, and chattiness are configurable
 - **Import browser data** — cookies, passwords, bookmarks, history
 - **Automate browsers** via Playwright-style CDP automation (`handle.cdp.page()`)
-- **Schedule recurring work** — run a reviewed worker method, exact inline eval,
+- **Schedule recurring work** — run an installed worker method, exact inline eval,
   or agent prompt on an interval or timezone-aware cron calendar, optionally
   ending at a time, run limit, or natural completion response; inspect and
   control every durable tick from its chat-history pill or Automations
@@ -76,20 +76,20 @@ The chat panel hosts an AI agent that can:
 
 ### Automations
 
-Automations are reviewed recurring tasks. A reusable deterministic job runs as
+Automations are immediately launched recurring tasks. A reusable deterministic job runs as
 a method on an exact Durable Object build. A smaller exact script can run inline
 in an existing agent's channel-bound EvalDO without publishing a new worker;
 agent work can instead send a prompt through the ordinary turn loop. Both agent
 actions use either a fresh conversation for every run or one specific
-continuing conversation. Agents can prepare and edit inert drafts and control
-reviewed runs, but only the user activates a revision after reviewing the exact
-target, schedule, end policy, reach, and standing authority. Schedules can use
-elapsed intervals or five-field cron in a reviewed IANA timezone. They can end
+continuing conversation. Agents launch and edit active definitions; the running
+pill exposes the exact target, schedule, end policy, reach, standing authority,
+history, and controls. Schedules can use elapsed intervals or five-field cron
+in an explicit IANA timezone. They can end
 at a time, after a maximum number of admitted runs, or when a prompt, eval, or
 method returns an explicit natural-completion response.
 
-The **Automations** panel is both the review and supervision surface. It
-highlights active runs, completed definitions, drafts awaiting review, and
+The **Automations** panel is the supervision surface. It highlights active
+runs, completed definitions, and
 recent failures; provides search, filters, and paged run history; shows each
 run's completion response, final message, or error; and links agent runs to
 their exact conversations. The same definition/tick inspector appears on

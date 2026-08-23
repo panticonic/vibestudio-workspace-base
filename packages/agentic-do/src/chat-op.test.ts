@@ -106,8 +106,11 @@ class TestVessel extends AgentVesselBase {
   callerIdForTest: string | null = null;
   callerKindForTest: string | null = null;
   blobTextReaderForTest: ((digest: string) => Promise<string | null>) | null = null;
-  automationProposalForTest: MissionRecord | null = null;
-  readonly automationProposalCalls: Array<{ args: unknown[]; options?: unknown }> = [];
+  automationLaunchForTest: MissionRecord | null = null;
+  readonly automationLaunchCalls: Array<{
+    args: unknown[];
+    options?: unknown;
+  }> = [];
   readonly channelPublishFailures = new Set<string>();
   readonly channelStub = {
     published: [] as Array<{
@@ -116,7 +119,12 @@ class TestVessel extends AgentVesselBase {
       idempotencyKey?: string;
     }>,
     messageTypes: new Map<string, Record<string, unknown>>(),
-    calls: [] as Array<{ callId: string; targetPid: string; method: string; args: unknown }>,
+    calls: [] as Array<{
+      callId: string;
+      targetPid: string;
+      method: string;
+      args: unknown;
+    }>,
     participants: [] as Array<{
       participantId: string;
       ref: ParticipantRef;
@@ -149,7 +157,10 @@ class TestVessel extends AgentVesselBase {
     this.markWorkReady(...queues);
   }
 
-  durableWorkReadyGenerationsForTest(): Array<{ queue: string; generation: number }> {
+  durableWorkReadyGenerationsForTest(): Array<{
+    queue: string;
+    generation: number;
+  }> {
     const prefix = "durable-work-ready-generation:";
     return (
       this.sql
@@ -249,7 +260,11 @@ class TestVessel extends AgentVesselBase {
   }
 
   protected override getParticipantInfo(): ParticipantDescriptor {
-    return { type: "agent", name: "TestAgent", handle: "testagent" } as ParticipantDescriptor;
+    return {
+      type: "agent",
+      name: "TestAgent",
+      handle: "testagent",
+    } as ParticipantDescriptor;
   }
 
   /** Context-integrity ingestion is a mandatory host boundary, not an HTTP
@@ -274,7 +289,7 @@ class TestVessel extends AgentVesselBase {
               return vessel.blobTextReaderForTest(String(args[0]));
             }
             if (
-              vessel.automationProposalForTest &&
+              vessel.automationLaunchForTest &&
               targetId === "main" &&
               method === "workers.resolveService" &&
               args[0] === "vibestudio.missions.v1"
@@ -282,12 +297,12 @@ class TestVessel extends AgentVesselBase {
               return { kind: "durable-object", targetId: "do:missions" };
             }
             if (
-              vessel.automationProposalForTest &&
+              vessel.automationLaunchForTest &&
               targetId === "do:missions" &&
-              method === "proposeDraft"
+              method === "launch"
             ) {
-              vessel.automationProposalCalls.push({ args, options });
-              return vessel.automationProposalForTest;
+              vessel.automationLaunchCalls.push({ args, options });
+              return vessel.automationLaunchForTest;
             }
             return target.call(targetId, method, args, options as never);
           };
@@ -301,6 +316,15 @@ class TestVessel extends AgentVesselBase {
   protected override createChannelClient(channelId: string): ChannelClient {
     this.channelClientCreations += 1;
     return this.makeChannelStub(channelId) as unknown as ChannelClient;
+  }
+
+  async executeAutomationLaunchForTest(input: unknown): Promise<unknown> {
+    const tool = this.createAutomationLaunchTool(CHANNEL, {
+      invocationId: "invocation-daily",
+      commandId: "command-daily",
+      rpc: this.rpc,
+    });
+    return tool.execute("tool-call-daily", input);
   }
 
   /** Register a subscription row (so getParticipantId returns a non-null
@@ -441,18 +465,30 @@ class TestVessel extends AgentVesselBase {
           content: string,
           options?: Record<string, unknown>
         ) => {
-          stub.sent.push({ channelId, participantId, messageId, content, options });
+          stub.sent.push({
+            channelId,
+            participantId,
+            messageId,
+            content,
+            options,
+          });
         }
       ),
       recordTaskProvenance: vi.fn(async () => undefined),
       relationshipState: vi.fn(async () => ({ revision: 0, active: false })),
       join: vi.fn(async (input: { participantId: string; revision: number }) => {
         operationLog.push(`channel:${channelId}:join`);
-        stub.subscriptions.push({ channelId, participantId: input.participantId });
+        stub.subscriptions.push({
+          channelId,
+          participantId: input.participantId,
+        });
         return {
           ok: true,
           channelConfig: {},
-          envelope: { logEvents: [], ready: { totalCount: 0, envelopeCount: 0 } },
+          envelope: {
+            logEvents: [],
+            ready: { totalCount: 0, envelopeCount: 0 },
+          },
           participantId: input.participantId,
           revision: input.revision,
         };
@@ -598,7 +634,10 @@ class PromptEventProbe extends TestVessel {
 }
 
 class AutomationCompletionProbe extends PromptEventProbe {
-  private openAutomationTurn: { turnId: string; metadata: AgentTurnMetadata } | null = null;
+  private openAutomationTurn: {
+    turnId: string;
+    metadata: AgentTurnMetadata;
+  } | null = null;
 
   setAutomationTurnForTest(automation: NonNullable<AgentTurnMetadata["automation"]>): void {
     this.openAutomationTurn = {
@@ -846,7 +885,13 @@ describe("AgentVesselBase finite channel delivery", () => {
         payload: {
           protocol: AGENTIC_PROTOCOL_VERSION,
           role: "user",
-          blocks: [{ blockId: "delivery-message:block", type: "text", content: "hello" }],
+          blocks: [
+            {
+              blockId: "delivery-message:block",
+              type: "text",
+              content: "hello",
+            },
+          ],
           outcome: "completed",
         },
         createdAt: new Date().toISOString(),
@@ -1253,10 +1298,10 @@ describe("AgentVesselBase.chatOp", () => {
     expect(started!.event.actor.kind).toBe("agent");
   });
 
-  it("proposes one idempotent draft and immediately publishes its inspectable institution", async () => {
+  it("launches one active automation and publishes its running inspector before returning", async () => {
     const vessel = await makeVessel();
     vessel.callerIdForTest = await expectedEvalCaller();
-    vessel.automationProposalForTest = {
+    vessel.automationLaunchForTest = {
       missionId: "mission-daily",
       name: "Daily check",
       revision: 1,
@@ -1265,7 +1310,11 @@ describe("AgentVesselBase.chatOp", () => {
         harness: { unit: "workers/agent", ev: "a".repeat(64) },
         execution: {
           kind: "agent",
-          target: { source: "workers/agent", className: "Agent", objectKey: "daily" },
+          target: {
+            source: "workers/agent",
+            className: "Agent",
+            objectKey: "daily",
+          },
           action: { kind: "prompt", text: "Check the project." },
           conversation: { mode: "fresh" },
           toolExposure: {
@@ -1277,10 +1326,14 @@ describe("AgentVesselBase.chatOp", () => {
           },
           declaredLineageClasses: ["none"],
         },
-        trigger: { kind: "cron", expression: "5 5 * * THU", timezone: "America/New_York" },
+        trigger: {
+          kind: "cron",
+          expression: "5 5 * * THU",
+          timezone: "America/New_York",
+        },
       },
       owner: { userId: "alice", deviceId: AGENT_ID },
-      state: "draft",
+      state: "active",
       revisionDigest: "b".repeat(64),
       createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_000_000,
@@ -1300,14 +1353,11 @@ describe("AgentVesselBase.chatOp", () => {
       },
       permissions: [],
     };
-    await expect(
-      vessel.chatOp(CHANNEL, "proposeAutomation", [
-        input,
-        { invocationId: "invocation-daily", ordinal: 1 },
-      ])
-    ).resolves.toMatchObject({ missionId: "mission-daily", state: "draft" });
+    await expect(vessel.executeAutomationLaunchForTest(input)).resolves.toMatchObject({
+      details: { missionId: "mission-daily", state: "active" },
+    });
 
-    expect(vessel.automationProposalCalls).toEqual([
+    expect(vessel.automationLaunchCalls).toEqual([
       {
         args: [
           {
@@ -1343,7 +1393,7 @@ describe("AgentVesselBase.chatOp", () => {
           },
         ],
         options: {
-          idempotencyKey: expect.stringMatching(/automation:proposal:.*:[0-9a-f]{64}$/),
+          idempotencyKey: expect.stringMatching(/automation:launch:.*:[0-9a-f]{64}$/),
         },
       },
     ]);
@@ -1355,6 +1405,7 @@ describe("AgentVesselBase.chatOp", () => {
           payload: expect.objectContaining({
             definition: expect.objectContaining({
               missionId: "mission-daily",
+              state: "active",
               action: "prompt",
               schedule: {
                 kind: "cron",
@@ -1398,7 +1449,9 @@ describe("AgentVesselBase.chatOp", () => {
     const promise = vessel.chatOp(CHANNEL, "callMethod", ["panel-pid", "doThing", { x: 1 }]);
     const call = await waitForCall(vessel);
     expect(call.method).toBe("doThing");
-    await vessel.deliverTerminal(call.callId, "invocation.completed", { result: { ok: 42 } });
+    await vessel.deliverTerminal(call.callId, "invocation.completed", {
+      result: { ok: 42 },
+    });
     await expect(promise).resolves.toEqual({ ok: 42 });
   });
 
@@ -1407,7 +1460,9 @@ describe("AgentVesselBase.chatOp", () => {
     vessel.callerIdForTest = await expectedEvalCaller();
     const promise = vessel.chatOp(CHANNEL, "callMethodResult", ["panel-pid", "doThing", {}]);
     const call = await waitForCall(vessel);
-    await vessel.deliverTerminal(call.callId, "invocation.completed", { result: "hello" });
+    await vessel.deliverTerminal(call.callId, "invocation.completed", {
+      result: "hello",
+    });
     await expect(promise).resolves.toEqual({ content: "hello" });
   });
 
@@ -1416,7 +1471,9 @@ describe("AgentVesselBase.chatOp", () => {
     vessel.callerIdForTest = await expectedEvalCaller();
     const promise = vessel.chatOp(CHANNEL, "callMethod", ["panel-pid", "boom", {}]);
     const call = await waitForCall(vessel);
-    await vessel.deliverTerminal(call.callId, "invocation.failed", { error: "kaboom" });
+    await vessel.deliverTerminal(call.callId, "invocation.failed", {
+      error: "kaboom",
+    });
     await expect(promise).rejects.toThrow(/kaboom/);
   });
 
@@ -1481,7 +1538,11 @@ describe("AgentVesselBase.processChannelEvent", () => {
     const vessel = await makePromptProbe({
       observations: { payloadKinds: ["application.incident.v1"] },
     });
-    const payload = { incidentId: "inc-17", severity: "high", details: { region: "eu" } };
+    const payload = {
+      incidentId: "inc-17",
+      severity: "high",
+      details: { region: "eu" },
+    };
 
     await vessel.processChannelEvent(
       CHANNEL,
@@ -1575,7 +1636,12 @@ describe("AgentVesselBase.processChannelEvent", () => {
     );
 
     const incoming = vessel.handleIncomingSpy.mock.calls[0]?.[1] as {
-      command?: { structuredInput?: { payload?: unknown; truncated?: Record<string, unknown> } };
+      command?: {
+        structuredInput?: {
+          payload?: unknown;
+          truncated?: Record<string, unknown>;
+        };
+      };
     };
     expect(incoming.command?.structuredInput).toMatchObject({
       payload: null,
@@ -1666,7 +1732,12 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
 
     await vessel.onEvalComplete({
       runId: ids.invocationEffect("inv-77"),
-      result: { success: true, console: "out", returnValue: 7, scopeKeys: ["a"] },
+      result: {
+        success: true,
+        console: "out",
+        returnValue: 7,
+        scopeKeys: ["a"],
+      },
       channelId: CHANNEL,
     });
 
@@ -1770,7 +1841,10 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     const vessel = await makeVessel();
     const deliverSpy = stubDriver(vessel);
     vessel.callerKindForTest = "server";
-    await vessel.onEvalComplete({ runId: "inv-79", result: { success: true, console: "" } });
+    await vessel.onEvalComplete({
+      runId: "inv-79",
+      result: { success: true, console: "" },
+    });
     await vessel.onEvalComplete({ runId: "inv-79", channelId: CHANNEL });
     expect(deliverSpy).not.toHaveBeenCalled();
   });
@@ -1804,12 +1878,16 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
 
     vessel.callerIdForTest = "do:workers/pubsub-channel:PubSubChannel:another-channel";
     await expect(
-      vessel.deliverEffectOutcome("eff-wrong-channel", outcome, { channelId: CHANNEL })
+      vessel.deliverEffectOutcome("eff-wrong-channel", outcome, {
+        channelId: CHANNEL,
+      })
     ).rejects.toThrow(/refusing caller/);
 
     vessel.callerIdForTest = "do:workers/forged-channel:PubSubChannel:chan-1";
     await expect(
-      vessel.deliverEffectOutcome("eff-forged-source", outcome, { channelId: CHANNEL })
+      vessel.deliverEffectOutcome("eff-forged-source", outcome, {
+        channelId: CHANNEL,
+      })
     ).rejects.toThrow(/refusing caller/);
 
     vessel.callerIdForTest = "do:agents/evil:EvilAgent:x"; // a foreign agent forging
@@ -1869,8 +1947,11 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     });
     await vi.waitFor(() =>
       expect(
-        (vessel as unknown as { directMethodCalls: Map<string, AbortController> }).directMethodCalls
-          .size
+        (
+          vessel as unknown as {
+            directMethodCalls: Map<string, AbortController>;
+          }
+        ).directMethodCalls.size
       ).toBe(1)
     );
 
@@ -1880,8 +1961,11 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     });
     await vi.waitFor(() =>
       expect(
-        (vessel as unknown as { directMethodCalls: Map<string, AbortController> }).directMethodCalls
-          .size
+        (
+          vessel as unknown as {
+            directMethodCalls: Map<string, AbortController>;
+          }
+        ).directMethodCalls.size
       ).toBe(2)
     );
 
@@ -1940,7 +2024,10 @@ class EvalGateProbe extends TestVessel {
           if (this.cancelError) throw this.cancelError;
           return { ok: true };
         }
-        return { runId: (args[0] as { runId: string }).runId, status: "pending" };
+        return {
+          runId: (args[0] as { runId: string }).runId,
+          status: "pending",
+        };
       },
     } as unknown as RpcClient;
   }
@@ -2004,7 +2091,10 @@ describe("AgentVesselBase turn recovery", () => {
     expect(claim).toEqual(expect.objectContaining({ itemId: "turn-recovery:effect-1" }));
 
     await expect(
-      probe.executeWakeClaim({ itemId: claim!.itemId, generation: claim!.generation })
+      probe.executeWakeClaim({
+        itemId: claim!.itemId,
+        generation: claim!.generation,
+      })
     ).resolves.toEqual({ processed: true });
     expect(wake).toHaveBeenCalledWith(CHANNEL);
     expect(
@@ -2113,7 +2203,11 @@ class SubagentSpawnProbe extends TestVessel {
         }
         if (target === "gad" && method === "forkLog") {
           const input = args[0] as { atSeq?: number };
-          return { forkSeq: input.atSeq ?? 0, forkHash: "fork-hash", inherited: 0 };
+          return {
+            forkSeq: input.atSeq ?? 0,
+            forkHash: "fork-hash",
+            inherited: 0,
+          };
         }
         if (target === "main" && method === "extensions.invokeProvider") {
           const [provider, providerMethod] = args as [string, string, unknown[]];
@@ -2283,7 +2377,10 @@ class SubagentSpawnProbe extends TestVessel {
       senderMetadata: { type: "agent" },
       payload: {
         kind: outcome === "success" ? "task.completed" : "task.failed",
-        actor: { kind: "agent", id: run.childParticipantId ?? run.childEntityId },
+        actor: {
+          kind: "agent",
+          id: run.childParticipantId ?? run.childEntityId,
+        },
         causality: { taskId: runId, invocationId: runId },
         payload:
           outcome === "success"
@@ -2413,9 +2510,19 @@ function semanticComparison(
       concluded,
     },
     counts: { adopt, convergent: 0, composed: 0, conflict, resolved: 0 },
-    intentCounts: { merged: 0, settled: 0, split: 0, contested: conflict, pending: adopt },
+    intentCounts: {
+      merged: 0,
+      settled: 0,
+      split: 0,
+      contested: conflict,
+      pending: adopt,
+    },
     coordinates: coordinates.map((entry) => ({
-      coordinate: { kind: "file" as const, id: entry.id, paths: { theirs: `${entry.id}.ts` } },
+      coordinate: {
+        kind: "file" as const,
+        id: entry.id,
+        paths: { theirs: `${entry.id}.ts` },
+      },
       status: entry.status,
       aspects: [
         {
@@ -2453,6 +2560,7 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
       scope: { key: CHANNEL },
       source: { kind: "inline", code: "1+1" },
       resultReceiver: { kind: "caller" },
+      timeoutMs: 300_000,
     });
     // The poll backstop check happened even on the first dispatch.
     expect(probe.rpcCalls.some((c) => c.method === "eval.get")).toBe(true);
@@ -2594,7 +2702,9 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     };
 
     await expect(
-      probe.callGate(CHANNEL, "inv-failed", { code: "throw new Error('boom')" })
+      probe.callGate(CHANNEL, "inv-failed", {
+        code: "throw new Error('boom')",
+      })
     ).resolves.toMatchObject({
       isError: true,
       result: { details: { success: false, error: "boom" } },
@@ -2636,7 +2746,11 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     const probe = await makeGateProbe();
     probe.getRunStatus = { status: "pending" };
     await expect(
-      probe.callGate(CHANNEL, "inv-4", { code: "x", path: "meta", sourcePath: "src/probe.ts" })
+      probe.callGate(CHANNEL, "inv-4", {
+        code: "x",
+        path: "meta",
+        sourcePath: "src/probe.ts",
+      })
     ).resolves.toEqual({ deferred: true, reason: "external-result" });
     expect(probe.rpcCalls.find((call) => call.method === "eval.start")?.args[0]).toMatchObject({
       source: { kind: "inline", code: "x", pathHint: "src/probe.ts" },
@@ -2662,7 +2776,10 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     probe.getRunStatus = { status: "pending" };
 
     await expect(
-      probe.callGate(CHANNEL, "inv-reset", { reset: true, code: "return Object.keys(scope)" })
+      probe.callGate(CHANNEL, "inv-reset", {
+        reset: true,
+        code: "return Object.keys(scope)",
+      })
     ).resolves.toEqual({ deferred: true, reason: "external-result" });
 
     expect(probe.rpcCalls.find((call) => call.method === "eval.start")?.args[0]).toMatchObject({
@@ -2798,9 +2915,10 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     probe.startRunError = new Error("response lost before admission was observable");
     probe.getRunStatus = { status: "unknown" };
 
-    await expect(
-      probe.callGate(CHANNEL, "inv-admission-race", { code: "1+1" })
-    ).resolves.toEqual({ deferred: true, reason: "external-result" });
+    await expect(probe.callGate(CHANNEL, "inv-admission-race", { code: "1+1" })).resolves.toEqual({
+      deferred: true,
+      reason: "external-result",
+    });
     expect(probe.rpcCalls.filter((call) => call.method === "eval.start")).toHaveLength(1);
     expect(probe.rpcCalls.filter((call) => call.method === "eval.get")).toHaveLength(1);
   });
@@ -2810,7 +2928,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
   it("turns a subagent's natural final answer into a durable terminal intent", async () => {
     const probe = await makeChildCompletionProbe();
 
-    await probe.closeOwnTurnForTest({ finalMessage: "Five concise design bullets." });
+    await probe.closeOwnTurnForTest({
+      finalMessage: "Five concise design bullets.",
+    });
 
     expect(probe.ownTerminalWakeForTest()).toMatchObject({
       disposition: "ready",
@@ -2896,7 +3016,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       isError: false,
       result: {
         details: {
-          launchConfig: { model: "openai-codex:gpt-5.3-codex-spark", approvalLevel: 1 },
+          launchConfig: {
+            model: "openai-codex:gpt-5.3-codex-spark",
+            approvalLevel: 1,
+          },
         },
       },
     });
@@ -2905,7 +3028,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     );
     expect(create?.args[0]).toMatchObject({
       stateArgs: {
-        agentConfig: { model: "openai-codex:gpt-5.3-codex-spark", approvalLevel: 1 },
+        agentConfig: {
+          model: "openai-codex:gpt-5.3-codex-spark",
+          approvalLevel: 1,
+        },
       },
     });
   });
@@ -3255,7 +3381,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       isError: true,
       result: "publish failed: subagent-seed:inv-1",
     });
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "failed" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "failed",
+    });
     expect(
       probe.rpcCalls.some(
         (call) =>
@@ -3298,8 +3426,14 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const probe = await makeSubagentSpawnProbe();
     probe.insertSubagentRunForTest({ runId: "inv-1", status: "running" });
 
-    await probe.spawnForTest(CHANNEL, "inv-1", { mode: "fresh", task: "seed retry" });
-    await probe.spawnForTest(CHANNEL, "inv-1", { mode: "fresh", task: "seed retry" });
+    await probe.spawnForTest(CHANNEL, "inv-1", {
+      mode: "fresh",
+      task: "seed retry",
+    });
+    await probe.spawnForTest(CHANNEL, "inv-1", {
+      mode: "fresh",
+      task: "seed retry",
+    });
 
     const seeds = probe.channelStub.published.filter(
       (entry) => entry.idempotencyKey === "subagent-seed:inv-1"
@@ -3323,7 +3457,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
 
     const out = await probe.inspectSubagentForTest("inv-recovered", "status");
 
-    expect(out.details).toMatchObject({ runId: "inv-recovered", query: "status" });
+    expect(out.details).toMatchObject({
+      runId: "inv-recovered",
+      query: "status",
+    });
     expect(probe.subagentRunForTest("inv-recovered")).toMatchObject({
       runId: "inv-recovered",
       status: "running",
@@ -3437,7 +3574,11 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         type: AGENTIC_EVENT_PAYLOAD_KIND,
         payload: {
           kind: "message.completed",
-          actor: { kind: "agent", id: "participant-child", displayName: "Child" },
+          actor: {
+            kind: "agent",
+            id: "participant-child",
+            displayName: "Child",
+          },
           payload: {
             protocol: "agentic.trajectory.v1",
             role: "assistant",
@@ -3466,8 +3607,14 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const probe = await makeSubagentSpawnProbe();
     const runId = "inv-semantic";
     probe.insertSubagentRunForTest({ runId, status: "running" });
-    const target = { kind: "application" as const, applicationId: "application:target" };
-    const integrated = { kind: "application" as const, applicationId: "application:integrated" };
+    const target = {
+      kind: "application" as const,
+      applicationId: "application:target",
+    };
+    const integrated = {
+      kind: "application" as const,
+      applicationId: "application:integrated",
+    };
     const sourceEventId = "event:source";
     const integration = {
       contextId: "ctx-1",
@@ -3492,7 +3639,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         workUnitId: "work:child",
         side: "theirs",
         state: "pending",
-        intent: { tier: "trigger", text: "asked by user:owner: Build the fixture corpus" },
+        intent: {
+          tier: "trigger",
+          text: "asked by user:owner: Build the fixture corpus",
+        },
         coordinates: [{ kind: "file", id: "one" }],
       },
     ];
@@ -3509,10 +3659,20 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       incorporatedChangeCount: 1,
       decisionIds: ["decision:1"],
       outcomes: [],
-      resolution: { complete: true, remainingCoordinateCount: 0, concluded: true },
+      resolution: {
+        complete: true,
+        remainingCoordinateCount: 0,
+        concluded: true,
+      },
       intents: initialComparison.intents,
       intentsTruncated: false,
-      counts: { adopt: 0, convergent: 0, composed: 0, conflict: 0, resolved: 1 },
+      counts: {
+        adopt: 0,
+        convergent: 0,
+        composed: 0,
+        conflict: 0,
+        resolved: 1,
+      },
       conflicts: [],
       nextConflictCursor: null,
       composed: [
@@ -3571,7 +3731,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const probe = await makeSubagentSpawnProbe();
     const runId = "inv-retry";
     probe.insertSubagentRunForTest({ runId, status: "running" });
-    const target = { kind: "application" as const, applicationId: "application:target" };
+    const target = {
+      kind: "application" as const,
+      applicationId: "application:target",
+    };
     const sourceEventId = "event:source";
     probe.respondToVcs(
       "status",
@@ -3582,8 +3745,18 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       status: "unchanged",
       contextId: "ctx-1",
       workingHead: target,
-      resolution: { complete: true, remainingCoordinateCount: 0, concluded: true },
-      counts: { adopt: 0, convergent: 0, composed: 0, conflict: 0, resolved: 1 },
+      resolution: {
+        complete: true,
+        remainingCoordinateCount: 0,
+        concluded: true,
+      },
+      counts: {
+        adopt: 0,
+        convergent: 0,
+        composed: 0,
+        conflict: 0,
+        resolved: 1,
+      },
       intents: [],
       intentsTruncated: false,
       conflicts: [],
@@ -3617,7 +3790,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const probe = await makeSubagentSpawnProbe();
     const runId = "inv-paged-conflict";
     probe.insertSubagentRunForTest({ runId, status: "running" });
-    const target = { kind: "application" as const, applicationId: "application:target" };
+    const target = {
+      kind: "application" as const,
+      applicationId: "application:target",
+    };
     const sourceEventId = "event:source";
     probe.respondToVcs(
       "status",
@@ -3634,7 +3810,11 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       status: "unchanged",
       contextId: "ctx-1",
       workingHead: target,
-      resolution: { complete: false, remainingCoordinateCount: 1, concluded: true },
+      resolution: {
+        complete: false,
+        remainingCoordinateCount: 1,
+        concluded: true,
+      },
       counts: latePage.counts,
       intents: [],
       intentsTruncated: false,
@@ -3662,8 +3842,14 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const probe = await makeSubagentSpawnProbe();
     const runId = "inv-conflict";
     probe.insertSubagentRunForTest({ runId, status: "running" });
-    const target = { kind: "application" as const, applicationId: "application:target" };
-    const integrated = { kind: "application" as const, applicationId: "application:partial" };
+    const target = {
+      kind: "application" as const,
+      applicationId: "application:target",
+    };
+    const integrated = {
+      kind: "application" as const,
+      applicationId: "application:partial",
+    };
     const sourceEventId = "event:source";
     const conflicting = { id: "conflicting", status: "conflict" as const };
     probe.respondToVcs(
@@ -3693,10 +3879,20 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       workingHead: integrated,
       decisionId: "decision:partial",
       outcomes: [],
-      resolution: { complete: false, remainingCoordinateCount: 1, concluded: true },
+      resolution: {
+        complete: false,
+        remainingCoordinateCount: 1,
+        concluded: true,
+      },
       intents: [],
       intentsTruncated: false,
-      counts: { adopt: 0, convergent: 0, composed: 0, conflict: 1, resolved: 1 },
+      counts: {
+        adopt: 0,
+        convergent: 0,
+        composed: 0,
+        conflict: 1,
+        resolved: 1,
+      },
       conflicts: semanticComparison(integrated, sourceEventId, [conflicting], true).coordinates,
       nextConflictCursor: null,
       composed: [],
@@ -3789,7 +3985,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
             mergeableCoordinateCount: 0,
             conflictCoordinateCount: 3,
             concluded: true,
-            asOfWorkingHead: { kind: "application", applicationId: "application:parent" },
+            asOfWorkingHead: {
+              kind: "application",
+              applicationId: "application:parent",
+            },
             stale: false,
           },
         ]
@@ -3844,7 +4043,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
 
     expect(replacement).toMatchObject({ isError: false });
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "completed" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "completed",
+    });
   });
 
   it("wakes the parent channel when the child completes while the parent is suspended", async () => {
@@ -3857,7 +4058,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
 
     await probe.completeSubagentForTest("inv-1", "All checks passed.", "success");
 
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "completed" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "completed",
+    });
     expect(
       probe.channelStub.published.find(
         (entry) => entry.channelId === CHANNEL && entry.idempotencyKey === "subagent-terminal:inv-1"
@@ -3882,7 +4085,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       },
     });
     const terminalPrompt = (
-      probe.handleIncomingSpy.mock.calls[0]?.[1] as { command?: { content?: string } }
+      probe.handleIncomingSpy.mock.calls[0]?.[1] as {
+        command?: { content?: string };
+      }
     ).command?.content;
     expect(terminalPrompt).toContain("Integrate it only when incorporating the child's work");
     expect(terminalPrompt).not.toContain("Review and integrate retained results");
@@ -3903,7 +4108,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         protocol: AGENTIC_PROTOCOL_VERSION,
         terminalOutcome: "success",
         summary: "Child completed first.",
-        result: { protocolContent: [{ type: "text", text: "Child completed first." }] },
+        result: {
+          protocolContent: [{ type: "text", text: "Child completed first." }],
+        },
       },
       createdAt: new Date().toISOString(),
     } as unknown as AgenticEvent;
@@ -3918,12 +4125,17 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
 
     await probe.settleSubagentForTest("inv-1", "abandoned", "supervisor retired");
 
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "completed" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "completed",
+    });
     expect(
       probe.channelStub.published.find(
         (entry) => entry.channelId === CHANNEL && entry.idempotencyKey === "subagent-terminal:inv-1"
       )?.event
-    ).toMatchObject({ kind: "task.completed", payload: { summary: "Child completed first." } });
+    ).toMatchObject({
+      kind: "task.completed",
+      payload: { summary: "Child completed first." },
+    });
   });
 
   it("rejects a canonical task terminal whose actor does not match its publisher", async () => {
@@ -3956,7 +4168,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     await expect(
       probe.settleSubagentForTest("inv-1", "abandoned", "supervisor retired")
     ).rejects.toThrow(/no authorized canonical task-channel event/);
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "running" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "running",
+    });
     expect(
       probe.channelStub.published.some(
         (entry) => entry.channelId === CHANNEL && entry.idempotencyKey === "subagent-terminal:inv-1"
@@ -3979,14 +4193,20 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
 
     await probe.completeSubagentForTest("inv-1", "First result.", "success");
 
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "completed" });
-    expect(probe.subagentRunForTest("inv-2")).toMatchObject({ status: "running" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "completed",
+    });
+    expect(probe.subagentRunForTest("inv-2")).toMatchObject({
+      status: "running",
+    });
     expect(probe.handleIncomingSpy).toHaveBeenCalledOnce();
     const firstWake = probe.handleIncomingSpy.mock.calls[0]?.[1] as {
       command?: { source?: { envelopeId?: string }; content?: string };
     };
     expect(firstWake.command?.source?.envelopeId).toBe("subagent-terminal:inv-1:completed");
-    expect(firstWake.command).toMatchObject({ metadata: { deliverAfterTurn: true } });
+    expect(firstWake.command).toMatchObject({
+      metadata: { deliverAfterTurn: true },
+    });
     expect(firstWake.command?.content).toContain("First result.");
     expect(firstWake.command?.content).toContain("1 other supervised subagent remains live");
     expect(firstWake.command?.content).toContain("inv-1 (first audit): completed");
@@ -3997,7 +4217,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
 
     await probe.completeSubagentForTest("inv-2", "Second result.", "success");
 
-    expect(probe.subagentRunForTest("inv-2")).toMatchObject({ status: "completed" });
+    expect(probe.subagentRunForTest("inv-2")).toMatchObject({
+      status: "completed",
+    });
     expect(probe.handleIncomingSpy).toHaveBeenCalledTimes(2);
     const secondWake = probe.handleIncomingSpy.mock.calls[1]?.[1] as {
       command?: { source?: { envelopeId?: string }; content?: string };
@@ -4024,8 +4246,12 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
 
     await probe.completeSubagentForTest("inv-1", "Blocked by invalid input.", "failed");
 
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "failed" });
-    expect(probe.subagentRunForTest("inv-2")).toMatchObject({ status: "running" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "failed",
+    });
+    expect(probe.subagentRunForTest("inv-2")).toMatchObject({
+      status: "running",
+    });
     expect(probe.handleIncomingSpy).toHaveBeenCalledOnce();
     expect(probe.handleIncomingSpy.mock.calls[0]?.[1]).toMatchObject({
       command: {
@@ -4053,8 +4279,12 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       probe.completeSubagentForTest("inv-2", "Second result.", "success"),
     ]);
 
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "completed" });
-    expect(probe.subagentRunForTest("inv-2")).toMatchObject({ status: "completed" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "completed",
+    });
+    expect(probe.subagentRunForTest("inv-2")).toMatchObject({
+      status: "completed",
+    });
     expect(probe.handleIncomingSpy).toHaveBeenCalledTimes(2);
     const envelopeIds = probe.handleIncomingSpy.mock.calls.map(
       (call) =>
@@ -4099,11 +4329,15 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       probe.completeSubagentForTest("inv-1", "All checks passed.", "success")
     ).rejects.toThrow("wake failed");
 
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "running" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "running",
+    });
 
     await probe.completeSubagentForTest("inv-1", "All checks passed.", "success");
 
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "completed" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "completed",
+    });
     expect(probe.handleIncomingSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -4128,7 +4362,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       })
     );
     probe.deferredPostTurnQueueForTest = [{ metadata: { supervisedTerminalRunId: "inv-1" } }];
-    await expect(probe.guardBackgroundSuspensionForTest()).resolves.toEqual({ suspend: true });
+    await expect(probe.guardBackgroundSuspensionForTest()).resolves.toEqual({
+      suspend: true,
+    });
 
     probe.deferredPostTurnQueueForTest = [];
     await expect(probe.guardBackgroundSuspensionForTest()).resolves.toMatchObject({
@@ -4153,12 +4389,16 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const completion = probe.completeSubagentForTest("inv-1", "All checks passed.", "success");
     await vi.waitFor(() => expect(probe.handleIncomingSpy).toHaveBeenCalledOnce());
 
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "running" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "running",
+    });
 
     admitReport();
     await completion;
 
-    expect(probe.subagentRunForTest("inv-1")).toMatchObject({ status: "completed" });
+    expect(probe.subagentRunForTest("inv-1")).toMatchObject({
+      status: "completed",
+    });
   });
 
   it("agentKind:'claude-code' prepares the linked vessel and headless-launches via the supervisor", async () => {
@@ -4327,7 +4567,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
 describe("AgentVesselBase.cancelEval (pill cancel → server-side eval run)", () => {
   it("derives the namespaced effect id and routes eval.cancel for ITSELF", async () => {
     const probe = await makeGateProbe();
-    const out = await probe.callAgentMethod(CHANNEL, "cancelEval", { invocationId: "inv-9" });
+    const out = await probe.callAgentMethod(CHANNEL, "cancelEval", {
+      invocationId: "inv-9",
+    });
     expect(out).toEqual({ result: { ok: true } });
     const cancel = probe.rpcCalls.find((c) => c.method === "eval.cancel");
     expect(cancel?.args[0]).toEqual({
@@ -4346,8 +4588,13 @@ describe("AgentVesselBase.cancelEval (pill cancel → server-side eval run)", ()
   it("surfaces an eval.cancel failure as an error result (without throwing)", async () => {
     const probe = await makeGateProbe();
     probe.cancelError = new Error("cancel dispatch failed");
-    const out = await probe.callAgentMethod(CHANNEL, "cancelEval", { invocationId: "inv-10" });
-    expect(out).toMatchObject({ isError: true, result: { error: "cancel dispatch failed" } });
+    const out = await probe.callAgentMethod(CHANNEL, "cancelEval", {
+      invocationId: "inv-10",
+    });
+    expect(out).toMatchObject({
+      isError: true,
+      result: { error: "cancel dispatch failed" },
+    });
   });
 });
 
@@ -4396,7 +4643,9 @@ describe("AgentVesselBase pause", () => {
     await probe.registerSubscriptionForTest("channel-2");
     const { interruptChannel } = probe.stubDriverForPause();
 
-    await expect(probe.interruptAllChannels()).resolves.toEqual({ interrupted: 2 });
+    await expect(probe.interruptAllChannels()).resolves.toEqual({
+      interrupted: 2,
+    });
     expect(interruptChannel).toHaveBeenCalledTimes(2);
     expect(interruptChannel).toHaveBeenCalledWith(CHANNEL, true);
     expect(interruptChannel).toHaveBeenCalledWith("channel-2", true);

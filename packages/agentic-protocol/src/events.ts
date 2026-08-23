@@ -149,7 +149,9 @@ export type MessageRole = "user" | "assistant" | "system" | "tool" | "panel";
 
 export type { StoredValueRef as BlobRefPayload } from "./stored-values.js";
 
-export type StoredAgenticEvent = Omit<AgenticEvent, "payload"> & { payload: unknown };
+export type StoredAgenticEvent = Omit<AgenticEvent, "payload"> & {
+  payload: unknown;
+};
 
 export type MessagePayload =
   | {
@@ -274,8 +276,15 @@ interface MessageBlockBase {
  * with no id — are unrepresentable.
  */
 export type MessageBlockInput =
-  | (MessageBlockBase & { type: "text" | "thinking" | "toolcall-progress"; content: string })
-  | (MessageBlockBase & { type: "invocation"; invocationId: InvocationId; content?: string })
+  | (MessageBlockBase & {
+      type: "text" | "thinking" | "toolcall-progress";
+      content: string;
+    })
+  | (MessageBlockBase & {
+      type: "invocation";
+      invocationId: InvocationId;
+      content?: string;
+    })
   | (MessageBlockBase & { type: "attachment" | "data"; content?: string })
   | (MessageBlockBase & { type: "diagnostic"; content: string });
 
@@ -620,7 +629,12 @@ export interface UiFeedbackPayload {
     callId?: string;
     turnId?: TurnId;
   };
-  error: { name?: string; message: string; stack?: string; componentStack?: string };
+  error: {
+    name?: string;
+    message: string;
+    stack?: string;
+    componentStack?: string;
+  };
   /** Dedupe key — repeated occurrences of the same failure collapse to one. */
   occurrenceKey: string;
 }
@@ -756,9 +770,9 @@ export type AutomationScheduleSnapshot =
     }
   | null;
 
-/** Immutable, zero-fetch definition summary written when an agent creates a
- * draft. The mission ledger remains canonical; this snapshot makes the
- * institution event immediately useful and permanently understandable. */
+/** Immutable, zero-fetch definition summary written when an agent launches an
+ * automation. The mission ledger remains canonical; this snapshot makes the
+ * running-resource event immediately useful and permanently understandable. */
 export interface AutomationDefinitionSnapshot {
   missionId: string;
   name: string;
@@ -766,6 +780,8 @@ export interface AutomationDefinitionSnapshot {
   revision: number;
   action: "prompt" | "eval" | "method";
   createdAt: number;
+  state: "active";
+  nextRunAt?: number;
   schedule: AutomationScheduleSnapshot;
 }
 

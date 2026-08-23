@@ -49,7 +49,6 @@ export interface AutomationUiClient {
     missionId: string,
     patch: { name?: string; charter?: MissionCharter }
   ): Promise<MissionRecord>;
-  requestReview(missionId: string): Promise<MissionRecord>;
   pause(missionId: string): Promise<MissionRecord>;
   resume(missionId: string): Promise<MissionRecord>;
   runNow(missionId: string): Promise<MissionRunRecord>;
@@ -96,7 +95,6 @@ export function createAutomationUiClient(
     get: (missionId) => call("get", [missionId]),
     getRun: (runId) => call("getRun", [runId]),
     edit: (missionId, patch) => call("edit", [missionId, patch]),
-    requestReview: (missionId) => call("requestReview", [missionId]),
     pause: (missionId) => call("pause", [missionId]),
     resume: (missionId) => call("resume", [missionId]),
     runNow: (missionId) => call("runNow", [missionId]),
@@ -170,9 +168,10 @@ function cachedRun(client: AutomationUiClient, runId: string) {
 }
 
 function formatAbsolute(value: number): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(
-    value
-  );
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(value);
 }
 
 export function formatAutomationInterval(value: number): string {
@@ -279,15 +278,31 @@ function localTimeZone(): string {
 
 function activityStatus(activity: AutomationActivityPayload) {
   if (activity.status === "succeeded") {
-    return { label: "Succeeded", color: "green" as const, icon: <CheckCircledIcon /> };
+    return {
+      label: "Succeeded",
+      color: "green" as const,
+      icon: <CheckCircledIcon />,
+    };
   }
   if (activity.status === "failed") {
-    return { label: "Failed", color: "red" as const, icon: <CrossCircledIcon /> };
+    return {
+      label: "Failed",
+      color: "red" as const,
+      icon: <CrossCircledIcon />,
+    };
   }
   if (activity.status === "skipped") {
-    return { label: "Skipped", color: "amber" as const, icon: <ExclamationTriangleIcon /> };
+    return {
+      label: "Skipped",
+      color: "amber" as const,
+      icon: <ExclamationTriangleIcon />,
+    };
   }
-  return { label: "Running", color: "blue" as const, icon: <Spinner size="1" /> };
+  return {
+    label: "Running",
+    color: "blue" as const,
+    icon: <Spinner size="1" />,
+  };
 }
 
 function definitionStatus(state?: MissionRecord["state"]) {
@@ -298,12 +313,24 @@ function definitionStatus(state?: MissionRecord["state"]) {
     return { label: "Paused", color: "amber" as const, icon: <PauseIcon /> };
   }
   if (state === "completed") {
-    return { label: "Completed", color: "green" as const, icon: <CheckCircledIcon /> };
+    return {
+      label: "Completed",
+      color: "green" as const,
+      icon: <CheckCircledIcon />,
+    };
   }
   if (state === "retired") {
-    return { label: "Retired", color: "gray" as const, icon: <CrossCircledIcon /> };
+    return {
+      label: "Retired",
+      color: "gray" as const,
+      icon: <CrossCircledIcon />,
+    };
   }
-  return { label: "Needs review", color: "amber" as const, icon: <Pencil2Icon /> };
+  return {
+    label: "Stopped",
+    color: "gray" as const,
+    icon: <CrossCircledIcon />,
+  };
 }
 
 function durationLabel(startedAt: number, finishedAt?: number): string {
@@ -314,7 +341,10 @@ function durationLabel(startedAt: number, finishedAt?: number): string {
   return `${Math.floor(elapsed / 60_000)}m ${Math.round((elapsed % 60_000) / 1_000)}s`;
 }
 
-function editableInterval(trigger: MissionCharter["trigger"]): { amount: string; unit: string } {
+function editableInterval(trigger: MissionCharter["trigger"]): {
+  amount: string;
+  unit: string;
+} {
   if (trigger.kind !== "schedule") return { amount: "1", unit: "day" };
   if (trigger.everyMs % 86_400_000 === 0)
     return { amount: String(trigger.everyMs / 86_400_000), unit: "day" };
@@ -485,14 +515,6 @@ export function AutomationParametersEditor({
 
   return (
     <Flex direction="column" gap="3">
-      <Callout.Root color="amber" size="1">
-        <Callout.Icon>
-          <ExclamationTriangleIcon />
-        </Callout.Icon>
-        <Callout.Text>
-          Saving changes stops the current schedule until you review the new exact revision.
-        </Callout.Text>
-      </Callout.Root>
       <Grid columns={{ initial: "1", sm: "2" }} gap="3">
         <TextField.Root
           aria-label="Automation name"
@@ -620,7 +642,7 @@ export function AutomationParametersEditor({
           Cancel
         </Button>
         <Button disabled={saving} onClick={() => void save()}>
-          {saving ? <Spinner size="1" /> : null}Save as new revision
+          {saving ? <Spinner size="1" /> : null}Save and apply
         </Button>
       </Flex>
     </Flex>
@@ -662,7 +684,7 @@ function Inspector({
     [client, onChanged]
   );
   const action = useCallback(
-    async (kind: "pause" | "resume" | "requestReview" | "runNow") => {
+    async (kind: "pause" | "resume" | "runNow") => {
       if (!current) return;
       setBusy(kind);
       setError(null);
@@ -704,14 +726,14 @@ function Inspector({
   const execution = current.charter.execution;
   return (
     <Flex direction="column" gap="4">
-      {definition && (current.state === "draft" || current.state === "needs-reapproval") ? (
-        <Callout.Root color="amber" size="1">
+      {definition ? (
+        <Callout.Root color="green" size="1">
           <Callout.Icon>
-            <ClockIcon />
+            <PlayIcon />
           </Callout.Icon>
           <Callout.Text>
-            Created here {formatAbsolute(Date.parse(definition.institutedAt))}. This draft is inert
-            until you review its exact action, schedule, and authority.
+            Started here {formatAbsolute(Date.parse(definition.institutedAt))}. Open this inspector
+            any time to review its exact action, cadence, authority, and run history.
           </Callout.Text>
         </Callout.Root>
       ) : null}
@@ -783,12 +805,6 @@ function Inspector({
               Resume
             </Button>
           ) : null}
-          {current.state === "draft" || current.state === "needs-reapproval" ? (
-            <Button size="1" disabled={busy !== null} onClick={() => void action("requestReview")}>
-              <CheckCircledIcon />
-              Review changes
-            </Button>
-          ) : null}
         </Flex>
       </Flex>
       {error ? (
@@ -827,9 +843,7 @@ function Inspector({
           <Text size="2" weight="medium">
             {current.activatedAt !== undefined
               ? formatAbsolute(current.activatedAt)
-              : current.state === "draft"
-                ? "Awaiting first activation"
-                : "Not recorded"}
+              : "Not recorded"}
           </Text>
         </Box>
         <Box>
@@ -887,7 +901,11 @@ function Inspector({
               <Text
                 as="span"
                 mt="1"
-                style={{ display: "block", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+                style={{
+                  display: "block",
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                }}
               >
                 {current.completionResponse}
               </Text>
@@ -954,7 +972,11 @@ function Inspector({
                 </Text>
                 <Text
                   as="span"
-                  style={{ display: "block", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+                  style={{
+                    display: "block",
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                  }}
                 >
                   {run.completionResponse}
                 </Text>
@@ -1010,7 +1032,7 @@ function Inspector({
           )}
           {run ? (
             <Code size="1" style={{ overflowWrap: "anywhere" }}>
-              reviewed closure {run.closureDigest}
+              installed closure {run.closureDigest}
             </Code>
           ) : null}
           {current.revision === (activity?.snapshot.revision ?? definition?.snapshot.revision) ? (
@@ -1077,8 +1099,11 @@ export const AutomationActivity = React.memo(function AutomationActivity({
     };
   }, [activity, automation, client, isDefinition, open, run, snapshot.missionId]);
   const status = useMemo(
-    () => (activity ? activityStatus(activity) : definitionStatus(automation?.state)),
-    [activity, automation?.state]
+    () =>
+      activity
+        ? activityStatus(activity)
+        : definitionStatus(automation?.state ?? definition?.snapshot.state),
+    [activity, automation?.state, definition?.snapshot.state]
   );
   const since = activity
     ? (activity.snapshot.activatedAt ?? activity.snapshot.createdAt)
@@ -1144,7 +1169,7 @@ export const AutomationActivity = React.memo(function AutomationActivity({
         <Dialog.Description size="2" color="gray" mb="4">
           {isDefinition
             ? "Automation definition created in this conversation"
-            : "Reviewed automation and exact tick details"}
+            : "Automation and exact tick details"}
         </Dialog.Description>
         {error ? (
           <Callout.Root color="red">

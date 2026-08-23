@@ -48,7 +48,7 @@ import type {
 } from "@vibestudio/shared/authority/mission";
 import { AboutPage, AboutThemeRoot } from "../../packages/about-shared/ui";
 
-type Filter = "all" | "attention" | "active" | "paused" | "completed" | "drafts";
+type Filter = "all" | "attention" | "active" | "paused" | "completed";
 type AutomationRecord = MissionRecord;
 type RunRecord = MissionRunRecord;
 type AutomationState = MissionRecord["state"];
@@ -67,7 +67,6 @@ type Overview = {
     active: number;
     running: number;
     failedLast24Hours: number;
-    awaitingReview: number;
     completed: number;
   };
   items: OverviewItem[];
@@ -134,8 +133,7 @@ function duration(ms: number): string {
 }
 
 function stateLabel(state: AutomationState): string {
-  if (state === "needs-reapproval") return "Needs review";
-  if (state === "draft") return "Draft";
+  if (state === "needs-reapproval" || state === "draft") return "Stopped";
   return state.charAt(0).toUpperCase() + state.slice(1);
 }
 
@@ -327,7 +325,11 @@ function RunRow({ run, automation }: { run: RunRecord; automation: AutomationRec
               </Text>
               <Text
                 as="span"
-                style={{ display: "block", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+                style={{
+                  display: "block",
+                  whiteSpace: "pre-wrap",
+                  overflowWrap: "anywhere",
+                }}
               >
                 {run.completionResponse}
               </Text>
@@ -336,14 +338,24 @@ function RunRow({ run, automation }: { run: RunRecord; automation: AutomationRec
         ) : null}
         {run.finalMessage && run.finalMessage !== run.completionResponse ? (
           <details>
-            <summary style={{ cursor: "pointer", color: "var(--gray-11)", fontSize: 13 }}>
+            <summary
+              style={{
+                cursor: "pointer",
+                color: "var(--gray-11)",
+                fontSize: 13,
+              }}
+            >
               Final message
             </summary>
             <Text
               as="div"
               size="2"
               mt="2"
-              style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", maxWidth: "80ch" }}
+              style={{
+                whiteSpace: "pre-wrap",
+                overflowWrap: "anywhere",
+                maxWidth: "80ch",
+              }}
             >
               {run.finalMessage}
             </Text>
@@ -680,7 +692,7 @@ function AutomationEditorButton({
       <Dialog.Content maxWidth="760px" aria-describedby={undefined}>
         <Dialog.Title>Edit {automation.name}</Dialog.Title>
         <Dialog.Description size="2" color="gray" mb="4">
-          Change the action or cadence as a new reviewable revision.
+          Change the action or cadence. Saving applies the new revision immediately.
         </Dialog.Description>
         <AutomationParametersEditor
           automation={automation}
@@ -712,14 +724,14 @@ function AutomationCard({
   busyAction: string | null;
   loadingMore: boolean;
   canLoadMore: boolean;
-  onAction(action: "requestReview" | "runNow" | "pause" | "resume" | "retire"): void;
+  onAction(action: "runNow" | "pause" | "resume" | "retire"): void;
   onEdited(): void;
   onLoadMore(): void;
   deepLinked?: boolean;
 }) {
   const automation = item.automation;
   const execution = automation.charter.execution;
-  const hasProblem = item.failedRunsSince > 0 || automation.state === "needs-reapproval";
+  const hasProblem = item.failedRunsSince > 0;
   const busy = busyAction !== null;
   const schedule = scheduleDescription(automation);
   return (
@@ -743,11 +755,9 @@ function AutomationCard({
                     ? "green"
                     : automation.state === "completed"
                       ? "violet"
-                      : automation.state === "needs-reapproval"
-                        ? "amber"
-                        : automation.state === "paused"
-                          ? "blue"
-                          : "gray"
+                      : automation.state === "paused"
+                        ? "blue"
+                        : "gray"
                 }
                 variant="soft"
               >
@@ -766,16 +776,6 @@ function AutomationCard({
           <Flex gap="2" wrap="wrap" align="center">
             {automation.state !== "retired" ? (
               <AutomationEditorButton automation={automation} disabled={busy} onSaved={onEdited} />
-            ) : null}
-            {automation.state === "draft" || automation.state === "needs-reapproval" ? (
-              <Button
-                disabled={busy}
-                onClick={() => onAction("requestReview")}
-                aria-label={`Review ${automation.name}`}
-              >
-                {busyAction === "requestReview" ? <Spinner size="1" /> : <CheckCircledIcon />}
-                Review
-              </Button>
             ) : null}
             {automation.state === "active" ? (
               <>
@@ -817,7 +817,7 @@ function AutomationCard({
                 <AlertDialog.Content maxWidth="440px">
                   <AlertDialog.Title>Retire {automation.name}?</AlertDialog.Title>
                   <AlertDialog.Description size="2">
-                    This permanently ends its schedule and reviewed identity. Its run history and
+                    This permanently ends its schedule and installed identity. Its run history and
                     conversations remain available for inspection.
                   </AlertDialog.Description>
                   <Flex gap="3" mt="4" justify="end">
@@ -911,7 +911,11 @@ function AutomationCard({
                 <Text
                   as="span"
                   mt="1"
-                  style={{ display: "block", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}
+                  style={{
+                    display: "block",
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                  }}
                 >
                   {automation.completionResponse}
                 </Text>
@@ -1005,7 +1009,10 @@ function AutomationsPage() {
         if (overviewRequest.current === requestId) {
           setOverview((current) =>
             append && current
-              ? { ...next, items: mergeOverviewItems(current.items, next.items) }
+              ? {
+                  ...next,
+                  items: mergeOverviewItems(current.items, next.items),
+                }
               : next
           );
         }
@@ -1040,10 +1047,7 @@ function AutomationsPage() {
   }, [activeRunCount, load]);
 
   const action = useCallback(
-    async (
-      automation: AutomationRecord,
-      method: "requestReview" | "runNow" | "pause" | "resume" | "retire"
-    ) => {
+    async (automation: AutomationRecord, method: "runNow" | "pause" | "resume" | "retire") => {
       setBusy({ id: automation.missionId, action: method });
       setError(null);
       try {
@@ -1069,7 +1073,10 @@ function AutomationsPage() {
       try {
         const page = await callAutomations<RunPage>("listRuns", [
           id,
-          { limit: 20, cursor: { startedAt: last.startedAt, runId: last.runId } },
+          {
+            limit: 20,
+            cursor: { startedAt: last.startedAt, runId: last.runId },
+          },
         ]);
         setOlderRuns((value) => ({
           ...value,
@@ -1093,7 +1100,6 @@ function AutomationsPage() {
     active: 0,
     running: 0,
     failedLast24Hours: 0,
-    awaitingReview: 0,
     completed: 0,
   };
 
@@ -1101,7 +1107,7 @@ function AutomationsPage() {
     <AboutPage
       icon={<LightningBoltIcon width={20} height={20} />}
       title="Automations"
-      subtitle="Reviewed schedules, unattended runs, results, and conversations"
+      subtitle="Running schedules, unattended results, and inspectable conversations"
       maxWidth={1080}
       actions={
         <Flex align="center" gap="2">
@@ -1124,11 +1130,11 @@ function AutomationsPage() {
         </Flex>
       }
     >
-      <Grid columns={{ initial: "2", sm: "5" }} gap="3">
+      <Grid columns={{ initial: "2", sm: "4" }} gap="3">
         <MetricCard
           label="Active"
           value={counts.active}
-          detail="reviewed automations"
+          detail="running definitions"
           tone="green"
         />
         <MetricCard
@@ -1142,11 +1148,6 @@ function AutomationsPage() {
           value={counts.failedLast24Hours}
           detail="in the last 24h"
           tone="red"
-        />
-        <MetricCard
-          label="Awaiting review"
-          value={counts.awaitingReview}
-          detail="inert until approved"
         />
         <MetricCard label="Completed" value={counts.completed} detail="ended naturally" />
       </Grid>
@@ -1228,7 +1229,6 @@ function AutomationsPage() {
             <SegmentedControl.Item value="active">Active</SegmentedControl.Item>
             <SegmentedControl.Item value="paused">Paused</SegmentedControl.Item>
             <SegmentedControl.Item value="completed">Completed</SegmentedControl.Item>
-            <SegmentedControl.Item value="drafts">Drafts</SegmentedControl.Item>
           </SegmentedControl.Root>
         </Box>
         <TextField.Root
@@ -1266,8 +1266,8 @@ function AutomationsPage() {
               </Box>
               <Heading size="4">No automations yet</Heading>
               <Text as="p" size="2" color="gray" style={{ maxWidth: 520 }}>
-                Ask an agent to propose a periodic script or prompt. Its draft remains completely
-                inert until you review its exact code, schedule, and authority here.
+                Ask an agent to launch a periodic script or prompt. It starts immediately and
+                appears in its conversation as an inspectable automation pill.
               </Text>
             </Flex>
           </Card>

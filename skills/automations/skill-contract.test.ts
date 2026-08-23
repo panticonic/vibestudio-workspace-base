@@ -6,7 +6,7 @@ function compact(name: "SKILL.md" | "API.md"): string {
 }
 
 describe("Automations skill contract", () => {
-  it("documents the complete agent-to-review workflow", () => {
+  it("documents immediate launch and the running inspector", () => {
     const skill = compact("SKILL.md");
 
     expect(skill).toContain("Use this skill when a user asks to run work repeatedly or later");
@@ -14,10 +14,10 @@ describe("Automations skill contract", () => {
     expect(skill).toContain("**Agent** sends a prompt through the ordinary agent turn loop");
     expect(skill).toContain("exact inline `eval` code executed without a model call");
     expect(skill).toContain("does not require a new worker");
-    expect(skill).toContain("`automations.propose(...)`");
-    expect(skill).toContain("immediately adds an inspectable, editable pill");
-    expect(skill).toContain("inert draft is waiting in **Automations** for review");
-    expect(skill).toContain("Do not call `requestReview` for them");
+    expect(skill).toContain("native `launch_automation` tool");
+    expect(skill).toContain("canonical active definition");
+    expect(skill).toContain("pill is an inspector and controller, not an approval gate");
+    expect(skill).toContain("what is running and when it will run next");
   });
 
   it("documents supervision, history, conversations, results, and errors", () => {
@@ -36,7 +36,7 @@ describe("Automations skill contract", () => {
     expect(skill).toContain(
       "Agents can use the agent-facing `edit`, `runNow`, `pause`, `resume`, and"
     );
-    expect(api).toContain("`requestReview` is intentionally not agent-facing");
+    expect(api).toContain("there is no proposal or review transition");
   });
 
   it("documents interval, calendar, finite, and natural-completion schedules", () => {

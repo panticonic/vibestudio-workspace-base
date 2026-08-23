@@ -21,7 +21,7 @@
         {
           "name": "missions.edit",
           "title": "Change an automation",
-          "action": "create or change an automation draft",
+          "action": "create or change a running automation",
           "tier": "gated",
           "sensitivity": "write",
           "resourceType": "mission",
@@ -37,7 +37,7 @@
         {
           "name": "missions.run",
           "title": "Run an automation",
-          "action": "run an already reviewed automation",
+          "action": "run an installed automation",
           "tier": "gated",
           "sensitivity": "write",
           "resourceType": "mission",

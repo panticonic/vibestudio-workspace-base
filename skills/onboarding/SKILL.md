@@ -45,17 +45,17 @@ invent a fallback.
 **Schedule recurring work** is a ready-now conversation route owned by
 [Automations](../automations/SKILL.md). Read that returned skill, clarify only
 the details needed to choose a worker method, exact inline agent eval, or agent
-prompt, and propose an inert draft. Small recurring scripts can use the built-in
+prompt, and launch the automation. Small recurring scripts can use the built-in
 agent/EvalDO path without publishing a new codebase. Choose either an elapsed
 interval or a cron calendar in an explicit timezone, and capture optional end
 time, maximum-run, and natural-completion behavior. Agents can later edit, run,
-pause, resume, or retire reviewed automations when the user asks; activation of
-a new revision remains a human review action.
-The successful proposal immediately appears at that point in the conversation
-as an inspectable pill. The user can open it to review or edit the draft before
-any tick exists; it is the same durable definition shown in Automations.
-Do not open an empty supervision panel in place of helping, and do not imply the
-draft is scheduled before the user reviews it in Automations.
+pause, resume, or retire automations when the user asks. Saving an edit installs
+the new revision immediately.
+The successful launch immediately appears at that point in the conversation as
+an inspectable running pill. The user can open it to inspect, edit, pause, run,
+or stop the definition before any tick exists; it is the same durable
+definition shown in Automations. Do not open an empty supervision panel in
+place of helping.
 
 After the client-affine handoff, use ordinary server-side eval unless work
 depends on the inviting client's DOM, panel state, or native transport.
@@ -81,7 +81,7 @@ conversation observes it after `unavailable`.
 - Open one owner-controlled workflow per selection. Don't replace it with
   feedback questions or a custom approval UI.
 - Treat recurring work as an immediately usable agent capability, not setup.
-  Automations owns its review, schedule, execution, history, and supervision.
+  Automations owns its schedule, execution, history, and supervision.
 - Onboarding may suggest verified template outcomes, but Templates remains the
   sole install/update path.
 

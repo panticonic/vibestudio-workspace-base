@@ -5,7 +5,10 @@ describe("onboarding skill template handoff", () => {
   it("takes React and the theme from the panel realm rather than owning them", () => {
     const manifest = JSON.parse(
       fs.readFileSync(new URL("package.json", import.meta.url), "utf8")
-    ) as { dependencies?: Record<string, string>; peerDependencies?: Record<string, string> };
+    ) as {
+      dependencies?: Record<string, string>;
+      peerDependencies?: Record<string, string>;
+    };
 
     // This skill's components render inside a panel's realm. Owning React here
     // would put a second copy in that realm, where the host's hooks and this
@@ -38,7 +41,7 @@ describe("onboarding skill template handoff", () => {
 
     expect(skill).toContain("**Schedule recurring work** is a ready-now conversation route");
     expect(skill).toContain("[Automations](../automations/SKILL.md)");
-    expect(skill).toContain("propose an inert draft");
+    expect(skill).toContain("launch the automation");
     expect(skill).toContain("immediately appears at that point in the conversation");
     expect(skill).not.toContain("automations setup status");
   });

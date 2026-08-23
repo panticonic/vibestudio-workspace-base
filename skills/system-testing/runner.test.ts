@@ -673,6 +673,7 @@ describe("HeadlessRunner", () => {
         {
           testPolicy: {
             testId: "docs-workspace-loop",
+            initiatingUserId: "system-test-unattributed",
             agent: {
               model: "openai-codex:gpt-5.3-codex-spark",
               approvalLevel: 2,

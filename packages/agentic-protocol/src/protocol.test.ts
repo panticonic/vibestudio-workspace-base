@@ -51,7 +51,13 @@ function textCompletedPayload(messageId: string, role: "user" | "assistant", con
   return {
     protocol: AGENTIC_PROTOCOL_VERSION,
     role,
-    blocks: [{ blockId: brandId<BlockId>(`${messageId}:block:0`), type: "text" as const, content }],
+    blocks: [
+      {
+        blockId: brandId<BlockId>(`${messageId}:block:0`),
+        type: "text" as const,
+        content,
+      },
+    ],
     outcome: "completed" as const,
   };
 }
@@ -66,7 +72,13 @@ function messageEvent(
     payload: {
       protocol: AGENTIC_PROTOCOL_VERSION,
       role: "user",
-      blocks: [{ blockId: brandId<BlockId>("msg-1:block:0"), type: "text", content: "hello" }],
+      blocks: [
+        {
+          blockId: brandId<BlockId>("msg-1:block:0"),
+          type: "text",
+          content: "hello",
+        },
+      ],
       outcome: "completed",
     },
     createdAt: "2026-05-20T12:00:00.000Z",
@@ -127,6 +139,7 @@ describe("@workspace/agentic-protocol schemas", () => {
           summary: "Review the project every Thursday.",
           revision: 1,
           action: "prompt",
+          state: "active",
           createdAt: 1_700_000_000_000,
           schedule: {
             kind: "cron",
@@ -191,7 +204,11 @@ describe("@workspace/agentic-protocol schemas", () => {
       agenticEventSchema.safeParse({
         ...base,
         kind: "invocation.completed",
-        payload: { protocol: AGENTIC_PROTOCOL_VERSION, terminalOutcome: "success", to },
+        payload: {
+          protocol: AGENTIC_PROTOCOL_VERSION,
+          terminalOutcome: "success",
+          to,
+        },
       }).success
     ).toBe(true);
     expect(
@@ -217,7 +234,11 @@ describe("@workspace/agentic-protocol schemas", () => {
 
   it("keeps actor extensions inside metadata instead of accepting undeclared wire fields", () => {
     expect(
-      actorRefSchema.safeParse({ kind: "agent", id: "agent-1", privateAccountId: "hidden" }).success
+      actorRefSchema.safeParse({
+        kind: "agent",
+        id: "agent-1",
+        privateAccountId: "hidden",
+      }).success
     ).toBe(false);
     expect(
       actorRefSchema.safeParse({
@@ -364,7 +385,11 @@ describe("@workspace/agentic-protocol schemas", () => {
     ).toBe(true);
     expect(
       agenticEventSchema.safeParse(
-        completed({ blockId: brandId<BlockId>("b0"), type: "text", content: "hi" })
+        completed({
+          blockId: brandId<BlockId>("b0"),
+          type: "text",
+          content: "hi",
+        })
       ).success
     ).toBe(true);
 
@@ -373,7 +398,11 @@ describe("@workspace/agentic-protocol schemas", () => {
     // A text block carrying an invocationId is rejected (strict: field belongs only to invocation).
     expect(
       agenticEventSchema.safeParse(
-        completed({ type: "text", content: "hi", invocationId: brandId<InvocationId>("call-1") })
+        completed({
+          type: "text",
+          content: "hi",
+          invocationId: brandId<InvocationId>("call-1"),
+        })
       ).success
     ).toBe(false);
     // A text block without content is rejected.
@@ -521,7 +550,10 @@ describe("@workspace/agentic-protocol schemas", () => {
       kind: "invocation.started",
       actor: agent,
       causality: { invocationId: "inv-1" },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, request: { code: "run()" } },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        request: { code: "run()" },
+      },
       createdAt: "2026-05-20T12:00:00.000Z",
     });
 
@@ -637,7 +669,10 @@ describe("@workspace/agentic-protocol schemas", () => {
         {
           name: "eval",
           description: "large method description",
-          parameters: { type: "object", properties: { code: { type: "string" } } },
+          parameters: {
+            type: "object",
+            properties: { code: { type: "string" } },
+          },
           returns: { type: "object" },
         },
       ],
@@ -811,7 +846,10 @@ describe("@workspace/agentic-protocol stored values", () => {
       kind: "invocation.output",
       actor: agent,
       causality: { invocationId: brandId<InvocationId>("inv-out") },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, output } as AgenticEvent["payload"],
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        output,
+      } as AgenticEvent["payload"],
       createdAt: "2026-05-20T12:00:00.000Z",
     });
 
@@ -828,7 +866,10 @@ describe("@workspace/agentic-protocol stored values", () => {
   it("rejects oversized inline content at encode time (no implicit spill)", async () => {
     const largeText = "x".repeat(140 * 1024);
     const writer = {
-      putText: async (value: string) => ({ digest: "unused", size: value.length }),
+      putText: async (value: string) => ({
+        digest: "unused",
+        size: value.length,
+      }),
     };
 
     // Block content over the inline bound is the EMITTER's bug (the
@@ -841,7 +882,11 @@ describe("@workspace/agentic-protocol stored values", () => {
             protocol: AGENTIC_PROTOCOL_VERSION,
             role: "assistant",
             blocks: [
-              { blockId: brandId<BlockId>("msg-1:block:0"), type: "text", content: largeText },
+              {
+                blockId: brandId<BlockId>("msg-1:block:0"),
+                type: "text",
+                content: largeText,
+              },
             ],
             outcome: "completed",
           },
@@ -874,7 +919,10 @@ describe("@workspace/agentic-protocol reducers", () => {
       kind: "turn.waiting",
       actor: agent,
       turnId,
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, reason: "model_credential_required" },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        reason: "model_credential_required",
+      },
       createdAt: "2026-05-20T12:00:01.000Z",
     };
 
@@ -896,7 +944,11 @@ describe("@workspace/agentic-protocol reducers", () => {
         protocol: AGENTIC_PROTOCOL_VERSION,
         role: "assistant",
         blocks: [
-          { blockId: brandId<BlockId>("msg-replace:block:0"), type: "text", content: "hello worl" },
+          {
+            blockId: brandId<BlockId>("msg-replace:block:0"),
+            type: "text",
+            content: "hello worl",
+          },
         ],
       },
       createdAt: "2026-05-20T12:00:00.000Z",
@@ -952,7 +1004,13 @@ describe("@workspace/agentic-protocol reducers", () => {
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         role: "assistant",
-        blocks: [{ blockId: brandId<BlockId>("think-1"), type: "thinking", content: "draft" }],
+        blocks: [
+          {
+            blockId: brandId<BlockId>("think-1"),
+            type: "thinking",
+            content: "draft",
+          },
+        ],
       },
       createdAt: "2026-05-20T12:00:00.000Z",
     };
@@ -985,7 +1043,11 @@ describe("@workspace/agentic-protocol reducers", () => {
       actor: agent,
       turnId: brandId<TurnId>("turn-1"),
       causality: { messageId: brandId<MessageId>("msg-stream") },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, role: "assistant", blocks: [] },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        role: "assistant",
+        blocks: [],
+      },
       createdAt: "2026-05-20T12:00:00.000Z",
     };
     const delta = (
@@ -1019,7 +1081,11 @@ describe("@workspace/agentic-protocol reducers", () => {
 
     // Each block accumulates only its own fragments — no duplication, no bleed.
     expect(state.messages["msg-stream"]?.blocks).toEqual([
-      { blockId: "msg-stream:block:0", type: "thinking", content: "Think more" },
+      {
+        blockId: "msg-stream:block:0",
+        type: "thinking",
+        content: "Think more",
+      },
       { blockId: "msg-stream:block:1", type: "text", content: "Hello" },
     ]);
     expect(messageDisplayText(state.messages["msg-stream"]?.blocks)).toBe("Hello");
@@ -1032,7 +1098,10 @@ describe("@workspace/agentic-protocol reducers", () => {
       seq: 1,
       from: agentParticipant,
       payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
-      payload: { kind: "message.completed", payload: { content: "missing required fields" } },
+      payload: {
+        kind: "message.completed",
+        payload: { content: "missing required fields" },
+      },
       publishedAt: "2026-05-20T12:00:00.000Z",
     } as unknown as ChannelEnvelope<AgenticEvent>;
     const valid = envelope(
@@ -1068,10 +1137,18 @@ describe("@workspace/agentic-protocol reducers", () => {
         actor: agent,
         turnId: brandId<TurnId>("turn-1"),
         causality: { messageId: brandId<MessageId>("msg-1") },
-        payload: { protocol: AGENTIC_PROTOCOL_VERSION, role: "assistant", blocks: [] },
+        payload: {
+          protocol: AGENTIC_PROTOCOL_VERSION,
+          role: "assistant",
+          blocks: [],
+        },
         createdAt: "2026-05-20T12:00:01.000Z",
       },
-      { eventId: brandId<EventId>("evt-start"), seq: 1, prevEventHash: turnOpened.eventHash }
+      {
+        eventId: brandId<EventId>("evt-start"),
+        seq: 1,
+        prevEventHash: turnOpened.eventHash,
+      }
     );
     const completed = await trajectoryEvent(
       {
@@ -1082,7 +1159,11 @@ describe("@workspace/agentic-protocol reducers", () => {
         payload: textCompletedPayload("msg-1", "assistant", "done"),
         createdAt: "2026-05-20T12:00:02.000Z",
       },
-      { eventId: brandId<EventId>("evt-complete"), seq: 2, prevEventHash: started.eventHash }
+      {
+        eventId: brandId<EventId>("evt-complete"),
+        seq: 2,
+        prevEventHash: started.eventHash,
+      }
     );
 
     const trajectory = [turnOpened, started, completed].reduce(
@@ -1102,7 +1183,10 @@ describe("@workspace/agentic-protocol reducers", () => {
         kind: "turn.opened",
         actor: agent,
         turnId: brandId<TurnId>("turn-wait"),
-        payload: { protocol: AGENTIC_PROTOCOL_VERSION, summary: "Running model" },
+        payload: {
+          protocol: AGENTIC_PROTOCOL_VERSION,
+          summary: "Running model",
+        },
         createdAt: "2026-05-20T12:00:00.000Z",
       },
       { eventId: brandId<EventId>("evt-turn"), seq: 0 }
@@ -1119,7 +1203,11 @@ describe("@workspace/agentic-protocol reducers", () => {
         },
         createdAt: "2026-05-20T12:00:01.000Z",
       },
-      { eventId: brandId<EventId>("evt-waiting"), seq: 1, prevEventHash: turnOpened.eventHash }
+      {
+        eventId: brandId<EventId>("evt-waiting"),
+        seq: 1,
+        prevEventHash: turnOpened.eventHash,
+      }
     );
 
     const trajectory = [turnOpened, waiting].reduce(
@@ -1148,7 +1236,11 @@ describe("@workspace/agentic-protocol reducers", () => {
       kind: "invocation.started",
       actor: agent,
       causality: { invocationId: brandId<InvocationId>("inv-1") },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, name: "read_file", userVisible: true },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        name: "read_file",
+        userVisible: true,
+      },
       createdAt: "2026-05-20T12:00:00.000Z",
     };
     const completed: AgenticEvent<"invocation.completed"> = {
@@ -1229,7 +1321,11 @@ describe("@workspace/agentic-protocol reducers", () => {
       kind: "invocation.completed",
       actor: agent,
       causality: { invocationId: brandId<InvocationId>("inv-cross") },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, result: "done", terminalOutcome: "success" },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        result: "done",
+        terminalOutcome: "success",
+      },
       createdAt: "2026-05-20T12:00:01.000Z",
     };
 
@@ -1281,7 +1377,10 @@ describe("@workspace/agentic-protocol reducers", () => {
         protocol: AGENTIC_PROTOCOL_VERSION,
         uiType: "inline",
         id: "inline-1",
-        source: { type: "code", code: "export default function App() { return null; }" },
+        source: {
+          type: "code",
+          code: "export default function App() { return null; }",
+        },
         props: { ok: true },
       },
       createdAt: "2026-05-20T12:00:00.000Z",
@@ -1304,7 +1403,9 @@ describe("@workspace/agentic-protocol reducers", () => {
       createInitialChannelViewState()
     );
 
-    expect(state.inlineUi["participant-agent-1"]?.["inline-1"]?.props).toEqual({ ok: true });
+    expect(state.inlineUi["participant-agent-1"]?.["inline-1"]?.props).toEqual({
+      ok: true,
+    });
     expect(state.actionBars["participant-agent-1"]?.source).toEqual({
       type: "file",
       path: "ActionBar.tsx",
@@ -1380,7 +1481,10 @@ describe("@workspace/agentic-protocol reducers", () => {
         protocol: AGENTIC_PROTOCOL_VERSION,
         typeId: "weather",
         displayMode: "row",
-        source: { type: "code", code: "export default function Weather() { return null; }" },
+        source: {
+          type: "code",
+          code: "export default function Weather() { return null; }",
+        },
       },
       createdAt: "2026-05-20T12:00:00.000Z",
     };
@@ -1388,7 +1492,10 @@ describe("@workspace/agentic-protocol reducers", () => {
       ...oldRegister,
       payload: {
         ...oldRegister.payload,
-        source: { type: "code", code: "export default function CurrentWeather() { return null; }" },
+        source: {
+          type: "code",
+          code: "export default function CurrentWeather() { return null; }",
+        },
       },
       createdAt: "2026-05-20T12:00:10.000Z",
     };
@@ -1474,7 +1581,11 @@ describe("@workspace/agentic-protocol hash helpers", () => {
         causality: { messageId: brandId<MessageId>("msg-2") },
         payload: textCompletedPayload("msg-2", "user", "next"),
       }),
-      { eventId: brandId<EventId>("evt-2"), seq: 1, prevEventHash: first.eventHash }
+      {
+        eventId: brandId<EventId>("evt-2"),
+        seq: 1,
+        prevEventHash: first.eventHash,
+      }
     );
 
     await expect(checkTrajectoryIntegrity([first, second])).resolves.toEqual({
@@ -1506,7 +1617,11 @@ describe("@workspace/agentic-protocol message delivery events", () => {
       payload: { protocol: AGENTIC_PROTOCOL_VERSION, ...extra },
       createdAt: "2026-05-20T12:00:05.000Z",
     }) as AgenticEvent;
-  type AnyParticipant = { kind: "user" | "agent"; id: string; participantId: string };
+  type AnyParticipant = {
+    kind: "user" | "agent";
+    id: string;
+    participantId: string;
+  };
   const edited = (
     by: AnyParticipant = userParticipant,
     actor: AnyParticipant = userParticipant
@@ -1537,7 +1652,10 @@ describe("@workspace/agentic-protocol message delivery events", () => {
     messageEvent({
       actor: userParticipant,
       causality: { messageId: target },
-      payload: { ...textCompletedPayload(target, "user", "hello"), to: undefined },
+      payload: {
+        ...textCompletedPayload(target, "user", "hello"),
+        to: undefined,
+      },
     });
 
   it("accepts received/read/edited/retracted events", () => {
@@ -1551,7 +1669,10 @@ describe("@workspace/agentic-protocol message delivery events", () => {
 
   it("rejects message delivery events without a messageId", () => {
     expect(
-      agenticEventSchema.safeParse({ ...receipt("message.read"), causality: undefined }).success
+      agenticEventSchema.safeParse({
+        ...receipt("message.read"),
+        causality: undefined,
+      }).success
     ).toBe(false);
   });
 

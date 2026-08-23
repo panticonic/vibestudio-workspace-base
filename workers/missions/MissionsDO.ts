@@ -34,7 +34,7 @@ const ATTENTION_LIMIT = 8;
 const DEFAULT_OVERVIEW_LIMIT = 30;
 const RUN_STARTED_NOTIFICATION_TTL_MS = 6_000;
 
-type OverviewFilter = "all" | "attention" | "active" | "paused" | "completed" | "drafts";
+type OverviewFilter = "all" | "attention" | "active" | "paused" | "completed";
 interface OverviewCursor {
   updatedAt: number;
   missionId: string;
@@ -176,7 +176,6 @@ export class MissionsDO extends DurableObjectBase {
       active: number;
       running: number;
       failedLast24Hours: number;
-      awaitingReview: number;
       completed: number;
     };
     items: Array<{
@@ -187,7 +186,11 @@ export class MissionsDO extends DurableObjectBase {
       failedRunsSince: number;
     }>;
     nextCursor?: OverviewCursor;
-    attention: Array<{ missionId: string; missionName: string; run: MissionRunRecord }>;
+    attention: Array<{
+      missionId: string;
+      missionName: string;
+      run: MissionRunRecord;
+    }>;
   } {
     const userId = this.requireUser();
     const generatedAt = Date.now();
@@ -210,10 +213,9 @@ export class MissionsDO extends DurableObjectBase {
     if (filter === "active") conditions.push("state='active'");
     if (filter === "paused") conditions.push("state='paused'");
     if (filter === "completed") conditions.push("state='completed'");
-    if (filter === "drafts") conditions.push("state IN ('draft','needs-reapproval')");
     if (filter === "attention") {
       conditions.push(
-        "(state='needs-reapproval' OR EXISTS (SELECT 1 FROM mission_runs r WHERE r.mission_id=missions.mission_id AND r.status='failed' AND r.started_at>=?))"
+        "EXISTS (SELECT 1 FROM mission_runs r WHERE r.mission_id=missions.mission_id AND r.status='failed' AND r.started_at>=?)"
       );
       bindings.push(cutoff);
     }
@@ -273,8 +275,7 @@ export class MissionsDO extends DurableObjectBase {
       .exec(
         `SELECT COUNT(*) AS total,
            SUM(CASE WHEN state='active' THEN 1 ELSE 0 END) AS active,
-           SUM(CASE WHEN state='completed' THEN 1 ELSE 0 END) AS completed,
-           SUM(CASE WHEN state IN ('draft','needs-reapproval') THEN 1 ELSE 0 END) AS awaiting_review
+           SUM(CASE WHEN state='completed' THEN 1 ELSE 0 END) AS completed
          FROM missions WHERE seeded=1 OR owner_user_id=?`,
         userId
       )
@@ -331,7 +332,6 @@ export class MissionsDO extends DurableObjectBase {
         active: Number(definitionStats?.["active"] ?? 0),
         running: Number(runStats?.["running"] ?? 0),
         failedLast24Hours: Number(runStats?.["failed"] ?? 0),
-        awaitingReview: Number(definitionStats?.["awaiting_review"] ?? 0),
         completed: Number(definitionStats?.["completed"] ?? 0),
       },
       items: missionRows.map((row) => ({
@@ -381,7 +381,10 @@ export class MissionsDO extends DurableObjectBase {
   listRuns(
     missionId: string,
     options: { limit?: number; cursor?: { startedAt: number; runId: string } }
-  ): { items: MissionRunRecord[]; nextCursor?: { startedAt: number; runId: string } } {
+  ): {
+    items: MissionRunRecord[];
+    nextCursor?: { startedAt: number; runId: string };
+  } {
     this.requireMission(missionId);
     const limit = options.limit ?? 20;
     const rows = (options.cursor
@@ -408,7 +411,12 @@ export class MissionsDO extends DurableObjectBase {
     return {
       items: page.map((row) => this.rowToRun(row)),
       ...(hasMore && last
-        ? { nextCursor: { startedAt: Number(last.started_at), runId: last.run_id } }
+        ? {
+            nextCursor: {
+              startedAt: Number(last.started_at),
+              runId: last.run_id,
+            },
+          }
         : {}),
     };
   }
@@ -422,42 +430,21 @@ export class MissionsDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  proposeDraft(input: {
+  async launch(input: {
     name: string;
     charter: MissionCharter;
     permissions: MissionPermission[];
     standingRestrictions?: MissionStandingRestriction[];
-  }): MissionRecord {
-    return this.insertDraft(input, this.rpcIdempotencyKey ?? undefined);
-  }
-
-  @schemaRpc()
-  createDraft(input: {
-    name: string;
-    charter: MissionCharter;
-    permissions: MissionPermission[];
-    standingRestrictions?: MissionStandingRestriction[];
-  }): MissionRecord {
-    return this.insertDraft(input);
-  }
-
-  private insertDraft(
-    input: {
-      name: string;
-      charter: MissionCharter;
-      permissions: MissionPermission[];
-      standingRestrictions?: MissionStandingRestriction[];
-    },
-    proposalKey?: string
-  ): MissionRecord {
+  }): Promise<MissionRecord> {
     const caller = this.requireOwnerCaller();
-    if (proposalKey) {
+    const launchKey = this.rpcIdempotencyKey ?? this.rpcRequestId ?? crypto.randomUUID();
+    if (launchKey) {
       const existing = this.sql
         .exec(
           `SELECT mission_id FROM mission_proposals
             WHERE owner_user_id=? AND proposal_key=?`,
           caller.userId,
-          proposalKey
+          launchKey
         )
         .toArray()[0];
       if (existing) return this.requireMission(String(existing["mission_id"]));
@@ -471,36 +458,65 @@ export class MissionsDO extends DurableObjectBase {
       input.permissions,
       standingRestrictions
     );
-    this.ctx.storage.transactionSync(() => {
-      this.sql.exec(
-        `INSERT INTO missions
-         (mission_id,name,revision,charter_json,permissions_json,standing_restrictions_json,
-          owner_user_id,owner_device_id,state,revision_digest,active_closure_digest,seeded,
-          schedule_origin_at,next_run_at,last_run_at,created_at,updated_at,activated_at,
-          run_count,completed_at,completion_reason,completion_response)
-         VALUES (?,?,1,?,?,?,?,?,'draft',?,NULL,0,NULL,NULL,NULL,?,?,NULL,0,NULL,NULL,NULL)`,
-        missionId,
-        input.name,
-        canonicalJson(input.charter),
-        canonicalJson(input.permissions),
-        canonicalJson(standingRestrictions),
-        caller.userId,
-        caller.callerId,
-        revisionDigest,
-        now,
-        now
-      );
-      if (proposalKey) {
+    const mission: MissionRecord = {
+      missionId,
+      name: input.name,
+      revision: 1,
+      charter: input.charter,
+      owner: { userId: caller.userId, deviceId: caller.callerId },
+      state: "active",
+      revisionDigest,
+      createdAt: now,
+      updatedAt: now,
+      activatedAt: now,
+      runCount: 0,
+      permissions: input.permissions,
+      standingRestrictions,
+    };
+    this.assertCanActivate(mission, now);
+    const { body, closureDigest } = this.compileClosure(mission);
+    await this.installClosure(body, closureDigest);
+    const scheduleOriginAt = scheduleOrigin(mission.charter, now);
+    const nextRunAt = initialNextRunAt(mission.charter, now, scheduleOriginAt);
+    try {
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec(
+          `INSERT INTO missions
+           (mission_id,name,revision,charter_json,permissions_json,standing_restrictions_json,
+            owner_user_id,owner_device_id,state,revision_digest,active_closure_digest,seeded,
+            schedule_origin_at,next_run_at,last_run_at,created_at,updated_at,activated_at,
+            run_count,completed_at,completion_reason,completion_response)
+           VALUES (?,?,1,?,?,?,?,?,'active',?,?,0,?,?,NULL,?,?,?,0,NULL,NULL,NULL)`,
+          missionId,
+          input.name,
+          canonicalJson(input.charter),
+          canonicalJson(input.permissions),
+          canonicalJson(standingRestrictions),
+          caller.userId,
+          caller.callerId,
+          revisionDigest,
+          closureDigest,
+          scheduleOriginAt,
+          nextRunAt,
+          now,
+          now,
+          now
+        );
         this.sql.exec(
           `INSERT INTO mission_proposals
            (owner_user_id,proposal_key,mission_id,created_at) VALUES (?,?,?,?)`,
           caller.userId,
-          proposalKey,
+          launchKey,
           missionId,
           now
         );
-      }
-    });
+      });
+    } catch (error) {
+      await this.rpc.call("main", "reviewedClosure.suspend", [
+        `mission:${missionId}@${closureDigest}`,
+      ]);
+      throw error;
+    }
     return this.requireMission(missionId);
   }
 
@@ -517,7 +533,7 @@ export class MissionsDO extends DurableObjectBase {
     const current = this.requireMission(missionId);
     const caller = this.requireOwnerCaller();
     if (current.seeded) {
-      return this.insertDraft({
+      return this.launch({
         name: input.name ?? `${current.name} (custom)`,
         charter: input.charter ?? current.charter,
         permissions: input.permissions ?? [...current.permissions],
@@ -529,8 +545,6 @@ export class MissionsDO extends DurableObjectBase {
     const nextCharter = input.charter ?? current.charter;
     const nextPermissions = input.permissions ?? current.permissions;
     assertExecutionPermissions(nextCharter, nextPermissions);
-    const subject = this.activeSubject(current);
-    if (subject) await this.rpc.call("main", "reviewedClosure.suspend", [subject]);
     const next: MissionRecord = {
       ...current,
       name: input.name ?? current.name,
@@ -538,7 +552,7 @@ export class MissionsDO extends DurableObjectBase {
       charter: nextCharter,
       permissions: nextPermissions,
       standingRestrictions: input.standingRestrictions ?? current.standingRestrictions,
-      state: current.state === "draft" ? "draft" : "needs-reapproval",
+      state: "active",
       updatedAt: Date.now(),
     };
     next.revisionDigest = missionClosureDigest(
@@ -546,72 +560,52 @@ export class MissionsDO extends DurableObjectBase {
       next.permissions,
       next.standingRestrictions
     );
-    this.sql.exec(
-      `INSERT INTO mission_revisions (mission_id,revision,record_json,recorded_at)
-       VALUES (?,?,?,?)`,
-      current.missionId,
-      current.revision,
-      canonicalJson(current),
-      next.updatedAt
-    );
-    this.sql.exec(
-      `UPDATE missions SET name=?,revision=?,charter_json=?,permissions_json=?,
-       standing_restrictions_json=?,state=?,revision_digest=?,active_closure_digest=NULL,
-       schedule_origin_at=NULL,next_run_at=NULL,updated_at=?,completed_at=NULL,
-       completion_reason=NULL,completion_response=NULL WHERE mission_id=?`,
-      next.name,
-      next.revision,
-      canonicalJson(next.charter),
-      canonicalJson(next.permissions),
-      canonicalJson(next.standingRestrictions),
-      next.state,
-      next.revisionDigest,
-      next.updatedAt,
-      missionId
-    );
-    return this.requireMission(missionId);
-  }
-
-  @schemaRpc()
-  async requestReview(missionId: string): Promise<MissionRecord> {
-    const mission = this.requireMission(missionId);
-    if (mission.state !== "draft" && mission.state !== "needs-reapproval") {
-      throw denied("Only an inert automation revision can be reviewed");
+    this.assertCanActivate(next, next.updatedAt);
+    const oldSubject = this.activeSubject(current);
+    const { body, closureDigest } = this.compileClosure(next);
+    if (oldSubject) await this.rpc.call("main", "reviewedClosure.suspend", [oldSubject]);
+    try {
+      await this.installClosure(body, closureDigest);
+      const scheduleOriginAt = scheduleOrigin(next.charter, next.updatedAt);
+      const nextRunAt = initialNextRunAt(next.charter, next.updatedAt, scheduleOriginAt);
+      this.ctx.storage.transactionSync(() => {
+        this.sql.exec(
+          `INSERT INTO mission_revisions (mission_id,revision,record_json,recorded_at)
+           VALUES (?,?,?,?)`,
+          current.missionId,
+          current.revision,
+          canonicalJson(current),
+          next.updatedAt
+        );
+        this.sql.exec(
+          `UPDATE missions SET name=?,revision=?,charter_json=?,permissions_json=?,
+           standing_restrictions_json=?,state='active',revision_digest=?,active_closure_digest=?,
+           schedule_origin_at=?,next_run_at=?,updated_at=?,activated_at=COALESCE(activated_at,?),
+           completed_at=NULL,completion_reason=NULL,completion_response=NULL WHERE mission_id=?`,
+          next.name,
+          next.revision,
+          canonicalJson(next.charter),
+          canonicalJson(next.permissions),
+          canonicalJson(next.standingRestrictions),
+          next.revisionDigest,
+          closureDigest,
+          scheduleOriginAt,
+          nextRunAt,
+          next.updatedAt,
+          next.updatedAt,
+          missionId
+        );
+      });
+    } catch (error) {
+      await this.rpc
+        .call("main", "reviewedClosure.suspend", [`mission:${missionId}@${closureDigest}`])
+        .catch(() => undefined);
+      if (oldSubject) {
+        const previous = this.compileClosure(current);
+        await this.installClosure(previous.body, previous.closureDigest).catch(() => undefined);
+      }
+      throw error;
     }
-    const now = Date.now();
-    this.assertCanActivate(mission, now);
-    const { body, closureDigest } = this.compileClosure(mission);
-    const staleSubject = this.activeSubject(mission);
-    if (staleSubject) await this.rpc.call("main", "reviewedClosure.suspend", [staleSubject]);
-    await this.rpc.call("main", "reviewedClosure.activate", [
-      {
-        body,
-        closureDigest,
-        presentation: {
-          title: `Activate ${mission.name}`,
-          description:
-            "Review the exact code, action, schedule, network reach, and standing authority for this automation.",
-          summary: mission.charter.summary,
-          facts: [
-            { label: "Execution", value: executionLabel(mission.charter.execution) },
-            { label: "Schedule", value: triggerLabel(mission.charter) },
-            { label: "Standing rules", value: String(body.grants.length) },
-          ],
-        },
-      },
-    ]);
-    const scheduleOriginAt = scheduleOrigin(mission.charter, now);
-    const nextRunAt = initialNextRunAt(mission.charter, now, scheduleOriginAt);
-    this.sql.exec(
-      `UPDATE missions SET state='active',active_closure_digest=?,schedule_origin_at=?,next_run_at=?,updated_at=?,activated_at=COALESCE(activated_at,?),completed_at=NULL,completion_reason=NULL,completion_response=NULL
-       WHERE mission_id=?`,
-      closureDigest,
-      scheduleOriginAt,
-      nextRunAt,
-      now,
-      now,
-      missionId
-    );
     return this.requireMission(missionId);
   }
 
@@ -641,7 +635,7 @@ export class MissionsDO extends DurableObjectBase {
     if (mission.state !== "paused") throw denied("Only paused automations can resume");
     const { body, closureDigest } = this.compileClosure(mission);
     if (closureDigest !== this.getRow(missionId)?.active_closure_digest) {
-      throw denied("Automation must be reviewed again before it can resume");
+      throw denied("Automation closure no longer matches its installed revision");
     }
     const now = Date.now();
     const completion = this.completionBeforeRun(mission, now);
@@ -653,11 +647,6 @@ export class MissionsDO extends DurableObjectBase {
       {
         body,
         closureDigest,
-        presentation: {
-          title: `Resume ${mission.name}`,
-          description: "Resume this unchanged reviewed automation closure.",
-          summary: mission.charter.summary,
-        },
       },
     ]);
     const row = this.getRow(missionId);
@@ -710,7 +699,7 @@ export class MissionsDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  async proposeAuthorityRevision(input: {
+  async pauseForAuthorityDenial(input: {
     missionId: string;
     capability: string;
     resource: MissionPermission["resource"];
@@ -718,45 +707,12 @@ export class MissionsDO extends DurableObjectBase {
   }): Promise<MissionRecord> {
     this.requireHost();
     const current = this.requireMission(input.missionId, true);
-    if (current.charter.execution.kind !== "agent") {
-      throw denied("Method automations inherit their installed code authority");
-    }
-    if (current.state === "retired") throw denied("Retired automations cannot be revised");
-    const duplicate = current.permissions.some(
-      (permission) =>
-        permission.capability === input.capability &&
-        canonicalJson(permission.resource) === canonicalJson(input.resource)
-    );
-    if (duplicate) return current;
+    if (current.state !== "active") return current;
     const subject = this.activeSubject(current);
     if (subject) await this.rpc.call("main", "reviewedClosure.suspend", [subject]);
-    const nextPermissions = [
-      ...current.permissions,
-      { capability: input.capability, resource: input.resource, tier: input.tier },
-    ];
-    const revision = current.revision + 1;
-    const revisionDigest = missionClosureDigest(
-      current.charter,
-      nextPermissions,
-      current.standingRestrictions
-    );
     const now = Date.now();
     this.sql.exec(
-      `INSERT INTO mission_revisions (mission_id,revision,record_json,recorded_at)
-       VALUES (?,?,?,?)`,
-      current.missionId,
-      current.revision,
-      canonicalJson(current),
-      now
-    );
-    this.sql.exec(
-      `UPDATE missions SET revision=?,permissions_json=?,state='needs-reapproval',
-       revision_digest=?,active_closure_digest=NULL,next_run_at=NULL,updated_at=?,
-       completed_at=NULL,completion_reason=NULL,completion_response=NULL
-       WHERE mission_id=?`,
-      revision,
-      canonicalJson(nextPermissions),
-      revisionDigest,
+      `UPDATE missions SET state='paused',next_run_at=NULL,updated_at=? WHERE mission_id=?`,
       now,
       current.missionId
     );
@@ -776,7 +732,7 @@ export class MissionsDO extends DurableObjectBase {
     }
     const subject = this.requireActiveSubject(mission);
     const closureDigest = this.getRow(mission.missionId)?.active_closure_digest;
-    if (!closureDigest) throw denied("Automation has no active reviewed closure");
+    if (!closureDigest) throw denied("Automation has no active installed closure");
     const active = this.activeRunRow(mission.missionId);
     const runId = `run_${crypto.randomUUID().replaceAll("-", "")}`;
     if (active) {
@@ -931,7 +887,10 @@ export class MissionsDO extends DurableObjectBase {
       await this.activateChannel(channelId, contextId);
       const freshExecution: Extract<MissionExecution, { kind: "agent" }> = {
         ...execution,
-        target: { ...execution.target, objectKey: `${execution.target.objectKey}-${runId}` },
+        target: {
+          ...execution.target,
+          objectKey: `${execution.target.objectKey}-${runId}`,
+        },
       };
       const handle = await this.activateTarget(
         freshExecution,
@@ -988,7 +947,11 @@ export class MissionsDO extends DurableObjectBase {
         ...(agentChannelId ? { agentChannelId } : {}),
       },
     ]);
-    const handle = value as { id?: unknown; targetId?: unknown; contextId?: unknown } | null;
+    const handle = value as {
+      id?: unknown;
+      targetId?: unknown;
+      contextId?: unknown;
+    } | null;
     if (!handle || typeof handle.id !== "string" || typeof handle.targetId !== "string") {
       throw new Error("Automation target could not be activated");
     }
@@ -1066,7 +1029,11 @@ export class MissionsDO extends DurableObjectBase {
     await this.rpc.call("main", "reviewedClosure.finishSession", [{ sessionId }]);
     const row = this.getRunRow(runId);
     if (!row) throw notFound(`Unknown automation run ${runId}`);
-    await this.terminalizeRun(row, status, { finalMessage, completionResponse, error });
+    await this.terminalizeRun(row, status, {
+      finalMessage,
+      completionResponse,
+      error,
+    });
   }
 
   private async failStartingRun(runId: string, error: unknown): Promise<void> {
@@ -1083,7 +1050,11 @@ export class MissionsDO extends DurableObjectBase {
   private async terminalizeRun(
     row: RunRow,
     status: "succeeded" | "failed",
-    input: { finalMessage?: string; completionResponse?: string; error?: string }
+    input: {
+      finalMessage?: string;
+      completionResponse?: string;
+      error?: string;
+    }
   ): Promise<void> {
     const now = Date.now();
     const mission = this.requireMission(row.mission_id, true);
@@ -1272,6 +1243,18 @@ export class MissionsDO extends DurableObjectBase {
     return { body, closureDigest: reviewedExecutionClosureDigest(body) };
   }
 
+  private async installClosure(
+    body: ReviewedExecutionClosureBody,
+    closureDigest: string
+  ): Promise<void> {
+    await this.rpc.call("main", "reviewedClosure.activate", [
+      {
+        body,
+        closureDigest,
+      },
+    ]);
+  }
+
   private getRow(missionId: string): MissionRow | null {
     const rows = this.sql.exec("SELECT * FROM missions WHERE mission_id=?", missionId).toArray();
     return rows[0] ? (rows[0] as unknown as MissionRow) : null;
@@ -1301,20 +1284,51 @@ export class MissionsDO extends DurableObjectBase {
   }
 
   private requireUser(): string {
-    const userId = this.caller?.userId;
-    if (!userId || userId === "system") throw denied("Automations require an authenticated user");
+    const authorization = this.authorization;
+    const attributedUser =
+      authorization?.actingUser ??
+      authorization?.ownerChain.at(-1) ??
+      [...(authorization?.initiatorChain ?? [])]
+        .reverse()
+        .find((principal) => principal.startsWith("user:")) ??
+      (authorization?.testPolicy?.kind === "case" && authorization.testPolicy.case.initiatingUserId
+        ? `user:${authorization.testPolicy.case.initiatingUserId}`
+        : null);
+    const callerUser = this.caller?.userId;
+    const userId =
+      callerUser && callerUser !== "system"
+        ? callerUser
+        : attributedUser?.startsWith("user:")
+          ? attributedUser.slice("user:".length)
+          : callerUser;
+    if (!userId || userId === "system") {
+      console.warn("[MissionsDO] launch lacks human attribution", {
+        callerUser: callerUser ?? null,
+        actingUser: authorization?.actingUser ?? null,
+        ownerChain: authorization?.ownerChain ?? [],
+        testPolicy:
+          authorization?.testPolicy?.kind === "case"
+            ? {
+                policyId: authorization.testPolicy.policyId,
+                initiatingUserId: authorization.testPolicy.case.initiatingUserId ?? null,
+              }
+            : (authorization?.testPolicy?.kind ?? null),
+      });
+      throw denied("Automations require an authenticated user");
+    }
     return userId;
   }
 
   private requireOwnerCaller(): { userId: string; callerId: string } {
     const caller = this.caller;
     const userId = this.requireUser();
-    if (!caller) throw denied("Automation drafts require an authenticated caller");
+    if (!caller) throw denied("Automations require an authenticated caller");
     return { userId, callerId: caller.callerId };
   }
 
   private requireHost(): void {
-    if (this.caller?.callerKind !== "server") throw denied("Automation revision is host-only");
+    if (this.caller?.callerKind !== "server")
+      throw denied("Automation authority pause is host-only");
   }
 
   private rowToMission(row: MissionRow): MissionRecord {
@@ -1464,11 +1478,6 @@ function withJitter(value: number, jitterMs = 0): number {
   return value + (jitterMs > 0 ? Math.floor(Math.random() * jitterMs) : 0);
 }
 
-function executionLabel(execution: MissionExecution): string {
-  if (execution.kind === "method") return `${execution.target.className}.${execution.method}`;
-  return `${execution.action.kind === "eval" ? "Eval in" : "Prompt"} ${execution.target.className}`;
-}
-
 function automationActivity(mission: MissionRecord, run: MissionRunRecord) {
   const trigger = mission.charter.trigger;
   const action =
@@ -1506,22 +1515,13 @@ function automationActivity(mission: MissionRecord, run: MissionRunRecord) {
   };
 }
 
-function triggerLabel(charter: MissionCharter): string {
-  const trigger = charter.trigger;
-  if (trigger.kind === "manual") return "Manual";
-  if (trigger.kind === "cron") return `${trigger.expression} in ${trigger.timezone}`;
-  return `Every ${trigger.everyMs} ms${
-    trigger.anchorAt === undefined ? "" : ` from ${trigger.anchorAt}`
-  }`;
-}
-
 function assertExecutionPermissions(
   charter: MissionCharter,
   permissions: readonly MissionPermission[]
 ): void {
   if (charter.execution.kind === "method" && permissions.length > 0) {
     throw new Error(
-      "Method automations use the target code's reviewed installation authority and cannot declare agent grants"
+      "Method automations use the target code's installed authority and cannot declare agent grants"
     );
   }
 }

@@ -209,6 +209,9 @@ const CHANNEL_STATE_CACHE_MS = 5_000;
  * primary triggers are lifecycle events (resume, retire); this alarm only
  * covers an EvalDO outage that outlives them. */
 const EVAL_CANCEL_INTENT_RETRY_MS = 60_000;
+/** Agent turns must always regain control. Long-running evals remain possible
+ * by opting into an explicit larger timeout, up to the eval service maximum. */
+const DEFAULT_AGENT_EVAL_TIMEOUT_MS = 5 * 60_000;
 const BLOB_TEXT_CACHE_MAX_BYTES = 8 * 1024 * 1024;
 /** ~256KB of serialized session entries before compaction — comfortably
  *  under modern model context windows while keeping plenty of recent
@@ -494,7 +497,10 @@ export interface ChannelObservationInput {
  */
 export function resolveRespondFromHandles(
   respondFrom: readonly string[],
-  participants: ReadonlyArray<{ participantId: string; metadata?: Record<string, unknown> | null }>
+  participants: ReadonlyArray<{
+    participantId: string;
+    metadata?: Record<string, unknown> | null;
+  }>
 ): string[] {
   const handleToId = new Map<string, string>();
   for (const p of participants) {
@@ -662,7 +668,6 @@ type DeferredEvalGateResult =
 
 export abstract class AgentVesselBase extends DurableObjectBase {
   static override schemaVersion = 3;
-
 
   protected readonly identity: DOIdentity;
   protected readonly subscriptions: SubscriptionManager;
@@ -1089,7 +1094,12 @@ export abstract class AgentVesselBase extends DurableObjectBase {
           [
             providerSlot ?? externalSubagentExtensionId(agentKind),
             "release",
-            [{ entityId: run.externalSessionEntityId, generationId: run.externalGenerationId }],
+            [
+              {
+                entityId: run.externalSessionEntityId,
+                generationId: run.externalGenerationId,
+              },
+            ],
           ]
         );
       } else {
@@ -1209,7 +1219,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
    * Set (or clear) this agent's self-description on a channel and revise its
    * roster metadata so the directory reflects it now — not on the next join.
    */
-  protected async setAgentDescription(channelId: string, description: string | null): Promise<void> {
+  protected async setAgentDescription(
+    channelId: string,
+    description: string | null
+  ): Promise<void> {
     if (description) this.setStateValue(`agent:description:${channelId}`, description);
     else this.deleteStateValue(`agent:description:${channelId}`);
     const participantId = this.subscriptions.getParticipantId(channelId);
@@ -1284,9 +1297,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         : {}),
     });
     const subagent = this.subagentIdentity();
-    return [composed, subagent ? subagentRuntimePrompt(subagent) : ""]
-      .filter(Boolean)
-      .join("\n\n");
+    return [composed, subagent ? subagentRuntimePrompt(subagent) : ""].filter(Boolean).join("\n\n");
   }
 
   /** Local tools registered with the local-tool executor. */
@@ -1445,7 +1456,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       id: this.participantId(),
       participantId: this.participantId(),
       displayName: descriptor.name,
-      metadata: { type: descriptor.type, name: descriptor.name, handle: descriptor.handle },
+      metadata: {
+        type: descriptor.type,
+        name: descriptor.name,
+        handle: descriptor.handle,
+      },
     };
   }
 
@@ -1694,7 +1709,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     this.ensureIdentity();
     const ref = this.identity.ref;
     return {
-      selfRef: { kind: "agent", id: this.participantId(), participantId: this.participantId() },
+      selfRef: {
+        kind: "agent",
+        id: this.participantId(),
+        participantId: this.participantId(),
+      },
       blobstore: {
         getText: (digest) => this.getCachedBlobText(digest),
         putText: async (value) => {
@@ -1870,7 +1889,9 @@ export abstract class AgentVesselBase extends DurableObjectBase {
             resolvedTool = registry.get(tool);
             if (!resolvedTool) {
               const failure = agentToolFailureFromUnknown(
-                Object.assign(new Error(`unknown tool: ${tool}`), { code: "tool_not_found" }),
+                Object.assign(new Error(`unknown tool: ${tool}`), {
+                  code: "tool_not_found",
+                }),
                 {
                   operation: `tool.${tool}`,
                   stage: "resolve",
@@ -1896,7 +1917,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
               onProgress,
             });
             return {
-              result: { protocolContent: result.content, details: result.details },
+              result: {
+                protocolContent: result.content,
+                details: result.details,
+              },
               isError: result.isError === true,
               ...(result.isError !== true && result.terminate === true ? { terminate: true } : {}),
             };
@@ -2065,7 +2089,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   }
 
   private enqueueEphemeralSignal(channelId: string, send: () => Promise<void>): void {
-    const pump = this.signalPumps.get(channelId) ?? { running: false, pending: [] };
+    const pump = this.signalPumps.get(channelId) ?? {
+      running: false,
+      pending: [],
+    };
     if (pump.pending.length >= MAX_PENDING_SIGNAL_BATCHES) pump.pending.shift();
     pump.pending.push(send);
     this.signalPumps.set(channelId, pump);
@@ -2088,7 +2115,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       this.sendOrderedSignalMessage(emit.channelId, emit.content, emit.contentType);
       return;
     }
-    const buffer = this.deltaBuffers.get(emit.channelId) ?? { events: [], timer: null };
+    const buffer = this.deltaBuffers.get(emit.channelId) ?? {
+      events: [],
+      timer: null,
+    };
     if (buffer.events.length >= MAX_BUFFERED_DELTA_EVENTS) buffer.events.shift();
     buffer.events.push(emit.event);
     if (!buffer.timer) {
@@ -2392,9 +2422,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     const registry = await stage("prompt-artifacts.tool-registry", () =>
       this.toolRegistry(channelId)
     );
-    const schemas: Array<{ name: string; description?: string; parameters?: unknown }> = [
-      ...registry.values(),
-    ].map((tool) => {
+    const schemas: Array<{
+      name: string;
+      description?: string;
+      parameters?: unknown;
+    }> = [...registry.values()].map((tool) => {
       assertAgentToolParametersSchema(tool.name, tool.parameters);
       return {
         name: tool.name,
@@ -2455,7 +2487,12 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     const names = JSON.stringify([...registry.keys()]);
     const executionModesJson = JSON.stringify(executionModes);
     const cancellationModesJson = JSON.stringify(cancellationModes);
-    const signature = stableSha256Hex({ systemPrompt, schemas, executionModes, cancellationModes });
+    const signature = stableSha256Hex({
+      systemPrompt,
+      schemas,
+      executionModes,
+      cancellationModes,
+    });
     const promptHashKey = `agent:promptHash:${channelId}`;
     const toolsHashKey = `agent:toolsHash:${channelId}`;
     const toolNamesKey = `agent:toolNames:${channelId}`;
@@ -2562,7 +2599,12 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   protected async workspaceUserEntries(): Promise<AddresseeUserEntry[]> {
     try {
       const members = await this.rpc.call<
-        Array<{ userId: string; handle?: string; displayName?: string; revoked?: boolean }>
+        Array<{
+          userId: string;
+          handle?: string;
+          displayName?: string;
+          revoked?: boolean;
+        }>
       >("main", "account.listWorkspaceMembers", []);
       return members
         .filter((member) => member.revoked !== true)
@@ -2612,6 +2654,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       if (this.includeMemoryRecallTool()) {
         registry.set("memory_recall", this.createMemoryRecallTool());
       }
+      registry.set("launch_automation", this.createAutomationLaunchTool(channelId, execution));
       registry.set("complete_automation", this.createAutomationCompletionTool(channelId));
       for (const tool of await this.getLoopTools(channelId, execution)) {
         registry.set(tool.name, tool);
@@ -2624,6 +2667,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       if (this.includeMemoryRecallTool()) {
         registry.set("memory_recall", this.createMemoryRecallTool());
       }
+      registry.set("launch_automation", this.createAutomationLaunchTool(channelId));
       registry.set("complete_automation", this.createAutomationCompletionTool(channelId));
       for (const tool of await this.getLoopTools(channelId)) {
         registry.set(tool.name, tool);
@@ -2631,6 +2675,129 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       this.localTools.set(channelId, registry);
     }
     return registry;
+  }
+
+  protected createAutomationLaunchTool(
+    channelId: string,
+    execution?: AgentToolExecutionContext
+  ): AgentTool {
+    return {
+      name: "launch_automation",
+      label: "launch_automation",
+      description:
+        "Create and immediately start one recurring or manual automation. The running automation is added to this chat as an inspectable pill before the tool returns.",
+      parameters: {
+        type: "object",
+        properties: {
+          name: { type: "string", description: "Short automation name." },
+          summary: {
+            type: "string",
+            description: "Plain-language purpose and cadence.",
+          },
+          action: {
+            oneOf: [
+              {
+                type: "object",
+                properties: {
+                  kind: { const: "prompt" },
+                  text: { type: "string" },
+                },
+                required: ["kind", "text"],
+                additionalProperties: false,
+              },
+              {
+                type: "object",
+                properties: {
+                  kind: { const: "eval" },
+                  code: { type: "string" },
+                  syntax: { enum: ["javascript", "typescript", "jsx", "tsx"] },
+                  timeoutMs: { type: "integer", minimum: 1 },
+                  reset: { type: "boolean" },
+                },
+                required: ["kind", "code"],
+                additionalProperties: false,
+              },
+            ],
+          },
+          trigger: {
+            oneOf: [
+              {
+                type: "object",
+                properties: { kind: { const: "manual" } },
+                required: ["kind"],
+                additionalProperties: false,
+              },
+              {
+                type: "object",
+                properties: {
+                  kind: { const: "schedule" },
+                  everyMs: { type: "integer", minimum: 60000 },
+                  anchorAt: { type: "integer", minimum: 0 },
+                  jitterMs: { type: "integer", minimum: 0 },
+                  untilAt: { type: "integer", minimum: 0 },
+                  maxRuns: { type: "integer", minimum: 1 },
+                },
+                required: ["kind", "everyMs"],
+                additionalProperties: false,
+              },
+              {
+                type: "object",
+                properties: {
+                  kind: { const: "cron" },
+                  expression: { type: "string" },
+                  timezone: { type: "string" },
+                  untilAt: { type: "integer", minimum: 0 },
+                  maxRuns: { type: "integer", minimum: 1 },
+                },
+                required: ["kind", "expression", "timezone"],
+                additionalProperties: false,
+              },
+            ],
+          },
+          conversation: {
+            type: "object",
+            properties: { mode: { enum: ["fresh", "continue"] } },
+            required: ["mode"],
+            additionalProperties: false,
+          },
+          toolExposure: { type: "object" },
+          declaredLineageClasses: {
+            type: "array",
+            items: {
+              enum: ["none", "web", "email", "channel-external", "external"],
+            },
+          },
+          permissions: { type: "array", items: { type: "object" } },
+          standingRestrictions: { type: "array", items: { type: "object" } },
+        },
+        required: ["name", "summary", "action", "trigger"],
+        additionalProperties: false,
+      } as never,
+      execute: async (toolCallId, params) => {
+        if (!execution) {
+          throw new Error("launch_automation requires an admitted agent invocation");
+        }
+        const activeTurn = this.driver.peekLoadedLoop(channelId)?.state.openTurn;
+        if (activeTurn?.metadata?.automation) {
+          throw new Error("A scheduled automation cannot launch another automation");
+        }
+        const automation = await this.launchAutomation(
+          channelId,
+          params,
+          execution.commandId || toolCallId,
+          execution.rpc
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: `${automation.name} is running. Its automation pill is now available in this chat.`,
+            },
+          ],
+          details: automation,
+        } as AgentToolResult<MissionRecord>;
+      },
+    } as AgentTool;
   }
 
   private createAutomationCompletionTool(channelId: string): AgentTool {
@@ -2704,12 +2871,19 @@ export abstract class AgentVesselBase extends DurableObjectBase {
             description:
               "Optional filter by memory kind. Commit summaries retain decisions whose text has left current files.",
           },
-          limit: { type: "number", description: "Max results (default 10, max 50)." },
+          limit: {
+            type: "number",
+            description: "Max results (default 10, max 50).",
+          },
         },
         required: ["query"],
       } as never,
       execute: async (_toolCallId, params) => {
-        const input = params as { query?: unknown; kinds?: unknown; limit?: unknown };
+        const input = params as {
+          query?: unknown;
+          kinds?: unknown;
+          limit?: unknown;
+        };
         if (typeof input.query !== "string" || !input.query.trim()) {
           throw new Error("memory_recall requires a non-empty query");
         }
@@ -2953,7 +3127,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       if (after === undefined || throughSeq === undefined) {
         throw new Error("subscription replay claims more history without a stable cursor");
       }
-      page = await this.createChannelClient(channelId).getReplayAfter({ after, throughSeq });
+      page = await this.createChannelClient(channelId).getReplayAfter({
+        after,
+        throughSeq,
+      });
     }
     if (wakeAfterReplay) await this.driver.wake(channelId);
   }
@@ -3524,7 +3701,12 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
   })
   failReadyWork(
     queue: DurableWorkQueue,
-    request: { workerId: string; itemId: string; generation: number; error?: unknown }
+    request: {
+      workerId: string;
+      itemId: string;
+      generation: number;
+      error?: unknown;
+    }
   ): { retryAt: number } | "stale" {
     if (queue === "agent-effect") {
       const parsed = parseOutboxExternalId(request.itemId);
@@ -3609,7 +3791,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     tier: "open",
     sensitivity: "read",
   })
-  durableWorkStatus(): { readyQueues: DurableWorkQueue[]; nextRecoveryAt: number | null } {
+  durableWorkStatus(): {
+    readyQueues: DurableWorkQueue[];
+    nextRecoveryAt: number | null;
+  } {
     return {
       readyQueues: this.readyDurableWorkQueues(),
       nextRecoveryAt: this.nextDurableWorkRecoveryAt(),
@@ -4285,8 +4470,7 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     const settings = this.getAgentSettings();
     // respondFrom is per-agent: resolve handle entries to this channel's ids.
     const respondFrom = resolveRespondFromHandles(settings.respondFrom, respondParticipants);
-    const inboundHops =
-      (event.annotations?.["agentHops"] as number | undefined) ?? agentStreakHops;
+    const inboundHops = (event.annotations?.["agentHops"] as number | undefined) ?? agentStreakHops;
     // Remember what depth this conversation is at, so a cross-channel `notify`
     // can carry the count over the boundary (plan §4.6, D13). Without this the
     // hop cap is a per-channel fold and an A↔B ping-pong gets twice the depth
@@ -4377,7 +4561,12 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     const selfId = this.participantId();
     const roster: RosterEntry[] = relationships
       .filter(
-        (value): value is { participantId: string; metadata: Record<string, unknown> } =>
+        (
+          value
+        ): value is {
+          participantId: string;
+          metadata: Record<string, unknown>;
+        } =>
           !!value &&
           typeof value === "object" &&
           typeof (value as { participantId?: unknown }).participantId === "string" &&
@@ -4399,8 +4588,13 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
               }>
             )
               .filter(
-                (method): method is { name: string; description?: string; parameters?: unknown } =>
-                  typeof method?.name === "string"
+                (
+                  method
+                ): method is {
+                  name: string;
+                  description?: string;
+                  parameters?: unknown;
+                } => typeof method?.name === "string"
               )
               .map((method) => this.boundedRosterMethod(method))
           : [],
@@ -4425,7 +4619,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       (await this.createChannelClient(channelId).getConfig()) ??
       (this.subscriptions.getConfig(channelId) as Record<string, unknown> | null) ??
       null;
-    this.channelConfigCache.set(channelId, { value, expiresAt: now + CHANNEL_STATE_CACHE_MS });
+    this.channelConfigCache.set(channelId, {
+      value,
+      expiresAt: now + CHANNEL_STATE_CACHE_MS,
+    });
     return value;
   }
 
@@ -4440,7 +4637,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     const cached = this.participantCache.get(channelId);
     if (cached && cached.expiresAt > now) return cached.value;
     const value = await this.createChannelClient(channelId).getParticipants();
-    this.participantCache.set(channelId, { value, expiresAt: now + CHANNEL_STATE_CACHE_MS });
+    this.participantCache.set(channelId, {
+      value,
+      expiresAt: now + CHANNEL_STATE_CACHE_MS,
+    });
     return value;
   }
 
@@ -4482,7 +4682,12 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     }
   }
 
-  @rpc({ principals: ["code"], effect: { kind: "open" }, tier: "open", sensitivity: "write" })
+  @rpc({
+    principals: ["code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "write",
+  })
   async cancelDirectMethodCall(channelId: string, transportCallId: string): Promise<void> {
     this.assertChannelDeliveryCaller("cancelDirectMethodCall", channelId);
     const controller = this.directMethodCalls.get(
@@ -4613,7 +4818,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
         // derives the distinct eval-effect coordinate used as the run id.
         const invocationId = (args as { invocationId?: unknown } | null)?.invocationId;
         if (typeof invocationId !== "string" || invocationId.length === 0) {
-          return { result: { error: "cancelEval requires an invocationId" }, isError: true };
+          return {
+            result: { error: "cancelEval requires an invocationId" },
+            isError: true,
+          };
         }
         const runId = ids.invocationEffect(invocationId);
         try {
@@ -4652,20 +4860,29 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
           browserHandoffCallerKind?: string;
         };
         if (!input.providerId) {
-          return { result: { error: "connectModelCredential requires providerId" }, isError: true };
+          return {
+            result: { error: "connectModelCredential requires providerId" },
+            isError: true,
+          };
         }
         const setup = this.getModelCredentialSetupProps(input.providerId);
         if (!setup) {
           return {
-            result: { error: `no credential setup for provider ${input.providerId}` },
+            result: {
+              error: `no credential setup for provider ${input.providerId}`,
+            },
             isError: true,
           };
         }
         const browser = normalizeBrowserOpenMode(input.browserOpenMode);
-        const request = toCredentialConnectRequest(input.providerId, { browser });
+        const request = toCredentialConnectRequest(input.providerId, {
+          browser,
+        });
         if (!request) {
           return {
-            result: { error: `no credential connect request for provider ${input.providerId}` },
+            result: {
+              error: `no credential connect request for provider ${input.providerId}`,
+            },
             isError: true,
           };
         }
@@ -4701,7 +4918,9 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
         const model = (args as { model?: unknown } | null)?.model;
         if (typeof model !== "string" || model.length === 0) {
           return {
-            result: { error: "setModel requires model in provider:model format" },
+            result: {
+              error: "setModel requires model in provider:model format",
+            },
             isError: true,
           };
         }
@@ -4836,72 +5055,22 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
           this.subscriptions.getConfig(channelId)
         );
         await channel.send(participantId, messageId, content, {
-          senderMetadata: { type: "agent", name: descriptor.name, handle: descriptor.handle },
+          senderMetadata: {
+            type: "agent",
+            name: descriptor.name,
+            handle: descriptor.handle,
+          },
           ...(options?.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
         });
         return undefined;
       }
-      case "proposeAutomation": {
-        const [input, provenance] = a as [
-          unknown,
-          { invocationId?: unknown; ordinal?: unknown } | undefined,
-        ];
-        const service = await this.rpc.call<{ kind?: unknown; targetId?: unknown }>(
-          "main",
-          "workers.resolveService",
-          ["vibestudio.missions.v1"]
-        );
-        if (service.kind !== "durable-object" || typeof service.targetId !== "string") {
-          throw new Error("The Automations service is unavailable");
-        }
-        const proposalRequestIdentity =
-          provenance &&
-          typeof provenance.invocationId === "string" &&
-          provenance.invocationId.length > 0 &&
-          Number.isSafeInteger(provenance.ordinal) &&
-          Number(provenance.ordinal) > 0
-            ? `${provenance.invocationId}:${Number(provenance.ordinal)}`
-            : (this.rpcRequestId ?? crypto.randomUUID());
-        const automation = await this.rpc.call<MissionRecord>(
-          service.targetId,
-          "proposeDraft",
-          [this.selfAutomationProposal(channelId, input)],
-          {
-            idempotencyKey: `automation:proposal:${this.objectKey}:${sha256HexSyncText(proposalRequestIdentity)}`,
-          }
-        );
-        const descriptor = this.getEffectiveParticipantInfo(
-          channelId,
-          this.subscriptions.getConfig(channelId)
-        );
-        const senderMetadata = {
-          type: "agent",
-          name: descriptor.name,
-          handle: descriptor.handle,
-        };
-        const event: AgenticEvent<"automation.instituted"> = {
-          kind: "automation.instituted",
-          actor: {
-            kind: "agent",
-            id: participantId,
-            displayName: descriptor.name,
-            metadata: senderMetadata,
-          },
-          payload: {
-            protocol: AGENTIC_PROTOCOL_VERSION,
-            definition: automationDefinitionSnapshot(automation),
-          },
-          createdAt: new Date(automation.createdAt).toISOString(),
-        };
-        await channel.publishAgenticEvent(participantId, event, {
-          idempotencyKey: `automation:instituted:${automation.missionId}`,
-          senderMetadata,
-        });
-        return automation;
-      }
       case "publishCustomMessage": {
         const [input, options] = a as [
-          { typeId: string; initialState?: unknown; displayMode?: CustomMessageDisplayMode },
+          {
+            typeId: string;
+            initialState?: unknown;
+            displayMode?: CustomMessageDisplayMode;
+          },
           { idempotencyKey?: string } | undefined,
         ];
         // create() mints a fresh card identity (random natural key), publishing
@@ -5026,30 +5195,91 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     return this.describeSelf(channelId);
   }
 
-  /** Expand the ergonomic agent-owned proposal into the exact reviewed
-   * mission closure. Identity and code version come from this executing
-   * vessel, never from guest-authored strings or a racy build lookup. */
-  private selfAutomationProposal(channelId: string, raw: unknown): {
+  /** Launch the canonical mission first, then publish its idempotent running
+   * resource projection. A retry recovers the same mission and the same pill;
+   * the tool does not report success until both durable owners acknowledge. */
+  private async launchAutomation(
+    channelId: string,
+    input: unknown,
+    requestIdentity: string,
+    callerRpc: RpcClient
+  ): Promise<MissionRecord> {
+    const service = await callerRpc.call<{
+      kind?: unknown;
+      targetId?: unknown;
+    }>("main", "workers.resolveService", ["vibestudio.missions.v1"]);
+    if (service.kind !== "durable-object" || typeof service.targetId !== "string") {
+      throw new Error("The Automations service is unavailable");
+    }
+    const automation = await callerRpc.call<MissionRecord>(
+      service.targetId,
+      "launch",
+      [this.selfAutomationDefinition(channelId, input)],
+      {
+        idempotencyKey: `automation:launch:${this.objectKey}:${sha256HexSyncText(requestIdentity)}`,
+      }
+    );
+    if (automation.state !== "active") {
+      throw new Error(`Automation launch returned unexpected state ${automation.state}`);
+    }
+    const participantId = this.subscriptions.getParticipantId(channelId) ?? this.participantId();
+    const descriptor = this.getEffectiveParticipantInfo(
+      channelId,
+      this.subscriptions.getConfig(channelId)
+    );
+    const senderMetadata = {
+      type: "agent",
+      name: descriptor.name,
+      handle: descriptor.handle,
+    };
+    const event: AgenticEvent<"automation.instituted"> = {
+      kind: "automation.instituted",
+      actor: {
+        kind: "agent",
+        id: participantId,
+        displayName: descriptor.name,
+        metadata: senderMetadata,
+      },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        definition: automationDefinitionSnapshot(automation),
+      },
+      createdAt: new Date(automation.createdAt).toISOString(),
+    };
+    await this.createChannelClient(channelId).publishAgenticEvent(participantId, event, {
+      idempotencyKey: `automation:instituted:${automation.missionId}`,
+      senderMetadata,
+    });
+    return automation;
+  }
+
+  /** Expand the native agent tool input into the exact installed mission
+   * closure. Identity and code version come from this executing vessel, never
+   * from model-authored strings or a racy build lookup. */
+  private selfAutomationDefinition(
+    channelId: string,
+    raw: unknown
+  ): {
     name: string;
     charter: MissionRecord["charter"];
     permissions: MissionPermission[];
     standingRestrictions?: MissionStandingRestriction[];
   } {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
-      throw new Error("automations.propose requires an object");
+      throw new Error("launch_automation requires an object");
     }
     const input = raw as Record<string, unknown>;
     const name = typeof input["name"] === "string" ? input["name"].trim() : "";
     const summary = typeof input["summary"] === "string" ? input["summary"].trim() : "";
     if (!name || !summary || !input["action"] || !input["trigger"]) {
-      throw new Error("automations.propose requires name, summary, action, and trigger");
+      throw new Error("launch_automation requires name, summary, action, and trigger");
     }
     const source = String(this.env["WORKER_SOURCE"] ?? "");
     const className = String(this.env["WORKER_CLASS_NAME"] ?? this.constructor.name);
     const ev = String(this.env["WORKER_EFFECTIVE_VERSION"] ?? "");
     if (!source || !className || !/^[0-9a-f]{64}$/u.test(ev)) {
       throw new Error(
-        "automations.propose cannot bind this agent to an exact installed build; rebuild the agent runtime"
+        "launch_automation cannot bind this agent to an exact installed build; rebuild the agent runtime"
       );
     }
     const conversationInput = input["conversation"] as { mode?: unknown } | undefined;
@@ -5058,7 +5288,7 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       conversationInput.mode !== "fresh" &&
       conversationInput.mode !== "continue"
     ) {
-      throw new Error('automations.propose conversation.mode must be "fresh" or "continue"');
+      throw new Error('launch_automation conversation.mode must be "fresh" or "continue"');
     }
     const conversation =
       conversationInput?.mode === "continue"
@@ -5238,7 +5468,11 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       id: participantId,
       displayName: descriptor.name,
       participantId,
-      metadata: { type: "agent", name: descriptor.name, handle: descriptor.handle },
+      metadata: {
+        type: "agent",
+        name: descriptor.name,
+        handle: descriptor.handle,
+      },
     };
   }
 
@@ -5509,7 +5743,7 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
         reset: p.reset === true,
         source,
         imports: p.imports,
-        timeoutMs: p.timeoutMs,
+        timeoutMs: p.timeoutMs ?? DEFAULT_AGENT_EVAL_TIMEOUT_MS,
         authority,
         runId,
       });
@@ -5547,7 +5781,9 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       this.forgetDeferredEval(channelId, runId);
       // eval.start returned the result inline — no push channel was exercised,
       // so this must not inflate the push side of the push-vs-backstop ratio.
-      this.traceHotPath(channelId, "deferred-eval.completed", { source: "inline" });
+      this.traceHotPath(channelId, "deferred-eval.completed", {
+        source: "inline",
+      });
       return this.deferredEvalSettlement(invocationId, settlement.result);
     }
     await this.publishDeferredEvalPending(channelId, invocationId, runId);
@@ -5591,12 +5827,16 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     if (snapshot.status === "done" || snapshot.status === "approval-route-lost") {
       if (!snapshot.result) throw new Error(`eval: terminal run ${runId} has no result`);
       this.forgetDeferredEval(channelId, runId);
-      this.traceHotPath(channelId, "deferred-eval.completed", { source: "backstop-poll" });
+      this.traceHotPath(channelId, "deferred-eval.completed", {
+        source: "backstop-poll",
+      });
       return this.deferredEvalSettlement(invocationId, snapshot.result);
     }
     if (snapshot.status === "cancelled") {
       this.forgetDeferredEval(channelId, runId);
-      this.traceHotPath(channelId, "deferred-eval.completed", { source: "backstop-poll" });
+      this.traceHotPath(channelId, "deferred-eval.completed", {
+        source: "backstop-poll",
+      });
       if (snapshot.result) {
         return this.deferredEvalSettlement(invocationId, snapshot.result);
       }
@@ -5683,7 +5923,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
             }
           );
     return {
-      result: { protocolContent: formatted.content, details: formatted.details },
+      result: {
+        protocolContent: formatted.content,
+        details: formatted.details,
+      },
       // Preserve the structured diagnostic, but do not lie about its
       // terminal outcome. A user-code exception is still a failed eval tool
       // invocation; callers (and the system-test harness) must be able to
@@ -5758,7 +6001,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       this.sql
         .exec(`SELECT channel_id, run_id FROM deferred_eval_cancel_intents ORDER BY created_at`)
         .toArray() as Array<Record<string, unknown>>
-    ).map((row) => ({ channelId: String(row["channel_id"]), runId: String(row["run_id"]) }));
+    ).map((row) => ({
+      channelId: String(row["channel_id"]),
+      runId: String(row["run_id"]),
+    }));
     for (const intent of intents) {
       try {
         await this.rpc.call("main", "eval.cancel", [
@@ -5870,7 +6116,11 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       kind: "invocation.output",
       actor,
       causality: { invocationId: payload.agentInvocationId as never },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, output: payload.output, channel: "stdout" },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        output: payload.output,
+        channel: "stdout",
+      },
       createdAt: new Date().toISOString(),
     };
     await this.createChannelClient(payload.channelId).publishAgenticEvent(participantId, event, {
@@ -5911,7 +6161,9 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
             {
               operation: "tool.eval",
               stage: "execute",
-              causal: { invocationId: payload.agentInvocationId ?? payload.runId },
+              causal: {
+                invocationId: payload.agentInvocationId ?? payload.runId,
+              },
               ...(payload.result.failureKind === "infrastructure"
                 ? { kind: "infrastructure" as const }
                 : {}),
@@ -5921,7 +6173,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       payload.runId,
       {
         kind: "tool",
-        result: { protocolContent: formatted.content, details: formatted.details },
+        result: {
+          protocolContent: formatted.content,
+          details: formatted.details,
+        },
         isError: payload.result.success !== true,
         ...(payload.result.failureKind === "infrastructure"
           ? { terminalOutcome: "infrastructure_error" as const }
@@ -5931,7 +6186,9 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       { channelId: payload.channelId }
     );
     if (delivered) {
-      this.traceHotPath(payload.channelId, "deferred-eval.completed", { source: "direct-push" });
+      this.traceHotPath(payload.channelId, "deferred-eval.completed", {
+        source: "direct-push",
+      });
     }
   }
 
@@ -6033,7 +6290,11 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       throw new Error(`${via}: durable channel identity is required before content ingestion`);
     }
     await this.rpc.call("main", "contextIntegrity.ingest", [
-      { key: `msg:${channelId}/${event.messageId}`, via, classification: "derived" },
+      {
+        key: `msg:${channelId}/${event.messageId}`,
+        via,
+        classification: "derived",
+      },
     ]);
   }
 
@@ -6049,7 +6310,9 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
 
   /** Plain-text turn input extracted from a channel event. */
   protected buildTurnInput(event: ChannelEvent): { content: string } {
-    const agentic = event.payload as { payload?: { blocks?: unknown[] } } | null;
+    const agentic = event.payload as {
+      payload?: { blocks?: unknown[] };
+    } | null;
     const blocks = agentic?.payload?.blocks ?? [];
     const content = blocks
       .map((block) =>
@@ -6239,7 +6502,11 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     // Subclass fork cleanup/setup runs with the rename applied but BEFORE the
     // new channel is (re)subscribed, so subclasses can purge per-channel state
     // the clone copied and influence the upcoming subscribe.
-    await this.onChannelForked({ oldChannelId, newChannelId, forkPointPubsubId });
+    await this.onChannelForked({
+      oldChannelId,
+      newChannelId,
+      forkPointPubsubId,
+    });
     await this.subscribeChannel({
       channelId: newChannelId,
       // After rename, getContextId(newChannelId) reflects newContextId.
@@ -6531,7 +6798,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       const maxSubagents = loopConfig.maxSubagents ?? DEFAULT_MAX_SUBAGENTS;
       const childDepth = this.currentSubagentDepth() + 1;
       if (childDepth > maxDepth) {
-        return { result: `subagent depth limit reached (max ${maxDepth})`, isError: true };
+        return {
+          result: `subagent depth limit reached (max ${maxDepth})`,
+          isError: true,
+        };
       }
       if (this.subagentRuns.countLive() >= maxSubagents) {
         return {
@@ -6629,7 +6899,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
           ? String(childConfig["className"])
           : String(this.env["WORKER_CLASS_NAME"] ?? this.constructor.name);
       if (!source) {
-        return { result: "spawn_subagent could not resolve a child source", isError: true };
+        return {
+          result: "spawn_subagent could not resolve a child source",
+          isError: true,
+        };
       }
 
       const parentContextId = this.subscriptions.getContextId(channelId);
@@ -6809,7 +7082,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       // then transition from setup to live before the child sees a task prompt.
       await this.publishSubagentStarted(run);
       this.subagentRuns.setStatus(runId, "running");
-      const runningRun = this.subagentRuns.get(runId) ?? { ...run, status: "running" as const };
+      const runningRun = this.subagentRuns.get(runId) ?? {
+        ...run,
+        status: "running" as const,
+      };
 
       // 7) Seed the task prompt (both modes, when provided).
       await this.publishSubagentSeed(runningRun, task);
@@ -7170,7 +7446,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
             ? (result["details"] as Record<string, unknown>)
             : details;
         if (terminalDetails && typeof terminalDetails["sourceEventId"] === "string") {
-          recovered = { ...recovered, sourceEventId: terminalDetails["sourceEventId"] };
+          recovered = {
+            ...recovered,
+            sourceEventId: terminalDetails["sourceEventId"],
+          };
         }
         if (eventKind === "task.completed") {
           recovered = { ...recovered, status: "completed" };
@@ -7224,7 +7503,9 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
   ): Promise<AgentToolResult<Record<string, unknown>>> {
     const run = await this.resolveSubagentRun(runId, parentChannelId);
     if (!run) {
-      throw this.subagentReferenceError(`unknown subagent run ${runId}`, { runId });
+      throw this.subagentReferenceError(`unknown subagent run ${runId}`, {
+        runId,
+      });
     }
     if (run.status !== "starting" && run.status !== "running") {
       throw Object.assign(
@@ -7267,7 +7548,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     });
     this.subagentRuns.touch(run.runId, Date.now());
     const handle = subagentRunHandle(run.runId);
-    return this.toolText(`sent to subagent ${handle}`, { runId: handle, messageId });
+    return this.toolText(`sent to subagent ${handle}`, {
+      runId: handle,
+      messageId,
+    });
   }
 
   /** Inspect semantic child state through VCS, or an external engine through
@@ -7283,7 +7567,9 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     const run = await this.resolveSubagentRun(runId, parentChannelId);
     const runResolvedAt = performance.now();
     if (!run) {
-      throw this.subagentReferenceError(`unknown subagent run ${runId}`, { runId });
+      throw this.subagentReferenceError(`unknown subagent run ${runId}`, {
+        runId,
+      });
     }
     const q = (query ?? "status").trim() || "status";
     if (q === "runtime") {
@@ -7414,7 +7700,11 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
         throw this.subagentReferenceError(
           `no managed file at ${requestedPath} in subagent ${subagentRunHandle(run.runId)}; ` +
             "use an exact repo-prefixed path — inspect the child's diff or log for the paths it touched",
-          { runId: run.runId, path: requestedPath, referenceKind: "child-file-path" }
+          {
+            runId: run.runId,
+            path: requestedPath,
+            referenceKind: "child-file-path",
+          }
         );
       }
       result = file;
@@ -7459,7 +7749,9 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     const run = await this.resolveSubagentRun(runId, parentChannelId);
     const runResolvedAt = performance.now();
     if (!run) {
-      throw this.subagentReferenceError(`unknown subagent run ${runId}`, { runId });
+      throw this.subagentReferenceError(`unknown subagent run ${runId}`, {
+        runId,
+      });
     }
     if (!run.parentContextId) {
       throw new Error(`subagent ${run.runId} has no recoverable parent context`);
@@ -7581,7 +7873,9 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
   ): Promise<AgentToolResult<Record<string, unknown>>> {
     const run = await this.resolveSubagentRun(runId, parentChannelId);
     if (!run) {
-      throw this.subagentReferenceError(`unknown subagent run ${runId}`, { runId });
+      throw this.subagentReferenceError(`unknown subagent run ${runId}`, {
+        runId,
+      });
     }
     const envelope = await this.createChannelClient(run.taskChannelId).getReplayAfter({
       after: Number.isFinite(afterSeq) ? afterSeq : 0,
@@ -7595,7 +7889,11 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       if ((agentic as { kind?: string } | null)?.kind !== "message.completed") continue;
       const text = this.extractMessageText(agentic);
       if (!text) continue;
-      messages.push({ seq: event.id ?? 0, author: event.senderId ?? "unknown", text });
+      messages.push({
+        seq: event.id ?? 0,
+        author: event.senderId ?? "unknown",
+        text,
+      });
     }
     if (messages.length === 0) {
       return {
@@ -7632,7 +7930,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     toolRpc: RpcClient = this.rpc
   ): Promise<AgentToolResult<Record<string, unknown>>> {
     const run = await this.resolveSubagentRun(runId, parentChannelId);
-    if (!run) throw this.subagentReferenceError(`unknown subagent run ${runId}`, { runId });
+    if (!run)
+      throw this.subagentReferenceError(`unknown subagent run ${runId}`, {
+        runId,
+      });
     if (run.status !== "starting" && run.status !== "running") {
       return this.toolText(
         `Subagent ${subagentRunHandle(run.runId)} is already ${run.status}; no cancellation was performed.`,
@@ -7662,7 +7963,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       );
     });
     await this.driveCancelSubagent(run.runId, reason, toolRpc);
-    const terminal = this.subagentRuns.get(run.runId) ?? { ...run, status: "cancelled" as const };
+    const terminal = this.subagentRuns.get(run.runId) ?? {
+      ...run,
+      status: "cancelled" as const,
+    };
     return this.toolText(`cancelled subagent ${subagentRunHandle(run.runId)}`, {
       ...this.subagentRunDetails(terminal),
       cancelled: true,
@@ -7690,7 +7994,12 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
       await toolRpc.call("main", providerSlot ? "extensions.invokeProvider" : "extensions.invoke", [
         providerSlot ?? externalSubagentExtensionId(agentKind),
         "release",
-        [{ entityId: run.externalSessionEntityId, generationId: run.externalGenerationId }],
+        [
+          {
+            entityId: run.externalSessionEntityId,
+            generationId: run.externalGenerationId,
+          },
+        ],
       ]);
     } else {
       await toolRpc.call(run.childEntityId, "cancelSubagentExecution", [
@@ -7747,7 +8056,11 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
          ) VALUES (?, ?, 'subagent-terminal-publish', ?, NULL, ?, 0, ?, 0, ?, 'terminal-completed')`,
         wakeId,
         subagent.taskChannelId,
-        JSON.stringify({ runId: subagent.runId, reason: input.reason, outcome: "abandoned" }),
+        JSON.stringify({
+          runId: subagent.runId,
+          reason: input.reason,
+          outcome: "abandoned",
+        }),
         wakeId,
         now,
         now
@@ -7760,7 +8073,11 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
   private subagentReferenceError(message: string, detail: Record<string, unknown>): Error {
     return Object.assign(new Error(message), {
       code: "InvalidReference",
-      errorData: { code: "InvalidReference", operation: "subagent-reference", ...detail },
+      errorData: {
+        code: "InvalidReference",
+        operation: "subagent-reference",
+        ...detail,
+      },
     });
   }
 
@@ -7801,7 +8118,9 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     outcome: "completed" | "failed" | "cancelled"
   ): Promise<void> {
     const contextId = this.subscriptions.getContextId(sub.taskChannelId);
-    const childStatus = await createSubagentVcsClient(this.rpc).status({ contextId });
+    const childStatus = await createSubagentVcsClient(this.rpc).status({
+      contextId,
+    });
     const sourceEventId =
       childStatus.clean && childStatus.committed.kind === "event"
         ? childStatus.committed.eventId
@@ -7868,7 +8187,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     const event = {
       kind: "task.started",
       actor,
-      causality: { taskId: run.runId as never, invocationId: run.runId as never },
+      causality: {
+        taskId: run.runId as never,
+        invocationId: run.runId as never,
+      },
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         taskType: "subagent",
@@ -7961,7 +8283,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     const event = {
       kind: kindByOutcome[outcome],
       actor,
-      causality: { taskId: run.runId as never, invocationId: run.runId as never },
+      causality: {
+        taskId: run.runId as never,
+        invocationId: run.runId as never,
+      },
       payload,
       createdAt: new Date().toISOString(),
     } as unknown as AgenticEvent;
@@ -8086,7 +8411,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
             terminalOutcome,
             summary: input.report,
             to: [{ kind: "participant" as const, participantId: input.parentRef }],
-            result: { protocolContent: [{ type: "text", text: input.report }], details },
+            result: {
+              protocolContent: [{ type: "text", text: input.report }],
+              details,
+            },
           }
         : {
             protocol: AGENTIC_PROTOCOL_VERSION,
@@ -8098,7 +8426,10 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     const event = {
       kind,
       actor,
-      causality: { taskId: input.runId as never, invocationId: input.runId as never },
+      causality: {
+        taskId: input.runId as never,
+        invocationId: input.runId as never,
+      },
       payload,
       createdAt: new Date().toISOString(),
     } as unknown as AgenticEvent;
@@ -8125,7 +8456,12 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
         [
           providerSlot ?? externalSubagentExtensionId(agentKind),
           "release",
-          [{ entityId: run.externalSessionEntityId, generationId: run.externalGenerationId }],
+          [
+            {
+              entityId: run.externalSessionEntityId,
+              generationId: run.externalGenerationId,
+            },
+          ],
         ]
       );
     }
@@ -8431,6 +8767,8 @@ function automationDefinitionSnapshot(automation: MissionRecord): AutomationDefi
     revision: automation.revision,
     action: execution.kind === "method" ? "method" : execution.action.kind,
     createdAt: automation.createdAt,
+    state: "active",
+    ...(automation.nextRunAt === undefined ? {} : { nextRunAt: automation.nextRunAt }),
     schedule:
       trigger.kind === "schedule"
         ? {

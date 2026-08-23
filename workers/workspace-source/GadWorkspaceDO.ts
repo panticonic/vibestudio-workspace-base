@@ -410,7 +410,9 @@ export interface LogAppendEventInput {
   causality?: LogEventCausality | null;
   annotations?: Record<string, unknown> | null;
   appendedAt?: string | null;
-  publish?: { channels: Array<{ channelId: string; audience?: unknown }> } | null;
+  publish?: {
+    channels: Array<{ channelId: string; audience?: unknown }>;
+  } | null;
 }
 
 export interface AppendLogEventInput {
@@ -433,7 +435,11 @@ export interface AppendLogEventResult {
   headSeq: number;
   headHash: string;
   envelopes: LogEnvelope[];
-  published: Array<{ originEnvelopeId: string; channelId: string; envelopeId: string }>;
+  published: Array<{
+    originEnvelopeId: string;
+    channelId: string;
+    envelopeId: string;
+  }>;
 }
 
 export interface ForkLogInput {
@@ -923,7 +929,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
     tier: "open",
     sensitivity: "write",
   })
-  adoptDurableWorkWorker(workerId: string): { adopted: boolean; previousWorkerId: string | null } {
+  adoptDurableWorkWorker(workerId: string): {
+    adopted: boolean;
+    previousWorkerId: string | null;
+  } {
     return this.adoptDurableWorkWorkerGeneration(workerId);
   }
 
@@ -1075,7 +1084,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
     tier: "open",
     sensitivity: "read",
   })
-  durableWorkStatus(): { readyQueues: DurableWorkQueue[]; nextRecoveryAt: number | null } {
+  durableWorkStatus(): {
+    readyQueues: DurableWorkQueue[];
+    nextRecoveryAt: number | null;
+  } {
     const now = Date.now();
     const ready = this.hasReadyPublicationDelivery(now);
     return {
@@ -1433,7 +1445,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
             contextId,
             commandId: `${input.commandId}:context`,
           },
-          { causalParent: null, contextIntegrity: { class: "internal", externalKeys: [] } }
+          {
+            causalParent: null,
+            contextIntegrity: { class: "internal", externalKeys: [] },
+          }
         );
         if (ensured.kind !== "complete") {
           if (ensured.kind === "host-read") {
@@ -1574,7 +1589,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
     if (!mainEventId) return null;
     return {
       stateHash: stateHashForRoot(
-        this.semanticVcsStore().stateRoot({ kind: "event", eventId: mainEventId })
+        this.semanticVcsStore().stateRoot({
+          kind: "event",
+          eventId: mainEventId,
+        })
       ),
     };
   }
@@ -1586,7 +1604,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  workspaceSourceHealth(): { ok: true; protocol: "vibestudio.workspace-source.v1" } {
+  workspaceSourceHealth(): {
+    ok: true;
+    protocol: "vibestudio.workspace-source.v1";
+  } {
     this.ensureReady();
     return { ok: true, protocol: "vibestudio.workspace-source.v1" };
   }
@@ -1969,7 +1990,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
       targetJson,
       now
     );
-    return { refName: input.refName, kind: input.kind, target: input.target, updatedAt: now };
+    return {
+      refName: input.refName,
+      kind: input.kind,
+      target: input.target,
+      updatedAt: now,
+    };
   }
 
   @schemaRpc()
@@ -2128,7 +2154,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
       const key = `${currentLogId}\u0000${currentHead}`;
       if (seen.has(key)) throw new Error(`log lineage cycle at ${currentLogId}:${currentHead}`);
       seen.add(key);
-      segments.push({ logId: currentLogId, head: currentHead, throughSeq: cap });
+      segments.push({
+        logId: currentLogId,
+        head: currentHead,
+        throughSeq: cap,
+      });
       const row = this.logHeadRow(currentLogId, currentHead);
       if (!row) break;
       const parentLogId = asString(row["parent_log_id"]);
@@ -2210,7 +2240,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
         ? { annotations: parseRecord(asString(row["annotations_json"])) }
         : {}),
       ...(row["causality_json"]
-        ? { causality: parseRecord(asString(row["causality_json"])) as LogEventCausality }
+        ? {
+            causality: parseRecord(asString(row["causality_json"])) as LogEventCausality,
+          }
         : {}),
       appendedAt: String(row["appended_at"]),
       prevHash: String(row["prev_hash"]),
@@ -3386,7 +3418,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
       )
       .toArray()[0] as JsonRecord | undefined;
 
-    this.projectAgentDirectoryPresence(envelope, { action, channelId, participantId, metadata });
+    this.projectAgentDirectoryPresence(envelope, {
+      action,
+      channelId,
+      participantId,
+      metadata,
+    });
 
     if (action === "join") {
       if (openRow) {
@@ -3536,7 +3573,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
    */
   private projectAgentDirectoryPresence(
     envelope: LogEnvelope,
-    input: { action: string; channelId: string; participantId: string; metadata: JsonRecord }
+    input: {
+      action: string;
+      channelId: string;
+      participantId: string;
+      metadata: JsonRecord;
+    }
   ): void {
     const type = asString(input.metadata["type"]);
     // Humans and panels are addressable, but they are not agent *instances*;
@@ -3590,10 +3632,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
    * clock-driven "went quiet" transition anywhere in this projection —
    * `last_activity_at` is informational and gates nothing.
    */
-  private projectAgentDirectoryActivity(
-    envelope: LogEnvelope,
-    status: "running" | "idle"
-  ): void {
+  private projectAgentDirectoryActivity(envelope: LogEnvelope, status: "running" | "idle"): void {
     const channelId = channelIdFromTrajectoryLog(envelope.logId);
     if (!channelId) return;
     const actor = envelope.actor as unknown as JsonRecord;
@@ -4068,8 +4107,17 @@ export class GadWorkspaceDO extends DurableObjectBase {
         // Own events live above forkSeq; when throughSeq < forkSeq this range
         // is empty (the requested prefix is entirely within the inherited part).
         const afterSeq = parentLogId && parentHead ? forkSeq : 0;
-        for (const envelope of this.readOwnLogRange({ logId, head, afterSeq, throughSeq })) {
-          this.applyProjections(logKind, { ...envelope, logId: key.logId, head: key.head });
+        for (const envelope of this.readOwnLogRange({
+          logId,
+          head,
+          afterSeq,
+          throughSeq,
+        })) {
+          this.applyProjections(logKind, {
+            ...envelope,
+            logId: key.logId,
+            head: key.head,
+          });
           replayed += 1;
         }
         prefixCache.set(cacheKey, key);
@@ -4650,7 +4698,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
       items: rows.map((envelope) => this.channelEnvelopeView(envelope, request.channelId)),
       pageInfo: channelEnvelopePageInfo(
         request,
-        { totalCount: stats.count, firstSeq: stats.firstSeq, lastSeq: stats.lastSeq },
+        {
+          totalCount: stats.count,
+          firstSeq: stats.firstSeq,
+          lastSeq: stats.lastSeq,
+        },
         rows.map((envelope) => envelope.seq)
       ),
     };
@@ -4680,7 +4732,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
           payloadKind: envelope.payloadKind,
           from: summarizeJsonForInspection(envelope.from) as JsonRecord,
           ...(envelope.metadata !== undefined
-            ? { metadata: summarizeJsonForInspection(envelope.metadata) as JsonRecord }
+            ? {
+                metadata: summarizeJsonForInspection(envelope.metadata) as JsonRecord,
+              }
             : {}),
           bytes: {
             from: utf8Bytes(JSON.stringify(envelope.from)),
@@ -4795,10 +4849,14 @@ export class GadWorkspaceDO extends DurableObjectBase {
             source,
             ...(payload["imports"] ? { imports: payload["imports"] } : {}),
             ...(payload["stateSchema"]
-              ? { stateSchema: payload["stateSchema"] as Record<string, unknown> }
+              ? {
+                  stateSchema: payload["stateSchema"] as Record<string, unknown>,
+                }
               : {}),
             ...(payload["updateSchema"]
-              ? { updateSchema: payload["updateSchema"] as Record<string, unknown> }
+              ? {
+                  updateSchema: payload["updateSchema"] as Record<string, unknown>,
+                }
               : {}),
             ...(registeredBy ? { registeredBy } : {}),
           },
@@ -5261,9 +5319,27 @@ export class GadWorkspaceDO extends DurableObjectBase {
                 i.started_event_id,
                 i.completed_event_id,
                 i.updated_at,
+                CASE
+                  WHEN json_extract(trigger.payload_ref_json, '$.senderRef.kind') = 'user'
+                  THEN replace(
+                    COALESCE(
+                      json_extract(trigger.payload_ref_json, '$.senderRef.participantId'),
+                      json_extract(trigger.payload_ref_json, '$.senderRef.id')
+                    ),
+                    'user:',
+                    ''
+                  )
+                  ELSE NULL
+                END AS initiating_user_id,
                 COUNT(CASE WHEN e.payload_kind = 'invocation.started' THEN 1 END) AS started_events,
                 COUNT(CASE WHEN e.payload_kind IN ('invocation.completed', 'invocation.failed', 'invocation.cancelled', 'invocation.abandoned') THEN 1 END) AS terminal_events
          FROM trajectory_invocations i
+         LEFT JOIN trajectory_turns t
+           ON t.log_id = i.log_id AND t.head = i.head AND t.turn_id = i.turn_id
+         LEFT JOIN log_events trigger
+           ON trigger.log_id = t.log_id
+          AND trigger.head = t.head
+          AND trigger.envelope_id = t.trigger_message_id
          LEFT JOIN log_events e
            ON e.log_id = i.log_id
           AND e.head = i.head
@@ -5271,7 +5347,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
          ${where}
          GROUP BY i.log_id, i.head, i.invocation_id, i.turn_id, i.transport_call_id, i.kind, i.status,
                   i.terminal_outcome, i.terminal_reason_code, i.started_event_id,
-                  i.completed_event_id, i.updated_at
+                  i.completed_event_id, i.updated_at, initiating_user_id
          ORDER BY i.updated_at DESC
          LIMIT ?`,
         ...bindings,
@@ -5592,9 +5668,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
             .exec(
               `SELECT d.* FROM gad_agent_directory_fts f
                  JOIN agent_directory d ON d.instance_id = f.instance_id
-                WHERE ${recallTokens([input.query])
-                  .map(() => `f.text LIKE ?`)
-                  .join(" OR ") || "1 = 0"}${statusFilter}
+                WHERE ${
+                  recallTokens([input.query])
+                    .map(() => `f.text LIKE ?`)
+                    .join(" OR ") || "1 = 0"
+                }${statusFilter}
                 ORDER BY d.last_activity_at DESC
                 LIMIT ?`,
               ...recallTokens([input.query]).map((term) => `%${term}%`),
@@ -5658,7 +5736,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       return {
         channelId,
         envelopeCount: asNumber(stats?.["n"] ?? 0),
-        lastEnvelopeAt: last ? (Date.parse(last) || null) : null,
+        lastEnvelopeAt: last ? Date.parse(last) || null : null,
         participants,
       };
     });
@@ -5677,9 +5755,19 @@ export class GadWorkspaceDO extends DurableObjectBase {
       branchId,
       limit,
     });
-    const fullTurnState = this.inspectTurnState({ channelId: input.channelId, branchId, limit });
-    const fullInvocationState = this.inspectInvocationState({ branchId, limit });
-    const fullRoster = this.inspectChannelRoster({ channelId: input.channelId, limit });
+    const fullTurnState = this.inspectTurnState({
+      channelId: input.channelId,
+      branchId,
+      limit,
+    });
+    const fullInvocationState = this.inspectInvocationState({
+      branchId,
+      limit,
+    });
+    const fullRoster = this.inspectChannelRoster({
+      channelId: input.channelId,
+      limit,
+    });
     const turnState: TurnStateInspection = {
       summary: fullTurnState.summary,
       rows: fullTurnState.rows
@@ -5887,8 +5975,14 @@ export class GadWorkspaceDO extends DurableObjectBase {
     const count = (sql: string, ...bindings: SqlBinding[]) =>
       asNumber(this.sql.exec(sql, ...bindings).one()["value"]);
     return [
-      { metric: "Log events", value: count(`SELECT COUNT(*) AS value FROM log_events`) },
-      { metric: "Log heads", value: count(`SELECT COUNT(*) AS value FROM log_heads`) },
+      {
+        metric: "Log events",
+        value: count(`SELECT COUNT(*) AS value FROM log_events`),
+      },
+      {
+        metric: "Log heads",
+        value: count(`SELECT COUNT(*) AS value FROM log_heads`),
+      },
       {
         metric: "Channel envelopes",
         value: count(
@@ -5897,12 +5991,18 @@ export class GadWorkspaceDO extends DurableObjectBase {
            WHERE h.log_kind = 'channel'`
         ),
       },
-      { metric: "Workspace contexts", value: count(`SELECT COUNT(*) AS value FROM vcs_contexts`) },
+      {
+        metric: "Workspace contexts",
+        value: count(`SELECT COUNT(*) AS value FROM vcs_contexts`),
+      },
       {
         metric: "Workspace events",
         value: count(`SELECT COUNT(*) AS value FROM gad_workspace_events`),
       },
-      { metric: "Work units", value: count(`SELECT COUNT(*) AS value FROM gad_work_units`) },
+      {
+        metric: "Work units",
+        value: count(`SELECT COUNT(*) AS value FROM gad_work_units`),
+      },
     ];
   }
 
@@ -6341,7 +6441,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   /** Generic durable removal surface for a notification's trusted producer. */
   @schemaRpc()
-  deleteUserNotification(input: { userId: string; id: string }): { deleted: boolean } {
+  deleteUserNotification(input: { userId: string; id: string }): {
+    deleted: boolean;
+  } {
     this.ensureReady();
     const userId = this.requireInviteUserId(input?.userId, "deleteUserNotification");
     const id = this.requireUserNotificationText(input?.id, "id", "deleteUserNotification");
@@ -6441,7 +6543,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
    * annotates each with its bound context via the channel DO's `getContextId`.
    */
   @schemaRpc()
-  listChannelLogs(): { channelId: string; logId: string; createdAt: number | null }[] {
+  listChannelLogs(): {
+    channelId: string;
+    logId: string;
+    createdAt: number | null;
+  }[] {
     this.ensureReady();
     const rows = this.sql
       .exec(
@@ -6457,7 +6563,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
         throw new Error(`Channel log index contains a non-canonical trajectory identity: ${logId}`);
       }
       const createdAt = row["createdAt"];
-      return { channelId, logId, createdAt: typeof createdAt === "number" ? createdAt : null };
+      return {
+        channelId,
+        logId,
+        createdAt: typeof createdAt === "number" ? createdAt : null,
+      };
     });
   }
 
@@ -6478,7 +6588,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  async checkGadIntegrity(): Promise<{ ok: boolean; errors: Array<Record<string, unknown>> }> {
+  async checkGadIntegrity(): Promise<{
+    ok: boolean;
+    errors: Array<Record<string, unknown>>;
+  }> {
     this.ensureReady();
     const errors: Array<Record<string, unknown>> = [];
 

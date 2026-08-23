@@ -1,6 +1,6 @@
 ---
 name: automations
-description: Schedule recurring scripts or agent prompts, propose reviewable automation drafts, and supervise runs, conversations, results, and errors.
+description: Launch recurring scripts or agent prompts immediately, then supervise their exact behavior, authority, runs, conversations, results, and errors.
 ---
 
 # Automations
@@ -16,14 +16,14 @@ cadence with its `cron` trigger rather than adding worker-level cron
 configuration, heartbeat loops, timers, a second alarm owner, or an independent
 run log.
 
-An automation draft is inert. An agent proposes one with the agent-owned
-`automations.propose(...)` eval binding. That one operation creates the canonical
-draft and immediately adds an inspectable, editable pill to the current chat;
-the user can also supervise the same definition in **Automations**. Only the
-user can review its exact code, schedule, reach, and standing authority. Never
-imply that a proposal is already scheduled.
+Launch an agent-owned automation with the native `launch_automation` tool. A
+successful call creates the canonical active definition and adds its running
+pill to the current chat before returning. The pill is an inspector and
+controller, not an approval gate: it shows the exact action, cadence, reach,
+standing authority, and run history, and lets the user edit, pause, run, or
+stop it. The same definition is available in **Automations**.
 
-Read [API.md](API.md) before authoring a draft. Use one of two execution forms,
+Read [API.md](API.md) before authoring an automation. Use one of two execution forms,
 with two first-class actions on the agent form:
 
 - **Method** runs one RPC method on an exact Durable Object build. Package a
@@ -31,7 +31,7 @@ with two first-class actions on the agent form:
   jobs that do not need an agent conversation.
 - **Agent** sends a prompt through the ordinary agent turn loop. It can continue
   one existing conversation or create an isolated agent, context, and
-  conversation for each run. Its reviewed action is either a normal model
+  conversation for each run. Its installed action is either a normal model
   `prompt` or exact inline `eval` code executed without a model call. Eval is the
   light-weight script path: it uses the selected agent's channel-bound EvalDO,
   so it does not require a new worker to be published.
@@ -44,36 +44,35 @@ Typical choices are:
 | “Review project changes every Friday.”                       | Agent                                                           | Fresh run each time              |
 | “Revisit the open risks in this conversation every morning.” | Agent                                                           | Continue this exact conversation |
 
-## Turn an intent into a reviewable draft
+## Turn an intent into a running automation
 
 1. Confirm only details that materially change the work: what should run, the
    cadence and timezone, optional end time or maximum total runs, and—only for
    agent work—whether runs should be fresh or continue one exact conversation.
    Also establish what outcome, if any, should naturally complete the recurring
    goal. Prefer an explicit recommendation over a questionnaire.
-2. For a prompt or small inline eval, use the current agent through
-   `automations.propose(...)`. The binding atomically stamps this agent's exact
+2. For a prompt or small inline eval, use the current agent through the native
+   `launch_automation` tool. The receiver atomically stamps this agent's exact
    source, class, object key, and installed effective version; never discover or
    reconstruct those values in guest code. For a reusable method job on another
    worker, use the lower-level Missions API described in [API.md](API.md).
-3. Call `automations.propose(...)` with the behavior, cadence, and least
+3. Call `launch_automation` with the behavior, cadence, and least
    authority needed. Do not call `agent.describe()`, `build.getEffectiveVersion`,
-   or `workers.resolveService` to prepare an agent-owned proposal.
-4. Tell the user what will run and when, and that the inert draft is waiting in
-   **Automations** for review. Do not say it is scheduled until the user approves
-   it there.
+   or `workers.resolveService` to prepare an agent-owned launch.
+4. Tell the user what is running and when it will run next. Point to the chat
+   pill when its exact behavior or controls would be useful.
 
 One user request produces one automation definition. Do not split scheduling,
-execution, history, or approval across parallel mechanisms.
+execution, history, or supervision across parallel mechanisms.
 
-## Propose an automation
+## Launch an automation
 
 The agent-owned helper is deliberately self-targeting. This complete recurring
-notification proposal needs no identity lookup, build RPC, service resolution,
+notification needs no identity lookup, build RPC, service resolution,
 or manually fabricated object key:
 
 ```ts
-return await automations.propose({
+({
   name: "Machine Learning fun facts",
   summary:
     "Every two minutes, send the owner one concise Machine Learning fun fact.",
@@ -87,11 +86,12 @@ return await automations.propose({
 });
 ```
 
-After a successful proposal, tell the user its name and that it is waiting for
-review. Its chat pill is already visible at the exact institution point; opening
+Pass that object to `launch_automation`. After a successful launch, tell the
+user its name and cadence. Its chat pill is already visible at the exact
+institution point; opening
 it or opening Automations shows the same definition controls, schedule,
 conversation behavior, reach, and standing authority. Do not publish a second
-summary card. Do not call `requestReview` for them.
+summary card or ask for a second approval.
 
 ## Choose conversation behavior deliberately
 
@@ -162,7 +162,7 @@ declaredLineageClasses: ["none"],
 
 Scheduled eval is not an alternate sandbox or message path. The agent loop
 journals the exact source as a normal `eval` tool invocation, EvalDO executes
-it with `approvals: "pregranted-only"` under the reviewed mission closure, and
+it with `approvals: "pregranted-only"` under the installed mission closure, and
 the invocation result closes the exact run. Ambient `chat` can publish typed or
 custom channel messages with the agent's identity. Do not use `chat.send` for
 status: it is user-intent ingress and can begin another agent turn.
@@ -186,15 +186,16 @@ part of the task.
 - `declaredLineageClasses` states the outside-content classes expected by the
   work. It must be non-empty and contain no duplicates.
 
-`permissions` contains the standing gated/critical capability rows shown in
-review. A method automation must use `permissions: []`: its installed code
+`permissions` contains the exact standing gated/critical capability rows shown
+in the inspector. A method automation must use `permissions: []`: its installed code
 authority remains the only authority for that method. Do not widen exposure or
-permissions to make a denial disappear; revise the draft to describe the real
-task and let the user evaluate the change.
+permissions to make a denial disappear. A standing-authority denial pauses the
+automation; edit its declared authority only when that accurately describes the
+task, then save to install and resume the new revision.
 
 ## Scheduling semantics
 
-Use `{ kind: "manual" }` for reviewable run-on-demand work. A periodic schedule
+Use `{ kind: "manual" }` for run-on-demand work. A periodic schedule
 is:
 
 ```ts
@@ -240,7 +241,7 @@ has minute precision and the same one-minute minimum as interval schedules.
 admitted successful and failed runs count, while visible overlap skips do not.
 When both are present, the first boundary reached ends the automation. Editing
 a completed automation can raise the maximum or move the boundary, but creates
-an inert revision that must be reviewed before it runs again.
+an active revision that resumes on its new cadence.
 
 Runs never overlap. If a trigger arrives while the previous run is starting or
 running, the ledger records a visible `skipped` run instead of creating hidden
@@ -299,10 +300,9 @@ unbounded ledger or poll every automation.
 
 The institution pill, each scheduled tick's chat-history pill, and the
 **Automations** panel share the same supervision surface. The institution pill
-exists before the first run, opens with no run lookup, and lets the user edit or
-review the inert draft directly. The overview calls out
-running work, naturally completed definitions, drafts awaiting review, and
-failures from the last 24 hours.
+exists before the first run, opens with no run lookup, and lets the user inspect
+or edit the running definition directly. The overview calls out running work,
+naturally completed definitions, and failures from the last 24 hours.
 Calendar schedules are presented as plain-language rules such as “Every
 Thursday at 5:05 AM in New York time.” Editing common hourly, daily, weekly,
 and monthly rules uses time controls, weekday choices, and timezone search.
@@ -314,17 +314,15 @@ definition exposes bounded recent runs and paged history; each run shows its
 terminal message or error and links to the exact conversation when it has one.
 Opening a history pill lazily loads only that definition and tick, showing the
 cadence and timezone, end policy, lifetime run progress, first activation,
-exact revision, duration, completion response or result/error, and reviewed
-execution. It also offers edit, stop/resume, review, and run-now controls.
+exact revision, duration, completion response or result/error, and installed
+execution. It also offers edit, stop/resume, and run-now controls.
 Collapsed transcript pills perform no service reads. The panel auto-refreshes
 only while a run is active. `starting` and `running`
 are live states; `succeeded`, `failed`, and `skipped` are terminal.
 
 Agents can use the agent-facing `edit`, `runNow`, `pause`, `resume`, and
 `retire` methods when the user explicitly asks for that lifecycle action.
-`requestReview` remains human-only: an agent may prepare the exact revision,
-but the user activates it from the shared inspector or Automations panel.
-Retirement is terminal. Editing any behavior-bearing field stops the schedule,
-lapses the reviewed closure, and returns the automation to review.
-Natural completion is not retirement: history remains inspectable and the
-definition can be edited into a new reviewable revision.
+Retirement is terminal. Editing any behavior-bearing field atomically installs
+the new closure and applies its schedule. Natural completion is not retirement:
+history remains inspectable and the definition can be edited into a new active
+revision.

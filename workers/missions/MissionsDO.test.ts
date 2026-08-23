@@ -11,9 +11,9 @@ import type {
 import type { ReviewedExecutionClosureBody } from "@vibestudio/shared/authority/reviewedExecutionClosure";
 import { MissionsDO } from "./MissionsDO.js";
 
-class IdempotentProposalMissionsDO extends MissionsDO {
+class IdempotentLaunchMissionsDO extends MissionsDO {
   protected override get rpcIdempotencyKey(): string | null {
-    return "agent-proposal-request";
+    return "agent-launch-request";
   }
 }
 
@@ -32,7 +32,11 @@ const charter = (): MissionCharter => ({
   harness: { unit: "workers/summary", ev: "a".repeat(64) },
   execution: {
     kind: "agent",
-    target: { source: "workers/summary", className: "SummaryAgent", objectKey: "daily" },
+    target: {
+      source: "workers/summary",
+      className: "SummaryAgent",
+      objectKey: "daily",
+    },
     action: { kind: "prompt", text: "Prepare a daily summary" },
     conversation: { mode: "fresh" },
     toolExposure: {
@@ -52,7 +56,11 @@ const methodCharter = (resultLimit?: number): MissionCharter => ({
   harness: { unit: "workers/rollout", ev: "d".repeat(64) },
   execution: {
     kind: "method",
-    target: { source: "workers/rollout", className: "RolloutWorker", objectKey: "primary" },
+    target: {
+      source: "workers/rollout",
+      className: "RolloutWorker",
+      objectKey: "primary",
+    },
     method: "check",
     args: [],
   },
@@ -65,11 +73,22 @@ const methodCharter = (resultLimit?: number): MissionCharter => ({
 });
 
 async function missions() {
-  return createTestDO(MissionsDO, {
+  const result = await createTestDO(MissionsDO, {
     WORKER_SOURCE: "workers/missions",
     WORKER_CLASS_NAME: "MissionsDO",
     __objectKey: "workspace-missions",
   });
+  Object.defineProperty(result.instance, "rpc", {
+    value: {
+      call: vi.fn(async (target: string, method: string) => {
+        if (target === "main" && method === "reviewedClosure.activate") return undefined;
+        if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+        throw new Error(`Unexpected RPC ${target}.${method}`);
+      }),
+    },
+    configurable: true,
+  });
+  return result;
 }
 
 describe("MissionsDO", () => {
@@ -94,11 +113,19 @@ describe("MissionsDO", () => {
     expect(productMethods.sort()).toEqual(Object.keys(missionsMethods).sort());
   });
 
-  it("owns drafts per authenticated user and records a revision digest", async () => {
+  it("owns launched definitions per authenticated user and records a revision digest", async () => {
     const { callAs } = await missions();
-    const alice = { callerId: "panel:alice", callerKind: "panel" as const, userId: "alice" };
-    const bob = { callerId: "panel:bob", callerKind: "panel" as const, userId: "bob" };
-    const created = await callAs<MissionRecord>(alice, "createDraft", {
+    const alice = {
+      callerId: "panel:alice",
+      callerKind: "panel" as const,
+      userId: "alice",
+    };
+    const bob = {
+      callerId: "panel:bob",
+      callerKind: "panel" as const,
+      userId: "bob",
+    };
+    const created = await callAs<MissionRecord>(alice, "launch", {
       name: "Daily summary",
       charter: charter(),
       permissions: [],
@@ -106,7 +133,7 @@ describe("MissionsDO", () => {
 
     expect(created).toMatchObject({
       name: "Daily summary",
-      state: "draft",
+      state: "active",
       revision: 1,
       owner: { userId: "alice", deviceId: "panel:alice" },
     });
@@ -117,20 +144,40 @@ describe("MissionsDO", () => {
     ]);
   });
 
-  it("returns the same draft when an agent proposal transport is retried", async () => {
-    const { callAs, sql } = await createTestDO(IdempotentProposalMissionsDO, {
+  it("returns the same running definition when an agent launch transport is retried", async () => {
+    const { instance, callAs, sql } = await createTestDO(IdempotentLaunchMissionsDO, {
       WORKER_SOURCE: "vibestudio/internal",
       WORKER_CLASS_NAME: "MissionsDO",
       __objectKey: "workspace",
     });
-    const caller = { callerId: "do:agent", callerKind: "do" as const, userId: "alice" };
-    const input = { name: "Daily summary", charter: charter(), permissions: [] };
+    Object.defineProperty(instance, "rpc", {
+      value: {
+        call: vi.fn(async (target: string, method: string) => {
+          if (target === "main" && method === "reviewedClosure.activate") return undefined;
+          if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+          throw new Error(`Unexpected RPC ${target}.${method}`);
+        }),
+      },
+      configurable: true,
+    });
+    const caller = {
+      callerId: "do:agent",
+      callerKind: "do" as const,
+      userId: "alice",
+    };
+    const input = {
+      name: "Daily summary",
+      charter: charter(),
+      permissions: [],
+    };
 
-    const first = await callAs<MissionRecord>(caller, "proposeDraft", input);
-    const retried = await callAs<MissionRecord>(caller, "proposeDraft", input);
+    const first = await callAs<MissionRecord>(caller, "launch", input);
+    const retried = await callAs<MissionRecord>(caller, "launch", input);
 
     expect(retried.missionId).toBe(first.missionId);
-    expect(sql.exec(`SELECT COUNT(*) AS count FROM missions`).one()).toEqual({ count: 1 });
+    expect(sql.exec(`SELECT COUNT(*) AS count FROM missions`).one()).toEqual({
+      count: 1,
+    });
     expect(sql.exec(`SELECT mission_id FROM mission_proposals`).one()).toEqual({
       mission_id: first.missionId,
     });
@@ -140,7 +187,7 @@ describe("MissionsDO", () => {
     const { instance, callAs } = await missions();
     const created = await callAs<MissionRecord>(
       { callerId: "panel:alice", callerKind: "panel", userId: "alice" },
-      "createDraft",
+      "launch",
       {
         name: "Daily summary",
         charter: charter(),
@@ -160,7 +207,9 @@ describe("MissionsDO", () => {
     );
     const compiled = (
       instance as unknown as {
-        compileClosure(record: MissionRecord): { body: ReviewedExecutionClosureBody };
+        compileClosure(record: MissionRecord): {
+          body: ReviewedExecutionClosureBody;
+        };
       }
     ).compileClosure(created);
 
@@ -172,8 +221,12 @@ describe("MissionsDO", () => {
 
   it("returns one bounded supervision overview and cursor-pages older runs", async () => {
     const { instance, callAs } = await missions();
-    const alice = { callerId: "panel:alice", callerKind: "panel" as const, userId: "alice" };
-    const created = await callAs<MissionRecord>(alice, "createDraft", {
+    const alice = {
+      callerId: "panel:alice",
+      callerKind: "panel" as const,
+      userId: "alice",
+    };
+    const created = await callAs<MissionRecord>(alice, "launch", {
       name: "Daily summary",
       charter: charter(),
       permissions: [],
@@ -210,7 +263,6 @@ describe("MissionsDO", () => {
         active: number;
         running: number;
         failedLast24Hours: number;
-        awaitingReview: number;
         completed: number;
       };
       items: Array<{
@@ -220,14 +272,16 @@ describe("MissionsDO", () => {
         activeRuns: number;
         failedRunsSince: number;
       }>;
-      attention: Array<{ missionId: string; run: { runId: string; error?: string } }>;
+      attention: Array<{
+        missionId: string;
+        run: { runId: string; error?: string };
+      }>;
     }>(alice, "overview", {});
     expect(overview.stats).toEqual({
       total: 1,
-      active: 0,
+      active: 1,
       running: 1,
       failedLast24Hours: 1,
-      awaitingReview: 1,
       completed: 0,
     });
     expect(overview.items).toEqual([
@@ -243,7 +297,10 @@ describe("MissionsDO", () => {
     expect(overview.attention).toEqual([
       expect.objectContaining({
         missionId: created.missionId,
-        run: expect.objectContaining({ runId: "run-1", error: "provider unavailable" }),
+        run: expect.objectContaining({
+          runId: "run-1",
+          error: "provider unavailable",
+        }),
       }),
     ]);
     await expect(callAs(alice, "getRun", "run-1")).resolves.toMatchObject({
@@ -274,10 +331,14 @@ describe("MissionsDO", () => {
 
   it("pages and filters definitions on the server while keeping global counts", async () => {
     const { instance, callAs } = await missions();
-    const alice = { callerId: "panel:alice", callerKind: "panel" as const, userId: "alice" };
+    const alice = {
+      callerId: "panel:alice",
+      callerKind: "panel" as const,
+      userId: "alice",
+    };
     const records = await Promise.all(
       ["Archive cleanup", "Billing digest", "Customer briefing", "Dependency review"].map((name) =>
-        callAs<MissionRecord>(alice, "createDraft", {
+        callAs<MissionRecord>(alice, "launch", {
           name,
           charter: { ...charter(), summary: `${name} summary` },
           permissions: [],
@@ -285,23 +346,25 @@ describe("MissionsDO", () => {
       )
     );
     const sql = (
-      instance as unknown as { sql: { exec(query: string, ...bindings: unknown[]): unknown } }
+      instance as unknown as {
+        sql: { exec(query: string, ...bindings: unknown[]): unknown };
+      }
     ).sql;
     records.forEach((record, index) => {
       sql.exec(
         "UPDATE missions SET updated_at=?,state=? WHERE mission_id=?",
         10_000 + index,
-        index === 2 ? "paused" : "draft",
+        index === 2 ? "paused" : "active",
         record.missionId
       );
     });
 
     const first = await callAs<{
-      stats: { total: number; awaitingReview: number };
+      stats: { total: number; active: number };
       items: Array<{ automation: MissionRecord }>;
       nextCursor?: { updatedAt: number; missionId: string };
     }>(alice, "overview", { limit: 2 });
-    expect(first.stats).toMatchObject({ total: 4, awaitingReview: 3 });
+    expect(first.stats).toMatchObject({ total: 4, active: 3 });
     expect(first.items.map((item) => item.automation.name)).toEqual([
       "Dependency review",
       "Customer briefing",
@@ -321,18 +384,14 @@ describe("MissionsDO", () => {
     ]);
     expect(second.nextCursor).toBeUndefined();
 
-    const drafts = await callAs<{ items: Array<{ automation: MissionRecord }> }>(
-      alice,
-      "overview",
-      { filter: "drafts" }
-    );
-    expect(drafts.items.map((item) => item.automation.name)).not.toContain("Customer briefing");
+    const active = await callAs<{
+      items: Array<{ automation: MissionRecord }>;
+    }>(alice, "overview", { filter: "active" });
+    expect(active.items.map((item) => item.automation.name)).not.toContain("Customer briefing");
 
-    const search = await callAs<{ items: Array<{ automation: MissionRecord }> }>(
-      alice,
-      "overview",
-      { query: "BILLING" }
-    );
+    const search = await callAs<{
+      items: Array<{ automation: MissionRecord }>;
+    }>(alice, "overview", { query: "BILLING" });
     expect(search.items.map((item) => item.automation.name)).toEqual(["Billing digest"]);
 
     const deepLinked = await callAs<{
@@ -345,7 +404,11 @@ describe("MissionsDO", () => {
 
   it("runs calendar automations to natural completion and preserves editable history", async () => {
     const { instance, callAs } = await missions();
-    const alice = { callerId: "panel:alice", callerKind: "panel" as const, userId: "alice" };
+    const alice = {
+      callerId: "panel:alice",
+      callerKind: "panel" as const,
+      userId: "alice",
+    };
     const rpcCall = vi.fn(async (target: string, method: string) => {
       if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
       if (target === "main" && method === "reviewedClosure.activate") return undefined;
@@ -354,7 +417,11 @@ describe("MissionsDO", () => {
       if (target === "main" && method === "reviewedClosure.finishSession") return undefined;
       if (target === "main" && method === "notification.showToUser") return "notif-run-started";
       if (target === "main" && method === "runtime.createEntity") {
-        return { id: "rollout-worker", targetId: "do:rollout", contextId: undefined };
+        return {
+          id: "rollout-worker",
+          targetId: "do:rollout",
+          contextId: undefined,
+        };
       }
       if (target === "do:rollout" && method === "check") {
         return {
@@ -368,13 +435,11 @@ describe("MissionsDO", () => {
       value: { call: rpcCall },
       configurable: true,
     });
-    const draft = await callAs<MissionRecord>(alice, "createDraft", {
+    const active = await callAs<MissionRecord>(alice, "launch", {
       name: "Rollout watcher",
       charter: methodCharter(10),
       permissions: [],
     });
-    const active = await callAs<MissionRecord>(alice, "requestReview", draft.missionId);
-
     expect(active).toMatchObject({
       state: "active",
       runCount: 0,
@@ -389,7 +454,7 @@ describe("MissionsDO", () => {
     });
     expect(active.nextRunAt).toBeGreaterThan(Date.now());
 
-    const run = await callAs<MissionRunRecord>(alice, "runNow", draft.missionId);
+    const run = await callAs<MissionRunRecord>(alice, "runNow", active.missionId);
     expect(run).toMatchObject({
       revision: 1,
       runNumber: 1,
@@ -410,13 +475,13 @@ describe("MissionsDO", () => {
             command: expect.objectContaining({
               type: "panel.open",
               source: "about/automations",
-              stateArgs: { missionId: draft.missionId },
+              stateArgs: { missionId: active.missionId },
             }),
           }),
         ],
       }),
     ]);
-    const completed = await callAs<MissionRecord>(alice, "get", draft.missionId);
+    const completed = await callAs<MissionRecord>(alice, "get", active.missionId);
     expect(completed).toMatchObject({
       state: "completed",
       runCount: 1,
@@ -425,11 +490,11 @@ describe("MissionsDO", () => {
     });
     expect(completed.nextRunAt).toBeUndefined();
 
-    const revised = await callAs<MissionRecord>(alice, "edit", draft.missionId, {
+    const revised = await callAs<MissionRecord>(alice, "edit", active.missionId, {
       charter: methodCharter(3),
     });
     expect(revised).toMatchObject({
-      state: "needs-reapproval",
+      state: "active",
       revision: 2,
       runCount: 1,
     });
@@ -444,7 +509,11 @@ describe("MissionsDO", () => {
       const now = Date.UTC(2026, 7, 12, 12);
       vi.setSystemTime(now);
       const { instance, callAs, sql } = await missions();
-      const alice = { callerId: "panel:alice", callerKind: "panel" as const, userId: "alice" };
+      const alice = {
+        callerId: "panel:alice",
+        callerKind: "panel" as const,
+        userId: "alice",
+      };
       const rpcCall = vi.fn(async (target: string, method: string) => {
         if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
         if (target === "main" && method.startsWith("reviewedClosure.")) return undefined;
@@ -461,12 +530,11 @@ describe("MissionsDO", () => {
       });
       const scheduled = methodCharter();
       scheduled.trigger = { kind: "schedule", everyMs: 60_000 };
-      const draft = await callAs<MissionRecord>(alice, "createDraft", {
+      const launched = await callAs<MissionRecord>(alice, "launch", {
         name: "Minute watcher",
         charter: scheduled,
         permissions: [],
       });
-      await callAs(alice, "requestReview", draft.missionId);
 
       expect(rpcCall).not.toHaveBeenCalledWith(
         "main",
@@ -499,7 +567,7 @@ describe("MissionsDO", () => {
                   command: {
                     type: "panel.open",
                     source: "about/automations",
-                    stateArgs: { missionId: draft.missionId },
+                    stateArgs: { missionId: launched.missionId },
                   },
                 },
               ],
@@ -507,7 +575,7 @@ describe("MissionsDO", () => {
           ],
         ],
       ]);
-      await expect(callAs<MissionRecord>(alice, "get", draft.missionId)).resolves.toMatchObject({
+      await expect(callAs<MissionRecord>(alice, "get", launched.missionId)).resolves.toMatchObject({
         state: "active",
         runCount: 1,
       });
@@ -516,14 +584,14 @@ describe("MissionsDO", () => {
         `INSERT INTO mission_runs
          (run_id,mission_id,closure_digest,mission_revision,trigger_kind,status,started_at,run_number)
          VALUES ('already-running',?, ?,1,'scheduled','running',?,2)`,
-        draft.missionId,
+        launched.missionId,
         "b".repeat(64),
         now + 90_000
       );
       sql.exec(
         "UPDATE missions SET next_run_at=? WHERE mission_id=?",
         now + 120_000,
-        draft.missionId
+        launched.missionId
       );
       vi.setSystemTime(now + 120_000);
       await instance.alarm();
@@ -532,7 +600,7 @@ describe("MissionsDO", () => {
           ([target, method]) => target === "main" && method === "notification.showToUser"
         )
       ).toHaveLength(1);
-      await expect(callAs<MissionRecord>(alice, "get", draft.missionId)).resolves.toMatchObject({
+      await expect(callAs<MissionRecord>(alice, "get", launched.missionId)).resolves.toMatchObject({
         runCount: 1,
       });
     } finally {
@@ -542,7 +610,11 @@ describe("MissionsDO", () => {
 
   it("completes after the configured maximum even when the terminal run fails", async () => {
     const { instance, callAs } = await missions();
-    const alice = { callerId: "panel:alice", callerKind: "panel" as const, userId: "alice" };
+    const alice = {
+      callerId: "panel:alice",
+      callerKind: "panel" as const,
+      userId: "alice",
+    };
     const rpcCall = vi.fn(async (target: string, method: string) => {
       if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
       if (target === "main" && method.startsWith("reviewedClosure.")) return undefined;
@@ -557,16 +629,19 @@ describe("MissionsDO", () => {
       value: { call: rpcCall },
       configurable: true,
     });
-    const draft = await callAs<MissionRecord>(alice, "createDraft", {
+    const launched = await callAs<MissionRecord>(alice, "launch", {
       name: "Bounded rollout watcher",
       charter: methodCharter(1),
       permissions: [],
     });
-    await callAs(alice, "requestReview", draft.missionId);
-    const run = await callAs<MissionRunRecord>(alice, "runNow", draft.missionId);
+    const run = await callAs<MissionRunRecord>(alice, "runNow", launched.missionId);
 
-    expect(run).toMatchObject({ status: "failed", runNumber: 1, error: "health check failed" });
-    await expect(callAs<MissionRecord>(alice, "get", draft.missionId)).resolves.toMatchObject({
+    expect(run).toMatchObject({
+      status: "failed",
+      runNumber: 1,
+      error: "health check failed",
+    });
+    await expect(callAs<MissionRecord>(alice, "get", launched.missionId)).resolves.toMatchObject({
       state: "completed",
       runCount: 1,
       completionReason: "max-runs",
@@ -579,7 +654,11 @@ describe("MissionsDO", () => {
       const now = Date.UTC(2026, 7, 12, 12);
       vi.setSystemTime(now);
       const { instance, callAs } = await missions();
-      const alice = { callerId: "panel:alice", callerKind: "panel" as const, userId: "alice" };
+      const alice = {
+        callerId: "panel:alice",
+        callerKind: "panel" as const,
+        userId: "alice",
+      };
       const rpcCall = vi.fn(async (target: string, method: string) => {
         if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
         if (
@@ -599,17 +678,16 @@ describe("MissionsDO", () => {
         everyMs: 60_000,
         untilAt: now + 90_000,
       };
-      const draft = await callAs<MissionRecord>(alice, "createDraft", {
+      const launched = await callAs<MissionRecord>(alice, "launch", {
         name: "Short-lived watcher",
         charter: scheduled,
         permissions: [],
       });
-      await callAs(alice, "requestReview", draft.missionId);
 
       vi.setSystemTime(now + 90_000);
       await instance.alarm();
 
-      await expect(callAs<MissionRecord>(alice, "get", draft.missionId)).resolves.toMatchObject({
+      await expect(callAs<MissionRecord>(alice, "get", launched.missionId)).resolves.toMatchObject({
         state: "completed",
         runCount: 0,
         completedAt: now + 90_000,

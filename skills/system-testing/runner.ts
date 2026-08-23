@@ -195,6 +195,7 @@ export class HeadlessRunner {
     testNames: Map<HeadlessSession, string | null>;
     modelPolicy: ModelPolicyState;
     thinkingLevel?: SystemTestThinkingLevel;
+    initiatingUserId: string;
     sessionPolicies: Map<HeadlessSession, ModelPolicyState>;
   };
   private readonly testName: string | null;
@@ -217,12 +218,17 @@ export class HeadlessRunner {
    */
   constructor(
     contextId: string,
-    opts?: { model?: string; thinkingLevel?: SystemTestThinkingLevel },
+    opts?: {
+      model?: string;
+      thinkingLevel?: SystemTestThinkingLevel;
+      initiatingUserId?: string;
+    },
     shared?: {
       sessions: Set<HeadlessSession>;
       testNames: Map<HeadlessSession, string | null>;
       modelPolicy: HeadlessRunner["shared"]["modelPolicy"];
       thinkingLevel?: SystemTestThinkingLevel;
+      initiatingUserId: string;
       sessionPolicies: Map<HeadlessSession, ModelPolicyState>;
     },
     testName: string | null = null,
@@ -239,6 +245,7 @@ export class HeadlessRunner {
       sessions: new Set(),
       testNames: new Map(),
       sessionPolicies: new Map(),
+      initiatingUserId: opts?.initiatingUserId ?? "system-test-unattributed",
       ...(opts?.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
       modelPolicy: {
         ...modelRoute,
@@ -352,6 +359,7 @@ export class HeadlessRunner {
       workspaceRepoFixture,
       {
         testId: testName,
+        initiatingUserId: this.shared.initiatingUserId,
         agent: {
           model: this.shared.modelPolicy.primaryModel,
           approvalLevel: 2,
@@ -507,7 +515,8 @@ export class HeadlessRunner {
     const model = policy.activeModel;
     const contextMode =
       opts?.context ?? (this.workspaceRepoFixture ? "task" : "isolated");
-    const taskContextId = this.workspaceRepoFixtureLifecycle?.taskContextId ?? null;
+    const taskContextId =
+      this.workspaceRepoFixtureLifecycle?.taskContextId ?? null;
     if ((contextMode === "task" || contextMode === "fork") && !taskContextId) {
       throw new Error(
         "Workspace repository fixture must be prepared before spawning its task agent",
@@ -713,21 +722,32 @@ export class HeadlessRunner {
   private fixtureForkOwner(): Promise<string> {
     const taskContextId = this.workspaceRepoFixtureLifecycle?.taskContextId;
     if (!taskContextId) {
-      throw new Error("Workspace fixture fork owner requires a prepared task context");
+      throw new Error(
+        "Workspace fixture fork owner requires a prepared task context",
+      );
     }
     this.fixtureForkOwnerPromise ??= rpc
-      .call<{ id?: string; contextId?: string }>("main", "runtime.createEntity", [
-        {
-          kind: "do",
-          execution: { surface: "code", source: "workers/system-test-runner" },
-          className: "SystemTestRunnerDO",
-          key: `system-test-fork-owner:${this.testName ?? "unknown"}:${crypto.randomUUID()}`,
-          contextId: taskContextId,
-        },
-      ])
+      .call<{ id?: string; contextId?: string }>(
+        "main",
+        "runtime.createEntity",
+        [
+          {
+            kind: "do",
+            execution: {
+              surface: "code",
+              source: "workers/system-test-runner",
+            },
+            className: "SystemTestRunnerDO",
+            key: `system-test-fork-owner:${this.testName ?? "unknown"}:${crypto.randomUUID()}`,
+            contextId: taskContextId,
+          },
+        ],
+      )
       .then((handle) => {
         if (!handle.id || handle.contextId !== taskContextId) {
-          throw new Error("Workspace fixture fork owner was not created in its task context");
+          throw new Error(
+            "Workspace fixture fork owner was not created in its task context",
+          );
         }
         return handle.id;
       });

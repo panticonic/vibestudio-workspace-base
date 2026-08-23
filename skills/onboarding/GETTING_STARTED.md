@@ -42,8 +42,8 @@ Owner workflows remain authoritative:
 - Alternative search setup uses `skills/web-research/SKILL.md`; Codex agents
   use subscription search and other agents use DuckDuckGo without setup.
 - Recurring worker methods, exact inline agent evals, and agent prompts use
-  `skills/automations/SKILL.md`; help shape and propose the inert draft before
-  the user reviews it in Automations.
+  `skills/automations/SKILL.md`; help shape and launch the active definition,
+  whose chat pill exposes inspection and controls.
 - Model/provider and agent-default changes use model settings.
 - Device and remote controls open the typed shell connection surface.
 - Credential inspection/revocation and agent grants open their distinct About
@@ -68,10 +68,10 @@ document or starts an ingestion task; it never creates a PDF setup flow.
 Likewise, **Schedule recurring work** begins the Automations owner workflow: it
 chooses a deterministic method, a model-free inline eval in an existing agent,
 or an agent prompt; selects an interval or timezone-aware cron cadence plus any
-time/run/natural-completion boundary; resolves the exact target; and proposes a
-reviewable draft. The user approves it and later inspects/controls runs from
-either the shared chat-history tick inspector or the Automations panel; opening
-the panel alone does not complete the request.
+time/run/natural-completion boundary; resolves the exact target; and launches
+it. The user can immediately inspect and control it from either the running
+chat pill or the Automations panel; opening the panel alone does not complete
+the request.
 Channel and project configuration is disclosed only when the user chooses that
 channel or project goal.
 

@@ -41,8 +41,10 @@ perspective:
     focus: true,
   });
   const observed = await child.observe();
-  if (observed.phase !== "ready") throw new Error(`Unexpected phase: ${observed.phase}`);
-  if (child.parentId !== root.id) throw new Error("Panel was not created as a child");
+  if (observed.phase !== "ready")
+    throw new Error(`Unexpected phase: ${observed.phase}`);
+  if (child.parentId !== root.id)
+    throw new Error("Panel was not created as a child");
 
   // Archive the temporary root when the whole headless workflow is done; it
   // owns/cleans its descendants. Do not archive an inherited user panel.
@@ -138,7 +140,7 @@ multi-file work, prefer a real entry file.
 | `sourcePath` | string                                           | —                       | Virtual context-relative filename for inline code and relative imports                                                                     |
 | `syntax`     | `"javascript" \| "typescript" \| "jsx" \| "tsx"` | `"tsx"`                 | Source syntax                                                                                                                              |
 | `imports`    | `Record<string, string>`                         | —                       | Packages to build on-demand (workspace or npm)                                                                                             |
-| `timeoutMs`  | positive integer                                 | —                       | Optional wall-clock deadline in milliseconds; omitted means no deadline                                                                    |
+| `timeoutMs`  | positive integer                                 | —                       | Optional wall-clock deadline in milliseconds; an agent tool call defaults to five minutes                                                  |
 | `authority`  | per-run authority intent                         | adaptive mutable prompt | Attenuate this run with an exact `requests` allowlist, read-only effects, pregranted-only execution, or exact prospective preauthorization |
 
 The table above is the ergonomic agent tool. Code that calls the server service
@@ -148,7 +150,12 @@ directly uses the single typed lifecycle shape:
 await rpc.call("main", "eval.start", [
   {
     runId,
-    source: { kind: "inline", code, pathHint: "src/probe.ts", syntax: "typescript" },
+    source: {
+      kind: "inline",
+      code,
+      pathHint: "src/probe.ts",
+      syntax: "typescript",
+    },
     scope: { key: channelId, lifecycle: "persistent" },
     resultReceiver: { kind: "caller" }, // optional terminal push to the authenticated caller
     authority,
@@ -213,7 +220,7 @@ workspace BuildStore root set.
 ## Injected Variables
 
 These are available in eval code. `scope`, `scopes`, `db`, `ctx`, `help`, `chat`,
-`agent`, and `automations` are eval-context ambient variables. `rpc`, `fs`, `services`, and
+and `agent` are eval-context ambient variables. `rpc`, `fs`, `services`, and
 `hosts` are the same portable bindings used by panels/workers; use them
 ambiently or import them from `@workspace/runtime`.
 
@@ -229,7 +236,6 @@ ambiently or import them from `@workspace/runtime`.
 | `db`                               | Synchronous in-DO SQLite (see below)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | `chat`                             | The full chat API for the current channel — `publish`/`send`, custom-message cards, `registerMessageType`, `callMethod`, etc. (agent eval only; see below)                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `agent`                            | Inspect/configure THIS agent's own state — `await agent.describe()`, `await agent.setModel("provider:model")`, etc. (agent eval only; see below)                                                                                                                                                                                                                                                                                                                                                                                                             |
-| `automations`                      | Propose an inert recurring automation with trusted current-channel provenance — `await automations.propose(input)` (agent eval only; see below)                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `help()`                           | `await help()` lists services + import guidance; `await help("vcs")` returns a compact live method index; `await help("vcs.edit")` returns that method's exact schema and typed errors                                                                                                                                                                                                                                                                                                                                                                       |
 
 ```
@@ -279,27 +285,6 @@ use GAD inspectors or the channel DO's read-only `inspectAgent` method.
 > gets no `chat` — interact with the channel through `rpc`/`services` instead.
 > The `chat` handle is also available to panel-rendered components
 > (`inline_ui`, `feedback_custom`, action bars) — see [CHAT_API.md](CHAT_API.md).
-
-### automations (agent eval)
-
-`automations.propose(input)` is the agent authoring path for recurring work. It
-accepts behavior (`name`, `summary`, `action`, `trigger`, optional conversation,
-reach, lineage, and permissions), then atomically supplies this agent's exact
-installed identity and effective version. Do not call `agent.describe()`,
-`build.getEffectiveVersion`, or `workers.resolveService` first. It creates one
-canonical inert draft through `vibestudio.missions.v1`, then
-publishes a typed institution event as this agent in `chat.channelId` before the
-call returns. The new definition therefore appears immediately in chat as a
-zero-fetch pill that the user can open to inspect, edit, and review; it does not
-wait for a first run.
-
-The binding deliberately accepts no channel, actor identity, target, harness,
-or effective version. `{ mode: "continue" }` means this exact channel/context;
-`fresh` is the default. The owning agent supplies those facts after verifying
-this EvalDO, and the mission service remains the only scheduler and run-ledger
-owner. Always await `agent.describe()` and `automations.propose(...)`. See
-[Automations](../automations/SKILL.md) for the charter, cron/interval schedules,
-end policies, completion responses, and supervision workflow.
 
 ### agent (agent eval)
 
@@ -1019,11 +1004,21 @@ summaries first.
 Prefer compact inspectors first:
 
 ```ts
-return await rpc.call("main", "gad.inspectChannelEnvelopes", [{ channelId, limit: 50 }]);
+return await rpc.call("main", "gad.inspectChannelEnvelopes", [
+  { channelId, limit: 50 },
+]);
 return await rpc.call("main", "gad.inspectTurnState", [{ branchId }]);
-return await rpc.call("main", "gad.inspectInvocationState", [{ transportCallId }]);
-return await rpc.call("main", "gad.inspectPublicationIntegrity", [{ channelId }]);
-return await services.serverLog.query({ level: "warn", contains: "BuildV2", limit: 100 });
+return await rpc.call("main", "gad.inspectInvocationState", [
+  { transportCallId },
+]);
+return await rpc.call("main", "gad.inspectPublicationIntegrity", [
+  { channelId },
+]);
+return await services.serverLog.query({
+  level: "warn",
+  contains: "BuildV2",
+  limit: 100,
+});
 ```
 
 If you need a large artifact, store the full bytes/text in the **blobstore** and
@@ -1066,7 +1061,10 @@ return {
   digest: stored.digest,
   bytes: new TextEncoder().encode(text).byteLength,
   type: Array.isArray(largeValue) ? "array" : typeof largeValue,
-  keys: largeValue && typeof largeValue === "object" ? Object.keys(largeValue).slice(0, 20) : [],
+  keys:
+    largeValue && typeof largeValue === "object"
+      ? Object.keys(largeValue).slice(0, 20)
+      : [],
   preview: text.slice(0, 1000),
 };
 ```
@@ -1137,9 +1135,10 @@ eval({ code: `
 
 ## Timeouts
 
-Eval runs have no implicit wall-clock deadline. Pass a positive integer
-`timeoutMs` when one call must finish within a known bound, especially for a
-probe that may stall. At an explicit deadline, async work is cancelled normally;
+Agent-owned eval tool calls have a five-minute wall-clock deadline by default,
+so a lost or non-settling dependency becomes a terminal failure instead of
+redriving the turn forever. Pass a positive integer `timeoutMs` when one call
+needs a different bound. At a deadline, async work is cancelled normally;
 synchronous authored loops and functions are stopped by cooperative sandbox
 checkpoints and reported as a visible eval error rather than hanging the agent
 runtime. Split long work into shorter runs when useful and carry state in

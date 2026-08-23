@@ -65,14 +65,12 @@ function client(): AutomationUiClient & {
   get: ReturnType<typeof vi.fn>;
   getRun: ReturnType<typeof vi.fn>;
   edit: ReturnType<typeof vi.fn>;
-  requestReview: ReturnType<typeof vi.fn>;
   pause: ReturnType<typeof vi.fn>;
 } {
   return {
     get: vi.fn(async () => automation),
     getRun: vi.fn(async () => run),
-    edit: vi.fn(async () => ({ ...automation, state: "needs-reapproval" as const })),
-    requestReview: vi.fn(async () => automation),
+    edit: vi.fn(async () => automation),
     pause: vi.fn(async () => ({ ...automation, state: "paused" as const })),
     resume: vi.fn(async () => automation),
     runNow: vi.fn(async () => run),
@@ -131,7 +129,11 @@ describe("AutomationActivity", () => {
     expect(api.get).not.toHaveBeenCalled();
     expect(api.getRun).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: /Inspect automation tick Daily check/ }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Inspect automation tick Daily check/,
+      })
+    );
     await screen.findByText("Everything looks good.");
     expect(api.get).toHaveBeenCalledWith(automation.missionId);
     expect(api.getRun).toHaveBeenCalledWith(run.runId);
@@ -142,46 +144,48 @@ describe("AutomationActivity", () => {
     expect(await screen.findByRole("button", { name: "Resume" })).toBeTruthy();
   });
 
-  it("renders an instituted draft immediately and opens definition controls without fetching a run", async () => {
-    const draft = { ...automation, revision: 1, state: "draft" as const, runCount: 0 };
+  it("renders a launched automation immediately and opens controls without fetching a run", async () => {
+    const launched = {
+      ...automation,
+      revision: 1,
+      state: "active" as const,
+      runCount: 0,
+    };
     const api = client();
-    api.get.mockResolvedValue(draft);
-    api.requestReview.mockResolvedValue({ ...draft, state: "active" as const });
+    api.get.mockResolvedValue(launched);
     render(
       <Theme>
         <AutomationActivity
           definition={{
             snapshot: {
-              missionId: draft.missionId,
-              name: draft.name,
-              summary: draft.charter.summary,
-              revision: draft.revision,
+              missionId: launched.missionId,
+              name: launched.name,
+              summary: launched.charter.summary,
+              revision: launched.revision,
               action: "prompt",
-              createdAt: draft.createdAt,
+              state: "active",
+              createdAt: launched.createdAt,
               schedule: { kind: "interval", everyMs: 86_400_000 },
             },
-            institutedAt: new Date(draft.createdAt).toISOString(),
+            institutedAt: new Date(launched.createdAt).toISOString(),
           }}
           client={api}
         />
       </Theme>
     );
 
-    expect(screen.getByText("Needs review")).toBeTruthy();
+    expect(screen.getByText("Active")).toBeTruthy();
     expect(screen.getByText(/Every 1 day · created/)).toBeTruthy();
     expect(api.get).not.toHaveBeenCalled();
     expect(api.getRun).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Inspect automation Daily check" }));
-    await screen.findByText(/This draft is inert until you review/);
-    expect(api.get).toHaveBeenCalledWith(draft.missionId);
+    await screen.findByText(/Started here/);
+    expect(api.get).toHaveBeenCalledWith(launched.missionId);
     expect(api.getRun).not.toHaveBeenCalled();
     expect(screen.queryByText("This tick")).toBeNull();
     expect(screen.getByRole("button", { name: "Edit parameters" })).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Review changes" }));
-    await waitFor(() => expect(api.requestReview).toHaveBeenCalledWith(draft.missionId));
-    expect(await screen.findByRole("button", { name: "Stop recurring calls" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Stop recurring calls" })).toBeTruthy();
   });
 
   it.each([
@@ -189,12 +193,20 @@ describe("AutomationActivity", () => {
     ["one-hour interval", { kind: "schedule" as const, everyMs: 3_600_000 }, false],
     [
       "weekly calendar schedule",
-      { kind: "cron" as const, expression: "5 5 * * THU", timezone: "America/New_York" },
+      {
+        kind: "cron" as const,
+        expression: "5 5 * * THU",
+        timezone: "America/New_York",
+      },
       true,
     ],
     [
       "hourly calendar schedule",
-      { kind: "cron" as const, expression: "5 * * * *", timezone: "America/New_York" },
+      {
+        kind: "cron" as const,
+        expression: "5 * * * *",
+        timezone: "America/New_York",
+      },
       false,
     ],
   ])("%s provider-cache warning: %s", async (_label, trigger, expected) => {
@@ -250,7 +262,11 @@ describe("AutomationActivity", () => {
     );
 
     expect(screen.queryByText("Additional provider token cost")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /Inspect automation tick Daily check/ }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Inspect automation tick Daily check/,
+      })
+    );
     if (expected) {
       expect(await screen.findByText("Additional provider token cost")).toBeTruthy();
       expect(screen.getByText(/API-provider context caches may expire/)).toBeTruthy();
@@ -260,7 +276,7 @@ describe("AutomationActivity", () => {
     }
   });
 
-  it("edits the exact action parameters as an inert new revision", async () => {
+  it("edits the exact action parameters and applies the active revision", async () => {
     const api = client();
     render(
       <Theme>
@@ -289,12 +305,16 @@ describe("AutomationActivity", () => {
       </Theme>
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Inspect automation tick Daily check/ }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Inspect automation tick Daily check/,
+      })
+    );
     fireEvent.click(await screen.findByRole("button", { name: "Edit parameters" }));
     fireEvent.change(screen.getByLabelText("Prompt text"), {
       target: { value: "Check the project and summarize blockers." },
     });
-    fireEvent.click(screen.getByRole("button", { name: "Save as new revision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save and apply" }));
 
     await waitFor(() =>
       expect(api.edit).toHaveBeenCalledWith(
@@ -364,7 +384,11 @@ describe("AutomationActivity", () => {
     );
 
     expect(screen.getByText(/Every Thursday at 5:05.*New York time/)).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Inspect automation tick Daily check/ }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Inspect automation tick Daily check/,
+      })
+    );
     expect(await screen.findByText("4 runs of 8")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Edit parameters" }));
     expect(screen.queryByLabelText("Cron expression")).toBeNull();
@@ -381,8 +405,10 @@ describe("AutomationActivity", () => {
       target: { value: "35 7 * * MON-FRI" },
     });
     expect(await screen.findByText(/Every Monday through Friday at 7:35/)).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Maximum runs"), { target: { value: "12" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save as new revision" }));
+    fireEvent.change(screen.getByLabelText("Maximum runs"), {
+      target: { value: "12" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save and apply" }));
 
     await waitFor(() =>
       expect(api.edit).toHaveBeenCalledWith(
@@ -442,7 +468,11 @@ describe("AutomationActivity", () => {
       </Theme>
     );
 
-    fireEvent.click(screen.getByRole("button", { name: /Inspect automation tick Daily check/ }));
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: /Inspect automation tick Daily check/,
+      })
+    );
     expect(await screen.findByText("Automation completed", { exact: false })).toBeTruthy();
     expect(screen.getByText("Natural completion response")).toBeTruthy();
     expect(screen.getByText("The monitored rollout is healthy everywhere.")).toBeTruthy();

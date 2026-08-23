@@ -4,26 +4,25 @@ Resolve protocol `vibestudio.missions.v1` with `workers.resolveService(...)`,
 then call the returned Durable Object target with `rpc.call(targetId, method,
 args)`. The service is context-aware and user-scoped.
 
-Agent-authored definitions use the higher-level ambient
-`automations.propose(input)` binding. The receiver atomically fills the current
+Agent-authored definitions use the native `launch_automation(input)` tool. The receiver atomically fills the current
 agent's exact source, class, object key, installed effective version, and—when
-continuing—the current channel/context. It then calls `proposeDraft` with a
+continuing—the current channel/context. It then calls `launch` with a
 transport idempotency key and, before returning, publishes one typed
 `automation.instituted` event as the owning agent in the current channel. This
-is the documented proposal path because it supplies trusted channel provenance
+is the documented launch path because it supplies trusted channel provenance
 without making guest code discover or assert runtime identity. Direct service
 calls remain the lower-level lifecycle contract for method jobs and non-chat
 integrations.
 
-This service owns the complete automation lifecycle: definition and human
-review, schedule delivery, non-overlapping execution, durable run history,
+This service owns the complete automation lifecycle: definition installation,
+schedule delivery, non-overlapping execution, durable run history,
 terminal summaries and errors, and agent-conversation identity. Callers must
 not create a second timer, queue, conversation loop, or run ledger around it.
 
-## Agent-owned proposal
+## Agent-owned launch
 
 ```ts
-type AgentAutomationProposal = {
+type AgentAutomationLaunch = {
   name: string;
   summary: string;
   action:
@@ -46,15 +45,16 @@ type AgentAutomationProposal = {
 };
 ```
 
-Always `await automations.propose(input)`. Do not precede it with
+Call the `launch_automation` tool directly. Do not wrap it in eval or precede it with
 `agent.describe()`, `build.getEffectiveVersion`, or `workers.resolveService`.
-Those calls are unnecessary and make one proposal depend on several mutable
+Those calls are unnecessary and make one launch depend on several mutable
 observations. The installed vessel supplies one coherent target/version
-snapshot at the receiver boundary.
+snapshot at the receiver boundary. The tool returns only after the active
+mission and its idempotent running pill are durable.
 
 `conversation: { mode: "continue" }` means this exact conversation; the binding
 fills its channel and context. The input intentionally cannot target a different
-agent. Use the canonical lower-level Missions service when a reviewed method on
+agent. Use the canonical lower-level Missions service when a method on
 another target is the behavior you actually want.
 
 ## Canonical charter (lower-level Missions API)
@@ -97,7 +97,9 @@ type Charter = {
           evalNetwork: "none" | "declared-origins" | "unrestricted";
           declaredOrigins: string[];
         };
-        declaredLineageClasses: Array<"none" | "web" | "email" | "channel-external" | "external">;
+        declaredLineageClasses: Array<
+          "none" | "web" | "email" | "channel-external" | "external"
+        >;
       };
   trigger:
     | { kind: "manual" }
@@ -120,7 +122,7 @@ type Charter = {
 ```
 
 The harness unit must equal the execution target source. Every behavior-bearing
-field participates in the reviewed closure digest. `agent/eval` stores exact
+field participates in the installed closure digest. `agent/eval` stores exact
 inline EvalDO source in that closure and is the happy path for a small script
 that should run as an existing agent/channel participant. It deliberately does
 not accept a mutable context-file path or npm import map. Use ambient runtime
@@ -163,26 +165,24 @@ definition, and wins over a count/time boundary reached on that same run.
 
 ## Methods
 
-| Method          | Arguments                                               | Result                                                     | Use                                         |
-| --------------- | ------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------- |
-| `overview`      | `{ limit?, cursor?, filter?, query? }`                  | paged definitions, global counts, recent runs and failures | supervision dashboards and quick inspection |
-| `list`          | none                                                    | all visible definitions                                    | definition tooling                          |
-| `get`           | `missionId`                                             | definition or `null`                                       | addressed inspection                        |
-| `listRuns`      | `missionId`, `{ limit?, cursor? }`                      | `{ items, nextCursor? }`                                   | paged historical ledger                     |
-| `getRun`        | `runId`                                                 | exact run or `null`                                        | chat tick inspection                        |
-| `proposeDraft`  | `{ name, charter, permissions, standingRestrictions? }` | inert draft                                                | lower-level creation; the owner binding expands its ergonomic input into this contract |
-| `createDraft`   | same as `proposeDraft`                                  | inert draft                                                | trusted user/code tooling                   |
-| `edit`          | `missionId`, changed fields                             | new inert revision                                         | behavior changes                            |
-| `requestReview` | `missionId`                                             | active definition after approval                           | human review surfaces only                  |
-| `runNow`        | `missionId`                                             | new run record                                             | explicit manual execution                   |
-| `pause`         | `missionId`                                             | paused definition                                          | stop future triggers                        |
-| `resume`        | `missionId`                                             | active definition                                          | resume unchanged reviewed closure           |
-| `retire`        | `missionId`                                             | retired definition                                         | permanent shutdown                          |
+| Method     | Arguments                                               | Result                                                     | Use                                         |
+| ---------- | ------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------- |
+| `overview` | `{ limit?, cursor?, filter?, query? }`                  | paged definitions, global counts, recent runs and failures | supervision dashboards and quick inspection |
+| `list`     | none                                                    | all visible definitions                                    | definition tooling                          |
+| `get`      | `missionId`                                             | definition or `null`                                       | addressed inspection                        |
+| `listRuns` | `missionId`, `{ limit?, cursor? }`                      | `{ items, nextCursor? }`                                   | paged historical ledger                     |
+| `getRun`   | `runId`                                                 | exact run or `null`                                        | chat tick inspection                        |
+| `launch`   | `{ name, charter, permissions, standingRestrictions? }` | active definition                                          | atomic creation and immediate scheduling    |
+| `edit`     | `missionId`, changed fields                             | installed active revision                                  | behavior changes applied immediately        |
+| `runNow`   | `missionId`                                             | new run record                                             | explicit manual execution                   |
+| `pause`    | `missionId`                                             | paused definition                                          | stop future triggers                        |
+| `resume`   | `missionId`                                             | active definition                                          | resume unchanged installed closure          |
+| `retire`   | `missionId`                                             | retired definition                                         | permanent shutdown                          |
 
 `overview` defaults to 30 definitions and accepts at most 50. Its `stats`
 contains global `total`, `active`, `running`, `failedLast24Hours`, and
-`awaitingReview`, and `completed` counts regardless of the page or filter.
-Filters are `all`, `attention`, `active`, `paused`, `completed`, and `drafts`;
+`completed` counts regardless of the page or filter.
+Filters are `all`, `attention`, `active`, `paused`, and `completed`;
 `query` searches names and
 summaries on the server. Pass its exact `nextCursor` to fetch another page.
 
@@ -191,8 +191,8 @@ summaries on the server. Pass its exact `nextCursor` to fetch another page.
 
 Ordinary agent sessions can discover and call `edit`, `runNow`, `pause`,
 `resume`, and `retire` through the live service catalog, subject to their normal
-gated/critical authority. `requestReview` is intentionally not agent-facing;
-only a human review surface may activate a draft or edited revision.
+gated/critical authority. `launch_automation` is the trusted self-targeting
+creation path; there is no proposal or review transition.
 
 ## Run record
 
@@ -221,18 +221,18 @@ detail remains in the linked conversation. `channelId` and `contextId` are the
 canonical deep-link identity for that conversation; do not derive a link from
 names or run order.
 
-Mission records also include lifetime `runCount`, `activatedAt` after first
-human activation, and—when naturally ended—`completedAt`, `completionReason`
+Mission records also include lifetime `runCount`, `activatedAt` after launch,
+and—when naturally ended—`completedAt`, `completionReason`
 (`until`, `max-runs`, or `response`), and optional `completionResponse`. Chat
 turn metadata carries a bounded immutable tick snapshot—mission/run ids, run
 number, name, revision, action, trigger, schedule, creation/activation times—so
 collapsed history pills render without network reads. Opening a pill lazily
 calls `get` and `getRun` for current controls and full bounded details.
 
-Agent proposal also writes a bounded immutable definition snapshot—mission id,
+Agent launch also writes a bounded immutable definition snapshot—mission id,
 name, summary, revision, action, schedule, and creation time—to the originating
 channel. Its institution pill therefore renders immediately and performs no
 service read while collapsed. Opening it calls only `get`; no run exists yet.
-The same shared inspector provides editing and human review controls, and later
+The same shared inspector provides editing and runtime controls, and later
 provides run-now, pause/stop, resume, completion, and historical tick details as
 the definition changes state.

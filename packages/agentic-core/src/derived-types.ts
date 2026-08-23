@@ -340,7 +340,7 @@ export interface ChatMessage {
   diagnostic?: DiagnosticNotice;
   /** First-class reviewed automation tick projected from durable turn metadata. */
   automation?: AutomationActivityPayload;
-  /** First-class draft institution projected from a durable channel event. */
+  /** First-class running automation projected from a durable channel event. */
   automationDefinition?: AutomationDefinitionPayload;
   /**
    * Per-recipient delivery state for this message, resolved against the

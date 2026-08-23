@@ -6,12 +6,19 @@ import { unitDiagnosticsTests } from "./unit-diagnostics.js";
 function execution(
   code: string,
   returnValue: unknown,
-  final = "The workspace has 4 automations: 2 active, 1 running, and 1 failed in the last 24 hours."
+  final = "The workspace has 4 automations: 2 active, 1 running, and 1 failed in the last 24 hours.",
+  toolName = "eval"
 ): TestExecutionResult {
   return {
     duration: 0,
     messages: [
-      { id: "prompt", kind: "message", senderId: "user", complete: true, content: "prompt" },
+      {
+        id: "prompt",
+        kind: "message",
+        senderId: "user",
+        complete: true,
+        content: "prompt",
+      },
       {
         id: "eval",
         kind: "message",
@@ -22,11 +29,11 @@ function execution(
         content: "",
         invocation: {
           id: "eval-call",
-          name: "eval",
+          name: toolName,
           status: "complete",
           terminalOutcome: "success",
           isError: false,
-          arguments: { code },
+          arguments: toolName === "eval" ? { code } : (returnValue as Record<string, unknown>),
           result: { details: { success: true, returnValue } },
         },
       } as unknown as TestExecutionResult["messages"][number],
@@ -45,8 +52,8 @@ function execution(
 const automationTest = unitDiagnosticsTests.find(
   (candidate) => candidate.name === "automation-overview-readonly"
 )!;
-const automationDraftTest = unitDiagnosticsTests.find(
-  (candidate) => candidate.name === "automation-inline-eval-draft"
+const automationLaunchTest = unitDiagnosticsTests.find(
+  (candidate) => candidate.name === "automation-native-launch"
 )!;
 
 describe("automation overview system test validator", () => {
@@ -56,7 +63,12 @@ describe("automation overview system test validator", () => {
   it("requires the canonical read-only surface and exact bounded counts", () => {
     expect(
       automationTest.validate(
-        execution(readCode, { automations: 4, active: 2, running: 1, failedLast24Hours: 1 })
+        execution(readCode, {
+          automations: 4,
+          active: 2,
+          running: 1,
+          failedLast24Hours: 1,
+        })
       )
     ).toEqual({ passed: true });
   });
@@ -123,89 +135,62 @@ describe("automation overview system test validator", () => {
   });
 });
 
-describe("automation inline eval system test validator", () => {
-  const draft = {
+describe("automation native launch system test validator", () => {
+  const launch = {
     name: "Daily project pulse",
-    state: "draft",
+    summary: "Publish the project pulse every Thursday.",
     permissions: [],
-    charter: {
-      trigger: {
-        kind: "cron",
-        expression: "5 5 * * THU",
-        timezone: "America/New_York",
-        untilAt: Date.UTC(2027, 0, 1, 5),
-        maxRuns: 12,
-      },
-      execution: {
-        kind: "agent",
-        target: {
-          source: "workers/agent-worker",
-          className: "AiChatWorker",
-          objectKey: "daily-project-pulse",
-        },
-        action: {
-          kind: "eval",
-          code: "const status = await services.vcs.status({ contextId: ctx.contextId }); await chat.publish('project.pulse', status); return status.clean ? { protocol: 'automation-completion.v1', response: 'The project is clean.' } : status;",
-        },
-        conversation: { mode: "fresh" },
-        toolExposure: { services: ["vcs.status"], evalNetwork: "none" },
-      },
+    trigger: {
+      kind: "cron",
+      expression: "5 5 * * THU",
+      timezone: "America/New_York",
+      untilAt: Date.UTC(2027, 0, 1, 5),
+      maxRuns: 12,
     },
+    action: {
+      kind: "eval",
+      code: "const status = await services.vcs.status({ contextId: ctx.contextId }); await chat.publish('project.pulse', status); return status.clean ? { protocol: 'automation-completion.v1', response: 'The project is clean.' } : status;",
+    },
+    conversation: { mode: "fresh" },
+    toolExposure: {
+      services: ["vcs.status"],
+      userlandServices: [],
+      workspaceServiceDiscovery: "bound",
+      evalNetwork: "none",
+      declaredOrigins: [],
+    },
+    declaredLineageClasses: ["none"],
   };
 
-  it("pregrants the installed Missions worker that owns draft proposals", () => {
-    expect(automationDraftTest.authorityPolicy).toEqual({
-      authority: [
-        {
-          ruleId: "propose-automation-draft",
-          capability: { kind: "exact", key: "workspace-service:missions" },
-          resource: {
-            kind: "prefix",
-            prefix: "do:workers/missions:MissionsDO:",
-          },
-          tier: "gated",
-          decision: "once",
-        },
-      ],
-    });
+  it("needs no approval pregrant for native launch", () => {
+    expect(automationLaunchTest.authorityPolicy).toEqual({ authority: [] });
   });
 
-  it("accepts a returned inert draft with the requested exact lightweight behavior", () => {
+  it("accepts one native launch with the requested exact lightweight behavior", () => {
     expect(
-      automationDraftTest.validate(
+      automationLaunchTest.validate(
         execution(
-          "return rpc.call(missions.targetId, 'proposeDraft', [input]);",
-          draft,
-          "The inert draft is waiting in Automations for your review."
+          "",
+          launch,
+          "Daily project pulse is running; use its automation pill to inspect or stop it.",
+          "launch_automation"
         )
       )
     ).toEqual({ passed: true });
   });
 
-  it("accepts an eval result that includes the inert draft with a concise proposal summary", () => {
+  it("rejects routing creation through eval", () => {
     expect(
-      automationDraftTest.validate(
+      automationLaunchTest.validate(
         execution(
-          "return { missionId: draft.missionId, name: draft.name, draft };",
-          { missionId: "msn_daily-project-pulse", name: draft.name, draft },
-          "The inert draft is waiting in Automations for your review."
-        )
-      )
-    ).toEqual({ passed: true });
-  });
-
-  it("rejects activating the draft from the agent path", () => {
-    expect(
-      automationDraftTest.validate(
-        execution(
-          "const draft = await rpc.call(missions.targetId, 'proposeDraft', [input]); await rpc.call(missions.targetId, 'requestReview', [draft.missionId]); return draft;",
-          draft,
-          "The draft is waiting for review."
+          "return rpc.call(missions.targetId, 'launch', [input]);",
+          launch,
+          "Daily project pulse is running and inspectable."
         )
       )
     ).toMatchObject({
       passed: false,
-      reason: "The automation draft scenario attempted to activate or run the automation",
+      reason: "No successful native launch created the requested inline-eval automation",
     });
   });
 });
@@ -283,7 +268,10 @@ describe("workspace unit diagnostics semantic validators", () => {
           "extensions/status has 2 logs and 1 error."
         )
       )
-    ).toMatchObject({ passed: false, reason: expect.stringContaining("health packet") });
+    ).toMatchObject({
+      passed: false,
+      reason: expect.stringContaining("health packet"),
+    });
   });
 
   it("rejects diagnostic records from a different unit identity", () => {
@@ -305,7 +293,10 @@ describe("workspace unit diagnostics semantic validators", () => {
           "extensions/status has 2 logs and 1 error."
         )
       )
-    ).toMatchObject({ passed: false, reason: expect.stringContaining("identity-consistent") });
+    ).toMatchObject({
+      passed: false,
+      reason: expect.stringContaining("identity-consistent"),
+    });
   });
 
   it("rejects a report that omits one observed buffer count", () => {
@@ -313,6 +304,9 @@ describe("workspace unit diagnostics semantic validators", () => {
       logsTest.validate(
         execution(healthCode, health, "extensions/status has 2 recent logs and looks healthy.")
       )
-    ).toMatchObject({ passed: false, reason: expect.stringContaining("exact buffer counts") });
+    ).toMatchObject({
+      passed: false,
+      reason: expect.stringContaining("exact buffer counts"),
+    });
   });
 });

@@ -29,7 +29,11 @@ import {
   messageTypeDefinitionsFromChannelView,
 } from "./channel-chat-merge.js";
 
-const agent = { kind: "agent" as const, id: "agent-1", displayName: "Agent One" };
+const agent = {
+  kind: "agent" as const,
+  id: "agent-1",
+  displayName: "Agent One",
+};
 const participant = { ...agent, participantId: "participant-agent-1" };
 
 function envelope(payload: AgenticEvent, seq: number): ChannelEnvelope<AgenticEvent> {
@@ -50,7 +54,13 @@ function textPayload(messageId: string, role: MessageRole, content: string) {
   return {
     protocol: AGENTIC_PROTOCOL_VERSION,
     role,
-    blocks: [{ blockId: brandId<BlockId>(`${messageId}:block:0`), type: "text" as const, content }],
+    blocks: [
+      {
+        blockId: brandId<BlockId>(`${messageId}:block:0`),
+        type: "text" as const,
+        content,
+      },
+    ],
     outcome: "completed" as const,
   };
 }
@@ -64,7 +74,10 @@ describe("chatMessagesFromChannelView", () => {
         protocol: AGENTIC_PROTOCOL_VERSION,
         typeId: "weather",
         displayMode: "inline",
-        source: { type: "code", code: "export default function Weather() { return null; }" },
+        source: {
+          type: "code",
+          code: "export default function Weather() { return null; }",
+        },
       },
       createdAt: "2026-05-20T12:00:01.000Z",
     };
@@ -169,7 +182,11 @@ describe("chatMessagesFromChannelView", () => {
     expect(chatMessage).toMatchObject({
       id: "say:call-1",
       // Only people count as escalation targets; the agent addressee does not.
-      escalation: { alert: "inbox", title: "Briefing", users: ["user:gabriel"] },
+      escalation: {
+        alert: "inbox",
+        title: "Briefing",
+        users: ["user:gabriel"],
+      },
     });
   });
 
@@ -277,7 +294,11 @@ describe("chatMessagesFromChannelView", () => {
       kind: "invocation.started",
       actor: agent,
       causality: { invocationId: brandId<InvocationId>("inv-docs") },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, name: "invocation", request: {} },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        name: "invocation",
+        request: {},
+      },
       createdAt: "2026-05-20T12:00:01.000Z",
     };
     const completed: AgenticEvent<"invocation.completed"> = {
@@ -315,7 +336,11 @@ describe("chatMessagesFromChannelView", () => {
       kind: "invocation.started",
       actor: agent,
       causality: { invocationId: brandId<InvocationId>("inv-search") },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, name: "invocation", request: {} },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        name: "invocation",
+        request: {},
+      },
       createdAt: "2026-05-20T12:00:01.000Z",
     };
     const completed: AgenticEvent<"invocation.completed"> = {
@@ -359,7 +384,11 @@ describe("chatMessagesFromChannelView", () => {
       kind: "invocation.started",
       actor: agent,
       causality: { invocationId: brandId<InvocationId>("inv-empty-search") },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, name: "invocation", request: {} },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        name: "invocation",
+        request: {},
+      },
       createdAt: "2026-05-20T12:00:01.000Z",
     };
     const completed: AgenticEvent<"invocation.completed"> = {
@@ -519,7 +548,10 @@ describe("chatMessagesFromChannelView", () => {
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         name: "feedback_custom",
-        request: { title: "Choose deployment target", path: "skills/deploy/Picker.tsx" },
+        request: {
+          title: "Choose deployment target",
+          path: "skills/deploy/Picker.tsx",
+        },
       },
       createdAt: "2026-05-20T12:00:03.000Z",
     };
@@ -672,7 +704,10 @@ describe("chatMessagesFromChannelView", () => {
       kind: "message.completed",
       actor: agent,
       causality: { messageId: brandId<MessageId>("msg-explicit") },
-      payload: { ...textPayload("msg-explicit", "assistant", "noted"), tier: "secondary" },
+      payload: {
+        ...textPayload("msg-explicit", "assistant", "noted"),
+        tier: "secondary",
+      },
       createdAt: "2026-05-20T12:00:00.000Z",
     };
     const state = [envelope(message, 1)].reduce(reduceChannelView, createInitialChannelViewState());
@@ -691,7 +726,9 @@ describe("chatMessagesFromChannelView", () => {
       createdAt: "2026-05-20T12:00:00.000Z",
     };
     const state = [envelope(message, 1)].reduce(reduceChannelView, createInitialChannelViewState());
-    expect(chatMessagesFromChannelView(state)[0]).toMatchObject({ tier: "primary" });
+    expect(chatMessagesFromChannelView(state)[0]).toMatchObject({
+      tier: "primary",
+    });
   });
 
   it("does not infer a secondary tier from unstamped assistant content", () => {
@@ -1041,7 +1078,11 @@ describe("chatMessagesFromChannelView", () => {
       actor: agent,
       turnId,
       causality: { invocationId: brandId<InvocationId>("inv-stalled") },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, name: "eval", request: { code: "run()" } },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        name: "eval",
+        request: { code: "run()" },
+      },
       createdAt: "2026-05-20T12:00:01.000Z",
     };
     const abandoned: AgenticEvent<"invocation.abandoned"> = {
@@ -1061,7 +1102,10 @@ describe("chatMessagesFromChannelView", () => {
       kind: "turn.closed",
       actor: agent,
       turnId,
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, reason: "runner_restarted" },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        reason: "runner_restarted",
+      },
       createdAt: "2026-05-20T12:00:03.000Z",
     };
 
@@ -1098,15 +1142,23 @@ describe("chatMessagesFromChannelView", () => {
       kind: "invocation.started",
       actor: agent,
       turnId,
-      causality: { invocationId: brandId<InvocationId>("inv-aborted-dispatch") },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, name: "eval", request: { code: "run()" } },
+      causality: {
+        invocationId: brandId<InvocationId>("inv-aborted-dispatch"),
+      },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        name: "eval",
+        request: { code: "run()" },
+      },
       createdAt: "2026-05-20T12:00:01.000Z",
     };
     const cancelled: AgenticEvent<"invocation.cancelled"> = {
       kind: "invocation.cancelled",
       actor: agent,
       turnId,
-      causality: { invocationId: brandId<InvocationId>("inv-aborted-dispatch") },
+      causality: {
+        invocationId: brandId<InvocationId>("inv-aborted-dispatch"),
+      },
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         reason: "Agent turn was interrupted before tool dispatch.",
@@ -1120,7 +1172,10 @@ describe("chatMessagesFromChannelView", () => {
       kind: "turn.closed",
       actor: agent,
       turnId,
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, reason: "runner_restarted" },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        reason: "runner_restarted",
+      },
       createdAt: "2026-05-20T12:00:03.000Z",
     };
 
@@ -1271,7 +1326,10 @@ describe("chatMessagesFromChannelView", () => {
       kind: "turn.closed",
       actor: agent,
       turnId,
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, summary: "Agent turn completed" },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        summary: "Agent turn completed",
+      },
       createdAt: "2026-05-20T12:00:02.000Z",
     };
 
@@ -1314,7 +1372,10 @@ describe("chatMessagesFromChannelView", () => {
       kind: "turn.closed",
       actor: agent,
       turnId,
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, summary: "Agent turn completed" },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        summary: "Agent turn completed",
+      },
       createdAt: "2026-05-20T12:00:02.000Z",
     };
 
@@ -1360,7 +1421,10 @@ describe("chatMessagesFromChannelView", () => {
       kind: "turn.closed",
       actor: agent,
       turnId,
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, summary: "Agent turn completed" },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        summary: "Agent turn completed",
+      },
       createdAt: "2026-05-20T12:00:02.000Z",
     };
 
@@ -1397,7 +1461,10 @@ describe("chatMessagesFromChannelView", () => {
       kind: "turn.closed",
       actor: agent,
       turnId,
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, summary: "Agent turn completed" },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        summary: "Agent turn completed",
+      },
       createdAt: "2026-05-20T12:00:02.000Z",
     };
 
@@ -1440,7 +1507,10 @@ describe("chatMessagesFromChannelView", () => {
       contentType: "lifecycle",
       content: "Waiting for model credential approval",
       turnId,
-      lifecycle: { status: "waiting", title: "Waiting for model credential approval" },
+      lifecycle: {
+        status: "waiting",
+        title: "Waiting for model credential approval",
+      },
     });
     // It is a waiting indicator, not an error.
     expect(card?.error).toBeUndefined();
@@ -1617,7 +1687,11 @@ describe("chatMessagesFromChannelView", () => {
       actor: agent,
       turnId,
       causality: { invocationId: brandId<InvocationId>("inv-cancelled") },
-      payload: { protocol: AGENTIC_PROTOCOL_VERSION, name: "eval", request: { code: "run()" } },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        name: "eval",
+        request: { code: "run()" },
+      },
       createdAt: "2026-05-20T12:00:01.000Z",
     };
     const cancelled: AgenticEvent<"invocation.cancelled"> = {
@@ -1924,7 +1998,11 @@ describe("chatMessagesFromChannelView", () => {
   });
 
   it("preserves provider method names and streamed output across cross-participant invocation events", () => {
-    const provider = { kind: "panel" as const, id: "provider-1", displayName: "Provider" };
+    const provider = {
+      kind: "panel" as const,
+      id: "provider-1",
+      displayName: "Provider",
+    };
     const started: AgenticEvent<"invocation.started"> = {
       kind: "invocation.started",
       actor: agent,
@@ -2103,7 +2181,10 @@ describe("chatMessagesFromChannelView", () => {
     const startedByChannel: AgenticEvent<"invocation.started"> = {
       kind: "invocation.started",
       actor: { kind: "system", id: "system" },
-      causality: { invocationId: brandId<InvocationId>("tool-1"), transportCallId: "transport-1" },
+      causality: {
+        invocationId: brandId<InvocationId>("tool-1"),
+        transportCallId: "transport-1",
+      },
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         name: "unknown",
@@ -2115,7 +2196,10 @@ describe("chatMessagesFromChannelView", () => {
     const cancelled: AgenticEvent<"invocation.cancelled"> = {
       kind: "invocation.cancelled",
       actor: { kind: "system", id: "system" },
-      causality: { invocationId: brandId<InvocationId>("tool-1"), transportCallId: "transport-1" },
+      causality: {
+        invocationId: brandId<InvocationId>("tool-1"),
+        transportCallId: "transport-1",
+      },
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         reason: "cancelled",
@@ -2127,7 +2211,10 @@ describe("chatMessagesFromChannelView", () => {
     const lateCompleted: AgenticEvent<"invocation.completed"> = {
       kind: "invocation.completed",
       actor: agent,
-      causality: { invocationId: brandId<InvocationId>("tool-1"), transportCallId: "transport-1" },
+      causality: {
+        invocationId: brandId<InvocationId>("tool-1"),
+        transportCallId: "transport-1",
+      },
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         result: { ok: true },
@@ -2263,6 +2350,7 @@ describe("chatMessagesFromChannelView", () => {
           summary: "Review the project every Thursday.",
           revision: 1,
           action: "prompt",
+          state: "active",
           createdAt: Date.parse("2026-05-20T12:00:00.000Z"),
           schedule: {
             kind: "cron",
@@ -2344,7 +2432,13 @@ describe("chatMessagesFromChannelView", () => {
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         role: "assistant",
-        blocks: [{ blockId: brandId<BlockId>("msg-1:block:0"), type: "text", content: "partial" }],
+        blocks: [
+          {
+            blockId: brandId<BlockId>("msg-1:block:0"),
+            type: "text",
+            content: "partial",
+          },
+        ],
       },
       createdAt: "2026-05-20T12:00:01.000Z",
     };
@@ -2368,7 +2462,9 @@ describe("chatMessagesFromChannelView", () => {
     const failed: AgenticEvent<"invocation.failed"> = {
       kind: "invocation.failed",
       actor: agent,
-      causality: { invocationId: brandId<InvocationId>("inv-terminal-failure") },
+      causality: {
+        invocationId: brandId<InvocationId>("inv-terminal-failure"),
+      },
       payload: {
         protocol: AGENTIC_PROTOCOL_VERSION,
         reason: "permission denied",
@@ -2601,7 +2697,11 @@ describe("chatMessagesFromChannelView", () => {
   });
 
   it("projects multi-recipient receipts and aggregates partial when only some read", () => {
-    const user = { kind: "user" as const, id: "user-1", participantId: "participant-user-1" };
+    const user = {
+      kind: "user" as const,
+      id: "user-1",
+      participantId: "participant-user-1",
+    };
     const agentA = { kind: "agent" as const, id: "a", participantId: "pa" };
     const agentB = { kind: "agent" as const, id: "b", participantId: "pb" };
     const id = brandId<MessageId>("u-receipts");
@@ -2631,11 +2731,18 @@ describe("chatMessagesFromChannelView", () => {
       .reduce(reduceChannelView, createInitialChannelViewState());
     const chat = chatMessagesFromChannelView(state).find((message) => message.id === id);
     expect(chat?.receipts?.aggregate).toBe("partial");
-    expect(chat?.receipts?.byParticipant).toMatchObject({ pa: "read", pb: "received" });
+    expect(chat?.receipts?.byParticipant).toMatchObject({
+      pa: "read",
+      pb: "received",
+    });
   });
 
   it("marks a retracted message and drops it from no further ack", () => {
-    const user = { kind: "user" as const, id: "user-1", participantId: "participant-user-1" };
+    const user = {
+      kind: "user" as const,
+      id: "user-1",
+      participantId: "participant-user-1",
+    };
     const id = brandId<MessageId>("u-retract");
     const sent: AgenticEvent<"message.completed"> = {
       kind: "message.completed",
@@ -2672,7 +2779,11 @@ describe("cross-channel traffic", () => {
   };
 
   function published(
-    publications: Array<{ channelId: string; envelopeId: string; summary?: string }>,
+    publications: Array<{
+      channelId: string;
+      envelopeId: string;
+      summary?: string;
+    }>,
     createdAt: string
   ): AgenticEvent<"external.envelope_published"> {
     return {
@@ -2730,8 +2841,16 @@ describe("cross-channel traffic", () => {
       envelope(
         published(
           [
-            { channelId: "channel-a", envelopeId: "say:call-1", summary: "for a" },
-            { channelId: "channel-b", envelopeId: "say:call-1", summary: "for b" },
+            {
+              channelId: "channel-a",
+              envelopeId: "say:call-1",
+              summary: "for a",
+            },
+            {
+              channelId: "channel-b",
+              envelopeId: "say:call-1",
+              summary: "for b",
+            },
           ],
           "2026-05-20T12:00:00.000Z"
         ),

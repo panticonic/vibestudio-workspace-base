@@ -95,7 +95,13 @@ const blockBaseShape = {
 };
 const messageBlockInputSchema = z.discriminatedUnion("type", [
   z.object({ ...blockBaseShape, type: z.literal("text"), content: z.string() }).strict(),
-  z.object({ ...blockBaseShape, type: z.literal("thinking"), content: z.string() }).strict(),
+  z
+    .object({
+      ...blockBaseShape,
+      type: z.literal("thinking"),
+      content: z.string(),
+    })
+    .strict(),
   z
     .object({
       ...blockBaseShape,
@@ -105,10 +111,26 @@ const messageBlockInputSchema = z.discriminatedUnion("type", [
     })
     .strict(),
   z
-    .object({ ...blockBaseShape, type: z.literal("attachment"), content: z.string().optional() })
+    .object({
+      ...blockBaseShape,
+      type: z.literal("attachment"),
+      content: z.string().optional(),
+    })
     .strict(),
-  z.object({ ...blockBaseShape, type: z.literal("data"), content: z.string().optional() }).strict(),
-  z.object({ ...blockBaseShape, type: z.literal("diagnostic"), content: z.string() }).strict(),
+  z
+    .object({
+      ...blockBaseShape,
+      type: z.literal("data"),
+      content: z.string().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      ...blockBaseShape,
+      type: z.literal("diagnostic"),
+      content: z.string(),
+    })
+    .strict(),
 ]);
 
 const messageReplacesSchema = z
@@ -656,6 +678,8 @@ const automationInstitutedPayloadSchema = z
         revision: z.number().int().positive(),
         action: z.enum(["prompt", "eval", "method"]),
         createdAt: z.number().int().nonnegative(),
+        state: z.literal("active"),
+        nextRunAt: z.number().int().nonnegative().optional(),
         schedule: automationScheduleSnapshotSchema,
       })
       .strict(),
@@ -845,7 +869,11 @@ function requireStoredPayloadField(
 ): void {
   if (!payload) return;
   if (check(payload[field])) return;
-  ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["payload", field], message });
+  ctx.addIssue({
+    code: z.ZodIssueCode.custom,
+    path: ["payload", field],
+    message,
+  });
 }
 
 export const storedAgenticEventSchema = z
