@@ -134,7 +134,7 @@ export function LaunchGateFacts({
   );
 }
 
-export function HostTargetsSection() {
+export function HostTargetsSection({ showHeading = true }: { showHeading?: boolean } = {}) {
   const [candidates, setCandidates] = useState<Record<HostTarget, HostTargetCandidate[]>>({
     electron: [],
     "react-native": [],
@@ -438,11 +438,13 @@ export function HostTargetsSection() {
   if (!hasCandidates) return null;
 
   return (
-    <Flex direction="column" gap="2" mt="4">
-      <Flex justify="between" align="center">
-        <Text size="2" weight="medium">
-          Host targets
-        </Text>
+    <Flex direction="column" gap="2">
+      <Flex justify={showHeading ? "between" : "end"} align="center">
+        {showHeading ? (
+          <Text size="2" weight="medium">
+            Host targets
+          </Text>
+        ) : null}
         <Button size="1" variant="soft" onClick={() => void load()}>
           Refresh
         </Button>

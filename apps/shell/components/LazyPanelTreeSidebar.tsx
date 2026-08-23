@@ -50,7 +50,7 @@ import { isPanelClosePointerButton } from "@vibestudio/shared/panelCommands";
 import { notification, panel } from "../shell/client.js";
 import {
   activeWorkspaceNameAtom,
-  connectionSettingsDialogOpenAtom,
+  settingsDialogSectionAtom,
   pinnedPanelIdsAtom,
   workspaceChooserDialogOpenAtom,
 } from "../state/appModeAtoms.js";
@@ -720,7 +720,7 @@ interface SidebarFooterProps {
 }
 
 function SidebarFooter({ activeWorkspaceName, onSwitchWorkspace, onNewPanel }: SidebarFooterProps) {
-  const setConnectionSettingsOpen = useSetAtom(connectionSettingsDialogOpenAtom);
+  const setSettingsSection = useSetAtom(settingsDialogSectionAtom);
   const openCommandAgent = useSetAtom(openCommandAgentAtom);
   const handleWorkspaceKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -803,7 +803,7 @@ function SidebarFooter({ activeWorkspaceName, onSwitchWorkspace, onNewPanel }: S
         ) : (
           <Box style={{ flex: 1 }} />
         )}
-        <ConnectionStatusBadge onOpenSettings={() => setConnectionSettingsOpen(true)} />
+        <ConnectionStatusBadge onOpenSettings={() => setSettingsSection("connection")} />
         <ThemeSettings />
       </Flex>
     </Box>

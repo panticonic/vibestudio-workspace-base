@@ -3,7 +3,7 @@ import { useAtomValue, useSetAtom } from "jotai";
 import { AppDialog } from "@workspace/ui/overlay";
 
 import {
-  connectionSettingsDialogOpenAtom,
+  settingsDialogSectionAtom,
   workspaceChooserDialogOpenAtom,
   shellOverlayActiveAtom,
 } from "../state/appModeAtoms";
@@ -23,19 +23,17 @@ import { WorkspaceWizard } from "./WorkspaceWizard";
 export default function MainMode() {
   const workspaceChooserOpen = useAtomValue(workspaceChooserDialogOpenAtom);
   const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
-  const connectionSettingsOpen = useAtomValue(connectionSettingsDialogOpenAtom);
-  const setConnectionSettingsOpen = useSetAtom(
-    connectionSettingsDialogOpenAtom
-  );
+  const settingsSection = useAtomValue(settingsDialogSectionAtom);
+  const setSettingsSection = useSetAtom(settingsDialogSectionAtom);
   const shellOverlayActive = useAtomValue(shellOverlayActiveAtom);
 
   // Mounted here, not next to the badge that opens it: the badge lives in the
   // panel tree, which breadcrumb mode unmounts, but this event arrives in both.
   useShellEvent(
-    "open-connection-settings",
+    "open-settings",
     useCallback(
-      () => setConnectionSettingsOpen(true),
-      [setConnectionSettingsOpen]
+      ({ section }) => setSettingsSection(section),
+      [setSettingsSection]
     )
   );
 
@@ -97,8 +95,8 @@ export default function MainMode() {
       </AppDialog>
 
       <ConnectionSettingsDialog
-        open={connectionSettingsOpen}
-        onOpenChange={setConnectionSettingsOpen}
+        section={settingsSection}
+        onSectionChange={setSettingsSection}
       />
     </>
   );

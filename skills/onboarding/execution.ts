@@ -8,6 +8,7 @@ import {
   type OnboardingInteraction,
   type ResolvedOnboardingSelection,
 } from "./routing";
+import type { ShellNavigationTarget } from "./catalog";
 import { readInstalledOnboardingCatalog } from "./snapshot";
 
 export interface OnboardingExecutionDependencies {
@@ -15,7 +16,7 @@ export interface OnboardingExecutionDependencies {
     id: string;
     readiness?: "ready" | "unconfirmed";
   }>;
-  openShellSurface: (target: "connection-settings" | "workspace-chooser") => Promise<void>;
+  openShellSurface: (target: ShellNavigationTarget) => Promise<void>;
   readCatalog?: typeof readInstalledOnboardingCatalog;
 }
 

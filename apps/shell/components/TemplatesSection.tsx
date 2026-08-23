@@ -95,7 +95,7 @@ function WorkspaceTemplateReview({
  * The workspace-settings surface for direct template relationships. Inherited
  * rows deliberately remain visible, but cannot be removed independently.
  */
-export function TemplatesSection() {
+export function TemplatesSection({ showHeading = true }: { showHeading?: boolean } = {}) {
   const controller = useTemplateManagementController(templates);
   const { rows, operations, catalog, loading, notice, error } = controller;
   const [query, setQuery] = useState("");
@@ -186,17 +186,28 @@ export function TemplatesSection() {
   };
 
   return (
-    <Card mt="4" aria-label="Templates">
+    <Card aria-label="Templates">
       <Flex direction="column" gap="3">
         <Flex align="center" justify="between" gap="2" wrap="wrap">
-          <Box>
-            <Text as="div" weight="bold">
-              Templates
-            </Text>
-            <Text as="div" size="1" color="gray">
-              Templates shape this workspace. You review changes before anything is added.
-            </Text>
-          </Box>
+          {showHeading ? (
+            <Box>
+              <Text as="div" weight="bold">
+                Templates
+              </Text>
+              <Text as="div" size="1" color="gray">
+                Templates shape this workspace. You review changes before anything is added.
+              </Text>
+            </Box>
+          ) : (
+            <Box>
+              <Text as="div" size="3" weight="medium">
+                Workspace templates
+              </Text>
+              <Text as="div" size="2" color="gray">
+                Review the templates that shape this workspace and manage their updates.
+              </Text>
+            </Box>
+          )}
           <Button
             size="1"
             variant="soft"

@@ -60,14 +60,185 @@ const GRAYS = [
  * covered. Falls back to the viewport if this ever renders outside the tree.
  */
 const SHELL_CHROME_BOUNDARY_SELECTOR = '[data-shell-panel-sidebar="true"]';
-const RADII: ThemeConfigValue["radius"][] = ["none", "small", "medium", "large", "full"];
-const SCALINGS: ThemeConfigValue["scaling"][] = ["90%", "95%", "100%", "105%", "110%"];
+const RADII: ThemeConfigValue["radius"][] = [
+  "none",
+  "small",
+  "medium",
+  "large",
+  "full",
+];
+const SCALINGS: ThemeConfigValue["scaling"][] = [
+  "90%",
+  "95%",
+  "100%",
+  "105%",
+  "110%",
+];
 
-export function ThemeSettings() {
+export function ThemeSettingsControls() {
   const mode = useAtomValue(themeModeAtom);
   const config = useAtomValue(themeConfigAtom);
   const setMode = useSetAtom(setThemeModeAtom);
   const setConfig = useSetAtom(setThemeConfigAtom);
+
+  return (
+    <Flex direction="column" gap="3">
+      <Flex direction="column" gap="1">
+        <Text size="1" color="gray" weight="medium">
+          Appearance
+        </Text>
+        <SegmentedControl.Root
+          size="1"
+          value={mode}
+          onValueChange={(value) => setMode(value as typeof mode)}
+        >
+          <SegmentedControl.Item className="app-touch-target" value="light">
+            Light
+          </SegmentedControl.Item>
+          <SegmentedControl.Item className="app-touch-target" value="dark">
+            Dark
+          </SegmentedControl.Item>
+          <SegmentedControl.Item className="app-touch-target" value="system">
+            System
+          </SegmentedControl.Item>
+        </SegmentedControl.Root>
+      </Flex>
+
+      <Flex direction="column" gap="1">
+        <Text size="1" color="gray" weight="medium">
+          Accent
+        </Text>
+        <Flex gap="2" wrap="wrap">
+          {ACCENTS.map((accent) => {
+            const selected = config.accentColor === accent;
+            return (
+              <Tooltip key={accent} content={accent}>
+                <button
+                  type="button"
+                  aria-label={`Accent ${accent}`}
+                  aria-pressed={selected}
+                  onClick={() => setConfig({ accentColor: accent })}
+                  className="app-touch-target"
+                  style={
+                    {
+                      width: 26,
+                      height: 26,
+                      borderRadius: "var(--radius-3)",
+                      // The swatch's own accent scale, scoped via data-accent-color.
+                      background: `var(--${accent}-9)`,
+                      border: selected
+                        ? "2px solid var(--gray-12)"
+                        : "1px solid var(--surface-border)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      cursor: "pointer",
+                      padding: 0,
+                    } as CSSProperties
+                  }
+                >
+                  {selected ? <CheckIcon style={{ color: "white" }} /> : null}
+                </button>
+              </Tooltip>
+            );
+          })}
+        </Flex>
+      </Flex>
+
+      <Flex direction="column" gap="1">
+        <Text size="1" color="gray" weight="medium">
+          Gray
+        </Text>
+        <Select.Root
+          size="1"
+          value={config.grayColor}
+          onValueChange={(value) => {
+            if (isThemeGrayColor(value)) setConfig({ grayColor: value });
+          }}
+        >
+          <Select.Trigger className="app-touch-target" />
+          <Select.Content>
+            {GRAYS.map((gray) => (
+              <Select.Item key={gray} value={gray}>
+                {gray}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
+      </Flex>
+
+      <Flex direction="column" gap="1">
+        <Text size="1" color="gray" weight="medium">
+          Corner radius
+        </Text>
+        <Select.Root
+          size="1"
+          value={config.radius}
+          onValueChange={(value) => {
+            if (isThemeRadius(value)) setConfig({ radius: value });
+          }}
+        >
+          <Select.Trigger className="app-touch-target" />
+          <Select.Content>
+            {RADII.map((radius) => (
+              <Select.Item key={radius} value={radius}>
+                {radius}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
+      </Flex>
+
+      <Flex direction="column" gap="1">
+        <Text size="1" color="gray" weight="medium">
+          Scaling
+        </Text>
+        <Select.Root
+          size="1"
+          value={config.scaling}
+          onValueChange={(value) => {
+            if (isThemeScaling(value)) setConfig({ scaling: value });
+          }}
+        >
+          <Select.Trigger className="app-touch-target" />
+          <Select.Content>
+            {SCALINGS.map((scaling) => (
+              <Select.Item key={scaling} value={scaling}>
+                {scaling}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
+      </Flex>
+
+      <Flex direction="column" gap="1">
+        <Text size="1" color="gray" weight="medium">
+          Panel background
+        </Text>
+        <SegmentedControl.Root
+          size="1"
+          value={config.panelBackground}
+          onValueChange={(value) => {
+            if (isThemePanelBackground(value))
+              setConfig({ panelBackground: value });
+          }}
+        >
+          <SegmentedControl.Item className="app-touch-target" value="solid">
+            Solid
+          </SegmentedControl.Item>
+          <SegmentedControl.Item
+            className="app-touch-target"
+            value="translucent"
+          >
+            Translucent
+          </SegmentedControl.Item>
+        </SegmentedControl.Root>
+      </Flex>
+    </Flex>
+  );
+}
+
+export function ThemeSettings() {
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const [boundary, setBoundary] = useState<Element | null>(null);
 
@@ -75,7 +246,9 @@ export function ThemeSettings() {
   // user toggles navigation modes, so a reference taken once goes stale.
   const handleOpenChange = useCallback((open: boolean) => {
     if (!open) return;
-    setBoundary(triggerRef.current?.closest(SHELL_CHROME_BOUNDARY_SELECTOR) ?? null);
+    setBoundary(
+      triggerRef.current?.closest(SHELL_CHROME_BOUNDARY_SELECTOR) ?? null,
+    );
   }, []);
 
   return (
@@ -95,168 +268,16 @@ export function ThemeSettings() {
       </Tooltip>
       <Popover.Content
         size="2"
-        // Upward and end-aligned: the trigger sits at the foot of the tree, so
-        // this is the one direction with room inside the boundary.
         side="top"
         align="end"
         {...(boundary ? { collisionBoundary: boundary } : {})}
         style={{
           width: 264,
-          // Radix publishes the room left inside the boundary; clamping to it
-          // keeps a narrowed tree from pushing the popover under the panels.
           maxWidth: "var(--radix-popover-content-available-width)",
           zIndex: "var(--z-popover)" as unknown as number,
         }}
       >
-        <Flex direction="column" gap="3">
-          <Flex direction="column" gap="1">
-            <Text size="1" color="gray" weight="medium">
-              Appearance
-            </Text>
-            <SegmentedControl.Root
-              size="1"
-              value={mode}
-              onValueChange={(value) => setMode(value as typeof mode)}
-            >
-              <SegmentedControl.Item className="app-touch-target" value="light">
-                Light
-              </SegmentedControl.Item>
-              <SegmentedControl.Item className="app-touch-target" value="dark">
-                Dark
-              </SegmentedControl.Item>
-              <SegmentedControl.Item className="app-touch-target" value="system">
-                System
-              </SegmentedControl.Item>
-            </SegmentedControl.Root>
-          </Flex>
-
-          <Flex direction="column" gap="1">
-            <Text size="1" color="gray" weight="medium">
-              Accent
-            </Text>
-            <Flex gap="2" wrap="wrap">
-              {ACCENTS.map((accent) => {
-                const selected = config.accentColor === accent;
-                return (
-                  <Tooltip key={accent} content={accent}>
-                    <button
-                      type="button"
-                      aria-label={`Accent ${accent}`}
-                      aria-pressed={selected}
-                      onClick={() => setConfig({ accentColor: accent })}
-                      className="app-touch-target"
-                      style={
-                        {
-                          width: 26,
-                          height: 26,
-                          borderRadius: "var(--radius-3)",
-                          // The swatch's own accent scale, scoped via data-accent-color.
-                          background: `var(--${accent}-9)`,
-                          border: selected
-                            ? "2px solid var(--gray-12)"
-                            : "1px solid var(--surface-border)",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          cursor: "pointer",
-                          padding: 0,
-                        } as CSSProperties
-                      }
-                    >
-                      {selected ? <CheckIcon style={{ color: "white" }} /> : null}
-                    </button>
-                  </Tooltip>
-                );
-              })}
-            </Flex>
-          </Flex>
-
-          <Flex direction="column" gap="1">
-            <Text size="1" color="gray" weight="medium">
-              Gray
-            </Text>
-            <Select.Root
-              size="1"
-              value={config.grayColor}
-              onValueChange={(value) => {
-                if (isThemeGrayColor(value)) setConfig({ grayColor: value });
-              }}
-            >
-              <Select.Trigger className="app-touch-target" />
-              <Select.Content>
-                {GRAYS.map((gray) => (
-                  <Select.Item key={gray} value={gray}>
-                    {gray}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          </Flex>
-
-          <Flex direction="column" gap="1">
-            <Text size="1" color="gray" weight="medium">
-              Corner radius
-            </Text>
-            <Select.Root
-              size="1"
-              value={config.radius}
-              onValueChange={(value) => {
-                if (isThemeRadius(value)) setConfig({ radius: value });
-              }}
-            >
-              <Select.Trigger className="app-touch-target" />
-              <Select.Content>
-                {RADII.map((radius) => (
-                  <Select.Item key={radius} value={radius}>
-                    {radius}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          </Flex>
-
-          <Flex direction="column" gap="1">
-            <Text size="1" color="gray" weight="medium">
-              Scaling
-            </Text>
-            <Select.Root
-              size="1"
-              value={config.scaling}
-              onValueChange={(value) => {
-                if (isThemeScaling(value)) setConfig({ scaling: value });
-              }}
-            >
-              <Select.Trigger className="app-touch-target" />
-              <Select.Content>
-                {SCALINGS.map((scaling) => (
-                  <Select.Item key={scaling} value={scaling}>
-                    {scaling}
-                  </Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          </Flex>
-
-          <Flex direction="column" gap="1">
-            <Text size="1" color="gray" weight="medium">
-              Panel background
-            </Text>
-            <SegmentedControl.Root
-              size="1"
-              value={config.panelBackground}
-              onValueChange={(value) => {
-                if (isThemePanelBackground(value)) setConfig({ panelBackground: value });
-              }}
-            >
-              <SegmentedControl.Item className="app-touch-target" value="solid">
-                Solid
-              </SegmentedControl.Item>
-              <SegmentedControl.Item className="app-touch-target" value="translucent">
-                Translucent
-              </SegmentedControl.Item>
-            </SegmentedControl.Root>
-          </Flex>
-        </Flex>
+        <ThemeSettingsControls />
       </Popover.Content>
     </Popover.Root>
   );

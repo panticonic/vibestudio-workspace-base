@@ -27,10 +27,12 @@ export function PairedDevicesSection({
   currentDeviceId,
   workspaceName,
   onStartPhoneSetup,
+  showHeading = true,
 }: {
   currentDeviceId?: string;
   workspaceName?: string;
   onStartPhoneSetup?: () => void;
+  showHeading?: boolean;
 }) {
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [owners, setOwners] = useState<Record<string, ShellAccountProfile>>({});
@@ -157,11 +159,13 @@ export function PairedDevicesSection({
   const expired = !!invite && remainingMs <= 0 && !pairedDevice;
 
   return (
-    <Flex direction="column" gap="2" mt="4">
-      <Flex justify="between" align="center">
-        <Text size="2" weight="medium">
-          Paired devices
-        </Text>
+    <Flex direction="column" gap="2">
+      <Flex justify={showHeading ? "between" : "end"} align="center">
+        {showHeading ? (
+          <Text size="2" weight="medium">
+            Paired devices
+          </Text>
+        ) : null}
         <Flex gap="2">
           <Button
             size="1"

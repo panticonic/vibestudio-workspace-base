@@ -1,5 +1,6 @@
 import { atom } from "jotai";
 import type { WorkspaceEntry } from "@vibestudio/shared/types";
+import type { SettingsSection } from "@vibestudio/shared/shellSurface";
 import { app, workspace } from "../shell/client.js";
 
 // =============================================================================
@@ -144,13 +145,13 @@ export const workspaceChooserDialogOpenAtom = atom(false);
 // =============================================================================
 
 /**
- * Whether the connection/pairing settings dialog is open. Held here rather than
+ * The open settings section, or null while the dialog is closed. Held here rather than
  * in the control that opens it: the connection badge lives in the panel tree,
  * which is unmounted in breadcrumb navigation, but the dialog is also opened
- * from the `open-connection-settings` shell event (app.openShellSurface) and
+ * from the `open-settings` shell event (app.openShellSurface) and
  * the hamburger menu, which must work in either navigation mode.
  */
-export const connectionSettingsDialogOpenAtom = atom(false);
+export const settingsDialogSectionAtom = atom<SettingsSection | null>(null);
 
 // =============================================================================
 // Workspace Wizard State

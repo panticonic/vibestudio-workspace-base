@@ -10,7 +10,7 @@ type ReleaseVersions = Awaited<ReturnType<typeof supervisedUnits.versions>>;
 type AppUnit = SupervisedUnit & { versions: ReleaseVersions };
 type UnitHealth = Awaited<ReturnType<typeof supervisedUnits.health>>;
 
-export function AppUpdatesSection() {
+export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolean } = {}) {
   const [pending, setPending] = useState<PendingUpdate[]>([]);
   const [apps, setApps] = useState<AppUnit[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
@@ -146,11 +146,13 @@ export function AppUpdatesSection() {
   if (apps.length === 0) return null;
 
   return (
-    <Flex direction="column" gap="2" mt="4">
-      <Flex justify="between" align="center">
-        <Text size="2" weight="medium">
-          App updates
-        </Text>
+    <Flex direction="column" gap="2">
+      <Flex justify={showHeading ? "between" : "end"} align="center">
+        {showHeading ? (
+          <Text size="2" weight="medium">
+            App updates
+          </Text>
+        ) : null}
         <Button size="1" variant="soft" onClick={() => void load()}>
           Refresh
         </Button>

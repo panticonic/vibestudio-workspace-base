@@ -1,3 +1,8 @@
+import {
+  validateShellSurfaceTarget,
+  type ShellSurfaceDescriptor,
+} from "@vibestudio/shared/shellSurface";
+
 export type OnboardingRole =
   | "connection"
   | "optional-configuration"
@@ -43,7 +48,10 @@ export const setupActions = [
 
 export type SetupAction = (typeof setupActions)[number];
 
-export type ShellNavigationTarget = "connection-settings" | "workspace-chooser";
+export type ShellNavigationTarget = Extract<
+  ShellSurfaceDescriptor,
+  { kind: "settings" | "workspace-chooser" }
+>;
 
 export type SetupActionTarget =
   | { via: "owner-skill" }
@@ -200,8 +208,8 @@ export const onboardingCatalog: readonly OnboardingCapabilityDefinition[] = [
     tier: "host-topology",
     ownerSkillPath: "skills/phone-setup/SKILL.md",
     actions: {
-      setup: { via: "shell-navigation", target: "connection-settings" },
-      change: { via: "shell-navigation", target: "connection-settings" },
+      setup: { via: "shell-navigation", target: { kind: "settings", section: "devices" } },
+      change: { via: "shell-navigation", target: { kind: "settings", section: "devices" } },
     },
     visibility: "secondary",
     setup: {
@@ -219,8 +227,8 @@ export const onboardingCatalog: readonly OnboardingCapabilityDefinition[] = [
     scope: "server",
     tier: "host-topology",
     actions: {
-      setup: { via: "shell-navigation", target: "connection-settings" },
-      change: { via: "shell-navigation", target: "connection-settings" },
+      setup: { via: "shell-navigation", target: { kind: "settings", section: "connection" } },
+      change: { via: "shell-navigation", target: { kind: "settings", section: "connection" } },
     },
     visibility: "secondary",
     setup: {
@@ -468,14 +476,11 @@ function parseActionTarget(value: unknown, label: string): SetupActionTarget {
     };
   }
   if (via === "shell-navigation") {
-    return {
-      via,
-      target: oneOf(
-        source["target"],
-        ["connection-settings", "workspace-chooser"] as const,
-        `${label}.target`
-      ),
-    };
+    const target = validateShellSurfaceTarget(source["target"]);
+    if (target.kind !== "settings" && target.kind !== "workspace-chooser") {
+      throw new Error(`${label}.target must be settings or workspace-chooser`);
+    }
+    return { via, target };
   }
   return { via };
 }

@@ -39,7 +39,10 @@ describe("executeOnboardingSelection", () => {
       executeOnboardingSelection(onboardingInteraction("connection.device", "setup"), deps)
     ).resolves.toEqual({
       handled: true,
-      target: { via: "shell-navigation", target: "connection-settings" },
+      target: {
+        via: "shell-navigation",
+        target: { kind: "settings", section: "devices" },
+      },
     });
     await executeOnboardingSelection(onboardingInteraction("connection.github", "inspect"), deps);
     await expect(
@@ -54,7 +57,10 @@ describe("executeOnboardingSelection", () => {
       readiness: "ready",
     });
 
-    expect(deps.openShellSurface).toHaveBeenCalledWith("connection-settings");
+    expect(deps.openShellSurface).toHaveBeenCalledWith({
+      kind: "settings",
+      section: "devices",
+    });
     expect(deps.openWorkspacePanel).toHaveBeenCalledWith("about/credentials");
     expect(deps.openWorkspacePanel).toHaveBeenCalledWith("about/browser-import-inspector");
   });

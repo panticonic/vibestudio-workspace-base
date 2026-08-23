@@ -348,7 +348,7 @@ Under the hood this is the open host method `app.openShellSurface(target)`
 | `{ kind: "command-agent", panelId?, mode?, prompt? }` | the command overlay about a panel; the shell focuses that panel first so the overlay, the focused panel and the bound conversation agree |
 | `{ kind: "about", page }` | an About page by id (`permissions`, `credentials`, `automations`, …) |
 | `{ kind: "panel-command", panelId, commandId }` | a host command that panel contributed — routed exactly like a palette selection |
-| `"connection-settings"`, `"workspace-chooser"` | management chrome |
+| `{ kind: "settings", section?: "connection" \| "devices" \| "profile" \| "appearance" \| "apps" \| "hosts" \| "templates" }`, `"workspace-chooser"` | management chrome |
 
 `panel.describeShellSurfaces()` lists the kinds this host can open; offer only
 those instead of probing. Hosts without shell chrome (headless server, some
