@@ -1290,10 +1290,7 @@ export class MissionsDO extends DurableObjectBase {
       authorization?.ownerChain.at(-1) ??
       [...(authorization?.initiatorChain ?? [])]
         .reverse()
-        .find((principal) => principal.startsWith("user:")) ??
-      (authorization?.testPolicy?.kind === "case" && authorization.testPolicy.case.initiatingUserId
-        ? `user:${authorization.testPolicy.case.initiatingUserId}`
-        : null);
+        .find((principal) => principal.startsWith("user:"));
     const callerUser = this.caller?.userId;
     const userId =
       callerUser && callerUser !== "system"
@@ -1306,13 +1303,6 @@ export class MissionsDO extends DurableObjectBase {
         callerUser: callerUser ?? null,
         actingUser: authorization?.actingUser ?? null,
         ownerChain: authorization?.ownerChain ?? [],
-        testPolicy:
-          authorization?.testPolicy?.kind === "case"
-            ? {
-                policyId: authorization.testPolicy.policyId,
-                initiatingUserId: authorization.testPolicy.case.initiatingUserId ?? null,
-              }
-            : (authorization?.testPolicy?.kind ?? null),
       });
       throw denied("Automations require an authenticated user");
     }

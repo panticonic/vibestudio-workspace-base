@@ -214,7 +214,7 @@ describe("MissionsDO", () => {
 
   it("installs an edited revision immediately and keeps it active", async () => {
     const { instance, callAs } = await missions();
-    const rpcCall = vi.fn(async (target: string, method: string) => {
+    const rpcCall = vi.fn(async (target: string, method: string, _args?: unknown[]) => {
       if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
       if (target === "main" && method === "reviewedClosure.activate") return undefined;
       if (target === "main" && method === "reviewedClosure.suspend") return undefined;
@@ -269,7 +269,7 @@ describe("MissionsDO", () => {
   it("keeps the installed revision when replacement closure installation fails", async () => {
     const { instance, callAs } = await missions();
     let activationCount = 0;
-    const rpcCall = vi.fn(async (target: string, method: string) => {
+    const rpcCall = vi.fn(async (target: string, method: string, _args?: unknown[]) => {
       if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
       if (target === "main" && method === "reviewedClosure.suspend") return undefined;
       if (target === "main" && method === "reviewedClosure.activate") {
@@ -318,7 +318,7 @@ describe("MissionsDO", () => {
 
   it("pauses an active automation when the host reports denied run authority", async () => {
     const { instance, callAs } = await missions();
-    const rpcCall = vi.fn(async (target: string, method: string) => {
+    const rpcCall = vi.fn(async (target: string, method: string, _args?: unknown[]) => {
       if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
       if (target === "main" && method === "reviewedClosure.activate") return undefined;
       if (target === "main" && method === "reviewedClosure.suspend") return undefined;
@@ -589,7 +589,7 @@ describe("MissionsDO", () => {
       callerKind: "panel" as const,
       userId: "alice",
     };
-    const rpcCall = vi.fn(async (target: string, method: string) => {
+    const rpcCall = vi.fn(async (target: string, method: string, _args?: unknown[]) => {
       if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
       if (target === "main" && method === "reviewedClosure.activate") return undefined;
       if (target === "main" && method === "reviewedClosure.suspend") return undefined;
@@ -694,7 +694,7 @@ describe("MissionsDO", () => {
         callerKind: "panel" as const,
         userId: "alice",
       };
-      const rpcCall = vi.fn(async (target: string, method: string) => {
+      const rpcCall = vi.fn(async (target: string, method: string, _args?: unknown[]) => {
         if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
         if (target === "main" && method.startsWith("reviewedClosure.")) return undefined;
         if (target === "main" && method === "notification.showToUser") return "notif-scheduled";
@@ -795,7 +795,7 @@ describe("MissionsDO", () => {
       callerKind: "panel" as const,
       userId: "alice",
     };
-    const rpcCall = vi.fn(async (target: string, method: string) => {
+    const rpcCall = vi.fn(async (target: string, method: string, _args?: unknown[]) => {
       if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
       if (target === "main" && method.startsWith("reviewedClosure.")) return undefined;
       if (target === "main" && method === "notification.showToUser") return "notif-run-started";
@@ -839,7 +839,7 @@ describe("MissionsDO", () => {
         callerKind: "panel" as const,
         userId: "alice",
       };
-      const rpcCall = vi.fn(async (target: string, method: string) => {
+      const rpcCall = vi.fn(async (target: string, method: string, _args?: unknown[]) => {
         if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
         if (
           target === "main" &&

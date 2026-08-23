@@ -195,7 +195,6 @@ export class HeadlessRunner {
     testNames: Map<HeadlessSession, string | null>;
     modelPolicy: ModelPolicyState;
     thinkingLevel?: SystemTestThinkingLevel;
-    initiatingUserId: string;
     sessionPolicies: Map<HeadlessSession, ModelPolicyState>;
   };
   private readonly testName: string | null;
@@ -221,14 +220,12 @@ export class HeadlessRunner {
     opts?: {
       model?: string;
       thinkingLevel?: SystemTestThinkingLevel;
-      initiatingUserId?: string;
     },
     shared?: {
       sessions: Set<HeadlessSession>;
       testNames: Map<HeadlessSession, string | null>;
       modelPolicy: HeadlessRunner["shared"]["modelPolicy"];
       thinkingLevel?: SystemTestThinkingLevel;
-      initiatingUserId: string;
       sessionPolicies: Map<HeadlessSession, ModelPolicyState>;
     },
     testName: string | null = null,
@@ -245,7 +242,6 @@ export class HeadlessRunner {
       sessions: new Set(),
       testNames: new Map(),
       sessionPolicies: new Map(),
-      initiatingUserId: opts?.initiatingUserId ?? "system-test-unattributed",
       ...(opts?.thinkingLevel ? { thinkingLevel: opts.thinkingLevel } : {}),
       modelPolicy: {
         ...modelRoute,
@@ -359,7 +355,6 @@ export class HeadlessRunner {
       workspaceRepoFixture,
       {
         testId: testName,
-        initiatingUserId: this.shared.initiatingUserId,
         agent: {
           model: this.shared.modelPolicy.primaryModel,
           approvalLevel: 2,

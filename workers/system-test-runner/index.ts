@@ -18,7 +18,6 @@ import { readEvalStatusWithRetry } from "./eval-status-retry.js";
 interface SystemTestRunConfig {
   runId: string;
   contextId: string;
-  initiatingUserId?: string;
   names?: string[];
   category?: string;
   all?: boolean;
@@ -243,11 +242,9 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     sensitivity: "write",
   })
   async startSystemTestRun(options: SystemTestRunConfig): Promise<{ runId: string }> {
-    const initiatingUserId = this.caller?.userId;
-    if (!initiatingUserId || initiatingUserId === "system") {
+    if (!this.caller?.userId || this.caller.userId === "system") {
       throw new Error("System tests require an authenticated human initiator");
     }
-    const attributedOptions = { ...options, initiatingUserId };
     const handle = createEvalRunHandle(
       <T>(method: string, args: unknown[]) => this.rpc.call<T>("main", method, args),
       {
@@ -255,7 +252,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
         scope: { key: options.runId, lifecycle: "finite" },
         source: {
           kind: "inline",
-          code: systemTestEvalCode(attributedOptions),
+          code: systemTestEvalCode(options),
           syntax: "typescript",
         },
       }

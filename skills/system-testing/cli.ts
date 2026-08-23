@@ -24,8 +24,6 @@ export interface SystemTestDescriptor {
 export interface SystemTestRunOptions {
   runId: string;
   contextId: string;
-  /** Host-attested account that started this unattended run. */
-  initiatingUserId?: string;
   names?: string[];
   category?: string;
   all?: boolean;
@@ -200,7 +198,6 @@ export async function runSystemTests(options: SystemTestRunOptions): Promise<Sys
   const runner = new HeadlessRunner(options.contextId, {
     ...(options.model ? { model } : {}),
     ...(options.thinkingLevel ? { thinkingLevel: options.thinkingLevel } : {}),
-    initiatingUserId: options.initiatingUserId,
   });
   const tester = new TestRunner(runner, {
     testTimeoutMs,
