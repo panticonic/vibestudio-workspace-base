@@ -183,6 +183,186 @@ describe("MissionsDO", () => {
     });
   });
 
+  it("does not persist a running definition when closure installation fails", async () => {
+    const { instance, callAs, sql } = await missions();
+    Object.defineProperty(instance, "rpc", {
+      value: {
+        call: vi.fn(async (target: string, method: string) => {
+          if (target === "main" && method === "reviewedClosure.activate") {
+            throw new Error("closure registry unavailable");
+          }
+          throw new Error(`Unexpected RPC ${target}.${method}`);
+        }),
+      },
+      configurable: true,
+    });
+
+    await expect(
+      callAs(
+        { callerId: "panel:alice", callerKind: "panel", userId: "alice" },
+        "launch",
+        {
+          name: "Daily summary",
+          charter: charter(),
+          permissions: [],
+        }
+      )
+    ).rejects.toThrow("closure registry unavailable");
+    expect(sql.exec(`SELECT COUNT(*) AS count FROM missions`).one()).toEqual({ count: 0 });
+    expect(sql.exec(`SELECT COUNT(*) AS count FROM mission_proposals`).one()).toEqual({ count: 0 });
+  });
+
+  it("installs an edited revision immediately and keeps it active", async () => {
+    const { instance, callAs } = await missions();
+    const rpcCall = vi.fn(async (target: string, method: string) => {
+      if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+      if (target === "main" && method === "reviewedClosure.activate") return undefined;
+      if (target === "main" && method === "reviewedClosure.suspend") return undefined;
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    Object.defineProperty(instance, "rpc", {
+      value: { call: rpcCall },
+      configurable: true,
+    });
+    const alice = {
+      callerId: "panel:alice",
+      callerKind: "panel" as const,
+      userId: "alice",
+    };
+    const launched = await callAs<MissionRecord>(alice, "launch", {
+      name: "Daily summary",
+      charter: charter(),
+      permissions: [],
+    });
+    const editedCharter = charter();
+    editedCharter.summary = "Prepare a focused daily summary";
+    const edited = await callAs<MissionRecord>(alice, "edit", launched.missionId, {
+      name: "Focused daily summary",
+      charter: editedCharter,
+    });
+
+    expect(edited).toMatchObject({
+      missionId: launched.missionId,
+      name: "Focused daily summary",
+      revision: 2,
+      state: "active",
+      charter: { summary: "Prepare a focused daily summary" },
+    });
+    expect(edited.revisionDigest).not.toBe(launched.revisionDigest);
+    const closureCalls = rpcCall.mock.calls.filter(
+      ([target, method]) => target === "main" && String(method).startsWith("reviewedClosure.")
+    );
+    expect(closureCalls.map(([, method]) => method)).toEqual([
+      "reviewedClosure.activate",
+      "reviewedClosure.suspend",
+      "reviewedClosure.activate",
+    ]);
+    const launchedClosureDigest = String(
+      (closureCalls[0]![2] as Array<{ closureDigest: string }>)[0]!.closureDigest
+    );
+    expect(closureCalls[1]![2]).toEqual([
+      `mission:${launched.missionId}@${launchedClosureDigest}`,
+    ]);
+    await expect(callAs<MissionRecord>(alice, "get", launched.missionId)).resolves.toEqual(edited);
+  });
+
+  it("keeps the installed revision when replacement closure installation fails", async () => {
+    const { instance, callAs } = await missions();
+    let activationCount = 0;
+    const rpcCall = vi.fn(async (target: string, method: string) => {
+      if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+      if (target === "main" && method === "reviewedClosure.suspend") return undefined;
+      if (target === "main" && method === "reviewedClosure.activate") {
+        activationCount += 1;
+        if (activationCount === 2) throw new Error("replacement install failed");
+        return undefined;
+      }
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    Object.defineProperty(instance, "rpc", {
+      value: { call: rpcCall },
+      configurable: true,
+    });
+    const alice = {
+      callerId: "panel:alice",
+      callerKind: "panel" as const,
+      userId: "alice",
+    };
+    const launched = await callAs<MissionRecord>(alice, "launch", {
+      name: "Daily summary",
+      charter: charter(),
+      permissions: [],
+    });
+
+    await expect(
+      callAs(alice, "edit", launched.missionId, { name: "Replacement summary" })
+    ).rejects.toThrow("replacement install failed");
+    await expect(callAs<MissionRecord>(alice, "get", launched.missionId)).resolves.toEqual(
+      launched
+    );
+    expect(
+      rpcCall.mock.calls
+        .filter(
+          ([target, method]) =>
+            target === "main" && String(method).startsWith("reviewedClosure.")
+        )
+        .map(([, method]) => method)
+    ).toEqual([
+      "reviewedClosure.activate",
+      "reviewedClosure.suspend",
+      "reviewedClosure.activate",
+      "reviewedClosure.suspend",
+      "reviewedClosure.activate",
+    ]);
+  });
+
+  it("pauses an active automation when the host reports denied run authority", async () => {
+    const { instance, callAs } = await missions();
+    const rpcCall = vi.fn(async (target: string, method: string) => {
+      if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+      if (target === "main" && method === "reviewedClosure.activate") return undefined;
+      if (target === "main" && method === "reviewedClosure.suspend") return undefined;
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    Object.defineProperty(instance, "rpc", {
+      value: { call: rpcCall },
+      configurable: true,
+    });
+    const launched = await callAs<MissionRecord>(
+      { callerId: "panel:alice", callerKind: "panel", userId: "alice" },
+      "launch",
+      {
+        name: "Rollout watcher",
+        charter: methodCharter(),
+        permissions: [],
+      }
+    );
+    const launchedClosureDigest = String(
+      (
+        rpcCall.mock.calls.find(([, method]) => method === "reviewedClosure.activate")![2] as Array<{
+          closureDigest: string;
+        }>
+      )[0]!.closureDigest
+    );
+
+    const paused = await callAs<MissionRecord>(
+      { callerId: "main", callerKind: "server" },
+      "pauseForAuthorityDenial",
+      {
+        missionId: launched.missionId,
+        capability: "docs.read",
+        resource: { kind: "prefix", prefix: "docs/" },
+        tier: "gated",
+      }
+    );
+
+    expect(paused).toMatchObject({ missionId: launched.missionId, state: "paused" });
+    expect(paused.nextRunAt).toBeUndefined();
+    expect(rpcCall).toHaveBeenCalledWith("main", "reviewedClosure.suspend", [
+      `mission:${launched.missionId}@${launchedClosureDigest}`,
+    ]);
+  });
+
   it("compiles only eligible gated permissions into standing grants", async () => {
     const { instance, callAs } = await missions();
     const created = await callAs<MissionRecord>(

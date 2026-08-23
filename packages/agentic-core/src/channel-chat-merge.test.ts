@@ -2338,7 +2338,7 @@ describe("chatMessagesFromChannelView", () => {
     );
   });
 
-  it("projects an automation draft at institution time before any run exists", () => {
+  it("projects a running automation at institution time before any run exists", () => {
     const instituted: AgenticEvent<"automation.instituted"> = {
       kind: "automation.instituted",
       actor: agent,

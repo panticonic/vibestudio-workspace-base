@@ -1353,12 +1353,21 @@ describe("AgentVesselBase.chatOp", () => {
       },
       permissions: [],
     };
+    const pillKey = "automation:instituted:mission-daily";
+    vessel.channelPublishFailures.add(pillKey);
+    await expect(vessel.executeAutomationLaunchForTest(input)).rejects.toThrow(
+      `publish failed: ${pillKey}`
+    );
+    expect(vessel.channelStub.published).toHaveLength(0);
+
+    vessel.channelPublishFailures.delete(pillKey);
     await expect(vessel.executeAutomationLaunchForTest(input)).resolves.toMatchObject({
       details: { missionId: "mission-daily", state: "active" },
     });
 
-    expect(vessel.automationLaunchCalls).toEqual([
-      {
+    expect(vessel.automationLaunchCalls).toHaveLength(2);
+    expect(vessel.automationLaunchCalls).toEqual(
+      Array.from({ length: 2 }, () => ({
         args: [
           {
             name: "Daily check",
@@ -1395,11 +1404,14 @@ describe("AgentVesselBase.chatOp", () => {
         options: {
           idempotencyKey: expect.stringMatching(/automation:launch:.*:[0-9a-f]{64}$/),
         },
-      },
-    ]);
+      }))
+    );
+    expect(vessel.automationLaunchCalls[1]!.options).toEqual(
+      vessel.automationLaunchCalls[0]!.options
+    );
     expect(vessel.channelStub.published).toContainEqual(
       expect.objectContaining({
-        idempotencyKey: "automation:instituted:mission-daily",
+        idempotencyKey: pillKey,
         event: expect.objectContaining({
           kind: "automation.instituted",
           payload: expect.objectContaining({
