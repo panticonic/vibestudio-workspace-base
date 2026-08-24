@@ -227,10 +227,10 @@ describe("transcript delivery markers", () => {
           owner: { userId: "alice", deviceId: "panel:alice" },
           state: "active",
           revisionDigest: "b".repeat(64),
-          operationPolicy: {
+          authorityPlan: {
             schemaVersion: 1,
             digest: "d".repeat(64),
-            artifactRef: `policy:${"d".repeat(64)}`,
+            artifactRef: `authority-plan:${"d".repeat(64)}`,
             compilerVersion: "test",
             catalogDigest: "e".repeat(64),
           },

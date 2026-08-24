@@ -126,18 +126,19 @@ content to disguise origin, or invent/parse lineage-set coordinates. Use
 `contextIntegrity.explain` for bounded diagnostics from the current session.
 
 A mission revision is a durable principal over an exact charter and
-host-compiled operation policy. Userland declares semantic service operations;
+host-compiled authority plan. Userland declares semantic service operations;
 it never authors capability rows. The host derives capability and resource
-leaves from receiver contracts, stores the immutable policy artifact, and
+leaves from receiver contracts, stores the immutable authority-plan artifact, and
 acquires eligible grants for `mission:<id>@<revisionDigest>` under the
 attributed requesting user. Editing creates a new subject. Pausing only stops
 new admission and preserves the existing subject and grants.
 
-Execution admission binds that subject and policy to one authenticated agent
+Execution admission binds that subject and plan provenance to one authenticated agent
 turn, eval run, or method invocation. Causal child calls inherit the ordinary
 authorization context. Channel IDs are routing facts, never authority subjects.
 Missing runtime authority uses ordinary acquisition; do not force automation
-eval into `pregranted-only` mode.
+eval into `pregranted-only` mode. The plan predicts launch-time acquisition; it
+does not authorize, deny, or structurally expose a runtime call.
 
 The System Agent is a product-owned mission with a product-derived worker,
 prompt, roster, tools, and execution identity. It uses ordinary typed services

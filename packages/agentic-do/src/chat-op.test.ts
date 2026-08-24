@@ -669,6 +669,10 @@ class AutomationCompletionProbe extends PromptEventProbe {
     return tool.execute("complete-call", { response });
   }
 
+  async automationAddresseeContextForTest(): Promise<{ ownerUserId?: string }> {
+    return this.addresseeContext(CHANNEL);
+  }
+
   async closeAutomationTurnForTest(input: {
     automation: NonNullable<AgentTurnMetadata["automation"]>;
     summary?: string;
@@ -728,6 +732,7 @@ describe("AgentVesselBase automation ingress", () => {
   const automation = {
     missionId: "mission-health",
     runId: "run-health",
+    ownerUserId: "usr_owner",
     authoritySessionNonce: "nonce:run-health",
     name: "Project health",
     revision: 2,
@@ -738,6 +743,33 @@ describe("AgentVesselBase automation ingress", () => {
     activatedAt: 1_786_100_000_000,
     schedule: { kind: "interval" as const, everyMs: 3_600_000 },
   };
+
+  it("keeps the mission owner exactly addressable in an otherwise empty fresh run channel", async () => {
+    const { instance: vessel } = await createTestDO(AutomationCompletionProbe, TEST_AGENT_ENV);
+    await vessel.registerSubscriptionForTest(CHANNEL);
+    vessel.markEmptyRosterFresh(CHANNEL);
+    vessel.setAutomationTurnForTest(automation);
+    Object.defineProperty(vessel, "rpc", {
+      value: {
+        call: vi.fn(async (target: string, method: string) => {
+          if (target === "main" && method === "account.listWorkspaceMembers") {
+            return [{ userId: automation.ownerUserId, handle: "owner" }];
+          }
+          if (target === "main" && method === "workers.resolveService") {
+            throw new Error("directory unavailable");
+          }
+          throw new Error(`Unexpected RPC ${target}.${method}`);
+        }),
+      },
+      configurable: true,
+    });
+
+    await expect(vessel.automationAddresseeContextForTest()).resolves.toMatchObject({
+      ownerUserId: automation.ownerUserId,
+      roster: [],
+      users: [{ userId: automation.ownerUserId, handle: "owner" }],
+    });
+  });
 
   it("journals scheduled eval source with ordinary approval fallback", async () => {
     const vessel = await makePromptProbe();
@@ -865,6 +897,40 @@ describe("AgentVesselBase automation ingress", () => {
         outcome: "succeeded",
         finalMessage: "No pending migrations remain.",
         completionResponse: "No pending migrations remain.",
+      },
+    ]);
+  });
+
+  it("reports a failed scheduled turn with the mission ledger's structured failure contract", async () => {
+    const { instance: vessel } = await createTestDO(AutomationCompletionProbe, TEST_AGENT_ENV);
+    await vessel.registerSubscriptionForTest(CHANNEL);
+    const promptAutomation = { ...automation, action: "prompt" as const };
+    vessel.setAutomationTurnForTest(promptAutomation);
+    const rpcCall = vi.fn(async (target: string, method: string) => {
+      if (target === "main" && method === "workers.resolveService") {
+        return { kind: "durable-object", targetId: "do:missions" };
+      }
+      if (target === "do:missions" && method === "finishRun") return undefined;
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    Object.defineProperty(vessel, "rpc", { value: { call: rpcCall }, configurable: true });
+
+    await vessel.closeAutomationTurnForTest({
+      automation: promptAutomation,
+      reason: "model_failed",
+      summary: "Provider rejected the turn",
+    });
+
+    expect(rpcCall).toHaveBeenCalledWith("do:missions", "finishRun", [
+      {
+        runId: automation.runId,
+        outcome: "failed",
+        failure: {
+          code: "EAGENTTURN",
+          stage: "executing",
+          message: "Provider rejected the turn",
+          retry: "manual",
+        },
       },
     ]);
   });
@@ -1332,10 +1398,10 @@ describe("AgentVesselBase.chatOp", () => {
       owner: { userId: "alice", deviceId: AGENT_ID },
       state: "active",
       revisionDigest: "b".repeat(64),
-      operationPolicy: {
+      authorityPlan: {
         schemaVersion: 1,
         digest: "c".repeat(64),
-        artifactRef: `policy:${"c".repeat(64)}`,
+        artifactRef: `authority-plan:${"c".repeat(64)}`,
         compilerVersion: "test",
         catalogDigest: "d".repeat(64),
       },

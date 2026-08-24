@@ -55,6 +55,9 @@ const automationTest = unitDiagnosticsTests.find(
 const automationLaunchTest = unitDiagnosticsTests.find(
   (candidate) => candidate.name === "automation-native-launch"
 )!;
+const scheduledNotificationTest = unitDiagnosticsTests.find(
+  (candidate) => candidate.name === "automation-scheduled-notification"
+)!;
 
 describe("automation overview system test validator", () => {
   const readCode =
@@ -183,6 +186,48 @@ describe("automation native launch system test validator", () => {
     ).toMatchObject({
       passed: false,
       reason: "No successful native launch created the requested inline-eval automation",
+    });
+  });
+});
+
+describe("scheduled automation notification system test validator", () => {
+  const scheduledLaunch = {
+    name: "Scheduled notification proof",
+    summary: "Notify after one minute.",
+    action: {
+      kind: "prompt",
+      text: "Notify the owner with SYSTEM_AUTOMATION_TICK_OK.",
+    },
+    trigger: { kind: "schedule", everyMs: 60_000, maxRuns: 1 },
+    conversation: { mode: "fresh" },
+    operations: [
+      { service: "notification", method: "showToUser", use: "action" },
+    ],
+  };
+
+  it("requires a terminal successful run and independently observed notification", () => {
+    const result = execution("", scheduledLaunch, "Running and inspectable.", "launch_automation");
+    result.diagnostics = {
+      scheduledNotification: {
+        run: { phase: "terminal", outcome: "succeeded" },
+        notification: {
+          kind: "agent.message",
+          title: "Automation system proof",
+          message: "SYSTEM_AUTOMATION_TICK_OK",
+        },
+      },
+    };
+    expect(scheduledNotificationTest.validate(result)).toEqual({ passed: true });
+  });
+
+  it("rejects launch-only evidence without the promised outcome", () => {
+    expect(
+      scheduledNotificationTest.validate(
+        execution("", scheduledLaunch, "Running and inspectable.", "launch_automation")
+      )
+    ).toMatchObject({
+      passed: false,
+      reason: "No durable scheduled-run evidence was observed",
     });
   });
 });

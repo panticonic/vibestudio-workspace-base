@@ -14,9 +14,24 @@
         {
           "protocol": "vibestudio.models.v1",
           "availability": "required"
+        },
+        {
+          "protocol": "vibestudio.missions.v1",
+          "availability": "required"
         }
       ],
-      "provides": []
+      "provides": [],
+      "requests": [
+        {
+          "capability": "workspace-service:missions",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        }
+      ]
     }
   },
   "exports": {

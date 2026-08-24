@@ -35,10 +35,10 @@ const automation: MissionRecord = {
   owner: { userId: "alice", deviceId: "panel:alice" },
   state: "active",
   revisionDigest: "b".repeat(64),
-  operationPolicy: {
+  authorityPlan: {
     schemaVersion: 1,
     digest: "e".repeat(64),
-    artifactRef: `policy:${"e".repeat(64)}`,
+    artifactRef: `authority-plan:${"e".repeat(64)}`,
     compilerVersion: "test",
     catalogDigest: "f".repeat(64),
   },
@@ -186,6 +186,13 @@ describe("AutomationActivity", () => {
     expect(api.get).toHaveBeenCalledWith(launched.missionId);
     expect(api.getRun).not.toHaveBeenCalled();
     expect(screen.queryByText("This tick")).toBeNull();
+    expect(screen.getByText("Exact action")).toBeTruthy();
+    expect(screen.getByText("Check the project.")).toBeTruthy();
+    expect(screen.getByText("Launch-time authority planning")).toBeTruthy();
+    expect(
+      screen.getByText("No pre-acquisition hints. Runtime calls still use ordinary approval.")
+    ).toBeTruthy();
+    expect(screen.getByText("Standing authority")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit parameters" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Stop recurring calls" })).toBeTruthy();
   });

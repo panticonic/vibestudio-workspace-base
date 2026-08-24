@@ -14,7 +14,7 @@ For work performed by the current agent, call `launch_automation` directly. A su
 ## Choose the executor
 
 - Use an agent `prompt` when a model should reason each run.
-- Use agent `eval` for a small exact script that should run as the same agent and use its ordinary channel-bound EvalDO.
+- Use agent `eval` for a small exact script that should run as the same agent and use its ordinary channel-bound EvalDO. Eval code has the ordinary module API; model-facing tools such as `notify` are not JavaScript globals. If a run must use an agent tool, use a prompt action.
 - Use a lower-level `method` charter for a reusable deterministic method on another exact Durable Object image.
 
 Choose `conversation: { mode: "fresh" }` for isolated runs. Choose `continue` only when the current conversation’s accumulated context is part of the task; the tool binds the channel and context itself.
@@ -22,7 +22,7 @@ Choose `conversation: { mode: "fresh" }` for isolated runs. Choose `continue` on
 ## Launch correctly
 
 1. Resolve only user choices that materially alter the job: behavior, cadence and timezone, optional end condition, and fresh versus continuing conversation.
-2. Enumerate every semantic service operation the action may perform. Declare each as `{ service, method, args?, use }`, where `use` is `action` or `conditional`. These are behavior declarations, not capability names or grants.
+2. Enumerate the concrete external service operations known in advance. Declare each as `{ service, method, args?, use }`, where `use` is `action` or `conditional`. These are launch-time acquisition hints, not capability names, grants, or a runtime allowlist. A prompt action can choose tools dynamically; do not invent low-level service calls for a model-facing tool such as `notify`.
    Declare only external service calls made by the action. Scheduling, fresh-conversation creation, delivery of the eval result into that conversation, and the `automation-completion.v1` return are intrinsic mission behavior: do not invent `missions.finishRun`, `chat.publish`, or similar operations for them.
 3. Call `launch_automation` once with the action, trigger, conversation mode, and operations. Do not wrap it in eval and do not discover the current agent’s build, class, object key, channel, or context first; the receiver seals those facts atomically.
 4. Report the active automation’s name and cadence. Point to its pill for inspection or control; do not publish a second card or ask for a second launch approval.
@@ -39,13 +39,7 @@ Example:
   },
   trigger: { kind: "schedule", everyMs: 60_000 },
   conversation: { mode: "fresh" },
-  operations: [
-    {
-      service: "notification",
-      method: "showToUser",
-      use: "action",
-    },
-  ],
+  operations: [],
 });
 ```
 
@@ -82,11 +76,11 @@ For a small model-free project-status check, return the status text from eval; t
 
 ## Authority
 
-The agent never authors capability rows. At launch, the host compiles declared operations against receiver-owned method contracts into an immutable, content-addressed operation policy. It derives the exact capability and resource for each operation and starts durable acquisition for every gated operation eligible for standing mission authority.
+The agent never authors capability rows. At launch, the host compiles declared operations against receiver-owned method contracts into an immutable, content-addressed authority plan. It derives the exact capability and resource for each declared operation and starts durable acquisition for every gated operation eligible for standing mission authority.
 
 The authenticated user who requested launch is recorded as the owner of the revision subject `mission:<id>@<revisionDigest>`. Grants belong to that subject, not to a channel, transient eval runtime, or model-authored identity. Channel IDs are routing facts, never authority subjects; context IDs are conversation facts.
 
-Pre-acquisition is the normal authoring path, but it is not a runtime restriction. If authority is absent when an admitted run reaches an operation, ordinary acquisition presents the exact approval, durably parks the invocation, and resumes after the decision. Critical or otherwise non-standing authority always uses that invocation-time path. In particular, do not force automation eval into `pregranted-only`.
+Pre-acquisition is the normal authoring path, but the authority plan is not a runtime allowlist, grant, tool surface, or network ceiling. If an operation was omitted or authority is absent when an admitted run reaches it, ordinary acquisition presents the exact approval, durably parks the invocation, and resumes after the decision. Structural reach still comes from the immutable code manifest and ordinary agent/eval tool exposure. Critical or otherwise non-standing authority always uses the invocation-time path. In particular, do not force automation eval into `pregranted-only`.
 
 Do not broaden operations to avoid an approval. A denial is evidence to preserve and explain, not a reason to retry through another caller or transport.
 
@@ -124,7 +118,7 @@ The minimum cadence is one minute. `untilAt` prevents a run starting at or after
 
 - `pause` stops new admission and preserves the revision’s standing grants.
 - `resume` re-enables the same revision.
-- `edit` creates a new immutable revision, policy, subject, and authority acquisition.
+- `edit` creates a new immutable revision, authority plan, subject, and authority acquisition.
 - `retire` permanently prevents new runs and retires revision authority after live executions close.
 - A failure is recorded on the run; it does not silently pause the automation.
 
@@ -139,4 +133,4 @@ return {
 };
 ```
 
-When debugging, inspect the automation pill or **Automations** for the compiled policy reference, declared operations, pending/granted/denied authority, current run phase, executor, and structured failure. Do not infer authority from a channel ID or a successful prior run.
+When debugging, inspect the automation pill or **Automations** for the authority-plan reference, declared pre-acquisition operations, pending/granted/denied authority, current run phase, executor, and structured failure. Do not infer authority from a channel ID or a successful prior run.

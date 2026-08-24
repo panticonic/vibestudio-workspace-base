@@ -30,7 +30,9 @@ type MissionOperationIntent = {
 };
 ```
 
-Operations express reachable behavior. Do not supply capability names, permission rows, grants, runtime identities, or channel IDs. The host compiles each operation against the live receiver-owned method contract and rejects unresolvable or dynamically prepared authority.
+Operations express concrete behavior known at launch. Do not supply capability names, permission rows, grants, runtime identities, or channel IDs. The host compiles each operation against the live receiver-owned method contract for durable pre-acquisition. The artifact is not a runtime allowlist: omitted or dynamic operations use ordinary prompt-capable authority acquisition when actually invoked.
+
+Model-facing agent tools are not service methods. In particular, `notify` is available to a prompt action and is not an eval JavaScript global; do not invent a `notification.*` operation as its implementation. Eval actions import the ordinary `@workspace/runtime` APIs they use.
 
 Only external service methods invoked by the action belong in `operations`.
 The mission service itself owns scheduling, run admission, fresh-conversation
@@ -114,17 +116,17 @@ recreates source state; the effective version identifies the compiled installed 
 `launch({ name, charter })` performs one idempotent durable launch:
 
 1. Validate and seal the charter.
-2. Ask the host to compile a content-addressed operation policy.
-3. Persist an active revision and its policy reference.
+2. Ask the host to compile a content-addressed authority plan.
+3. Persist an active revision and its authority-plan reference.
 4. Register `mission:<missionId>@<revisionDigest>` with the host under the attributed requesting user.
 5. Start durable acquisition for mission-grantable gated leaves.
 6. Return the active record with pending, granted, and denied request IDs.
 
 Launch institution is immediate. Individual capability decisions may still be pending; they target the durable mission revision and survive the launch execution and host restart without duplicate cards.
 
-At execution, the Missions service asks the host for an admission bound to the exact revision, policy digest, execution image, executor identity, and idempotent admission key. The returned nonce is attached to the concrete method invocation or agent turn. Causal eval and service calls inherit that admission through the ordinary RPC authorization context.
+At execution, the Missions service asks the host for an admission bound to the exact revision, authority-plan digest, execution image, executor identity, and idempotent admission key. The returned nonce is attached to the concrete method invocation or agent turn. Causal eval and service calls inherit that admission through the ordinary RPC authorization context. The authority plan records launch-time acquisition hints; it does not allow or deny runtime calls.
 
-If no matching standing grant exists, dispatcher acquisition follows the ordinary prompt-capable path. The run may wait for authority; it is not restricted to pregranted authority.
+If no matching standing grant exists, dispatcher acquisition follows the ordinary prompt-capable path. The concrete agent/eval invocation owns that approval wait while the mission run remains `executing`; it is not restricted to pregranted authority and MissionsDO does not copy a second acquisition lifecycle.
 
 ## Mission record
 
@@ -135,10 +137,10 @@ type MissionRecord = {
   name: string;
   revision: number;
   charter: MissionCharter;
-  operationPolicy: {
+  authorityPlan: {
     schemaVersion: 1;
     digest: string;
-    artifactRef: `policy:${string}`;
+    artifactRef: `authority-plan:${string}`;
     compilerVersion: string;
     catalogDigest: string;
   };
@@ -180,14 +182,12 @@ type MissionRunRecord = {
     | "executor-preparing"
     | "dispatching"
     | "executing"
-    | "waiting-authority"
     | "terminal";
   outcome?: "succeeded" | "failed" | "skipped" | "interrupted" | "cancelled";
   startedAt: number;
   runNumber?: number;
   finishedAt?: number;
   authoritySessionId?: string;
-  acquisitionId?: string;
   channelId?: string;
   contextId?: string;
   executorId?: string;
@@ -226,4 +226,4 @@ Nonterminal phases are resumable checkpoints, not UI-only status. Persist a phas
 | `retire`    | `missionId`                                        | retired definition                                   |
 | `finishRun` | structured terminal result                         | `void`; executor-only                                |
 
-The dashboard and chat inspector consume these records directly. They show declared operations and the host policy reference rather than reconstructing a permission model in userland.
+The dashboard and chat inspector consume these records directly. They show declared pre-acquisition operations and the host authority-plan reference rather than reconstructing a permission model in userland.

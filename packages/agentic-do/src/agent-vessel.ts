@@ -1585,7 +1585,16 @@ export abstract class AgentVesselBase extends DurableObjectBase {
               ? { finalMessage: input.summary }
               : {}),
         ...(!failed && completionResponse ? { completionResponse } : {}),
-        ...(failed ? { error: input.summary ?? input.reason ?? "Automation turn failed" } : {}),
+        ...(failed
+          ? {
+              failure: {
+                code: "EAGENTTURN",
+                stage: "executing",
+                message: input.summary ?? input.reason ?? "Automation turn failed",
+                retry: "manual",
+              },
+            }
+          : {}),
       },
     ]);
     if (recordedCompletion) this.deleteStateValue(completionKey);
@@ -2581,7 +2590,9 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   protected async addresseeContext(channelId: string): Promise<ResolveAddresseeContext> {
     const parentParticipantId = this.subagentIdentity()?.parentParticipantId;
     const roster = this.rosterSnapshot(channelId).map(rosterParticipantRef);
-    const ownerUserId = soleChannelUserId(roster);
+    const automationOwnerUserId = this.driver.peekLoadedLoop(channelId)?.state?.openTurn?.metadata
+      ?.automation?.ownerUserId;
+    const ownerUserId = automationOwnerUserId ?? soleChannelUserId(roster);
     const [directory, users] = await Promise.all([
       this.agentDirectoryEntries(),
       this.workspaceUserEntries(),
@@ -2695,7 +2706,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       name: "launch_automation",
       label: "launch_automation",
       description:
-        "Create and immediately start one recurring or manual automation. List the exact semantic service operations the action may use; the host compiles their authority and acquires eligible standing grants. Missing authority falls back to ordinary user approval during a run. The running automation is added to this chat as an inspectable pill before the tool returns.",
+        "Create and immediately start one recurring or manual automation. Use a prompt action when a run must call model-facing tools such as notify; those tools are not eval JavaScript globals. List concrete external service operations known at launch so the host can pre-acquire eligible standing grants; this list is not a runtime allowlist, and omitted authority falls back to ordinary user approval during a run. The running automation is added to this chat as an inspectable pill before the tool returns.",
       parameters: {
         type: "object",
         properties: {
@@ -2773,7 +2784,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
           operations: {
             type: "array",
             description:
-              "Exact service and method operations this automation may invoke. This is behavioral intent, not capability or permission metadata.",
+              "Concrete external service calls known in advance for an eval action, used only for launch-time authority acquisition. Omit for prompt actions and model-facing tools such as notify.",
             items: {
               type: "object",
               properties: {

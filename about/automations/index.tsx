@@ -580,7 +580,7 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
       <Grid columns={{ initial: "1", sm: "2" }} gap="3">
         <Box>
           <Text as="div" size="1" color="gray" mb="1">
-            Declared operations
+            Launch-time authority planning
           </Text>
           {execution.operations.length ? (
             <Flex direction="column" gap="1">
@@ -594,7 +594,7 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
             </Flex>
           ) : (
             <Text size="2" color="gray">
-              None
+              No pre-acquisition hints; runtime calls still use ordinary approval.
             </Text>
           )}
         </Box>
@@ -607,7 +607,7 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
             {automation.authority.requestIds.length} pending ·{" "}
             {automation.authority.denialIds.length} denied
           </Text>
-          <DetailCode>{automation.operationPolicy.artifactRef}</DetailCode>
+          <DetailCode>{automation.authorityPlan.artifactRef}</DetailCode>
         </Box>
       </Grid>
     </Flex>
@@ -814,7 +814,7 @@ function AutomationCard({
           </Box>
           <Box>
             <Text as="div" size="1" color="gray">
-              Operation policy
+              Authority plan
             </Text>
             <Text as="div" size="2" weight="medium">
               {execution.operations.length} declared operation

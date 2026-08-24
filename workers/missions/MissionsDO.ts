@@ -10,7 +10,7 @@ import type {
   MissionCharter,
   MissionCompletionReason,
   MissionExecution,
-  MissionOperationPolicyReference,
+  MissionAuthorityPlanReference,
   MissionRecord,
   MissionRunFailure,
   MissionRunOutcome,
@@ -47,7 +47,7 @@ interface MissionRow {
   name: string;
   revision: number;
   charter_json: string;
-  operation_policy_json: string;
+  authority_plan_json: string;
   owner_user_id: string;
   owner_device_id: string | null;
   state: MissionState;
@@ -75,10 +75,10 @@ interface RunRow {
   phase: MissionRunPhase;
   outcome: MissionRunOutcome | null;
   started_at: number;
+  progress_at: number;
   run_number: number | null;
   finished_at: number | null;
   authority_session_id: string | null;
-  acquisition_id: string | null;
   channel_id: string | null;
   context_id: string | null;
   executor_id: string | null;
@@ -93,7 +93,7 @@ interface AdmissionResult {
 }
 
 export class MissionsDO extends DurableObjectBase {
-  static override schemaVersion = 1;
+  static override schemaVersion = 2;
   static override rpcMethods = missionsMethods;
 
   constructor(ctx: DurableObjectContext, env: unknown) {
@@ -106,7 +106,7 @@ export class MissionsDO extends DurableObjectBase {
       name TEXT NOT NULL,
       revision INTEGER NOT NULL CHECK (revision > 0),
       charter_json TEXT NOT NULL,
-      operation_policy_json TEXT NOT NULL,
+      authority_plan_json TEXT NOT NULL,
       owner_user_id TEXT NOT NULL,
       owner_device_id TEXT,
       state TEXT NOT NULL CHECK (state IN ('active','paused','completed','retired')),
@@ -134,13 +134,13 @@ export class MissionsDO extends DurableObjectBase {
       mission_subject TEXT NOT NULL,
       mission_revision INTEGER NOT NULL,
       trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('manual','scheduled')),
-      phase TEXT NOT NULL CHECK (phase IN ('admitted','execution-admitting','context-preparing','executor-preparing','dispatching','executing','waiting-authority','terminal')),
+      phase TEXT NOT NULL CHECK (phase IN ('admitted','execution-admitting','context-preparing','executor-preparing','dispatching','executing','terminal')),
       outcome TEXT CHECK (outcome IS NULL OR outcome IN ('succeeded','failed','skipped','interrupted','cancelled')),
       started_at INTEGER NOT NULL,
+      progress_at INTEGER NOT NULL,
       run_number INTEGER,
       finished_at INTEGER,
       authority_session_id TEXT,
-      acquisition_id TEXT,
       channel_id TEXT,
       context_id TEXT,
       executor_id TEXT,
@@ -157,6 +157,18 @@ export class MissionsDO extends DurableObjectBase {
       created_at INTEGER NOT NULL,
       error TEXT,
       PRIMARY KEY (owner_user_id, launch_key)
+    )`);
+    this.sql.exec(`CREATE TABLE mission_edits (
+      owner_user_id TEXT NOT NULL,
+      edit_key TEXT NOT NULL,
+      mission_id TEXT NOT NULL,
+      target_revision INTEGER NOT NULL,
+      intent_json TEXT NOT NULL,
+      state TEXT NOT NULL CHECK (state IN ('preparing','active','failed')),
+      result_json TEXT,
+      created_at INTEGER NOT NULL,
+      error TEXT,
+      PRIMARY KEY (owner_user_id, edit_key)
     )`);
     this.sql.exec(`CREATE TABLE mission_effects (
       effect_id TEXT PRIMARY KEY,
@@ -180,6 +192,7 @@ export class MissionsDO extends DurableObjectBase {
       "mission_revisions",
       "mission_runs",
       "mission_launches",
+      "mission_edits",
       "mission_effects",
     ];
   }
@@ -198,8 +211,8 @@ export class MissionsDO extends DurableObjectBase {
 
   override async alarm(): Promise<{ wakeAt: number } | null> {
     await super.alarm();
-    await this.reconcileEffects(false);
     await this.resumeRuns();
+    await this.reconcileEffects(false);
     const now = Date.now();
     const due = this.sql
       .exec(
@@ -222,7 +235,11 @@ export class MissionsDO extends DurableObjectBase {
         continue;
       }
       if (mission.nextRunAt !== undefined && mission.nextRunAt <= now)
-        await this.startExecution(mission, "scheduled");
+        await this.startExecution(
+          mission,
+          "scheduled",
+          `scheduled:${mission.nextRunAt}`,
+        );
     }
     const next = this.nextWakeAt();
     return next === null ? null : { wakeAt: next };
@@ -435,6 +452,11 @@ export class MissionsDO extends DurableObjectBase {
       if (existing) {
         const mission = this.rowToMission(existing);
         await this.ensureAuthority(mission);
+        this.sql.exec(
+          "UPDATE mission_launches SET state='active',error=NULL WHERE owner_user_id=? AND launch_key=?",
+          caller.userId,
+          launchKey,
+        );
         return this.requireMission(mission.missionId);
       }
       missionId = String(prior["mission_id"]);
@@ -456,10 +478,10 @@ export class MissionsDO extends DurableObjectBase {
     }
     const now = Date.now();
     try {
-      const operationPolicy = await this.compilePolicy(input.charter);
+      const authorityPlan = await this.compilePolicy(input.charter);
       const revisionDigest = missionRevisionDigest(
         input.charter,
-        operationPolicy.digest,
+        authorityPlan.digest,
       );
       const authority: MissionAuthorityProjection = {
         requestIds: [],
@@ -471,12 +493,12 @@ export class MissionsDO extends DurableObjectBase {
       this.ctx.storage.transactionSync(() => {
         this.sql.exec(
           `INSERT INTO missions
-          (mission_id,name,revision,charter_json,operation_policy_json,owner_user_id,owner_device_id,state,revision_digest,authority_json,seeded,schedule_origin_at,next_run_at,last_run_at,created_at,updated_at,activated_at,run_count)
+          (mission_id,name,revision,charter_json,authority_plan_json,owner_user_id,owner_device_id,state,revision_digest,authority_json,seeded,schedule_origin_at,next_run_at,last_run_at,created_at,updated_at,activated_at,run_count)
           VALUES (?,?,1,?,?,?,?, 'active',?,?,0,?,?,NULL,?,?,?,0)`,
           missionId,
           input.name,
           canonicalJson(input.charter),
-          canonicalJson(operationPolicy),
+          canonicalJson(authorityPlan),
           caller.userId,
           caller.callerId,
           revisionDigest,
@@ -523,13 +545,58 @@ export class MissionsDO extends DurableObjectBase {
         name: input.name ?? `${current.name} (custom)`,
         charter: input.charter ?? current.charter,
       });
+    const editKey = this.rpcIdempotencyKey ?? this.rpcRequestId;
+    if (!editKey) throw new Error("Automation edit requires a command identity");
+    const intentJson = canonicalJson({ missionId, input });
+    const prior = this.sql
+      .exec(
+        "SELECT target_revision,intent_json,state,result_json FROM mission_edits WHERE owner_user_id=? AND edit_key=?",
+        caller.userId,
+        editKey,
+      )
+      .toArray()[0];
+    const targetRevision = prior
+      ? Number(prior["target_revision"])
+      : current.revision + 1;
+    if (prior) {
+      if (String(prior["intent_json"]) !== intentJson)
+        throw denied("Edit idempotency key was reused for a different automation change");
+      if (prior["state"] === "active" && prior["result_json"])
+        return JSON.parse(String(prior["result_json"])) as MissionRecord;
+    } else {
+      this.sql.exec(
+        "INSERT INTO mission_edits (owner_user_id,edit_key,mission_id,target_revision,intent_json,state,created_at) VALUES (?,?,?,?,?,'preparing',?)",
+        caller.userId,
+        editKey,
+        missionId,
+        targetRevision,
+        intentJson,
+        Date.now(),
+      );
+    }
     const charter = input.charter ?? current.charter;
     validateMissionCharter(charter);
     const policy = input.charter
       ? await this.compilePolicy(charter)
-      : current.operationPolicy;
+      : current.authorityPlan;
     const digest = missionRevisionDigest(charter, policy.digest);
-    await this.interruptRuns(current, "Automation revision was replaced");
+    if (current.revision === targetRevision) {
+      if (current.revisionDigest !== digest)
+        throw new Error("Prepared automation edit conflicts with the active revision");
+      await this.resumeRuns();
+      await this.ensureAuthority(current);
+      await this.reconcileEffects(true);
+      const result = this.requireMission(missionId);
+      this.sql.exec(
+        "UPDATE mission_edits SET state='active',result_json=?,error=NULL WHERE owner_user_id=? AND edit_key=?",
+        canonicalJson(result),
+        caller.userId,
+        editKey,
+      );
+      return result;
+    }
+    if (current.revision + 1 !== targetRevision)
+      throw new Error("Prepared automation edit no longer follows the active revision");
     const now = Date.now();
     const origin = scheduleOrigin(charter, now);
     const next = initialNextRunAt(charter, now, origin);
@@ -542,9 +609,9 @@ export class MissionsDO extends DurableObjectBase {
         now,
       );
       this.sql.exec(
-        `UPDATE missions SET name=?,revision=?,charter_json=?,operation_policy_json=?,state='active',revision_digest=?,authority_json=?,schedule_origin_at=?,next_run_at=?,updated_at=?,activated_at=?,completed_at=NULL,completion_reason=NULL,completion_response=NULL WHERE mission_id=?`,
+        `UPDATE missions SET name=?,revision=?,charter_json=?,authority_plan_json=?,state='active',revision_digest=?,authority_json=?,schedule_origin_at=?,next_run_at=?,updated_at=?,activated_at=?,completed_at=NULL,completion_reason=NULL,completion_response=NULL WHERE mission_id=?`,
         input.name ?? current.name,
-        current.revision + 1,
+        targetRevision,
         canonicalJson(charter),
         canonicalJson(policy),
         digest,
@@ -560,9 +627,20 @@ export class MissionsDO extends DurableObjectBase {
         now,
       );
     });
+    await this.interruptRunsForSubject(
+      missionPrincipal(current.missionId, current.revisionDigest),
+      "Automation revision was replaced",
+    );
     await this.ensureAuthority(this.requireMission(missionId));
     await this.reconcileEffects(true);
-    return this.requireMission(missionId);
+    const result = this.requireMission(missionId);
+    this.sql.exec(
+      "UPDATE mission_edits SET state='active',result_json=?,error=NULL WHERE owner_user_id=? AND edit_key=?",
+      canonicalJson(result),
+      caller.userId,
+      editKey,
+    );
+    return result;
   }
 
   @schemaRpc()
@@ -570,7 +648,9 @@ export class MissionsDO extends DurableObjectBase {
     const mission = this.requireMission(missionId);
     this.requireActive(mission);
     await this.ensureAuthority(mission);
-    return this.startExecution(mission, "manual");
+    const requestKey = this.rpcIdempotencyKey ?? this.rpcRequestId;
+    if (!requestKey) throw new Error("Manual automation run requires a command identity");
+    return this.startExecution(mission, "manual", `manual:${requestKey}`);
   }
 
   @schemaRpc()
@@ -611,7 +691,6 @@ export class MissionsDO extends DurableObjectBase {
   @schemaRpc()
   async retire(missionId: string): Promise<MissionRecord> {
     const mission = this.requireMission(missionId);
-    await this.interruptRuns(mission, "Automation was retired");
     const now = Date.now();
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
@@ -624,6 +703,10 @@ export class MissionsDO extends DurableObjectBase {
         now,
       );
     });
+    await this.interruptRunsForSubject(
+      missionPrincipal(mission.missionId, mission.revisionDigest),
+      "Automation was retired",
+    );
     await this.reconcileEffects(true);
     return this.requireMission(missionId);
   }
@@ -651,10 +734,10 @@ export class MissionsDO extends DurableObjectBase {
 
   private async compilePolicy(
     charter: MissionCharter,
-  ): Promise<MissionOperationPolicyReference> {
-    const result = await this.rpc.call<MissionOperationPolicyReference>(
+  ): Promise<MissionAuthorityPlanReference> {
+    const result = await this.rpc.call<MissionAuthorityPlanReference>(
       "main",
-      "authority.compileOperationPolicy",
+      "authority.compileAuthorityPlan",
       [
         {
           executionImageDigest: missionExecutionImageDigest(
@@ -669,7 +752,7 @@ export class MissionsDO extends DurableObjectBase {
         },
       ],
       {
-        idempotencyKey: `automation:policy:${missionExecutionImageDigest(charter.execution.image)}:${canonicalJson(charter.execution.operations)}`,
+        idempotencyKey: `automation:authority-plan:${missionExecutionImageDigest(charter.execution.image)}:${canonicalJson(charter.execution.operations)}`,
       },
     );
     return result;
@@ -679,7 +762,7 @@ export class MissionsDO extends DurableObjectBase {
     const subject = missionPrincipal(mission.missionId, mission.revisionDigest);
     const projection = await this.acquireAuthority(
       subject,
-      mission.operationPolicy.digest,
+      mission.authorityPlan.digest,
     );
     this.sql.exec(
       "UPDATE missions SET authority_json=?,updated_at=? WHERE mission_id=? AND revision_digest=?",
@@ -692,12 +775,12 @@ export class MissionsDO extends DurableObjectBase {
 
   private acquireAuthority(
     subject: `mission:${string}@${string}`,
-    operationPolicyDigest: string,
+    authorityPlanDigest: string,
   ): Promise<MissionAuthorityProjection> {
     return this.rpc.call<MissionAuthorityProjection>(
       "main",
       "authority.acquireForTarget",
-      [{ targetSubject: subject, operationPolicyDigest }],
+      [{ targetSubject: subject, authorityPlanDigest }],
       { idempotencyKey: `automation:authority:${subject}` },
     );
   }
@@ -757,14 +840,14 @@ export class MissionsDO extends DurableObjectBase {
     }
   }
 
-  private async interruptRuns(
-    mission: MissionRecord,
+  private async interruptRunsForSubject(
+    subject: `mission:${string}@${string}`,
     message: string,
   ): Promise<void> {
     const rows = this.sql
       .exec(
-        "SELECT * FROM mission_runs WHERE mission_id=? AND phase!='terminal' ORDER BY started_at,run_id",
-        mission.missionId,
+        "SELECT * FROM mission_runs WHERE mission_subject=? AND phase!='terminal' ORDER BY started_at,run_id",
+        subject,
       )
       .toArray() as unknown as RunRow[];
     for (const row of rows) {
@@ -777,7 +860,8 @@ export class MissionsDO extends DurableObjectBase {
 
   private async startExecution(
     mission: MissionRecord,
-    trigger: "manual" | "scheduled"
+    trigger: "manual" | "scheduled",
+    occurrenceKey: string,
   ): Promise<MissionRunRecord> {
     const now = Date.now();
     const completion = this.completionBeforeRun(mission, now);
@@ -786,17 +870,20 @@ export class MissionsDO extends DurableObjectBase {
       throw denied(`Automation has completed (${completion.reason})`);
     }
     this.requireActive(mission);
-    const active = this.activeRunRow(mission.missionId);
-    const runId = `run_${crypto.randomUUID().replaceAll("-", "")}`;
     const subject = missionPrincipal(mission.missionId, mission.revisionDigest);
+    const runId = await deterministicRunId(subject, occurrenceKey);
+    const existing = this.getRunRow(runId);
+    if (existing) return this.rowToRun(existing);
+    const active = this.activeRunRow(mission.missionId);
     if (active) {
       this.sql.exec(
-        `INSERT INTO mission_runs (run_id,mission_id,mission_subject,mission_revision,trigger_kind,phase,outcome,started_at,finished_at,failure_json) VALUES (?,?,?,?,?,'terminal','skipped',?,?,?)`,
+        `INSERT INTO mission_runs (run_id,mission_id,mission_subject,mission_revision,trigger_kind,phase,outcome,started_at,progress_at,finished_at,failure_json) VALUES (?,?,?,?,?,'terminal','skipped',?,?,?,?)`,
         runId,
         mission.missionId,
         subject,
         mission.revision,
         trigger,
+        now,
         now,
         now,
         canonicalJson(
@@ -814,12 +901,13 @@ export class MissionsDO extends DurableObjectBase {
     const runNumber = mission.runCount + 1;
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
-        `INSERT INTO mission_runs (run_id,mission_id,mission_subject,mission_revision,trigger_kind,phase,started_at,run_number) VALUES (?,?,?,?,?,'admitted',?,?)`,
+        `INSERT INTO mission_runs (run_id,mission_id,mission_subject,mission_revision,trigger_kind,phase,started_at,progress_at,run_number) VALUES (?,?,?,?,?,'admitted',?,?,?)`,
         runId,
         mission.missionId,
         subject,
         mission.revision,
         trigger,
+        now,
         now,
         runNumber
       );
@@ -848,19 +936,15 @@ export class MissionsDO extends DurableObjectBase {
   private async advanceRun(runId: string): Promise<void> {
     try {
       let row = this.getRunRow(runId);
-      if (
-        !row ||
-        row.phase === "terminal" ||
-        row.phase === "executing" ||
-        row.phase === "waiting-authority"
-      )
-        return;
+      if (!row || row.phase === "terminal") return;
+      if (row.phase === "executing" && row.progress_at + 60_000 > Date.now()) return;
       const mission = this.requireMission(row.mission_id, true);
       if (
         row.mission_subject !==
           missionPrincipal(mission.missionId, mission.revisionDigest) ||
         mission.state === "retired"
       ) {
+        await this.closeAdmission(row);
         this.terminalizeRun(row, "interrupted", {
           failure: failure(
             "EREVISION",
@@ -896,7 +980,8 @@ export class MissionsDO extends DurableObjectBase {
           }
         } else contextId = `automation-method:${mission.missionId}`;
         this.sql.exec(
-          "UPDATE mission_runs SET phase='executor-preparing',context_id=?,channel_id=? WHERE run_id=? AND phase='context-preparing'",
+          "UPDATE mission_runs SET phase='executor-preparing',progress_at=?,failure_json=NULL,context_id=?,channel_id=? WHERE run_id=? AND phase='context-preparing'",
+          Date.now(),
           contextId,
           channelId,
           runId,
@@ -929,7 +1014,8 @@ export class MissionsDO extends DurableObjectBase {
           );
         }
         this.sql.exec(
-          "UPDATE mission_runs SET phase='execution-admitting',executor_id=? WHERE run_id=? AND phase='executor-preparing'",
+          "UPDATE mission_runs SET phase='execution-admitting',progress_at=?,failure_json=NULL,executor_id=? WHERE run_id=? AND phase='executor-preparing'",
+          Date.now(),
           target.targetId,
           runId,
         );
@@ -938,7 +1024,8 @@ export class MissionsDO extends DurableObjectBase {
       if (row.phase === "execution-admitting") {
         const admission = await this.admit(mission, row);
         this.sql.exec(
-          "UPDATE mission_runs SET phase='dispatching',authority_session_id=? WHERE run_id=? AND phase='execution-admitting'",
+          "UPDATE mission_runs SET phase='dispatching',progress_at=?,failure_json=NULL,authority_session_id=? WHERE run_id=? AND phase='execution-admitting'",
+          Date.now(),
           admission.authoritySessionId,
           runId,
         );
@@ -946,6 +1033,14 @@ export class MissionsDO extends DurableObjectBase {
       }
       if (row.phase === "dispatching") {
         const admission = await this.admit(mission, row);
+        this.recordAdmission(runId, admission);
+        if (execution.kind === "method")
+          await this.dispatchMethod(mission, row, admission);
+        else await this.dispatchAgent(mission, row, admission);
+      }
+      if (row.phase === "executing") {
+        const admission = await this.admit(mission, row);
+        this.recordAdmission(runId, admission);
         if (execution.kind === "method")
           await this.dispatchMethod(mission, row, admission);
         else await this.dispatchAgent(mission, row, admission);
@@ -953,6 +1048,10 @@ export class MissionsDO extends DurableObjectBase {
     } catch (error) {
       const row = this.getRunRow(runId);
       if (!row || row.phase === "terminal") return;
+      if (retryFor(error) === "automatic") {
+        this.deferRun(row, error);
+        return;
+      }
       await this.closeAdmission(row).catch(() => undefined);
       this.terminalizeRun(row, "failed", {
         failure: failure(
@@ -996,7 +1095,7 @@ export class MissionsDO extends DurableObjectBase {
             effectiveVersion: execution.image.effectiveVersion,
             className: execution.image.className,
           },
-          operationPolicyDigest: mission.operationPolicy.digest,
+          authorityPlanDigest: mission.authorityPlan.digest,
           executor:
             execution.kind === "agent"
               ? {
@@ -1042,6 +1141,11 @@ export class MissionsDO extends DurableObjectBase {
         completionResponse: completion?.response,
       });
     } catch (error) {
+      const current = this.requireRunRow(row.run_id);
+      if (retryFor(error) === "automatic") {
+        this.deferRun(current, error);
+        return;
+      }
       await this.closeAdmission(this.requireRunRow(row.run_id)).catch(
         () => undefined,
       );
@@ -1179,9 +1283,30 @@ export class MissionsDO extends DurableObjectBase {
 
   private setPhase(runId: string, phase: MissionRunPhase): void {
     this.sql.exec(
-      "UPDATE mission_runs SET phase=? WHERE run_id=? AND phase!='terminal'",
+      "UPDATE mission_runs SET phase=?,progress_at=?,failure_json=NULL WHERE run_id=? AND phase!='terminal'",
       phase,
+      Date.now(),
       runId,
+    );
+  }
+
+  private recordAdmission(runId: string, admission: AdmissionResult): void {
+    this.sql.exec(
+      "UPDATE mission_runs SET authority_session_id=?,progress_at=? WHERE run_id=? AND phase!='terminal'",
+      admission.authoritySessionId,
+      Date.now(),
+      runId,
+    );
+  }
+
+  private deferRun(row: RunRow, error: unknown): void {
+    this.sql.exec(
+      "UPDATE mission_runs SET progress_at=?,failure_json=? WHERE run_id=? AND phase!='terminal'",
+      Date.now(),
+      canonicalJson(
+        failure(errorCode(error), row.phase, describeError(error), "automatic"),
+      ),
+      row.run_id,
     );
   }
 
@@ -1204,8 +1329,9 @@ export class MissionsDO extends DurableObjectBase {
         : null;
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
-        "UPDATE mission_runs SET phase='terminal',outcome=?,finished_at=?,final_message=?,completion_response=?,failure_json=? WHERE run_id=? AND phase!='terminal'",
+        "UPDATE mission_runs SET phase='terminal',outcome=?,progress_at=?,finished_at=?,final_message=?,completion_response=?,failure_json=? WHERE run_id=? AND phase!='terminal'",
         outcome,
+        now,
         now,
         bounded(input.finalMessage) ?? null,
         bounded(input.completionResponse) ?? null,
@@ -1281,7 +1407,7 @@ export class MissionsDO extends DurableObjectBase {
       .exec(
         `SELECT MIN(wake_at) AS wake FROM (
       SELECT next_run_at AS wake_at FROM missions WHERE state='active' AND next_run_at IS NOT NULL
-      UNION ALL SELECT started_at+60000 AS wake_at FROM mission_runs WHERE phase!='terminal'
+      UNION ALL SELECT progress_at+60000 AS wake_at FROM mission_runs WHERE phase!='terminal'
       UNION ALL SELECT next_attempt_at AS wake_at FROM mission_effects
     )`,
       )
@@ -1366,10 +1492,10 @@ export class MissionsDO extends DurableObjectBase {
 
   private rowToMission(row: MissionRow): MissionRecord {
     const charter = JSON.parse(row.charter_json) as MissionCharter;
-    const operationPolicy = JSON.parse(
-      row.operation_policy_json,
-    ) as MissionOperationPolicyReference;
-    const digest = missionRevisionDigest(charter, operationPolicy.digest);
+    const authorityPlan = JSON.parse(
+      row.authority_plan_json,
+    ) as MissionAuthorityPlanReference;
+    const digest = missionRevisionDigest(charter, authorityPlan.digest);
     if (digest !== row.revision_digest)
       throw new Error(
         `Automation ${row.mission_id} has an invalid revision digest`,
@@ -1380,7 +1506,7 @@ export class MissionsDO extends DurableObjectBase {
       name: row.name,
       revision: Number(row.revision),
       charter,
-      operationPolicy,
+      authorityPlan,
       owner: {
         userId: row.owner_user_id,
         ...(row.owner_device_id ? { deviceId: row.owner_device_id } : {}),
@@ -1428,7 +1554,6 @@ export class MissionsDO extends DurableObjectBase {
       ...(row.authority_session_id
         ? { authoritySessionId: row.authority_session_id }
         : {}),
-      ...(row.acquisition_id ? { acquisitionId: row.acquisition_id } : {}),
       ...(row.channel_id ? { channelId: row.channel_id } : {}),
       ...(row.context_id ? { contextId: row.context_id } : {}),
       ...(row.executor_id ? { executorId: row.executor_id } : {}),
@@ -1487,11 +1612,23 @@ function initialNextRunAt(
 function withJitter(value: number, jitterMs = 0): number {
   return value + (jitterMs > 0 ? Math.floor(Math.random() * jitterMs) : 0);
 }
+
+async function deterministicRunId(
+  subject: `mission:${string}@${string}`,
+  occurrenceKey: string,
+): Promise<string> {
+  const bytes = new TextEncoder().encode(
+    `automation-run-v1\0${subject}\0${occurrenceKey}`,
+  );
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", bytes));
+  return `run_${[...digest].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
 function automationActivity(mission: MissionRecord, run: MissionRunRecord) {
   const trigger = mission.charter.trigger;
   return {
     missionId: mission.missionId,
     runId: run.runId,
+    ownerUserId: mission.owner.userId,
     name: mission.name,
     revision: mission.revision,
     action:

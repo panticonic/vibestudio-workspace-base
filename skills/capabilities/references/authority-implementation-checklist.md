@@ -64,19 +64,19 @@ Treat these as one contract:
 - exact immutable execution image;
 - action, conversation mode, and trigger;
 - semantic operation intents;
-- host-compiled, content-addressed operation policy with compiler and catalog versions;
+- host-compiled, content-addressed authority plan for pre-acquisition, with compiler and catalog versions;
 - durable subject `mission:<id>@<revisionDigest>` and attributed owner;
 - durable target authority requests and grants; and
 - generic executor admission and causal inheritance.
 
 The host compiler—not userland—derives capability/resource leaves from receiver
-contracts. Store the canonical policy body under its digest; never trust a body
+contracts. Store the canonical authority-plan body under its digest; never trust a body
 supplied by the mission store or recompile an old revision against a newer
 catalog during admission.
 
 Launch registers the subject and begins eligible standing acquisition. Pending
 requests belong to the revision, survive the launching execution and host
-restart, and deduplicate by revision policy plus compiled operation. Runtime
+restart, and deduplicate by revision plan plus compiled operation. Runtime
 misses still enter ordinary acquisition and may park the invocation.
 
 Editing creates a new revision subject. Prevent new admission to the retired

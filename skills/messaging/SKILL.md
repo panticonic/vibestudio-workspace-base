@@ -95,8 +95,9 @@ notify({
 
 For a recurring notification, put the same explicit `notify` call in an
 agent-owned automation prompt. Use `alert: "inbox"` explicitly even though
-person-addressed messages currently default there, and declare the bounded
-notification operation in the automation charter. See
+person-addressed messages currently default there. `notify` is an agent tool,
+not a service operation, so omit the automation `operations` list unless the
+action separately makes concrete external service calls. See
 [Automations](../automations/SKILL.md); `launch_automation` immediately creates
 the active revision and seals the current agent's identity and installed image.
 

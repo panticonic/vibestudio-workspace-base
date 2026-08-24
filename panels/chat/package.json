@@ -25,6 +25,10 @@
           "availability": "required"
         },
         {
+          "protocol": "vibestudio.missions.v1",
+          "availability": "required"
+        },
+        {
           "protocol": "vibestudio.models.v1",
           "availability": "required"
         }
@@ -155,6 +159,15 @@
           },
           "tier": "gated",
           "evidence": "intentional-broad"
+        },
+        {
+          "capability": "workspace-service:missions",
+          "resource": {
+            "kind": "exact",
+            "key": "do:workers/missions:MissionsDO:workspace-missions"
+          },
+          "tier": "gated",
+          "evidence": "exact"
         },
         {
           "capability": "workspace-service:models",

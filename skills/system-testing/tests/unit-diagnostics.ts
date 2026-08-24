@@ -1,4 +1,8 @@
-import type { TestCase } from "../types.js";
+import type {
+  TestCase,
+  TestExecutionResult,
+  TestOrchestrationContext,
+} from "../types.js";
 import {
   findLastAgentMessage,
   getToolCalls,
@@ -216,6 +220,141 @@ function automationNativeLaunchChecked(result: Parameters<typeof noIncompleteInv
   return noIncompleteInvocations(result);
 }
 
+const SCHEDULED_NOTIFICATION_NAME = "Scheduled notification proof";
+const SCHEDULED_NOTIFICATION_TEXT = "SYSTEM_AUTOMATION_TICK_OK";
+
+async function scheduledNotificationProof(
+  context: TestOrchestrationContext
+): Promise<TestExecutionResult> {
+  const startedAt = Date.now();
+  const session = await context.runner.spawn();
+  let error: string | undefined;
+  let observation: Record<string, unknown> | undefined;
+  try {
+    const { gad, rpc, workers } = await import("@workspace/runtime");
+    await context.sendAndWait(
+      session,
+      `Launch an automation named “${SCHEDULED_NOTIFICATION_NAME}” that runs every minute and stops after one admitted run. Use an agent prompt action so the scheduled agent invokes its notify tool (not an eval script). Each run must notify the owner at the inbox rung with title “Automation system proof” and exact content “${SCHEDULED_NOTIFICATION_TEXT}”. Use a fresh conversation for the run. Start it immediately and tell me where I can inspect it.`,
+      "scheduled notification launch"
+    );
+    const service = await workers.resolveService("vibestudio.missions.v1");
+    if (service.kind !== "durable-object" || !service.targetId) {
+      throw new Error("The automation ledger did not resolve to a Durable Object");
+    }
+    const deadline = Date.now() + Math.min(100_000, context.remainingTimeMs() ?? 100_000);
+    while (Date.now() < deadline) {
+      const overview = await rpc.call<Record<string, unknown>>(service.targetId, "overview", [
+        { query: SCHEDULED_NOTIFICATION_NAME, limit: 5 },
+      ]);
+      const item = Array.isArray(overview["items"]) ? overview["items"][0] : undefined;
+      const itemRecord = isRecord(item) ? item : undefined;
+      const automation = isRecord(itemRecord?.["automation"])
+        ? itemRecord?.["automation"]
+        : undefined;
+      const recentRuns = Array.isArray(itemRecord?.["recentRuns"])
+        ? itemRecord?.["recentRuns"]
+        : [];
+      const run = recentRuns.find(
+        (candidate) => isRecord(candidate) && candidate["phase"] === "terminal"
+      );
+      if (automation?.["name"] === SCHEDULED_NOTIFICATION_NAME && isRecord(run)) {
+        const notifications = await gad.listUserNotificationsForMe({
+          includeAcknowledged: true,
+          limit: 100,
+        });
+        const notification = notifications.find(
+          (candidate) =>
+            candidate.kind === "agent.message" &&
+            (candidate.title === "Automation system proof" ||
+              candidate.message === SCHEDULED_NOTIFICATION_TEXT)
+        );
+        observation = {
+          missionId: automation["missionId"],
+          missionState: automation["state"],
+          runCount: automation["runCount"],
+          run: {
+            runId: run["runId"],
+            phase: run["phase"],
+            outcome: run["outcome"],
+            finalMessage: run["finalMessage"],
+            failure: run["failure"],
+          },
+          notification: notification
+            ? {
+                id: notification.id,
+                kind: notification.kind,
+                title: notification.title,
+                message: notification.message,
+              }
+            : null,
+        };
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+    if (!observation) throw new Error("The first scheduled run did not become terminal in time");
+  } catch (cause) {
+    error = cause instanceof Error ? cause.message : String(cause);
+  }
+  const execution: TestExecutionResult = {
+    messages: [...session.messages],
+    duration: Date.now() - startedAt,
+    snapshot: session.snapshot(),
+    diagnostics: { scheduledNotification: observation ?? null },
+    ...(error ? { error } : {}),
+  };
+  try {
+    await session.close();
+  } catch (cause) {
+    execution.cleanupErrors = [
+      `close: ${cause instanceof Error ? cause.message : String(cause)}`,
+    ];
+  }
+  return execution;
+}
+
+function scheduledNotificationChecked(result: TestExecutionResult) {
+  if (result.error) return { passed: false, reason: result.error };
+  const base = noIncompleteInvocations(result);
+  if (!base.passed) return base;
+  const launches = getToolCalls(result).filter(
+    (call) =>
+      call.name === "launch_automation" &&
+      call.execution?.status === "complete" &&
+      call.execution?.isError !== true &&
+      call.arguments?.["name"] === SCHEDULED_NOTIFICATION_NAME
+  );
+  if (launches.length !== 1) {
+    return { passed: false, reason: "The proof automation was not launched exactly once" };
+  }
+  if ((launches[0]?.arguments?.["action"] as { kind?: unknown } | undefined)?.kind !== "prompt") {
+    return { passed: false, reason: "The prompt-execution proof launched a different executor" };
+  }
+  const observed = result.diagnostics?.["scheduledNotification"];
+  if (!isRecord(observed) || !isRecord(observed["run"])) {
+    return { passed: false, reason: "No durable scheduled-run evidence was observed" };
+  }
+  const run = observed["run"];
+  if (run["phase"] !== "terminal" || run["outcome"] !== "succeeded") {
+    return {
+      passed: false,
+      reason: `The first scheduled run did not succeed: ${JSON.stringify(run)}`,
+    };
+  }
+  const notification = observed["notification"];
+  if (
+    !isRecord(notification) ||
+    (notification["title"] !== "Automation system proof" &&
+      notification["message"] !== SCHEDULED_NOTIFICATION_TEXT)
+  ) {
+    return {
+      passed: false,
+      reason: "The successful run did not produce the requested durable user notification",
+    };
+  }
+  return { passed: true };
+}
+
 function isDailyProjectPulseLaunch(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
@@ -320,5 +459,29 @@ export const unitDiagnosticsTests: TestCase[] = [
     authorityPolicy: { authority: [] },
     validation: "agent-evidence",
     validate: automationNativeLaunchChecked,
+  },
+  {
+    name: "automation-scheduled-notification",
+    description: "A launched one-minute automation completes a real run and notifies its owner",
+    category: "unit-diagnostics",
+    timeoutMs: 150_000,
+    prompt: "Harness-orchestrated scheduled automation outcome proof.",
+    authorityPolicy: {
+      authority: [
+        {
+          ruleId: "inspect-scheduled-automation",
+          capability: { kind: "exact", key: "workspace-service:missions" },
+          resource: {
+            kind: "prefix",
+            prefix: "do:workers/missions:MissionsDO:",
+          },
+          tier: "gated",
+          decision: "once",
+        },
+      ],
+    },
+    validation: "agent-evidence",
+    orchestrate: scheduledNotificationProof,
+    validate: scheduledNotificationChecked,
   },
 ];

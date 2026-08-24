@@ -20,7 +20,7 @@ describe("Automations skill contract", () => {
 
   it("keeps semantic operations separate from host-derived authority", () => {
     const value = docs();
-    expect(value).toContain("semantic service operation");
+    expect(value).toContain("launch-time acquisition hints");
     expect(value).toContain("never authors capability rows");
     expect(value).toContain("mission:<id>@<revisionDigest>");
     expect(value).toContain(
@@ -48,7 +48,10 @@ describe("Automations skill contract", () => {
     expect(value).toContain('kind: "cron"');
     expect(value).toContain('timezone: "America/New_York"');
     expect(value).toContain('protocol: "automation-completion.v1"');
-    expect(value).toContain('"waiting-authority"');
+    expect(value).toContain('"executing"');
+    expect(value).toContain(
+      "The authority plan records launch-time acquisition hints; it does not allow or deny runtime calls.",
+    );
     expect(value).toContain(
       "resumes existing nonterminal runs before admitting newly due runs",
     );

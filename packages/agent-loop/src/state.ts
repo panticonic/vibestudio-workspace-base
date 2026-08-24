@@ -158,6 +158,8 @@ export interface AgentTurnMetadata {
   automation?: {
     missionId: string;
     runId: string;
+    /** Account that owns this mission revision; used for exact `owner` addressing in fresh runs. */
+    ownerUserId: string;
     name: string;
     revision: number;
     action: "prompt" | "eval" | "method";

@@ -6,7 +6,7 @@ import { executionSessionNonceFor } from "@vibestudio/rpc/internal";
 import { missionsMethods } from "@vibestudio/service-schemas/missions";
 import type {
   MissionCharter,
-  MissionOperationPolicyReference,
+  MissionAuthorityPlanReference,
   MissionRecord,
   MissionRunRecord,
 } from "@vibestudio/shared/authority/mission";
@@ -20,6 +20,12 @@ const HASH_C = "c".repeat(64);
 class IdempotentLaunchMissionsDO extends MissionsDO {
   protected override get rpcIdempotencyKey(): string | null {
     return "agent-launch-request";
+  }
+}
+
+class IdempotentCommandMissionsDO extends MissionsDO {
+  protected override get rpcIdempotencyKey(): string | null {
+    return "stable-command";
   }
 }
 
@@ -73,11 +79,11 @@ function methodCharter(): MissionCharter {
   };
 }
 
-function policy(digest = HASH_C): MissionOperationPolicyReference {
+function policy(digest = HASH_C): MissionAuthorityPlanReference {
   return {
     schemaVersion: 1,
     digest,
-    artifactRef: `policy:${digest}`,
+    artifactRef: `authority-plan:${digest}`,
     compilerVersion: "test-compiler",
     catalogDigest: HASH_A,
   };
@@ -102,7 +108,7 @@ async function createMissions<T extends typeof MissionsDO>(
     WORKER_CLASS_NAME: "MissionsDO",
     __objectKey: "workspace-missions",
   });
-  let policyDigest = HASH_C;
+  let authorityPlanDigest = HASH_C;
   const calls: Array<{
     target: string;
     method: string;
@@ -117,8 +123,8 @@ async function createMissions<T extends typeof MissionsDO>(
       options?: unknown,
     ): Promise<unknown> => {
       calls.push({ target, method, args, options });
-      if (target === "main" && method === "authority.compileOperationPolicy")
-        return policy(policyDigest);
+      if (target === "main" && method === "authority.compileAuthorityPlan")
+        return policy(authorityPlanDigest);
       if (target === "main" && method === "authority.acquireForTarget")
         return { requestIds: [], grantIds: ["grant:mission"], denialIds: [] };
       if (target === "main" && method === "authority.retireTarget")
@@ -151,7 +157,7 @@ async function createMissions<T extends typeof MissionsDO>(
     calls,
     rpcCall,
     setPolicyDigest(value: string) {
-      policyDigest = value;
+      authorityPlanDigest = value;
     },
   };
 }
@@ -178,7 +184,7 @@ describe("MissionsDO", () => {
     expect(productMethods.sort()).toEqual(Object.keys(missionsMethods).sort());
   });
 
-  it("launches immediately with host-compiled policy and user-bound durable authority", async () => {
+  it("launches immediately with a host-compiled authority plan and user-bound durable authority", async () => {
     const { callAs, calls } = await createMissions();
     const created = await callAs<MissionRecord>(alice, "launch", {
       name: "Daily summary",
@@ -190,12 +196,12 @@ describe("MissionsDO", () => {
       state: "active",
       revision: 1,
       owner: { userId: "alice", deviceId: "panel:alice" },
-      operationPolicy: policy(),
+      authorityPlan: policy(),
       authority: { requestIds: [], grantIds: ["grant:mission"], denialIds: [] },
     });
     expect(created.revisionDigest).toMatch(/^[0-9a-f]{64}$/u);
     expect(calls.map(({ method }) => method)).toEqual([
-      "authority.compileOperationPolicy",
+      "authority.compileAuthorityPlan",
       "authority.acquireForTarget",
     ]);
     expect(calls[1]?.args).toEqual([
@@ -204,7 +210,7 @@ describe("MissionsDO", () => {
           created.missionId,
           created.revisionDigest,
         ),
-        operationPolicyDigest: HASH_C,
+        authorityPlanDigest: HASH_C,
       },
     ]);
     await expect(callAs(bob, "get", created.missionId)).rejects.toThrow(
@@ -279,7 +285,7 @@ describe("MissionsDO", () => {
       state: "active",
     });
     expect(edited.revisionDigest).not.toBe(launched.revisionDigest);
-    expect(edited.operationPolicy.digest).toBe(HASH_B);
+    expect(edited.authorityPlan.digest).toBe(HASH_B);
     expect(
       harness.calls
         .filter(({ method }) => method === "authority.acquireForTarget")
@@ -290,7 +296,7 @@ describe("MissionsDO", () => {
           edited.missionId,
           edited.revisionDigest,
         ),
-        operationPolicyDigest: HASH_B,
+        authorityPlanDigest: HASH_B,
       },
     ]);
     expect(
@@ -306,12 +312,36 @@ describe("MissionsDO", () => {
     ]);
   });
 
+  it("deduplicates edit retries to the exact committed revision", async () => {
+    const harness = await createMissions(IdempotentCommandMissionsDO);
+    const launched = await harness.callAs<MissionRecord>(alice, "launch", {
+      name: "Daily summary",
+      charter: agentCharter(),
+    });
+    harness.setPolicyDigest(HASH_B);
+    const input = {
+      name: "Focused summary",
+      charter: agentCharter("Prepare a focused summary"),
+    };
+    const first = await harness.callAs<MissionRecord>(alice, "edit", launched.missionId, input);
+    const replay = await harness.callAs<MissionRecord>(alice, "edit", launched.missionId, input);
+
+    expect(replay).toEqual(first);
+    expect(replay.revision).toBe(2);
+    expect(harness.sql.exec("SELECT COUNT(*) AS count FROM mission_revisions").one()).toEqual({
+      count: 1,
+    });
+    expect(
+      harness.calls.filter(({ method }) => method === "authority.compileAuthorityPlan"),
+    ).toHaveLength(2);
+  });
+
   it("binds method dispatch to the admitted execution nonce and closes admission", async () => {
     const harness = await createMissions();
     harness.rpcCall.mockImplementation(
       async (target, method, args = [], options) => {
         harness.calls.push({ target, method, args, options });
-        if (target === "main" && method === "authority.compileOperationPolicy")
+        if (target === "main" && method === "authority.compileAuthorityPlan")
           return policy();
         if (target === "main" && method === "authority.acquireForTarget")
           return { requestIds: [], grantIds: ["grant:mission"], denialIds: [] };
@@ -360,5 +390,200 @@ describe("MissionsDO", () => {
         ({ method }) => method === "authority.finishExecution",
       ),
     ).toBe(true);
+  });
+
+  it("deduplicates a retried manual run by its durable command identity", async () => {
+    const harness = await createMissions(IdempotentCommandMissionsDO);
+    let dispatches = 0;
+    harness.rpcCall.mockImplementation(async (target, method, args = []) => {
+      if (target === "main" && method === "authority.compileAuthorityPlan") return policy();
+      if (target === "main" && method === "authority.acquireForTarget")
+        return { requestIds: [], grantIds: [], denialIds: [] };
+      if (target === "main" && method === "runtime.createEntity")
+        return {
+          targetId: "do:workers/rollout:RolloutWorker:primary",
+          contextId: (args[0] as { contextId?: string })?.contextId,
+        };
+      if (target === "main" && method === "authority.admitExecution")
+        return { authoritySessionId: "admission:one", nonce: "nonce:one" };
+      if (target === "main" && method === "authority.finishExecution") return undefined;
+      if (target === "do:workers/rollout:RolloutWorker:primary" && method === "check") {
+        dispatches += 1;
+        return { ready: true };
+      }
+      if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    const mission = await harness.callAs<MissionRecord>(alice, "launch", {
+      name: "Rollout check",
+      charter: methodCharter(),
+    });
+    const first = await harness.callAs<MissionRunRecord>(alice, "runNow", mission.missionId);
+    const replay = await harness.callAs<MissionRunRecord>(alice, "runNow", mission.missionId);
+
+    expect(replay.runId).toBe(first.runId);
+    expect(dispatches).toBe(1);
+    expect(harness.sql.exec("SELECT COUNT(*) AS count FROM mission_runs").one()).toEqual({
+      count: 1,
+    });
+  });
+
+  it("re-drives an unacknowledged executing turn with the same receiver identity", async () => {
+    const harness = await createMissions(IdempotentCommandMissionsDO);
+    const dispatchKeys: string[] = [];
+    let admissions = 0;
+    harness.rpcCall.mockImplementation(async (target, method, args = [], options) => {
+      if (target === "main" && method === "authority.compileAuthorityPlan") return policy();
+      if (target === "main" && method === "authority.acquireForTarget")
+        return { requestIds: [], grantIds: [], denialIds: [] };
+      if (target === "main" && method === "runtime.createContext")
+        return { contextId: "ctx:fresh" };
+      if (target === "main" && method === "runtime.createEntity") {
+        const input = args[0] as { className?: string };
+        return input.className === "PubSubChannel"
+          ? { targetId: "do:workers/pubsub-channel:PubSubChannel:fresh", contextId: "ctx:fresh" }
+          : { targetId: "do:workers/summary:SummaryAgent:daily-run", contextId: "ctx:fresh" };
+      }
+      if (method === "subscribeChannel") return undefined;
+      if (target === "main" && method === "authority.admitExecution") {
+        admissions += 1;
+        return {
+          authoritySessionId: `admission:turn:${admissions}`,
+          nonce: `nonce:turn:${admissions}`,
+        };
+      }
+      if (method === "runAutomationTurn") {
+        dispatchKeys.push((options as { idempotencyKey?: string }).idempotencyKey ?? "");
+        return undefined;
+      }
+      if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    const mission = await harness.callAs<MissionRecord>(alice, "launch", {
+      name: "Daily summary",
+      charter: agentCharter(),
+    });
+    const run = await harness.callAs<MissionRunRecord>(alice, "runNow", mission.missionId);
+    expect(run.phase).toBe("executing");
+    harness.sql.exec(
+      "UPDATE mission_runs SET progress_at=? WHERE run_id=?",
+      Date.now() - 60_001,
+      run.runId,
+    );
+
+    const wake = await harness.instance.alarm();
+
+    expect(dispatchKeys).toEqual([`${run.runId}:dispatch`, `${run.runId}:dispatch`]);
+    expect(
+      harness.sql.exec(
+        "SELECT authority_session_id FROM mission_runs WHERE run_id=?",
+        run.runId,
+      ).one(),
+    ).toEqual({ authority_session_id: "admission:turn:3" });
+    expect(wake?.wakeAt).toBeGreaterThan(Date.now());
+  });
+
+  it("keeps a retryable remote failure nonterminal and later settles the same run", async () => {
+    const harness = await createMissions(IdempotentCommandMissionsDO);
+    let dispatches = 0;
+    harness.rpcCall.mockImplementation(async (target, method, args = []) => {
+      if (target === "main" && method === "authority.compileAuthorityPlan") return policy();
+      if (target === "main" && method === "authority.acquireForTarget")
+        return { requestIds: [], grantIds: [], denialIds: [] };
+      if (target === "main" && method === "runtime.createEntity")
+        return {
+          targetId: "do:workers/rollout:RolloutWorker:primary",
+          contextId: (args[0] as { contextId?: string })?.contextId,
+        };
+      if (target === "main" && method === "authority.admitExecution")
+        return { authoritySessionId: "admission:retry", nonce: "nonce:retry" };
+      if (target === "main" && method === "authority.finishExecution") return undefined;
+      if (target === "do:workers/rollout:RolloutWorker:primary" && method === "check") {
+        dispatches += 1;
+        if (dispatches === 1)
+          throw Object.assign(new Error("transport unavailable"), { code: "EUNAVAILABLE" });
+        return { ready: true };
+      }
+      if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    const mission = await harness.callAs<MissionRecord>(alice, "launch", {
+      name: "Rollout check",
+      charter: methodCharter(),
+    });
+    const first = await harness.callAs<MissionRunRecord>(alice, "runNow", mission.missionId);
+    expect(first).toMatchObject({
+      phase: "executing",
+      failure: { code: "EUNAVAILABLE", retry: "automatic" },
+    });
+    harness.sql.exec(
+      "UPDATE mission_runs SET progress_at=? WHERE run_id=?",
+      Date.now() - 60_001,
+      first.runId,
+    );
+
+    await harness.instance.alarm();
+
+    expect(dispatches).toBe(2);
+    expect(await harness.callAs<MissionRunRecord>(alice, "getRun", first.runId)).toMatchObject({
+      runId: first.runId,
+      phase: "terminal",
+      outcome: "succeeded",
+    });
+  });
+
+  it("switches revisions before closing old executions and retiring old authority", async () => {
+    const harness = await createMissions(IdempotentCommandMissionsDO);
+    let compileCount = 0;
+    const lifecycleObservations: Array<{ method: string; revision: number; state: string }> = [];
+    harness.rpcCall.mockImplementation(async (target, method, args = []) => {
+      if (target === "main" && method === "authority.compileAuthorityPlan") {
+        compileCount += 1;
+        return policy(compileCount === 1 ? HASH_C : HASH_B);
+      }
+      if (target === "main" && method === "authority.acquireForTarget")
+        return { requestIds: [], grantIds: [], denialIds: [] };
+      if (target === "main" && method === "runtime.createContext")
+        return { contextId: "ctx:lifecycle" };
+      if (target === "main" && method === "runtime.createEntity") {
+        const input = args[0] as { className?: string };
+        return input.className === "PubSubChannel"
+          ? { targetId: "do:workers/pubsub-channel:PubSubChannel:lifecycle", contextId: "ctx:lifecycle" }
+          : { targetId: "do:workers/summary:SummaryAgent:lifecycle", contextId: "ctx:lifecycle" };
+      }
+      if (method === "subscribeChannel" || method === "runAutomationTurn") return undefined;
+      if (target === "main" && method === "authority.admitExecution")
+        return { authoritySessionId: "admission:lifecycle", nonce: "nonce:lifecycle" };
+      if (
+        target === "main" &&
+        (method === "authority.finishExecution" || method === "authority.retireTarget")
+      ) {
+        const row = harness.sql.exec("SELECT revision,state FROM missions").one();
+        lifecycleObservations.push({
+          method,
+          revision: Number(row["revision"]),
+          state: String(row["state"]),
+        });
+        return method === "authority.retireTarget"
+          ? { cancelledRequestCount: 0, revokedGrantCount: 0 }
+          : undefined;
+      }
+      if (target === "main" && method.startsWith("workspace-state.alarm")) return undefined;
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    const mission = await harness.callAs<MissionRecord>(alice, "launch", {
+      name: "Daily summary",
+      charter: agentCharter(),
+    });
+    await harness.callAs<MissionRunRecord>(alice, "runNow", mission.missionId);
+
+    await harness.callAs<MissionRecord>(alice, "edit", mission.missionId, {
+      charter: agentCharter("Prepare a focused summary"),
+    });
+
+    expect(lifecycleObservations).toEqual([
+      { method: "authority.finishExecution", revision: 2, state: "active" },
+      { method: "authority.retireTarget", revision: 2, state: "active" },
+    ]);
   });
 });

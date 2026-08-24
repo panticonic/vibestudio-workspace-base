@@ -859,6 +859,73 @@ function Inspector({
           </Text>
         </Box>
       </Grid>
+      <Box>
+        <Text as="div" size="1" color="gray" mb="1">
+          Exact action
+        </Text>
+        <Box
+          p="3"
+          style={{
+            borderRadius: "var(--radius-2)",
+            background: "var(--gray-a2)",
+            whiteSpace: "pre-wrap",
+            overflowWrap: "anywhere",
+            maxHeight: 220,
+            overflow: "auto",
+          }}
+        >
+          <Text
+            size="2"
+            style={
+              execution.kind === "method" || execution.action.kind === "eval"
+                ? { fontFamily: "var(--code-font-family)" }
+                : undefined
+            }
+          >
+            {execution.kind === "method"
+              ? `${execution.method}(${JSON.stringify(execution.args, null, 2)})`
+              : execution.action.kind === "eval"
+                ? execution.action.code
+                : execution.action.text}
+          </Text>
+        </Box>
+      </Box>
+      <Grid columns={{ initial: "1", sm: "2" }} gap="3">
+        <Box>
+          <Text as="div" size="1" color="gray" mb="1">
+            Launch-time authority planning
+          </Text>
+          {execution.operations.length > 0 ? (
+            <Flex direction="column" gap="1">
+              {execution.operations.map((operation, index) => (
+                <Code
+                  key={`${operation.service}.${operation.method}:${index}`}
+                  size="1"
+                  style={{ overflowWrap: "anywhere" }}
+                >
+                  {operation.service}.{operation.method} · {operation.use}
+                </Code>
+              ))}
+            </Flex>
+          ) : (
+            <Text size="2" color="gray">
+              No pre-acquisition hints. Runtime calls still use ordinary approval.
+            </Text>
+          )}
+        </Box>
+        <Box>
+          <Text as="div" size="1" color="gray" mb="1">
+            Standing authority
+          </Text>
+          <Text size="2">
+            {current.authority.grantIds.length} granted · {current.authority.requestIds.length}{" "}
+            pending · {current.authority.denialIds.length} denied
+          </Text>
+          <Code size="1" style={{ display: "block", overflowWrap: "anywhere", marginTop: 4 }}>
+            {current.authorityPlan.artifactRef}
+          </Code>
+        </Box>
+      </Grid>
       {current.charter.trigger.kind !== "manual" ? (
         <Grid columns={{ initial: "1", sm: "2" }} gap="3">
           <Box>
