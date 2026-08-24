@@ -6,6 +6,7 @@ import {
 import { withExecutionAdmission } from "@vibestudio/rpc/internal";
 import { missionsMethods } from "@vibestudio/service-schemas/missions";
 import type {
+  AutomationExecutorRunStatus,
   MissionAuthorityProjection,
   MissionCharter,
   MissionCompletionReason,
@@ -103,10 +104,16 @@ type MissionEffect =
   | {
       kind: "user-notification";
       notification: PutUserNotificationInput;
+    }
+  | {
+      kind: "ack-executor-terminal";
+      executorId: string;
+      channelId: string;
+      runId: string;
     };
 
 export class MissionsDO extends DurableObjectBase {
-  static override schemaVersion = 4;
+  static override schemaVersion = 5;
   static override rpcMethods = missionsMethods;
 
   constructor(ctx: DurableObjectContext, env: unknown) {
@@ -185,7 +192,7 @@ export class MissionsDO extends DurableObjectBase {
     )`);
     this.sql.exec(`CREATE TABLE mission_effects (
       effect_id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL CHECK (kind IN ('retire-authority','user-notification')),
+      kind TEXT NOT NULL CHECK (kind IN ('retire-authority','user-notification','ack-executor-terminal')),
       payload_json TEXT NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0,
       next_attempt_at INTEGER NOT NULL,
@@ -750,9 +757,13 @@ export class MissionsDO extends DurableObjectBase {
   }): Promise<void> {
     const row = this.getRunRow(input.runId);
     if (!row) throw notFound(`Unknown automation run ${input.runId}`);
-    if (row.phase === "terminal") return;
     if (!row.executor_id || this.rpcCallerId !== row.executor_id)
       throw denied("Only the admitted automation executor can finish this run");
+    if (row.phase === "terminal") {
+      this.enqueueExecutorTerminalAck(row);
+      await this.reconcileEffects(false);
+      return;
+    }
     if (input.effectFailures?.length) {
       this.enqueueRunIssue(
         this.requireMission(row.mission_id, true),
@@ -763,12 +774,17 @@ export class MissionsDO extends DurableObjectBase {
       );
     }
     await this.closeAdmission(row);
-    this.terminalizeRun(row, input.outcome, {
-      finalMessage: input.finalMessage,
-      completionResponse: input.completionResponse,
-      failure: input.failure,
-      effectFailures: input.effectFailures,
-    });
+    this.terminalizeRun(
+      row,
+      input.outcome,
+      {
+        finalMessage: input.finalMessage,
+        completionResponse: input.completionResponse,
+        failure: input.failure,
+        effectFailures: input.effectFailures,
+      },
+      true,
+    );
     await this.reconcileEffects(false);
   }
 
@@ -845,6 +861,22 @@ export class MissionsDO extends DurableObjectBase {
     this.sql.exec(
       "INSERT OR IGNORE INTO mission_effects (effect_id,kind,payload_json,next_attempt_at) VALUES (?,'retire-authority',?,?)",
       `retire:${subject}`,
+      canonicalJson(effect),
+      now,
+    );
+  }
+
+  private enqueueExecutorTerminalAck(row: RunRow, now = Date.now()): void {
+    if (!row.executor_id || !row.channel_id) return;
+    const effect: MissionEffect = {
+      kind: "ack-executor-terminal",
+      executorId: row.executor_id,
+      channelId: row.channel_id,
+      runId: row.run_id,
+    };
+    this.sql.exec(
+      "INSERT OR IGNORE INTO mission_effects (effect_id,kind,payload_json,next_attempt_at) VALUES (?,'ack-executor-terminal',?,?)",
+      `ack-executor-terminal:${row.run_id}`,
       canonicalJson(effect),
       now,
     );
@@ -932,6 +964,15 @@ export class MissionsDO extends DurableObjectBase {
   private async executeEffect(effect: MissionEffect): Promise<void> {
     if (effect.kind === "retire-authority") {
       await this.retireAuthority(effect.subject);
+      return;
+    }
+    if (effect.kind === "ack-executor-terminal") {
+      await this.rpc.call(
+        effect.executorId,
+        "acknowledgeAutomationRun",
+        [{ channelId: effect.channelId, runId: effect.runId }],
+        { idempotencyKey: `${effect.runId}:ack-executor-terminal` },
+      );
       return;
     }
     // The GAD upsert is idempotent by the producer-stable notification id and
@@ -1181,11 +1222,13 @@ export class MissionsDO extends DurableObjectBase {
         else await this.dispatchAgent(mission, row, admission);
       }
       if (row.phase === "executing") {
-        const admission = await this.admit(mission, row);
-        if (admission) this.recordAdmission(runId, admission);
-        if (execution.kind === "method")
+        if (execution.kind === "method") {
+          const admission = await this.admit(mission, row);
+          if (admission) this.recordAdmission(runId, admission);
           await this.dispatchMethod(mission, row, requireAdmission(admission));
-        else await this.dispatchAgent(mission, row, admission);
+        } else {
+          await this.reconcileAgentExecution(mission, row);
+        }
       }
     } catch (error) {
       const row = this.getRunRow(runId);
@@ -1324,7 +1367,6 @@ export class MissionsDO extends DurableObjectBase {
       ...automationActivity(mission, this.rowToRun(row)),
       ...(admission ? { authoritySessionNonce: admission.nonce } : {}),
     };
-    this.setPhase(row.run_id, "executing");
     const executorRpc = admission
       ? withExecutionAdmission(this.rpc, admission.nonce)
       : this.rpc;
@@ -1363,6 +1405,60 @@ export class MissionsDO extends DurableObjectBase {
         ],
         { idempotencyKey: `${row.run_id}:dispatch` },
       );
+    this.setPhase(row.run_id, "executing");
+  }
+
+  private async reconcileAgentExecution(
+    mission: MissionRecord,
+    row: RunRow,
+  ): Promise<void> {
+    if (!row.executor_id || !row.channel_id)
+      throw new Error("Automation executor is not prepared");
+    const status = await this.rpc.call<AutomationExecutorRunStatus>(
+      row.executor_id,
+      "describeAutomationRun",
+      [{ channelId: row.channel_id, runId: row.run_id }],
+    );
+    if (status.state === "running") {
+      this.sql.exec(
+        "UPDATE mission_runs SET progress_at=?,failure_json=NULL WHERE run_id=? AND phase='executing'",
+        Date.now(),
+        row.run_id,
+      );
+      return;
+    }
+    if (status.state === "not-found") {
+      // Receiver evidence says the stable command was never retained. Re-enter
+      // dispatching and submit the same receiver-idempotent run identity.
+      this.setPhase(row.run_id, "dispatching");
+      const current = this.requireRunRow(row.run_id);
+      const admission = await this.admit(mission, current);
+      if (admission) this.recordAdmission(row.run_id, admission);
+      await this.dispatchAgent(mission, current, admission);
+      return;
+    }
+    if (status.effectFailures?.length) {
+      this.enqueueRunIssue(
+        mission,
+        row.run_id,
+        status.effectFailures
+          .map((effect) => `${effect.name}: ${effect.message}`)
+          .join("\n"),
+      );
+    }
+    await this.closeAdmission(row);
+    this.terminalizeRun(
+      row,
+      status.outcome,
+      {
+        finalMessage: status.finalMessage,
+        completionResponse: status.completionResponse,
+        failure: status.failure,
+        effectFailures: status.effectFailures,
+      },
+      true,
+    );
+    await this.reconcileEffects(false);
   }
 
   private async activateTarget(
@@ -1487,6 +1583,7 @@ export class MissionsDO extends DurableObjectBase {
       failure?: MissionRunFailure;
       effectFailures?: MissionRunEffectFailure[];
     },
+    acknowledgeExecutor = false,
   ): void {
     const now = Date.now();
     const mission = this.requireMission(row.mission_id, true);
@@ -1514,6 +1611,7 @@ export class MissionsDO extends DurableObjectBase {
         row.run_id,
       );
       if (completion) this.markCompleted(mission.missionId, completion, now);
+      if (acknowledgeExecutor) this.enqueueExecutorTerminalAck(row, now);
     });
   }
 

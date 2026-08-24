@@ -613,10 +613,29 @@ describe("MissionsDO", () => {
     });
   });
 
-  it("re-drives an unacknowledged executing turn with the same receiver identity", async () => {
+  it("reconciles an executing turn from receiver-owned evidence", async () => {
     const harness = await createMissions(IdempotentCommandMissionsDO);
     const dispatchKeys: string[] = [];
     let admissions = 0;
+    let executorStatus:
+      | { state: "not-found" }
+      | {
+          state: "running";
+          channelId: string;
+          turnId: string;
+          waiting: boolean;
+        }
+      | {
+          state: "terminal";
+          outcome: "succeeded";
+          finalMessage: string;
+        } = {
+      state: "running",
+      channelId: "do:workers/pubsub-channel:PubSubChannel:fresh",
+      turnId: "turn:live",
+      waiting: true,
+    };
+    let acknowledged = false;
     harness.rpcCall.mockImplementation(
       async (target, method, args = [], options) => {
         if (target === "main" && method === "authority.compileAuthorityPlan")
@@ -651,6 +670,13 @@ describe("MissionsDO", () => {
           );
           return undefined;
         }
+        if (method === "describeAutomationRun") return executorStatus;
+        if (method === "acknowledgeAutomationRun") {
+          acknowledged = true;
+          return undefined;
+        }
+        if (target === "main" && method === "authority.finishExecution")
+          return undefined;
         if (target === "main" && method.startsWith("workspace-state.alarm"))
           return undefined;
         throw new Error(`Unexpected RPC ${target}.${method}`);
@@ -674,6 +700,19 @@ describe("MissionsDO", () => {
 
     const wake = await harness.instance.alarm();
 
+    expect(dispatchKeys).toEqual([`${run.runId}:dispatch`]);
+    expect(
+      await harness.callAs<MissionRunRecord>(alice, "getRun", run.runId),
+    ).toMatchObject({ phase: "executing" });
+
+    executorStatus = { state: "not-found" };
+    harness.sql.exec(
+      "UPDATE mission_runs SET progress_at=? WHERE run_id=?",
+      Date.now() - 60_001,
+      run.runId,
+    );
+    await harness.instance.alarm();
+
     expect(dispatchKeys).toEqual([
       `${run.runId}:dispatch`,
       `${run.runId}:dispatch`,
@@ -686,6 +725,26 @@ describe("MissionsDO", () => {
         )
         .one(),
     ).toEqual({ authority_session_id: "admission:turn:3" });
+
+    executorStatus = {
+      state: "terminal",
+      outcome: "succeeded",
+      finalMessage: "Summary sent.",
+    };
+    harness.sql.exec(
+      "UPDATE mission_runs SET progress_at=? WHERE run_id=?",
+      Date.now() - 60_001,
+      run.runId,
+    );
+    await harness.instance.alarm();
+    expect(
+      await harness.callAs<MissionRunRecord>(alice, "getRun", run.runId),
+    ).toMatchObject({
+      phase: "terminal",
+      outcome: "succeeded",
+      finalMessage: "Summary sent.",
+    });
+    expect(acknowledged).toBe(true);
     expect(wake?.wakeAt).toBeGreaterThan(Date.now());
   });
 
@@ -713,6 +772,7 @@ describe("MissionsDO", () => {
       }
       if (method === "subscribeChannel" || method === "runAutomationTurn")
         return undefined;
+      if (method === "acknowledgeAutomationRun") return undefined;
       if (target === "main" && method === "authority.admitExecution")
         return { authoritySessionId: "admission:turn", nonce: "nonce:turn" };
       if (target === "main" && method === "authority.finishExecution") {

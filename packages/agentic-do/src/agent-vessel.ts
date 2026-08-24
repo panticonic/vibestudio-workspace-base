@@ -111,6 +111,7 @@ import {
   MISSION_COMPLETION_PROTOCOL,
   missionCompletionResponse,
   missionExecutionImageDigest,
+  type AutomationExecutorRunStatus,
   type MissionAgentAction,
   type MissionAuthorityPlanReference,
   type MissionAuthorityProjection,
@@ -1695,31 +1696,57 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       : input.effectFailures.length > 0
         ? "completed-with-errors"
         : "succeeded";
+    const terminal: Extract<
+      AutomationExecutorRunStatus,
+      { state: "terminal" }
+    > = {
+      state: "terminal",
+      channelId: input.channelId,
+      turnId: input.turnId,
+      outcome,
+      ...(input.finalMessage
+        ? { finalMessage: input.finalMessage }
+        : !failed && completionResponse
+          ? { finalMessage: completionResponse }
+          : !failed && input.summary
+            ? { finalMessage: input.summary }
+            : {}),
+      ...(!failed && completionResponse ? { completionResponse } : {}),
+      ...(input.effectFailures.length > 0
+        ? { effectFailures: input.effectFailures }
+        : {}),
+      ...(failed
+        ? {
+            failure: {
+              code: "EAGENTTURN",
+              stage: "executing",
+              message:
+                input.summary ?? input.reason ?? "Automation turn failed",
+              retry: "manual" as const,
+            },
+          }
+        : {}),
+    };
+    // The receiver records terminal truth before the cross-object callback.
+    // If the callback or its response is lost, MissionsDO can reconcile this
+    // exact result instead of guessing from elapsed time or redispatching.
+    this.setStateValue(
+      automationRunReceiptKey(runId),
+      JSON.stringify(terminal),
+    );
     await this.rpc.call(service.targetId, "finishRun", [
       {
         runId,
-        outcome,
-        ...(input.finalMessage
-          ? { finalMessage: input.finalMessage }
-          : !failed && completionResponse
-            ? { finalMessage: completionResponse }
-            : !failed && input.summary
-              ? { finalMessage: input.summary }
-              : {}),
-        ...(!failed && completionResponse ? { completionResponse } : {}),
-        ...(input.effectFailures.length > 0
-          ? { effectFailures: input.effectFailures }
+        outcome: terminal.outcome,
+        ...(terminal.finalMessage
+          ? { finalMessage: terminal.finalMessage }
           : {}),
-        ...(failed
-          ? {
-              failure: {
-                code: "EAGENTTURN",
-                stage: "executing",
-                message:
-                  input.summary ?? input.reason ?? "Automation turn failed",
-                retry: "manual",
-              },
-            }
+        ...(terminal.completionResponse
+          ? { completionResponse: terminal.completionResponse }
+          : {}),
+        ...(terminal.failure ? { failure: terminal.failure } : {}),
+        ...(terminal.effectFailures
+          ? { effectFailures: terminal.effectFailures }
           : {}),
       },
     ]);
@@ -3342,6 +3369,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     if (!input.automation.runId || !input.prompt.trim()) {
       throw new Error("Automation turn requires provenance and prompt text");
     }
+    const existing = await this.describeAutomationRun({
+      channelId: input.channelId,
+      runId: input.automation.runId,
+    });
+    if (existing.state !== "not-found") return;
     const tickPrompt = `${input.prompt.trim()}
 
 <automation-tick>
@@ -3389,6 +3421,11 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     if (!input.automation.runId || !input.eval.code.trim()) {
       throw new Error("Automation eval requires provenance and inline code");
     }
+    const existing = await this.describeAutomationRun({
+      channelId: input.channelId,
+      runId: input.automation.runId,
+    });
+    if (existing.state !== "not-found") return;
     await this.driver.handleIncoming(input.channelId, {
       type: "command",
       command: {
@@ -3411,6 +3448,61 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         },
       },
     });
+  }
+
+  /** Receiver-owned evidence for an automation dispatch. This method hydrates
+   * the durable channel fold when needed; it never treats activation-local
+   * cache absence as evidence that a run is missing. */
+  @rpc({
+    principals: ["host", "code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "read",
+  })
+  async describeAutomationRun(input: {
+    channelId: string;
+    runId: string;
+  }): Promise<AutomationExecutorRunStatus> {
+    if (!this.subscriptions.listChannelIds().includes(input.channelId)) {
+      throw new Error(
+        `Automation channel ${input.channelId} is not subscribed`,
+      );
+    }
+    const terminal = automationRunReceipt(
+      this.getStateValue(automationRunReceiptKey(input.runId)),
+      input.channelId,
+    );
+    if (terminal) return terminal;
+    const loop = await this.driver.loop(input.channelId);
+    const turn = loop.state.openTurn;
+    if (turn?.metadata?.automation?.runId !== input.runId)
+      return { state: "not-found" };
+    return {
+      state: "running",
+      channelId: input.channelId,
+      turnId: turn.turnId,
+      waiting: turn.waitingAtSeq !== undefined || turn.waitingCount > 0,
+    };
+  }
+
+  /** MissionsDO calls this only after its terminal ledger row is durable. A
+   * missed acknowledgement merely retains replay evidence; it cannot reopen or
+   * duplicate the run. */
+  @rpc({
+    principals: ["host", "code"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "write",
+  })
+  async acknowledgeAutomationRun(input: {
+    channelId: string;
+    runId: string;
+  }): Promise<void> {
+    const terminal = automationRunReceipt(
+      this.getStateValue(automationRunReceiptKey(input.runId)),
+      input.channelId,
+    );
+    if (terminal) this.deleteStateValue(automationRunReceiptKey(input.runId));
   }
 
   private async ingestSubscriptionReplay(
@@ -9666,6 +9758,42 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
 function automationCompletionStateKey(runId: string): string {
   return `automation:completion:${runId}`;
+}
+
+function automationRunReceiptKey(runId: string): string {
+  return `automation:terminal:${runId}`;
+}
+
+function automationRunReceipt(
+  value: string | null,
+  channelId: string,
+): Extract<AutomationExecutorRunStatus, { state: "terminal" }> | null {
+  if (!value) return null;
+  try {
+    const candidate = JSON.parse(value) as Partial<
+      Extract<AutomationExecutorRunStatus, { state: "terminal" }>
+    >;
+    if (
+      candidate.state !== "terminal" ||
+      candidate.channelId !== channelId ||
+      typeof candidate.turnId !== "string" ||
+      ![
+        "succeeded",
+        "completed-with-errors",
+        "failed",
+        "interrupted",
+        "cancelled",
+      ].includes(String(candidate.outcome))
+    ) {
+      return null;
+    }
+    return candidate as Extract<
+      AutomationExecutorRunStatus,
+      { state: "terminal" }
+    >;
+  } catch {
+    return null;
+  }
 }
 
 function automationDefinitionSnapshot(

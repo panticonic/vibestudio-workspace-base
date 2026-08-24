@@ -702,6 +702,7 @@ class PromptEventProbe extends TestVessel {
     return {
       activateChannel: vi.fn(),
       handleIncoming: this.handleIncomingSpy,
+      loop: vi.fn(async () => ({ state: { openTurn: null } })),
     } as unknown as AgentLoopDriver;
   }
 
@@ -733,6 +734,9 @@ class AutomationCompletionProbe extends PromptEventProbe {
       peekLoadedLoop: vi.fn(() =>
         openTurn ? { state: { openTurn } } : { state: { openTurn: null } },
       ),
+      loop: vi.fn(async () => ({
+        state: { openTurn },
+      })),
     } as unknown as AgentLoopDriver;
   }
 
@@ -1084,6 +1088,54 @@ describe("AgentVesselBase automation ingress", () => {
         effectFailures: [effectFailure],
       },
     ]);
+  });
+
+  it("retains terminal receiver evidence when the mission callback is lost", async () => {
+    const { instance: vessel } = await createTestDO(
+      AutomationCompletionProbe,
+      TEST_AGENT_ENV,
+    );
+    await vessel.registerSubscriptionForTest(CHANNEL);
+    const promptAutomation = { ...automation, action: "prompt" as const };
+    vessel.setAutomationTurnForTest(promptAutomation);
+    Object.defineProperty(vessel, "rpc", {
+      value: {
+        call: vi.fn(async (target: string, method: string) => {
+          if (target === "main" && method === "workers.resolveService") {
+            return { kind: "durable-object", targetId: "do:missions" };
+          }
+          if (target === "do:missions" && method === "finishRun") {
+            throw new Error("response lost after receiver commit");
+          }
+          throw new Error(`Unexpected RPC ${target}.${method}`);
+        }),
+      },
+      configurable: true,
+    });
+
+    await expect(
+      vessel.closeAutomationTurnForTest({
+        automation: promptAutomation,
+        summary: "The scheduled work completed.",
+      }),
+    ).rejects.toThrow("response lost after receiver commit");
+
+    await expect(
+      vessel.describeAutomationRun({
+        channelId: CHANNEL,
+        runId: automation.runId,
+      }),
+    ).resolves.toMatchObject({
+      state: "terminal",
+      outcome: "succeeded",
+      finalMessage: "The scheduled work completed.",
+    });
+    await vessel.runAutomationTurn({
+      channelId: CHANNEL,
+      automation: promptAutomation,
+      prompt: "This must not be submitted again.",
+    });
+    expect(vessel.handleIncomingSpy).not.toHaveBeenCalled();
   });
 });
 
