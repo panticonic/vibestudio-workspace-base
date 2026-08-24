@@ -49,15 +49,6 @@
           "evidence": "intentional-broad"
         },
         {
-          "capability": "userland:workers/missions/missions.pause#*",
-          "resource": {
-            "kind": "exact",
-            "key": "mission:do:workers/missions:MissionsDO:workspace-missions"
-          },
-          "tier": "gated",
-          "evidence": "bounded-dynamic"
-        },
-        {
           "capability": "subagents.create",
           "resource": {
             "kind": "prefix",

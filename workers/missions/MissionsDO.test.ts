@@ -275,6 +275,21 @@ describe("MissionsDO", () => {
     ).toBe(false);
   });
 
+  it("keeps open lifecycle controls scoped to the automation owner", async () => {
+    const { callAs } = await createMissions();
+    const launched = await callAs<MissionRecord>(alice, "launch", {
+      name: "Daily summary",
+      charter: agentCharter(),
+    });
+
+    await expect(callAs(bob, "pause", launched.missionId)).rejects.toThrow(
+      /Unknown automation/,
+    );
+    expect(
+      await callAs<MissionRecord>(alice, "get", launched.missionId),
+    ).toMatchObject({ state: "active" });
+  });
+
   it("edits by creating a new immutable revision subject and policy", async () => {
     const harness = await createMissions();
     const launched = await harness.callAs<MissionRecord>(alice, "launch", {

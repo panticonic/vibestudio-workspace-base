@@ -51,22 +51,6 @@
           ]
         },
         {
-          "name": "missions.pause",
-          "title": "Pause an automation",
-          "action": "pause or resume an automation",
-          "tier": "gated",
-          "sensitivity": "write",
-          "resourceType": "mission",
-          "presentation": {
-            "domain": "automation",
-            "verb": "manage"
-          },
-          "notability": "headline",
-          "grantScopes": [
-            "once"
-          ]
-        },
-        {
           "name": "missions.retire",
           "title": "Remove an automation",
           "action": "permanently remove an automation",

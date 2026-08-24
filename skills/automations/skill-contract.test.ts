@@ -23,6 +23,14 @@ describe("Automations skill contract", () => {
     );
   });
 
+  it("uses native owner-scoped control instead of eval discovery or redundant confirmation", () => {
+    const value = docs();
+    expect(value).toContain("`control_automation` directly");
+    expect(value).toContain("mean reversible `pause`");
+    expect(value).toContain("Do not discover the missions service");
+    expect(value).toContain("not routed through eval or a redundant approval card");
+  });
+
   it("keeps semantic operations separate from host-derived authority", () => {
     const value = docs();
     expect(value).toContain("launch-time acquisition plans");

@@ -60,6 +60,59 @@ const TEST_AGENT_ENV = {
   WORKER_SOURCE_REF: `state:${"b".repeat(64)}`,
 } as const;
 
+function automationRecord(
+  overrides: Partial<MissionRecord> = {},
+): MissionRecord {
+  return {
+    schemaVersion: 3,
+    missionId: "mission-daily",
+    name: "Daily check",
+    revision: 1,
+    charter: {
+      summary: "Check the project every morning.",
+      execution: {
+        kind: "agent",
+        image: {
+          source: "workers/agent",
+          effectiveVersion: "a".repeat(64),
+          ref: `state:${"b".repeat(64)}`,
+          className: "Agent",
+          objectKey: "daily",
+        },
+        action: { kind: "prompt", text: "Check the project." },
+        conversation: {
+          mode: "continue",
+          channelId: CHANNEL,
+          contextId: "ctx-1",
+          executorId: AGENT_ID,
+        },
+        operations: [],
+      },
+      trigger: {
+        kind: "cron",
+        expression: "5 5 * * THU",
+        timezone: "America/New_York",
+      },
+    },
+    owner: { userId: "alice" },
+    state: "active",
+    revisionDigest: "b".repeat(64),
+    authorityPlan: {
+      schemaVersion: 1,
+      digest: "c".repeat(64),
+      artifactRef: `authority-plan:${"c".repeat(64)}`,
+      compilerVersion: "test",
+      catalogDigest: "d".repeat(64),
+    },
+    createdAt: 1_700_000_000_000,
+    updatedAt: 1_700_000_000_000,
+    activatedAt: 1_700_000_000_000,
+    runCount: 0,
+    authority: { requestIds: [], grantIds: [], denialIds: [] },
+    ...overrides,
+  };
+}
+
 async function withAlarmGateway<T>(
   run: (gatewayUrl: string) => Promise<T>,
 ): Promise<T> {
@@ -122,6 +175,7 @@ class TestVessel extends AgentVesselBase {
   blobTextReaderForTest: ((digest: string) => Promise<string | null>) | null =
     null;
   automationLaunchForTest: MissionRecord | null = null;
+  automationVisibleForTest: MissionRecord[] | null = null;
   readonly automationLaunchCalls: Array<{
     args: unknown[];
     options?: unknown;
@@ -129,6 +183,11 @@ class TestVessel extends AgentVesselBase {
   readonly automationAuthorityCalls: Array<{
     method: string;
     args: unknown[];
+  }> = [];
+  readonly automationControlCalls: Array<{
+    method: string;
+    args: unknown[];
+    options?: unknown;
   }> = [];
   readonly channelPublishFailures = new Set<string>();
   readonly channelStub = {
@@ -313,7 +372,8 @@ class TestVessel extends AgentVesselBase {
               return vessel.blobTextReaderForTest(String(args[0]));
             }
             if (
-              vessel.automationLaunchForTest &&
+              (vessel.automationLaunchForTest ||
+                vessel.automationVisibleForTest) &&
               targetId === "main" &&
               method === "authority.compileAuthorityPlan"
             ) {
@@ -339,7 +399,8 @@ class TestVessel extends AgentVesselBase {
               };
             }
             if (
-              vessel.automationLaunchForTest &&
+              (vessel.automationLaunchForTest ||
+                vessel.automationVisibleForTest) &&
               targetId === "main" &&
               method === "workers.resolveService" &&
               args[0] === "vibestudio.missions.v1"
@@ -353,6 +414,33 @@ class TestVessel extends AgentVesselBase {
             ) {
               vessel.automationLaunchCalls.push({ args, options });
               return vessel.automationLaunchForTest;
+            }
+            if (
+              vessel.automationVisibleForTest &&
+              targetId === "do:missions" &&
+              method === "list"
+            ) {
+              return vessel.automationVisibleForTest;
+            }
+            if (
+              vessel.automationVisibleForTest &&
+              targetId === "do:missions" &&
+              ["pause", "resume", "runNow", "retire"].includes(method)
+            ) {
+              vessel.automationControlCalls.push({ method, args, options });
+              const mission = vessel.automationVisibleForTest.find(
+                (candidate) => candidate.missionId === args[0],
+              );
+              if (!mission) throw new Error("unknown test automation");
+              return {
+                ...mission,
+                state:
+                  method === "pause"
+                    ? "paused"
+                    : method === "retire"
+                      ? "retired"
+                      : "active",
+              };
             }
             return target.call(targetId, method, args, options as never);
           };
@@ -375,6 +463,15 @@ class TestVessel extends AgentVesselBase {
       rpc: this.rpc,
     });
     return tool.execute("tool-call-daily", input);
+  }
+
+  async executeAutomationControlForTest(input: unknown): Promise<unknown> {
+    const tool = this.createAutomationControlTool(CHANNEL, {
+      invocationId: "invocation-control",
+      commandId: "command-control",
+      rpc: this.rpc,
+    });
+    return tool.execute("tool-call-control", input);
   }
 
   /** Register a subscription row (so getParticipantId returns a non-null
@@ -1774,6 +1871,49 @@ describe("AgentVesselBase.chatOp", () => {
         },
       },
     ]);
+  });
+
+  it("pauses the sole active automation in this conversation through the native control tool", async () => {
+    const vessel = await makeVessel();
+    vessel.automationVisibleForTest = [
+      automationRecord({ missionId: "mission-sloths", name: "Sloth fun facts" }),
+    ];
+
+    await expect(
+      vessel.executeAutomationControlForTest({ action: "pause" }),
+    ).resolves.toMatchObject({
+      content: [{ text: "Sloth fun facts was paused." }],
+      details: { missionId: "mission-sloths", state: "paused" },
+    });
+    expect(vessel.automationControlCalls).toEqual([
+      {
+        method: "pause",
+        args: ["mission-sloths"],
+        options: {
+          idempotencyKey: expect.stringMatching(
+            /automation:control:agent-key:[0-9a-f]{64}:pause:mission-sloths/,
+          ),
+        },
+      },
+    ]);
+  });
+
+  it("requires an exact target when multiple current-conversation automations match", async () => {
+    const vessel = await makeVessel();
+    vessel.automationVisibleForTest = [
+      automationRecord({ missionId: "mission-one", name: "One" }),
+      automationRecord({ missionId: "mission-two", name: "Two" }),
+    ];
+
+    await expect(
+      vessel.executeAutomationControlForTest({ action: "pause" }),
+    ).rejects.toThrow("More than one automation matches");
+    await expect(
+      vessel.executeAutomationControlForTest({
+        action: "pause",
+        name: "Two",
+      }),
+    ).resolves.toMatchObject({ details: { missionId: "mission-two" } });
   });
 
   it("updateCustomMessage publishes custom.updated AS the agent and returns its pubsubId", async () => {

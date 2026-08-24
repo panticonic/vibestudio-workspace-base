@@ -11,6 +11,13 @@ Use this skill for work that should run later, repeatedly, on a calendar, or on 
 
 For work performed by the current agent, call `launch_automation` directly. A successful call creates an active automation immediately and publishes an inspectable automation pill in the current conversation. The pill is a controller, not an approval gate. It opens the same definition and run history shown in **Automations**.
 
+When the user asks to stop, pause, resume, run, or remove an automation, call
+`control_automation` directly. Do not discover the missions service, list it
+through eval, or ask for a second confirmation. “Stop”, “disable”, and “turn it
+off” mean reversible `pause`; use permanent `retire` only for an explicit
+remove/delete request. The native tool resolves only automations visible to the
+current user and the missions service enforces ownership again at mutation.
+
 ## Choose the executor
 
 - Use an agent `prompt` when a model should reason each run.

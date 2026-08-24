@@ -61,6 +61,9 @@ const automationLaunchTest = unitDiagnosticsTests.find(
 const scheduledNotificationTest = unitDiagnosticsTests.find(
   (candidate) => candidate.name === "automation-scheduled-notification",
 )!;
+const nativeControlTest = unitDiagnosticsTests.find(
+  (candidate) => candidate.name === "automation-native-control",
+)!;
 
 describe("automation overview system test validator", () => {
   const readCode =
@@ -320,6 +323,66 @@ describe("scheduled automation notification system test validator", () => {
     expect(scheduledNotificationTest.validate(result)).toMatchObject({
       passed: false,
       reason: expect.stringContaining("Live inbox invalidation failed"),
+    });
+  });
+});
+
+describe("native automation control system test validator", () => {
+  function resultWithControl(toolName = "control_automation") {
+    const result = execution(
+      "",
+      {
+        name: "Sloth facts stop proof",
+        summary: "Send a sloth fact every minute.",
+        action: { kind: "prompt", text: "Send a sloth fact." },
+        trigger: { kind: "schedule", everyMs: 60_000 },
+      },
+      "Sloth facts stop proof is paused.",
+      "launch_automation",
+    );
+    result.messages.splice(-1, 0, {
+      id: "control",
+      kind: "message",
+      senderId: "agent",
+      senderMetadata: { type: "agent" },
+      complete: true,
+      contentType: "invocation",
+      content: "",
+      invocation: {
+        id: "control-call",
+        name: toolName,
+        status: "complete",
+        terminalOutcome: "success",
+        isError: false,
+        arguments:
+          toolName === "control_automation"
+            ? { action: "pause", name: "Sloth facts stop proof" }
+            : { code: "return await rpc.call(service.targetId, 'pause', [id])" },
+        result: { details: { state: "paused" } },
+      },
+    } as unknown as TestExecutionResult["messages"][number]);
+    result.diagnostics = {
+      nativeAutomationControl: {
+        missionId: "mission-sloths",
+        name: "Sloth facts stop proof",
+        state: "paused",
+        runCount: 0,
+      },
+    };
+    return result;
+  }
+
+  it("accepts one native pause and canonical paused state", () => {
+    expect(nativeControlTest.authorityPolicy).toEqual({ authority: [] });
+    expect(nativeControlTest.validate(resultWithControl())).toEqual({
+      passed: true,
+    });
+  });
+
+  it("rejects eval-based stop discovery", () => {
+    expect(nativeControlTest.validate(resultWithControl("eval"))).toMatchObject({
+      passed: false,
+      reason: expect.stringContaining("native pause"),
     });
   });
 });

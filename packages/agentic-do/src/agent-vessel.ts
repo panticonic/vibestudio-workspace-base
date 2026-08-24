@@ -2938,6 +2938,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         this.createAutomationLaunchTool(channelId, execution),
       );
       registry.set(
+        "control_automation",
+        this.createAutomationControlTool(channelId, execution),
+      );
+      registry.set(
         "complete_automation",
         this.createAutomationCompletionTool(channelId),
       );
@@ -2955,6 +2959,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       registry.set(
         "launch_automation",
         this.createAutomationLaunchTool(channelId),
+      );
+      registry.set(
+        "control_automation",
+        this.createAutomationControlTool(channelId),
       );
       registry.set(
         "complete_automation",
@@ -3101,6 +3109,41 @@ export abstract class AgentVesselBase extends DurableObjectBase {
           ],
           details: automation,
         } as AgentToolResult<MissionRecord>;
+      },
+    } as AgentTool;
+  }
+
+  protected createAutomationControlTool(
+    channelId: string,
+    execution?: AgentToolExecutionContext,
+  ): AgentTool {
+    return {
+      name: "control_automation",
+      label: "control_automation",
+      description:
+        "Control an automation owned by the current user directly. Use pause when the user says stop, disable, or turn it off; pause is reversible and must not be treated as deletion. Use retire only when the user explicitly asks to remove or delete the automation permanently. Do not inspect automation APIs, discover services, or use eval first. Omit the target only when exactly one matching automation is active in this conversation; otherwise pass its exact name or missionId from the launch result or automation pill.",
+      parameters: {
+        type: "object",
+        properties: {
+          action: { enum: ["pause", "resume", "run_now", "retire"] },
+          missionId: { type: "string" },
+          name: { type: "string" },
+        },
+        required: ["action"],
+        additionalProperties: false,
+      } as never,
+      execute: async (toolCallId, params) => {
+        if (!execution) {
+          throw new Error(
+            "control_automation requires an admitted agent invocation",
+          );
+        }
+        return this.controlAutomation(
+          channelId,
+          params,
+          execution.commandId || toolCallId,
+          execution.rpc,
+        );
       },
     } as AgentTool;
   }
@@ -5845,6 +5888,117 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   /** Launch the canonical mission first, then publish its idempotent running
    * resource projection. A retry recovers the same mission and the same pill;
    * the tool does not report success until both durable owners acknowledge. */
+  private async automationServiceTarget(callerRpc: RpcClient): Promise<string> {
+    const service = await callerRpc.call<{
+      kind?: unknown;
+      targetId?: unknown;
+    }>("main", "workers.resolveService", ["vibestudio.missions.v1"]);
+    if (
+      service.kind !== "durable-object" ||
+      typeof service.targetId !== "string"
+    ) {
+      throw new Error("The Automations service is unavailable");
+    }
+    return service.targetId;
+  }
+
+  private async controlAutomation(
+    channelId: string,
+    raw: unknown,
+    requestIdentity: string,
+    callerRpc: RpcClient,
+  ): Promise<AgentToolResult<unknown>> {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+      throw new Error("control_automation requires an object");
+    }
+    const input = raw as Record<string, unknown>;
+    const action = input["action"];
+    if (
+      action !== "pause" &&
+      action !== "resume" &&
+      action !== "run_now" &&
+      action !== "retire"
+    ) {
+      throw new Error(
+        "control_automation action must be pause, resume, run_now, or retire",
+      );
+    }
+    const requestedMissionId =
+      typeof input["missionId"] === "string"
+        ? input["missionId"].trim()
+        : "";
+    const requestedName =
+      typeof input["name"] === "string" ? input["name"].trim() : "";
+    if (requestedMissionId && requestedName) {
+      throw new Error(
+        "control_automation accepts missionId or name, not both",
+      );
+    }
+
+    const target = await this.automationServiceTarget(callerRpc);
+    const visible = await callerRpc.call<MissionRecord[]>(target, "list", []);
+    let candidates = visible;
+    if (requestedMissionId) {
+      candidates = visible.filter(
+        (mission) => mission.missionId === requestedMissionId,
+      );
+    } else if (requestedName) {
+      const normalized = requestedName.toLocaleLowerCase();
+      candidates = visible.filter(
+        (mission) => mission.name.toLocaleLowerCase() === normalized,
+      );
+    } else {
+      candidates = visible.filter((mission) => {
+        const execution = mission.charter.execution;
+        return (
+          execution.kind === "agent" &&
+          execution.conversation.mode === "continue" &&
+          execution.conversation.channelId === channelId &&
+          (action === "resume"
+            ? mission.state === "paused"
+            : mission.state === "active")
+        );
+      });
+    }
+    if (candidates.length === 0) {
+      throw new Error("No matching automation owned by the current user");
+    }
+    if (candidates.length > 1) {
+      throw new Error(
+        `More than one automation matches; call control_automation again with one exact name or missionId: ${candidates
+          .map((mission) => `${mission.name} (${mission.missionId})`)
+          .join(", ")}`,
+      );
+    }
+    const mission = candidates[0]!;
+    const method = action === "run_now" ? "runNow" : action;
+    const result = await callerRpc.call<unknown>(
+      target,
+      method,
+      [mission.missionId],
+      {
+        idempotencyKey: `automation:control:${this.objectKey}:${sha256HexSyncText(requestIdentity)}:${action}:${mission.missionId}`,
+      },
+    );
+    const verb =
+      action === "pause"
+        ? "paused"
+        : action === "resume"
+          ? "resumed"
+          : action === "run_now"
+            ? "started"
+            : "removed";
+    return {
+      content: [
+        {
+          type: "text",
+          text: `${mission.name} was ${verb}.`,
+        },
+      ],
+      details: result,
+    } as AgentToolResult<unknown>;
+  }
+
   private async launchAutomation(
     channelId: string,
     input: unknown,
@@ -5893,18 +6047,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         );
       }
     }
-    const service = await callerRpc.call<{
-      kind?: unknown;
-      targetId?: unknown;
-    }>("main", "workers.resolveService", ["vibestudio.missions.v1"]);
-    if (
-      service.kind !== "durable-object" ||
-      typeof service.targetId !== "string"
-    ) {
-      throw new Error("The Automations service is unavailable");
-    }
+    const target = await this.automationServiceTarget(callerRpc);
     const automation = await callerRpc.call<MissionRecord>(
-      service.targetId,
+      target,
       "launch",
       [definition],
       {

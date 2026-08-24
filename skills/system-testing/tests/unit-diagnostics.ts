@@ -494,6 +494,121 @@ function scheduledNotificationChecked(result: TestExecutionResult) {
   return { passed: true };
 }
 
+const NATIVE_CONTROL_NAME = "Sloth facts stop proof";
+
+async function nativeAutomationControlProof(
+  context: TestOrchestrationContext,
+): Promise<TestExecutionResult> {
+  const startedAt = Date.now();
+  const session = await context.runner.spawn();
+  let error: string | undefined;
+  let observation: Record<string, unknown> | undefined;
+  try {
+    const { rpc, workers } = await import("@workspace/runtime");
+    await context.sendAndWait(
+      session,
+      `Every minute, send me a fun fact about sloths. Call it “${NATIVE_CONTROL_NAME}”.`,
+      "natural automation launch",
+    );
+    await context.sendAndWait(
+      session,
+      "Thanks for doing this — please stop now.",
+      "natural automation stop",
+    );
+    const service = await workers.resolveService("vibestudio.missions.v1");
+    if (service.kind !== "durable-object" || !service.targetId) {
+      throw new Error(
+        "The automation ledger did not resolve to a Durable Object",
+      );
+    }
+    const overview = await rpc.call<Record<string, unknown>>(
+      service.targetId,
+      "overview",
+      [{ query: NATIVE_CONTROL_NAME, limit: 5 }],
+    );
+    const item = Array.isArray(overview["items"])
+      ? overview["items"][0]
+      : undefined;
+    const automation = isRecord(item) && isRecord(item["automation"])
+      ? item["automation"]
+      : undefined;
+    observation = automation
+      ? {
+          missionId: automation["missionId"],
+          name: automation["name"],
+          state: automation["state"],
+          runCount: automation["runCount"],
+        }
+      : undefined;
+    if (!observation) throw new Error("The launched automation was not found");
+  } catch (cause) {
+    error = cause instanceof Error ? cause.message : String(cause);
+  }
+  const execution: TestExecutionResult = {
+    messages: [...session.messages],
+    duration: Date.now() - startedAt,
+    snapshot: session.snapshot(),
+    diagnostics: { nativeAutomationControl: observation ?? null },
+    ...(error ? { error } : {}),
+  };
+  try {
+    await session.close();
+  } catch (cause) {
+    execution.cleanupErrors = [
+      `close: ${cause instanceof Error ? cause.message : String(cause)}`,
+    ];
+  }
+  return execution;
+}
+
+function nativeAutomationControlChecked(result: TestExecutionResult) {
+  if (result.error) return { passed: false, reason: result.error };
+  const base = noIncompleteInvocations(result);
+  if (!base.passed) return base;
+  const launches = getToolCalls(result).filter(
+    (call) => call.name === "launch_automation",
+  );
+  const controls = getToolCalls(result).filter(
+    (call) => call.name === "control_automation",
+  );
+  if (
+    launches.length !== 1 ||
+    launches[0]?.execution?.status !== "complete" ||
+    launches[0]?.execution?.isError === true
+  ) {
+    return { passed: false, reason: "The automation was not launched once" };
+  }
+  if (
+    controls.length !== 1 ||
+    controls[0]?.arguments?.["action"] !== "pause" ||
+    controls[0]?.execution?.status !== "complete" ||
+    controls[0]?.execution?.isError === true
+  ) {
+    return {
+      passed: false,
+      reason: "The natural stop request did not complete through one native pause",
+    };
+  }
+  if (getToolCalls(result).some((call) => call.name === "eval")) {
+    return {
+      passed: false,
+      reason: "The stop request performed automation discovery through eval",
+    };
+  }
+  const observed = result.diagnostics?.["nativeAutomationControl"];
+  if (
+    !isRecord(observed) ||
+    observed["name"] !== NATIVE_CONTROL_NAME ||
+    observed["state"] !== "paused"
+  ) {
+    return {
+      passed: false,
+      reason: "The canonical automation ledger did not retain the paused state",
+    };
+  }
+  return { passed: true };
+}
+
 function isDailyProjectPulseLaunch(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
@@ -626,5 +741,17 @@ export const unitDiagnosticsTests: TestCase[] = [
     validation: "agent-evidence",
     orchestrate: scheduledNotificationProof,
     validate: scheduledNotificationChecked,
+  },
+  {
+    name: "automation-native-control",
+    description:
+      "A natural follow-up stop request pauses the owner's automation without eval or redundant approval",
+    category: "unit-diagnostics",
+    timeoutMs: 120_000,
+    prompt: "Harness-orchestrated native automation control proof.",
+    authorityPolicy: { authority: [] },
+    validation: "agent-evidence",
+    orchestrate: nativeAutomationControlProof,
+    validate: nativeAutomationControlChecked,
   },
 ];

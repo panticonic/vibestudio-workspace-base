@@ -1,6 +1,24 @@
 # Automations API
 
-Resolve `vibestudio.missions.v1` with `workers.resolveService(...)` and call its Durable Object target with `rpc.call(targetId, method, args)`. Prefer the native `launch_automation` tool for work owned by the current agent: it seals the installed execution image and conversation binding without guest-code identity discovery.
+Resolve `vibestudio.missions.v1` with `workers.resolveService(...)` and call its Durable Object target with `rpc.call(service.targetId, method, args)`. Prefer the native `launch_automation` tool for work owned by the current agent: it seals the installed execution image and conversation binding without guest-code identity discovery. Prefer `control_automation` for conversational pause/resume/run/remove requests; it resolves the owner-visible target and avoids guest-code service discovery.
+
+## Native control
+
+```ts
+type AgentAutomationControl = {
+  action: "pause" | "resume" | "run_now" | "retire";
+  missionId?: string;
+  name?: string;
+};
+```
+
+Omit the target only when one eligible automation is active in the current
+conversation. Otherwise pass one exact name or the `missionId` returned by
+launch. Use `pause` for ordinary “stop” language; it is reversible. `retire` is
+permanent and is reserved for explicit deletion. A user-authored request to
+control their own automation is executed directly by the native tool and is
+not routed through eval or a redundant approval card. Ownership and user
+attribution are still checked by MissionsDO.
 
 ## Agent launch input
 
