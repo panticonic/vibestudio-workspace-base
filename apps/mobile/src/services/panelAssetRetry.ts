@@ -34,7 +34,7 @@ export interface RetryTransport {
 }
 
 export interface PanelAssetRetryOptions {
-  /** Total attempts including the first. */
+  /** Optional diagnostic cap. Production requests retry while their client is alive. */
   attempts?: number;
   /** True while no byte of a response has reached the socket. */
   canRetry: () => boolean;
@@ -76,24 +76,28 @@ export function awaitPipeReady(transport: RetryTransport): Promise<void> {
 /**
  * Run `attempt`, retrying transient pipe failures once the pipe is back.
  *
- * Rethrows the last error when the budget is spent, the failure is not
- * transient, or the response is already committed — the caller still owns
- * turning that into a 502.
+ * Rethrows when an explicit diagnostic budget is spent, the failure is not
+ * transient, or the response is already committed. Production callers leave
+ * the budget open: a WebView module request must survive however many failed
+ * connection generations precede recovery, and `canRetry` ties its lifetime to
+ * the requesting socket.
  */
 export async function withPanelAssetRetry<T>(
   transport: RetryTransport,
   options: PanelAssetRetryOptions,
   attempt: () => Promise<T>
 ): Promise<T> {
-  const budget = Math.max(1, options.attempts ?? 3);
+  const budget = options.attempts === undefined ? null : Math.max(1, options.attempts);
   let lastError: unknown;
-  for (let tries = 1; tries <= budget; tries += 1) {
+  for (let tries = 1; budget === null || tries <= budget; tries += 1) {
     try {
       return await attempt();
     } catch (error) {
       lastError = error;
       const retryable =
-        tries < budget && isTransientPipeError(error) && options.canRetry();
+        (budget === null || tries < budget) &&
+        isTransientPipeError(error) &&
+        options.canRetry();
       if (!retryable) break;
       options.onRetry?.(tries, error);
       await awaitPipeReady(transport);

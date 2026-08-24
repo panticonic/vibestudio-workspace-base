@@ -78,6 +78,18 @@ describe("withPanelAssetRetry", () => {
     expect(calls).toBe(2);
   });
 
+  it("does not exhaust a production request during a prolonged recovery", async () => {
+    const transport = fakeTransport();
+    let calls = 0;
+    const result = await withPanelAssetRetry(transport, { canRetry: () => true }, async () => {
+      calls += 1;
+      if (calls <= 5) throw pipeDown();
+      return "recovered";
+    });
+    expect(result).toBe("recovered");
+    expect(calls).toBe(6);
+  });
+
   it("waits for the pipe to come back rather than retrying into a dead link", async () => {
     const transport = fakeTransport("disconnected");
     let calls = 0;

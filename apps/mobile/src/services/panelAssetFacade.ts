@@ -513,7 +513,7 @@ async function handleRequest(
       const fetched = await withPanelAssetRetry(
         transport,
         {
-          canRetry: () => !headSent,
+          canRetry: () => !headSent && !socket.destroyed,
           onRetry: (attempt, error) => {
             retriedAttempts = attempt;
             const detail = error instanceof Error ? error.message : String(error);
