@@ -344,7 +344,7 @@ describe("ApprovalCard", () => {
           taskRef: "task:nightly-briefing",
           agentName: "News",
           agentScopeEligible: true,
-          reviewedClosureSubject: "-",
+          missionSubject: "-",
           snippetDigest: "snippet:news",
           codeLineage: { class: "internal", chain: ["code:news"] },
           contextLineage: null,

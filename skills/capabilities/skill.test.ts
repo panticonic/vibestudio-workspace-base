@@ -36,7 +36,7 @@ describe("capabilities skill", () => {
     expect(markdown).toContain("references/authority-implementation-checklist.md");
     expect(checklist).toContain("One version decision covers code plus its full authority contract");
     expect(checklist).toContain("one progressive-disclosure startup decision");
-    expect(checklist).toContain("mission:<id>@<closureDigest>");
+    expect(checklist).toContain("mission:<id>@<revisionDigest>");
     expect(checklist).toContain("immutable product snapshot outputs");
     expect(checklist).toContain("exactly `eval` and `notify` as model-facing tools");
     expect(checklist).toContain("no non-delegated approval payload or settlement");

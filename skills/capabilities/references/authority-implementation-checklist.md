@@ -59,39 +59,42 @@ registry. Never regenerate a static host catalog to approve workspace code.
 
 ## Change a mission
 
-Review the entire closure together:
+Treat these as one contract:
 
-- task specification;
-- exact harness source and effective version;
-- skill paths and content hashes;
-- exact host service exposure;
-- userland service bindings and pinned/follow-head policy;
-- model and parameters;
-- manual, cron, or closed-grammar event trigger;
-- eval network policy and exact canonical origins;
-- requested permissions; and
-- standing restrictions.
+- exact immutable execution image;
+- action, conversation mode, and trigger;
+- semantic operation intents;
+- host-compiled, content-addressed operation policy with compiler and catalog versions;
+- durable subject `mission:<id>@<revisionDigest>` and attributed owner;
+- durable target authority requests and grants; and
+- generic executor admission and causal inheritance.
 
-Approval mints grants for the exact `mission:<id>@<closureDigest>` subject. Any closure
-change requires a new revision. Start only active, digest-consistent missions.
-Interruption during seed replacement must leave the mission inert and needing
-reapproval; never retain the old active bit while replacing grants.
+The host compiler—not userland—derives capability/resource leaves from receiver
+contracts. Store the canonical policy body under its digest; never trust a body
+supplied by the mission store or recompile an old revision against a newer
+catalog during admission.
 
-Standing restrictions are deny grants for the exact mission closure. Reconcile
-removed restrictions by revoking their old deny grants, and mint current denies
-alongside allows before activating the closure.
+Launch registers the subject and begins eligible standing acquisition. Pending
+requests belong to the revision, survive the launching execution and host
+restart, and deduplicate by revision policy plus compiled operation. Runtime
+misses still enter ordinary acquisition and may park the invocation.
+
+Editing creates a new revision subject. Prevent new admission to the retired
+subject, terminalize its live executions, then revoke its grants. Pause is not
+retirement: it prevents new runs while preserving the same subject and grants.
+
+Execution admission must represent agent-turn, eval, and method executors in
+one authenticated schema with an idempotent admission key, exact image, policy
+digest, parent derivation, renewal owner, and terminal closure. Do not add a
+second transport for one executor kind or bind authority to a channel ID.
 
 ## Change a product-seeded mission
 
 Seed files are strict, checked-in reviewed inputs under the host's seed directory.
 Resolve `@seed` harness and skill hashes only from immutable product snapshot outputs.
 Key reconciliation by the exact product snapshot state and preserve the host/system
-owner. On snapshot drift:
-
-1. make the old mission record inert;
-2. revoke stale seeded grants;
-3. mint the complete new allow/deny set; then
-4. mark the exact new closure active.
+owner. On snapshot drift, create and activate a new exact revision, prevent new
+old admissions, finish old executions, and only then revoke old revision grants.
 
 Do not read mutable workspace source to construct a product seed. Do not add a
 compatibility or repair path for old schemas; migrate forward and fail closed on

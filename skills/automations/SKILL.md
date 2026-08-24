@@ -1,349 +1,142 @@
 ---
 name: automations
-description: Launch recurring scripts or agent prompts immediately, then supervise their exact behavior, authority, runs, conversations, results, and errors.
+description: Launch recurring or later work immediately, then inspect and control its exact behavior, authority, runs, conversations, results, and failures.
 ---
 
 # Automations
 
-Use this skill when a user asks to run work repeatedly or later: “every hour,”
-“each morning,” “weekly,” “periodically,” “on a schedule,” or similar language.
-It covers deterministic scripts and unattended agent turns. The user does not
-need to know which form they need.
+Use this skill for work that should run later, repeatedly, on a calendar, or on demand without another chat turn. Read [API.md](API.md) before authoring or debugging an automation.
 
-Use the `vibestudio.missions.v1` service for every recurring or manually
-triggered unattended task. It is the only scheduling system: express calendar
-cadence with its `cron` trigger rather than adding worker-level cron
-configuration, heartbeat loops, timers, a second alarm owner, or an independent
-run log.
+`vibestudio.missions.v1` is the only schedule and run-ledger owner. Do not add a second timer, worker cron, alarm loop, queue, or history store.
 
-Launch an agent-owned automation with the native `launch_automation` tool. A
-successful call creates the canonical active definition and adds its running
-pill to the current chat before returning. The pill is an inspector and
-controller, not an approval gate: it shows the exact action, cadence, reach,
-standing authority, and run history, and lets the user edit, pause, run, or
-stop it. The same definition is available in **Automations**.
+For work performed by the current agent, call `launch_automation` directly. A successful call creates an active automation immediately and publishes an inspectable automation pill in the current conversation. The pill is a controller, not an approval gate. It opens the same definition and run history shown in **Automations**.
 
-Read [API.md](API.md) before authoring an automation. Use one of two execution forms,
-with two first-class actions on the agent form:
+## Choose the executor
 
-- **Method** runs one RPC method on an exact Durable Object build. Package a
-  periodic script as a narrow exported method and use this form for deterministic
-  jobs that do not need an agent conversation.
-- **Agent** sends a prompt through the ordinary agent turn loop. It can continue
-  one existing conversation or create an isolated agent, context, and
-  conversation for each run. Its installed action is either a normal model
-  `prompt` or exact inline `eval` code executed without a model call. Eval is the
-  light-weight script path: it uses the selected agent's channel-bound EvalDO,
-  so it does not require a new worker to be published.
+- Use an agent `prompt` when a model should reason each run.
+- Use agent `eval` for a small exact script that should run as the same agent and use its ordinary channel-bound EvalDO.
+- Use a lower-level `method` charter for a reusable deterministic method on another exact Durable Object image.
 
-Typical choices are:
+Choose `conversation: { mode: "fresh" }` for isolated runs. Choose `continue` only when the current conversation’s accumulated context is part of the task; the tool binds the channel and context itself.
 
-| User intent                                                  | Execution                                                       | Conversation                     |
-| ------------------------------------------------------------ | --------------------------------------------------------------- | -------------------------------- |
-| “Refresh these figures every hour.”                          | Agent eval for a small inline job; method for a reusable worker | Fresh or continuing              |
-| “Review project changes every Friday.”                       | Agent                                                           | Fresh run each time              |
-| “Revisit the open risks in this conversation every morning.” | Agent                                                           | Continue this exact conversation |
+## Launch correctly
 
-## Turn an intent into a running automation
+1. Resolve only user choices that materially alter the job: behavior, cadence and timezone, optional end condition, and fresh versus continuing conversation.
+2. Enumerate every semantic service operation the action may perform. Declare each as `{ service, method, args?, use }`, where `use` is `action` or `conditional`. These are behavior declarations, not capability names or grants.
+   Declare only external service calls made by the action. Scheduling, fresh-conversation creation, delivery of the eval result into that conversation, and the `automation-completion.v1` return are intrinsic mission behavior: do not invent `missions.finishRun`, `chat.publish`, or similar operations for them.
+3. Call `launch_automation` once with the action, trigger, conversation mode, and operations. Do not wrap it in eval and do not discover the current agent’s build, class, object key, channel, or context first; the receiver seals those facts atomically.
+4. Report the active automation’s name and cadence. Point to its pill for inspection or control; do not publish a second card or ask for a second launch approval.
 
-1. Confirm only details that materially change the work: what should run, the
-   cadence and timezone, optional end time or maximum total runs, and—only for
-   agent work—whether runs should be fresh or continue one exact conversation.
-   Also establish what outcome, if any, should naturally complete the recurring
-   goal. Prefer an explicit recommendation over a questionnaire.
-2. For a prompt or small inline eval, use the current agent through the native
-   `launch_automation` tool. The receiver atomically stamps this agent's exact
-   source, class, object key, and installed effective version; never discover or
-   reconstruct those values in guest code. For a reusable method job on another
-   worker, use the lower-level Missions API described in [API.md](API.md).
-3. Call `launch_automation` with the behavior, cadence, and least authority
-   needed. For every operation the action may call, put its exact method in
-   `toolExposure.services` (or its reviewed provider binding in
-   `toolExposure.userlandServices`). If its authority metadata is gated and
-   mission-grantable, also copy that exact capability, resource scope, and
-   `tier: "gated"` into `permissions`. Open operations need no permission row.
-   Critical and non-mission-grantable operations cannot be standing grants;
-   omit them and the run will ask the user when it reaches them. Do not call
-   `agent.describe()`, `build.getEffectiveVersion`, or
-   `workers.resolveService` to prepare an agent-owned launch.
-4. Tell the user what is running and when it will run next. Point to the chat
-   pill when its exact behavior or controls would be useful.
-
-One user request produces one automation definition. Do not split scheduling,
-execution, history, or supervision across parallel mechanisms.
-
-## Launch an automation
-
-The agent-owned helper is deliberately self-targeting. This complete recurring
-notification needs no identity lookup, build RPC, service resolution,
-or manually fabricated object key:
+Example:
 
 ```ts
 ({
-  name: "Machine Learning fun facts",
-  summary:
-    "Every two minutes, send the owner one concise Machine Learning fun fact.",
+  name: "Talk timer",
+  summary: "Every minute, tell the owner that another minute has passed.",
   action: {
     kind: "prompt",
-    text: "Send one accurate Machine Learning fun fact with notify({ to: 'owner', alert: 'inbox', title: 'Machine Learning fun fact', content: '...' }).",
+    text: "Notify the owner with the exact text: ⏱️ One minute has passed.",
   },
-  trigger: { kind: "schedule", everyMs: 120_000 },
+  trigger: { kind: "schedule", everyMs: 60_000 },
   conversation: { mode: "fresh" },
-  permissions: [],
+  operations: [
+    {
+      service: "notification",
+      method: "showToUser",
+      use: "action",
+    },
+  ],
 });
 ```
 
-Pass that object to `launch_automation`. After a successful launch, tell the
-user its name and cadence. Its chat pill is already visible at the exact
-institution point; opening
-it or opening Automations shows the same definition controls, schedule,
-conversation behavior, reach, and standing authority. Do not publish a second
-summary card or ask for a second approval.
-
-## Choose conversation behavior deliberately
-
-`conversation` accepts `{ mode: "fresh" }` (the default) or
-`{ mode: "continue" }`. Continue automatically binds the current channel and
-context; callers never pass either identifier.
-
-For an isolated agent and conversation on every run, provide the behavior and
-reach directly:
+For a small model-free project-status check, return the status text from eval; the run publishes that result in its conversation. Declare the status read itself:
 
 ```ts
-action: {
-  kind: "prompt",
-  text: "Review this week's project changes and finish with the three most important risks.",
-},
-conversation: { mode: "fresh" },
-toolExposure: {
-  services: ["build.listUnits", "vcs.status"],
-  userlandServices: [],
-  workspaceServiceDiscovery: "bound",
-  evalNetwork: "none",
-  declaredOrigins: [],
-},
-declaredLineageClasses: ["none"],
+({
+  name: "Project pulse",
+  summary: "Report project status every Thursday morning.",
+  action: {
+    kind: "eval",
+    code: `
+      import { vcs } from "@workspace/runtime";
+      const status = await vcs.status();
+      if (status.clean && status.mainRelation === "at") {
+        return {
+          protocol: "automation-completion.v1",
+          response: "The project is clean and in sync.",
+        };
+      }
+      return "Project pulse: " + status.mainRelation;
+    `,
+    syntax: "typescript",
+  },
+  trigger: {
+    kind: "cron",
+    expression: "5 5 * * THU",
+    timezone: "America/New_York",
+  },
+  conversation: { mode: "fresh" },
+  operations: [{ service: "vcs", method: "status", use: "action" }],
+});
 ```
 
-For this exact conversation:
+## Authority
 
-```ts
-action: { kind: "prompt", text: "Revisit the open risks and report what changed." },
-conversation: { mode: "continue" },
-toolExposure: {
-  services: ["build.listUnits", "vcs.status"],
-  userlandServices: [],
-  workspaceServiceDiscovery: "bound",
-  evalNetwork: "none",
-  declaredOrigins: [],
-},
-declaredLineageClasses: ["none"],
-```
+The agent never authors capability rows. At launch, the host compiles declared operations against receiver-owned method contracts into an immutable, content-addressed operation policy. It derives the exact capability and resource for each operation and starts durable acquisition for every gated operation eligible for standing mission authority.
 
-For a small deterministic script, use an eval action on this same exact agent:
+The authenticated user who requested launch is recorded as the owner of the revision subject `mission:<id>@<revisionDigest>`. Grants belong to that subject, not to a channel, transient eval runtime, or model-authored identity. Channel IDs are routing facts, never authority subjects; context IDs are conversation facts.
 
-```ts
-action: {
-  kind: "eval",
-  code: `
-    const status = await services.vcs.status({ contextId: ctx.contextId });
-    const result = { workingHead: status.workingHead, checkedAt: Date.now() };
-    await chat.publish("project.health.checked", result, {
-      idempotencyKey: "health:" + result.checkedAt,
-    });
-    return result;
-  `,
-  syntax: "typescript",
-  timeoutMs: 30_000,
-},
-conversation: { mode: "fresh" },
-toolExposure: {
-  services: ["vcs.status"],
-  userlandServices: [],
-  workspaceServiceDiscovery: "bound",
-  evalNetwork: "none",
-  declaredOrigins: [],
-},
-declaredLineageClasses: ["none"],
-```
+Pre-acquisition is the normal authoring path, but it is not a runtime restriction. If authority is absent when an admitted run reaches an operation, ordinary acquisition presents the exact approval, durably parks the invocation, and resumes after the decision. Critical or otherwise non-standing authority always uses that invocation-time path. In particular, do not force automation eval into `pregranted-only`.
 
-Scheduled eval is not an alternate sandbox or message path. The agent loop
-journals the exact source as a normal `eval` tool invocation, EvalDO executes
-it under the installed mission closure, and the invocation result closes the
-exact run. Eval uses the ordinary approval-capable authority path: installed
-standing grants settle first without interruption; if a needed grant was
-missed or cannot be standing authority, the run parks on the normal durable
-approval and resumes after the user's decision. Ambient `chat` can publish
-typed or custom channel messages with the agent's identity. Do not use
-`chat.send` for status: it is user-intent ingress and can begin another agent
-turn.
+Do not broaden operations to avoid an approval. A denial is evidence to preserve and explain, not a reason to retry through another caller or transport.
 
-Use `fresh` when runs should be independent, easily audited, and unaffected by
-old conversation state. Use `continue` when accumulated conversation context is
-part of the task.
+## Scheduling
 
-## Authority and reach
+Use `{ kind: "manual" }` for run-on-demand work.
 
-`toolExposure` is the structural addressability bound for an agent run:
-
-- `services` contains exact `service.method` names or a service-local `name.*`.
-  Global `*` is invalid.
-- `userlandServices` contains resolved provider bindings, never an unresolved
-  display name. Prefer an exact provider EV and `upgradePolicy: "pinned"`.
-- `workspaceServiceDiscovery: "bound"` uses only reviewed bindings.
-  `"live-declarations"` cannot be combined with pinned bindings.
-- `evalNetwork` is `none`, `declared-origins`, or `unrestricted`.
-  Declared origins must be canonical origins such as `https://example.com`.
-- `declaredLineageClasses` states the outside-content classes expected by the
-  work. It must be non-empty and contain no duplicates.
-
-`permissions` contains the exact standing gated capability rows shown in the
-inspector. Treat it as required launch work, not an optional optimization:
-pregrant every eligible gated operation the action is expected to perform.
-`toolExposure` only makes a tool addressable; it does not grant authority.
-Conversely, a permission does not expose a tool. The platform automatically
-installs the sealed agent/channel/workspace harness grants; do not duplicate
-those internal dependencies in `permissions`.
-
-A method automation must use `permissions: []`: its installed code authority
-remains the only authority for that method. Critical and policy-ineligible
-capabilities cannot become standing automation grants and are rejected at
-launch if placed in `permissions`; omit them so the run uses the normal
-approval flow. A missing eligible permission also falls back to that same
-approval flow and leaves the run pending rather than converting the miss into
-an opaque automation failure. Do not widen exposure or permissions merely to
-make a denial disappear.
-
-## Scheduling semantics
-
-Use `{ kind: "manual" }` for run-on-demand work. A periodic schedule
-is:
+Use an interval for elapsed cadence:
 
 ```ts
 {
   kind: "schedule",
   everyMs: 3_600_000,
-  anchorAt: Date.UTC(2026, 7, 12, 6, 0), // optional epoch cadence origin
-  jitterMs: 300_000,                    // optional, always less than everyMs
-  untilAt: Date.UTC(2026, 8, 1),        // optional exclusive start boundary
-  maxRuns: 100,                         // optional total admitted executions
+  anchorAt: Date.UTC(2026, 7, 12, 6, 0), // optional alignment
+  jitterMs: 300_000,                    // optional
+  untilAt: Date.UTC(2026, 8, 1),        // optional exclusive boundary
+  maxRuns: 100,                         // optional admitted runs
 }
 ```
 
-The interval is at least one minute. Without `anchorAt`, activation becomes the
-cadence origin. With it, occurrences align to `anchorAt + n * everyMs`. This is
-timezone- and DST-independent; compute a local-time anchor explicitly when the
-human request is expressed in local time and state the chosen timezone in the
-summary. Jitter delays an occurrence within the declared bound. Use this form
-for “every five minutes starting now” and other elapsed-time cadences.
-
-For a wall-clock calendar cadence, use a five-field Vixie cron expression and
-an explicit canonical IANA timezone:
+Use cron for wall-clock cadence and always provide an IANA timezone:
 
 ```ts
 {
   kind: "cron",
-  expression: "5 5 * * THU",       // minute hour day-of-month month weekday
+  expression: "5 5 * * THU",
   timezone: "America/New_York",
-  untilAt: Date.UTC(2026, 11, 31),  // optional
-  maxRuns: 20,                      // optional
+  maxRuns: 20,
 }
 ```
 
-This means every Thursday at 5:05 a.m. New York time. Expressions support
-lists, ranges, steps, month/weekday names, and the calendar modifiers accepted
-by the service (`L`, `W`, `#`, and `+`), plus standard nicknames such as
-`@daily`. Calendar evaluation follows the declared timezone across daylight
-saving changes; it never inherits the host timezone. The five-field contract
-has minute precision and the same one-minute minimum as interval schedules.
+The minimum cadence is one minute. `untilAt` prevents a run starting at or after the boundary. `maxRuns` counts admitted runs; overlap skips do not count. Calendar evaluation follows the declared timezone through daylight-saving transitions.
 
-`untilAt` means no run begins at or after that epoch-millisecond boundary.
-`maxRuns` is the lifetime total for the automation, not a per-revision counter:
-admitted successful and failed runs count, while visible overlap skips do not.
-When both are present, the first boundary reached ends the automation. Editing
-a completed automation can raise the maximum or move the boundary, but creates
-an active revision that resumes on its new cadence.
+## Lifecycle and recovery
 
-Runs never overlap. If a trigger arrives while the previous run is starting or
-running, the ledger records a visible `skipped` run instead of creating hidden
-parallel work.
+- `pause` stops new admission and preserves the revision’s standing grants.
+- `resume` re-enables the same revision.
+- `edit` creates a new immutable revision, policy, subject, and authority acquisition.
+- `retire` permanently prevents new runs and retires revision authority after live executions close.
+- A failure is recorded on the run; it does not silently pause the automation.
 
-## Complete a recurring goal naturally
+Runs use durable phases. On wake or restart, the mission owner resumes nonterminal phases before admitting newly due work. External effects use stable idempotency keys derived from the run and phase.
 
-A successful tick normally leaves the schedule active. End it only when the
-recurring goal itself is finished:
-
-- A prompt automation calls the built-in `complete_automation` tool with a
-  concise `response`. The tool is valid only during an automation turn and
-  closes that turn successfully.
-- An inline eval or method returns
-  `{ protocol: "automation-completion.v1", response: "…" }`.
-
-The response is stored on both the terminal run and the completed automation,
-shown prominently in chat history and Automations, and prevents future ticks.
-Do not use the completion protocol merely to report that one periodic check
-succeeded. A completion response wins over a time or count boundary reached by
-that same terminal run, preserving the automation's meaningful final result.
-
-## Surface results where the person actually is
-
-An unattended run happens while nobody is watching, so putting its result only
-in the channel means nobody sees it until they next look. Report with `notify`:
+A prompt can complete its recurring goal with `complete_automation({ response })`. Eval or method code returns the equivalent protocol:
 
 ```ts
-notify({
-  to: "owner",
-  title: "Weekly dependency audit",
-  content:
-    "3 packages moved to a new major. `zod` needs a code change; the other two are drop-in.",
-}); // alert defaults to "inbox"
+return {
+  protocol: "automation-completion.v1",
+  response: "The monitored rollout is healthy.",
+};
 ```
 
-`alert: "inbox"` — the default whenever a person is addressed — writes a durable
-notification entry and reaches their phone. That is what makes an unattended
-schedule useful. Reserve `alert: "interrupt"` for a result someone would want to
-be pulled away from; a routine green tick usually deserves no notification at
-all, only the channel record.
-
-Transient toasts are UI feedback for something the user is already doing. They
-are not the proactive surface for a scheduled run, and a run that reports only
-through one has effectively reported nothing. The `messaging` skill covers the
-rungs and the etiquette in full.
-
-## Supervise and diagnose
-
-Use `overview` for a bounded snapshot. It returns a cursor-paged definition
-view, global supervision counts, at most five recent runs per returned
-automation, and a capped list of failures from the last 24 hours. Use its
-server-side `filter` and `query` options instead of fetching every definition.
-Use `listRuns` with its returned cursor for older history; never fetch an
-unbounded ledger or poll every automation.
-
-The institution pill, each scheduled tick's chat-history pill, and the
-**Automations** panel share the same supervision surface. The institution pill
-exists before the first run, opens with no run lookup, and lets the user inspect
-or edit the running definition directly. The overview calls out running work,
-naturally completed definitions, and failures from the last 24 hours.
-Calendar schedules are presented as plain-language rules such as “Every
-Thursday at 5:05 AM in New York time.” Editing common hourly, daily, weekly,
-and monthly rules uses time controls, weekday choices, and timezone search.
-Advanced cron stays lossless behind an Advanced control with a field legend,
-live validation, a human interpretation, and five concrete upcoming runs; the
-raw expression is never the only explanation shown to the user.
-Search and server-side filters keep large collections responsive. Each
-definition exposes bounded recent runs and paged history; each run shows its
-terminal message or error and links to the exact conversation when it has one.
-Opening a history pill lazily loads only that definition and tick, showing the
-cadence and timezone, end policy, lifetime run progress, first activation,
-exact revision, duration, completion response or result/error, and installed
-execution. It also offers edit, stop/resume, and run-now controls.
-Collapsed transcript pills perform no service reads. The panel auto-refreshes
-only while a run is active. `starting` and `running`
-are live states; `succeeded`, `failed`, and `skipped` are terminal.
-
-Agents can use the agent-facing `edit`, `runNow`, `pause`, `resume`, and
-`retire` methods when the user explicitly asks for that lifecycle action.
-Retirement is terminal. Editing any behavior-bearing field atomically installs
-the new closure and applies its schedule. Natural completion is not retirement:
-history remains inspectable and the definition can be edited into a new active
-revision.
+When debugging, inspect the automation pill or **Automations** for the compiled policy reference, declared operations, pending/granted/denied authority, current run phase, executor, and structured failure. Do not infer authority from a channel ID or a successful prior run.

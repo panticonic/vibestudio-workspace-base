@@ -221,8 +221,10 @@ function isDailyProjectPulseLaunch(value: unknown): boolean {
   const record = value as Record<string, unknown>;
   const trigger = record["trigger"] as Record<string, unknown> | undefined;
   const action = record["action"] as Record<string, unknown> | undefined;
-  const conversation = record["conversation"] as Record<string, unknown> | undefined;
-  const exposure = record["toolExposure"] as Record<string, unknown> | undefined;
+  const conversation = record["conversation"] as
+    | Record<string, unknown>
+    | undefined;
+  const operations = record["operations"];
   const source = action?.["code"];
   return (
     record["name"] === "Daily project pulse" &&
@@ -233,15 +235,21 @@ function isDailyProjectPulseLaunch(value: unknown): boolean {
     trigger["maxRuns"] === 12 &&
     action?.["kind"] === "eval" &&
     typeof source === "string" &&
-    /services\.vcs\.status/u.test(source) &&
-    /chat\.publish/u.test(source) &&
+    /vcs\.status/u.test(source) &&
     /automation-completion\.v1/u.test(source) &&
     conversation?.["mode"] === "fresh" &&
-    exposure?.["evalNetwork"] === "none" &&
-    Array.isArray(exposure["services"]) &&
-    exposure["services"].includes("vcs.status") &&
-    (record["permissions"] === undefined ||
-      (Array.isArray(record["permissions"]) && record["permissions"].length === 0))
+    Array.isArray(operations) &&
+    operations.some(
+      (operation) =>
+        operation !== null &&
+        typeof operation === "object" &&
+        (operation as Record<string, unknown>)["service"] === "vcs" &&
+        (operation as Record<string, unknown>)["method"] === "status" &&
+        (operation as Record<string, unknown>)["use"] === "action",
+    ) &&
+    record["permissions"] === undefined &&
+    record["toolExposure"] === undefined &&
+    record["declaredLineageClasses"] === undefined
   );
 }
 

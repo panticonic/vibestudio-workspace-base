@@ -1429,12 +1429,6 @@ export const shellApproval = {
     approvalId: string,
     resolution: import("@vibestudio/shared/authority/unitInstallReview").TemplateInstallResolution
   ) => shellApprovalClient.resolveInstallReview(approvalId, resolution),
-  resolveMissionReview: (
-    approvalId: string,
-    resolution:
-      | { decision: "approve"; selectedAuthorityKeys: string[] }
-      | { decision: "dismiss" }
-  ) => shellApprovalClient.resolveMissionReview(approvalId, resolution),
   submitClientConfig: (approvalId: string, values: Record<string, string>) =>
     shellApprovalClient.submitClientConfig(approvalId, values),
   submitCredentialInput: (approvalId: string, values: Record<string, string>) =>

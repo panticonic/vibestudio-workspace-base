@@ -20,7 +20,13 @@ import {
   type LifecycleResumeInput,
 } from "@workspace/runtime/worker/durable-base";
 import { assertExactSqlTableSchema } from "@workspace/runtime/worker/sql-table-schema";
-import { RemoteRpcError, rpc, withCausalParent, type RpcClient } from "@vibestudio/rpc";
+import {
+  RemoteRpcError,
+  rpc,
+  withCausalParent,
+  type RpcClient,
+} from "@vibestudio/rpc";
+import { withExecutionAdmission } from "@vibestudio/rpc/internal";
 import {
   createGadServiceClient,
   type DurableObjectServiceClient,
@@ -95,10 +101,8 @@ import {
   MISSION_COMPLETION_PROTOCOL,
   missionCompletionResponse,
   type MissionAgentAction,
-  type MissionPermission,
+  type MissionOperationIntent,
   type MissionRecord,
-  type MissionStandingRestriction,
-  type MissionToolExposure,
   type MissionTrigger,
 } from "@vibestudio/shared/authority/mission";
 import type {
@@ -1859,6 +1863,15 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       localTools: {
         run: async ({ channelId, tool, invocationId, args, signal, onProgress }) => {
           const trajectory = channelTrajectoryFor(channelId);
+          const causalRpc = withCausalParent(this.rpc, {
+            kind: "trajectory-invocation",
+            logId: trajectory.logId,
+            head: trajectory.head,
+            invocationId,
+          });
+          const admissionNonce =
+            this.driver.peekLoadedLoop(channelId)?.state.openTurn?.metadata
+              ?.automation?.authoritySessionNonce;
           const execution = Object.freeze({
             invocationId,
             commandId: commandIdForTrajectoryInvocation({
@@ -1866,12 +1879,9 @@ export abstract class AgentVesselBase extends DurableObjectBase {
               head: trajectory.head,
               invocationId,
             }),
-            rpc: withCausalParent(this.rpc, {
-              kind: "trajectory-invocation",
-              logId: trajectory.logId,
-              head: trajectory.head,
-              invocationId,
-            }),
+            rpc: admissionNonce
+              ? withExecutionAdmission(causalRpc, admissionNonce)
+              : causalRpc,
           }) satisfies AgentToolExecutionContext;
           let resolvedTool: AgentTool | undefined;
           let executionAdmitted = false;
@@ -2685,7 +2695,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       name: "launch_automation",
       label: "launch_automation",
       description:
-        "Create and immediately start one recurring or manual automation. Declare every action tool in toolExposure and pregrant its eligible gated capability in permissions. Missing authority falls back to a user approval during the run. The running automation is added to this chat as an inspectable pill before the tool returns.",
+        "Create and immediately start one recurring or manual automation. List the exact semantic service operations the action may use; the host compiles their authority and acquires eligible standing grants. Missing authority falls back to ordinary user approval during a run. The running automation is added to this chat as an inspectable pill before the tool returns.",
       parameters: {
         type: "object",
         properties: {
@@ -2760,62 +2770,22 @@ export abstract class AgentVesselBase extends DurableObjectBase {
             required: ["mode"],
             additionalProperties: false,
           },
-          toolExposure: { type: "object" },
-          declaredLineageClasses: {
-            type: "array",
-            items: {
-              enum: ["none", "web", "email", "channel-external", "external"],
-            },
-          },
-          permissions: {
+          operations: {
             type: "array",
             description:
-              "Standing gated authority required by the action. Use exact capability, resource scope, and tier from each exposed operation's authority metadata. Omit open capabilities. Critical or non-mission-grantable capabilities cannot be pregranted and must be omitted; a run that reaches one requests user approval.",
+              "Exact service and method operations this automation may invoke. This is behavioral intent, not capability or permission metadata.",
             items: {
               type: "object",
               properties: {
-                capability: { type: "string" },
-                resource: {
-                  oneOf: [
-                    {
-                      type: "object",
-                      properties: { kind: { const: "exact" }, key: { type: "string" } },
-                      required: ["kind", "key"],
-                      additionalProperties: false,
-                    },
-                    {
-                      type: "object",
-                      properties: { kind: { const: "prefix" }, prefix: { type: "string" } },
-                      required: ["kind", "prefix"],
-                      additionalProperties: false,
-                    },
-                    {
-                      type: "object",
-                      properties: { kind: { const: "origin" }, origin: { type: "string" } },
-                      required: ["kind", "origin"],
-                      additionalProperties: false,
-                    },
-                    {
-                      type: "object",
-                      properties: { kind: { const: "domain" }, domain: { type: "string" } },
-                      required: ["kind", "domain"],
-                      additionalProperties: false,
-                    },
-                    {
-                      type: "object",
-                      properties: { kind: { const: "network" }, value: { const: "*" } },
-                      required: ["kind", "value"],
-                      additionalProperties: false,
-                    },
-                  ],
-                },
-                tier: { const: "gated" },
+                service: { type: "string" },
+                method: { type: "string" },
+                args: { type: "array" },
+                use: { enum: ["action", "conditional"] },
               },
-              required: ["capability", "resource", "tier"],
+              required: ["service", "method", "use"],
               additionalProperties: false,
             },
           },
-          standingRestrictions: { type: "array", items: { type: "object" } },
         },
         required: ["name", "summary", "action", "trigger"],
         additionalProperties: false,
@@ -3090,7 +3060,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     const tickPrompt = `${input.prompt.trim()}
 
 <automation-tick>
-This is one reviewed recurring-automation tick. If this tick establishes that the recurring goal is naturally finished and no future tick is needed, call complete_automation exactly once with a concise completion response. Otherwise finish normally so the schedule continues. Do not call complete_automation merely because this individual tick succeeded.
+This is one admitted recurring-automation tick. If this tick establishes that the recurring goal is naturally finished and no future tick is needed, call complete_automation exactly once with a concise completion response. Otherwise finish normally so the schedule continues. Do not call complete_automation merely because this individual tick succeeded.
 </automation-tick>`;
     await this.submitAgentInitiatedTurn(
       input.channelId,
@@ -3106,7 +3076,7 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
   }
 
   /**
-   * Canonical model-free automation ingress. The exact reviewed source is
+   * Canonical model-free automation ingress. The exact revision source is
    * journaled as an ordinary eval invocation and runs in this agent/channel's
    * EvalDO, so ambient `chat` publishes with this agent's durable identity.
    */
@@ -5300,8 +5270,8 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
     return automation;
   }
 
-  /** Expand the native agent tool input into the exact installed mission
-   * closure. Identity and code version come from this executing vessel, never
+  /** Expand the native agent tool input into an exact installed mission
+   * charter. Identity and code version come from this executing vessel, never
    * from model-authored strings or a racy build lookup. */
   private selfAutomationDefinition(
     channelId: string,
@@ -5309,8 +5279,6 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
   ): {
     name: string;
     charter: MissionRecord["charter"];
-    permissions: MissionPermission[];
-    standingRestrictions?: MissionStandingRestriction[];
   } {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
       throw new Error("launch_automation requires an object");
@@ -5351,36 +5319,26 @@ This is one reviewed recurring-automation tick. If this tick establishes that th
             contextId: this.subscriptions.getContextId(channelId),
           }
         : { mode: "fresh" as const };
-    const defaultToolExposure: MissionToolExposure = {
-      services: [],
-      userlandServices: [],
-      workspaceServiceDiscovery: "bound",
-      evalNetwork: "none",
-      declaredOrigins: [],
-    };
+    const operations = (input["operations"] ?? []) as MissionOperationIntent[];
     return {
       name,
       charter: {
         summary,
-        harness: { unit: source, ev, ref },
         execution: {
           kind: "agent",
-          target: { source, className, objectKey: this.objectKey },
+          image: {
+            source,
+            ref: ref as `state:${string}`,
+            effectiveVersion: ev,
+            className,
+            objectKey: this.objectKey,
+          },
           action: input["action"] as MissionAgentAction,
           conversation,
-          toolExposure: (input["toolExposure"] ?? defaultToolExposure) as MissionToolExposure,
-          declaredLineageClasses: (input["declaredLineageClasses"] ?? ["none"]) as Array<
-            "none" | "web" | "email" | "channel-external" | "external"
-          >,
+          operations,
         },
         trigger: input["trigger"] as MissionTrigger,
       },
-      permissions: (input["permissions"] ?? []) as MissionPermission[],
-      ...(input["standingRestrictions"] !== undefined
-        ? {
-            standingRestrictions: input["standingRestrictions"] as MissionStandingRestriction[],
-          }
-        : {}),
     };
   }
 

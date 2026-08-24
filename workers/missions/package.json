@@ -83,27 +83,17 @@
           ]
         }
       ],
-      "requests": [
-        {
-          "capability": "reviewed-closure.activate",
-          "resource": {
-            "kind": "prefix",
-            "prefix": "closure:"
-          },
-          "tier": "gated",
-          "evidence": "bounded-dynamic"
-        }
-      ]
+      "requests": []
     }
   },
   "dependencies": {
+    "@vibestudio/rpc": "workspace:*",
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/shared": "workspace:*",
     "@workspace/runtime": "workspace:*"
   },
   "devDependencies": {
     "@vibestudio/durable": "workspace:*",
-    "@vibestudio/rpc": "workspace:*",
     "vitest": "3.2.7"
   }
 }

@@ -139,7 +139,6 @@ describe("automation native launch system test validator", () => {
   const launch = {
     name: "Daily project pulse",
     summary: "Publish the project pulse every Thursday.",
-    permissions: [],
     trigger: {
       kind: "cron",
       expression: "5 5 * * THU",
@@ -149,17 +148,10 @@ describe("automation native launch system test validator", () => {
     },
     action: {
       kind: "eval",
-      code: "const status = await services.vcs.status({ contextId: ctx.contextId }); await chat.publish('project.pulse', status); return status.clean ? { protocol: 'automation-completion.v1', response: 'The project is clean.' } : status;",
+      code: "const status = await vcs.status(); return status.clean ? { protocol: 'automation-completion.v1', response: 'The project is clean.' } : status;",
     },
     conversation: { mode: "fresh" },
-    toolExposure: {
-      services: ["vcs.status"],
-      userlandServices: [],
-      workspaceServiceDiscovery: "bound",
-      evalNetwork: "none",
-      declaredOrigins: [],
-    },
-    declaredLineageClasses: ["none"],
+    operations: [{ service: "vcs", method: "status", use: "action" }],
   };
 
   it("needs no approval pregrant for native launch", () => {

@@ -81,7 +81,7 @@ export function Authority() {
         pushLog(
           liveGrant
             ? `${callerSpec.label}: ${spec.receiver} → ${liveGrant.durability} grant matched, allowed.`
-            : `${callerSpec.label}: ${spec.receiver} → covered by the mission's reviewed closure, allowed.`
+            : `${callerSpec.label}: ${spec.receiver} → covered by the mission revision's standing grant, allowed.`,
         );
       } else {
         setStage("prompt");
@@ -189,7 +189,7 @@ export function Authority() {
                   : spec.tier === "critical"
                     ? "Critical: no standing grant can exist here."
                     : missionClosureCovers
-                      ? "Covered by the mission's reviewed closure."
+                      ? "Covered by the mission revision's standing grant."
                       : liveGrant
                         ? `Live ${liveGrant.durability} grant for this exact code${liveGrant.durability === "version" ? ` (v${liveGrant.version})` : ` (session ${liveGrant.sessionNo})`}.`
                         : grant

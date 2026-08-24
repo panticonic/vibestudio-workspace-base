@@ -166,6 +166,8 @@ export interface AgentTurnMetadata {
     createdAt: number;
     activatedAt?: number;
     runNumber?: number;
+    /** Opaque host admission for tool effects in this exact turn. Never rendered to the model. */
+    authoritySessionNonce: string;
     schedule:
       | {
           /** Missing only on durable turn snapshots written before calendar schedules. */

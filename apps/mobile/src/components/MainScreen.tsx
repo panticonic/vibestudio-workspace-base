@@ -689,17 +689,6 @@ export function MainScreen() {
     },
     [removeResolvedApproval, shellClient]
   );
-  const resolveMissionReview = useCallback(
-    async (
-      approvalId: string,
-      resolution: { decision: "approve"; selectedAuthorityKeys: string[] } | { decision: "dismiss" }
-    ) => {
-      if (!shellClient) throw new Error("Shell client not available");
-      await shellClient.shellApproval.resolveMissionReview(approvalId, resolution);
-      removeResolvedApproval(approvalId);
-    },
-    [removeResolvedApproval, shellClient]
-  );
   const activatePanel = useCallback(
     (panelId: string) => {
       if (!shellClient || !hostConfig) return;
@@ -2379,7 +2368,6 @@ export function MainScreen() {
         onSubmitClientConfig={submitClientConfig}
         onSubmitCredentialInput={submitCredentialInput}
         onSubmitSecretInput={submitSecretInput}
-        onResolveMissionReview={resolveMissionReview}
         onResolveInstallReview={resolveInstallReview}
         onNavigateToPanel={activatePanel}
         onFetchDiffContent={fetchApprovalDiffContent}

@@ -346,6 +346,7 @@ describe("AgentLoopDriver", () => {
           automation: {
             missionId: "mission-eval",
             runId: "run-eval",
+            authoritySessionNonce: "nonce:run-eval",
             name: "Daily check",
             revision: 1,
             action: "eval",
@@ -410,6 +411,7 @@ describe("AgentLoopDriver", () => {
         automation: {
           missionId: "mission-one",
           runId: "run-one",
+          authoritySessionNonce: "nonce:run-one",
           name: "One",
           revision: 1,
           action: "prompt",
@@ -428,6 +430,7 @@ describe("AgentLoopDriver", () => {
         automation: {
           missionId: "mission-two",
           runId: "run-two",
+          authoritySessionNonce: "nonce:run-two",
           name: "Two",
           revision: 1,
           action: "prompt",

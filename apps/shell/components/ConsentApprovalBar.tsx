@@ -372,14 +372,6 @@ export function ConsentApprovalBar() {
     if (current?.kind !== "secret-input") return;
     runApprovalAction(current, () => shellApproval.submitSecretInput(current.approvalId, values));
   };
-  const resolveMissionReview = (
-    resolution: { decision: "approve"; selectedAuthorityKeys: string[] } | { decision: "dismiss" }
-  ) => {
-    if (current?.kind !== "mission-review") return;
-    runApprovalAction(current, () =>
-      shellApproval.resolveMissionReview(current.approvalId, resolution)
-    );
-  };
   /**
    * Answer a review and keep what the server says came of it.
    *
@@ -564,10 +556,6 @@ export function ConsentApprovalBar() {
       case "submit-secret-input":
         continueReviewSession();
         submitSecretInput(intent.values);
-        return;
-      case "resolve-mission-review":
-        continueReviewSession();
-        resolveMissionReview(intent.resolution);
         return;
       case "resolve-install-review":
         continueReviewSession();

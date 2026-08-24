@@ -35,12 +35,6 @@ export interface ApprovalQueueInfo {
 export type ApprovalCardIntentBody =
   | { type: "decide"; decision: ApprovalDecision }
   | {
-      type: "resolve-mission-review";
-      resolution:
-        | { decision: "approve"; selectedAuthorityKeys: string[] }
-        | { decision: "dismiss" };
-    }
-  | {
       /**
        * Accept an install review with exactly what the user checked, or cancel
        * it. Every part arrives either way — this decides only what is allowed

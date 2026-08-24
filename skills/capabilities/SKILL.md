@@ -6,7 +6,7 @@ description: Declare, discover, inspect, or debug authority grants, workspace se
 # Capabilities and workspace services
 
 Read before adding a host effect, worker/DO API, authority request, or approval
-boundary. For host enforcement, mission closure, product seeds, or the System
+boundary. For host enforcement, automation execution, product seeds, or the System
 Agent, also read the [authority implementation
 checklist](references/authority-implementation-checklist.md).
 
@@ -125,11 +125,19 @@ integrity latch on reads. Never accept caller-supplied content class, copy
 content to disguise origin, or invent/parse lineage-set coordinates. Use
 `contextIntegrity.explain` for bounded diagnostics from the current session.
 
-A mission is an immutable automation authority closure over its exact harness,
-execution target, action or prompt, conversation policy, service exposure,
-trigger, expected content lineage, and network policy. Change closure inputs through a
-reviewed revision; preserve caller, owner, session, and context lineage through
-every leg. Standing restrictions are durable denies, not suggestions.
+A mission revision is a durable principal over an exact charter and
+host-compiled operation policy. Userland declares semantic service operations;
+it never authors capability rows. The host derives capability and resource
+leaves from receiver contracts, stores the immutable policy artifact, and
+acquires eligible grants for `mission:<id>@<revisionDigest>` under the
+attributed requesting user. Editing creates a new subject. Pausing only stops
+new admission and preserves the existing subject and grants.
+
+Execution admission binds that subject and policy to one authenticated agent
+turn, eval run, or method invocation. Causal child calls inherit the ordinary
+authorization context. Channel IDs are routing facts, never authority subjects.
+Missing runtime authority uses ordinary acquisition; do not force automation
+eval into `pregranted-only` mode.
 
 The System Agent is a product-owned mission with a product-derived worker,
 prompt, roster, tools, and execution identity. It uses ordinary typed services

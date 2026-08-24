@@ -203,41 +203,42 @@ describe("transcript delivery markers", () => {
       }
       if (method === "get") {
         return {
+          schemaVersion: 2,
           missionId: "mission-talk-timer",
           name: "Talk timer",
           revision: 1,
           charter: {
             summary: "Notify me every minute.",
-            harness: { unit: "workers/agent-worker", ev: "a".repeat(64) },
             execution: {
               kind: "agent",
-              target: {
+              image: {
                 source: "workers/agent-worker",
+                ref: `state:${"c".repeat(64)}`,
+                effectiveVersion: "a".repeat(64),
                 className: "AiChatWorker",
                 objectKey: "talk-timer",
               },
               action: { kind: "prompt", text: "Notify me." },
               conversation: { mode: "fresh" },
-              toolExposure: {
-                services: [],
-                userlandServices: [],
-                workspaceServiceDiscovery: "bound",
-                evalNetwork: "none",
-                declaredOrigins: [],
-              },
-              declaredLineageClasses: ["none"],
+              operations: [],
             },
             trigger: { kind: "schedule", everyMs: 60_000 },
           },
           owner: { userId: "alice", deviceId: "panel:alice" },
           state: "active",
           revisionDigest: "b".repeat(64),
+          operationPolicy: {
+            schemaVersion: 1,
+            digest: "d".repeat(64),
+            artifactRef: `policy:${"d".repeat(64)}`,
+            compilerVersion: "test",
+            catalogDigest: "e".repeat(64),
+          },
           createdAt,
           updatedAt: createdAt,
           activatedAt: createdAt,
           runCount: 0,
-          permissions: [],
-          standingRestrictions: [],
+          authority: { requestIds: [], grantIds: [], denialIds: [] },
         };
       }
       throw new Error(`Unexpected automation RPC ${method}`);

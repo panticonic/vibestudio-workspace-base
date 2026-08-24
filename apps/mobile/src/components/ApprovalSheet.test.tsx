@@ -75,47 +75,6 @@ const credential: PendingApproval = {
   },
 };
 
-const missionReview: PendingApproval = {
-  ...base,
-  kind: "mission-review",
-  missionId: "mission-1",
-  revision: 2,
-  closureDigest: "closure-abc123",
-  reviewKind: "revision",
-  title: "Review morning briefing",
-  taskSummary: "Prepare a morning briefing.",
-  triggerSummary: "Every weekday at 08:00",
-  authority: {
-    rows: [],
-    diff: { added: [], removed: [], unchanged: [], retiered: [] },
-  },
-  toolkitDomains: [],
-  networkSummary: "No network access",
-  lineageSummary: "Workspace content",
-  charter: {
-    summary: "Prepare a morning briefing.",
-    harness: { unit: "workers/briefing", ev: "ev-harness-123" },
-    execution: {
-      kind: "agent",
-      // validateMissionCharter requires the execution target's source to equal
-      // the harness unit.
-      target: { source: "workers/briefing", className: "BriefingDO", objectKey: "briefing" },
-      action: { kind: "prompt", text: "Prepare a morning briefing." },
-      conversation: { mode: "fresh" },
-      toolExposure: {
-        services: [],
-        userlandServices: [],
-        workspaceServiceDiscovery: "bound",
-        evalNetwork: "none",
-        declaredOrigins: [],
-      },
-      declaredLineageClasses: ["none"],
-    },
-    trigger: { kind: "cron", expression: "0 8 * * 1-5", timezone: "Europe/Berlin" },
-  },
-  charterChanges: [],
-};
-
 const notificationsRow = authorityRow({
   capability: "push.send",
   resource: { kind: "prefix", prefix: "" },
@@ -356,7 +315,6 @@ function renderSheet(
     onSubmitClientConfig: jest.fn(async () => undefined),
     onSubmitCredentialInput: jest.fn(async () => undefined),
     onSubmitSecretInput: jest.fn(async () => undefined),
-    onResolveMissionReview: jest.fn(async () => undefined),
     onResolveInstallReview: jest.fn(async () => undefined),
     ...overrides,
   };
@@ -391,8 +349,10 @@ describe("ApprovalSheet", () => {
     [genericApproval, "Open another workspace branch"],
     [deviceCode, "Sign in to GitHub"],
     [installReview, "Start this workspace?"],
-    [browserPermission, "Allow camera and microphone on https://meet.example.com?"],
-    [missionReview, "Review Review morning briefing"],
+    [
+      browserPermission,
+      "Allow camera and microphone on https://meet.example.com?",
+    ],
   ] as const)("renders %s", (approval, title) => {
     const { getByText } = renderSheet(approval);
     expect(getByText(title)).toBeTruthy();
@@ -461,15 +421,6 @@ describe("ApprovalSheet", () => {
     const { getByText } = renderSheet(credential);
     expect(getByText("Calendar account for scheduling")).toBeTruthy();
     expect(getByText("calendar-primary read calendar/events")).toBeTruthy();
-  });
-
-  it("discloses the exact mission closure, harness, and execution", () => {
-    const { getByTestId, getByText, queryByText } = renderSheet(missionReview);
-    expect(queryByText("closure-abc123")).toBeNull();
-    fireEvent.press(getByTestId("mission-developer-details"));
-    expect(getByText("closure-abc123")).toBeTruthy();
-    expect(getByText("workers/briefing@ev-harness-123")).toBeTruthy();
-    expect(getByText("agent:BriefingDO")).toBeTruthy();
   });
 
   it("puts what is worth knowing above the everyday fold", () => {
@@ -904,8 +855,7 @@ describe("ApprovalSheet", () => {
         onSubmitCredentialInput={jest.fn()}
         onResolveInstallReview={jest.fn()}
         onSubmitSecretInput={jest.fn()}
-        onResolveMissionReview={jest.fn()}
-      />
+      />,
     );
     expect(queryByText("The sign-in domain differs from the service domain.")).toBeNull();
   });
@@ -1086,8 +1036,7 @@ describe("ApprovalSheet", () => {
         onSubmitCredentialInput={jest.fn()}
         onResolveInstallReview={jest.fn()}
         onSubmitSecretInput={jest.fn()}
-        onResolveMissionReview={jest.fn()}
-      />
+      />,
     );
     expect(getByText("Add Acme API")).toBeTruthy();
   });

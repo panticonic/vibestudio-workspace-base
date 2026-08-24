@@ -953,12 +953,19 @@ function Inspector({
               </Text>
             </Box>
           </Grid>
-          {run?.error || (activity.status === "failed" && activity.summary) ? (
-            <Callout.Root color={activity.status === "skipped" ? "amber" : "red"} size="1" mt="3">
+          {run?.failure ||
+          (activity.status === "failed" && activity.summary) ? (
+            <Callout.Root
+              color={activity.status === "skipped" ? "amber" : "red"}
+              size="1"
+              mt="3"
+            >
               <Callout.Icon>
                 <CrossCircledIcon />
               </Callout.Icon>
-              <Callout.Text>{run?.error ?? activity.summary}</Callout.Text>
+              <Callout.Text>
+                {run?.failure?.message ?? activity.summary}
+              </Callout.Text>
             </Callout.Root>
           ) : null}
           {run?.completionResponse ? (
@@ -1032,16 +1039,16 @@ function Inspector({
           )}
           {run ? (
             <Code size="1" style={{ overflowWrap: "anywhere" }}>
-              installed closure {run.closureDigest}
+              mission authority {run.missionSubject}
             </Code>
           ) : null}
           {current.revision === (activity?.snapshot.revision ?? definition?.snapshot.revision) ? (
             <>
               <Code size="1" style={{ overflowWrap: "anywhere" }}>
-                {current.charter.harness.unit}@{current.charter.harness.ev}
+                {execution.image.source}@{execution.image.effectiveVersion}
               </Code>
               <Code size="1" style={{ overflowWrap: "anywhere" }}>
-                {execution.target.className} · {execution.target.objectKey}
+                {execution.image.className} · {execution.image.objectKey}
               </Code>
             </>
           ) : (

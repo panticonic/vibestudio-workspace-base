@@ -46,7 +46,6 @@ import type {
   PendingSecretInputApproval,
   PendingClientConfigApproval,
   PendingDeviceCodeApproval,
-  PendingMissionReviewApproval,
 } from "@vibestudio/shared/approvals";
 import { PanelIcon } from "./PanelIcon";
 import {
@@ -64,7 +63,6 @@ import {
 import type { ApprovalDecision } from "@vibestudio/shared/approvals";
 import { HOST_APPROVAL_COPY } from "@vibestudio/shared/hostApprovalCopy";
 import { AUTHORITY_DOMAINS } from "@vibestudio/shared/authority/authorityDomains";
-import { authorityRowKey } from "@vibestudio/shared/authority/authorityRowDiff";
 import {
   parseApprovalMarkdown,
   type ApprovalMarkdownInline,
@@ -141,15 +139,9 @@ export function ApprovalCard({
   const validationTerminal = lifecycleState === "failed" || lifecycleState === "cancelled";
   // Secret-config / credential-input values are held locally and only leave the
   // surface on submit.
-  const [secretConfigValues, setSecretConfigValues] = useState<Record<string, string>>({});
-  const [selectedMissionAuthorityKeys, setSelectedMissionAuthorityKeys] = useState<Set<string>>(
-    () =>
-      new Set(
-        approval.kind === "mission-review"
-          ? approval.authority.diff.added.filter((row) => row.tier === "gated").map(authorityRowKey)
-          : []
-      )
-  );
+  const [secretConfigValues, setSecretConfigValues] = useState<
+    Record<string, string>
+  >({});
   // The install review's selection lives here so the keyboard shortcuts accept
   // what is actually on screen rather than recomputing the default slate.
   const [installSelection, setInstallSelection] = useState<InstallSelection>(() =>
@@ -203,11 +195,6 @@ export function ApprovalCard({
         // Browser permission decisions have no one-shot "deny": dismissing
         // denies only this request, while "block" is the explicit durable act.
         emitForApproval({ type: "decide", decision: "dismiss" });
-      } else if (approval.kind === "mission-review") {
-        emitForApproval({
-          type: "resolve-mission-review",
-          resolution: { decision: "dismiss" },
-        });
       } else if (approval.kind === "unit-install-review") {
         // D is the decline key everywhere else, and it means the same here:
         // cancel leaves the workspace untouched. It never installs.
@@ -225,14 +212,9 @@ export function ApprovalCard({
       } else if (approval.kind === "credential-input") {
         emitForApproval({ type: "submit-credential-input", values: secretConfigValues });
       } else if (approval.kind === "secret-input") {
-        emitForApproval({ type: "submit-secret-input", values: secretConfigValues });
-      } else if (approval.kind === "mission-review") {
         emitForApproval({
-          type: "resolve-mission-review",
-          resolution: {
-            decision: "approve",
-            selectedAuthorityKeys: [...selectedMissionAuthorityKeys],
-          },
+          type: "submit-secret-input",
+          values: secretConfigValues,
         });
       } else if (approval.kind === "unit-install-review") {
         // Enter accepts the review exactly as it stands on screen — the default
@@ -300,26 +282,8 @@ export function ApprovalCard({
       />
     ) : // The install review owns its own actions, because they carry the
     // selection. There is no generic "allow" that could stand in for them.
-    approval.kind === "unit-install-review" ? null : approval.kind === "mission-review" ? (
-      <MissionReviewActions
-        approval={approval}
-        onApprove={() =>
-          emitForApproval({
-            type: "resolve-mission-review",
-            resolution: {
-              decision: "approve",
-              selectedAuthorityKeys: [...selectedMissionAuthorityKeys],
-            },
-          })
-        }
-        onDismiss={() =>
-          emitForApproval({
-            type: "resolve-mission-review",
-            resolution: { decision: "dismiss" },
-          })
-        }
-      />
-    ) : approval.kind === "secret-input" ? (
+    approval.kind === "unit-install-review" ? null : approval.kind ===
+      "secret-input" ? (
       <SecretInputActions
         approval={approval}
         values={secretConfigValues}
@@ -537,21 +501,6 @@ export function ApprovalCard({
                       // across every file of the entry, not just the focused one.
                       files: entry.changedFiles,
                     },
-                  })
-                }
-              />
-            ) : null}
-
-            {approval.kind === "mission-review" ? (
-              <MissionReviewBody
-                approval={approval}
-                selected={selectedMissionAuthorityKeys}
-                onToggle={(key, checked) =>
-                  setSelectedMissionAuthorityKeys((current) => {
-                    const next = new Set(current);
-                    if (checked) next.add(key);
-                    else next.delete(key);
-                    return next;
                   })
                 }
               />
@@ -984,152 +933,6 @@ function BrowserPermissionActions({
   );
 }
 
-function MissionReviewBody({
-  approval,
-  selected,
-  onToggle,
-}: {
-  approval: PendingMissionReviewApproval;
-  selected: ReadonlySet<string>;
-  onToggle: (key: string, checked: boolean) => void;
-}) {
-  return (
-    <Flex direction="column" gap="3" className="approval-mission-review">
-      <Box>
-        <Text size="1" color="gray">
-          Task description
-        </Text>
-        <Text as="p" size="2">
-          {approval.taskSummary}
-        </Text>
-      </Box>
-      <Text size="2">Runs: {approval.triggerSummary}</Text>
-      <Flex direction="column" gap="2">
-        <Text size="2" weight="bold">
-          What it can do
-        </Text>
-        {approval.authority.rows.length === 0 ? (
-          <Text size="2" color="gray">
-            No standing permissions
-          </Text>
-        ) : (
-          approval.authority.rows.map((row) => {
-            const key = authorityRowKey(row);
-            const isNew = approval.authority.diff.added.some(
-              (candidate) => authorityRowKey(candidate) === key
-            );
-            const interactiveOnly = row.tier === "critical";
-            const selectable = isNew && !interactiveOnly;
-            const retiered = approval.authority.diff.retiered.some(
-              ({ after }) => authorityRowKey(after) === key
-            );
-            return (
-              <label key={key} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                {selectable ? (
-                  <input
-                    type="checkbox"
-                    checked={selected.has(key)}
-                    onChange={(event) => onToggle(key, event.currentTarget.checked)}
-                    aria-label={`${row.action} ${row.resource}`}
-                  />
-                ) : (
-                  <LockClosedIcon style={{ marginTop: 2 }} />
-                )}
-                <Flex direction="column" gap="1">
-                  <Flex align="center" gap="2">
-                    <Badge color="blue" variant="soft">
-                      {AUTHORITY_DOMAINS[row.domain].label}
-                    </Badge>
-                    <Text size="2">
-                      {row.action} — {row.resource}
-                    </Text>
-                    <Badge
-                      color={interactiveOnly ? "amber" : isNew || retiered ? "amber" : "gray"}
-                      variant="soft"
-                    >
-                      {interactiveOnly
-                        ? "asks every time"
-                        : isNew
-                          ? "new"
-                          : retiered
-                            ? "permission changed"
-                            : "already allowed"}
-                    </Badge>
-                  </Flex>
-                </Flex>
-              </label>
-            );
-          })
-        )}
-      </Flex>
-      <Flex direction="column" gap="1">
-        <Text size="1">
-          If it needs a new permission within its toolkit, it pauses and asks you.
-        </Text>
-        <Text size="1">
-          To do anything beyond its toolkit, it stops and proposes an update for your review.
-        </Text>
-        <Text size="1">Actions that can’t be undone always wait for you.</Text>
-      </Flex>
-      <Flex gap="2" wrap="wrap">
-        {approval.toolkitDomains.map((domain) => (
-          <Badge key={domain} color="gray" variant="soft">
-            Uses {AUTHORITY_DOMAINS[domain].label.toLowerCase()}
-          </Badge>
-        ))}
-      </Flex>
-      <Text size="1">Can reach: {approval.networkSummary}</Text>
-      <Text size="1">Works with content from: {approval.lineageSummary}</Text>
-      {approval.charterChanges.map((change) => (
-        <Text key={change.field} size="1" color={change.widening ? "red" : "gray"}>
-          {change.field}: {change.before ?? "not set"} → {change.after}
-        </Text>
-      ))}
-      <Text size="1" color="gray">
-        Like all agents, it can’t change your safety controls.
-      </Text>
-      <details>
-        <summary>For developers</summary>
-        <Code size="1">
-          {approval.closureDigest} · {approval.charter.harness.unit}@{approval.charter.harness.ev} ·{" "}
-          {approval.charter.execution.kind === "agent"
-            ? `agent:${approval.charter.execution.target.className}`
-            : `${approval.charter.execution.target.className}.${approval.charter.execution.method}`}
-        </Code>
-      </details>
-    </Flex>
-  );
-}
-
-function MissionReviewActions({
-  approval,
-  onApprove,
-  onDismiss,
-}: {
-  approval: PendingMissionReviewApproval;
-  onApprove: () => void;
-  onDismiss: () => void;
-}) {
-  return (
-    <Flex direction="column" align="end" gap="1">
-      <Flex align="center" gap="2">
-        <Button color="sky" onClick={onApprove} data-testid="mission-review-approve">
-          <CheckCircledIcon />
-          {approval.reviewKind === "out-of-charter"
-            ? "Allow and update mission"
-            : "Approve mission"}
-        </Button>
-        <Button variant="soft" color="gray" onClick={onDismiss}>
-          {approval.reviewKind === "out-of-charter" ? "Don’t add" : "Not now"}
-        </Button>
-      </Flex>
-      <Text size="1" color="gray">
-        You can pause or change this anytime. Changes take effect after you review them.
-      </Text>
-    </Flex>
-  );
-}
-
 function ClientConfigActions({
   approval,
   values,
@@ -1435,7 +1238,7 @@ function ApprovalDetails({
             <SecretInputDetails approval={approval} />
           ) : approval.kind === "browser-permission" ? (
             <BrowserPermissionDetails approval={approval} />
-          ) : approval.kind === "mission-review" ? null : (
+          ) : (
             <CapabilityDetails approval={approval} />
           )}
         </Flex>

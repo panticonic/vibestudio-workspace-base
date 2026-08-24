@@ -22,7 +22,6 @@ import type {
   ApprovalDetailFormat,
   ApprovalDecision,
   PendingApproval,
-  PendingMissionReviewApproval,
   PendingBrowserPermissionApproval,
   PendingCapabilityApproval,
   PendingClientConfigApproval,
@@ -44,7 +43,6 @@ import {
   type LineDiffResult,
 } from "@vibestudio/shared/lineDiff";
 import { AUTHORITY_DOMAINS } from "@vibestudio/shared/authority/authorityDomains";
-import { authorityRowKey } from "@vibestudio/shared/authority/authorityRowDiff";
 import {
   parseApprovalMarkdown,
   type ApprovalMarkdownInline,
@@ -184,10 +182,9 @@ export interface ApprovalSheetProps {
     approvalId: string,
     values: Record<string, string>
   ) => Promise<void> | void;
-  onSubmitSecretInput: (approvalId: string, values: Record<string, string>) => Promise<void> | void;
-  onResolveMissionReview: (
+  onSubmitSecretInput: (
     approvalId: string,
-    resolution: { decision: "approve"; selectedAuthorityKeys: string[] } | { decision: "dismiss" }
+    values: Record<string, string>
   ) => Promise<void> | void;
   /**
    * Accept a review with exactly what the user allowed now, or cancel it. Every
@@ -213,9 +210,7 @@ type PendingAction =
   | ApprovalDecision
   | "submit-client-config"
   | "submit-credential-input"
-  | "submit-secret-input"
-  | "mission-review-approve"
-  | "mission-review-dismiss";
+  | "submit-secret-input";
 
 type ButtonVariant = "primary" | "surface" | "danger" | "dangerPrimary" | "outline";
 
@@ -225,7 +220,6 @@ export function ApprovalSheet({
   onSubmitClientConfig,
   onSubmitCredentialInput,
   onSubmitSecretInput,
-  onResolveMissionReview,
   onResolveInstallReview,
   onNavigateToPanel,
   onFetchDiffContent,
@@ -247,9 +241,6 @@ export function ApprovalSheet({
   const canPrev = queueLength > 1 && browseIndex > 0;
   const canNext = queueLength > 1 && browseIndex < queueLength - 1;
   const [values, setValues] = useState<Record<string, string>>({});
-  const [selectedMissionAuthorityKeys, setSelectedMissionAuthorityKeys] = useState<Set<string>>(
-    new Set()
-  );
   /**
    * What the user has allowed now, per part. Seeded from the review's own
    * defaults, so one tap accepts the complete slate with everything allowed and
@@ -306,13 +297,6 @@ export function ApprovalSheet({
     );
     if (!approvalChanged) return;
     setValues({});
-    setSelectedMissionAuthorityKeys(
-      new Set(
-        current.kind === "mission-review"
-          ? current.authority.diff.added.filter((row) => row.tier === "gated").map(authorityRowKey)
-          : []
-      )
-    );
     setError(null);
     setPendingAction(null);
     setMinimized(false);
@@ -564,20 +548,6 @@ export function ApprovalSheet({
                     }
                   />
                 ) : null}
-                {current.kind === "mission-review" ? (
-                  <MissionReviewPanel
-                    approval={current}
-                    selected={selectedMissionAuthorityKeys}
-                    onToggle={(key, checked) =>
-                      setSelectedMissionAuthorityKeys((currentSelection) => {
-                        const next = new Set(currentSelection);
-                        if (checked) next.add(key);
-                        else next.delete(key);
-                        return next;
-                      })
-                    }
-                  />
-                ) : null}
                 {current.kind === "capability" && current.operationSubstance ? (
                   <View style={styles.detailCard}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
@@ -713,25 +683,6 @@ export function ApprovalSheet({
                     onCancel={() =>
                       runAction("dismiss", () =>
                         onResolveInstallReview(current.approvalId, { decision: "cancel" })
-                      )
-                    }
-                  />
-                ) : current.kind === "mission-review" ? (
-                  <MissionReviewActions
-                    approval={current}
-                    busy={isBusy}
-                    pendingAction={pendingAction}
-                    onApprove={() =>
-                      runAction("mission-review-approve", () =>
-                        onResolveMissionReview(current.approvalId, {
-                          decision: "approve",
-                          selectedAuthorityKeys: [...selectedMissionAuthorityKeys],
-                        })
-                      )
-                    }
-                    onDismiss={() =>
-                      runAction("mission-review-dismiss", () =>
-                        onResolveMissionReview(current.approvalId, { decision: "dismiss" })
                       )
                     }
                   />
@@ -1240,7 +1191,7 @@ function ApprovalDetails({
           ) : approval.kind === "unit-install-review" ? null : approval.kind ===
             "browser-permission" ? (
             <BrowserPermissionDetails approval={approval} />
-          ) : approval.kind === "mission-review" ? null : (
+          ) : (
             <CapabilityDetails approval={approval} />
           )}
         </View>
@@ -2783,187 +2734,6 @@ function BrowserPermissionActions({
           loading={pendingAction === "dismiss"}
           onPress={() => onChoose("dismiss")}
           testID="approval-action-dismiss"
-        />
-      </View>
-    </View>
-  );
-}
-
-function MissionReviewPanel({
-  approval,
-  selected,
-  onToggle,
-}: {
-  approval: PendingMissionReviewApproval;
-  selected: ReadonlySet<string>;
-  onToggle: (key: string, checked: boolean) => void;
-}) {
-  const colors = useAtomValue(themeColorsAtom);
-  return (
-    <View style={styles.detailsBlock}>
-      <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>Task description</Text>
-      <Text style={[styles.detailValue, { color: colors.text }]}>{approval.taskSummary}</Text>
-      <Text style={[styles.detailValue, { color: colors.text }]}>
-        Runs: {approval.triggerSummary}
-      </Text>
-      <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>What it can do</Text>
-      {approval.authority.rows.map((row) => {
-        const key = authorityRowKey(row);
-        const isNew = approval.authority.diff.added.some(
-          (candidate) => authorityRowKey(candidate) === key
-        );
-        const interactiveOnly = row.tier === "critical";
-        const selectable = isNew && !interactiveOnly;
-        const retiered = approval.authority.diff.retiered.some(
-          ({ after }) => authorityRowKey(after) === key
-        );
-        return (
-          <Pressable
-            key={key}
-            accessibilityRole={selectable ? "checkbox" : undefined}
-            accessibilityState={selectable ? { checked: selected.has(key) } : undefined}
-            disabled={!selectable}
-            onPress={() => onToggle(key, !selected.has(key))}
-            style={styles.detailRow}
-            testID={selectable ? `mission-authority-${row.capability}` : undefined}
-          >
-            <Text style={[styles.detailLabel, { color: colors.text }]}>
-              {selectable ? (selected.has(key) ? "☑" : "☐") : "🔒"}{" "}
-              {AUTHORITY_DOMAINS[row.domain].label}
-            </Text>
-            <Text style={[styles.detailValue, { color: colors.textSecondary }]}>
-              {row.action} — {row.resource} ·{" "}
-              {interactiveOnly
-                ? "asks every time"
-                : isNew
-                  ? "new"
-                  : retiered
-                    ? "permission changed"
-                    : "already allowed"}
-            </Text>
-          </Pressable>
-        );
-      })}
-      <Text style={[styles.detailValue, { color: colors.textSecondary }]}>
-        If it needs a new permission within its toolkit, it pauses and asks you.
-      </Text>
-      <Text style={[styles.detailValue, { color: colors.textSecondary }]}>
-        To do anything beyond its toolkit, it stops and proposes an update for your review.
-      </Text>
-      <Text style={[styles.detailValue, { color: colors.textSecondary }]}>
-        Actions that can’t be undone always wait for you.
-      </Text>
-      <Text style={[styles.detailValue, { color: colors.text }]}>
-        Uses:{" "}
-        {approval.toolkitDomains
-          .map((domain) => AUTHORITY_DOMAINS[domain].label.toLowerCase())
-          .join(" · ") || "no standing toolkit"}
-      </Text>
-      <Text style={[styles.detailValue, { color: colors.text }]}>
-        Can reach: {approval.networkSummary}
-      </Text>
-      <Text style={[styles.detailValue, { color: colors.text }]}>
-        Works with content from: {approval.lineageSummary}
-      </Text>
-      {approval.charterChanges.map((change) => (
-        <Text
-          key={change.field}
-          style={[styles.detailValue, { color: change.widening ? colors.danger : colors.text }]}
-        >
-          {change.field}: {change.before ?? "not set"} → {change.after}
-        </Text>
-      ))}
-      <Text style={[styles.detailValue, { color: colors.textSecondary }]}>
-        Like all agents, it can’t change your safety controls.
-      </Text>
-      <MissionDeveloperDetails approval={approval} />
-    </View>
-  );
-}
-
-function MissionDeveloperDetails({ approval }: { approval: PendingMissionReviewApproval }) {
-  const colors = useAtomValue(themeColorsAtom);
-  const [open, setOpen] = useState(false);
-  return (
-    <View style={[styles.missionDeveloperDetails, { borderTopColor: colors.borderSubtle }]}>
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ expanded: open }}
-        onPress={() => setOpen((value) => !value)}
-        style={styles.detailsSummary}
-        testID="mission-developer-details"
-      >
-        {open ? (
-          <ChevronDown size={14} color={colors.textSecondary} />
-        ) : (
-          <ChevronRight size={14} color={colors.textSecondary} />
-        )}
-        <Text style={[styles.detailsSummaryText, { color: colors.textSecondary }]}>
-          Developer details
-        </Text>
-      </Pressable>
-      {open ? (
-        <View style={styles.detailRows}>
-          <DetailRow icon={Lock} label="Closure" value={approval.closureDigest} code />
-          <DetailRow
-            icon={Settings2}
-            label="Harness"
-            value={`${approval.charter.harness.unit}@${approval.charter.harness.ev}`}
-            code
-          />
-          <DetailRow
-            icon={Settings2}
-            label="Execution"
-            value={
-              approval.charter.execution.kind === "agent"
-                ? `agent:${approval.charter.execution.target.className}`
-                : `${approval.charter.execution.target.className}.${approval.charter.execution.method}`
-            }
-            code
-          />
-        </View>
-      ) : null}
-    </View>
-  );
-}
-
-function MissionReviewActions({
-  approval,
-  busy,
-  pendingAction,
-  onApprove,
-  onDismiss,
-}: {
-  approval: PendingMissionReviewApproval;
-  busy: boolean;
-  pendingAction: PendingAction | null;
-  onApprove: () => void;
-  onDismiss: () => void;
-}) {
-  return (
-    <View style={styles.actionGroups}>
-      <View style={styles.actionRow}>
-        <DecisionButton
-          label={
-            approval.reviewKind === "out-of-charter"
-              ? "Allow and update mission"
-              : "Approve mission"
-          }
-          description="Approve this exact reviewed mission closure."
-          variant="primary"
-          disabled={busy}
-          loading={pendingAction === "mission-review-approve"}
-          onPress={onApprove}
-          testID="approval-action-mission-approve"
-        />
-        <DecisionButton
-          label={approval.reviewKind === "out-of-charter" ? "Don’t add" : "Not now"}
-          description="Leave this mission unapproved."
-          variant="surface"
-          disabled={busy}
-          loading={pendingAction === "mission-review-dismiss"}
-          onPress={onDismiss}
-          testID="approval-action-mission-dismiss"
         />
       </View>
     </View>

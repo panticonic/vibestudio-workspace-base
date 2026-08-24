@@ -728,6 +728,7 @@ describe("AgentVesselBase automation ingress", () => {
   const automation = {
     missionId: "mission-health",
     runId: "run-health",
+    authoritySessionNonce: "nonce:run-health",
     name: "Project health",
     revision: 2,
     action: "eval" as const,
@@ -1303,33 +1304,24 @@ describe("AgentVesselBase.chatOp", () => {
     const vessel = await makeVessel();
     vessel.callerIdForTest = await expectedEvalCaller();
     vessel.automationLaunchForTest = {
+      schemaVersion: 2,
       missionId: "mission-daily",
       name: "Daily check",
       revision: 1,
       charter: {
         summary: "Check the project every morning.",
-        harness: {
-          unit: "workers/agent",
-          ev: "a".repeat(64),
-          ref: `state:${"b".repeat(64)}`,
-        },
         execution: {
           kind: "agent",
-          target: {
+          image: {
             source: "workers/agent",
+            effectiveVersion: "a".repeat(64),
+            ref: `state:${"b".repeat(64)}`,
             className: "Agent",
             objectKey: "daily",
           },
           action: { kind: "prompt", text: "Check the project." },
           conversation: { mode: "fresh" },
-          toolExposure: {
-            services: [],
-            userlandServices: [],
-            workspaceServiceDiscovery: "bound",
-            evalNetwork: "none",
-            declaredOrigins: [],
-          },
-          declaredLineageClasses: ["none"],
+          operations: [],
         },
         trigger: {
           kind: "cron",
@@ -1340,11 +1332,18 @@ describe("AgentVesselBase.chatOp", () => {
       owner: { userId: "alice", deviceId: AGENT_ID },
       state: "active",
       revisionDigest: "b".repeat(64),
+      operationPolicy: {
+        schemaVersion: 1,
+        digest: "c".repeat(64),
+        artifactRef: `policy:${"c".repeat(64)}`,
+        compilerVersion: "test",
+        catalogDigest: "d".repeat(64),
+      },
       createdAt: 1_700_000_000_000,
       updatedAt: 1_700_000_000_000,
+      activatedAt: 1_700_000_000_000,
       runCount: 0,
-      permissions: [],
-      standingRestrictions: [],
+      authority: { requestIds: [], grantIds: [], denialIds: [] },
     };
 
     const input = {
@@ -1356,7 +1355,7 @@ describe("AgentVesselBase.chatOp", () => {
         expression: "5 5 * * THU",
         timezone: "America/New_York",
       },
-      permissions: [],
+      operations: [],
     };
     const pillKey = "automation:instituted:mission-daily";
     vessel.channelPublishFailures.add(pillKey);
@@ -1378,28 +1377,18 @@ describe("AgentVesselBase.chatOp", () => {
             name: "Daily check",
             charter: {
               summary: "Check the project every morning.",
-              harness: {
-                unit: "test",
-                ev: "a".repeat(64),
-                ref: `state:${"b".repeat(64)}`,
-              },
               execution: {
                 kind: "agent",
-                target: {
+                image: {
                   source: "test",
+                  effectiveVersion: "a".repeat(64),
+                  ref: `state:${"b".repeat(64)}`,
                   className: "TestAgent",
                   objectKey: "agent-key",
                 },
                 action: { kind: "prompt", text: "Check the project." },
                 conversation: { mode: "fresh" },
-                toolExposure: {
-                  services: [],
-                  userlandServices: [],
-                  workspaceServiceDiscovery: "bound",
-                  evalNetwork: "none",
-                  declaredOrigins: [],
-                },
-                declaredLineageClasses: ["none"],
+                operations: [],
               },
               trigger: {
                 kind: "cron",
@@ -1407,7 +1396,6 @@ describe("AgentVesselBase.chatOp", () => {
                 timezone: "America/New_York",
               },
             },
-            permissions: [],
           },
         ],
         options: {

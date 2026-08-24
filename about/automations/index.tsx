@@ -42,7 +42,6 @@ import {
   type AutomationUiClient,
 } from "@workspace/agentic-chat";
 import type {
-  MissionPermission,
   MissionRecord,
   MissionRunRecord,
 } from "@vibestudio/shared/authority/mission";
@@ -52,7 +51,6 @@ type Filter = "all" | "attention" | "active" | "paused" | "completed";
 type AutomationRecord = MissionRecord;
 type RunRecord = MissionRunRecord;
 type AutomationState = MissionRecord["state"];
-type RunStatus = MissionRunRecord["status"];
 type OverviewItem = {
   automation: AutomationRecord;
   recentRuns: RunRecord[];
@@ -133,15 +131,16 @@ function duration(ms: number): string {
 }
 
 function stateLabel(state: AutomationState): string {
-  if (state === "needs-reapproval" || state === "draft") return "Stopped";
   return state.charAt(0).toUpperCase() + state.slice(1);
 }
 
-function statusLabel(status: RunStatus): string {
-  if (status === "starting") return "Starting";
-  if (status === "running") return "Running";
-  if (status === "succeeded") return "Succeeded";
-  if (status === "failed") return "Failed";
+function statusLabel(run: RunRecord): string {
+  if (run.phase !== "terminal")
+    return run.phase === "admitted" ? "Starting" : "Running";
+  if (run.outcome === "succeeded") return "Succeeded";
+  if (run.outcome === "failed") return "Failed";
+  if (run.outcome === "interrupted") return "Interrupted";
+  if (run.outcome === "cancelled") return "Cancelled";
   return "Skipped";
 }
 
@@ -157,12 +156,6 @@ function mergeOverviewItems(primary: OverviewItem[], extra: OverviewItem[]): Ove
   const byId = new Map(primary.map((item) => [item.automation.missionId, item]));
   for (const item of extra) byId.set(item.automation.missionId, item);
   return [...byId.values()];
-}
-
-function resourceDescription(resource: MissionPermission["resource"]): string {
-  if (resource.kind === "exact") return resource.key;
-  if (resource.kind === "prefix") return `${resource.prefix}…`;
-  return "Any resource";
 }
 
 function Disclosure({
@@ -274,17 +267,23 @@ function activityFor(automation: AutomationRecord, run: RunRecord) {
             : null,
     },
     status:
-      run.status === "succeeded"
+      run.outcome === "succeeded"
         ? ("succeeded" as const)
-        : run.status === "failed"
+        : run.outcome === "failed"
           ? ("failed" as const)
-          : run.status === "skipped"
+          : run.outcome === "skipped"
             ? ("skipped" as const)
             : ("running" as const),
     openedAt: new Date(run.startedAt).toISOString(),
-    ...(run.finishedAt === undefined ? {} : { closedAt: new Date(run.finishedAt).toISOString() }),
-    ...(run.finalMessage ? { summary: run.finalMessage } : run.error ? { summary: run.error } : {}),
-    ...(run.error ? { reason: "work_failed" } : {}),
+    ...(run.finishedAt === undefined
+      ? {}
+      : { closedAt: new Date(run.finishedAt).toISOString() }),
+    ...(run.finalMessage
+      ? { summary: run.finalMessage }
+      : run.failure
+        ? { summary: run.failure.message }
+        : {}),
+    ...(run.failure ? { reason: "work_failed" } : {}),
   };
 }
 
@@ -293,7 +292,7 @@ function RunRow({ run, automation }: { run: RunRecord; automation: AutomationRec
     <Box
       py="3"
       style={{ borderTop: "1px solid var(--gray-a5)" }}
-      aria-label={`${statusLabel(run.status)} run from ${absoluteTime(run.startedAt)}`}
+      aria-label={`${statusLabel(run)} run from ${absoluteTime(run.startedAt)}`}
     >
       <Flex direction="column" gap="2">
         <AutomationActivity
@@ -306,12 +305,17 @@ function RunRow({ run, automation }: { run: RunRecord; automation: AutomationRec
         <Flex justify="end">
           <ConversationButton run={run} />
         </Flex>
-        {run.error ? (
-          <Callout.Root color={run.status === "skipped" ? "amber" : "red"} size="1">
+        {run.failure ? (
+          <Callout.Root
+            color={run.outcome === "skipped" ? "amber" : "red"}
+            size="1"
+          >
             <Callout.Icon>
               <ExclamationTriangleIcon />
             </Callout.Icon>
-            <Callout.Text style={{ overflowWrap: "anywhere" }}>{run.error}</Callout.Text>
+            <Callout.Text style={{ overflowWrap: "anywhere" }}>
+              {run.failure.message}
+            </Callout.Text>
           </Callout.Root>
         ) : null}
         {run.completionResponse ? (
@@ -360,7 +364,7 @@ function RunRow({ run, automation }: { run: RunRecord; automation: AutomationRec
               {run.finalMessage}
             </Text>
           </details>
-        ) : run.status === "running" || run.status === "starting" ? (
+        ) : run.phase !== "terminal" ? (
           <Flex align="center" gap="2">
             <Spinner size="1" />
             <Text size="1" color="gray">
@@ -402,8 +406,14 @@ function AttentionRow({
             {relativeTime(item.run.startedAt)}
           </Text>
         </Flex>
-        <Text as="div" size="2" color="red" truncate style={{ maxWidth: "72ch" }}>
-          {item.run.error ?? "The run ended without a final result."}
+        <Text
+          as="div"
+          size="2"
+          color="red"
+          truncate
+          style={{ maxWidth: "72ch" }}
+        >
+          {item.run.failure?.message ?? "The run ended without a final result."}
         </Text>
       </Box>
       <Flex gap="2" style={{ flexShrink: 0 }}>
@@ -419,7 +429,7 @@ function AttentionRow({
 function executionDescription(automation: AutomationRecord): string {
   const execution = automation.charter.execution;
   if (execution.kind === "method") {
-    return `${execution.target.className}.${execution.method}`;
+    return `${execution.image.className}.${execution.method}`;
   }
   const action = execution.action.kind === "eval" ? "Exact eval" : "Agent prompt";
   return execution.conversation.mode === "fresh"
@@ -481,7 +491,7 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
             Exact harness
           </Text>
           <DetailCode>
-            {automation.charter.harness.unit}@{automation.charter.harness.ev}
+            {execution.image.source}@{execution.image.effectiveVersion}
           </DetailCode>
         </Box>
         <Box>
@@ -489,7 +499,8 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
             Target
           </Text>
           <DetailCode>
-            {execution.target.source} · {execution.target.className} · {execution.target.objectKey}
+            {execution.image.source} · {execution.image.className} ·{" "}
+            {execution.image.objectKey}
           </DetailCode>
         </Box>
         <Box>
@@ -540,71 +551,12 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
                   : `Continue ${execution.conversation.channelId} in ${execution.conversation.contextId}`}
               </Text>
             </Box>
-            <Box>
-              <Text as="div" size="1" color="gray">
-                Workspace service discovery
-              </Text>
-              <Text size="2">
-                {execution.toolExposure.workspaceServiceDiscovery === "bound"
-                  ? "Reviewed bindings only"
-                  : "Live declarations"}
-              </Text>
-            </Box>
-            <Box>
-              <Text as="div" size="1" color="gray">
-                Network
-              </Text>
-              <Text size="2">
-                {execution.toolExposure.evalNetwork === "none"
-                  ? "No eval network access"
-                  : execution.toolExposure.evalNetwork === "unrestricted"
-                    ? "Unrestricted eval network"
-                    : execution.toolExposure.declaredOrigins.join(", ")}
-              </Text>
-            </Box>
-            <Box>
-              <Text as="div" size="1" color="gray">
-                Declared outside-content classes
-              </Text>
-              <Text size="2">{execution.declaredLineageClasses.join(", ")}</Text>
-            </Box>
           </Grid>
           <Box>
             <Text as="div" size="1" color="gray" mb="1">
-              Exposed services
-            </Text>
-            <Flex gap="1" wrap="wrap">
-              {execution.toolExposure.services.length ? (
-                execution.toolExposure.services.map((service) => (
-                  <Badge key={service} variant="soft" color="gray">
-                    {service}
-                  </Badge>
-                ))
-              ) : (
-                <Text size="2" color="gray">
-                  None
-                </Text>
-              )}
-            </Flex>
-          </Box>
-          {execution.toolExposure.userlandServices.length ? (
-            <Box>
-              <Text as="div" size="1" color="gray" mb="1">
-                Userland service bindings
-              </Text>
-              <Flex direction="column" gap="1">
-                {execution.toolExposure.userlandServices.map((binding) => (
-                  <DetailCode key={`${binding.name}:${binding.provider}`}>
-                    {binding.name} → {binding.provider}@{binding.providerEv} (
-                    {binding.upgradePolicy})
-                  </DetailCode>
-                ))}
-              </Flex>
-            </Box>
-          ) : null}
-          <Box>
-            <Text as="div" size="1" color="gray" mb="1">
-              {execution.action.kind === "eval" ? "Exact eval code" : "Exact prompt"}
+              {execution.action.kind === "eval"
+                ? "Exact eval code"
+                : "Exact prompt"}
             </Text>
             <Box
               p="3"
@@ -628,19 +580,16 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
       <Grid columns={{ initial: "1", sm: "2" }} gap="3">
         <Box>
           <Text as="div" size="1" color="gray" mb="1">
-            Standing permissions
+            Declared operations
           </Text>
-          {automation.permissions.length ? (
+          {execution.operations.length ? (
             <Flex direction="column" gap="1">
-              {automation.permissions.map((permission, index) => (
-                <Flex key={`${permission.capability}:${index}`} align="center" gap="2" wrap="wrap">
-                  <Badge color={permission.tier === "critical" ? "red" : "amber"} variant="soft">
-                    {permission.tier}
-                  </Badge>
-                  <DetailCode>
-                    {permission.capability} · {resourceDescription(permission.resource)}
-                  </DetailCode>
-                </Flex>
+              {execution.operations.map((operation, index) => (
+                <DetailCode
+                  key={`${operation.service}.${operation.method}:${index}`}
+                >
+                  {operation.service}.{operation.method} · {operation.use}
+                </DetailCode>
               ))}
             </Flex>
           ) : (
@@ -651,21 +600,14 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
         </Box>
         <Box>
           <Text as="div" size="1" color="gray" mb="1">
-            Explicit restrictions
+            Authority grants
           </Text>
-          {automation.standingRestrictions.length ? (
-            <Flex direction="column" gap="1">
-              {automation.standingRestrictions.map((restriction, index) => (
-                <DetailCode key={`${restriction.capability}:${index}`}>
-                  {restriction.capability} · {restriction.resourceKey}
-                </DetailCode>
-              ))}
-            </Flex>
-          ) : (
-            <Text size="2" color="gray">
-              None
-            </Text>
-          )}
+          <Text size="2">
+            {automation.authority.grantIds.length} granted ·{" "}
+            {automation.authority.requestIds.length} pending ·{" "}
+            {automation.authority.denialIds.length} denied
+          </Text>
+          <DetailCode>{automation.operationPolicy.artifactRef}</DetailCode>
         </Box>
       </Grid>
     </Flex>
@@ -872,19 +814,16 @@ function AutomationCard({
           </Box>
           <Box>
             <Text as="div" size="1" color="gray">
-              Reviewed authority
+              Operation policy
             </Text>
             <Text as="div" size="2" weight="medium">
-              {execution.kind === "method"
-                ? "Installed method authority"
-                : `${automation.permissions.length} permission${automation.permissions.length === 1 ? "" : "s"}`}
+              {execution.operations.length} declared operation
+              {execution.operations.length === 1 ? "" : "s"}
             </Text>
-            {automation.standingRestrictions.length > 0 ? (
-              <Text size="1" color="gray">
-                {automation.standingRestrictions.length} explicit restriction
-                {automation.standingRestrictions.length === 1 ? "" : "s"}
-              </Text>
-            ) : null}
+            <Text size="1" color="gray">
+              {automation.authority.grantIds.length} durable grant
+              {automation.authority.grantIds.length === 1 ? "" : "s"}
+            </Text>
           </Box>
         </Grid>
 

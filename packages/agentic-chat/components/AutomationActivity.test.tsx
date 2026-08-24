@@ -11,50 +11,52 @@ import {
 } from "./AutomationActivity.js";
 
 const automation: MissionRecord = {
+  schemaVersion: 2,
   missionId: "mission-daily",
   name: "Daily check",
   revision: 2,
   charter: {
     summary: "Check the project every morning.",
-    harness: { unit: "workers/agent-worker", ev: "a".repeat(64) },
     execution: {
       kind: "agent",
-      target: {
+      image: {
         source: "workers/agent-worker",
+        ref: `state:${"d".repeat(64)}`,
+        effectiveVersion: "a".repeat(64),
         className: "AiChatWorker",
         objectKey: "daily-check",
       },
       action: { kind: "prompt", text: "Check the project." },
       conversation: { mode: "fresh" },
-      toolExposure: {
-        services: [],
-        userlandServices: [],
-        workspaceServiceDiscovery: "bound",
-        evalNetwork: "none",
-        declaredOrigins: [],
-      },
-      declaredLineageClasses: ["none"],
+      operations: [],
     },
     trigger: { kind: "schedule", everyMs: 86_400_000 },
   },
   owner: { userId: "alice", deviceId: "panel:alice" },
   state: "active",
   revisionDigest: "b".repeat(64),
+  operationPolicy: {
+    schemaVersion: 1,
+    digest: "e".repeat(64),
+    artifactRef: `policy:${"e".repeat(64)}`,
+    compilerVersion: "test",
+    catalogDigest: "f".repeat(64),
+  },
   createdAt: 1_700_000_000_000,
   updatedAt: 1_700_000_000_000,
   activatedAt: 1_700_000_000_000,
   runCount: 1,
-  permissions: [],
-  standingRestrictions: [],
+  authority: { requestIds: [], grantIds: [], denialIds: [] },
 };
 
 const run: MissionRunRecord = {
   runId: "run-42",
   missionId: automation.missionId,
-  closureDigest: "c".repeat(64),
+  missionSubject: `mission:${automation.missionId}@${automation.revisionDigest}`,
   revision: 2,
   trigger: "scheduled",
-  status: "succeeded",
+  phase: "terminal",
+  outcome: "succeeded",
   startedAt: 1_700_100_000_000,
   runNumber: 1,
   finishedAt: 1_700_100_002_000,
