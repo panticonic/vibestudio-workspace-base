@@ -67,9 +67,11 @@ What the person sees: a notification-center row (grouped per agent, so two
 reports before they look read as one), a phone notification, and — at
 `interrupt` — a toast. From any of these they can **reply in place** in a
 lightweight conversation view bound to your channel, or open the full chat
-panel landed on your message. Reading your message *is* acknowledging it: you
-see the ordinary read receipt, and the entry retires. Do not re-notify what
-has been read.
+panel landed on your message. The durable entry retires only when the person
+explicitly replies, opens it from the inbox, or dismisses it. Rendering a
+mounted chat panel is not acknowledgement: window visibility, panel presence,
+and human attention are different facts. Do not re-notify an entry the person
+has already disposed of.
 
 Worked examples:
 

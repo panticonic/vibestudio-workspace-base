@@ -2164,12 +2164,8 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
     return callChannel("getChannelPresence");
   }
 
-  /**
-   * Record that this participant has read a message. Human surfaces emit it for
-   * messages that were escalated to them (messaging plan §4.5.4/§4.10.6): the
-   * receipt is what tells the sender "seen" and what retires the inbox entry —
-   * one fact, one event.
-   */
+  /** Record that this participant has read a message in the channel. Durable
+   * inbox disposition is deliberately separate and requires a user action. */
   async function recordReadReceipt(messageId: string): Promise<void> {
     await callChannel("recordReceipt", pid, messageId, "read", {});
   }

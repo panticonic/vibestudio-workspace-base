@@ -1,7 +1,6 @@
 import { useMemo } from "react";
 import type { ReactNode } from "react";
 import { Flex, Spinner, Text } from "@radix-ui/themes";
-import { useEscalationAcknowledgement } from "../hooks/useEscalationAcknowledgement";
 import { useChatContext } from "../context/ChatContext";
 import { useChatInputActions } from "../context/ChatInputContext";
 import { AgentSetupInline } from "./AgentSetupInline";
@@ -65,19 +64,8 @@ export function ChatMessageArea({
     clientRef,
     deferredAgent,
     connectionError,
-    onAcknowledgeEscalation,
   } = useChatContext();
   const { setReplyTo } = useChatInputActions();
-
-  // Rendering an escalated message IS reading it (messaging plan §4.5.4): the
-  // read receipt goes out and the inbox entry retires from this one fact.
-  useEscalationAcknowledgement({
-    messages,
-    selfId,
-    client: clientRef.current,
-    acknowledge: onAcknowledgeEscalation,
-    enabled: connected,
-  });
 
   const mdxActions = useMemo(
     () => ({

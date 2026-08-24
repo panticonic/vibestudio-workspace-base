@@ -196,12 +196,6 @@ export interface AgenticChatActions {
     channelId: string,
     opts?: { focusMessageId?: string },
   ) => Promise<void> | void;
-  /**
-   * Acknowledge one durable inbox entry addressed to this person (messaging
-   * plan §4.5.4): called when the transcript renders an escalated message.
-   * Hosts wire it to Gad `acknowledgeUserNotification`.
-   */
-  onAcknowledgeEscalation?: (notificationId: string) => Promise<void> | void;
   onBecomeVisible?: () => void;
   /** Raise host-level attention for a blocking in-chat question. */
   onAttentionRequired?: (title: string, message?: string) => void;

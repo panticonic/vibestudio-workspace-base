@@ -1461,7 +1461,6 @@ Use package imports available to inline_ui plus relative imports for local helpe
   const onFocusPanel = actions?.onFocusPanel;
   const onReloadPanel = actions?.onReloadPanel;
   const onOpenChannel = actions?.onOpenChannel;
-  const onAcknowledgeEscalation = actions?.onAcknowledgeEscalation;
   const onNewConversation = actions?.onNewConversation;
   const onOpenClaudeCode = actions?.onOpenClaudeCode;
   const onOpenLocalModelsLog = actions?.onOpenLocalModelsLog;
@@ -1574,7 +1573,6 @@ Use package imports available to inline_ui plus relative imports for local helpe
       onFocusPanel,
       onReloadPanel,
       onOpenChannel,
-      onAcknowledgeEscalation,
       onNewConversation,
       onOpenClaudeCode,
       onOpenLocalModelsLog,
@@ -1654,7 +1652,6 @@ Use package imports available to inline_ui plus relative imports for local helpe
       onFocusPanel,
       onReloadPanel,
       onOpenChannel,
-      onAcknowledgeEscalation,
       onNewConversation,
       onOpenClaudeCode,
       onOpenLocalModelsLog,

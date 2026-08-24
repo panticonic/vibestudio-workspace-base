@@ -1,15 +1,17 @@
 // @vitest-environment jsdom
 
 import { render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
+import type { ChatMessage } from "../types";
 import { ChatMessageArea } from "./ChatMessageArea";
 
+const recordReadReceipt = vi.fn(() => Promise.resolve());
 const chatContext = {
   connected: true,
-  messages: [],
+  messages: [] as ChatMessage[],
   participants: {},
-  selfId: null,
+  selfId: null as string | null,
   allParticipants: {},
   inlineUiComponents: new Map(),
   messageTypeComponents: new Map(),
@@ -22,7 +24,7 @@ const chatContext = {
   onReloadPanel: undefined,
   chat: { send: vi.fn() },
   browserHandoffCaller: undefined,
-  clientRef: { current: null },
+  clientRef: { current: { recordReadReceipt } },
   deferredAgent: undefined,
   connectionError: undefined,
 };
@@ -45,6 +47,11 @@ vi.mock("./SignalPills", () => ({ SignalPills: () => null }));
 vi.mock("./Outbox", () => ({ deriveActiveOutbox: () => [] }));
 
 describe("ChatMessageArea empty transcript", () => {
+  beforeEach(() => {
+    chatContext.messages = [];
+    recordReadReceipt.mockClear();
+  });
+
   it("lets products delegate to the complete stock empty state", () => {
     const renderEmptyState = vi.fn((defaultContent: ReactNode) => (
       <section data-testid="product-empty-state">{defaultContent}</section>
@@ -63,5 +70,28 @@ describe("ChatMessageArea empty transcript", () => {
         .getByTestId("product-empty-state")
         .contains(screen.getByTestId("stock-empty-state"))
     ).toBe(true);
+  });
+
+  it("does not infer read or inbox acknowledgement from a mounted visible transcript", () => {
+    chatContext.selfId = "user:owner";
+    chatContext.messages = [
+      {
+        id: "message-1",
+        senderId: "agent:helper",
+        content: "A meaningful background result",
+        escalation: {
+          alert: "inbox",
+          users: ["user:owner"],
+        },
+      },
+    ];
+
+    render(
+      <ChatMessageArea
+        features={{ feedback: false, inlineUi: false, actionBar: false, clientEval: false }}
+      />
+    );
+
+    expect(recordReadReceipt).not.toHaveBeenCalled();
   });
 });

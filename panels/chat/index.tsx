@@ -15,7 +15,6 @@ import {
   openPanel,
   notifications,
   extensions,
-  gad,
 } from "@workspace/runtime";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
@@ -581,15 +580,6 @@ export default function ChatPanel() {
   const handleReloadPanel = useCallback(async (panelId: string) => {
     await panel.focusPanel(panelId);
     window.location.reload();
-  }, []);
-
-  // Find-or-open another channel's chat panel (dispatch cards, guest origin
-  // links, the external-conversations menu). Same rule the shell applies from
-  // the notification surfaces: never a second panel for an open conversation.
-  // The inbox half of acknowledge-on-read (messaging plan §4.5.4): the receipt
-  // is emitted by the shared hook; this retires the durable entry.
-  const handleAcknowledgeEscalation = useCallback(async (notificationId: string) => {
-    await gad.acknowledgeUserNotification(notificationId);
   }, []);
 
   // Once the transcript has landed on the requested envelope, drop the request
@@ -1185,7 +1175,6 @@ export default function ChatPanel() {
       onFocusPanel: handleFocusPanel,
       onReloadPanel: handleReloadPanel,
       onOpenChannel: handleOpenChannel,
-      onAcknowledgeEscalation: handleAcknowledgeEscalation,
       onOpenClaudeCode: handleOpenClaudeCode,
       onOpenLocalModelsLog: handleOpenLocalModelsLog,
       onOpenLocalModels: handleOpenLocalModels,
@@ -1216,7 +1205,6 @@ export default function ChatPanel() {
       handleFocusPanel,
       handleReloadPanel,
       handleOpenChannel,
-      handleAcknowledgeEscalation,
       handleOpenClaudeCode,
       handleOpenLocalModelsLog,
       handleOpenLocalModels,

@@ -298,9 +298,9 @@ export interface ChatMessage {
   origin?: { channelId: string; participantId: string; envelopeId?: string };
   /**
    * Escalation the sender declared on a `notify` (messaging plan §4.5, §4.10.5):
-   * the rung, an optional headline, and the people it was addressed to. Read
-   * state per person comes from the ordinary read receipt (`receipts`), so the
-   * footer and acknowledge-on-read need no second source (D16).
+   * the rung, an optional headline, and the people it was addressed to. Channel
+   * read state remains an ordinary receipt; durable inbox disposition is a
+   * separate explicit user action and must never be inferred from rendering.
    */
   escalation?: {
     alert: "none" | "inbox" | "interrupt";

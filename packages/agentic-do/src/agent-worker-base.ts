@@ -1265,8 +1265,9 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
 
         // Escalation (plan §4.5): the envelope above is always the canonical
         // copy; the inbox entry is the durable half that reaches a person who
-        // is not looking. There is no presence check — the entry retires when
-        // the user actually reads the message (§4.5.4), a fact, not a guess.
+        // is not looking. There is no presence check: only an explicit inbox
+        // action retires the entry. Rendering a mounted panel proves nothing
+        // about the person's attention.
         if (alert !== "none" && channelMessageId) {
           const descriptor = this.getEffectiveParticipantInfo(
             channelId,
