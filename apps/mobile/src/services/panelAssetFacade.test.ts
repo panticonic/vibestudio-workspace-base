@@ -1,9 +1,10 @@
 import {
   panelAssetCacheKey,
-  streamAndPopulateImmutableAsset,
+  populateImmutableAsset,
   streamPassthrough,
   type MobileFetchedResponse,
 } from "./panelAssetFacade";
+import { withPanelAssetRetry, type PipeStatus } from "./panelAssetRetry";
 
 jest.mock(
   "react-native-tcp-socket",
@@ -127,8 +128,8 @@ describe("streamPassthrough head-sent signalling", () => {
   });
 });
 
-describe("streamAndPopulateImmutableAsset", () => {
-  it("streams cold bytes before durable population completes", async () => {
+describe("populateImmutableAsset", () => {
+  it("publishes cold bytes only after durable population completes", async () => {
     const calls: string[] = [];
     let resolveCommit!: () => void;
     const commitGate = new Promise<void>((resolve) => (resolveCommit = resolve));
@@ -167,11 +168,7 @@ describe("streamAndPopulateImmutableAsset", () => {
       },
     });
     let transferred = 0;
-    const socket = fakeSocket();
-
-    const population = streamAndPopulateImmutableAsset(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      socket as any,
+    const population = populateImmutableAsset(
       store,
       "/immutable.js",
       {
@@ -183,25 +180,21 @@ describe("streamAndPopulateImmutableAsset", () => {
         cacheable: true,
         body,
       },
-      () => calls.push("head"),
       (bytes) => {
         transferred += bytes;
       }
     );
 
-    // Both chunks and their staging appends happen while commit is still
-    // blocked: cold TTFB no longer waits for the complete artifact.
+    // Both chunks reach durable staging while commit is blocked. The caller
+    // has no stored handle to serve, so no HTTP response can be committed yet.
     await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(calls).toEqual(["open", "head", "append:1,2", "append:3,4,5"]);
-    expect(String(socket.__writes[0])).toMatch(/^HTTP\/1\.1 200 OK/u);
-    expect(socket.__writes).toHaveLength(3);
+    expect(calls).toEqual(["open", "append:1,2", "append:3,4,5"]);
     resolveCommit();
     const stored = await population;
 
     expect(stored.size).toBe(5);
     expect(transferred).toBe(5);
-    expect(calls).toEqual(["open", "head", "append:1,2", "append:3,4,5", "commit"]);
-    expect(socket.__writes.at(-1)).toBe("0\r\n\r\n");
+    expect(calls).toEqual(["open", "append:1,2", "append:3,4,5", "commit"]);
     expect(store.abort).not.toHaveBeenCalled();
   });
 
@@ -222,9 +215,7 @@ describe("streamAndPopulateImmutableAsset", () => {
     });
 
     await expect(
-      streamAndPopulateImmutableAsset(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        fakeSocket() as any,
+      populateImmutableAsset(
         store,
         "/immutable.js",
         {
@@ -236,7 +227,6 @@ describe("streamAndPopulateImmutableAsset", () => {
           cacheable: true,
           body,
         },
-        () => undefined,
         () => undefined
       )
     ).rejects.toThrow("native append failed");
@@ -258,9 +248,7 @@ describe("streamAndPopulateImmutableAsset", () => {
     });
 
     await expect(
-      streamAndPopulateImmutableAsset(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        fakeSocket() as any,
+      populateImmutableAsset(
         store,
         "/immutable.js",
         {
@@ -272,11 +260,91 @@ describe("streamAndPopulateImmutableAsset", () => {
           cacheable: true,
           body,
         },
-        () => undefined,
         () => undefined
       )
     ).rejects.toThrow("body length mismatch");
     expect(store.abort).toHaveBeenCalledWith("write-truncated");
     expect(store.commit).not.toHaveBeenCalled();
+  });
+
+  it("restarts an interrupted immutable capture before any response is committed", async () => {
+    let status: PipeStatus = "connected";
+    const listeners = new Set<(next: PipeStatus) => void>();
+    const transport = {
+      get status() {
+        return status;
+      },
+      onStatusChange(callback: (next: PipeStatus) => void) {
+        listeners.add(callback);
+        return () => listeners.delete(callback);
+      },
+      set(next: PipeStatus) {
+        status = next;
+        for (const listener of [...listeners]) listener(next);
+      },
+    };
+    let writes = 0;
+    const store = {
+      openWrite: jest.fn(async () => `write-${++writes}`),
+      append: jest.fn(async () => undefined),
+      commit: jest.fn(async () => ({
+        handle: `vibestudio-asset-v1:${"a".repeat(64)}`,
+        size: 3,
+        metadata: {
+          status: 200 as const,
+          statusText: "OK",
+          gzip: false,
+          contentType: "text/javascript",
+          replayHeaders: {
+            "cache-control": "public, max-age=31536000, immutable",
+          },
+        },
+      })),
+      abort: jest.fn(async () => undefined),
+    };
+    let attempts = 0;
+    const flight = withPanelAssetRetry(transport, { canRetry: () => true }, async () => {
+      attempts += 1;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new Uint8Array([1, 2, 3]));
+          if (attempts === 1) {
+            transport.set("disconnected");
+            controller.error(
+              Object.assign(new Error("Not connected to server"), {
+                code: "PIPE_CLOSED",
+              })
+            );
+          } else {
+            controller.close();
+          }
+        },
+      });
+      return populateImmutableAsset(
+        store,
+        "/chunk.js",
+        {
+          status: 200,
+          statusText: "OK",
+          gzip: false,
+          contentType: "text/javascript",
+          replayHeaders: {
+            "cache-control": "public, max-age=31536000, immutable",
+          },
+          cacheable: true,
+          body,
+        },
+        () => undefined
+      );
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(attempts).toBe(1);
+    transport.set("connected");
+
+    await expect(flight).resolves.toMatchObject({ size: 3 });
+    expect(attempts).toBe(2);
+    expect(store.abort).toHaveBeenCalledWith("write-1");
+    expect(store.commit).toHaveBeenCalledTimes(1);
   });
 });

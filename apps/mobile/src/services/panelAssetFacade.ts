@@ -6,7 +6,9 @@
  * On mobile there is no local gateway — the RPC plane rides the WebRTC pipe — so
  * this tiny loopback TCP server stands in for it: it parses each webview asset
  * request, proxies it to the remote gateway over the pipe via the STREAMING
- * `gateway.fetch` RPC, and streams the response back chunked.
+ * `gateway.fetch` RPC. Mutable responses stream back chunked; immutable
+ * responses are durably captured before their HTTP head is committed so a
+ * transient pipe loss can be retried without exposing a truncated module.
  *
  * Panel bundles are multiple MB. Requesting `gzip` on the wire + chunked transfer
  * keeps each payload inside react-native-webrtc's serialized-receive throughput
@@ -508,7 +510,7 @@ async function handleRequest(
       // A dropped pipe must cost a retry, not the panel. Safe only while
       // nothing has been written: `headSent` is the commit point, after which
       // re-fetching would append a second body to a half-sent response.
-      const response = await withPanelAssetRetry(
+      const fetched = await withPanelAssetRetry(
         transport,
         {
           canRetry: () => !headSent,
@@ -520,24 +522,22 @@ async function handleRequest(
             );
           },
         },
-        fetcher
+        async () => {
+          const response = await fetcher();
+          if (!response.cacheable) return { kind: "passthrough" as const, response };
+          cacheableResponse = true;
+          const asset = await populateImmutableAsset(store, cacheKey, response, countTransferred);
+          return { kind: "stored" as const, asset };
+        }
       );
-      if (!response.cacheable) {
+      if (fetched.kind === "passthrough") {
         tier = "no-store";
         acquisition.complete(null);
-        await streamPassthrough(socket, response, markHeadSent, countTransferred);
+        await streamPassthrough(socket, fetched.response, markHeadSent, countTransferred);
         return;
       }
-      cacheableResponse = true;
-      const stored = await streamAndPopulateImmutableAsset(
-        socket,
-        store,
-        cacheKey,
-        { ...response, body: response.body },
-        markHeadSent,
-        countTransferred
-      );
-      acquisition.complete(stored);
+      acquisition.complete(fetched.asset);
+      await writeStoredAsset(socket, fetched.asset, markHeadSent);
     } catch (error) {
       acquisition.fail(error);
       throw error;
@@ -701,45 +701,28 @@ async function writeStoredAsset(
 }
 
 /**
- * Cold immutable miss: stream each received chunk to the WebView while also
- * staging it in the durable store. Only the completed, integrity-checked body
- * is published to the cache. A body failure after the HTTP head is visible as
- * an ordinary truncated HTTP response; it is never retried behind the same
- * response and never publishes partial bytes.
+ * Cold immutable miss: capture the complete response in the durable store
+ * before committing an HTTP head to the WebView. A pipe loss midway through a
+ * dynamic module would otherwise leave import() permanently rejected even
+ * after the transport reconnects. The caller can safely retry this whole
+ * operation because no response byte has crossed the loopback socket yet.
  */
-export async function streamAndPopulateImmutableAsset(
-  socket: TcpSocketConn,
+export async function populateImmutableAsset(
   store: Pick<MobileAssetStore, "openWrite" | "append" | "commit" | "abort">,
   cacheKey: string,
   response: MobileFetchedResponse & { body: ReadableStream<Uint8Array> },
-  onHeadSent: () => void,
   onTransferred: (bytes: number) => void
 ): Promise<MobileStoredAsset> {
   const writeId = await store.openWrite(cacheKey);
   const reader = response.body.getReader();
   let committed = false;
   try {
-    await writeToSocket(
-      socket,
-      buildHead(
-        response.status,
-        response.statusText,
-        response.contentType,
-        response.gzip,
-        response.replayHeaders,
-        { chunked: true }
-      )
-    );
-    onHeadSent();
     for (;;) {
       const { done, value } = await reader.read();
       if (done) break;
       if (!value || value.byteLength === 0) continue;
       onTransferred(value.byteLength);
-      await Promise.all([
-        store.append(writeId, value),
-        writeToSocket(socket, frameHttpChunk(value)),
-      ]);
+      await store.append(writeId, value);
     }
     const metadata: MobileStoredAssetMetadata = {
       status: 200,
@@ -750,11 +733,6 @@ export async function streamAndPopulateImmutableAsset(
     };
     const stored = await store.commit(writeId, metadata);
     committed = true;
-    // Do not make the HTTP response complete until atomic cache publication has
-    // succeeded. If commit fails, the client sees a truncated response and can
-    // retry normally; it can never mistake an uncommitted body for success.
-    await writeToSocket(socket, "0\r\n\r\n");
-    socket.end();
     return stored;
   } finally {
     reader.releaseLock();
