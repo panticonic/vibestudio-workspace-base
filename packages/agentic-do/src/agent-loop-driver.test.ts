@@ -12,13 +12,24 @@ import {
   type StepPolicy,
 } from "@workspace/agent-loop";
 import { AgentLoopDriver, type DriverDeps } from "./agent-loop-driver.js";
-import type { ChannelCallPort, EffectExecutor, EphemeralEmit } from "./effect-executors/index.js";
-import { CREDENTIAL_CONNECT_PAYLOAD_KIND } from "@workspace/agentic-protocol";
+import type {
+  ChannelCallPort,
+  EffectExecutor,
+  EphemeralEmit,
+} from "./effect-executors/index.js";
+import {
+  CREDENTIAL_CONNECT_PAYLOAD_KIND,
+  agentToolFailureFromUnknown,
+} from "@workspace/agentic-protocol";
 import { logIdForChannel } from "@vibestudio/trajectory-identity";
 import { summarizeTurn } from "./agent-vessel.js";
 
 const createTestDO: typeof createBaseTestDO = (DOClass, env, opts) =>
-  createBaseTestDO(DOClass, { RPC_FETCH: successfulTestRpcFetch, ...env }, opts);
+  createBaseTestDO(
+    DOClass,
+    { RPC_FETCH: successfulTestRpcFetch, ...env },
+    opts,
+  );
 
 const CHANNEL = "chan-d1";
 const LOG_ID = logIdForChannel(CHANNEL);
@@ -86,23 +97,35 @@ async function makeHarness(opts: {
   channelPublish?: ChannelCallPort["publish"];
   onTurnClosed?: NonNullable<DriverDeps["onTurnClosed"]>;
   commitTerminalOutcome?: NonNullable<DriverDeps["commitTerminalOutcome"]>;
-  clearTerminalOutcomeRecovery?: NonNullable<DriverDeps["clearTerminalOutcomeRecovery"]>;
+  clearTerminalOutcomeRecovery?: NonNullable<
+    DriverDeps["clearTerminalOutcomeRecovery"]
+  >;
 }) {
-  const gad = opts.gad ?? (await createTestDO(GadWorkspaceDO, { __objectKey: "gad" }));
+  const gad =
+    opts.gad ?? (await createTestDO(GadWorkspaceDO, { __objectKey: "gad" }));
   const driverHost =
-    opts.driverSql ?? (await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" }));
+    opts.driverSql ??
+    (await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" }));
   const ephemerals: EphemeralEmit[] = [];
   const channelPublishes: Array<Parameters<ChannelCallPort["publish"]>[0]> = [];
-  const readReceipts: Array<Parameters<ChannelCallPort["recordReadReceipt"]>[0]> = [];
+  const readReceipts: Array<
+    Parameters<ChannelCallPort["recordReadReceipt"]>[0]
+  > = [];
   const channelCalls: Array<Parameters<ChannelCallPort["callMethod"]>[0]> = [];
-  const cancelledChannelCalls: Array<{ channelId: string; transportCallId: string }> = [];
+  const cancelledChannelCalls: Array<{
+    channelId: string;
+    transportCallId: string;
+  }> = [];
   const alarms: number[] = [];
   let now = 1_750_000_000_000;
   const setNow = (value: number) => {
     now = value;
   };
 
-  const fakeExecutor = (kind: EffectDescriptor["kind"], queue: EffectOutcome[]): EffectExecutor =>
+  const fakeExecutor = (
+    kind: EffectDescriptor["kind"],
+    queue: EffectOutcome[],
+  ): EffectExecutor =>
     ({
       kind,
       async execute({ onEphemeral }) {
@@ -139,17 +162,24 @@ async function makeHarness(opts: {
         prepare: async () => opts.config ?? config,
       },
       channel: {
-        callMethod: async (input: Parameters<ChannelCallPort["callMethod"]>[0]) => {
+        callMethod: async (
+          input: Parameters<ChannelCallPort["callMethod"]>[0],
+        ) => {
           channelCalls.push(input);
         },
-        cancelMethodCall: async (channelId: string, transportCallId: string) => {
+        cancelMethodCall: async (
+          channelId: string,
+          transportCallId: string,
+        ) => {
           cancelledChannelCalls.push({ channelId, transportCallId });
         },
         publish: async (input: Parameters<ChannelCallPort["publish"]>[0]) => {
           channelPublishes.push(input);
           await opts.channelPublish?.(input);
         },
-        recordReadReceipt: async (input: Parameters<ChannelCallPort["recordReadReceipt"]>[0]) => {
+        recordReadReceipt: async (
+          input: Parameters<ChannelCallPort["recordReadReceipt"]>[0],
+        ) => {
           readReceipts.push(input);
         },
         sendSignalEvent: async () => {},
@@ -160,7 +190,12 @@ async function makeHarness(opts: {
       },
     } as never, // fakes only touch blobstore
     selfRefFor:
-      opts.selfRefFor ?? (() => ({ kind: "agent", id: "agent:self", participantId: "agent:self" })),
+      opts.selfRefFor ??
+      (() => ({
+        kind: "agent",
+        id: "agent:self",
+        participantId: "agent:self",
+      })),
     configFor: () => opts.config ?? config,
     policiesFor: () => opts.policies ?? [],
     onEphemeral: (emit) => ephemerals.push(emit),
@@ -176,8 +211,10 @@ async function makeHarness(opts: {
     executorOverride: (descriptor) => {
       const override = opts.executorOverride?.(descriptor);
       if (override) return override;
-      if (descriptor.kind === "model_call") return fakeExecutor("model_call", opts.script.model);
-      if (descriptor.kind === "local_tool") return fakeExecutor("local_tool", opts.script.tool);
+      if (descriptor.kind === "model_call")
+        return fakeExecutor("model_call", opts.script.model);
+      if (descriptor.kind === "local_tool")
+        return fakeExecutor("local_tool", opts.script.tool);
       return null;
     },
     ...(opts.compaction ? { compaction: opts.compaction } : {}),
@@ -207,7 +244,11 @@ async function settle(driver: AgentLoopDriver, rounds = 12): Promise<void> {
   }
 }
 
-function promptIncoming(envelopeId = "env-1", content = "hello", metadata?: AgentTurnMetadata) {
+function promptIncoming(
+  envelopeId = "env-1",
+  content = "hello",
+  metadata?: AgentTurnMetadata,
+) {
   return {
     type: "command" as const,
     command: {
@@ -215,7 +256,11 @@ function promptIncoming(envelopeId = "env-1", content = "hello", metadata?: Agen
       channelId: CHANNEL,
       source: { envelopeId },
       content,
-      senderRef: { kind: "user" as const, id: "panel:user", participantId: "panel:user" },
+      senderRef: {
+        kind: "user" as const,
+        id: "panel:user",
+        participantId: "panel:user",
+      },
       ...(metadata ? { metadata } : {}),
     },
   };
@@ -223,7 +268,7 @@ function promptIncoming(envelopeId = "env-1", content = "hello", metadata?: Agen
 
 function observationIncoming(
   envelopeId = "observation-env-1",
-  payloadKind = "application.incident.v1"
+  payloadKind = "application.incident.v1",
 ) {
   const structuredInput = {
     kind: "channel-observation" as const,
@@ -251,23 +296,33 @@ function observationIncoming(
 }
 
 async function logKinds(gad: {
-  sql: { exec(query: string, ...bindings: unknown[]): { toArray(): Record<string, unknown>[] } };
+  sql: {
+    exec(
+      query: string,
+      ...bindings: unknown[]
+    ): { toArray(): Record<string, unknown>[] };
+  };
 }) {
   const rows = gad.sql.exec(
     `SELECT payload_kind FROM log_events
      WHERE log_id = '${LOG_ID}'
        AND envelope_id NOT LIKE 'sys:prompt-artifacts:%'
-     ORDER BY seq`
+     ORDER BY seq`,
   );
   return rows.toArray().map((row) => String(row["payload_kind"]));
 }
 
 function inspectSql<TResult>(
   gad: {
-    sql: { exec(query: string, ...bindings: unknown[]): { toArray(): Record<string, unknown>[] } };
+    sql: {
+      exec(
+        query: string,
+        ...bindings: unknown[]
+      ): { toArray(): Record<string, unknown>[] };
+    };
   },
   query: string,
-  bindings: unknown[] = []
+  bindings: unknown[] = [],
 ): TResult {
   return { rows: gad.sql.exec(query, ...bindings).toArray() } as TResult;
 }
@@ -339,7 +394,10 @@ describe("AgentLoopDriver", () => {
         channelId: CHANNEL,
         source: { envelopeId: "automation:run-eval" },
         tool: "eval",
-        args: { code: "return 42", authority: { approvals: "pregranted-only" } },
+        args: {
+          code: "return 42",
+          authority: { approvals: "pregranted-only" },
+        },
         metadata: {
           origin: "scheduled",
           completion: "after-invocation",
@@ -361,7 +419,9 @@ describe("AgentLoopDriver", () => {
     });
     await settle(harness.driver);
 
-    expect(observed.map((descriptor) => descriptor.kind)).toEqual(["local_tool"]);
+    expect(observed.map((descriptor) => descriptor.kind)).toEqual([
+      "local_tool",
+    ]);
     expect(observed[0]).toMatchObject({
       kind: "local_tool",
       tool: "eval",
@@ -378,8 +438,82 @@ describe("AgentLoopDriver", () => {
       expect.objectContaining({
         summary: "eval completed",
         metadata: expect.objectContaining({
-          automation: expect.objectContaining({ runId: "run-eval", action: "eval" }),
+          automation: expect.objectContaining({
+            runId: "run-eval",
+            action: "eval",
+          }),
         }),
+      }),
+    ]);
+  });
+
+  it("reports terminal child-effect failures when an automation turn closes", async () => {
+    const closed: Parameters<NonNullable<DriverDeps["onTurnClosed"]>>[0][] = [];
+    const failure = agentToolFailureFromUnknown(
+      Object.assign(new Error("Notification delivery failed"), {
+        code: "EDELIVERY",
+      }),
+      { operation: "tool.notify", stage: "execute" },
+    );
+    const harness = await makeHarness({
+      script: {
+        model: [],
+        tool: [
+          {
+            kind: "tool",
+            result: { protocolContent: [], details: { failure } },
+            isError: true,
+            terminalOutcome: "tool_error",
+            terminalReasonCode: failure.code,
+            failure,
+          },
+        ],
+      },
+      onTurnClosed: (input) => {
+        closed.push(input);
+      },
+    });
+
+    await harness.driver.handleIncoming(CHANNEL, {
+      type: "command",
+      command: {
+        kind: "invoke",
+        channelId: CHANNEL,
+        source: { envelopeId: "automation:run-notify" },
+        tool: "notify",
+        args: { content: "One minute has passed" },
+        metadata: {
+          origin: "scheduled",
+          completion: "after-invocation",
+          automation: {
+            missionId: "mission-notify",
+            runId: "run-notify",
+            ownerUserId: "usr_owner",
+            authoritySessionNonce: "nonce:run-notify",
+            name: "Talk timer",
+            revision: 1,
+            action: "prompt",
+            trigger: "scheduled",
+            startedAt: 10,
+            createdAt: 1,
+            schedule: { everyMs: 60_000 },
+          },
+        },
+      },
+    });
+    await settle(harness.driver);
+
+    expect(closed).toEqual([
+      expect.objectContaining({
+        effectFailures: [
+          {
+            invocationId: expect.any(String),
+            name: "notify",
+            outcome: "tool_error",
+            code: "EDELIVERY",
+            message: "Notification delivery failed",
+          },
+        ],
       }),
     ]);
   });
@@ -422,7 +556,7 @@ describe("AgentLoopDriver", () => {
           createdAt: 1,
           schedule: { everyMs: 60_000 },
         },
-      })
+      }),
     );
     await settle(harness.driver);
     await harness.driver.handleIncoming(
@@ -442,7 +576,7 @@ describe("AgentLoopDriver", () => {
           createdAt: 1,
           schedule: { everyMs: 60_000 },
         },
-      })
+      }),
     );
     await settle(harness.driver);
 
@@ -464,18 +598,22 @@ describe("AgentLoopDriver", () => {
   });
 
   it("deduplicates a replayed structured observation by source envelope", async () => {
-    const harness = await makeHarness({ script: { model: [textReply("done")], tool: [] } });
+    const harness = await makeHarness({
+      script: { model: [textReply("done")], tool: [] },
+    });
     const incoming = observationIncoming("observation-replayed");
 
     await harness.driver.handleIncoming(CHANNEL, incoming);
     await harness.driver.handleIncoming(CHANNEL, incoming);
     await settle(harness.driver);
 
-    expect((await logKinds(harness.gad)).filter((kind) => kind === "turn.opened")).toHaveLength(1);
+    expect(
+      (await logKinds(harness.gad)).filter((kind) => kind === "turn.opened"),
+    ).toHaveLength(1);
     const userRows = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
       harness.gad,
       `SELECT payload_ref_json FROM log_events WHERE log_id = ? AND payload_kind = 'message.completed' ORDER BY seq`,
-      [LOG_ID]
+      [LOG_ID],
     ).rows.filter((row) => JSON.parse(row.payload_ref_json).role === "user");
     expect(userRows).toHaveLength(1);
     expect(JSON.parse(userRows[0]!.payload_ref_json)).toMatchObject({
@@ -488,33 +626,57 @@ describe("AgentLoopDriver", () => {
       script: { model: [textReply("first"), textReply("second")], tool: [] },
     });
 
-    await harness.driver.handleIncoming(CHANNEL, observationIncoming("observation-a"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      observationIncoming("observation-a"),
+    );
     await settle(harness.driver);
-    await harness.driver.handleIncoming(CHANNEL, observationIncoming("observation-b"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      observationIncoming("observation-b"),
+    );
     await settle(harness.driver);
 
-    expect((await logKinds(harness.gad)).filter((kind) => kind === "turn.opened")).toHaveLength(2);
     expect(
-      (await harness.driver.loop(CHANNEL)).state.entries.filter((entry) => entry.kind === "user")
+      (await logKinds(harness.gad)).filter((kind) => kind === "turn.opened"),
+    ).toHaveLength(2);
+    expect(
+      (await harness.driver.loop(CHANNEL)).state.entries.filter(
+        (entry) => entry.kind === "user",
+      ),
     ).toHaveLength(2);
   });
 
   it("uses the existing steering queue for an observation during an open turn", async () => {
     const harness = await makeHarness({ script: { model: [], tool: [] } });
 
-    await harness.driver.handleIncoming(CHANNEL, observationIncoming("observation-open-a"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      observationIncoming("observation-open-a"),
+    );
     const preparation = harness.driver.outbox.all()[0];
     expect(preparation).toMatchObject({ kind: "prompt_artifacts" });
-    await harness.driver.applyOutcome(preparation!, { kind: "prompt-artifacts", patch: {} });
-    const originalTurnId = (await harness.driver.loop(CHANNEL)).state.openTurn?.turnId;
+    await harness.driver.applyOutcome(preparation!, {
+      kind: "prompt-artifacts",
+      patch: {},
+    });
+    const originalTurnId = (await harness.driver.loop(CHANNEL)).state.openTurn
+      ?.turnId;
 
-    await harness.driver.handleIncoming(CHANNEL, observationIncoming("observation-open-b"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      observationIncoming("observation-open-b"),
+    );
 
     const state = (await harness.driver.loop(CHANNEL)).state;
     expect(state.openTurn?.turnId).toBe(originalTurnId);
     expect(state.steeringQueue).toHaveLength(1);
-    expect(state.steeringQueue[0]?.turnTriggerEnvelopeId).toBe("observation-open-b");
-    expect((await logKinds(harness.gad)).filter((kind) => kind === "turn.opened")).toHaveLength(1);
+    expect(state.steeringQueue[0]?.turnTriggerEnvelopeId).toBe(
+      "observation-open-b",
+    );
+    expect(
+      (await logKinds(harness.gad)).filter((kind) => kind === "turn.opened"),
+    ).toHaveLength(1);
   });
 
   it("can retry the same observation after failure before prompt admission", async () => {
@@ -522,18 +684,24 @@ describe("AgentLoopDriver", () => {
     const harness = await makeHarness({
       script: { model: [], tool: [] },
       gadFault: (method) =>
-        failAdmission && method === "appendLogEvent" ? new Error("trajectory unavailable") : null,
+        failAdmission && method === "appendLogEvent"
+          ? new Error("trajectory unavailable")
+          : null,
     });
     const incoming = observationIncoming("observation-retry");
 
-    await expect(harness.driver.handleIncoming(CHANNEL, incoming)).rejects.toThrow(
-      "trajectory unavailable"
-    );
+    await expect(
+      harness.driver.handleIncoming(CHANNEL, incoming),
+    ).rejects.toThrow("trajectory unavailable");
     failAdmission = false;
-    await expect(harness.driver.handleIncoming(CHANNEL, incoming)).resolves.toBeUndefined();
+    await expect(
+      harness.driver.handleIncoming(CHANNEL, incoming),
+    ).resolves.toBeUndefined();
 
     expect(
-      (await harness.driver.loop(CHANNEL)).state.entries.filter((entry) => entry.kind === "user")
+      (await harness.driver.loop(CHANNEL)).state.entries.filter(
+        (entry) => entry.kind === "user",
+      ),
     ).toHaveLength(1);
   });
 
@@ -598,7 +766,9 @@ describe("AgentLoopDriver", () => {
   });
 
   it("reports journal-derived model execution routing and usage", async () => {
-    const harness = await makeHarness({ script: { model: [textReply("done")], tool: [] } });
+    const harness = await makeHarness({
+      script: { model: [textReply("done")], tool: [] },
+    });
 
     await harness.driver.handleIncoming(CHANNEL, promptIncoming());
     await settle(harness.driver);
@@ -646,13 +816,17 @@ describe("AgentLoopDriver", () => {
         source: { envelopeId: "env-1" },
         sourceMessageId: "u1",
         content: "hi",
-        senderRef: { kind: "user", id: "panel:user", participantId: "panel:user" },
+        senderRef: {
+          kind: "user",
+          id: "panel:user",
+          participantId: "panel:user",
+        },
       },
     });
     const alarm = harness.driver.dispatchReadyEffectsForTest();
     await started.promise;
     expect(harness.readReceipts).toContainEqual(
-      expect.objectContaining({ channelId: CHANNEL, messageId: "u1" })
+      expect.objectContaining({ channelId: CHANNEL, messageId: "u1" }),
     );
     hung.resolve(textReply("done"));
     await alarm;
@@ -700,7 +874,11 @@ describe("AgentLoopDriver", () => {
         channelId: CHANNEL_B,
         source: { envelopeId: "env-b" },
         content: "hi",
-        senderRef: { kind: "user", id: "panel:user", participantId: "panel:user" },
+        senderRef: {
+          kind: "user",
+          id: "panel:user",
+          participantId: "panel:user",
+        },
       },
     });
     await harness.driver.dispatchReadyEffectsForTest();
@@ -794,20 +972,25 @@ describe("AgentLoopDriver", () => {
                       resolve({
                         kind: "tool",
                         result: {
-                          protocolContent: [{ type: "text", text: "write committed" }],
+                          protocolContent: [
+                            { type: "text", text: "write committed" },
+                          ],
                           details: { committed: true },
                         },
                         isError: false,
                       });
                     },
-                    { once: true }
+                    { once: true },
                   );
                 });
               },
             } as EffectExecutor)
           : null,
     });
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-settle-mutation"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-settle-mutation"),
+    );
     const dispatch = harness.driver.dispatchReadyEffectsForTest();
     await started.promise;
 
@@ -820,12 +1003,12 @@ describe("AgentLoopDriver", () => {
         `SELECT payload_kind FROM log_events
          WHERE log_id = ? AND payload_kind IN ('invocation.completed', 'system.event')
          ORDER BY seq`,
-        LOG_ID
+        LOG_ID,
       )
       .toArray();
     const terminalKinds = rows.map((row) => row["payload_kind"]);
     expect(terminalKinds.lastIndexOf("invocation.completed")).toBeLessThan(
-      terminalKinds.lastIndexOf("system.event")
+      terminalKinds.lastIndexOf("system.event"),
     );
     expect(harness.driver.outbox.all()).toEqual([]);
   });
@@ -848,17 +1031,21 @@ describe("AgentLoopDriver", () => {
                   () => {
                     retirementOrder.push("executor-aborted");
                   },
-                  { once: true }
+                  { once: true },
                 );
                 return finish.promise;
               },
             } as EffectExecutor)
           : null,
       onGadCall: (method) => {
-        if (retiring && method === "appendLogEvent") retirementOrder.push("retirement-journal");
+        if (retiring && method === "appendLogEvent")
+          retirementOrder.push("retirement-journal");
       },
     });
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-channel-retire"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-channel-retire"),
+    );
     const { completion } = harness.driver.beginReadyEffectDispatchForTest();
     await started.promise;
 
@@ -879,12 +1066,18 @@ describe("AgentLoopDriver", () => {
     expect(harness.driver.outbox.all()).toEqual([]);
 
     await harness.driver.wake(CHANNEL);
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-after-retirement"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-after-retirement"),
+    );
     await harness.driver.dispatchReadyEffectsForTest();
     expect(await logKinds(harness.gad)).toEqual(kindsAfterRetirement);
 
     harness.driver.activateChannel(CHANNEL);
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-after-reactivation"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-after-reactivation"),
+    );
     expect(harness.driver.outbox.all()).not.toEqual([]);
   });
 
@@ -904,7 +1097,10 @@ describe("AgentLoopDriver", () => {
             } as EffectExecutor)
           : null,
     });
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-retire-after-interrupt"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-retire-after-interrupt"),
+    );
     const alarm = harness.driver.dispatchReadyEffectsForTest();
     await started.promise;
 
@@ -916,14 +1112,18 @@ describe("AgentLoopDriver", () => {
     hung.resolve({ kind: "model", blocks: [], stopReason: "aborted" });
     await alarm;
 
-    const turnId = ids.turnId(CHANNEL, "env-retire-after-interrupt", "agent:self");
+    const turnId = ids.turnId(
+      CHANNEL,
+      "env-retire-after-interrupt",
+      "agent:self",
+    );
     const rows = inspectSql<{ rows: Array<{ envelope_id: string }> }>(
       harness.gad,
       `SELECT envelope_id FROM log_events
        WHERE log_id = '${LOG_ID}'
          AND payload_kind = 'system.event'
          AND envelope_id LIKE '%:interrupt:%'
-       ORDER BY seq`
+       ORDER BY seq`,
     );
     expect(rows.rows.map((row) => row.envelope_id)).toEqual([
       ids.interruptEvent(turnId, "user_interrupted"),
@@ -939,8 +1139,10 @@ describe("AgentLoopDriver", () => {
         new Promise<EffectOutcome>((_resolve, reject) => {
           executions += 1;
           started.resolve();
-          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
-        })
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        }),
     );
     const harness = await makeHarness({
       script: { model: [], tool: [] },
@@ -969,7 +1171,10 @@ describe("AgentLoopDriver", () => {
 
     await harness.driver.dispatchReadyEffectsForTest();
     expect(executions).toBe(1);
-    expect(ensureLoaded).toHaveBeenCalledWith("lfm2.5-2.6b", expect.any(AbortSignal));
+    expect(ensureLoaded).toHaveBeenCalledWith(
+      "lfm2.5-2.6b",
+      expect.any(AbortSignal),
+    );
   });
 
   it("does not let a non-cooperative executor hold lifecycle release or journal a late result", async () => {
@@ -990,7 +1195,10 @@ describe("AgentLoopDriver", () => {
             } as EffectExecutor)
           : null,
     });
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-noncooperative-release"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-noncooperative-release"),
+    );
     const { completion } = harness.driver.beginReadyEffectDispatchForTest();
     await started.promise;
     let completionSettled = false;
@@ -1055,8 +1263,13 @@ describe("AgentLoopDriver", () => {
           : null,
     });
 
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-authority"));
-    const alarm = harness.driver.dispatchReadyEffectsForTest().catch(() => undefined);
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-authority"),
+    );
+    const alarm = harness.driver
+      .dispatchReadyEffectsForTest()
+      .catch(() => undefined);
     await started.promise;
     allowed = false;
     continueExecution.resolve();
@@ -1096,24 +1309,32 @@ describe("AgentLoopDriver", () => {
                         blocks: [],
                         stopReason: "aborted",
                       }),
-                    { once: true }
+                    { once: true },
                   );
                 });
               },
             } as EffectExecutor)
           : null,
     });
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-admission"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-admission"),
+    );
     const alarm = harness.driver.dispatchReadyEffectsForTest();
     await modelStarted.promise;
     const handleIncoming = harness.driver.handleIncoming.bind(harness.driver);
-    vi.spyOn(harness.driver, "handleIncoming").mockImplementation(async (channelId, incoming) => {
-      if (incoming.type === "command" && incoming.command.kind === "interrupt") {
-        interruptEntered.resolve();
-        await releaseInterrupt.promise;
-      }
-      await handleIncoming(channelId, incoming);
-    });
+    vi.spyOn(harness.driver, "handleIncoming").mockImplementation(
+      async (channelId, incoming) => {
+        if (
+          incoming.type === "command" &&
+          incoming.command.kind === "interrupt"
+        ) {
+          interruptEntered.resolve();
+          await releaseInterrupt.promise;
+        }
+        await handleIncoming(channelId, incoming);
+      },
+    );
 
     const interrupt = harness.driver.interruptChannel(CHANNEL);
     await interruptEntered.promise;
@@ -1141,18 +1362,22 @@ describe("AgentLoopDriver", () => {
             } as EffectExecutor)
           : null,
       gadFault: (method) =>
-        failAppends && method === "appendLogEvent" ? new Error("append down") : null,
+        failAppends && method === "appendLogEvent"
+          ? new Error("append down")
+          : null,
     });
 
     await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-bg-fail"));
     expect(failAppends).toBe(false);
 
-    await expect(harness.driver.dispatchReadyEffectsForTest()).rejects.toThrow("append down");
+    await expect(harness.driver.dispatchReadyEffectsForTest()).rejects.toThrow(
+      "append down",
+    );
     expect(harness.driver.outbox.all()[0]).toEqual(
       expect.objectContaining({
         disposition: "leased",
         leaseOwner: "agent-loop-driver:test-host",
-      })
+      }),
     );
   });
 
@@ -1176,9 +1401,12 @@ describe("AgentLoopDriver", () => {
           : null,
     });
 
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-collision"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-collision"),
+    );
     await expect(harness.driver.dispatchReadyEffectsForTest()).rejects.toThrow(
-      "GadAppendError[id-collision]"
+      "GadAppendError[id-collision]",
     );
     expect(harness.driver.outbox.all()).toEqual([
       expect.objectContaining({
@@ -1186,7 +1414,9 @@ describe("AgentLoopDriver", () => {
         disposition: "leased",
       }),
     ]);
-    expect((await harness.driver.loop(CHANNEL)).state.inFlightModelCall).not.toBeNull();
+    expect(
+      (await harness.driver.loop(CHANNEL)).state.inFlightModelCall,
+    ).not.toBeNull();
   });
 
   it("stamps channel-specific self identity on durable turn events", async () => {
@@ -1206,7 +1436,7 @@ describe("AgentLoopDriver", () => {
 
     const rows = inspectSql<{ rows: Array<{ actor_json: string }> }>(
       harness.gad,
-      `SELECT actor_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'turn.opened' ORDER BY seq`
+      `SELECT actor_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'turn.opened' ORDER BY seq`,
     );
     expect(rows.rows).toHaveLength(1);
     expect(JSON.parse(rows.rows[0]!.actor_json)).toEqual({
@@ -1228,7 +1458,7 @@ describe("AgentLoopDriver", () => {
 
     const rows = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
       harness.gad,
-      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.completed' ORDER BY seq`
+      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.completed' ORDER BY seq`,
     );
     const assistantCompleted = rows.rows
       .map((row) => JSON.parse(row.payload_ref_json) as Record<string, unknown>)
@@ -1294,11 +1524,13 @@ describe("AgentLoopDriver", () => {
     await harness.driver.deliverEffectOutcome(
       bob.effectId,
       { kind: "tool", result: { answer: "yes" }, isError: false },
-      { channelId: CHANNEL }
+      { channelId: CHANNEL },
     );
 
     expect(
-      harness.driver.outbox.all().filter((row) => row.descriptor.kind === "channel_call")
+      harness.driver.outbox
+        .all()
+        .filter((row) => row.descriptor.kind === "channel_call"),
     ).toHaveLength(0);
     expect(harness.cancelledChannelCalls).toEqual([
       {
@@ -1310,9 +1542,11 @@ describe("AgentLoopDriver", () => {
       rows: Array<{ envelope_id: string }>;
     }>(
       harness.gad,
-      `SELECT envelope_id FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'invocation.completed'`
+      `SELECT envelope_id FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'invocation.completed'`,
     );
-    expect(terminalRows.rows).toEqual([{ envelope_id: ids.invocationTerminal("tc-ask") }]);
+    expect(terminalRows.rows).toEqual([
+      { envelope_id: ids.invocationTerminal("tc-ask") },
+    ]);
   });
 
   it("keeps equal effect ids isolated by branch", async () => {
@@ -1339,12 +1573,14 @@ describe("AgentLoopDriver", () => {
     harness.driver.outbox.insert(otherLog, effectFor(otherChannel), null);
 
     expect(harness.driver.outbox.all()).toHaveLength(2);
-    expect(harness.driver.outbox.get(LOG_ID, ids.invocationEffect("tc-1"))?.channelId).toBe(
-      CHANNEL
-    );
-    expect(harness.driver.outbox.get(otherLog, ids.invocationEffect("tc-1"))?.channelId).toBe(
-      otherChannel
-    );
+    expect(
+      harness.driver.outbox.get(LOG_ID, ids.invocationEffect("tc-1"))
+        ?.channelId,
+    ).toBe(CHANNEL);
+    expect(
+      harness.driver.outbox.get(otherLog, ids.invocationEffect("tc-1"))
+        ?.channelId,
+    ).toBe(otherChannel);
   });
 
   it("redrives only parked eval effects when a runtime generation is replaced", async () => {
@@ -1366,16 +1602,20 @@ describe("AgentLoopDriver", () => {
     harness.driver.outbox.insert(LOG_ID, effect("read-1", "read"), null);
     harness.driverHost.sql.exec(
       `UPDATE effect_outbox SET disposition = 'parked', next_attempt_at = ?`,
-      Date.now() + 60_000
+      Date.now() + 60_000,
     );
 
     harness.driver.reconcileDeferredEvalRuns();
 
-    expect(harness.driver.outbox.get(LOG_ID, ids.invocationEffect("eval-1"))).toMatchObject({
+    expect(
+      harness.driver.outbox.get(LOG_ID, ids.invocationEffect("eval-1")),
+    ).toMatchObject({
       disposition: "ready",
       leaseOwner: null,
     });
-    expect(harness.driver.outbox.get(LOG_ID, ids.invocationEffect("read-1"))).toMatchObject({
+    expect(
+      harness.driver.outbox.get(LOG_ID, ids.invocationEffect("read-1")),
+    ).toMatchObject({
       disposition: "parked",
     });
   });
@@ -1398,7 +1638,7 @@ describe("AgentLoopDriver", () => {
     const effect = (
       invocationSeq: number,
       tool: string,
-      executionMode: "sequential" | "parallel"
+      executionMode: "sequential" | "parallel",
     ): EffectDescriptor => ({
       kind: "local_tool",
       effectId: ids.invocationEffect(`tc-${invocationSeq}`),
@@ -1419,7 +1659,8 @@ describe("AgentLoopDriver", () => {
       effect(13, "read-after-write", "parallel"),
       effect(14, "write-b", "sequential"),
     ];
-    for (const descriptor of rows) harness.driver.outbox.insert(LOG_ID, descriptor, null);
+    for (const descriptor of rows)
+      harness.driver.outbox.insert(LOG_ID, descriptor, null);
 
     await harness.driver.dispatchReadyEffectsForTest();
     expect(starts).toEqual(["read-a", "read-b"]);
@@ -1441,11 +1682,20 @@ describe("AgentLoopDriver", () => {
 
     harness.driver.outbox.delete(LOG_ID, rows[3]!.effectId);
     await harness.driver.dispatchReadyEffectsForTest();
-    expect(starts).toEqual(["read-a", "read-b", "write-a", "read-after-write", "write-b"]);
+    expect(starts).toEqual([
+      "read-a",
+      "read-b",
+      "write-a",
+      "read-after-write",
+      "write-b",
+    ]);
   });
 
   it("applies policy filters to executor-side ephemeral signals", async () => {
-    const messageId = ids.messageId(ids.turnId(CHANNEL, "env-1", "agent:self"), 1);
+    const messageId = ids.messageId(
+      ids.turnId(CHANNEL, "env-1", "agent:self"),
+      1,
+    );
     const dropEphemeral: StepPolicy = {
       name: "drop-ephemeral",
       intercept: ({ output }) => output,
@@ -1459,7 +1709,11 @@ describe("AgentLoopDriver", () => {
         channelId: CHANNEL,
         event: {
           kind: "message.delta",
-          actor: { kind: "agent", id: "agent:self", participantId: "agent:self" },
+          actor: {
+            kind: "agent",
+            id: "agent:self",
+            participantId: "agent:self",
+          },
           causality: { messageId: messageId as never },
           payload: {
             protocol: "agentic.trajectory.v1",
@@ -1480,7 +1734,10 @@ describe("AgentLoopDriver", () => {
 
   it("runs prompt → model → tool → model → close against the real gad store", async () => {
     const harness = await makeHarness({
-      script: { model: [toolCallReply("tc-1"), textReply("done")], tool: [toolOk] },
+      script: {
+        model: [toolCallReply("tc-1"), textReply("done")],
+        tool: [toolOk],
+      },
     });
     await harness.driver.handleIncoming(CHANNEL, promptIncoming());
     await settle(harness.driver);
@@ -1500,15 +1757,17 @@ describe("AgentLoopDriver", () => {
     expect(harness.driver.outbox.all()).toHaveLength(0);
     const channelRows = inspectSql<{ rows: Array<{ cnt: number }> }>(
       harness.gad,
-      `SELECT COUNT(*) AS cnt FROM log_events WHERE log_id = '${CHANNEL}'`
+      `SELECT COUNT(*) AS cnt FROM log_events WHERE log_id = '${CHANNEL}'`,
     );
     expect(channelRows.rows[0]!.cnt).toBeGreaterThan(0);
-    const publicationRows = inspectSql<{ rows: Array<{ envelope_id: string }> }>(
+    const publicationRows = inspectSql<{
+      rows: Array<{ envelope_id: string }>;
+    }>(
       harness.gad,
-      `SELECT envelope_id FROM publication_delivery_outbox ORDER BY created_at, item_id`
+      `SELECT envelope_id FROM publication_delivery_outbox ORDER BY created_at, item_id`,
     );
     expect(publicationRows.rows.map((row) => row.envelope_id)).toContain(
-      `pub:${ids.messageTerminal(ids.messageId(ids.turnId(CHANNEL, "env-1", "agent:self"), 1))}:${CHANNEL}`
+      `pub:${ids.messageTerminal(ids.messageId(ids.turnId(CHANNEL, "env-1", "agent:self"), 1))}:${CHANNEL}`,
     );
   });
 
@@ -1526,7 +1785,11 @@ describe("AgentLoopDriver", () => {
           participants: [
             {
               participantId: "panel:user",
-              ref: { kind: "panel", id: "panel:user", participantId: "panel:user" },
+              ref: {
+                kind: "panel",
+                id: "panel:user",
+                participantId: "panel:user",
+              },
               type: "panel",
               methods: [{ name: "set_title" }],
             },
@@ -1554,7 +1817,9 @@ describe("AgentLoopDriver", () => {
     await started.promise;
     // An unrelated in-flight model call is not evidence that this particular
     // invocation can materialize.
-    expect(await harness.driver.channelCallMayMaterialize(CHANNEL, effectId)).toBe(false);
+    expect(
+      await harness.driver.channelCallMayMaterialize(CHANNEL, effectId),
+    ).toBe(false);
 
     firstModel.resolve({
       kind: "model",
@@ -1572,15 +1837,19 @@ describe("AgentLoopDriver", () => {
     expect(harness.driver.outbox.all()).toEqual([
       expect.objectContaining({ effectId, kind: "channel_call" }),
     ]);
-    expect(await harness.driver.channelCallMayMaterialize(CHANNEL, effectId)).toBe(true);
+    expect(
+      await harness.driver.channelCallMayMaterialize(CHANNEL, effectId),
+    ).toBe(true);
 
     await harness.driver.deliverEffectOutcome(
       effectId,
       { kind: "tool", result: { ok: true }, isError: false },
-      { channelId: CHANNEL }
+      { channelId: CHANNEL },
     );
     await settle(harness.driver);
-    expect(await harness.driver.channelCallMayMaterialize(CHANNEL, effectId)).toBe(false);
+    expect(
+      await harness.driver.channelCallMayMaterialize(CHANNEL, effectId),
+    ).toBe(false);
   });
 
   it("a deferred local_tool (eval) parks the row + keeps the turn open; deliverEffectOutcome completes it → next model call", async () => {
@@ -1607,7 +1876,9 @@ describe("AgentLoopDriver", () => {
     // The deferred local_tool PARKS (row kept, not deleted) and the turn stays OPEN / non-stranded
     // — its PendingInvocation in the fold is the keep-alive (no credential-style turn.waiting needed).
     expect(toolDispatches).toBe(1);
-    expect(harness.driver.outbox.all()).toEqual([expect.objectContaining({ kind: "local_tool" })]);
+    expect(harness.driver.outbox.all()).toEqual([
+      expect.objectContaining({ kind: "local_tool" }),
+    ]);
     expect((await harness.driver.loop(CHANNEL)).state.openTurn).not.toBeNull();
 
     // Deliver the result out-of-band (exactly what the agent's onEvalComplete does).
@@ -1621,7 +1892,7 @@ describe("AgentLoopDriver", () => {
         },
         isError: false,
       },
-      { channelId: CHANNEL }
+      { channelId: CHANNEL },
     );
     await settle(harness.driver);
 
@@ -1638,7 +1909,14 @@ describe("AgentLoopDriver", () => {
     const effectId = ids.invocationEffect(invocationId);
     const evalToolCall: EffectOutcome = {
       kind: "model",
-      blocks: [{ type: "toolCall", id: invocationId, name: "eval", arguments: { code: "1+1" } }],
+      blocks: [
+        {
+          type: "toolCall",
+          id: invocationId,
+          name: "eval",
+          arguments: { code: "1+1" },
+        },
+      ],
       stopReason: "completed",
     };
     let driver!: AgentLoopDriver;
@@ -1658,7 +1936,8 @@ describe("AgentLoopDriver", () => {
                   return { deferred: true, reason: "external-result" };
                 }
                 canonicalReads += 1;
-                if (!terminalDurable) return { deferred: true, reason: "external-result" };
+                if (!terminalDurable)
+                  return { deferred: true, reason: "external-result" };
                 return {
                   kind: "tool",
                   result: {
@@ -1675,7 +1954,9 @@ describe("AgentLoopDriver", () => {
 
     await driver.handleIncoming(CHANNEL, promptIncoming("env-generation-loss"));
     await settle(driver);
-    expect(driver.outbox.get(LOG_ID, effectId)).toMatchObject({ disposition: "parked" });
+    expect(driver.outbox.get(LOG_ID, effectId)).toMatchObject({
+      disposition: "parked",
+    });
     expect(evalStarts).toBe(1);
 
     // EvalDO durably committed its terminal, but the live onEvalComplete push
@@ -1709,7 +1990,10 @@ describe("AgentLoopDriver", () => {
           : null,
     });
 
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-authority-deferred"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-authority-deferred"),
+    );
     await settle(harness.driver);
 
     const parked = harness.driver.outbox.all();
@@ -1754,7 +2038,10 @@ describe("AgentLoopDriver", () => {
           : null,
     });
 
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-racing-authority"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-racing-authority"),
+    );
     const dispatch = harness.driver.dispatchReadyEffectsForTest();
     await started.promise;
     expect(harness.driver.outbox.all()[0]).toMatchObject({
@@ -1792,7 +2079,10 @@ describe("AgentLoopDriver", () => {
           : null,
     });
 
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-external-deferred"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-external-deferred"),
+    );
     await settle(harness.driver);
 
     const parked = harness.driver.outbox.all()[0]!;
@@ -1800,7 +2090,9 @@ describe("AgentLoopDriver", () => {
     expect(toolDispatches).toBe(1);
 
     harness.driver.nudgeAuthorityRedrive();
-    expect(harness.driver.outbox.all()[0]!.nextAttemptAt).toBe(parked.nextAttemptAt);
+    expect(harness.driver.outbox.all()[0]!.nextAttemptAt).toBe(
+      parked.nextAttemptAt,
+    );
     await harness.driver.dispatchReadyEffectsForTest();
     expect(toolDispatches).toBe(1);
   });
@@ -1827,18 +2119,26 @@ describe("AgentLoopDriver", () => {
       isError: false,
     };
     await expect(
-      harness.driver.deliverEffectOutcome(ids.invocationEffect("tc-1"), outcome, {
-        channelId: CHANNEL,
-      })
+      harness.driver.deliverEffectOutcome(
+        ids.invocationEffect("tc-1"),
+        outcome,
+        {
+          channelId: CHANNEL,
+        },
+      ),
     ).resolves.toBe(true);
     await settle(harness.driver);
     const kindsAfterFirst = await logKinds(harness.gad);
 
     // Second delivery (the getRun poll backstop racing the onEvalComplete push) — idempotent no-op.
     await expect(
-      harness.driver.deliverEffectOutcome(ids.invocationEffect("tc-1"), outcome, {
-        channelId: CHANNEL,
-      })
+      harness.driver.deliverEffectOutcome(
+        ids.invocationEffect("tc-1"),
+        outcome,
+        {
+          channelId: CHANNEL,
+        },
+      ),
     ).resolves.toBe(false);
     await settle(harness.driver);
     expect(await logKinds(harness.gad)).toEqual(kindsAfterFirst);
@@ -1864,13 +2164,17 @@ describe("AgentLoopDriver", () => {
           : null,
       // Fail ONLY the fold-load head read, and only while armed — appends still work.
       gadFault: (method) =>
-        faultArmed && method === "getLogHead" ? new Error("store unavailable") : null,
+        faultArmed && method === "getLogHead"
+          ? new Error("store unavailable")
+          : null,
     });
 
     await harness.driver.handleIncoming(CHANNEL, promptIncoming());
     await settle(harness.driver);
     // Parked: the deferred local_tool row is kept, the turn stays open.
-    expect(harness.driver.outbox.all()).toEqual([expect.objectContaining({ kind: "local_tool" })]);
+    expect(harness.driver.outbox.all()).toEqual([
+      expect.objectContaining({ kind: "local_tool" }),
+    ]);
 
     const outcome: EffectOutcome = {
       kind: "tool",
@@ -1886,18 +2190,28 @@ describe("AgentLoopDriver", () => {
     faultArmed = true;
     // The transient error PROPAGATES (no longer swallowed) — the caller's redrive/alarm retries.
     await expect(
-      harness.driver.deliverEffectOutcome(ids.invocationEffect("tc-1"), outcome, {
-        channelId: CHANNEL,
-      })
+      harness.driver.deliverEffectOutcome(
+        ids.invocationEffect("tc-1"),
+        outcome,
+        {
+          channelId: CHANNEL,
+        },
+      ),
     ).rejects.toThrow(/store unavailable/);
     // Critically: the outbox row is STILL parked (the outcome was not dropped, the row not deleted).
-    expect(harness.driver.outbox.all()).toEqual([expect.objectContaining({ kind: "local_tool" })]);
+    expect(harness.driver.outbox.all()).toEqual([
+      expect.objectContaining({ kind: "local_tool" }),
+    ]);
 
     // Store recovers → the redelivery (the redrive/push backstop) settles the invocation normally.
     faultArmed = false;
-    await harness.driver.deliverEffectOutcome(ids.invocationEffect("tc-1"), outcome, {
-      channelId: CHANNEL,
-    });
+    await harness.driver.deliverEffectOutcome(
+      ids.invocationEffect("tc-1"),
+      outcome,
+      {
+        channelId: CHANNEL,
+      },
+    );
     await settle(harness.driver);
     expect(harness.driver.outbox.all()).toHaveLength(0);
     const kinds = await logKinds(harness.gad);
@@ -1940,25 +2254,27 @@ describe("AgentLoopDriver", () => {
           modelBaseUrl: "https://chatgpt.com/backend-api/codex",
         }),
         idempotencyKey: expect.stringContaining("credcard:"),
-      })
+      }),
     );
     expect(harness.driver.outbox.all()).toEqual([
       expect.objectContaining({ kind: "credential_wait" }),
     ]);
-    const effectId = ids.credentialWaitEffect(ids.credKey(CHANNEL, "openai-codex"));
+    const effectId = ids.credentialWaitEffect(
+      ids.credKey(CHANNEL, "openai-codex"),
+    );
     await expect(
       harness.driver.deliverEffectOutcome(
         effectId,
         { kind: "credential", resolved: true },
-        { channelId: CHANNEL }
-      )
+        { channelId: CHANNEL },
+      ),
     ).resolves.toBe(true);
     await expect(
       harness.driver.deliverEffectOutcome(
         effectId,
         { kind: "credential", resolved: true },
-        { channelId: CHANNEL }
-      )
+        { channelId: CHANNEL },
+      ),
     ).resolves.toBe(false);
     const loop = await harness.driver.loop(CHANNEL);
     expect(loop.state.pendingCredentialWaits).toEqual({});
@@ -1966,7 +2282,8 @@ describe("AgentLoopDriver", () => {
   });
 
   it("parks model auth failures behind a credential reconnect card", async () => {
-    const reason = "Provided authentication token is expired. Please try signing in again.";
+    const reason =
+      "Provided authentication token is expired. Please try signing in again.";
     const harness = await makeHarness({
       script: {
         model: [
@@ -1995,18 +2312,22 @@ describe("AgentLoopDriver", () => {
       "system.event",
       "turn.waiting",
     ]);
-    const failedRows = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
+    const failedRows = inspectSql<{
+      rows: Array<{ payload_ref_json: string }>;
+    }>(
       harness.gad,
-      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.failed'`
+      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.failed'`,
     );
     expect(JSON.parse(failedRows.rows[0]!.payload_ref_json)).toMatchObject({
       reason: "model_credential_reconnect_required",
       recoverable: true,
       code: "auth_or_credentials",
     });
-    const waitingRows = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
+    const waitingRows = inspectSql<{
+      rows: Array<{ payload_ref_json: string }>;
+    }>(
       harness.gad,
-      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'turn.waiting'`
+      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'turn.waiting'`,
     );
     expect(JSON.parse(waitingRows.rows[0]!.payload_ref_json)).toMatchObject({
       reason: "model_credential_reconnect_required",
@@ -2022,7 +2343,7 @@ describe("AgentLoopDriver", () => {
           reason,
           failureCode: "auth_or_credentials",
         }),
-      })
+      }),
     );
     expect(harness.driver.outbox.all()).toEqual([
       expect.objectContaining({ kind: "credential_wait" }),
@@ -2030,7 +2351,11 @@ describe("AgentLoopDriver", () => {
   });
 
   it("lets unattended executor auth throws continue on local fallback", async () => {
-    const modelDispatches: Array<{ provider: string; model: string; auth?: string }> = [];
+    const modelDispatches: Array<{
+      provider: string;
+      model: string;
+      auth?: string;
+    }> = [];
     const harness = await makeHarness({
       config: { ...config, fallbackModelRef, fallbackModelSpec },
       script: { model: [], tool: [] },
@@ -2046,8 +2371,10 @@ describe("AgentLoopDriver", () => {
             });
             if (descriptor.request.provider !== "local") {
               throw Object.assign(
-                new Error("Provided authentication token is expired. Please try signing in again."),
-                { status: 401 }
+                new Error(
+                  "Provided authentication token is expired. Please try signing in again.",
+                ),
+                { status: 401 },
               );
             }
             return textReply("continued locally");
@@ -2058,7 +2385,9 @@ describe("AgentLoopDriver", () => {
 
     await harness.driver.handleIncoming(
       CHANNEL,
-      promptIncoming("env-scheduled", "background check", { origin: "scheduled" })
+      promptIncoming("env-scheduled", "background check", {
+        origin: "scheduled",
+      }),
     );
     await settle(harness.driver, 8);
 
@@ -2067,20 +2396,24 @@ describe("AgentLoopDriver", () => {
       { provider: "local", model: "lfm2.5-2.6b", auth: "loopback" },
     ]);
     expect(harness.channelPublishes).not.toContainEqual(
-      expect.objectContaining({ payloadKind: CREDENTIAL_CONNECT_PAYLOAD_KIND })
+      expect.objectContaining({ payloadKind: CREDENTIAL_CONNECT_PAYLOAD_KIND }),
     );
     const notices = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
       harness.gad,
-      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'system.event' ORDER BY seq`
+      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'system.event' ORDER BY seq`,
     );
-    expect(notices.rows.map((row) => JSON.parse(row.payload_ref_json))).toContainEqual(
-      expect.objectContaining({ kind: "model.fallback_continued" })
+    expect(
+      notices.rows.map((row) => JSON.parse(row.payload_ref_json)),
+    ).toContainEqual(
+      expect.objectContaining({ kind: "model.fallback_continued" }),
     );
     const starts = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
       harness.gad,
-      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.started' ORDER BY seq`
+      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.started' ORDER BY seq`,
     );
-    expect(JSON.parse(starts.rows.at(-1)!.payload_ref_json).modelRequest).toMatchObject({
+    expect(
+      JSON.parse(starts.rows.at(-1)!.payload_ref_json).modelRequest,
+    ).toMatchObject({
       provider: "local",
       model: "lfm2.5-2.6b",
       auth: "loopback",
@@ -2096,7 +2429,9 @@ describe("AgentLoopDriver", () => {
 
     await harness.driver.handleIncoming(CHANNEL, promptIncoming());
     const preparation = harness.driver.outbox.all()[0];
-    expect(preparation).toEqual(expect.objectContaining({ kind: "prompt_artifacts" }));
+    expect(preparation).toEqual(
+      expect.objectContaining({ kind: "prompt_artifacts" }),
+    );
     await harness.driver.applyOutcome(preparation!, {
       kind: "prompt-artifacts",
       patch: {},
@@ -2130,14 +2465,18 @@ describe("AgentLoopDriver", () => {
               kind: "prompt_artifacts",
               async execute() {
                 attempts += 1;
-                if (attempts < 3) throw new TypeError("workspace.listSkills fetch failed");
+                if (attempts < 3)
+                  throw new TypeError("workspace.listSkills fetch failed");
                 return { kind: "prompt-artifacts", patch: config };
               },
             } satisfies EffectExecutor)
           : null,
     });
 
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-prompt-retry"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-prompt-retry"),
+    );
     await harness.driver.dispatchReadyEffectsForTest();
     expect(attempts).toBe(1);
     expect(harness.driver.outbox.all()).toEqual([
@@ -2166,7 +2505,9 @@ describe("AgentLoopDriver", () => {
 
   it("does not mark a generation-owned model call failed after activation restart", async () => {
     const gad = await createTestDO(GadWorkspaceDO, { __objectKey: "gad" });
-    const host = await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" });
+    const host = await createTestDO(GadWorkspaceDO, {
+      __objectKey: "driver-host",
+    });
     const started = deferred<void>();
     const first = await makeHarness({
       script: { model: [], tool: [] },
@@ -2193,7 +2534,7 @@ describe("AgentLoopDriver", () => {
         kind: "model_call",
         disposition: "leased",
         leaseOwner: "agent-loop-driver:test-host",
-      })
+      }),
     );
 
     const recovered = await makeHarness({
@@ -2203,19 +2544,25 @@ describe("AgentLoopDriver", () => {
     });
     await recovered.driver.wake(CHANNEL);
 
-    expect(await logKinds(gad)).toEqual(["message.completed", "turn.opened", "message.started"]);
+    expect(await logKinds(gad)).toEqual([
+      "message.completed",
+      "turn.opened",
+      "message.started",
+    ]);
     expect(recovered.driver.outbox.all()[0]).toEqual(
       expect.objectContaining({
         kind: "model_call",
         disposition: "leased",
         leaseGeneration: leasedRow?.leaseGeneration,
-      })
+      }),
     );
   });
 
   it("closes a completed assistant turn when replay missed the terminal cascade", async () => {
     const gad = await createTestDO(GadWorkspaceDO, { __objectKey: "gad" });
-    const host = await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" });
+    const host = await createTestDO(GadWorkspaceDO, {
+      __objectKey: "driver-host",
+    });
     let outcomeAppends = 0;
     const crashed = await makeHarness({
       script: { model: [textReply("done")], tool: [] },
@@ -2258,8 +2605,13 @@ describe("AgentLoopDriver", () => {
 
   it("leaves a durable recovery intent when activation loss follows local effect consumption", async () => {
     const gad = await createTestDO(GadWorkspaceDO, { __objectKey: "gad" });
-    const host = await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" });
-    const recoveries = new Map<string, { channelId: string; branchId: string; effectId: string }>();
+    const host = await createTestDO(GadWorkspaceDO, {
+      __objectKey: "driver-host",
+    });
+    const recoveries = new Map<
+      string,
+      { channelId: string; branchId: string; effectId: string }
+    >();
     let deletedOutcomes = 0;
     const crashed = await makeHarness({
       script: { model: [textReply("done")], tool: [] },
@@ -2306,7 +2658,9 @@ describe("AgentLoopDriver", () => {
 
   it("settles cancellation after recovering a completed turn from a prior activation", async () => {
     const gad = await createTestDO(GadWorkspaceDO, { __objectKey: "gad" });
-    const host = await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" });
+    const host = await createTestDO(GadWorkspaceDO, {
+      __objectKey: "driver-host",
+    });
     let deletedOutcomes = 0;
     const crashed = await makeHarness({
       script: { model: [textReply("done")], tool: [] },
@@ -2327,7 +2681,9 @@ describe("AgentLoopDriver", () => {
       gad,
       driverSql: host,
     });
-    await expect(recovered.driver.interruptChannel(CHANNEL)).resolves.toBeUndefined();
+    await expect(
+      recovered.driver.interruptChannel(CHANNEL),
+    ).resolves.toBeUndefined();
 
     expect((await recovered.driver.loop(CHANNEL)).state.openTurn).toBeNull();
     expect((await logKinds(gad)).at(-1)).toBe("turn.closed");
@@ -2337,7 +2693,10 @@ describe("AgentLoopDriver", () => {
   it("repairs a committed tool-call cascade before accepting queued steering", async () => {
     let deletedOutcomes = 0;
     const harness = await makeHarness({
-      script: { model: [toolCallReply("tc-queued"), textReply("done")], tool: [toolOk] },
+      script: {
+        model: [toolCallReply("tc-queued"), textReply("done")],
+        tool: [toolOk],
+      },
       killPoint: (point) => {
         // Prompt-artifact preparation commits first. Crash the same activation
         // after deleting the completed model row but before message.completed
@@ -2363,13 +2722,19 @@ describe("AgentLoopDriver", () => {
         channelId: CHANNEL,
         source: { envelopeId: "env-steer" },
         content: "also remove the maximum width",
-        senderRef: { kind: "user", id: "panel:user", participantId: "panel:user" },
+        senderRef: {
+          kind: "user",
+          id: "panel:user",
+          participantId: "panel:user",
+        },
       },
     });
 
     const afterSteer = await logKinds(harness.gad);
     expect(afterSteer).toContain("invocation.started");
-    expect(afterSteer.filter((kind) => kind === "message.started")).toHaveLength(1);
+    expect(
+      afterSteer.filter((kind) => kind === "message.started"),
+    ).toHaveLength(1);
 
     await settle(harness.driver);
     expect(await logKinds(harness.gad)).toEqual([
@@ -2399,7 +2764,11 @@ describe("AgentLoopDriver", () => {
       events: [
         {
           envelopeId: ids.messageTerminal("parent-msg"),
-          actor: { kind: "agent", id: "agent:parent", participantId: "agent:parent" },
+          actor: {
+            kind: "agent",
+            id: "agent:parent",
+            participantId: "agent:parent",
+          },
           payloadKind: "message.completed",
           payload: {
             protocol: "agentic.trajectory.v1",
@@ -2424,7 +2793,11 @@ describe("AgentLoopDriver", () => {
         },
         {
           envelopeId: ids.invocationStart(inheritedInvocationId),
-          actor: { kind: "agent", id: "agent:parent", participantId: "agent:parent" },
+          actor: {
+            kind: "agent",
+            id: "agent:parent",
+            participantId: "agent:parent",
+          },
           payloadKind: "invocation.started",
           payload: {
             protocol: "agentic.trajectory.v1",
@@ -2461,14 +2834,22 @@ describe("AgentLoopDriver", () => {
       events: [
         {
           envelopeId: ids.turnOpened(childTurnId),
-          actor: { kind: "agent", id: "agent:self", participantId: "agent:self" },
+          actor: {
+            kind: "agent",
+            id: "agent:self",
+            participantId: "agent:self",
+          },
           payloadKind: "turn.opened",
           payload: { protocol: "agentic.trajectory.v1" },
           causality: { turnId: childTurnId },
         },
         {
           envelopeId: ids.messageStarted(childMessageId),
-          actor: { kind: "agent", id: "agent:self", participantId: "agent:self" },
+          actor: {
+            kind: "agent",
+            id: "agent:self",
+            participantId: "agent:self",
+          },
           payloadKind: "message.started",
           payload: {
             protocol: "agentic.trajectory.v1",
@@ -2495,17 +2876,23 @@ describe("AgentLoopDriver", () => {
 
     const rows = inspectSql<{ rows: Array<{ envelope_id: string }> }>(
       gad,
-      `SELECT envelope_id FROM log_events WHERE log_id = '${LOG_ID}' ORDER BY seq`
+      `SELECT envelope_id FROM log_events WHERE log_id = '${LOG_ID}' ORDER BY seq`,
     );
     const localEnvelopeIds = rows.rows.map((row) => row.envelope_id);
     expect(localEnvelopeIds).toContain(ids.messageTerminal(childMessageId));
-    expect(localEnvelopeIds).toContain(ids.messageStarted(ids.messageId(childTurnId, 1)));
-    expect(localEnvelopeIds).not.toContain(ids.invocationStart(inheritedInvocationId));
+    expect(localEnvelopeIds).toContain(
+      ids.messageStarted(ids.messageId(childTurnId, 1)),
+    );
+    expect(localEnvelopeIds).not.toContain(
+      ids.invocationStart(inheritedInvocationId),
+    );
   });
 
   it("parks a reset-aware model failure when replay missed the terminal cascade", async () => {
     const gad = await createTestDO(GadWorkspaceDO, { __objectKey: "gad" });
-    const host = await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" });
+    const host = await createTestDO(GadWorkspaceDO, {
+      __objectKey: "driver-host",
+    });
     let outcomeAppends = 0;
     const crashed = await makeHarness({
       script: {
@@ -2585,9 +2972,11 @@ describe("AgentLoopDriver", () => {
       "message.failed",
       "turn.waiting",
     ]);
-    const failedRows = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
+    const failedRows = inspectSql<{
+      rows: Array<{ payload_ref_json: string }>;
+    }>(
       harness.gad,
-      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.failed'`
+      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.failed'`,
     );
     expect(JSON.parse(failedRows.rows[0]!.payload_ref_json)).toMatchObject({
       reason:
@@ -2597,12 +2986,15 @@ describe("AgentLoopDriver", () => {
       resetAt: "2026-06-15T18:35:01.000Z",
     });
 
-    const messageId = ids.messageId(ids.turnId(CHANNEL, "env-1", "agent:self"), 0);
+    const messageId = ids.messageId(
+      ids.turnId(CHANNEL, "env-1", "agent:self"),
+      0,
+    );
     await expect(
       harness.driver.scheduleResumeAtReset(CHANNEL, {
         messageId,
         resetAt: "2026-06-15T18:35:01.000Z",
-      })
+      }),
     ).resolves.toMatchObject({
       scheduled: true,
       wakeAt: "2026-06-15T18:35:01.000Z",
@@ -2650,9 +3042,11 @@ describe("AgentLoopDriver", () => {
       "message.failed",
       "turn.waiting",
     ]);
-    const failedRows = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
+    const failedRows = inspectSql<{
+      rows: Array<{ payload_ref_json: string }>;
+    }>(
       harness.gad,
-      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.failed'`
+      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.failed'`,
     );
     expect(JSON.parse(failedRows.rows[0]!.payload_ref_json)).toMatchObject({
       code: "usage_limit_terminal",
@@ -2687,9 +3081,11 @@ describe("AgentLoopDriver", () => {
       "message.failed",
       "turn.closed",
     ]);
-    const failedRows = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
+    const failedRows = inspectSql<{
+      rows: Array<{ payload_ref_json: string }>;
+    }>(
       harness.gad,
-      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.failed'`
+      `SELECT payload_ref_json FROM log_events WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.failed'`,
     );
     expect(JSON.parse(failedRows.rows[0]!.payload_ref_json)).toMatchObject({
       reason: rawInvalidToolSchemaError(),
@@ -2760,7 +3156,10 @@ describe("AgentLoopDriver", () => {
           : null,
     });
 
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-network-outage"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-network-outage"),
+    );
     for (let attempt = 0; attempt < 2; attempt += 1) {
       harness.setNow((attempt + 1) * 10_000);
       await harness.driver.dispatchReadyEffectsForTest();
@@ -2798,7 +3197,10 @@ describe("AgentLoopDriver", () => {
           : null,
     });
 
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming("env-network-stalled"));
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-network-stalled"),
+    );
     for (let attempt = 0; attempt < 2; attempt += 1) {
       harness.setNow((attempt + 1) * 10_000);
       await harness.driver.dispatchReadyEffectsForTest();
@@ -2869,7 +3271,10 @@ describe("AgentLoopDriver", () => {
   it("converges after a crash at every kill point (crash-injection harness)", async () => {
     // Reference run
     const reference = await makeHarness({
-      script: { model: [toolCallReply("tc-1"), textReply("done")], tool: [toolOk] },
+      script: {
+        model: [toolCallReply("tc-1"), textReply("done")],
+        tool: [toolOk],
+      },
     });
     await reference.driver.handleIncoming(CHANNEL, promptIncoming());
     await settle(reference.driver);
@@ -2883,7 +3288,9 @@ describe("AgentLoopDriver", () => {
       "after-outbox-delete",
     ]) {
       const gad = await createTestDO(GadWorkspaceDO, { __objectKey: "gad" });
-      const host = await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" });
+      const host = await createTestDO(GadWorkspaceDO, {
+        __objectKey: "driver-host",
+      });
       const script: Script = {
         model: [toolCallReply("tc-1"), textReply("done")],
         tool: [toolOk],
@@ -2900,7 +3307,9 @@ describe("AgentLoopDriver", () => {
           }
         },
       });
-      await crashed.driver.handleIncoming(CHANNEL, promptIncoming()).catch(() => {});
+      await crashed.driver
+        .handleIncoming(CHANNEL, promptIncoming())
+        .catch(() => {});
       // one pump round, then the "process dies" mid-flight
       await crashed.driver.dispatchReadyEffectsForTest().catch(() => {});
 
@@ -2915,21 +3324,28 @@ describe("AgentLoopDriver", () => {
       const kinds = await logKinds(gad);
       // allow benign extra message.failed{recoverable} + retry pairs
       const essential = kinds.filter(
-        (kind) => kind !== "message.failed" && kind !== "message.started"
+        (kind) => kind !== "message.failed" && kind !== "message.started",
       );
       const referenceEssential = referenceKinds.filter(
-        (kind) => kind !== "message.failed" && kind !== "message.started"
+        (kind) => kind !== "message.failed" && kind !== "message.started",
       );
       expect(essential, `kill point ${point}`).toEqual(referenceEssential);
-      expect(recovered.driver.outbox.all(), `kill point ${point}`).toHaveLength(0);
-      const integrity = await gad.call<{ ok: boolean }>("checkLogIntegrity", {});
+      expect(recovered.driver.outbox.all(), `kill point ${point}`).toHaveLength(
+        0,
+      );
+      const integrity = await gad.call<{ ok: boolean }>(
+        "checkLogIntegrity",
+        {},
+      );
       expect(integrity.ok, `kill point ${point}`).toBe(true);
     }
   }, 30_000);
 
   it("survives total cache amnesia mid-run (P3)", async () => {
     const gad = await createTestDO(GadWorkspaceDO, { __objectKey: "gad" });
-    const host = await createTestDO(GadWorkspaceDO, { __objectKey: "driver-host" });
+    const host = await createTestDO(GadWorkspaceDO, {
+      __objectKey: "driver-host",
+    });
     const script: Script = {
       model: [toolCallReply("tc-1"), textReply("done")],
       tool: [toolOk],
@@ -2947,7 +3363,9 @@ describe("AgentLoopDriver", () => {
         }
       },
     });
-    await first.driver.handleIncoming(CHANNEL, promptIncoming()).catch(() => {});
+    await first.driver
+      .handleIncoming(CHANNEL, promptIncoming())
+      .catch(() => {});
     await first.driver.dispatchReadyEffectsForTest().catch(() => {});
 
     // cache amnesia: wipe BOTH caches
@@ -2964,7 +3382,9 @@ describe("AgentLoopDriver", () => {
     expect(kinds).toContain("invocation.completed");
     expect(kinds[kinds.length - 1]).toBe("turn.closed");
     expect(recovered.driver.outbox.all()).toHaveLength(0);
-    expect((await gad.call<{ ok: boolean }>("checkLogIntegrity", {})).ok).toBe(true);
+    expect((await gad.call<{ ok: boolean }>("checkLogIntegrity", {})).ok).toBe(
+      true,
+    );
   });
 
   it("treats duplicate deliverEffectOutcome as a no-op (deterministic terminals)", async () => {
@@ -2979,13 +3399,17 @@ describe("AgentLoopDriver", () => {
     await driver.handleIncoming(CHANNEL, promptIncoming()).catch(() => {});
     await driver.dispatchReadyEffectsForTest().catch(() => {});
     const effectId = ids.invocationEffect("tc-1");
-    await expect(driver.deliverEffectOutcome(effectId, toolOk)).resolves.toBe(true);
+    await expect(driver.deliverEffectOutcome(effectId, toolOk)).resolves.toBe(
+      true,
+    );
     const kindsAfterFirst = await logKinds(harness.gad);
-    await expect(driver.deliverEffectOutcome(effectId, toolOk)).resolves.toBe(false); // duplicate
+    await expect(driver.deliverEffectOutcome(effectId, toolOk)).resolves.toBe(
+      false,
+    ); // duplicate
     expect(await logKinds(harness.gad)).toEqual(kindsAfterFirst);
     const terminals = inspectSql<{ rows: Array<{ cnt: number }> }>(
       harness.gad,
-      `SELECT COUNT(*) AS cnt FROM log_events WHERE envelope_id = '${ids.invocationTerminal("tc-1")}'`
+      `SELECT COUNT(*) AS cnt FROM log_events WHERE envelope_id = '${ids.invocationTerminal("tc-1")}'`,
     );
     expect(terminals.rows[0]!.cnt).toBe(1);
   });
@@ -2994,14 +3418,20 @@ describe("AgentLoopDriver", () => {
     const TURNS = 6;
     const harness = await makeHarness({
       // one plain text reply per turn (no tool calls)
-      script: { model: Array.from({ length: TURNS }, (_, i) => textReply(`reply-${i}`)), tool: [] },
+      script: {
+        model: Array.from({ length: TURNS }, (_, i) => textReply(`reply-${i}`)),
+        tool: [],
+      },
       // low thresholds so a handful of turns trips compaction; the vessel sizes
       // these to the model context window in production.
       compaction: { minEntries: 6, triggerBytes: 1 },
     });
 
     for (let i = 0; i < TURNS; i += 1) {
-      await harness.driver.handleIncoming(CHANNEL, promptIncoming(`env-${i}`, `msg-${i}`));
+      await harness.driver.handleIncoming(
+        CHANNEL,
+        promptIncoming(`env-${i}`, `msg-${i}`),
+      );
       await settle(harness.driver);
     }
 
@@ -3026,10 +3456,14 @@ describe("AgentLoopDriver", () => {
       script: { model: [toolCallReply("tc-1"), textReply("done")], tool: [] },
       compaction: { minEntries: 1, triggerBytes: 1 },
     });
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming()).catch(() => {});
+    await harness.driver
+      .handleIncoming(CHANNEL, promptIncoming())
+      .catch(() => {});
     await harness.driver.dispatchReadyEffectsForTest().catch(() => {});
     // Turn is open (awaiting the tool). No compaction event yet.
-    expect(await logKinds(harness.gad)).not.toContain("system.compaction_recorded");
+    expect(await logKinds(harness.gad)).not.toContain(
+      "system.compaction_recorded",
+    );
     const loop = await harness.driver.loop(CHANNEL);
     expect(loop.state.openTurn).not.toBeNull();
   });
@@ -3054,16 +3488,20 @@ describe("AgentLoopDriver", () => {
     }>(
       harness.gad,
       `SELECT payload_ref_json FROM log_events
-        WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.failed'`
+        WHERE log_id = '${LOG_ID}' AND payload_kind = 'message.failed'`,
     );
-    expect(failures.rows.map((row) => JSON.parse(row.payload_ref_json))).toContainEqual({
+    expect(
+      failures.rows.map((row) => JSON.parse(row.payload_ref_json)),
+    ).toContainEqual({
       protocol: expect.any(String),
       reason: expect.any(String),
       recoverable: true,
       code: "context_overflow_terminal",
     });
     expect(await logKinds(harness.gad)).toContain("turn.closed");
-    expect(await harness.driver.modelExecutionEvidence(CHANNEL)).toMatchObject({ totalCalls: 2 });
+    expect(await harness.driver.modelExecutionEvidence(CHANNEL)).toMatchObject({
+      totalCalls: 2,
+    });
   });
 });
 
@@ -3072,7 +3510,9 @@ describe("AgentLoopDriver", () => {
 // state re-folded from the persisted log (not the in-memory cache).
 describe("summarizeTurn over a real GAD-backed loop (agent.describe turn block)", () => {
   it("reports an in-flight turn after a prompt, then idle once it settles", async () => {
-    const harness = await makeHarness({ script: { model: [textReply("done")], tool: [] } });
+    const harness = await makeHarness({
+      script: { model: [textReply("done")], tool: [] },
+    });
 
     await harness.driver.handleIncoming(CHANNEL, promptIncoming());
     harness.driver.dropLoop(CHANNEL); // force a fresh fold from the log
@@ -3095,7 +3535,9 @@ describe("summarizeTurn over a real GAD-backed loop (agent.describe turn block)"
     const harness = await makeHarness({
       script: { model: [toolCallReply("tc-1"), textReply("done")], tool: [] },
     });
-    await harness.driver.handleIncoming(CHANNEL, promptIncoming()).catch(() => {});
+    await harness.driver
+      .handleIncoming(CHANNEL, promptIncoming())
+      .catch(() => {});
     await harness.driver.dispatchReadyEffectsForTest().catch(() => {}); // model emits the tool call
 
     harness.driver.dropLoop(CHANNEL);

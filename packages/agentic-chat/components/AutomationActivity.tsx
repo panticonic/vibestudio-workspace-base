@@ -40,19 +40,30 @@ import {
   canonicalCronTimeZone,
   describeCronSchedule,
 } from "@vibestudio/shared/authority/cronSchedule";
-import { CronScheduleDisplay, CronScheduleEditor } from "./CronScheduleControls.js";
+import {
+  CronScheduleDisplay,
+  CronScheduleEditor,
+} from "./CronScheduleControls.js";
 
 export interface AutomationUiClient {
-  get(missionId: string): Promise<MissionRecord | null>;
+  inspect(missionId: string): Promise<AutomationInspection | null>;
   getRun(runId: string): Promise<MissionRunRecord | null>;
   edit(
     missionId: string,
-    patch: { name?: string; charter?: MissionCharter }
+    patch: { name?: string; charter?: MissionCharter },
   ): Promise<MissionRecord>;
   pause(missionId: string): Promise<MissionRecord>;
   resume(missionId: string): Promise<MissionRecord>;
   runNow(missionId: string): Promise<MissionRunRecord>;
   openConversation?(run: MissionRunRecord): void;
+}
+
+export interface AutomationInspection {
+  automation: MissionRecord;
+  recentRuns: MissionRunRecord[];
+  totalRuns: number;
+  activeRuns: number;
+  issueRunsSince: number;
 }
 
 export interface AutomationUiRpc {
@@ -64,7 +75,7 @@ const clientByRpc = new WeakMap<AutomationUiRpc, AutomationUiClient>();
 
 export function createAutomationUiClient(
   rpc: AutomationUiRpc,
-  openConversation?: (run: MissionRunRecord) => void
+  openConversation?: (run: MissionRunRecord) => void,
 ): AutomationUiClient {
   if (!openConversation) {
     const existing = clientByRpc.get(rpc);
@@ -92,7 +103,13 @@ export function createAutomationUiClient(
   const call = async <T,>(method: string, args: unknown[]) =>
     (await rpc.call(await target(), method, args)) as T;
   const client: AutomationUiClient = {
-    get: (missionId) => call("get", [missionId]),
+    inspect: async (missionId) => {
+      const overview = await call<{ items?: unknown[] }>("overview", [
+        { missionId, limit: 1 },
+      ]);
+      const item = overview.items?.[0] as AutomationInspection | undefined;
+      return item?.automation?.missionId === missionId ? item : null;
+    },
     getRun: (runId) => call("getRun", [runId]),
     edit: (missionId, patch) => call("edit", [missionId, patch]),
     pause: (missionId) => call("pause", [missionId]),
@@ -123,15 +140,18 @@ export type AutomationActivityProps =
       run?: never;
     });
 
-const definitionCaches = new WeakMap<
+const inspectionRequests = new WeakMap<
   AutomationUiClient,
-  Map<string, Promise<MissionRecord | null>>
+  Map<string, Promise<AutomationInspection | null>>
 >();
-const runCaches = new WeakMap<AutomationUiClient, Map<string, Promise<MissionRunRecord | null>>>();
+const runRequests = new WeakMap<
+  AutomationUiClient,
+  Map<string, Promise<MissionRunRecord | null>>
+>();
 
 function cacheFor<T>(
   owner: WeakMap<AutomationUiClient, Map<string, T>>,
-  client: AutomationUiClient
+  client: AutomationUiClient,
 ) {
   let cache = owner.get(client);
   if (!cache) {
@@ -141,27 +161,21 @@ function cacheFor<T>(
   return cache;
 }
 
-function cachedDefinition(client: AutomationUiClient, missionId: string) {
-  const cache = cacheFor(definitionCaches, client);
+function inspectAutomation(client: AutomationUiClient, missionId: string) {
+  const cache = cacheFor(inspectionRequests, client);
   let pending = cache.get(missionId);
   if (!pending) {
-    pending = client.get(missionId).catch((error) => {
-      cache.delete(missionId);
-      throw error;
-    });
+    pending = client.inspect(missionId).finally(() => cache.delete(missionId));
     cache.set(missionId, pending);
   }
   return pending;
 }
 
-function cachedRun(client: AutomationUiClient, runId: string) {
-  const cache = cacheFor(runCaches, client);
+function inspectRun(client: AutomationUiClient, runId: string) {
+  const cache = cacheFor(runRequests, client);
   let pending = cache.get(runId);
   if (!pending) {
-    pending = client.getRun(runId).catch((error) => {
-      cache.delete(runId);
-      throw error;
-    });
+    pending = client.getRun(runId).finally(() => cache.delete(runId));
     cache.set(runId, pending);
   }
   return pending;
@@ -177,16 +191,23 @@ function formatAbsolute(value: number): string {
 export function formatAutomationInterval(value: number): string {
   if (value % 86_400_000 === 0)
     return `${value / 86_400_000} day${value === 86_400_000 ? "" : "s"}`;
-  if (value % 3_600_000 === 0) return `${value / 3_600_000} hour${value === 3_600_000 ? "" : "s"}`;
-  if (value % 60_000 === 0) return `${value / 60_000} minute${value === 60_000 ? "" : "s"}`;
+  if (value % 3_600_000 === 0)
+    return `${value / 3_600_000} hour${value === 3_600_000 ? "" : "s"}`;
+  if (value % 60_000 === 0)
+    return `${value / 60_000} minute${value === 60_000 ? "" : "s"}`;
   return `${Math.round(value / 1_000)} seconds`;
 }
 
-function scheduleSummary(snapshot: Pick<AutomationActivitySnapshot, "schedule">): string {
+function scheduleSummary(
+  snapshot: Pick<AutomationActivitySnapshot, "schedule">,
+): string {
   if (!snapshot.schedule) return "Manual";
   if (snapshot.schedule.kind === "cron") {
     try {
-      return describeCronSchedule(snapshot.schedule.expression, snapshot.schedule.timezone);
+      return describeCronSchedule(
+        snapshot.schedule.expression,
+        snapshot.schedule.timezone,
+      );
     } catch {
       return "Calendar schedule";
     }
@@ -197,23 +218,32 @@ function scheduleSummary(snapshot: Pick<AutomationActivitySnapshot, "schedule">)
 function terminationSummary(trigger: MissionCharter["trigger"]): string {
   if (trigger.kind === "manual") return "No automatic end";
   const parts = [
-    ...(trigger.untilAt === undefined ? [] : [`until ${formatAbsolute(trigger.untilAt)}`]),
+    ...(trigger.untilAt === undefined
+      ? []
+      : [`until ${formatAbsolute(trigger.untilAt)}`]),
     ...(trigger.maxRuns === undefined
       ? []
       : [`after ${trigger.maxRuns} run${trigger.maxRuns === 1 ? "" : "s"}`]),
   ];
-  return parts.length > 0 ? parts.join(" or ") : "Runs until stopped or completed";
+  return parts.length > 0
+    ? parts.join(" or ")
+    : "Runs until stopped or completed";
 }
 
 const PROVIDER_CONTEXT_CACHE_TTL_MS = 60 * 60 * 1_000;
 
-function cronFieldCoversRange(field: string, minimum: number, maximum: number): boolean {
+function cronFieldCoversRange(
+  field: string,
+  minimum: number,
+  maximum: number,
+): boolean {
   const covered = new Set<number>();
   for (const part of field.split(",")) {
     const [range = "", rawStep] = part.split("/");
     const step = rawStep === undefined ? 1 : Number(rawStep);
     if (!Number.isInteger(step) || step < 1) return false;
-    const [rawStart, rawEnd] = range === "*" ? [minimum, maximum] : range.split("-").map(Number);
+    const [rawStart, rawEnd] =
+      range === "*" ? [minimum, maximum] : range.split("-").map(Number);
     const start = rawStart ?? Number.NaN;
     const end = rawEnd ?? start;
     if (
@@ -249,7 +279,9 @@ function cronCanWaitLongerThanProviderCacheTtl(expression: string): boolean {
   );
 }
 
-function continuingConversationExceedsProviderCacheTtl(automation: MissionRecord): boolean {
+function continuingConversationExceedsProviderCacheTtl(
+  automation: MissionRecord,
+): boolean {
   const { execution, trigger } = automation.charter;
   if (
     execution.kind !== "agent" ||
@@ -258,7 +290,8 @@ function continuingConversationExceedsProviderCacheTtl(automation: MissionRecord
   ) {
     return false;
   }
-  if (trigger.kind === "schedule") return trigger.everyMs > PROVIDER_CONTEXT_CACHE_TTL_MS;
+  if (trigger.kind === "schedule")
+    return trigger.everyMs > PROVIDER_CONTEXT_CACHE_TTL_MS;
   try {
     return cronCanWaitLongerThanProviderCacheTtl(trigger.expression);
   } catch {
@@ -269,7 +302,9 @@ function continuingConversationExceedsProviderCacheTtl(automation: MissionRecord
 function localDateTimeInput(value?: number): string {
   if (value === undefined) return "";
   const date = new Date(value);
-  return new Date(value - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+  return new Date(value - date.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 16);
 }
 
 function localTimeZone(): string {
@@ -374,31 +409,36 @@ export function AutomationParametersEditor({
   const initialTrigger = automation.charter.trigger;
   const [name, setName] = useState(automation.name);
   const [summary, setSummary] = useState(automation.charter.summary);
-  const [scheduleKind, setScheduleKind] = useState<"manual" | "interval" | "cron">(
-    initialTrigger.kind === "schedule" ? "interval" : initialTrigger.kind
-  );
+  const [scheduleKind, setScheduleKind] = useState<
+    "manual" | "interval" | "cron"
+  >(initialTrigger.kind === "schedule" ? "interval" : initialTrigger.kind);
   const [amount, setAmount] = useState(initialInterval.amount);
   const [unit, setUnit] = useState(initialInterval.unit);
   const [cronExpression, setCronExpression] = useState(
-    initialTrigger.kind === "cron" ? initialTrigger.expression : "5 5 * * THU"
+    initialTrigger.kind === "cron" ? initialTrigger.expression : "5 5 * * THU",
   );
   const [timezone, setTimezone] = useState(
     initialTrigger.kind === "cron"
       ? initialTrigger.timezone
-      : Intl.DateTimeFormat().resolvedOptions().timeZone
+      : Intl.DateTimeFormat().resolvedOptions().timeZone,
   );
   const [until, setUntil] = useState(
-    initialTrigger.kind === "manual" ? "" : localDateTimeInput(initialTrigger.untilAt)
+    initialTrigger.kind === "manual"
+      ? ""
+      : localDateTimeInput(initialTrigger.untilAt),
   );
   const [maxRuns, setMaxRuns] = useState(
     initialTrigger.kind === "manual" || initialTrigger.maxRuns === undefined
       ? ""
-      : String(initialTrigger.maxRuns)
+      : String(initialTrigger.maxRuns),
   );
   const [payload, setPayload] = useState(() => {
     const execution = automation.charter.execution;
-    if (execution.kind === "method") return JSON.stringify(execution.args, null, 2);
-    return execution.action.kind === "prompt" ? execution.action.text : execution.action.code;
+    if (execution.kind === "method")
+      return JSON.stringify(execution.args, null, 2);
+    return execution.action.kind === "prompt"
+      ? execution.action.text
+      : execution.action.code;
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -411,8 +451,13 @@ export function AutomationParametersEditor({
       setError("Name, purpose, and action are required.");
       return;
     }
-    if (scheduleKind === "interval" && (!Number.isFinite(everyMs) || everyMs < 60_000)) {
-      setError("Recurring schedules must run no more often than once per minute.");
+    if (
+      scheduleKind === "interval" &&
+      (!Number.isFinite(everyMs) || everyMs < 60_000)
+    ) {
+      setError(
+        "Recurring schedules must run no more often than once per minute.",
+      );
       return;
     }
     let normalizedCronExpression: string | undefined;
@@ -438,7 +483,9 @@ export function AutomationParametersEditor({
         parsedMaxRuns < 1 ||
         parsedMaxRuns <= automation.runCount)
     ) {
-      setError(`Maximum runs must be greater than the ${automation.runCount} already admitted.`);
+      setError(
+        `Maximum runs must be greater than the ${automation.runCount} already admitted.`,
+      );
       return;
     }
     let nextExecution: MissionCharter["execution"];
@@ -449,7 +496,10 @@ export function AutomationParametersEditor({
           : execution.action.kind === "prompt"
             ? { ...execution, action: { kind: "prompt", text: payload } }
             : { ...execution, action: { ...execution.action, code: payload } };
-      if (nextExecution.kind === "method" && !Array.isArray(nextExecution.args)) {
+      if (
+        nextExecution.kind === "method" &&
+        !Array.isArray(nextExecution.args)
+      ) {
         throw new Error("Method arguments must be a JSON array.");
       }
     } catch (cause) {
@@ -469,7 +519,8 @@ export function AutomationParametersEditor({
             ? {
                 kind: "schedule",
                 everyMs,
-                ...(previous.kind === "schedule" && previous.anchorAt !== undefined
+                ...(previous.kind === "schedule" &&
+                previous.anchorAt !== undefined
                   ? { anchorAt: previous.anchorAt }
                   : {}),
                 ...(previous.kind === "schedule" &&
@@ -478,7 +529,9 @@ export function AutomationParametersEditor({
                   ? { jitterMs: previous.jitterMs }
                   : {}),
                 ...(untilAt === undefined ? {} : { untilAt }),
-                ...(parsedMaxRuns === undefined ? {} : { maxRuns: parsedMaxRuns }),
+                ...(parsedMaxRuns === undefined
+                  ? {}
+                  : { maxRuns: parsedMaxRuns }),
               }
             : scheduleKind === "cron"
               ? {
@@ -486,11 +539,15 @@ export function AutomationParametersEditor({
                   expression: normalizedCronExpression!,
                   timezone: normalizedTimezone!,
                   ...(untilAt === undefined ? {} : { untilAt }),
-                  ...(parsedMaxRuns === undefined ? {} : { maxRuns: parsedMaxRuns }),
+                  ...(parsedMaxRuns === undefined
+                    ? {}
+                    : { maxRuns: parsedMaxRuns }),
                 }
               : { kind: "manual" },
       };
-      onSaved(await client.edit(automation.missionId, { name: name.trim(), charter }));
+      onSaved(
+        await client.edit(automation.missionId, { name: name.trim(), charter }),
+      );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
     } finally {
@@ -524,7 +581,9 @@ export function AutomationParametersEditor({
         />
         <Select.Root
           value={scheduleKind}
-          onValueChange={(value) => setScheduleKind(value as typeof scheduleKind)}
+          onValueChange={(value) =>
+            setScheduleKind(value as typeof scheduleKind)
+          }
         >
           <Select.Trigger style={{ flex: 1 }} />
           <Select.Content>
@@ -592,7 +651,8 @@ export function AutomationParametersEditor({
               placeholder="No limit"
             />
             <Text as="div" size="1" color="gray" mt="1">
-              {automation.runCount} admitted so far; failed runs count, overlap skips do not.
+              {automation.runCount} admitted so far; failed runs count, overlap
+              skips do not.
             </Text>
           </Box>
         </Grid>
@@ -624,7 +684,10 @@ export function AutomationParametersEditor({
           onChange={(event) => setPayload(event.target.value)}
           resize="vertical"
           style={{
-            minHeight: execution.kind === "agent" && execution.action.kind === "eval" ? 220 : 120,
+            minHeight:
+              execution.kind === "agent" && execution.action.kind === "eval"
+                ? 220
+                : 120,
             fontFamily:
               execution.kind === "agent" && execution.action.kind === "eval"
                 ? "var(--code-font-family)"
@@ -653,6 +716,7 @@ function Inspector({
   activity,
   definition,
   automation,
+  recentRuns,
   run,
   client,
   onChanged,
@@ -660,6 +724,7 @@ function Inspector({
   activity?: AutomationActivityPayload;
   definition?: AutomationDefinitionPayload;
   automation: MissionRecord | null;
+  recentRuns: MissionRunRecord[];
   run: MissionRunRecord | null;
   client: AutomationUiClient;
   onChanged?(automation: MissionRecord): void;
@@ -671,17 +736,18 @@ function Inspector({
   const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => setCurrent(automation), [automation]);
   const showProviderCacheWarning = useMemo(
-    () => current !== null && continuingConversationExceedsProviderCacheTtl(current),
-    [current]
+    () =>
+      current !== null &&
+      continuingConversationExceedsProviderCacheTtl(current),
+    [current],
   );
   const changed = useCallback(
     (value: MissionRecord) => {
-      cacheFor(definitionCaches, client).set(value.missionId, Promise.resolve(value));
       setCurrent(value);
       setEditing(false);
       onChanged?.(value);
     },
-    [client, onChanged]
+    [onChanged],
   );
   const action = useCallback(
     async (kind: "pause" | "resume" | "runNow") => {
@@ -692,7 +758,9 @@ function Inspector({
       try {
         if (kind === "runNow") {
           await client.runNow(current.missionId);
-          setNotice("A new tick has started. It will appear in history when its turn opens.");
+          setNotice(
+            "A new tick has started. It will appear in history when its turn opens.",
+          );
         } else {
           changed(await client[kind](current.missionId));
         }
@@ -702,15 +770,15 @@ function Inspector({
         setBusy(null);
       }
     },
-    [changed, client, current]
+    [changed, client, current],
   );
 
   if (!current)
     return (
       <Callout.Root color="amber">
         <Callout.Text>
-          This automation definition is no longer available. Its historical provenance remains in
-          this conversation.
+          This automation definition is no longer available. Its historical
+          provenance remains in this conversation.
         </Callout.Text>
       </Callout.Root>
     );
@@ -732,8 +800,9 @@ function Inspector({
             <PlayIcon />
           </Callout.Icon>
           <Callout.Text>
-            Started here {formatAbsolute(Date.parse(definition.institutedAt))}. Open this inspector
-            any time to review its exact action, cadence, authority, and run history.
+            Started here {formatAbsolute(Date.parse(definition.institutedAt))}.
+            Open this inspector any time to review its exact action, cadence,
+            authority, and run history.
           </Callout.Text>
         </Callout.Root>
       ) : null}
@@ -747,9 +816,10 @@ function Inspector({
               Additional provider token cost
             </Text>
             <Text as="span" style={{ display: "block" }}>
-              This automation continues one chat conversation and can wait more than one hour
-              between wake-ups. API-provider context caches may expire during that gap. After the
-              cache expires, each later wake-up consumes additional input tokens to restore the
+              This automation continues one chat conversation and can wait more
+              than one hour between wake-ups. API-provider context caches may
+              expire during that gap. After the cache expires, each later
+              wake-up consumes additional input tokens to restore the
               conversation context.
             </Text>
           </Callout.Text>
@@ -909,7 +979,8 @@ function Inspector({
             </Flex>
           ) : (
             <Text size="2" color="gray">
-              No pre-acquisition hints. Runtime calls still use ordinary approval.
+              No pre-acquisition hints. Runtime calls still use ordinary
+              approval.
             </Text>
           )}
         </Box>
@@ -918,10 +989,14 @@ function Inspector({
             Standing authority
           </Text>
           <Text size="2">
-            {current.authority.grantIds.length} granted · {current.authority.requestIds.length}{" "}
-            pending · {current.authority.denialIds.length} denied
+            {current.authority.grantIds.length} granted ·{" "}
+            {current.authority.requestIds.length} pending ·{" "}
+            {current.authority.denialIds.length} denied
           </Text>
-          <Code size="1" style={{ display: "block", overflowWrap: "anywhere", marginTop: 4 }}>
+          <Code
+            size="1"
+            style={{ display: "block", overflowWrap: "anywhere", marginTop: 4 }}
+          >
             {current.authorityPlan.artifactRef}
           </Code>
         </Box>
@@ -954,7 +1029,9 @@ function Inspector({
           <Callout.Text>
             <Text as="span" weight="medium" style={{ display: "block" }}>
               Automation completed
-              {current.completedAt === undefined ? "" : ` ${formatAbsolute(current.completedAt)}`}
+              {current.completedAt === undefined
+                ? ""
+                : ` ${formatAbsolute(current.completedAt)}`}
             </Text>
             <Text as="span" style={{ display: "block" }}>
               {current.completionReason === "response"
@@ -980,6 +1057,103 @@ function Inspector({
           </Callout.Text>
         </Callout.Root>
       ) : null}
+      {definition && recentRuns.length > 0 ? (
+        <>
+          <Separator size="4" />
+          <Box>
+            <Text as="div" weight="medium" mb="2">
+              Recent runs
+            </Text>
+            <Flex direction="column" gap="2">
+              {recentRuns.map((recent) => {
+                const failed = recent.outcome === "failed";
+                const completedWithErrors =
+                  recent.outcome === "completed-with-errors";
+                const active = recent.phase !== "terminal";
+                return (
+                  <Box
+                    key={recent.runId}
+                    p="3"
+                    style={{
+                      borderRadius: "var(--radius-2)",
+                      background: "var(--gray-a2)",
+                    }}
+                  >
+                    <Flex justify="between" gap="3" align="start" wrap="wrap">
+                      <Box>
+                        <Flex gap="2" align="center" wrap="wrap">
+                          <Badge
+                            color={
+                              failed
+                                ? "red"
+                                : completedWithErrors
+                                  ? "amber"
+                                  : active
+                                    ? "blue"
+                                    : "green"
+                            }
+                            variant="soft"
+                          >
+                            {active
+                              ? "Running"
+                              : failed
+                                ? "Failed"
+                                : completedWithErrors
+                                  ? "Completed with errors"
+                                  : (recent.outcome ?? "Finished")}
+                          </Badge>
+                          <Text size="2" weight="medium">
+                            {recent.runNumber === undefined
+                              ? "Run"
+                              : `Run #${recent.runNumber}`}
+                          </Text>
+                          <Text size="1" color="gray">
+                            {formatAbsolute(recent.startedAt)}
+                          </Text>
+                        </Flex>
+                        {recent.failure ? (
+                          <Text as="div" size="2" color="red" mt="2">
+                            {recent.failure.message}
+                          </Text>
+                        ) : recent.finalMessage ? (
+                          <Text
+                            as="div"
+                            size="2"
+                            mt="2"
+                            style={{ whiteSpace: "pre-wrap" }}
+                          >
+                            {recent.finalMessage}
+                          </Text>
+                        ) : null}
+                        {recent.effectFailures?.map((effect) => (
+                          <Text
+                            key={effect.invocationId}
+                            as="div"
+                            size="2"
+                            color="red"
+                            mt="2"
+                          >
+                            {effect.name}: {effect.message}
+                          </Text>
+                        ))}
+                      </Box>
+                      {recent.channelId && client.openConversation ? (
+                        <Button
+                          size="1"
+                          variant="soft"
+                          onClick={() => client.openConversation?.(recent)}
+                        >
+                          Open run
+                        </Button>
+                      ) : null}
+                    </Flex>
+                  </Box>
+                );
+              })}
+            </Flex>
+          </Box>
+        </>
+      ) : null}
       {activity ? <Separator size="4" /> : null}
       {activity ? (
         <Box>
@@ -995,7 +1169,9 @@ function Inspector({
               <Text as="div" size="1" color="gray">
                 Started
               </Text>
-              <Text size="2">{formatAbsolute(run?.startedAt ?? activity.snapshot.startedAt)}</Text>
+              <Text size="2">
+                {formatAbsolute(run?.startedAt ?? activity.snapshot.startedAt)}
+              </Text>
             </Box>
             <Box>
               <Text as="div" size="1" color="gray">
@@ -1004,7 +1180,10 @@ function Inspector({
               <Text size="2">
                 {durationLabel(
                   run?.startedAt ?? activity.snapshot.startedAt,
-                  run?.finishedAt ?? (activity.closedAt ? Date.parse(activity.closedAt) : undefined)
+                  run?.finishedAt ??
+                    (activity.closedAt
+                      ? Date.parse(activity.closedAt)
+                      : undefined),
                 )}
               </Text>
             </Box>
@@ -1013,7 +1192,9 @@ function Inspector({
                 Trigger
               </Text>
               <Text size="2">
-                {activity.snapshot.trigger === "scheduled" ? "Scheduled tick" : "Run now"}
+                {activity.snapshot.trigger === "scheduled"
+                  ? "Scheduled tick"
+                  : "Run now"}
                 {(run?.runNumber ?? activity.snapshot.runNumber) === undefined
                   ? ""
                   : ` · #${run?.runNumber ?? activity.snapshot.runNumber}`}
@@ -1032,6 +1213,27 @@ function Inspector({
               </Callout.Icon>
               <Callout.Text>
                 {run?.failure?.message ?? activity.summary}
+              </Callout.Text>
+            </Callout.Root>
+          ) : null}
+          {run?.effectFailures?.length ? (
+            <Callout.Root color="amber" size="1" mt="3">
+              <Callout.Icon>
+                <ExclamationTriangleIcon />
+              </Callout.Icon>
+              <Callout.Text>
+                <Text as="span" weight="medium" style={{ display: "block" }}>
+                  This run completed with failed effects
+                </Text>
+                {run.effectFailures.map((effect) => (
+                  <Text
+                    key={effect.invocationId}
+                    as="span"
+                    style={{ display: "block" }}
+                  >
+                    {effect.name}: {effect.message}
+                  </Text>
+                ))}
               </Callout.Text>
             </Callout.Root>
           ) : null}
@@ -1058,7 +1260,9 @@ function Inspector({
             </Callout.Root>
           ) : null}
           {(run?.finalMessage && run.finalMessage !== run.completionResponse) ||
-          (activity.status === "succeeded" && activity.summary && !run?.completionResponse) ? (
+          (activity.status === "succeeded" &&
+            activity.summary &&
+            !run?.completionResponse) ? (
             <Box
               mt="3"
               p="3"
@@ -1072,21 +1276,29 @@ function Inspector({
               }}
             >
               <Text size="2">
-                {run?.finalMessage && run.finalMessage !== run.completionResponse
+                {run?.finalMessage &&
+                run.finalMessage !== run.completionResponse
                   ? run.finalMessage
                   : activity.summary}
               </Text>
             </Box>
           ) : null}
           {run && client.openConversation && run.channelId && run.contextId ? (
-            <Button size="1" variant="soft" mt="3" onClick={() => client.openConversation?.(run)}>
+            <Button
+              size="1"
+              variant="soft"
+              mt="3"
+              onClick={() => client.openConversation?.(run)}
+            >
               Open conversation
             </Button>
           ) : null}
         </Box>
       ) : null}
       <details>
-        <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--gray-11)" }}>
+        <summary
+          style={{ cursor: "pointer", fontSize: 13, color: "var(--gray-11)" }}
+        >
           Technical provenance
         </summary>
         <Flex direction="column" gap="2" mt="2">
@@ -1109,7 +1321,8 @@ function Inspector({
               mission authority {run.missionSubject}
             </Code>
           ) : null}
-          {current.revision === (activity?.snapshot.revision ?? definition?.snapshot.revision) ? (
+          {current.revision ===
+          (activity?.snapshot.revision ?? definition?.snapshot.revision) ? (
             <>
               <Code size="1" style={{ overflowWrap: "anywhere" }}>
                 {execution.image.source}@{execution.image.effectiveVersion}
@@ -1120,8 +1333,8 @@ function Inspector({
             </>
           ) : (
             <Text size="1" color="amber">
-              The automation is now at r{current.revision}; edit controls affect the current
-              revision, while this history item preserves r
+              The automation is now at r{current.revision}; edit controls affect
+              the current revision, while this history item preserves r
               {activity?.snapshot.revision ?? definition?.snapshot.revision}.
             </Text>
           )}
@@ -1143,41 +1356,52 @@ export const AutomationActivity = React.memo(function AutomationActivity({
   const snapshot = activity?.snapshot ?? definition!.snapshot;
   const isDefinition = definition !== undefined;
   const [open, setOpen] = useState(false);
-  const [automation, setAutomation] = useState<MissionRecord | null | undefined>(
-    suppliedAutomation
-  );
+  const [automation, setAutomation] = useState<
+    MissionRecord | null | undefined
+  >(suppliedAutomation);
+  const [recentRuns, setRecentRuns] = useState<MissionRunRecord[]>([]);
   const [run, setRun] = useState<MissionRunRecord | null | undefined>(
-    isDefinition ? null : suppliedRun
+    isDefinition ? null : suppliedRun,
   );
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   useEffect(() => setAutomation(suppliedAutomation), [suppliedAutomation]);
-  useEffect(() => setRun(isDefinition ? null : suppliedRun), [isDefinition, suppliedRun]);
+  useEffect(
+    () => setRun(isDefinition ? null : suppliedRun),
+    [isDefinition, suppliedRun],
+  );
   useEffect(() => {
-    if (!open || (automation !== undefined && (isDefinition || run !== undefined))) return;
+    if (!open) return;
     let cancelled = false;
     setError(null);
+    setLoading(true);
     void Promise.all([
-      automation === undefined ? cachedDefinition(client, snapshot.missionId) : automation,
-      !isDefinition && run === undefined ? cachedRun(client, activity!.snapshot.runId) : run,
+      inspectAutomation(client, snapshot.missionId),
+      !isDefinition ? inspectRun(client, activity!.snapshot.runId) : null,
     ])
-      .then(([nextAutomation, nextRun]) => {
+      .then(([inspection, nextRun]) => {
         if (cancelled) return;
-        setAutomation(nextAutomation);
+        setAutomation(inspection?.automation ?? null);
+        setRecentRuns(inspection?.recentRuns ?? []);
         setRun(nextRun);
       })
       .catch((cause) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
+        if (!cancelled)
+          setError(cause instanceof Error ? cause.message : String(cause));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [activity, automation, client, isDefinition, open, run, snapshot.missionId]);
+  }, [activity, client, isDefinition, open, snapshot.missionId]);
   const status = useMemo(
     () =>
       activity
         ? activityStatus(activity)
         : definitionStatus(automation?.state ?? definition?.snapshot.state),
-    [activity, automation?.state, definition?.snapshot.state]
+    [activity, automation?.state, definition?.snapshot.state],
   );
   const since = activity
     ? (activity.snapshot.activatedAt ?? activity.snapshot.createdAt)
@@ -1249,7 +1473,9 @@ export const AutomationActivity = React.memo(function AutomationActivity({
           <Callout.Root color="red">
             <Callout.Text>{error}</Callout.Text>
           </Callout.Root>
-        ) : automation === undefined || (!isDefinition && run === undefined) ? (
+        ) : loading ||
+          automation === undefined ||
+          (!isDefinition && run === undefined) ? (
           <Flex justify="center" py="6">
             <Spinner />
           </Flex>
@@ -1258,6 +1484,7 @@ export const AutomationActivity = React.memo(function AutomationActivity({
             activity={activity}
             definition={definition}
             automation={automation}
+            recentRuns={recentRuns}
             run={run ?? null}
             client={client}
             onChanged={(value) => {

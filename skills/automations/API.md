@@ -183,7 +183,13 @@ type MissionRunRecord = {
     | "dispatching"
     | "executing"
     | "terminal";
-  outcome?: "succeeded" | "failed" | "skipped" | "interrupted" | "cancelled";
+  outcome?:
+    | "succeeded"
+    | "completed-with-errors"
+    | "failed"
+    | "skipped"
+    | "interrupted"
+    | "cancelled";
   startedAt: number;
   runNumber?: number;
   finishedAt?: number;
@@ -204,10 +210,36 @@ type MissionRunRecord = {
     causalEventRef?: string;
     detailsRef?: string;
   };
+  effectFailures?: Array<{
+    invocationId: string;
+    name: string;
+    outcome:
+      | "tool_error"
+      | "infrastructure_error"
+      | "cancelled"
+      | "stale_dispatch"
+      | "abandoned";
+    code: string;
+    message: string;
+  }>;
 };
 ```
 
 Nonterminal phases are resumable checkpoints, not UI-only status. Persist a phase before its external effect and reuse the phase’s stable idempotency key on recovery. Wake handling resumes existing nonterminal runs before admitting newly due runs.
+
+`succeeded` means both the turn and all of its terminal child effects succeeded.
+If the agent recovered enough to finish its turn but any child effect failed,
+the executor records `completed-with-errors` and preserves `effectFailures`.
+This distinction is generic; notification delivery is not special-cased.
+Mission attention is a retryable projection into the ordinary durable GAD
+inbox; the mission run remains the canonical outcome if that projection is
+temporarily unavailable.
+
+The RPC runtime observes every outbound operation through direct clients,
+request-scoped clients, and typed peers. An inbound execution remains active
+until every RPC it started settles, including when its handler throws. Work
+intended to outlive that execution must be journaled and admitted later under
+its own execution identity.
 
 ## Methods
 
@@ -226,4 +258,8 @@ Nonterminal phases are resumable checkpoints, not UI-only status. Persist a phas
 | `retire`    | `missionId`                                        | retired definition                                   |
 | `finishRun` | structured terminal result                         | `void`; executor-only                                |
 
-The dashboard and chat inspector consume these records directly. They show declared pre-acquisition operations and the host authority-plan reference rather than reconstructing a permission model in userland.
+The dashboard and chat inspector consume these records directly. The chat pill
+is a launch snapshot only until opened; every inspector open queries `overview`
+for the canonical definition and recent runs. They show failed child effects,
+declared pre-acquisition operations, and the host authority-plan reference
+rather than reconstructing a permission model in userland.

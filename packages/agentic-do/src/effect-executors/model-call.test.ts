@@ -61,15 +61,20 @@ describe("model-facing tool results", () => {
       toPiMessages([
         {
           role: "assistant",
-          blocks: [{ type: "toolCall", id: "capture-1", name: "read", arguments: {} }],
+          blocks: [
+            { type: "toolCall", id: "capture-1", name: "read", arguments: {} },
+          ],
         },
         {
           role: "toolResult",
           toolCallId: "capture-1",
           toolName: "read",
-          content: { protocolContent: content, details: { internal: "hidden" } },
+          content: {
+            protocolContent: content,
+            details: { internal: "hidden" },
+          },
         },
-      ])[1]
+      ])[1],
     ).toMatchObject({ role: "toolResult", content });
   });
 });
@@ -93,7 +98,9 @@ describe("historical assistant model identity", () => {
   } as never;
 
   it("preserves reasoning for the same model and downgrades it for a real cross-model handoff", () => {
-    const [historical] = toPiMessages([{ role: "assistant", blocks: [thinking], model: identity }]);
+    const [historical] = toPiMessages([
+      { role: "assistant", blocks: [thinking], model: identity },
+    ]);
 
     expect(historical).toMatchObject(identity);
     expect(transformMessages([historical!], currentModel)[0]).toMatchObject({
@@ -113,10 +120,12 @@ describe("historical assistant model identity", () => {
         provider: "openai-codex",
         api: "openai-codex-responses",
         input: ["text"],
-      } as never)[0]
+      } as never)[0],
     ).toMatchObject({
       role: "assistant",
-      content: [{ type: "text", text: "reasoning that belongs to its producing model" }],
+      content: [
+        { type: "text", text: "reasoning that belongs to its producing model" },
+      ],
     });
   });
 });
@@ -146,11 +155,15 @@ const config: AgentLoopConfig = {
   roster: { participants: [] },
 };
 
-function initialAgentState(input: Omit<InitialStateInput, "selfId">): AgentState {
+function initialAgentState(
+  input: Omit<InitialStateInput, "selfId">,
+): AgentState {
   return createInitialAgentState({ ...input, selfId: "agent:self" });
 }
 
-function descriptor(requestOverrides: Partial<ModelCallEffect["request"]> = {}): ModelCallEffect {
+function descriptor(
+  requestOverrides: Partial<ModelCallEffect["request"]> = {},
+): ModelCallEffect {
   return {
     effectId: "model:msg-1",
     kind: "model_call",
@@ -180,7 +193,10 @@ function deps(): ExecutorDeps {
     selfRef: { kind: "agent", id: "agent:self", participantId: "agent:self" },
     blobstore: {
       getText: async () => "",
-      putText: async (value) => ({ digest: `digest:${value.length}`, size: value.length }),
+      putText: async (value) => ({
+        digest: `digest:${value.length}`,
+        size: value.length,
+      }),
     },
     credentials: {
       getApiKey: async () => ({ apiKey: "test-key" }),
@@ -223,7 +239,7 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: inputDeps,
         onEphemeral: () => {},
-      })
+      }),
     ).rejects.toMatchObject({
       name: "PromptArtifactInvariantError",
       message: expect.stringContaining("system prompt artifact is not ready"),
@@ -248,7 +264,7 @@ describe("modelCallExecutor", () => {
         signal,
         deps: inputDeps,
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toEqual({ deferred: true, reason: "authority" });
 
     expect(getApiKey).toHaveBeenCalledWith({
@@ -265,7 +281,9 @@ describe("modelCallExecutor", () => {
 
   it("routes loopback auth through the local-models port, never the credential system", async () => {
     const getApiKey = vi.fn(async () => ({ apiKey: "cloud-key" }));
-    const ensureLoaded = vi.fn(async () => ({ baseUrl: "http://127.0.0.1:43117/v1" }));
+    const ensureLoaded = vi.fn(async () => ({
+      baseUrl: "http://127.0.0.1:43117/v1",
+    }));
     const getLoopbackAuth = vi.fn(async () => ({ apiKey: "loopback-key" }));
     const inputDeps = deps();
     inputDeps.credentials.getApiKey = getApiKey;
@@ -275,7 +293,11 @@ describe("modelCallExecutor", () => {
     const ephemerals: unknown[] = [];
     const attempts: ModelExecutionAttemptEvent[] = [];
     mocks.stream.mockImplementation(
-      (model: Record<string, unknown>, _context, options: Record<string, unknown>) => {
+      (
+        model: Record<string, unknown>,
+        _context,
+        options: Record<string, unknown>,
+      ) => {
         streamedModel = model;
         streamOptions = options;
         return {
@@ -287,7 +309,7 @@ describe("modelCallExecutor", () => {
             stopReason: "stop",
           }),
         };
-      }
+      },
     );
 
     const outcome = await modelCallExecutor.execute({
@@ -318,7 +340,10 @@ describe("modelCallExecutor", () => {
 
     expect(outcome).toMatchObject({ kind: "model", stopReason: "completed" });
     expect(getApiKey).not.toHaveBeenCalled();
-    expect(ensureLoaded).toHaveBeenCalledWith("lfm2.5-2.6b", expect.any(AbortSignal));
+    expect(ensureLoaded).toHaveBeenCalledWith(
+      "lfm2.5-2.6b",
+      expect.any(AbortSignal),
+    );
     expect(attempts).toMatchObject([
       {
         phase: "started",
@@ -336,16 +361,25 @@ describe("modelCallExecutor", () => {
     expect(attempts[0]?.attemptId).toBe(attempts[1]?.attemptId);
     expect(
       ephemerals
-        .filter((event) => (event as { kind?: unknown }).kind === "signal-message")
-        .map((event) => JSON.parse(String((event as { content?: unknown }).content)))
+        .filter(
+          (event) => (event as { kind?: unknown }).kind === "signal-message",
+        )
+        .map((event) =>
+          JSON.parse(String((event as { content?: unknown }).content)),
+        ),
     ).toEqual([
       { message: "Starting local model…" },
       { message: "Loading LFM2.5 2.6B… (first use may download)" },
     ]);
-    expect(streamOptions).toMatchObject({ apiKey: "loopback-key", maxTokens: 4096 });
+    expect(streamOptions).toMatchObject({
+      apiKey: "loopback-key",
+      maxTokens: 4096,
+    });
     // pi-ai constructs its client from model.baseUrl and IGNORES a baseUrl
     // option — the live endpoint must be baked into the model literal.
-    expect(streamedModel).toMatchObject({ baseUrl: "http://127.0.0.1:43117/v1" });
+    expect(streamedModel).toMatchObject({
+      baseUrl: "http://127.0.0.1:43117/v1",
+    });
   });
 
   it("propagates activation cancellation while local model loading is pending", async () => {
@@ -354,12 +388,17 @@ describe("modelCallExecutor", () => {
       resolveEntered = resolve;
     });
     const ensureLoaded = vi.fn(
-      async (_modelId: string, signal: AbortSignal): Promise<{ baseUrl: string }> => {
+      async (
+        _modelId: string,
+        signal: AbortSignal,
+      ): Promise<{ baseUrl: string }> => {
         resolveEntered();
         return new Promise((_resolve, reject) => {
-          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
         });
-      }
+      },
     );
     const inputDeps = deps();
     inputDeps.localModels = {
@@ -406,7 +445,7 @@ describe("modelCallExecutor", () => {
         new Promise<{ apiKey: string }>((resolve) => {
           resolveCredential = resolve;
           credentialEntered();
-        })
+        }),
     );
     const controller = new AbortController();
     const pending = modelCallExecutor.execute({
@@ -432,7 +471,11 @@ describe("modelCallExecutor", () => {
     delete inputDeps.localModels;
 
     const outcome = await modelCallExecutor.execute({
-      descriptor: descriptor({ provider: "local", model: "lfm2.5-2.6b", auth: "loopback" }),
+      descriptor: descriptor({
+        provider: "local",
+        model: "lfm2.5-2.6b",
+        auth: "loopback",
+      }),
       state: initialAgentState({ channelId: "channel-1", config }),
       signal: new AbortController().signal,
       deps: inputDeps,
@@ -447,16 +490,19 @@ describe("modelCallExecutor", () => {
   it("returns retry-later for retryable provider rate limits", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     mocks.getModel.mockReturnValue({ baseUrl: "https://api.openai.com/v1" });
-    const rateLimit = Object.assign(new Error("Rate limit reached for requests."), {
-      status: 429,
-      headers: { "retry-after": "12" },
-      body: {
-        error: {
-          type: "rate_limit_exceeded",
-          message: "Rate limit reached for requests.",
+    const rateLimit = Object.assign(
+      new Error("Rate limit reached for requests."),
+      {
+        status: 429,
+        headers: { "retry-after": "12" },
+        body: {
+          error: {
+            type: "rate_limit_exceeded",
+            message: "Rate limit reached for requests.",
+          },
         },
       },
-    });
+    );
     mocks.stream.mockImplementation(() => ({
       [Symbol.asyncIterator]() {
         return {
@@ -478,7 +524,7 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: deps(),
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({
       kind: "retry",
       reason: "Rate limit reached for requests.",
@@ -487,7 +533,7 @@ describe("modelCallExecutor", () => {
     });
     expect(warn).toHaveBeenCalledWith(
       "[model-call] stream failed:",
-      expect.stringContaining("Rate limit reached")
+      expect.stringContaining("Rate limit reached"),
     );
   });
 
@@ -580,7 +626,7 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: deps(),
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({
       kind: "retry",
       code: "unknown_retryable",
@@ -588,10 +634,12 @@ describe("modelCallExecutor", () => {
       reason: "WebSocket idle timeout after 300000ms",
     });
     expect(providerSessionId).toBeTruthy();
-    expect(mocks.closeOpenAICodexWebSocketSessions).toHaveBeenCalledWith(providerSessionId);
+    expect(mocks.closeOpenAICodexWebSocketSessions).toHaveBeenCalledWith(
+      providerSessionId,
+    );
     expect(warn).toHaveBeenCalledWith(
       "[model-call] stream failed:",
-      expect.stringContaining("WebSocket idle timeout")
+      expect.stringContaining("WebSocket idle timeout"),
     );
   });
 
@@ -607,7 +655,9 @@ describe("modelCallExecutor", () => {
               emittedStart = true;
               return { done: false, value: { type: "start" } };
             }
-            return await new Promise<IteratorResult<Record<string, unknown>>>(() => {});
+            return await new Promise<IteratorResult<Record<string, unknown>>>(
+              () => {},
+            );
           },
           return: async () => {
             returnCalled = true;
@@ -626,7 +676,7 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: deps(),
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({
       kind: "retry",
       code: "model_stream_stalled_retryable",
@@ -636,15 +686,17 @@ describe("modelCallExecutor", () => {
     expect(mocks.closeOpenAICodexWebSocketSessions).toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith(
       "[model-call] stream failed:",
-      expect.stringContaining("ModelProgressIdleTimeoutError")
+      expect.stringContaining("ModelProgressIdleTimeoutError"),
     );
   });
 
   it("parks interactive URL-bound auth stream failures behind credential reconnect", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const authError = Object.assign(
-      new Error("Provided authentication token is expired. Please try signing in again."),
-      { status: 401 }
+      new Error(
+        "Provided authentication token is expired. Please try signing in again.",
+      ),
+      { status: 401 },
     );
     mocks.stream.mockImplementation(() => ({
       [Symbol.asyncIterator]() {
@@ -664,14 +716,16 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: deps(),
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({
       kind: "model-suspended",
       reason: "credential",
       providerId: "test",
       modelBaseUrl: "https://api.test.example/v1",
       waitReason: "model_credential_reconnect_required",
-      diagnosticReason: expect.stringContaining("authentication token is expired"),
+      diagnosticReason: expect.stringContaining(
+        "authentication token is expired",
+      ),
       failureCode: "auth_or_credentials",
     });
   });
@@ -679,8 +733,10 @@ describe("modelCallExecutor", () => {
   it("returns unattended URL-bound auth stream failures as model errors", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {});
     const authError = Object.assign(
-      new Error("Provided authentication token is expired. Please try signing in again."),
-      { status: 401 }
+      new Error(
+        "Provided authentication token is expired. Please try signing in again.",
+      ),
+      { status: 401 },
     );
     mocks.stream.mockImplementation(() => ({
       [Symbol.asyncIterator]() {
@@ -700,7 +756,7 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: deps(),
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({
       kind: "model",
       stopReason: "error",
@@ -733,7 +789,7 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: deps(),
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({
       kind: "retry",
       code: "circuit_breaker_open_retryable",
@@ -770,7 +826,11 @@ describe("modelCallExecutor", () => {
         },
         result: async () => ({
           content: [
-            { type: "thinking", thinking: "think ", thinkingSignature: "sig-thinking" },
+            {
+              type: "thinking",
+              thinking: "think ",
+              thinkingSignature: "sig-thinking",
+            },
             {
               type: "text",
               text: "done",
@@ -794,8 +854,10 @@ describe("modelCallExecutor", () => {
 
     expect(
       ephemerals.map(
-        (event) => (event as { event: { payload: { type: string; text: string } } }).event.payload
-      )
+        (event) =>
+          (event as { event: { payload: { type: string; text: string } } })
+            .event.payload,
+      ),
     ).toEqual([
       {
         protocol: "agentic.trajectory.v1",
@@ -826,12 +888,14 @@ describe("modelCallExecutor", () => {
           type: "text",
           blockId: "msg-1:block:1",
           content: "done",
-          metadata: { pi: { textSignature: JSON.stringify({ v: 1, id: "resp-msg" }) } },
+          metadata: {
+            pi: { textSignature: JSON.stringify({ v: 1, id: "resp-msg" }) },
+          },
         },
       ],
     });
     expect(mocks.releaseOpenAICodexWebSocketSession).toHaveBeenCalledWith(
-      "channel-1:agent:self:turn-1:test:model"
+      "channel-1:agent:self:turn-1:test:model",
     );
   });
 
@@ -839,7 +903,9 @@ describe("modelCallExecutor", () => {
     mocks.stream.mockImplementation(() => ({
       async *[Symbol.asyncIterator]() {},
       result: async () => ({
-        content: [{ type: "toolCall", id: "call-1", name: "read", arguments: {} }],
+        content: [
+          { type: "toolCall", id: "call-1", name: "read", arguments: {} },
+        ],
         stopReason: "toolUse",
       }),
     }));
@@ -861,11 +927,14 @@ describe("modelCallExecutor", () => {
   });
 
   it("bounds long provider session IDs before streaming", async () => {
-    mocks.getModel.mockReturnValue({ baseUrl: "https://chatgpt.com/backend-api" });
+    mocks.getModel.mockReturnValue({
+      baseUrl: "https://chatgpt.com/backend-api",
+    });
     const longDescriptor = descriptor();
     longDescriptor.request.provider = "openai-codex";
     longDescriptor.request.model = "gpt-5.3-codex-spark";
-    longDescriptor.channelId = "ctx-panel-tree-panels-chat-mqcwmvir-0fe8dd6c-extra-long";
+    longDescriptor.channelId =
+      "ctx-panel-tree-panels-chat-mqcwmvir-0fe8dd6c-extra-long";
     const inputDeps = deps();
     inputDeps.selfRef = {
       kind: "agent",
@@ -875,7 +944,7 @@ describe("modelCallExecutor", () => {
     mocks.stream.mockImplementation((_model, _context, options) => {
       expect(options.sessionId).toHaveLength(64);
       expect(options.sessionId).toMatch(
-        /^ctx-panel-tree-panels-chat-mqcwmvir-0fe8dd6c-.*-[0-9a-z]{14}$/
+        /^ctx-panel-tree-panels-chat-mqcwmvir-0fe8dd6c-.*-[0-9a-z]{14}$/,
       );
       return {
         async *[Symbol.asyncIterator]() {},
@@ -890,11 +959,14 @@ describe("modelCallExecutor", () => {
     await expect(
       modelCallExecutor.execute({
         descriptor: longDescriptor,
-        state: initialAgentState({ channelId: longDescriptor.channelId, config }),
+        state: initialAgentState({
+          channelId: longDescriptor.channelId,
+          config,
+        }),
         signal: new AbortController().signal,
         deps: inputDeps,
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({
       kind: "model",
       stopReason: "completed",
@@ -931,17 +1003,30 @@ describe("modelCallExecutor", () => {
         state: {
           ...initialAgentState({ channelId: "channel-1", config }),
           entries: [
-            { kind: "user", seq: 1, envelopeId: "env-1", content: "Inspect the package" },
+            {
+              kind: "user",
+              seq: 1,
+              envelopeId: "env-1",
+              content: "Inspect the package",
+            },
             {
               kind: "assistant",
               seq: 2,
               messageId: "msg-old",
-              blocks: [{ type: "toolCall", id: "call-old", name: "read", arguments: {} }],
+              blocks: [
+                {
+                  type: "toolCall",
+                  id: "call-old",
+                  name: "read",
+                  arguments: {},
+                },
+              ],
             },
             {
               kind: "tool-result",
               seq: 3,
               invocationId: "call-old",
+              turnId: "turn-context",
               name: "read",
               result: "old result",
               isError: false,
@@ -950,12 +1035,20 @@ describe("modelCallExecutor", () => {
               kind: "assistant",
               seq: 4,
               messageId: "msg-new",
-              blocks: [{ type: "toolCall", id: "call-new", name: "read", arguments: {} }],
+              blocks: [
+                {
+                  type: "toolCall",
+                  id: "call-new",
+                  name: "read",
+                  arguments: {},
+                },
+              ],
             },
             {
               kind: "tool-result",
               seq: 5,
               invocationId: "call-new",
+              turnId: "turn-context",
               name: "read",
               result: {
                 protocol: "vibestudio.blob-ref.v1",
@@ -971,16 +1064,24 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: inputDeps,
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({ kind: "model", stopReason: "completed" });
 
     const messages = streamedContext?.messages ?? [];
     expect(JSON.stringify(messages).length).toBeLessThan(9_000);
-    expect(JSON.stringify(messages)).toContain("older completed transcript message");
-    expect(JSON.stringify(messages)).toContain("Completed mutations remain durable");
-    expect(JSON.stringify(messages)).toContain("Recent completed-call receipts");
+    expect(JSON.stringify(messages)).toContain(
+      "older completed transcript message",
+    );
+    expect(JSON.stringify(messages)).toContain(
+      "Completed mutations remain durable",
+    );
+    expect(JSON.stringify(messages)).toContain(
+      "Recent completed-call receipts",
+    );
     expect(JSON.stringify(messages)).toContain("old result");
-    expect(JSON.stringify(messages)).toContain("tool result windowed for model context");
+    expect(JSON.stringify(messages)).toContain(
+      "tool result windowed for model context",
+    );
     expect(JSON.stringify(messages)).not.toContain("call-old");
     expect(JSON.stringify(messages)).toContain("call-new");
   });
@@ -990,7 +1091,8 @@ describe("modelCallExecutor", () => {
     const inputDescriptor = descriptor({ modelSpec: tinySpec });
     inputDescriptor.request.contextThroughSeq = 4;
     const inputDeps = deps();
-    inputDeps.blobstore.getText = async (digest) => (digest === "sys" ? "BASE SYSTEM" : "");
+    inputDeps.blobstore.getText = async (digest) =>
+      digest === "sys" ? "BASE SYSTEM" : "";
     let streamedContext: { messages?: unknown[] } | undefined;
     mocks.stream.mockImplementation((_model, context) => {
       streamedContext = context;
@@ -1039,6 +1141,7 @@ describe("modelCallExecutor", () => {
               kind: "tool-result",
               seq: 4,
               invocationId: "call-interleaved",
+              turnId: "turn-context",
               name: "inspect_subagent",
               result: "inspection result",
               isError: false,
@@ -1048,13 +1151,15 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: inputDeps,
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({ kind: "model", stopReason: "completed" });
 
     const serialized = JSON.stringify(streamedContext?.messages ?? []);
     expect(serialized).toContain("call-interleaved");
     expect(serialized).toContain("inspection result");
-    expect(serialized).toContain("A child completed while inspection was running.");
+    expect(serialized).toContain(
+      "A child completed while inspection was running.",
+    );
   });
 
   it("rejects orphaned tool results before provider submission", async () => {
@@ -1062,54 +1167,8 @@ describe("modelCallExecutor", () => {
     const inputDescriptor = descriptor();
     inputDescriptor.request.contextThroughSeq = 3;
     const inputDeps = deps();
-    inputDeps.blobstore.getText = async (digest) => (digest === "sys" ? "BASE SYSTEM" : "");
-
-    await expect(
-      modelCallExecutor.execute({
-        descriptor: inputDescriptor,
-        state: {
-          ...initialAgentState({ channelId: "channel-1", config }),
-          entries: [
-            {
-              kind: "assistant",
-              seq: 1,
-              messageId: "msg-tool",
-              blocks: [{ type: "toolCall", id: "call-present", name: "read", arguments: {} }],
-            },
-            {
-              kind: "tool-result",
-              seq: 2,
-              invocationId: "call-present",
-              name: "read",
-              result: "valid result",
-              isError: false,
-            },
-            {
-              kind: "tool-result",
-              seq: 3,
-              invocationId: "call-missing",
-              name: "inspect_subagent",
-              result: "orphan result",
-              isError: true,
-            },
-          ],
-        },
-        signal: new AbortController().signal,
-        deps: inputDeps,
-        onEphemeral: () => {},
-      })
-    ).rejects.toThrow(
-      "model transcript invariant violated: orphaned tool result inspect_subagent call-missing"
-    );
-    expect(mocks.stream).not.toHaveBeenCalled();
-  });
-
-  it("rejects assistant tool calls without tool results before provider submission", async () => {
-    mocks.getModel.mockReturnValue({ baseUrl: "https://model.test" });
-    const inputDescriptor = descriptor();
-    inputDescriptor.request.contextThroughSeq = 1;
-    const inputDeps = deps();
-    inputDeps.blobstore.getText = async (digest) => (digest === "sys" ? "BASE SYSTEM" : "");
+    inputDeps.blobstore.getText = async (digest) =>
+      digest === "sys" ? "BASE SYSTEM" : "";
 
     await expect(
       modelCallExecutor.execute({
@@ -1122,7 +1181,69 @@ describe("modelCallExecutor", () => {
               seq: 1,
               messageId: "msg-tool",
               blocks: [
-                { type: "toolCall", id: "call-missing-result", name: "read", arguments: {} },
+                {
+                  type: "toolCall",
+                  id: "call-present",
+                  name: "read",
+                  arguments: {},
+                },
+              ],
+            },
+            {
+              kind: "tool-result",
+              seq: 2,
+              invocationId: "call-present",
+              turnId: "turn-context",
+              name: "read",
+              result: "valid result",
+              isError: false,
+            },
+            {
+              kind: "tool-result",
+              seq: 3,
+              invocationId: "call-missing",
+              turnId: "turn-context",
+              name: "inspect_subagent",
+              result: "orphan result",
+              isError: true,
+            },
+          ],
+        },
+        signal: new AbortController().signal,
+        deps: inputDeps,
+        onEphemeral: () => {},
+      }),
+    ).rejects.toThrow(
+      "model transcript invariant violated: orphaned tool result inspect_subagent call-missing",
+    );
+    expect(mocks.stream).not.toHaveBeenCalled();
+  });
+
+  it("rejects assistant tool calls without tool results before provider submission", async () => {
+    mocks.getModel.mockReturnValue({ baseUrl: "https://model.test" });
+    const inputDescriptor = descriptor();
+    inputDescriptor.request.contextThroughSeq = 1;
+    const inputDeps = deps();
+    inputDeps.blobstore.getText = async (digest) =>
+      digest === "sys" ? "BASE SYSTEM" : "";
+
+    await expect(
+      modelCallExecutor.execute({
+        descriptor: inputDescriptor,
+        state: {
+          ...initialAgentState({ channelId: "channel-1", config }),
+          entries: [
+            {
+              kind: "assistant",
+              seq: 1,
+              messageId: "msg-tool",
+              blocks: [
+                {
+                  type: "toolCall",
+                  id: "call-missing-result",
+                  name: "read",
+                  arguments: {},
+                },
               ],
             },
           ],
@@ -1130,9 +1251,9 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: inputDeps,
         onEphemeral: () => {},
-      })
+      }),
     ).rejects.toThrow(
-      "model transcript invariant violated: assistant tool call call-missing-result has no tool result"
+      "model transcript invariant violated: assistant tool call call-missing-result has no tool result",
     );
     expect(mocks.stream).not.toHaveBeenCalled();
   });
@@ -1141,7 +1262,9 @@ describe("modelCallExecutor", () => {
     const previous = process.env["VIBESTUDIO_TEST_MODE"];
     delete process.env["VIBESTUDIO_TEST_MODE"];
     try {
-      mocks.getModel.mockReturnValue({ baseUrl: "https://chatgpt.com/backend-api" });
+      mocks.getModel.mockReturnValue({
+        baseUrl: "https://chatgpt.com/backend-api",
+      });
       const getApiKey = vi.fn(async () => ({ apiKey: "test-key" }));
       const inputDeps = deps();
       inputDeps.credentials.getApiKey = getApiKey;
@@ -1178,7 +1301,10 @@ describe("modelCallExecutor", () => {
         ],
       });
 
-      const continuedState = initialAgentState({ channelId: "channel-1", config });
+      const continuedState = initialAgentState({
+        channelId: "channel-1",
+        config,
+      });
       continuedState.entries = [
         {
           kind: "assistant",
@@ -1197,6 +1323,7 @@ describe("modelCallExecutor", () => {
           kind: "tool-result",
           seq: 2,
           invocationId: "msg-tool:test-read",
+          turnId: "turn-context",
           name: "read",
           result: "---\nname: onboarding\n---",
           isError: false,
@@ -1211,7 +1338,12 @@ describe("modelCallExecutor", () => {
       });
       expect(continued).toMatchObject({
         kind: "model",
-        blocks: [{ type: "text", content: "E2E model response: initial agent turn completed." }],
+        blocks: [
+          {
+            type: "text",
+            content: "E2E model response: initial agent turn completed.",
+          },
+        ],
       });
     } finally {
       if (previous === undefined) {
@@ -1294,10 +1426,11 @@ describe("modelCallExecutor", () => {
         kind: "tool-result",
         seq: 3,
         invocationId: "msg-web:test-web-fetch",
+        turnId: "turn-context",
         name: "web_fetch",
         result: "<title>Example Domain</title>",
         isError: false,
-      }
+      },
     );
 
     await expect(
@@ -1307,10 +1440,15 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: inputDeps,
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({
       kind: "model",
-      blocks: [{ type: "text", content: "E2E model response: initial agent turn completed." }],
+      blocks: [
+        {
+          type: "text",
+          content: "E2E model response: initial agent turn completed.",
+        },
+      ],
     });
     expect(mocks.stream).not.toHaveBeenCalled();
   });
@@ -1369,7 +1507,9 @@ describe("modelCallExecutor", () => {
         },
       ],
     });
-    expect(JSON.stringify(requested)).toContain('credentials.fetch(\\"https://example.com\\")');
+    expect(JSON.stringify(requested)).toContain(
+      'credentials.fetch(\\"https://example.com\\")',
+    );
     expect(JSON.stringify(requested)).not.toContain('"name":"web_fetch"');
 
     state.entries.push(
@@ -1390,10 +1530,11 @@ describe("modelCallExecutor", () => {
         kind: "tool-result",
         seq: 3,
         invocationId: "msg-eval-web:test-eval-fetch",
+        turnId: "turn-context",
         name: "eval",
         result: { success: true, returnValue: { status: 200 } },
         isError: false,
-      }
+      },
     );
 
     await expect(
@@ -1403,10 +1544,15 @@ describe("modelCallExecutor", () => {
         signal: new AbortController().signal,
         deps: inputDeps,
         onEphemeral: () => {},
-      })
+      }),
     ).resolves.toMatchObject({
       kind: "model",
-      blocks: [{ type: "text", content: "E2E model response: initial agent turn completed." }],
+      blocks: [
+        {
+          type: "text",
+          content: "E2E model response: initial agent turn completed.",
+        },
+      ],
     });
   });
 
@@ -1441,7 +1587,12 @@ describe("modelCallExecutor", () => {
 
     expect(outcome).toMatchObject({
       kind: "model",
-      blocks: [{ type: "text", content: "E2E model response: initial agent turn completed." }],
+      blocks: [
+        {
+          type: "text",
+          content: "E2E model response: initial agent turn completed.",
+        },
+      ],
     });
     expect(ensureLoaded).not.toHaveBeenCalled();
     expect(inputDeps.credentials.getApiKey).not.toHaveBeenCalled();
@@ -1466,7 +1617,7 @@ describe("modelCallExecutor", () => {
           thoughtSignature: "tool-sig-1",
         },
       ],
-      "msg-1"
+      "msg-1",
     );
 
     expect(protocolBlocks).toEqual([
@@ -1523,18 +1674,23 @@ describe("modelCallExecutor", () => {
     });
     // The per-call "[model-call] finished:" summary is intentionally always on;
     // only the fine-grained stage trace is gated behind the env flag.
-    expect(info.mock.calls.filter((call) => call[0] === "[model-call] trace:")).toHaveLength(0);
+    expect(
+      info.mock.calls.filter((call) => call[0] === "[model-call] trace:"),
+    ).toHaveLength(0);
 
     await modelCallExecutor.execute({
       descriptor: inputDescriptor,
       state: initialAgentState({ channelId: "channel-1", config }),
       signal: new AbortController().signal,
-      deps: { ...deps(), env: { VIBESTUDIO_TEST_MODE: "1", VIBESTUDIO_MODEL_CALL_TRACE: "1" } },
+      deps: {
+        ...deps(),
+        env: { VIBESTUDIO_TEST_MODE: "1", VIBESTUDIO_MODEL_CALL_TRACE: "1" },
+      },
       onEphemeral: () => {},
     });
     expect(info).toHaveBeenCalledWith(
       "[model-call] trace:",
-      expect.objectContaining({ stage: "start", provider: "openai-codex" })
+      expect.objectContaining({ stage: "start", provider: "openai-codex" }),
     );
   });
 });

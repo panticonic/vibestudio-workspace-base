@@ -11,7 +11,10 @@ import type {
   LogEnvelope,
   ParticipantRef,
 } from "@workspace/agentic-protocol";
-import { participantKey, participantRefFromActor } from "@workspace/agentic-protocol";
+import {
+  participantKey,
+  participantRefFromActor,
+} from "@workspace/agentic-protocol";
 import type {
   AgentState,
   AgentTurnMetadata,
@@ -29,7 +32,9 @@ function payloadRecord(envelope: LogEnvelope): Record<string, unknown> {
     : {};
 }
 
-function metadataFromPayload(payload: Record<string, unknown>): AgentTurnMetadata | undefined {
+function metadataFromPayload(
+  payload: Record<string, unknown>,
+): AgentTurnMetadata | undefined {
   const metadata = payload["metadata"];
   return metadata && typeof metadata === "object" && !Array.isArray(metadata)
     ? (metadata as AgentTurnMetadata)
@@ -38,12 +43,17 @@ function metadataFromPayload(payload: Record<string, unknown>): AgentTurnMetadat
 
 /** Sender's canonical message id, carried on the recv payload IN ADDITION to
  *  the private recv envelope id. The read-ack / edit / retract correlation key. */
-function sourceMessageIdFromPayload(payload: Record<string, unknown>): string | undefined {
+function sourceMessageIdFromPayload(
+  payload: Record<string, unknown>,
+): string | undefined {
   const value = payload["sourceMessageId"];
   return typeof value === "string" && value ? value : undefined;
 }
 
-function resumeOpenTurn(turn: OpenTurn, request: ModelRequestDescriptor): OpenTurn {
+function resumeOpenTurn(
+  turn: OpenTurn,
+  request: ModelRequestDescriptor,
+): OpenTurn {
   const { waitingAtSeq: _waitingAtSeq, ...resumed } = turn;
   return {
     ...resumed,
@@ -51,7 +61,9 @@ function resumeOpenTurn(turn: OpenTurn, request: ModelRequestDescriptor): OpenTu
     activeModelRequest: request,
     // A new model call consumes any soft flush intent.
     ...(turn.pendingFlush ? { pendingFlush: undefined } : {}),
-    ...(turn.lastFailedModelRequest ? { lastFailedModelRequest: undefined } : {}),
+    ...(turn.lastFailedModelRequest
+      ? { lastFailedModelRequest: undefined }
+      : {}),
   };
 }
 
@@ -60,7 +72,7 @@ function resumeOpenTurn(turn: OpenTurn, request: ModelRequestDescriptor): OpenTu
  *  for the edit/retract author guard. */
 function senderRefFromPayload(
   payload: Record<string, unknown>,
-  fallback: ActorRef
+  fallback: ActorRef,
 ): ParticipantRef {
   const value = payload["senderRef"];
   return value && typeof value === "object" && !Array.isArray(value)
@@ -71,7 +83,10 @@ function senderRefFromPayload(
 /** Is the message still un-consumed (un-read) — present in a live queue? Once a
  *  message has only an `entries` copy (consumed into a model context) it is
  *  read, and edits/retracts no-op ("read wins"). */
-function liveSenderRef(state: AgentState, sourceMessageId: string): ParticipantRef | undefined {
+function liveSenderRef(
+  state: AgentState,
+  sourceMessageId: string,
+): ParticipantRef | undefined {
   for (const entry of state.steeringQueue) {
     if (entry.sourceMessageId === sourceMessageId) return entry.senderRef;
   }
@@ -86,7 +101,10 @@ function liveSenderRef(state: AgentState, sourceMessageId: string): ParticipantR
 
 /** Replace a user entry/queue item's content blocks in place (edit before read). */
 function withEditedBlocks(content: unknown, blocks: unknown): unknown {
-  const base = content && typeof content === "object" && !Array.isArray(content) ? content : {};
+  const base =
+    content && typeof content === "object" && !Array.isArray(content)
+      ? content
+      : {};
   return { ...(base as Record<string, unknown>), blocks };
 }
 
@@ -94,13 +112,18 @@ function withAdvance(state: AgentState, envelope: LogEnvelope): AgentState {
   return { ...state, lastSeq: envelope.seq, lastHash: envelope.hash };
 }
 
-export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState {
+export function applyEvent(
+  prev: AgentState,
+  envelope: LogEnvelope,
+): AgentState {
   const state = withAdvance(prev, envelope);
   const kind = envelope.payloadKind;
   const payload = payloadRecord(envelope);
   const causality = (envelope.causality ?? {}) as Record<string, unknown>;
   const turnId =
-    typeof causality["turnId"] === "string" ? (causality["turnId"] as string) : undefined;
+    typeof causality["turnId"] === "string"
+      ? (causality["turnId"] as string)
+      : undefined;
 
   // Only THIS agent's turn lifecycle drives its loop state. The shared channel log carries
   // every participant's events; a foreign-authored turn/message advances the fold position
@@ -111,7 +134,9 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
   switch (true) {
     case kind === "message.delta":
       // Deltas are signal-only and never in the log (§2.4.1).
-      throw new Error("message.delta must never be appended to a trajectory log");
+      throw new Error(
+        "message.delta must never be appended to a trajectory log",
+      );
 
     case kind === "turn.opened": {
       if (!turnId || foreignAuthor) return state;
@@ -120,12 +145,17 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
         openTurn: {
           turnId,
           openedAtSeq: envelope.seq,
-          reason: typeof payload["reason"] === "string" ? (payload["reason"] as string) : undefined,
+          reason:
+            typeof payload["reason"] === "string"
+              ? (payload["reason"] as string)
+              : undefined,
           modelCallCount: 0,
           consecutiveModelFailureCount: 0,
           interrupted: false,
           waitingCount: 0,
-          ...(metadataFromPayload(payload) ? { metadata: metadataFromPayload(payload) } : {}),
+          ...(metadataFromPayload(payload)
+            ? { metadata: metadataFromPayload(payload) }
+            : {}),
         },
         pendingPrompt: null,
       };
@@ -133,7 +163,8 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
 
     case kind === "turn.closed": {
       if (foreignAuthor) return state;
-      if (state.openTurn && turnId && state.openTurn.turnId !== turnId) return state;
+      if (state.openTurn && turnId && state.openTurn.turnId !== turnId)
+        return state;
       return { ...state, openTurn: null, inFlightModelCall: null };
     }
 
@@ -153,13 +184,17 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       const role = payload["role"];
       if (role !== "assistant" || foreignAuthor) return state;
       const messageId = String(causality["messageId"] ?? "");
-      const request = payload["modelRequest"] as ModelRequestDescriptor | undefined;
+      const request = payload["modelRequest"] as
+        | ModelRequestDescriptor
+        | undefined;
       if (!request) {
-        throw new Error(`assistant message.started ${messageId} lacks a modelRequest descriptor`);
+        throw new Error(
+          `assistant message.started ${messageId} lacks a modelRequest descriptor`,
+        );
       }
       if (!request.modelSpec || typeof request.modelSpec !== "object") {
         throw new Error(
-          `assistant message.started ${messageId} lacks the required journaled modelSpec`
+          `assistant message.started ${messageId} lacks the required journaled modelSpec`,
         );
       }
       const contextThroughSeq = request.contextThroughSeq;
@@ -171,9 +206,13 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
           contextThroughSeq,
           request,
         },
-        openTurn: state.openTurn ? resumeOpenTurn(state.openTurn, request) : state.openTurn,
+        openTurn: state.openTurn
+          ? resumeOpenTurn(state.openTurn, request)
+          : state.openTurn,
         // Steered messages covered by this call's context snapshot are consumed.
-        steeringQueue: state.steeringQueue.filter((entry) => entry.seq > contextThroughSeq),
+        steeringQueue: state.steeringQueue.filter(
+          (entry) => entry.seq > contextThroughSeq,
+        ),
       };
     }
 
@@ -188,15 +227,21 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
         ) {
           return state; // stale terminal for an older attempt — fold ignores
         }
-        const modelRequest = foreignAuthor ? undefined : state.inFlightModelCall?.request;
+        const modelRequest = foreignAuthor
+          ? undefined
+          : state.inFlightModelCall?.request;
         const entry: SessionEntry = {
           kind: "assistant",
           seq: envelope.seq,
           messageId,
           senderRef: participantRefFromActor(envelope.actor),
-          blocks: Array.isArray(payload["blocks"]) ? (payload["blocks"] as unknown[]) : [],
+          blocks: Array.isArray(payload["blocks"])
+            ? (payload["blocks"] as unknown[])
+            : [],
           outcome:
-            typeof payload["outcome"] === "string" ? (payload["outcome"] as string) : undefined,
+            typeof payload["outcome"] === "string"
+              ? (payload["outcome"] as string)
+              : undefined,
           ...(modelRequest
             ? {
                 model: {
@@ -228,14 +273,18 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       const sourceMessageId = sourceMessageIdFromPayload(payload);
       const senderRef = senderRefFromPayload(payload, envelope.actor);
       const artifactsReady = payload["promptArtifactsReady"] === true;
-      const turnTriggerEnvelopeId = String(payload["turnTriggerEnvelopeId"] ?? "");
+      const turnTriggerEnvelopeId = String(
+        payload["turnTriggerEnvelopeId"] ?? "",
+      );
       if (!turnTriggerEnvelopeId) {
         throw new Error(
-          `user trajectory event ${String(envelope.envelopeId)} lacks turnTriggerEnvelopeId`
+          `user trajectory event ${String(envelope.envelopeId)} lacks turnTriggerEnvelopeId`,
         );
       }
       const agentHops =
-        typeof causality["agentHops"] === "number" ? (causality["agentHops"] as number) : undefined;
+        typeof causality["agentHops"] === "number"
+          ? (causality["agentHops"] as number)
+          : undefined;
 
       // Send-after-turn: while a turn is open, hold the message in the deferred
       // queue ONLY. Skipping `entries` is exactly what keeps it out of the
@@ -257,13 +306,18 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
           ...(agentHops !== undefined ? { agentHops } : {}),
           ...(artifactsReady ? { artifactsReady: true } : {}),
         };
-        return { ...state, deferredPostTurnQueue: [...state.deferredPostTurnQueue, deferred] };
+        return {
+          ...state,
+          deferredPostTurnQueue: [...state.deferredPostTurnQueue, deferred],
+        };
       }
 
       // A promoted after-turn recv carries the same sourceMessageId as its
       // deferred entry — drop that entry from the queue as it enters context.
       const deferredPostTurnQueue = sourceMessageId
-        ? state.deferredPostTurnQueue.filter((d) => d.sourceMessageId !== sourceMessageId)
+        ? state.deferredPostTurnQueue.filter(
+            (d) => d.sourceMessageId !== sourceMessageId,
+          )
         : state.deferredPostTurnQueue;
 
       const entry: SessionEntry = {
@@ -324,13 +378,15 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       // author rides on payload.by; it must match the stored sender.
       const by = payload["by"] as ParticipantRef | undefined;
       if (by && participantKey(by) !== participantKey(sender)) return state;
-      const blocks = Array.isArray(payload["blocks"]) ? (payload["blocks"] as unknown[]) : [];
+      const blocks = Array.isArray(payload["blocks"])
+        ? (payload["blocks"] as unknown[])
+        : [];
       return {
         ...state,
         steeringQueue: state.steeringQueue.map((entry) =>
           entry.sourceMessageId === sourceMessageId
             ? { ...entry, content: withEditedBlocks(entry.content, blocks) }
-            : entry
+            : entry,
         ),
         pendingPrompt:
           state.pendingPrompt?.sourceMessageId === sourceMessageId
@@ -341,13 +397,16 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
             : state.pendingPrompt,
         deferredPostTurnQueue: state.deferredPostTurnQueue.map((deferred) =>
           deferred.sourceMessageId === sourceMessageId
-            ? { ...deferred, content: withEditedBlocks(deferred.content, blocks) }
-            : deferred
+            ? {
+                ...deferred,
+                content: withEditedBlocks(deferred.content, blocks),
+              }
+            : deferred,
         ),
         entries: state.entries.map((entry) =>
           entry.kind === "user" && entry.sourceMessageId === sourceMessageId
             ? { ...entry, content: withEditedBlocks(entry.content, blocks) }
-            : entry
+            : entry,
         ),
       };
     }
@@ -362,15 +421,20 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       return {
         ...state,
         steeringQueue: state.steeringQueue.filter(
-          (entry) => entry.sourceMessageId !== sourceMessageId
+          (entry) => entry.sourceMessageId !== sourceMessageId,
         ),
         pendingPrompt:
-          state.pendingPrompt?.sourceMessageId === sourceMessageId ? null : state.pendingPrompt,
+          state.pendingPrompt?.sourceMessageId === sourceMessageId
+            ? null
+            : state.pendingPrompt,
         deferredPostTurnQueue: state.deferredPostTurnQueue.filter(
-          (deferred) => deferred.sourceMessageId !== sourceMessageId
+          (deferred) => deferred.sourceMessageId !== sourceMessageId,
         ),
         entries: state.entries.filter(
-          (entry) => !(entry.kind === "user" && entry.sourceMessageId === sourceMessageId)
+          (entry) =>
+            !(
+              entry.kind === "user" && entry.sourceMessageId === sourceMessageId
+            ),
         ),
       };
     }
@@ -378,7 +442,11 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
     case kind === "message.failed": {
       if (foreignAuthor) return state;
       const messageId = String(causality["messageId"] ?? "");
-      if (state.inFlightModelCall && state.inFlightModelCall.messageId !== messageId) return state;
+      if (
+        state.inFlightModelCall &&
+        state.inFlightModelCall.messageId !== messageId
+      )
+        return state;
       const failedRequest = state.inFlightModelCall?.request;
       return {
         ...state,
@@ -388,7 +456,8 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
             ? {
                 ...state.openTurn,
                 lastFailedModelRequest: failedRequest,
-                consecutiveModelFailureCount: state.openTurn.consecutiveModelFailureCount + 1,
+                consecutiveModelFailureCount:
+                  state.openTurn.consecutiveModelFailureCount + 1,
               }
             : state.openTurn,
       };
@@ -398,9 +467,13 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       if (foreignAuthor) return state;
       const invocationId = String(causality["invocationId"] ?? "");
       if (!invocationId) return state;
-      const transport = payload["transport"] as PendingInvocation["transport"] | undefined;
+      const transport = payload["transport"] as
+        | PendingInvocation["transport"]
+        | undefined;
       if (!transport) {
-        throw new Error(`invocation.started ${invocationId} lacks a transport (WS1 §1.9)`);
+        throw new Error(
+          `invocation.started ${invocationId} lacks a transport (WS1 §1.9)`,
+        );
       }
       const pending: PendingInvocation = {
         invocationId,
@@ -412,7 +485,8 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
             : undefined,
         name: String(payload["name"] ?? "unknown"),
         transport,
-        executionMode: payload["executionMode"] === "parallel" ? "parallel" : "sequential",
+        executionMode:
+          payload["executionMode"] === "parallel" ? "parallel" : "sequential",
         ...(Array.isArray(payload["askUserTargets"])
           ? { askUserTargets: payload["askUserTargets"] as ParticipantRef[] }
           : {}),
@@ -422,7 +496,10 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       };
       return {
         ...state,
-        pendingInvocations: { ...state.pendingInvocations, [invocationId]: pending },
+        pendingInvocations: {
+          ...state.pendingInvocations,
+          [invocationId]: pending,
+        },
       };
     }
 
@@ -441,13 +518,15 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
               kind: "tool-result",
               seq: envelope.seq,
               invocationId,
+              turnId: pending.turnId,
               ...(pending.attemptId ? { attemptId: pending.attemptId } : {}),
               name: pending.name,
               result: payload["result"],
               isError: false,
               ...(payload["turnControl"] &&
               typeof payload["turnControl"] === "object" &&
-              (payload["turnControl"] as Record<string, unknown>)["kind"] === "terminate"
+              (payload["turnControl"] as Record<string, unknown>)["kind"] ===
+                "terminate"
                 ? { terminate: true }
                 : {}),
             }
@@ -455,6 +534,7 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
               kind: "tool-result",
               seq: envelope.seq,
               invocationId,
+              turnId: pending.turnId,
               ...(pending.attemptId ? { attemptId: pending.attemptId } : {}),
               name: pending.name,
               result:
@@ -463,7 +543,10 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
                   : (payload["error"] ?? payload["reason"] ?? "failed"),
               isError: true,
               ...(payload["terminalOutcome"] === "tool_error" ||
-              payload["terminalOutcome"] === "infrastructure_error"
+              payload["terminalOutcome"] === "infrastructure_error" ||
+              payload["terminalOutcome"] === "cancelled" ||
+              payload["terminalOutcome"] === "stale_dispatch" ||
+              payload["terminalOutcome"] === "abandoned"
                 ? { terminalOutcome: payload["terminalOutcome"] }
                 : {}),
               ...(typeof payload["terminalReasonCode"] === "string"
@@ -471,7 +554,9 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
                 : {}),
               ...(payload["failure"] && typeof payload["failure"] === "object"
                 ? {
-                    failureRecovery: (payload["failure"] as AgentToolFailure).recovery,
+                    failureRecovery: (payload["failure"] as AgentToolFailure)
+                      .recovery,
+                    failure: payload["failure"] as AgentToolFailure,
                   }
                 : {}),
             };
@@ -487,7 +572,10 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       const approvalId = String(causality["approvalId"] ?? "");
       const invocationId = String(causality["invocationId"] ?? "");
       if (!approvalId) return state;
-      const details = (payload["details"] ?? {}) as { toolName?: string; input?: unknown };
+      const details = (payload["details"] ?? {}) as {
+        toolName?: string;
+        input?: unknown;
+      };
       const invocation = state.pendingInvocations[invocationId];
       return {
         ...state,
@@ -505,7 +593,11 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
         pendingInvocations: invocation
           ? {
               ...state.pendingInvocations,
-              [invocationId]: { ...invocation, approvalState: "pending", approvalId },
+              [invocationId]: {
+                ...invocation,
+                approvalState: "pending",
+                approvalId,
+              },
             }
           : state.pendingInvocations,
       };
@@ -516,7 +608,8 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       const approvalId = String(causality["approvalId"] ?? "");
       const approval = state.pendingApprovals[approvalId];
       if (!approval) return state;
-      const { [approvalId]: _removedApproval, ...restApprovals } = state.pendingApprovals;
+      const { [approvalId]: _removedApproval, ...restApprovals } =
+        state.pendingApprovals;
       const invocation = state.pendingInvocations[approval.invocationId];
       const granted = payload["granted"] === true;
       return {
@@ -526,7 +619,10 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
           invocation && granted
             ? {
                 ...state.pendingInvocations,
-                [approval.invocationId]: { ...invocation, approvalState: "granted" },
+                [approval.invocationId]: {
+                  ...invocation,
+                  approvalState: "granted",
+                },
               }
             : state.pendingInvocations,
         // denied: invocation stays pending until step appends its
@@ -538,7 +634,9 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       const replacement = payload["replacement"];
       return {
         ...state,
-        entries: Array.isArray(replacement) ? (replacement as SessionEntry[]) : state.entries,
+        entries: Array.isArray(replacement)
+          ? (replacement as SessionEntry[])
+          : state.entries,
       };
     }
 
@@ -547,15 +645,17 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
       const detailKind = String(details["kind"] ?? payload["kind"] ?? "");
       if (detailKind === "prompt.artifacts_requested") {
         const triggerEnvelopeId = String(
-          payload["triggerEnvelopeId"] ?? details["triggerEnvelopeId"] ?? ""
+          payload["triggerEnvelopeId"] ?? details["triggerEnvelopeId"] ?? "",
         );
         if (!triggerEnvelopeId) return state;
         const turnTriggerEnvelopeId = String(
-          payload["turnTriggerEnvelopeId"] ?? details["turnTriggerEnvelopeId"] ?? ""
+          payload["turnTriggerEnvelopeId"] ??
+            details["turnTriggerEnvelopeId"] ??
+            "",
         );
         if (!turnTriggerEnvelopeId) {
           throw new Error(
-            `prompt artifact request ${String(envelope.envelopeId)} lacks turnTriggerEnvelopeId`
+            `prompt artifact request ${String(envelope.envelopeId)} lacks turnTriggerEnvelopeId`,
           );
         }
         return {
@@ -570,31 +670,42 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
           },
         };
       }
-      if (detailKind === "prompt.artifacts_ready" || detailKind === "prompt.artifacts_failed") {
+      if (
+        detailKind === "prompt.artifacts_ready" ||
+        detailKind === "prompt.artifacts_failed"
+      ) {
         const triggerEnvelopeId = String(
-          payload["triggerEnvelopeId"] ?? details["triggerEnvelopeId"] ?? ""
+          payload["triggerEnvelopeId"] ?? details["triggerEnvelopeId"] ?? "",
         );
         if (!triggerEnvelopeId) return state;
-        const { [triggerEnvelopeId]: _removedPreparation, ...pendingPromptPreparations } =
-          state.pendingPromptPreparations;
+        const {
+          [triggerEnvelopeId]: _removedPreparation,
+          ...pendingPromptPreparations
+        } = state.pendingPromptPreparations;
         if (detailKind === "prompt.artifacts_failed") {
           return {
             ...state,
             pendingPromptPreparations,
             pendingPrompt:
-              state.pendingPrompt?.envelopeId === triggerEnvelopeId ? null : state.pendingPrompt,
+              state.pendingPrompt?.envelopeId === triggerEnvelopeId
+                ? null
+                : state.pendingPrompt,
             steeringQueue: state.steeringQueue.filter(
-              (entry) => entry.envelopeId !== triggerEnvelopeId
+              (entry) => entry.envelopeId !== triggerEnvelopeId,
             ),
             deferredPostTurnQueue: state.deferredPostTurnQueue.filter(
-              (entry) => entry.envelopeId !== triggerEnvelopeId
+              (entry) => entry.envelopeId !== triggerEnvelopeId,
             ),
             entries: state.entries.filter(
-              (entry) => entry.kind !== "user" || entry.envelopeId !== triggerEnvelopeId
+              (entry) =>
+                entry.kind !== "user" || entry.envelopeId !== triggerEnvelopeId,
             ),
           };
         }
-        const patch = (payload["patch"] ?? details["patch"] ?? {}) as Record<string, unknown>;
+        const patch = (payload["patch"] ?? details["patch"] ?? {}) as Record<
+          string,
+          unknown
+        >;
         return {
           ...state,
           config: { ...state.config, ...patch },
@@ -604,10 +715,14 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
               ? { ...state.pendingPrompt, artifactsReady: true }
               : state.pendingPrompt,
           steeringQueue: state.steeringQueue.map((entry) =>
-            entry.envelopeId === triggerEnvelopeId ? { ...entry, artifactsReady: true } : entry
+            entry.envelopeId === triggerEnvelopeId
+              ? { ...entry, artifactsReady: true }
+              : entry,
           ),
           deferredPostTurnQueue: state.deferredPostTurnQueue.map((entry) =>
-            entry.envelopeId === triggerEnvelopeId ? { ...entry, artifactsReady: true } : entry
+            entry.envelopeId === triggerEnvelopeId
+              ? { ...entry, artifactsReady: true }
+              : entry,
           ),
         };
       }
@@ -620,7 +735,10 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
         const reason = payload["reason"] ?? details["reason"];
         const failureCode = payload["failureCode"] ?? details["failureCode"];
         const messageId = String(
-          payload["messageId"] ?? details["messageId"] ?? causality["messageId"] ?? ""
+          payload["messageId"] ??
+            details["messageId"] ??
+            causality["messageId"] ??
+            "",
         );
         const next: AgentState = {
           ...state,
@@ -628,19 +746,28 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
             ...state.pendingCredentialWaits,
             [credKey]: {
               credKey,
-              providerId: String(payload["providerId"] ?? details["providerId"] ?? ""),
+              providerId: String(
+                payload["providerId"] ?? details["providerId"] ?? "",
+              ),
               turnId: turnId ?? state.openTurn?.turnId ?? "",
               startedAtSeq: envelope.seq,
-              connectSpec: (details["connectSpec"] ?? {}) as Record<string, unknown>,
-              modelBaseUrl: typeof modelBaseUrl === "string" ? modelBaseUrl : undefined,
+              connectSpec: (details["connectSpec"] ?? {}) as Record<
+                string,
+                unknown
+              >,
+              modelBaseUrl:
+                typeof modelBaseUrl === "string" ? modelBaseUrl : undefined,
               waitReason:
                 waitReason === "model_credential_reconnect_required" ||
                 waitReason === "model_credential_required"
                   ? waitReason
                   : undefined,
               reason: typeof reason === "string" ? reason : undefined,
-              failureCode: typeof failureCode === "string" ? failureCode : undefined,
-              expiresAt: String(payload["expiresAt"] ?? details["expiresAt"] ?? ""),
+              failureCode:
+                typeof failureCode === "string" ? failureCode : undefined,
+              expiresAt: String(
+                payload["expiresAt"] ?? details["expiresAt"] ?? "",
+              ),
             },
           },
         };
@@ -649,10 +776,14 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
         }
         return next;
       }
-      if (detailKind === "credential.wait_resolved" || detailKind === "credential.wait_expired") {
+      if (
+        detailKind === "credential.wait_resolved" ||
+        detailKind === "credential.wait_expired"
+      ) {
         const credKey = String(payload["credKey"] ?? details["credKey"] ?? "");
         if (!(credKey in state.pendingCredentialWaits)) return state;
-        const { [credKey]: _removedWait, ...restWaits } = state.pendingCredentialWaits;
+        const { [credKey]: _removedWait, ...restWaits } =
+          state.pendingCredentialWaits;
         return { ...state, pendingCredentialWaits: restWaits };
       }
       if (detailKind === "roster.snapshot") {
@@ -660,14 +791,19 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
           ...state,
           config: {
             ...state.config,
-            roster: (details["roster"] ?? { participants: [] }) as AgentState["config"]["roster"],
+            roster: (details["roster"] ?? {
+              participants: [],
+            }) as AgentState["config"]["roster"],
           },
         };
       }
       if (detailKind === "config.changed") {
         return {
           ...state,
-          config: { ...state.config, ...(details["patch"] as Record<string, unknown>) },
+          config: {
+            ...state.config,
+            ...(details["patch"] as Record<string, unknown>),
+          },
         };
       }
       if (detailKind === "interrupt") {
@@ -680,7 +816,10 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
         // interrupted terminal continues (consumes queued steers) instead of
         // closing. Does NOT set `interrupted`.
         return state.openTurn
-          ? { ...state, openTurn: { ...state.openTurn, pendingFlush: "steers" } }
+          ? {
+              ...state,
+              openTurn: { ...state.openTurn, pendingFlush: "steers" },
+            }
           : state;
       }
       if (
@@ -688,7 +827,10 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
         detailKind === "model.local_fallback_continued"
       ) {
         return state.openTurn
-          ? { ...state, openTurn: { ...state.openTurn, failedOverToFallback: true } }
+          ? {
+              ...state,
+              openTurn: { ...state.openTurn, failedOverToFallback: true },
+            }
           : state;
       }
       return state;
@@ -699,7 +841,10 @@ export function applyEvent(prev: AgentState, envelope: LogEnvelope): AgentState 
   }
 }
 
-export function foldEvents(initial: AgentState, envelopes: LogEnvelope[]): AgentState {
+export function foldEvents(
+  initial: AgentState,
+  envelopes: LogEnvelope[],
+): AgentState {
   let state = initial;
   for (const envelope of envelopes) state = applyEvent(state, envelope);
   return state;

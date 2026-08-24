@@ -101,6 +101,14 @@ action separately makes concrete external service calls. See
 [Automations](../automations/SKILL.md); `launch_automation` immediately creates
 the active revision and seals the current agent's identity and installed image.
 
+An explicit `inbox` or `interrupt` rung is part of the tool effect. If its
+durable entry or live inbox invalidation fails, `notify` fails rather than
+claiming delivery merely because the channel message was published. An
+automation that completes its turn after such a failure is recorded as
+`completed-with-errors`; its inspector shows the exact failed invocation and
+the mission owner projects an addressed failure entry through the ordinary
+durable GAD inbox. That projection retries independently of the canonical run.
+
 ## Etiquette
 
 Notification is cheap. Keep it **rare**.

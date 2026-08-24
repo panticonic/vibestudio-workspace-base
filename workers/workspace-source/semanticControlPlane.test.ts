@@ -20,7 +20,11 @@ import { GadWorkspaceDO } from "./index.js";
 import type { WorkClaim } from "@vibestudio/shared/durableWork";
 
 const createTestDO: typeof createBaseTestDO = (DOClass, env, opts) =>
-  createBaseTestDO(DOClass, { RPC_FETCH: successfulTestRpcFetch, ...env }, opts);
+  createBaseTestDO(
+    DOClass,
+    { RPC_FETCH: successfulTestRpcFetch, ...env },
+    opts,
+  );
 
 const owner = { kind: "agent" as const, id: "agent-1" };
 const GENESIS = GENESIS_EVENT_HASH;
@@ -38,7 +42,9 @@ const verifiedUserCaller = (userId: string) => ({
 
 function event<K extends AgenticEvent["kind"]>(
   kind: K,
-  patch: Omit<AgenticEvent<K>, "kind" | "actor" | "createdAt"> & { createdAt?: string }
+  patch: Omit<AgenticEvent<K>, "kind" | "actor" | "createdAt"> & {
+    createdAt?: string;
+  },
 ): AgenticEvent<K> {
   return {
     kind,
@@ -58,11 +64,21 @@ function blobRef(digest: string, encoded = "{}") {
   };
 }
 
-function textMessagePayload(messageId: string, role: "user" | "assistant", content: string) {
+function textMessagePayload(
+  messageId: string,
+  role: "user" | "assistant",
+  content: string,
+) {
   return {
     protocol: AGENTIC_PROTOCOL_VERSION,
     role,
-    blocks: [{ blockId: `${messageId}:block:0` as never, type: "text" as const, content }],
+    blocks: [
+      {
+        blockId: `${messageId}:block:0` as never,
+        type: "text" as const,
+        content,
+      },
+    ],
     outcome: "completed" as const,
   };
 }
@@ -76,7 +92,10 @@ function largeParticipantMetadata() {
       {
         name: "eval",
         description: "large method description",
-        parameters: { type: "object", properties: { code: { type: "string" } } },
+        parameters: {
+          type: "object",
+          properties: { code: { type: "string" } },
+        },
         returns: { type: "object" },
       },
     ],
@@ -93,10 +112,18 @@ function expectNoPrivateParticipantMetadata(value: unknown): void {
 }
 
 /** Shorthand for an opaque (non-agentic) log event input for appendLogEvent. */
-function opaque(envelopeId: string, value: unknown, appendedAt = "2026-05-20T12:00:00.000Z") {
+function opaque(
+  envelopeId: string,
+  value: unknown,
+  appendedAt = "2026-05-20T12:00:00.000Z",
+) {
   return {
     envelopeId,
-    actor: { kind: "panel" as const, id: "panel:user", participantId: "panel:user" },
+    actor: {
+      kind: "panel" as const,
+      id: "panel:user",
+      participantId: "panel:user",
+    },
     payloadKind: "custom.kind",
     payload: { value },
     appendedAt,
@@ -118,14 +145,16 @@ async function appendTrajectoryEvents<T = any>(
     owner: { kind: "agent"; id: string; metadata?: Record<string, unknown> };
     expectedHeadHash?: string | null;
     events: TrajectoryEventFixture[];
-  }
+  },
 ): Promise<T> {
   return call<T>("appendLogEvent", {
     logId: input.trajectoryId,
     head: input.branchId,
     logKind: "trajectory",
     owner: input.owner,
-    ...("expectedHeadHash" in input ? { expectedHeadHash: input.expectedHeadHash ?? null } : {}),
+    ...("expectedHeadHash" in input
+      ? { expectedHeadHash: input.expectedHeadHash ?? null }
+      : {}),
     events: input.events.map((item) => {
       const causality = {
         ...(item.event.causality ?? {}),
@@ -160,16 +189,20 @@ interface TestSql {
 async function querySql<R extends { rows: unknown[] }>(
   sql: TestSql,
   query: string,
-  bindings: unknown[] = []
+  bindings: unknown[] = [],
 ): Promise<R> {
   return { rows: sql.exec(query, ...bindings).toArray() } as R;
 }
 
-async function countRows(sql: TestSql, where: string, params: unknown[]): Promise<number> {
+async function countRows(
+  sql: TestSql,
+  where: string,
+  params: unknown[],
+): Promise<number> {
   const result = await querySql<{ rows: Array<{ cnt: number }> }>(
     sql,
     `SELECT COUNT(*) AS cnt FROM log_events WHERE ${where}`,
-    params
+    params,
   );
   return Number(result.rows[0]?.cnt ?? 0);
 }
@@ -181,7 +214,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
       instance as unknown as {
         rpcAuthorityDeclaration(
           method: string,
-          schema: (typeof gadWireMethods)["vcsStatus"]
+          schema: (typeof gadWireMethods)["vcsStatus"],
         ): unknown;
       }
     ).rpcAuthorityDeclaration("vcsStatus", gadWireMethods.vcsStatus);
@@ -214,7 +247,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
     ).semanticWorkspaceId.bind(instance);
 
     expect(semanticWorkspaceId).toThrow(
-      "GadWorkspaceDO requires the topology-owned WORKSPACE_ID binding"
+      "GadWorkspaceDO requires the topology-owned WORKSPACE_ID binding",
     );
   });
 
@@ -224,9 +257,11 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
       WORKSPACE_ID: "ws_authoritative",
     });
 
-    expect((instance as unknown as { semanticWorkspaceId(): string }).semanticWorkspaceId()).toBe(
-      "ws_authoritative"
-    );
+    expect(
+      (
+        instance as unknown as { semanticWorkspaceId(): string }
+      ).semanticWorkspaceId(),
+    ).toBe("ws_authoritative");
   });
 
   it("does not self-register its sealed identity through a public runtime RPC", async () => {
@@ -234,7 +269,9 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
 
     // The product builtin catalog owns this singleton's identity and display
     // title. Construction must not open the RPC bridge to publish metadata.
-    expect((instance as unknown as { connectionless?: unknown }).connectionless).toBeNull();
+    expect(
+      (instance as unknown as { connectionless?: unknown }).connectionless,
+    ).toBeNull();
   });
 
   // §3.1 — schema shape
@@ -243,7 +280,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
     const tables = await querySql<{ rows: Array<{ name: string }> }>(
       sql,
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
-      []
+      [],
     );
     const names = tables.rows.map((row) => row.name);
     expect(names).toEqual(
@@ -279,7 +316,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
         "gad_integration_decisions",
         "vcs_command_journal",
         "gad_effect_intents",
-      ])
+      ]),
     );
     for (const dropped of [
       "trajectory_branches",
@@ -307,10 +344,14 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
     const turnColumns = await querySql<{ rows: Array<{ name: string }> }>(
       sql,
       "PRAGMA table_info(trajectory_turns)",
-      []
+      [],
     );
-    expect(turnColumns.rows.map((row) => row.name)).toContain("trigger_message_id");
-    expect(turnColumns.rows.map((row) => row.name)).not.toContain("opened_by_json");
+    expect(turnColumns.rows.map((row) => row.name)).toContain(
+      "trigger_message_id",
+    );
+    expect(turnColumns.rows.map((row) => row.name)).not.toContain(
+      "opened_by_json",
+    );
     for (const deadKnowledgeProjection of [
       "gad_claims",
       "gad_claim_relations",
@@ -359,7 +400,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
         addedBy: "user:usr_mallory",
         addedAt: 40,
         revision: 2,
-      })
+      }),
     ).rejects.toThrow(/only the owning channel DO/);
     await expect(
       callAs(channelCaller("channel-b"), "putChannelMembership", {
@@ -369,28 +410,36 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
         handle: "bob",
         addedBy: "user:usr_alice",
         addedAt: 20,
-      })
+      }),
     ).rejects.toThrow(/Invalid arguments for putChannelMembership/);
 
     await expect(
-      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe")
+      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe"),
     ).resolves.toMatchObject({
       notifications: [
-        { id: "channel.invite:channel-b", kind: "channel.invite", userId: "usr_bob" },
-        { id: "channel.invite:channel-a", kind: "channel.invite", userId: "usr_bob" },
+        {
+          id: "channel.invite:channel-b",
+          kind: "channel.invite",
+          userId: "usr_bob",
+        },
+        {
+          id: "channel.invite:channel-a",
+          kind: "channel.invite",
+          userId: "usr_bob",
+        },
       ],
     });
     await expect(
       callAs(verifiedUserCaller("usr_bob"), "acknowledgeUserNotification", {
         id: "channel.invite:channel-b",
-      })
+      }),
     ).resolves.toEqual({
       acknowledged: true,
     });
     await expect(
       callAs(verifiedUserCaller("usr_bob"), "acknowledgeUserNotification", {
         id: "channel.invite:channel-b",
-      })
+      }),
     ).resolves.toEqual({
       acknowledged: false,
     });
@@ -403,7 +452,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
         addedBy: "user:usr_alice",
         addedAt: 20,
         revision: 1,
-      })
+      }),
     ).resolves.toEqual({ applied: false, currentRevision: 1 });
     // A lost-response retry of the already-applied put must not resurrect the
     // pending invite after the user acknowledged it.
@@ -412,27 +461,40 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
         .exec(
           `SELECT 1 FROM user_notifications
             WHERE user_id = 'usr_bob' AND notification_id = 'channel.invite:channel-b'
-              AND acknowledged_at IS NULL`
+              AND acknowledged_at IS NULL`,
         )
-        .toArray()
+        .toArray(),
     ).toEqual([]);
     expect(
       sql
-        .exec(`SELECT COUNT(*) AS count FROM user_notifications WHERE acknowledged_at IS NULL`)
-        .one()["count"]
+        .exec(
+          `SELECT COUNT(*) AS count FROM user_notifications WHERE acknowledged_at IS NULL`,
+        )
+        .one()["count"],
     ).toBe(2);
-    await expect(call("listChannelMembershipsForUser", { userId: "usr_bob" })).resolves.toEqual({
+    await expect(
+      call("listChannelMembershipsForUser", { userId: "usr_bob" }),
+    ).resolves.toEqual({
       userId: "usr_bob",
       channelIds: ["channel-a", "channel-b"],
     });
     await call("purgeRevokedUserChannelIndexes", { userId: "usr_bob" });
-    expect(sql.exec(`SELECT COUNT(*) AS count FROM user_notifications`).one()["count"]).toBe(1);
-    expect(sql.exec(`SELECT COUNT(*) AS count FROM channel_membership_index`).one()["count"]).toBe(
-      1
-    );
+    expect(
+      sql.exec(`SELECT COUNT(*) AS count FROM user_notifications`).one()[
+        "count"
+      ],
+    ).toBe(1);
+    expect(
+      sql.exec(`SELECT COUNT(*) AS count FROM channel_membership_index`).one()[
+        "count"
+      ],
+    ).toBe(1);
 
     await expect(
-      callAs({ callerId: "shell", callerKind: "shell" }, "listUserNotificationsForMe")
+      callAs(
+        { callerId: "shell", callerKind: "shell" },
+        "listUserNotificationsForMe",
+      ),
     ).rejects.toThrow(/authenticated workspace account/);
     await expect(
       callAs(channelCaller("bad"), "putChannelMembership", {
@@ -443,7 +505,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
         addedBy: "user:usr_alice",
         addedAt: 1,
         revision: 1,
-      })
+      }),
     ).rejects.toThrow(/bare workspace account id/);
   });
 
@@ -459,7 +521,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
         data: { buildId: 42 },
         createdAt: 42,
         revision: 1,
-      })
+      }),
     ).resolves.toMatchObject({
       id: "build:release-42",
       kind: "build.completed",
@@ -468,30 +530,32 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
     });
 
     await expect(
-      callAs(verifiedUserCaller("usr_charlie"), "listUserNotificationsForMe")
+      callAs(verifiedUserCaller("usr_charlie"), "listUserNotificationsForMe"),
     ).resolves.toEqual({ notifications: [] });
     await expect(
-      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe")
+      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe"),
     ).resolves.toMatchObject({
       notifications: [{ id: "build:release-42", title: "Build complete" }],
     });
     await expect(
       callAs(verifiedUserCaller("usr_bob"), "acknowledgeUserNotification", {
         id: "build:release-42",
-      })
+      }),
     ).resolves.toEqual({
       acknowledged: true,
     });
     await expect(
-      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe")
+      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe"),
     ).resolves.toEqual({ notifications: [] });
     // The inbox is the durable record: history is opt-in and carries when it was read.
     await expect(
       callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe", {
         includeAcknowledged: true,
-      })
+      }),
     ).resolves.toMatchObject({
-      notifications: [{ id: "build:release-42", acknowledgedAt: expect.any(Number) }],
+      notifications: [
+        { id: "build:release-42", acknowledgedAt: expect.any(Number) },
+      ],
     });
     await callAs(channelCaller("producer"), "putUserNotification", {
       id: "build:release-42",
@@ -504,7 +568,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
       revision: 1,
     });
     await expect(
-      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe")
+      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe"),
     ).resolves.toEqual({ notifications: [] });
 
     await callAs(channelCaller("producer"), "putUserNotification", {
@@ -516,7 +580,7 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
       revision: 2,
     });
     await expect(
-      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe")
+      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe"),
     ).resolves.toMatchObject({
       notifications: [{ id: "build:release-42", revision: 2 }],
     });
@@ -529,15 +593,65 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
         title: "Forged channel invite",
         createdAt: 44,
         revision: 1,
-      })
-    ).rejects.toThrow(/reserved for the revisioned channel membership projection/);
+      }),
+    ).rejects.toThrow(
+      /reserved for the revisioned channel membership projection/,
+    );
+  });
+
+  it("does not report a durable notification as delivered when live invalidation fails", async () => {
+    let signalAvailable = false;
+    let signalAttempts = 0;
+    const signalFetch: typeof fetch = async (request, init) => {
+      const envelope = JSON.parse(String(init?.body ?? "{}")) as {
+        message?: { method?: string };
+      };
+      expect(envelope.message?.method).toBe("notification.signalUserInbox");
+      signalAttempts += 1;
+      return signalAvailable
+        ? successfulTestRpcFetch(request, init)
+        : new Response("live inbox bridge unavailable", { status: 503 });
+    };
+    const { callAs } = await createTestDO(GadWorkspaceDO, {
+      RPC_FETCH: signalFetch,
+    });
+    const input = {
+      id: "build:delivery-failure",
+      userId: "usr_bob",
+      kind: "build.completed",
+      title: "Build complete",
+      createdAt: 45,
+      revision: 1,
+    };
+
+    await expect(
+      callAs(channelCaller("producer"), "putUserNotification", input),
+    ).rejects.toThrow(/503|live inbox bridge unavailable/);
+    await expect(
+      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe"),
+    ).resolves.toMatchObject({
+      notifications: [{ id: input.id, title: input.title }],
+    });
+    const attemptsAfterFailure = signalAttempts;
+
+    // Retrying the same idempotent semantic operation must repair the live
+    // half even though the durable half was already committed.
+    signalAvailable = true;
+    await expect(
+      callAs(channelCaller("producer"), "putUserNotification", input),
+    ).resolves.toMatchObject({ id: input.id, revision: input.revision });
+    expect(signalAttempts).toBeGreaterThan(attemptsAfterFailure);
   });
 
   // §3.1 — read-only guard
   it("does not expose arbitrary SQL through the production RPC surface", async () => {
     const { call } = await createTestDO(GadWorkspaceDO);
-    await expect(call("query", "SELECT 1", [])).rejects.toThrow("no direct authority declaration");
-    await expect(call("rawSql", "SELECT 1", [])).rejects.toThrow("no direct authority declaration");
+    await expect(call("query", "SELECT 1", [])).rejects.toThrow(
+      "no direct authority declaration",
+    );
+    await expect(call("rawSql", "SELECT 1", [])).rejects.toThrow(
+      "no direct authority declaration",
+    );
   });
 
   // §3.1 — reopening a current-version schema must not write schema state.
@@ -548,11 +662,13 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
     // was sealed, making the next activation reject this otherwise-current DB.
     first.instance.recallMemory({ query: "nothing-indexed-yet" });
 
-    const second = await createTestDO(GadWorkspaceDO, undefined, { db: first.db });
+    const second = await createTestDO(GadWorkspaceDO, undefined, {
+      db: first.db,
+    });
     const rows = await querySql<{ rows: Array<{ hash: string }> }>(
       second.sql,
       "SELECT hash FROM gad_blobs WHERE hash = ?",
-      ["blob:one"]
+      ["blob:one"],
     );
 
     expect(rows.rows).toEqual([{ hash: "blob:one" }]);
@@ -562,16 +678,21 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
     const SQL = await initSqlJs();
     const db = new SQL.Database();
     db.run(`CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
-    db.run(`INSERT INTO state (key, value) VALUES ('application_marker', ?)`, ["preserved"]);
-
-    await expect(createTestDO(GadWorkspaceDO, undefined, { db })).rejects.toThrow(
-      /no current schema identity/
-    );
-    expect(db.exec(`SELECT value FROM state WHERE key = 'application_marker'`)[0]!.values).toEqual([
-      ["preserved"],
+    db.run(`INSERT INTO state (key, value) VALUES ('application_marker', ?)`, [
+      "preserved",
     ]);
+
+    await expect(
+      createTestDO(GadWorkspaceDO, undefined, { db }),
+    ).rejects.toThrow(/no current schema identity/);
     expect(
-      db.exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'log_heads'`)
+      db.exec(`SELECT value FROM state WHERE key = 'application_marker'`)[0]!
+        .values,
+    ).toEqual([["preserved"]]);
+    expect(
+      db.exec(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'log_heads'`,
+      ),
     ).toEqual([]);
   });
 });
@@ -599,11 +720,15 @@ describe("appendLogEvent core (§3.2)", () => {
     });
 
     const workerId = "driver-publication-1";
-    const [first] = await call<WorkClaim[]>("claimReadyWork", "workspace-publication", {
-      workerId,
-      now: Date.now(),
-      limit: 10,
-    });
+    const [first] = await call<WorkClaim[]>(
+      "claimReadyWork",
+      "workspace-publication",
+      {
+        workerId,
+        now: Date.now(),
+        limit: 10,
+      },
+    );
     expect(first).toMatchObject({
       generation: 1,
       attempt: 1,
@@ -617,25 +742,33 @@ describe("appendLogEvent core (§3.2)", () => {
       },
     });
 
-    const failed = await call<{ retryAt: number }>("failReadyWork", "workspace-publication", {
-      workerId,
-      itemId: first!.itemId,
-      generation: first!.generation,
-    });
+    const failed = await call<{ retryAt: number }>(
+      "failReadyWork",
+      "workspace-publication",
+      {
+        workerId,
+        itemId: first!.itemId,
+        generation: first!.generation,
+      },
+    );
     expect(failed.retryAt).toBeGreaterThan(Date.now());
     await expect(
       call<WorkClaim[]>("claimReadyWork", "workspace-publication", {
         workerId,
         now: failed.retryAt - 1,
         limit: 10,
-      })
+      }),
     ).resolves.toEqual([]);
 
-    const [retry] = await call<WorkClaim[]>("claimReadyWork", "workspace-publication", {
-      workerId,
-      now: failed.retryAt,
-      limit: 10,
-    });
+    const [retry] = await call<WorkClaim[]>(
+      "claimReadyWork",
+      "workspace-publication",
+      {
+        workerId,
+        now: failed.retryAt,
+        limit: 10,
+      },
+    );
     expect(retry).toMatchObject({ generation: 2, attempt: 2 });
     await expect(
       call("settleReadyWork", "workspace-publication", {
@@ -643,7 +776,7 @@ describe("appendLogEvent core (§3.2)", () => {
         itemId: retry!.itemId,
         generation: first!.generation,
         outcome: { broadcasted: 1 },
-      })
+      }),
     ).resolves.toBe("stale");
     await expect(
       call("settleReadyWork", "workspace-publication", {
@@ -651,12 +784,12 @@ describe("appendLogEvent core (§3.2)", () => {
         itemId: retry!.itemId,
         generation: retry!.generation,
         outcome: { broadcasted: 1 },
-      })
+      }),
     ).resolves.toBe("accepted");
 
     const remaining = await querySql<{ rows: unknown[] }>(
       sql,
-      "SELECT item_id FROM publication_delivery_outbox"
+      "SELECT item_id FROM publication_delivery_outbox",
     );
     expect(remaining.rows).toEqual([]);
   });
@@ -683,8 +816,8 @@ describe("appendLogEvent core (§3.2)", () => {
 
     expect(
       queries.filter((query) =>
-        query.includes("SELECT * FROM log_heads WHERE log_id = ? AND head = ?")
-      )
+        query.includes("SELECT * FROM log_heads WHERE log_id = ? AND head = ?"),
+      ),
     ).toHaveLength(appendCount);
   });
 
@@ -717,13 +850,15 @@ describe("appendLogEvent core (§3.2)", () => {
 
     expect(
       queries.filter((query) =>
-        query.includes("SELECT * FROM log_heads WHERE log_id = ? AND head = ?")
-      )
+        query.includes("SELECT * FROM log_heads WHERE log_id = ? AND head = ?"),
+      ),
     ).toHaveLength(appendCount * 2);
     expect(
       queries.filter((query) =>
-        query.includes("SELECT * FROM log_events WHERE log_id = ? AND head = ? AND envelope_id = ?")
-      )
+        query.includes(
+          "SELECT * FROM log_events WHERE log_id = ? AND head = ? AND envelope_id = ?",
+        ),
+      ),
     ).toHaveLength(appendCount);
   });
 
@@ -747,7 +882,11 @@ describe("appendLogEvent core (§3.2)", () => {
           envelopeId: "evt-2",
           actor: owner,
           payloadKind: "message.completed",
-          payload: textMessagePayload("msg-1", "assistant", "hello from the unified log"),
+          payload: textMessagePayload(
+            "msg-1",
+            "assistant",
+            "hello from the unified log",
+          ),
           causality: { turnId: "turn-1", messageId: "msg-1" },
           appendedAt: "2026-05-20T12:00:01.000Z",
           publish: { channels: [{ channelId: "chan-core" }] },
@@ -783,7 +922,7 @@ describe("appendLogEvent core (§3.2)", () => {
     const synthesized = await querySql<{ rows: Array<{ cnt: number }> }>(
       sql,
       "SELECT COUNT(*) AS cnt FROM log_events WHERE payload_kind = 'external.envelope_published'",
-      []
+      [],
     );
     expect(synthesized.rows[0]?.cnt).toBe(0);
 
@@ -809,14 +948,17 @@ describe("appendLogEvent core (§3.2)", () => {
         originEnvelopeId: "evt-2",
       },
     });
-    const channelHead = await call<any>("getLogHead", { logId: "chan-core", head: "main" });
+    const channelHead = await call<any>("getLogHead", {
+      logId: "chan-core",
+      head: "main",
+    });
     expect(channelHead).toMatchObject({ logKind: "channel", seq: 1 });
 
     // denormalized causality columns
     const denorm = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT origin_log_id, origin_envelope_id FROM log_events WHERE log_id = ? AND envelope_id = ?",
-      ["chan-core", "pub:evt-2:chan-core"]
+      ["chan-core", "pub:evt-2:chan-core"],
     );
     expect(denorm.rows[0]).toMatchObject({
       origin_log_id: "traj-core",
@@ -827,7 +969,7 @@ describe("appendLogEvent core (§3.2)", () => {
     const messages = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT log_id, head, message_id, role, status FROM trajectory_messages WHERE log_id = ? AND head = ?",
-      ["traj-core", "main"]
+      ["traj-core", "main"],
     );
     expect(messages.rows).toEqual([
       expect.objectContaining({
@@ -841,15 +983,26 @@ describe("appendLogEvent core (§3.2)", () => {
     const turns = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT log_id, head, turn_id FROM trajectory_turns WHERE log_id = ? AND head = ?",
-      ["traj-core", "main"]
+      ["traj-core", "main"],
     );
     expect(turns.rows).toEqual([
-      expect.objectContaining({ log_id: "traj-core", head: "main", turn_id: "turn-1" }),
+      expect.objectContaining({
+        log_id: "traj-core",
+        head: "main",
+        turn_id: "turn-1",
+      }),
     ]);
 
     // structured log head pointer
-    const head = await call<any>("getLogHead", { logId: "traj-core", head: "main" });
-    expect(head).toMatchObject({ seq: 2, hash: result.headHash, envelopeId: "evt-2" });
+    const head = await call<any>("getLogHead", {
+      logId: "traj-core",
+      head: "main",
+    });
+    expect(head).toMatchObject({
+      seq: 2,
+      hash: result.headHash,
+      envelopeId: "evt-2",
+    });
 
     // point lookup + payloadKind filter
     const single = await call<any>("getLogEvent", {
@@ -872,7 +1025,10 @@ describe("appendLogEvent core (§3.2)", () => {
     expect(filtered.map((row) => row.envelopeId)).toEqual(["evt-2"]);
 
     // one integrity code path passes over both log kinds
-    const integrity = await call<{ ok: boolean; errors: unknown[] }>("checkLogIntegrity", {});
+    const integrity = await call<{ ok: boolean; errors: unknown[] }>(
+      "checkLogIntegrity",
+      {},
+    );
     expect(integrity).toMatchObject({ ok: true, errors: [] });
   });
 
@@ -882,7 +1038,11 @@ describe("appendLogEvent core (§3.2)", () => {
       envelopeId: "evt-dup",
       actor: owner,
       payloadKind: "message.completed",
-      payload: textMessagePayload("msg-dup", "assistant", "landed by the other writer"),
+      payload: textMessagePayload(
+        "msg-dup",
+        "assistant",
+        "landed by the other writer",
+      ),
       causality: { turnId: "turn-1", messageId: "msg-dup" },
       appendedAt: "2026-05-20T12:00:00.000Z",
     };
@@ -914,16 +1074,18 @@ describe("appendLogEvent core (§3.2)", () => {
       ],
     });
 
-    expect(result.envelopes.map((row: { envelopeId: string }) => row.envelopeId)).toEqual([
-      "evt-dup",
-      "evt-new",
-    ]);
+    expect(
+      result.envelopes.map((row: { envelopeId: string }) => row.envelopeId),
+    ).toEqual(["evt-dup", "evt-new"]);
     const rows = await querySql<{ rows: Array<{ envelope_id: string }> }>(
       sql,
       "SELECT envelope_id FROM log_events WHERE log_id = ? AND head = ? ORDER BY seq",
-      ["traj-midbatch", "main"]
+      ["traj-midbatch", "main"],
     );
-    expect(rows.rows.map((row) => row.envelope_id)).toEqual(["evt-dup", "evt-new"]);
+    expect(rows.rows.map((row) => row.envelope_id)).toEqual([
+      "evt-dup",
+      "evt-new",
+    ]);
   });
 
   it("still rejects a DIVERGENT already-applied event after a new one", async () => {
@@ -938,7 +1100,11 @@ describe("appendLogEvent core (§3.2)", () => {
           envelopeId: "evt-dup",
           actor: owner,
           payloadKind: "message.completed",
-          payload: textMessagePayload("msg-dup", "assistant", "original content"),
+          payload: textMessagePayload(
+            "msg-dup",
+            "assistant",
+            "original content",
+          ),
           causality: { turnId: "turn-1", messageId: "msg-dup" },
           appendedAt: "2026-05-20T12:00:00.000Z",
         },
@@ -956,7 +1122,11 @@ describe("appendLogEvent core (§3.2)", () => {
             envelopeId: "evt-new",
             actor: owner,
             payloadKind: "message.completed",
-            payload: textMessagePayload("msg-new", "assistant", "genuinely new"),
+            payload: textMessagePayload(
+              "msg-new",
+              "assistant",
+              "genuinely new",
+            ),
             causality: { turnId: "turn-1", messageId: "msg-new" },
             appendedAt: "2026-05-20T12:00:01.000Z",
           },
@@ -964,12 +1134,16 @@ describe("appendLogEvent core (§3.2)", () => {
             envelopeId: "evt-dup",
             actor: owner,
             payloadKind: "message.completed",
-            payload: textMessagePayload("msg-dup", "assistant", "DIFFERENT content"),
+            payload: textMessagePayload(
+              "msg-dup",
+              "assistant",
+              "DIFFERENT content",
+            ),
             causality: { turnId: "turn-1", messageId: "msg-dup" },
             appendedAt: "2026-05-20T12:00:00.000Z",
           },
         ],
-      })
+      }),
     ).rejects.toThrow(/replay-mismatch.*DIVERGENT/s);
   });
 
@@ -996,7 +1170,7 @@ describe("appendLogEvent core (§3.2)", () => {
         head: "main",
         logKind: "channel",
         events: [opaque("evt-2", 1)],
-      })
+      }),
     ).rejects.toThrow();
   });
 
@@ -1015,7 +1189,7 @@ describe("appendLogEvent core (§3.2)", () => {
         logKind: "generic",
         expectedHeadHash: GENESIS, // stale: head has moved past genesis
         events: [opaque("evt-2", 2)],
-      })
+      }),
     ).rejects.toThrow(/log head conflict/u);
     // matching expectation succeeds
     await expect(
@@ -1025,7 +1199,7 @@ describe("appendLogEvent core (§3.2)", () => {
         logKind: "generic",
         expectedHeadHash: first.headHash,
         events: [opaque("evt-2", 2)],
-      })
+      }),
     ).resolves.toMatchObject({ headSeq: 2 });
   });
 
@@ -1054,7 +1228,9 @@ describe("appendLogEvent core (§3.2)", () => {
       publishedAt: "2026-05-20T12:00:01.000Z",
     });
 
-    await expect(call<any[]>("listTrajectoryBranches", { limit: 10 })).resolves.toEqual([
+    await expect(
+      call<any[]>("listTrajectoryBranches", { limit: 10 }),
+    ).resolves.toEqual([
       expect.objectContaining({
         trajectory_id: "trajectory-browser",
         branch_id: "main",
@@ -1062,7 +1238,9 @@ describe("appendLogEvent core (§3.2)", () => {
         head_event_id: "trajectory-browser-event",
       }),
     ]);
-    await expect(call<any[]>("listChannelEnvelopes", { limit: 10 })).resolves.toEqual([
+    await expect(
+      call<any[]>("listChannelEnvelopes", { limit: 10 }),
+    ).resolves.toEqual([
       expect.objectContaining({
         channel_id: "channel-browser",
         seq: 1,
@@ -1181,7 +1359,7 @@ describe("trajectory projection invariants", () => {
         WHERE turns.log_id = ? AND turns.head = ? AND turns.turn_id = ?`,
         "trajectory-1",
         "main",
-        turnId
+        turnId,
       )
       .toArray();
     expect(walk).toEqual([
@@ -1254,7 +1432,10 @@ describe("trajectory projection invariants", () => {
           event: event("turn.opened", {
             turnId: "turn-1" as never,
             createdAt: "2026-05-20T12:00:00.000Z",
-            payload: { protocol: AGENTIC_PROTOCOL_VERSION, summary: "first open" },
+            payload: {
+              protocol: AGENTIC_PROTOCOL_VERSION,
+              summary: "first open",
+            },
           }),
         },
       ],
@@ -1271,11 +1452,14 @@ describe("trajectory projection invariants", () => {
             event: event("turn.opened", {
               turnId: "turn-1" as never,
               createdAt: "2026-05-20T12:05:00.000Z",
-              payload: { protocol: AGENTIC_PROTOCOL_VERSION, summary: "duplicate open" },
+              payload: {
+                protocol: AGENTIC_PROTOCOL_VERSION,
+                summary: "duplicate open",
+              },
             }),
           },
         ],
-      })
+      }),
     ).rejects.toThrow(/duplicate turn\.opened for turn turn-1/u);
   });
 
@@ -1293,7 +1477,10 @@ describe("trajectory projection invariants", () => {
             event: event("turn.opened", {
               turnId: "turn-1" as never,
               createdAt: "2026-05-20T12:00:00.000Z",
-              payload: { protocol: AGENTIC_PROTOCOL_VERSION, summary: "first open" },
+              payload: {
+                protocol: AGENTIC_PROTOCOL_VERSION,
+                summary: "first open",
+              },
             }),
           },
           {
@@ -1301,11 +1488,14 @@ describe("trajectory projection invariants", () => {
             event: event("turn.opened", {
               turnId: "turn-1" as never,
               createdAt: "2026-05-20T12:05:00.000Z",
-              payload: { protocol: AGENTIC_PROTOCOL_VERSION, summary: "duplicate open" },
+              payload: {
+                protocol: AGENTIC_PROTOCOL_VERSION,
+                summary: "duplicate open",
+              },
             }),
           },
         ],
-      })
+      }),
     ).rejects.toThrow(/duplicate turn\.opened for turn turn-1/u);
   });
 
@@ -1333,15 +1523,19 @@ describe("trajectory projection invariants", () => {
 
     expect(second.headSeq).toBe(first.headSeq);
     expect(second.headHash).toBe(first.headHash);
-    expect(second.envelopes.map((row: { envelopeId: string }) => row.envelopeId)).toEqual([
-      "event-message-idempotent",
-    ]);
+    expect(
+      second.envelopes.map((row: { envelopeId: string }) => row.envelopeId),
+    ).toEqual(["event-message-idempotent"]);
     expect(second.published).toEqual(first.published);
 
-    expect(await countRows(sql, "envelope_id = ?", ["event-message-idempotent"])).toBe(1);
+    expect(
+      await countRows(sql, "envelope_id = ?", ["event-message-idempotent"]),
+    ).toBe(1);
     // the deterministic publication envelope also stays single
     expect(
-      await countRows(sql, "envelope_id = ?", ["pub:event-message-idempotent:channel-1"])
+      await countRows(sql, "envelope_id = ?", [
+        "pub:event-message-idempotent:channel-1",
+      ]),
     ).toBe(1);
   });
 
@@ -1357,7 +1551,11 @@ describe("trajectory projection invariants", () => {
           event: event("message.completed", {
             turnId: "turn-1" as never,
             causality: { messageId: "msg-prefix" as never },
-            payload: textMessagePayload("msg-prefix", "assistant", "already committed"),
+            payload: textMessagePayload(
+              "msg-prefix",
+              "assistant",
+              "already committed",
+            ),
           }),
           publish: { channelIds: ["channel-1"] },
         },
@@ -1374,7 +1572,11 @@ describe("trajectory projection invariants", () => {
           event: event("message.completed", {
             turnId: "turn-1" as never,
             causality: { messageId: "msg-prefix" as never },
-            payload: textMessagePayload("msg-prefix", "assistant", "already committed"),
+            payload: textMessagePayload(
+              "msg-prefix",
+              "assistant",
+              "already committed",
+            ),
           }),
           publish: { channelIds: ["channel-1"] },
         },
@@ -1393,17 +1595,21 @@ describe("trajectory projection invariants", () => {
       ],
     });
 
-    expect(replay.envelopes.map((row: { envelopeId: string }) => row.envelopeId)).toEqual([
+    expect(
+      replay.envelopes.map((row: { envelopeId: string }) => row.envelopeId),
+    ).toEqual(["event-prefix", "event-suffix"]);
+    expect(replay.published).toEqual(first.published);
+    const rows = await querySql<{
+      rows: Array<{ envelope_id: string; payload_kind: string }>;
+    }>(
+      sql,
+      "SELECT envelope_id, payload_kind FROM log_events WHERE log_id = ? AND head = ? ORDER BY seq",
+      ["traj-1", "main"],
+    );
+    expect(rows.rows.map((row) => row.envelope_id)).toEqual([
       "event-prefix",
       "event-suffix",
     ]);
-    expect(replay.published).toEqual(first.published);
-    const rows = await querySql<{ rows: Array<{ envelope_id: string; payload_kind: string }> }>(
-      sql,
-      "SELECT envelope_id, payload_kind FROM log_events WHERE log_id = ? AND head = ? ORDER BY seq",
-      ["traj-1", "main"]
-    );
-    expect(rows.rows.map((row) => row.envelope_id)).toEqual(["event-prefix", "event-suffix"]);
     expect(rows.rows.map((row) => row.payload_kind)).toEqual([
       "message.completed",
       "invocation.completed",
@@ -1443,11 +1649,11 @@ describe("trajectory projection invariants", () => {
             }),
           },
         ],
-      })
+      }),
     ).rejects.toThrow(
       // Instrumentation: the error must NAME the diverging field (here the payload),
       // not just say "different content" — so a live id-collision is diagnosable.
-      /log envelope id collision with different content:.*diverged at → .*payload/u
+      /log envelope id collision with different content:.*diverged at → .*payload/u,
     );
   });
 
@@ -1486,7 +1692,7 @@ describe("trajectory projection invariants", () => {
             }),
           },
         ],
-      })
+      }),
     ).rejects.toThrow(/log head conflict/u);
 
     await expect(
@@ -1506,7 +1712,7 @@ describe("trajectory projection invariants", () => {
             }),
           },
         ],
-      })
+      }),
     ).resolves.toMatchObject({ envelopes: [{ envelopeId: "event-next" }] });
   });
 
@@ -1521,7 +1727,10 @@ describe("trajectory projection invariants", () => {
           eventId: "event-invocation-1",
           event: event("invocation.started", {
             turnId: "turn-1" as never,
-            causality: { invocationId: "tool-1" as never, transportCallId: "transport-1" },
+            causality: {
+              invocationId: "tool-1" as never,
+              transportCallId: "transport-1",
+            },
             payload: {
               protocol: AGENTIC_PROTOCOL_VERSION,
               name: "eval",
@@ -1535,9 +1744,11 @@ describe("trajectory projection invariants", () => {
     const projected = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT invocation_id, transport_call_id FROM trajectory_invocations WHERE log_id = ? AND head = ?",
-      ["traj-1", "main"]
+      ["traj-1", "main"],
     );
-    expect(projected.rows).toEqual([{ invocation_id: "tool-1", transport_call_id: "transport-1" }]);
+    expect(projected.rows).toEqual([
+      { invocation_id: "tool-1", transport_call_id: "transport-1" },
+    ]);
   });
 
   it("inspects turn and invocation state without hydrating full payloads", async () => {
@@ -1566,7 +1777,10 @@ describe("trajectory projection invariants", () => {
           eventId: "invocation-started-1",
           event: event("invocation.started", {
             turnId: "turn-1" as never,
-            causality: { invocationId: "tool-1" as never, transportCallId: "transport-1" },
+            causality: {
+              invocationId: "tool-1" as never,
+              transportCallId: "transport-1",
+            },
             payload: {
               protocol: AGENTIC_PROTOCOL_VERSION,
               name: "eval",
@@ -1593,7 +1807,10 @@ describe("trajectory projection invariants", () => {
       ],
     });
 
-    const turns = await call<any>("inspectTurnState", { trajectoryId: "traj-1", branchId: "main" });
+    const turns = await call<any>("inspectTurnState", {
+      trajectoryId: "traj-1",
+      branchId: "main",
+    });
     expect(turns.summary).toMatchObject({
       openTurns: 2,
       streamingMessages: 1,
@@ -1721,7 +1938,9 @@ describe("channel projections (§3.4)", () => {
       payloadKind: "custom.kind",
       payload: { value: 1 },
       metadata: { name: "User" },
-      attachments: [{ id: "att-1", mimeType: "text/plain", data: "aGVsbG8=", size: 5 }],
+      attachments: [
+        { id: "att-1", mimeType: "text/plain", data: "aGVsbG8=", size: 5 },
+      ],
       publishedAt: "2026-05-20T12:00:00.000Z",
     });
     await call("appendChannelEnvelope", {
@@ -1739,8 +1958,14 @@ describe("channel projections (§3.4)", () => {
           channelId: "channel-1",
           window: { kind: "after", seq: 1 },
         })
-      ).items
-    ).toEqual([expect.objectContaining({ envelopeId: "env-2", seq: 2, payload: { value: 2 } })]);
+      ).items,
+    ).toEqual([
+      expect.objectContaining({
+        envelopeId: "env-2",
+        seq: 2,
+        payload: { value: 2 },
+      }),
+    ]);
     expect(
       (
         await call<any>("readChannelEnvelopes", {
@@ -1748,7 +1973,7 @@ describe("channel projections (§3.4)", () => {
           window: { kind: "before", seq: 2 },
           limit: 1,
         })
-      ).items
+      ).items,
     ).toEqual([
       expect.objectContaining({
         envelopeId: "env-1",
@@ -1825,7 +2050,7 @@ describe("channel projections (§3.4)", () => {
       "{not-json",
       "channel-parent",
       "main",
-      1
+      1,
     );
 
     const initial = await call<any>("readChannelEnvelopes", {
@@ -1859,10 +2084,17 @@ describe("channel projections (§3.4)", () => {
       limit: 1,
     });
     expect(before.items.map((envelope: any) => envelope.seq)).toEqual([6]);
-    expect(before.pageInfo).toMatchObject({ totalCount: 7, firstSeq: 1, hasMoreBefore: true });
+    expect(before.pageInfo).toMatchObject({
+      totalCount: 7,
+      firstSeq: 1,
+      hasMoreBefore: true,
+    });
 
     await expect(
-      call<any>("readChannelEnvelopes", { channelId: "channel-child", limit: 0 })
+      call<any>("readChannelEnvelopes", {
+        channelId: "channel-child",
+        limit: 0,
+      }),
     ).resolves.toMatchObject({ items: [] });
   });
 
@@ -1882,7 +2114,10 @@ describe("channel projections (§3.4)", () => {
       envelopeId: "env-presence-update",
       from: { kind: "panel", id: "panel:user", participantId: "panel:user" },
       payloadKind: "presence",
-      payload: { action: "update", metadata: { name: "Renamed", type: "panel" } },
+      payload: {
+        action: "update",
+        metadata: { name: "Renamed", type: "panel" },
+      },
       publishedAt: "2026-05-20T12:01:00.000Z",
     });
     await call("appendChannelEnvelope", {
@@ -1897,11 +2132,13 @@ describe("channel projections (§3.4)", () => {
     const count = await querySql<{ rows: Array<{ cnt: number }> }>(
       sql,
       "SELECT COUNT(*) AS cnt FROM channel_roster",
-      []
+      [],
     );
     expect(count.rows[0]?.cnt).toBe(1);
 
-    const roster = await call<any>("inspectChannelRoster", { channelId: "channel-1" });
+    const roster = await call<any>("inspectChannelRoster", {
+      channelId: "channel-1",
+    });
     expect(roster.summary).toMatchObject({
       rows: 1,
       activeParticipants: 0,
@@ -1928,7 +2165,14 @@ describe("channel projections (§3.4)", () => {
         participantId: "panel:user",
         metadata: hugeMetadata,
       },
-      to: [{ kind: "agent", id: "agent:one", participantId: "agent:one", metadata: hugeMetadata }],
+      to: [
+        {
+          kind: "agent",
+          id: "agent:one",
+          participantId: "agent:one",
+          metadata: hugeMetadata,
+        },
+      ],
       payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
       payload: event("invocation.started", {
         causality: { invocationId: "inv-1" as never },
@@ -1953,10 +2197,12 @@ describe("channel projections (§3.4)", () => {
     const rows = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT actor_json, to_json, payload_ref_json, annotations_json FROM log_events WHERE envelope_id = ?",
-      ["env-sanitized"]
+      ["env-sanitized"],
     );
     expectNoPrivateParticipantMetadata(rows.rows);
-    const annotations = JSON.parse(String(rows.rows[0]?.["annotations_json"])) as {
+    const annotations = JSON.parse(
+      String(rows.rows[0]?.["annotations_json"]),
+    ) as {
       metadata?: unknown;
     };
     expect(annotations.metadata).toEqual({
@@ -2000,7 +2246,11 @@ describe("channel projections (§3.4)", () => {
                 encoding: "json",
                 originalBytes: 19,
               },
-              registeredBy: { kind: "panel", id: "panel:user", metadata: hugeMetadata },
+              registeredBy: {
+                kind: "panel",
+                id: "panel:user",
+                metadata: hugeMetadata,
+              },
             },
           },
           annotations: { metadata: hugeMetadata },
@@ -2055,9 +2305,11 @@ describe("channel projections (§3.4)", () => {
     const rows = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT actor_json, to_json, payload_ref_json, annotations_json FROM log_events",
-      []
+      [],
     );
-    const registered = await call<any[]>("listMessageTypes", { channelId: "channel-1" });
+    const registered = await call<any[]>("listMessageTypes", {
+      channelId: "channel-1",
+    });
 
     expectNoPrivateParticipantMetadata(rows.rows);
     expectNoPrivateParticipantMetadata(registered);
@@ -2106,7 +2358,7 @@ describe("channel projections (§3.4)", () => {
     const rows = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT payload_ref_json FROM log_events WHERE envelope_id = ?",
-      ["roster-1"]
+      ["roster-1"],
     );
     const payload = JSON.parse(String(rows.rows[0]?.["payload_ref_json"])) as {
       details: {
@@ -2120,14 +2372,18 @@ describe("channel projections (§3.4)", () => {
     };
 
     expectNoPrivateParticipantMetadata(payload);
-    expect(payload.details.roster.participants[0]?.methods).toEqual([{ name: "eval" }]);
+    expect(payload.details.roster.participants[0]?.methods).toEqual([
+      { name: "eval" },
+    ]);
     expect(payload.details.roster.participants[0]?.ref.metadata).toEqual({
       type: "panel",
       name: "Panel",
       handle: "alice",
       methods: [{ name: "eval" }],
     });
-    await expect(call("checkGadIntegrity", {})).resolves.toMatchObject({ ok: true });
+    await expect(call("checkGadIntegrity", {})).resolves.toMatchObject({
+      ok: true,
+    });
   });
 
   it("treats replayed matching channel envelope ids as idempotent appends", async () => {
@@ -2146,13 +2402,16 @@ describe("channel projections (§3.4)", () => {
 
     expect(second).toEqual(first);
     expect(
-      await countRows(sql, "log_id = ? AND envelope_id = ?", ["channel-1", "env-idempotent"])
+      await countRows(sql, "log_id = ? AND envelope_id = ?", [
+        "channel-1",
+        "env-idempotent",
+      ]),
     ).toBe(1);
     await expect(
       call("appendChannelEnvelope", {
         ...input,
         payload: { value: 2 },
-      })
+      }),
     ).rejects.toThrow(/log envelope id collision with different content/u);
   });
 
@@ -2170,7 +2429,11 @@ describe("channel projections (§3.4)", () => {
         events: [
           {
             envelopeId: input.envelopeId,
-            actor: { kind: "panel", id: "panel:user", participantId: "panel:user" },
+            actor: {
+              kind: "panel",
+              id: "panel:user",
+              participantId: "panel:user",
+            },
             payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
             payload: {
               kind: input.kind,
@@ -2203,7 +2466,10 @@ describe("channel projections (§3.4)", () => {
       sourceDigest: "registry-source-1",
     });
     expect(
-      await call<any>("getMessageType", { channelId: "channel-1", typeId: "custom" })
+      await call<any>("getMessageType", {
+        channelId: "channel-1",
+        typeId: "custom",
+      }),
     ).toMatchObject({ typeId: "custom" });
 
     await appendRegistryEvent({
@@ -2211,9 +2477,14 @@ describe("channel projections (§3.4)", () => {
       kind: "messageType.cleared",
     });
     expect(
-      await call<any>("getMessageType", { channelId: "channel-1", typeId: "custom" })
+      await call<any>("getMessageType", {
+        channelId: "channel-1",
+        typeId: "custom",
+      }),
     ).toBeNull();
-    expect(await call<any[]>("listMessageTypes", { channelId: "channel-1" })).toEqual([]);
+    expect(
+      await call<any[]>("listMessageTypes", { channelId: "channel-1" }),
+    ).toEqual([]);
 
     // a later upsert at a higher seq wins over the earlier clear
     await appendRegistryEvent({
@@ -2222,7 +2493,10 @@ describe("channel projections (§3.4)", () => {
       sourceDigest: "registry-source-2",
     });
     expect(
-      await call<any>("getMessageType", { channelId: "channel-1", typeId: "custom" })
+      await call<any>("getMessageType", {
+        channelId: "channel-1",
+        typeId: "custom",
+      }),
     ).toMatchObject({ typeId: "custom" });
   });
 
@@ -2237,10 +2511,12 @@ describe("channel projections (§3.4)", () => {
       metadata: { name: "User" },
     });
 
-    const raw = await call<any>("readChannelEnvelopes", { channelId: "channel-1" });
+    const raw = await call<any>("readChannelEnvelopes", {
+      channelId: "channel-1",
+    });
     const inspected = await call<{ items: Array<Record<string, unknown>> }>(
       "inspectChannelEnvelopes",
-      { channelId: "channel-1" }
+      { channelId: "channel-1" },
     );
 
     expect(JSON.stringify(raw.items).length).toBeGreaterThan(4000);
@@ -2265,10 +2541,12 @@ describe("forkLog no-copy (§3.5)", () => {
         opaque("env-3", 3, "2026-05-20T12:00:03.000Z"),
       ],
     });
-    const parentRows = await querySql<{ rows: Array<{ seq: number; hash: string }> }>(
+    const parentRows = await querySql<{
+      rows: Array<{ seq: number; hash: string }>;
+    }>(
       sql,
       "SELECT seq, hash FROM log_events WHERE log_id = ? AND head = ? ORDER BY seq",
-      ["chan-parent", "main"]
+      ["chan-parent", "main"],
     );
 
     const fork = await call<any>("forkLog", {
@@ -2289,7 +2567,10 @@ describe("forkLog no-copy (§3.5)", () => {
     });
 
     // lineage-aware read: child sees the parent prefix with ORIGINAL envelope ids
-    const childView = await call<any[]>("readLog", { logId: "chan-fork", head: "main" });
+    const childView = await call<any[]>("readLog", {
+      logId: "chan-fork",
+      head: "main",
+    });
     expect(childView.map((row) => [row.seq, row.envelopeId])).toEqual([
       [1, "env-1"],
       [2, "env-2"],
@@ -2320,7 +2601,7 @@ describe("forkLog no-copy (§3.5)", () => {
         toLogId: "chan-fork",
         toHead: "main",
         atSeq: 2,
-      })
+      }),
     ).resolves.toMatchObject({ forkSeq: 2, forkHash: fork.forkHash });
     await expect(
       call("forkLog", {
@@ -2329,11 +2610,14 @@ describe("forkLog no-copy (§3.5)", () => {
         toLogId: "chan-fork",
         toHead: "main",
         atSeq: 1,
-      })
+      }),
     ).rejects.toThrow();
 
     // child head metadata
-    const childHead = await call<any>("getLogHead", { logId: "chan-fork", head: "main" });
+    const childHead = await call<any>("getLogHead", {
+      logId: "chan-fork",
+      head: "main",
+    });
     expect(childHead).toMatchObject({
       logKind: "channel", // inherited from parent
       parentLogId: "chan-parent",
@@ -2344,10 +2628,10 @@ describe("forkLog no-copy (§3.5)", () => {
 
     // one integrity path passes for both heads
     await expect(
-      call("checkLogIntegrity", { logId: "chan-parent", head: "main" })
+      call("checkLogIntegrity", { logId: "chan-parent", head: "main" }),
     ).resolves.toMatchObject({ ok: true });
     await expect(
-      call("checkLogIntegrity", { logId: "chan-fork", head: "main" })
+      call("checkLogIntegrity", { logId: "chan-fork", head: "main" }),
     ).resolves.toMatchObject({ ok: true });
   });
 
@@ -2397,17 +2681,25 @@ describe("forkLog no-copy (§3.5)", () => {
     });
     expect(fork).toMatchObject({ forkSeq: 2, inherited: 2 });
 
-    const childView = await call<any[]>("readLog", { logId: "traj-p5-fork", head: "main" });
+    const childView = await call<any[]>("readLog", {
+      logId: "traj-p5-fork",
+      head: "main",
+    });
     expect(childView.map((row) => row.envelopeId)).toEqual(["msg-1", "msg-2"]);
     expect(await countRows(sql, "log_id = ?", ["traj-p5-fork"])).toBe(0);
 
     // projections were seeded under the child key without copying log rows
-    const childMessages = await querySql<{ rows: Array<Record<string, unknown>> }>(
+    const childMessages = await querySql<{
+      rows: Array<Record<string, unknown>>;
+    }>(
       sql,
       "SELECT message_id FROM trajectory_messages WHERE log_id = ? AND head = ? ORDER BY message_id",
-      ["traj-p5-fork", "main"]
+      ["traj-p5-fork", "main"],
     );
-    expect(childMessages.rows.map((row) => row["message_id"])).toEqual(["msg-1", "msg-2"]);
+    expect(childMessages.rows.map((row) => row["message_id"])).toEqual([
+      "msg-1",
+      "msg-2",
+    ]);
 
     const appended = await appendTrajectoryEvents<any>(call, {
       trajectoryId: "traj-p5-fork",
@@ -2420,7 +2712,11 @@ describe("forkLog no-copy (§3.5)", () => {
             turnId: "turn-2" as never,
             createdAt: "2026-05-20T12:00:03.000Z",
             causality: { messageId: "msg-fork-only" as never },
-            payload: textMessagePayload("msg-fork-only", "assistant", "diverged"),
+            payload: textMessagePayload(
+              "msg-fork-only",
+              "assistant",
+              "diverged",
+            ),
           }),
         },
       ],
@@ -2431,10 +2727,10 @@ describe("forkLog no-copy (§3.5)", () => {
     });
 
     await expect(
-      call("checkLogIntegrity", { logId: "traj-p5", head: "main" })
+      call("checkLogIntegrity", { logId: "traj-p5", head: "main" }),
     ).resolves.toMatchObject({ ok: true });
     await expect(
-      call("checkLogIntegrity", { logId: "traj-p5-fork", head: "main" })
+      call("checkLogIntegrity", { logId: "traj-p5-fork", head: "main" }),
     ).resolves.toMatchObject({ ok: true });
   });
 
@@ -2487,7 +2783,9 @@ describe("forkLog no-copy (§3.5)", () => {
         limit: 10,
       })
     ).items;
-    expect(forked.map((envelope: any) => [envelope.seq, envelope.envelopeId])).toEqual([
+    expect(
+      forked.map((envelope: any) => [envelope.seq, envelope.envelopeId]),
+    ).toEqual([
       [1, "env-1"],
       [2, "env-presence"],
       [3, "env-2"],
@@ -2507,8 +2805,10 @@ describe("forkLog no-copy (§3.5)", () => {
           window: { kind: "after", seq: 3 },
           limit: 10,
         })
-      ).items
-    ).toEqual([expect.objectContaining({ envelopeId: "env-fork-new", seq: 4 })]);
+      ).items,
+    ).toEqual([
+      expect.objectContaining({ envelopeId: "env-fork-new", seq: 4 }),
+    ]);
   });
 });
 
@@ -2590,14 +2890,14 @@ describe("fork-divergent deterministic terminals (§3.6)", () => {
         branchId: "child2",
         owner,
         events: [parentTerminal],
-      })
+      }),
     ).resolves.toMatchObject({ head: "child2" });
     expect(
       await countRows(sql, "log_id = ? AND head = ? AND envelope_id = ?", [
         "traj-div",
         "child2",
         "inv:1:terminal",
-      ])
+      ]),
     ).toBe(1);
 
     // 5. child appends a DIVERGENT terminal under the same deterministic id — succeeds
@@ -2629,14 +2929,14 @@ describe("fork-divergent deterministic terminals (§3.6)", () => {
         branchId: "main",
         owner,
         events: [parentTerminal],
-      })
+      }),
     ).resolves.toMatchObject({ head: "main" });
     expect(
       await countRows(sql, "log_id = ? AND head = ? AND envelope_id = ?", [
         "traj-div",
         "main",
         "inv:1:terminal",
-      ])
+      ]),
     ).toBe(1);
 
     // 7. each head stored its own version of the terminal
@@ -2661,7 +2961,7 @@ describe("fork-divergent deterministic terminals (§3.6)", () => {
     const statuses = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT head, status FROM trajectory_invocations WHERE log_id = ? AND invocation_id = ? ORDER BY head",
-      ["traj-div", "inv-1"]
+      ["traj-div", "inv-1"],
     );
     expect(statuses.rows).toEqual([
       expect.objectContaining({ head: "child", status: "abandoned" }),
@@ -2698,7 +2998,7 @@ describe("refs (§3.7)", () => {
         kind: "tag",
         target: { stateHash: "state:bbb" },
         expected: null,
-      })
+      }),
     ).rejects.toThrow(/ref CAS conflict: tag:release-1/u);
 
     // update with matching expected succeeds
@@ -2717,7 +3017,7 @@ describe("refs (§3.7)", () => {
         kind: "tag",
         target: { stateHash: "state:ccc" },
         expected: { stateHash: "state:aaa" },
-      })
+      }),
     ).rejects.toThrow(/ref CAS conflict: tag:release-1/u);
 
     // unconditional update (expected omitted)
@@ -2726,13 +3026,17 @@ describe("refs (§3.7)", () => {
       kind: "tag",
       target: { stateHash: "state:ccc" },
     });
-    expect(await call<any>("resolveRef", { refName: "tag:release-1" })).toMatchObject({
+    expect(
+      await call<any>("resolveRef", { refName: "tag:release-1" }),
+    ).toMatchObject({
       target: { stateHash: "state:ccc" },
     });
     expect(await call<any>("resolveRef", { refName: "tag:nope" })).toBeNull();
 
     // reflog recorded each transition
-    const reflog = await call<any[]>("listRefLog", { refName: "tag:release-1" });
+    const reflog = await call<any[]>("listRefLog", {
+      refName: "tag:release-1",
+    });
     expect(reflog).toHaveLength(3);
     const transitions = reflog.map((row: any) => [
       row.old_target_json ? JSON.parse(row.old_target_json).stateHash : null,
@@ -2743,11 +3047,15 @@ describe("refs (§3.7)", () => {
         [null, "state:aaa"],
         ["state:aaa", "state:bbb"],
         ["state:bbb", "state:ccc"],
-      ])
+      ]),
     );
 
     // listing by kind and prefix
-    await call("updateRef", { refName: "context:ctx-1", kind: "context", target: { id: "ctx-1" } });
+    await call("updateRef", {
+      refName: "context:ctx-1",
+      kind: "context",
+      target: { id: "ctx-1" },
+    });
     const tags = await call<any[]>("listRefs", { kind: "tag" });
     expect(tags.map((row: any) => row.refName)).toEqual(["tag:release-1"]);
     const byPrefix = await call<any[]>("listRefs", { prefix: "context:" });
@@ -2772,12 +3080,22 @@ describe("refs (§3.7)", () => {
       target: { id: "wildcard-candidate-2" },
     });
 
-    const listed = await call<any[]>("listRefs", { prefix: "context:literal_%" });
-    expect(listed.map((row: any) => row.refName)).toEqual(["context:literal_%:one"]);
+    const listed = await call<any[]>("listRefs", {
+      prefix: "context:literal_%",
+    });
+    expect(listed.map((row: any) => row.refName)).toEqual([
+      "context:literal_%:one",
+    ]);
 
-    expect(await call<any>("resolveRef", { refName: "context:literal_%:one" })).toBeTruthy();
-    expect(await call<any>("resolveRef", { refName: "context:literal_A:any" })).toBeTruthy();
-    expect(await call<any>("resolveRef", { refName: "context:literal_zz:any" })).toBeTruthy();
+    expect(
+      await call<any>("resolveRef", { refName: "context:literal_%:one" }),
+    ).toBeTruthy();
+    expect(
+      await call<any>("resolveRef", { refName: "context:literal_A:any" }),
+    ).toBeTruthy();
+    expect(
+      await call<any>("resolveRef", { refName: "context:literal_zz:any" }),
+    ).toBeTruthy();
   });
 });
 
@@ -2794,7 +3112,11 @@ describe("projection replay", () => {
           event: event("message.started", {
             turnId: "turn-1" as never,
             causality: { messageId: "msg-1" as never },
-            payload: { protocol: AGENTIC_PROTOCOL_VERSION, role: "assistant", blocks: [] },
+            payload: {
+              protocol: AGENTIC_PROTOCOL_VERSION,
+              role: "assistant",
+              blocks: [],
+            },
           }),
         },
         {
@@ -2813,12 +3135,15 @@ describe("projection replay", () => {
       ],
     });
 
-    const replay = await call<{ replayed: number }>("rebuildTrajectoryProjections", {});
+    const replay = await call<{ replayed: number }>(
+      "rebuildTrajectoryProjections",
+      {},
+    );
     expect(replay.replayed).toBe(2);
     const messages = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT log_id, head, message_id, role, status FROM trajectory_messages",
-      []
+      [],
     );
     expect(messages.rows).toEqual([
       expect.objectContaining({
@@ -2863,7 +3188,9 @@ describe("terminal idempotency guards (§3.13)", () => {
       ],
     });
 
-    const inspection = await call<any>("inspectInvocationState", { invocationId: "inv-1" });
+    const inspection = await call<any>("inspectInvocationState", {
+      invocationId: "inv-1",
+    });
     expect(inspection.rows[0]).toMatchObject({
       invocation_id: "inv-1",
       status: "completed",
@@ -2890,10 +3217,12 @@ describe("terminal idempotency guards (§3.13)", () => {
             }),
           },
         ],
-      })
+      }),
     ).resolves.toMatchObject({ head: "main" });
 
-    const replayInspection = await call<any>("inspectInvocationState", { invocationId: "inv-1" });
+    const replayInspection = await call<any>("inspectInvocationState", {
+      invocationId: "inv-1",
+    });
     expect(replayInspection.rows[0]).toMatchObject({
       invocation_id: "inv-1",
       status: "completed",
@@ -2920,12 +3249,15 @@ describe("terminal idempotency guards (§3.13)", () => {
             }),
           },
         ],
-      })
+      }),
     ).resolves.toMatchObject({ head: "main" });
 
-    const duplicateProjectionInspection = await call<any>("inspectInvocationState", {
-      invocationId: "inv-1",
-    });
+    const duplicateProjectionInspection = await call<any>(
+      "inspectInvocationState",
+      {
+        invocationId: "inv-1",
+      },
+    );
     expect(duplicateProjectionInspection.rows[0]).toMatchObject({
       invocation_id: "inv-1",
       status: "completed",
@@ -2952,13 +3284,13 @@ describe("terminal idempotency guards (§3.13)", () => {
                 terminalReasonCode: "eval_exception",
                 failure: agentToolFailureFromUnknown(
                   { message: "too late" },
-                  { operation: "eval", stage: "test" }
+                  { operation: "eval", stage: "test" },
                 ),
               },
             }),
           },
         ],
-      })
+      }),
     ).rejects.toThrow(/duplicate terminal invocation/u);
   });
 
@@ -2982,7 +3314,7 @@ describe("terminal idempotency guards (§3.13)", () => {
             }),
           },
         ],
-      })
+      }),
     ).rejects.toThrow(/terminalOutcome/u);
   });
 
@@ -2997,16 +3329,29 @@ describe("terminal idempotency guards (§3.13)", () => {
           eventId: "event-approval-request",
           event: event("approval.requested", {
             turnId: "turn-1" as never,
-            causality: { approvalId: "appr-1" as never, invocationId: "inv-1" as never },
-            payload: { protocol: AGENTIC_PROTOCOL_VERSION, question: "Run eval?" },
+            causality: {
+              approvalId: "appr-1" as never,
+              invocationId: "inv-1" as never,
+            },
+            payload: {
+              protocol: AGENTIC_PROTOCOL_VERSION,
+              question: "Run eval?",
+            },
           }),
         },
         {
           eventId: "event-approval-grant",
           event: event("approval.resolved", {
             turnId: "turn-1" as never,
-            causality: { approvalId: "appr-1" as never, invocationId: "inv-1" as never },
-            payload: { protocol: AGENTIC_PROTOCOL_VERSION, granted: true, resolvedBy: owner },
+            causality: {
+              approvalId: "appr-1" as never,
+              invocationId: "inv-1" as never,
+            },
+            payload: {
+              protocol: AGENTIC_PROTOCOL_VERSION,
+              granted: true,
+              resolvedBy: owner,
+            },
           }),
         },
       ],
@@ -3025,18 +3370,25 @@ describe("terminal idempotency guards (§3.13)", () => {
             eventId: "event-approval-deny",
             event: event("approval.resolved", {
               turnId: "turn-1" as never,
-              causality: { approvalId: "appr-1" as never, invocationId: "inv-1" as never },
-              payload: { protocol: AGENTIC_PROTOCOL_VERSION, granted: false, resolvedBy: owner },
+              causality: {
+                approvalId: "appr-1" as never,
+                invocationId: "inv-1" as never,
+              },
+              payload: {
+                protocol: AGENTIC_PROTOCOL_VERSION,
+                granted: false,
+                resolvedBy: owner,
+              },
             }),
           },
         ],
-      })
+      }),
     ).rejects.toThrow(/duplicate terminal approval/u);
 
     const approval = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT status, resolved_event_id FROM trajectory_approvals WHERE approval_id = ?",
-      ["appr-1"]
+      ["appr-1"],
     );
     expect(approval.rows[0]).toMatchObject({
       status: "granted",
@@ -3085,7 +3437,7 @@ describe("stored-value refs (§3.14)", () => {
     }>(
       sql,
       "SELECT log_id, head, envelope_id, field_path, digest FROM log_blob_refs ORDER BY envelope_id, field_path",
-      []
+      [],
     );
     expect(refs.rows).toEqual([
       {
@@ -3119,7 +3471,7 @@ describe("stored-value refs (§3.14)", () => {
             }),
           },
         ],
-      })
+      }),
     ).rejects.toThrow(/unencoded stored values/u);
   });
 
@@ -3135,19 +3487,24 @@ describe("stored-value refs (§3.14)", () => {
 
     const diagnostics = await call<{ rows: Array<Record<string, unknown>> }>(
       "inspectStorageDiagnostics",
-      {}
+      {},
     );
-    expect(diagnostics.rows).toEqual([expect.objectContaining({ id: "env-oversized" })]);
+    expect(diagnostics.rows).toEqual([
+      expect.objectContaining({ id: "env-oversized" }),
+    ]);
 
-    const integrity = await call<{ ok: boolean; errors: Array<Record<string, unknown>> }>(
-      "checkGadIntegrity",
-      {}
-    );
+    const integrity = await call<{
+      ok: boolean;
+      errors: Array<Record<string, unknown>>;
+    }>("checkGadIntegrity", {});
     expect(integrity.ok).toBe(false);
     expect(integrity.errors).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: "storage-diagnostic", id: "env-oversized" }),
-      ])
+        expect.objectContaining({
+          type: "storage-diagnostic",
+          id: "env-oversized",
+        }),
+      ]),
     );
   });
 
@@ -3179,11 +3536,17 @@ describe("stored-value refs (§3.14)", () => {
       ],
     });
 
-    const refs = await call<{ rows: Array<{ digest: string }> }>("listStoredValueRefs", {
-      eventId: "event-ref",
-    });
+    const refs = await call<{ rows: Array<{ digest: string }> }>(
+      "listStoredValueRefs",
+      {
+        eventId: "event-ref",
+      },
+    );
     expect(refs.rows.map((row) => row.digest)).toEqual(["kept-digest"]);
-    const diagnostics = await call<{ rows: unknown[] }>("inspectStorageDiagnostics", {});
+    const diagnostics = await call<{ rows: unknown[] }>(
+      "inspectStorageDiagnostics",
+      {},
+    );
     expect(diagnostics.rows).toEqual([]);
   });
 });
@@ -3201,7 +3564,11 @@ describe("lineage queries over causality edges (§3.15)", () => {
           event: event("message.completed", {
             turnId: "turn-1" as never,
             causality: { messageId: "msg-1" as never },
-            payload: textMessagePayload("msg-1", "assistant", "hello from trajectory"),
+            payload: textMessagePayload(
+              "msg-1",
+              "assistant",
+              "hello from trajectory",
+            ),
           }),
           publish: { channelIds: ["channel-1"] },
         },
@@ -3265,7 +3632,7 @@ describe("lineage queries over causality edges (§3.15)", () => {
         branchId: "main",
         channelId: "channel-1",
         channelSeq: 1,
-      })
+      }),
     ).resolves.toEqual({ seq: 1 });
     await expect(
       call("resolveTrajectoryForkPoint", {
@@ -3273,13 +3640,16 @@ describe("lineage queries over causality edges (§3.15)", () => {
         branchId: "main",
         channelId: "channel-1",
         channelSeq: 0,
-      })
+      }),
     ).resolves.toEqual({ seq: 0 });
 
-    const turnPublications = await call<any[]>("listPublishedEnvelopesForTrajectory", {
-      branchId: "main",
-      turnId: "turn-1",
-    });
+    const turnPublications = await call<any[]>(
+      "listPublishedEnvelopesForTrajectory",
+      {
+        branchId: "main",
+        turnId: "turn-1",
+      },
+    );
     expect(turnPublications).toHaveLength(1);
     expect(turnPublications[0]).toMatchObject({
       publication: {
@@ -3292,13 +3662,18 @@ describe("lineage queries over causality edges (§3.15)", () => {
       },
     });
 
-    const envelopesForTrajectory = await call<any[]>("getEnvelopesForTrajectory", {
-      branchId: "main",
-      eventId: "event-message-1",
-    });
+    const envelopesForTrajectory = await call<any[]>(
+      "getEnvelopesForTrajectory",
+      {
+        branchId: "main",
+        eventId: "event-message-1",
+      },
+    );
     expect(envelopesForTrajectory).toHaveLength(1);
 
-    const artifacts = await call<any[]>("getPublishedArtifactsForTurn", { turnId: "turn-1" });
+    const artifacts = await call<any[]>("getPublishedArtifactsForTurn", {
+      turnId: "turn-1",
+    });
     expect(artifacts).toEqual([
       expect.objectContaining({
         lineage: expect.objectContaining({
@@ -3307,14 +3682,22 @@ describe("lineage queries over causality edges (§3.15)", () => {
       }),
     ]);
 
-    const privateLineage = await call<any>("getPrivateLineageForPublishedEnvelope", {
-      envelopeId: "pub:event-message-1:channel-1",
-    });
-    expect(privateLineage.branchEvents.map((row: any) => row.eventId)).toEqual(["event-message-1"]);
+    const privateLineage = await call<any>(
+      "getPrivateLineageForPublishedEnvelope",
+      {
+        envelopeId: "pub:event-message-1:channel-1",
+      },
+    );
+    expect(privateLineage.branchEvents.map((row: any) => row.eventId)).toEqual([
+      "event-message-1",
+    ]);
 
-    const publicationIntegrity = await call<any>("inspectPublicationIntegrity", {
-      channelId: "channel-1",
-    });
+    const publicationIntegrity = await call<any>(
+      "inspectPublicationIntegrity",
+      {
+        channelId: "channel-1",
+      },
+    );
     expect(publicationIntegrity.summary).toMatchObject({
       expectedMappings: 1,
       missingMappings: 0,
@@ -3339,7 +3722,10 @@ describe("lineage queries over causality edges (§3.15)", () => {
             payload: {
               protocol: AGENTIC_PROTOCOL_VERSION,
               kind: "side-search-result",
-              details: blobRef("details-side", '{"privateFinding":"keep this out of PubSub"}'),
+              details: blobRef(
+                "details-side",
+                '{"privateFinding":"keep this out of PubSub"}',
+              ),
             },
           }),
         },
@@ -3351,7 +3737,7 @@ describe("lineage queries over causality edges (§3.15)", () => {
             payload: textMessagePayload(
               "side-summary-message",
               "assistant",
-              "Side task summary for the main session"
+              "Side task summary for the main session",
             ),
           }),
           publish: { channelIds: ["main-channel"] },
@@ -3387,21 +3773,31 @@ describe("lineage queries over causality edges (§3.15)", () => {
     });
 
     const publishedEnvelopeId = sideEnvelopes[0].publication.envelopeId;
-    const publicChannel = (await call<any>("readChannelEnvelopes", { channelId: "main-channel" }))
-      .items;
+    const publicChannel = (
+      await call<any>("readChannelEnvelopes", { channelId: "main-channel" })
+    ).items;
     expect(
-      publicChannel.map((envelope: any) => envelope.payload.payload.blocks?.[0]?.content)
+      publicChannel.map(
+        (envelope: any) => envelope.payload.payload.blocks?.[0]?.content,
+      ),
     ).toEqual(["Side task summary for the main session"]);
-    expect(JSON.stringify(publicChannel)).not.toContain("keep this out of PubSub");
+    expect(JSON.stringify(publicChannel)).not.toContain(
+      "keep this out of PubSub",
+    );
 
-    const privateLineage = await call<any>("getPrivateLineageForPublishedEnvelope", {
-      envelopeId: publishedEnvelopeId,
-    });
+    const privateLineage = await call<any>(
+      "getPrivateLineageForPublishedEnvelope",
+      {
+        envelopeId: publishedEnvelopeId,
+      },
+    );
     expect(privateLineage.branchEvents.map((row: any) => row.eventId)).toEqual([
       "side-private-observation",
       "side-summary",
     ]);
-    expect(JSON.stringify(privateLineage.branchEvents)).not.toContain("keep this out of PubSub");
+    expect(JSON.stringify(privateLineage.branchEvents)).not.toContain(
+      "keep this out of PubSub",
+    );
     expect(privateLineage.branchEvents[0].payload.details).toMatchObject({
       protocol: "vibestudio.blob-ref.v1",
       digest: "details-side",
@@ -3430,7 +3826,9 @@ describe("lineage queries over causality edges (§3.15)", () => {
     const consumers = await call<any[]>("getDownstreamConsumers", {
       envelopeId: publishedEnvelopeId,
     });
-    expect(consumers.map((row) => row.eventId)).toEqual(["main-consumes-side-summary"]);
+    expect(consumers.map((row) => row.eventId)).toEqual([
+      "main-consumes-side-summary",
+    ]);
     expect(consumers[0]).toMatchObject({
       branchId: "main",
       payload: { details: { object: publishedEnvelopeId } },
@@ -3457,19 +3855,26 @@ describe("checkGadIntegrity (§3.16)", () => {
       ],
     });
 
-    sql.exec("UPDATE log_events SET payload_ref_json = ? WHERE envelope_id = ?", "{}", "msg-1");
+    sql.exec(
+      "UPDATE log_events SET payload_ref_json = ? WHERE envelope_id = ?",
+      "{}",
+      "msg-1",
+    );
 
-    const scoped = await call<{ ok: boolean; errors: unknown[] }>("checkLogIntegrity", {
-      logId: "traj-1",
-      head: "main",
-    });
+    const scoped = await call<{ ok: boolean; errors: unknown[] }>(
+      "checkLogIntegrity",
+      {
+        logId: "traj-1",
+        head: "main",
+      },
+    );
     expect(scoped.ok).toBe(false);
     expect(scoped.errors.length).toBeGreaterThan(0);
 
-    const integrity = await call<{ ok: boolean; errors: Array<Record<string, unknown>> }>(
-      "checkGadIntegrity",
-      {}
-    );
+    const integrity = await call<{
+      ok: boolean;
+      errors: Array<Record<string, unknown>>;
+    }>("checkGadIntegrity", {});
     expect(integrity.ok).toBe(false);
     expect(JSON.stringify(integrity.errors)).toContain("msg-1");
   });
@@ -3490,19 +3895,22 @@ describe("checkGadIntegrity (§3.16)", () => {
       "deadbeef",
       "env-x",
       "channel-1",
-      "main"
+      "main",
     );
 
-    const scoped = await call<{ ok: boolean; errors: unknown[] }>("checkLogIntegrity", {
-      logId: "channel-1",
-      head: "main",
-    });
+    const scoped = await call<{ ok: boolean; errors: unknown[] }>(
+      "checkLogIntegrity",
+      {
+        logId: "channel-1",
+        head: "main",
+      },
+    );
     expect(scoped.ok).toBe(false);
 
-    const integrity = await call<{ ok: boolean; errors: Array<Record<string, unknown>> }>(
-      "checkGadIntegrity",
-      {}
-    );
+    const integrity = await call<{
+      ok: boolean;
+      errors: Array<Record<string, unknown>>;
+    }>("checkGadIntegrity", {});
     expect(integrity.ok).toBe(false);
     expect(JSON.stringify(integrity.errors)).toContain("channel-1");
   });
@@ -3518,14 +3926,18 @@ describe("checkGadIntegrity (§3.16)", () => {
     });
     sql.exec(
       `UPDATE log_events SET actor_json = ? WHERE envelope_id = ?`,
-      JSON.stringify({ kind: "panel", id: "panel:user", metadata: largeParticipantMetadata() }),
-      "env-corrupt"
+      JSON.stringify({
+        kind: "panel",
+        id: "panel:user",
+        metadata: largeParticipantMetadata(),
+      }),
+      "env-corrupt",
     );
 
-    const integrity = await call<{ ok: boolean; errors: Array<Record<string, unknown>> }>(
-      "checkGadIntegrity",
-      {}
-    );
+    const integrity = await call<{
+      ok: boolean;
+      errors: Array<Record<string, unknown>>;
+    }>("checkGadIntegrity", {});
 
     expect(integrity.ok).toBe(false);
     expect(JSON.stringify(integrity.errors)).toContain("env-corrupt");
@@ -3559,7 +3971,7 @@ describe("trajectory projection details", () => {
     const rows = await querySql<{ rows: Array<Record<string, unknown>> }>(
       sql,
       "SELECT turn_id, ordinal FROM trajectory_turns ORDER BY ordinal",
-      []
+      [],
     );
     expect(rows.rows).toEqual([
       expect.objectContaining({ turn_id: "turn-1", ordinal: 0 }),

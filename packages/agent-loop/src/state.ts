@@ -12,7 +12,13 @@ import type {
 } from "@workspace/agentic-protocol";
 import { logIdForChannel } from "@vibestudio/trajectory-identity";
 
-export type ThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type ThinkingLevel =
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
 
 /** How the executor authenticates a model call (design §6.3):
  *  "url-bound" — resolve a stored URL-bound credential (suspends on absence);
@@ -36,7 +42,12 @@ export interface AgentModelSpec {
   baseUrl: string;
   reasoning: boolean;
   input: Array<"text" | "image">;
-  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
   contextWindow: number;
   maxTokens: number;
   /** Provider service tiers supported by this exact catalog model. */
@@ -230,7 +241,7 @@ const FOLD_OWNED_CONFIG_KEYS = ["roster"] as const;
  *  channel tools don't vanish after an eviction/reload. */
 export function overlayInputConfig(
   folded: AgentLoopConfig,
-  input: AgentLoopConfig
+  input: AgentLoopConfig,
 ): AgentLoopConfig {
   const merged = { ...input };
   for (const key of FOLD_OWNED_CONFIG_KEYS) {
@@ -356,7 +367,9 @@ export interface PendingCredentialWait {
   startedAtSeq: number;
   connectSpec: Record<string, unknown>;
   modelBaseUrl?: string;
-  waitReason?: "model_credential_required" | "model_credential_reconnect_required";
+  waitReason?:
+    | "model_credential_required"
+    | "model_credential_reconnect_required";
   reason?: string;
   failureCode?: string;
   /** ISO; from the logged event, never wall clock. */
@@ -445,6 +458,7 @@ export type SessionEntry =
       kind: "tool-result";
       seq: number;
       invocationId: string;
+      turnId: string;
       attemptId?: string;
       name: string;
       result: unknown;
@@ -454,8 +468,16 @@ export type SessionEntry =
       terminate?: boolean;
       /** Retained so a terminal infrastructure failure cannot be forgotten
        * while parallel sibling invocations are still settling. */
-      terminalOutcome?: "tool_error" | "infrastructure_error";
+      terminalOutcome?:
+        | "tool_error"
+        | "infrastructure_error"
+        | "cancelled"
+        | "stale_dispatch"
+        | "abandoned";
       terminalReasonCode?: string;
+      /** Full typed failure is retained until turn closure so mission ledgers
+       * can record child-effect failures even when the model recovers. */
+      failure?: AgentToolFailure;
       /** Typed recovery survives folding so parallel sibling settlement cannot
        * turn a recoverable infrastructure failure into a terminal turn. */
       failureRecovery?: AgentToolFailure["recovery"];
@@ -509,23 +531,30 @@ export const MODEL_CONTEXT_VERSION = 1;
 export function normalizeForkControlState(state: AgentState): AgentState {
   if (state.forkSeq <= 0) return state;
   const pendingPrompt =
-    state.pendingPrompt && state.pendingPrompt.seq <= state.forkSeq ? null : state.pendingPrompt;
+    state.pendingPrompt && state.pendingPrompt.seq <= state.forkSeq
+      ? null
+      : state.pendingPrompt;
   const pendingPromptPreparations = Object.fromEntries(
     Object.entries(state.pendingPromptPreparations).filter(
-      ([, preparation]) => preparation.requestedAtSeq > state.forkSeq
-    )
+      ([, preparation]) => preparation.requestedAtSeq > state.forkSeq,
+    ),
   );
   return {
     ...state,
     modelContextVersion: MODEL_CONTEXT_VERSION,
     pendingPrompt,
     pendingPromptPreparations,
-    steeringQueue: state.steeringQueue.filter((entry) => entry.seq > state.forkSeq),
-    deferredPostTurnQueue: state.deferredPostTurnQueue.filter((entry) => entry.seq > state.forkSeq),
+    steeringQueue: state.steeringQueue.filter(
+      (entry) => entry.seq > state.forkSeq,
+    ),
+    deferredPostTurnQueue: state.deferredPostTurnQueue.filter(
+      (entry) => entry.seq > state.forkSeq,
+    ),
   };
 }
 
-export const GENESIS_LAST_HASH = "0000000000000000000000000000000000000000000000000000000000000000";
+export const GENESIS_LAST_HASH =
+  "0000000000000000000000000000000000000000000000000000000000000000";
 
 export interface InitialStateInput {
   channelId: string;
@@ -566,9 +595,12 @@ export function initialAgentState(input: InitialStateInput): AgentState {
 
 /** Derived turn status — replaces the old 8-state agent_turn_runs FSM. */
 export function derivedTurnStatus(
-  state: AgentState
+  state: AgentState,
 ): "idle" | "starting" | "running_model" | "waiting_external" | "continuing" {
-  if (state.pendingPrompt || Object.keys(state.pendingPromptPreparations).length > 0) {
+  if (
+    state.pendingPrompt ||
+    Object.keys(state.pendingPromptPreparations).length > 0
+  ) {
     return "starting";
   }
   if (!state.openTurn) return "idle";

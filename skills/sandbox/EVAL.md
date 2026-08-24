@@ -355,9 +355,11 @@ A trailing async IIFE is also treated as the eval result and awaited:
 })();
 ```
 
-Use `void (async () => { /* ... */ })()` only when intentionally starting
-detached background work. Detached work may outlive the eval result, so it is
-not appropriate for mutations whose result or failure the caller needs.
+Do not use `void (async () => { /* ... */ })()` to create background work.
+Detaching a promise neither journals it nor preserves the eval's execution
+authority. Work intended to outlive the eval must be persisted by an owning
+queue/workflow and resumed under a later admitted execution; otherwise await it
+so its result or failure belongs to this run.
 
 ## Console Output
 

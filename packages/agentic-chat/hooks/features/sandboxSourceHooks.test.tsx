@@ -6,6 +6,7 @@ import * as ReactJsxDevRuntime from "react/jsx-dev-runtime";
 import * as RadixIcons from "@radix-ui/react-icons";
 import * as RadixThemes from "@radix-ui/themes";
 import * as ReactResponsive from "@workspace/react/responsive";
+import * as ShellSurface from "@vibestudio/shared/shellSurface";
 import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFile } from "node:fs/promises";
@@ -409,6 +410,7 @@ describe("sandbox source hooks", () => {
     moduleMap["@radix-ui/react-icons"] = RadixIcons;
     moduleMap["@workspace/runtime"] = {};
     moduleMap["@workspace/model-catalog/catalog"] = {};
+    moduleMap["@vibestudio/shared/shellSurface"] = ShellSurface;
 
     const sourcePath = "skills/onboarding/SetupHub.tsx";
     const workspaceRoot =

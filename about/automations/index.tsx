@@ -1,4 +1,10 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   AlertDialog,
   Badge,
@@ -56,7 +62,7 @@ type OverviewItem = {
   recentRuns: RunRecord[];
   totalRuns: number;
   activeRuns: number;
-  failedRunsSince: number;
+  issueRunsSince: number;
 };
 type Overview = {
   generatedAt: number;
@@ -64,7 +70,7 @@ type Overview = {
     total: number;
     active: number;
     running: number;
-    failedLast24Hours: number;
+    issueRunsLast24Hours: number;
     completed: number;
   };
   items: OverviewItem[];
@@ -93,14 +99,17 @@ function callAutomations<T>(method: string, args: unknown[]): Promise<T> {
   return targetPromise.then((target) => rpc.call<T>(target, method, args));
 }
 
-const automationUiClient: AutomationUiClient = createAutomationUiClient(rpc, (run) => {
-  if (!run.channelId || !run.contextId) return;
-  void openPanel("panels/chat", {
-    focus: true,
-    contextId: run.contextId,
-    stateArgs: { channelName: run.channelId },
-  });
-});
+const automationUiClient: AutomationUiClient = createAutomationUiClient(
+  rpc,
+  (run) => {
+    if (!run.channelId || !run.contextId) return;
+    void openPanel("panels/chat", {
+      focus: true,
+      contextId: run.contextId,
+      stateArgs: { channelName: run.channelId },
+    });
+  },
+);
 
 function absoluteTime(value: number): string {
   return new Intl.DateTimeFormat(undefined, {
@@ -116,10 +125,13 @@ function relativeTime(value: number, now = Date.now()): string {
     [3_600_000, "hour"],
     [60_000, "minute"],
   ] as const;
-  const [unitMs, unit] = units.find(([size]) => Math.abs(delta) >= size) ?? [1_000, "second"];
+  const [unitMs, unit] = units.find(([size]) => Math.abs(delta) >= size) ?? [
+    1_000,
+    "second",
+  ];
   return new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(
     Math.round(delta / unitMs),
-    unit
+    unit,
   );
 }
 
@@ -138,6 +150,7 @@ function statusLabel(run: RunRecord): string {
   if (run.phase !== "terminal")
     return run.phase === "admitted" ? "Starting" : "Running";
   if (run.outcome === "succeeded") return "Succeeded";
+  if (run.outcome === "completed-with-errors") return "Completed with errors";
   if (run.outcome === "failed") return "Failed";
   if (run.outcome === "interrupted") return "Interrupted";
   if (run.outcome === "cancelled") return "Cancelled";
@@ -148,12 +161,17 @@ function mergeRuns(primary: RunRecord[], extra: RunRecord[]): RunRecord[] {
   const byId = new Map(extra.map((run) => [run.runId, run]));
   for (const run of primary) byId.set(run.runId, run);
   return [...byId.values()].sort(
-    (a, b) => b.startedAt - a.startedAt || b.runId.localeCompare(a.runId)
+    (a, b) => b.startedAt - a.startedAt || b.runId.localeCompare(a.runId),
   );
 }
 
-function mergeOverviewItems(primary: OverviewItem[], extra: OverviewItem[]): OverviewItem[] {
-  const byId = new Map(primary.map((item) => [item.automation.missionId, item]));
+function mergeOverviewItems(
+  primary: OverviewItem[],
+  extra: OverviewItem[],
+): OverviewItem[] {
+  const byId = new Map(
+    primary.map((item) => [item.automation.missionId, item]),
+  );
   for (const item of extra) byId.set(item.automation.missionId, item);
   return [...byId.values()];
 }
@@ -169,8 +187,13 @@ function Disclosure({
 }) {
   const [open, setOpen] = useState(initiallyOpen);
   return (
-    <details open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary style={{ cursor: "pointer", fontWeight: 500 }}>{summary}</summary>
+    <details
+      open={open}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary style={{ cursor: "pointer", fontWeight: 500 }}>
+        {summary}
+      </summary>
       {open ? children : null}
     </details>
   );
@@ -240,36 +263,53 @@ function activityFor(automation: AutomationRecord, run: RunRecord) {
       runId: run.runId,
       name: automation.name,
       revision: run.revision,
-      action: execution.kind === "method" ? ("method" as const) : execution.action.kind,
+      action:
+        execution.kind === "method"
+          ? ("method" as const)
+          : execution.action.kind,
       trigger: run.trigger,
       startedAt: run.startedAt,
       createdAt: automation.createdAt,
-      ...(automation.activatedAt === undefined ? {} : { activatedAt: automation.activatedAt }),
+      ...(automation.activatedAt === undefined
+        ? {}
+        : { activatedAt: automation.activatedAt }),
       ...(run.runNumber === undefined ? {} : { runNumber: run.runNumber }),
       schedule:
         trigger.kind === "schedule"
           ? {
               kind: "interval" as const,
               everyMs: trigger.everyMs,
-              ...(trigger.anchorAt === undefined ? {} : { anchorAt: trigger.anchorAt }),
-              ...(trigger.jitterMs === undefined ? {} : { jitterMs: trigger.jitterMs }),
-              ...(trigger.untilAt === undefined ? {} : { untilAt: trigger.untilAt }),
-              ...(trigger.maxRuns === undefined ? {} : { maxRuns: trigger.maxRuns }),
+              ...(trigger.anchorAt === undefined
+                ? {}
+                : { anchorAt: trigger.anchorAt }),
+              ...(trigger.jitterMs === undefined
+                ? {}
+                : { jitterMs: trigger.jitterMs }),
+              ...(trigger.untilAt === undefined
+                ? {}
+                : { untilAt: trigger.untilAt }),
+              ...(trigger.maxRuns === undefined
+                ? {}
+                : { maxRuns: trigger.maxRuns }),
             }
           : trigger.kind === "cron"
             ? {
                 kind: "cron" as const,
                 expression: trigger.expression,
                 timezone: trigger.timezone,
-                ...(trigger.untilAt === undefined ? {} : { untilAt: trigger.untilAt }),
-                ...(trigger.maxRuns === undefined ? {} : { maxRuns: trigger.maxRuns }),
+                ...(trigger.untilAt === undefined
+                  ? {}
+                  : { untilAt: trigger.untilAt }),
+                ...(trigger.maxRuns === undefined
+                  ? {}
+                  : { maxRuns: trigger.maxRuns }),
               }
             : null,
     },
     status:
       run.outcome === "succeeded"
         ? ("succeeded" as const)
-        : run.outcome === "failed"
+        : run.outcome === "failed" || run.outcome === "completed-with-errors"
           ? ("failed" as const)
           : run.outcome === "skipped"
             ? ("skipped" as const)
@@ -287,7 +327,13 @@ function activityFor(automation: AutomationRecord, run: RunRecord) {
   };
 }
 
-function RunRow({ run, automation }: { run: RunRecord; automation: AutomationRecord }) {
+function RunRow({
+  run,
+  automation,
+}: {
+  run: RunRecord;
+  automation: AutomationRecord;
+}) {
   return (
     <Box
       py="3"
@@ -315,6 +361,27 @@ function RunRow({ run, automation }: { run: RunRecord; automation: AutomationRec
             </Callout.Icon>
             <Callout.Text style={{ overflowWrap: "anywhere" }}>
               {run.failure.message}
+            </Callout.Text>
+          </Callout.Root>
+        ) : null}
+        {run.effectFailures?.length ? (
+          <Callout.Root color="amber" size="1">
+            <Callout.Icon>
+              <ExclamationTriangleIcon />
+            </Callout.Icon>
+            <Callout.Text>
+              <Text as="span" weight="medium" style={{ display: "block" }}>
+                Failed effects
+              </Text>
+              {run.effectFailures.map((effect) => (
+                <Text
+                  key={effect.invocationId}
+                  as="span"
+                  style={{ display: "block" }}
+                >
+                  {effect.name}: {effect.message}
+                </Text>
+              ))}
             </Callout.Text>
           </Callout.Root>
         ) : null}
@@ -431,7 +498,8 @@ function executionDescription(automation: AutomationRecord): string {
   if (execution.kind === "method") {
     return `${execution.image.className}.${execution.method}`;
   }
-  const action = execution.action.kind === "eval" ? "Exact eval" : "Agent prompt";
+  const action =
+    execution.action.kind === "eval" ? "Exact eval" : "Agent prompt";
   return execution.conversation.mode === "fresh"
     ? `${action} · new conversation each run`
     : `${action} · continues one conversation`;
@@ -440,7 +508,9 @@ function executionDescription(automation: AutomationRecord): string {
 function scheduleDescription(automation: AutomationRecord): string {
   const trigger = automation.charter.trigger;
   if (trigger.kind === "manual") return "Manual only";
-  return trigger.kind === "schedule" ? `Every ${duration(trigger.everyMs)}` : "Calendar schedule";
+  return trigger.kind === "schedule"
+    ? `Every ${duration(trigger.everyMs)}`
+    : "Calendar schedule";
 }
 
 function ScheduleDetails({ automation }: { automation: AutomationRecord }) {
@@ -474,7 +544,8 @@ function ScheduleDetails({ automation }: { automation: AutomationRecord }) {
         </Text>
       ) : (
         <Text size="1" color="gray">
-          {automation.runCount} run{automation.runCount === 1 ? "" : "s"} admitted
+          {automation.runCount} run{automation.runCount === 1 ? "" : "s"}{" "}
+          admitted
         </Text>
       )}
     </Flex>
@@ -522,7 +593,8 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
       {execution.kind === "method" ? (
         <Box>
           <Text as="div" size="1" color="gray" mb="1">
-            Exact method arguments · authority comes from the installed target code
+            Exact method arguments · authority comes from the installed target
+            code
           </Text>
           <Box
             p="3"
@@ -570,7 +642,9 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
               }}
             >
               <Text as="div" size="2">
-                {execution.action.kind === "eval" ? execution.action.code : execution.action.text}
+                {execution.action.kind === "eval"
+                  ? execution.action.code
+                  : execution.action.text}
               </Text>
             </Box>
           </Box>
@@ -594,7 +668,8 @@ function DefinitionDetails({ automation }: { automation: AutomationRecord }) {
             </Flex>
           ) : (
             <Text size="2" color="gray">
-              No pre-acquisition hints; runtime calls still use ordinary approval.
+              No pre-acquisition hints; runtime calls still use ordinary
+              approval.
             </Text>
           )}
         </Box>
@@ -634,7 +709,8 @@ function AutomationEditorButton({
       <Dialog.Content maxWidth="760px" aria-describedby={undefined}>
         <Dialog.Title>Edit {automation.name}</Dialog.Title>
         <Dialog.Description size="2" color="gray" mb="4">
-          Change the action or cadence. Saving applies the new revision immediately.
+          Change the action or cadence. Saving applies the new revision
+          immediately.
         </Dialog.Description>
         <AutomationParametersEditor
           automation={automation}
@@ -673,7 +749,7 @@ function AutomationCard({
 }) {
   const automation = item.automation;
   const execution = automation.charter.execution;
-  const hasProblem = item.failedRunsSince > 0;
+  const hasProblem = item.issueRunsSince > 0;
   const busy = busyAction !== null;
   const schedule = scheduleDescription(automation);
   return (
@@ -681,7 +757,11 @@ function AutomationCard({
       id={`automation-${automation.missionId}`}
       size="3"
       style={{
-        borderColor: deepLinked ? "var(--accent-a8)" : hasProblem ? "var(--amber-a7)" : undefined,
+        borderColor: deepLinked
+          ? "var(--accent-a8)"
+          : hasProblem
+            ? "var(--amber-a7)"
+            : undefined,
         boxShadow: deepLinked ? "0 0 0 1px var(--accent-a5)" : undefined,
         scrollMargin: 24,
       }}
@@ -717,12 +797,20 @@ function AutomationCard({
           </Box>
           <Flex gap="2" wrap="wrap" align="center">
             {automation.state !== "retired" ? (
-              <AutomationEditorButton automation={automation} disabled={busy} onSaved={onEdited} />
+              <AutomationEditorButton
+                automation={automation}
+                disabled={busy}
+                onSaved={onEdited}
+              />
             ) : null}
             {automation.state === "active" ? (
               <>
                 <Button disabled={busy} onClick={() => onAction("runNow")}>
-                  {busyAction === "runNow" ? <Spinner size="1" /> : <PlayIcon />}
+                  {busyAction === "runNow" ? (
+                    <Spinner size="1" />
+                  ) : (
+                    <PlayIcon />
+                  )}
                   Run now
                 </Button>
                 <Button
@@ -732,7 +820,11 @@ function AutomationCard({
                   onClick={() => onAction("pause")}
                   aria-label={`Stop recurring calls for ${automation.name}`}
                 >
-                  {busyAction === "pause" ? <Spinner size="1" /> : <PauseIcon />}
+                  {busyAction === "pause" ? (
+                    <Spinner size="1" />
+                  ) : (
+                    <PauseIcon />
+                  )}
                   {automation.charter.trigger.kind !== "manual"
                     ? "Stop recurring calls"
                     : "Pause automation"}
@@ -740,8 +832,13 @@ function AutomationCard({
               </>
             ) : null}
             {automation.state === "paused" ? (
-              <Button variant="soft" disabled={busy} onClick={() => onAction("resume")}>
-                {busyAction === "resume" ? <Spinner size="1" /> : <PlayIcon />} Resume
+              <Button
+                variant="soft"
+                disabled={busy}
+                onClick={() => onAction("resume")}
+              >
+                {busyAction === "resume" ? <Spinner size="1" /> : <PlayIcon />}{" "}
+                Resume
               </Button>
             ) : null}
             {automation.state !== "retired" ? (
@@ -757,10 +854,13 @@ function AutomationCard({
                   </IconButton>
                 </AlertDialog.Trigger>
                 <AlertDialog.Content maxWidth="440px">
-                  <AlertDialog.Title>Retire {automation.name}?</AlertDialog.Title>
+                  <AlertDialog.Title>
+                    Retire {automation.name}?
+                  </AlertDialog.Title>
                   <AlertDialog.Description size="2">
-                    This permanently ends its schedule and installed identity. Its run history and
-                    conversations remain available for inspection.
+                    This permanently ends its schedule and installed identity.
+                    Its run history and conversations remain available for
+                    inspection.
                   </AlertDialog.Description>
                   <Flex gap="3" mt="4" justify="end">
                     <AlertDialog.Cancel>
@@ -806,7 +906,11 @@ function AutomationCard({
               Action
             </Text>
             <Flex align="center" gap="1">
-              {execution.kind === "agent" ? <RocketIcon /> : <LightningBoltIcon />}
+              {execution.kind === "agent" ? (
+                <RocketIcon />
+              ) : (
+                <LightningBoltIcon />
+              )}
               <Text size="2" weight="medium">
                 {executionDescription(automation)}
               </Text>
@@ -864,7 +968,9 @@ function AutomationCard({
         ) : null}
 
         <Disclosure
-          initiallyOpen={deepLinked || item.activeRuns > 0 || item.failedRunsSince > 0}
+          initiallyOpen={
+            deepLinked || item.activeRuns > 0 || item.issueRunsSince > 0
+          }
           summary={
             <>
               Run history <Text color="gray">({item.totalRuns})</Text>
@@ -873,17 +979,27 @@ function AutomationCard({
         >
           <Box mt="2">
             {runs.length > 0 ? (
-              runs.map((run) => <RunRow key={run.runId} run={run} automation={automation} />)
+              runs.map((run) => (
+                <RunRow key={run.runId} run={run} automation={automation} />
+              ))
             ) : (
               <Box py="3">
                 <Text as="div" size="2" color="gray">
                   No runs yet.{" "}
-                  {automation.state === "active" ? "Run it now or wait for its schedule." : ""}
+                  {automation.state === "active"
+                    ? "Run it now or wait for its schedule."
+                    : ""}
                 </Text>
               </Box>
             )}
             {canLoadMore ? (
-              <Button mt="2" size="1" variant="soft" disabled={loadingMore} onClick={onLoadMore}>
+              <Button
+                mt="2"
+                size="1"
+                variant="soft"
+                disabled={loadingMore}
+                onClick={onLoadMore}
+              >
                 {loadingMore ? <Spinner size="1" /> : null} Load older runs
               </Button>
             ) : null}
@@ -905,9 +1021,12 @@ function AutomationCard({
 }
 
 function AutomationsPage() {
-  const initialMissionId = panel.stateArgs.get<{ missionId?: unknown }>().missionId;
+  const initialMissionId = panel.stateArgs.get<{ missionId?: unknown }>()
+    .missionId;
   const [deepLinkedMissionId, setDeepLinkedMissionId] = useState<string | null>(
-    typeof initialMissionId === "string" && initialMissionId ? initialMissionId : null
+    typeof initialMissionId === "string" && initialMissionId
+      ? initialMissionId
+      : null,
   );
   const [overview, setOverview] = useState<Overview | null>(null);
   const [olderRuns, setOlderRuns] = useState<Record<string, RunRecord[]>>({});
@@ -952,7 +1071,7 @@ function AutomationsPage() {
                   ...next,
                   items: mergeOverviewItems(current.items, next.items),
                 }
-              : next
+              : next,
           );
         }
       } catch (cause) {
@@ -967,7 +1086,7 @@ function AutomationsPage() {
         }
       }
     },
-    [debouncedQuery, deepLinkedMissionId, filter]
+    [debouncedQuery, deepLinkedMissionId, filter],
   );
 
   useEffect(() => {
@@ -986,7 +1105,10 @@ function AutomationsPage() {
   }, [activeRunCount, load]);
 
   const action = useCallback(
-    async (automation: AutomationRecord, method: "runNow" | "pause" | "resume" | "retire") => {
+    async (
+      automation: AutomationRecord,
+      method: "runNow" | "pause" | "resume" | "retire",
+    ) => {
       setBusy({ id: automation.missionId, action: method });
       setError(null);
       try {
@@ -998,7 +1120,7 @@ function AutomationsPage() {
         setBusy(null);
       }
     },
-    [load]
+    [load],
   );
 
   const loadMore = useCallback(
@@ -1030,7 +1152,7 @@ function AutomationsPage() {
         setLoadingMoreId(null);
       }
     },
-    [olderRuns]
+    [olderRuns],
   );
 
   const items = overview?.items ?? [];
@@ -1038,7 +1160,7 @@ function AutomationsPage() {
     total: 0,
     active: 0,
     running: 0,
-    failedLast24Hours: 0,
+    issueRunsLast24Hours: 0,
     completed: 0,
   };
 
@@ -1051,7 +1173,11 @@ function AutomationsPage() {
       actions={
         <Flex align="center" gap="2">
           {overview ? (
-            <Text size="1" color="gray" title={absoluteTime(overview.generatedAt)}>
+            <Text
+              size="1"
+              color="gray"
+              title={absoluteTime(overview.generatedAt)}
+            >
               Updated {relativeTime(overview.generatedAt)}
             </Text>
           ) : null}
@@ -1084,11 +1210,15 @@ function AutomationsPage() {
         />
         <MetricCard
           label="Failed"
-          value={counts.failedLast24Hours}
+          value={counts.issueRunsLast24Hours}
           detail="in the last 24h"
           tone="red"
         />
-        <MetricCard label="Completed" value={counts.completed} detail="ended naturally" />
+        <MetricCard
+          label="Completed"
+          value={counts.completed}
+          detail="ended naturally"
+        />
       </Grid>
 
       {error ? (
@@ -1110,7 +1240,9 @@ function AutomationsPage() {
           <Callout.Icon>
             <LightningBoltIcon />
           </Callout.Icon>
-          <Callout.Text>Showing the automation selected from its processing notice.</Callout.Text>
+          <Callout.Text>
+            Showing the automation selected from its processing notice.
+          </Callout.Text>
           <Button
             size="1"
             variant="soft"
@@ -1125,7 +1257,10 @@ function AutomationsPage() {
       ) : null}
 
       {overview?.attention.length ? (
-        <Card size="3" style={{ background: "var(--red-a2)", borderColor: "var(--red-a6)" }}>
+        <Card
+          size="3"
+          style={{ background: "var(--red-a2)", borderColor: "var(--red-a6)" }}
+        >
           <Flex align="center" gap="2" mb="1">
             <CrossCircledIcon color="var(--red-10)" />
             <Heading size="4">Needs attention</Heading>
@@ -1134,7 +1269,8 @@ function AutomationsPage() {
             </Badge>
           </Flex>
           <Text as="p" size="2" color="gray" mb="2">
-            Recent failures are collected here so unattended work cannot fail silently.
+            Recent failures are collected here so unattended work cannot fail
+            silently.
           </Text>
           {overview.attention.map((item) => (
             <AttentionRow key={item.run.runId} item={item} />
@@ -1145,7 +1281,9 @@ function AutomationsPage() {
           <Callout.Icon>
             <CheckCircledIcon />
           </Callout.Icon>
-          <Callout.Text>No automation failures in the last 24 hours.</Callout.Text>
+          <Callout.Text>
+            No automation failures in the last 24 hours.
+          </Callout.Text>
         </Callout.Root>
       ) : null}
 
@@ -1164,10 +1302,14 @@ function AutomationsPage() {
             style={{ minWidth: "max-content" }}
           >
             <SegmentedControl.Item value="all">All</SegmentedControl.Item>
-            <SegmentedControl.Item value="attention">Attention</SegmentedControl.Item>
+            <SegmentedControl.Item value="attention">
+              Attention
+            </SegmentedControl.Item>
             <SegmentedControl.Item value="active">Active</SegmentedControl.Item>
             <SegmentedControl.Item value="paused">Paused</SegmentedControl.Item>
-            <SegmentedControl.Item value="completed">Completed</SegmentedControl.Item>
+            <SegmentedControl.Item value="completed">
+              Completed
+            </SegmentedControl.Item>
           </SegmentedControl.Root>
         </Box>
         <TextField.Root
@@ -1205,8 +1347,9 @@ function AutomationsPage() {
               </Box>
               <Heading size="4">No automations yet</Heading>
               <Text as="p" size="2" color="gray" style={{ maxWidth: 520 }}>
-                Ask an agent to launch a periodic script or prompt. It starts immediately and
-                appears in its conversation as an inspectable automation pill.
+                Ask an agent to launch a periodic script or prompt. It starts
+                immediately and appears in its conversation as an inspectable
+                automation pill.
               </Text>
             </Flex>
           </Card>

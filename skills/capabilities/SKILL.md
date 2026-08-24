@@ -140,6 +140,12 @@ Missing runtime authority uses ordinary acquisition; do not force automation
 eval into `pregranted-only` mode. The plan predicts launch-time acquisition; it
 does not authorize, deny, or structurally expose a runtime call.
 
+The RPC runtime keeps an admitted parent active until every outbound operation
+it started settles, across direct clients, request-scoped clients, and typed
+peers, including when the parent handler throws. Do not use `waitUntil` or a
+floating promise as authority inheritance. Work intended to begin after the
+parent closes must be persisted and admitted as a new execution.
+
 The System Agent is a product-owned mission with a product-derived worker,
 prompt, roster, tools, and execution identity. It uses ordinary typed services
 inside eval. Never add a special transport, receiver bypass, approval channel,

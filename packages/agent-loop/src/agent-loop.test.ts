@@ -86,7 +86,7 @@ function scenario(
     modelAuth?: AgentLoopConfig["modelAuth"];
     fallback?: boolean;
     fallbackConfig?: Partial<AgentLoopConfig>;
-  } = {}
+  } = {},
 ): Scenario {
   return createScenario({
     state: initialAgentState({
@@ -101,7 +101,9 @@ function scenario(
         ...(opts.modelAuth ? { modelAuth: opts.modelAuth } : {}),
         ...(opts.fallback ? { fallbackModelRef, fallbackModelSpec } : {}),
         ...opts.fallbackConfig,
-        ...(opts.publishPolicy !== undefined ? { publishPolicy: opts.publishPolicy } : {}),
+        ...(opts.publishPolicy !== undefined
+          ? { publishPolicy: opts.publishPolicy }
+          : {}),
       },
       forkSeq: opts.forkSeq,
     }),
@@ -113,7 +115,7 @@ function prompt(
   s: Scenario,
   envelopeId = "env-1",
   content = "hello",
-  metadata?: AgentTurnMetadata
+  metadata?: AgentTurnMetadata,
 ): void {
   dispatch(s, {
     type: "command",
@@ -122,7 +124,11 @@ function prompt(
       channelId: "chan-1",
       source: { envelopeId },
       content,
-      senderRef: { kind: "user", id: "panel:user", participantId: "panel:user" },
+      senderRef: {
+        kind: "user",
+        id: "panel:user",
+        participantId: "panel:user",
+      },
       ...(metadata ? { metadata } : {}),
     },
   });
@@ -132,7 +138,7 @@ function prompt(
 function drainPromptArtifactPreparations(s: Scenario): void {
   for (;;) {
     const effect = [...s.effects.values()].find(
-      (candidate) => candidate.kind === "prompt_artifacts"
+      (candidate) => candidate.kind === "prompt_artifacts",
     );
     if (!effect) return;
     resolveEffect(s, effect.effectId, {
@@ -171,7 +177,9 @@ describe("agent-loop core lifecycle", () => {
       },
     });
 
-    expect(s.log.find((row) => row.payloadKind === "message.completed")?.payload).toMatchObject({
+    expect(
+      s.log.find((row) => row.payloadKind === "message.completed")?.payload,
+    ).toMatchObject({
       role: "user",
       structuredInput,
     });
@@ -196,20 +204,30 @@ describe("agent-loop core lifecycle", () => {
         channelId: "chan-1",
         source: { envelopeId: "env-1" },
         content: "hello",
-        senderRef: { kind: "user", id: "panel:user", participantId: "panel:user" },
+        senderRef: {
+          kind: "user",
+          id: "panel:user",
+          participantId: "panel:user",
+        },
       },
     });
 
     expect(kinds(s)).toEqual(["message.completed"]);
     expect(s.state.openTurn).toBeNull();
-    expect(pendingEffectIds(s)).toEqual([ids.promptArtifactsEffect(triggerEnvelopeId)]);
+    expect(pendingEffectIds(s)).toEqual([
+      ids.promptArtifactsEffect(triggerEnvelopeId),
+    ]);
 
     resolveEffect(s, ids.promptArtifactsEffect(triggerEnvelopeId), {
       kind: "prompt-artifacts",
       patch: { systemPromptHash: "blob:prepared" },
     });
 
-    expect(kinds(s)).toEqual(["message.completed", "turn.opened", "message.started"]);
+    expect(kinds(s)).toEqual([
+      "message.completed",
+      "turn.opened",
+      "message.started",
+    ]);
     expect(s.state.config.systemPromptHash).toBe("blob:prepared");
     expect(s.state.openTurn?.turnId).toBe(turn1);
     expect(pendingEffectIds(s)).toEqual([ids.modelEffect(msg0)]);
@@ -218,7 +236,7 @@ describe("agent-loop core lifecycle", () => {
         s.log.find((row) => row.payloadKind === "message.started")!.payload as {
           modelRequest: { systemPromptHash: string };
         }
-      ).modelRequest.systemPromptHash
+      ).modelRequest.systemPromptHash,
     ).toBe("blob:prepared");
   });
 
@@ -233,7 +251,11 @@ describe("agent-loop core lifecycle", () => {
         channelId: "chan-1",
         source: { envelopeId: "env-1" },
         content: "hello",
-        senderRef: { kind: "user", id: "panel:user", participantId: "panel:user" },
+        senderRef: {
+          kind: "user",
+          id: "panel:user",
+          participantId: "panel:user",
+        },
       },
     });
     dispatch(s, {
@@ -257,8 +279,9 @@ describe("agent-loop core lifecycle", () => {
     expect(
       s.log.find(
         (row) =>
-          row.payloadKind === "message.completed" && row.envelopeId.includes(":prompt-artifacts:")
-      )
+          row.payloadKind === "message.completed" &&
+          row.envelopeId.includes(":prompt-artifacts:"),
+      ),
     ).toMatchObject({
       payloadKind: "message.completed",
       publish: true,
@@ -286,13 +309,22 @@ describe("agent-loop core lifecycle", () => {
         channelId: "chan-1",
         source: { envelopeId: "env-1" },
         content: "hello",
-        senderRef: { kind: "user", id: "panel:user", participantId: "panel:user" },
+        senderRef: {
+          kind: "user",
+          id: "panel:user",
+          participantId: "panel:user",
+        },
         reason: "prompt resource unavailable",
         code: "prompt_artifact_load_failed",
       },
     });
 
-    expect(kinds(s)).toEqual(["message.completed", "turn.opened", "message.failed", "turn.closed"]);
+    expect(kinds(s)).toEqual([
+      "message.completed",
+      "turn.opened",
+      "message.failed",
+      "turn.closed",
+    ]);
     expect(s.log[2]).toMatchObject({
       payload: {
         reason: "prompt resource unavailable",
@@ -311,7 +343,11 @@ describe("agent-loop core lifecycle", () => {
     prompt(s);
 
     // journal-before-dispatch: recv + turn.opened + message.started all durable
-    expect(kinds(s)).toEqual(["message.completed", "turn.opened", "message.started"]);
+    expect(kinds(s)).toEqual([
+      "message.completed",
+      "turn.opened",
+      "message.started",
+    ]);
     const opened = s.log.find((row) => row.payloadKind === "turn.opened")!;
     const started = s.log.find((row) => row.payloadKind === "message.started")!;
     expect(opened.causality).toMatchObject({
@@ -322,7 +358,9 @@ describe("agent-loop core lifecycle", () => {
     expect(pendingEffectIds(s)).toEqual([ids.modelEffect(msg0)]);
 
     // the started payload fully describes the request (re-derivable, P2)
-    const request = (started.payload as { modelRequest: Record<string, unknown> }).modelRequest;
+    const request = (
+      started.payload as { modelRequest: Record<string, unknown> }
+    ).modelRequest;
     expect(request).toMatchObject({
       provider: "anthropic",
       model: "claude-sonnet-4-6",
@@ -346,7 +384,10 @@ describe("agent-loop core lifecycle", () => {
     ]);
     expect(s.state.openTurn).toBeNull();
     expect(pendingEffectIds(s)).toEqual([]);
-    expect(s.state.entries.map((entry) => entry.kind)).toEqual(["user", "assistant"]);
+    expect(s.state.entries.map((entry) => entry.kind)).toEqual([
+      "user",
+      "assistant",
+    ]);
   });
 
   it("journals the priority service tier when fast mode is enabled for a supporting model", () => {
@@ -366,7 +407,8 @@ describe("agent-loop core lifecycle", () => {
 
     const started = s.log.find((row) => row.payloadKind === "message.started")!;
     expect(
-      (started.payload as { modelRequest: Record<string, unknown> }).modelRequest
+      (started.payload as { modelRequest: Record<string, unknown> })
+        .modelRequest,
     ).toMatchObject({ serviceTier: "priority" });
   });
 
@@ -376,7 +418,11 @@ describe("agent-loop core lifecycle", () => {
       participants: [
         {
           participantId: "panel:user",
-          ref: { kind: "panel" as const, id: "panel:user", participantId: "panel:user" },
+          ref: {
+            kind: "panel" as const,
+            id: "panel:user",
+            participantId: "panel:user",
+          },
           type: "panel",
           methods: [{ name: "set_title" }],
         },
@@ -400,12 +446,21 @@ describe("agent-loop core lifecycle", () => {
     prompt(s);
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
-      blocks: [{ type: "toolCall", id: "tc-1", name: "read", arguments: { path: "a.ts" } }],
+      blocks: [
+        {
+          type: "toolCall",
+          id: "tc-1",
+          name: "read",
+          arguments: { path: "a.ts" },
+        },
+      ],
       stopReason: "completed",
     });
 
     // invocation journaled with full transport; effect pending
-    const started = s.log.find((row) => row.envelopeId === ids.invocationStart("tc-1"))!;
+    const started = s.log.find(
+      (row) => row.envelopeId === ids.invocationStart("tc-1"),
+    )!;
     expect(started.payload).toMatchObject({
       name: "read",
       transport: { kind: "local", awaiterId: "tc-1" },
@@ -419,7 +474,7 @@ describe("agent-loop core lifecycle", () => {
         invocationSeq: started.seq,
         executionMode: "parallel",
         cancellationMode: "interruptible",
-      })
+      }),
     );
 
     resolveEffect(s, ids.invocationEffect("tc-1"), {
@@ -457,20 +512,32 @@ describe("agent-loop core lifecycle", () => {
     prompt(s);
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
-      blocks: [{ type: "toolCall", id: "tc-infra", name: "read", arguments: { path: "a.ts" } }],
+      blocks: [
+        {
+          type: "toolCall",
+          id: "tc-infra",
+          name: "read",
+          arguments: { path: "a.ts" },
+        },
+      ],
       stopReason: "completed",
     });
 
     resolveEffect(s, ids.invocationEffect("tc-infra"), {
       kind: "tool",
-      result: { error: "package linker unavailable", code: "package_load_failed" },
+      result: {
+        error: "package linker unavailable",
+        code: "package_load_failed",
+      },
       isError: true,
       reason: "package linker unavailable",
       terminalOutcome: "infrastructure_error",
       terminalReasonCode: "package_load_failed",
     });
 
-    const terminal = s.log.find((row) => row.envelopeId === ids.invocationTerminal("tc-infra"))!;
+    const terminal = s.log.find(
+      (row) => row.envelopeId === ids.invocationTerminal("tc-infra"),
+    )!;
     expect(terminal).toMatchObject({
       payloadKind: "invocation.failed",
       payload: {
@@ -481,7 +548,8 @@ describe("agent-loop core lifecycle", () => {
     const diagnostics = s.log.filter(
       (row) =>
         row.payloadKind === "message.completed" &&
-        (row.payload as { blocks?: Array<{ type?: string }> }).blocks?.[0]?.type === "diagnostic"
+        (row.payload as { blocks?: Array<{ type?: string }> }).blocks?.[0]
+          ?.type === "diagnostic",
     );
     expect(diagnostics).toHaveLength(1);
     expect(diagnostics[0]).toMatchObject({
@@ -512,9 +580,11 @@ describe("agent-loop core lifecycle", () => {
       type: "event-appended",
       envelope: terminal as never,
     });
-    expect(s.log.filter((row) => row.envelopeId.includes(":infrastructure:tc-infra"))).toHaveLength(
-      1
-    );
+    expect(
+      s.log.filter((row) =>
+        row.envelopeId.includes(":infrastructure:tc-infra"),
+      ),
+    ).toHaveLength(1);
   });
 
   it("continues the same turn when infrastructure failure has typed recovery", () => {
@@ -523,7 +593,12 @@ describe("agent-loop core lifecycle", () => {
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
       blocks: [
-        { type: "toolCall", id: "tc-repair", name: "eval", arguments: { code: "create()" } },
+        {
+          type: "toolCall",
+          id: "tc-repair",
+          name: "eval",
+          arguments: { code: "create()" },
+        },
       ],
       stopReason: "completed",
     });
@@ -545,7 +620,8 @@ describe("agent-loop core lifecycle", () => {
         retry: { policy: "none", commandIdPolicy: "not-applicable" },
         recovery: {
           action: "repair-source",
-          instruction: "Inspect diagnostics, repair source, and publish a new revision.",
+          instruction:
+            "Inspect diagnostics, repair source, and publish a new revision.",
         },
         causes: [
           {
@@ -558,16 +634,22 @@ describe("agent-loop core lifecycle", () => {
     });
 
     expect(
-      s.log.find((row) => row.envelopeId === ids.invocationTerminal("tc-repair"))
+      s.log.find(
+        (row) => row.envelopeId === ids.invocationTerminal("tc-repair"),
+      ),
     ).toMatchObject({
       payload: {
         terminalOutcome: "infrastructure_error",
         failure: { recovery: { action: "repair-source" } },
       },
     });
-    expect(s.log.some((row) => row.envelopeId.includes(":infrastructure:"))).toBe(false);
+    expect(
+      s.log.some((row) => row.envelopeId.includes(":infrastructure:")),
+    ).toBe(false);
     expect(s.state.openTurn).not.toBeNull();
-    expect(pendingEffectIds(s)).toEqual([ids.modelEffect(ids.messageId(turn1, 1))]);
+    expect(pendingEffectIds(s)).toEqual([
+      ids.modelEffect(ids.messageId(turn1, 1)),
+    ]);
   });
 
   it("retains typed recovery while waiting for parallel siblings", () => {
@@ -601,7 +683,11 @@ describe("agent-loop core lifecycle", () => {
           instruction: "Acquire a page for the current panel generation.",
         },
         causes: [
-          { role: "primary", code: "cdp_target_closed", message: "panel generation changed" },
+          {
+            role: "primary",
+            code: "cdp_target_closed",
+            message: "panel generation changed",
+          },
         ],
       },
     });
@@ -613,9 +699,13 @@ describe("agent-loop core lifecycle", () => {
       isError: false,
     });
 
-    expect(s.log.some((row) => row.envelopeId.includes(":infrastructure:"))).toBe(false);
+    expect(
+      s.log.some((row) => row.envelopeId.includes(":infrastructure:")),
+    ).toBe(false);
     expect(s.state.openTurn).not.toBeNull();
-    expect(pendingEffectIds(s)).toEqual([ids.modelEffect(ids.messageId(turn1, 1))]);
+    expect(pendingEffectIds(s)).toEqual([
+      ids.modelEffect(ids.messageId(turn1, 1)),
+    ]);
   });
 
   it("waits for parallel siblings before publishing an infrastructure diagnostic", () => {
@@ -624,8 +714,18 @@ describe("agent-loop core lifecycle", () => {
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
       blocks: [
-        { type: "toolCall", id: "tc-infra", name: "read", arguments: { path: "a.ts" } },
-        { type: "toolCall", id: "tc-sibling", name: "read", arguments: { path: "b.ts" } },
+        {
+          type: "toolCall",
+          id: "tc-infra",
+          name: "read",
+          arguments: { path: "a.ts" },
+        },
+        {
+          type: "toolCall",
+          id: "tc-sibling",
+          name: "read",
+          arguments: { path: "b.ts" },
+        },
       ],
       stopReason: "completed",
     });
@@ -639,7 +739,9 @@ describe("agent-loop core lifecycle", () => {
       terminalReasonCode: "package_load_failed",
     });
     expect(s.state.openTurn).not.toBeNull();
-    expect(s.log.some((row) => row.envelopeId.includes(":infrastructure:"))).toBe(false);
+    expect(
+      s.log.some((row) => row.envelopeId.includes(":infrastructure:")),
+    ).toBe(false);
 
     resolveEffect(s, ids.invocationEffect("tc-sibling"), {
       kind: "tool",
@@ -658,7 +760,14 @@ describe("agent-loop core lifecycle", () => {
     prompt(s);
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
-      blocks: [{ type: "toolCall", id: "tc-user", name: "read", arguments: { path: "missing" } }],
+      blocks: [
+        {
+          type: "toolCall",
+          id: "tc-user",
+          name: "read",
+          arguments: { path: "missing" },
+        },
+      ],
       stopReason: "completed",
     });
 
@@ -670,16 +779,18 @@ describe("agent-loop core lifecycle", () => {
       terminalReasonCode: "WorkingChangesPresent",
     });
 
-    expect(s.log.find((row) => row.envelopeId === ids.invocationTerminal("tc-user"))).toMatchObject(
-      {
-        payload: {
-          terminalOutcome: "tool_error",
-          terminalReasonCode: "WorkingChangesPresent",
-        },
-      }
-    );
+    expect(
+      s.log.find((row) => row.envelopeId === ids.invocationTerminal("tc-user")),
+    ).toMatchObject({
+      payload: {
+        terminalOutcome: "tool_error",
+        terminalReasonCode: "WorkingChangesPresent",
+      },
+    });
     expect(s.state.openTurn).not.toBeNull();
-    expect(pendingEffectIds(s)).toEqual([ids.modelEffect(ids.messageId(turn1, 1))]);
+    expect(pendingEffectIds(s)).toEqual([
+      ids.modelEffect(ids.messageId(turn1, 1)),
+    ]);
   });
 
   it("stamps tier secondary on tool-call (intermediate) messages and primary on the final answer", () => {
@@ -688,12 +799,24 @@ describe("agent-loop core lifecycle", () => {
     // First model output carries a tool call → the turn continues → tier 2.
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
-      blocks: [{ type: "toolCall", id: "tc-1", name: "read", arguments: { path: "a.ts" } }],
+      blocks: [
+        {
+          type: "toolCall",
+          id: "tc-1",
+          name: "read",
+          arguments: { path: "a.ts" },
+        },
+      ],
       stopReason: "completed",
     });
-    const intermediate = s.log.find((row) => row.envelopeId === ids.messageTerminal(msg0))!;
+    const intermediate = s.log.find(
+      (row) => row.envelopeId === ids.messageTerminal(msg0),
+    )!;
     expect((intermediate.payload as { tier?: string }).tier).toBe("secondary");
-    expect(intermediate.causality).toMatchObject({ messageId: msg0, turnId: turn1 });
+    expect(intermediate.causality).toMatchObject({
+      messageId: msg0,
+      turnId: turn1,
+    });
 
     resolveEffect(s, ids.invocationEffect("tc-1"), {
       kind: "tool",
@@ -707,7 +830,9 @@ describe("agent-loop core lifecycle", () => {
       blocks: [{ type: "text", content: "done" }],
       stopReason: "completed",
     });
-    const final = s.log.find((row) => row.envelopeId === ids.messageTerminal(msg1))!;
+    const final = s.log.find(
+      (row) => row.envelopeId === ids.messageTerminal(msg1),
+    )!;
     expect((final.payload as { tier?: string }).tier).toBe("primary");
     expect(final.causality).toMatchObject({ messageId: msg1, turnId: turn1 });
   });
@@ -717,13 +842,23 @@ describe("agent-loop core lifecycle", () => {
     prompt(s);
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
-      blocks: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "a.ts" } }],
+      blocks: [
+        {
+          type: "toolCall",
+          id: "read-1",
+          name: "read",
+          arguments: { path: "a.ts" },
+        },
+      ],
       stopReason: "completed",
     });
 
     // Simulate an activation/migration fold that retained the open turn but
     // lost its materialized prompt hash.
-    s.state = { ...s.state, config: { ...s.state.config, systemPromptHash: "" } };
+    s.state = {
+      ...s.state,
+      config: { ...s.state.config, systemPromptHash: "" },
+    };
     resolveEffect(s, ids.invocationEffect("read-1"), {
       kind: "tool",
       result: "file contents",
@@ -731,10 +866,12 @@ describe("agent-loop core lifecycle", () => {
     });
 
     const preparation = [...s.effects.values()].find(
-      (effect) => effect.kind === "prompt_artifacts"
+      (effect) => effect.kind === "prompt_artifacts",
     );
     expect(preparation).toBeDefined();
-    expect(pendingEffectIds(s)).not.toContain(ids.modelEffect(ids.messageId(turn1, 1)));
+    expect(pendingEffectIds(s)).not.toContain(
+      ids.modelEffect(ids.messageId(turn1, 1)),
+    );
 
     resolveEffect(s, preparation!.effectId, {
       kind: "prompt-artifacts",
@@ -745,10 +882,12 @@ describe("agent-loop core lifecycle", () => {
     expect(pendingEffectIds(s)).toContain(ids.modelEffect(continuationId));
     expect(
       (
-        s.log.find((row) => row.envelopeId === ids.messageStarted(continuationId))!.payload as {
+        s.log.find(
+          (row) => row.envelopeId === ids.messageStarted(continuationId),
+        )!.payload as {
           modelRequest: { systemPromptHash: string };
         }
-      ).modelRequest.systemPromptHash
+      ).modelRequest.systemPromptHash,
     ).toBe("blob:repaired");
   });
 
@@ -777,7 +916,9 @@ describe("agent-loop core lifecycle", () => {
       isError: false,
     });
 
-    const terminal = s.log.find((row) => row.envelopeId === ids.invocationTerminal("spawn-1"))!;
+    const terminal = s.log.find(
+      (row) => row.envelopeId === ids.invocationTerminal("spawn-1"),
+    )!;
     expect(terminal.payloadKind).toBe("invocation.completed");
     expect(terminal.publish).toBe(true);
     expect(s.state.entries.map((entry) => entry.kind)).toContain("tool-result");
@@ -806,7 +947,9 @@ describe("agent-loop core lifecycle", () => {
       reason: "spawn_subagent(mode:'fresh') requires a non-empty task",
     });
 
-    const terminal = s.log.find((row) => row.envelopeId === ids.invocationTerminal("spawn-1"))!;
+    const terminal = s.log.find(
+      (row) => row.envelopeId === ids.invocationTerminal("spawn-1"),
+    )!;
     expect(terminal.payloadKind).toBe("invocation.failed");
     expect(terminal.publish).toBe(true);
   });
@@ -847,7 +990,9 @@ describe("agent-loop core lifecycle", () => {
       summary: "Suspended until background work or user input arrives",
     });
     expect(s.state.openTurn).not.toBeNull();
-    expect(s.log.filter((row) => row.payloadKind === "message.started")).toHaveLength(1);
+    expect(
+      s.log.filter((row) => row.payloadKind === "message.started"),
+    ).toHaveLength(1);
     expect(pendingEffectIds(s)).toEqual([]);
 
     const [backgroundTerminal] = applyAppend(s, [
@@ -890,10 +1035,14 @@ describe("agent-loop core lifecycle", () => {
 
     expect(s.state.openTurn).toBeNull();
     expect(pendingEffectIds(s)).toEqual([]);
-    expect(s.log.find((row) => row.payloadKind === "turn.closed")?.payload).toMatchObject({
+    expect(
+      s.log.find((row) => row.payloadKind === "turn.closed")?.payload,
+    ).toMatchObject({
       reason: "tool_terminated",
     });
-    expect(s.log.filter((row) => row.payloadKind === "message.started")).toHaveLength(1);
+    expect(
+      s.log.filter((row) => row.payloadKind === "message.started"),
+    ).toHaveLength(1);
   });
 
   it("continues after a mixed tool batch where only one result requests termination", () => {
@@ -921,7 +1070,9 @@ describe("agent-loop core lifecycle", () => {
     });
 
     expect(s.state.openTurn).not.toBeNull();
-    expect(pendingEffectIds(s)).toEqual([ids.modelEffect(ids.messageId(turn1, 1))]);
+    expect(pendingEffectIds(s)).toEqual([
+      ids.modelEffect(ids.messageId(turn1, 1)),
+    ]);
   });
 
   it("does not let a recovery wake resume a turn from its own suspension result", () => {
@@ -957,7 +1108,9 @@ describe("agent-loop core lifecycle", () => {
 
     expect(s.state.openTurn?.waitingAtSeq).toBeDefined();
     expect(pendingEffectIds(s)).toEqual([]);
-    expect(s.log.filter((row) => row.payloadKind === "message.started")).toHaveLength(1);
+    expect(
+      s.log.filter((row) => row.payloadKind === "message.started"),
+    ).toHaveLength(1);
   });
 
   it("stamps tier primary on a direct text-only answer", () => {
@@ -968,7 +1121,9 @@ describe("agent-loop core lifecycle", () => {
       blocks: [{ type: "text", content: "hi there" }],
       stopReason: "completed",
     });
-    const completed = s.log.find((row) => row.envelopeId === ids.messageTerminal(msg0))!;
+    const completed = s.log.find(
+      (row) => row.envelopeId === ids.messageTerminal(msg0),
+    )!;
     expect((completed.payload as { tier?: string }).tier).toBe("primary");
   });
 
@@ -982,7 +1137,14 @@ describe("agent-loop core lifecycle", () => {
       expect(pendingEffectIds(s)).toEqual([ids.modelEffect(messageId)]);
       resolveEffect(s, ids.modelEffect(messageId), {
         kind: "model",
-        blocks: [{ type: "toolCall", id: toolCallId, name: "read", arguments: { path: "a.ts" } }],
+        blocks: [
+          {
+            type: "toolCall",
+            id: toolCallId,
+            name: "read",
+            arguments: { path: "a.ts" },
+          },
+        ],
         stopReason: "completed",
       });
       resolveEffect(s, ids.invocationEffect(toolCallId), {
@@ -1052,13 +1214,25 @@ describe("agent-loop core lifecycle", () => {
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
       blocks: [
-        { type: "toolCall", id: "tc-write-1", name: "write", arguments: { path: "a" } },
-        { type: "toolCall", id: "tc-write-2", name: "write", arguments: { path: "b" } },
+        {
+          type: "toolCall",
+          id: "tc-write-1",
+          name: "write",
+          arguments: { path: "a" },
+        },
+        {
+          type: "toolCall",
+          id: "tc-write-2",
+          name: "write",
+          arguments: { path: "b" },
+        },
       ],
       stopReason: "completed",
     });
 
-    const effects = derivePendingEffects(s.state).filter((effect) => effect.kind === "local_tool");
+    const effects = derivePendingEffects(s.state).filter(
+      (effect) => effect.kind === "local_tool",
+    );
     expect(effects).toEqual([
       expect.objectContaining({
         invocationId: "tc-write-1",
@@ -1106,7 +1280,8 @@ describe("agent-loop core lifecycle", () => {
     const interrupts = s.log.filter(
       (row) =>
         row.payloadKind === "system.event" &&
-        (row.payload as { details?: { kind?: string } }).details?.kind === "interrupt"
+        (row.payload as { details?: { kind?: string } }).details?.kind ===
+          "interrupt",
     );
     expect(interrupts).toEqual([
       expect.objectContaining({
@@ -1141,8 +1316,12 @@ describe("agent-loop core lifecycle", () => {
       blocks: [],
       stopReason: "completed",
     });
-    const completed = s.log.filter((row) => row.payloadKind === "message.completed");
-    expect(completed[completed.length - 1]!.payload).toMatchObject({ outcome: "empty" });
+    const completed = s.log.filter(
+      (row) => row.payloadKind === "message.completed",
+    );
+    expect(completed[completed.length - 1]!.payload).toMatchObject({
+      outcome: "empty",
+    });
   });
 
   it("compacts without orphaning retained tool results from their assistant tool calls", () => {
@@ -1152,7 +1331,12 @@ describe("agent-loop core lifecycle", () => {
         seq: 1,
         messageId: "msg-tool",
         blocks: [
-          { type: "toolCall", id: "call-kept-result", name: "spawn_subagent", arguments: {} },
+          {
+            type: "toolCall",
+            id: "call-kept-result",
+            name: "spawn_subagent",
+            arguments: {},
+          },
           { type: "toolCall", id: "call-sibling", name: "read", arguments: {} },
         ],
       },
@@ -1160,6 +1344,7 @@ describe("agent-loop core lifecycle", () => {
         kind: "tool-result",
         seq: 2,
         invocationId: "call-sibling",
+        turnId: "turn-tool",
         name: "read",
         result: "contents",
         isError: false,
@@ -1170,6 +1355,7 @@ describe("agent-loop core lifecycle", () => {
         kind: "tool-result",
         seq: 5,
         invocationId: "call-kept-result",
+        turnId: "turn-tool",
         name: "spawn_subagent",
         result: "spawned",
         isError: false,
@@ -1184,7 +1370,11 @@ describe("agent-loop core lifecycle", () => {
     ];
     const s = createScenario({
       state: {
-        ...initialAgentState({ channelId: "chan-1", config: baseConfig, selfId: "agent:self" }),
+        ...initialAgentState({
+          channelId: "chan-1",
+          config: baseConfig,
+          selfId: "agent:self",
+        }),
         entries,
         lastSeq: 12,
       },
@@ -1193,9 +1383,12 @@ describe("agent-loop core lifecycle", () => {
 
     dispatch(s, { type: "command", command: { kind: "compact" } });
 
-    expect(s.state.entries.map((entry) => entry.seq)).toEqual([1, 2, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(s.state.entries.map((entry) => entry.seq)).toEqual([
+      1, 2, 5, 6, 7, 8, 9, 10, 11, 12,
+    ]);
     expect(
-      s.log.find((row) => row.payloadKind === "system.compaction_recorded")?.payload
+      s.log.find((row) => row.payloadKind === "system.compaction_recorded")
+        ?.payload,
     ).toMatchObject({
       summary: "compacted 2 entries",
     });
@@ -1217,7 +1410,11 @@ describe("agent-loop core lifecycle", () => {
             kind: "assistant",
             seq: 1,
             messageId: "m:t:parent-channel:parent-trigger:parent-agent:0",
-            senderRef: { kind: "agent", id: "parent-agent", participantId: "parent-agent" },
+            senderRef: {
+              kind: "agent",
+              id: "parent-agent",
+              participantId: "parent-agent",
+            },
             blocks: [
               {
                 type: "toolCall",
@@ -1262,9 +1459,11 @@ describe("agent-loop core lifecycle", () => {
       ids.messageTerminal(childMessageId),
       ids.messageStarted(ids.messageId(childTurnId, 1)),
     ]);
-    expect(s.log.some((row) => row.envelopeId === ids.invocationStart("call-parent-spawn"))).toBe(
-      false
-    );
+    expect(
+      s.log.some(
+        (row) => row.envelopeId === ids.invocationStart("call-parent-spawn"),
+      ),
+    ).toBe(false);
   });
 
   it("multi-attempt: recoverable model failure retries with a fresh messageId", () => {
@@ -1278,9 +1477,13 @@ describe("agent-loop core lifecycle", () => {
     });
     const msg1 = ids.messageId(turn1, 1);
     expect(pendingEffectIds(s)).toEqual([ids.modelEffect(msg1)]);
-    expect(s.log.some((row) => row.payloadKind === "message.failed")).toBe(true);
+    expect(s.log.some((row) => row.payloadKind === "message.failed")).toBe(
+      true,
+    );
     // fresh attempt id
-    const started = s.log.filter((row) => row.payloadKind === "message.started");
+    const started = s.log.filter(
+      (row) => row.payloadKind === "message.started",
+    );
     expect(started).toHaveLength(2);
   });
 
@@ -1301,10 +1504,14 @@ describe("agent-loop core lifecycle", () => {
 
     expect(s.state.openTurn).toBeNull();
     expect(pendingEffectIds(s)).toEqual([]);
-    expect(s.log.filter((row) => row.payloadKind === "message.started")).toHaveLength(3);
-    expect(s.log.filter((row) => row.payloadKind === "message.failed")).toHaveLength(3);
+    expect(
+      s.log.filter((row) => row.payloadKind === "message.started"),
+    ).toHaveLength(3);
+    expect(
+      s.log.filter((row) => row.payloadKind === "message.failed"),
+    ).toHaveLength(3);
     const diagnostic = s.log.find(
-      (row) => row.envelopeId === `diag:${turn1}:model-retry-limit-exceeded`
+      (row) => row.envelopeId === `diag:${turn1}:model-retry-limit-exceeded`,
     );
     expect(diagnostic?.payload).toMatchObject({
       blocks: [
@@ -1321,7 +1528,9 @@ describe("agent-loop core lifecycle", () => {
     });
     expect(diagnostic?.publish).toBe(true);
     const closed = s.log.find((row) => row.payloadKind === "turn.closed")!;
-    expect(closed.payload).toMatchObject({ reason: "model_retry_limit_exceeded" });
+    expect(closed.payload).toMatchObject({
+      reason: "model_retry_limit_exceeded",
+    });
   });
 
   it("auto-failover: scheduled provider failure continues once on local fallback", () => {
@@ -1344,7 +1553,7 @@ describe("agent-loop core lifecycle", () => {
     const notice = s.log.find(
       (row) =>
         row.payloadKind === "system.event" &&
-        (row.payload as { kind?: string }).kind === "model.fallback_continued"
+        (row.payload as { kind?: string }).kind === "model.fallback_continued",
     );
     expect(notice?.publish).toBe(true);
     expect(notice?.payload).toMatchObject({
@@ -1355,9 +1564,12 @@ describe("agent-loop core lifecycle", () => {
         fallbackModelRef,
       },
     });
-    const fallbackStarted = s.log.find((row) => row.envelopeId === ids.messageStarted(msg1))!;
-    const request = (fallbackStarted.payload as { modelRequest: Record<string, unknown> })
-      .modelRequest;
+    const fallbackStarted = s.log.find(
+      (row) => row.envelopeId === ids.messageStarted(msg1),
+    )!;
+    const request = (
+      fallbackStarted.payload as { modelRequest: Record<string, unknown> }
+    ).modelRequest;
     expect(request).toMatchObject({
       provider: "local",
       model: "lfm2.5-2.6b",
@@ -1385,17 +1597,20 @@ describe("agent-loop core lifecycle", () => {
         },
       });
 
-      expect(s.log.filter((row) => row.payloadKind === "message.started")).toHaveLength(1);
+      expect(
+        s.log.filter((row) => row.payloadKind === "message.started"),
+      ).toHaveLength(1);
       expect(
         s.log.some(
           (row) =>
             row.payloadKind === "system.event" &&
-            (row.payload as { kind?: string }).kind === "model.fallback_continued"
-        )
+            (row.payload as { kind?: string }).kind ===
+              "model.fallback_continued",
+        ),
       ).toBe(false);
       expect(s.state.openTurn).toBeNull();
       expect(pendingEffectIds(s)).toEqual([]);
-    }
+    },
   );
 
   it("uses an explicitly scoped cloud fallback at its own effort on a user usage limit", () => {
@@ -1433,9 +1648,12 @@ describe("agent-loop core lifecycle", () => {
 
     const msg1 = ids.messageId(turn1, 1);
     expect(pendingEffectIds(s)).toEqual([ids.modelEffect(msg1)]);
-    const started = s.log.find((row) => row.envelopeId === ids.messageStarted(msg1))!;
+    const started = s.log.find(
+      (row) => row.envelopeId === ids.messageStarted(msg1),
+    )!;
     expect(
-      (started.payload as { modelRequest: Record<string, unknown> }).modelRequest
+      (started.payload as { modelRequest: Record<string, unknown> })
+        .modelRequest,
     ).toMatchObject({
       provider: "openai-codex",
       model: "gpt-5.6-luna",
@@ -1445,7 +1663,7 @@ describe("agent-loop core lifecycle", () => {
     const notice = s.log.find(
       (row) =>
         row.payloadKind === "system.event" &&
-        (row.payload as { kind?: string }).kind === "model.fallback_continued"
+        (row.payload as { kind?: string }).kind === "model.fallback_continued",
     );
     expect(notice?.payload).toMatchObject({
       details: {
@@ -1458,7 +1676,14 @@ describe("agent-loop core lifecycle", () => {
 
     resolveEffect(s, ids.modelEffect(msg1), {
       kind: "model",
-      blocks: [{ type: "toolCall", id: "tc-fallback", name: "read", arguments: { path: "a.ts" } }],
+      blocks: [
+        {
+          type: "toolCall",
+          id: "tc-fallback",
+          name: "read",
+          arguments: { path: "a.ts" },
+        },
+      ],
       stopReason: "completed",
     });
     resolveEffect(s, ids.invocationEffect("tc-fallback"), {
@@ -1468,9 +1693,12 @@ describe("agent-loop core lifecycle", () => {
     });
 
     const msg2 = ids.messageId(turn1, 2);
-    const continued = s.log.find((row) => row.envelopeId === ids.messageStarted(msg2))!;
+    const continued = s.log.find(
+      (row) => row.envelopeId === ids.messageStarted(msg2),
+    )!;
     expect(
-      (continued.payload as { modelRequest: Record<string, unknown> }).modelRequest
+      (continued.payload as { modelRequest: Record<string, unknown> })
+        .modelRequest,
     ).toMatchObject({
       provider: "openai-codex",
       model: "gpt-5.6-luna",
@@ -1506,13 +1734,16 @@ describe("agent-loop core lifecycle", () => {
       },
     });
 
-    expect(s.log.filter((row) => row.payloadKind === "message.started")).toHaveLength(2);
+    expect(
+      s.log.filter((row) => row.payloadKind === "message.started"),
+    ).toHaveLength(2);
     expect(
       s.log.filter(
         (row) =>
           row.payloadKind === "system.event" &&
-          (row.payload as { kind?: string }).kind === "model.fallback_continued"
-      )
+          (row.payload as { kind?: string }).kind ===
+            "model.fallback_continued",
+      ),
     ).toHaveLength(1);
     expect(s.state.openTurn).toBeNull();
     expect(pendingEffectIds(s)).toEqual([]);
@@ -1538,13 +1769,16 @@ describe("agent-loop core lifecycle", () => {
       },
     });
 
-    expect(s.log.filter((row) => row.payloadKind === "message.started")).toHaveLength(1);
+    expect(
+      s.log.filter((row) => row.payloadKind === "message.started"),
+    ).toHaveLength(1);
     expect(
       s.log.some(
         (row) =>
           row.payloadKind === "system.event" &&
-          (row.payload as { kind?: string }).kind === "model.fallback_continued"
-      )
+          (row.payload as { kind?: string }).kind ===
+            "model.fallback_continued",
+      ),
     ).toBe(false);
     expect(s.state.openTurn).toBeNull();
     expect(pendingEffectIds(s)).toEqual([]);
@@ -1574,8 +1808,12 @@ describe("agent-loop core lifecycle", () => {
 
     expect(pendingEffectIds(s)).toEqual([]);
     expect(s.state.openTurn).not.toBeNull();
-    expect(s.log.filter((row) => row.payloadKind === "message.started")).toHaveLength(1);
-    const failed = s.log.find((row) => row.envelopeId === ids.messageTerminal(msg0))!;
+    expect(
+      s.log.filter((row) => row.payloadKind === "message.started"),
+    ).toHaveLength(1);
+    const failed = s.log.find(
+      (row) => row.envelopeId === ids.messageTerminal(msg0),
+    )!;
     expect(failed.causality).toMatchObject({ messageId: msg0, turnId: turn1 });
     expect(failed.payload).toMatchObject({
       reason:
@@ -1602,7 +1840,9 @@ describe("agent-loop core lifecycle", () => {
     });
     const msg1 = ids.messageId(turn1, 1);
     expect(pendingEffectIds(s)).toEqual([ids.modelEffect(msg1)]);
-    expect(s.log.filter((row) => row.payloadKind === "message.started")).toHaveLength(2);
+    expect(
+      s.log.filter((row) => row.payloadKind === "message.started"),
+    ).toHaveLength(2);
   });
 
   it("effect-failed (model, attempts exhausted) closes the turn with a published diagnostic", () => {
@@ -1618,11 +1858,15 @@ describe("agent-loop core lifecycle", () => {
     expect(s.state.openTurn).toBeNull();
     const closed = s.log.find((row) => row.payloadKind === "turn.closed")!;
     expect(closed.payload).toMatchObject({ reason: "work_failed" });
-    const failed = s.log.find((row) => row.envelopeId === ids.messageTerminal(msg0))!;
+    const failed = s.log.find(
+      (row) => row.envelopeId === ids.messageTerminal(msg0),
+    )!;
     expect(failed.payloadKind).toBe("message.failed");
     expect(failed.publish).toBe(true);
     const diagnostic = s.log.find(
-      (row) => row.payloadKind === "message.completed" && String(row.envelopeId).startsWith("diag:")
+      (row) =>
+        row.payloadKind === "message.completed" &&
+        String(row.envelopeId).startsWith("diag:"),
     );
     expect(diagnostic).toBeDefined();
     expect(diagnostic!.publish).toBe(true);
@@ -1637,7 +1881,12 @@ describe("approval gate (approvalLevel < 2)", () => {
       kind: "model",
       blocks: [
         { type: "toolCall", id: "tc-r", name: "read", arguments: {} },
-        { type: "toolCall", id: "tc-w", name: "write", arguments: { path: "x" } },
+        {
+          type: "toolCall",
+          id: "tc-w",
+          name: "write",
+          arguments: { path: "x" },
+        },
       ],
       stopReason: "completed",
     });
@@ -1645,16 +1894,21 @@ describe("approval gate (approvalLevel < 2)", () => {
     const approvalId = ids.approvalId("tc-w");
     // read dispatches immediately; write is gated behind the approval form
     expect(pendingEffectIds(s)).toEqual(
-      [ids.approvalFormEffect(approvalId), ids.invocationEffect("tc-r")].sort()
+      [ids.approvalFormEffect(approvalId), ids.invocationEffect("tc-r")].sort(),
     );
     expect(
-      s.log.find((row) => row.envelopeId === ids.approvalRequested(approvalId))!.payload
+      s.log.find((row) => row.envelopeId === ids.approvalRequested(approvalId))!
+        .payload,
     ).toMatchObject({
       question: "Allow write to act on “x”?",
       details: { toolName: "write" },
     });
 
-    resolveEffect(s, ids.invocationEffect("tc-r"), { kind: "tool", result: null, isError: false });
+    resolveEffect(s, ids.invocationEffect("tc-r"), {
+      kind: "tool",
+      result: null,
+      isError: false,
+    });
     // still waiting on approval — no model call yet
     expect(pendingEffectIds(s)).toEqual([ids.approvalFormEffect(approvalId)]);
 
@@ -1666,7 +1920,11 @@ describe("approval gate (approvalLevel < 2)", () => {
     // grant → the gated tool's dispatch effect becomes derivable
     expect(pendingEffectIds(s)).toEqual([ids.invocationEffect("tc-w")]);
 
-    resolveEffect(s, ids.invocationEffect("tc-w"), { kind: "tool", result: null, isError: false });
+    resolveEffect(s, ids.invocationEffect("tc-w"), {
+      kind: "tool",
+      result: null,
+      isError: false,
+    });
     const msg1 = ids.messageId(turn1, 1);
     expect(pendingEffectIds(s)).toEqual([ids.modelEffect(msg1)]);
   });
@@ -1686,7 +1944,9 @@ describe("approval gate (approvalLevel < 2)", () => {
       resolvedBy: { kind: "user", id: "panel:user" },
       reason: "nope",
     });
-    const terminal = s.log.find((row) => row.envelopeId === ids.invocationTerminal("tc-w"))!;
+    const terminal = s.log.find(
+      (row) => row.envelopeId === ids.invocationTerminal("tc-w"),
+    )!;
     expect(terminal.payloadKind).toBe("invocation.failed");
     expect(terminal.payload).toMatchObject({ reason: "approval denied" });
     // denial settles the invocation → loop continues with a fresh model call
@@ -1718,14 +1978,18 @@ describe("approval gate (approvalLevel < 2)", () => {
     });
 
     // The approval is resolved fail-closed and is NO LONGER pending.
-    const resolved = s.log.find((row) => row.envelopeId === ids.approvalResolved(approvalId))!;
+    const resolved = s.log.find(
+      (row) => row.envelopeId === ids.approvalResolved(approvalId),
+    )!;
     expect(resolved.payloadKind).toBe("approval.resolved");
     expect(resolved.payload).toMatchObject({ granted: false });
     expect(s.state.pendingApprovals[approvalId]).toBeUndefined();
 
     // The loop converges: the denied invocation settles and a fresh model call
     // is the only pending effect — the approval form is gone for good.
-    expect(pendingEffectIds(s)).not.toContain(ids.approvalFormEffect(approvalId));
+    expect(pendingEffectIds(s)).not.toContain(
+      ids.approvalFormEffect(approvalId),
+    );
     const msg1 = ids.messageId(turn1, 1);
     expect(pendingEffectIds(s)).toEqual([ids.modelEffect(msg1)]);
   });
@@ -1738,7 +2002,11 @@ describe("ask user policy", () => {
         participants: [
           {
             participantId: "user:alice",
-            ref: { kind: "user", id: "user:alice", participantId: "user:alice" },
+            ref: {
+              kind: "user",
+              id: "user:alice",
+              participantId: "user:alice",
+            },
             type: "user",
             handle: "alice",
             methods: [{ name: "feedback_form" }],
@@ -1760,10 +2028,15 @@ describe("ask user policy", () => {
       stopReason: "completed",
     });
 
-    const started = s.log.find((row) => row.envelopeId === ids.invocationStart("tc-invalid"))!;
-    expect(started.payload).toMatchObject({ name: "ask_user", request: { options: ["Yes"] } });
+    const started = s.log.find(
+      (row) => row.envelopeId === ids.invocationStart("tc-invalid"),
+    )!;
+    expect(started.payload).toMatchObject({
+      name: "ask_user",
+      request: { options: ["Yes"] },
+    });
     expect(s.outputs.flatMap((output) => output.effects)).toContainEqual(
-      expect.objectContaining({ kind: "local_tool", tool: "ask_user" })
+      expect.objectContaining({ kind: "local_tool", tool: "ask_user" }),
     );
   });
 
@@ -1773,7 +2046,11 @@ describe("ask user policy", () => {
         participants: [
           {
             participantId: "user:alice",
-            ref: { kind: "user", id: "user:alice", participantId: "user:alice" },
+            ref: {
+              kind: "user",
+              id: "user:alice",
+              participantId: "user:alice",
+            },
             type: "user",
             handle: "alice",
             methods: [{ name: "feedback_form" }],
@@ -1799,8 +2076,11 @@ describe("ask user policy", () => {
       stopReason: "completed",
     });
 
-    const started = s.log.find((row) => row.envelopeId === ids.invocationStart("tc-q"))!;
-    const request = (started.payload as { request: Record<string, unknown> }).request;
+    const started = s.log.find(
+      (row) => row.envelopeId === ids.invocationStart("tc-q"),
+    )!;
+    const request = (started.payload as { request: Record<string, unknown> })
+      .request;
     const fields = request["fields"] as Array<Record<string, unknown>>;
 
     expect(started.payload).toMatchObject({
@@ -1862,10 +2142,12 @@ describe("ask user policy", () => {
       stopReason: "completed",
     });
 
-    const started = s.log.find((row) => row.envelopeId === ids.invocationStart("tc-everyone"))!;
-    expect((started.payload as { askUserTargets?: unknown }).askUserTargets).toEqual(
-      humans.map((human) => human.ref)
-    );
+    const started = s.log.find(
+      (row) => row.envelopeId === ids.invocationStart("tc-everyone"),
+    )!;
+    expect(
+      (started.payload as { askUserTargets?: unknown }).askUserTargets,
+    ).toEqual(humans.map((human) => human.ref));
     expect([...s.effects.values()]).toEqual([
       expect.objectContaining({
         effectId: ids.invocationEffect("tc-everyone"),
@@ -1907,7 +2189,10 @@ describe("ask user policy", () => {
       stopReason: "completed",
     });
     expect([...addressed.effects.values()]).toEqual([
-      expect.objectContaining({ target: participants[1]!.ref, purpose: "ask-user" }),
+      expect.objectContaining({
+        target: participants[1]!.ref,
+        purpose: "ask-user",
+      }),
     ]);
 
     const unknown = scenario({ roster: { participants } });
@@ -1982,7 +2267,7 @@ describe("ask user policy", () => {
     });
 
     const started = s.log.find(
-      (row) => row.envelopeId === ids.invocationStart("tc-presence-race")
+      (row) => row.envelopeId === ids.invocationStart("tc-presence-race"),
     )!;
     expect(started.payload).toMatchObject({
       name: "feedback_form",
@@ -2009,13 +2294,21 @@ describe("channel tools", () => {
         participants: [
           {
             participantId: "agent:self",
-            ref: { kind: "agent", id: "agent:self", participantId: "agent:self" },
+            ref: {
+              kind: "agent",
+              id: "agent:self",
+              participantId: "agent:self",
+            },
             type: "agent",
             methods: [{ name: "getDebugState" }],
           },
           {
             participantId: "panel:user",
-            ref: { kind: "panel", id: "panel:user", participantId: "panel:user" },
+            ref: {
+              kind: "panel",
+              id: "panel:user",
+              participantId: "panel:user",
+            },
             type: "panel",
             methods: [{ name: "set_title" }],
           },
@@ -2040,7 +2333,11 @@ describe("channel tools", () => {
         participants: [
           {
             participantId: "panel:user",
-            ref: { kind: "panel", id: "panel:user", participantId: "panel:user" },
+            ref: {
+              kind: "panel",
+              id: "panel:user",
+              participantId: "panel:user",
+            },
             type: "panel",
             methods: [{ name: "eval" }],
           },
@@ -2050,10 +2347,19 @@ describe("channel tools", () => {
     prompt(s);
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
-      blocks: [{ type: "toolCall", id: "tc-e", name: "eval", arguments: { code: "1+1" } }],
+      blocks: [
+        {
+          type: "toolCall",
+          id: "tc-e",
+          name: "eval",
+          arguments: { code: "1+1" },
+        },
+      ],
       stopReason: "completed",
     });
-    const started = s.log.find((row) => row.envelopeId === ids.invocationStart("tc-e"))!;
+    const started = s.log.find(
+      (row) => row.envelopeId === ids.invocationStart("tc-e"),
+    )!;
     expect(started.payload).toMatchObject({
       transport: {
         kind: "channel",
@@ -2063,7 +2369,9 @@ describe("channel tools", () => {
       },
     });
     const effects = derivePendingEffects(s.state);
-    expect(effects).toEqual([expect.objectContaining({ kind: "channel_call", method: "eval" })]);
+    expect(effects).toEqual([
+      expect.objectContaining({ kind: "channel_call", method: "eval" }),
+    ]);
   });
 
   it("routes against the roster captured for the model call when presence changes in flight", () => {
@@ -2113,7 +2421,9 @@ describe("channel tools", () => {
       stopReason: "completed",
     });
 
-    const started = s.log.find((row) => row.envelopeId === ids.invocationStart("tc-title"))!;
+    const started = s.log.find(
+      (row) => row.envelopeId === ids.invocationStart("tc-title"),
+    )!;
     expect(started.payload).toMatchObject({
       transport: {
         kind: "channel",
@@ -2133,13 +2443,21 @@ describe("channel tools", () => {
         participants: [
           {
             participantId: "panel:other",
-            ref: { kind: "panel", id: "panel:other", participantId: "panel:other" },
+            ref: {
+              kind: "panel",
+              id: "panel:other",
+              participantId: "panel:other",
+            },
             type: "panel",
             methods: [{ name: "client_eval" }],
           },
           {
             participantId: "panel:user",
-            ref: { kind: "panel", id: "panel:user", participantId: "panel:user" },
+            ref: {
+              kind: "panel",
+              id: "panel:user",
+              participantId: "panel:user",
+            },
             type: "panel",
             methods: [{ name: "client_eval" }],
           },
@@ -2170,10 +2488,14 @@ describe("wake / recovery (C-wake)", () => {
     expect(
       s.log.some(
         (row) =>
-          row.payloadKind === "message.failed" && row.envelopeId === ids.messageTerminal(msg0)
-      )
+          row.payloadKind === "message.failed" &&
+          row.envelopeId === ids.messageTerminal(msg0),
+      ),
     ).toBe(true);
-    expect(s.log.find((row) => row.envelopeId === ids.messageTerminal(msg0))?.publish).toBe(true);
+    expect(
+      s.log.find((row) => row.envelopeId === ids.messageTerminal(msg0))
+        ?.publish,
+    ).toBe(true);
     const msg1 = ids.messageId(turn1, 1);
     expect(pendingEffectIds(s)).toEqual([ids.modelEffect(msg1)]);
   });
@@ -2192,7 +2514,9 @@ describe("wake / recovery (C-wake)", () => {
 
     // the pending invocation re-derives; NO new model_call (the guard)
     expect(pendingEffectIds(s)).toEqual([ids.invocationEffect("tc-1")]);
-    expect(derivePendingEffects(s.state).map((effect) => effect.kind)).toEqual(["local_tool"]);
+    expect(derivePendingEffects(s.state).map((effect) => effect.kind)).toEqual([
+      "local_tool",
+    ]);
   });
 
   it("starts a turn from a pendingPrompt on wake", () => {
@@ -2239,7 +2563,10 @@ describe("credential wait", () => {
         publish: true,
       },
       {
-        envelopeId: ids.systemEvent(ids.credKey("chan-1", "anthropic"), "started"),
+        envelopeId: ids.systemEvent(
+          ids.credKey("chan-1", "anthropic"),
+          "started",
+        ),
         payloadKind: "system.event",
         payload: {
           protocol: "agentic.trajectory.v1",
@@ -2260,14 +2587,21 @@ describe("credential wait", () => {
     expect(s.state.openTurn).not.toBeNull();
     expect(s.state.inFlightModelCall).toBeNull();
     expect(Object.keys(s.state.pendingCredentialWaits)).toHaveLength(1);
-    expect(s.log.filter((row) => row.payloadKind === "turn.closed")).toHaveLength(0);
+    expect(
+      s.log.filter((row) => row.payloadKind === "turn.closed"),
+    ).toHaveLength(0);
     // the wait derives a credential_wait effect
-    expect(derivePendingEffects(s.state).map((effect) => effect.kind)).toEqual(["credential_wait"]);
+    expect(derivePendingEffects(s.state).map((effect) => effect.kind)).toEqual([
+      "credential_wait",
+    ]);
 
     // resolution event arrives → wait cleared, model restarts
     const resolved = applyAppend(s, [
       {
-        envelopeId: ids.systemEvent(ids.credKey("chan-1", "anthropic"), "resolved"),
+        envelopeId: ids.systemEvent(
+          ids.credKey("chan-1", "anthropic"),
+          "resolved",
+        ),
         payloadKind: "system.event",
         payload: {
           protocol: "agentic.trajectory.v1",
@@ -2282,7 +2616,8 @@ describe("credential wait", () => {
         causality: { turnId: turn1 },
       },
     ]);
-    for (const envelope of resolved) dispatch(s, { type: "event-appended", envelope });
+    for (const envelope of resolved)
+      dispatch(s, { type: "event-appended", envelope });
     expect(Object.keys(s.state.pendingCredentialWaits)).toHaveLength(0);
     const msg1 = ids.messageId(turn1, 1);
     expect(pendingEffectIds(s)).toContain(ids.modelEffect(msg1));
@@ -2309,11 +2644,15 @@ describe("fork policy", () => {
 
     dispatch(child, { type: "command", command: { kind: "wake" } });
 
-    const abandoned = child.log.find((row) => row.envelopeId === ids.invocationTerminal("tc-1"))!;
+    const abandoned = child.log.find(
+      (row) => row.envelopeId === ids.invocationTerminal("tc-1"),
+    )!;
     expect(abandoned.payloadKind).toBe("invocation.abandoned");
     expect(abandoned.payload).toMatchObject({ reason: "forked" });
     const closed = child.log.filter((row) => row.payloadKind === "turn.closed");
-    expect(closed[closed.length - 1]!.payload).toMatchObject({ reason: "forked" });
+    expect(closed[closed.length - 1]!.payload).toMatchObject({
+      reason: "forked",
+    });
     expect(child.state.openTurn).toBeNull();
     expect(pendingEffectIds(child)).toEqual([]);
   });
@@ -2329,7 +2668,10 @@ describe("publish policy: say-only", () => {
       stopReason: "completed",
     });
     for (const row of s.log) {
-      if (row.payloadKind === "turn.opened" || row.payloadKind === "turn.closed") {
+      if (
+        row.payloadKind === "turn.opened" ||
+        row.payloadKind === "turn.closed"
+      ) {
         expect(row.publish).toBe(true);
       } else {
         expect(row.publish ?? false).toBe(false);
@@ -2347,7 +2689,7 @@ describe("publish policy: say-only", () => {
           channelId: "chan-1",
           event: { kind: "message.delta" } as never,
         },
-      })
+      }),
     ).toBeNull();
   });
 });
@@ -2362,7 +2704,11 @@ describe("publish policy: turn-final", () => {
       blocks: [{ type: "toolCall", id: "tc-1", name: "read", arguments: {} }],
       stopReason: "completed",
     });
-    resolveEffect(s, ids.invocationEffect("tc-1"), { kind: "tool", result: null, isError: false });
+    resolveEffect(s, ids.invocationEffect("tc-1"), {
+      kind: "tool",
+      result: null,
+      isError: false,
+    });
     // final model round: text-only ⇒ tier "primary".
     const msg1 = ids.messageId(turn1, 1);
     resolveEffect(s, ids.modelEffect(msg1), {
@@ -2374,12 +2720,15 @@ describe("publish policy: turn-final", () => {
       s.log.filter(
         (row) =>
           row.payloadKind === kind &&
-          (tier === undefined || (row.payload as { tier?: string }).tier === tier) &&
-          row.publish === true
+          (tier === undefined ||
+            (row.payload as { tier?: string }).tier === tier) &&
+          row.publish === true,
       );
     // no message.started publishes; the secondary (tool-call) completion is suppressed.
     expect(
-      s.log.filter((row) => row.payloadKind === "message.started" && row.publish === true)
+      s.log.filter(
+        (row) => row.payloadKind === "message.started" && row.publish === true,
+      ),
     ).toHaveLength(0);
     expect(published("message.completed", "secondary")).toHaveLength(0);
     // the primary headline + turn boundaries + invocation outcome still publish.
@@ -2438,10 +2787,15 @@ describe("determinism properties", () => {
         {
           envelopeId: "delta-1",
           payloadKind: "message.delta",
-          payload: { protocol: "agentic.trajectory.v1", blockId: "b", type: "text", text: "x" },
+          payload: {
+            protocol: "agentic.trajectory.v1",
+            blockId: "b",
+            type: "text",
+            text: "x",
+          },
           causality: { messageId: "m" as never },
         },
-      ])
+      ]),
     ).toThrow(/never be appended/u);
   });
 
@@ -2485,7 +2839,11 @@ describe("determinism properties", () => {
 });
 
 describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", () => {
-  const userRef = { kind: "user" as const, id: "panel:user", participantId: "panel:user" };
+  const userRef = {
+    kind: "user" as const,
+    id: "panel:user",
+    participantId: "panel:user",
+  };
 
   function promptWith(
     s: Scenario,
@@ -2494,7 +2852,7 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
       sourceMessageId?: string;
       content?: string;
       metadata?: { deliverAfterTurn?: boolean };
-    }
+    },
   ): void {
     dispatch(s, {
       type: "command",
@@ -2502,7 +2860,9 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
         kind: "prompt",
         channelId: "chan-1",
         source: { envelopeId: opts.envelopeId },
-        ...(opts.sourceMessageId ? { sourceMessageId: opts.sourceMessageId } : {}),
+        ...(opts.sourceMessageId
+          ? { sourceMessageId: opts.sourceMessageId }
+          : {}),
         content: opts.content ?? "hello",
         senderRef: userRef,
         ...(opts.metadata ? { metadata: opts.metadata } : {}),
@@ -2511,7 +2871,9 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     drainPromptArtifactPreparations(s);
   }
 
-  function readAcks(s: Scenario): Array<{ messageId: string; turnId?: string }> {
+  function readAcks(
+    s: Scenario,
+  ): Array<{ messageId: string; turnId?: string }> {
     return s.outputs
       .flatMap((output) => output.effects)
       .filter((effect) => effect.kind === "record_receipt")
@@ -2568,10 +2930,14 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     });
     // recv appended, but no NEW model_call effect and no context entry
     expect(pendingEffectIds(s)).toEqual(before);
-    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(["d1"]);
-    expect(s.state.entries.some((e) => e.kind === "user" && e.sourceMessageId === "d1")).toBe(
-      false
+    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(
+      ["d1"],
     );
+    expect(
+      s.state.entries.some(
+        (e) => e.kind === "user" && e.sourceMessageId === "d1",
+      ),
+    ).toBe(false);
     const newModelCalls = s.outputs
       .slice(outputsBefore)
       .flatMap((o) => o.effects)
@@ -2622,8 +2988,10 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     expect(s.state.openTurn?.waitingAtSeq).toBeUndefined();
     expect(
       s.state.entries.some(
-        (entry) => entry.kind === "user" && entry.sourceMessageId === "subagent-terminal:run-1"
-      )
+        (entry) =>
+          entry.kind === "user" &&
+          entry.sourceMessageId === "subagent-terminal:run-1",
+      ),
     ).toBe(true);
     expect(pendingEffectIds(s)).toEqual([
       ids.modelEffect(ids.messageId(turn1, 1)),
@@ -2654,9 +3022,9 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
       content: "Subagent run-1 completed.",
       metadata: { deliverAfterTurn: true },
     });
-    expect(s.state.deferredPostTurnQueue.map((entry) => entry.sourceMessageId)).toEqual([
-      "subagent-terminal:run-1",
-    ]);
+    expect(
+      s.state.deferredPostTurnQueue.map((entry) => entry.sourceMessageId),
+    ).toEqual(["subagent-terminal:run-1"]);
 
     resolveEffect(s, ids.invocationEffect("suspend-1"), {
       kind: "tool",
@@ -2677,8 +3045,10 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     expect(s.state.openTurn?.waitingAtSeq).toBeUndefined();
     expect(
       s.state.entries.some(
-        (entry) => entry.kind === "user" && entry.sourceMessageId === "subagent-terminal:run-1"
-      )
+        (entry) =>
+          entry.kind === "user" &&
+          entry.sourceMessageId === "subagent-terminal:run-1",
+      ),
     ).toBe(true);
     expect(pendingEffectIds(s)).toEqual([
       ids.modelEffect(ids.messageId(turn1, 1)),
@@ -2688,7 +3058,7 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     expect(
       s.outputs
         .flatMap((output) => output.append)
-        .some((item) => item.payloadKind === "turn.closed")
+        .some((item) => item.payloadKind === "turn.closed"),
     ).toBe(false);
   });
 
@@ -2752,10 +3122,12 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
       metadata: { deliverAfterTurn: true },
     });
 
-    expect(s.state.steeringQueue.map((entry) => entry.sourceMessageId)).toEqual(["u2"]);
-    expect(s.state.deferredPostTurnQueue.map((entry) => entry.sourceMessageId)).toEqual([
-      "subagent-terminal:run-2",
-    ]);
+    expect(s.state.steeringQueue.map((entry) => entry.sourceMessageId)).toEqual(
+      ["u2"],
+    );
+    expect(
+      s.state.deferredPostTurnQueue.map((entry) => entry.sourceMessageId),
+    ).toEqual(["subagent-terminal:run-2"]);
 
     resolveEffect(s, firstTerminalModel, {
       kind: "model",
@@ -2769,9 +3141,9 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
       `read:u1:${turn1}`,
       `read:u2:${turn1}`,
     ]);
-    expect(s.state.deferredPostTurnQueue.map((entry) => entry.sourceMessageId)).toEqual([
-      "subagent-terminal:run-2",
-    ]);
+    expect(
+      s.state.deferredPostTurnQueue.map((entry) => entry.sourceMessageId),
+    ).toEqual(["subagent-terminal:run-2"]);
 
     resolveEffect(s, steeredModel, {
       kind: "model",
@@ -2782,11 +3154,17 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     expect(s.state.deferredPostTurnQueue).toHaveLength(0);
     expect(
       s.state.entries.some(
-        (entry) => entry.kind === "user" && entry.sourceMessageId === "subagent-terminal:run-2"
-      )
+        (entry) =>
+          entry.kind === "user" &&
+          entry.sourceMessageId === "subagent-terminal:run-2",
+      ),
     ).toBe(true);
     expect(readAcks(s).map((ack) => ack.messageId)).toEqual(
-      expect.arrayContaining(["subagent-terminal:run-1", "u2", "subagent-terminal:run-2"])
+      expect.arrayContaining([
+        "subagent-terminal:run-1",
+        "u2",
+        "subagent-terminal:run-2",
+      ]),
     );
     expect(pendingEffectIds(s).some((id) => id.includes("model"))).toBe(true);
   });
@@ -2796,7 +3174,14 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     promptWith(s, { envelopeId: "env-1", sourceMessageId: "u1" });
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
-      blocks: [{ type: "toolCall", id: "tc-slow", name: "read", arguments: { path: "a.ts" } }],
+      blocks: [
+        {
+          type: "toolCall",
+          id: "tc-slow",
+          name: "read",
+          arguments: { path: "a.ts" },
+        },
+      ],
       stopReason: "completed",
     });
 
@@ -2813,9 +3198,14 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
       },
     });
 
-    const deferredPreparation = ids.promptArtifactsEffect(ids.recvUserMessage("chan-1", "env-2"));
+    const deferredPreparation = ids.promptArtifactsEffect(
+      ids.recvUserMessage("chan-1", "env-2"),
+    );
     expect(pendingEffectIds(s)).toEqual(
-      expect.arrayContaining([ids.invocationEffect("tc-slow"), deferredPreparation])
+      expect.arrayContaining([
+        ids.invocationEffect("tc-slow"),
+        deferredPreparation,
+      ]),
     );
 
     resolveEffect(s, ids.invocationEffect("tc-slow"), {
@@ -2825,11 +3215,18 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     });
 
     expect(pendingEffectIds(s)).toEqual(
-      expect.arrayContaining([ids.modelEffect(ids.messageId(turn1, 1)), deferredPreparation])
+      expect.arrayContaining([
+        ids.modelEffect(ids.messageId(turn1, 1)),
+        deferredPreparation,
+      ]),
     );
-    expect(s.state.deferredPostTurnQueue.map((item) => item.sourceMessageId)).toEqual(["d1"]);
     expect(
-      s.state.entries.some((entry) => entry.kind === "user" && entry.sourceMessageId === "d1")
+      s.state.deferredPostTurnQueue.map((item) => item.sourceMessageId),
+    ).toEqual(["d1"]);
+    expect(
+      s.state.entries.some(
+        (entry) => entry.kind === "user" && entry.sourceMessageId === "d1",
+      ),
     ).toBe(false);
   });
 
@@ -2846,7 +3243,9 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
       sourceMessageId: "d2",
       metadata: { deliverAfterTurn: true },
     });
-    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(["d1", "d2"]);
+    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(
+      ["d1", "d2"],
+    );
 
     // first turn closes → promote d1 into its own fresh turn
     resolveEffect(s, ids.modelEffect(msg0), {
@@ -2854,19 +3253,25 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
       blocks: [{ type: "text", content: "done" }],
       stopReason: "completed",
     });
-    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(["d2"]);
+    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(
+      ["d2"],
+    );
     expect(s.state.openTurn).not.toBeNull();
     // promoted recv used a fresh deterministic id (not the arrival env-2)
-    const promoted = s.log.find((row) => row.envelopeId.startsWith("recv:promoted:d1:"));
+    const promoted = s.log.find((row) =>
+      row.envelopeId.startsWith("recv:promoted:d1:"),
+    );
     expect(promoted).toBeDefined();
     const promotedTurn = s.log.find(
       (row) =>
         row.payloadKind === "turn.opened" &&
-        (row.causality as { turnId?: string } | undefined)?.turnId === s.state.openTurn?.turnId
+        (row.causality as { turnId?: string } | undefined)?.turnId ===
+          s.state.openTurn?.turnId,
     );
-    expect((promotedTurn?.causality as { messageId?: string } | undefined)?.messageId).toBe(
-      promoted?.envelopeId
-    );
+    expect(
+      (promotedTurn?.causality as { messageId?: string } | undefined)
+        ?.messageId,
+    ).toBe(promoted?.envelopeId);
 
     // d1's turn closes → promote d2
     const d1Msg = ids.messageId(s.state.openTurn!.turnId, 0);
@@ -2878,7 +3283,7 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     expect(s.state.deferredPostTurnQueue).toHaveLength(0);
     expect(s.state.openTurn).not.toBeNull();
     expect(readAcks(s).map((ack) => ack.messageId)).toEqual(
-      expect.arrayContaining(["u1", "d1", "d2"])
+      expect.arrayContaining(["u1", "d1", "d2"]),
     );
   });
 
@@ -2914,9 +3319,13 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
   it("no-ops an edit/retract after the message was read (consumed into context)", () => {
     const s = scenario();
     // u1 is folded into the first model call → consumed (read); only in entries.
-    promptWith(s, { envelopeId: "env-1", sourceMessageId: "u1", content: "original" });
+    promptWith(s, {
+      envelopeId: "env-1",
+      sourceMessageId: "u1",
+      content: "original",
+    });
     const entryBefore = s.state.entries.find(
-      (e) => e.kind === "user" && e.sourceMessageId === "u1"
+      (e) => e.kind === "user" && e.sourceMessageId === "u1",
     );
     expect(entryBefore).toBeDefined();
     dispatch(s, {
@@ -2933,7 +3342,9 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
       command: { kind: "retract", sourceMessageId: "u1", by: userRef },
     });
     // read wins: the consumed entry is untouched, never removed.
-    const entryAfter = s.state.entries.find((e) => e.kind === "user" && e.sourceMessageId === "u1");
+    const entryAfter = s.state.entries.find(
+      (e) => e.kind === "user" && e.sourceMessageId === "u1",
+    );
     expect(entryAfter).toEqual(entryBefore);
   });
 
@@ -2979,14 +3390,25 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
       metadata: { deliverAfterTurn: true },
     });
     // flush: steers present + model in flight → soft flush marker
-    dispatch(s, { type: "command", command: { kind: "interrupt", flushDeferred: true } });
+    dispatch(s, {
+      type: "command",
+      command: { kind: "interrupt", flushDeferred: true },
+    });
     expect(s.state.openTurn?.pendingFlush).toBe("steers");
-    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(["d1"]);
+    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(
+      ["d1"],
+    );
     // aborted model terminal → continuation consumes the steer (turn stays open)
-    resolveEffect(s, ids.modelEffect(msg0), { kind: "model", blocks: [], stopReason: "aborted" });
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [],
+      stopReason: "aborted",
+    });
     expect(s.state.openTurn).not.toBeNull();
     expect(readAcks(s).map((ack) => ack.messageId)).toContain("s1");
-    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(["d1"]);
+    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(
+      ["d1"],
+    );
   });
 
   it("allows repeated soft flushes in the same turn", () => {
@@ -3005,13 +3427,22 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     });
     drainPromptArtifactPreparations(s);
 
-    dispatch(s, { type: "command", command: { kind: "interrupt", flushDeferred: true } });
+    dispatch(s, {
+      type: "command",
+      command: { kind: "interrupt", flushDeferred: true },
+    });
     const firstFlushId = s.log.find(
-      (row) => row.payloadKind === "system.event" && row.envelopeId.includes("flush-steers")
+      (row) =>
+        row.payloadKind === "system.event" &&
+        row.envelopeId.includes("flush-steers"),
     )?.envelopeId;
     expect(firstFlushId).toBeDefined();
     expect(s.state.openTurn?.pendingFlush).toBe("steers");
-    resolveEffect(s, ids.modelEffect(msg0), { kind: "model", blocks: [], stopReason: "aborted" });
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [],
+      stopReason: "aborted",
+    });
     expect(readAcks(s).map((ack) => ack.messageId)).toContain("s1");
 
     const msg1 = ids.messageId(turn1, 1);
@@ -3029,17 +3460,26 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     });
     drainPromptArtifactPreparations(s);
 
-    dispatch(s, { type: "command", command: { kind: "interrupt", flushDeferred: true } });
+    dispatch(s, {
+      type: "command",
+      command: { kind: "interrupt", flushDeferred: true },
+    });
     const flushIds = s.log
       .filter(
-        (row) => row.payloadKind === "system.event" && row.envelopeId.includes("flush-steers")
+        (row) =>
+          row.payloadKind === "system.event" &&
+          row.envelopeId.includes("flush-steers"),
       )
       .map((row) => row.envelopeId);
     expect(flushIds).toHaveLength(2);
     expect(flushIds[1]).not.toBe(firstFlushId);
     expect(s.state.openTurn?.pendingFlush).toBe("steers");
 
-    resolveEffect(s, ids.modelEffect(msg1), { kind: "model", blocks: [], stopReason: "aborted" });
+    resolveEffect(s, ids.modelEffect(msg1), {
+      kind: "model",
+      blocks: [],
+      stopReason: "aborted",
+    });
     expect(s.state.openTurn).not.toBeNull();
     expect(readAcks(s).map((ack) => ack.messageId)).toContain("s2");
   });
@@ -3051,7 +3491,9 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     // stays pending, no model in flight, so wakeGuard is unsatisfied.
     resolveEffect(s, ids.modelEffect(msg0), {
       kind: "model",
-      blocks: [{ type: "toolCall", id: "tc-1", name: "feedback_form", arguments: {} }],
+      blocks: [
+        { type: "toolCall", id: "tc-1", name: "feedback_form", arguments: {} },
+      ],
       stopReason: "completed",
     });
     expect(pendingEffectIds(s)).toEqual([ids.invocationEffect("tc-1")]);
@@ -3071,15 +3513,20 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
     drainPromptArtifactPreparations(s);
     expect(s.state.steeringQueue.map((e) => e.sourceMessageId)).toEqual(["s1"]);
     // Flush ("Send now"): abandon the pending form + deliver the steer.
-    dispatch(s, { type: "command", command: { kind: "interrupt", flushDeferred: true } });
+    dispatch(s, {
+      type: "command",
+      command: { kind: "interrupt", flushDeferred: true },
+    });
     // The pending invocation was cancelled (a valid cancelled tool-result)...
-    const cancelled = s.log.find((r) => r.payloadKind === "invocation.cancelled");
+    const cancelled = s.log.find(
+      (r) => r.payloadKind === "invocation.cancelled",
+    );
     expect(cancelled).toBeTruthy();
     // ...and the cancel carries the transportCallId the provider knows, so a
     // panel feedback form can correlate it and dismiss (not linger on screen).
-    expect((cancelled!.causality as { transportCallId?: string }).transportCallId).toBe(
-      ids.transportCallId("tc-1")
-    );
+    expect(
+      (cancelled!.causality as { transportCallId?: string }).transportCallId,
+    ).toBe(ids.transportCallId("tc-1"));
     // ...a fresh turn opened that folds + read-acks the steer, and the steer
     // queue drained — i.e. the agent actually makes progress.
     expect(readAcks(s).map((a) => a.messageId)).toContain("s1");
@@ -3102,10 +3549,19 @@ describe("agent-loop message delivery (acks, edit/retract, after-turn, flush)", 
       metadata: { deliverAfterTurn: true },
     });
     // flush: no steers, model in flight, deferred present → hard interrupt + close
-    dispatch(s, { type: "command", command: { kind: "interrupt", flushDeferred: true } });
-    resolveEffect(s, ids.modelEffect(msg0), { kind: "model", blocks: [], stopReason: "aborted" });
+    dispatch(s, {
+      type: "command",
+      command: { kind: "interrupt", flushDeferred: true },
+    });
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [],
+      stopReason: "aborted",
+    });
     // one head promoted into a fresh turn; the other still queued
-    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(["d2"]);
+    expect(s.state.deferredPostTurnQueue.map((d) => d.sourceMessageId)).toEqual(
+      ["d2"],
+    );
     expect(s.state.openTurn).not.toBeNull();
   });
 });

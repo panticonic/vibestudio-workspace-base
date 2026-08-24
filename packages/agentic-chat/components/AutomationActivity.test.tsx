@@ -3,7 +3,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { describe, expect, it, vi } from "vitest";
-import type { MissionRecord, MissionRunRecord } from "@vibestudio/shared/authority/mission";
+import type {
+  MissionRecord,
+  MissionRunRecord,
+} from "@vibestudio/shared/authority/mission";
 import {
   AutomationActivity,
   createAutomationUiClient,
@@ -64,13 +67,19 @@ const run: MissionRunRecord = {
 };
 
 function client(): AutomationUiClient & {
-  get: ReturnType<typeof vi.fn>;
+  inspect: ReturnType<typeof vi.fn>;
   getRun: ReturnType<typeof vi.fn>;
   edit: ReturnType<typeof vi.fn>;
   pause: ReturnType<typeof vi.fn>;
 } {
   return {
-    get: vi.fn(async () => automation),
+    inspect: vi.fn(async () => ({
+      automation,
+      recentRuns: [run],
+      totalRuns: 1,
+      activeRuns: 0,
+      issueRunsSince: 0,
+    })),
     getRun: vi.fn(async () => run),
     edit: vi.fn(async () => automation),
     pause: vi.fn(async () => ({ ...automation, state: "paused" as const })),
@@ -85,7 +94,19 @@ describe("AutomationActivity", () => {
       if (method === "workers.resolveService") {
         return { kind: "durable-object", targetId: "do:missions" };
       }
-      if (method === "get") return automation;
+      if (method === "overview") {
+        return {
+          items: [
+            {
+              automation,
+              recentRuns: [run],
+              totalRuns: 1,
+              activeRuns: 0,
+              issueRunsSince: 0,
+            },
+          ],
+        };
+      }
       if (method === "getRun") return run;
       throw new Error(`Unexpected method ${method}`);
     });
@@ -94,9 +115,14 @@ describe("AutomationActivity", () => {
     const second = createAutomationUiClient(rpc);
 
     expect(second).toBe(first);
-    await Promise.all([first.get(automation.missionId), second.getRun(run.runId)]);
+    await Promise.all([
+      first.inspect(automation.missionId),
+      second.getRun(run.runId),
+    ]);
     expect(
-      call.mock.calls.filter(([, method]) => method === "workers.resolveService")
+      call.mock.calls.filter(
+        ([, method]) => method === "workers.resolveService",
+      ),
     ).toHaveLength(1);
   });
 
@@ -124,25 +150,29 @@ describe("AutomationActivity", () => {
           }}
           client={api}
         />
-      </Theme>
+      </Theme>,
     );
 
     expect(screen.getByText(/Every 1 day/)).toBeTruthy();
-    expect(api.get).not.toHaveBeenCalled();
+    expect(api.inspect).not.toHaveBeenCalled();
     expect(api.getRun).not.toHaveBeenCalled();
 
     fireEvent.click(
       screen.getByRole("button", {
         name: /Inspect automation tick Daily check/,
-      })
+      }),
     );
     await screen.findByText("Everything looks good.");
-    expect(api.get).toHaveBeenCalledWith(automation.missionId);
+    expect(api.inspect).toHaveBeenCalledWith(automation.missionId);
     expect(api.getRun).toHaveBeenCalledWith(run.runId);
     expect(screen.queryByText("Additional provider token cost")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Stop recurring calls" }));
-    await waitFor(() => expect(api.pause).toHaveBeenCalledWith(automation.missionId));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Stop recurring calls" }),
+    );
+    await waitFor(() =>
+      expect(api.pause).toHaveBeenCalledWith(automation.missionId),
+    );
     expect(await screen.findByRole("button", { name: "Resume" })).toBeTruthy();
   });
 
@@ -154,7 +184,29 @@ describe("AutomationActivity", () => {
       runCount: 0,
     };
     const api = client();
-    api.get.mockResolvedValue(launched);
+    const failedRun: MissionRunRecord = {
+      ...run,
+      runId: "run-live-failure",
+      runNumber: 2,
+      outcome: "completed-with-errors",
+      finalMessage: undefined,
+      effectFailures: [
+        {
+          invocationId: "notify-call",
+          name: "notify",
+          outcome: "tool_error",
+          code: "ENOTIFY",
+          message: "Notification delivery failed",
+        },
+      ],
+    };
+    api.inspect.mockResolvedValue({
+      automation: { ...launched, runCount: 2 },
+      recentRuns: [failedRun],
+      totalRuns: 2,
+      activeRuns: 0,
+      issueRunsSince: 1,
+    });
     render(
       <Theme>
         <AutomationActivity
@@ -173,33 +225,53 @@ describe("AutomationActivity", () => {
           }}
           client={api}
         />
-      </Theme>
+      </Theme>,
     );
 
     expect(screen.getByText("Active")).toBeTruthy();
     expect(screen.getByText(/Every 1 day · created/)).toBeTruthy();
-    expect(api.get).not.toHaveBeenCalled();
+    expect(api.inspect).not.toHaveBeenCalled();
     expect(api.getRun).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Inspect automation Daily check" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Inspect automation Daily check" }),
+    );
     await screen.findByText(/Started here/);
-    expect(api.get).toHaveBeenCalledWith(launched.missionId);
+    expect(api.inspect).toHaveBeenCalledWith(launched.missionId);
     expect(api.getRun).not.toHaveBeenCalled();
     expect(screen.queryByText("This tick")).toBeNull();
     expect(screen.getByText("Exact action")).toBeTruthy();
     expect(screen.getByText("Check the project.")).toBeTruthy();
     expect(screen.getByText("Launch-time authority planning")).toBeTruthy();
     expect(
-      screen.getByText("No pre-acquisition hints. Runtime calls still use ordinary approval.")
+      screen.getByText(
+        "No pre-acquisition hints. Runtime calls still use ordinary approval.",
+      ),
     ).toBeTruthy();
     expect(screen.getByText("Standing authority")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Edit parameters" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Stop recurring calls" })).toBeTruthy();
+    expect(screen.getByText("2 runs")).toBeTruthy();
+    expect(screen.getByText("Recent runs")).toBeTruthy();
+    expect(screen.getByText("Completed with errors")).toBeTruthy();
+    expect(screen.getByText(/Notification delivery failed/)).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Edit parameters" }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole("button", { name: "Stop recurring calls" }),
+    ).toBeTruthy();
   });
 
   it.each([
-    ["two-hour interval", { kind: "schedule" as const, everyMs: 7_200_000 }, true],
-    ["one-hour interval", { kind: "schedule" as const, everyMs: 3_600_000 }, false],
+    [
+      "two-hour interval",
+      { kind: "schedule" as const, everyMs: 7_200_000 },
+      true,
+    ],
+    [
+      "one-hour interval",
+      { kind: "schedule" as const, everyMs: 3_600_000 },
+      false,
+    ],
     [
       "weekly calendar schedule",
       {
@@ -220,7 +292,8 @@ describe("AutomationActivity", () => {
     ],
   ])("%s provider-cache warning: %s", async (_label, trigger, expected) => {
     const agentExecution = automation.charter.execution;
-    if (agentExecution.kind !== "agent") throw new Error("Expected an agent automation fixture");
+    if (agentExecution.kind !== "agent")
+      throw new Error("Expected an agent automation fixture");
     const continuedAutomation: MissionRecord = {
       ...automation,
       charter: {
@@ -236,6 +309,14 @@ describe("AutomationActivity", () => {
         },
       },
     };
+    const api = client();
+    api.inspect.mockResolvedValue({
+      automation: continuedAutomation,
+      recentRuns: [run],
+      totalRuns: 1,
+      activeRuns: 0,
+      issueRunsSince: 0,
+    });
     render(
       <Theme>
         <AutomationActivity
@@ -265,20 +346,24 @@ describe("AutomationActivity", () => {
           }}
           automation={continuedAutomation}
           run={run}
-          client={client()}
+          client={api}
         />
-      </Theme>
+      </Theme>,
     );
 
     expect(screen.queryByText("Additional provider token cost")).toBeNull();
     fireEvent.click(
       screen.getByRole("button", {
         name: /Inspect automation tick Daily check/,
-      })
+      }),
     );
     if (expected) {
-      expect(await screen.findByText("Additional provider token cost")).toBeTruthy();
-      expect(screen.getByText(/API-provider context caches may expire/)).toBeTruthy();
+      expect(
+        await screen.findByText("Additional provider token cost"),
+      ).toBeTruthy();
+      expect(
+        screen.getByText(/API-provider context caches may expire/),
+      ).toBeTruthy();
       expect(screen.getByText(/consumes additional input tokens/)).toBeTruthy();
     } else {
       expect(screen.queryByText("Additional provider token cost")).toBeNull();
@@ -311,15 +396,17 @@ describe("AutomationActivity", () => {
           run={run}
           client={api}
         />
-      </Theme>
+      </Theme>,
     );
 
     fireEvent.click(
       screen.getByRole("button", {
         name: /Inspect automation tick Daily check/,
-      })
+      }),
     );
-    fireEvent.click(await screen.findByRole("button", { name: "Edit parameters" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Edit parameters" }),
+    );
     fireEvent.change(screen.getByLabelText("Prompt text"), {
       target: { value: "Check the project and summarize blockers." },
     });
@@ -337,8 +424,8 @@ describe("AutomationActivity", () => {
               },
             }),
           }),
-        })
-      )
+        }),
+      ),
     );
   });
 
@@ -358,6 +445,13 @@ describe("AutomationActivity", () => {
       },
     };
     const api = client();
+    api.inspect.mockResolvedValue({
+      automation: calendarAutomation,
+      recentRuns: [{ ...run, runNumber: 4 }],
+      totalRuns: 4,
+      activeRuns: 0,
+      issueRunsSince: 0,
+    });
     render(
       <Theme>
         <AutomationActivity
@@ -389,31 +483,37 @@ describe("AutomationActivity", () => {
           run={{ ...run, runNumber: 4 }}
           client={api}
         />
-      </Theme>
+      </Theme>,
     );
 
-    expect(screen.getByText(/Every Thursday at 5:05.*New York time/)).toBeTruthy();
+    expect(
+      screen.getByText(/Every Thursday at 5:05.*New York time/),
+    ).toBeTruthy();
     fireEvent.click(
       screen.getByRole("button", {
         name: /Inspect automation tick Daily check/,
-      })
+      }),
     );
     expect(await screen.findByText("4 runs of 8")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Edit parameters" }));
     expect(screen.queryByLabelText("Cron expression")).toBeNull();
-    expect((screen.getByLabelText("Time") as HTMLInputElement).value).toBe("05:05");
-    expect((screen.getByLabelText("Thursday") as HTMLButtonElement).dataset["state"]).toBe(
-      "checked"
+    expect((screen.getByLabelText("Time") as HTMLInputElement).value).toBe(
+      "05:05",
     );
-    expect((screen.getByLabelText("Cron timezone") as HTMLInputElement).value).toBe(
-      "America/New_York"
-    );
+    expect(
+      (screen.getByLabelText("Thursday") as HTMLButtonElement).dataset["state"],
+    ).toBe("checked");
+    expect(
+      (screen.getByLabelText("Cron timezone") as HTMLInputElement).value,
+    ).toBe("America/New_York");
     expect(screen.getByText("Next five runs")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: "Advanced" }));
     fireEvent.change(screen.getByLabelText("Cron expression"), {
       target: { value: "35 7 * * MON-FRI" },
     });
-    expect(await screen.findByText(/Every Monday through Friday at 7:35/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Every Monday through Friday at 7:35/),
+    ).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Maximum runs"), {
       target: { value: "12" },
     });
@@ -432,8 +532,8 @@ describe("AutomationActivity", () => {
               untilAt: expect.any(Number),
             }),
           }),
-        })
-      )
+        }),
+      ),
     );
   });
 
@@ -449,6 +549,15 @@ describe("AutomationActivity", () => {
       ...run,
       completionResponse: "The monitored rollout is healthy everywhere.",
     };
+    const api = client();
+    api.inspect.mockResolvedValue({
+      automation: completed,
+      recentRuns: [completedRun],
+      totalRuns: 1,
+      activeRuns: 0,
+      issueRunsSince: 0,
+    });
+    api.getRun.mockResolvedValue(completedRun);
     render(
       <Theme>
         <AutomationActivity
@@ -472,19 +581,23 @@ describe("AutomationActivity", () => {
           }}
           automation={completed}
           run={completedRun}
-          client={client()}
+          client={api}
         />
-      </Theme>
+      </Theme>,
     );
 
     fireEvent.click(
       screen.getByRole("button", {
         name: /Inspect automation tick Daily check/,
-      })
+      }),
     );
-    expect(await screen.findByText("Automation completed", { exact: false })).toBeTruthy();
+    expect(
+      await screen.findByText("Automation completed", { exact: false }),
+    ).toBeTruthy();
     expect(screen.getByText("Natural completion response")).toBeTruthy();
-    expect(screen.getByText("The monitored rollout is healthy everywhere.")).toBeTruthy();
+    expect(
+      screen.getByText("The monitored rollout is healthy everywhere."),
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Run now" })).toBeNull();
   });
 });

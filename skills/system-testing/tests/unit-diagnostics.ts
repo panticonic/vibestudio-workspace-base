@@ -15,20 +15,22 @@ import { walkRecords } from "./_scenario-evidence.js";
 function semanticUnitInspection(
   result: Parameters<typeof noIncompleteInvocations>[0],
   requiredCode: RegExp[],
-  finalClaims: RegExp[]
+  finalClaims: RegExp[],
 ) {
   const code = successfulEvalCode(result);
   if (!requiredCode.every((pattern) => pattern.test(code))) {
     return {
       passed: false,
-      reason: "Successful eval evidence omitted a required unit diagnostic surface",
+      reason:
+        "Successful eval evidence omitted a required unit diagnostic surface",
     };
   }
   const final = findLastAgentMessage(result);
   if (!finalClaims.every((pattern) => pattern.test(final))) {
     return {
       passed: false,
-      reason: "Final response did not report the observed unit diagnostics semantically",
+      reason:
+        "Final response did not report the observed unit diagnostics semantically",
     };
   }
   return noIncompleteInvocations(result);
@@ -38,7 +40,10 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function sameIdentity(value: unknown, expected: Record<string, unknown>): boolean {
+function sameIdentity(
+  value: unknown,
+  expected: Record<string, unknown>,
+): boolean {
   return (
     isRecord(value) &&
     value["kind"] === expected["kind"] &&
@@ -46,17 +51,30 @@ function sameIdentity(value: unknown, expected: Record<string, unknown>): boolea
   );
 }
 
-function labeledCount(final: string, label: "log" | "error", count: number): boolean {
-  if (count === 0 && new RegExp(`\\bno\\s+(?:recent\\s+)?${label}s?\\b`, "iu").test(final)) {
+function labeledCount(
+  final: string,
+  label: "log" | "error",
+  count: number,
+): boolean {
+  if (
+    count === 0 &&
+    new RegExp(`\\bno\\s+(?:recent\\s+)?${label}s?\\b`, "iu").test(final)
+  ) {
     return true;
   }
   return (
-    new RegExp(`\\b${label}s?\\b[^\\d\\n]{0,24}\\b${count}\\b`, "iu").test(final) ||
-    new RegExp(`\\b${count}\\b[^\\d\\n]{0,24}\\b${label}s?\\b`, "iu").test(final)
+    new RegExp(`\\b${label}s?\\b[^\\d\\n]{0,24}\\b${count}\\b`, "iu").test(
+      final,
+    ) ||
+    new RegExp(`\\b${count}\\b[^\\d\\n]{0,24}\\b${label}s?\\b`, "iu").test(
+      final,
+    )
   );
 }
 
-function unitDiagnosticLogInspection(result: Parameters<typeof noIncompleteInvocations>[0]) {
+function unitDiagnosticLogInspection(
+  result: Parameters<typeof noIncompleteInvocations>[0],
+) {
   const code = successfulEvalCode(result);
   if (
     !/runtime\.supervision\.list/iu.test(code) ||
@@ -66,37 +84,46 @@ function unitDiagnosticLogInspection(result: Parameters<typeof noIncompleteInvoc
   ) {
     return {
       passed: false,
-      reason: "The unit-log investigation did not perform one bounded exact-unit health read",
+      reason:
+        "The unit-log investigation did not perform one bounded exact-unit health read",
     };
   }
 
-  const packet = walkRecords(successfulEvalReturnValues(result)).find((record) => {
-    const entity = record["entity"];
-    const logs = record["logs"];
-    const errors = record["errors"];
-    const dropped = record["dropped"];
-    const capacity = record["capacity"];
-    if (
-      !isRecord(entity) ||
-      !isRecord(entity["identity"]) ||
-      typeof entity["source"] !== "string" ||
-      !Array.isArray(logs) ||
-      !Array.isArray(errors) ||
-      !isRecord(dropped) ||
-      !isRecord(capacity)
-    ) {
-      return false;
-    }
-    const identity = entity["identity"];
-    return (
-      logs.every((entry) => isRecord(entry) && sameIdentity(entry["identity"], identity)) &&
-      errors.every((entry) => isRecord(entry) && sameIdentity(entry["identity"], identity)) &&
-      Number.isInteger(dropped["entries"]) &&
-      Number.isInteger(dropped["errors"]) &&
-      Number.isInteger(capacity["entries"]) &&
-      Number.isInteger(capacity["errors"])
-    );
-  });
+  const packet = walkRecords(successfulEvalReturnValues(result)).find(
+    (record) => {
+      const entity = record["entity"];
+      const logs = record["logs"];
+      const errors = record["errors"];
+      const dropped = record["dropped"];
+      const capacity = record["capacity"];
+      if (
+        !isRecord(entity) ||
+        !isRecord(entity["identity"]) ||
+        typeof entity["source"] !== "string" ||
+        !Array.isArray(logs) ||
+        !Array.isArray(errors) ||
+        !isRecord(dropped) ||
+        !isRecord(capacity)
+      ) {
+        return false;
+      }
+      const identity = entity["identity"];
+      return (
+        logs.every(
+          (entry) =>
+            isRecord(entry) && sameIdentity(entry["identity"], identity),
+        ) &&
+        errors.every(
+          (entry) =>
+            isRecord(entry) && sameIdentity(entry["identity"], identity),
+        ) &&
+        Number.isInteger(dropped["entries"]) &&
+        Number.isInteger(dropped["errors"]) &&
+        Number.isInteger(capacity["entries"]) &&
+        Number.isInteger(capacity["errors"])
+      );
+    },
+  );
   if (!packet) {
     return {
       passed: false,
@@ -111,7 +138,8 @@ function unitDiagnosticLogInspection(result: Parameters<typeof noIncompleteInvoc
   const errors = packet["errors"] as unknown[];
   const final = findLastAgentMessage(result);
   if (
-    (!final.includes(String(entity["source"])) && !final.includes(String(identity["entityId"]))) ||
+    (!final.includes(String(entity["source"])) &&
+      !final.includes(String(identity["entityId"]))) ||
     !labeledCount(final, "log", logs.length) ||
     !labeledCount(final, "error", errors.length)
   ) {
@@ -124,7 +152,9 @@ function unitDiagnosticLogInspection(result: Parameters<typeof noIncompleteInvoc
   return noIncompleteInvocations(result);
 }
 
-function automationInspectionChecked(result: Parameters<typeof noIncompleteInvocations>[0]) {
+function automationInspectionChecked(
+  result: Parameters<typeof noIncompleteInvocations>[0],
+) {
   const evalCalls = getToolCalls(result).filter((call) => call.name === "eval");
   const code = successfulEvalCode(result);
   if (
@@ -134,16 +164,21 @@ function automationInspectionChecked(result: Parameters<typeof noIncompleteInvoc
   ) {
     return {
       passed: false,
-      reason: "Expected exactly one successful eval reading the automation overview",
+      reason:
+        "Expected exactly one successful eval reading the automation overview",
     };
   }
   const allEvalCode = getToolCalls(result)
     .filter((call) => call.name === "eval")
-    .map((call) => (typeof call.arguments?.["code"] === "string" ? call.arguments["code"] : ""))
+    .map((call) =>
+      typeof call.arguments?.["code"] === "string"
+        ? call.arguments["code"]
+        : "",
+    )
     .join("\n");
   if (
     /\b(?:runNow|pause|resume|retire|requestReview|createDraft|proposeDraft|edit)\b/u.test(
-      allEvalCode
+      allEvalCode,
     )
   ) {
     return {
@@ -154,7 +189,8 @@ function automationInspectionChecked(result: Parameters<typeof noIncompleteInvoc
   if (!successfulEvalReturnValues(result).some(isExactAutomationCounts)) {
     return {
       passed: false,
-      reason: "Automation inspection eval did not return the exact bounded overview counts",
+      reason:
+        "Automation inspection eval did not return the exact bounded overview counts",
     };
   }
   const final = findLastAgentMessage(result);
@@ -176,15 +212,21 @@ function isExactAutomationCounts(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const record = value as Record<string, unknown>;
   return (
-    Object.keys(record).sort().join(",") === "active,automations,failedLast24Hours,running" &&
+    Object.keys(record).sort().join(",") ===
+      "active,automations,failedLast24Hours,running" &&
     ["active", "automations", "failedLast24Hours", "running"].every(
-      (key) => Number.isSafeInteger(record[key]) && (record[key] as number) >= 0
+      (key) =>
+        Number.isSafeInteger(record[key]) && (record[key] as number) >= 0,
     )
   );
 }
 
-function automationNativeLaunchChecked(result: Parameters<typeof noIncompleteInvocations>[0]) {
-  const calls = getToolCalls(result).filter((call) => call.name === "launch_automation");
+function automationNativeLaunchChecked(
+  result: Parameters<typeof noIncompleteInvocations>[0],
+) {
+  const calls = getToolCalls(result).filter(
+    (call) => call.name === "launch_automation",
+  );
   if (
     calls.length !== 1 ||
     calls[0]?.execution?.status !== "complete" ||
@@ -193,7 +235,8 @@ function automationNativeLaunchChecked(result: Parameters<typeof noIncompleteInv
   ) {
     return {
       passed: false,
-      reason: "No successful native launch created the requested inline-eval automation",
+      reason:
+        "No successful native launch created the requested inline-eval automation",
     };
   }
   if (
@@ -201,20 +244,25 @@ function automationNativeLaunchChecked(result: Parameters<typeof noIncompleteInv
       (call) =>
         call.name === "eval" &&
         /(?:launch_automation|automations\.propose|missions\.launch)/u.test(
-          String(call.arguments?.["code"] ?? "")
-        )
+          String(call.arguments?.["code"] ?? ""),
+        ),
     )
   ) {
     return {
       passed: false,
-      reason: "The automation launch was routed through eval instead of the native tool",
+      reason:
+        "The automation launch was routed through eval instead of the native tool",
     };
   }
   const final = findLastAgentMessage(result);
-  if (!/(?:running|started|launched)/iu.test(final) || !/(?:pill|automation)/iu.test(final)) {
+  if (
+    !/(?:running|started|launched)/iu.test(final) ||
+    !/(?:pill|automation)/iu.test(final)
+  ) {
     return {
       passed: false,
-      reason: "Final response did not explain that the automation is running and inspectable",
+      reason:
+        "Final response did not explain that the automation is running and inspectable",
     };
   }
   return noIncompleteInvocations(result);
@@ -224,7 +272,7 @@ const SCHEDULED_NOTIFICATION_NAME = "Scheduled notification proof";
 const SCHEDULED_NOTIFICATION_TEXT = "SYSTEM_AUTOMATION_TICK_OK";
 
 async function scheduledNotificationProof(
-  context: TestOrchestrationContext
+  context: TestOrchestrationContext,
 ): Promise<TestExecutionResult> {
   const startedAt = Date.now();
   const session = await context.runner.spawn();
@@ -235,18 +283,25 @@ async function scheduledNotificationProof(
     await context.sendAndWait(
       session,
       `Launch an automation named “${SCHEDULED_NOTIFICATION_NAME}” that runs every minute and stops after one admitted run. Use an agent prompt action so the scheduled agent invokes its notify tool (not an eval script). Each run must notify the owner at the inbox rung with title “Automation system proof” and exact content “${SCHEDULED_NOTIFICATION_TEXT}”. Use a fresh conversation for the run. Start it immediately and tell me where I can inspect it.`,
-      "scheduled notification launch"
+      "scheduled notification launch",
     );
     const service = await workers.resolveService("vibestudio.missions.v1");
     if (service.kind !== "durable-object" || !service.targetId) {
-      throw new Error("The automation ledger did not resolve to a Durable Object");
+      throw new Error(
+        "The automation ledger did not resolve to a Durable Object",
+      );
     }
-    const deadline = Date.now() + Math.min(100_000, context.remainingTimeMs() ?? 100_000);
+    const deadline =
+      Date.now() + Math.min(100_000, context.remainingTimeMs() ?? 100_000);
     while (Date.now() < deadline) {
-      const overview = await rpc.call<Record<string, unknown>>(service.targetId, "overview", [
-        { query: SCHEDULED_NOTIFICATION_NAME, limit: 5 },
-      ]);
-      const item = Array.isArray(overview["items"]) ? overview["items"][0] : undefined;
+      const overview = await rpc.call<Record<string, unknown>>(
+        service.targetId,
+        "overview",
+        [{ query: SCHEDULED_NOTIFICATION_NAME, limit: 5 }],
+      );
+      const item = Array.isArray(overview["items"])
+        ? overview["items"][0]
+        : undefined;
       const itemRecord = isRecord(item) ? item : undefined;
       const automation = isRecord(itemRecord?.["automation"])
         ? itemRecord?.["automation"]
@@ -255,9 +310,12 @@ async function scheduledNotificationProof(
         ? itemRecord?.["recentRuns"]
         : [];
       const run = recentRuns.find(
-        (candidate) => isRecord(candidate) && candidate["phase"] === "terminal"
+        (candidate) => isRecord(candidate) && candidate["phase"] === "terminal",
       );
-      if (automation?.["name"] === SCHEDULED_NOTIFICATION_NAME && isRecord(run)) {
+      if (
+        automation?.["name"] === SCHEDULED_NOTIFICATION_NAME &&
+        isRecord(run)
+      ) {
         const notifications = await gad.listUserNotificationsForMe({
           includeAcknowledged: true,
           limit: 100,
@@ -266,7 +324,7 @@ async function scheduledNotificationProof(
           (candidate) =>
             candidate.kind === "agent.message" &&
             (candidate.title === "Automation system proof" ||
-              candidate.message === SCHEDULED_NOTIFICATION_TEXT)
+              candidate.message === SCHEDULED_NOTIFICATION_TEXT),
         );
         observation = {
           missionId: automation["missionId"],
@@ -278,6 +336,7 @@ async function scheduledNotificationProof(
             outcome: run["outcome"],
             finalMessage: run["finalMessage"],
             failure: run["failure"],
+            effectFailures: run["effectFailures"],
           },
           notification: notification
             ? {
@@ -292,7 +351,10 @@ async function scheduledNotificationProof(
       }
       await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
-    if (!observation) throw new Error("The first scheduled run did not become terminal in time");
+    if (!observation)
+      throw new Error(
+        "The first scheduled run did not become terminal in time",
+      );
   } catch (cause) {
     error = cause instanceof Error ? cause.message : String(cause);
   }
@@ -322,23 +384,35 @@ function scheduledNotificationChecked(result: TestExecutionResult) {
       call.name === "launch_automation" &&
       call.execution?.status === "complete" &&
       call.execution?.isError !== true &&
-      call.arguments?.["name"] === SCHEDULED_NOTIFICATION_NAME
+      call.arguments?.["name"] === SCHEDULED_NOTIFICATION_NAME,
   );
   if (launches.length !== 1) {
-    return { passed: false, reason: "The proof automation was not launched exactly once" };
+    return {
+      passed: false,
+      reason: "The proof automation was not launched exactly once",
+    };
   }
-  if ((launches[0]?.arguments?.["action"] as { kind?: unknown } | undefined)?.kind !== "prompt") {
-    return { passed: false, reason: "The prompt-execution proof launched a different executor" };
+  if (
+    (launches[0]?.arguments?.["action"] as { kind?: unknown } | undefined)
+      ?.kind !== "prompt"
+  ) {
+    return {
+      passed: false,
+      reason: "The prompt-execution proof launched a different executor",
+    };
   }
   const observed = result.diagnostics?.["scheduledNotification"];
   if (!isRecord(observed) || !isRecord(observed["run"])) {
-    return { passed: false, reason: "No durable scheduled-run evidence was observed" };
+    return {
+      passed: false,
+      reason: "No durable scheduled-run evidence was observed",
+    };
   }
   const run = observed["run"];
   if (run["phase"] !== "terminal" || run["outcome"] !== "succeeded") {
     return {
       passed: false,
-      reason: `The first scheduled run did not succeed: ${JSON.stringify(run)}`,
+      reason: `The first scheduled run or one of its requested effects did not succeed: ${JSON.stringify(run)}`,
     };
   }
   const notification = observed["notification"];
@@ -349,7 +423,8 @@ function scheduledNotificationChecked(result: TestExecutionResult) {
   ) {
     return {
       passed: false,
-      reason: "The successful run did not produce the requested durable user notification",
+      reason:
+        "The successful run did not produce the requested durable user notification",
     };
   }
   return { passed: true };
@@ -402,8 +477,11 @@ export const unitDiagnosticsTests: TestCase[] = [
     validate: (result) =>
       semanticUnitInspection(
         result,
-        [/runtime\.supervision\.list/iu, /runtime\.supervision\.(?:describe|health)/iu],
-        [/unit/iu, /running|available|status/iu, /\d/u]
+        [
+          /runtime\.supervision\.list/iu,
+          /runtime\.supervision\.(?:describe|health)/iu,
+        ],
+        [/unit/iu, /running|available|status/iu, /\d/u],
       ),
   },
   {
@@ -424,7 +502,7 @@ export const unitDiagnosticsTests: TestCase[] = [
       semanticUnitInspection(
         result,
         [/build\.listUnits/iu, /runtime\.supervision\.versions/iu],
-        [/version/iu, /active|current/iu, /\d/u]
+        [/version/iu, /active|current/iu, /\d/u],
       ),
   },
   {
@@ -462,7 +540,8 @@ export const unitDiagnosticsTests: TestCase[] = [
   },
   {
     name: "automation-scheduled-notification",
-    description: "A launched one-minute automation completes a real run and notifies its owner",
+    description:
+      "A launched one-minute automation completes a real run and notifies its owner",
     category: "unit-diagnostics",
     timeoutMs: 150_000,
     prompt: "Harness-orchestrated scheduled automation outcome proof.",

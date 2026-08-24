@@ -7,7 +7,7 @@ function execution(
   code: string,
   returnValue: unknown,
   final = "The workspace has 4 automations: 2 active, 1 running, and 1 failed in the last 24 hours.",
-  toolName = "eval"
+  toolName = "eval",
 ): TestExecutionResult {
   return {
     duration: 0,
@@ -33,7 +33,10 @@ function execution(
           status: "complete",
           terminalOutcome: "success",
           isError: false,
-          arguments: toolName === "eval" ? { code } : (returnValue as Record<string, unknown>),
+          arguments:
+            toolName === "eval"
+              ? { code }
+              : (returnValue as Record<string, unknown>),
           result: { details: { success: true, returnValue } },
         },
       } as unknown as TestExecutionResult["messages"][number],
@@ -50,13 +53,13 @@ function execution(
 }
 
 const automationTest = unitDiagnosticsTests.find(
-  (candidate) => candidate.name === "automation-overview-readonly"
+  (candidate) => candidate.name === "automation-overview-readonly",
 )!;
 const automationLaunchTest = unitDiagnosticsTests.find(
-  (candidate) => candidate.name === "automation-native-launch"
+  (candidate) => candidate.name === "automation-native-launch",
 )!;
 const scheduledNotificationTest = unitDiagnosticsTests.find(
-  (candidate) => candidate.name === "automation-scheduled-notification"
+  (candidate) => candidate.name === "automation-scheduled-notification",
 )!;
 
 describe("automation overview system test validator", () => {
@@ -71,8 +74,8 @@ describe("automation overview system test validator", () => {
           active: 2,
           running: 1,
           failedLast24Hours: 1,
-        })
-      )
+        }),
+      ),
     ).toEqual({ passed: true });
   });
 
@@ -96,24 +99,31 @@ describe("automation overview system test validator", () => {
   it("rejects prose-only automation claims", () => {
     expect(
       automationTest.validate(
-        execution("return { automations: 4, active: 2, running: 1, failedLast24Hours: 1 };", {})
-      )
+        execution(
+          "return { automations: 4, active: 2, running: 1, failedLast24Hours: 1 };",
+          {},
+        ),
+      ),
     ).toMatchObject({
       passed: false,
-      reason: "Expected exactly one successful eval reading the automation overview",
+      reason:
+        "Expected exactly one successful eval reading the automation overview",
     });
   });
 
   it("rejects automation mutation attempts", () => {
     expect(
       automationTest.validate(
-        execution(`${readCode}\nawait rpc.call(service.targetId, 'runNow', ['id']);`, {
-          automations: 4,
-          active: 2,
-          running: 1,
-          failedLast24Hours: 1,
-        })
-      )
+        execution(
+          `${readCode}\nawait rpc.call(service.targetId, 'runNow', ['id']);`,
+          {
+            automations: 4,
+            active: 2,
+            running: 1,
+            failedLast24Hours: 1,
+          },
+        ),
+      ),
     ).toMatchObject({
       passed: false,
       reason: "Automation inspection probe attempted a mutating operation",
@@ -129,11 +139,12 @@ describe("automation overview system test validator", () => {
           running: 1,
           failedLast24Hours: 1,
           definitions: [{ name: "news" }],
-        })
-      )
+        }),
+      ),
     ).toMatchObject({
       passed: false,
-      reason: "Automation inspection eval did not return the exact bounded overview counts",
+      reason:
+        "Automation inspection eval did not return the exact bounded overview counts",
     });
   });
 });
@@ -168,9 +179,9 @@ describe("automation native launch system test validator", () => {
           "",
           launch,
           "Daily project pulse is running; use its automation pill to inspect or stop it.",
-          "launch_automation"
-        )
-      )
+          "launch_automation",
+        ),
+      ),
     ).toEqual({ passed: true });
   });
 
@@ -180,12 +191,13 @@ describe("automation native launch system test validator", () => {
         execution(
           "return rpc.call(missions.targetId, 'launch', [input]);",
           launch,
-          "Daily project pulse is running and inspectable."
-        )
-      )
+          "Daily project pulse is running and inspectable.",
+        ),
+      ),
     ).toMatchObject({
       passed: false,
-      reason: "No successful native launch created the requested inline-eval automation",
+      reason:
+        "No successful native launch created the requested inline-eval automation",
     });
   });
 });
@@ -200,13 +212,16 @@ describe("scheduled automation notification system test validator", () => {
     },
     trigger: { kind: "schedule", everyMs: 60_000, maxRuns: 1 },
     conversation: { mode: "fresh" },
-    operations: [
-      { service: "notification", method: "showToUser", use: "action" },
-    ],
+    operations: [],
   };
 
   it("requires a terminal successful run and independently observed notification", () => {
-    const result = execution("", scheduledLaunch, "Running and inspectable.", "launch_automation");
+    const result = execution(
+      "",
+      scheduledLaunch,
+      "Running and inspectable.",
+      "launch_automation",
+    );
     result.diagnostics = {
       scheduledNotification: {
         run: { phase: "terminal", outcome: "succeeded" },
@@ -217,27 +232,65 @@ describe("scheduled automation notification system test validator", () => {
         },
       },
     };
-    expect(scheduledNotificationTest.validate(result)).toEqual({ passed: true });
+    expect(scheduledNotificationTest.validate(result)).toEqual({
+      passed: true,
+    });
   });
 
   it("rejects launch-only evidence without the promised outcome", () => {
     expect(
       scheduledNotificationTest.validate(
-        execution("", scheduledLaunch, "Running and inspectable.", "launch_automation")
-      )
+        execution(
+          "",
+          scheduledLaunch,
+          "Running and inspectable.",
+          "launch_automation",
+        ),
+      ),
     ).toMatchObject({
       passed: false,
       reason: "No durable scheduled-run evidence was observed",
+    });
+  });
+
+  it("rejects a completed turn whose requested notification effect failed", () => {
+    const result = execution(
+      "",
+      scheduledLaunch,
+      "Running and inspectable.",
+      "launch_automation",
+    );
+    result.diagnostics = {
+      scheduledNotification: {
+        run: {
+          phase: "terminal",
+          outcome: "completed-with-errors",
+          effectFailures: [
+            {
+              invocationId: "notify-call",
+              name: "notify",
+              outcome: "tool_error",
+              code: "EDELIVERY",
+              message: "Live inbox invalidation failed",
+            },
+          ],
+        },
+        notification: null,
+      },
+    };
+    expect(scheduledNotificationTest.validate(result)).toMatchObject({
+      passed: false,
+      reason: expect.stringContaining("Live inbox invalidation failed"),
     });
   });
 });
 
 describe("workspace unit diagnostics semantic validators", () => {
   const listTest = unitDiagnosticsTests.find(
-    (candidate) => candidate.name === "unit-list-inspect"
+    (candidate) => candidate.name === "unit-list-inspect",
   )!;
   const logsTest = unitDiagnosticsTests.find(
-    (candidate) => candidate.name === "unit-diagnostics-error-buffer"
+    (candidate) => candidate.name === "unit-diagnostics-error-buffer",
   )!;
 
   const identity = { kind: "extension", entityId: "extension:status:1" };
@@ -253,7 +306,9 @@ describe("workspace unit diagnostics semantic validators", () => {
       { identity, timestamp: 1, level: "info", message: "ready" },
       { identity, timestamp: 2, level: "warn", message: "slow poll" },
     ],
-    errors: [{ identity, timestamp: 3, level: "error", message: "old failure" }],
+    errors: [
+      { identity, timestamp: 3, level: "error", message: "old failure" },
+    ],
     dropped: { entries: 0, errors: 0 },
     capacity: { entries: 100, errors: 50 },
   };
@@ -266,9 +321,9 @@ describe("workspace unit diagnostics semantic validators", () => {
         execution(
           "const units = await runtime.supervision.list(); const detail = await runtime.supervision.health(units[0].identity, { limit: 5, errorLimit: 2 }); return { units: units.length, detail };",
           { units: 3, detail: { status: "running" } },
-          "There are 3 workspace units available; the representative unit I inspected is running."
-        )
-      )
+          "There are 3 workspace units available; the representative unit I inspected is running.",
+        ),
+      ),
     ).toEqual({ passed: true });
   });
 
@@ -278,9 +333,9 @@ describe("workspace unit diagnostics semantic validators", () => {
         execution(
           "return { units: 3, detail: { status: 'running' } };",
           { units: 3, detail: { status: "running" } },
-          "There are 3 workspace units available; the representative unit I inspected is running."
-        )
-      )
+          "There are 3 workspace units available; the representative unit I inspected is running.",
+        ),
+      ),
     ).toMatchObject({ passed: false });
   });
 
@@ -290,9 +345,9 @@ describe("workspace unit diagnostics semantic validators", () => {
         execution(
           healthCode,
           health,
-          "extensions/status has 2 recent logs and 1 entry in its separate error buffer."
-        )
-      )
+          "extensions/status has 2 recent logs and 1 entry in its separate error buffer.",
+        ),
+      ),
     ).toEqual({ passed: true, reason: undefined });
   });
 
@@ -302,9 +357,9 @@ describe("workspace unit diagnostics semantic validators", () => {
         execution(
           healthCode,
           { source: "extensions/status", logs: 2, errors: 1 },
-          "extensions/status has 2 logs and 1 error."
-        )
-      )
+          "extensions/status has 2 logs and 1 error.",
+        ),
+      ),
     ).toMatchObject({
       passed: false,
       reason: expect.stringContaining("health packet"),
@@ -327,9 +382,9 @@ describe("workspace unit diagnostics semantic validators", () => {
               },
             ],
           },
-          "extensions/status has 2 logs and 1 error."
-        )
-      )
+          "extensions/status has 2 logs and 1 error.",
+        ),
+      ),
     ).toMatchObject({
       passed: false,
       reason: expect.stringContaining("identity-consistent"),
@@ -339,8 +394,12 @@ describe("workspace unit diagnostics semantic validators", () => {
   it("rejects a report that omits one observed buffer count", () => {
     expect(
       logsTest.validate(
-        execution(healthCode, health, "extensions/status has 2 recent logs and looks healthy.")
-      )
+        execution(
+          healthCode,
+          health,
+          "extensions/status has 2 recent logs and looks healthy.",
+        ),
+      ),
     ).toMatchObject({
       passed: false,
       reason: expect.stringContaining("exact buffer counts"),

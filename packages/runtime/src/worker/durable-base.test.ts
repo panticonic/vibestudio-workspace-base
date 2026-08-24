@@ -2,19 +2,25 @@ import { createServer } from "node:http";
 import { describe, expect, it } from "vitest";
 import { rpc } from "@vibestudio/rpc";
 import { DIRECT_AUTHORITY_ACCEPTED_AT_HEADER } from "@vibestudio/rpc/internal";
-import type { AuthenticatedCaller } from "@vibestudio/rpc";
-import type { DoAlarmDispatchResult, DoAlarmSchedule } from "@vibestudio/shared/doDispatcher";
+import type { AuthenticatedCaller, RpcEnvelope } from "@vibestudio/rpc";
+import type {
+  DoAlarmDispatchResult,
+  DoAlarmSchedule,
+} from "@vibestudio/shared/doDispatcher";
 import { DURABLE_WORK_READY_HEADER } from "@vibestudio/shared/durableWork";
 import initSqlJs from "sql.js";
 import { DurableObjectBase } from "./durable-base.js";
-import { createTestDO, createTestDirectAuthority } from "./durable-test-utils.js";
+import {
+  createTestDO,
+  createTestDirectAuthority,
+} from "./durable-test-utils.js";
 
 abstract class TestDurableObjectBase extends DurableObjectBase {}
 
 function authenticatedTestCaller(
   method: string,
   callerKind: AuthenticatedCaller["callerKind"] = "server",
-  overrides?: Parameters<typeof createTestDirectAuthority>[0]["overrides"]
+  overrides?: Parameters<typeof createTestDirectAuthority>[0]["overrides"],
 ) {
   return {
     callerId: callerKind === "server" ? "main" : `${callerKind}:test`,
@@ -34,6 +40,22 @@ class EchoDO extends TestDurableObjectBase {
   })
   echo(...args: unknown[]): unknown[] {
     return args;
+  }
+}
+
+class DetachedRpcProbeDO extends TestDurableObjectBase {
+  protected createTables(): void {}
+
+  @rpc({
+    principals: ["host"],
+    effect: { kind: "open" },
+    tier: "open",
+    sensitivity: "write",
+  })
+  startDetached(throwAfterStart = false): string {
+    void this.rpc.call("main", "notification.signalUserInbox", ["usr_test"]);
+    if (throwAfterStart) throw new Error("parent failed after starting child");
+    return "started";
   }
 }
 
@@ -131,7 +153,10 @@ class LifecycleProbeDO extends TestDurableObjectBase {
 class WorkReadyProbeDO extends TestDurableObjectBase {
   protected createTables(): void {}
 
-  protected override durableWorkQueues(): readonly ["agent-wake", "agent-effect"] {
+  protected override durableWorkQueues(): readonly [
+    "agent-wake",
+    "agent-effect",
+  ] {
     return ["agent-wake", "agent-effect"];
   }
 
@@ -173,7 +198,10 @@ class DurableWorkAdoptionProbeDO extends TestDurableObjectBase {
     `);
   }
 
-  adopt(workerId: string): { adopted: boolean; previousWorkerId: string | null } {
+  adopt(workerId: string): {
+    adopted: boolean;
+    previousWorkerId: string | null;
+  } {
     this.ensureReady();
     return this.adoptDurableWorkWorkerGeneration(workerId);
   }
@@ -184,7 +212,7 @@ class DurableWorkAdoptionProbeDO extends TestDurableObjectBase {
       `INSERT INTO adoption_probe_claims (item_id, disposition, lease_owner)
        VALUES (?, 'leased', ?)`,
       itemId,
-      workerId
+      workerId,
     );
   }
 
@@ -192,21 +220,24 @@ class DurableWorkAdoptionProbeDO extends TestDurableObjectBase {
     this.ensureReady();
     return String(
       this.sql
-        .exec(`SELECT disposition FROM adoption_probe_claims WHERE item_id = ?`, itemId)
-        .one()["disposition"]
+        .exec(
+          `SELECT disposition FROM adoption_probe_claims WHERE item_id = ?`,
+          itemId,
+        )
+        .one()["disposition"],
     );
   }
 
   protected override releaseDurableWorkClaims(
     previousWorkerId: string | null,
-    _nextWorkerId: string
+    _nextWorkerId: string,
   ): void {
     if (!previousWorkerId) return;
     this.sql.exec(
       `UPDATE adoption_probe_claims
           SET disposition = 'ready', lease_owner = NULL
         WHERE disposition = 'leased' AND lease_owner = ?`,
-      previousWorkerId
+      previousWorkerId,
     );
   }
 }
@@ -215,7 +246,9 @@ class SchemaProbeDO extends TestDurableObjectBase {
   static override schemaVersion = 2;
 
   protected createTables(): void {
-    this.sql.exec(`CREATE TABLE required_table (id TEXT PRIMARY KEY, payload TEXT)`);
+    this.sql.exec(
+      `CREATE TABLE required_table (id TEXT PRIMARY KEY, payload TEXT)`,
+    );
   }
 
   protected override requiredTables(): readonly string[] {
@@ -231,7 +264,9 @@ class SchemaProbeDO extends TestDurableObjectBase {
   hasRequiredTable(): boolean {
     return (
       this.sql
-        .exec(`SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'required_table'`)
+        .exec(
+          `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'required_table'`,
+        )
         .toArray().length === 1
     );
   }
@@ -304,7 +339,9 @@ async function dispatchAlarm(instance: DurableObjectBase): Promise<{
   response: Response;
   result: DoAlarmDispatchResult;
 }> {
-  const fetchable = instance as unknown as { fetch(request: Request): Promise<Response> };
+  const fetchable = instance as unknown as {
+    fetch(request: Request): Promise<Response>;
+  };
   const response = await fetchable.fetch(
     new Request("http://test/test-key/__alarm", {
       method: "POST",
@@ -315,7 +352,7 @@ async function dispatchAlarm(instance: DurableObjectBase): Promise<{
         __instanceId: "do:test:AlarmProbeDO:test-key",
         __caller: authenticatedTestCaller("__alarm"),
       }),
-    })
+    }),
   );
   return {
     response,
@@ -382,7 +419,7 @@ describe("DurableObjectBase request parsing", () => {
             args: [],
           },
         }),
-      })
+      }),
     );
 
     await expect(response.json()).resolves.toMatchObject({
@@ -437,7 +474,7 @@ describe("DurableObjectBase request parsing", () => {
             args: [],
           },
         }),
-      })
+      }),
     );
 
     expect(response.status).toBe(403);
@@ -455,7 +492,9 @@ describe("DurableObjectBase request parsing", () => {
 
   it("returns a streaming RPC method's raw response body from __rpc", async () => {
     const { instance } = await createTestDO(StreamProbeDO);
-    const fetchable = instance as unknown as { fetch(request: Request): Promise<Response> };
+    const fetchable = instance as unknown as {
+      fetch(request: Request): Promise<Response>;
+    };
     const response = await fetchable.fetch(
       new Request("http://test/test-key/__rpc", {
         method: "POST",
@@ -473,7 +512,7 @@ describe("DurableObjectBase request parsing", () => {
             args: [],
           },
         }),
-      })
+      }),
     );
 
     expect(response.headers.get("Content-Type")).toBe("application/x-ndjson");
@@ -482,7 +521,9 @@ describe("DurableObjectBase request parsing", () => {
 
   it("unwraps tokenized dispatch envelopes into positional arguments", async () => {
     const { instance } = await createTestDO(EchoDO);
-    const fetchable = instance as unknown as { fetch(request: Request): Promise<Response> };
+    const fetchable = instance as unknown as {
+      fetch(request: Request): Promise<Response>;
+    };
     const response = await fetchable.fetch(
       new Request("http://test/test-key/echo", {
         method: "POST",
@@ -493,7 +534,7 @@ describe("DurableObjectBase request parsing", () => {
           __instanceId: "do:internal/WorkspaceDO:test-key",
           __caller: authenticatedTestCaller("echo"),
         }),
-      })
+      }),
     );
 
     await expect(response.json()).resolves.toEqual([["op-1"], "shell:owner"]);
@@ -522,33 +563,36 @@ describe("DurableObjectBase request parsing", () => {
         audience: "do:test:TestDO:another-key",
       }),
     ],
-  ])("rejects %s direct authority before method entry", async (_case, caller) => {
-    const { instance } = await createTestDO(EchoDO);
-    const response = await (
-      instance as unknown as { fetch(request: Request): Promise<Response> }
-    ).fetch(
-      new Request("http://test/test-key/echo", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          args: ["never-returned"],
-          __instanceToken: "token",
-          __instanceId: "do:test:TestDO:test-key",
-          ...(caller ? { __caller: caller } : {}),
+  ])(
+    "rejects %s direct authority before method entry",
+    async (_case, caller) => {
+      const { instance } = await createTestDO(EchoDO);
+      const response = await (
+        instance as unknown as { fetch(request: Request): Promise<Response> }
+      ).fetch(
+        new Request("http://test/test-key/echo", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            args: ["never-returned"],
+            __instanceToken: "token",
+            __instanceId: "do:test:TestDO:test-key",
+            ...(caller ? { __caller: caller } : {}),
+          }),
         }),
-      })
-    );
-    expect(response.status).toBe(403);
-    const body = await response.text();
-    if (_case === "stale") {
-      expect(body).toContain("nonce was replayed or is outside");
-      expect(body).toContain("retention bound");
-    } else if (_case === "wrong target") {
-      expect(body).toContain("bound to another invocation");
-      expect(body).toContain("expected audience=do:test:TestDO:test-key");
-      expect(body).toContain("received audience=do:test:TestDO:another-key");
-    }
-  });
+      );
+      expect(response.status).toBe(403);
+      const body = await response.text();
+      if (_case === "stale") {
+        expect(body).toContain("nonce was replayed or is outside");
+        expect(body).toContain("retention bound");
+      } else if (_case === "wrong target") {
+        expect(body).toContain("bound to another invocation");
+        expect(body).toContain("expected audience=do:test:TestDO:test-key");
+        expect(body).toContain("received audience=do:test:TestDO:another-key");
+      }
+    },
+  );
 
   it("accepts an agent subscribeChannel invocation that was fresh at router ingress before a cold load", async () => {
     const source = "workers/agent-worker";
@@ -581,7 +625,11 @@ describe("DurableObjectBase request parsing", () => {
           from: "panel:chat",
           target,
           delivery: {
-            caller: { callerId: "panel:chat", callerKind: "panel", authorization },
+            caller: {
+              callerId: "panel:chat",
+              callerKind: "panel",
+              authorization,
+            },
           },
           provenance: [],
           message: {
@@ -592,7 +640,7 @@ describe("DurableObjectBase request parsing", () => {
             args: ["channel-1"],
           },
         }),
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -637,7 +685,11 @@ describe("DurableObjectBase request parsing", () => {
           from: "panel:chat",
           target,
           delivery: {
-            caller: { callerId: "panel:chat", callerKind: "panel", authorization },
+            caller: {
+              callerId: "panel:chat",
+              callerKind: "panel",
+              authorization,
+            },
           },
           provenance: [],
           message: {
@@ -648,7 +700,7 @@ describe("DurableObjectBase request parsing", () => {
             args: [],
           },
         }),
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
@@ -668,9 +720,11 @@ describe("DurableObjectBase request parsing", () => {
           args: [123],
           __instanceToken: "token",
           __instanceId: "do:test:TestDO:test-key",
-          __caller: authenticatedTestCaller("scheduleWake", "server", { readOnly: true }),
+          __caller: authenticatedTestCaller("scheduleWake", "server", {
+            readOnly: true,
+          }),
         }),
-      })
+      }),
     );
     expect(response.status).toBe(403);
     await expect(response.text()).resolves.toContain("EVAL_READ_ONLY");
@@ -678,7 +732,9 @@ describe("DurableObjectBase request parsing", () => {
 
   it("preserves structured application failures on method-path dispatch", async () => {
     const { instance } = await createTestDO(StructuredErrorDO);
-    const fetchable = instance as unknown as { fetch(request: Request): Promise<Response> };
+    const fetchable = instance as unknown as {
+      fetch(request: Request): Promise<Response>;
+    };
     const response = await fetchable.fetch(
       new Request("http://test/test-key/fail", {
         method: "POST",
@@ -689,7 +745,7 @@ describe("DurableObjectBase request parsing", () => {
           __instanceId: "do:internal/WorkspaceDO:test-key",
           __caller: authenticatedTestCaller("fail"),
         }),
-      })
+      }),
     );
 
     expect(response.status).toBe(500);
@@ -708,15 +764,19 @@ describe("DurableObjectBase request parsing", () => {
 describe("DurableObjectBase lifecycle routing", () => {
   it("accepts lifecycle calls only from the verified server envelope caller", async () => {
     const { instance } = await createTestDO(LifecycleProbeDO);
-    const fetchable = instance as unknown as { fetch(request: Request): Promise<Response> };
+    const fetchable = instance as unknown as {
+      fetch(request: Request): Promise<Response>;
+    };
 
     const rejected = await fetchable.fetch(
       new Request("http://test/test-key/__lifecycle/prepare", {
         method: "POST",
         body: JSON.stringify({
-          args: [{ epoch: "e1", mode: "suspend", reason: "test", deadlineMs: 1 }],
+          args: [
+            { epoch: "e1", mode: "suspend", reason: "test", deadlineMs: 1 },
+          ],
         }),
-      })
+      }),
     );
     expect(rejected.status).toBe(403);
 
@@ -724,12 +784,14 @@ describe("DurableObjectBase lifecycle routing", () => {
       new Request("http://test/test-key/__lifecycle/prepare", {
         method: "POST",
         body: JSON.stringify({
-          args: [{ epoch: "e1", mode: "suspend", reason: "test", deadlineMs: 1 }],
+          args: [
+            { epoch: "e1", mode: "suspend", reason: "test", deadlineMs: 1 },
+          ],
           __instanceToken: "token",
           __instanceId: "do:internal/WorkspaceDO:test-key",
           __caller: authenticatedTestCaller("__lifecycle/prepare"),
         }),
-      })
+      }),
     );
     expect(accepted.status).toBe(200);
     expect(instance.prepared).toBe(true);
@@ -738,20 +800,27 @@ describe("DurableObjectBase lifecycle routing", () => {
 
   it("does not leak verified lifecycle caller into later ordinary calls", async () => {
     const { instance, callAs } = await createTestDO(LifecycleProbeDO);
-    const fetchable = instance as unknown as { fetch(request: Request): Promise<Response> };
+    const fetchable = instance as unknown as {
+      fetch(request: Request): Promise<Response>;
+    };
 
     await fetchable.fetch(
       new Request("http://test/test-key/__lifecycle/resume", {
         method: "POST",
         body: JSON.stringify({
           args: [
-            { epoch: "e1", previousGeneration: null, currentGeneration: 1, reason: "planned" },
+            {
+              epoch: "e1",
+              previousGeneration: null,
+              currentGeneration: 1,
+              reason: "planned",
+            },
           ],
           __instanceToken: "token",
           __instanceId: "do:internal/WorkspaceDO:test-key",
           __caller: authenticatedTestCaller("__lifecycle/resume"),
         }),
-      })
+      }),
     );
     expect(instance.scheduleProjectionCalls).toBe(0);
 
@@ -771,12 +840,14 @@ describe("DurableObjectBase lifecycle routing", () => {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          args: [{ epoch: "e1", mode: "suspend", reason: "test", deadlineMs: 1 }],
+          args: [
+            { epoch: "e1", mode: "suspend", reason: "test", deadlineMs: 1 },
+          ],
           __instanceToken: "token",
           __instanceId: "do:internal/WorkspaceDO:test-key",
           __caller: { callerId: "main", callerKind: "server" },
         }),
-      })
+      }),
     );
 
     expect(response.status).toBe(403);
@@ -797,7 +868,9 @@ describe("DurableObjectBase lifecycle routing", () => {
 describe("DurableObjectBase work-ready receipts", () => {
   it("exposes framework @rpc capability methods on subclasses", async () => {
     const { instance } = await createTestDO(WorkReadyProbeDO);
-    const fetchable = instance as unknown as { fetch(request: Request): Promise<Response> };
+    const fetchable = instance as unknown as {
+      fetch(request: Request): Promise<Response>;
+    };
     const response = await fetchable.fetch(
       new Request("http://test/test-key/durableWorkCapabilities", {
         method: "POST",
@@ -808,16 +881,21 @@ describe("DurableObjectBase work-ready receipts", () => {
           __instanceId: "do:workers/probe:WorkReadyProbeDO:test-key",
           __caller: authenticatedTestCaller("durableWorkCapabilities"),
         }),
-      })
+      }),
     );
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toEqual(["agent-wake", "agent-effect"]);
+    await expect(response.json()).resolves.toEqual([
+      "agent-wake",
+      "agent-effect",
+    ]);
   });
 
   it("re-emits one unacknowledged generation without manufacturing new work", async () => {
     const { instance, sql } = await createTestDO(WorkReadyProbeDO);
-    const fetchable = instance as unknown as { fetch(request: Request): Promise<Response> };
+    const fetchable = instance as unknown as {
+      fetch(request: Request): Promise<Response>;
+    };
     const request = (method: string, args: unknown[]) =>
       fetchable.fetch(
         new Request(`http://test/test-key/${method}`, {
@@ -829,25 +907,31 @@ describe("DurableObjectBase work-ready receipts", () => {
             __instanceId: "do:workers/probe:WorkReadyProbeDO:test-key",
             __caller: authenticatedTestCaller(method),
           }),
-        })
+        }),
       );
 
     const ordinary = await request("enqueue", []);
     await expect(ordinary.json()).resolves.toEqual({ committed: true });
-    expect(ordinary.headers.get(DURABLE_WORK_READY_HEADER)).toBe("agent-effect,agent-wake");
+    expect(ordinary.headers.get(DURABLE_WORK_READY_HEADER)).toBe(
+      "agent-effect,agent-wake",
+    );
 
     const firstAlarm = await request("__alarm", []);
-    expect(firstAlarm.headers.get(DURABLE_WORK_READY_HEADER)).toBe("agent-effect,agent-wake");
+    expect(firstAlarm.headers.get(DURABLE_WORK_READY_HEADER)).toBe(
+      "agent-effect,agent-wake",
+    );
     const secondAlarm = await request("__alarm", []);
-    expect(secondAlarm.headers.get(DURABLE_WORK_READY_HEADER)).toBe("agent-effect,agent-wake");
+    expect(secondAlarm.headers.get(DURABLE_WORK_READY_HEADER)).toBe(
+      "agent-effect,agent-wake",
+    );
     expect(
       sql
         .exec(
           `SELECT key, value FROM state
             WHERE key LIKE 'durable-work-ready-generation:%'
-            ORDER BY key`
+            ORDER BY key`,
         )
-        .toArray()
+        .toArray(),
     ).toEqual([
       { key: "durable-work-ready-generation:agent-effect", value: "1" },
       { key: "durable-work-ready-generation:agent-wake", value: "1" },
@@ -859,7 +943,12 @@ describe("DurableObjectBase work-ready receipts", () => {
     expect(drainedAlarm.headers.get(DURABLE_WORK_READY_HEADER)).toBeNull();
 
     const resume = await request("__lifecycle/resume", [
-      { epoch: "e1", previousGeneration: null, currentGeneration: 1, reason: "planned" },
+      {
+        epoch: "e1",
+        previousGeneration: null,
+        currentGeneration: 1,
+        reason: "planned",
+      },
     ]);
     expect(resume.headers.get(DURABLE_WORK_READY_HEADER)).toBe("agent-wake");
   });
@@ -878,9 +967,13 @@ describe("DurableObjectBase work-ready receipts", () => {
     });
     expect(first.instance.disposition("claim-1")).toBe("leased");
 
-    const reconstructed = await createTestDO(DurableWorkAdoptionProbeDO, undefined, {
-      db: first.db,
-    });
+    const reconstructed = await createTestDO(
+      DurableWorkAdoptionProbeDO,
+      undefined,
+      {
+        db: first.db,
+      },
+    );
     expect(reconstructed.instance.adopt("durable-work-driver:test")).toEqual({
       adopted: true,
       previousWorkerId: "durable-work-driver:test",
@@ -894,7 +987,9 @@ describe("DurableObjectBase durable replay protection", () => {
     const first = await createTestDO(EchoDO);
     const caller = authenticatedTestCaller("echo");
     const dispatch = (instance: EchoDO) =>
-      (instance as unknown as { fetch(request: Request): Promise<Response> }).fetch(
+      (
+        instance as unknown as { fetch(request: Request): Promise<Response> }
+      ).fetch(
         new Request("http://test/test-key/echo", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -904,11 +999,15 @@ describe("DurableObjectBase durable replay protection", () => {
             __instanceId: "do:test:TestDO:test-key",
             __caller: caller,
           }),
-        })
+        }),
       );
 
-    await expect(dispatch(first.instance)).resolves.toMatchObject({ status: 200 });
-    const reconstructed = await createTestDO(EchoDO, undefined, { db: first.db });
+    await expect(dispatch(first.instance)).resolves.toMatchObject({
+      status: 200,
+    });
+    const reconstructed = await createTestDO(EchoDO, undefined, {
+      db: first.db,
+    });
     const replay = await dispatch(reconstructed.instance);
     expect(replay.status).toBe(403);
     await expect(replay.json()).resolves.toMatchObject({
@@ -933,9 +1032,12 @@ describe("DurableObjectBase server-driven alarm durability", () => {
       response.statusCode = 500;
       response.end();
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("test server did not bind TCP");
+    if (!address || typeof address === "string")
+      throw new Error("test server did not bind TCP");
 
     try {
       const { instance } = await createTestDO(AlarmRescheduleProbeDO, {
@@ -950,7 +1052,7 @@ describe("DurableObjectBase server-driven alarm durability", () => {
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve()))
+        server.close((error) => (error ? reject(error) : resolve())),
       );
     }
   });
@@ -987,12 +1089,15 @@ describe("DurableObjectBase server-driven alarm durability", () => {
             requestId: envelope.message.requestId,
             result: undefined,
           },
-        })
+        }),
       );
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("test server did not bind TCP");
+    if (!address || typeof address === "string")
+      throw new Error("test server did not bind TCP");
 
     try {
       const { call } = await createTestDO(DerivedAlarmProbeDO, {
@@ -1004,7 +1109,7 @@ describe("DurableObjectBase server-driven alarm durability", () => {
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve()))
+        server.close((error) => (error ? reject(error) : resolve())),
       );
     }
   });
@@ -1042,12 +1147,15 @@ describe("DurableObjectBase server-driven alarm durability", () => {
             requestId: envelope.message.requestId,
             result: undefined,
           },
-        })
+        }),
       );
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("test server did not bind TCP");
+    if (!address || typeof address === "string")
+      throw new Error("test server did not bind TCP");
 
     try {
       const { call } = await createTestDO(AlarmProbeDO, {
@@ -1066,7 +1174,7 @@ describe("DurableObjectBase server-driven alarm durability", () => {
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve()))
+        server.close((error) => (error ? reject(error) : resolve())),
       );
     }
   });
@@ -1076,9 +1184,12 @@ describe("DurableObjectBase server-driven alarm durability", () => {
       response.statusCode = 503;
       response.end("workspace alarm store unavailable");
     });
-    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
     const address = server.address();
-    if (!address || typeof address === "string") throw new Error("test server did not bind TCP");
+    if (!address || typeof address === "string")
+      throw new Error("test server did not bind TCP");
 
     try {
       const { call } = await createTestDO(AlarmProbeDO, {
@@ -1089,10 +1200,97 @@ describe("DurableObjectBase server-driven alarm durability", () => {
     } finally {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) =>
-        server.close((error) => (error ? reject(error) : resolve()))
+        server.close((error) => (error ? reject(error) : resolve())),
       );
     }
   });
+});
+
+describe("DurableObjectBase causal child RPC lifetime", () => {
+  it.each([
+    ["successful", false],
+    ["failed", true],
+  ])(
+    "keeps a %s inbound invocation open until an unawaited child RPC settles",
+    async (_label, throwAfterStart) => {
+      let observeChild!: (envelope: RpcEnvelope) => void;
+      const childObserved = new Promise<RpcEnvelope>((resolve) => {
+        observeChild = resolve;
+      });
+      let releaseChild!: () => void;
+      const childRelease = new Promise<void>((resolve) => {
+        releaseChild = resolve;
+      });
+      const server = createServer(async (request, response) => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(Buffer.from(chunk));
+        const envelope = JSON.parse(
+          Buffer.concat(chunks).toString("utf8"),
+        ) as RpcEnvelope;
+        observeChild(envelope);
+        await childRelease;
+        const message = envelope.message as { requestId?: string };
+        response.setHeader("Content-Type", "application/json");
+        response.end(
+          JSON.stringify({
+            from: envelope.target,
+            target: envelope.from,
+            delivery: envelope.delivery,
+            provenance: envelope.provenance ?? [],
+            message: {
+              type: "response",
+              requestId: message.requestId ?? "",
+              result: true,
+            },
+          }),
+        );
+      });
+      await new Promise<void>((resolve) =>
+        server.listen(0, "127.0.0.1", resolve),
+      );
+      const address = server.address();
+      if (!address || typeof address === "string")
+        throw new Error("test server did not bind TCP");
+
+      try {
+        const authorization = createTestDirectAuthority({
+          callerKind: "server",
+          method: "startDetached",
+        });
+        const { callAs } = await createTestDO(DetachedRpcProbeDO, {
+          GATEWAY_URL: `http://127.0.0.1:${address.port}`,
+        });
+        let settled = false;
+        const result = callAs(
+          { callerId: "main", callerKind: "server", authorization },
+          "startDetached",
+          throwAfterStart,
+        ).then((value) => {
+          settled = true;
+          return value;
+        });
+        const child = await childObserved;
+
+        expect(settled).toBe(false);
+        expect(
+          (child.message as { authorityParentNonce?: string })
+            .authorityParentNonce,
+        ).toBe(authorization.nonce);
+        releaseChild();
+        if (throwAfterStart)
+          await expect(result).rejects.toThrow(
+            "parent failed after starting child",
+          );
+        else await expect(result).resolves.toBe("started");
+      } finally {
+        releaseChild();
+        server.closeAllConnections();
+        await new Promise<void>((resolve, reject) =>
+          server.close((error) => (error ? reject(error) : resolve())),
+        );
+      }
+    },
+  );
 });
 
 describe("DurableObjectBase schema readiness", () => {
@@ -1100,21 +1298,33 @@ describe("DurableObjectBase schema readiness", () => {
     const SQL = await initSqlJs();
     const db = new SQL.Database();
     db.run(`CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
-    db.run(`CREATE TABLE _vibestudio_schema (singleton INTEGER PRIMARY KEY, version INTEGER)`);
+    db.run(
+      `CREATE TABLE _vibestudio_schema (singleton INTEGER PRIMARY KEY, version INTEGER)`,
+    );
     db.run(`INSERT INTO _vibestudio_schema (singleton, version) VALUES (1, 2)`);
 
-    const { instance } = await createTestDO(SchemaProbeDO, undefined, { db, initialize: false });
+    const { instance } = await createTestDO(SchemaProbeDO, undefined, {
+      db,
+      initialize: false,
+    });
 
-    expect(() => instance.initializeSchemaForTest()).toThrow(/schema identity table is malformed/);
+    expect(() => instance.initializeSchemaForTest()).toThrow(
+      /schema identity table is malformed/,
+    );
   });
 
   it("returns the same correlated schema refusal envelope as the product base", async () => {
     const SQL = await initSqlJs();
     const db = new SQL.Database();
     db.run(`CREATE TABLE state (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
-    db.run(`CREATE TABLE _vibestudio_schema (singleton INTEGER PRIMARY KEY, version INTEGER)`);
+    db.run(
+      `CREATE TABLE _vibestudio_schema (singleton INTEGER PRIMARY KEY, version INTEGER)`,
+    );
     db.run(`INSERT INTO _vibestudio_schema (singleton, version) VALUES (1, 2)`);
-    const { instance } = await createTestDO(SchemaProbeDO, undefined, { db, initialize: false });
+    const { instance } = await createTestDO(SchemaProbeDO, undefined, {
+      db,
+      initialize: false,
+    });
     const response = await instance.fetch(
       new Request("http://test/test-key/__rpc", {
         method: "POST",
@@ -1132,7 +1342,7 @@ describe("DurableObjectBase schema readiness", () => {
             args: [],
           },
         }),
-      })
+      }),
     );
     expect(response.status).toBe(200);
     expect((await response.json()) as unknown).toMatchObject({

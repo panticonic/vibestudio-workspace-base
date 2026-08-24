@@ -19,7 +19,10 @@ import {
   gadWireMethods,
   StoredRegistryMutationInputSchema,
 } from "@vibestudio/service-schemas/workspaceSource";
-import { channelIdFromTrajectoryLog, logIdForChannel } from "@vibestudio/trajectory-identity";
+import {
+  channelIdFromTrajectoryLog,
+  logIdForChannel,
+} from "@vibestudio/trajectory-identity";
 import { DurableObjectBase } from "@vibestudio/durable";
 import type {
   ChannelInvite,
@@ -164,7 +167,9 @@ type PublicationIntegrityIssue = PublicationIntegrityInspection["rows"][number];
 type ChannelStoredValueRef = ChannelEnvelopeInspection["storedRefs"][number];
 type TurnStateRow = TurnStateInspection["rows"][number];
 type InvocationStateRow = InvocationStateInspection["rows"][number];
-type InvocationDiagnostic = NonNullable<InvocationDiagnosticPacket["invocation"]>;
+type InvocationDiagnostic = NonNullable<
+  InvocationDiagnosticPacket["invocation"]
+>;
 type TurnDiagnostic = NonNullable<InvocationDiagnosticPacket["turn"]>;
 type CommandDiagnostic = InvocationDiagnosticPacket["commands"][number];
 type ChannelRosterRow = ChannelRosterInspection["rows"][number];
@@ -176,7 +181,8 @@ const GAD_WORKSPACE_SCHEMA_VERSION = 65;
 const PUBLICATION_RETRY_BASE_MS = 250;
 const PUBLICATION_RETRY_MAX_MS = 30_000;
 
-const utf8Bytes = (value: string): number => new TextEncoder().encode(value).byteLength;
+const utf8Bytes = (value: string): number =>
+  new TextEncoder().encode(value).byteLength;
 
 const CHANNEL_LOG_HEAD = "main";
 
@@ -224,7 +230,7 @@ function createPublicationDeliveryOutbox(sql: {
   `);
   sql.exec(
     `CREATE INDEX IF NOT EXISTS idx_publication_delivery_claim
-       ON publication_delivery_outbox(disposition, next_attempt_at, created_at)`
+       ON publication_delivery_outbox(disposition, next_attempt_at, created_at)`,
   );
 }
 
@@ -237,7 +243,7 @@ function createMemoryIndex(sql: {
          text, kind UNINDEXED, log_id UNINDEXED, head UNINDEXED,
          event_id UNINDEXED, path UNINDEXED, content_hash UNINDEXED,
          anchor_json UNINDEXED
-       )`
+       )`,
     );
     return "fts";
   } catch {
@@ -245,7 +251,7 @@ function createMemoryIndex(sql: {
       `CREATE TABLE IF NOT EXISTS gad_memory_fts (
          text TEXT NOT NULL, kind TEXT NOT NULL, log_id TEXT, head TEXT,
          event_id TEXT, path TEXT, content_hash TEXT, anchor_json TEXT
-       )`
+       )`,
     );
     return "plain";
   }
@@ -289,13 +295,17 @@ function createAgentDirectory(sql: {
   `);
   sql.exec(
     `CREATE INDEX IF NOT EXISTS idx_agent_directory_channel
-       ON agent_directory (channel_id, status)`
+       ON agent_directory (channel_id, status)`,
   );
-  sql.exec(`CREATE INDEX IF NOT EXISTS idx_agent_directory_worker ON agent_directory (worker_id)`);
-  sql.exec(`CREATE INDEX IF NOT EXISTS idx_agent_directory_run ON agent_directory (run_id)`);
+  sql.exec(
+    `CREATE INDEX IF NOT EXISTS idx_agent_directory_worker ON agent_directory (worker_id)`,
+  );
+  sql.exec(
+    `CREATE INDEX IF NOT EXISTS idx_agent_directory_run ON agent_directory (run_id)`,
+  );
   sql.exec(
     `CREATE INDEX IF NOT EXISTS idx_agent_directory_participant
-       ON agent_directory (channel_id, participant_id)`
+       ON agent_directory (channel_id, participant_id)`,
   );
 }
 
@@ -310,7 +320,7 @@ function createAgentDirectoryIndex(sql: {
     sql.exec(
       `CREATE VIRTUAL TABLE IF NOT EXISTS gad_agent_directory_fts USING fts5(
          text, instance_id UNINDEXED, channel_id UNINDEXED, status UNINDEXED
-       )`
+       )`,
     );
     return "fts";
   } catch {
@@ -318,30 +328,42 @@ function createAgentDirectoryIndex(sql: {
       `CREATE TABLE IF NOT EXISTS gad_agent_directory_fts (
          text TEXT NOT NULL, instance_id TEXT NOT NULL,
          channel_id TEXT, status TEXT
-       )`
+       )`,
     );
     return "plain";
   }
 }
 
 function existingAgentDirectoryIndexMode(sql: {
-  exec(query: string, ...bindings: SqlBinding[]): { toArray(): Record<string, unknown>[] };
+  exec(
+    query: string,
+    ...bindings: SqlBinding[]
+  ): { toArray(): Record<string, unknown>[] };
 }): "fts" | "plain" | null {
   const row = sql
-    .exec(`SELECT sql FROM sqlite_master WHERE name = 'gad_agent_directory_fts' LIMIT 1`)
+    .exec(
+      `SELECT sql FROM sqlite_master WHERE name = 'gad_agent_directory_fts' LIMIT 1`,
+    )
     .toArray()[0];
   if (!row) return null;
-  return /\bCREATE\s+VIRTUAL\s+TABLE\b/iu.test(String(row["sql"] ?? "")) ? "fts" : "plain";
+  return /\bCREATE\s+VIRTUAL\s+TABLE\b/iu.test(String(row["sql"] ?? ""))
+    ? "fts"
+    : "plain";
 }
 
 function existingMemoryIndexMode(sql: {
-  exec(query: string, ...bindings: SqlBinding[]): { toArray(): Record<string, unknown>[] };
+  exec(
+    query: string,
+    ...bindings: SqlBinding[]
+  ): { toArray(): Record<string, unknown>[] };
 }): "fts" | "plain" | null {
   const row = sql
     .exec(`SELECT sql FROM sqlite_master WHERE name = 'gad_memory_fts' LIMIT 1`)
     .toArray()[0];
   if (!row) return null;
-  return /\bCREATE\s+VIRTUAL\s+TABLE\b/iu.test(String(row["sql"] ?? "")) ? "fts" : "plain";
+  return /\bCREATE\s+VIRTUAL\s+TABLE\b/iu.test(String(row["sql"] ?? ""))
+    ? "fts"
+    : "plain";
 }
 
 /** Valid log/event actor kinds. Actor provenance can be semantic participants
@@ -543,8 +565,11 @@ function asString(value: unknown): string | null {
  *  not an account handle); this reads it back out so the provenance projection
  *  can carry WHO resolved without conflating the two. Returns null when no
  *  account is stamped (system-authored or pre-multi-user resolutions). */
-function accountFromActorMetadata(metadata: unknown): { userId: string; handle?: string } | null {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return null;
+function accountFromActorMetadata(
+  metadata: unknown,
+): { userId: string; handle?: string } | null {
+  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata))
+    return null;
   const record = metadata as Record<string, unknown>;
   const userId = asString(record["userId"]);
   if (!userId) return null;
@@ -555,7 +580,10 @@ function accountFromActorMetadata(metadata: unknown): { userId: string; handle?:
 /** Serialize the canonical approval provenance actor shape. Every non-null row
  *  carries `kind`, `id`, and an explicit `account` (`null` for system actors),
  *  so readers never need to infer which schema generation produced it. */
-function approvalActorJson(actor: unknown, resolutionMetadata?: unknown): string | null {
+function approvalActorJson(
+  actor: unknown,
+  resolutionMetadata?: unknown,
+): string | null {
   if (actor == null) return null;
   if (typeof actor !== "object" || Array.isArray(actor)) {
     throw new Error("approval actor must be an object");
@@ -565,7 +593,8 @@ function approvalActorJson(actor: unknown, resolutionMetadata?: unknown): string
     throw new Error("approval actor requires kind and id");
   }
   const account =
-    accountFromActorMetadata(record["metadata"]) ?? accountFromActorMetadata(resolutionMetadata);
+    accountFromActorMetadata(record["metadata"]) ??
+    accountFromActorMetadata(resolutionMetadata);
   return JSON.stringify({ ...record, account });
 }
 
@@ -604,7 +633,10 @@ function ftsQuery(terms: readonly string[], operator: " " | " OR "): string {
 /** Split raw text into whitespace-separated word tokens (≤ `cap`), quotes and
  *  blanks stripped. Shared by the FTS and plain-mode recall query builders so
  *  steering keywords are tokenized exactly like the base query. */
-function recallTokens(values: readonly string[] | null | undefined, cap = 8): string[] {
+function recallTokens(
+  values: readonly string[] | null | undefined,
+  cap = 8,
+): string[] {
   if (!values || values.length === 0) return [];
   return values
     .flatMap((value) => value.split(/\s+/u))
@@ -616,7 +648,9 @@ function recallTokens(values: readonly string[] | null | undefined, cap = 8): st
 /** Short context window around the first query-term hit. */
 function snippetAround(text: string, query: string, radius = 160): string {
   const firstTerm = query.split(/\s+/u).find((term) => term.length > 0) ?? "";
-  const index = firstTerm ? text.toLowerCase().indexOf(firstTerm.toLowerCase()) : -1;
+  const index = firstTerm
+    ? text.toLowerCase().indexOf(firstTerm.toLowerCase())
+    : -1;
   if (index < 0) return text.slice(0, radius * 2);
   const start = Math.max(0, index - radius);
   const end = Math.min(text.length, index + firstTerm.length + radius);
@@ -632,7 +666,9 @@ function summarizeJsonForInspection(value: unknown, depth = 0): unknown {
   }
   if (typeof value === "number" || typeof value === "boolean") return value;
   if (Array.isArray(value)) {
-    const sample = value.slice(0, 20).map((item) => summarizeJsonForInspection(item, depth + 1));
+    const sample = value
+      .slice(0, 20)
+      .map((item) => summarizeJsonForInspection(item, depth + 1));
     return value.length > sample.length
       ? [...sample, { omittedItems: value.length - sample.length }]
       : sample;
@@ -642,9 +678,13 @@ function summarizeJsonForInspection(value: unknown, depth = 0): unknown {
     const entries = Object.entries(value as Record<string, unknown>);
     const sample = entries
       .slice(0, 40)
-      .map(([key, child]) => [key, summarizeJsonForInspection(child, depth + 1)]);
+      .map(([key, child]) => [
+        key,
+        summarizeJsonForInspection(child, depth + 1),
+      ]);
     const out = Object.fromEntries(sample) as Record<string, unknown>;
-    if (entries.length > sample.length) out["omittedKeys"] = entries.length - sample.length;
+    if (entries.length > sample.length)
+      out["omittedKeys"] = entries.length - sample.length;
     return out;
   }
   return String(value);
@@ -665,7 +705,7 @@ function isActorRefLike(value: unknown): value is ActorRef {
 }
 
 function sanitizeRegistryMutation(
-  mutation: StoredRegistryMutationInput
+  mutation: StoredRegistryMutationInput,
 ): StoredRegistryMutationInput {
   if (mutation.kind !== "upsertMessageType") return mutation;
   const registeredBy = mutation.row.registeredBy;
@@ -682,11 +722,17 @@ function sanitizeRegistryMutation(
   });
 }
 
-function findPrivateParticipantMetadataPath(value: unknown, path = "$"): string | null {
+function findPrivateParticipantMetadataPath(
+  value: unknown,
+  path = "$",
+): string | null {
   if (!value || typeof value !== "object") return null;
   if (Array.isArray(value)) {
     for (let index = 0; index < value.length; index += 1) {
-      const found = findPrivateParticipantMetadataPath(value[index], `${path}[${index}]`);
+      const found = findPrivateParticipantMetadataPath(
+        value[index],
+        `${path}[${index}]`,
+      );
       if (found) return found;
     }
     return null;
@@ -694,7 +740,8 @@ function findPrivateParticipantMetadataPath(value: unknown, path = "$"): string 
   const record = value as Record<string, unknown>;
   if ("methods" in record && Array.isArray(record["methods"])) {
     for (const [index, method] of (record["methods"] as unknown[]).entries()) {
-      if (!method || typeof method !== "object" || Array.isArray(method)) continue;
+      if (!method || typeof method !== "object" || Array.isArray(method))
+        continue;
       const methodRecord = method as Record<string, unknown>;
       if (
         "parameters" in methodRecord ||
@@ -706,8 +753,12 @@ function findPrivateParticipantMetadataPath(value: unknown, path = "$"): string 
     }
   }
   for (const key of Object.keys(record)) {
-    if (key === "parameters" || key === "returns" || key === "description") continue;
-    const found = findPrivateParticipantMetadataPath(record[key], `${path}.${key}`);
+    if (key === "parameters" || key === "returns" || key === "description")
+      continue;
+    const found = findPrivateParticipantMetadataPath(
+      record[key],
+      `${path}.${key}`,
+    );
     if (found) return found;
   }
   return null;
@@ -719,16 +770,22 @@ function sanitizeRosterMethodSummaries(methods: unknown): unknown[] {
 }
 
 function sanitizeRosterSnapshotPayload(payload: unknown): unknown {
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== "object" || Array.isArray(payload))
+    return payload;
   const record = payload as Record<string, unknown>;
   const details = record["details"];
-  if (!details || typeof details !== "object" || Array.isArray(details)) return payload;
+  if (!details || typeof details !== "object" || Array.isArray(details))
+    return payload;
   const detailsRecord = details as Record<string, unknown>;
-  if (detailsRecord["kind"] !== "roster.snapshot" && record["kind"] !== "roster.snapshot") {
+  if (
+    detailsRecord["kind"] !== "roster.snapshot" &&
+    record["kind"] !== "roster.snapshot"
+  ) {
     return payload;
   }
   const roster = detailsRecord["roster"];
-  if (!roster || typeof roster !== "object" || Array.isArray(roster)) return payload;
+  if (!roster || typeof roster !== "object" || Array.isArray(roster))
+    return payload;
   const rosterRecord = roster as Record<string, unknown>;
   if (!Array.isArray(rosterRecord["participants"])) return payload;
 
@@ -739,7 +796,11 @@ function sanitizeRosterSnapshotPayload(payload: unknown): unknown {
       roster: {
         ...rosterRecord,
         participants: rosterRecord["participants"].map((participant) => {
-          if (!participant || typeof participant !== "object" || Array.isArray(participant)) {
+          if (
+            !participant ||
+            typeof participant !== "object" ||
+            Array.isArray(participant)
+          ) {
             return participant;
           }
           const participantRecord = participant as Record<string, unknown>;
@@ -749,7 +810,9 @@ function sanitizeRosterSnapshotPayload(payload: unknown): unknown {
             ...(ref && typeof ref === "object" && !Array.isArray(ref)
               ? { ref: publicParticipantRef(ref as ParticipantRef) }
               : {}),
-            methods: sanitizeRosterMethodSummaries(participantRecord["methods"]),
+            methods: sanitizeRosterMethodSummaries(
+              participantRecord["methods"],
+            ),
           };
         }),
       },
@@ -758,7 +821,7 @@ function sanitizeRosterSnapshotPayload(payload: unknown): unknown {
 }
 
 function sanitizeAudience(
-  audience: ParticipantRef[] | ParticipantSelector | null | undefined
+  audience: ParticipantRef[] | ParticipantSelector | null | undefined,
 ): ParticipantRef[] | ParticipantSelector | undefined {
   if (audience == null) return undefined;
   if (!Array.isArray(audience)) return audience;
@@ -779,7 +842,7 @@ function isAgenticEventPayload(payload: unknown): payload is AgenticEvent {
 /** Strip cross-log/turn keys so the remaining causality matches the agentic
  *  trajectory causality shape. */
 function agenticCausality(
-  causality: LogEventCausality | null | undefined
+  causality: LogEventCausality | null | undefined,
 ): Record<string, unknown> | undefined {
   if (!causality) return undefined;
   const {
@@ -793,7 +856,9 @@ function agenticCausality(
 }
 
 /** Rebuild the semantic agentic event from a unified log envelope. */
-function agenticEventFromEnvelope(envelope: LogEnvelope): Record<string, unknown> {
+function agenticEventFromEnvelope(
+  envelope: LogEnvelope,
+): Record<string, unknown> {
   const causality = agenticCausality(envelope.causality);
   const turnId = envelope.causality?.turnId;
   return {
@@ -806,7 +871,9 @@ function agenticEventFromEnvelope(envelope: LogEnvelope): Record<string, unknown
   };
 }
 
-function terminalInvocationSignatureFromEnvelope(envelope: LogEnvelope): string {
+function terminalInvocationSignatureFromEnvelope(
+  envelope: LogEnvelope,
+): string {
   const causality = (envelope.causality ?? {}) as Record<string, unknown>;
   return canonicalJson({
     actor: envelope.actor,
@@ -858,7 +925,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
   static override rpcMethods = gadWireMethods;
   static override schemaVersion = GAD_WORKSPACE_SCHEMA_VERSION;
 
-  protected override rpcSchemaCodeSource(_method: string, wireMethod: MethodSchema): string | null {
+  protected override rpcSchemaCodeSource(
+    _method: string,
+    wireMethod: MethodSchema,
+  ): string | null {
     return wireMethod.capability === "workspace-service:gad.workspace"
       ? "vibestudio/internal"
       : null;
@@ -878,7 +948,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   protected override releaseDurableWorkClaims(
     previousWorkerId: string | null,
-    _nextWorkerId: string
+    _nextWorkerId: string,
   ): void {
     if (!previousWorkerId) return;
     this.sql.exec(
@@ -886,7 +956,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           SET disposition = 'ready', lease_owner = NULL, next_attempt_at = ?
         WHERE disposition = 'leased' AND lease_owner = ?`,
       Date.now(),
-      previousWorkerId
+      previousWorkerId,
     );
   }
 
@@ -897,7 +967,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           `SELECT 1 FROM publication_delivery_outbox
             WHERE disposition IN ('ready', 'retrying') AND next_attempt_at <= ?
             LIMIT 1`,
-          now
+          now,
         )
         .toArray().length > 0
     );
@@ -908,7 +978,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       .exec(
         `SELECT MIN(next_attempt_at) AS due
            FROM publication_delivery_outbox
-          WHERE disposition = 'retrying'`
+          WHERE disposition = 'retrying'`,
       )
       .toArray()[0]?.["due"];
     return typeof value === "number" ? value : null;
@@ -920,7 +990,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       this.markWorkReady("workspace-publication");
     }
     const recoveryAt = this.nextPublicationRecoveryAt();
-    return recoveryAt === null ? null : { wakeAt: Math.max(recoveryAt, Date.now() + 100) };
+    return recoveryAt === null
+      ? null
+      : { wakeAt: Math.max(recoveryAt, Date.now() + 100) };
   }
 
   @rpc({
@@ -956,7 +1028,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
             ORDER BY created_at, item_id
             LIMIT ?`,
           input.now,
-          input.limit
+          input.limit,
         )
         .toArray();
       return rows.map((row) => {
@@ -970,7 +1042,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           input.workerId,
           generation,
           input.now,
-          itemId
+          itemId,
         );
         const channelId = String(row["channel_id"]);
         return {
@@ -1005,7 +1077,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
   })
   settleReadyWork(
     queue: DurableWorkQueue,
-    request: SettleRequest<{ broadcasted: number }>
+    request: SettleRequest<{ broadcasted: number }>,
   ): ClaimSettlement {
     if (queue !== "workspace-publication") return "stale";
     return this.ctx.storage.transactionSync(() => {
@@ -1013,7 +1085,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         .exec(
           `SELECT lease_owner, lease_generation, disposition
              FROM publication_delivery_outbox WHERE item_id = ?`,
-          request.itemId
+          request.itemId,
         )
         .toArray()[0];
       if (!row) return "duplicate";
@@ -1025,9 +1097,14 @@ export class GadWorkspaceDO extends DurableObjectBase {
         return "stale";
       }
       if (!request.outcome || request.outcome.broadcasted !== 1) {
-        throw new Error("settleReadyWork: publication was not broadcast exactly once");
+        throw new Error(
+          "settleReadyWork: publication was not broadcast exactly once",
+        );
       }
-      this.sql.exec(`DELETE FROM publication_delivery_outbox WHERE item_id = ?`, request.itemId);
+      this.sql.exec(
+        `DELETE FROM publication_delivery_outbox WHERE item_id = ?`,
+        request.itemId,
+      );
       return "accepted";
     });
   }
@@ -1040,7 +1117,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
   })
   failReadyWork(
     queue: DurableWorkQueue,
-    request: { workerId: string; itemId: string; generation: number }
+    request: { workerId: string; itemId: string; generation: number },
   ): { retryAt: number } | "stale" {
     if (queue !== "workspace-publication") return "stale";
     const result = this.ctx.storage.transactionSync(() => {
@@ -1051,7 +1128,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
               AND disposition = 'leased'`,
           request.itemId,
           request.workerId,
-          request.generation
+          request.generation,
         )
         .toArray()[0];
       if (!row) return "stale";
@@ -1060,7 +1137,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         Date.now() +
         Math.min(
           PUBLICATION_RETRY_BASE_MS * 2 ** Math.min(attempts - 1, 7),
-          PUBLICATION_RETRY_MAX_MS
+          PUBLICATION_RETRY_MAX_MS,
         );
       this.sql.exec(
         `UPDATE publication_delivery_outbox
@@ -1070,7 +1147,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         retryAt,
         request.itemId,
         request.workerId,
-        request.generation
+        request.generation,
       );
       return { retryAt };
     });
@@ -1138,13 +1215,17 @@ export class GadWorkspaceDO extends DurableObjectBase {
       )
     `);
     this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_log_events_kind ON log_events(payload_kind, log_id, head, seq)`
+      `CREATE INDEX IF NOT EXISTS idx_log_events_kind ON log_events(payload_kind, log_id, head, seq)`,
     );
     this.sql.exec(
-      `CREATE INDEX IF NOT EXISTS idx_log_events_origin ON log_events(origin_envelope_id)`
+      `CREATE INDEX IF NOT EXISTS idx_log_events_origin ON log_events(origin_envelope_id)`,
     );
-    this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_log_events_envelope ON log_events(envelope_id)`);
-    this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_log_events_turn ON log_events(turn_id)`);
+    this.sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_log_events_envelope ON log_events(envelope_id)`,
+    );
+    this.sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_log_events_turn ON log_events(turn_id)`,
+    );
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS log_blob_refs (
         log_id TEXT NOT NULL,
@@ -1158,7 +1239,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
         PRIMARY KEY (log_id, head, envelope_id, field_path)
       )
     `);
-    this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_log_blob_refs_digest ON log_blob_refs(digest)`);
+    this.sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_log_blob_refs_digest ON log_blob_refs(digest)`,
+    );
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS refs (
         ref_name TEXT PRIMARY KEY,
@@ -1176,7 +1259,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
         updated_at TEXT NOT NULL
       )
     `);
-    this.sql.exec(`CREATE INDEX IF NOT EXISTS idx_ref_log_name ON ref_log(ref_name, id)`);
+    this.sql.exec(
+      `CREATE INDEX IF NOT EXISTS idx_ref_log_name ON ref_log(ref_name, id)`,
+    );
     createTrajectoryMirrorSchema(this.sql);
     this.sql.exec(`
       CREATE TABLE IF NOT EXISTS trajectory_invocation_outputs (
@@ -1327,7 +1412,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       hash,
       size,
       mimeType ?? null,
-      nowIso()
+      nowIso(),
     );
   }
 
@@ -1348,33 +1433,39 @@ export class GadWorkspaceDO extends DurableObjectBase {
   private semanticWorkspaceId(): string {
     const configured = this.env["WORKSPACE_ID"];
     if (typeof configured !== "string" || configured.length === 0) {
-      throw new Error("GadWorkspaceDO requires the topology-owned WORKSPACE_ID binding");
+      throw new Error(
+        "GadWorkspaceDO requires the topology-owned WORKSPACE_ID binding",
+      );
     }
     return configured;
   }
 
   @schemaRpc()
   async workspaceSourceInitializeExactSnapshot(
-    input: InitializeExactWorkspaceSnapshotInput
+    input: InitializeExactWorkspaceSnapshotInput,
   ): Promise<WorkspaceSourceInitializationInspection> {
     this.ensureReady();
     const requestDigest = sha256HexSyncText(
-      canonicalJson({ pin: input.pin, repositories: input.repositories })
+      canonicalJson({ pin: input.pin, repositories: input.repositories }),
     );
     const existing = this.workspaceSourceInitializationRow();
     if (existing && String(existing["command_id"]) !== input.commandId) {
       throw new Error(
-        `Workspace source was already initialized by ${String(existing["command_id"])}`
+        `Workspace source was already initialized by ${String(existing["command_id"])}`,
       );
     }
     if (existing && String(existing["request_digest"]) !== requestDigest) {
-      throw new Error(`Workspace source initialization command ${input.commandId} was reused`);
+      throw new Error(
+        `Workspace source initialization command ${input.commandId} was reused`,
+      );
     }
     if (!existing) {
       const repoPaths = new Set<string>();
       for (const repository of input.repositories) {
         if (repoPaths.has(repository.repoPath)) {
-          throw new Error(`Workspace source snapshot repeats ${repository.repoPath}`);
+          throw new Error(
+            `Workspace source snapshot repeats ${repository.repoPath}`,
+          );
         }
         repoPaths.add(repository.repoPath);
       }
@@ -1391,7 +1482,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         canonicalJson(input.pin),
         canonicalJson(input.repositories),
         `workspace-initialization:${this.objectKey}`,
-        nowIso()
+        nowIso(),
       );
     }
 
@@ -1405,21 +1496,26 @@ export class GadWorkspaceDO extends DurableObjectBase {
         .find(
           (effect) =>
             effect.effectId === input.acknowledgement?.effectId &&
-            effect.payloadDigest === input.acknowledgement.payloadDigest
+            effect.payloadDigest === input.acknowledgement.payloadDigest,
         );
       if (!pending || !pending.commandId.startsWith(`${input.commandId}:`)) {
         throw new Error(
-          `Initialization acknowledgement does not match a pending effect for ${input.commandId}`
+          `Initialization acknowledgement does not match a pending effect for ${input.commandId}`,
         );
       }
       const acknowledged = workspace.acknowledgeEffect(
-        input.acknowledgement as SemanticEffectAcknowledgement
+        input.acknowledgement as SemanticEffectAcknowledgement,
       );
       if (acknowledged.kind === "effects-pending") {
-        return this.workspaceSourcePendingInspection(input.commandId, acknowledged.effects[0]);
+        return this.workspaceSourcePendingInspection(
+          input.commandId,
+          acknowledged.effects[0],
+        );
       }
       if (acknowledged.kind === "host-read") {
-        throw new Error("Workspace initialization emitted an unsupported host read");
+        throw new Error(
+          "Workspace initialization emitted an unsupported host read",
+        );
       }
     }
 
@@ -1427,10 +1523,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
       const pending = workspace
         .pendingEffects()
         .find((effect) => effect.commandId.startsWith(`${input.commandId}:`));
-      if (pending) return this.workspaceSourcePendingInspection(input.commandId, pending);
+      if (pending)
+        return this.workspaceSourcePendingInspection(input.commandId, pending);
 
       const row = this.workspaceSourceInitializationRow();
-      if (!row) throw new Error("Workspace source initialization record disappeared");
+      if (!row)
+        throw new Error("Workspace source initialization record disappeared");
       const phase = String(row["phase"]);
       const contextId = String(row["context_id"]);
       const store = this.semanticVcsStore();
@@ -1448,17 +1546,24 @@ export class GadWorkspaceDO extends DurableObjectBase {
           {
             causalParent: null,
             contextIntegrity: { class: "internal", externalKeys: [] },
-          }
+          },
         );
         if (ensured.kind !== "complete") {
           if (ensured.kind === "host-read") {
-            throw new Error("Workspace initialization emitted an unsupported host read");
+            throw new Error(
+              "Workspace initialization emitted an unsupported host read",
+            );
           }
-          return this.workspaceSourcePendingInspection(input.commandId, ensured.effects[0]);
+          return this.workspaceSourcePendingInspection(
+            input.commandId,
+            ensured.effects[0],
+          );
         }
         const context = store.contextRequired(contextId);
         if (context.committed.ref.kind !== "event") {
-          throw new Error("Workspace source initialization context is not at an event");
+          throw new Error(
+            "Workspace source initialization context is not at an event",
+          );
         }
         this.sql.exec(
           `UPDATE workspace_source_initializations
@@ -1466,7 +1571,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
             WHERE command_id = ?`,
           context.committed.ref.eventId,
           nowIso(),
-          input.commandId
+          input.commandId,
         );
         continue;
       }
@@ -1474,14 +1579,17 @@ export class GadWorkspaceDO extends DurableObjectBase {
       if (phase === "imports") {
         const importCommandId = `${input.commandId}:import`;
         const command = this.sql
-          .exec(`SELECT status FROM vcs_command_journal WHERE command_id = ?`, importCommandId)
+          .exec(
+            `SELECT status FROM vcs_command_journal WHERE command_id = ?`,
+            importCommandId,
+          )
           .toArray()[0] as JsonRecord | undefined;
         if (command?.["status"] === "complete") {
           this.sql.exec(
             `UPDATE workspace_source_initializations
                 SET phase = 'publish', updated_at = ? WHERE command_id = ?`,
             nowIso(),
-            input.commandId
+            input.commandId,
           );
           continue;
         }
@@ -1506,13 +1614,18 @@ export class GadWorkspaceDO extends DurableObjectBase {
           {
             causalParent: null,
             contextIntegrity: { class: "internal", externalKeys: [] },
-          }
+          },
         );
         if (dispatched.kind === "host-read") {
-          throw new Error("Workspace initialization emitted an unsupported host read");
+          throw new Error(
+            "Workspace initialization emitted an unsupported host read",
+          );
         }
         if (dispatched.kind === "effects-pending") {
-          return this.workspaceSourcePendingInspection(input.commandId, dispatched.effects[0]);
+          return this.workspaceSourcePendingInspection(
+            input.commandId,
+            dispatched.effects[0],
+          );
         }
         continue;
       }
@@ -1520,7 +1633,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
       if (phase === "publish") {
         const pushCommandId = `${input.commandId}:publish`;
         const command = this.sql
-          .exec(`SELECT status FROM vcs_command_journal WHERE command_id = ?`, pushCommandId)
+          .exec(
+            `SELECT status FROM vcs_command_journal WHERE command_id = ?`,
+            pushCommandId,
+          )
           .toArray()[0] as JsonRecord | undefined;
         if (command?.["status"] === "complete") {
           const context = store.contextRequired(contextId);
@@ -1531,7 +1647,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
             commandId: input.commandId,
             pin: input.pin,
             initializedEventId: context.committed.ref.eventId,
-            initializedStateHash: stateHashForRoot(context.committed.workspaceFactRootId),
+            initializedStateHash: stateHashForRoot(
+              context.committed.workspaceFactRootId,
+            ),
           };
           this.sql.exec(
             `UPDATE workspace_source_initializations
@@ -1539,7 +1657,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
               WHERE command_id = ?`,
             canonicalJson(receipt),
             nowIso(),
-            input.commandId
+            input.commandId,
           );
           return { state: "ready", commandId: input.commandId, receipt };
         }
@@ -1558,15 +1676,21 @@ export class GadWorkspaceDO extends DurableObjectBase {
           },
         });
         if (dispatched.kind === "host-read") {
-          throw new Error("Workspace initialization emitted an unsupported host read");
+          throw new Error(
+            "Workspace initialization emitted an unsupported host read",
+          );
         }
         if (dispatched.kind === "effects-pending") {
-          return this.workspaceSourcePendingInspection(input.commandId, dispatched.effects[0]);
+          return this.workspaceSourcePendingInspection(
+            input.commandId,
+            dispatched.effects[0],
+          );
         }
         continue;
       }
 
-      if (phase === "ready") return this.workspaceSourceInitializationInspection();
+      if (phase === "ready")
+        return this.workspaceSourceInitializationInspection();
       throw new Error(`Unknown workspace source initialization phase ${phase}`);
     }
     throw new Error("Workspace source initialization made no progress");
@@ -1592,7 +1716,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         this.semanticVcsStore().stateRoot({
           kind: "event",
           eventId: mainEventId,
-        })
+        }),
       ),
     };
   }
@@ -1619,7 +1743,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
                 next_repository, context_id, genesis_event_id, receipt_json,
                 failure_json, updated_at
            FROM workspace_source_initializations
-          ORDER BY updated_at DESC LIMIT 1`
+          ORDER BY updated_at DESC LIMIT 1`,
       )
       .toArray()[0] as JsonRecord | undefined;
   }
@@ -1633,7 +1757,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       return {
         state: "ready",
         commandId,
-        receipt: JSON.parse(String(row["receipt_json"])) as WorkspaceSourceInitializationReceipt,
+        receipt: JSON.parse(
+          String(row["receipt_json"]),
+        ) as WorkspaceSourceInitializationReceipt,
       };
     }
     if (phase === "failed") {
@@ -1666,9 +1792,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
           payload: Record<string, unknown>;
           payloadDigest: string;
         }
-      | undefined
+      | undefined,
   ): WorkspaceSourceInitializationInspection {
-    if (!effect) throw new Error("Workspace source initialization reported no pending effect");
+    if (!effect)
+      throw new Error(
+        "Workspace source initialization reported no pending effect",
+      );
     const pendingEffect: WorkspaceSourceEffect = {
       effectId: effect.effectId,
       scopeKind: effect.scopeKind,
@@ -1684,7 +1813,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   private vcsSemantic(
     method: import("@vibestudio/service-schemas/vcs").VcsSemanticMethodName,
-    request: SemanticDispatchRequest
+    request: SemanticDispatchRequest,
   ): Promise<unknown> {
     this.ensureReady();
     return this.semanticWorkspace().dispatch(method, request);
@@ -1736,7 +1865,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  vcsSupersedeExternalDelta(request: SemanticDispatchRequest): Promise<unknown> {
+  vcsSupersedeExternalDelta(
+    request: SemanticDispatchRequest,
+  ): Promise<unknown> {
     return this.vcsSemantic("supersedeExternalDelta", request);
   }
 
@@ -1821,7 +1952,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  vcsSemanticEffectAck(input: { acknowledgement: SemanticEffectAcknowledgement }): unknown {
+  vcsSemanticEffectAck(input: {
+    acknowledgement: SemanticEffectAcknowledgement;
+  }): unknown {
     this.ensureReady();
     return this.semanticWorkspace().acknowledgeEffect(input.acknowledgement);
   }
@@ -1861,7 +1994,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
     references: Array<{ kind: string; value: unknown }>;
   }): unknown {
     this.ensureReady();
-    return this.semanticWorkspace().referencesReachable(input.contextIds, input.references);
+    return this.semanticWorkspace().referencesReachable(
+      input.contextIds,
+      input.references,
+    );
   }
 
   @schemaRpc()
@@ -1874,7 +2010,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
     return this.semanticWorkspace().isStateDescendant(
       input.ancestor as import("@workspace/vcs-engine").StateNodeRef,
       input.descendant as import("@workspace/vcs-engine").StateNodeRef,
-      input.maxEdges
+      input.maxEdges,
     );
   }
 
@@ -1901,7 +2037,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
     this.ensureReady();
     return this.semanticWorkspace().contextMaterializationCommand(
       input.contextId,
-      input.materializedState
+      input.materializedState,
     );
   }
 
@@ -1920,7 +2056,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
   vcsDropContext(input: { contextId: string }): { dropped: boolean } {
     this.ensureReady();
     return {
-      dropped: this.transaction(() => this.semanticVcsStore().dropContext(input.contextId)),
+      dropped: this.transaction(() =>
+        this.semanticVcsStore().dropContext(input.contextId),
+      ),
     };
   }
 
@@ -1980,7 +2118,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       input.refName,
       input.kind,
       targetJson,
-      now
+      now,
     );
     this.sql.exec(
       `INSERT INTO ref_log (ref_name, old_target_json, new_target_json, updated_at)
@@ -1988,7 +2126,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       input.refName,
       existing ? JSON.stringify(existing.target) : null,
       targetJson,
-      now
+      now,
     );
     return {
       refName: input.refName,
@@ -2021,15 +2159,21 @@ export class GadWorkspaceDO extends DurableObjectBase {
       this.sql.exec(
         `DELETE FROM log_events WHERE log_id = ? AND head = ?`,
         input.logId,
-        input.head
+        input.head,
       );
-      this.sql.exec(`DELETE FROM log_heads WHERE log_id = ? AND head = ?`, input.logId, input.head);
+      this.sql.exec(
+        `DELETE FROM log_heads WHERE log_id = ? AND head = ?`,
+        input.logId,
+        input.head,
+      );
       return { deleted: existed };
     });
   }
 
   @schemaRpc()
-  listRefs(input: { kind?: string | null; prefix?: string | null } = {}): RefRecord[] {
+  listRefs(
+    input: { kind?: string | null; prefix?: string | null } = {},
+  ): RefRecord[] {
     this.ensureReady();
     const clauses: string[] = [];
     const bindings: SqlBinding[] = [];
@@ -2039,7 +2183,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
     }
     if (input.prefix) {
       const upper = stringPrefixUpperBound(input.prefix);
-      clauses.push(upper ? "(ref_name >= ? AND ref_name < ?)" : "ref_name >= ?");
+      clauses.push(
+        upper ? "(ref_name >= ? AND ref_name < ?)" : "ref_name >= ?",
+      );
       bindings.push(input.prefix);
       if (upper) bindings.push(upper);
     }
@@ -2064,7 +2210,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       .exec(
         `SELECT * FROM ref_log WHERE ref_name = ? ORDER BY id ASC LIMIT ?`,
         input.refName,
-        limit
+        limit,
       )
       .toArray() as JsonRecord[];
   }
@@ -2111,7 +2257,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
     const row = this.logHeadRow(input.logId, input.head ?? CHANNEL_LOG_HEAD);
     return {
       parentLogId: row ? asString(row["parent_log_id"]) : null,
-      forkSeq: row && row["fork_seq"] != null ? asNumber(row["fork_seq"]) : null,
+      forkSeq:
+        row && row["fork_seq"] != null ? asNumber(row["fork_seq"]) : null,
       forkHash: row ? asString(row["fork_hash"]) : null,
     };
   }
@@ -2119,7 +2266,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
   private logHeadRow(logId: string, head: string): JsonRecord | null {
     return (
       (this.sql
-        .exec(`SELECT * FROM log_heads WHERE log_id = ? AND head = ?`, logId, head)
+        .exec(
+          `SELECT * FROM log_heads WHERE log_id = ? AND head = ?`,
+          logId,
+          head,
+        )
         .toArray()[0] as JsonRecord | undefined) ?? null
     );
   }
@@ -2129,7 +2280,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
   private headPointer(
     logId: string,
     head: string,
-    headRow?: JsonRecord | null
+    headRow?: JsonRecord | null,
   ): { seq: number; hash: string; envelopeId: string | null } {
     const row = headRow ?? this.logHeadRow(logId, head);
     if (row) {
@@ -2152,7 +2303,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
     let cap = Number.POSITIVE_INFINITY;
     for (;;) {
       const key = `${currentLogId}\u0000${currentHead}`;
-      if (seen.has(key)) throw new Error(`log lineage cycle at ${currentLogId}:${currentHead}`);
+      if (seen.has(key))
+        throw new Error(`log lineage cycle at ${currentLogId}:${currentHead}`);
       seen.add(key);
       segments.push({
         logId: currentLogId,
@@ -2179,13 +2331,17 @@ export class GadWorkspaceDO extends DurableObjectBase {
     head: string,
     seq: number,
     prevHash: string,
-    semantic: Record<string, unknown>
+    semantic: Record<string, unknown>,
   ): string {
-    return sha256HexSyncText(logEnvelopeHashPreimage({ prevHash, logId, head, seq, semantic }));
+    return sha256HexSyncText(
+      logEnvelopeHashPreimage({ prevHash, logId, head, seq, semantic }),
+    );
   }
 
   /** The hash-covered slice — the protocol's logEnvelopeSemantic. */
-  private semanticSlice(event: LogEnvelopeSemanticInput): Record<string, unknown> {
+  private semanticSlice(
+    event: LogEnvelopeSemanticInput,
+  ): Record<string, unknown> {
     return logEnvelopeSemantic(event);
   }
 
@@ -2199,7 +2355,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
    */
   private describeSemanticDivergence(
     incoming: Record<string, unknown>,
-    stored: Record<string, unknown>
+    stored: Record<string, unknown>,
   ): string {
     const isObj = (v: unknown): v is Record<string, unknown> =>
       typeof v === "object" && v !== null && !Array.isArray(v);
@@ -2208,17 +2364,24 @@ export class GadWorkspaceDO extends DurableObjectBase {
       return s.length > 160 ? `${s.slice(0, 160)}…(${s.length}b)` : s;
     };
     const parts: string[] = [];
-    for (const key of new Set([...Object.keys(incoming), ...Object.keys(stored)])) {
+    for (const key of new Set([
+      ...Object.keys(incoming),
+      ...Object.keys(stored),
+    ])) {
       if (canonicalJson(incoming[key]) === canonicalJson(stored[key])) continue;
       if (key === "payload" && isObj(incoming[key]) && isObj(stored[key])) {
         const a = incoming[key] as Record<string, unknown>;
         const b = stored[key] as Record<string, unknown>;
         for (const pk of new Set([...Object.keys(a), ...Object.keys(b)])) {
           if (canonicalJson(a[pk]) === canonicalJson(b[pk])) continue;
-          parts.push(`payload.${pk} (incoming=${trunc(a[pk])} stored=${trunc(b[pk])})`);
+          parts.push(
+            `payload.${pk} (incoming=${trunc(a[pk])} stored=${trunc(b[pk])})`,
+          );
         }
       } else {
-        parts.push(`${key} (incoming=${trunc(incoming[key])} stored=${trunc(stored[key])})`);
+        parts.push(
+          `${key} (incoming=${trunc(incoming[key])} stored=${trunc(stored[key])})`,
+        );
       }
     }
     return parts.length > 0
@@ -2233,7 +2396,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       seq: asNumber(row["seq"]),
       envelopeId: brandId<EnvelopeId>(String(row["envelope_id"])),
       actor: parseRecord(asString(row["actor_json"])) as unknown as ActorRef,
-      ...(row["to_json"] ? { to: parseJson(asString(row["to_json"])) as LogEnvelope["to"] } : {}),
+      ...(row["to_json"]
+        ? { to: parseJson(asString(row["to_json"])) as LogEnvelope["to"] }
+        : {}),
       payloadKind: String(row["payload_kind"]),
       payload: parseJson(asString(row["payload_ref_json"])),
       ...(row["annotations_json"]
@@ -2241,7 +2406,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
         : {}),
       ...(row["causality_json"]
         ? {
-            causality: parseRecord(asString(row["causality_json"])) as LogEventCausality,
+            causality: parseRecord(
+              asString(row["causality_json"]),
+            ) as LogEventCausality,
           }
         : {}),
       appendedAt: String(row["appended_at"]),
@@ -2252,10 +2419,14 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   private logEventWhereForSegment(
     segment: LineageSegment,
-    input: Pick<ReadLogInput, "afterSeq" | "beforeSeq" | "payloadKind">
+    input: Pick<ReadLogInput, "afterSeq" | "beforeSeq" | "payloadKind">,
   ): { where: string; bindings: SqlBinding[] } {
     const clauses = ["log_id = ?", "head = ?", "seq > ?"];
-    const bindings: SqlBinding[] = [segment.logId, segment.head, input.afterSeq ?? 0];
+    const bindings: SqlBinding[] = [
+      segment.logId,
+      segment.head,
+      input.afterSeq ?? 0,
+    ];
     if (Number.isFinite(segment.throughSeq)) {
       clauses.push("seq <= ?");
       bindings.push(segment.throughSeq);
@@ -2281,7 +2452,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         .exec(
           `SELECT COUNT(*) AS cnt, MIN(seq) AS first_seq, MAX(seq) AS last_seq
            FROM log_events WHERE ${where}`,
-          ...bindings
+          ...bindings,
         )
         .one();
       const segmentCount = asNumber(row["cnt"]);
@@ -2289,8 +2460,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
       if (segmentCount > 0) {
         const segmentFirst = asNumber(row["first_seq"]);
         const segmentLast = asNumber(row["last_seq"]);
-        firstSeq = firstSeq === undefined ? segmentFirst : Math.min(firstSeq, segmentFirst);
-        lastSeq = lastSeq === undefined ? segmentLast : Math.max(lastSeq, segmentLast);
+        firstSeq =
+          firstSeq === undefined
+            ? segmentFirst
+            : Math.min(firstSeq, segmentFirst);
+        lastSeq =
+          lastSeq === undefined ? segmentLast : Math.max(lastSeq, segmentLast);
       }
     }
     return {
@@ -2303,7 +2478,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
   @schemaRpc()
   readLog(input: ReadLogInput): LogEnvelope[] {
     this.ensureReady();
-    const limit = input.limit == null ? null : Math.max(Math.trunc(input.limit), 0);
+    const limit =
+      input.limit == null ? null : Math.max(Math.trunc(input.limit), 0);
     if (limit === 0) return [];
     const segments = this.logLineage(input.logId, input.head);
     const collected: LogEnvelope[] = [];
@@ -2317,7 +2493,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           `SELECT * FROM log_events WHERE ${where} ORDER BY seq ASC${
             remaining != null ? " LIMIT ?" : ""
           }`,
-          ...(remaining != null ? [...bindings, remaining] : bindings)
+          ...(remaining != null ? [...bindings, remaining] : bindings),
         )
         .toArray() as JsonRecord[];
       for (const row of rows) {
@@ -2329,7 +2505,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   private readLogTail(input: ReadLogInput): LogEnvelope[] {
     this.ensureReady();
-    const limit = input.limit == null ? null : Math.max(Math.trunc(input.limit), 0);
+    const limit =
+      input.limit == null ? null : Math.max(Math.trunc(input.limit), 0);
     if (limit === 0) return [];
     if (limit == null) return this.readLog(input);
     const collected: JsonRecord[] = [];
@@ -2341,7 +2518,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         .exec(
           `SELECT * FROM log_events WHERE ${where} ORDER BY seq DESC LIMIT ?`,
           ...bindings,
-          remaining
+          remaining,
         )
         .toArray() as JsonRecord[];
       collected.push(...rows);
@@ -2350,21 +2527,29 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  getLogEvent(input: { logId: string; head: string; envelopeId: string }): LogEnvelope | null {
+  getLogEvent(input: {
+    logId: string;
+    head: string;
+    envelopeId: string;
+  }): LogEnvelope | null {
     this.ensureReady();
     const row = this.lineageEventRow(input.logId, input.head, input.envelopeId);
     return row ? this.mapLogEnvelope(row) : null;
   }
 
   @schemaRpc()
-  hasLogEvents(input: { logId: string; head: string; envelopeIds: string[] }): string[] {
+  hasLogEvents(input: {
+    logId: string;
+    head: string;
+    envelopeIds: string[];
+  }): string[] {
     this.ensureReady();
     const requested = Array.from(
       new Set(
         (Array.isArray(input.envelopeIds) ? input.envelopeIds : []).filter(
-          (id): id is string => typeof id === "string" && id.length > 0
-        )
-      )
+          (id): id is string => typeof id === "string" && id.length > 0,
+        ),
+      ),
     );
     if (requested.length === 0) return [];
 
@@ -2385,7 +2570,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
           bindings.push(segment.throughSeq);
         }
         const rows = this.sql
-          .exec(`SELECT envelope_id FROM log_events WHERE ${clauses.join(" AND ")}`, ...bindings)
+          .exec(
+            `SELECT envelope_id FROM log_events WHERE ${clauses.join(" AND ")}`,
+            ...bindings,
+          )
           .toArray() as JsonRecord[];
         for (const row of rows) found.add(String(row["envelope_id"]));
       }
@@ -2393,7 +2581,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
     return requested.filter((id) => found.has(id));
   }
 
-  private lineageEventRow(logId: string, head: string, envelopeId: string): JsonRecord | null {
+  private lineageEventRow(
+    logId: string,
+    head: string,
+    envelopeId: string,
+  ): JsonRecord | null {
     for (const segment of this.logLineage(logId, head)) {
       const clauses = ["log_id = ?", "head = ?", "envelope_id = ?"];
       const bindings: SqlBinding[] = [segment.logId, segment.head, envelopeId];
@@ -2402,21 +2594,29 @@ export class GadWorkspaceDO extends DurableObjectBase {
         bindings.push(segment.throughSeq);
       }
       const row = this.sql
-        .exec(`SELECT * FROM log_events WHERE ${clauses.join(" AND ")} LIMIT 1`, ...bindings)
+        .exec(
+          `SELECT * FROM log_events WHERE ${clauses.join(" AND ")} LIMIT 1`,
+          ...bindings,
+        )
         .toArray()[0] as JsonRecord | undefined;
       if (row) return row;
     }
     return null;
   }
-  private lineageEventBySeq(logId: string, head: string, seq: number): JsonRecord | null {
+  private lineageEventBySeq(
+    logId: string,
+    head: string,
+    seq: number,
+  ): JsonRecord | null {
     for (const segment of this.logLineage(logId, head)) {
-      if (Number.isFinite(segment.throughSeq) && seq > segment.throughSeq) continue;
+      if (Number.isFinite(segment.throughSeq) && seq > segment.throughSeq)
+        continue;
       const row = this.sql
         .exec(
           `SELECT * FROM log_events WHERE log_id = ? AND head = ? AND seq = ? LIMIT 1`,
           segment.logId,
           segment.head,
-          seq
+          seq,
         )
         .toArray()[0] as JsonRecord | undefined;
       if (row) return row;
@@ -2424,7 +2624,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
     return null;
   }
 
-  private lineageEventCountThrough(logId: string, head: string, throughSeq: number): number {
+  private lineageEventCountThrough(
+    logId: string,
+    head: string,
+    throughSeq: number,
+  ): number {
     let count = 0;
     for (const segment of this.logLineage(logId, head)) {
       const cap = Number.isFinite(segment.throughSeq)
@@ -2436,16 +2640,18 @@ export class GadWorkspaceDO extends DurableObjectBase {
             `SELECT COUNT(*) AS cnt FROM log_events WHERE log_id = ? AND head = ? AND seq <= ?`,
             segment.logId,
             segment.head,
-            cap
+            cap,
           )
-          .one()["cnt"]
+          .one()["cnt"],
       );
     }
     return count;
   }
 
   @schemaRpc()
-  async appendLogEvent(input: AppendLogEventInput): Promise<AppendLogEventResult> {
+  async appendLogEvent(
+    input: AppendLogEventInput,
+  ): Promise<AppendLogEventResult> {
     this.ensureReady();
     const publicationWasReady = this.hasReadyPublicationDelivery(Date.now());
     const result = this.transaction(() => this.appendLogEventInTxn(input));
@@ -2455,25 +2661,35 @@ export class GadWorkspaceDO extends DurableObjectBase {
     return result;
   }
 
-  private appendLogEventInTxn(input: AppendLogEventInput): AppendLogEventResult {
+  private appendLogEventInTxn(
+    input: AppendLogEventInput,
+  ): AppendLogEventResult {
     if (!input.logId) throw new Error("appendLogEvent requires logId");
     if (!input.head) throw new Error("appendLogEvent requires head");
-    if (!input.events.length) throw new Error("appendLogEvent requires at least one event");
+    if (!input.events.length)
+      throw new Error("appendLogEvent requires at least one event");
 
     const existingHead = this.logHeadRow(input.logId, input.head);
-    if (existingHead && String(existingHead["log_kind"]) !== String(input.logKind)) {
+    if (
+      existingHead &&
+      String(existingHead["log_kind"]) !== String(input.logKind)
+    ) {
       throw new Error(
         `log kind mismatch for ${input.logId}:${input.head}: ` +
-          `${String(existingHead["log_kind"])} != ${String(input.logKind)}`
+          `${String(existingHead["log_kind"])} != ${String(input.logKind)}`,
       );
     }
-    const logKind = existingHead ? String(existingHead["log_kind"]) : String(input.logKind);
+    const logKind = existingHead
+      ? String(existingHead["log_kind"])
+      : String(input.logKind);
 
     const prepared = input.events.map((event) =>
       this.prepareLogEvent(
         logKind,
-        logKind === "channel" ? this.stampChannelContent(input.logId, event) : event
-      )
+        logKind === "channel"
+          ? this.stampChannelContent(input.logId, event)
+          : event,
+      ),
     );
 
     // Lineage-scoped idempotent replay: skip the longest already-applied prefix.
@@ -2486,7 +2702,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       const stored = this.mapLogEnvelope(existing);
       const incomingSemantic = this.semanticSlice({
         ...event,
-        appendedAt: event.appendedAtExplicit ? event.appendedAt : stored.appendedAt,
+        appendedAt: event.appendedAtExplicit
+          ? event.appendedAt
+          : stored.appendedAt,
       });
       const storedSemantic = this.semanticSlice(stored);
       if (canonicalJson(incomingSemantic) !== canonicalJson(storedSemantic)) {
@@ -2496,13 +2714,16 @@ export class GadWorkspaceDO extends DurableObjectBase {
           replayed.push(stored);
           continue;
         }
-        const divergence = this.describeSemanticDivergence(incomingSemantic, storedSemantic);
+        const divergence = this.describeSemanticDivergence(
+          incomingSemantic,
+          storedSemantic,
+        );
         throw new Error(
           gadAppendErrorMessage(
             "id-collision",
             `log envelope id collision with different content: ${event.envelopeId} ` +
-              `[log=${input.logId} head=${input.head}] diverged at → ${divergence}`
-          )
+              `[log=${input.logId} head=${input.head}] diverged at → ${divergence}`,
+          ),
         );
       }
       replayed.push(stored);
@@ -2516,7 +2737,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
     // causality/ordering bug, never benign redelivery.
     const midBatchReplayed: LogEnvelope[] = [];
     const remaining: typeof prepared = [];
-    for (const [suffixIndex, event] of prepared.slice(replayed.length).entries()) {
+    for (const [suffixIndex, event] of prepared
+      .slice(replayed.length)
+      .entries()) {
       // The prefix scan stopped precisely because this first suffix event did
       // not exist. No writes have occurred since, so querying it again in the
       // mid-batch pass cannot reveal different state.
@@ -2531,23 +2754,28 @@ export class GadWorkspaceDO extends DurableObjectBase {
       const stored = this.mapLogEnvelope(existing);
       const incomingSemantic = this.semanticSlice({
         ...event,
-        appendedAt: event.appendedAtExplicit ? event.appendedAt : stored.appendedAt,
+        appendedAt: event.appendedAtExplicit
+          ? event.appendedAt
+          : stored.appendedAt,
       });
       const storedSemantic = this.semanticSlice(stored);
       if (canonicalJson(incomingSemantic) !== canonicalJson(storedSemantic)) {
-        const divergence = this.describeSemanticDivergence(incomingSemantic, storedSemantic);
+        const divergence = this.describeSemanticDivergence(
+          incomingSemantic,
+          storedSemantic,
+        );
         throw new Error(
           gadAppendErrorMessage(
             "replay-mismatch",
             `log append replay has a DIVERGENT already-applied event after a new suffix ` +
               `[log=${input.logId} head=${input.head} alreadyApplied=${event.envelopeId} ` +
-              `replayedPrefix=${replayed.length}/${prepared.length}] diverged at → ${divergence}`
-          )
+              `replayedPrefix=${replayed.length}/${prepared.length}] diverged at → ${divergence}`,
+          ),
         );
       }
       console.warn(
         `[SemanticControlPlane] skipped already-journaled duplicate in mid-batch replay ` +
-          `[log=${input.logId} head=${input.head} envelopeId=${event.envelopeId}]`
+          `[log=${input.logId} head=${input.head} envelopeId=${event.envelopeId}]`,
       );
       midBatchReplayed.push(stored);
     }
@@ -2560,7 +2788,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         input.head,
         logKind,
         json(input.owner ? publicActorRef(input.owner) : null),
-        nowIso()
+        nowIso(),
       );
     }
 
@@ -2577,7 +2805,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
       (input.expectedHeadHash ?? GENESIS_EVENT_HASH) !== pointer.hash
     ) {
       throw new Error(
-        gadAppendErrorMessage("head-conflict", `log head conflict for ${input.logId}:${input.head}`)
+        gadAppendErrorMessage(
+          "head-conflict",
+          `log head conflict for ${input.logId}:${input.head}`,
+        ),
       );
     }
     if (remaining.length > 0 && replayed.length > 0) {
@@ -2586,8 +2817,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
         throw new Error(
           gadAppendErrorMessage(
             "replay-mismatch",
-            "log append replay prefix is not the current head"
-          )
+            "log append replay prefix is not the current head",
+          ),
         );
       }
     }
@@ -2598,7 +2829,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       for (const publication of this.publicationsForOrigin(
         input.logId,
         input.head,
-        String(envelope.envelopeId)
+        String(envelope.envelopeId),
       )) {
         published.push(publication);
       }
@@ -2613,11 +2844,22 @@ export class GadWorkspaceDO extends DurableObjectBase {
         event.payloadKind === "turn.opened" &&
         event.causality?.turnId
       ) {
-        this.assertTurnNotOpened(input.logId, input.head, event.causality.turnId, appended);
+        this.assertTurnNotOpened(
+          input.logId,
+          input.head,
+          event.causality.turnId,
+          appended,
+        );
       }
       seq += 1;
       const semantic = this.semanticSlice(event);
-      const hash = this.computeEnvelopeHash(input.logId, input.head, seq, prevHash, semantic);
+      const hash = this.computeEnvelopeHash(
+        input.logId,
+        input.head,
+        seq,
+        prevHash,
+        semantic,
+      );
       const envelope: LogEnvelope = {
         logId: input.logId,
         head: input.head,
@@ -2627,8 +2869,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
         ...(event.to !== undefined ? { to: event.to } : {}),
         payloadKind: event.payloadKind,
         payload: event.payload,
-        ...(event.annotations !== undefined ? { annotations: event.annotations } : {}),
-        ...(event.causality !== undefined ? { causality: event.causality } : {}),
+        ...(event.annotations !== undefined
+          ? { annotations: event.annotations }
+          : {}),
+        ...(event.causality !== undefined
+          ? { causality: event.causality }
+          : {}),
         appendedAt: event.appendedAt,
         prevHash,
         hash,
@@ -2678,7 +2924,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           pubEnvelopeId,
           `workspace-publication:${target.channelId}:${pubEnvelopeId}`,
           createdAt,
-          createdAt
+          createdAt,
         );
       }
     }
@@ -2693,7 +2939,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         last.hash,
         String(last.envelopeId),
         input.logId,
-        input.head
+        input.head,
       );
     }
 
@@ -2718,7 +2964,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
   private publicationsForOrigin(
     originLogId: string,
     originHead: string,
-    originEnvelopeId: string
+    originEnvelopeId: string,
   ): AppendLogEventResult["published"] {
     const rows = this.sql
       .exec(
@@ -2727,7 +2973,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
          ORDER BY log_id ASC, seq ASC`,
         originLogId,
         originHead,
-        originEnvelopeId
+        originEnvelopeId,
       )
       .toArray() as JsonRecord[];
     return rows.map((row) => ({
@@ -2741,30 +2987,45 @@ export class GadWorkspaceDO extends DurableObjectBase {
     logId: string,
     head: string,
     turnId: string,
-    pendingBatch: LogEnvelope[]
+    pendingBatch: LogEnvelope[],
   ): void {
     for (const envelope of pendingBatch) {
-      if (envelope.payloadKind === "turn.opened" && envelope.causality?.turnId === turnId) {
+      if (
+        envelope.payloadKind === "turn.opened" &&
+        envelope.causality?.turnId === turnId
+      ) {
         throw new Error(`duplicate turn.opened for turn ${turnId}`);
       }
     }
     for (const segment of this.logLineage(logId, head)) {
-      const clauses = ["log_id = ?", "head = ?", "payload_kind = 'turn.opened'", "turn_id = ?"];
+      const clauses = [
+        "log_id = ?",
+        "head = ?",
+        "payload_kind = 'turn.opened'",
+        "turn_id = ?",
+      ];
       const bindings: SqlBinding[] = [segment.logId, segment.head, turnId];
       if (Number.isFinite(segment.throughSeq)) {
         clauses.push("seq <= ?");
         bindings.push(segment.throughSeq);
       }
       const exists = this.sql
-        .exec(`SELECT 1 AS ok FROM log_events WHERE ${clauses.join(" AND ")} LIMIT 1`, ...bindings)
+        .exec(
+          `SELECT 1 AS ok FROM log_events WHERE ${clauses.join(" AND ")} LIMIT 1`,
+          ...bindings,
+        )
         .toArray()[0];
       if (exists) throw new Error(`duplicate turn.opened for turn ${turnId}`);
     }
   }
 
   /** Validate + sanitize one append input into its storable form. */
-  private prepareLogEvent(logKind: string, input: LogAppendEventInput): PreparedLogEvent {
-    if (!input.payloadKind) throw new Error("appendLogEvent requires payloadKind");
+  private prepareLogEvent(
+    logKind: string,
+    input: LogAppendEventInput,
+  ): PreparedLogEvent {
+    if (!input.payloadKind)
+      throw new Error("appendLogEvent requires payloadKind");
     const envelopeId = input.envelopeId ?? crypto.randomUUID();
     const appendedAtExplicit = input.appendedAt != null;
     const appendedAt = input.appendedAt ?? nowIso();
@@ -2773,14 +3034,21 @@ export class GadWorkspaceDO extends DurableObjectBase {
     let payload = input.payload;
     const causality = input.causality ?? undefined;
     let annotations = input.annotations ?? undefined;
-    if (annotations && "metadata" in annotations && annotations["metadata"] != null) {
+    if (
+      annotations &&
+      "metadata" in annotations &&
+      annotations["metadata"] != null
+    ) {
       annotations = {
         ...annotations,
-        metadata: publicParticipantMetadata(annotations["metadata"] as Record<string, unknown>),
+        metadata: publicParticipantMetadata(
+          annotations["metadata"] as Record<string, unknown>,
+        ),
       };
     }
 
-    const agenticKind = AGENTIC_LOG_KINDS.has(logKind) && isStoredEventKind(input.payloadKind);
+    const agenticKind =
+      AGENTIC_LOG_KINDS.has(logKind) && isStoredEventKind(input.payloadKind);
     if (agenticKind) {
       const causalityForEvent = agenticCausality(causality);
       const reconstructed = storedAgenticEventSchema.parse({
@@ -2796,7 +3064,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       payload = sanitizeRosterSnapshotPayload(sanitized.payload);
     } else if (input.payloadKind === AGENTIC_EVENT_PAYLOAD_KIND) {
       if (!isAgenticEventPayload(payload)) {
-        throw new Error("agentic channel payload must be a stored agentic event");
+        throw new Error(
+          "agentic channel payload must be a stored agentic event",
+        );
       }
       const parsed = storedAgenticEventSchema.parse(payload) as AgenticEvent;
       const sanitized = sanitizeAgenticEventParticipantRefs(parsed);
@@ -2844,7 +3114,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       envelope.causality?.originLogId ?? null,
       envelope.causality?.originHead ?? null,
       envelope.causality?.originEnvelopeId ?? null,
-      envelope.causality?.turnId ?? null
+      envelope.causality?.turnId ?? null,
     );
     for (const { path, ref } of collectStoredValueRefs(envelope.payload)) {
       this.sql.exec(
@@ -2858,12 +3128,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
         ref.digest,
         "payload",
         ref.size,
-        nowIso()
+        nowIso(),
       );
       this.ensureBlob(
         ref.digest,
         ref.size,
-        ref.encoding === "json" ? "application/json" : "text/plain"
+        ref.encoding === "json" ? "application/json" : "text/plain",
       );
     }
   }
@@ -2872,25 +3142,45 @@ export class GadWorkspaceDO extends DurableObjectBase {
   forkLog(input: ForkLogInput): ForkLogResult {
     this.ensureReady();
     return this.transaction(() => {
-      if (!input.fromLogId || !input.fromHead) throw new Error("forkLog requires a source");
-      if (!input.toLogId || !input.toHead) throw new Error("forkLog requires a target");
-      if (input.fromLogId === input.toLogId && input.fromHead === input.toHead) {
+      if (!input.fromLogId || !input.fromHead)
+        throw new Error("forkLog requires a source");
+      if (!input.toLogId || !input.toHead)
+        throw new Error("forkLog requires a target");
+      if (
+        input.fromLogId === input.toLogId &&
+        input.fromHead === input.toHead
+      ) {
         throw new Error("forkLog requires distinct source and target");
       }
       const sourceRow = this.logHeadRow(input.fromLogId, input.fromHead);
       if (!sourceRow) {
-        throw new Error(`forkLog source does not exist: ${input.fromLogId}:${input.fromHead}`);
+        throw new Error(
+          `forkLog source does not exist: ${input.fromLogId}:${input.fromHead}`,
+        );
       }
-      const sourcePointer = this.headPointer(input.fromLogId, input.fromHead, sourceRow);
+      const sourcePointer = this.headPointer(
+        input.fromLogId,
+        input.fromHead,
+        sourceRow,
+      );
       const forkSeq = input.atSeq ?? sourcePointer.seq;
       if (forkSeq > sourcePointer.seq) {
-        throw new Error(`forkLog atSeq ${forkSeq} is beyond the source head ${sourcePointer.seq}`);
+        throw new Error(
+          `forkLog atSeq ${forkSeq} is beyond the source head ${sourcePointer.seq}`,
+        );
       }
       let forkHash = GENESIS_EVENT_HASH;
       let forkEnvelopeId: string | null = null;
       if (forkSeq > 0) {
-        const eventRow = this.lineageEventBySeq(input.fromLogId, input.fromHead, forkSeq);
-        if (!eventRow) throw new Error(`forkLog atSeq ${forkSeq} not found in source lineage`);
+        const eventRow = this.lineageEventBySeq(
+          input.fromLogId,
+          input.fromHead,
+          forkSeq,
+        );
+        if (!eventRow)
+          throw new Error(
+            `forkLog atSeq ${forkSeq} not found in source lineage`,
+          );
         forkHash = String(eventRow["hash"]);
         forkEnvelopeId = String(eventRow["envelope_id"]);
       }
@@ -2904,7 +3194,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           asString(existing["fork_hash"]) !== forkHash
         ) {
           throw new Error(
-            `target log already exists with different fork lineage: ${input.toLogId}:${input.toHead}`
+            `target log already exists with different fork lineage: ${input.toLogId}:${input.toHead}`,
           );
         }
         return {
@@ -2914,7 +3204,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
           toHead: input.toHead,
           forkSeq,
           forkHash,
-          inherited: this.lineageEventCountThrough(input.toLogId, input.toHead, forkSeq),
+          inherited: this.lineageEventCountThrough(
+            input.toLogId,
+            input.toHead,
+            forkSeq,
+          ),
         };
       }
 
@@ -2935,7 +3229,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         forkSeq,
         forkHash,
         forkEnvelopeId,
-        nowIso()
+        nowIso(),
       );
 
       // Seed the child's projection caches (P1: caches, rebuildable) by folding
@@ -2966,7 +3260,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   @schemaRpc()
   async checkLogIntegrity(
-    input: { logId?: string | null; head?: string | null } = {}
+    input: { logId?: string | null; head?: string | null } = {},
   ): Promise<{ ok: boolean; errors: JsonRecord[] }> {
     this.ensureReady();
     const errors: JsonRecord[] = [];
@@ -2982,18 +3276,22 @@ export class GadWorkspaceDO extends DurableObjectBase {
     }
     const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
     const heads = this.sql
-      .exec(`SELECT * FROM log_heads ${where} ORDER BY log_id, head`, ...bindings)
+      .exec(
+        `SELECT * FROM log_heads ${where} ORDER BY log_id, head`,
+        ...bindings,
+      )
       .toArray() as JsonRecord[];
     for (const headRow of heads) {
       const logId = String(headRow["log_id"]);
       const head = String(headRow["head"]);
-      const startSeq = headRow["fork_seq"] == null ? 0 : asNumber(headRow["fork_seq"]);
+      const startSeq =
+        headRow["fork_seq"] == null ? 0 : asNumber(headRow["fork_seq"]);
       const startHash = asString(headRow["fork_hash"]) ?? GENESIS_EVENT_HASH;
       const rows = this.sql
         .exec(
           `SELECT * FROM log_events WHERE log_id = ? AND head = ? ORDER BY seq ASC`,
           logId,
-          head
+          head,
         )
         .toArray() as JsonRecord[];
       let expectedSeq = startSeq;
@@ -3025,7 +3323,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           head,
           envelope.seq,
           envelope.prevHash,
-          this.semanticSlice(envelope)
+          this.semanticSlice(envelope),
         );
         if (recomputed !== envelope.hash) {
           errors.push({
@@ -3039,8 +3337,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
         prevHash = envelope.hash;
       }
       const pointer = this.headPointer(logId, head, headRow);
-      const lastSeq = rows.length > 0 ? asNumber(rows[rows.length - 1]!["seq"]) : startSeq;
-      const lastHash = rows.length > 0 ? String(rows[rows.length - 1]!["hash"]) : startHash;
+      const lastSeq =
+        rows.length > 0 ? asNumber(rows[rows.length - 1]!["seq"]) : startSeq;
+      const lastHash =
+        rows.length > 0 ? String(rows[rows.length - 1]!["hash"]) : startHash;
       if (pointer.seq !== lastSeq || pointer.hash !== lastHash) {
         errors.push({
           type: "log-head-pointer",
@@ -3076,11 +3376,18 @@ export class GadWorkspaceDO extends DurableObjectBase {
       this.projectMessageTypeEvent(envelope);
       return;
     }
-    if (!AGENTIC_LOG_KINDS.has(logKind) || !isStoredEventKind(envelope.payloadKind)) return;
+    if (
+      !AGENTIC_LOG_KINDS.has(logKind) ||
+      !isStoredEventKind(envelope.payloadKind)
+    )
+      return;
     const kind = envelope.payloadKind;
     if (kind === "turn.opened" || kind === "turn.closed") {
       this.projectTurn(envelope);
-      this.projectAgentDirectoryActivity(envelope, kind === "turn.opened" ? "running" : "idle");
+      this.projectAgentDirectoryActivity(
+        envelope,
+        kind === "turn.opened" ? "running" : "idle",
+      );
       return;
     }
     if (kind.startsWith("message.")) {
@@ -3110,9 +3417,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
           .exec(
             `SELECT COUNT(*) AS n FROM trajectory_turns WHERE log_id = ? AND head = ?`,
             envelope.logId,
-            envelope.head
+            envelope.head,
           )
-          .one()["n"]
+          .one()["n"],
       );
       this.sql.exec(
         `INSERT OR IGNORE INTO trajectory_turns
@@ -3124,7 +3431,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         envelope.appendedAt,
         asString(payload["summary"]),
         priorTurns,
-        envelope.causality?.messageId ?? null
+        envelope.causality?.messageId ?? null,
       );
       return;
     }
@@ -3138,7 +3445,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       envelope.head,
       turnId,
       envelope.appendedAt,
-      asString(payload["summary"])
+      asString(payload["summary"]),
     );
   }
 
@@ -3152,7 +3459,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         `SELECT role FROM trajectory_messages WHERE log_id = ? AND head = ? AND message_id = ?`,
         envelope.logId,
         envelope.head,
-        messageId
+        messageId,
       )
       .toArray()[0] as JsonRecord | undefined;
     const status =
@@ -3178,13 +3485,15 @@ export class GadWorkspaceDO extends DurableObjectBase {
       envelope.head,
       messageId,
       envelope.causality?.turnId ?? null,
-      asString(payload["role"]) ?? asString(existing?.["role"]) ?? envelope.actor.kind,
+      asString(payload["role"]) ??
+        asString(existing?.["role"]) ??
+        envelope.actor.kind,
       status,
       kind === "message.started" ? String(envelope.envelopeId) : null,
       kind === "message.completed" || kind === "message.failed"
         ? String(envelope.envelopeId)
         : null,
-      nowIso()
+      nowIso(),
     );
 
     const blocks = Array.isArray(payload["blocks"]) ? payload["blocks"] : [];
@@ -3192,7 +3501,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
     blocks.forEach((block, index) => {
       if (!block || typeof block !== "object" || Array.isArray(block)) return;
       const record = block as JsonRecord;
-      const blockId = asString(record["blockId"]) ?? `${messageId}:block:${index}`;
+      const blockId =
+        asString(record["blockId"]) ?? `${messageId}:block:${index}`;
       this.sql.exec(
         `INSERT OR REPLACE INTO trajectory_message_blocks (
            log_id, head, block_id, message_id, block_index, block_type, invocation_id
@@ -3203,7 +3513,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         messageId,
         index,
         asString(record["type"]) ?? "data",
-        asString(record["invocationId"])
+        asString(record["invocationId"]),
       );
       if (record["type"] === "text" && typeof record["content"] === "string") {
         memoryTexts.push(record["content"]);
@@ -3223,7 +3533,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
     // A deliberate `notify` (wire saliency "say") is the instance's own account
     // of what it is doing, so it refreshes the directory summary. Ordinary turn
     // narration deliberately does not.
-    if (kind === "message.completed" && payload["saliency"] === "say" && memoryTexts.length > 0) {
+    if (
+      kind === "message.completed" &&
+      payload["saliency"] === "say" &&
+      memoryTexts.length > 0
+    ) {
       this.projectAgentDirectorySummary(envelope, memoryTexts.join("\n"));
     }
   }
@@ -3237,7 +3551,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         `SELECT * FROM trajectory_invocations WHERE log_id = ? AND head = ? AND invocation_id = ?`,
         envelope.logId,
         envelope.head,
-        invocationId
+        invocationId,
       )
       .toArray()[0] as JsonRecord | undefined;
     if (
@@ -3251,7 +3565,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       ) {
         return;
       }
-      throw new Error(`duplicate terminal invocation event for ${invocationId}`);
+      throw new Error(
+        `duplicate terminal invocation event for ${invocationId}`,
+      );
     }
     const payload = envelope.payload as JsonRecord;
     if (kind === "invocation.output" || kind === "invocation.progress") {
@@ -3264,7 +3580,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         invocationId,
         envelope.seq,
         JSON.stringify(payload),
-        envelope.appendedAt
+        envelope.appendedAt,
       );
     }
     this.sql.exec(
@@ -3298,14 +3614,21 @@ export class GadWorkspaceDO extends DurableObjectBase {
       kind === "invocation.completed" ? json(payload["result"]) : null,
       kind === "invocation.started" ? String(envelope.envelopeId) : null,
       TERMINAL_INVOCATION_KINDS.has(kind) ? String(envelope.envelopeId) : null,
-      nowIso()
+      nowIso(),
     );
   }
 
-  private matchesExistingTerminalInvocation(envelope: LogEnvelope, existing: JsonRecord): boolean {
+  private matchesExistingTerminalInvocation(
+    envelope: LogEnvelope,
+    existing: JsonRecord,
+  ): boolean {
     const completedEventId = asString(existing["completed_event_id"]);
     if (!completedEventId) return false;
-    const priorRow = this.lineageEventRow(envelope.logId, envelope.head, completedEventId);
+    const priorRow = this.lineageEventRow(
+      envelope.logId,
+      envelope.head,
+      completedEventId,
+    );
     if (!priorRow) return false;
     const prior = this.mapLogEnvelope(priorRow);
     return (
@@ -3314,11 +3637,17 @@ export class GadWorkspaceDO extends DurableObjectBase {
     );
   }
 
-  private matchesExistingTerminalProjection(envelope: LogEnvelope, existing: JsonRecord): boolean {
+  private matchesExistingTerminalProjection(
+    envelope: LogEnvelope,
+    existing: JsonRecord,
+  ): boolean {
     const payload = envelope.payload as JsonRecord;
     const nextStatus = envelope.payloadKind.replace("invocation.", "");
     if (asString(existing["status"]) !== nextStatus) return false;
-    if (asString(existing["terminal_outcome"]) !== asString(payload["terminalOutcome"])) {
+    if (
+      asString(existing["terminal_outcome"]) !==
+      asString(payload["terminalOutcome"])
+    ) {
       return false;
     }
     // The first terminal event owns the projection. Later terminals with the
@@ -3346,7 +3675,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           `SELECT status FROM trajectory_approvals WHERE log_id = ? AND head = ? AND approval_id = ?`,
           envelope.logId,
           envelope.head,
-          approvalId
+          approvalId,
         )
         .toArray()[0] as JsonRecord | undefined;
       const existingStatus = existing ? String(existing["status"]) : null;
@@ -3379,13 +3708,13 @@ export class GadWorkspaceDO extends DurableObjectBase {
         : null,
       kind === "approval.requested" ? String(envelope.envelopeId) : null,
       kind === "approval.resolved" ? String(envelope.envelopeId) : null,
-      nowIso()
+      nowIso(),
     );
   }
 
   private applyChannelRosterProjection(
     envelope: LogEnvelope,
-    impliedAction?: "join" | "update" | "leave"
+    impliedAction?: "join" | "update" | "leave",
   ): void {
     const payload =
       envelope.payload && typeof envelope.payload === "object"
@@ -3402,11 +3731,16 @@ export class GadWorkspaceDO extends DurableObjectBase {
     const channelId = envelope.logId;
     const metadata = parseRecord(
       JSON.stringify(
-        payload["metadata"] ?? envelope.annotations?.["metadata"] ?? actor["metadata"] ?? null
-      )
+        payload["metadata"] ??
+          envelope.annotations?.["metadata"] ??
+          actor["metadata"] ??
+          null,
+      ),
     );
     const rolesJson =
-      Object.keys(metadata).length > 0 ? JSON.stringify(sortForCanonicalJson(metadata)) : null;
+      Object.keys(metadata).length > 0
+        ? JSON.stringify(sortForCanonicalJson(metadata))
+        : null;
     const openRow = this.sql
       .exec(
         `SELECT joined_at FROM channel_roster
@@ -3414,7 +3748,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
          ORDER BY joined_at DESC
          LIMIT 1`,
         channelId,
-        participantId
+        participantId,
       )
       .toArray()[0] as JsonRecord | undefined;
 
@@ -3435,7 +3769,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
             rolesJson,
             channelId,
             participantId,
-            String(openRow["joined_at"])
+            String(openRow["joined_at"]),
           );
         }
         return;
@@ -3446,7 +3780,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         channelId,
         participantId,
         envelope.appendedAt,
-        rolesJson
+        rolesJson,
       );
       return;
     }
@@ -3461,7 +3795,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           rolesJson,
           channelId,
           participantId,
-          String(openRow["joined_at"])
+          String(openRow["joined_at"]),
         );
       }
       return;
@@ -3476,7 +3810,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       rolesJson,
       channelId,
       participantId,
-      String(openRow["joined_at"])
+      String(openRow["joined_at"]),
     );
   }
 
@@ -3492,7 +3826,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
    * hold every join in their channel logs and nothing in the projection.
    * Replay just those facts once, in log order, and remember that it happened.
    */
-  private static readonly ROSTER_BACKFILL_MARKER = "roster-projection:subscription-facts:v1";
+  private static readonly ROSTER_BACKFILL_MARKER =
+    "roster-projection:subscription-facts:v1";
 
   protected override afterSchemaReady(): void {
     super.afterSchemaReady();
@@ -3503,7 +3838,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           WHERE payload_kind IN (
             'channel.subscription.opened', 'channel.subscription.revised',
             'channel.subscription.ended', 'channel.subscription.detached')
-          ORDER BY log_id ASC, head ASC, seq ASC`
+          ORDER BY log_id ASC, head ASC, seq ASC`,
       )
       .toArray() as JsonRecord[];
     for (const row of rows) {
@@ -3511,7 +3846,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
       const action = rosterActionForPayloadKind(envelope.payloadKind);
       if (action) this.applyChannelRosterProjection(envelope, action);
     }
-    this.setStateValue(GadWorkspaceDO.ROSTER_BACKFILL_MARKER, new Date().toISOString());
+    this.setStateValue(
+      GadWorkspaceDO.ROSTER_BACKFILL_MARKER,
+      new Date().toISOString(),
+    );
   }
 
   private agentDirectoryIndexMode: "fts" | "plain" | null = null;
@@ -3521,7 +3859,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
     // createTables() runs from the base constructor before subclass field
     // initializers, so this cache cannot be seeded there.
     this.agentDirectoryIndexMode =
-      existingAgentDirectoryIndexMode(this.sql) ?? createAgentDirectoryIndex(this.sql);
+      existingAgentDirectoryIndexMode(this.sql) ??
+      createAgentDirectoryIndex(this.sql);
     return this.agentDirectoryIndexMode;
   }
 
@@ -3533,7 +3872,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
     text: string;
   }): void {
     this.ensureAgentDirectoryIndex();
-    this.sql.exec(`DELETE FROM gad_agent_directory_fts WHERE instance_id = ?`, row.instanceId);
+    this.sql.exec(
+      `DELETE FROM gad_agent_directory_fts WHERE instance_id = ?`,
+      row.instanceId,
+    );
     if (!row.text.trim()) return;
     this.sql.exec(
       `INSERT INTO gad_agent_directory_fts (text, instance_id, channel_id, status)
@@ -3541,7 +3883,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       row.text,
       row.instanceId,
       row.channelId,
-      row.status
+      row.status,
     );
   }
 
@@ -3550,7 +3892,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       .exec(
         `SELECT channel_id, status, handle, display_name, description, summary
            FROM agent_directory WHERE instance_id = ?`,
-        instanceId
+        instanceId,
       )
       .toArray()[0] as JsonRecord | undefined;
     if (!row) return;
@@ -3558,7 +3900,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
       instanceId,
       channelId: String(row["channel_id"]),
       status: String(row["status"]),
-      text: [row["handle"], row["display_name"], row["description"], row["summary"]]
+      text: [
+        row["handle"],
+        row["display_name"],
+        row["description"],
+        row["summary"],
+      ]
         .map((value) => asString(value) ?? "")
         .filter(Boolean)
         .join(" — "),
@@ -3578,7 +3925,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       channelId: string;
       participantId: string;
       metadata: JsonRecord;
-    }
+    },
   ): void {
     const type = asString(input.metadata["type"]);
     // Humans and panels are addressable, but they are not agent *instances*;
@@ -3586,9 +3933,13 @@ export class GadWorkspaceDO extends DurableObjectBase {
     if (type !== "agent" && type !== "headless") return;
     const handle = asString(input.metadata["handle"]) ?? input.participantId;
     const instanceId = `${handle}@${input.channelId}`;
-    const subagent = parseRecord(JSON.stringify(input.metadata["subagent"] ?? null));
+    const subagent = parseRecord(
+      JSON.stringify(input.metadata["subagent"] ?? null),
+    );
     const subagentRunId =
-      asString(subagent["runId"]) ?? asString(input.metadata["subagentRunId"]) ?? null;
+      asString(subagent["runId"]) ??
+      asString(input.metadata["subagentRunId"]) ??
+      null;
     const status = input.action === "leave" ? "terminal" : "idle";
     this.sql.exec(
       `INSERT INTO agent_directory
@@ -3611,7 +3962,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       instanceId,
       input.channelId,
       input.participantId,
-      subagentRunId ? "subagent" : (asString(input.metadata["kind"]) ?? "worker-agent"),
+      subagentRunId
+        ? "subagent"
+        : (asString(input.metadata["kind"]) ?? "worker-agent"),
       handle,
       asString(input.metadata["name"]),
       asString(input.metadata["description"]),
@@ -3621,7 +3974,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       asString(input.metadata["ownerUserId"]),
       status,
       envelope.envelopeId,
-      Date.parse(envelope.appendedAt ?? "") || null
+      Date.parse(envelope.appendedAt ?? "") || null,
     );
     this.reindexAgentDirectoryInstance(instanceId);
   }
@@ -3632,11 +3985,15 @@ export class GadWorkspaceDO extends DurableObjectBase {
    * clock-driven "went quiet" transition anywhere in this projection —
    * `last_activity_at` is informational and gates nothing.
    */
-  private projectAgentDirectoryActivity(envelope: LogEnvelope, status: "running" | "idle"): void {
+  private projectAgentDirectoryActivity(
+    envelope: LogEnvelope,
+    status: "running" | "idle",
+  ): void {
     const channelId = channelIdFromTrajectoryLog(envelope.logId);
     if (!channelId) return;
     const actor = envelope.actor as unknown as JsonRecord;
-    const participantId = asString(actor["participantId"]) ?? asString(actor["id"]);
+    const participantId =
+      asString(actor["participantId"]) ?? asString(actor["id"]);
     if (!participantId) return;
     this.sql.exec(
       `UPDATE agent_directory
@@ -3648,17 +4005,21 @@ export class GadWorkspaceDO extends DurableObjectBase {
       envelope.envelopeId,
       Date.parse(envelope.appendedAt ?? "") || null,
       channelId,
-      participantId
+      participantId,
     );
   }
 
   /** A deliberate utterance is the best self-description an instance produces,
    *  so it is what `discover_agents` searches — not a transcript dump. */
-  private projectAgentDirectorySummary(envelope: LogEnvelope, summary: string): void {
+  private projectAgentDirectorySummary(
+    envelope: LogEnvelope,
+    summary: string,
+  ): void {
     const channelId = channelIdFromTrajectoryLog(envelope.logId);
     if (!channelId) return;
     const actor = envelope.actor as unknown as JsonRecord;
-    const participantId = asString(actor["participantId"]) ?? asString(actor["id"]);
+    const participantId =
+      asString(actor["participantId"]) ?? asString(actor["id"]);
     if (!participantId) return;
     const trimmed = summary.trim().slice(0, 400);
     if (!trimmed) return;
@@ -3668,13 +4029,13 @@ export class GadWorkspaceDO extends DurableObjectBase {
       trimmed,
       Date.parse(envelope.appendedAt ?? "") || null,
       channelId,
-      participantId
+      participantId,
     );
     const row = this.sql
       .exec(
         `SELECT instance_id FROM agent_directory WHERE channel_id = ? AND participant_id = ?`,
         channelId,
-        participantId
+        participantId,
       )
       .toArray()[0] as JsonRecord | undefined;
     if (row) this.reindexAgentDirectoryInstance(String(row["instance_id"]));
@@ -3693,7 +4054,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
     // createTables() runs from the base constructor before subclass field
     // initializers, so its selected fallback mode cannot safely live only in
     // this field. Re-derive it from the sealed schema on first use.
-    this.memoryIndexMode = existingMemoryIndexMode(this.sql) ?? createMemoryIndex(this.sql);
+    this.memoryIndexMode =
+      existingMemoryIndexMode(this.sql) ?? createMemoryIndex(this.sql);
     return this.memoryIndexMode;
   }
 
@@ -3714,7 +4076,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       this.sql.exec(
         `DELETE FROM gad_memory_fts
           WHERE kind = 'commit'
-            AND event_id IN (SELECT event_id FROM gad_workspace_events)`
+            AND event_id IN (SELECT event_id FROM gad_workspace_events)`,
       );
     }
 
@@ -3743,7 +4105,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
               SELECT 1 FROM gad_memory_fts m
                WHERE m.kind = 'commit'
                  AND m.event_id = e.event_id
-            )`
+            )`,
       )
       .toArray() as JsonRecord[];
     for (const row of missing) {
@@ -3754,7 +4116,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
         .filter((part, index, parts) => parts.indexOf(part) === index)
         .join("\n");
       const eventId = asString(row["event_id"]);
-      const workspaceFactRootId = asString(row["result_workspace_fact_root_id"]);
+      const workspaceFactRootId = asString(
+        row["result_workspace_fact_root_id"],
+      );
       if (!summary || !eventId || !workspaceFactRootId) continue;
       this.indexMemoryRow({
         text: summary,
@@ -3789,10 +4153,13 @@ export class GadWorkspaceDO extends DurableObjectBase {
             AND COALESCE(head, '') = COALESCE(?, '')`,
         row.eventId,
         row.logId ?? null,
-        row.head ?? null
+        row.head ?? null,
       );
     } else if (row.path) {
-      this.sql.exec(`DELETE FROM gad_memory_fts WHERE path = ? AND kind = 'file'`, row.path);
+      this.sql.exec(
+        `DELETE FROM gad_memory_fts WHERE path = ? AND kind = 'file'`,
+        row.path,
+      );
     }
     this.sql.exec(
       `INSERT INTO gad_memory_fts (text, kind, log_id, head, event_id, path, content_hash, anchor_json)
@@ -3804,7 +4171,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       row.eventId ?? null,
       row.path ?? null,
       row.contentHash ?? null,
-      row.anchor ? JSON.stringify(row.anchor) : null
+      row.anchor ? JSON.stringify(row.anchor) : null,
     );
   }
 
@@ -3818,7 +4185,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
     this.ensureReady();
     this.ensureMemoryIndex();
     for (const removed of input.removedPaths ?? []) {
-      this.sql.exec(`DELETE FROM gad_memory_fts WHERE path = ? AND kind = 'file'`, removed);
+      this.sql.exec(
+        `DELETE FROM gad_memory_fts WHERE path = ? AND kind = 'file'`,
+        removed,
+      );
     }
     for (const file of input.files) {
       this.indexMemoryRow({
@@ -3887,9 +4257,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
     // otherwise duplicates eat slots and the caller's page under-fills (§8.1/C6).
     const fetchLimit = Math.min(limit * 3, 150);
     const kinds = input.kinds && input.kinds.length > 0 ? input.kinds : null;
-    if (kinds === null || kinds.includes("commit")) this.ensureCommitMemoryIndex();
+    if (kinds === null || kinds.includes("commit"))
+      this.ensureCommitMemoryIndex();
     const pathPrefixes =
-      input.pathPrefixes && input.pathPrefixes.length > 0 ? input.pathPrefixes : null;
+      input.pathPrefixes && input.pathPrefixes.length > 0
+        ? input.pathPrefixes
+        : null;
     // (path IS NULL OR path = pre OR path LIKE 'pre/%') for each prefix, OR-ed.
     const pathFilter = pathPrefixes
       ? ` AND (path IS NULL OR ${pathPrefixes
@@ -3897,7 +4270,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
           .join(" OR ")})`
       : "";
     const pathBindings = pathPrefixes
-      ? pathPrefixes.flatMap((pre) => [pre, `${pre.replace(/[%_\\]/gu, "\\$&")}/%`])
+      ? pathPrefixes.flatMap((pre) => [
+          pre,
+          `${pre.replace(/[%_\\]/gu, "\\$&")}/%`,
+        ])
       : [];
     let rows: JsonRecord[];
     if (mode === "fts") {
@@ -3914,7 +4290,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
           : keywordMatch
         : baseMatch;
       if (!match) return { results: [] };
-      const kindFilter = kinds ? ` AND kind IN (${kinds.map(() => "?").join(",")})` : "";
+      const kindFilter = kinds
+        ? ` AND kind IN (${kinds.map(() => "?").join(",")})`
+        : "";
       const queryRows = (candidateMatch: string): JsonRecord[] =>
         this.sql
           .exec(
@@ -3926,7 +4304,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
             candidateMatch,
             ...(kinds ?? []),
             ...pathBindings,
-            fetchLimit
+            fetchLimit,
           )
           .toArray() as JsonRecord[];
       rows = queryRows(match);
@@ -3936,22 +4314,31 @@ export class GadWorkspaceDO extends DurableObjectBase {
       // FTS query syntax or repeatedly guess which term the index retained.
       if (rows.length === 0 && queryTerms.length > 1) {
         const broadBase = ftsQuery(queryTerms, " OR ");
-        const broadMatch = keywordMatch ? `(${broadBase}) OR ${keywordMatch}` : broadBase;
+        const broadMatch = keywordMatch
+          ? `(${broadBase}) OR ${keywordMatch}`
+          : broadBase;
         rows = queryRows(broadMatch);
       }
     } else {
       const queryTerms = recallTokens([input.query]);
       const keywordTerms = recallTokens(input.recallKeywords);
-      if (queryTerms.length === 0 && keywordTerms.length === 0) return { results: [] };
-      const kindFilter = kinds ? ` AND kind IN (${kinds.map(() => "?").join(",")})` : "";
+      if (queryTerms.length === 0 && keywordTerms.length === 0)
+        return { results: [] };
+      const kindFilter = kinds
+        ? ` AND kind IN (${kinds.map(() => "?").join(",")})`
+        : "";
       const queryRows = (operator: " AND " | " OR "): JsonRecord[] => {
         const likeBindings: string[] = [];
         const likeOf = (term: string): string => {
           likeBindings.push(`%${term.replace(/[%_\\]/gu, "\\$&")}%`);
           return `text LIKE ? ESCAPE '\\'`;
         };
-        const baseClause = queryTerms.length ? `(${queryTerms.map(likeOf).join(operator)})` : "";
-        const keywordClause = keywordTerms.length ? keywordTerms.map(likeOf).join(" OR ") : "";
+        const baseClause = queryTerms.length
+          ? `(${queryTerms.map(likeOf).join(operator)})`
+          : "";
+        const keywordClause = keywordTerms.length
+          ? keywordTerms.map(likeOf).join(" OR ")
+          : "";
         const matchClause =
           baseClause && keywordClause
             ? `(${baseClause} OR ${keywordClause})`
@@ -3966,7 +4353,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
             ...likeBindings,
             ...(kinds ?? []),
             ...pathBindings,
-            fetchLimit
+            fetchLimit,
           )
           .toArray() as JsonRecord[];
       };
@@ -3998,7 +4385,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
         eventId,
         path: asString(row["path"]),
         contentHash: asString(row["content_hash"]),
-        anchor: parseJson(asString(row["anchor_json"])) as Record<string, unknown> | null,
+        anchor: parseJson(asString(row["anchor_json"])) as Record<
+          string,
+          unknown
+        > | null,
         actor,
         appendedAt,
       };
@@ -4045,14 +4435,18 @@ export class GadWorkspaceDO extends DurableObjectBase {
    *  batched lookup over `log_heads`; a `log_id`'s kind is stable across heads. */
   private trajectoryLogIds(rows: JsonRecord[]): Set<string> {
     const logIds = [
-      ...new Set(rows.map((row) => asString(row["log_id"])).filter((v): v is string => v != null)),
+      ...new Set(
+        rows
+          .map((row) => asString(row["log_id"]))
+          .filter((v): v is string => v != null),
+      ),
     ];
     if (logIds.length === 0) return new Set();
     const placeholders = logIds.map(() => "?").join(",");
     const found = this.sql
       .exec(
         `SELECT DISTINCT log_id FROM log_heads WHERE log_kind = 'trajectory' AND log_id IN (${placeholders})`,
-        ...logIds
+        ...logIds,
       )
       .toArray() as JsonRecord[];
     return new Set(found.map((row) => String(row["log_id"])));
@@ -4070,19 +4464,22 @@ export class GadWorkspaceDO extends DurableObjectBase {
       const prefixCache = new Map<string, ProjectionKey | null>();
       const temporaryKeys: ProjectionKey[] = [];
       const heads = this.sql
-        .exec(`SELECT * FROM log_heads ORDER BY created_at ASC, log_id ASC, head ASC`)
+        .exec(
+          `SELECT * FROM log_heads ORDER BY created_at ASC, log_id ASC, head ASC`,
+        )
         .toArray() as JsonRecord[];
 
       const materializePrefix = (
         logId: string,
         head: string,
-        throughSeq: number
+        throughSeq: number,
       ): ProjectionKey | null => {
         if (throughSeq <= 0) return null;
         const cacheKey = `${logId}\u0000${head}\u0000${throughSeq}`;
         if (prefixCache.has(cacheKey)) return prefixCache.get(cacheKey) ?? null;
         const headRow = this.logHeadRow(logId, head);
-        if (!headRow) throw new Error(`projection replay source missing: ${logId}:${head}`);
+        if (!headRow)
+          throw new Error(`projection replay source missing: ${logId}:${head}`);
         const logKind = String(headRow["log_kind"]);
         const key: ProjectionKey = {
           logId,
@@ -4091,7 +4488,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
         temporaryKeys.push(key);
         const parentLogId = asString(headRow["parent_log_id"]);
         const parentHead = asString(headRow["parent_head"]);
-        const forkSeq = headRow["fork_seq"] == null ? 0 : asNumber(headRow["fork_seq"]);
+        const forkSeq =
+          headRow["fork_seq"] == null ? 0 : asNumber(headRow["fork_seq"]);
         if (parentLogId && parentHead && forkSeq > 0) {
           // Cap the parent at min(forkSeq, throughSeq): when the requested
           // prefix ends BELOW this node's own fork point (a descendant forked
@@ -4100,7 +4498,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           const parentPrefix = materializePrefix(
             parentLogId,
             parentHead,
-            Math.min(forkSeq, throughSeq)
+            Math.min(forkSeq, throughSeq),
           );
           if (parentPrefix) this.copyProjectionKey(parentPrefix, key);
         }
@@ -4130,10 +4528,16 @@ export class GadWorkspaceDO extends DurableObjectBase {
         const logKind = String(headRow["log_kind"]);
         const parentLogId = asString(headRow["parent_log_id"]);
         const parentHead = asString(headRow["parent_head"]);
-        const forkSeq = headRow["fork_seq"] == null ? 0 : asNumber(headRow["fork_seq"]);
+        const forkSeq =
+          headRow["fork_seq"] == null ? 0 : asNumber(headRow["fork_seq"]);
         if (parentLogId && parentHead && forkSeq > 0) {
-          const parentPrefix = materializePrefix(parentLogId, parentHead, forkSeq);
-          if (parentPrefix) this.copyProjectionKey(parentPrefix, { logId, head });
+          const parentPrefix = materializePrefix(
+            parentLogId,
+            parentHead,
+            forkSeq,
+          );
+          if (parentPrefix)
+            this.copyProjectionKey(parentPrefix, { logId, head });
         }
         const pointer = this.headPointer(logId, head, headRow);
         const afterSeq = parentLogId && parentHead ? forkSeq : 0;
@@ -4165,7 +4569,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
       bindings.push(input.throughSeq);
     }
     const rows = this.sql
-      .exec(`SELECT * FROM log_events WHERE ${clauses.join(" AND ")} ORDER BY seq ASC`, ...bindings)
+      .exec(
+        `SELECT * FROM log_events WHERE ${clauses.join(" AND ")} ORDER BY seq ASC`,
+        ...bindings,
+      )
       .toArray() as JsonRecord[];
     return rows.map((row) => this.mapLogEnvelope(row));
   }
@@ -4175,49 +4582,49 @@ export class GadWorkspaceDO extends DurableObjectBase {
       "trajectory_turns",
       "turn_id, opened_at, closed_at, summary, ordinal",
       from,
-      to
+      to,
     );
     this.copyProjectionRows(
       "trajectory_messages",
       "message_id, turn_id, role, status, started_event_id, completed_event_id, updated_at",
       from,
-      to
+      to,
     );
     this.copyProjectionRows(
       "trajectory_message_blocks",
       "block_id, message_id, block_index, block_type, invocation_id",
       from,
-      to
+      to,
     );
     this.copyProjectionRows(
       "trajectory_invocations",
       "invocation_id, turn_id, transport_call_id, kind, status, terminal_outcome, terminal_reason_code, request_ref_json, result_ref_json, started_event_id, completed_event_id, updated_at",
       from,
-      to
+      to,
     );
     this.copyProjectionRows(
       "trajectory_invocation_outputs",
       "invocation_id, seq, chunk_ref_json, created_at",
       from,
-      to
+      to,
     );
     this.copyProjectionRows(
       "trajectory_approvals",
       "approval_id, invocation_id, status, requested_by_json, resolved_by_json, requested_event_id, resolved_event_id, updated_at",
       from,
-      to
+      to,
     );
     this.copyProjectionRows(
       "trajectory_usage_rollups",
       "turn_id, input_tokens, output_tokens, total_tokens, cost_usd",
       from,
-      to
+      to,
     );
     this.copyProjectionRows(
       "trajectory_checkpoints",
       "anchor_event_hash, materialized_blob_json, materializer_version, created_at",
       from,
-      to
+      to,
     );
     this.sql.exec(
       `INSERT INTO gad_memory_fts (text, kind, log_id, head, event_id, path, content_hash, anchor_json)
@@ -4227,7 +4634,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       to.logId,
       to.head,
       from.logId,
-      from.head
+      from.head,
     );
   }
 
@@ -4235,7 +4642,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
     table: string,
     columns: string,
     from: ProjectionKey,
-    to: ProjectionKey
+    to: ProjectionKey,
   ): void {
     this.sql.exec(
       `INSERT OR REPLACE INTO ${table} (log_id, head, ${columns})
@@ -4243,7 +4650,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       to.logId,
       to.head,
       from.logId,
-      from.head
+      from.head,
     );
   }
 
@@ -4258,9 +4665,17 @@ export class GadWorkspaceDO extends DurableObjectBase {
       "trajectory_usage_rollups",
       "trajectory_checkpoints",
     ]) {
-      this.sql.exec(`DELETE FROM ${table} WHERE log_id = ? AND head = ?`, key.logId, key.head);
+      this.sql.exec(
+        `DELETE FROM ${table} WHERE log_id = ? AND head = ?`,
+        key.logId,
+        key.head,
+      );
     }
-    this.sql.exec(`DELETE FROM gad_memory_fts WHERE log_id = ? AND head = ?`, key.logId, key.head);
+    this.sql.exec(
+      `DELETE FROM gad_memory_fts WHERE log_id = ? AND head = ?`,
+      key.logId,
+      key.head,
+    );
   }
 
   @schemaRpc()
@@ -4296,7 +4711,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   private trajectoryEventView(
     envelope: LogEnvelope,
-    override?: { trajectoryId: string; branchId: string }
+    override?: { trajectoryId: string; branchId: string },
   ): TrajectoryEvent {
     const causality = agenticCausality(envelope.causality);
     const turnId = envelope.causality?.turnId;
@@ -4316,7 +4731,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
     } as unknown as TrajectoryEvent;
   }
 
-  private channelEnvelopeView(envelope: LogEnvelope, channelId?: string): ChannelEnvelope {
+  private channelEnvelopeView(
+    envelope: LogEnvelope,
+    channelId?: string,
+  ): ChannelEnvelope {
     const annotations = envelope.annotations ?? {};
     const {
       metadata: _viewMetadata,
@@ -4333,7 +4751,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       from: envelope.actor,
       ...(envelope.to !== undefined ? { to: envelope.to } : {}),
       payload: envelope.payload,
-      ...(envelope.payloadKind !== "opaque" ? { payloadKind: envelope.payloadKind } : {}),
+      ...(envelope.payloadKind !== "opaque"
+        ? { payloadKind: envelope.payloadKind }
+        : {}),
       ...(annotations["metadata"] !== undefined
         ? { metadata: annotations["metadata"] as Record<string, unknown> }
         : {}),
@@ -4341,16 +4761,22 @@ export class GadWorkspaceDO extends DurableObjectBase {
         ? { attachments: annotations["attachments"] as unknown[] }
         : {}),
       ...contentIntegrity,
-      ...(Object.keys(policyAnnotations).length > 0 ? { annotations: policyAnnotations } : {}),
+      ...(Object.keys(policyAnnotations).length > 0
+        ? { annotations: policyAnnotations }
+        : {}),
       publishedAt: envelope.appendedAt,
     };
   }
 
-  private stampChannelContent(channelId: string, event: LogAppendEventInput): LogAppendEventInput {
+  private stampChannelContent(
+    channelId: string,
+    event: LogAppendEventInput,
+  ): LogAppendEventInput {
     const annotations = { ...(event.annotations ?? {}) };
     const callerIsOwningChannel =
       this.authorization?.authorizingOrigin.kind === "code" &&
-      this.caller?.callerId === `do:workers/pubsub-channel:PubSubChannel:${channelId}`;
+      this.caller?.callerId ===
+        `do:workers/pubsub-channel:PubSubChannel:${channelId}`;
 
     if (callerIsOwningChannel) {
       // PubSubChannel derives these fields from its inbound host-sealed
@@ -4361,9 +4787,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
       delete annotations["contentClass"];
       delete annotations["externalKeys"];
       const fact = this.authorization?.contextIntegrity;
-      annotations["contentClass"] = fact?.class === "external" ? "external" : "internal";
+      annotations["contentClass"] =
+        fact?.class === "external" ? "external" : "internal";
       annotations["externalKeys"] =
-        fact?.class === "external" ? [...new Set(fact.externalKeys.map(String))] : [];
+        fact?.class === "external"
+          ? [...new Set(fact.externalKeys.map(String))]
+          : [];
     }
     return { ...event, annotations };
   }
@@ -4380,7 +4809,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       !keys.every((key) => typeof key === "string") ||
       (contentClass === "internal" && keys.length > 0)
     ) {
-      throw new Error("Channel append requires a valid host-attested content class");
+      throw new Error(
+        "Channel append requires a valid host-attested content class",
+      );
     }
     const externalKeys = keys.map((key) => parseLineageKey(key));
     return { contentClass, externalKeys: [...new Set(externalKeys)] };
@@ -4407,7 +4838,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       this.trajectoryEventView(envelope, {
         trajectoryId: logId,
         branchId: input.branchId,
-      })
+      }),
     );
   }
 
@@ -4430,13 +4861,16 @@ export class GadWorkspaceDO extends DurableObjectBase {
           WHERE log_kind = 'trajectory'
           ORDER BY created_at DESC
           LIMIT ?`,
-        limit
+        limit,
       )
       .toArray() as JsonRecord[];
   }
 
   @schemaRpc()
-  listTrajectoryInvocations(input: { branchId: string; limit?: number | null }): JsonRecord[] {
+  listTrajectoryInvocations(input: {
+    branchId: string;
+    limit?: number | null;
+  }): JsonRecord[] {
     this.ensureReady();
     const limit = Math.min(Math.max(input.limit ?? 200, 1), 1000);
     return this.sql
@@ -4446,7 +4880,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           ORDER BY updated_at DESC
           LIMIT ?`,
         input.branchId,
-        limit
+        limit,
       )
       .toArray() as JsonRecord[];
   }
@@ -4462,7 +4896,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
            FROM trajectory_approvals
           ORDER BY updated_at DESC
           LIMIT ?`,
-        limit
+        limit,
       )
       .toArray() as JsonRecord[];
   }
@@ -4489,7 +4923,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           )
           ORDER BY log_id, head, seq
           LIMIT ?`,
-        limit
+        limit,
       )
       .toArray() as JsonRecord[];
   }
@@ -4505,13 +4939,19 @@ export class GadWorkspaceDO extends DurableObjectBase {
   getTrajectoryEvent(input: { eventId: string }): TrajectoryEvent | null {
     this.ensureReady();
     const row = this.sql
-      .exec(`SELECT * FROM log_events WHERE envelope_id = ? LIMIT 1`, input.eventId)
+      .exec(
+        `SELECT * FROM log_events WHERE envelope_id = ? LIMIT 1`,
+        input.eventId,
+      )
       .toArray()[0] as JsonRecord | undefined;
     return row ? this.trajectoryEventView(this.mapLogEnvelope(row)) : null;
   }
 
   @schemaRpc()
-  getTrajectoryBranchHead(input: { trajectoryId: string; branchId: string }): JsonRecord | null {
+  getTrajectoryBranchHead(input: {
+    trajectoryId: string;
+    branchId: string;
+  }): JsonRecord | null {
     this.ensureReady();
     const row = this.logHeadRow(input.trajectoryId, input.branchId);
     if (!row) return null;
@@ -4531,18 +4971,25 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   @schemaRpc()
   async forkTrajectoryBranch(
-    input: ForkTrajectoryBranchInput
+    input: ForkTrajectoryBranchInput,
   ): Promise<ForkTrajectoryBranchResult> {
     this.ensureReady();
     let atSeq: number | null = input.throughSeq ?? null;
     if (input.throughEventHash) {
       const row = this.sql
-        .exec(`SELECT seq FROM log_events WHERE hash = ? LIMIT 1`, input.throughEventHash)
+        .exec(
+          `SELECT seq FROM log_events WHERE hash = ? LIMIT 1`,
+          input.throughEventHash,
+        )
         .toArray()[0] as JsonRecord | undefined;
-      if (!row) throw new Error("forkTrajectoryBranch throughEventHash not found");
+      if (!row)
+        throw new Error("forkTrajectoryBranch throughEventHash not found");
       atSeq = asNumber(row["seq"]);
     }
-    if (input.throughPublishedChannelId && input.throughPublishedChannelSeq != null) {
+    if (
+      input.throughPublishedChannelId &&
+      input.throughPublishedChannelSeq != null
+    ) {
       const row = this.sql
         .exec(
           `SELECT MAX(o.seq) AS seq
@@ -4558,7 +5005,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           input.throughPublishedChannelId,
           input.throughPublishedChannelSeq,
           input.fromTrajectoryId,
-          input.fromBranchId
+          input.fromBranchId,
         )
         .toArray()[0] as JsonRecord | undefined;
       atSeq = row?.["seq"] == null ? 0 : asNumber(row["seq"]);
@@ -4595,7 +5042,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
     > & {
       envelopeId?: string | null;
       publishedAt?: string | null;
-    }
+    },
   ): Promise<ChannelEnvelope> {
     this.ensureReady();
     const result = await this.appendLogEvent({
@@ -4615,15 +5062,19 @@ export class GadWorkspaceDO extends DurableObjectBase {
     > & {
       envelopeId?: string | null;
       publishedAt?: string | null;
-    }
+    },
   ): LogAppendEventInput {
     const annotations: Record<string, unknown> = {};
     if (input.metadata !== undefined) annotations["metadata"] = input.metadata;
-    if (input.attachments !== undefined) annotations["attachments"] = input.attachments;
+    if (input.attachments !== undefined)
+      annotations["attachments"] = input.attachments;
     const fact = this.authorization?.contextIntegrity;
-    annotations["contentClass"] = fact?.class === "external" ? "external" : "internal";
+    annotations["contentClass"] =
+      fact?.class === "external" ? "external" : "internal";
     annotations["externalKeys"] =
-      fact?.class === "external" ? [...new Set(fact.externalKeys.map(String))] : [];
+      fact?.class === "external"
+        ? [...new Set(fact.externalKeys.map(String))]
+        : [];
     return {
       envelopeId: input.envelopeId ?? null,
       actor: input.from,
@@ -4647,16 +5098,23 @@ export class GadWorkspaceDO extends DurableObjectBase {
         head: CHANNEL_LOG_HEAD,
         envelopeId: input.envelopeId,
       });
-      return envelope ? this.channelEnvelopeView(envelope, input.channelId) : null;
+      return envelope
+        ? this.channelEnvelopeView(envelope, input.channelId)
+        : null;
     }
     const row = this.sql
-      .exec(`SELECT * FROM log_events WHERE envelope_id = ? LIMIT 1`, input.envelopeId)
+      .exec(
+        `SELECT * FROM log_events WHERE envelope_id = ? LIMIT 1`,
+        input.envelopeId,
+      )
       .toArray()[0] as JsonRecord | undefined;
     return row ? this.channelEnvelopeView(this.mapLogEnvelope(row)) : null;
   }
 
   @schemaRpc()
-  readChannelEnvelopes(input: ChannelEnvelopePageRequest): ChannelEnvelopePage<ChannelEnvelope> {
+  readChannelEnvelopes(
+    input: ChannelEnvelopePageRequest,
+  ): ChannelEnvelopePage<ChannelEnvelope> {
     this.ensureReady();
     const request = normalizeChannelEnvelopePageRequest(input);
     const stats = this.lineageEventStats({
@@ -4695,7 +5153,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       });
     }
     return {
-      items: rows.map((envelope) => this.channelEnvelopeView(envelope, request.channelId)),
+      items: rows.map((envelope) =>
+        this.channelEnvelopeView(envelope, request.channelId),
+      ),
       pageInfo: channelEnvelopePageInfo(
         request,
         {
@@ -4703,14 +5163,14 @@ export class GadWorkspaceDO extends DurableObjectBase {
           firstSeq: stats.firstSeq,
           lastSeq: stats.lastSeq,
         },
-        rows.map((envelope) => envelope.seq)
+        rows.map((envelope) => envelope.seq),
       ),
     };
   }
 
   @schemaRpc()
   inspectChannelEnvelopes(
-    input: ChannelEnvelopePageRequest
+    input: ChannelEnvelopePageRequest,
   ): ChannelEnvelopePage<ChannelEnvelopeInspection> {
     const page = this.readChannelEnvelopes(input);
     return {
@@ -4721,7 +5181,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
             `SELECT field_path, digest, purpose, size, created_at
              FROM log_blob_refs WHERE envelope_id = ?
              ORDER BY field_path ASC`,
-            String(envelope.envelopeId)
+            String(envelope.envelopeId),
           )
           .toArray() as unknown as ChannelStoredValueRef[];
         const payloadText = JSON.stringify(envelope.payload ?? null);
@@ -4733,18 +5193,26 @@ export class GadWorkspaceDO extends DurableObjectBase {
           from: summarizeJsonForInspection(envelope.from) as JsonRecord,
           ...(envelope.metadata !== undefined
             ? {
-                metadata: summarizeJsonForInspection(envelope.metadata) as JsonRecord,
+                metadata: summarizeJsonForInspection(
+                  envelope.metadata,
+                ) as JsonRecord,
               }
             : {}),
           bytes: {
             from: utf8Bytes(JSON.stringify(envelope.from)),
-            to: utf8Bytes(envelope.to !== undefined ? JSON.stringify(envelope.to) : ""),
+            to: utf8Bytes(
+              envelope.to !== undefined ? JSON.stringify(envelope.to) : "",
+            ),
             payload: utf8Bytes(payloadText),
             metadata: utf8Bytes(
-              envelope.metadata !== undefined ? JSON.stringify(envelope.metadata) : ""
+              envelope.metadata !== undefined
+                ? JSON.stringify(envelope.metadata)
+                : "",
             ),
             attachments: utf8Bytes(
-              envelope.attachments !== undefined ? JSON.stringify(envelope.attachments) : ""
+              envelope.attachments !== undefined
+                ? JSON.stringify(envelope.attachments)
+                : "",
             ),
           },
           payloadSummary: summarizeJsonForInspection(envelope.payload),
@@ -4756,7 +5224,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  listMessageTypes(input: { channelId: string }): StoredChannelMessageTypeDefinition[] {
+  listMessageTypes(input: {
+    channelId: string;
+  }): StoredChannelMessageTypeDefinition[] {
     this.ensureReady();
     const rows = this.sql
       .exec(
@@ -4764,7 +5234,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
          WHERE channel_id = ? AND source_json IS NOT NULL
            AND updated_at_seq > COALESCE(cleared_at_seq, -1)
          ORDER BY type_id ASC`,
-        input.channelId
+        input.channelId,
       )
       .toArray() as JsonRecord[];
     return rows.map((row) => this.mapMessageType(row));
@@ -4784,7 +5254,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
            AND updated_at_seq > COALESCE(cleared_at_seq, -1)
          LIMIT 1`,
         input.channelId,
-        input.typeId
+        input.typeId,
       )
       .toArray()[0] as JsonRecord | undefined;
     return row ? this.mapMessageType(row) : null;
@@ -4799,14 +5269,19 @@ export class GadWorkspaceDO extends DurableObjectBase {
     const event = envelope.payload as Record<string, unknown> | null;
     if (!event || typeof event !== "object") return;
     const kind = asString(event["kind"]);
-    if (kind !== "messageType.registered" && kind !== "messageType.cleared") return;
+    if (kind !== "messageType.registered" && kind !== "messageType.cleared")
+      return;
     const payload =
-      event["payload"] && typeof event["payload"] === "object" && !Array.isArray(event["payload"])
+      event["payload"] &&
+      typeof event["payload"] === "object" &&
+      !Array.isArray(event["payload"])
         ? (event["payload"] as Record<string, unknown>)
         : {};
     const typeId = asString(payload["typeId"]);
     if (!typeId) {
-      throw new Error(`${kind} payload invalid: typeId must be a non-empty string`);
+      throw new Error(
+        `${kind} payload invalid: typeId must be a non-empty string`,
+      );
     }
     if (kind === "messageType.cleared") {
       this.applyRegistryMutation(envelope.logId, envelope.seq, {
@@ -4818,22 +5293,32 @@ export class GadWorkspaceDO extends DurableObjectBase {
     const displayMode = payload["displayMode"];
     if (displayMode !== "inline" && displayMode !== "row") {
       throw new Error(
-        `messageType.registered payload invalid: displayMode must be "inline" or "row"`
+        `messageType.registered payload invalid: displayMode must be "inline" or "row"`,
       );
     }
     const source = payload["source"];
     if (!isStoredValueRef(source)) {
-      throw new Error(`messageType.registered payload invalid: source must be stored by reference`);
-    }
-    if (payload["imports"] !== undefined && !isStoredValueRef(payload["imports"])) {
       throw new Error(
-        `messageType.registered payload invalid: imports must be stored by reference`
+        `messageType.registered payload invalid: source must be stored by reference`,
+      );
+    }
+    if (
+      payload["imports"] !== undefined &&
+      !isStoredValueRef(payload["imports"])
+    ) {
+      throw new Error(
+        `messageType.registered payload invalid: imports must be stored by reference`,
       );
     }
     for (const field of ["stateSchema", "updateSchema"] as const) {
       const value = payload[field];
-      if (value !== undefined && (typeof value !== "object" || Array.isArray(value))) {
-        throw new Error(`messageType.registered payload invalid: ${field} must be an object`);
+      if (
+        value !== undefined &&
+        (typeof value !== "object" || Array.isArray(value))
+      ) {
+        throw new Error(
+          `messageType.registered payload invalid: ${field} must be an object`,
+        );
       }
     }
     const registeredBy = payload["registeredBy"] ?? event["actor"];
@@ -4850,25 +5335,31 @@ export class GadWorkspaceDO extends DurableObjectBase {
             ...(payload["imports"] ? { imports: payload["imports"] } : {}),
             ...(payload["stateSchema"]
               ? {
-                  stateSchema: payload["stateSchema"] as Record<string, unknown>,
+                  stateSchema: payload["stateSchema"] as Record<
+                    string,
+                    unknown
+                  >,
                 }
               : {}),
             ...(payload["updateSchema"]
               ? {
-                  updateSchema: payload["updateSchema"] as Record<string, unknown>,
+                  updateSchema: payload["updateSchema"] as Record<
+                    string,
+                    unknown
+                  >,
                 }
               : {}),
             ...(registeredBy ? { registeredBy } : {}),
           },
-        })
-      )
+        }),
+      ),
     );
   }
 
   private applyRegistryMutation(
     channelId: string,
     seq: number,
-    mutation: StoredRegistryMutationInput
+    mutation: StoredRegistryMutationInput,
   ): void {
     if (mutation.kind === "upsertMessageType") {
       this.sql.exec(
@@ -4897,14 +5388,17 @@ export class GadWorkspaceDO extends DurableObjectBase {
         JSON.stringify(mutation.row.source),
         mutation.row.imports ? JSON.stringify(mutation.row.imports) : null,
         // schema_json holds both JSON Schema documents for the type.
-        mutation.row.stateSchema !== undefined || mutation.row.updateSchema !== undefined
+        mutation.row.stateSchema !== undefined ||
+          mutation.row.updateSchema !== undefined
           ? JSON.stringify({
               stateSchema: mutation.row.stateSchema,
               updateSchema: mutation.row.updateSchema,
             })
           : null,
-        mutation.row.registeredBy ? JSON.stringify(mutation.row.registeredBy) : null,
-        seq
+        mutation.row.registeredBy
+          ? JSON.stringify(mutation.row.registeredBy)
+          : null,
+        seq,
       );
       return;
     }
@@ -4917,7 +5411,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
          cleared_at_seq = MAX(COALESCE(channel_message_types.cleared_at_seq, -1), excluded.cleared_at_seq)`,
       channelId,
       mutation.typeId,
-      seq
+      seq,
     );
   }
 
@@ -4926,13 +5420,13 @@ export class GadWorkspaceDO extends DurableObjectBase {
       typeId: String(row["type_id"]),
       displayMode: String(row["display_mode"]) === "inline" ? "inline" : "row",
       source: parseRecord(
-        asString(row["source_json"])
+        asString(row["source_json"]),
       ) as StoredChannelMessageTypeDefinition["source"],
       updatedAtSeq: asNumber(row["updated_at_seq"]),
     };
     if (row["imports_json"])
       result.imports = parseRecord(
-        asString(row["imports_json"])
+        asString(row["imports_json"]),
       ) as StoredChannelMessageTypeDefinition["imports"];
     if (row["schema_json"]) {
       const schemas = parseJson(asString(row["schema_json"])) as {
@@ -4940,8 +5434,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
         updateSchema?: Record<string, unknown>;
       } | null;
       if (schemas && typeof schemas === "object") {
-        if (schemas.stateSchema) result.stateSchema = schemas.stateSchema as GadJsonRecord;
-        if (schemas.updateSchema) result.updateSchema = schemas.updateSchema as GadJsonRecord;
+        if (schemas.stateSchema)
+          result.stateSchema = schemas.stateSchema as GadJsonRecord;
+        if (schemas.updateSchema)
+          result.updateSchema = schemas.updateSchema as GadJsonRecord;
       }
     }
     if (row["registered_by_json"])
@@ -4986,12 +5482,14 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  getTrajectoryForEnvelope(input: { envelopeId: string }): EnvelopeLineage | null {
+  getTrajectoryForEnvelope(input: {
+    envelopeId: string;
+  }): EnvelopeLineage | null {
     this.ensureReady();
     const channelRow = this.sql
       .exec(
         `SELECT * FROM log_events WHERE envelope_id = ? AND origin_envelope_id IS NOT NULL LIMIT 1`,
-        input.envelopeId
+        input.envelopeId,
       )
       .toArray()[0] as JsonRecord | undefined;
     if (!channelRow) return null;
@@ -5021,7 +5519,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         input.channelId,
         input.channelSeq,
         input.trajectoryId,
-        input.branchId
+        input.branchId,
       )
       .one() as JsonRecord;
     const seq = row["seq"];
@@ -5064,14 +5562,15 @@ export class GadWorkspaceDO extends DurableObjectBase {
          ORDER BY ch.log_id ASC, ch.seq ASC
          LIMIT ?`,
         ...bindings,
-        limit
+        limit,
       )
       .toArray() as JsonRecord[];
     const lineages: EnvelopeLineage[] = [];
     for (const row of rows) {
       const lineage = this.lineageForChannelRow(row);
       if (!lineage) continue;
-      if (input.turnId && lineage.trajectoryEvent.turnId !== input.turnId) continue;
+      if (input.turnId && lineage.trajectoryEvent.turnId !== input.turnId)
+        continue;
       lineages.push(lineage);
     }
     return lineages;
@@ -5114,18 +5613,21 @@ export class GadWorkspaceDO extends DurableObjectBase {
     const trajectoryId = lineage.publication.trajectoryId;
     const branchId = lineage.publication.branchId;
     const events = this.readLog({ logId: trajectoryId, head: branchId }).filter(
-      (envelope) => envelope.seq <= lineage.trajectoryEvent.seq
+      (envelope) => envelope.seq <= lineage.trajectoryEvent.seq,
     );
     return {
       lineage,
       branchEvents: events.map((envelope) =>
-        this.trajectoryEventView(envelope, { trajectoryId, branchId })
+        this.trajectoryEventView(envelope, { trajectoryId, branchId }),
       ),
     };
   }
 
   @schemaRpc()
-  getDownstreamConsumers(input: { envelopeId: string; limit?: number | null }): TrajectoryEvent[] {
+  getDownstreamConsumers(input: {
+    envelopeId: string;
+    limit?: number | null;
+  }): TrajectoryEvent[] {
     this.ensureReady();
     const needle = input.envelopeId;
     const rows = this.sql
@@ -5139,17 +5641,19 @@ export class GadWorkspaceDO extends DurableObjectBase {
         `%${needle}%`,
         `%${needle}%`,
         needle,
-        Math.min(Math.max(input.limit ?? 500, 1), 1000)
+        Math.min(Math.max(input.limit ?? 500, 1), 1000),
       )
       .toArray() as JsonRecord[];
-    return rows.map((row) => this.trajectoryEventView(this.mapLogEnvelope(row)));
+    return rows.map((row) =>
+      this.trajectoryEventView(this.mapLogEnvelope(row)),
+    );
   }
 
   // --- Inspection / maintenance ----------------------------------------------
 
   @schemaRpc()
   inspectPublicationIntegrity(
-    input: InspectPublicationIntegrityInput = {}
+    input: InspectPublicationIntegrityInput = {},
   ): PublicationIntegrityInspection {
     this.ensureReady();
     const limit = Math.min(Math.max(input.limit ?? 100, 1), 1000);
@@ -5166,7 +5670,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
     const publicationRows = this.sql
       .exec(
         `SELECT * FROM log_events WHERE ${clauses.join(" AND ")} ORDER BY log_id, seq`,
-        ...bindings
+        ...bindings,
       )
       .toArray() as JsonRecord[];
     const rows: PublicationIntegrityIssue[] = [];
@@ -5194,9 +5698,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
            ${input.channelId ? "AND log_id = ?" : ""}`,
           ...(input.channelId
             ? [AGENTIC_EVENT_PAYLOAD_KIND, input.channelId]
-            : [AGENTIC_EVENT_PAYLOAD_KIND])
+            : [AGENTIC_EVENT_PAYLOAD_KIND]),
         )
-        .one()["count"]
+        .one()["count"],
     );
     return {
       summary: {
@@ -5251,7 +5755,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
          ORDER BY t.opened_at DESC
          LIMIT ?`,
         ...bindings,
-        limit
+        limit,
       )
       .toArray() as unknown as TurnStateRow[];
     // An explicit branch is already an exact scope. The channel-name heuristic
@@ -5264,26 +5768,31 @@ export class GadWorkspaceDO extends DurableObjectBase {
     return {
       summary: {
         branches: new Set(
-          scopedRows.map((row) => `${String(row["log_id"])} ${String(row["head"])}`)
+          scopedRows.map(
+            (row) => `${String(row["log_id"])} ${String(row["head"])}`,
+          ),
         ).size,
         openTurns: scopedRows.filter((row) => row["closed_at"] == null).length,
         streamingMessages: scopedRows.reduce(
           (sum, row) => sum + asNumber(row["streaming_messages"]),
-          0
+          0,
         ),
         nonterminalInvocations: scopedRows.reduce(
           (sum, row) => sum + asNumber(row["nonterminal_invocations"]),
-          0
+          0,
         ),
-        duplicateOpenedTurns: scopedRows.filter((row) => asNumber(row["duplicate_open_events"]) > 1)
-          .length,
+        duplicateOpenedTurns: scopedRows.filter(
+          (row) => asNumber(row["duplicate_open_events"]) > 1,
+        ).length,
       },
       rows: scopedRows,
     };
   }
 
   @schemaRpc()
-  inspectInvocationState(input: InspectInvocationStateInput = {}): InvocationStateInspection {
+  inspectInvocationState(
+    input: InspectInvocationStateInput = {},
+  ): InvocationStateInspection {
     this.ensureReady();
     const limit = Math.min(Math.max(input.limit ?? 100, 1), 1000);
     const clauses: string[] = [];
@@ -5351,17 +5860,25 @@ export class GadWorkspaceDO extends DurableObjectBase {
          ORDER BY i.updated_at DESC
          LIMIT ?`,
         ...bindings,
-        limit
+        limit,
       )
       .toArray() as unknown as InvocationStateRow[];
     return {
       summary: {
         projected: rows.length,
-        startedEvents: rows.reduce((sum, row) => sum + asNumber(row["started_events"]), 0),
-        terminalEvents: rows.reduce((sum, row) => sum + asNumber(row["terminal_events"]), 0),
+        startedEvents: rows.reduce(
+          (sum, row) => sum + asNumber(row["started_events"]),
+          0,
+        ),
+        terminalEvents: rows.reduce(
+          (sum, row) => sum + asNumber(row["terminal_events"]),
+          0,
+        ),
         openProjectedInvocations: rows.filter(
           (row) =>
-            !["completed", "failed", "cancelled", "abandoned"].includes(String(row["status"]))
+            !["completed", "failed", "cancelled", "abandoned"].includes(
+              String(row["status"]),
+            ),
         ).length,
       },
       rows,
@@ -5369,7 +5886,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  diagnoseInvocation(input: DiagnoseInvocationInput): InvocationDiagnosticPacket {
+  diagnoseInvocation(
+    input: DiagnoseInvocationInput,
+  ): InvocationDiagnosticPacket {
     this.ensureReady();
     const eventLimit = Math.min(Math.max(input.eventLimit ?? 20, 1), 50);
     const commandLimit = Math.min(Math.max(input.commandLimit ?? 20, 1), 50);
@@ -5384,7 +5903,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           LIMIT 1`,
         input.trajectoryId,
         input.branchId,
-        input.invocationId
+        input.invocationId,
       )
       .toArray()[0] as unknown as InvocationDiagnostic | undefined;
     const turn =
@@ -5397,7 +5916,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
                 LIMIT 1`,
               input.trajectoryId,
               input.branchId,
-              String(invocation["turn_id"])
+              String(invocation["turn_id"]),
             )
             .toArray()[0] as unknown as TurnDiagnostic | undefined);
     const eventRows = this.sql
@@ -5410,14 +5929,16 @@ export class GadWorkspaceDO extends DurableObjectBase {
         input.trajectoryId,
         input.branchId,
         input.invocationId,
-        eventLimit + 1
+        eventLimit + 1,
       )
       .toArray() as JsonRecord[];
     const eventsTruncated = eventRows.length > eventLimit;
     const events = eventRows
       .slice(0, eventLimit)
       .map((row) =>
-        summarizeJsonForInspection(this.trajectoryEventView(this.mapLogEnvelope(row)))
+        summarizeJsonForInspection(
+          this.trajectoryEventView(this.mapLogEnvelope(row)),
+        ),
       ) as JsonRecord[];
     const commandRows = this.sql
       .exec(
@@ -5430,55 +5951,61 @@ export class GadWorkspaceDO extends DurableObjectBase {
         input.trajectoryId,
         input.branchId,
         input.invocationId,
-        commandLimit + 1
+        commandLimit + 1,
       )
       .toArray() as JsonRecord[];
     const commandsTruncated = commandRows.length > commandLimit;
     let effectsTruncated = false;
-    const commands: CommandDiagnostic[] = commandRows.slice(0, commandLimit).map((command) => {
-      const effects = this.sql
-        .exec(
-          `SELECT effect_id,scope_kind,scope_id,command_id,kind,payload_digest,status,
+    const commands: CommandDiagnostic[] = commandRows
+      .slice(0, commandLimit)
+      .map((command) => {
+        const effects = this.sql
+          .exec(
+            `SELECT effect_id,scope_kind,scope_id,command_id,kind,payload_digest,status,
                   receipt_digest,created_at,applied_at,payload_json,receipt_json
              FROM gad_effect_intents
             WHERE command_id = ? AND scope_kind = ? AND scope_id = ?
             ORDER BY created_at ASC,effect_id ASC
             LIMIT ?`,
-          String(command["command_id"]),
-          String(command["scope_kind"]),
-          String(command["scope_id"]),
-          effectLimit + 1
-        )
-        .toArray()
-        .slice(0, effectLimit + 1)
-        .map((effect) => {
-          const {
-            payload_json: payloadJson,
-            receipt_json: receiptJson,
-            ...identity
-          } = effect as JsonRecord;
-          return {
+            String(command["command_id"]),
+            String(command["scope_kind"]),
+            String(command["scope_id"]),
+            effectLimit + 1,
+          )
+          .toArray()
+          .slice(0, effectLimit + 1)
+          .map((effect) => {
+            const {
+              payload_json: payloadJson,
+              receipt_json: receiptJson,
+              ...identity
+            } = effect as JsonRecord;
+            return {
+              ...identity,
+              payload:
+                payloadJson == null ? null : parseJson(String(payloadJson)),
+              receipt:
+                receiptJson == null ? null : parseJson(String(receiptJson)),
+            };
+          }) as CommandDiagnostic["effects"];
+        if (effects.length > effectLimit) effectsTruncated = true;
+        effects.splice(effectLimit);
+        const { result_json: resultJson, ...identity } = command;
+        return {
+          command: {
             ...identity,
-            payload: payloadJson == null ? null : parseJson(String(payloadJson)),
-            receipt: receiptJson == null ? null : parseJson(String(receiptJson)),
-          };
-        }) as CommandDiagnostic["effects"];
-      if (effects.length > effectLimit) effectsTruncated = true;
-      effects.splice(effectLimit);
-      const { result_json: resultJson, ...identity } = command;
-      return {
-        command: {
-          ...identity,
-          result: resultJson == null ? null : parseJson(String(resultJson)),
-        } as CommandDiagnostic["command"],
-        effects,
-      };
-    });
+            result: resultJson == null ? null : parseJson(String(resultJson)),
+          } as CommandDiagnostic["command"],
+          effects,
+        };
+      });
     const cleanupFailureCount = events.reduce((count, event) => {
       const payload = event["payload"];
-      if (!payload || typeof payload !== "object" || Array.isArray(payload)) return count;
+      if (!payload || typeof payload !== "object" || Array.isArray(payload))
+        return count;
       const failure = (payload as Record<string, unknown>)["failure"];
-      if (!failure || typeof failure !== "object" || Array.isArray(failure)) return count;
+      if (!failure || typeof failure !== "object" || Array.isArray(failure))
+        return count;
       const causes = (failure as Record<string, unknown>)["causes"];
       return (
         count +
@@ -5488,7 +6015,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
                 cause &&
                 typeof cause === "object" &&
                 !Array.isArray(cause) &&
-                ["cleanup", "rollback"].includes(String((cause as Record<string, unknown>)["role"]))
+                ["cleanup", "rollback"].includes(
+                  String((cause as Record<string, unknown>)["role"]),
+                ),
             ).length
           : 0)
       );
@@ -5507,15 +6036,19 @@ export class GadWorkspaceDO extends DurableObjectBase {
       summary: {
         terminal: Boolean(
           invocation &&
-          ["completed", "failed", "cancelled", "abandoned"].includes(String(invocation["status"]))
+          ["completed", "failed", "cancelled", "abandoned"].includes(
+            String(invocation["status"]),
+          ),
         ),
         eventCount: events.length,
         commandCount: commands.length,
         pendingEffectCount: commands.reduce(
           (count, command) =>
             count +
-            command.effects.filter((effect) => String(effect["status"]) === "pending").length,
-          0
+            command.effects.filter(
+              (effect) => String(effect["status"]) === "pending",
+            ).length,
+          0,
         ),
         cleanupFailureCount,
         truncated: {
@@ -5528,7 +6061,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  inspectChannelRoster(input: InspectChannelRosterInput): ChannelRosterInspection {
+  inspectChannelRoster(
+    input: InspectChannelRosterInput,
+  ): ChannelRosterInspection {
     this.ensureReady();
     const limit = Math.min(Math.max(input.limit ?? 100, 1), 1000);
     const rows = this.sql
@@ -5543,7 +6078,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           ORDER BY joined_at DESC
           LIMIT ?`,
         input.channelId,
-        limit
+        limit,
       )
       .toArray()
       .map((row) => ({
@@ -5551,13 +6086,16 @@ export class GadWorkspaceDO extends DurableObjectBase {
         participant_id: row["participant_id"] as JsonValue,
         joined_at: row["joined_at"] as JsonValue,
         left_at: row["left_at"] as JsonValue,
-        roles: parseJson(row["roles_json"] as string | null | undefined) as JsonValue,
+        roles: parseJson(
+          row["roles_json"] as string | null | undefined,
+        ) as JsonValue,
       })) as ChannelRosterRow[];
     return {
       summary: {
         rows: rows.length,
         activeParticipants: rows.filter((row) => row["left_at"] == null).length,
-        inactiveParticipants: rows.filter((row) => row["left_at"] != null).length,
+        inactiveParticipants: rows.filter((row) => row["left_at"] != null)
+          .length,
       },
       rows,
     };
@@ -5583,12 +6121,17 @@ export class GadWorkspaceDO extends DurableObjectBase {
       ownerUserId: asString(row["owner_user_id"]),
       status: String(row["status"]) as AgentDirectoryEntry["status"],
       statusEventId: asString(row["status_event_id"]),
-      lastActivityAt: typeof row["last_activity_at"] === "number" ? row["last_activity_at"] : null,
+      lastActivityAt:
+        typeof row["last_activity_at"] === "number"
+          ? row["last_activity_at"]
+          : null,
       summary: asString(row["summary"]),
     };
   }
 
-  private agentDirectoryListing(entries: AgentDirectoryEntry[]): AgentDirectoryListing {
+  private agentDirectoryListing(
+    entries: AgentDirectoryEntry[],
+  ): AgentDirectoryListing {
     return {
       summary: {
         rows: entries.length,
@@ -5637,18 +6180,24 @@ export class GadWorkspaceDO extends DurableObjectBase {
                    instance_id
           LIMIT ?`,
         ...bindings,
-        limit
+        limit,
       )
       .toArray() as JsonRecord[];
-    return this.agentDirectoryListing(rows.map((row) => this.agentDirectoryEntry(row)));
+    return this.agentDirectoryListing(
+      rows.map((row) => this.agentDirectoryEntry(row)),
+    );
   }
 
   @schemaRpc()
-  searchAgentDirectory(input: SearchAgentDirectoryInput): AgentDirectoryListing {
+  searchAgentDirectory(
+    input: SearchAgentDirectoryInput,
+  ): AgentDirectoryListing {
     this.ensureReady();
     const limit = Math.min(Math.max(input.limit ?? 20, 1), 100);
     const mode = this.ensureAgentDirectoryIndex();
-    const statusFilter = input.includeTerminal ? "" : ` AND d.status != 'terminal'`;
+    const statusFilter = input.includeTerminal
+      ? ""
+      : ` AND d.status != 'terminal'`;
     const rows =
       mode === "fts"
         ? (this.sql
@@ -5661,7 +6210,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
               // Terms are quoted so a purpose query can't inject FTS5 syntax;
               // OR-ed because "gmail triage" should match either word.
               ftsQuery(recallTokens([input.query]), " OR "),
-              limit
+              limit,
             )
             .toArray() as JsonRecord[])
         : (this.sql
@@ -5676,10 +6225,12 @@ export class GadWorkspaceDO extends DurableObjectBase {
                 ORDER BY d.last_activity_at DESC
                 LIMIT ?`,
               ...recallTokens([input.query]).map((term) => `%${term}%`),
-              limit
+              limit,
             )
             .toArray() as JsonRecord[]);
-    return this.agentDirectoryListing(rows.map((row) => this.agentDirectoryEntry(row)));
+    return this.agentDirectoryListing(
+      rows.map((row) => this.agentDirectoryEntry(row)),
+    );
   }
 
   /**
@@ -5702,7 +6253,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
             this.sql
               .exec(
                 `SELECT DISTINCT log_id FROM log_heads WHERE log_kind = 'channel' LIMIT ?`,
-                limit
+                limit,
               )
               .toArray() as JsonRecord[]
           ).map((row) => {
@@ -5715,7 +6266,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           `SELECT COUNT(*) AS n, MAX(appended_at) AS last FROM log_events
             WHERE log_id = ? AND head = ?`,
           channelId,
-          CHANNEL_LOG_HEAD
+          CHANNEL_LOG_HEAD,
         )
         .toArray()[0] as JsonRecord | undefined;
       const participants = (
@@ -5723,14 +6274,16 @@ export class GadWorkspaceDO extends DurableObjectBase {
           .exec(
             `SELECT participant_id, handle, kind, status FROM agent_directory
               WHERE channel_id = ? ORDER BY handle, participant_id`,
-            channelId
+            channelId,
           )
           .toArray() as JsonRecord[]
       ).map((row) => ({
         participantId: String(row["participant_id"]),
         handle: asString(row["handle"]),
         kind: asString(row["kind"]),
-        status: asString(row["status"]) as ChannelDescription["participants"][number]["status"],
+        status: asString(
+          row["status"],
+        ) as ChannelDescription["participants"][number]["status"],
       }));
       const last = asString(stats?.["last"]);
       return {
@@ -5743,7 +6296,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  async inspectAgentHealth(input: InspectAgentHealthInput): Promise<AgentHealthInspection> {
+  async inspectAgentHealth(
+    input: InspectAgentHealthInput,
+  ): Promise<AgentHealthInspection> {
     this.ensureReady();
     // This API is the incident *summary*. Keep it compact even when a caller
     // passes the broad limits used by the detailed inspectors; exact follow-up
@@ -5776,16 +6331,23 @@ export class GadWorkspaceDO extends DurableObjectBase {
             row["closed_at"] == null ||
             asNumber(row["streaming_messages"]) > 0 ||
             asNumber(row["nonterminal_invocations"]) > 0 ||
-            asNumber(row["duplicate_open_events"]) > 1
+            asNumber(row["duplicate_open_events"]) > 1,
         )
         .slice(0, 10),
     };
-    const terminalInvocationStatuses = new Set(["completed", "failed", "cancelled", "abandoned"]);
+    const terminalInvocationStatuses = new Set([
+      "completed",
+      "failed",
+      "cancelled",
+      "abandoned",
+    ]);
     const invocationState: InvocationStateInspection = {
       summary: fullInvocationState.summary,
       rows: fullInvocationState.rows
         .filter((row) => {
-          const terminal = terminalInvocationStatuses.has(String(row["status"]));
+          const terminal = terminalInvocationStatuses.has(
+            String(row["status"]),
+          );
           return (
             !terminal ||
             asNumber(row["started_events"]) !== 1 ||
@@ -5796,7 +6358,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
     };
     const roster: ChannelRosterInspection = {
       summary: fullRoster.summary,
-      rows: fullRoster.rows.filter((row) => row["left_at"] == null).slice(0, 10),
+      rows: fullRoster.rows
+        .filter((row) => row["left_at"] == null)
+        .slice(0, 10),
     };
     const envelopes = this.inspectChannelEnvelopes({
       channelId: input.channelId,
@@ -5814,13 +6378,21 @@ export class GadWorkspaceDO extends DurableObjectBase {
       asNumber(publicationIntegrity.summary.sequenceMismatches);
     const openTurns = asNumber(turnState.summary.openTurns);
     const streamingMessages = asNumber(turnState.summary.streamingMessages);
-    const nonterminalInvocations = asNumber(turnState.summary.nonterminalInvocations);
-    const turnIntegrityIssues = asNumber(turnState.summary.duplicateOpenedTurns);
+    const nonterminalInvocations = asNumber(
+      turnState.summary.nonterminalInvocations,
+    );
+    const turnIntegrityIssues = asNumber(
+      turnState.summary.duplicateOpenedTurns,
+    );
     const storageIssues = storage.rows.length;
     const activity: "idle" | "in-flight" =
-      openTurns > 0 || streamingMessages > 0 || nonterminalInvocations > 0 ? "in-flight" : "idle";
+      openTurns > 0 || streamingMessages > 0 || nonterminalInvocations > 0
+        ? "in-flight"
+        : "idle";
     const durableIntegrityOk =
-      publicationIssues === 0 && turnIntegrityIssues === 0 && storageIssues === 0;
+      publicationIssues === 0 &&
+      turnIntegrityIssues === 0 &&
+      storageIssues === 0;
     return {
       channelId: input.channelId,
       branchId,
@@ -5877,9 +6449,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
            ORDER BY bytes DESC LIMIT ?`,
           ...eventBindings,
           rowByteLimit,
-          limit
+          limit,
         )
-        .toArray() as unknown as StorageDiagnostic[])
+        .toArray() as unknown as StorageDiagnostic[]),
     );
 
     const invocationBindings: SqlBinding[] = [];
@@ -5896,9 +6468,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
            ORDER BY bytes DESC LIMIT ?`,
           rowByteLimit,
           ...invocationBindings,
-          limit
+          limit,
         )
-        .toArray() as unknown as StorageDiagnostic[])
+        .toArray() as unknown as StorageDiagnostic[]),
     );
 
     const refClauses: string[] = [];
@@ -5923,9 +6495,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
            ${refClauses.length ? `AND ${refClauses.join(" AND ")}` : ""}
            LIMIT ?`,
           ...refBindings,
-          limit
+          limit,
         )
-        .toArray() as unknown as StorageDiagnostic[])
+        .toArray() as unknown as StorageDiagnostic[]),
     );
 
     return { rows: rows.slice(0, limit) };
@@ -5938,7 +6510,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
       envelopeId?: string | null;
       digest?: string | null;
       limit?: number | null;
-    } = {}
+    } = {},
   ): { rows: JsonRecord[] } {
     this.ensureReady();
     const limit = Math.min(Math.max(input.limit ?? 500, 1), 1000);
@@ -5964,7 +6536,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
          ${where}
          ORDER BY r.created_at ASC LIMIT ?`,
         ...bindings,
-        limit
+        limit,
       )
       .toArray() as JsonRecord[];
     return { rows };
@@ -5988,7 +6560,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         value: count(
           `SELECT COUNT(*) AS value FROM log_events e
            JOIN log_heads h ON h.log_id = e.log_id AND h.head = e.head
-           WHERE h.log_kind = 'channel'`
+           WHERE h.log_kind = 'channel'`,
         ),
       },
       {
@@ -6011,7 +6583,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
   // -------------------------------------------------------------------------
 
   private requireInviteUserId(value: unknown, method: string): string {
-    if (typeof value !== "string" || value.trim() === "" || value.startsWith("user:")) {
+    if (
+      typeof value !== "string" ||
+      value.trim() === "" ||
+      value.startsWith("user:")
+    ) {
       throw new Error(`${method}: userId must be a bare workspace account id`);
     }
     return value.trim();
@@ -6024,13 +6600,18 @@ export class GadWorkspaceDO extends DurableObjectBase {
     return value.trim();
   }
 
-  private assertInviteChannelAuthority(channelId: string, method: string): void {
+  private assertInviteChannelAuthority(
+    channelId: string,
+    method: string,
+  ): void {
     const caller = this.caller;
     const origin = this.authorization?.authorizingOrigin.kind;
     if (origin === "host") return;
     const expected = `do:workers/pubsub-channel:PubSubChannel:${channelId}`;
     if (origin !== "code" || caller?.callerId !== expected) {
-      throw new Error(`${method}: only the owning channel DO may mutate or inspect this row`);
+      throw new Error(
+        `${method}: only the owning channel DO may mutate or inspect this row`,
+      );
     }
   }
 
@@ -6043,14 +6624,14 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   private channelMembershipRevision(
     userId: string,
-    channelId: string
+    channelId: string,
   ): { revision: number; action: "put" | "delete" } | null {
     const row = this.sql
       .exec(
         `SELECT revision, action FROM channel_membership_revisions
           WHERE user_id = ? AND channel_id = ?`,
         userId,
-        channelId
+        channelId,
       )
       .toArray()[0];
     if (!row) return null;
@@ -6064,7 +6645,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
     userId: string,
     channelId: string,
     revision: number,
-    action: "put" | "delete"
+    action: "put" | "delete",
   ): void {
     this.sql.exec(
       `INSERT INTO channel_membership_revisions (user_id, channel_id, revision, action)
@@ -6075,21 +6656,35 @@ export class GadWorkspaceDO extends DurableObjectBase {
       userId,
       channelId,
       revision,
-      action
+      action,
     );
   }
 
-  private requireUserNotificationText(value: unknown, field: string, method: string): string {
+  private requireUserNotificationText(
+    value: unknown,
+    field: string,
+    method: string,
+  ): string {
     if (typeof value !== "string" || value.trim() === "") {
       throw new Error(`${method}: ${field} is required`);
     }
     const text = value.trim();
-    const max = field === "id" ? 512 : field === "kind" ? 128 : field === "title" ? 256 : 4096;
-    if (text.length > max) throw new Error(`${method}: ${field} exceeds ${max} characters`);
+    const max =
+      field === "id"
+        ? 512
+        : field === "kind"
+          ? 128
+          : field === "title"
+            ? 256
+            : 4096;
+    if (text.length > max)
+      throw new Error(`${method}: ${field} exceeds ${max} characters`);
     return text;
   }
 
-  private userNotificationFromRow(row: Record<string, unknown>): UserNotification {
+  private userNotificationFromRow(
+    row: Record<string, unknown>,
+  ): UserNotification {
     const dataJson = row["data_json"];
     let data: unknown;
     if (typeof dataJson === "string") {
@@ -6097,7 +6692,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         data = JSON.parse(dataJson);
       } catch {
         throw new Error(
-          `Corrupt user notification ${String(row["notification_id"])}: invalid data_json`
+          `Corrupt user notification ${String(row["notification_id"])}: invalid data_json`,
         );
       }
     }
@@ -6106,24 +6701,35 @@ export class GadWorkspaceDO extends DurableObjectBase {
       userId: String(row["user_id"]),
       kind: String(row["kind"]),
       title: String(row["title"]),
-      ...(typeof row["message"] === "string" ? { message: row["message"] } : {}),
+      ...(typeof row["message"] === "string"
+        ? { message: row["message"] }
+        : {}),
       ...(data !== undefined ? { data } : {}),
       createdAt: Number(row["created_at"]),
       revision: Number(row["producer_revision"]),
     };
   }
 
-  private writeUserNotification(input: PutUserNotificationInput, method: string): UserNotification {
+  private writeUserNotification(
+    input: PutUserNotificationInput,
+    method: string,
+  ): UserNotification {
     const userId = this.requireInviteUserId(input?.userId, method);
     const id = this.requireUserNotificationText(input?.id, "id", method);
     const kind = this.requireUserNotificationText(input?.kind, "kind", method);
-    const title = this.requireUserNotificationText(input?.title, "title", method);
+    const title = this.requireUserNotificationText(
+      input?.title,
+      "title",
+      method,
+    );
     const message =
       typeof input.message === "string" && input.message.trim()
         ? this.requireUserNotificationText(input.message, "message", method)
         : null;
     if (!Number.isSafeInteger(input.createdAt) || input.createdAt < 0) {
-      throw new Error(`${method}: createdAt must be a non-negative safe integer`);
+      throw new Error(
+        `${method}: createdAt must be a non-negative safe integer`,
+      );
     }
     if (!Number.isSafeInteger(input.revision) || input.revision <= 0) {
       throw new Error(`${method}: revision must be a positive safe integer`);
@@ -6136,7 +6742,8 @@ export class GadWorkspaceDO extends DurableObjectBase {
       } catch {
         throw new Error(`${method}: data must be JSON-serializable`);
       }
-      if (encoded === undefined) throw new Error(`${method}: data must be JSON-serializable`);
+      if (encoded === undefined)
+        throw new Error(`${method}: data must be JSON-serializable`);
       if (new TextEncoder().encode(encoded).byteLength > 64 * 1024) {
         throw new Error(`${method}: data exceeds 65536 serialized bytes`);
       }
@@ -6147,7 +6754,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         `SELECT user_id, notification_id, kind, title, message, data_json, created_at, producer_revision
            FROM user_notifications WHERE user_id = ? AND notification_id = ?`,
         userId,
-        id
+        id,
       )
       .toArray()[0];
     if (existingRow) {
@@ -6158,11 +6765,14 @@ export class GadWorkspaceDO extends DurableObjectBase {
           existing.kind === kind &&
           existing.title === title &&
           (existing.message ?? null) === message &&
-          (typeof existingRow["data_json"] === "string" ? existingRow["data_json"] : null) ===
-            dataJson &&
+          (typeof existingRow["data_json"] === "string"
+            ? existingRow["data_json"]
+            : null) === dataJson &&
           existing.createdAt === input.createdAt;
         if (!identical) {
-          throw new Error(`${method}: revision ${input.revision} was already used for other data`);
+          throw new Error(
+            `${method}: revision ${input.revision} was already used for other data`,
+          );
         }
         return existing;
       }
@@ -6190,34 +6800,32 @@ export class GadWorkspaceDO extends DurableObjectBase {
       message,
       dataJson,
       input.createdAt,
-      input.revision
+      input.revision,
     );
     const row = this.sql
       .exec(
         `SELECT user_id, notification_id, kind, title, message, data_json, created_at, producer_revision
            FROM user_notifications WHERE user_id = ? AND notification_id = ?`,
         userId,
-        id
+        id,
       )
       .toArray()[0];
-    if (!row) throw new Error(`${method}: notification upsert did not produce a row`);
+    if (!row)
+      throw new Error(`${method}: notification upsert did not produce a row`);
     return this.userNotificationFromRow(row);
   }
 
-  private signalUserNotificationChange(userId: string): void {
-    try {
-      const signal = this.rpc
-        .call("main", "notification.signalUserInbox", [userId])
-        .catch((error: unknown) =>
-          console.warn(`[GAD] live user-notification nudge failed for ${userId}:`, error)
-        );
-      if (this.ctx.waitUntil) this.ctx.waitUntil(signal);
-      else void signal;
-    } catch (error) {
-      // The durable row is authoritative; a reconnect snapshot repairs a missed
-      // best-effort nudge if the host bridge is not initialized yet.
-      console.warn(`[GAD] could not start user-notification nudge for ${userId}:`, error);
-    }
+  private async signalUserNotificationChange(userId: string): Promise<boolean> {
+    // This is the live-delivery half of the durable inbox mutation, not
+    // unrelated background work. Keep it inside the originating RPC lifetime
+    // so inherited authority remains valid, and propagate transport or
+    // authorization failures to the producer. The durable write is
+    // idempotent, so the producer can safely retry the semantic operation.
+    // `false` only means that no transport for the account is currently live;
+    // the next authenticated shell snapshot will still load the durable row.
+    return this.rpc.call<boolean>("main", "notification.signalUserInbox", [
+      userId,
+    ]);
   }
 
   /**
@@ -6227,26 +6835,38 @@ export class GadWorkspaceDO extends DurableObjectBase {
    * rejected without mutating either projection.
    */
   @schemaRpc()
-  putChannelMembership(input: PutChannelMembershipInput): {
+  async putChannelMembership(input: PutChannelMembershipInput): Promise<{
     applied: boolean;
     currentRevision: number;
-  } {
+  }> {
     this.ensureReady();
-    const userId = this.requireInviteUserId(input?.userId, "putChannelMembership");
-    const channelId = this.requireInviteChannelId(input?.channelId, "putChannelMembership");
+    const userId = this.requireInviteUserId(
+      input?.userId,
+      "putChannelMembership",
+    );
+    const channelId = this.requireInviteChannelId(
+      input?.channelId,
+      "putChannelMembership",
+    );
     this.assertInviteChannelAuthority(channelId, "putChannelMembership");
     const memberId = `user:${userId}`;
     if (input?.memberId !== memberId) {
       throw new Error(`putChannelMembership: memberId must equal ${memberId}`);
     }
     const handle = typeof input.handle === "string" ? input.handle.trim() : "";
-    const addedBy = typeof input.addedBy === "string" ? input.addedBy.trim() : "";
+    const addedBy =
+      typeof input.addedBy === "string" ? input.addedBy.trim() : "";
     if (!handle) throw new Error("putChannelMembership: handle is required");
     if (!addedBy) throw new Error("putChannelMembership: addedBy is required");
     if (!Number.isSafeInteger(input.addedAt) || input.addedAt < 0) {
-      throw new Error("putChannelMembership: addedAt must be a non-negative integer");
+      throw new Error(
+        "putChannelMembership: addedAt must be a non-negative integer",
+      );
     }
-    const revision = this.requireMembershipRevision(input.revision, "putChannelMembership");
+    const revision = this.requireMembershipRevision(
+      input.revision,
+      "putChannelMembership",
+    );
     let applied = false;
     let currentRevision = revision;
     this.ctx.storage.transactionSync(() => {
@@ -6254,7 +6874,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       if (current && revision <= current.revision) {
         currentRevision = current.revision;
         if (revision === current.revision && current.action !== "put") {
-          throw new Error(`putChannelMembership: revision ${revision} was already used for delete`);
+          throw new Error(
+            `putChannelMembership: revision ${revision} was already used for delete`,
+          );
         }
         return;
       }
@@ -6272,7 +6894,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         memberId,
         handle,
         addedBy,
-        input.addedAt
+        input.addedAt,
       );
       this.writeUserNotification(
         channelInviteNotification(
@@ -6284,29 +6906,40 @@ export class GadWorkspaceDO extends DurableObjectBase {
             addedBy,
             addedAt: input.addedAt,
           },
-          revision
+          revision,
         ),
-        "putChannelMembership"
+        "putChannelMembership",
       );
       this.recordChannelMembershipRevision(userId, channelId, revision, "put");
       applied = true;
     });
-    if (applied) this.signalUserNotificationChange(userId);
+    // Re-drive the live projection even for an equal-revision retry. The
+    // durable mutation may have committed before a previous signal failed.
+    await this.signalUserNotificationChange(userId);
     return { applied, currentRevision };
   }
 
   /** Versioned channel-DO removal from membership and invite indexes. */
   @schemaRpc()
-  deleteChannelMembership(input: DeleteChannelMembershipInput): {
+  async deleteChannelMembership(input: DeleteChannelMembershipInput): Promise<{
     applied: boolean;
     currentRevision: number;
     deleted: boolean;
-  } {
+  }> {
     this.ensureReady();
-    const userId = this.requireInviteUserId(input?.userId, "deleteChannelMembership");
-    const channelId = this.requireInviteChannelId(input?.channelId, "deleteChannelMembership");
+    const userId = this.requireInviteUserId(
+      input?.userId,
+      "deleteChannelMembership",
+    );
+    const channelId = this.requireInviteChannelId(
+      input?.channelId,
+      "deleteChannelMembership",
+    );
     this.assertInviteChannelAuthority(channelId, "deleteChannelMembership");
-    const revision = this.requireMembershipRevision(input.revision, "deleteChannelMembership");
+    const revision = this.requireMembershipRevision(
+      input.revision,
+      "deleteChannelMembership",
+    );
     let deleted = false;
     let applied = false;
     let currentRevision = revision;
@@ -6315,7 +6948,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       if (current && revision <= current.revision) {
         currentRevision = current.revision;
         if (revision === current.revision && current.action !== "delete") {
-          throw new Error(`deleteChannelMembership: revision ${revision} was already used for put`);
+          throw new Error(
+            `deleteChannelMembership: revision ${revision} was already used for put`,
+          );
         }
         return;
       }
@@ -6324,36 +6959,46 @@ export class GadWorkspaceDO extends DurableObjectBase {
           .exec(
             `SELECT 1 FROM channel_membership_index WHERE user_id = ? AND channel_id = ?`,
             userId,
-            channelId
+            channelId,
           )
           .toArray().length > 0;
       this.sql.exec(
         `DELETE FROM channel_membership_index WHERE user_id = ? AND channel_id = ?`,
         userId,
-        channelId
+        channelId,
       );
       this.sql.exec(
         `DELETE FROM user_notifications WHERE user_id = ? AND notification_id = ?`,
         userId,
-        channelInviteNotificationId(channelId)
+        channelInviteNotificationId(channelId),
       );
-      this.recordChannelMembershipRevision(userId, channelId, revision, "delete");
+      this.recordChannelMembershipRevision(
+        userId,
+        channelId,
+        revision,
+        "delete",
+      );
       applied = true;
     });
-    if (applied) this.signalUserNotificationChange(userId);
+    await this.signalUserNotificationChange(userId);
     return { applied, currentRevision, deleted };
   }
 
   /** Server-only durable plan used by the child revocation cascade. */
   @schemaRpc()
-  listChannelMembershipsForUser(input: { userId: string }): ChannelMembershipCleanupPlan {
+  listChannelMembershipsForUser(input: {
+    userId: string;
+  }): ChannelMembershipCleanupPlan {
     this.ensureReady();
-    const userId = this.requireInviteUserId(input?.userId, "listChannelMembershipsForUser");
+    const userId = this.requireInviteUserId(
+      input?.userId,
+      "listChannelMembershipsForUser",
+    );
     const channelIds = this.sql
       .exec(
         `SELECT channel_id FROM channel_membership_index
          WHERE user_id = ? ORDER BY channel_id`,
-        userId
+        userId,
       )
       .toArray()
       .map((row) => String(row["channel_id"]));
@@ -6362,39 +7007,55 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   /** Final idempotent scrub after every indexed channel acknowledged removal. */
   @schemaRpc()
-  purgeRevokedUserChannelIndexes(input: { userId: string }): void {
+  async purgeRevokedUserChannelIndexes(input: {
+    userId: string;
+  }): Promise<void> {
     this.ensureReady();
-    const userId = this.requireInviteUserId(input?.userId, "purgeRevokedUserChannelIndexes");
+    const userId = this.requireInviteUserId(
+      input?.userId,
+      "purgeRevokedUserChannelIndexes",
+    );
     this.ctx.storage.transactionSync(() => {
-      this.sql.exec(`DELETE FROM channel_membership_index WHERE user_id = ?`, userId);
+      this.sql.exec(
+        `DELETE FROM channel_membership_index WHERE user_id = ?`,
+        userId,
+      );
       this.sql.exec(`DELETE FROM user_notifications WHERE user_id = ?`, userId);
     });
-    this.signalUserNotificationChange(userId);
+    await this.signalUserNotificationChange(userId);
   }
 
   /** Idempotent channel-DO removal from the workspace inbox. */
   @schemaRpc()
-  deleteChannelInvite(input: DeleteChannelInviteInput): { deleted: boolean } {
+  async deleteChannelInvite(
+    input: DeleteChannelInviteInput,
+  ): Promise<{ deleted: boolean }> {
     this.ensureReady();
-    const userId = this.requireInviteUserId(input?.userId, "deleteChannelInvite");
-    const channelId = this.requireInviteChannelId(input?.channelId, "deleteChannelInvite");
+    const userId = this.requireInviteUserId(
+      input?.userId,
+      "deleteChannelInvite",
+    );
+    const channelId = this.requireInviteChannelId(
+      input?.channelId,
+      "deleteChannelInvite",
+    );
     this.assertInviteChannelAuthority(channelId, "deleteChannelInvite");
     const existed =
       this.sql
         .exec(
           `SELECT 1 FROM user_notifications WHERE user_id = ? AND notification_id = ?`,
           userId,
-          channelInviteNotificationId(channelId)
+          channelInviteNotificationId(channelId),
         )
         .toArray().length > 0;
     if (existed) {
       this.sql.exec(
         `DELETE FROM user_notifications WHERE user_id = ? AND notification_id = ?`,
         userId,
-        channelInviteNotificationId(channelId)
+        channelInviteNotificationId(channelId),
       );
-      this.signalUserNotificationChange(userId);
     }
+    await this.signalUserNotificationChange(userId);
     return { deleted: existed };
   }
 
@@ -6403,7 +7064,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
   getChannelInvite(input: DeleteChannelInviteInput): ChannelInvite | null {
     this.ensureReady();
     const userId = this.requireInviteUserId(input?.userId, "getChannelInvite");
-    const channelId = this.requireInviteChannelId(input?.channelId, "getChannelInvite");
+    const channelId = this.requireInviteChannelId(
+      input?.channelId,
+      "getChannelInvite",
+    );
     this.assertInviteChannelAuthority(channelId, "getChannelInvite");
     const rows = this.sql
       .exec(
@@ -6411,45 +7075,62 @@ export class GadWorkspaceDO extends DurableObjectBase {
            FROM user_notifications
           WHERE user_id = ? AND notification_id = ? AND acknowledged_at IS NULL`,
         userId,
-        channelInviteNotificationId(channelId)
+        channelInviteNotificationId(channelId),
       )
       .toArray();
     if (rows.length === 0) return null;
-    const invite = channelInviteFromNotification(this.userNotificationFromRow(rows[0]!));
-    return invite?.channelId === channelId && invite.userId === userId ? invite : null;
+    const invite = channelInviteFromNotification(
+      this.userNotificationFromRow(rows[0]!),
+    );
+    return invite?.channelId === channelId && invite.userId === userId
+      ? invite
+      : null;
   }
 
   private verifiedUserNotificationCallerUserId(method: string): string {
     const userId = this.caller?.userId;
-    if (!userId) throw new Error(`${method} requires an authenticated workspace account`);
+    if (!userId)
+      throw new Error(`${method} requires an authenticated workspace account`);
     return this.requireInviteUserId(userId, method);
   }
 
   /** Generic durable publish surface for trusted workspace services. */
   @schemaRpc()
-  putUserNotification(input: PutUserNotificationInput): UserNotification {
+  async putUserNotification(
+    input: PutUserNotificationInput,
+  ): Promise<UserNotification> {
     this.ensureReady();
     if (input?.kind === CHANNEL_INVITE_NOTIFICATION_KIND) {
       throw new Error(
-        "putUserNotification: channel.invite is reserved for the revisioned channel membership projection"
+        "putUserNotification: channel.invite is reserved for the revisioned channel membership projection",
       );
     }
-    const notification = this.writeUserNotification(input, "putUserNotification");
-    this.signalUserNotificationChange(notification.userId);
+    const notification = this.writeUserNotification(
+      input,
+      "putUserNotification",
+    );
+    await this.signalUserNotificationChange(notification.userId);
     return notification;
   }
 
   /** Generic durable removal surface for a notification's trusted producer. */
   @schemaRpc()
-  deleteUserNotification(input: { userId: string; id: string }): {
+  async deleteUserNotification(input: { userId: string; id: string }): Promise<{
     deleted: boolean;
-  } {
+  }> {
     this.ensureReady();
-    const userId = this.requireInviteUserId(input?.userId, "deleteUserNotification");
-    const id = this.requireUserNotificationText(input?.id, "id", "deleteUserNotification");
+    const userId = this.requireInviteUserId(
+      input?.userId,
+      "deleteUserNotification",
+    );
+    const id = this.requireUserNotificationText(
+      input?.id,
+      "id",
+      "deleteUserNotification",
+    );
     if (id.startsWith(`${CHANNEL_INVITE_NOTIFICATION_KIND}:`)) {
       throw new Error(
-        "deleteUserNotification: channel invitation notifications are owned by the channel membership projection"
+        "deleteUserNotification: channel invitation notifications are owned by the channel membership projection",
       );
     }
     const deleted =
@@ -6457,17 +7138,17 @@ export class GadWorkspaceDO extends DurableObjectBase {
         .exec(
           `SELECT 1 FROM user_notifications WHERE user_id = ? AND notification_id = ?`,
           userId,
-          id
+          id,
         )
         .toArray().length > 0;
     if (deleted) {
       this.sql.exec(
         `DELETE FROM user_notifications WHERE user_id = ? AND notification_id = ?`,
         userId,
-        id
+        id,
       );
-      this.signalUserNotificationChange(userId);
     }
+    await this.signalUserNotificationChange(userId);
     return { deleted };
   }
 
@@ -6478,10 +7159,14 @@ export class GadWorkspaceDO extends DurableObjectBase {
     limit?: number;
   }): UserNotificationListResult {
     this.ensureReady();
-    const userId = this.verifiedUserNotificationCallerUserId("listUserNotificationsForMe");
+    const userId = this.verifiedUserNotificationCallerUserId(
+      "listUserNotificationsForMe",
+    );
     const includeAcknowledged = input?.includeAcknowledged === true;
     const limit =
-      typeof input?.limit === "number" && Number.isInteger(input.limit) && input.limit > 0
+      typeof input?.limit === "number" &&
+      Number.isInteger(input.limit) &&
+      input.limit > 0
         ? Math.min(input.limit, 500)
         : null;
     // The inbox is the durable record (messaging plan §4.10.8): the default view
@@ -6491,7 +7176,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
         `SELECT user_id, notification_id, kind, title, message, data_json, created_at, producer_revision, acknowledged_at
            FROM user_notifications WHERE user_id = ?${includeAcknowledged ? "" : " AND acknowledged_at IS NULL"}
            ORDER BY created_at DESC, notification_id ASC${limit ? ` LIMIT ${limit}` : ""}`,
-        userId
+        userId,
       )
       .toArray();
     return {
@@ -6507,17 +7192,25 @@ export class GadWorkspaceDO extends DurableObjectBase {
 
   /** Acknowledge/dismiss one notification for the verified account caller. */
   @schemaRpc()
-  acknowledgeUserNotification(input: { id: string }): UserNotificationAcknowledgementResult {
+  async acknowledgeUserNotification(input: {
+    id: string;
+  }): Promise<UserNotificationAcknowledgementResult> {
     this.ensureReady();
-    const userId = this.verifiedUserNotificationCallerUserId("acknowledgeUserNotification");
-    const id = this.requireUserNotificationText(input?.id, "id", "acknowledgeUserNotification");
+    const userId = this.verifiedUserNotificationCallerUserId(
+      "acknowledgeUserNotification",
+    );
+    const id = this.requireUserNotificationText(
+      input?.id,
+      "id",
+      "acknowledgeUserNotification",
+    );
     const acknowledged =
       this.sql
         .exec(
           `SELECT 1 FROM user_notifications
             WHERE user_id = ? AND notification_id = ? AND acknowledged_at IS NULL`,
           userId,
-          id
+          id,
         )
         .toArray().length > 0;
     if (acknowledged) {
@@ -6526,10 +7219,10 @@ export class GadWorkspaceDO extends DurableObjectBase {
           WHERE user_id = ? AND notification_id = ? AND acknowledged_at IS NULL`,
         Date.now(),
         userId,
-        id
+        id,
       );
-      this.signalUserNotificationChange(userId);
     }
+    await this.signalUserNotificationChange(userId);
     return { acknowledged };
   }
 
@@ -6553,14 +7246,16 @@ export class GadWorkspaceDO extends DurableObjectBase {
       .exec(
         `SELECT log_id AS logId, MIN(created_at) AS createdAt
          FROM log_heads WHERE log_kind = 'channel'
-         GROUP BY log_id ORDER BY createdAt DESC`
+         GROUP BY log_id ORDER BY createdAt DESC`,
       )
       .toArray();
     return rows.map((row) => {
       const logId = String(row["logId"]);
       const channelId = channelIdFromTrajectoryLog(logId);
       if (!channelId) {
-        throw new Error(`Channel log index contains a non-canonical trajectory identity: ${logId}`);
+        throw new Error(
+          `Channel log index contains a non-canonical trajectory identity: ${logId}`,
+        );
       }
       const createdAt = row["createdAt"];
       return {
@@ -6577,7 +7272,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
     return {
       ok: integrity.ok,
       errors: integrity.errors.map(
-        (error) => `${String(error["type"])}: ${String(error["message"])}`
+        (error) => `${String(error["type"])}: ${String(error["message"])}`,
       ),
     };
   }
@@ -6604,7 +7299,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
       errors.push({
         type: "semantic-vcs",
         message: error instanceof Error ? error.message : String(error),
-        ...(error instanceof SemanticVcsError ? { code: error.code, detail: error.detail } : {}),
+        ...(error instanceof SemanticVcsError
+          ? { code: error.code, detail: error.detail }
+          : {}),
       });
     }
 
@@ -6617,14 +7314,18 @@ export class GadWorkspaceDO extends DurableObjectBase {
       });
     }
 
-    for (const event of this.sql.exec(`SELECT * FROM log_events`).toArray() as JsonRecord[]) {
+    for (const event of this.sql
+      .exec(`SELECT * FROM log_events`)
+      .toArray() as JsonRecord[]) {
       for (const field of [
         "actor_json",
         "to_json",
         "payload_ref_json",
         "annotations_json",
       ] as const) {
-        const path = findPrivateParticipantMetadataPath(parseJson(asString(event[field])));
+        const path = findPrivateParticipantMetadataPath(
+          parseJson(asString(event[field])),
+        );
         if (path) {
           errors.push({
             type: "log-event-shape",
@@ -6664,7 +7365,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
  * kept for direct appenders that phrase a roster change that way (its payload
  * then carries `action`).
  */
-function rosterActionForPayloadKind(payloadKind: string): "join" | "update" | "leave" | null {
+function rosterActionForPayloadKind(
+  payloadKind: string,
+): "join" | "update" | "leave" | null {
   switch (payloadKind) {
     case "channel.subscription.opened":
       return "join";

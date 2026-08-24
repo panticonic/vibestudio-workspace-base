@@ -43,7 +43,10 @@ import {
   renderCompareReview,
   renderMergeReview,
 } from "@workspace/harness/merge-driver";
-import { composeSystemPrompt, type SystemPromptMode } from "@workspace/harness/system-prompt";
+import {
+  composeSystemPrompt,
+  type SystemPromptMode,
+} from "@workspace/harness/system-prompt";
 import {
   evalToolParameters,
   formatEvalResult,
@@ -51,7 +54,10 @@ import {
   type EvalRunResult,
 } from "@workspace/harness/tools/eval";
 import { resolveToolFile } from "@workspace/harness/semantic-file-resolution";
-import type { ChannelEvent, ParticipantDescriptor } from "@workspace/harness/types";
+import type {
+  ChannelEvent,
+  ParticipantDescriptor,
+} from "@workspace/harness/types";
 import {
   AGENTIC_EVENT_PAYLOAD_KIND,
   AGENTIC_PROTOCOL_VERSION,
@@ -71,7 +77,11 @@ import {
   type AddresseeUserEntry,
   type ResolveAddresseeContext,
 } from "@workspace/agentic-protocol";
-import { canonicalJson, sha256HexSyncText, stableSha256Hex } from "@vibestudio/content-addressing";
+import {
+  canonicalJson,
+  sha256HexSyncText,
+  stableSha256Hex,
+} from "@vibestudio/content-addressing";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
 import {
   createDeferredEvalExecutor,
@@ -143,7 +153,10 @@ import {
   installUrlBoundModelFetchProxy,
 } from "./model-fetch-proxy.js";
 import { modelTransportRuntimeEvidence } from "./effect-executors/index.js";
-import { assertAgentToolParametersSchema, prepareAgentToolArguments } from "./tool-arguments.js";
+import {
+  assertAgentToolParametersSchema,
+  prepareAgentToolArguments,
+} from "./tool-arguments.js";
 
 export interface AgentToolExecutionContext {
   readonly invocationId: string;
@@ -158,7 +171,11 @@ import type {
 } from "@workspace/runtime/credentials";
 import { DOIdentity } from "./identity.js";
 import { SubscriptionManager } from "./subscription-manager.js";
-import { SubagentRunStore, type SubagentAgentKind, type SubagentRunRow } from "./subagent-runs.js";
+import {
+  SubagentRunStore,
+  type SubagentAgentKind,
+  type SubagentRunRow,
+} from "./subagent-runs.js";
 import { ChannelClient } from "./channel-client.js";
 import { FeedbackIngest } from "./feedback-ingest.js";
 import { CardManager } from "./custom-cards.js";
@@ -167,7 +184,11 @@ import {
   ensureAgentLoopDriverSchema,
   type DriverDeps,
 } from "./agent-loop-driver.js";
-import { inspectEffectOutbox, outboxExternalId, parseOutboxExternalId } from "./effect-outbox.js";
+import {
+  inspectEffectOutbox,
+  outboxExternalId,
+  parseOutboxExternalId,
+} from "./effect-outbox.js";
 import {
   CredentialApprovalDeferredError,
   CredentialPendingError,
@@ -254,7 +275,9 @@ export function subagentRunHandle(runId: string): string {
  * agent is told to name whom it meant. Picking the first human would be exactly
  * the "tell the wrong person" failure the addressee model exists to prevent.
  */
-function soleChannelUserId(roster: readonly ParticipantRef[]): string | undefined {
+function soleChannelUserId(
+  roster: readonly ParticipantRef[],
+): string | undefined {
   const users = roster.filter((entry) => entry.kind === "user");
   if (users.length !== 1) return undefined;
   const id = users[0]?.participantId ?? users[0]?.id ?? "";
@@ -263,7 +286,9 @@ function soleChannelUserId(roster: readonly ParticipantRef[]): string | undefine
 
 function rosterParticipantRef(entry: RosterEntry): ParticipantRef {
   const handle =
-    entry.handle ?? (entry.ref.metadata as { handle?: unknown } | undefined)?.handle ?? undefined;
+    entry.handle ??
+    (entry.ref.metadata as { handle?: unknown } | undefined)?.handle ??
+    undefined;
   return {
     ...entry.ref,
     participantId: entry.ref.participantId ?? entry.participantId,
@@ -273,7 +298,9 @@ function rosterParticipantRef(entry: RosterEntry): ParticipantRef {
   };
 }
 
-function subagentLaunchReceipt(run: Pick<SubagentRunRow, "runId" | "status">): string {
+function subagentLaunchReceipt(
+  run: Pick<SubagentRunRow, "runId" | "status">,
+): string {
   const handle = subagentRunHandle(run.runId);
   if (run.status !== "starting" && run.status !== "running") {
     return `subagent ${handle} already exists with status ${run.status}`;
@@ -288,7 +315,7 @@ function subagentLaunchReceipt(run: Pick<SubagentRunRow, "runId" | "status">): s
 function subagentVcsCommandId(
   phase: "merge",
   run: Pick<SubagentRunRow, "runId" | "parentContextId" | "childContextId">,
-  basis: Record<string, unknown>
+  basis: Record<string, unknown>,
 ): string {
   return `subagent-${phase}:${stableSha256Hex({
     protocol: SUBAGENT_MERGE_PROTOCOL,
@@ -301,11 +328,13 @@ function subagentVcsCommandId(
 
 function createSubagentVcsClient(rpcClient: RpcClient) {
   return createTypedServiceClient("vcs", vcsMethods, (_service, method, args) =>
-    rpcClient.call("main", `vcs.${method}`, args)
+    rpcClient.call("main", `vcs.${method}`, args),
   );
 }
 
-function semanticIntegrationFromProjection(projection: VcsIntegrationProjection) {
+function semanticIntegrationFromProjection(
+  projection: VcsIntegrationProjection,
+) {
   const state =
     projection.remainingCoordinateCount === 0 && projection.concluded
       ? "complete"
@@ -320,17 +349,20 @@ function sameVcsStateNodeRef(left: unknown, right: VcsStateNodeRef): boolean {
   const candidate = left as Record<string, unknown>;
   return right.kind === "event"
     ? candidate["kind"] === "event" && candidate["eventId"] === right.eventId
-    : candidate["kind"] === "application" && candidate["applicationId"] === right.applicationId;
+    : candidate["kind"] === "application" &&
+        candidate["applicationId"] === right.applicationId;
 }
 
 function semanticIntegrationForRun(
   run: SubagentRunRow,
   projections: readonly VcsIntegrationProjection[] = [],
-  currentWorkingHead?: VcsStateNodeRef
+  currentWorkingHead?: VcsStateNodeRef,
 ): Record<string, unknown> {
   const live = run.sourceEventId
     ? projections.find(
-        (entry) => entry.source.kind === "event" && entry.source.eventId === run.sourceEventId
+        (entry) =>
+          entry.source.kind === "event" &&
+          entry.source.eventId === run.sourceEventId,
       )
     : undefined;
   if (live) return semanticIntegrationFromProjection(live);
@@ -343,7 +375,8 @@ function semanticIntegrationForRun(
     receiptSource &&
     typeof receiptSource === "object" &&
     (receiptSource as Record<string, unknown>)["kind"] === "event" &&
-    (receiptSource as Record<string, unknown>)["eventId"] === run.sourceEventId &&
+    (receiptSource as Record<string, unknown>)["eventId"] ===
+      run.sourceEventId &&
     sameVcsStateNodeRef(receipt["asOfWorkingHead"], currentWorkingHead)
   ) {
     return receipt;
@@ -381,7 +414,9 @@ function externalSubagentExtensionId(agentKind: SubagentAgentKind): string {
   return `@workspace-extensions/${agentKind}`;
 }
 
-function externalSubagentProviderSlot(agentKind: SubagentAgentKind): string | null {
+function externalSubagentProviderSlot(
+  agentKind: SubagentAgentKind,
+): string | null {
   return agentKind === "claude-code" ? "claudeCode" : null;
 }
 
@@ -401,13 +436,13 @@ const OBSERVABLE_SUBAGENT_CONFIG_KEYS = [
 ] as const;
 
 function observableSubagentLaunchConfig(
-  value: Record<string, unknown> | undefined
+  value: Record<string, unknown> | undefined,
 ): Record<string, unknown> | null {
   if (!value) return null;
   const selected = Object.fromEntries(
     OBSERVABLE_SUBAGENT_CONFIG_KEYS.flatMap((key) =>
-      value[key] === undefined ? [] : [[key, value[key]]]
-    )
+      value[key] === undefined ? [] : [[key, value[key]]],
+    ),
   );
   return Object.keys(selected).length > 0 ? selected : null;
 }
@@ -459,7 +494,11 @@ function isFallbackOn(value: unknown): value is string[] {
   return (
     Array.isArray(value) &&
     value.length > 0 &&
-    value.every((code) => typeof code === "string" && CONFIGURABLE_FALLBACK_FAILURE_CODES.has(code))
+    value.every(
+      (code) =>
+        typeof code === "string" &&
+        CONFIGURABLE_FALLBACK_FAILURE_CODES.has(code),
+    )
   );
 }
 
@@ -504,12 +543,13 @@ export function resolveRespondFromHandles(
   participants: ReadonlyArray<{
     participantId: string;
     metadata?: Record<string, unknown> | null;
-  }>
+  }>,
 ): string[] {
   const handleToId = new Map<string, string>();
   for (const p of participants) {
     const handle = p.metadata?.["handle"];
-    if (typeof handle === "string" && handle.length > 0) handleToId.set(handle, p.participantId);
+    if (typeof handle === "string" && handle.length > 0)
+      handleToId.set(handle, p.participantId);
   }
   return respondFrom.map((entry) => handleToId.get(entry) ?? entry);
 }
@@ -524,10 +564,14 @@ function configuredParticipantHandle(config: unknown): string | null {
   return typeof handle === "string" && handle.length > 0 ? handle : null;
 }
 
-function configuredWakePolicy(config: unknown): "every-envelope" | "explicit" | "manual" {
+function configuredWakePolicy(
+  config: unknown,
+): "every-envelope" | "explicit" | "manual" {
   if (!config || typeof config !== "object") return "every-envelope";
   const wakePolicy = (config as Record<string, unknown>)["wakePolicy"];
-  return wakePolicy === "explicit" || wakePolicy === "manual" ? wakePolicy : "every-envelope";
+  return wakePolicy === "explicit" || wakePolicy === "manual"
+    ? wakePolicy
+    : "every-envelope";
 }
 
 function sanitizeParticipantHandlePart(value: string): string {
@@ -537,15 +581,17 @@ function sanitizeParticipantHandlePart(value: string): string {
 export function deriveSubagentParticipantHandle(
   baseHandle: string,
   runId: string,
-  objectKey?: string
+  objectKey?: string,
 ): string {
   if (objectKey && PARTICIPANT_HANDLE_PATTERN.test(objectKey)) return objectKey;
 
   const base = sanitizeParticipantHandlePart(baseHandle) || "agent";
-  const suffixSource = sanitizeParticipantHandlePart(objectKey ?? runId) || "subagent";
+  const suffixSource =
+    sanitizeParticipantHandlePart(objectKey ?? runId) || "subagent";
   const suffix = suffixSource.slice(-16);
   const maxBaseLength = Math.max(1, 63 - suffix.length);
-  const trimmedBase = base.slice(0, maxBaseLength).replace(/[-_]+$/g, "") || "agent";
+  const trimmedBase =
+    base.slice(0, maxBaseLength).replace(/[-_]+$/g, "") || "agent";
   const candidate = `${trimmedBase}-${suffix}`;
   const handle = /^[a-zA-Z]/.test(candidate) ? candidate : `a-${candidate}`;
   return handle.slice(0, 64);
@@ -601,7 +647,9 @@ type ConnectCredentialEnvelope = {
 };
 
 function isSystemPromptMode(value: unknown): value is SystemPromptMode {
-  return value === "append" || value === "replace" || value === "replace-vibestudio";
+  return (
+    value === "append" || value === "replace" || value === "replace-vibestudio"
+  );
 }
 
 function normalizeBrowserOpenMode(value: unknown): BrowserOpenMode {
@@ -615,7 +663,8 @@ function normalizeBrowserHandoffTarget(input: {
   const callerId = input.browserHandoffCallerId;
   const callerKind = input.browserHandoffCallerKind;
   if (typeof callerId !== "string" || callerId.length === 0) return null;
-  if (callerKind !== "app" && callerKind !== "panel" && callerKind !== "shell") return null;
+  if (callerKind !== "app" && callerKind !== "panel" && callerKind !== "shell")
+    return null;
   return { callerId, callerKind };
 }
 
@@ -689,7 +738,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   /** Deferred evals are child resources of the channel that started them. */
   private readonly deferredEvalRuns = new Map<string, Set<string>>();
   private readonly deferredEvalBackstopWarnings = new Set<string>();
-  private readonly deltaBuffers = new Map<string, { events: AgenticEvent[]; timer: unknown }>();
+  private readonly deltaBuffers = new Map<
+    string,
+    { events: AgenticEvent[]; timer: unknown }
+  >();
   private readonly channelClients = new Map<string, ChannelClient>();
   private readonly channelConfigCache = new Map<
     string,
@@ -706,7 +758,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       }>;
     }
   >();
-  private readonly blobTextCache = new Map<string, { value: string; bytes: number }>();
+  private readonly blobTextCache = new Map<
+    string,
+    { value: string; bytes: number }
+  >();
   private readonly blobTextReads = new Map<string, Promise<string | null>>();
   private blobTextCacheBytes = 0;
   private readonly alarmSources = new Map<string, AgentAlarmSource>();
@@ -739,14 +794,15 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     this.subscriptions = new SubscriptionManager(
       this.sql,
       (channelId) => this.createChannelClient(channelId),
-      this.identity
+      this.identity,
     );
     this.subagentRuns = new SubagentRunStore(this.sql);
     this.feedback = new FeedbackIngest(this.sql);
     this.cards = new CardManager({
       sql: this.sql,
       createChannelClient: (channelId) => this.createChannelClient(channelId),
-      getParticipantId: (channelId) => this.subscriptions.getParticipantId(channelId),
+      getParticipantId: (channelId) =>
+        this.subscriptions.getParticipantId(channelId),
       getActor: () => ({ kind: "agent", id: this.participantId() }),
       getAgentId: () => this.objectKey,
     });
@@ -756,7 +812,8 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   protected override afterSchemaReady(): void {
     this.registerAgentAlarmSource({
       id: "agent-loop-driver",
-      nextWakeAt: () => this._driver?.nextWakeAt() ?? this.driverNextWakeAtFromSql(),
+      nextWakeAt: () =>
+        this._driver?.nextWakeAt() ?? this.driverNextWakeAtFromSql(),
       fire: async () => {
         await this.driver.reconcileForRecovery();
       },
@@ -797,7 +854,9 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       )
     `);
     const wakeQueueDefinition = this.sql
-      .exec(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_wake_queue'`)
+      .exec(
+        `SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'agent_wake_queue'`,
+      )
       .toArray()[0]?.["sql"];
     if (
       typeof wakeQueueDefinition === "string" &&
@@ -805,7 +864,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     ) {
       this.ctx.storage.transactionSync(() => {
         this.sql.exec(
-          `ALTER TABLE agent_wake_queue RENAME TO agent_wake_queue_before_turn_recovery`
+          `ALTER TABLE agent_wake_queue RENAME TO agent_wake_queue_before_turn_recovery`,
         );
         this.sql.exec(`
           CREATE TABLE agent_wake_queue (
@@ -954,7 +1013,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
 
   protected override releaseDurableWorkClaims(
     previousWorkerId: string | null,
-    _nextWorkerId: string
+    _nextWorkerId: string,
   ): void {
     if (!previousWorkerId) return;
     const now = Date.now();
@@ -965,7 +1024,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
               next_attempt_at = ?
         WHERE disposition = 'leased' AND lease_owner = ?`,
       now,
-      previousWorkerId
+      previousWorkerId,
     );
     try {
       this.sql.exec(
@@ -975,7 +1034,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
                 next_attempt_at = ?
           WHERE disposition = 'leased' AND lease_owner = ?`,
         now,
-        previousWorkerId
+        previousWorkerId,
       );
     } catch {
       // Effect storage is lazy.
@@ -991,7 +1050,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       itemId?: string;
       generation?: number;
       details?: Record<string, string | number | boolean | null>;
-    } = {}
+    } = {},
   ): void {
     const now = Date.now();
     const startedAt = input.startedAt ?? now;
@@ -1007,10 +1066,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       input.generation ?? null,
       startedAt,
       input.startedAt === undefined ? null : Math.max(0, now - startedAt),
-      JSON.stringify(input.details ?? {})
+      JSON.stringify(input.details ?? {}),
     );
     const insertsSinceSweep =
-      (this.hotPathTraceInsertsSinceSweep.get(channelId) ?? HOT_PATH_TRACE_SWEEP_INTERVAL - 1) + 1;
+      (this.hotPathTraceInsertsSinceSweep.get(channelId) ??
+        HOT_PATH_TRACE_SWEEP_INTERVAL - 1) + 1;
     if (insertsSinceSweep < HOT_PATH_TRACE_SWEEP_INTERVAL) {
       this.hotPathTraceInsertsSinceSweep.set(channelId, insertsSinceSweep);
       return;
@@ -1025,7 +1085,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
              LIMIT ${HOT_PATH_TRACE_RETENTION_LIMIT}
           )`,
       channelId,
-      channelId
+      channelId,
     );
     this.hotPathTraceInsertsSinceSweep.set(channelId, 0);
   }
@@ -1039,7 +1099,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
              FROM agent_hot_path_trace
             WHERE channel_id = ?
             ORDER BY sequence`,
-          channelId
+          channelId,
         )
         .toArray() as Array<Record<string, unknown>>
     ).map((row) => ({
@@ -1047,21 +1107,28 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       phase: String(row["phase"]),
       ...(row["source"] == null ? {} : { source: String(row["source"]) }),
       ...(row["item_id"] == null ? {} : { itemId: String(row["item_id"]) }),
-      ...(row["generation"] == null ? {} : { generation: Number(row["generation"]) }),
+      ...(row["generation"] == null
+        ? {}
+        : { generation: Number(row["generation"]) }),
       startedAt: Number(row["started_at"]),
-      ...(row["duration_ms"] == null ? {} : { durationMs: Number(row["duration_ms"]) }),
+      ...(row["duration_ms"] == null
+        ? {}
+        : { durationMs: Number(row["duration_ms"]) }),
       details: JSON.parse(String(row["details_json"])),
     }));
   }
 
   override async releaseForLifecycle(
-    input: LifecyclePrepareInput
+    input: LifecyclePrepareInput,
   ): Promise<LifecyclePrepareResult> {
-    const releasedEffects = this._driver ? await this._driver.releaseActivation() : 0;
+    const releasedEffects = this._driver
+      ? await this._driver.releaseActivation()
+      : 0;
     if (input.mode === "retire") {
       const abandonedSubagents = await this.abandonLiveSubagentsForRetirement();
       const channelIds = this.subscriptions.listChannelIds();
-      for (const channelId of channelIds) await this.unsubscribeChannel(channelId);
+      for (const channelId of channelIds)
+        await this.unsubscribeChannel(channelId);
       return {
         status: "ready",
         detail: {
@@ -1089,7 +1156,9 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       if (run.externalSessionEntityId && run.externalGenerationId) {
         const agentKind = normalizeSubagentAgentKind(run.agentKind);
         if (!agentKind || agentKind === "pi") {
-          throw new Error(`retire: invalid external agent kind ${run.agentKind}`);
+          throw new Error(
+            `retire: invalid external agent kind ${run.agentKind}`,
+          );
         }
         const providerSlot = externalSubagentProviderSlot(agentKind);
         await this.rpc.call(
@@ -1104,7 +1173,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
                 generationId: run.externalGenerationId,
               },
             ],
-          ]
+          ],
         );
       } else {
         await this.rpc.call(run.childEntityId, "retireSubagentExecution", [
@@ -1117,7 +1186,9 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     return abandoned;
   }
 
-  override async resumeAfterRestart(input: LifecycleResumeInput): Promise<void> {
+  override async resumeAfterRestart(
+    input: LifecycleResumeInput,
+  ): Promise<void> {
     await super.resumeAfterRestart(input);
     // Eval terminal delivery was activation-local. Re-observe every parked
     // eval through its deterministic run id now, instead of waiting for the
@@ -1156,7 +1227,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
    *  agents publish everything (`undefined` ⇒ "all"); the silent agent overrides
    *  this to "notify-only" (the old `silentPolicy` behavior). */
   protected getPublishPolicy(
-    _channelId: string
+    _channelId: string,
   ): "all" | "turn-final" | "notify-only" | "say-only" | undefined {
     return undefined;
   }
@@ -1171,11 +1242,14 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     return DEFAULT_MAX_SUBAGENTS;
   }
 
-  protected abstract getParticipantInfo(channelId: string, config?: unknown): ParticipantDescriptor;
+  protected abstract getParticipantInfo(
+    channelId: string,
+    config?: unknown,
+  ): ParticipantDescriptor;
 
   protected getEffectiveParticipantInfo(
     channelId: string,
-    config?: unknown
+    config?: unknown,
   ): ParticipantDescriptor {
     const declared = this.getParticipantInfo(channelId, config);
     // The agent's own one-line self-description (`set_description`) rides the
@@ -1205,7 +1279,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     }
     return {
       ...descriptor,
-      handle: deriveSubagentParticipantHandle(descriptor.handle, subagent.runId, objectKey),
+      handle: deriveSubagentParticipantHandle(
+        descriptor.handle,
+        subagent.runId,
+        objectKey,
+      ),
     };
   }
 
@@ -1225,15 +1303,16 @@ export abstract class AgentVesselBase extends DurableObjectBase {
    */
   protected async setAgentDescription(
     channelId: string,
-    description: string | null
+    description: string | null,
   ): Promise<void> {
-    if (description) this.setStateValue(`agent:description:${channelId}`, description);
+    if (description)
+      this.setStateValue(`agent:description:${channelId}`, description);
     else this.deleteStateValue(`agent:description:${channelId}`);
     const participantId = this.subscriptions.getParticipantId(channelId);
     if (!participantId) return;
     const descriptor = this.getEffectiveParticipantInfo(
       channelId,
-      this.subscriptions.getConfig(channelId)
+      this.subscriptions.getConfig(channelId),
     );
     await this.createChannelClient(channelId).updateMetadata(participantId, {
       name: descriptor.name,
@@ -1255,7 +1334,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   /** Workspace-level prompt resources. Workspace agents load AGENTS.md and the
    *  skill index here; non-workspace agents may return nothing. */
   protected loadPromptResources(
-    _channelId: string
+    _channelId: string,
   ): AgentPromptResources | Promise<AgentPromptResources> {
     return {};
   }
@@ -1293,21 +1372,27 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       ...(resources.workspacePrompt !== undefined
         ? { workspacePrompt: resources.workspacePrompt }
         : {}),
-      ...(resources.skillIndex !== undefined ? { skillIndex: resources.skillIndex } : {}),
+      ...(resources.skillIndex !== undefined
+        ? { skillIndex: resources.skillIndex }
+        : {}),
       ...(agentPrompt !== undefined ? { agentPrompt } : {}),
-      ...(override.systemPrompt !== undefined ? { systemPrompt: override.systemPrompt } : {}),
+      ...(override.systemPrompt !== undefined
+        ? { systemPrompt: override.systemPrompt }
+        : {}),
       ...(override.systemPromptMode !== undefined
         ? { systemPromptMode: override.systemPromptMode }
         : {}),
     });
     const subagent = this.subagentIdentity();
-    return [composed, subagent ? subagentRuntimePrompt(subagent) : ""].filter(Boolean).join("\n\n");
+    return [composed, subagent ? subagentRuntimePrompt(subagent) : ""]
+      .filter(Boolean)
+      .join("\n\n");
   }
 
   /** Local tools registered with the local-tool executor. */
   protected getLoopTools(
     _channelId: string,
-    _execution?: AgentToolExecutionContext
+    _execution?: AgentToolExecutionContext,
   ): AgentTool[] | Promise<AgentTool[]> {
     return [];
   }
@@ -1344,14 +1429,17 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   }
 
   /** Hook before addressing — return true to swallow the event. */
-  protected async onChannelEvent(_channelId: string, _event: ChannelEvent): Promise<boolean> {
+  protected async onChannelEvent(
+    _channelId: string,
+    _event: ChannelEvent,
+  ): Promise<boolean> {
     return false;
   }
 
   /** Build the bounded, model-facing form of an opted-in non-chat envelope. */
   protected resolveChannelObservation(
     channelId: string,
-    event: ChannelEvent
+    event: ChannelEvent,
   ): ChannelObservationInput | null {
     const serializedPayload = canonicalJson(event.payload);
     const source: ChannelObservationInput["source"] = {
@@ -1377,12 +1465,17 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       payload: null,
       truncated: {
         originalChars: serializedPayload.length,
-        preview: serializedPayload.slice(0, MAX_CHANNEL_OBSERVATION_PREVIEW_CHARS),
+        preview: serializedPayload.slice(
+          0,
+          MAX_CHANNEL_OBSERVATION_PREVIEW_CHARS,
+        ),
       },
     };
   }
 
-  protected getModelCredentialSetupProps(_providerId: string): Record<string, unknown> | null {
+  protected getModelCredentialSetupProps(
+    _providerId: string,
+  ): Record<string, unknown> | null {
     return null;
   }
 
@@ -1390,7 +1483,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
    *  openai-codex's chatgpt_account_id). Subclass hook; default none. */
   protected getModelCredentialTokenClaims(
     _providerId: string,
-    _credential: ModelCredentialSummary
+    _credential: ModelCredentialSummary,
   ): Record<string, unknown> {
     return {};
   }
@@ -1428,7 +1521,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     const sessionId = env["WORKERD_SESSION_ID"];
     if (!source || !className || !sessionId) {
       throw new Error(
-        "Agent vessel identity requires WORKER_SOURCE, WORKER_CLASS_NAME, and WORKERD_SESSION_ID"
+        "Agent vessel identity requires WORKER_SOURCE, WORKER_CLASS_NAME, and WORKERD_SESSION_ID",
       );
     }
     const generationRaw = env["WORKERD_BOOT_GENERATION"];
@@ -1439,7 +1532,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     this.identity.bootstrap(
       { source, className, objectKey: this.objectKey },
       sessionId,
-      Number.isFinite(generation) ? generation : null
+      Number.isFinite(generation) ? generation : null,
     );
     this._identityBootstrapped = true;
   }
@@ -1453,7 +1546,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   protected selfRef(channelId: string): ParticipantRef {
     const descriptor = this.getEffectiveParticipantInfo(
       channelId,
-      this.subscriptions.getConfig(channelId)
+      this.subscriptions.getConfig(channelId),
     );
     return {
       kind: "agent",
@@ -1472,7 +1565,8 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     this._driver ??= new AgentLoopDriver({
       sql: this.sql,
       gad: {
-        call: <T>(method: string, args: Record<string, unknown>) => this.callGad<T>(method, args),
+        call: <T>(method: string, args: Record<string, unknown>) =>
+          this.callGad<T>(method, args),
       },
       executorDeps: this.executorDeps(),
       selfRefFor: (channelId) => this.selfRef(channelId),
@@ -1487,7 +1581,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       // window); a subclass can tune via getCompactionTriggerBytes.
       compaction: { triggerBytes: this.getCompactionTriggerBytes() },
       scheduleAlarm: (at) => {
-        this.scheduleAgentAlarm("agent-loop-driver", Math.max(at, Date.now() + 50));
+        this.scheduleAgentAlarm(
+          "agent-loop-driver",
+          Math.max(at, Date.now() + 50),
+        );
       },
       notifyWorkReady: () => this.markWorkReady("agent-effect"),
       commitTerminalOutcome: async (input, commitLocal) => {
@@ -1504,7 +1601,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
             input.channelId,
             wakeId,
             now,
-            now
+            now,
           );
           commitLocal();
         });
@@ -1516,7 +1613,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       clearTerminalOutcomeRecovery: (input) => {
         this.sql.exec(
           `DELETE FROM agent_wake_queue WHERE wake_id = ? AND disposition = 'ready'`,
-          `turn-recovery:${outboxExternalId(input.branchId, input.effectId)}`
+          `turn-recovery:${outboxExternalId(input.branchId, input.effectId)}`,
         );
       },
       executorOverride: this.getDriverExecutorOverride(),
@@ -1533,6 +1630,18 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     reason?: string;
     summary?: string;
     finalMessage?: string;
+    effectFailures: Array<{
+      invocationId: string;
+      name: string;
+      outcome:
+        | "tool_error"
+        | "infrastructure_error"
+        | "cancelled"
+        | "stale_dispatch"
+        | "abandoned";
+      code: string;
+      message: string;
+    }>;
   }): Promise<void> {
     const subagent = this.subagentIdentity();
     if (
@@ -1540,14 +1649,18 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       subagent.taskChannelId === input.channelId &&
       !this.subagentTerminalIntentRecorded(subagent.runId)
     ) {
-      const failed = Boolean(input.reason && input.reason !== "tool_terminated");
+      const failed = Boolean(
+        input.reason && input.reason !== "tool_terminated",
+      );
       const report =
-        input.finalMessage?.trim() || input.summary?.trim() || (failed ? input.reason : undefined);
+        input.finalMessage?.trim() ||
+        input.summary?.trim() ||
+        (failed ? input.reason : undefined);
       if (report) {
         await this.recordOwnSubagentTerminalIntent(
           subagent,
           report,
-          failed ? "failed" : "completed"
+          failed ? "failed" : "completed",
         );
       }
       return;
@@ -1566,17 +1679,23 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     const recordedCompletion = automationCompletionForTurn(
       this.getStateValue(completionKey),
       input.channelId,
-      input.turnId
+      input.turnId,
     );
     const evalCompletion =
       !failed && input.metadata.automation?.action === "eval"
         ? automationCompletionFromEvalSummary(input.summary)
         : null;
-    const completionResponse = recordedCompletion?.response ?? evalCompletion?.response;
+    const completionResponse =
+      recordedCompletion?.response ?? evalCompletion?.response;
+    const outcome = failed
+      ? "failed"
+      : input.effectFailures.length > 0
+        ? "completed-with-errors"
+        : "succeeded";
     await this.rpc.call(service.targetId, "finishRun", [
       {
         runId,
-        outcome: failed ? "failed" : "succeeded",
+        outcome,
         ...(input.finalMessage
           ? { finalMessage: input.finalMessage }
           : !failed && completionResponse
@@ -1585,12 +1704,16 @@ export abstract class AgentVesselBase extends DurableObjectBase {
               ? { finalMessage: input.summary }
               : {}),
         ...(!failed && completionResponse ? { completionResponse } : {}),
+        ...(input.effectFailures.length > 0
+          ? { effectFailures: input.effectFailures }
+          : {}),
         ...(failed
           ? {
               failure: {
                 code: "EAGENTTURN",
                 stage: "executing",
-                message: input.summary ?? input.reason ?? "Automation turn failed",
+                message:
+                  input.summary ?? input.reason ?? "Automation turn failed",
                 retry: "manual",
               },
             }
@@ -1617,7 +1740,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
 
   protected scheduleAgentAlarm(sourceId: string, timeMs: number): void {
     if (!Number.isFinite(timeMs)) return;
-    this.alarmDeadlines.set(sourceId, Math.max(Math.round(timeMs), Date.now() + 1));
+    this.alarmDeadlines.set(
+      sourceId,
+      Math.max(Math.round(timeMs), Date.now() + 1),
+    );
   }
 
   protected clearAgentAlarm(sourceId: string): void {
@@ -1630,8 +1756,12 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       if (next === null) this.alarmDeadlines.delete(source.id);
       else this.alarmDeadlines.set(source.id, next);
     }
-    const deadlines = [...this.alarmDeadlines.values(), this.nextDurableWorkReadyEdgeAt()].filter(
-      (value): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0
+    const deadlines = [
+      ...this.alarmDeadlines.values(),
+      this.nextDurableWorkReadyEdgeAt(),
+    ].filter(
+      (value): value is number =>
+        typeof value === "number" && Number.isFinite(value) && value >= 0,
     );
     return deadlines.length === 0 ? null : { wakeAt: Math.min(...deadlines) };
   }
@@ -1645,7 +1775,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       .map((source) => ({ source, wakeAt: source.nextWakeAt() }))
       .filter(
         (entry): entry is { source: AgentAlarmSource; wakeAt: number } =>
-          typeof entry.wakeAt === "number" && entry.wakeAt <= now
+          typeof entry.wakeAt === "number" && entry.wakeAt <= now,
       )
       .sort((a, b) => a.wakeAt - b.wakeAt);
     // Reconcile every due source before entering any source handler. A long
@@ -1664,7 +1794,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         .exec(
           `SELECT MIN(next_attempt_at) AS due
              FROM effect_outbox
-            WHERE disposition IN ('retrying', 'parked')`
+            WHERE disposition IN ('retrying', 'parked')`,
         )
         .toArray()[0];
       const value = row?.["due"];
@@ -1688,7 +1818,8 @@ export abstract class AgentVesselBase extends DurableObjectBase {
 
   protected async callGad<T>(method: string, ...args: unknown[]): Promise<T> {
     this._gadClient ??= createGadServiceClient({
-      call: <R>(targetId: string, m: string, a: unknown[]) => this.rpc.call<R>(targetId, m, a),
+      call: <R>(targetId: string, m: string, a: unknown[]) =>
+        this.rpc.call<R>(targetId, m, a),
     });
     return this._gadClient.call<T>(method, ...args);
   }
@@ -1697,14 +1828,15 @@ export abstract class AgentVesselBase extends DurableObjectBase {
    * Missing commands are ordinary for read-only tools; every other inspection
    * failure stays exceptional so uncertainty can never authorize a duplicate. */
   private async completedMutationEvidence(
-    commandId: string
+    commandId: string,
   ): Promise<{ commandId: string; command: unknown } | null> {
     try {
       const inspected = await createSubagentVcsClient(this.rpc).inspect({
         node: { kind: "command", commandId },
         edgeLimit: 1,
       });
-      return inspected.node.kind === "command" && inspected.node.value.status === "complete"
+      return inspected.node.kind === "command" &&
+        inspected.node.value.status === "complete"
         ? { commandId, command: inspected.node }
         : null;
     } catch (error) {
@@ -1733,7 +1865,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
           const stored = await this.rpc.call<{ digest: string; size: number }>(
             "main",
             "blobstore.putText",
-            [value]
+            [value],
           );
           this.rememberBlobText(stored.digest, value);
           return stored;
@@ -1752,13 +1884,13 @@ export abstract class AgentVesselBase extends DurableObjectBase {
               transportCallId: input.transportCallId,
               ...(input.turnId ? { turnId: input.turnId } : {}),
               ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
-            }
+            },
           );
         },
         cancelMethodCall: async (channelId, transportCallId) => {
           await this.createChannelClient(channelId).cancelCall(
             this.participantId(),
-            transportCallId
+            transportCallId,
           );
         },
         publish: async (input) => {
@@ -1769,21 +1901,23 @@ export abstract class AgentVesselBase extends DurableObjectBase {
             this.participantId(),
             input.payloadKind,
             input.payload,
-            input.idempotencyKey ? { idempotencyKey: input.idempotencyKey } : undefined
+            input.idempotencyKey
+              ? { idempotencyKey: input.idempotencyKey }
+              : undefined,
           );
         },
         recordReadReceipt: async (input) => {
           await this.createChannelClient(input.channelId).recordReadReceipt(
             this.participantId(),
             input.messageId,
-            input.turnId
+            input.turnId,
           );
         },
         sendSignalEvent: async (channelId, event) => {
           await this.createChannelClient(channelId).sendSignalEvent(
             this.participantId(),
             AGENTIC_EVENT_PAYLOAD_KIND,
-            event
+            event,
           );
         },
       },
@@ -1796,26 +1930,35 @@ export abstract class AgentVesselBase extends DurableObjectBase {
             "main",
             "extensions.invoke",
             [LOCAL_MODELS_EXTENSION_ID, "ensureLoaded", [modelId]],
-            { signal }
+            { signal },
           ),
         getLoopbackAuth: async (signal) =>
           await this.rpc.call<{ apiKey: string }>(
             "main",
             "extensions.invoke",
             [LOCAL_MODELS_EXTENSION_ID, "getLoopbackAuth", []],
-            { signal }
+            { signal },
           ),
       },
       promptArtifacts: {
-        prepare: (channelId, signal) => this.preparePromptArtifacts(channelId, signal),
+        prepare: (channelId, signal) =>
+          this.preparePromptArtifacts(channelId, signal),
       },
       credentials: {
-        getApiKey: async ({ providerId, modelBaseUrl, requestId, idempotencyKey, signal }) => {
+        getApiKey: async ({
+          providerId,
+          modelBaseUrl,
+          requestId,
+          idempotencyKey,
+          signal,
+        }) => {
           // Prefer URL-bound credentials when the model exposes a concrete
           // endpoint; fall back to provider-scoped credentials for providers
           // whose registry entries do not carry a base URL.
           let summary: ModelCredentialSummary | null;
-          const resolveRequest = modelBaseUrl ? { url: modelBaseUrl } : { providerId };
+          const resolveRequest = modelBaseUrl
+            ? { url: modelBaseUrl }
+            : { providerId };
           try {
             if (requestId) {
               summary = await this.rpc.call<ModelCredentialSummary | null>(
@@ -1826,26 +1969,30 @@ export abstract class AgentVesselBase extends DurableObjectBase {
                   idempotencyKey: idempotencyKey ?? requestId,
                   authorityAcquisition: "return",
                   signal,
-                }
+                },
               );
             } else {
               summary = await this.rpc.call<ModelCredentialSummary | null>(
                 "main",
                 "credentials.resolveCredential",
                 [resolveRequest],
-                { signal }
+                { signal },
               );
             }
-            if (!summary) throw new CredentialPendingError(providerId, modelBaseUrl);
+            if (!summary)
+              throw new CredentialPendingError(providerId, modelBaseUrl);
           } catch (err) {
             if (authorityAcquisitionRequired(err)) {
-              throw new CredentialApprovalDeferredError(providerId, modelBaseUrl);
+              throw new CredentialApprovalDeferredError(
+                providerId,
+                modelBaseUrl,
+              );
             }
             if (authorityDecisionDenied(err)) throw err;
             if (!(err instanceof CredentialPendingError)) {
               console.warn(
                 `[AgentVessel] resolveCredential(${modelBaseUrl ?? providerId}) failed:`,
-                err instanceof Error ? err.message : err
+                err instanceof Error ? err.message : err,
               );
             }
             // Only a successful resolver returning null means "no credential".
@@ -1856,11 +2003,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
             throw err;
           }
           installUrlBoundModelFetchProxy(modelBaseUrl ?? "*", (url, init) =>
-            this.credentials.fetch(url, init)
+            this.credentials.fetch(url, init),
           );
           return {
             apiKey: createModelCredentialSentinel(
-              this.getModelCredentialTokenClaims(providerId, summary)
+              this.getModelCredentialTokenClaims(providerId, summary),
             ),
           };
         },
@@ -1870,7 +2017,14 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         },
       },
       localTools: {
-        run: async ({ channelId, tool, invocationId, args, signal, onProgress }) => {
+        run: async ({
+          channelId,
+          tool,
+          invocationId,
+          args,
+          signal,
+          onProgress,
+        }) => {
           const trajectory = channelTrajectoryFor(channelId);
           const causalRpc = withCausalParent(this.rpc, {
             kind: "trajectory-invocation",
@@ -1898,7 +2052,12 @@ export abstract class AgentVesselBase extends DurableObjectBase {
             // The `eval` tool DEFERS: the agent can't hold a connection for a multi-minute run.
             // eval.start receives this verified parent scope and delegates it to the EvalDO.
             if (tool === "eval") {
-              return await this.runDeferredEval(channelId, invocationId, args, execution.rpc);
+              return await this.runDeferredEval(
+                channelId,
+                invocationId,
+                args,
+                execution.rpc,
+              );
             }
             // `spawn_subagent` is an agentic lifecycle operation, not workspace authorship.
             if (tool === "spawn_subagent") {
@@ -1915,11 +2074,13 @@ export abstract class AgentVesselBase extends DurableObjectBase {
                   operation: `tool.${tool}`,
                   stage: "resolve",
                   causal: { invocationId, commandId: execution.commandId },
-                }
+                },
               );
               return {
                 result: {
-                  protocolContent: [{ type: "text", text: renderAgentToolFailure(failure) }],
+                  protocolContent: [
+                    { type: "text", text: renderAgentToolFailure(failure) },
+                  ],
                   details: { failure },
                 },
                 isError: true,
@@ -1941,11 +2102,18 @@ export abstract class AgentVesselBase extends DurableObjectBase {
                 details: result.details,
               },
               isError: result.isError === true,
-              ...(result.isError !== true && result.terminate === true ? { terminate: true } : {}),
+              ...(result.isError !== true && result.terminate === true
+                ? { terminate: true }
+                : {}),
             };
           } catch (err) {
-            if (executionAdmitted && resolvedTool?.cancellationMode === "settle") {
-              const evidence = await this.completedMutationEvidence(execution.commandId);
+            if (
+              executionAdmitted &&
+              resolvedTool?.cancellationMode === "settle"
+            ) {
+              const evidence = await this.completedMutationEvidence(
+                execution.commandId,
+              );
               if (evidence) {
                 return {
                   result: {
@@ -1995,7 +2163,8 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       },
       http: {
         post: async (input) => {
-          if (!input.target) throw new Error("http_call requires a target service/method");
+          if (!input.target)
+            throw new Error("http_call requires a target service/method");
           try {
             const result = await this.rpc.call(
               "main",
@@ -2004,7 +2173,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
               {
                 idempotencyKey: input.idempotencyKey,
                 authorityAcquisition: "return",
-              }
+              },
             );
             return { deferred: false, result, isError: false };
           } catch (error) {
@@ -2043,11 +2212,13 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     this.blobTextReads.set(digest, pending);
     void pending.then(
       () => {
-        if (this.blobTextReads.get(digest) === pending) this.blobTextReads.delete(digest);
+        if (this.blobTextReads.get(digest) === pending)
+          this.blobTextReads.delete(digest);
       },
       () => {
-        if (this.blobTextReads.get(digest) === pending) this.blobTextReads.delete(digest);
-      }
+        if (this.blobTextReads.get(digest) === pending)
+          this.blobTextReads.delete(digest);
+      },
     );
     return pending;
   }
@@ -2070,10 +2241,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
   }
 
   private async channelTarget(channelId: string): Promise<string> {
-    const service = await this.rpc.call<{ targetId?: string }>("main", "workers.resolveService", [
-      "vibestudio.channel.v1",
-      channelId,
-    ]);
+    const service = await this.rpc.call<{ targetId?: string }>(
+      "main",
+      "workers.resolveService",
+      ["vibestudio.channel.v1", channelId],
+    );
     if (!service.targetId) throw new Error("channel service did not resolve");
     return service.targetId;
   }
@@ -2093,21 +2265,28 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         .sendSignalEvent(
           this.participantId(),
           AGENTIC_EVENT_PAYLOAD_KIND,
-          events.length === 1 ? events[0] : events
+          events.length === 1 ? events[0] : events,
         )
-        .catch(() => {})
+        .catch(() => {}),
     );
   }
 
-  private sendOrderedSignalMessage(channelId: string, content: string, contentType?: string): void {
+  private sendOrderedSignalMessage(
+    channelId: string,
+    content: string,
+    contentType?: string,
+  ): void {
     this.enqueueEphemeralSignal(channelId, () =>
       this.createChannelClient(channelId)
         .sendSignal(this.participantId(), content, contentType)
-        .catch(() => {})
+        .catch(() => {}),
     );
   }
 
-  private enqueueEphemeralSignal(channelId: string, send: () => Promise<void>): void {
+  private enqueueEphemeralSignal(
+    channelId: string,
+    send: () => Promise<void>,
+  ): void {
     const pump = this.signalPumps.get(channelId) ?? {
       running: false,
       pending: [],
@@ -2122,7 +2301,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         while (pump.pending.length > 0) await pump.pending.shift()!();
       } finally {
         pump.running = false;
-        if (pump.pending.length === 0 && this.signalPumps.get(channelId) === pump) {
+        if (
+          pump.pending.length === 0 &&
+          this.signalPumps.get(channelId) === pump
+        ) {
           this.signalPumps.delete(channelId);
         }
       }
@@ -2131,14 +2313,19 @@ export abstract class AgentVesselBase extends DurableObjectBase {
 
   private emitEphemeral(emit: EphemeralEmit): void {
     if (emit.kind === "signal-message") {
-      this.sendOrderedSignalMessage(emit.channelId, emit.content, emit.contentType);
+      this.sendOrderedSignalMessage(
+        emit.channelId,
+        emit.content,
+        emit.contentType,
+      );
       return;
     }
     const buffer = this.deltaBuffers.get(emit.channelId) ?? {
       events: [],
       timer: null,
     };
-    if (buffer.events.length >= MAX_BUFFERED_DELTA_EVENTS) buffer.events.shift();
+    if (buffer.events.length >= MAX_BUFFERED_DELTA_EVENTS)
+      buffer.events.shift();
     buffer.events.push(emit.event);
     if (!buffer.timer) {
       buffer.timer = setTimeout(() => {
@@ -2214,12 +2401,16 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       seed.fallbackThinkingLevel = c["fallbackThinkingLevel"];
     }
     if (isFallbackOn(c["fallbackOn"])) seed.fallbackOn = [...c["fallbackOn"]];
-    if (c["fallbackScope"] === "unattended" || c["fallbackScope"] === "all-turns") {
+    if (
+      c["fallbackScope"] === "unattended" ||
+      c["fallbackScope"] === "all-turns"
+    ) {
       seed.fallbackScope = c["fallbackScope"];
     }
     const al = c["approvalLevel"];
     if (al === 0 || al === 1 || al === 2) seed.approvalLevel = al;
-    if (isRespondPolicy(c["respondPolicy"])) seed.respondPolicy = c["respondPolicy"];
+    if (isRespondPolicy(c["respondPolicy"]))
+      seed.respondPolicy = c["respondPolicy"];
     const rf = c["respondFrom"];
     if (Array.isArray(rf) && rf.every((x) => typeof x === "string"))
       seed.respondFrom = rf as string[];
@@ -2276,11 +2467,15 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     // initial value until the channel makes an explicit selection. Host
     // authority is evaluated separately for each concrete operation.
     const channelConfig =
-      (this.subscriptions.getConfig(channelId) as Record<string, unknown> | null) ??
-      this.channelConfigCache.get(channelId)?.value;
+      (this.subscriptions.getConfig(channelId) as Record<
+        string,
+        unknown
+      > | null) ?? this.channelConfigCache.get(channelId)?.value;
     const channelApprovalLevel = channelConfig?.["approvalLevel"];
     const approvalLevel =
-      channelApprovalLevel === 0 || channelApprovalLevel === 1 || channelApprovalLevel === 2
+      channelApprovalLevel === 0 ||
+      channelApprovalLevel === 1 ||
+      channelApprovalLevel === 2
         ? channelApprovalLevel
         : settings.approvalLevel;
     const publishPolicy = this.getPublishPolicy(channelId);
@@ -2288,15 +2483,18 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     if (!materialized) {
       throw new Error(
         `Agent model ${JSON.stringify(settings.model)} could not be materialized; ` +
-          "select a model present in the current catalog before starting the agent"
+          "select a model present in the current catalog before starting the agent",
       );
     }
     const fallbackModelRef = settings.fallbackModel ?? LOCAL_FALLBACK_MODEL_REF;
-    const fallbackMaterialized = this.materializedModel(channelId, fallbackModelRef);
+    const fallbackMaterialized = this.materializedModel(
+      channelId,
+      fallbackModelRef,
+    );
     if (settings.fallbackModel && !fallbackMaterialized) {
       throw new Error(
         `Agent fallback model ${JSON.stringify(settings.fallbackModel)} could not be materialized; ` +
-          "select a fallback model present in the current catalog before starting the agent"
+          "select a fallback model present in the current catalog before starting the agent",
       );
     }
     const toolSchemasHash =
@@ -2317,24 +2515,29 @@ export abstract class AgentVesselBase extends DurableObjectBase {
             ...(settings.fallbackThinkingLevel
               ? { fallbackThinkingLevel: settings.fallbackThinkingLevel }
               : {}),
-            ...(settings.fallbackOn ? { fallbackFailureCodes: settings.fallbackOn } : {}),
-            ...(settings.fallbackScope ? { fallbackScope: settings.fallbackScope } : {}),
+            ...(settings.fallbackOn
+              ? { fallbackFailureCodes: settings.fallbackOn }
+              : {}),
+            ...(settings.fallbackScope
+              ? { fallbackScope: settings.fallbackScope }
+              : {}),
           }
         : {}),
       thinkingLevel: settings.thinkingLevel,
       fastMode: settings.fastMode,
       approvalLevel,
       respondPolicy: settings.respondPolicy,
-      systemPromptHash: this.getStateValue(`agent:promptHash:${channelId}`) ?? "",
+      systemPromptHash:
+        this.getStateValue(`agent:promptHash:${channelId}`) ?? "",
       toolSchemasHash,
       activeToolNames: JSON.parse(
-        this.getStateValue(`agent:toolNames:${channelId}`) ?? "[]"
+        this.getStateValue(`agent:toolNames:${channelId}`) ?? "[]",
       ) as string[],
       localToolExecutionModes: JSON.parse(
-        this.getStateValue(`agent:toolExecutionModes:${channelId}`) ?? "{}"
+        this.getStateValue(`agent:toolExecutionModes:${channelId}`) ?? "{}",
       ) as Record<string, "sequential" | "parallel">,
       localToolCancellationModes: JSON.parse(
-        this.getStateValue(`agent:toolCancellationModes:${channelId}`) ?? "{}"
+        this.getStateValue(`agent:toolCancellationModes:${channelId}`) ?? "{}",
       ) as Record<string, "interruptible" | "settle">,
       roster: { participants: [] }, // roster snapshots fold from system.event
       maxSubagentDepth: this.getMaxSubagentDepth(),
@@ -2347,7 +2550,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
    *  cached extension entry (refreshed in ensurePromptArtifacts), cloud refs
    *  from the pi-ai registry — an INPUT to materialization here at the impure
    *  edge, never a resolution path in the executor. */
-  private materializedModel(channelId: string, ref: string): MaterializedModel | null {
+  private materializedModel(
+    channelId: string,
+    ref: string,
+  ): MaterializedModel | null {
     const idx = ref.indexOf(":");
     const providerId = idx === -1 ? "anthropic" : ref.slice(0, idx);
     const modelId = idx === -1 ? ref : ref.slice(idx + 1);
@@ -2376,11 +2582,11 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     if (!model.startsWith(`${LOCAL_PROVIDER_ID}:`)) return;
     const slug = model.slice(LOCAL_PROVIDER_ID.length + 1);
     try {
-      const entries = await this.rpc.call<LocalModelDescriptor[]>("main", "extensions.invoke", [
-        LOCAL_MODELS_EXTENSION_ID,
-        "listModels",
-        [],
-      ]);
+      const entries = await this.rpc.call<LocalModelDescriptor[]>(
+        "main",
+        "extensions.invoke",
+        [LOCAL_MODELS_EXTENSION_ID, "listModels", []],
+      );
       const entry = Array.isArray(entries)
         ? (entries.find((candidate) => candidate?.slug === slug) ?? null)
         : null;
@@ -2394,7 +2600,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
           contextWindow: entry.contextWindow,
           maxTokens: entry.maxTokens,
           toolsCapable: entry.toolsCapable,
-        } satisfies LocalModelDescriptor)
+        } satisfies LocalModelDescriptor),
       );
     } catch (err) {
       console.warn("[agent-vessel] local model entry refresh failed:", err);
@@ -2407,11 +2613,14 @@ export abstract class AgentVesselBase extends DurableObjectBase {
    * prerequisite and never awaits this method. */
   private async preparePromptArtifacts(
     channelId: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<Partial<AgentLoopConfig>> {
     const preparationStartedAt = Date.now();
     this.traceHotPath(channelId, "prompt-artifacts.started");
-    const stage = async <T>(phase: string, operation: () => T | Promise<T>): Promise<T> => {
+    const stage = async <T>(
+      phase: string,
+      operation: () => T | Promise<T>,
+    ): Promise<T> => {
       const startedAt = Date.now();
       try {
         const value = await operation();
@@ -2432,14 +2641,16 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         : new Error("prompt artifact preparation aborted");
     };
     throwIfAborted();
-    await stage("prompt-artifacts.local-model", () => this.refreshLocalModelEntry(channelId));
+    await stage("prompt-artifacts.local-model", () =>
+      this.refreshLocalModelEntry(channelId),
+    );
     throwIfAborted();
     const systemPrompt = await stage("prompt-artifacts.resources", () =>
-      this.composePrompt(channelId)
+      this.composePrompt(channelId),
     );
     throwIfAborted();
     const registry = await stage("prompt-artifacts.tool-registry", () =>
-      this.toolRegistry(channelId)
+      this.toolRegistry(channelId),
     );
     const schemas: Array<{
       name: string;
@@ -2457,13 +2668,13 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       [...registry.values()].map((tool) => [
         tool.name,
         tool.executionMode === "parallel" ? "parallel" : "sequential",
-      ])
+      ]),
     ) satisfies Record<string, "sequential" | "parallel">;
     const cancellationModes = Object.fromEntries(
       [...registry.values()].map((tool) => [
         tool.name,
         tool.cancellationMode === "settle" ? "settle" : "interruptible",
-      ])
+      ]),
     ) satisfies Record<string, "interruptible" | "settle">;
     // Channel tools: roster participants' advertised methods become model
     // tools dispatched as channel_call effects (the panel's UI surface —
@@ -2480,7 +2691,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       if (participant.methods.length > 0) {
         await this.recordDerivedSessionIngestion(
           participant.participantId,
-          "participant-tool-advertisement"
+          "participant-tool-advertisement",
         );
         throwIfAborted();
       }
@@ -2529,17 +2740,27 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       this.getStateValue(toolCancellationModesKey) !== cancellationModesJson
     ) {
       const prompt = await stage("prompt-artifacts.prompt-blob", () =>
-        this.rpc.call<{ digest?: string }>("main", "blobstore.putText", [systemPrompt])
+        this.rpc.call<{ digest?: string }>("main", "blobstore.putText", [
+          systemPrompt,
+        ]),
       );
       throwIfAborted();
       const tools = await stage("prompt-artifacts.tools-blob", () =>
-        this.rpc.call<{ digest?: string }>("main", "blobstore.putText", [schemasJson])
+        this.rpc.call<{ digest?: string }>("main", "blobstore.putText", [
+          schemasJson,
+        ]),
       );
       throwIfAborted();
-      const promptHash = typeof prompt?.digest === "string" ? prompt.digest : "";
+      const promptHash =
+        typeof prompt?.digest === "string" ? prompt.digest : "";
       const toolsHash = typeof tools?.digest === "string" ? tools.digest : "";
-      if (!/^[0-9a-f]{64}$/u.test(promptHash) || !/^[0-9a-f]{64}$/u.test(toolsHash)) {
-        throw new Error("prompt artifact storage returned an invalid content digest");
+      if (
+        !/^[0-9a-f]{64}$/u.test(promptHash) ||
+        !/^[0-9a-f]{64}$/u.test(toolsHash)
+      ) {
+        throw new Error(
+          "prompt artifact storage returned an invalid content digest",
+        );
       }
       this.setStateValue(promptHashKey, promptHash);
       this.setStateValue(toolsHashKey, toolsHash);
@@ -2587,11 +2808,14 @@ export abstract class AgentVesselBase extends DurableObjectBase {
    * therefore fails closed with "use discover_agents", which is the honest
    * answer while there is nothing to discover them from.
    */
-  protected async addresseeContext(channelId: string): Promise<ResolveAddresseeContext> {
+  protected async addresseeContext(
+    channelId: string,
+  ): Promise<ResolveAddresseeContext> {
     const parentParticipantId = this.subagentIdentity()?.parentParticipantId;
     const roster = this.rosterSnapshot(channelId).map(rosterParticipantRef);
-    const automationOwnerUserId = this.driver.peekLoadedLoop(channelId)?.state?.openTurn?.metadata
-      ?.automation?.ownerUserId;
+    const automationOwnerUserId =
+      this.driver.peekLoadedLoop(channelId)?.state?.openTurn?.metadata
+        ?.automation?.ownerUserId;
     const ownerUserId = automationOwnerUserId ?? soleChannelUserId(roster);
     const [directory, users] = await Promise.all([
       this.agentDirectoryEntries(),
@@ -2600,11 +2824,15 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     return {
       channelId,
       roster,
-      ...(parentParticipantId ? { parent: { participantId: parentParticipantId } } : {}),
+      ...(parentParticipantId
+        ? { parent: { participantId: parentParticipantId } }
+        : {}),
       runs: this.subagentRuns.listLive().map((run) => ({
         runId: run.runId,
         taskChannelId: run.taskChannelId,
-        ...(run.childParticipantId ? { participantId: run.childParticipantId } : {}),
+        ...(run.childParticipantId
+          ? { participantId: run.childParticipantId }
+          : {}),
       })),
       directory,
       users,
@@ -2668,15 +2896,21 @@ export abstract class AgentVesselBase extends DurableObjectBase {
 
   private async toolRegistry(
     channelId: string,
-    execution?: AgentToolExecutionContext
+    execution?: AgentToolExecutionContext,
   ): Promise<Map<string, AgentTool>> {
     if (execution) {
       const registry = new Map<string, AgentTool>();
       if (this.includeMemoryRecallTool()) {
         registry.set("memory_recall", this.createMemoryRecallTool());
       }
-      registry.set("launch_automation", this.createAutomationLaunchTool(channelId, execution));
-      registry.set("complete_automation", this.createAutomationCompletionTool(channelId));
+      registry.set(
+        "launch_automation",
+        this.createAutomationLaunchTool(channelId, execution),
+      );
+      registry.set(
+        "complete_automation",
+        this.createAutomationCompletionTool(channelId),
+      );
       for (const tool of await this.getLoopTools(channelId, execution)) {
         registry.set(tool.name, tool);
       }
@@ -2688,8 +2922,14 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       if (this.includeMemoryRecallTool()) {
         registry.set("memory_recall", this.createMemoryRecallTool());
       }
-      registry.set("launch_automation", this.createAutomationLaunchTool(channelId));
-      registry.set("complete_automation", this.createAutomationCompletionTool(channelId));
+      registry.set(
+        "launch_automation",
+        this.createAutomationLaunchTool(channelId),
+      );
+      registry.set(
+        "complete_automation",
+        this.createAutomationCompletionTool(channelId),
+      );
       for (const tool of await this.getLoopTools(channelId)) {
         registry.set(tool.name, tool);
       }
@@ -2700,7 +2940,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
 
   protected createAutomationLaunchTool(
     channelId: string,
-    execution?: AgentToolExecutionContext
+    execution?: AgentToolExecutionContext,
   ): AgentTool {
     return {
       name: "launch_automation",
@@ -2803,17 +3043,22 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       } as never,
       execute: async (toolCallId, params) => {
         if (!execution) {
-          throw new Error("launch_automation requires an admitted agent invocation");
+          throw new Error(
+            "launch_automation requires an admitted agent invocation",
+          );
         }
-        const activeTurn = this.driver.peekLoadedLoop(channelId)?.state.openTurn;
+        const activeTurn =
+          this.driver.peekLoadedLoop(channelId)?.state.openTurn;
         if (activeTurn?.metadata?.automation) {
-          throw new Error("A scheduled automation cannot launch another automation");
+          throw new Error(
+            "A scheduled automation cannot launch another automation",
+          );
         }
         const automation = await this.launchAutomation(
           channelId,
           params,
           execution.commandId || toolCallId,
-          execution.rpc
+          execution.rpc,
         );
         return {
           content: [
@@ -2847,19 +3092,26 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         additionalProperties: false,
       } as never,
       execute: async (_toolCallId, params) => {
-        const response = String((params as { response?: unknown }).response ?? "").trim();
-        if (!response) throw new Error("complete_automation requires a completion response");
+        const response = String(
+          (params as { response?: unknown }).response ?? "",
+        ).trim();
+        if (!response)
+          throw new Error("complete_automation requires a completion response");
         if (response.length > 24_000) {
-          throw new Error("complete_automation response exceeds 24000 characters");
+          throw new Error(
+            "complete_automation response exceeds 24000 characters",
+          );
         }
         const turn = this.driver.peekLoadedLoop(channelId)?.state.openTurn;
         const automation = turn?.metadata?.automation;
         if (!turn || !automation) {
-          throw new Error("complete_automation is only available during an automation turn");
+          throw new Error(
+            "complete_automation is only available during an automation turn",
+          );
         }
         this.setStateValue(
           automationCompletionStateKey(automation.runId),
-          JSON.stringify({ channelId, turnId: turn.turnId, response })
+          JSON.stringify({ channelId, turnId: turn.turnId, response }),
         );
         return {
           content: [
@@ -2927,13 +3179,17 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         }>("recallMemory", {
           query: input.query,
           kinds: Array.isArray(input.kinds)
-            ? input.kinds.filter((kind): kind is string => typeof kind === "string")
+            ? input.kinds.filter(
+                (kind): kind is string => typeof kind === "string",
+              )
             : null,
           limit: typeof input.limit === "number" ? input.limit : null,
         });
         for (const result of recall.results) {
           const origin =
-            result.actor && typeof result.actor === "object" && "id" in result.actor
+            result.actor &&
+            typeof result.actor === "object" &&
+            "id" in result.actor
               ? String((result.actor as { id: unknown }).id)
               : (result.eventId ?? "memory-unknown");
           await this.recordDerivedSessionIngestion(origin, "memory-recall");
@@ -2941,7 +3197,9 @@ export abstract class AgentVesselBase extends DurableObjectBase {
         const lines = recall.results.map((result) => {
           const where =
             result.path ??
-            (result.actor && typeof result.actor === "object" && "id" in result.actor
+            (result.actor &&
+            typeof result.actor === "object" &&
+            "id" in result.actor
               ? String((result.actor as { id: unknown }).id)
               : (result.eventId ?? "unknown"));
           const when = result.appendedAt ? ` @ ${result.appendedAt}` : "";
@@ -2951,7 +3209,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
           content: [
             {
               type: "text" as const,
-              text: lines.length > 0 ? lines.join("\n\n") : "No memory matched the query.",
+              text:
+                lines.length > 0
+                  ? lines.join("\n\n")
+                  : "No memory matched the query.",
             },
           ],
           details: { resultCount: recall.results.length } as never,
@@ -2987,7 +3248,10 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     // static fallback descriptor.
     await this.refreshLocalModelEntry(opts.channelId);
     this.driver.activateChannel(opts.channelId);
-    const descriptor = this.getEffectiveParticipantInfo(opts.channelId, opts.config);
+    const descriptor = this.getEffectiveParticipantInfo(
+      opts.channelId,
+      opts.config,
+    );
     // Subscription is MEMBERSHIP + presentation only. Behavior config (model,
     // approvalLevel, respondPolicy, …) is per-agent and seeded at creation from
     // STATE_ARGS.agentConfig — it does NOT ride the subscription. `config` here
@@ -3005,7 +3269,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     await this.ingestSubscriptionReplay(
       opts.channelId,
       result.envelope,
-      configuredWakePolicy(opts.config) === "every-envelope"
+      configuredWakePolicy(opts.config) === "every-envelope",
     );
     this.traceHotPath(opts.channelId, "subscription.completed", {
       startedAt: subscriptionStartedAt,
@@ -3022,11 +3286,14 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     sensitivity: "write",
   })
   async adoptDurableWorkWorker(
-    workerId: string
+    workerId: string,
   ): Promise<{ adopted: boolean; previousWorkerId: string | null }> {
     const adoption = this.adoptDurableWorkWorkerGeneration(workerId);
     if (adoption.adopted) this._durableWorkActivationRecovered = false;
-    if (!this._durableWorkActivationRecovered && !this._durableWorkActivationRecovery) {
+    if (
+      !this._durableWorkActivationRecovered &&
+      !this._durableWorkActivationRecovery
+    ) {
       const recovery = (async () => {
         for (const channelId of this.subscriptions.listChannelIds()) {
           await this.driver.wake(channelId);
@@ -3063,7 +3330,9 @@ export abstract class AgentVesselBase extends DurableObjectBase {
     automation: NonNullable<AgentTurnMetadata["automation"]>;
   }): Promise<void> {
     if (!this.subscriptions.listChannelIds().includes(input.channelId)) {
-      throw new Error(`Automation channel ${input.channelId} is not subscribed`);
+      throw new Error(
+        `Automation channel ${input.channelId} is not subscribed`,
+      );
     }
     if (!input.automation.runId || !input.prompt.trim()) {
       throw new Error("Automation turn requires provenance and prompt text");
@@ -3082,7 +3351,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         automation: input.automation,
         delivery: "channel",
         deliverAfterTurn: true,
-      }
+      },
     );
   }
 
@@ -3108,7 +3377,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     };
   }): Promise<void> {
     if (!this.subscriptions.listChannelIds().includes(input.channelId)) {
-      throw new Error(`Automation channel ${input.channelId} is not subscribed`);
+      throw new Error(
+        `Automation channel ${input.channelId} is not subscribed`,
+      );
     }
     if (!input.automation.runId || !input.eval.code.trim()) {
       throw new Error("Automation eval requires provenance and inline code");
@@ -3140,7 +3411,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private async ingestSubscriptionReplay(
     channelId: string,
     envelope: ChannelReplayEnvelope | undefined,
-    wakeAfterReplay: boolean
+    wakeAfterReplay: boolean,
   ): Promise<void> {
     let page = envelope;
     for (;;) {
@@ -3153,7 +3424,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       const after = page.ready.replayToId;
       const throughSeq = page.ready.snapshotLastSeq;
       if (after === undefined || throughSeq === undefined) {
-        throw new Error("subscription replay claims more history without a stable cursor");
+        throw new Error(
+          "subscription replay claims more history without a stable cursor",
+        );
       }
       page = await this.createChannelClient(channelId).getReplayAfter({
         after,
@@ -3165,7 +3438,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private async processSubscriptionReplayEvent(
     channelId: string,
-    event: ChannelReplayEnvelope["logEvents"][number]
+    event: ChannelReplayEnvelope["logEvents"][number],
   ): Promise<void> {
     const contentIntegrity = event as typeof event &
       Pick<ChannelEvent, "contentClass" | "externalKeys">;
@@ -3181,9 +3454,12 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       ...(event.attachments ? { attachments: event.attachments } : {}),
       contentClass: contentIntegrity.contentClass,
       externalKeys: contentIntegrity.externalKeys,
-      ...((event as unknown as { annotations?: Record<string, unknown> }).annotations
+      ...((event as unknown as { annotations?: Record<string, unknown> })
+        .annotations
         ? {
-            annotations: (event as unknown as { annotations: Record<string, unknown> }).annotations,
+            annotations: (
+              event as unknown as { annotations: Record<string, unknown> }
+            ).annotations,
           }
         : {}),
     });
@@ -3223,13 +3499,17 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     tier: "open",
     sensitivity: "write",
   })
-  async acceptChannelDelivery(delivery: ChannelDeliveryInput): Promise<ChannelDeliveryOutcome> {
+  async acceptChannelDelivery(
+    delivery: ChannelDeliveryInput,
+  ): Promise<ChannelDeliveryOutcome> {
     const recipientExecutionStartedAt = Date.now();
     this.ensureIdentity();
     if (delivery.channelRef.objectKey !== delivery.channelId) {
       throw new Error("acceptChannelDelivery: channel identity mismatch");
     }
-    const storedParticipantId = this.subscriptions.getParticipantId(delivery.channelId);
+    const storedParticipantId = this.subscriptions.getParticipantId(
+      delivery.channelId,
+    );
     const stored = this.subscriptions
       .listStored()
       .find(({ channelId }) => channelId === delivery.channelId);
@@ -3240,29 +3520,39 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         `SELECT channel_id, participant_id, subscription_revision, event_sequence,
                 envelope_json, agentic_context_json, state, outcome_json
            FROM channel_delivery_admissions WHERE delivery_id = ?`,
-        delivery.deliveryId
+        delivery.deliveryId,
       )
       .toArray()[0];
     if (existing) {
       if (
         existing["channel_id"] !== delivery.channelId ||
         existing["participant_id"] !== delivery.participantId ||
-        Number(existing["subscription_revision"]) !== delivery.subscriptionRevision ||
+        Number(existing["subscription_revision"]) !==
+          delivery.subscriptionRevision ||
         Number(existing["event_sequence"]) !== delivery.eventSequence ||
         // Terminal rows shed their envelope bytes (storage bound); the
         // deterministic delivery id plus the coordinate columns above remain
         // the duplicate identity. Compare bytes only while retained.
-        (existing["envelope_json"] !== null && existing["envelope_json"] !== envelopeJson) ||
+        (existing["envelope_json"] !== null &&
+          existing["envelope_json"] !== envelopeJson) ||
         (existing["agentic_context_json"] !== null &&
           existing["agentic_context_json"] !== agenticContextJson)
       ) {
-        throw new Error(`acceptChannelDelivery: mismatched duplicate ${delivery.deliveryId}`);
+        throw new Error(
+          `acceptChannelDelivery: mismatched duplicate ${delivery.deliveryId}`,
+        );
       }
-      if (existing["state"] === "processed" || existing["state"] === "declined") {
-        const retained = JSON.parse(String(existing["outcome_json"])) as ChannelDeliveryOutcome;
+      if (
+        existing["state"] === "processed" ||
+        existing["state"] === "declined"
+      ) {
+        const retained = JSON.parse(
+          String(existing["outcome_json"]),
+        ) as ChannelDeliveryOutcome;
         return {
           ...retained,
-          disposition: existing["state"] === "processed" ? "duplicate" : "declined",
+          disposition:
+            existing["state"] === "processed" ? "duplicate" : "declined",
           recipientExecutionStartedAt,
         };
       }
@@ -3275,8 +3565,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     if (storedParticipantId !== delivery.participantId || !stored) {
       if (delivery.participantId === this.participantId() && !stored) {
         throw Object.assign(
-          new Error("acceptChannelDelivery: local subscription commit is still pending"),
-          { code: "SubscriptionCommitPending" }
+          new Error(
+            "acceptChannelDelivery: local subscription commit is still pending",
+          ),
+          { code: "SubscriptionCommitPending" },
         );
       }
       const outcome: ChannelDeliveryOutcome = {
@@ -3296,7 +3588,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         delivery.eventSequence,
         JSON.stringify(outcome),
         Date.now(),
-        Date.now()
+        Date.now(),
       );
       return outcome;
     }
@@ -3315,7 +3607,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         envelopeJson,
         agenticContextJson,
         now,
-        now
+        now,
       );
     }
     this.traceHotPath(delivery.channelId, "delivery.admitted", {
@@ -3325,15 +3617,21 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     const envelope = delivery.envelope as RpcChannelMessage;
     if (envelope.kind !== "log" || !envelope.event) {
       throw Object.assign(
-        new Error("acceptChannelDelivery: durable delivery must contain one log event"),
-        { code: "PermanentChannelDelivery" }
+        new Error(
+          "acceptChannelDelivery: durable delivery must contain one log event",
+        ),
+        { code: "PermanentChannelDelivery" },
       );
     }
     const agenticContext = await this.applyDeliveredAgenticContext(
       delivery.channelId,
-      delivery.agenticContext
+      delivery.agenticContext,
     );
-    await this.processChannelEvent(delivery.channelId, envelope.event, agenticContext);
+    await this.processChannelEvent(
+      delivery.channelId,
+      envelope.event,
+      agenticContext,
+    );
     const outcome: ChannelDeliveryOutcome = {
       deliveryId: delivery.deliveryId,
       disposition: "processed",
@@ -3346,7 +3644,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         WHERE delivery_id = ?`,
       JSON.stringify(outcome),
       Date.now(),
-      delivery.deliveryId
+      delivery.deliveryId,
     );
     this.traceHotPath(delivery.channelId, "delivery.processed", {
       source: "channel-delivery",
@@ -3389,7 +3687,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             row.kind === "record_receipt" ||
             row.kind === "channel_call" ||
             row.kind === "http_call" ||
-            (row.descriptor.kind === "local_tool" && row.descriptor.executionMode === "parallel")
+            (row.descriptor.kind === "local_tool" &&
+              row.descriptor.executionMode === "parallel")
               ? `${row.channelId}\u0000${row.effectId}`
               : row.channelId,
           channelId: row.channelId,
@@ -3398,12 +3697,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       }));
       for (const claim of claimed) {
         const channelId = String(
-          (claim.payload as { channelId?: unknown } | null)?.channelId ?? ""
+          (claim.payload as { channelId?: unknown } | null)?.channelId ?? "",
         );
         if (channelId) {
           this.traceHotPath(channelId, "effect.claimed", {
             source: String(
-              (claim.payload as { claimSource?: unknown } | null)?.claimSource ?? "unknown"
+              (claim.payload as { claimSource?: unknown } | null)
+                ?.claimSource ?? "unknown",
             ),
             itemId: claim.itemId,
             generation: claim.generation,
@@ -3424,7 +3724,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             `SELECT channel_id, message_id, reset_at_ms, created_at
                FROM scheduled_model_resumes
               WHERE reset_at_ms <= ?`,
-            input.now
+            input.now,
           )
           .toArray();
       } catch {
@@ -3446,7 +3746,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           JSON.stringify({ messageId }),
           wakeId,
           resetAtMs,
-          Number(resume["created_at"])
+          Number(resume["created_at"]),
         );
       }
       const candidates = this.sql
@@ -3464,7 +3764,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             ORDER BY channel_id, created_at
             LIMIT ?`,
           input.now,
-          Math.min(input.limit * 4, 1_000)
+          Math.min(input.limit * 4, 1_000),
         )
         .toArray();
       const selected: typeof candidates = [];
@@ -3489,7 +3789,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           input.workerId,
           generation,
           input.now,
-          wakeId
+          wakeId,
         );
         return {
           itemId: wakeId,
@@ -3506,7 +3806,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       });
     });
     for (const claim of claimed) {
-      const channelId = String((claim.payload as { channelId?: unknown } | null)?.channelId ?? "");
+      const channelId = String(
+        (claim.payload as { channelId?: unknown } | null)?.channelId ?? "",
+      );
       if (channelId) {
         this.traceHotPath(channelId, "wake.claimed", {
           source: input.trigger ?? "unknown",
@@ -3527,7 +3829,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     tier: "open",
     sensitivity: "write",
   })
-  async executeWakeClaim(input: { itemId: string; generation: number }): Promise<{
+  async executeWakeClaim(input: {
+    itemId: string;
+    generation: number;
+  }): Promise<{
     processed: true;
   }> {
     const row = this.sql
@@ -3538,7 +3843,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             AND lease_generation = ?
             AND disposition = 'leased'`,
         input.itemId,
-        input.generation
+        input.generation,
       )
       .toArray()[0];
     if (!row) throw new Error("executeWakeClaim: stale claim");
@@ -3549,7 +3854,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       generation: input.generation,
     });
     const wakeKind = String(row["wake_kind"]);
-    const payload = JSON.parse(String(row["payload_json"])) as Record<string, unknown>;
+    const payload = JSON.parse(String(row["payload_json"])) as Record<
+      string,
+      unknown
+    >;
     if (wakeKind === "subagent-terminal-publish") {
       if (
         typeof payload["runId"] !== "string" ||
@@ -3558,8 +3866,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         typeof payload["report"] !== "string"
       ) {
         throw Object.assign(
-          new Error("executeWakeClaim: invalid subagent-terminal-publish payload"),
-          { code: "PermanentDurableWork" }
+          new Error(
+            "executeWakeClaim: invalid subagent-terminal-publish payload",
+          ),
+          { code: "PermanentDurableWork" },
         );
       }
       await this.publishOwnSubagentTerminal({
@@ -3574,28 +3884,39 @@ This is one admitted recurring-automation tick. If this tick establishes that th
               ? "cancelled"
               : "completed",
         sourceEventId:
-          typeof payload["sourceEventId"] === "string" ? payload["sourceEventId"] : null,
+          typeof payload["sourceEventId"] === "string"
+            ? payload["sourceEventId"]
+            : null,
       });
     } else if (wakeKind === "subagent-cancel-settle") {
       // PARENT side: re-drive an interrupted cancellation to its terminal
       // fact. Idempotent — a run already terminal no-ops.
       if (typeof payload["runId"] !== "string") {
-        throw Object.assign(new Error("executeWakeClaim: invalid subagent-cancel-settle payload"), {
-          code: "PermanentDurableWork",
-        });
+        throw Object.assign(
+          new Error("executeWakeClaim: invalid subagent-cancel-settle payload"),
+          {
+            code: "PermanentDurableWork",
+          },
+        );
       }
       await this.driveCancelSubagent(
         String(payload["runId"]),
-        typeof payload["reason"] === "string" ? payload["reason"] : "cancelled"
+        typeof payload["reason"] === "string" ? payload["reason"] : "cancelled",
       );
     } else if (wakeKind === "turn-recovery") {
       await this.driver.wake(channelId);
-    } else if (wakeKind === "scheduled-model-resume" && typeof payload["messageId"] === "string") {
+    } else if (
+      wakeKind === "scheduled-model-resume" &&
+      typeof payload["messageId"] === "string"
+    ) {
       await this.driver.executeScheduledResume(channelId, payload["messageId"]);
     } else {
-      throw Object.assign(new Error(`executeWakeClaim: invalid ${wakeKind} payload`), {
-        code: "PermanentDurableWork",
-      });
+      throw Object.assign(
+        new Error(`executeWakeClaim: invalid ${wakeKind} payload`),
+        {
+          code: "PermanentDurableWork",
+        },
+      );
     }
     this.traceHotPath(channelId, "wake.execution.completed", {
       startedAt,
@@ -3611,7 +3932,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     tier: "open",
     sensitivity: "write",
   })
-  async executeEffectClaim(input: { itemId: string; generation: number }): Promise<{
+  async executeEffectClaim(input: {
+    itemId: string;
+    generation: number;
+  }): Promise<{
     executed: true;
   }> {
     const parsed = parseOutboxExternalId(input.itemId);
@@ -3642,7 +3966,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     tier: "open",
     sensitivity: "write",
   })
-  settleReadyWork(queue: DurableWorkQueue, request: SettleRequest): ClaimSettlement {
+  settleReadyWork(
+    queue: DurableWorkQueue,
+    request: SettleRequest,
+  ): ClaimSettlement {
     if (queue === "agent-effect") {
       const parsed = parseOutboxExternalId(request.itemId);
       if (!parsed) throw new Error("settleReadyWork: invalid effect identity");
@@ -3656,7 +3983,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       }
       if (row.disposition === "leased") {
         if (this.driver.isActivationReleased()) return "stale";
-        throw new Error("settleReadyWork: effect execution left its claim leased");
+        throw new Error(
+          "settleReadyWork: effect execution left its claim leased",
+        );
       }
       this.traceHotPath(row.channelId, "effect.settled", {
         source: request.workerId,
@@ -3672,7 +4001,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           `SELECT lease_owner, lease_generation, disposition
              FROM agent_wake_queue
             WHERE wake_id = ?`,
-          request.itemId
+          request.itemId,
         )
         .toArray()[0];
       if (!row) return { disposition: "duplicate" as const, channelId: null };
@@ -3686,7 +4015,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       const channel = this.sql
         .exec(
           `SELECT channel_id, wake_kind FROM agent_wake_queue WHERE wake_id = ?`,
-          request.itemId
+          request.itemId,
         )
         .toArray()[0];
       if (
@@ -3696,14 +4025,17 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         // This wake id is reusable when the same message is legitimately
         // scheduled again. Keeping a terminal row would make INSERT OR IGNORE
         // swallow that later schedule forever.
-        this.sql.exec(`DELETE FROM agent_wake_queue WHERE wake_id = ?`, request.itemId);
+        this.sql.exec(
+          `DELETE FROM agent_wake_queue WHERE wake_id = ?`,
+          request.itemId,
+        );
       } else {
         this.sql.exec(
           `UPDATE agent_wake_queue
               SET disposition = 'terminal-completed',
                   lease_owner = NULL
             WHERE wake_id = ?`,
-          request.itemId
+          request.itemId,
         );
       }
       return {
@@ -3734,7 +4066,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       itemId: string;
       generation: number;
       error?: unknown;
-    }
+    },
   ): { retryAt: number } | "stale" {
     if (queue === "agent-effect") {
       const parsed = parseOutboxExternalId(request.itemId);
@@ -3751,7 +4083,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       const updated = this.driver.outbox.recordFailure(
         parsed.branchId,
         parsed.effectId,
-        Date.now()
+        Date.now(),
       );
       const retryAt = updated?.nextAttemptAt;
       if (retryAt === null || retryAt === undefined) return "stale";
@@ -3769,7 +4101,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
               AND disposition = 'leased'`,
           request.itemId,
           request.workerId,
-          request.generation
+          request.generation,
         )
         .toArray()[0];
       if (!row) return "stale";
@@ -3784,14 +4116,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             WHERE wake_id = ? AND lease_owner = ? AND lease_generation = ?`,
           request.itemId,
           request.workerId,
-          request.generation
+          request.generation,
         );
         return { retryAt: Date.now() };
       }
       const attempts = Number(row["attempts"] ?? 0) + 1;
       const delay = Math.min(
         CHANNEL_ENVELOPE_RETRY_MS * 2 ** Math.min(attempts - 1, 7),
-        CHANNEL_ENVELOPE_MAX_RETRY_MS
+        CHANNEL_ENVELOPE_MAX_RETRY_MS,
       );
       const retryAt = Date.now() + delay;
       this.sql.exec(
@@ -3807,7 +4139,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         retryAt,
         request.itemId,
         request.workerId,
-        request.generation
+        request.generation,
       );
       return { retryAt };
     });
@@ -3837,7 +4169,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
              FROM agent_wake_queue
             WHERE disposition IN ('ready', 'retrying') AND next_attempt_at <= ?
             LIMIT 1`,
-          now
+          now,
         )
         .toArray().length > 0;
     let effectReady = false;
@@ -3853,7 +4185,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
                 AND (next_attempt_at IS NULL OR next_attempt_at <= ?)
               )
               LIMIT 1`,
-            now
+            now,
           )
           .toArray().length > 0;
     } catch {
@@ -3862,7 +4194,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     try {
       scheduledResumeReady =
         this.sql
-          .exec(`SELECT 1 FROM scheduled_model_resumes WHERE reset_at_ms <= ? LIMIT 1`, now)
+          .exec(
+            `SELECT 1 FROM scheduled_model_resumes WHERE reset_at_ms <= ? LIMIT 1`,
+            now,
+          )
           .toArray().length > 0;
     } catch {
       // Scheduled-resume storage is lazy.
@@ -3878,7 +4213,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       .exec(
         `SELECT MIN(next_attempt_at) AS due
            FROM agent_wake_queue
-          WHERE disposition = 'retrying'`
+          WHERE disposition = 'retrying'`,
       )
       .toArray()[0]?.["due"];
     const wakeAt = typeof wakeValue === "number" ? wakeValue : null;
@@ -3888,7 +4223,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         .exec(
           `SELECT MIN(next_attempt_at) AS due
              FROM effect_outbox
-            WHERE disposition IN ('retrying', 'parked')`
+            WHERE disposition IN ('retrying', 'parked')`,
         )
         .toArray()[0]?.["due"];
       effectAt = typeof effectValue === "number" ? effectValue : null;
@@ -3896,7 +4231,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       // Effect storage is lazy.
     }
     const candidates = [wakeAt, effectAt].filter(
-      (value): value is number => typeof value === "number"
+      (value): value is number => typeof value === "number",
     );
     return candidates.length > 0 ? Math.min(...candidates) : null;
   }
@@ -3904,7 +4239,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   async processChannelEvent(
     channelId: string,
     event: ChannelEvent,
-    deliveredContext?: ChannelAgenticContext
+    deliveredContext?: ChannelAgenticContext,
   ): Promise<void> {
     // Invalidate the cached participant roster on any presence change, in the one sink both the
     // live stream and subscription-replay paths funnel through, so neither path
@@ -3921,9 +4256,15 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       return;
     }
     const maybeFeedback = event.payload as AgenticEvent | null;
-    if (maybeFeedback && (maybeFeedback as { kind?: string }).kind === "ui.feedback") {
+    if (
+      maybeFeedback &&
+      (maybeFeedback as { kind?: string }).kind === "ui.feedback"
+    ) {
       const payload = (maybeFeedback as AgenticEvent<"ui.feedback">).payload;
-      if ((payload.target as { participantId?: string })?.participantId === this.participantId()) {
+      if (
+        (payload.target as { participantId?: string })?.participantId ===
+        this.participantId()
+      ) {
         this.feedback.ingest(channelId, payload);
       }
       return;
@@ -3949,28 +4290,35 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     // (task channels the supervisor watches, subscribed "explicit") retains
     // envelopes in the durable log and wakes only for explicit child-to-parent
     // communication. Ordinary child turn closure is progress, not a new prompt.
-    const wakePolicy = this.subscriptions.getConfig(channelId)?.wakePolicy ?? "every-envelope";
+    const wakePolicy =
+      this.subscriptions.getConfig(channelId)?.wakePolicy ?? "every-envelope";
     if (wakePolicy !== "every-envelope") {
       if (await this.resolveWake(channelId, event, wakePolicy)) return;
     }
 
     const agentic = event.payload as AgenticEvent | null;
-    if (!agentic || (agentic as { kind?: string }).kind !== "message.completed") return;
+    if (!agentic || (agentic as { kind?: string }).kind !== "message.completed")
+      return;
     if (event.senderId === this.participantId()) return;
 
-    const respond = await this.shouldRespond(channelId, event, deliveredContext);
+    const respond = await this.shouldRespond(
+      channelId,
+      event,
+      deliveredContext,
+    );
     if (!respond) return;
 
     // Sender's canonical message identity — the read-ack / edit / retract
     // correlation key. NOT derived from the recv envelope id.
     const sourceMessageId =
-      ((agentic as AgenticEvent).causality?.messageId as string | undefined) ?? undefined;
+      ((agentic as AgenticEvent).causality?.messageId as string | undefined) ??
+      undefined;
 
     // Validate identity before recording ingestion or allowing a subclass to
     // consume content. A transport envelope is not a durable source identity.
     if (!sourceMessageId) {
       throw new Error(
-        `channel input ${event.messageId} has no canonical source message identity; refusing an unwalkable turn`
+        `channel input ${event.messageId} has no canonical source message identity; refusing an unwalkable turn`,
       );
     }
 
@@ -3984,7 +4332,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private async routeConfiguredObservation(
     channelId: string,
-    event: ChannelEvent
+    event: ChannelEvent,
   ): Promise<boolean> {
     const subscriptionConfig = this.subscriptions.getConfig(channelId);
     const configured = subscriptionConfig?.observations;
@@ -3999,15 +4347,19 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       });
       return false;
     }
-    if (configuredWakePolicy(subscriptionConfig) !== "every-envelope") return false;
+    if (configuredWakePolicy(subscriptionConfig) !== "every-envelope")
+      return false;
     if (!observationConfig.payloadKinds.has(event.type)) return false;
     if (event.senderId === this.participantId()) {
-      console.debug("[agent-vessel] skipped self-authored channel observation", {
-        channelId,
-        envelopeId: event.messageId,
-        payloadKind: event.type,
-        truncated: false,
-      });
+      console.debug(
+        "[agent-vessel] skipped self-authored channel observation",
+        {
+          channelId,
+          envelopeId: event.messageId,
+          payloadKind: event.type,
+          truncated: false,
+        },
+      );
       return false;
     }
 
@@ -4039,7 +4391,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    * transition succeeds, so a foreground turn cannot consume or hide it. */
   private async routeSupervisedTaskTerminal(
     channelId: string,
-    event: ChannelEvent
+    event: ChannelEvent,
   ): Promise<boolean> {
     if (event.type !== AGENTIC_EVENT_PAYLOAD_KIND) return false;
     const agentic = event.payload as AgenticEvent;
@@ -4050,7 +4402,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     const terminalStatus = this.authorizedSubagentTerminalStatus(run, event);
     if (!terminalStatus) {
       console.warn(
-        `[agent-vessel] ignoring task terminal for ${runId}: publisher is neither the child nor an authorized supervisor terminal source`
+        `[agent-vessel] ignoring task terminal for ${runId}: publisher is neither the child nor an authorized supervisor terminal source`,
       );
       return false;
     }
@@ -4090,7 +4442,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       .filter((candidate) => candidate.parentChannelId === run.parentChannelId)
       .map(
         (candidate) =>
-          `- ${subagentRunHandle(candidate.runId)} (${candidate.label || "unlabeled"}): ${this.admittingSubagentTerminals.get(candidate.runId) ?? candidate.status}`
+          `- ${subagentRunHandle(candidate.runId)} (${candidate.label || "unlabeled"}): ${this.admittingSubagentTerminals.get(candidate.runId) ?? candidate.status}`,
       )
       .join("\n");
     const liveCount = this.subagentRuns
@@ -4098,7 +4450,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       .filter(
         (candidate) =>
           candidate.parentChannelId === run.parentChannelId &&
-          !this.admittingSubagentTerminals.has(candidate.runId)
+          !this.admittingSubagentTerminals.has(candidate.runId),
       ).length;
     const content = [
       `Subagent "${run.label || subagentRunHandle(runId)}" ${terminalStatus}.`,
@@ -4149,7 +4501,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   protected async dispatchApprovedInput(
     channelId: string,
     event: ChannelEvent,
-    sourceMessageId: string | undefined
+    sourceMessageId: string | undefined,
   ): Promise<void> {
     // §7.2 execution fence: once this vessel (running as a subagent) has
     // committed its terminal intent, no further model execution is admitted.
@@ -4157,7 +4509,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     const sub = this.subagentIdentity();
     if (sub && this.subagentTerminalIntentRecorded(sub.runId)) {
       console.warn(
-        `[agent-vessel] refusing post-terminal dispatch for subagent run ${sub.runId} on ${channelId}`
+        `[agent-vessel] refusing post-terminal dispatch for subagent run ${sub.runId} on ${channelId}`,
       );
       return;
     }
@@ -4188,18 +4540,27 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   /** Route a `message.edited` / `message.retracted` channel event to the loop
    *  as an edit/retract command. The fold enforces the author guard and the
    *  read-wins cutoff; here we only skip our own events and require a target. */
-  private async routeMessageMutation(channelId: string, event: ChannelEvent): Promise<boolean> {
+  private async routeMessageMutation(
+    channelId: string,
+    event: ChannelEvent,
+  ): Promise<boolean> {
     if (event.type !== AGENTIC_EVENT_PAYLOAD_KIND) return false;
     const agentic = event.payload as AgenticEvent | null;
     const kind = (agentic as { kind?: string } | null)?.kind;
     if (kind !== "message.edited" && kind !== "message.retracted") return false;
     if (event.senderId === this.participantId()) return true; // our own; nothing to do
-    const sourceMessageId = (agentic as AgenticEvent).causality?.messageId as string | undefined;
+    const sourceMessageId = (agentic as AgenticEvent).causality?.messageId as
+      | string
+      | undefined;
     const by = participantRefFromActor((agentic as AgenticEvent).actor);
     if (!sourceMessageId || !by) return true;
     if (kind === "message.edited") {
       const payload = (agentic as AgenticEvent<"message.edited">).payload;
-      await this.recordMessageIngestion(channelId, event, "channel-message-edit");
+      await this.recordMessageIngestion(
+        channelId,
+        event,
+        "channel-message-edit",
+      );
       await this.driver.handleIncoming(channelId, {
         type: "command",
         command: { kind: "edit", sourceMessageId, blocks: payload.blocks, by },
@@ -4227,17 +4588,22 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    *  channel_call at-least-once protocol — without it a turn that invokes a
    *  panel method (inline UI, feedback, …) never advances. Duplicate delivery is
    *  a no-op: the outbox row is gone after the first settle. */
-  private async routeInvocationTerminal(channelId: string, event: ChannelEvent): Promise<boolean> {
+  private async routeInvocationTerminal(
+    channelId: string,
+    event: ChannelEvent,
+  ): Promise<boolean> {
     const agentic = event.payload as AgenticEvent;
     const kind = (agentic as { kind?: string }).kind ?? "";
     if (!kind.startsWith("invocation.")) return false;
     if (!AgentVesselBase.INVOCATION_TERMINAL_KINDS.has(kind)) {
       return true; // started/output traffic is never a prompt
     }
-    const causality = ((agentic as { causality?: Record<string, unknown> }).causality ??
-      {}) as Record<string, unknown>;
+    const causality = ((agentic as { causality?: Record<string, unknown> })
+      .causality ?? {}) as Record<string, unknown>;
     const invocationId =
-      typeof causality["invocationId"] === "string" ? (causality["invocationId"] as string) : null;
+      typeof causality["invocationId"] === "string"
+        ? (causality["invocationId"] as string)
+        : null;
     if (!invocationId) return true;
     const effectId = ids.invocationEffect(invocationId);
     const row = this.driver.outbox.getForChannel(channelId, effectId);
@@ -4252,22 +4618,23 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         event.senderId === this.participantId() &&
         (await this.driver.channelCallMayMaterialize(channelId, effectId))
       ) {
-        throw new Error(`channel invocation terminal arrived before effect ${effectId}`);
+        throw new Error(
+          `channel invocation terminal arrived before effect ${effectId}`,
+        );
       }
       return true; // not ours or already settled
     }
-    const descriptor = row.descriptor as import("@workspace/agent-loop").ChannelCallEffect;
-    const payload = ((agentic as { payload?: Record<string, unknown> }).payload ?? {}) as Record<
-      string,
-      unknown
-    >;
+    const descriptor =
+      row.descriptor as import("@workspace/agent-loop").ChannelCallEffect;
+    const payload = ((agentic as { payload?: Record<string, unknown> })
+      .payload ?? {}) as Record<string, unknown>;
     const isError = kind !== "invocation.completed";
     const responderSessionId = participantIdFromRef(descriptor.target);
     await this.recordMessageIngestion(channelId, event, "channel-tool-result");
     const hydratedResult = await this.hydrateTransportValue(
       payload["result"],
       responderSessionId,
-      "channel-tool-result"
+      "channel-tool-result",
     );
     let outcome: EffectOutcome;
     if (descriptor.purpose === "approval-form") {
@@ -4281,17 +4648,25 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         kind: "approval",
         granted,
         resolvedBy: descriptor.target,
-        ...(typeof payload["reason"] === "string" ? { reason: payload["reason"] as string } : {}),
+        ...(typeof payload["reason"] === "string"
+          ? { reason: payload["reason"] as string }
+          : {}),
       };
       if (isError) {
-        await this.publishApprovalDeliveryDiagnostic(channelId, descriptor, payload["reason"]);
+        await this.publishApprovalDeliveryDiagnostic(
+          channelId,
+          descriptor,
+          payload["reason"],
+        );
       }
     } else {
       outcome = {
         kind: "tool",
         result: hydratedResult ?? payload["error"] ?? payload["reason"] ?? null,
         isError,
-        ...(typeof payload["reason"] === "string" ? { reason: payload["reason"] as string } : {}),
+        ...(typeof payload["reason"] === "string"
+          ? { reason: payload["reason"] as string }
+          : {}),
       };
     }
     await this.driver.deliverEffectOutcome(effectId, outcome, { channelId });
@@ -4301,12 +4676,15 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private async publishApprovalDeliveryDiagnostic(
     channelId: string,
     descriptor: import("@workspace/agent-loop").ChannelCallEffect,
-    reason: unknown
+    reason: unknown,
   ): Promise<void> {
-    const participantId = this.subscriptions.getParticipantId(channelId) ?? this.participantId();
+    const participantId =
+      this.subscriptions.getParticipantId(channelId) ?? this.participantId();
     const messageId = `approval-delivery-failed:${descriptor.transportCallId}`;
     const reasonText =
-      typeof reason === "string" && reason.trim() ? reason : "approval prompt unavailable";
+      typeof reason === "string" && reason.trim()
+        ? reason
+        : "approval prompt unavailable";
     const event: AgenticEvent<"message.completed"> = {
       kind: "message.completed",
       actor: {
@@ -4314,7 +4692,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         id: participantId,
         displayName: this.getEffectiveParticipantInfo(
           channelId,
-          this.subscriptions.getConfig(channelId)
+          this.subscriptions.getConfig(channelId),
         ).name,
       },
       turnId: descriptor.turnId as never,
@@ -4326,7 +4704,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           {
             blockId: `${messageId}:diagnostic` as never,
             type: "diagnostic",
-            content: "Approval prompt could not be delivered. The requested action was denied.",
+            content:
+              "Approval prompt could not be delivered. The requested action was denied.",
             metadata: {
               code: "approval_prompt_unavailable",
               severity: "error",
@@ -4345,7 +4724,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         senderMetadata: { type: "agent", name: participantId },
       })
       .catch((err) => {
-        console.error(`[AgentVessel] approval diagnostic emit failed for ${channelId}:`, err);
+        console.error(
+          `[AgentVessel] approval diagnostic emit failed for ${channelId}:`,
+          err,
+        );
       });
   }
 
@@ -4358,12 +4740,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         typeof block === "object" &&
         typeof (block as { content?: unknown }).content === "string"
           ? (block as { content: string }).content
-          : ""
+          : "",
       )
       .filter(Boolean)
       .join("\n");
     const notes = this.feedback.consume(channelId);
-    return notes.length > 0 ? [...notes, text].filter(Boolean).join("\n\n") : text;
+    return notes.length > 0
+      ? [...notes, text].filter(Boolean).join("\n\n")
+      : text;
   }
 
   protected turnMetadata(event: ChannelEvent): AgentTurnMetadata | undefined {
@@ -4378,7 +4762,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    *  Written wherever an inbound event's depth is resolved; read by `notify`
    *  when it stamps a guest envelope. A human message resets the streak to 0
    *  upstream, so this needs no reset of its own. */
-  protected recordInboundAgentHops(channelId: string, hops: number | undefined): void {
+  protected recordInboundAgentHops(
+    channelId: string,
+    hops: number | undefined,
+  ): void {
     if (typeof hops !== "number" || !Number.isFinite(hops)) return;
     try {
       this.setStateValue(`agent:inbound-hops:${channelId}`, String(hops));
@@ -4400,7 +4787,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   protected async shouldRespond(
     channelId: string,
     event: ChannelEvent,
-    deliveredContext?: ChannelAgenticContext
+    deliveredContext?: ChannelAgenticContext,
   ): Promise<boolean> {
     const agentic = event.payload as AgenticEvent;
     const payload = (agentic.payload ?? {}) as {
@@ -4408,7 +4795,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       replyTo?: string;
       to?: never[];
     };
-    const channel = deliveredContext ? null : this.createChannelClient(channelId);
+    const channel = deliveredContext
+      ? null
+      : this.createChannelClient(channelId);
     let lastCompletedSender: string | null = null;
     let lastCompletedMessageId: string | null = null;
     let replyToSenderId: string | undefined;
@@ -4426,11 +4815,16 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         ? {
             conversation: deliveredContext.conversation,
             config: deliveredContext.channelConfig,
-            participants: deliveredContext.relationships.map((relationship) => ({
-              participantId: relationship.participantId,
-              metadata: relationship.metadata,
-              ref: participantRefFromMetadata(relationship.participantId, relationship.metadata),
-            })),
+            participants: deliveredContext.relationships.map(
+              (relationship) => ({
+                participantId: relationship.participantId,
+                metadata: relationship.metadata,
+                ref: participantRefFromMetadata(
+                  relationship.participantId,
+                  relationship.metadata,
+                ),
+              }),
+            ),
             replyToSenderId: deliveredContext.replyToSenderId ?? undefined,
           }
         : await (async () => {
@@ -4444,8 +4838,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
               config,
               participants,
               replyToSenderId: payload.replyTo
-                ? ((await channel!.getMessageSender(this.participantId(), payload.replyTo)) ??
-                  undefined)
+                ? ((await channel!.getMessageSender(
+                    this.participantId(),
+                    payload.replyTo,
+                  )) ?? undefined)
                 : undefined,
             };
           })();
@@ -4466,11 +4862,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         agentStreakHops = conversation.agentStreak;
       }
       lastCompletedSender =
-        conversation.lastCompletedSeq != null && conversation.lastCompletedSeq === event.id
+        conversation.lastCompletedSeq != null &&
+        conversation.lastCompletedSeq === event.id
           ? conversation.previousCompletedSender
           : conversation.lastCompletedSender;
       lastCompletedMessageId =
-        conversation.lastCompletedSeq != null && conversation.lastCompletedSeq === event.id
+        conversation.lastCompletedSeq != null &&
+        conversation.lastCompletedSeq === event.id
           ? (conversation.previousCompletedMessageId ?? null)
           : (conversation.lastCompletedMessageId ?? null);
       if (
@@ -4483,7 +4881,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       if (typeof resolved.config?.["agentHopLimit"] === "number") {
         agentHopLimit = resolved.config["agentHopLimit"];
       }
-      participantIds = resolved.participants.map((participant) => participant.participantId);
+      participantIds = resolved.participants.map(
+        (participant) => participant.participantId,
+      );
       respondParticipants = resolved.participants;
       if (payload.replyTo) {
         replyToSenderId =
@@ -4497,8 +4897,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     }
     const settings = this.getAgentSettings();
     // respondFrom is per-agent: resolve handle entries to this channel's ids.
-    const respondFrom = resolveRespondFromHandles(settings.respondFrom, respondParticipants);
-    const inboundHops = (event.annotations?.["agentHops"] as number | undefined) ?? agentStreakHops;
+    const respondFrom = resolveRespondFromHandles(
+      settings.respondFrom,
+      respondParticipants,
+    );
+    const inboundHops =
+      (event.annotations?.["agentHops"] as number | undefined) ??
+      agentStreakHops;
     // Remember what depth this conversation is at, so a cross-channel `notify`
     // can carry the count over the boundary (plan §4.6, D13). Without this the
     // hop cap is a per-channel fold and an A↔B ping-pong gets twice the depth
@@ -4540,16 +4945,21 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   }): { name: string; description?: string; parameters?: unknown } {
     const description =
       typeof method.description === "string"
-        ? method.description.slice(0, AgentVesselBase.MAX_ROSTER_DESCRIPTION_CHARS)
+        ? method.description.slice(
+            0,
+            AgentVesselBase.MAX_ROSTER_DESCRIPTION_CHARS,
+          )
         : undefined;
     let parameters = method.parameters;
     if (parameters !== undefined) {
       try {
-        const bytes = new TextEncoder().encode(JSON.stringify(parameters)).byteLength;
+        const bytes = new TextEncoder().encode(
+          JSON.stringify(parameters),
+        ).byteLength;
         if (bytes > AgentVesselBase.MAX_ROSTER_PARAMETERS_BYTES) {
           console.warn(
             `[Vessel] dropping oversized parameter schema for roster method ` +
-              `${method.name} (${bytes} bytes > ${AgentVesselBase.MAX_ROSTER_PARAMETERS_BYTES})`
+              `${method.name} (${bytes} bytes > ${AgentVesselBase.MAX_ROSTER_PARAMETERS_BYTES})`,
           );
           parameters = undefined;
         }
@@ -4570,43 +4980,60 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    * this recipient. */
   private async applyDeliveredAgenticContext(
     channelId: string,
-    context: ChannelAgenticContext
+    context: ChannelAgenticContext,
   ): Promise<ChannelAgenticContext> {
     if (context?.version !== 1) {
-      throw Object.assign(new Error("acceptChannelDelivery: unsupported agentic context version"), {
-        code: "PermanentChannelDelivery",
-      });
+      throw Object.assign(
+        new Error("acceptChannelDelivery: unsupported agentic context version"),
+        {
+          code: "PermanentChannelDelivery",
+        },
+      );
     }
     const relationships =
       context && typeof context === "object"
         ? (context as { relationships?: unknown }).relationships
         : undefined;
-    if (!Array.isArray(relationships) || !context.conversation || !context.channelConfig) {
-      throw Object.assign(new Error("acceptChannelDelivery: missing versioned agentic context"), {
-        code: "PermanentChannelDelivery",
-      });
+    if (
+      !Array.isArray(relationships) ||
+      !context.conversation ||
+      !context.channelConfig
+    ) {
+      throw Object.assign(
+        new Error("acceptChannelDelivery: missing versioned agentic context"),
+        {
+          code: "PermanentChannelDelivery",
+        },
+      );
     }
     const selfId = this.participantId();
     const roster: RosterEntry[] = relationships
       .filter(
         (
-          value
+          value,
         ): value is {
           participantId: string;
           metadata: Record<string, unknown>;
         } =>
           !!value &&
           typeof value === "object" &&
-          typeof (value as { participantId?: unknown }).participantId === "string" &&
+          typeof (value as { participantId?: unknown }).participantId ===
+            "string" &&
           !!(value as { metadata?: unknown }).metadata &&
-          typeof (value as { metadata?: unknown }).metadata === "object"
+          typeof (value as { metadata?: unknown }).metadata === "object",
       )
       .filter(({ participantId }) => participantId !== selfId)
       .map(({ participantId, metadata }) => ({
         participantId,
         ref: participantRefFromMetadata(participantId, metadata),
-        handle: typeof metadata["handle"] === "string" ? String(metadata["handle"]) : undefined,
-        type: typeof metadata["type"] === "string" ? String(metadata["type"]) : undefined,
+        handle:
+          typeof metadata["handle"] === "string"
+            ? String(metadata["handle"])
+            : undefined,
+        type:
+          typeof metadata["type"] === "string"
+            ? String(metadata["type"])
+            : undefined,
         methods: Array.isArray(metadata["methods"])
           ? (
               metadata["methods"] as Array<{
@@ -4617,12 +5044,12 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             )
               .filter(
                 (
-                  method
+                  method,
                 ): method is {
                   name: string;
                   description?: string;
                   parameters?: unknown;
-                } => typeof method?.name === "string"
+                } => typeof method?.name === "string",
               )
               .map((method) => this.boundedRosterMethod(method))
           : [],
@@ -4639,13 +5066,18 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     return context;
   }
 
-  private async getCachedChannelConfig(channelId: string): Promise<Record<string, unknown> | null> {
+  private async getCachedChannelConfig(
+    channelId: string,
+  ): Promise<Record<string, unknown> | null> {
     const now = Date.now();
     const cached = this.channelConfigCache.get(channelId);
     if (cached && cached.expiresAt > now) return cached.value;
     const value =
       (await this.createChannelClient(channelId).getConfig()) ??
-      (this.subscriptions.getConfig(channelId) as Record<string, unknown> | null) ??
+      (this.subscriptions.getConfig(channelId) as Record<
+        string,
+        unknown
+      > | null) ??
       null;
     this.channelConfigCache.set(channelId, {
       value,
@@ -4684,11 +5116,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     channelId: string,
     transportCallId: string,
     methodName: string,
-    args: unknown
+    args: unknown,
   ): Promise<{ result: unknown; isError?: boolean }> {
     this.assertChannelDeliveryCaller("onMethodCall", channelId);
     const directCallKey = this.directMethodCallKey(channelId, transportCallId);
-    this.directMethodCalls.get(directCallKey)?.abort("superseded provider generation");
+    this.directMethodCalls
+      .get(directCallKey)
+      ?.abort("superseded provider generation");
     const controller = new AbortController();
     this.directMethodCalls.set(directCallKey, controller);
     try {
@@ -4697,7 +5131,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           channelId,
           methodName,
           args,
-          controller.signal
+          controller.signal,
         )) ?? {
           result: { error: `unknown method: ${methodName}` },
           isError: true,
@@ -4716,10 +5150,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     tier: "open",
     sensitivity: "write",
   })
-  async cancelDirectMethodCall(channelId: string, transportCallId: string): Promise<void> {
+  async cancelDirectMethodCall(
+    channelId: string,
+    transportCallId: string,
+  ): Promise<void> {
     this.assertChannelDeliveryCaller("cancelDirectMethodCall", channelId);
     const controller = this.directMethodCalls.get(
-      this.directMethodCallKey(channelId, transportCallId)
+      this.directMethodCallKey(channelId, transportCallId),
     );
     if (controller) controller.abort(`method call cancelled on ${channelId}`);
   }
@@ -4744,13 +5181,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   })
   async readAgentInspection(
     channelId: string,
-    methodName: string
+    methodName: string,
   ): Promise<{ result: unknown; isError?: boolean }> {
     this.assertChannelDeliveryCaller("readAgentInspection", channelId);
     if (!isAgentInspectionMethod(methodName)) {
       throw new Error(
         `readAgentInspection: unsupported method ${methodName}; expected one of ` +
-          AGENT_INSPECTION_METHODS.join(", ")
+          AGENT_INSPECTION_METHODS.join(", "),
       );
     }
     return this.readStandardAgentInspection(channelId, methodName);
@@ -4758,7 +5195,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private readStandardAgentInspection(
     channelId: string,
-    methodName: AgentInspectionMethod
+    methodName: AgentInspectionMethod,
   ): { result: unknown; isError?: boolean } {
     switch (methodName) {
       case "getDebugState":
@@ -4800,7 +5237,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     tier: "open",
     sensitivity: "write",
   })
-  async interruptChannel(channelId: string, flushDeferred = false): Promise<{ interrupted: true }> {
+  async interruptChannel(
+    channelId: string,
+    flushDeferred = false,
+  ): Promise<{ interrupted: true }> {
     await this.driver.interruptChannel(channelId, flushDeferred);
     return { interrupted: true };
   }
@@ -4811,12 +5251,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     tier: "open",
     sensitivity: "write",
   })
-  async interruptAllChannels(flushDeferred = true): Promise<{ interrupted: number }> {
+  async interruptAllChannels(
+    flushDeferred = true,
+  ): Promise<{ interrupted: number }> {
     const channelIds = [
-      ...new Set(this.subscriptions.listAll().map((subscription) => subscription.channelId)),
+      ...new Set(
+        this.subscriptions
+          .listAll()
+          .map((subscription) => subscription.channelId),
+      ),
     ];
     await Promise.all(
-      channelIds.map((channelId) => this.driver.interruptChannel(channelId, flushDeferred))
+      channelIds.map((channelId) =>
+        this.driver.interruptChannel(channelId, flushDeferred),
+      ),
     );
     return { interrupted: channelIds.length };
   }
@@ -4825,7 +5273,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     channelId: string,
     methodName: string,
     args: unknown,
-    signal?: AbortSignal
+    signal?: AbortSignal,
   ): Promise<{ result: unknown; isError?: boolean } | null> {
     if (!this.isParticipantMethodEnabled(methodName)) return null;
     if (isAgentInspectionMethod(methodName)) {
@@ -4833,7 +5281,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     }
     switch (methodName) {
       case "pause": {
-        const flushDeferred = (args as { flushDeferred?: unknown } | null)?.flushDeferred === true;
+        const flushDeferred =
+          (args as { flushDeferred?: unknown } | null)?.flushDeferred === true;
         await this.driver.interruptChannel(channelId, flushDeferred);
         return { result: { paused: true } };
       }
@@ -4844,7 +5293,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         // caller, so the panel cannot address another owner's EvalDO. The UI
         // supplies the journaled invocation coordinate; this trusted owner
         // derives the distinct eval-effect coordinate used as the run id.
-        const invocationId = (args as { invocationId?: unknown } | null)?.invocationId;
+        const invocationId = (args as { invocationId?: unknown } | null)
+          ?.invocationId;
         if (typeof invocationId !== "string" || invocationId.length === 0) {
           return {
             result: { error: "cancelEval requires an invocationId" },
@@ -4857,7 +5307,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             "main",
             "eval.cancel",
             [{ scopeKey: channelId, runId }],
-            { signal }
+            { signal },
           );
           return { result };
         } catch (err) {
@@ -4874,7 +5324,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       case "scheduleResumeAtReset": {
         const result = await this.driver.scheduleResumeAtReset(
           channelId,
-          (args ?? {}) as { messageId?: unknown; resetAt?: unknown }
+          (args ?? {}) as { messageId?: unknown; resetAt?: unknown },
         );
         return { result, isError: result.scheduled !== true };
       }
@@ -4915,21 +5365,25 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           };
         }
         const handoffTarget = normalizeBrowserHandoffTarget(input);
-        const connectParams: ConnectCredentialRequest | ConnectCredentialEnvelope = handoffTarget
+        const connectParams:
+          | ConnectCredentialRequest
+          | ConnectCredentialEnvelope = handoffTarget
           ? { spec: request, handoffTarget }
           : request;
         const credential = await this.rpc.call<Record<string, unknown>>(
           "main",
           "credentials.connect",
           [connectParams],
-          { signal }
+          { signal },
         );
         return { result: credential };
       }
       case "credentialConnected": {
         const input = (args ?? {}) as { providerId?: string };
         const providerId = input.providerId ?? "";
-        const effectId = ids.credentialWaitEffect(ids.credKey(channelId, providerId));
+        const effectId = ids.credentialWaitEffect(
+          ids.credKey(channelId, providerId),
+        );
         // This is the only reconnect success path that resumes the waiting loop.
         const resumed = await this.driver.deliverEffectOutcome(
           effectId,
@@ -4937,7 +5391,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             kind: "credential",
             resolved: true,
           } satisfies EffectOutcome,
-          { channelId }
+          { channelId },
         );
         if (resumed) await this.driver.wake(channelId);
         return { result: { resumed } };
@@ -4966,7 +5420,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         ) {
           return {
             result: {
-              error: "setThinkingLevel requires level: minimal, low, medium, high, xhigh, or max",
+              error:
+                "setThinkingLevel requires level: minimal, low, medium, high, xhigh, or max",
             },
             isError: true,
           };
@@ -5020,7 +5475,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         return {
           result: {
             refreshed: true,
-            systemPromptHash: this.getStateValue(`agent:promptHash:${channelId}`),
+            systemPromptHash: this.getStateValue(
+              `agent:promptHash:${channelId}`,
+            ),
             toolSchemasHash: this.getStateValue(`agent:toolsHash:${channelId}`),
           },
         };
@@ -5054,10 +5511,15 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     tier: "open",
     sensitivity: "write",
   })
-  async chatOp(channelId: string, op: string, args: unknown[]): Promise<unknown> {
+  async chatOp(
+    channelId: string,
+    op: string,
+    args: unknown[],
+  ): Promise<unknown> {
     await this.assertOwnEvalCaller(channelId);
     const channel = this.createChannelClient(channelId);
-    const participantId = this.subscriptions.getParticipantId(channelId) ?? this.participantId();
+    const participantId =
+      this.subscriptions.getParticipantId(channelId) ?? this.participantId();
     const a = args ?? [];
 
     switch (op) {
@@ -5072,15 +5534,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           participantId,
           eventType,
           payload,
-          options?.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : undefined,
+          options?.idempotencyKey
+            ? { idempotencyKey: options.idempotencyKey }
+            : undefined,
         ]);
       }
       case "send": {
-        const [content, options] = a as [string, { idempotencyKey?: string } | undefined];
+        const [content, options] = a as [
+          string,
+          { idempotencyKey?: string } | undefined,
+        ];
         const messageId = options?.idempotencyKey ?? crypto.randomUUID();
         const descriptor = this.getEffectiveParticipantInfo(
           channelId,
-          this.subscriptions.getConfig(channelId)
+          this.subscriptions.getConfig(channelId),
         );
         await channel.send(participantId, messageId, content, {
           senderMetadata: {
@@ -5088,7 +5555,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             name: descriptor.name,
             handle: descriptor.handle,
           },
-          ...(options?.idempotencyKey ? { idempotencyKey: options.idempotencyKey } : {}),
+          ...(options?.idempotencyKey
+            ? { idempotencyKey: options.idempotencyKey }
+            : {}),
         });
         return undefined;
       }
@@ -5104,30 +5573,52 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         // create() mints a fresh card identity (random natural key), publishing
         // custom.started as the agent. The handle carries the pubsubId of that
         // started event — matching the panel client's { messageId, pubsubId }.
-        const handle = await this.cards.create(channelId, input.typeId, input.initialState, {
-          ...(input.displayMode ? { displayMode: input.displayMode } : {}),
-          ...(options?.idempotencyKey ? { key: options.idempotencyKey } : {}),
-        });
+        const handle = await this.cards.create(
+          channelId,
+          input.typeId,
+          input.initialState,
+          {
+            ...(input.displayMode ? { displayMode: input.displayMode } : {}),
+            ...(options?.idempotencyKey ? { key: options.idempotencyKey } : {}),
+          },
+        );
         return { messageId: handle.messageId, pubsubId: handle.pubsubId };
       }
       case "updateCustomMessage": {
         const [messageId, update] = a as [string, unknown];
         const handle = this.cards.get(channelId, messageId);
         if (!handle) {
-          throw new Error(`updateCustomMessage: no card ${messageId} on channel ${channelId}`);
+          throw new Error(
+            `updateCustomMessage: no card ${messageId} on channel ${channelId}`,
+          );
         }
         // Resolves to the pubsubId of the custom.updated event (number | undefined).
         return handle.update(update);
       }
       case "registerMessageType": {
-        const [input] = a as [RegisterMessageTypeInput, { idempotencyKey?: string } | undefined];
-        const idempotencyKey = (a[1] as { idempotencyKey?: string } | undefined)?.idempotencyKey;
-        return this.publishMessageTypeRegistered(channelId, participantId, input, idempotencyKey);
+        const [input] = a as [
+          RegisterMessageTypeInput,
+          { idempotencyKey?: string } | undefined,
+        ];
+        const idempotencyKey = (a[1] as { idempotencyKey?: string } | undefined)
+          ?.idempotencyKey;
+        return this.publishMessageTypeRegistered(
+          channelId,
+          participantId,
+          input,
+          idempotencyKey,
+        );
       }
       case "clearMessageType": {
         const [typeId] = a as [string, { idempotencyKey?: string } | undefined];
-        const idempotencyKey = (a[1] as { idempotencyKey?: string } | undefined)?.idempotencyKey;
-        return this.publishMessageTypeCleared(channelId, participantId, typeId, idempotencyKey);
+        const idempotencyKey = (a[1] as { idempotencyKey?: string } | undefined)
+          ?.idempotencyKey;
+        return this.publishMessageTypeCleared(
+          channelId,
+          participantId,
+          typeId,
+          idempotencyKey,
+        );
       }
       case "getMessageType": {
         const [typeId] = a as [string];
@@ -5136,19 +5627,26 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       case "getMessageTypes":
         return channel.getMessageTypes();
       case "getParticipants":
-        return (await channel.getParticipants()).map(({ participantId: id, ref, metadata }) => ({
-          id,
-          ref,
-          type: metadata["type"],
-          name: metadata["name"],
-          isPerson: metadata["type"] === "user",
-          isAgent: metadata["type"] === "agent",
-          ...(typeof metadata["handle"] === "string" ? { handle: metadata["handle"] } : {}),
-          ...(Array.isArray(metadata["methods"]) ? { methods: metadata["methods"] } : {}),
-        }));
+        return (await channel.getParticipants()).map(
+          ({ participantId: id, ref, metadata }) => ({
+            id,
+            ref,
+            type: metadata["type"],
+            name: metadata["name"],
+            isPerson: metadata["type"] === "user",
+            isAgent: metadata["type"] === "agent",
+            ...(typeof metadata["handle"] === "string"
+              ? { handle: metadata["handle"] }
+              : {}),
+            ...(Array.isArray(metadata["methods"])
+              ? { methods: metadata["methods"] }
+              : {}),
+          }),
+        );
       case "replayEnvelope": {
         const [envelopeId] = a as [string];
-        if (typeof envelopeId !== "string" || envelopeId.length === 0) return null;
+        if (typeof envelopeId !== "string" || envelopeId.length === 0)
+          return null;
         return channel.getEnvelope(envelopeId);
       }
       case "callMethod": {
@@ -5158,7 +5656,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           unknown,
           { timeoutMs?: number } | undefined,
         ];
-        const result = await this.relayChannelCall(channelId, targetPid, method, callArgs, options);
+        const result = await this.relayChannelCall(
+          channelId,
+          targetPid,
+          method,
+          callArgs,
+          options,
+        );
         return result.content;
       }
       case "callMethodResult": {
@@ -5168,7 +5672,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           unknown,
           { timeoutMs?: number } | undefined,
         ];
-        return this.relayChannelCall(channelId, targetPid, method, callArgs, options);
+        return this.relayChannelCall(
+          channelId,
+          targetPid,
+          method,
+          callArgs,
+          options,
+        );
       }
       case "participantByHandle": {
         const [handle] = a as [string];
@@ -5182,7 +5692,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           { timeoutMs?: number } | undefined,
         ];
         const target = await this.requireParticipantByHandle(channelId, handle);
-        const result = await this.relayChannelCall(channelId, target.id, method, callArgs, options);
+        const result = await this.relayChannelCall(
+          channelId,
+          target.id,
+          method,
+          callArgs,
+          options,
+        );
         return result.content;
       }
       case "callMethodResultByHandle": {
@@ -5193,7 +5709,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           { timeoutMs?: number } | undefined,
         ];
         const target = await this.requireParticipantByHandle(channelId, handle);
-        return this.relayChannelCall(channelId, target.id, method, callArgs, options);
+        return this.relayChannelCall(
+          channelId,
+          target.id,
+          method,
+          callArgs,
+          options,
+        );
       }
       case "focusMessage":
         // Panel-only DOM scroll; no server-side equivalent.
@@ -5230,13 +5752,16 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     channelId: string,
     input: unknown,
     requestIdentity: string,
-    callerRpc: RpcClient
+    callerRpc: RpcClient,
   ): Promise<MissionRecord> {
     const service = await callerRpc.call<{
       kind?: unknown;
       targetId?: unknown;
     }>("main", "workers.resolveService", ["vibestudio.missions.v1"]);
-    if (service.kind !== "durable-object" || typeof service.targetId !== "string") {
+    if (
+      service.kind !== "durable-object" ||
+      typeof service.targetId !== "string"
+    ) {
       throw new Error("The Automations service is unavailable");
     }
     const automation = await callerRpc.call<MissionRecord>(
@@ -5245,15 +5770,18 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       [this.selfAutomationDefinition(channelId, input)],
       {
         idempotencyKey: `automation:launch:${this.objectKey}:${sha256HexSyncText(requestIdentity)}`,
-      }
+      },
     );
     if (automation.state !== "active") {
-      throw new Error(`Automation launch returned unexpected state ${automation.state}`);
+      throw new Error(
+        `Automation launch returned unexpected state ${automation.state}`,
+      );
     }
-    const participantId = this.subscriptions.getParticipantId(channelId) ?? this.participantId();
+    const participantId =
+      this.subscriptions.getParticipantId(channelId) ?? this.participantId();
     const descriptor = this.getEffectiveParticipantInfo(
       channelId,
-      this.subscriptions.getConfig(channelId)
+      this.subscriptions.getConfig(channelId),
     );
     const senderMetadata = {
       type: "agent",
@@ -5274,10 +5802,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       },
       createdAt: new Date(automation.createdAt).toISOString(),
     };
-    await this.createChannelClient(channelId).publishAgenticEvent(participantId, event, {
-      idempotencyKey: `automation:instituted:${automation.missionId}`,
-      senderMetadata,
-    });
+    await this.createChannelClient(channelId).publishAgenticEvent(
+      participantId,
+      event,
+      {
+        idempotencyKey: `automation:instituted:${automation.missionId}`,
+        senderMetadata,
+      },
+    );
     return automation;
   }
 
@@ -5286,7 +5818,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    * from model-authored strings or a racy build lookup. */
   private selfAutomationDefinition(
     channelId: string,
-    raw: unknown
+    raw: unknown,
   ): {
     name: string;
     charter: MissionRecord["charter"];
@@ -5296,12 +5828,17 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     }
     const input = raw as Record<string, unknown>;
     const name = typeof input["name"] === "string" ? input["name"].trim() : "";
-    const summary = typeof input["summary"] === "string" ? input["summary"].trim() : "";
+    const summary =
+      typeof input["summary"] === "string" ? input["summary"].trim() : "";
     if (!name || !summary || !input["action"] || !input["trigger"]) {
-      throw new Error("launch_automation requires name, summary, action, and trigger");
+      throw new Error(
+        "launch_automation requires name, summary, action, and trigger",
+      );
     }
     const source = String(this.env["WORKER_SOURCE"] ?? "");
-    const className = String(this.env["WORKER_CLASS_NAME"] ?? this.constructor.name);
+    const className = String(
+      this.env["WORKER_CLASS_NAME"] ?? this.constructor.name,
+    );
     const ev = String(this.env["WORKER_EFFECTIVE_VERSION"] ?? "");
     const ref = String(this.env["WORKER_SOURCE_REF"] ?? "");
     if (
@@ -5311,16 +5848,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       !/^state:[0-9a-f]{64}$/u.test(ref)
     ) {
       throw new Error(
-        "launch_automation cannot bind this agent to an exact installed build; rebuild the agent runtime"
+        "launch_automation cannot bind this agent to an exact installed build; rebuild the agent runtime",
       );
     }
-    const conversationInput = input["conversation"] as { mode?: unknown } | undefined;
+    const conversationInput = input["conversation"] as
+      | { mode?: unknown }
+      | undefined;
     if (
       conversationInput?.mode !== undefined &&
       conversationInput.mode !== "fresh" &&
       conversationInput.mode !== "continue"
     ) {
-      throw new Error('launch_automation conversation.mode must be "fresh" or "continue"');
+      throw new Error(
+        'launch_automation conversation.mode must be "fresh" or "continue"',
+      );
     }
     const conversation =
       conversationInput?.mode === "continue"
@@ -5359,11 +5900,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    *  caller to be that EvalDO. */
   private async assertOwnEvalCaller(channelId: string): Promise<void> {
     const callerId = this.rpcCallerId;
-    const expectedKey = sha256HexSyncText(`${this.participantId()}\0${channelId}`);
+    const expectedKey = sha256HexSyncText(
+      `${this.participantId()}\0${channelId}`,
+    );
     const expectedCaller = `do:vibestudio/internal:EvalDO:${expectedKey.slice(0, 40)}`;
     if (callerId !== expectedCaller) {
       throw new Error(
-        `chatOp: refusing caller ${callerId ?? "unknown"} — only this agent's own EvalDO may forward chat ops`
+        `chatOp: refusing caller ${callerId ?? "unknown"} — only this agent's own EvalDO may forward chat ops`,
       );
     }
   }
@@ -5375,7 +5918,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private assertServerCaller(method: string): void {
     if (this.rpcCallerKind !== "server") {
       throw new Error(
-        `${method}: refusing caller ${this.rpcCallerId ?? "unknown"} (kind ${this.rpcCallerKind ?? "unknown"}) — server-only`
+        `${method}: refusing caller ${this.rpcCallerId ?? "unknown"} (kind ${this.rpcCallerKind ?? "unknown"}) — server-only`,
       );
     }
   }
@@ -5388,11 +5931,17 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    *  relay otherwise lets a panel, a worker, or ANOTHER agent forge channel traffic /
    *  tool outcomes into the loop. callerId is server-authenticated, so the className
    *  segment cannot be spoofed. */
-  private directMethodCallKey(channelId: string, transportCallId: string): string {
+  private directMethodCallKey(
+    channelId: string,
+    transportCallId: string,
+  ): string {
     return `${channelId}\u0000${transportCallId}`;
   }
 
-  private assertChannelDeliveryCaller(method: string, channelId?: string): void {
+  private assertChannelDeliveryCaller(
+    method: string,
+    channelId?: string,
+  ): void {
     const kind = this.rpcCallerKind;
     if (kind === "server") return;
     const callerId = this.rpcCallerId ?? "";
@@ -5405,7 +5954,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       return;
     }
     throw new Error(
-      `${method}: refusing caller ${callerId || "unknown"} (kind ${kind ?? "unknown"})`
+      `${method}: refusing caller ${callerId || "unknown"} (kind ${kind ?? "unknown"})`,
     );
   }
 
@@ -5415,7 +5964,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     channelId: string,
     participantId: string,
     input: RegisterMessageTypeInput,
-    idempotencyKey?: string
+    idempotencyKey?: string,
   ): Promise<number | undefined> {
     // Self-gate: this helper is independently RPC-exposed (collectExposableMethods
     // reflects every method) over the open DO relay, so chatOp's assertOwnEvalCaller
@@ -5432,8 +5981,12 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         displayMode: input.displayMode,
         source: input.source,
         ...(input.imports !== undefined ? { imports: input.imports } : {}),
-        ...(input.stateSchema !== undefined ? { stateSchema: input.stateSchema } : {}),
-        ...(input.updateSchema !== undefined ? { updateSchema: input.updateSchema } : {}),
+        ...(input.stateSchema !== undefined
+          ? { stateSchema: input.stateSchema }
+          : {}),
+        ...(input.updateSchema !== undefined
+          ? { updateSchema: input.updateSchema }
+          : {}),
         registeredBy: actor,
       },
       createdAt: new Date().toISOString(),
@@ -5444,7 +5997,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       {
         ...(idempotencyKey ? { idempotencyKey } : {}),
         senderMetadata: actor.metadata,
-      }
+      },
     );
     this.cards.invalidateType(channelId, input.typeId);
     return res.id;
@@ -5455,7 +6008,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     channelId: string,
     participantId: string,
     typeId: string,
-    idempotencyKey?: string
+    idempotencyKey?: string,
   ): Promise<number | undefined> {
     await this.assertOwnEvalCaller(channelId); // direct-call gate — see publishMessageTypeRegistered
     const actor = this.cardActor(channelId, participantId);
@@ -5471,7 +6024,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       {
         ...(idempotencyKey ? { idempotencyKey } : {}),
         senderMetadata: actor.metadata,
-      }
+      },
     );
     this.cards.invalidateType(channelId, typeId);
     return res.id;
@@ -5479,11 +6032,11 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private cardActor(
     channelId: string,
-    participantId: string
+    participantId: string,
   ): ActorRef & { participantId?: string; metadata?: Record<string, unknown> } {
     const descriptor = this.getEffectiveParticipantInfo(
       channelId,
-      this.subscriptions.getConfig(channelId)
+      this.subscriptions.getConfig(channelId),
     );
     return {
       kind: "agent",
@@ -5502,7 +6055,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    *  roster. Returns the raw participant record (id + metadata) or null. */
   private async resolveParticipantByHandle(
     channelId: string,
-    rawHandle: string
+    rawHandle: string,
   ): Promise<{ id: string; metadata: Record<string, unknown> } | null> {
     const handle = rawHandle.startsWith("@") ? rawHandle.slice(1) : rawHandle;
     const participants = await this.getCachedParticipants(channelId);
@@ -5512,9 +6065,12 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private async requireParticipantByHandle(
     channelId: string,
-    rawHandle: string
+    rawHandle: string,
   ): Promise<{ id: string; metadata: Record<string, unknown> }> {
-    const participant = await this.resolveParticipantByHandle(channelId, rawHandle);
+    const participant = await this.resolveParticipantByHandle(
+      channelId,
+      rawHandle,
+    );
     if (!participant) {
       const handle = rawHandle.startsWith("@") ? rawHandle.slice(1) : rawHandle;
       throw new Error(`No participant with handle @${handle}`);
@@ -5534,7 +6090,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     targetPid: string,
     method: string,
     args: unknown,
-    options?: { timeoutMs?: number }
+    options?: { timeoutMs?: number },
   ): Promise<{ content: unknown }> {
     await this.assertOwnEvalCaller(channelId); // direct-call gate — see publishMessageTypeRegistered
     // An eval running inside this agent can inspect the agent itself, but a
@@ -5558,7 +6114,11 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       if (timeoutMs && timeoutMs > 0) {
         entry.timer = setTimeout(() => {
           if (this.chatOpPendingCalls.delete(callId)) {
-            reject(new Error(`chat.callMethod(${method}) timed out after ${timeoutMs}ms`));
+            reject(
+              new Error(
+                `chat.callMethod(${method}) timed out after ${timeoutMs}ms`,
+              ),
+            );
           }
         }, timeoutMs);
       }
@@ -5575,7 +6135,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           invocationId: callId,
           transportCallId: callId,
           ...(timeoutMs && timeoutMs > 0 ? { timeoutMs } : {}),
-        }
+        },
       );
     } catch (err) {
       const entry = this.chatOpPendingCalls.get(callId);
@@ -5589,13 +6149,16 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   /** Settle a pending chatOp relay call from a channel invocation terminal.
    *  Returns true when the event settled (or was a non-terminal phase of) one
    *  of our relay calls — so processChannelEvent stops routing it further. */
-  private async settleChatOpCall(channelId: string, event: ChannelEvent): Promise<boolean> {
+  private async settleChatOpCall(
+    channelId: string,
+    event: ChannelEvent,
+  ): Promise<boolean> {
     if (this.chatOpPendingCalls.size === 0) return false;
     const agentic = event.payload as AgenticEvent | null;
     const kind = (agentic as { kind?: string } | null)?.kind ?? "";
     if (!kind.startsWith("invocation.")) return false;
-    const causality = ((agentic as { causality?: Record<string, unknown> })?.causality ??
-      {}) as Record<string, unknown>;
+    const causality = ((agentic as { causality?: Record<string, unknown> })
+      ?.causality ?? {}) as Record<string, unknown>;
     const transportCallId =
       typeof causality["transportCallId"] === "string"
         ? (causality["transportCallId"] as string)
@@ -5611,10 +6174,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     }
     this.chatOpPendingCalls.delete(transportCallId);
     if (entry.timer) clearTimeout(entry.timer);
-    const payload = ((agentic as { payload?: Record<string, unknown> })?.payload ?? {}) as Record<
-      string,
-      unknown
-    >;
+    const payload = ((agentic as { payload?: Record<string, unknown> })
+      ?.payload ?? {}) as Record<string, unknown>;
     if (kind === "invocation.completed") {
       // Hydrate any stored-value refs the provider spilled, then resolve with
       // the delivered content (ChatMethodResult shape). hydrate is async; the
@@ -5624,15 +6185,17 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           this.hydrateTransportValue(
             payload["result"],
             entry.responderSessionId,
-            "chat-method-result"
-          )
+            "chat-method-result",
+          ),
         )
         .then(
           (content) => entry.resolve({ content }),
-          (err) => entry.reject(err instanceof Error ? err : new Error(String(err)))
+          (err) =>
+            entry.reject(err instanceof Error ? err : new Error(String(err))),
         );
     } else {
-      const reason = payload["error"] ?? payload["reason"] ?? payload["result"] ?? null;
+      const reason =
+        payload["error"] ?? payload["reason"] ?? payload["result"] ?? null;
       const message =
         typeof reason === "string" && reason.length > 0
           ? reason
@@ -5657,9 +6220,12 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   async deliverEffectOutcome(
     effectId: string,
     outcome: EffectOutcome,
-    address?: { branchId?: string; channelId?: string }
+    address?: { branchId?: string; channelId?: string },
   ): Promise<void> {
-    this.assertChannelDeliveryCaller("deliverEffectOutcome", address?.channelId);
+    this.assertChannelDeliveryCaller(
+      "deliverEffectOutcome",
+      address?.channelId,
+    );
     await this.driver.deliverEffectOutcome(effectId, outcome, address);
   }
 
@@ -5691,7 +6257,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     channelId: string,
     invocationId: string,
     args: unknown,
-    scopedRpc: RpcClient
+    scopedRpc: RpcClient,
   ): Promise<DeferredEvalGateResult> {
     const runId = ids.invocationEffect(invocationId);
     // Durable state FIRST (single source of truth: the outbox row). Once a
@@ -5702,14 +6268,19 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     // deletes runs; a fresh start would re-INSERT and RE-EXECUTE a
     // side-effectful eval). eval.get is the only permitted operation.
     if (this.driver.hasDeferredEvalStartAttempted(channelId, runId)) {
-      return await this.recoverStartedDeferredEval(channelId, invocationId, runId, scopedRpc);
+      return await this.recoverStartedDeferredEval(
+        channelId,
+        invocationId,
+        runId,
+        scopedRpc,
+      );
     }
     const p = prepareAgentToolArguments(
       {
         name: "eval",
         parameters: evalToolParameters,
       } as unknown as import("@workspace/pi-core").AgentTool,
-      args ?? {}
+      args ?? {},
     ) as {
       code?: string;
       path?: string;
@@ -5718,7 +6289,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       syntax?: "javascript" | "typescript" | "jsx" | "tsx";
       imports?: Record<string, string>;
       timeoutMs?: number;
-      authority?: Partial<import("@vibestudio/service-schemas/eval").EvalAuthorityIntent>;
+      authority?: Partial<
+        import("@vibestudio/service-schemas/eval").EvalAuthorityIntent
+      >;
     };
     let source;
     try {
@@ -5732,7 +6305,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     let authority;
     try {
       authority =
-        p.authority === undefined ? undefined : evalAuthorityInputSchema.parse(p.authority);
+        p.authority === undefined
+          ? undefined
+          : evalAuthorityInputSchema.parse(p.authority);
     } catch (error) {
       return {
         result: `[eval] Invalid authority: ${error instanceof Error ? error.message : String(error)}`,
@@ -5741,17 +6316,18 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     }
     this.trackDeferredEval(channelId, runId);
     const executeDeferred = createDeferredEvalExecutor(
-      <T>(method: string, callArgs: unknown[]) => scopedRpc.call<T>("main", method, callArgs),
+      <T>(method: string, callArgs: unknown[]) =>
+        scopedRpc.call<T>("main", method, callArgs),
       {
         onBackstopError: (err) => {
           if (this.deferredEvalBackstopWarnings.has(runId)) return;
           this.deferredEvalBackstopWarnings.add(runId);
           console.warn(
             `[AgentVessel] eval.get backstop for ${runId} failed (run parked; push/redrive covers it):`,
-            err instanceof Error ? err.message : err
+            err instanceof Error ? err.message : err,
           );
         },
-      }
+      },
     );
     // Commit the single-dispatch fence before crossing into EvalDO. The RPC
     // outcome is inherently ambiguous: any rejection may follow
@@ -5795,9 +6371,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       }
       console.warn(
         `[AgentVessel] eval.start outcome for ${runId} is ambiguous; reconciling read-only:`,
-        error instanceof Error ? error.message : error
+        error instanceof Error ? error.message : error,
       );
-      return await this.recoverStartedDeferredEval(channelId, invocationId, runId, scopedRpc);
+      return await this.recoverStartedDeferredEval(
+        channelId,
+        invocationId,
+        runId,
+        scopedRpc,
+      );
     }
     if (!settlement.deferred) {
       this.forgetDeferredEval(channelId, runId);
@@ -5825,12 +6406,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     channelId: string,
     invocationId: string,
     runId: string,
-    scopedRpc: RpcClient
+    scopedRpc: RpcClient,
   ): Promise<DeferredEvalGateResult> {
     this.trackDeferredEval(channelId, runId);
     let snapshot: { status: string; result?: EvalRunResult };
     try {
-      snapshot = await scopedRpc.call("main", "eval.get", [{ scopeKey: channelId, runId }]);
+      snapshot = await scopedRpc.call("main", "eval.get", [
+        { scopeKey: channelId, runId },
+      ]);
     } catch (error) {
       // EvalDO unreachable: leave the run parked; the terminal push or the
       // next redrive recovers it. An outage must never settle the invocation.
@@ -5838,7 +6421,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         this.deferredEvalBackstopWarnings.add(runId);
         console.warn(
           `[AgentVessel] eval.get recovery for started run ${runId} failed (run stays parked):`,
-          error instanceof Error ? error.message : error
+          error instanceof Error ? error.message : error,
         );
       }
       return { deferred: true, reason: "external-result" };
@@ -5846,8 +6429,12 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     if (snapshot.status === "unknown") {
       return { deferred: true, reason: "external-result" };
     }
-    if (snapshot.status === "done" || snapshot.status === "approval-route-lost") {
-      if (!snapshot.result) throw new Error(`eval: terminal run ${runId} has no result`);
+    if (
+      snapshot.status === "done" ||
+      snapshot.status === "approval-route-lost"
+    ) {
+      if (!snapshot.result)
+        throw new Error(`eval: terminal run ${runId} has no result`);
       this.forgetDeferredEval(channelId, runId);
       this.traceHotPath(channelId, "deferred-eval.completed", {
         source: "backstop-poll",
@@ -5883,9 +6470,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private async publishDeferredEvalPending(
     channelId: string,
     invocationId: string,
-    runId: string
+    runId: string,
   ): Promise<void> {
-    const participantId = this.subscriptions.getParticipantId(channelId) ?? this.participantId();
+    const participantId =
+      this.subscriptions.getParticipantId(channelId) ?? this.participantId();
     const actor = this.cardActor(channelId, participantId);
     const event: AgenticEvent<"invocation.progress"> = {
       kind: "invocation.progress",
@@ -5905,16 +6493,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       createdAt: new Date().toISOString(),
     };
     try {
-      await this.createChannelClient(channelId).publishAgenticEvent(participantId, event, {
-        idempotencyKey: `eval-pending:${runId}`,
-        senderMetadata: actor.metadata,
-      });
+      await this.createChannelClient(channelId).publishAgenticEvent(
+        participantId,
+        event,
+        {
+          idempotencyKey: `eval-pending:${runId}`,
+          senderMetadata: actor.metadata,
+        },
+      );
     } catch (error) {
       // The invocation outbox and EvalDO run remain authoritative. A failed
       // explanatory projection must not settle or re-execute durable eval.
       console.warn(
         `[AgentVessel] failed to publish pending state for ${runId}; eval remains parked:`,
-        error instanceof Error ? error.message : error
+        error instanceof Error ? error.message : error,
       );
     }
   }
@@ -5923,7 +6515,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    * durable-recovery settlement, so both produce identical tool results. */
   private deferredEvalSettlement(
     invocationId: string,
-    statusResult: EvalRunResult
+    statusResult: EvalRunResult,
   ): DeferredEvalGateResult {
     const formatted = formatEvalResult(statusResult);
     const failure =
@@ -5942,7 +6534,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
               ...(statusResult.failureKind === "infrastructure"
                 ? { kind: "infrastructure" as const }
                 : {}),
-            }
+            },
           );
     return {
       result: {
@@ -5992,7 +6584,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    */
   private async cancelDeferredEvalRuns(channelId: string): Promise<void> {
     const runIds = new Set<string>(this.deferredEvalRuns.get(channelId) ?? []);
-    for (const row of this.driver.deferredEvalRows(channelId)) runIds.add(row.effectId);
+    for (const row of this.driver.deferredEvalRows(channelId))
+      runIds.add(row.effectId);
     if (runIds.size === 0) return;
     const now = Date.now();
     for (const runId of runIds) {
@@ -6003,7 +6596,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         channelId,
         runId,
         now,
-        now
+        now,
       );
     }
     this.deferredEvalRuns.delete(channelId);
@@ -6021,7 +6614,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     // only schedules the backstop alarm; it is not an attempt gate.
     const intents = (
       this.sql
-        .exec(`SELECT channel_id, run_id FROM deferred_eval_cancel_intents ORDER BY created_at`)
+        .exec(
+          `SELECT channel_id, run_id FROM deferred_eval_cancel_intents ORDER BY created_at`,
+        )
         .toArray() as Array<Record<string, unknown>>
     ).map((row) => ({
       channelId: String(row["channel_id"]),
@@ -6035,12 +6630,12 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         this.sql.exec(
           `DELETE FROM deferred_eval_cancel_intents WHERE channel_id = ? AND run_id = ?`,
           intent.channelId,
-          intent.runId
+          intent.runId,
         );
       } catch (error) {
         console.warn(
           `[AgentVessel] deferred-eval cancel intent for ${intent.runId} not yet delivered (kept durable):`,
-          error instanceof Error ? error.message : error
+          error instanceof Error ? error.message : error,
         );
         this.sql.exec(
           `UPDATE deferred_eval_cancel_intents
@@ -6049,7 +6644,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             WHERE channel_id = ? AND run_id = ?`,
           Date.now() + EVAL_CANCEL_INTENT_RETRY_MS,
           intent.channelId,
-          intent.runId
+          intent.runId,
         );
       }
     }
@@ -6057,7 +6652,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private nextEvalCancelIntentWakeAt(): number | null {
     const row = this.sql
-      .exec(`SELECT MIN(next_attempt_at) AS due FROM deferred_eval_cancel_intents`)
+      .exec(
+        `SELECT MIN(next_attempt_at) AS due FROM deferred_eval_cancel_intents`,
+      )
       .toArray()[0];
     const value = row?.["due"];
     return typeof value === "number" ? value : null;
@@ -6098,15 +6695,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           ? (payload.activity.detail as Record<string, unknown>)
           : {};
       const capability =
-        typeof detail["capability"] === "string" ? detail["capability"] : undefined;
+        typeof detail["capability"] === "string"
+          ? detail["capability"]
+          : undefined;
       const resourceKey =
-        typeof detail["resourceKey"] === "string" ? detail["resourceKey"] : undefined;
+        typeof detail["resourceKey"] === "string"
+          ? detail["resourceKey"]
+          : undefined;
       const waiting = payload.activity.kind === "authority-requested";
       const message = waiting
         ? `Waiting for approval${capability ? ` to use ${capability}` : ""}${resourceKey ? ` on ${resourceKey}` : ""}`
         : "Approval decision received; resuming eval";
       const participantId =
-        this.subscriptions.getParticipantId(payload.channelId) ?? this.participantId();
+        this.subscriptions.getParticipantId(payload.channelId) ??
+        this.participantId();
       const actor = this.cardActor(payload.channelId, participantId);
       const event: AgenticEvent<"invocation.progress"> = {
         kind: "invocation.progress",
@@ -6125,14 +6727,19 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         },
         createdAt: new Date().toISOString(),
       };
-      await this.createChannelClient(payload.channelId).publishAgenticEvent(participantId, event, {
-        senderMetadata: actor.metadata,
-      });
+      await this.createChannelClient(payload.channelId).publishAgenticEvent(
+        participantId,
+        event,
+        {
+          senderMetadata: actor.metadata,
+        },
+      );
       return;
     }
     if (!payload.output) return;
     const participantId =
-      this.subscriptions.getParticipantId(payload.channelId) ?? this.participantId();
+      this.subscriptions.getParticipantId(payload.channelId) ??
+      this.participantId();
     const actor = this.cardActor(payload.channelId, participantId);
     const event: AgenticEvent<"invocation.output"> = {
       kind: "invocation.output",
@@ -6145,9 +6752,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       },
       createdAt: new Date().toISOString(),
     };
-    await this.createChannelClient(payload.channelId).publishAgenticEvent(participantId, event, {
-      senderMetadata: actor.metadata,
-    });
+    await this.createChannelClient(payload.channelId).publishAgenticEvent(
+      participantId,
+      event,
+      {
+        senderMetadata: actor.metadata,
+      },
+    );
   }
 
   /**
@@ -6189,7 +6800,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
               ...(payload.result.failureKind === "infrastructure"
                 ? { kind: "infrastructure" as const }
                 : {}),
-            }
+            },
           );
     const delivered = await this.driver.deliverEffectOutcome(
       payload.runId,
@@ -6205,7 +6816,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           : {}),
         ...(failure ? { terminalReasonCode: failure.code, failure } : {}),
       },
-      { channelId: payload.channelId }
+      { channelId: payload.channelId },
     );
     if (delivered) {
       this.traceHotPath(payload.channelId, "deferred-eval.completed", {
@@ -6221,7 +6832,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    *  card-owning agents to recover live card state after hibernation/fork. */
   protected async indexOwnCustomMessages(
     channelId: string,
-    reducerLookup?: (typeId: string) => CustomMessageReducer | undefined | null
+    reducerLookup?: (typeId: string) => CustomMessageReducer | undefined | null,
   ): Promise<Map<string, Map<string, unknown>>> {
     const selfParticipantId = this.subscriptions.getParticipantId(channelId);
     if (!selfParticipantId) return new Map();
@@ -6230,7 +6841,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     const channel = this.createChannelClient(channelId);
     for await (const envelope of iterateChannelReplayAfterPages(
       (request) => channel.getReplayAfter(request),
-      { after: 0 }
+      { after: 0 },
     )) {
       const events = envelope.logEvents;
       for (const event of events) {
@@ -6241,13 +6852,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           payload?: Record<string, unknown>;
         } | null;
         const actor = agentic?.actor;
-        if (actor?.participantId !== selfParticipantId && actor?.id !== selfParticipantId) {
+        if (
+          actor?.participantId !== selfParticipantId &&
+          actor?.id !== selfParticipantId
+        ) {
           continue;
         }
         const payload = agentic?.payload ?? {};
         if (agentic?.kind === "custom.started") {
-          const messageId = typeof payload["messageId"] === "string" ? payload["messageId"] : null;
-          const typeId = typeof payload["typeId"] === "string" ? payload["typeId"] : null;
+          const messageId =
+            typeof payload["messageId"] === "string"
+              ? payload["messageId"]
+              : null;
+          const typeId =
+            typeof payload["typeId"] === "string" ? payload["typeId"] : null;
           if (!messageId || !typeId) continue;
           byMessageId.set(messageId, {
             typeId,
@@ -6256,7 +6874,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           continue;
         }
         if (agentic?.kind === "custom.updated") {
-          const messageId = typeof payload["messageId"] === "string" ? payload["messageId"] : null;
+          const messageId =
+            typeof payload["messageId"] === "string"
+              ? payload["messageId"]
+              : null;
           if (!messageId) continue;
           const existing = byMessageId.get(messageId);
           if (!existing) continue;
@@ -6285,18 +6906,23 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private async hydrateTransportValue(
     value: unknown,
     originSessionId?: string | null,
-    via = "channel-value-hydration"
+    via = "channel-value-hydration",
   ): Promise<unknown> {
-    if (originSessionId) await this.recordDerivedSessionIngestion(originSessionId, via);
+    if (originSessionId)
+      await this.recordDerivedSessionIngestion(originSessionId, via);
     return hydrateStoredValueRefs(value, {
-      getText: (digest) => this.rpc.call<string | null>("main", "blobstore.getText", [digest]),
+      getText: (digest) =>
+        this.rpc.call<string | null>("main", "blobstore.getText", [digest]),
     });
   }
 
   /** Advance the monotone latch before indirect userland content is exposed to
    * prompt composition or a tool result. The server resolves the origin
    * session's persisted class; unknown origins conservatively become external. */
-  private async recordDerivedSessionIngestion(originSessionId: string, via: string): Promise<void> {
+  private async recordDerivedSessionIngestion(
+    originSessionId: string,
+    via: string,
+  ): Promise<void> {
     if (!originSessionId || originSessionId === this.participantId()) return;
     await this.rpc.call("main", "contextIntegrity.ingest", [
       { key: `session:${originSessionId}`, via, classification: "derived" },
@@ -6306,10 +6932,12 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private async recordMessageIngestion(
     channelId: string,
     event: ChannelEvent,
-    via: string
+    via: string,
   ): Promise<void> {
     if (!channelId || !event.messageId) {
-      throw new Error(`${via}: durable channel identity is required before content ingestion`);
+      throw new Error(
+        `${via}: durable channel identity is required before content ingestion`,
+      );
     }
     await this.rpc.call("main", "contextIntegrity.ingest", [
       {
@@ -6342,7 +6970,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         typeof block === "object" &&
         typeof (block as { content?: unknown }).content === "string"
           ? (block as { content: string }).content
-          : ""
+          : "",
       )
       .filter(Boolean)
       .join("\n");
@@ -6355,7 +6983,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   protected async submitAgentInitiatedTurn(
     channelId: string,
     input: { content: string },
-    opts?: AgentInitiatedTurnOptions
+    opts?: AgentInitiatedTurnOptions,
   ): Promise<void> {
     const { steeringId, ...turnMetadata } = opts ?? {};
     const metadata: AgentTurnMetadata = {
@@ -6381,31 +7009,41 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    *  parked turn to resume) and throws with the canonical message. */
   protected async resolveModelApiKey(
     channelId: string,
-    opts?: { connectCard?: boolean }
+    opts?: { connectCard?: boolean },
   ): Promise<string> {
     const model = this.getAgentSettings().model;
-    const providerId = model.includes(":") ? model.slice(0, model.indexOf(":")) : "anthropic";
-    const modelId = model.includes(":") ? model.slice(model.indexOf(":") + 1) : model;
+    const providerId = model.includes(":")
+      ? model.slice(0, model.indexOf(":"))
+      : "anthropic";
+    const modelId = model.includes(":")
+      ? model.slice(model.indexOf(":") + 1)
+      : model;
     try {
-      const { getBuiltinModel: getModel } = await import("@workspace/pi-ai/providers/all");
+      const { getBuiltinModel: getModel } =
+        await import("@workspace/pi-ai/providers/all");
       const registryModel = getModel(providerId as never, modelId as never) as
         | { baseUrl?: string }
         | undefined;
       const modelBaseUrl =
-        typeof registryModel?.baseUrl === "string" ? registryModel.baseUrl : undefined;
+        typeof registryModel?.baseUrl === "string"
+          ? registryModel.baseUrl
+          : undefined;
       const resolved = await this.executorDeps().credentials.getApiKey({
         providerId,
         ...(modelBaseUrl ? { modelBaseUrl } : {}),
       });
       return resolved.apiKey;
     } catch (err) {
-      if (err instanceof CredentialPendingError && opts?.connectCard !== false) {
+      if (
+        err instanceof CredentialPendingError &&
+        opts?.connectCard !== false
+      ) {
         await this.publishCredentialConnectCard(channelId, providerId, {
           resumeAfterConnect: false,
         });
       }
       throw new Error(
-        `No URL-bound model credential is configured for model provider: ${providerId}`
+        `No URL-bound model credential is configured for model provider: ${providerId}`,
       );
     }
   }
@@ -6414,9 +7052,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   protected async publishCredentialConnectCard(
     channelId: string,
     providerId: string,
-    opts: { resumeAfterConnect: boolean; reason?: string }
+    opts: { resumeAfterConnect: boolean; reason?: string },
   ): Promise<void> {
-    const participantId = this.subscriptions.getParticipantId(channelId) ?? this.participantId();
+    const participantId =
+      this.subscriptions.getParticipantId(channelId) ?? this.participantId();
     const cardId = `model-credential-${providerId}:${channelId}`;
     const event: AgenticEvent<"ui.inline_rendered"> = {
       kind: "ui.inline_rendered",
@@ -6446,7 +7085,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         senderMetadata: { type: "agent", name: participantId },
       })
       .catch((err) => {
-        console.error(`[AgentVessel] credential card emit failed for ${providerId}:`, err);
+        console.error(
+          `[AgentVessel] credential card emit failed for ${providerId}:`,
+          err,
+        );
       });
   }
 
@@ -6482,20 +7124,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     // The clone's new context. A true context fork (`runtime.cloneContext`) lands
     // the clone in a fresh, isolated context; thread it so the agent's subscription
     // re-homes to it (the entity record is already in the new context).
-    newContextId: string
+    newContextId: string,
   ): Promise<void> {
     if (!newContextId) throw new Error("postClone requires newContextId");
     // fix identity (cloneDO copied the parent's)
     this.sql.exec(
       `INSERT OR REPLACE INTO state (key, value) VALUES ('__objectKey', ?)`,
-      this.objectKey
+      this.objectKey,
     );
     const from = channelTrajectoryFor(oldChannelId);
     const to = channelTrajectoryFor(newChannelId);
     const atSeq = await this.resolveTrajectorySeqForChannelSeq(
       from.logId,
       oldChannelId,
-      forkPointPubsubId
+      forkPointPubsubId,
     );
     await this.callGad("forkLog", {
       fromLogId: from.logId,
@@ -6542,14 +7184,17 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private async resolveTrajectorySeqForChannelSeq(
     trajectoryLogId: string,
     channelId: string,
-    channelSeq: number
+    channelSeq: number,
   ): Promise<number> {
-    const fork = await this.callGad<{ seq: number }>("resolveTrajectoryForkPoint", {
-      trajectoryId: trajectoryLogId,
-      branchId: trajectoryLogId,
-      channelId,
-      channelSeq,
-    });
+    const fork = await this.callGad<{ seq: number }>(
+      "resolveTrajectoryForkPoint",
+      {
+        trajectoryId: trajectoryLogId,
+        branchId: trajectoryLogId,
+        channelId,
+        channelSeq,
+      },
+    );
     return fork.seq;
   }
 
@@ -6577,7 +7222,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     // Fix identity for parity with postClone (a fresh DO already has it correct).
     this.sql.exec(
       `INSERT OR REPLACE INTO state (key, value) VALUES ('__objectKey', ?)`,
-      this.objectKey
+      this.objectKey,
     );
     // `seq` is already a TRAJECTORY seq (the parent's folded head), not a channel
     // seq — no resolveTrajectorySeqForChannelSeq indirection needed.
@@ -6629,9 +7274,11 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       parentRef: s["parentRef"],
       parentChannelId: s["parentChannelId"],
       taskChannelId: s["taskChannelId"],
-      parentContextId: typeof s["parentContextId"] === "string" ? s["parentContextId"] : "",
+      parentContextId:
+        typeof s["parentContextId"] === "string" ? s["parentContextId"] : "",
       depth: typeof s["depth"] === "number" ? s["depth"] : 0,
-      mode: s["mode"] === "fork" || s["mode"] === "fresh" ? s["mode"] : undefined,
+      mode:
+        s["mode"] === "fork" || s["mode"] === "fresh" ? s["mode"] : undefined,
       parentParticipantId: s["parentParticipantId"],
     };
   }
@@ -6650,21 +7297,27 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     const supervised = this.subagentRuns
       .listAll()
       .filter((run) => run.parentChannelId === channelId);
-    const live = supervised.filter((run) => run.status === "starting" || run.status === "running");
+    const live = supervised.filter(
+      (run) => run.status === "starting" || run.status === "running",
+    );
     if (live.length > 0) return { suspend: true };
 
     const terminalRunIds = new Set(supervised.map((run) => run.runId));
     if (terminalRunIds.size > 0) {
       const loop = await this.driver.loop(channelId);
-      const admittedTerminalReport = loop.state.deferredPostTurnQueue.some((prompt) => {
-        const runId = prompt.metadata?.supervisedTerminalRunId;
-        return typeof runId === "string" && terminalRunIds.has(runId);
-      });
+      const admittedTerminalReport = loop.state.deferredPostTurnQueue.some(
+        (prompt) => {
+          const runId = prompt.metadata?.supervisedTerminalRunId;
+          return typeof runId === "string" && terminalRunIds.has(runId);
+        },
+      );
       if (admittedTerminalReport) return { suspend: true };
     }
 
     const completedRunsAwaitingIntegration = supervised
-      .filter((run) => run.semanticIntegrationSnapshot?.["state"] !== "complete")
+      .filter(
+        (run) => run.semanticIntegrationSnapshot?.["state"] !== "complete",
+      )
       .map((run) => subagentRunHandle(run.runId));
     return {
       suspend: false,
@@ -6685,7 +7338,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       this.sql
         .exec(
           `SELECT 1 FROM agent_wake_queue WHERE wake_id = ?`,
-          `subagent-terminal-publish:${runId}`
+          `subagent-terminal-publish:${runId}`,
         )
         .toArray().length > 0
     );
@@ -6697,7 +7350,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private toolText(
     text: string,
-    details?: Record<string, unknown>
+    details?: Record<string, unknown>,
   ): AgentToolResult<Record<string, unknown>> {
     return { content: [{ type: "text", text }], details: details ?? {} };
   }
@@ -6737,7 +7390,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       existing.forkSeq != null;
     if (existing && !equivalentExisting) {
       throw new Error(
-        `subagent task trajectory already exists with different fork lineage: ${to.logId}:${to.head}`
+        `subagent task trajectory already exists with different fork lineage: ${to.logId}:${to.head}`,
       );
     }
     const atSeq = equivalentExisting ? existing.forkSeq! : input.parentSeq;
@@ -6762,7 +7415,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   protected async runDeferredSpawn(
     channelId: string,
     invocationId: string,
-    args: unknown
+    args: unknown,
   ): Promise<{ result: unknown; isError: boolean }> {
     try {
       const p = (args ?? {}) as {
@@ -6776,7 +7429,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       const agentKind = normalizeSubagentAgentKind(p.agentKind);
       if (!agentKind) {
         return {
-          result: "spawn_subagent agentKind must be 'pi' or a valid extension launcher id",
+          result:
+            "spawn_subagent agentKind must be 'pi' or a valid extension launcher id",
           isError: true,
         };
       }
@@ -6791,12 +7445,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       const existingRun = this.subagentRuns.get(invocationId);
       if (existingRun) {
         if (existingRun.status === "starting") {
-          console.warn(`[AgentVessel] resetting stale starting subagent run ${existingRun.runId}`);
+          console.warn(
+            `[AgentVessel] resetting stale starting subagent run ${existingRun.runId}`,
+          );
           await this.rollbackFailedSubagentSpawn(existingRun);
         } else {
           if (existingRun.status === "running" && task.trim()) {
             console.info(
-              `[AgentVessel] retrying subagent seed for existing run ${existingRun.runId}`
+              `[AgentVessel] retrying subagent seed for existing run ${existingRun.runId}`,
             );
             await this.publishSubagentSeed(existingRun, task);
           }
@@ -6816,7 +7472,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       }
 
       const loopConfig = this.loopConfig(channelId);
-      const maxDepth = loopConfig.maxSubagentDepth ?? DEFAULT_MAX_SUBAGENT_DEPTH;
+      const maxDepth =
+        loopConfig.maxSubagentDepth ?? DEFAULT_MAX_SUBAGENT_DEPTH;
       const maxSubagents = loopConfig.maxSubagents ?? DEFAULT_MAX_SUBAGENTS;
       const childDepth = this.currentSubagentDepth() + 1;
       if (childDepth > maxDepth) {
@@ -6854,11 +7511,16 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       // remains an override. External launcher config is provider-specific CLI
       // input, so it intentionally does not receive Pi settings.
       const parentChannelConfig =
-        (this.subscriptions.getConfig(channelId) as Record<string, unknown> | null) ?? {};
+        (this.subscriptions.getConfig(channelId) as Record<
+          string,
+          unknown
+        > | null) ?? {};
       const inheritedPromptConfig = Object.fromEntries(
         ["systemPrompt", "systemPromptMode"].flatMap((key) =>
-          parentChannelConfig[key] === undefined ? [] : [[key, parentChannelConfig[key]]]
-        )
+          parentChannelConfig[key] === undefined
+            ? []
+            : [[key, parentChannelConfig[key]]],
+        ),
       );
       const childConfig =
         agentKind === "pi"
@@ -6874,7 +7536,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
               ...(loopConfig.fallbackFailureCodes
                 ? { fallbackOn: [...loopConfig.fallbackFailureCodes] }
                 : {}),
-              ...(loopConfig.fallbackScope ? { fallbackScope: loopConfig.fallbackScope } : {}),
+              ...(loopConfig.fallbackScope
+                ? { fallbackScope: loopConfig.fallbackScope }
+                : {}),
               approvalLevel: loopConfig.approvalLevel,
               respondPolicy: loopConfig.respondPolicy,
               ...inheritedPromptConfig,
@@ -6888,7 +7552,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       // admission and execution cannot disagree about catalog availability.
       if (agentKind === "pi") {
         const childModel = childConfig?.["model"];
-        if (typeof childModel !== "string" || !this.materializedModel(channelId, childModel)) {
+        if (
+          typeof childModel !== "string" ||
+          !this.materializedModel(channelId, childModel)
+        ) {
           return {
             result:
               `Agent model ${JSON.stringify(childModel)} could not be materialized; ` +
@@ -6932,7 +7599,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       const ownerRuntimeContextId = await this.rpc.call<string | null>(
         "main",
         "runtime.resolveContext",
-        [ownerEntityId]
+        [ownerEntityId],
       );
       if (ownerRuntimeContextId && ownerRuntimeContextId !== parentContextId) {
         console.warn("[AgentVessel] spawn_subagent context mismatch", {
@@ -6944,7 +7611,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         });
         throw new Error(
           `spawn_subagent context mismatch: owner ${ownerEntityId} is registered in ` +
-            `${ownerRuntimeContextId}, but channel ${channelId} is subscribed as ${parentContextId}`
+            `${ownerRuntimeContextId}, but channel ${channelId} is subscribed as ${parentContextId}`,
         );
       }
 
@@ -7027,7 +7694,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       // keeps observer-side roster/presence bookkeeping from claiming the task
       // trajectory as a root log.
       const parentLogId = logIdForChannel(channelId);
-      const parentSeq = mode === "fork" ? await this.trajectoryForkSeq(channelId) : 0;
+      const parentSeq =
+        mode === "fork" ? await this.trajectoryForkSeq(channelId) : 0;
       if (mode === "fork") {
         await this.ensureSubagentTaskTrajectoryFork({
           parentLogId,
@@ -7039,35 +7707,44 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       // 5) Bring the child online on the task channel.
       let childParticipantId: string;
       if (mode === "fork") {
-        const childSubscription = await initAgentFromTrajectoryFork(this.rpc, childHandle, {
-          parentLogId,
-          seq: parentSeq,
-          taskChannelId,
-          contextId,
-          config: childConfig,
-        });
+        const childSubscription = await initAgentFromTrajectoryFork(
+          this.rpc,
+          childHandle,
+          {
+            parentLogId,
+            seq: parentSeq,
+            taskChannelId,
+            contextId,
+            config: childConfig,
+          },
+        );
         childParticipantId = childSubscription.participantId;
       } else {
-        const childSubscription = await subscribeAgentToChannel(this.rpc, childHandle, {
-          channelId: taskChannelId,
-          contextId,
-          config: childConfig,
-          replay: false,
-        });
+        const childSubscription = await subscribeAgentToChannel(
+          this.rpc,
+          childHandle,
+          {
+            channelId: taskChannelId,
+            contextId,
+            config: childConfig,
+            replay: false,
+          },
+        );
         childParticipantId = childSubscription.participantId;
       }
       this.subagentRuns.setChildParticipantId(runId, childParticipantId);
-      const effectiveChildSettings = await this.rpc.call<Record<string, unknown>>(
-        childHandle.targetId,
-        "getAgentSettings",
-        []
-      );
+      const effectiveChildSettings = await this.rpc.call<
+        Record<string, unknown>
+      >(childHandle.targetId, "getAgentSettings", []);
       for (const key of ["model", "thinkingLevel"] as const) {
         const requested = requestedChildConfig?.[key];
-        if (requested !== undefined && effectiveChildSettings[key] !== requested) {
+        if (
+          requested !== undefined &&
+          effectiveChildSettings[key] !== requested
+        ) {
           throw new Error(
             `spawn_subagent effective ${key} mismatch: requested ${JSON.stringify(requested)}, ` +
-              `started ${JSON.stringify(effectiveChildSettings[key])}`
+              `started ${JSON.stringify(effectiveChildSettings[key])}`,
           );
         }
       }
@@ -7114,7 +7791,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
       return {
         result: {
-          protocolContent: [{ type: "text", text: subagentLaunchReceipt(runningRun) }],
+          protocolContent: [
+            { type: "text", text: subagentLaunchReceipt(runningRun) },
+          ],
           details: this.subagentRunDetails(runningRun),
         },
         isError: false,
@@ -7134,7 +7813,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           } catch (terminalErr) {
             console.error(
               `[AgentVessel] subagent setup failure terminal emit failed for ${run.runId}:`,
-              terminalErr
+              terminalErr,
             );
           }
         }
@@ -7142,7 +7821,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           await this.rollbackFailedSubagentSpawn(run).catch((rollbackError) => {
             console.error(
               `[AgentVessel] subagent spawn rollback failed for ${run.runId}:`,
-              rollbackError
+              rollbackError,
             );
           });
         }
@@ -7174,10 +7853,18 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       /** Launcher-specific options, forwarded verbatim; the extension owns the
        *  whitelist of what its CLI supports. */
       launcherOptions?: Record<string, unknown>;
-    }
+    },
   ): Promise<{ result: unknown; isError: boolean }> {
-    const { runId, taskChannelId, label, task, mode, childDepth, parentContextId, ownerEntityId } =
-      opts;
+    const {
+      runId,
+      taskChannelId,
+      label,
+      task,
+      mode,
+      childDepth,
+      parentContextId,
+      ownerEntityId,
+    } = opts;
     const targetKey = `subagent:${runId}`;
 
     // 1) Child context (deterministic; runtime records the lifecycle edge).
@@ -7259,14 +7946,17 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             },
           },
         ],
-      ]
+      ],
     );
 
     // The participant is the linked vessel's canonical publishing identity;
     // the entity remains its executable delivery/ownership endpoint. Terminal
     // admission validates the former and never conflates these two axes.
     this.subagentRuns.setChildEntityId(runId, launched.vesselEntityId);
-    this.subagentRuns.setChildParticipantId(runId, launched.vesselParticipantId);
+    this.subagentRuns.setChildParticipantId(
+      runId,
+      launched.vesselParticipantId,
+    );
     this.subagentRuns.setExternalSession(runId, {
       entityId: launched.entityId,
       generationId: launched.generationId,
@@ -7321,45 +8011,59 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       ...(run.externalSessionEntityId
         ? { externalSessionEntityId: run.externalSessionEntityId }
         : {}),
-      ...(run.externalGenerationId ? { externalGenerationId: run.externalGenerationId } : {}),
+      ...(run.externalGenerationId
+        ? { externalGenerationId: run.externalGenerationId }
+        : {}),
     };
   }
 
   private async resolveSubagentRun(
     runId: string,
-    parentChannelId?: string
+    parentChannelId?: string,
   ): Promise<SubagentRunRow | null> {
     const existing = this.subagentRuns.resolveReference(runId, parentChannelId);
     if (existing?.kind === "ambiguous") {
       throw this.subagentReferenceError(
         `ambiguous subagent run reference ${runId}; use a longer abbreviation or the exact runId`,
-        { runId }
+        { runId },
       );
     }
     if (existing) return this.hydrateSubagentParentContext(existing.run);
     // Recovery scans durable lifecycle cards by their exact causality id. An
     // abbreviated reference can only identify an already indexed run.
-    if (!parentChannelId || runId.trim().endsWith("...") || runId.trim().endsWith("…")) {
+    if (
+      !parentChannelId ||
+      runId.trim().endsWith("...") ||
+      runId.trim().endsWith("…")
+    ) {
       return null;
     }
     return this.recoverSubagentRunFromParentChannel(runId, parentChannelId);
   }
 
-  private async hydrateSubagentParentContext(run: SubagentRunRow): Promise<SubagentRunRow> {
+  private async hydrateSubagentParentContext(
+    run: SubagentRunRow,
+  ): Promise<SubagentRunRow> {
     if (run.parentContextId) return run;
     let parentContextId: string | null = null;
     try {
-      const provenance = await this.createChannelClient(run.taskChannelId).getProvenance();
+      const provenance = await this.createChannelClient(
+        run.taskChannelId,
+      ).getProvenance();
       if (provenance && typeof provenance === "object") {
         const record = provenance as Record<string, unknown>;
-        if (record["kind"] === "task" && typeof record["parentContextId"] === "string") {
+        if (
+          record["kind"] === "task" &&
+          typeof record["parentContextId"] === "string"
+        ) {
           parentContextId = record["parentContextId"];
         }
       }
     } catch {
       // Older task channels may not expose provenance; fall back below.
     }
-    parentContextId = parentContextId ?? this.subscriptionContextOrNull(run.parentChannelId);
+    parentContextId =
+      parentContextId ?? this.subscriptionContextOrNull(run.parentChannelId);
     if (!parentContextId) return run;
     this.subagentRuns.setParentContextId(run.runId, parentContextId);
     return { ...run, parentContextId };
@@ -7367,7 +8071,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private async recoverSubagentRunFromParentChannel(
     runId: string,
-    parentChannelId: string
+    parentChannelId: string,
   ): Promise<SubagentRunRow | null> {
     // The subagent lifecycle card is durably published on the parent channel.
     // Rebuild this local index from that stream after hibernation or teardown.
@@ -7375,7 +8079,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     const channel = this.createChannelClient(parentChannelId);
     for await (const page of iterateChannelReplayAfterPages(
       (request) => channel.getReplayAfter(request),
-      { after: 0 }
+      { after: 0 },
     )) {
       for (const event of page.logEvents) {
         if (event.type !== AGENTIC_EVENT_PAYLOAD_KIND) continue;
@@ -7384,9 +8088,11 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             ? (event.payload as AgenticEvent & { payload?: unknown })
             : null;
         if (!agentic) continue;
-        const eventKind = typeof agentic.kind === "string" ? agentic.kind : null;
+        const eventKind =
+          typeof agentic.kind === "string" ? agentic.kind : null;
         if (!eventKind) continue;
-        const taskId = (agentic.causality as { taskId?: unknown } | undefined)?.taskId;
+        const taskId = (agentic.causality as { taskId?: unknown } | undefined)
+          ?.taskId;
         if (taskId !== runId) continue;
         const payload =
           agentic.payload && typeof agentic.payload === "object"
@@ -7415,7 +8121,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           }
           const mode = subagent["mode"] === "fork" ? "fork" : "fresh";
           const startedAt =
-            Date.parse(typeof agentic.createdAt === "string" ? agentic.createdAt : "") ||
+            Date.parse(
+              typeof agentic.createdAt === "string" ? agentic.createdAt : "",
+            ) ||
             event.ts ||
             Date.now();
           recovered = {
@@ -7427,10 +8135,16 @@ This is one admitted recurring-automation tick. If this tick establishes that th
                 : this.subscriptionContextOrNull(parentChannelId),
             childContextId: contextId,
             childEntityId,
-            childParticipantId: typeof childParticipantId === "string" ? childParticipantId : null,
+            childParticipantId:
+              typeof childParticipantId === "string"
+                ? childParticipantId
+                : null,
             parentChannelId,
             mode,
-            label: typeof subagent["label"] === "string" ? subagent["label"] : "subagent",
+            label:
+              typeof subagent["label"] === "string"
+                ? subagent["label"]
+                : "subagent",
             depth: this.currentSubagentDepth() + 1,
             status: "running",
             sourceEventId: null,
@@ -7467,7 +8181,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           result?.["details"] && typeof result["details"] === "object"
             ? (result["details"] as Record<string, unknown>)
             : details;
-        if (terminalDetails && typeof terminalDetails["sourceEventId"] === "string") {
+        if (
+          terminalDetails &&
+          typeof terminalDetails["sourceEventId"] === "string"
+        ) {
           recovered = {
             ...recovered,
             sourceEventId: terminalDetails["sourceEventId"],
@@ -7489,13 +8206,19 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     return this.subagentRuns.get(runId) ?? recovered;
   }
 
-  private async publishSubagentSeed(run: SubagentRunRow, task: string): Promise<void> {
+  private async publishSubagentSeed(
+    run: SubagentRunRow,
+    task: string,
+  ): Promise<void> {
     if (!task.trim()) return;
     if (!run.childParticipantId) {
-      throw new Error(`subagent ${run.runId} has no child participant identity`);
+      throw new Error(
+        `subagent ${run.runId} has no child participant identity`,
+      );
     }
     const participantId =
-      this.subscriptions.getParticipantId(run.taskChannelId) ?? this.participantId();
+      this.subscriptions.getParticipantId(run.taskChannelId) ??
+      this.participantId();
     const messageId = `subagent-seed:${run.runId}`;
     const senderMetadata = {
       type: "headless",
@@ -7521,7 +8244,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     toolCallId: string,
     runId: string,
     message: string,
-    parentChannelId?: string
+    parentChannelId?: string,
   ): Promise<AgentToolResult<Record<string, unknown>>> {
     const run = await this.resolveSubagentRun(runId, parentChannelId);
     if (!run) {
@@ -7533,7 +8256,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       throw Object.assign(
         new Error(
           `subagent ${subagentRunHandle(run.runId)} is terminal (${run.status}) and cannot receive execution messages. ` +
-            `Its retained result stays inspectable and mergeable; to continue this line of work, spawn a new run.`
+            `Its retained result stays inspectable and mergeable; to continue this line of work, spawn a new run.`,
         ),
         {
           code: "SubagentTerminal",
@@ -7549,25 +8272,31 @@ This is one admitted recurring-automation tick. If this tick establishes that th
               "spawn_subagent",
             ],
           },
-        }
+        },
       );
     }
     if (typeof message !== "string" || !message.trim()) {
       throw new Error("notify to a subagent run requires non-empty content");
     }
     const participantId =
-      this.subscriptions.getParticipantId(run.taskChannelId) ?? this.participantId();
+      this.subscriptions.getParticipantId(run.taskChannelId) ??
+      this.participantId();
     if (!run.childParticipantId) {
       throw this.subagentReferenceError(
         `subagent ${run.runId} is not ready to receive targeted messages`,
-        { runId: run.runId }
+        { runId: run.runId },
       );
     }
     const messageId = `subagent-msg:${toolCallId}`;
-    await this.createChannelClient(run.taskChannelId).send(participantId, messageId, message, {
-      senderMetadata: { type: "agent", name: participantId },
-      to: [{ kind: "participant", participantId: run.childParticipantId }],
-    });
+    await this.createChannelClient(run.taskChannelId).send(
+      participantId,
+      messageId,
+      message,
+      {
+        senderMetadata: { type: "agent", name: participantId },
+        to: [{ kind: "participant", participantId: run.childParticipantId }],
+      },
+    );
     this.subagentRuns.touch(run.runId, Date.now());
     const handle = subagentRunHandle(run.runId);
     return this.toolText(`sent to subagent ${handle}`, {
@@ -7582,7 +8311,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     runId: string,
     query: string,
     parentChannelId?: string,
-    page: { limit: number; cursor?: string } = { limit: 20 }
+    page: { limit: number; cursor?: string } = { limit: 20 },
   ): Promise<AgentToolResult<Record<string, unknown>>> {
     const wrapperStartedAt = performance.now();
     const wrapperWallStartedAt = Date.now();
@@ -7605,12 +8334,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             reason: "not-external",
             agentKind: run.agentKind,
             status: run.status,
-          }
+          },
         );
       }
       const agentKind = normalizeSubagentAgentKind(run.agentKind);
       if (!agentKind || agentKind === "pi") {
-        throw new Error(`subagent ${run.runId} has invalid external agentKind ${run.agentKind}`);
+        throw new Error(
+          `subagent ${run.runId} has invalid external agentKind ${run.agentKind}`,
+        );
       }
       const providerSlot = externalSubagentProviderSlot(agentKind);
       const result = await this.rpc.call(
@@ -7625,7 +8356,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
               generationId: run.externalGenerationId,
             },
           ],
-        ]
+        ],
       );
       return this.toolText(JSON.stringify(result, null, 2), {
         runId: subagentRunHandle(run.runId),
@@ -7645,7 +8376,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     if (q === "status") {
       const [status, parentStatus] = await Promise.all([
         childStatus,
-        run.parentContextId ? vcs.status({ contextId: run.parentContextId }) : null,
+        run.parentContextId
+          ? vcs.status({ contextId: run.parentContextId })
+          : null,
       ]);
       statusFetchMs = performance.now() - childStatusStartedAt;
       if (status.clean && status.committed.kind === "event") {
@@ -7657,7 +8390,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       result = status;
     } else if (q === "diff") {
       if (!run.parentContextId) {
-        throw new Error(`subagent ${run.runId} has no parent context for a relative diff`);
+        throw new Error(
+          `subagent ${run.runId} has no parent context for a relative diff`,
+        );
       }
       const [status, parentStatus] = await Promise.all([
         childStatus,
@@ -7716,7 +8451,11 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       statusFetchMs = performance.now() - childStatusStartedAt;
       const requestedPath = q.replace(/^\/+/, "");
       const queryStartedAt = performance.now();
-      const file = await resolveToolFile(vcs, status.workingHead, requestedPath);
+      const file = await resolveToolFile(
+        vcs,
+        status.workingHead,
+        requestedPath,
+      );
       semanticQueryMs = performance.now() - queryStartedAt;
       if (!file) {
         throw this.subagentReferenceError(
@@ -7726,7 +8465,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             runId: run.runId,
             path: requestedPath,
             referenceKind: "child-file-path",
-          }
+          },
         );
       }
       result = file;
@@ -7736,7 +8475,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       this.traceHotPath(run.parentChannelId, "subagent-inspect.completed", {
         startedAt: wrapperWallStartedAt,
         details: {
-          queryKind: q === "status" || q === "diff" || q === "log" ? q : "managed-file",
+          queryKind:
+            q === "status" || q === "diff" || q === "log" ? q : "managed-file",
           runResolutionMs: Math.round(runResolvedAt - wrapperStartedAt),
           statusFetchMs: Math.round(statusFetchMs),
           semanticQueryMs: Math.round(semanticQueryMs),
@@ -7745,16 +8485,17 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       });
     }
     return this.toolText(
-      renderedResult ?? (typeof result === "string" ? result : JSON.stringify(result, null, 2)),
+      renderedResult ??
+        (typeof result === "string" ? result : JSON.stringify(result, null, 2)),
       {
         runId: subagentRunHandle(run.runId),
         query: q,
         semanticIntegration: semanticIntegrationForRun(
           semanticRun,
           semanticProjections,
-          semanticWorkingHead
+          semanticWorkingHead,
         ),
-      }
+      },
     );
   }
 
@@ -7764,7 +8505,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     parentChannelId?: string,
     resolutions: VcsMergeInput["resolutions"] = [],
     intentSummary?: string,
-    toolRpc: RpcClient = this.rpc
+    toolRpc: RpcClient = this.rpc,
   ): Promise<AgentToolResult<Record<string, unknown>>> {
     const wrapperStartedAt = performance.now();
     const wrapperWallStartedAt = Date.now();
@@ -7776,7 +8517,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       });
     }
     if (!run.parentContextId) {
-      throw new Error(`subagent ${run.runId} has no recoverable parent context`);
+      throw new Error(
+        `subagent ${run.runId} has no recoverable parent context`,
+      );
     }
 
     const vcs = createSubagentVcsClient(toolRpc);
@@ -7807,7 +8550,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           runId: subagentRunHandle(run.runId),
           status: "source-uncommitted",
           source: sourceStatus,
-        }
+        },
       );
     }
     if (sourceStatus.committed.kind !== "event") {
@@ -7845,7 +8588,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             ? "integrating"
             : "needs-decision",
       source,
-      remainingCoordinateCount: driven.review.resolution.remainingCoordinateCount,
+      remainingCoordinateCount:
+        driven.review.resolution.remainingCoordinateCount,
       mergeableCoordinateCount:
         driven.review.counts.adopt +
         driven.review.counts.composed +
@@ -7891,7 +8635,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   protected async readSubagent(
     runId: string,
     afterSeq: number,
-    parentChannelId?: string
+    parentChannelId?: string,
   ): Promise<AgentToolResult<Record<string, unknown>>> {
     const run = await this.resolveSubagentRun(runId, parentChannelId);
     if (!run) {
@@ -7899,7 +8643,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         runId,
       });
     }
-    const envelope = await this.createChannelClient(run.taskChannelId).getReplayAfter({
+    const envelope = await this.createChannelClient(
+      run.taskChannelId,
+    ).getReplayAfter({
       after: Number.isFinite(afterSeq) ? afterSeq : 0,
     });
     let nextSeq = Number.isFinite(afterSeq) ? afterSeq : 0;
@@ -7908,7 +8654,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       nextSeq = Math.max(nextSeq, event.id ?? 0);
       if (event.type !== AGENTIC_EVENT_PAYLOAD_KIND) continue;
       const agentic = event.payload as AgenticEvent | null;
-      if ((agentic as { kind?: string } | null)?.kind !== "message.completed") continue;
+      if ((agentic as { kind?: string } | null)?.kind !== "message.completed")
+        continue;
       const text = this.extractMessageText(agentic);
       if (!text) continue;
       messages.push({
@@ -7934,7 +8681,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         },
       };
     }
-    const rendered = messages.map((m) => `[#${m.seq} ${m.author}]\n${m.text}`).join("\n\n");
+    const rendered = messages
+      .map((m) => `[#${m.seq} ${m.author}]\n${m.text}`)
+      .join("\n\n");
     return this.toolText(rendered, {
       runId: subagentRunHandle(run.runId),
       nextSeq,
@@ -7949,7 +8698,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     runId: string,
     reason: string,
     parentChannelId?: string,
-    toolRpc: RpcClient = this.rpc
+    toolRpc: RpcClient = this.rpc,
   ): Promise<AgentToolResult<Record<string, unknown>>> {
     const run = await this.resolveSubagentRun(runId, parentChannelId);
     if (!run)
@@ -7959,7 +8708,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     if (run.status !== "starting" && run.status !== "running") {
       return this.toolText(
         `Subagent ${subagentRunHandle(run.runId)} is already ${run.status}; no cancellation was performed.`,
-        { ...this.subagentRunDetails(run), cancelled: false, terminal: true }
+        { ...this.subagentRunDetails(run), cancelled: false, terminal: true },
       );
     }
     // Durable cancel intent BEFORE any side effect: a crash anywhere between
@@ -7981,7 +8730,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         // Eligible only after a grace delay: the inline drive below is the
         // normal path; the wake row is the crash-recovery driver.
         now + CHANNEL_ENVELOPE_RETRY_MS,
-        now
+        now,
       );
     });
     await this.driveCancelSubagent(run.runId, reason, toolRpc);
@@ -8003,26 +8752,32 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private async driveCancelSubagent(
     runId: string,
     reason: string,
-    toolRpc: RpcClient = this.rpc
+    toolRpc: RpcClient = this.rpc,
   ): Promise<void> {
     const run = this.subagentRuns.get(runId);
     if (!run || (run.status !== "starting" && run.status !== "running")) return;
     if (run.externalSessionEntityId && run.externalGenerationId) {
       const agentKind = normalizeSubagentAgentKind(run.agentKind);
       if (!agentKind || agentKind === "pi") {
-        throw new Error(`cancel_subagent: invalid external agent kind ${run.agentKind}`);
+        throw new Error(
+          `cancel_subagent: invalid external agent kind ${run.agentKind}`,
+        );
       }
       const providerSlot = externalSubagentProviderSlot(agentKind);
-      await toolRpc.call("main", providerSlot ? "extensions.invokeProvider" : "extensions.invoke", [
-        providerSlot ?? externalSubagentExtensionId(agentKind),
-        "release",
+      await toolRpc.call(
+        "main",
+        providerSlot ? "extensions.invokeProvider" : "extensions.invoke",
         [
-          {
-            entityId: run.externalSessionEntityId,
-            generationId: run.externalGenerationId,
-          },
+          providerSlot ?? externalSubagentExtensionId(agentKind),
+          "release",
+          [
+            {
+              entityId: run.externalSessionEntityId,
+              generationId: run.externalGenerationId,
+            },
+          ],
         ],
-      ]);
+      );
     } else {
       await toolRpc.call(run.childEntityId, "cancelSubagentExecution", [
         { runId: run.runId, taskChannelId: run.taskChannelId, reason },
@@ -8044,10 +8799,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     reason: string;
   }): Promise<{ cancelled: true }> {
     const subagent = this.subagentIdentity();
-    if (!subagent || subagent.runId !== input.runId || subagent.parentRef !== this.rpcCallerId) {
-      throw new Error("cancelSubagentExecution: caller does not own this subagent run");
+    if (
+      !subagent ||
+      subagent.runId !== input.runId ||
+      subagent.parentRef !== this.rpcCallerId
+    ) {
+      throw new Error(
+        "cancelSubagentExecution: caller does not own this subagent run",
+      );
     }
-    await this.recordOwnSubagentTerminalIntent(subagent, input.reason, "cancelled");
+    await this.recordOwnSubagentTerminalIntent(
+      subagent,
+      input.reason,
+      "cancelled",
+    );
     await this.driver.abortChannel(input.taskChannelId, input.reason);
     return { cancelled: true };
   }
@@ -8064,8 +8829,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     reason: string;
   }): Promise<{ retired: true }> {
     const subagent = this.subagentIdentity();
-    if (!subagent || subagent.runId !== input.runId || subagent.parentRef !== this.rpcCallerId) {
-      throw new Error("retireSubagentExecution: caller does not own this subagent run");
+    if (
+      !subagent ||
+      subagent.runId !== input.runId ||
+      subagent.parentRef !== this.rpcCallerId
+    ) {
+      throw new Error(
+        "retireSubagentExecution: caller does not own this subagent run",
+      );
     }
     const wakeId = `subagent-terminal-publish:${subagent.runId}`;
     const now = Date.now();
@@ -8085,14 +8856,17 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         }),
         wakeId,
         now,
-        now
+        now,
       );
     });
     await this.driver.abortChannel(input.taskChannelId, input.reason);
     return { retired: true };
   }
 
-  private subagentReferenceError(message: string, detail: Record<string, unknown>): Error {
+  private subagentReferenceError(
+    message: string,
+    detail: Record<string, unknown>,
+  ): Error {
     return Object.assign(new Error(message), {
       code: "InvalidReference",
       errorData: {
@@ -8111,14 +8885,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
    *  the parent's settle is idempotent by run identity. */
   protected async completeAsSubagent(
     report: string,
-    outcome: "success" | "failed"
+    outcome: "success" | "failed",
   ): Promise<AgentToolResult<Record<string, unknown>>> {
     const sub = this.subagentIdentity();
     if (!sub) throw new Error("complete is only available to subagents");
     await this.recordOwnSubagentTerminalIntent(
       sub,
       report,
-      outcome === "failed" ? "failed" : "completed"
+      outcome === "failed" ? "failed" : "completed",
     );
     return {
       ...this.toolText("subagent run completed; terminal delivery is durable", {
@@ -8137,7 +8911,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private async recordOwnSubagentTerminalIntent(
     sub: SubagentIdentity,
     report: string,
-    outcome: "completed" | "failed" | "cancelled"
+    outcome: "completed" | "failed" | "cancelled",
   ): Promise<void> {
     const contextId = this.subscriptions.getContextId(sub.taskChannelId);
     const childStatus = await createSubagentVcsClient(this.rpc).status({
@@ -8172,7 +8946,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         }),
         wakeId,
         now,
-        now
+        now,
       );
     });
     this.markWorkReady("agent-wake");
@@ -8187,15 +8961,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   protected async settleSubagentTerminal(
     run: SubagentRunRow,
     outcome: "completed" | "failed" | "cancelled" | "abandoned",
-    text: string
+    text: string,
   ): Promise<void> {
-    const canonicalStatus = await this.publishSubagentTerminal(run, outcome, text);
+    const canonicalStatus = await this.publishSubagentTerminal(
+      run,
+      outcome,
+      text,
+    );
     this.subagentRuns.setStatus(run.runId, canonicalStatus);
   }
 
   private async publishSubagentStarted(run: SubagentRunRow): Promise<void> {
     const participantId =
-      this.subscriptions.getParticipantId(run.parentChannelId) ?? this.participantId();
+      this.subscriptions.getParticipantId(run.parentChannelId) ??
+      this.participantId();
     const actor: ActorRef = {
       kind: "agent",
       id: run.childEntityId,
@@ -8235,16 +9014,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       },
       createdAt: new Date().toISOString(),
     } as unknown as AgenticEvent;
-    await this.createChannelClient(run.parentChannelId).publishAgenticEvent(participantId, event, {
-      idempotencyKey: `subagent-started:${run.runId}`,
-      senderMetadata: actor.metadata,
-    });
+    await this.createChannelClient(run.parentChannelId).publishAgenticEvent(
+      participantId,
+      event,
+      {
+        idempotencyKey: `subagent-started:${run.runId}`,
+        senderMetadata: actor.metadata,
+      },
+    );
   }
 
   private async publishSubagentTerminal(
     run: SubagentRunRow,
     outcome: "completed" | "failed" | "cancelled" | "abandoned",
-    text: string
+    text: string,
   ): Promise<"completed" | "failed" | "cancelled" | "abandoned"> {
     const kindByOutcome = {
       completed: "task.completed",
@@ -8259,7 +9042,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       abandoned: "abandoned",
     } as const;
     const participantId =
-      this.subscriptions.getParticipantId(run.taskChannelId) ?? this.participantId();
+      this.subscriptions.getParticipantId(run.taskChannelId) ??
+      this.participantId();
     const actor: ActorRef = {
       kind: "agent",
       id: participantId,
@@ -8275,7 +9059,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     // replay-recovered receipt keeps its raw-VCS recovery recipe (the run row
     // may have been refreshed after `run` was captured).
     const sourceEventId =
-      this.subagentRuns.get(run.runId)?.sourceEventId ?? run.sourceEventId ?? null;
+      this.subagentRuns.get(run.runId)?.sourceEventId ??
+      run.sourceEventId ??
+      null;
     const terminalDetails = {
       runId: subagentRunHandle(run.runId),
       outcome: terminalOutcomeByOutcome[outcome],
@@ -8318,14 +9104,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       senderMetadata: actor.metadata,
     });
     const canonicalEnvelope = (await taskChannel.getEnvelope(
-      `ik:subagent-terminal:${run.runId}`
+      `ik:subagent-terminal:${run.runId}`,
     )) as ChannelEvent | null;
     const canonicalStatus = canonicalEnvelope
       ? this.authorizedSubagentTerminalStatus(run, canonicalEnvelope)
       : null;
     if (!canonicalEnvelope || !canonicalStatus) {
       throw new Error(
-        `subagent terminal ${run.runId} has no authorized canonical task-channel event`
+        `subagent terminal ${run.runId} has no authorized canonical task-channel event`,
       );
     }
     const canonicalEvent = canonicalEnvelope.payload as AgenticEvent;
@@ -8335,7 +9121,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private authorizedSubagentTerminalStatus(
     run: SubagentRunRow,
-    envelope: ChannelEvent
+    envelope: ChannelEvent,
   ): "completed" | "failed" | "cancelled" | "abandoned" | null {
     if (envelope.type !== AGENTIC_EVENT_PAYLOAD_KIND) return null;
     const event = envelope.payload as AgenticEvent;
@@ -8343,14 +9129,18 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     if (!status) return null;
     const childParticipantId = run.childParticipantId ?? run.childEntityId;
     const actorParticipantId = event.actor.participantId ?? event.actor.id;
-    if (envelope.senderId === childParticipantId && actorParticipantId === childParticipantId) {
+    if (
+      envelope.senderId === childParticipantId &&
+      actorParticipantId === childParticipantId
+    ) {
       return status;
     }
     // A supervisor may author cancellation/abandonment/infrastructure failure
     // facts when the child is unreachable. Successful completion is child
     // evidence and can never be asserted by the supervisor.
     const supervisorParticipantId =
-      this.subscriptions.getParticipantId(run.taskChannelId) ?? this.participantId();
+      this.subscriptions.getParticipantId(run.taskChannelId) ??
+      this.participantId();
     return status !== "completed" &&
       envelope.senderId === supervisorParticipantId &&
       actorParticipantId === supervisorParticipantId
@@ -8360,7 +9150,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private subagentTerminalStatus(
     event: AgenticEvent,
-    runId: string
+    runId: string,
   ): "completed" | "failed" | "cancelled" | "abandoned" | null {
     if (event.causality?.taskId !== runId) return null;
     switch (event.kind) {
@@ -8379,17 +9169,20 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
   private async mirrorSubagentTerminalToParent(
     run: SubagentRunRow,
-    canonicalEvent: AgenticEvent
+    canonicalEvent: AgenticEvent,
   ): Promise<void> {
     if (!this.subagentTerminalStatus(canonicalEvent, run.runId)) {
-      throw new Error(`refusing to mirror a non-canonical terminal for subagent ${run.runId}`);
+      throw new Error(
+        `refusing to mirror a non-canonical terminal for subagent ${run.runId}`,
+      );
     }
     const participantId =
-      this.subscriptions.getParticipantId(run.parentChannelId) ?? this.participantId();
+      this.subscriptions.getParticipantId(run.parentChannelId) ??
+      this.participantId();
     await this.createChannelClient(run.parentChannelId).publishAgenticEvent(
       participantId,
       canonicalEvent,
-      { idempotencyKey: `subagent-terminal:${run.runId}` }
+      { idempotencyKey: `subagent-terminal:${run.runId}` },
     );
   }
 
@@ -8414,7 +9207,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           ? "tool_error"
           : "cancelled";
     const participantId =
-      this.subscriptions.getParticipantId(input.taskChannelId) ?? this.participantId();
+      this.subscriptions.getParticipantId(input.taskChannelId) ??
+      this.participantId();
     const actor: ActorRef = {
       kind: "agent",
       id: participantId,
@@ -8432,7 +9226,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             protocol: AGENTIC_PROTOCOL_VERSION,
             terminalOutcome,
             summary: input.report,
-            to: [{ kind: "participant" as const, participantId: input.parentRef }],
+            to: [
+              { kind: "participant" as const, participantId: input.parentRef },
+            ],
             result: {
               protocolContent: [{ type: "text", text: input.report }],
               details,
@@ -8442,7 +9238,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             protocol: AGENTIC_PROTOCOL_VERSION,
             reason: input.report,
             terminalOutcome,
-            to: [{ kind: "participant" as const, participantId: input.parentRef }],
+            to: [
+              { kind: "participant" as const, participantId: input.parentRef },
+            ],
             details,
           };
     const event = {
@@ -8455,16 +9253,24 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       payload,
       createdAt: new Date().toISOString(),
     } as unknown as AgenticEvent;
-    await this.createChannelClient(input.taskChannelId).publishAgenticEvent(participantId, event, {
-      idempotencyKey: `subagent-terminal:${input.runId}`,
-      senderMetadata: actor.metadata,
-    });
+    await this.createChannelClient(input.taskChannelId).publishAgenticEvent(
+      participantId,
+      event,
+      {
+        idempotencyKey: `subagent-terminal:${input.runId}`,
+        senderMetadata: actor.metadata,
+      },
+    );
   }
   /** Compensation for a spawn transaction that never reached a published
    * running result. This is intentionally unreachable from normal lifecycle. */
-  private async rollbackFailedSubagentSpawn(run: SubagentRunRow): Promise<void> {
+  private async rollbackFailedSubagentSpawn(
+    run: SubagentRunRow,
+  ): Promise<void> {
     if (run.status !== "starting") {
-      throw new Error(`refusing spawn rollback for ${run.runId} in ${run.status}`);
+      throw new Error(
+        `refusing spawn rollback for ${run.runId} in ${run.status}`,
+      );
     }
     if (run.externalSessionEntityId && run.externalGenerationId) {
       const agentKind = normalizeSubagentAgentKind(run.agentKind);
@@ -8484,7 +9290,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
               generationId: run.externalGenerationId,
             },
           ],
-        ]
+        ],
       );
     }
     await this.unsubscribeChannel(run.taskChannelId);
@@ -8497,14 +9303,16 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   // ── Wake discipline (explicit supervisor messages / manual) ─────────────────
 
   private extractMessageText(agentic: AgenticEvent | null): string {
-    const blocks = (agentic as { payload?: { blocks?: unknown[] } } | null)?.payload?.blocks ?? [];
+    const blocks =
+      (agentic as { payload?: { blocks?: unknown[] } } | null)?.payload
+        ?.blocks ?? [];
     return blocks
       .map((block) =>
         block &&
         typeof block === "object" &&
         typeof (block as { content?: unknown }).content === "string"
           ? (block as { content: string }).content
-          : ""
+          : "",
       )
       .filter(Boolean)
       .join("\n");
@@ -8515,10 +9323,12 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     payload: {
       mentions?: string[];
       to?: Array<{ kind?: string; participantId?: string }>;
-    }
+    },
   ): boolean {
-    const selfPid = this.subscriptions.getParticipantId(channelId) ?? this.participantId();
-    if (Array.isArray(payload.mentions) && payload.mentions.includes(selfPid)) return true;
+    const selfPid =
+      this.subscriptions.getParticipantId(channelId) ?? this.participantId();
+    if (Array.isArray(payload.mentions) && payload.mentions.includes(selfPid))
+      return true;
     if (Array.isArray(payload.to)) {
       for (const target of payload.to) {
         if (target?.kind === "all") return true;
@@ -8537,7 +9347,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private async resolveWake(
     channelId: string,
     event: ChannelEvent,
-    wakePolicy: "explicit" | "manual"
+    wakePolicy: "explicit" | "manual",
   ): Promise<boolean> {
     if (wakePolicy === "manual") {
       // Never auto-wake; the supervisor reads via the read_subagent tool.
@@ -8554,8 +9364,15 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           mentions?: string[];
           to?: Array<{ kind?: string; participantId?: string }>;
         }) ?? {};
-      if (payload.saliency === "say" || this.eventAddressesSelf(channelId, payload)) {
-        await this.wakeSupervisorFromExplicitChildMessage(channelId, event, agentic);
+      if (
+        payload.saliency === "say" ||
+        this.eventAddressesSelf(channelId, payload)
+      ) {
+        await this.wakeSupervisorFromExplicitChildMessage(
+          channelId,
+          event,
+          agentic,
+        );
       }
       return true;
     }
@@ -8567,21 +9384,25 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   private async wakeSupervisorFromExplicitChildMessage(
     channelId: string,
     event: ChannelEvent,
-    agentic: AgenticEvent
+    agentic: AgenticEvent,
   ): Promise<void> {
     const run = this.subagentRuns.getByTaskChannel(channelId);
     if (!run) {
-      console.error("[AgentVessel] refusing explicit task message without an owning subagent run", {
-        taskChannelId: channelId,
-        eventId: event.id ?? null,
-      });
+      console.error(
+        "[AgentVessel] refusing explicit task message without an owning subagent run",
+        {
+          taskChannelId: channelId,
+          eventId: event.id ?? null,
+        },
+      );
       return;
     }
     const update = this.extractMessageText(agentic).trim();
     if (!update) return;
     this.subagentRuns.touch(run.runId, Date.now());
     const label = run.label ? `"${run.label}"` : subagentRunHandle(run.runId);
-    const sourceMessageId = (agentic.causality?.messageId as string | undefined) ?? event.messageId;
+    const sourceMessageId =
+      (agentic.causality?.messageId as string | undefined) ?? event.messageId;
     const content =
       `Subagent ${label} sent an explicit progress update for the existing user request. ` +
       `This is not a new request and does not mean the run is complete. Continue supervising ` +
@@ -8611,7 +9432,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
   }
 
   private activationDebugState(channelId?: string): Record<string, unknown> {
-    const channels = channelId ? [channelId] : this.subscriptions.listChannelIds();
+    const channels = channelId
+      ? [channelId]
+      : this.subscriptions.listChannelIds();
     const loops: Record<string, unknown> = {};
     for (const id of channels) {
       const loop = this._driver?.peekLoadedLoop(id) ?? null;
@@ -8631,7 +9454,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           lastSeq: loop.state.lastSeq,
           pendingInvocations: Object.keys(loop.state.pendingInvocations),
           pendingApprovals: Object.keys(loop.state.pendingApprovals),
-          pendingCredentialWaits: Object.keys(loop.state.pendingCredentialWaits),
+          pendingCredentialWaits: Object.keys(
+            loop.state.pendingCredentialWaits,
+          ),
           activeToolNames: loop.state.config.activeToolNames,
           settings: this.inspectAgentSettings(),
           promptPresentation,
@@ -8648,7 +9473,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       participantId: this.participantId(),
       loops,
       outbox: inspectEffectOutbox(this.sql),
-      activeDispatches: this._driver?.activeDispatchDiagnostics?.(channelId) ?? [],
+      activeDispatches:
+        this._driver?.activeDispatchDiagnostics?.(channelId) ?? [],
       retainedSubagentRuns: this.subagentRuns.listAll().length,
       liveSubagentRuns: this.subagentRuns.countLive(),
     };
@@ -8688,7 +9514,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         id: this.participantId(),
         objectKey: this.objectKey,
         source: String(this.env["WORKER_SOURCE"] ?? ""),
-        className: String(this.env["WORKER_CLASS_NAME"] ?? this.constructor.name),
+        className: String(
+          this.env["WORKER_CLASS_NAME"] ?? this.constructor.name,
+        ),
       },
       config: this.getAgentSettings(),
       channels: this.subscriptions.listAll(),
@@ -8715,7 +9543,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     if ("thinkingLevel" in patch) {
       const l = patch["thinkingLevel"];
       if (!isThinkingLevel(l)) {
-        throw new Error("thinkingLevel must be minimal|low|medium|high|xhigh|max");
+        throw new Error(
+          "thinkingLevel must be minimal|low|medium|high|xhigh|max",
+        );
       }
       next.thinkingLevel = l;
     }
@@ -8726,15 +9556,22 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       next.fastMode = patch["fastMode"];
     }
     if ("fallbackModel" in patch) {
-      if (typeof patch["fallbackModel"] !== "string" || !patch["fallbackModel"]) {
-        throw new Error("fallbackModel must be a non-empty 'provider:model' string");
+      if (
+        typeof patch["fallbackModel"] !== "string" ||
+        !patch["fallbackModel"]
+      ) {
+        throw new Error(
+          "fallbackModel must be a non-empty 'provider:model' string",
+        );
       }
       next.fallbackModel = patch["fallbackModel"];
     }
     if ("fallbackThinkingLevel" in patch) {
       const level = patch["fallbackThinkingLevel"];
       if (!isThinkingLevel(level)) {
-        throw new Error("fallbackThinkingLevel must be minimal|low|medium|high|xhigh|max");
+        throw new Error(
+          "fallbackThinkingLevel must be minimal|low|medium|high|xhigh|max",
+        );
       }
       next.fallbackThinkingLevel = level;
     }
@@ -8743,7 +9580,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         throw new Error(
           `fallbackOn must be a non-empty array containing only ${[
             ...CONFIGURABLE_FALLBACK_FAILURE_CODES,
-          ].join("|")}`
+          ].join("|")}`,
         );
       }
       next.fallbackOn = [...patch["fallbackOn"]];
@@ -8757,17 +9594,21 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     }
     if ("approvalLevel" in patch) {
       const l = patch["approvalLevel"];
-      if (l !== 0 && l !== 1 && l !== 2) throw new Error("approvalLevel must be 0, 1, or 2");
+      if (l !== 0 && l !== 1 && l !== 2)
+        throw new Error("approvalLevel must be 0, 1, or 2");
       next.approvalLevel = l;
     }
     if ("respondPolicy" in patch) {
-      if (!isRespondPolicy(patch["respondPolicy"])) throw new Error("invalid respondPolicy");
+      if (!isRespondPolicy(patch["respondPolicy"]))
+        throw new Error("invalid respondPolicy");
       next.respondPolicy = patch["respondPolicy"];
     }
     if ("respondFrom" in patch) {
       const from = patch["respondFrom"];
       if (!Array.isArray(from) || !from.every((x) => typeof x === "string")) {
-        throw new Error("respondFrom must be an array of handle/participant strings");
+        throw new Error(
+          "respondFrom must be an array of handle/participant strings",
+        );
       }
       next.respondFrom = from as string[];
     }
@@ -8779,7 +9620,9 @@ function automationCompletionStateKey(runId: string): string {
   return `automation:completion:${runId}`;
 }
 
-function automationDefinitionSnapshot(automation: MissionRecord): AutomationDefinitionSnapshot {
+function automationDefinitionSnapshot(
+  automation: MissionRecord,
+): AutomationDefinitionSnapshot {
   const execution = automation.charter.execution;
   const trigger = automation.charter.trigger;
   return {
@@ -8790,24 +9633,38 @@ function automationDefinitionSnapshot(automation: MissionRecord): AutomationDefi
     action: execution.kind === "method" ? "method" : execution.action.kind,
     createdAt: automation.createdAt,
     state: "active",
-    ...(automation.nextRunAt === undefined ? {} : { nextRunAt: automation.nextRunAt }),
+    ...(automation.nextRunAt === undefined
+      ? {}
+      : { nextRunAt: automation.nextRunAt }),
     schedule:
       trigger.kind === "schedule"
         ? {
             kind: "interval",
             everyMs: trigger.everyMs,
-            ...(trigger.anchorAt === undefined ? {} : { anchorAt: trigger.anchorAt }),
-            ...(trigger.jitterMs === undefined ? {} : { jitterMs: trigger.jitterMs }),
-            ...(trigger.untilAt === undefined ? {} : { untilAt: trigger.untilAt }),
-            ...(trigger.maxRuns === undefined ? {} : { maxRuns: trigger.maxRuns }),
+            ...(trigger.anchorAt === undefined
+              ? {}
+              : { anchorAt: trigger.anchorAt }),
+            ...(trigger.jitterMs === undefined
+              ? {}
+              : { jitterMs: trigger.jitterMs }),
+            ...(trigger.untilAt === undefined
+              ? {}
+              : { untilAt: trigger.untilAt }),
+            ...(trigger.maxRuns === undefined
+              ? {}
+              : { maxRuns: trigger.maxRuns }),
           }
         : trigger.kind === "cron"
           ? {
               kind: "cron",
               expression: trigger.expression,
               timezone: trigger.timezone,
-              ...(trigger.untilAt === undefined ? {} : { untilAt: trigger.untilAt }),
-              ...(trigger.maxRuns === undefined ? {} : { maxRuns: trigger.maxRuns }),
+              ...(trigger.untilAt === undefined
+                ? {}
+                : { untilAt: trigger.untilAt }),
+              ...(trigger.maxRuns === undefined
+                ? {}
+                : { maxRuns: trigger.maxRuns }),
             }
           : null,
   };
@@ -8816,7 +9673,7 @@ function automationDefinitionSnapshot(automation: MissionRecord): AutomationDefi
 function automationCompletionForTurn(
   value: string | null,
   channelId: string,
-  turnId: string
+  turnId: string,
 ): { response: string } | null {
   if (!value) return null;
   try {
@@ -8837,17 +9694,21 @@ function automationCompletionForTurn(
 }
 
 function automationCompletionFromEvalSummary(
-  summary: string | undefined
+  summary: string | undefined,
 ): { response: string } | null {
   if (!summary) return null;
   try {
     const value = JSON.parse(summary) as unknown;
     const direct = missionCompletionResponse(value);
     if (direct) return direct;
-    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    if (!value || typeof value !== "object" || Array.isArray(value))
+      return null;
     const details = (value as { details?: unknown }).details;
-    if (!details || typeof details !== "object" || Array.isArray(details)) return null;
-    return missionCompletionResponse((details as { returnValue?: unknown }).returnValue);
+    if (!details || typeof details !== "object" || Array.isArray(details))
+      return null;
+    return missionCompletionResponse(
+      (details as { returnValue?: unknown }).returnValue,
+    );
   } catch {
     return null;
   }

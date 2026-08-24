@@ -76,7 +76,9 @@ type StandardAgentMethodOptions = {
   exclude?: readonly StandardAgentMethodName[];
 };
 
-export function hasAskableUser(roster: readonly { ref: { kind: string } }[]): boolean {
+export function hasAskableUser(
+  roster: readonly { ref: { kind: string } }[],
+): boolean {
   return roster.some((participant) => participant.ref.kind === "user");
 }
 
@@ -90,12 +92,14 @@ function firstLine(content: string): string {
 function normalizeAddresseeRefs(value: unknown): string[] {
   if (value == null) return [];
   const list = Array.isArray(value) ? value : [value];
-  return list.filter((ref): ref is string => typeof ref === "string" && ref.trim().length > 0);
+  return list.filter(
+    (ref): ref is string => typeof ref === "string" && ref.trim().length > 0,
+  );
 }
 
 /** Group foreign addressees by target channel: one envelope per channel. */
 function groupByChannel(
-  addressees: readonly ResolvedAddressee[]
+  addressees: readonly ResolvedAddressee[],
 ): Array<{ channelId: string; addressees: ResolvedAddressee[] }> {
   const byChannel = new Map<string, ResolvedAddressee[]>();
   for (const entry of addressees) {
@@ -103,7 +107,10 @@ function groupByChannel(
     if (list) list.push(entry);
     else byChannel.set(entry.channelId, [entry]);
   }
-  return [...byChannel].map(([channelId, list]) => ({ channelId, addressees: list }));
+  return [...byChannel].map(([channelId, list]) => ({
+    channelId,
+    addressees: list,
+  }));
 }
 
 /** A resolution failure reaches the model verbatim, suggestions and all: the
@@ -147,7 +154,7 @@ function broadcastsToChannel(resolved: ResolvedAddressee): boolean {
 
 /** The channel audience for the addressees that live on this channel. */
 function audienceSelectors(
-  resolved: readonly ResolvedAddressee[]
+  resolved: readonly ResolvedAddressee[],
 ): Array<{ kind: "participant"; participantId: string }> {
   const seen = new Set<string>();
   const selectors: Array<{ kind: "participant"; participantId: string }> = [];
@@ -156,7 +163,9 @@ function audienceSelectors(
     // an audience selector here — this channel's roster has never heard of it.
     if (entry.kind === "run" || entry.foreign) continue;
     const participantId =
-      entry.kind === "participant" || entry.kind === "parent" || entry.kind === "agent"
+      entry.kind === "participant" ||
+      entry.kind === "parent" ||
+      entry.kind === "agent"
         ? entry.participantId
         : entry.kind === "user"
           ? (entry.participantId ?? `user:${entry.userId}`)
@@ -169,7 +178,9 @@ function audienceSelectors(
 }
 
 function requireBoundMutationInvocation(): never {
-  throw new Error("A semantic mutation cannot execute without a bound trajectory invocation");
+  throw new Error(
+    "A semantic mutation cannot execute without a bound trajectory invocation",
+  );
 }
 
 export abstract class AgentWorkerBase extends AgentVesselBase {
@@ -197,24 +208,30 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
   }
 
   protected override getModelCredentialSetupProps(
-    providerId: string
+    providerId: string,
   ): Record<string, unknown> | null {
     return (
-      (PROVIDER_CREDENTIAL_SETUPS as Record<string, Record<string, unknown>>)[providerId] ?? null
+      (PROVIDER_CREDENTIAL_SETUPS as Record<string, Record<string, unknown>>)[
+        providerId
+      ] ?? null
     );
   }
 
-  protected override async loadPromptResources(_channelId: string): Promise<AgentPromptResources> {
+  protected override async loadPromptResources(
+    _channelId: string,
+  ): Promise<AgentPromptResources> {
     if (this.promptResourceCache) return this.promptResourceCache;
     if (this.promptResourceLoad) return this.promptResourceLoad;
 
     const load = import("@workspace/harness/resource-loader")
-      .then(({ loadVibestudioResources }) => loadVibestudioResources({ rpc: this.rpc }))
+      .then(({ loadVibestudioResources }) =>
+        loadVibestudioResources({ rpc: this.rpc }),
+      )
       .then(
         (resources): AgentPromptResources => ({
           workspacePrompt: resources.systemPrompt,
           skillIndex: resources.skillIndex,
-        })
+        }),
       )
       .then((value) => {
         this.promptResourceCache = value;
@@ -236,7 +253,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
    *  agent's exact semantic context. */
   protected override async getLoopTools(
     channelId: string,
-    execution?: AgentToolExecutionContext
+    execution?: AgentToolExecutionContext,
   ): Promise<AgentTool[]> {
     // The complete authoring toolset carries parsers, runtime catalogs, schema
     // conversion, and provider adapters. A DO can service lifecycle and
@@ -274,20 +291,26 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
     // caller's context); writes go through the canonical semantic VCS so the
     // exact working state is authoritative and disk is its projection.
     const vcs = createToolVcs(<T>(method: string, methodArgs: unknown[]) =>
-      toolRpc.call<T>("main", method, methodArgs)
+      toolRpc.call<T>("main", method, methodArgs),
     );
     const session = channelTrajectoryFor(channelId);
     const contextId = () => this.subscriptions.getContextId(channelId);
     const agentReferences = createAgentReferenceStore({
       get: (key) => this.getStateValue(`agent:refs:${channelId}:${key}`),
-      set: (key, value) => this.setStateValue(`agent:refs:${channelId}:${key}`, value),
+      set: (key, value) =>
+        this.setStateValue(`agent:refs:${channelId}:${key}`, value),
       delete: (key) => this.deleteStateValue(`agent:refs:${channelId}:${key}`),
     });
     const fileObservations = createWorkspaceFileObservationStore({
-      get: (path) => this.getStateValue(`agent:file-observation:${channelId}:${path}`),
+      get: (path) =>
+        this.getStateValue(`agent:file-observation:${channelId}:${path}`),
       set: (path, contentHash) =>
-        this.setStateValue(`agent:file-observation:${channelId}:${path}`, contentHash),
-      delete: (path) => this.deleteStateValue(`agent:file-observation:${channelId}:${path}`),
+        this.setStateValue(
+          `agent:file-observation:${channelId}:${path}`,
+          contentHash,
+        ),
+      delete: (path) =>
+        this.deleteStateValue(`agent:file-observation:${channelId}:${path}`),
     });
     // Tool registries are also built without an invocation to expose schemas
     // to the model. Defer the fail-closed check until a mutation executes.
@@ -301,7 +324,9 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       onIntegrationSourcesCommitted: (result: VcsCommitResult) => {
         if (result.event.kind !== "event") return;
         for (const sourceEventId of result.integrationSourceEventIds) {
-          for (const run of this.subagentRuns.listBySourceEvent(sourceEventId)) {
+          for (const run of this.subagentRuns.listBySourceEvent(
+            sourceEventId,
+          )) {
             this.subagentRuns.setSemanticIntegrationSnapshot(run.runId, {
               state: "complete",
               sourceEventId,
@@ -314,12 +339,14 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
     };
     const configuredModelRef = this.getAgentSettings().model;
     const configuredModelSeparator = configuredModelRef.indexOf(":");
-    const configuredProviderId = configuredModelSeparator === -1
-      ? "anthropic"
-      : configuredModelRef.slice(0, configuredModelSeparator);
-    const configuredProviderModel = configuredModelSeparator === -1
-      ? configuredModelRef
-      : configuredModelRef.slice(configuredModelSeparator + 1);
+    const configuredProviderId =
+      configuredModelSeparator === -1
+        ? "anthropic"
+        : configuredModelRef.slice(0, configuredModelSeparator);
+    const configuredProviderModel =
+      configuredModelSeparator === -1
+        ? configuredModelRef
+        : configuredModelRef.slice(configuredModelSeparator + 1);
     const base = [
       createReadTool(cwd, fs, {
         rpc: toolRpc,
@@ -340,7 +367,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           contextId,
           session: { logId: session.logId, head: session.head },
         },
-        agentReferences
+        agentReferences,
       ),
       createWriteTool(cwd, vcs, mutationContext, fs, fileObservations),
       createEditTool(cwd, vcs, mutationContext, fs, fileObservations),
@@ -352,27 +379,32 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       createCopyFileTool(cwd, vcs, mutationContext, fs),
       createWorkspaceVcsTool(cwd, vcs, mutationContext, agentReferences),
       createEvalTool(
-        <T>(method: string, methodArgs: unknown[]) => toolRpc.call<T>("main", method, methodArgs),
+        <T>(method: string, methodArgs: unknown[]) =>
+          toolRpc.call<T>("main", method, methodArgs),
         // Scope the agent's EvalDO per channel (matches the old per-(channel,panel) scope),
         // so one multi-channel agent doesn't share REPL scope/db across unrelated chats.
-        { subKey: channelId }
+        { subKey: channelId },
       ),
       // Capability discovery: search/open the caller-aware catalog (services
       // and runtime APIs) with typed schemas + access rules.
-      createDocsSearchTool(<T>(method: string, methodArgs: unknown[], signal?: AbortSignal) =>
-        toolRpc.call<T>("main", method, methodArgs, { signal })
+      createDocsSearchTool(
+        <T>(method: string, methodArgs: unknown[], signal?: AbortSignal) =>
+          toolRpc.call<T>("main", method, methodArgs, { signal }),
       ),
-      createDocsOpenTool(<T>(method: string, methodArgs: unknown[], signal?: AbortSignal) =>
-        toolRpc.call<T>("main", method, methodArgs, { signal })
+      createDocsOpenTool(
+        <T>(method: string, methodArgs: unknown[], signal?: AbortSignal) =>
+          toolRpc.call<T>("main", method, methodArgs, { signal }),
       ),
       createWorkspaceServiceTool(vcs, mutationContext, {
         validateConfig: (content) =>
-          toolRpc.call("main", "workspace.validateConfig", [content]).then(() => undefined),
+          toolRpc
+            .call("main", "workspace.validateConfig", [content])
+            .then(() => undefined),
       }),
       createVerifyTool(
         <T>(method: string, methodArgs: unknown[], signal?: AbortSignal) =>
           toolRpc.call<T>("main", method, methodArgs, { signal }),
-        contextId
+        contextId,
       ),
       createSuspendTurnTool({
         guard: async ({ reason }) => {
@@ -380,44 +412,50 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           return this.guardBackgroundSuspension(channelId);
         },
       }),
-      ...(hasAskableUser(this.rosterSnapshot(channelId)) ? [this.createAskUserTool()] : []),
+      ...(hasAskableUser(this.rosterSnapshot(channelId))
+        ? [this.createAskUserTool()]
+        : []),
       ...createWebTools({
         rpc: {
           call: (target, method, args) => toolRpc.call(target, method, args),
         },
         recordIngestion: (entry) =>
-          toolRpc.call("main", "contextIntegrity.ingest", [entry]).then(() => undefined),
+          toolRpc
+            .call("main", "contextIntegrity.ingest", [entry])
+            .then(() => undefined),
         hasCredentialForOrigin: async (origin) => {
           try {
             const credential = await this.rpc.call<unknown>(
               "main",
               "credentials.resolveCredential",
-              [{ url: origin }]
+              [{ url: origin }],
             );
             return credential != null;
           } catch {
             return false;
           }
         },
-        searchBackend: configuredProviderId === "openai-codex" ? "codex" : "standard",
+        searchBackend:
+          configuredProviderId === "openai-codex" ? "codex" : "standard",
         resolveCodexSearchSession: async (signal) => {
           if (configuredProviderId !== "openai-codex") return null;
           const credential = await toolRpc.call<StoredCredentialSummary | null>(
             "main",
             "credentials.resolveCredential",
             [{ url: "https://chatgpt.com/backend-api" }],
-            { signal }
+            { signal },
           );
           if (!credential) {
             throw new Error(
-              "OpenAI Codex subscription is not configured. Connect the openai-codex model provider first."
+              "OpenAI Codex subscription is not configured. Connect the openai-codex model provider first.",
             );
           }
           const accountId =
-            credential.accountIdentity?.providerUserId ?? credential.metadata?.["accountId"];
+            credential.accountIdentity?.providerUserId ??
+            credential.metadata?.["accountId"];
           if (!accountId) {
             throw new Error(
-              "OpenAI Codex account id is missing from the connected credential. Reconnect the openai-codex model provider."
+              "OpenAI Codex account id is missing from the connected credential. Reconnect the openai-codex model provider.",
             );
           }
           const credentialClient = createCredentialClient(toolRpc);
@@ -426,7 +464,9 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             accountId,
             sessionId: channelId,
             fetcher: (url: string, init?: RequestInit) =>
-              credentialClient.fetch(url, init, { credentialId: credential.id }),
+              credentialClient.fetch(url, init, {
+                credentialId: credential.id,
+              }),
           };
         },
       }),
@@ -473,13 +513,14 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           titleExplicit: true,
         });
         return {
-          content: [{ type: "text", text: `set conversation title to ${normalized}` }],
+          content: [
+            { type: "text", text: `set conversation title to ${normalized}` },
+          ],
           details: { title: normalized },
         };
       },
     };
   }
-
 
   /**
    * The agent's one-line self-description in the workspace directory
@@ -505,14 +546,17 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       } as never,
       execute: async (_toolCallId, params) => {
         const raw = (params as { description?: unknown }).description;
-        if (typeof raw !== "string") throw new Error("set_description requires a description");
+        if (typeof raw !== "string")
+          throw new Error("set_description requires a description");
         const description = raw.trim().replace(/\s+/gu, " ").slice(0, 200);
         await this.setAgentDescription(channelId, description || null);
         return {
           content: [
             {
               type: "text",
-              text: description ? `description set: ${description}` : "description cleared",
+              text: description
+                ? `description set: ${description}`
+                : "description cleared",
             },
           ],
           details: { description: description || null },
@@ -526,9 +570,11 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
    *
    * The host stays content-blind: this writes to the workspace's own semantic
    * control plane, and the host only ever sees the opaque "inbox changed" ping
-   * Gad raises. A failed escalation must not fail the message — the envelope is
-   * already on the channel, which is the canonical copy — so the error is
-   * reported back as a note rather than thrown.
+   * Gad raises. The channel envelope is the canonical conversational copy, but
+   * an explicit inbox/interrupt rung is also part of the requested tool effect.
+   * Do not convert a failed durable escalation into a successful notification:
+   * the invocation journal must record the failure so an automation and its
+   * inspector cannot silently claim delivery.
    */
   protected async escalateNotify(input: {
     userId: string;
@@ -539,7 +585,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
     rung: "inbox" | "interrupt";
     title: string;
     message: string;
-  }): Promise<string | null> {
+  }): Promise<string> {
     const id = agentMessageNotificationId(input.messageId, input.userId);
     const data: AgentMessageNotificationData = {
       channelId: input.channelId,
@@ -548,20 +594,16 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       ...(input.senderHandle ? { senderHandle: input.senderHandle } : {}),
       rung: input.rung,
     };
-    try {
-      await this.callGad("putUserNotification", {
-        id,
-        userId: input.userId,
-        kind: AGENT_MESSAGE_NOTIFICATION_KIND,
-        title: input.title,
-        message: input.message,
-        data,
-        createdAt: Date.now(),
-        revision: 1,
-      });
-    } catch {
-      return null;
-    }
+    await this.callGad("putUserNotification", {
+      id,
+      userId: input.userId,
+      kind: AGENT_MESSAGE_NOTIFICATION_KIND,
+      title: input.title,
+      message: input.message,
+      data,
+      createdAt: Date.now(),
+      revision: 1,
+    });
     // The push half (plan §4.5 step 5): the host owns device registrations, so
     // this is the one seam where the entry's headline crosses to it. Push fires
     // at `inbox` and above; `interrupt` only raises the priority flag. Best
@@ -598,9 +640,12 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       messageId?: string;
       senderParticipantId?: string;
       senderHandle?: string;
-    }
+    },
   ): Promise<number> {
-    return this.rpc.call<number>("main", "notification.pushUserInbox", [userId, request]);
+    return this.rpc.call<number>("main", "notification.pushUserInbox", [
+      userId,
+      request,
+    ]);
   }
 
   /**
@@ -638,7 +683,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
   }): Promise<{ text: string; details: Record<string, unknown> }> {
     const descriptor = this.getEffectiveParticipantInfo(
       input.fromChannelId,
-      this.subscriptions.getConfig(input.fromChannelId)
+      this.subscriptions.getConfig(input.fromChannelId),
     );
     const senderMetadata: Record<string, unknown> = {
       ...descriptor.metadata,
@@ -660,7 +705,8 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       .filter((entry) => entry.kind === "agent")
       .map((entry) => ({
         kind: "participant" as const,
-        participantId: (entry as Extract<ResolvedAddressee, { kind: "agent" }>).participantId,
+        participantId: (entry as Extract<ResolvedAddressee, { kind: "agent" }>)
+          .participantId,
       }));
     const agentHops = this.inboundAgentHops(input.fromChannelId) + 1;
     const guest: ParticipantRef = {
@@ -678,7 +724,11 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         input.participantId,
         {
           kind: "external.participant_observed",
-          actor: { kind: "agent", id: input.participantId, metadata: senderMetadata },
+          actor: {
+            kind: "agent",
+            id: input.participantId,
+            metadata: senderMetadata,
+          },
           payload: {
             protocol: AGENTIC_PROTOCOL_VERSION,
             participant: guest,
@@ -686,7 +736,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           },
           createdAt: new Date().toISOString(),
         } as never,
-        { idempotencyKey: `${messageId}:participant`, senderMetadata }
+        { idempotencyKey: `${messageId}:participant`, senderMetadata },
       );
       await target.send(input.participantId, messageId, input.content, {
         saliency: "say",
@@ -702,7 +752,11 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         input.participantId,
         {
           kind: "external.envelope_observed",
-          actor: { kind: "agent", id: input.participantId, metadata: senderMetadata },
+          actor: {
+            kind: "agent",
+            id: input.participantId,
+            metadata: senderMetadata,
+          },
           payload: {
             protocol: AGENTIC_PROTOCOL_VERSION,
             channelId: input.fromChannelId,
@@ -715,7 +769,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           },
           createdAt: new Date().toISOString(),
         } as never,
-        { idempotencyKey: `${messageId}:observed`, senderMetadata }
+        { idempotencyKey: `${messageId}:observed`, senderMetadata },
       );
     } catch (error) {
       const code = (error as { code?: unknown }).code;
@@ -737,7 +791,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         new Error(
           `notify could not reach ${input.targetChannelId}: ${
             error instanceof Error ? error.message : String(error)
-          }`
+          }`,
         ),
         {
           code: "CrossChannelDeliveryFailed",
@@ -750,7 +804,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
                 "The target conversation did not accept the message. Check it still exists with discover_agents({ includeTerminal: true }) before sending again.",
             },
           },
-        }
+        },
       );
     }
 
@@ -761,7 +815,11 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         input.participantId,
         {
           kind: "external.envelope_published",
-          actor: { kind: "agent", id: input.participantId, metadata: senderMetadata },
+          actor: {
+            kind: "agent",
+            id: input.participantId,
+            metadata: senderMetadata,
+          },
           payload: {
             protocol: AGENTIC_PROTOCOL_VERSION,
             publications: [
@@ -775,7 +833,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           },
           createdAt: new Date().toISOString(),
         } as never,
-        { idempotencyKey: `${messageId}:published`, senderMetadata }
+        { idempotencyKey: `${messageId}:published`, senderMetadata },
       );
     } catch {
       /* the utterance is already durable in the target channel */
@@ -816,7 +874,8 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           },
         } as never,
         execute: async (_toolCallId, params) => {
-          const includeDirectory = (params as { includeDirectory?: unknown }).includeDirectory;
+          const includeDirectory = (params as { includeDirectory?: unknown })
+            .includeDirectory;
           const context = await this.addresseeContext(channelId);
           const lines: string[] = [];
           const rows: Record<string, unknown>[] = [];
@@ -829,9 +888,11 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             const handle = participant.metadata?.["handle"];
             const id = participant.participantId ?? participant.id;
             push(
-              typeof handle === "string" && handle ? `@${handle}` : `participant:${id}`,
+              typeof handle === "string" && handle
+                ? `@${handle}`
+                : `participant:${id}`,
               participant.kind,
-              participant.displayName ?? ""
+              participant.displayName ?? "",
             );
           }
           if (context.parent) {
@@ -843,7 +904,11 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           if (includeDirectory !== false) {
             for (const entry of context.directory ?? []) {
               if (entry.channelId === channelId) continue;
-              push(`agent:${entry.instanceId}`, "agent elsewhere", entry.channelId);
+              push(
+                `agent:${entry.instanceId}`,
+                "agent elsewhere",
+                entry.channelId,
+              );
             }
           }
           return {
@@ -866,14 +931,19 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             },
             includeTerminal: {
               type: "boolean",
-              description: "Include instances that have left their channel (default false).",
+              description:
+                "Include instances that have left their channel (default false).",
             },
             limit: { type: "integer", minimum: 1, maximum: 50 },
           },
           required: ["query"],
         } as never,
         execute: async (_toolCallId, params) => {
-          const input = params as { query?: unknown; includeTerminal?: unknown; limit?: unknown };
+          const input = params as {
+            query?: unknown;
+            includeTerminal?: unknown;
+            limit?: unknown;
+          };
           if (typeof input.query !== "string" || !input.query.trim()) {
             throw new Error("discover_agents requires a non-empty query");
           }
@@ -882,7 +952,9 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             entries: Array<Record<string, unknown>>;
           }>("searchAgentDirectory", {
             query: input.query.trim(),
-            ...(input.includeTerminal === true ? { includeTerminal: true } : {}),
+            ...(input.includeTerminal === true
+              ? { includeTerminal: true }
+              : {}),
             ...(typeof input.limit === "number" ? { limit: input.limit } : {}),
           });
           if (listing.entries.length === 0) {
@@ -902,7 +974,9 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
               // transcript dump (plan §4.7).
               const overview = entry["summary"] ?? entry["description"] ?? "";
               return `${entry["ref"]}  [${entry["status"]}] ${entry["displayName"] ?? entry["handle"] ?? ""}${
-                overview ? `\n    ${String(overview).replace(/\s+/gu, " ").slice(0, 200)}` : ""
+                overview
+                  ? `\n    ${String(overview).replace(/\s+/gu, " ").slice(0, 200)}`
+                  : ""
               }`;
             })
             .join("\n");
@@ -931,7 +1005,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
    *  a strict schema and a rename buys nothing but a release-skew matrix. */
   protected createNotifyTool(
     channelId: string,
-    fs: ReturnType<typeof createRpcFs>
+    fs: ReturnType<typeof createRpcFs>,
   ): AgentTool<never> {
     return {
       name: "notify",
@@ -943,7 +1017,10 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       parameters: {
         type: "object",
         properties: {
-          content: { type: "string", description: "Message text (markdown) to send." },
+          content: {
+            type: "string",
+            description: "Message text (markdown) to send.",
+          },
           to: {
             type: "array",
             items: { type: "string" },
@@ -973,7 +1050,10 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             description:
               "Optional short headline for escalated surfaces. Defaults to the first line of content.",
           },
-          replyTo: { type: "string", description: "Optional message id this is replying to." },
+          replyTo: {
+            type: "string",
+            description: "Optional message id this is replying to.",
+          },
           mentions: {
             type: "array",
             items: { type: "string" },
@@ -1003,10 +1083,13 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           throw new Error("notify requires non-empty content");
         }
         if (input.alert !== undefined && !isAlertRung(input.alert)) {
-          throw new Error(`notify alert must be one of ${ALERT_RUNGS.join(", ")}`);
+          throw new Error(
+            `notify alert must be one of ${ALERT_RUNGS.join(", ")}`,
+          );
         }
         const participantId = this.subscriptions.getParticipantId(channelId);
-        if (!participantId) throw new Error("agent is not subscribed to the channel");
+        if (!participantId)
+          throw new Error("agent is not subscribed to the channel");
 
         const refs = normalizeAddresseeRefs(input.to);
         const context = await this.addresseeContext(channelId);
@@ -1015,13 +1098,16 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           if (isAddresseeError(outcome)) throw addresseeToolError(ref, outcome);
           return outcome;
         });
-        const alert = isAlertRung(input.alert) ? input.alert : defaultAlertRung(resolved);
+        const alert = isAlertRung(input.alert)
+          ? input.alert
+          : defaultAlertRung(resolved);
 
         // Runs are addressed through the supervision path, not the channel
         // audience: the child lives in its own task channel, and that path
         // already refuses a terminal run with the operations that remain open.
         const runs = resolved.filter(
-          (entry): entry is Extract<ResolvedAddressee, { kind: "run" }> => entry.kind === "run"
+          (entry): entry is Extract<ResolvedAddressee, { kind: "run" }> =>
+            entry.kind === "run",
         );
         // A person who is not on this channel yet (plan §4.6): membership is
         // added first, so the escalated entry can open the conversation, and
@@ -1029,7 +1115,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         // id the read receipt and the inbox entry key on.
         const offChannel = resolved.filter(
           (entry): entry is Extract<ResolvedAddressee, { kind: "user" }> =>
-            entry.kind === "user" && !entry.inRoster
+            entry.kind === "user" && !entry.inRoster,
         );
         for (const person of offChannel) {
           try {
@@ -1039,7 +1125,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
               new Error(
                 `user:${person.userId} is not on this channel and could not be added: ${
                   error instanceof Error ? error.message : String(error)
-                }`
+                }`,
               ),
               {
                 code: "AddresseeUnreachable",
@@ -1052,7 +1138,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
                       "This person cannot be added to the conversation (not a workspace member, or membership is locked). Nothing was sent; do not retry with the same addressee.",
                   },
                 },
-              }
+              },
             );
           }
         }
@@ -1061,7 +1147,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         // channels produces one envelope per target channel, never a broadcast.
         const foreign = resolved.filter(
           (entry): entry is Extract<ResolvedAddressee, { foreign: true }> =>
-            entry.kind !== "run" && entry.foreign
+            entry.kind !== "run" && entry.foreign,
         );
 
         const results: string[] = [];
@@ -1073,53 +1159,75 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         // task channel with delivery interest "addressed", so carry the parent
         // in the audience explicitly — otherwise it stays in the task log
         // without ever creating supervisor work.
-        const parentParticipantId = this.subagentIdentity()?.parentParticipantId;
+        const parentParticipantId =
+          this.subagentIdentity()?.parentParticipantId;
         const selectors =
           refs.length === 0
             ? parentParticipantId
-              ? [{ kind: "participant" as const, participantId: parentParticipantId }]
+              ? [
+                  {
+                    kind: "participant" as const,
+                    participantId: parentParticipantId,
+                  },
+                ]
               : []
             : audienceSelectors(resolved);
-        const addressesChannel = refs.length > 0 && resolved.some(broadcastsToChannel);
-        const wantsChannelEnvelope = refs.length === 0 || addressesChannel || selectors.length > 0;
+        const addressesChannel =
+          refs.length > 0 && resolved.some(broadcastsToChannel);
+        const wantsChannelEnvelope =
+          refs.length === 0 || addressesChannel || selectors.length > 0;
 
         const attachmentPaths = Array.isArray(input.attachments)
-          ? input.attachments.filter((path): path is string => typeof path === "string")
+          ? input.attachments.filter(
+              (path): path is string => typeof path === "string",
+            )
           : [];
         const attachments =
-          attachmentPaths.length > 0 ? await readSayAttachments(fs, attachmentPaths) : [];
+          attachmentPaths.length > 0
+            ? await readSayAttachments(fs, attachmentPaths)
+            : [];
 
         if (wantsChannelEnvelope) {
           const descriptor = this.getEffectiveParticipantInfo(
             channelId,
-            this.subscriptions.getConfig(channelId)
+            this.subscriptions.getConfig(channelId),
           );
           const messageId = `say:${toolCallId}`;
-          await this.createChannelClient(channelId).send(participantId, messageId, content, {
-            saliency: "say",
-            senderMetadata: {
-              ...descriptor.metadata,
-              name: descriptor.name,
-              type: descriptor.type,
-              handle: descriptor.handle,
-            },
-            replyTo: typeof input.replyTo === "string" ? input.replyTo : undefined,
-            mentions: Array.isArray(input.mentions)
-              ? input.mentions.filter((mention): mention is string => typeof mention === "string")
-              : undefined,
-            // An explicit `channel:` addressee means everyone, so it erases the
-            // narrower selectors rather than being unioned with them.
-            ...(addressesChannel || selectors.length === 0 ? {} : { to: selectors }),
-            attachments: attachments.length > 0 ? attachments : undefined,
-            metadata: {
-              notify: {
-                alert,
-                ...(typeof input.title === "string" && input.title.trim()
-                  ? { title: input.title.trim() }
-                  : {}),
+          await this.createChannelClient(channelId).send(
+            participantId,
+            messageId,
+            content,
+            {
+              saliency: "say",
+              senderMetadata: {
+                ...descriptor.metadata,
+                name: descriptor.name,
+                type: descriptor.type,
+                handle: descriptor.handle,
+              },
+              replyTo:
+                typeof input.replyTo === "string" ? input.replyTo : undefined,
+              mentions: Array.isArray(input.mentions)
+                ? input.mentions.filter(
+                    (mention): mention is string => typeof mention === "string",
+                  )
+                : undefined,
+              // An explicit `channel:` addressee means everyone, so it erases the
+              // narrower selectors rather than being unioned with them.
+              ...(addressesChannel || selectors.length === 0
+                ? {}
+                : { to: selectors }),
+              attachments: attachments.length > 0 ? attachments : undefined,
+              metadata: {
+                notify: {
+                  alert,
+                  ...(typeof input.title === "string" && input.title.trim()
+                    ? { title: input.title.trim() }
+                    : {}),
+                },
               },
             },
-          });
+          );
           const attachmentNote =
             attachments.length > 0
               ? ` with ${attachments.length} attachment${attachments.length === 1 ? "" : "s"} (${attachments.map((attachment) => attachment.name).join(", ")})`
@@ -1141,14 +1249,18 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             runs.length > 1 ? `${toolCallId}:${run.runId}` : toolCallId,
             run.runId,
             content,
-            channelId
+            channelId,
           );
           const text = result.content
             ?.map((block) => (block.type === "text" ? block.text : ""))
             .join("")
             .trim();
           results.push(text || `sent to subagent ${run.runId}`);
-          sent.push({ runId: run.runId, channelId: run.channelId, alert: "none" });
+          sent.push({
+            runId: run.runId,
+            channelId: run.channelId,
+            alert: "none",
+          });
         }
 
         // Escalation (plan §4.5): the envelope above is always the canonical
@@ -1158,22 +1270,28 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         if (alert !== "none" && channelMessageId) {
           const descriptor = this.getEffectiveParticipantInfo(
             channelId,
-            this.subscriptions.getConfig(channelId)
+            this.subscriptions.getConfig(channelId),
           );
           // Whom the rung reaches: the people addressed — or, when the agent
           // raised the rung explicitly without naming anyone, the people on
           // this channel (D8: escalation is explicit; a rung set on purpose is
           // exactly that). Nobody outside the conversation is ever guessed.
           const addressedUsers = resolved.filter(
-            (entry): entry is Extract<ResolvedAddressee, { kind: "user" }> => entry.kind === "user"
+            (entry): entry is Extract<ResolvedAddressee, { kind: "user" }> =>
+              entry.kind === "user",
           );
           const escalationUsers: Array<{ userId: string }> =
             addressedUsers.length > 0
               ? addressedUsers
               : context.roster
                   .filter((entry) => entry.kind === "user")
-                  .map((entry) => (entry.participantId ?? entry.id).replace(/^user:/u, ""))
-                  .filter((userId, index, all) => userId && all.indexOf(userId) === index)
+                  .map((entry) =>
+                    (entry.participantId ?? entry.id).replace(/^user:/u, ""),
+                  )
+                  .filter(
+                    (userId, index, all) =>
+                      userId && all.indexOf(userId) === index,
+                  )
                   .map((userId) => ({ userId }));
           for (const addressee of escalationUsers) {
             const notification = await this.escalateNotify({
@@ -1189,7 +1307,10 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
                   : firstLine(content),
               message: content,
             });
-            if (notification) sent.push({ notificationId: notification, userId: addressee.userId });
+            sent.push({
+              notificationId: notification,
+              userId: addressee.userId,
+            });
           }
         }
 
@@ -1201,7 +1322,8 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             participantId,
             content,
             addressees: target.addressees,
-            replyTo: typeof input.replyTo === "string" ? input.replyTo : undefined,
+            replyTo:
+              typeof input.replyTo === "string" ? input.replyTo : undefined,
             ...(attachments.length > 0 ? { attachments } : {}),
             ...(channelMessageId ? { sourceEnvelopeId: channelMessageId } : {}),
           });
@@ -1222,7 +1344,10 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
    *  (advertised only to subagents). The vessel implements the spawn mechanics
    *  in the local-tool executor (it never reaches the `execute` below — see
    *  AgentVesselBase.runDeferredSpawn). */
-  private createSubagentTools(channelId: string, toolRpc: RpcClient): AgentTool[] {
+  private createSubagentTools(
+    channelId: string,
+    toolRpc: RpcClient,
+  ): AgentTool[] {
     const tools: AgentTool[] = [
       {
         name: "spawn_subagent",
@@ -1262,12 +1387,14 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
                 thinkingLevel: {
                   type: "string",
                   enum: ["minimal", "low", "medium", "high", "xhigh", "max"],
-                  description: "Pi child reasoning level. External launchers ignore this field.",
+                  description:
+                    "Pi child reasoning level. External launchers ignore this field.",
                 },
                 effort: {
                   type: "string",
                   enum: ["low", "medium", "high", "xhigh", "max"],
-                  description: "External-launcher effort. Pi children ignore this field.",
+                  description:
+                    "External-launcher effort. Pi children ignore this field.",
                 },
                 approvalLevel: { type: "integer", minimum: 0, maximum: 3 },
                 respondPolicy: { type: "string" },
@@ -1278,7 +1405,10 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
               },
               additionalProperties: true,
             },
-            label: { type: "string", description: "Optional short label for the run." },
+            label: {
+              type: "string",
+              description: "Optional short label for the run.",
+            },
             agentKind: {
               type: "string",
               description:
@@ -1288,7 +1418,9 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           required: ["mode", "task"],
         } as never,
         execute: async () => {
-          throw new Error("spawn_subagent is handled by the local-tool executor");
+          throw new Error(
+            "spawn_subagent is handled by the local-tool executor",
+          );
         },
       } as AgentTool,
       {
@@ -1342,8 +1474,9 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
                 typeof p.limit === "number" && Number.isInteger(p.limit)
                   ? Math.max(1, Math.min(100, p.limit))
                   : 20,
-              cursor: typeof p.cursor === "string" && p.cursor ? p.cursor : undefined,
-            }
+              cursor:
+                typeof p.cursor === "string" && p.cursor ? p.cursor : undefined,
+            },
           );
         },
       } as AgentTool,
@@ -1377,8 +1510,14 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
                         required: ["kind", "id"],
                         additionalProperties: false,
                       },
-                      resolution: { enum: ["composed", "theirs", "ours", "current"] },
-                      rationale: { type: "string", minLength: 1, maxLength: 2000 },
+                      resolution: {
+                        enum: ["composed", "theirs", "ours", "current"],
+                      },
+                      rationale: {
+                        type: "string",
+                        minLength: 1,
+                        maxLength: 2000,
+                      },
                     },
                     required: ["coordinate", "resolution"],
                     additionalProperties: false,
@@ -1391,7 +1530,11 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
                       type: "object",
                       properties: {
                         resolution: { enum: ["ours", "current"] },
-                        rationale: { type: "string", minLength: 1, maxLength: 2000 },
+                        rationale: {
+                          type: "string",
+                          minLength: 1,
+                          maxLength: 2000,
+                        },
                       },
                       required: ["resolution"],
                       additionalProperties: false,
@@ -1413,13 +1556,19 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           required: ["runId"],
         } as never,
         execute: async (_toolCallId, params) => {
-          const p = params as { runId?: unknown; resolutions?: unknown; intent?: unknown };
+          const p = params as {
+            runId?: unknown;
+            resolutions?: unknown;
+            intent?: unknown;
+          };
           return this.mergeSubagent(
             String(p.runId ?? ""),
             channelId,
-            p.resolutions && typeof p.resolutions === "object" ? (p.resolutions as never) : [],
+            p.resolutions && typeof p.resolutions === "object"
+              ? (p.resolutions as never)
+              : [],
             typeof p.intent === "string" ? p.intent : undefined,
-            toolRpc
+            toolRpc,
           );
         },
       } as AgentTool,
@@ -1438,7 +1587,8 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             },
             afterSeq: {
               type: "number",
-              description: "Return messages after this channel seq (default 0).",
+              description:
+                "Return messages after this channel seq (default 0).",
             },
           },
           required: ["runId"],
@@ -1448,7 +1598,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           return this.readSubagent(
             String(p.runId ?? ""),
             typeof p.afterSeq === "number" ? p.afterSeq : 0,
-            channelId
+            channelId,
           );
         },
       } as AgentTool,
@@ -1478,7 +1628,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             String(p.runId ?? ""),
             typeof p.reason === "string" ? p.reason : "cancelled by supervisor",
             channelId,
-            toolRpc
+            toolRpc,
           );
         },
       } as AgentTool,
@@ -1492,7 +1642,10 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         parameters: {
           type: "object",
           properties: {
-            report: { type: "string", description: "Your final report to the parent." },
+            report: {
+              type: "string",
+              description: "Your final report to the parent.",
+            },
             outcome: {
               type: "string",
               enum: ["success", "failed"],
@@ -1505,7 +1658,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           const p = params as { report?: unknown; outcome?: unknown };
           return this.completeAsSubagent(
             String(p.report ?? ""),
-            p.outcome === "failed" ? "failed" : "success"
+            p.outcome === "failed" ? "failed" : "success",
           );
         },
       } as AgentTool);
@@ -1522,11 +1675,15 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       parameters: {
         type: "object",
         properties: {
-          question: { type: "string", description: "Question to show the user." },
+          question: {
+            type: "string",
+            description: "Question to show the user.",
+          },
           options: {
             type: "array",
             items: { type: "string" },
-            description: "Optional short options; mutually exclusive unless multiSelect is true.",
+            description:
+              "Optional short options; mutually exclusive unless multiSelect is true.",
           },
           allowFreeform: {
             type: "boolean",
@@ -1554,33 +1711,44 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
 
   protected override getModelCredentialTokenClaims(
     providerId: string,
-    credential: StoredCredentialSummary
+    credential: StoredCredentialSummary,
   ): Record<string, unknown> {
     if (providerId !== "openai-codex") return {};
     const accountId =
-      credential.accountIdentity?.providerUserId ?? credential.metadata?.["accountId"];
-    return accountId ? { [OPENAI_CODEX_ACCOUNT_CLAIM]: { chatgpt_account_id: accountId } } : {};
+      credential.accountIdentity?.providerUserId ??
+      credential.metadata?.["accountId"];
+    return accountId
+      ? { [OPENAI_CODEX_ACCOUNT_CLAIM]: { chatgpt_account_id: accountId } }
+      : {};
   }
 
   protected getStandardAgentMethods(
-    opts?: StandardAgentMethodOptions
+    opts?: StandardAgentMethodOptions,
   ): NonNullable<ParticipantDescriptor["methods"]> {
     const methods: NonNullable<ParticipantDescriptor["methods"]> = [
       { name: "pause", description: "Pause the current AI turn" },
       { name: "resume", description: "Resume after pause" },
       {
         name: "scheduleResumeAtReset",
-        description: "Schedule a paused model turn to resume when its usage limit resets",
+        description:
+          "Schedule a paused model turn to resume when its usage limit resets",
       },
-      { name: "credentialConnected", description: "Resume after model credential connection" },
+      {
+        name: "credentialConnected",
+        description: "Resume after model credential connection",
+      },
       {
         name: "connectModelCredential",
         description: "Connect a model credential for the current provider",
       },
-      { name: "setModel", description: "Set the live model in provider:model format" },
+      {
+        name: "setModel",
+        description: "Set the live model in provider:model format",
+      },
       {
         name: "setThinkingLevel",
-        description: "Set live effort level: minimal, low, medium, high, xhigh, or max",
+        description:
+          "Set live effort level: minimal, low, medium, high, xhigh, or max",
       },
       {
         name: "setFastMode",
@@ -1588,15 +1756,18 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       },
       {
         name: "setApprovalLevel",
-        description: "Set live approval level: 0=manual, 1=auto-safe, 2=full-auto",
+        description:
+          "Set live approval level: 0=manual, 1=auto-safe, 2=full-auto",
       },
       {
         name: "setRespondPolicy",
-        description: "Set live chattiness policy and optional participant allow-list",
+        description:
+          "Set live chattiness policy and optional participant allow-list",
       },
       {
         name: "refreshPromptArtifacts",
-        description: "Reload workspace prompt resources and refresh model prompt/tool artifacts",
+        description:
+          "Reload workspace prompt resources and refresh model prompt/tool artifacts",
       },
       {
         name: "getAgentSettings",
@@ -1608,16 +1779,21 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         description:
           "Read durable provider/model routing and aggregate usage evidence for this channel",
       },
-      { name: "getDebugState", description: "Read agent DO persisted and in-memory debug state" },
+      {
+        name: "getDebugState",
+        description: "Read agent DO persisted and in-memory debug state",
+      },
       {
         name: "inspectMethodSuspensions",
-        description: "Inspect the pending effect outbox (dispatch cache over the log)",
+        description:
+          "Inspect the pending effect outbox (dispatch cache over the log)",
       },
     ];
     const include = opts?.include ? new Set<string>(opts.include) : null;
     const exclude = opts?.exclude ? new Set<string>(opts.exclude) : null;
     return methods.filter(
-      (method) => (!include || include.has(method.name)) && !exclude?.has(method.name)
+      (method) =>
+        (!include || include.has(method.name)) && !exclude?.has(method.name),
     );
   }
 }

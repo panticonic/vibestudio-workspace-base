@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { PubSubClient } from "@workspace/pubsub";
 import { Theme } from "@radix-ui/themes";
@@ -33,8 +39,12 @@ const hookState = vi.hoisted(() => {
     removeEventListener() {},
   };
   const contentElement = {};
-  const scrollRef = Object.assign((_node: unknown) => {}, { current: scrollElement });
-  const contentRef = Object.assign((_node: unknown) => {}, { current: contentElement });
+  const scrollRef = Object.assign((_node: unknown) => {}, {
+    current: scrollElement,
+  });
+  const contentRef = Object.assign((_node: unknown) => {}, {
+    current: contentElement,
+  });
   return {
     scrollRef,
     contentRef,
@@ -61,8 +71,8 @@ describe("agent settings parsing", () => {
           thinkingLevel: { value: "max" },
           fastMode: { value: true },
         },
-        null
-      )
+        null,
+      ),
     ).toMatchObject({
       model: "openai-codex:gpt-5.6-sol",
       thinkingLevel: "max",
@@ -101,7 +111,9 @@ describe("transcript UX smoke", () => {
     await act(async () => {
       await appendTrajectoryEventsAndBroadcast(harness, [
         assistantMessage("assistant-visible", "Welcome to Vibestudio."),
-        invocationStarted("call-eval", "eval", { code: "read('skills/onboarding/SKILL.md')" }),
+        invocationStarted("call-eval", "eval", {
+          code: "read('skills/onboarding/SKILL.md')",
+        }),
         invocationCompleted("call-eval", {
           toolCallId: "call-eval",
           toolName: "eval",
@@ -136,7 +148,11 @@ describe("transcript UX smoke", () => {
 
     const failed: AgenticEvent<"invocation.failed"> = {
       kind: "invocation.failed",
-      actor: { kind: "agent", id: "agent:onboarding", displayName: "Onboarding Agent" },
+      actor: {
+        kind: "agent",
+        id: "agent:onboarding",
+        displayName: "Onboarding Agent",
+      },
       causality: { invocationId: brandId<InvocationId>("call-list") },
       payload: invocationFailedPayload("tool_error", "permission denied", {
         error: {
@@ -146,7 +162,7 @@ describe("transcript UX smoke", () => {
         terminalReasonCode: "method_failed",
         failure: agentToolFailureFromUnknown(
           { message: "permission denied" },
-          { operation: "mcp__workspace__ListDirectory", stage: "test" }
+          { operation: "mcp__workspace__ListDirectory", stage: "test" },
         ),
       }),
       createdAt: new Date().toISOString(),
@@ -160,9 +176,13 @@ describe("transcript UX smoke", () => {
       expect(screen.getByText("List Directory")).toBeTruthy();
       expect(document.body.textContent).toContain("permission denied");
       expect(
-        document.body.querySelector('[data-invocation-name="mcp__workspace__ListDirectory"]')
+        document.body.querySelector(
+          '[data-invocation-name="mcp__workspace__ListDirectory"]',
+        ),
       ).toBeTruthy();
-      expect(document.body.querySelector('[data-invocation-status="error"]')).toBeTruthy();
+      expect(
+        document.body.querySelector('[data-invocation-status="error"]'),
+      ).toBeTruthy();
     });
 
     panel.close();
@@ -191,7 +211,7 @@ describe("transcript delivery markers", () => {
           onCopy={noop}
           onClearCopied={noop}
         />
-      </Theme>
+      </Theme>,
     );
   }
 
@@ -201,8 +221,8 @@ describe("transcript delivery markers", () => {
       if (method === "workers.resolveService") {
         return { kind: "durable-object", targetId: "do:missions" };
       }
-      if (method === "get") {
-        return {
+      if (method === "overview") {
+        const automation = {
           schemaVersion: 2,
           missionId: "mission-talk-timer",
           name: "Talk timer",
@@ -239,6 +259,17 @@ describe("transcript delivery markers", () => {
           activatedAt: createdAt,
           runCount: 0,
           authority: { requestIds: [], grantIds: [], denialIds: [] },
+        };
+        return {
+          items: [
+            {
+              automation,
+              recentRuns: [],
+              totalRuns: 0,
+              activeRuns: 0,
+              issueRunsSince: 0,
+            },
+          ],
         };
       }
       throw new Error(`Unexpected automation RPC ${method}`);
@@ -280,7 +311,7 @@ describe("transcript delivery markers", () => {
           onCopy={noop}
           onClearCopied={noop}
         />
-      </Theme>
+      </Theme>,
     );
 
     const pill = screen.getByRole("button", {
@@ -290,9 +321,13 @@ describe("transcript delivery markers", () => {
     expect(screen.getByText(/Every 1 minute · created/)).toBeTruthy();
     fireEvent.click(pill);
     expect(
-      await screen.findByText("Automation definition created in this conversation")
+      await screen.findByText(
+        "Automation definition created in this conversation",
+      ),
     ).toBeTruthy();
-    expect(call).toHaveBeenCalledWith("do:missions", "get", ["mission-talk-timer"]);
+    expect(call).toHaveBeenCalledWith("do:missions", "overview", [
+      { missionId: "mission-talk-timer", limit: 1 },
+    ]);
   });
 
   it("shows a compact ack badge for self-authored non-retracted messages", () => {
@@ -303,14 +338,17 @@ describe("transcript delivery markers", () => {
         content: "steer it",
         kind: "message",
         complete: true,
-        receipts: { byParticipant: { "agent:alice": "read" }, aggregate: "read" },
+        receipts: {
+          byParticipant: { "agent:alice": "read" },
+          aggregate: "read",
+        },
       },
       {
         "agent:alice": {
           id: "agent:alice",
           metadata: { name: "Alice", type: "agent", handle: "alice" },
         },
-      }
+      },
     );
     // Agent recipients are framed as "taken into account".
     expect(screen.getByLabelText(/Alice: taken into account/i)).toBeTruthy();
@@ -324,12 +362,17 @@ describe("transcript delivery markers", () => {
       kind: "message",
       complete: true,
       retracted: true,
-      receipts: { byParticipant: { "agent:alice": "pending" }, aggregate: "pending" },
+      receipts: {
+        byParticipant: { "agent:alice": "pending" },
+        aggregate: "pending",
+      },
     });
     expect(screen.getByText("Message canceled")).toBeTruthy();
     // No content and no badge on the tombstone.
     expect(screen.queryByText("secret that was canceled")).toBeNull();
-    expect(screen.queryByLabelText(/Delivery|pending|received|read/i)).toBeNull();
+    expect(
+      screen.queryByLabelText(/Delivery|pending|received|read/i),
+    ).toBeNull();
   });
 
   it("shows a quiet 'edited' marker when revision/editedAt is present", () => {

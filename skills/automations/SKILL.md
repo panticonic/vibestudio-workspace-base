@@ -121,8 +121,20 @@ The minimum cadence is one minute. `untilAt` prevents a run starting at or after
 - `edit` creates a new immutable revision, authority plan, subject, and authority acquisition.
 - `retire` permanently prevents new runs and retires revision authority after live executions close.
 - A failure is recorded on the run; it does not silently pause the automation.
+- A turn that reaches a final response after one or more child effects fail is
+  recorded as `completed-with-errors`, never `succeeded`. The run retains each
+  failed invocation's tool name, code, outcome, and message. The mission owner
+  projects that attention through the ordinary durable GAD inbox with a
+  retryable outbox; an alert transport failure cannot erase or strand the run.
 
 Runs use durable phases. On wake or restart, the mission owner resumes nonterminal phases before admitting newly due work. External effects use stable idempotency keys derived from the run and phase.
+
+Every outbound RPC started by a run is a causal child of that execution. The
+runtime keeps the parent admission alive until those children settle, even if
+userland forgot to await a child promise. Code that intends to continue after
+the invocation must persist a queue/outbox item and resume it under a new
+admitted execution; `waitUntil` or a floating promise is not an authority or
+durability boundary.
 
 A prompt can complete its recurring goal with `complete_automation({ response })`. Eval or method code returns the equivalent protocol:
 
@@ -133,4 +145,8 @@ return {
 };
 ```
 
-When debugging, inspect the automation pill or **Automations** for the authority-plan reference, declared pre-acquisition operations, pending/granted/denied authority, current run phase, executor, and structured failure. Do not infer authority from a channel ID or a successful prior run.
+When debugging, open the automation pill or **Automations**. Every open reads
+the canonical mission ledger rather than the launch-time snapshot and shows
+recent runs, failed effects, authority-plan reference, declared pre-acquisition
+operations, pending/granted/denied authority, current phase, and executor. Do
+not infer authority from a channel ID or a successful prior run.

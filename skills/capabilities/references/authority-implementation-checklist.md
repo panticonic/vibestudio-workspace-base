@@ -88,6 +88,17 @@ one authenticated schema with an idempotent admission key, exact image, policy
 digest, parent derivation, renewal owner, and terminal closure. Do not add a
 second transport for one executor kind or bind authority to a channel ID.
 
+Observe causal outbound operations in the generic RPC core, including direct,
+request-scoped, and typed-peer calls. Parent closure fences new children only
+after every operation already started has settled, on both handler success and
+failure. Delayed/background work that has not yet started is a separate durable
+execution and must not inherit an expired parent through `waitUntil`.
+
+Preserve terminal child-effect failures through turn closure. A mission run may
+be `succeeded` only when its turn and every terminal child effect succeeded;
+otherwise use `completed-with-errors` with exact invocation evidence or
+`failed` when the turn itself failed.
+
 ## Change a product-seeded mission
 
 Seed files are strict, checked-in reviewed inputs under the host's seed directory.

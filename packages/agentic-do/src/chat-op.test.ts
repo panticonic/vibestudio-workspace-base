@@ -14,7 +14,12 @@ import { ledgerTest } from "../../../tests/helpers/ledgerTest.js";
 import { createTestDO } from "@workspace/runtime/worker/test-utils";
 import { ids, type AgentTurnMetadata } from "@workspace/agent-loop";
 import { logIdForChannel } from "@vibestudio/trajectory-identity";
-import { RemoteRpcError, rpc, rpcMethodAuthority, type RpcClient } from "@vibestudio/rpc";
+import {
+  RemoteRpcError,
+  rpc,
+  rpcMethodAuthority,
+  type RpcClient,
+} from "@vibestudio/rpc";
 import {
   AGENTIC_EVENT_PAYLOAD_KIND,
   AGENTIC_PROTOCOL_VERSION,
@@ -24,14 +29,19 @@ import {
 import { sha256HexSyncText } from "@vibestudio/content-addressing";
 import type { ChannelEvent, ParticipantDescriptor } from "@workspace/harness";
 import type { RpcChannelMessage } from "@workspace/pubsub";
-import type { VcsCompareResult, VcsStatusResult } from "@vibestudio/service-schemas/vcs";
+import type {
+  VcsCompareResult,
+  VcsStatusResult,
+} from "@vibestudio/service-schemas/vcs";
 import type { MissionRecord } from "@vibestudio/shared/authority/mission";
 import { AgentVesselBase } from "./agent-vessel.js";
 import type { ChannelClient } from "./channel-client.js";
 import type { AgentLoopDriver } from "./agent-loop-driver.js";
 
 /** Wait until the relay has issued its channel call. */
-async function waitForCall(vessel: TestVessel): Promise<{ callId: string; method: string }> {
+async function waitForCall(
+  vessel: TestVessel,
+): Promise<{ callId: string; method: string }> {
   for (let i = 0; i < 100; i++) {
     const call = vessel.channelStub.calls[0];
     if (call) return call;
@@ -50,7 +60,9 @@ const TEST_AGENT_ENV = {
   WORKER_SOURCE_REF: `state:${"b".repeat(64)}`,
 } as const;
 
-async function withAlarmGateway<T>(run: (gatewayUrl: string) => Promise<T>): Promise<T> {
+async function withAlarmGateway<T>(
+  run: (gatewayUrl: string) => Promise<T>,
+): Promise<T> {
   const server = createServer(async (request, response) => {
     const chunks: Buffer[] = [];
     for await (const chunk of request) chunks.push(Buffer.from(chunk));
@@ -71,19 +83,20 @@ async function withAlarmGateway<T>(run: (gatewayUrl: string) => Promise<T>): Pro
           requestId: envelope.message.requestId,
           result: undefined,
         },
-      })
+      }),
     );
   });
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const address = server.address();
-  if (!address || typeof address === "string") throw new Error("test server did not bind TCP");
+  if (!address || typeof address === "string")
+    throw new Error("test server did not bind TCP");
 
   try {
     return await run(`http://127.0.0.1:${address.port}`);
   } finally {
     server.closeAllConnections();
     await new Promise<void>((resolve, reject) =>
-      server.close((error) => (error ? reject(error) : resolve()))
+      server.close((error) => (error ? reject(error) : resolve())),
     );
   }
 }
@@ -106,7 +119,8 @@ const WEATHER_TYPE = {
 class TestVessel extends AgentVesselBase {
   callerIdForTest: string | null = null;
   callerKindForTest: string | null = null;
-  blobTextReaderForTest: ((digest: string) => Promise<string | null>) | null = null;
+  blobTextReaderForTest: ((digest: string) => Promise<string | null>) | null =
+    null;
   automationLaunchForTest: MissionRecord | null = null;
   readonly automationLaunchCalls: Array<{
     args: unknown[];
@@ -170,7 +184,7 @@ class TestVessel extends AgentVesselBase {
              FROM state
             WHERE key LIKE ?
             ORDER BY key`,
-          `${prefix}%`
+          `${prefix}%`,
         )
         .toArray() as Record<string, unknown>[]
     ).map((row) => ({
@@ -192,9 +206,9 @@ class TestVessel extends AgentVesselBase {
           `SELECT COUNT(*) AS count
              FROM agent_hot_path_trace
             WHERE channel_id = ?`,
-          channelId
+          channelId,
         )
-        .toArray()[0]?.["count"] ?? 0
+        .toArray()[0]?.["count"] ?? 0,
     );
   }
 
@@ -206,7 +220,7 @@ class TestVessel extends AgentVesselBase {
             WHERE channel_id = ? AND phase = ?
             ORDER BY sequence`,
           channelId,
-          phase
+          phase,
         )
         .toArray() as Array<Record<string, unknown>>
     ).map((row) => String(row["source"]));
@@ -227,7 +241,7 @@ class TestVessel extends AgentVesselBase {
         tool: "eval",
         args: {},
       } as never,
-      null
+      null,
     );
     if (started) this.driver.markDeferredEvalStartAttempted(CHANNEL, runId);
   }
@@ -277,7 +291,12 @@ class TestVessel extends AgentVesselBase {
     return new Proxy(base, {
       get(target, property, receiver) {
         if (property === "call") {
-          return async (targetId: string, method: string, args: unknown[], options?: unknown) => {
+          return async (
+            targetId: string,
+            method: string,
+            args: unknown[],
+            options?: unknown,
+          ) => {
             if (targetId === "main" && method === "contextIntegrity.ingest") {
               vessel.operationLog.push("rpc:main:contextIntegrity.ingest");
               return { class: "internal", latchEpoch: 0, externalKeys: [] };
@@ -332,7 +351,10 @@ class TestVessel extends AgentVesselBase {
    *  participant id for the card publish path) WITHOUT running the heavy
    *  post-subscribe machinery (prompt artifacts, driver wake) that needs a live
    *  gateway/GAD. */
-  async registerSubscriptionForTest(channelId = CHANNEL, config?: unknown): Promise<void> {
+  async registerSubscriptionForTest(
+    channelId = CHANNEL,
+    config?: unknown,
+  ): Promise<void> {
     this.ensureIdentity();
     await this.subscriptions.subscribe({
       channelId,
@@ -346,7 +368,9 @@ class TestVessel extends AgentVesselBase {
   hasEffectOutboxTableForTest(): boolean {
     return (
       this.sql
-        .exec(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'effect_outbox'`)
+        .exec(
+          `SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'effect_outbox'`,
+        )
         .toArray().length > 0
     );
   }
@@ -368,15 +392,23 @@ class TestVessel extends AgentVesselBase {
     const failures = this.channelPublishFailures;
     const operationLog = this.operationLog;
     const getReplayAfter = vi.fn(
-      async (request: { after: number; limit?: number; throughSeq?: number }) => {
+      async (request: {
+        after: number;
+        limit?: number;
+        throughSeq?: number;
+      }) => {
         const all = (stub.replay.get(channelId) ?? []).filter(
           (event) =>
             (event.id ?? 0) > request.after &&
-            (request.throughSeq === undefined || (event.id ?? 0) <= request.throughSeq)
+            (request.throughSeq === undefined ||
+              (event.id ?? 0) <= request.throughSeq),
         );
         const snapshotLastSeq =
           request.throughSeq ??
-          all.reduce((maximum, event) => Math.max(maximum, event.id ?? 0), request.after);
+          all.reduce(
+            (maximum, event) => Math.max(maximum, event.id ?? 0),
+            request.after,
+          );
         const logEvents = all.slice(0, request.limit ?? 500);
         return {
           mode: "after" as const,
@@ -390,16 +422,24 @@ class TestVessel extends AgentVesselBase {
             hasMoreAfter: logEvents.length < all.length,
           },
         };
-      }
+      },
     );
     return {
       publishAgenticEvent: vi.fn(
-        async (pid: string, event: AgenticEvent, opts?: { idempotencyKey?: string }) => {
+        async (
+          pid: string,
+          event: AgenticEvent,
+          opts?: { idempotencyKey?: string },
+        ) => {
           if (opts?.idempotencyKey && failures.has(opts.idempotencyKey)) {
             throw new Error(`publish failed: ${opts.idempotencyKey}`);
           }
-          const envelopeId = opts?.idempotencyKey ? `ik:${opts.idempotencyKey}` : undefined;
-          const channelEnvelopeId = envelopeId ? `${channelId}\u0000${envelopeId}` : undefined;
+          const envelopeId = opts?.idempotencyKey
+            ? `ik:${opts.idempotencyKey}`
+            : undefined;
+          const channelEnvelopeId = envelopeId
+            ? `${channelId}\u0000${envelopeId}`
+            : undefined;
           const existing = channelEnvelopeId
             ? stub.channelEnvelopes.get(channelEnvelopeId)
             : undefined;
@@ -421,9 +461,11 @@ class TestVessel extends AgentVesselBase {
             } as ChannelEvent);
           }
           return { id };
-        }
+        },
       ),
-      getMessageType: vi.fn(async (typeId: string) => stub.messageTypes.get(typeId) ?? null),
+      getMessageType: vi.fn(
+        async (typeId: string) => stub.messageTypes.get(typeId) ?? null,
+      ),
       getMessageTypes: vi.fn(async () => [...stub.messageTypes.values()]),
       getParticipants: vi.fn(async () => stub.participants),
       callMethod: vi.fn(
@@ -432,10 +474,10 @@ class TestVessel extends AgentVesselBase {
           targetPid: string,
           callId: string,
           method: string,
-          args: unknown
+          args: unknown,
         ) => {
           stub.calls.push({ callId, targetPid, method, args });
-        }
+        },
       ),
       getReplayAfter,
       replayAfterPages: async function* (request: {
@@ -457,14 +499,14 @@ class TestVessel extends AgentVesselBase {
         async (envelopeId: string) =>
           stub.channelEnvelopes.get(`${channelId}\u0000${envelopeId}`) ??
           stub.envelopes.get(envelopeId) ??
-          null
+          null,
       ),
       send: vi.fn(
         async (
           participantId: string,
           messageId: string,
           content: string,
-          options?: Record<string, unknown>
+          options?: Record<string, unknown>,
         ) => {
           stub.sent.push({
             channelId,
@@ -473,27 +515,29 @@ class TestVessel extends AgentVesselBase {
             content,
             options,
           });
-        }
+        },
       ),
       recordTaskProvenance: vi.fn(async () => undefined),
       relationshipState: vi.fn(async () => ({ revision: 0, active: false })),
-      join: vi.fn(async (input: { participantId: string; revision: number }) => {
-        operationLog.push(`channel:${channelId}:join`);
-        stub.subscriptions.push({
-          channelId,
-          participantId: input.participantId,
-        });
-        return {
-          ok: true,
-          channelConfig: {},
-          envelope: {
-            logEvents: [],
-            ready: { totalCount: 0, envelopeCount: 0 },
-          },
-          participantId: input.participantId,
-          revision: input.revision,
-        };
-      }),
+      join: vi.fn(
+        async (input: { participantId: string; revision: number }) => {
+          operationLog.push(`channel:${channelId}:join`);
+          stub.subscriptions.push({
+            channelId,
+            participantId: input.participantId,
+          });
+          return {
+            ok: true,
+            channelConfig: {},
+            envelope: {
+              logEvents: [],
+              ready: { totalCount: 0, envelopeCount: 0 },
+            },
+            participantId: input.participantId,
+            revision: input.revision,
+          };
+        },
+      ),
       leave: vi.fn(async () => {
         operationLog.push(`channel:${channelId}:leave`);
       }),
@@ -510,7 +554,7 @@ class TestVessel extends AgentVesselBase {
       | "invocation.failed"
       | "invocation.cancelled"
       | "invocation.abandoned",
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
   ): Promise<void> {
     const event: ChannelEvent = {
       id: 1,
@@ -597,15 +641,17 @@ class TestVessel extends AgentVesselBase {
 }
 
 class PromptEventProbe extends TestVessel {
-  readonly handleIncomingSpy = vi.fn(async (_channelId: string, _incoming: unknown) => {
-    this.operationLog.push("driver:handleIncoming");
-  });
+  readonly handleIncomingSpy = vi.fn(
+    async (_channelId: string, _incoming: unknown) => {
+      this.operationLog.push("driver:handleIncoming");
+    },
+  );
   useDeliveredDecisionContext = false;
   consumePayloadKind: string | null = null;
 
   protected override async onChannelEvent(
     _channelId: string,
-    event: ChannelEvent
+    event: ChannelEvent,
   ): Promise<boolean> {
     return event.type === this.consumePayloadKind;
   }
@@ -613,7 +659,7 @@ class PromptEventProbe extends TestVessel {
   protected override async shouldRespond(
     channelId: string,
     event: ChannelEvent,
-    deliveredContext?: import("@workspace/pubsub").ChannelAgenticContext
+    deliveredContext?: import("@workspace/pubsub").ChannelAgenticContext,
   ): Promise<boolean> {
     return this.useDeliveredDecisionContext
       ? super.shouldRespond(channelId, event, deliveredContext)
@@ -640,7 +686,9 @@ class AutomationCompletionProbe extends PromptEventProbe {
     metadata: AgentTurnMetadata;
   } | null = null;
 
-  setAutomationTurnForTest(automation: NonNullable<AgentTurnMetadata["automation"]>): void {
+  setAutomationTurnForTest(
+    automation: NonNullable<AgentTurnMetadata["automation"]>,
+  ): void {
     this.openAutomationTurn = {
       turnId: "turn-automation",
       metadata: { origin: "scheduled", automation },
@@ -653,7 +701,7 @@ class AutomationCompletionProbe extends PromptEventProbe {
       activateChannel: vi.fn(),
       handleIncoming: this.handleIncomingSpy,
       peekLoadedLoop: vi.fn(() =>
-        openTurn ? { state: { openTurn } } : { state: { openTurn: null } }
+        openTurn ? { state: { openTurn } } : { state: { openTurn: null } },
       ),
     } as unknown as AgentLoopDriver;
   }
@@ -662,7 +710,10 @@ class AutomationCompletionProbe extends PromptEventProbe {
     const tool = (
       this as unknown as {
         createAutomationCompletionTool(channelId: string): {
-          execute(callId: string, input: { response: string }): Promise<unknown>;
+          execute(
+            callId: string,
+            input: { response: string },
+          ): Promise<unknown>;
         };
       }
     ).createAutomationCompletionTool(CHANNEL);
@@ -677,11 +728,19 @@ class AutomationCompletionProbe extends PromptEventProbe {
     automation: NonNullable<AgentTurnMetadata["automation"]>;
     summary?: string;
     reason?: string;
+    effectFailures?: Array<{
+      invocationId: string;
+      name: string;
+      outcome: "tool_error";
+      code: string;
+      message: string;
+    }>;
   }): Promise<void> {
     await this.onTurnClosed({
       channelId: CHANNEL,
       turnId: "turn-automation",
       metadata: { origin: "scheduled", automation: input.automation },
+      effectFailures: input.effectFailures ?? [],
       ...(input.summary === undefined ? {} : { summary: input.summary }),
       ...(input.reason === undefined ? {} : { reason: input.reason }),
     });
@@ -703,7 +762,10 @@ async function makePromptProbe(config?: unknown): Promise<PromptEventProbe> {
   return instance;
 }
 
-function customChannelEvent(type: string, overrides: Partial<ChannelEvent> = {}): ChannelEvent {
+function customChannelEvent(
+  type: string,
+  overrides: Partial<ChannelEvent> = {},
+): ChannelEvent {
   return {
     id: 17,
     messageId: "custom-envelope-17",
@@ -745,7 +807,10 @@ describe("AgentVesselBase automation ingress", () => {
   };
 
   it("keeps the mission owner exactly addressable in an otherwise empty fresh run channel", async () => {
-    const { instance: vessel } = await createTestDO(AutomationCompletionProbe, TEST_AGENT_ENV);
+    const { instance: vessel } = await createTestDO(
+      AutomationCompletionProbe,
+      TEST_AGENT_ENV,
+    );
     await vessel.registerSubscriptionForTest(CHANNEL);
     vessel.markEmptyRosterFresh(CHANNEL);
     vessel.setAutomationTurnForTest(automation);
@@ -764,7 +829,9 @@ describe("AgentVesselBase automation ingress", () => {
       configurable: true,
     });
 
-    await expect(vessel.automationAddresseeContextForTest()).resolves.toMatchObject({
+    await expect(
+      vessel.automationAddresseeContextForTest(),
+    ).resolves.toMatchObject({
       ownerUserId: automation.ownerUserId,
       roster: [],
       users: [{ userId: automation.ownerUserId, handle: "owner" }],
@@ -824,12 +891,15 @@ describe("AgentVesselBase automation ingress", () => {
             deliverAfterTurn: true,
           }),
         }),
-      })
+      }),
     );
   });
 
   it("records prompt completion as a first-class terminal automation response", async () => {
-    const { instance: vessel } = await createTestDO(AutomationCompletionProbe, TEST_AGENT_ENV);
+    const { instance: vessel } = await createTestDO(
+      AutomationCompletionProbe,
+      TEST_AGENT_ENV,
+    );
     await vessel.registerSubscriptionForTest(CHANNEL);
     const promptAutomation = { ...automation, action: "prompt" as const };
     vessel.setAutomationTurnForTest(promptAutomation);
@@ -846,7 +916,7 @@ describe("AgentVesselBase automation ingress", () => {
     });
 
     await expect(
-      vessel.completeAutomationForTest("All rollout targets are healthy.")
+      vessel.completeAutomationForTest("All rollout targets are healthy."),
     ).resolves.toMatchObject({ terminate: true });
     await vessel.closeAutomationTurnForTest({
       automation: promptAutomation,
@@ -864,7 +934,10 @@ describe("AgentVesselBase automation ingress", () => {
   });
 
   it("recognizes the same completion protocol returned by a scheduled eval", async () => {
-    const { instance: vessel } = await createTestDO(AutomationCompletionProbe, TEST_AGENT_ENV);
+    const { instance: vessel } = await createTestDO(
+      AutomationCompletionProbe,
+      TEST_AGENT_ENV,
+    );
     await vessel.registerSubscriptionForTest(CHANNEL);
     vessel.setAutomationTurnForTest(automation);
     const rpcCall = vi.fn(async (target: string, method: string) => {
@@ -902,7 +975,10 @@ describe("AgentVesselBase automation ingress", () => {
   });
 
   it("reports a failed scheduled turn with the mission ledger's structured failure contract", async () => {
-    const { instance: vessel } = await createTestDO(AutomationCompletionProbe, TEST_AGENT_ENV);
+    const { instance: vessel } = await createTestDO(
+      AutomationCompletionProbe,
+      TEST_AGENT_ENV,
+    );
     await vessel.registerSubscriptionForTest(CHANNEL);
     const promptAutomation = { ...automation, action: "prompt" as const };
     vessel.setAutomationTurnForTest(promptAutomation);
@@ -913,7 +989,10 @@ describe("AgentVesselBase automation ingress", () => {
       if (target === "do:missions" && method === "finishRun") return undefined;
       throw new Error(`Unexpected RPC ${target}.${method}`);
     });
-    Object.defineProperty(vessel, "rpc", { value: { call: rpcCall }, configurable: true });
+    Object.defineProperty(vessel, "rpc", {
+      value: { call: rpcCall },
+      configurable: true,
+    });
 
     await vessel.closeAutomationTurnForTest({
       automation: promptAutomation,
@@ -931,6 +1010,48 @@ describe("AgentVesselBase automation ingress", () => {
           message: "Provider rejected the turn",
           retry: "manual",
         },
+      },
+    ]);
+  });
+
+  it("reports a completed turn with failed effects instead of claiming success", async () => {
+    const { instance: vessel } = await createTestDO(
+      AutomationCompletionProbe,
+      TEST_AGENT_ENV,
+    );
+    await vessel.registerSubscriptionForTest(CHANNEL);
+    const promptAutomation = { ...automation, action: "prompt" as const };
+    vessel.setAutomationTurnForTest(promptAutomation);
+    const rpcCall = vi.fn(async (target: string, method: string) => {
+      if (target === "main" && method === "workers.resolveService")
+        return { kind: "durable-object", targetId: "do:missions" };
+      if (target === "do:missions" && method === "finishRun") return undefined;
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    Object.defineProperty(vessel, "rpc", {
+      value: { call: rpcCall },
+      configurable: true,
+    });
+    const effectFailure = {
+      invocationId: "notify-call",
+      name: "notify",
+      outcome: "tool_error" as const,
+      code: "EDELIVERY",
+      message: "Notification delivery failed",
+    };
+
+    await vessel.closeAutomationTurnForTest({
+      automation: promptAutomation,
+      summary: "I could not deliver the notification.",
+      effectFailures: [effectFailure],
+    });
+
+    expect(rpcCall).toHaveBeenCalledWith("do:missions", "finishRun", [
+      {
+        runId: automation.runId,
+        outcome: "completed-with-errors",
+        finalMessage: "I could not deliver the notification.",
+        effectFailures: [effectFailure],
       },
     ]);
   });
@@ -1031,7 +1152,10 @@ describe("AgentVesselBase hot-path trace retention", () => {
   });
 
   it("labels only a previously-started eval recovery claim as the redrive backstop", async () => {
-    const { instance: redrive } = await createTestDO(TestVessel, TEST_AGENT_ENV);
+    const { instance: redrive } = await createTestDO(
+      TestVessel,
+      TEST_AGENT_ENV,
+    );
     redrive.seedDeferredEvalForTest("eval:redrive", true);
     // The parked-row alarm delivers through the ordinary work-ready hint, so
     // the label must key on the durable started flag, not the trigger.
@@ -1041,11 +1165,16 @@ describe("AgentVesselBase hot-path trace retention", () => {
         now: Date.now(),
         limit: 1,
         trigger: "hint",
-      })
+      }),
     ).toHaveLength(1);
-    expect(redrive.hotPathTraceSourcesForTest("effect.claimed")).toEqual(["redrive-backstop"]);
+    expect(redrive.hotPathTraceSourcesForTest("effect.claimed")).toEqual([
+      "redrive-backstop",
+    ]);
 
-    const { instance: healthy } = await createTestDO(TestVessel, TEST_AGENT_ENV);
+    const { instance: healthy } = await createTestDO(
+      TestVessel,
+      TEST_AGENT_ENV,
+    );
     healthy.seedDeferredEvalForTest("eval:first-dispatch", false);
     expect(
       healthy.claimReadyWork("agent-effect", {
@@ -1053,9 +1182,11 @@ describe("AgentVesselBase hot-path trace retention", () => {
         now: Date.now(),
         limit: 1,
         trigger: "hint",
-      })
+      }),
     ).toHaveLength(1);
-    expect(healthy.hotPathTraceSourcesForTest("effect.claimed")).toEqual(["hint"]);
+    expect(healthy.hotPathTraceSourcesForTest("effect.claimed")).toEqual([
+      "hint",
+    ]);
   });
 });
 
@@ -1082,7 +1213,7 @@ describe("AgentVesselBase durable work readiness", () => {
         itemId: claim.itemId,
         generation: claim.generation,
         outcome: { executed: true },
-      })
+      }),
     ).toBe("stale");
   });
 
@@ -1093,12 +1224,19 @@ describe("AgentVesselBase durable work readiness", () => {
         GATEWAY_URL: gatewayUrl,
       });
 
-      await callAs("do", "markWorkReadyForTest", "agent-effect", "agent-effect");
+      await callAs(
+        "do",
+        "markWorkReadyForTest",
+        "agent-effect",
+        "agent-effect",
+      );
 
       expect(vessel.durableWorkReadyGenerationsForTest()).toEqual([
         { queue: "agent-effect", generation: 1 },
       ]);
-      expect(vessel.nextAlarmScheduleForTest()?.wakeAt).toEqual(expect.any(Number));
+      expect(vessel.nextAlarmScheduleForTest()?.wakeAt).toEqual(
+        expect.any(Number),
+      );
 
       await vessel.alarm();
       expect(vessel.durableWorkReadyGenerationsForTest()).toEqual([
@@ -1110,7 +1248,7 @@ describe("AgentVesselBase durable work readiness", () => {
           workerId: "test-worker",
           now: Date.now(),
           limit: 1,
-        })
+        }),
       ).toEqual([]);
       expect(vessel.nextAlarmScheduleForTest()).toBeNull();
     });
@@ -1156,7 +1294,9 @@ describe("AgentVesselBase activation-local inspection", () => {
     vessel.callerKindForTest = "do";
     vessel.callerIdForTest = "do:workers/pubsub-channel:PubSubChannel:chan-1";
 
-    await expect(vessel.readAgentInspection(CHANNEL, "getDebugState")).resolves.toMatchObject({
+    await expect(
+      vessel.readAgentInspection(CHANNEL, "getDebugState"),
+    ).resolves.toMatchObject({
       result: {
         loops: {
           [CHANNEL]: {
@@ -1177,7 +1317,9 @@ describe("AgentVesselBase activation-local inspection", () => {
     vessel.callerIdForTest = "do:workers/pubsub-channel:PubSubChannel:chan-1";
 
     expect(vessel.hasEffectOutboxTableForTest()).toBe(true);
-    await expect(vessel.readAgentInspection(CHANNEL, "getDebugState")).resolves.toMatchObject({
+    await expect(
+      vessel.readAgentInspection(CHANNEL, "getDebugState"),
+    ).resolves.toMatchObject({
       result: { loops: { [CHANNEL]: { loaded: false } }, outbox: [] },
     });
     expect(vessel.hasEffectOutboxTableForTest()).toBe(true);
@@ -1188,9 +1330,9 @@ describe("AgentVesselBase activation-local inspection", () => {
     vessel.callerKindForTest = "panel";
     vessel.callerIdForTest = "panel:untrusted";
 
-    await expect(vessel.readAgentInspection(CHANNEL, "getDebugState")).rejects.toThrow(
-      /refusing caller/u
-    );
+    await expect(
+      vessel.readAgentInspection(CHANNEL, "getDebugState"),
+    ).rejects.toThrow(/refusing caller/u);
   });
 });
 
@@ -1206,14 +1348,18 @@ describe("AgentVesselBase.chatOp", () => {
       });
     };
 
-    const concurrent = Array.from({ length: 32 }, () => vessel.readBlobTextForTest("same-digest"));
+    const concurrent = Array.from({ length: 32 }, () =>
+      vessel.readBlobTextForTest("same-digest"),
+    );
     await vi.waitFor(() => expect(reads).toBe(1));
     releaseRead?.("shared text");
 
     await expect(Promise.all(concurrent)).resolves.toEqual(
-      Array.from({ length: 32 }, () => "shared text")
+      Array.from({ length: 32 }, () => "shared text"),
     );
-    await expect(vessel.readBlobTextForTest("same-digest")).resolves.toBe("shared text");
+    await expect(vessel.readBlobTextForTest("same-digest")).resolves.toBe(
+      "shared text",
+    );
     expect(reads).toBe(1);
   });
 
@@ -1228,10 +1374,14 @@ describe("AgentVesselBase.chatOp", () => {
     };
 
     await expect(vessel.readBlobTextForTest("eventual-digest")).rejects.toThrow(
-      "temporary read failure"
+      "temporary read failure",
     );
-    await expect(vessel.readBlobTextForTest("eventual-digest")).resolves.toBeNull();
-    await expect(vessel.readBlobTextForTest("eventual-digest")).resolves.toBe("available");
+    await expect(
+      vessel.readBlobTextForTest("eventual-digest"),
+    ).resolves.toBeNull();
+    await expect(vessel.readBlobTextForTest("eventual-digest")).resolves.toBe(
+      "available",
+    );
     expect(reads).toBe(3);
   });
 
@@ -1239,14 +1389,16 @@ describe("AgentVesselBase.chatOp", () => {
     const vessel = await makeVessel();
     vessel.callerIdForTest = "do:vibestudio/internal:EvalDO:someoneelse";
     await expect(vessel.chatOp(CHANNEL, "getMessageTypes", [])).rejects.toThrow(
-      /only this agent's own EvalDO/
+      /only this agent's own EvalDO/,
     );
   });
 
   it("rejects when there is no verified caller", async () => {
     const vessel = await makeVessel();
     vessel.callerIdForTest = null;
-    await expect(vessel.chatOp(CHANNEL, "getMessageTypes", [])).rejects.toThrow(/refusing caller/);
+    await expect(vessel.chatOp(CHANNEL, "getMessageTypes", [])).rejects.toThrow(
+      /refusing caller/,
+    );
   });
 
   it("accepts the agent's own EvalDO (key matches the eval service formula)", async () => {
@@ -1270,9 +1422,15 @@ describe("AgentVesselBase.chatOp", () => {
     } as ChannelEvent;
     vessel.channelStub.envelopes.set("env-7", event);
 
-    await expect(vessel.chatOp(CHANNEL, "replayEnvelope", ["env-7"])).resolves.toEqual(event);
-    await expect(vessel.chatOp(CHANNEL, "replayEnvelope", ["missing"])).resolves.toBeNull();
-    await expect(vessel.chatOp(CHANNEL, "replayEnvelope", [""])).resolves.toBeNull();
+    await expect(
+      vessel.chatOp(CHANNEL, "replayEnvelope", ["env-7"]),
+    ).resolves.toEqual(event);
+    await expect(
+      vessel.chatOp(CHANNEL, "replayEnvelope", ["missing"]),
+    ).resolves.toBeNull();
+    await expect(
+      vessel.chatOp(CHANNEL, "replayEnvelope", [""]),
+    ).resolves.toBeNull();
   });
 
   it("getParticipants exposes the canonical chat participant shape", async () => {
@@ -1286,7 +1444,9 @@ describe("AgentVesselBase.chatOp", () => {
       },
     ];
 
-    await expect(vessel.chatOp(CHANNEL, "getParticipants", [])).resolves.toEqual([
+    await expect(
+      vessel.chatOp(CHANNEL, "getParticipants", []),
+    ).resolves.toEqual([
       {
         id: "participant-1",
         ref: { kind: "agent", id: "agent-1" },
@@ -1327,9 +1487,9 @@ describe("AgentVesselBase.chatOp", () => {
   it("configureAgent validates its patch (rejects an empty model)", async () => {
     const vessel = await makeVessel();
     vessel.callerIdForTest = await expectedEvalCaller();
-    await expect(vessel.chatOp(CHANNEL, "configureAgent", [{ model: "" }])).rejects.toThrow(
-      /model/
-    );
+    await expect(
+      vessel.chatOp(CHANNEL, "configureAgent", [{ model: "" }]),
+    ).rejects.toThrow(/model/);
   });
 
   it("registerMessageType publishes messageType.registered AS the agent", async () => {
@@ -1361,7 +1521,9 @@ describe("AgentVesselBase.chatOp", () => {
     // The stub returns { id: published.length }; the first publish is id 1, and
     // the handle must surface it (harmonized with the panel client).
     expect(result.pubsubId).toBe(1);
-    const started = vessel.channelStub.published.find((p) => p.event.kind === "custom.started");
+    const started = vessel.channelStub.published.find(
+      (p) => p.event.kind === "custom.started",
+    );
     expect(started).toBeDefined();
     expect(started!.event.actor.kind).toBe("agent");
   });
@@ -1426,12 +1588,14 @@ describe("AgentVesselBase.chatOp", () => {
     const pillKey = "automation:instituted:mission-daily";
     vessel.channelPublishFailures.add(pillKey);
     await expect(vessel.executeAutomationLaunchForTest(input)).rejects.toThrow(
-      `publish failed: ${pillKey}`
+      `publish failed: ${pillKey}`,
     );
     expect(vessel.channelStub.published).toHaveLength(0);
 
     vessel.channelPublishFailures.delete(pillKey);
-    await expect(vessel.executeAutomationLaunchForTest(input)).resolves.toMatchObject({
+    await expect(
+      vessel.executeAutomationLaunchForTest(input),
+    ).resolves.toMatchObject({
       details: { missionId: "mission-daily", state: "active" },
     });
 
@@ -1465,12 +1629,14 @@ describe("AgentVesselBase.chatOp", () => {
           },
         ],
         options: {
-          idempotencyKey: expect.stringMatching(/automation:launch:.*:[0-9a-f]{64}$/),
+          idempotencyKey: expect.stringMatching(
+            /automation:launch:.*:[0-9a-f]{64}$/,
+          ),
         },
-      }))
+      })),
     );
     expect(vessel.automationLaunchCalls[1]!.options).toEqual(
-      vessel.automationLaunchCalls[0]!.options
+      vessel.automationLaunchCalls[0]!.options,
     );
     expect(vessel.channelStub.published).toContainEqual(
       expect.objectContaining({
@@ -1490,7 +1656,7 @@ describe("AgentVesselBase.chatOp", () => {
             }),
           }),
         }),
-      })
+      }),
     );
   });
 
@@ -1507,7 +1673,9 @@ describe("AgentVesselBase.chatOp", () => {
     ]);
     // Second publish on this channel → stub id 2.
     expect(pubsubId).toBe(2);
-    const updated = vessel.channelStub.published.find((p) => p.event.kind === "custom.updated");
+    const updated = vessel.channelStub.published.find(
+      (p) => p.event.kind === "custom.updated",
+    );
     expect(updated).toBeDefined();
     expect(updated!.event.actor.kind).toBe("agent");
   });
@@ -1515,13 +1683,19 @@ describe("AgentVesselBase.chatOp", () => {
   it("focusMessage is panel-only and resolves false", async () => {
     const vessel = await makeVessel();
     vessel.callerIdForTest = await expectedEvalCaller();
-    await expect(vessel.chatOp(CHANNEL, "focusMessage", ["msg-1"])).resolves.toBe(false);
+    await expect(
+      vessel.chatOp(CHANNEL, "focusMessage", ["msg-1"]),
+    ).resolves.toBe(false);
   });
 
   it("callMethod initiates a channel call and resolves with the delivered content", async () => {
     const vessel = await makeVessel();
     vessel.callerIdForTest = await expectedEvalCaller();
-    const promise = vessel.chatOp(CHANNEL, "callMethod", ["panel-pid", "doThing", { x: 1 }]);
+    const promise = vessel.chatOp(CHANNEL, "callMethod", [
+      "panel-pid",
+      "doThing",
+      { x: 1 },
+    ]);
     const call = await waitForCall(vessel);
     expect(call.method).toBe("doThing");
     await vessel.deliverTerminal(call.callId, "invocation.completed", {
@@ -1533,7 +1707,11 @@ describe("AgentVesselBase.chatOp", () => {
   it("callMethodResult resolves with the full ChatMethodResult envelope", async () => {
     const vessel = await makeVessel();
     vessel.callerIdForTest = await expectedEvalCaller();
-    const promise = vessel.chatOp(CHANNEL, "callMethodResult", ["panel-pid", "doThing", {}]);
+    const promise = vessel.chatOp(CHANNEL, "callMethodResult", [
+      "panel-pid",
+      "doThing",
+      {},
+    ]);
     const call = await waitForCall(vessel);
     await vessel.deliverTerminal(call.callId, "invocation.completed", {
       result: "hello",
@@ -1544,7 +1722,11 @@ describe("AgentVesselBase.chatOp", () => {
   it("callMethod rejects when the channel terminal is an error", async () => {
     const vessel = await makeVessel();
     vessel.callerIdForTest = await expectedEvalCaller();
-    const promise = vessel.chatOp(CHANNEL, "callMethod", ["panel-pid", "boom", {}]);
+    const promise = vessel.chatOp(CHANNEL, "callMethod", [
+      "panel-pid",
+      "boom",
+      {},
+    ]);
     const call = await waitForCall(vessel);
     await vessel.deliverTerminal(call.callId, "invocation.failed", {
       error: "kaboom",
@@ -1557,7 +1739,7 @@ describe("AgentVesselBase.chatOp", () => {
     vessel.callerIdForTest = await expectedEvalCaller();
 
     await expect(
-      vessel.chatOp(CHANNEL, "callMethod", [AGENT_ID, "getDebugState", {}])
+      vessel.chatOp(CHANNEL, "callMethod", [AGENT_ID, "getDebugState", {}]),
     ).resolves.toMatchObject({ participantId: AGENT_ID });
     expect(vessel.channelStub.calls).toHaveLength(0);
   });
@@ -1604,7 +1786,10 @@ describe("AgentVesselBase.processChannelEvent", () => {
   it("ignores an unconfigured custom payload", async () => {
     const vessel = await makePromptProbe();
 
-    await vessel.processChannelEvent(CHANNEL, customChannelEvent("application.incident.v1"));
+    await vessel.processChannelEvent(
+      CHANNEL,
+      customChannelEvent("application.incident.v1"),
+    );
 
     expect(vessel.handleIncomingSpy).not.toHaveBeenCalled();
   });
@@ -1621,7 +1806,7 @@ describe("AgentVesselBase.processChannelEvent", () => {
 
     await vessel.processChannelEvent(
       CHANNEL,
-      customChannelEvent("application.incident.v1", { payload })
+      customChannelEvent("application.incident.v1", { payload }),
     );
 
     expect(vessel.handleIncomingSpy).toHaveBeenCalledOnce();
@@ -1665,11 +1850,14 @@ describe("AgentVesselBase.processChannelEvent", () => {
       },
     });
     expect(vessel.operationLog).toEqual(
-      expect.arrayContaining(["rpc:main:contextIntegrity.ingest", "driver:handleIncoming"])
+      expect.arrayContaining([
+        "rpc:main:contextIntegrity.ingest",
+        "driver:handleIncoming",
+      ]),
     );
-    expect(vessel.operationLog.indexOf("rpc:main:contextIntegrity.ingest")).toBeLessThan(
-      vessel.operationLog.indexOf("driver:handleIncoming")
-    );
+    expect(
+      vessel.operationLog.indexOf("rpc:main:contextIntegrity.ingest"),
+    ).toBeLessThan(vessel.operationLog.indexOf("driver:handleIncoming"));
   });
 
   it("requires an exact payload-kind match", async () => {
@@ -1679,7 +1867,7 @@ describe("AgentVesselBase.processChannelEvent", () => {
 
     await vessel.processChannelEvent(
       CHANNEL,
-      customChannelEvent("application.incident.v1.updated")
+      customChannelEvent("application.incident.v1.updated"),
     );
 
     expect(vessel.handleIncomingSpy).not.toHaveBeenCalled();
@@ -1692,7 +1880,7 @@ describe("AgentVesselBase.processChannelEvent", () => {
 
     await vessel.processChannelEvent(
       CHANNEL,
-      customChannelEvent("application.incident.v1", { senderId: AGENT_ID })
+      customChannelEvent("application.incident.v1", { senderId: AGENT_ID }),
     );
 
     expect(vessel.handleIncomingSpy).not.toHaveBeenCalled();
@@ -1707,7 +1895,7 @@ describe("AgentVesselBase.processChannelEvent", () => {
 
     await vessel.processChannelEvent(
       CHANNEL,
-      customChannelEvent("application.incident.v1", { payload })
+      customChannelEvent("application.incident.v1", { payload }),
     );
 
     const incoming = vessel.handleIncomingSpy.mock.calls[0]?.[1] as {
@@ -1735,10 +1923,13 @@ describe("AgentVesselBase.processChannelEvent", () => {
         observations: { payloadKinds: ["application.incident.v1"] },
       });
 
-      await vessel.processChannelEvent(CHANNEL, customChannelEvent("application.incident.v1"));
+      await vessel.processChannelEvent(
+        CHANNEL,
+        customChannelEvent("application.incident.v1"),
+      );
 
       expect(vessel.handleIncomingSpy).not.toHaveBeenCalled();
-    }
+    },
   );
 
   it("never routes agentic infrastructure events as observations", async () => {
@@ -1767,7 +1958,10 @@ describe("AgentVesselBase.processChannelEvent", () => {
     });
     vessel.consumePayloadKind = "application.incident.v1";
 
-    await vessel.processChannelEvent(CHANNEL, customChannelEvent("application.incident.v1"));
+    await vessel.processChannelEvent(
+      CHANNEL,
+      customChannelEvent("application.incident.v1"),
+    );
 
     expect(vessel.handleIncomingSpy).not.toHaveBeenCalled();
   });
@@ -1777,12 +1971,16 @@ describe("AgentVesselBase.processChannelEvent", () => {
       observations: { payloadKinds: ["application.incident.v1"] },
     });
     const event = customChannelEvent("application.incident.v1");
-    vessel.handleIncomingSpy.mockRejectedValueOnce(new Error("prompt admission failed"));
+    vessel.handleIncomingSpy.mockRejectedValueOnce(
+      new Error("prompt admission failed"),
+    );
 
     await expect(vessel.processChannelEvent(CHANNEL, event)).rejects.toThrow(
-      "prompt admission failed"
+      "prompt admission failed",
     );
-    await expect(vessel.processChannelEvent(CHANNEL, event)).resolves.toBeUndefined();
+    await expect(
+      vessel.processChannelEvent(CHANNEL, event),
+    ).resolves.toBeUndefined();
 
     expect(vessel.handleIncomingSpy).toHaveBeenCalledTimes(2);
   });
@@ -1934,7 +2132,7 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
         runId: "inv-80",
         result: { success: true, console: "" },
         channelId: CHANNEL,
-      })
+      }),
     ).rejects.toThrow(/only this agent's own EvalDO/);
     expect(deliverSpy).not.toHaveBeenCalled();
   });
@@ -1951,22 +2149,25 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     await vessel.deliverEffectOutcome("eff-2", outcome, { channelId: CHANNEL });
     expect(deliverSpy).toHaveBeenCalledTimes(2);
 
-    vessel.callerIdForTest = "do:workers/pubsub-channel:PubSubChannel:another-channel";
+    vessel.callerIdForTest =
+      "do:workers/pubsub-channel:PubSubChannel:another-channel";
     await expect(
       vessel.deliverEffectOutcome("eff-wrong-channel", outcome, {
         channelId: CHANNEL,
-      })
+      }),
     ).rejects.toThrow(/refusing caller/);
 
     vessel.callerIdForTest = "do:workers/forged-channel:PubSubChannel:chan-1";
     await expect(
       vessel.deliverEffectOutcome("eff-forged-source", outcome, {
         channelId: CHANNEL,
-      })
+      }),
     ).rejects.toThrow(/refusing caller/);
 
     vessel.callerIdForTest = "do:agents/evil:EvilAgent:x"; // a foreign agent forging
-    await expect(vessel.deliverEffectOutcome("eff-3", outcome)).rejects.toThrow(/refusing caller/);
+    await expect(vessel.deliverEffectOutcome("eff-3", outcome)).rejects.toThrow(
+      /refusing caller/,
+    );
     expect(deliverSpy).toHaveBeenCalledTimes(2);
   });
 
@@ -1985,12 +2186,12 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     await expect(
       vessel.onMethodCall(CHANNEL, "call-1", "credentialConnected", {
         providerId: "openai-codex",
-      })
+      }),
     ).resolves.toEqual({ result: { resumed: true } });
     expect(deliverSpy).toHaveBeenCalledWith(
       ids.credentialWaitEffect(ids.credKey(CHANNEL, "openai-codex")),
       { kind: "credential", resolved: true },
-      { channelId: CHANNEL }
+      { channelId: CHANNEL },
     );
     expect(wakeSpy).toHaveBeenCalledWith(CHANNEL);
 
@@ -1999,7 +2200,7 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     await expect(
       vessel.onMethodCall(CHANNEL, "call-2", "credentialConnected", {
         providerId: "openai-codex",
-      })
+      }),
     ).resolves.toEqual({ result: { resumed: false } });
     expect(wakeSpy).not.toHaveBeenCalled();
   });
@@ -2017,43 +2218,58 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     };
     vessel.callerKindForTest = "do";
     vessel.callerIdForTest = "do:workers/pubsub-channel:PubSubChannel:chan-1";
-    const first = vessel.onMethodCall("chan-1", "shared-transport", "credentialConnected", {
-      providerId: "provider-a",
-    });
+    const first = vessel.onMethodCall(
+      "chan-1",
+      "shared-transport",
+      "credentialConnected",
+      {
+        providerId: "provider-a",
+      },
+    );
     await vi.waitFor(() =>
       expect(
         (
           vessel as unknown as {
             directMethodCalls: Map<string, AbortController>;
           }
-        ).directMethodCalls.size
-      ).toBe(1)
+        ).directMethodCalls.size,
+      ).toBe(1),
     );
 
     vessel.callerIdForTest = "do:workers/pubsub-channel:PubSubChannel:chan-2";
-    const second = vessel.onMethodCall("chan-2", "shared-transport", "credentialConnected", {
-      providerId: "provider-b",
-    });
+    const second = vessel.onMethodCall(
+      "chan-2",
+      "shared-transport",
+      "credentialConnected",
+      {
+        providerId: "provider-b",
+      },
+    );
     await vi.waitFor(() =>
       expect(
         (
           vessel as unknown as {
             directMethodCalls: Map<string, AbortController>;
           }
-        ).directMethodCalls.size
-      ).toBe(2)
+        ).directMethodCalls.size,
+      ).toBe(2),
     );
 
     await vessel.cancelDirectMethodCall("chan-2", "shared-transport");
-    const calls = (vessel as unknown as { directMethodCalls: Map<string, AbortController> })
-      .directMethodCalls;
-    expect(calls.get("chan-1\u0000shared-transport")?.signal.aborted).toBe(false);
-    expect(calls.get("chan-2\u0000shared-transport")?.signal.aborted).toBe(true);
+    const calls = (
+      vessel as unknown as { directMethodCalls: Map<string, AbortController> }
+    ).directMethodCalls;
+    expect(calls.get("chan-1\u0000shared-transport")?.signal.aborted).toBe(
+      false,
+    );
+    expect(calls.get("chan-2\u0000shared-transport")?.signal.aborted).toBe(
+      true,
+    );
 
     vessel.callerIdForTest = "do:workers/pubsub-channel:PubSubChannel:chan-1";
-    await expect(vessel.cancelDirectMethodCall("chan-2", "shared-transport")).rejects.toThrow(
-      /refusing caller/
-    );
+    await expect(
+      vessel.cancelDirectMethodCall("chan-2", "shared-transport"),
+    ).rejects.toThrow(/refusing caller/);
     release(true);
     await Promise.all([first, second]);
   });
@@ -2061,7 +2277,9 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
   it("onAuthorityChanged refuses a non-server caller", async () => {
     const vessel = await makeVessel();
     vessel.callerKindForTest = "panel";
-    await expect(vessel.onAuthorityChanged("acq-1")).rejects.toThrow(/server-only/);
+    await expect(vessel.onAuthorityChanged("acq-1")).rejects.toThrow(
+      /server-only/,
+    );
   });
 
   it("onAuthorityChanged nudges durable authority redrive for the host-owned vessel", async () => {
@@ -2094,7 +2312,8 @@ class EvalGateProbe extends TestVessel {
           if (this.getRunError) throw this.getRunError;
           return this.getRunStatus;
         }
-        if (method === "eval.start" && this.startRunError) throw this.startRunError;
+        if (method === "eval.start" && this.startRunError)
+          throw this.startRunError;
         if (method === "eval.cancel") {
           if (this.cancelError) throw this.cancelError;
           return { ok: true };
@@ -2107,7 +2326,12 @@ class EvalGateProbe extends TestVessel {
     } as unknown as RpcClient;
   }
   callGate(channelId: string, invocationId: string, args: unknown) {
-    return this.runDeferredEval(channelId, invocationId, args, this.rpc as unknown as RpcClient);
+    return this.runDeferredEval(
+      channelId,
+      invocationId,
+      args,
+      this.rpc as unknown as RpcClient,
+    );
   }
   /** Drive a channel-callable agent method (cancelEval / pause / …) directly. */
   callAgentMethod(channelId: string, methodName: string, args: unknown) {
@@ -2135,7 +2359,7 @@ class EvalGateProbe extends TestVessel {
       CHANNEL,
       wakeId,
       now,
-      now
+      now,
     );
     this.markWorkReady("agent-wake");
   }
@@ -2163,13 +2387,15 @@ describe("AgentVesselBase turn recovery", () => {
       now: Date.now(),
       limit: 1,
     });
-    expect(claim).toEqual(expect.objectContaining({ itemId: "turn-recovery:effect-1" }));
+    expect(claim).toEqual(
+      expect.objectContaining({ itemId: "turn-recovery:effect-1" }),
+    );
 
     await expect(
       probe.executeWakeClaim({
         itemId: claim!.itemId,
         generation: claim!.generation,
-      })
+      }),
     ).resolves.toEqual({ processed: true });
     expect(wake).toHaveBeenCalledWith(CHANNEL);
     expect(
@@ -2178,14 +2404,14 @@ describe("AgentVesselBase turn recovery", () => {
         itemId: claim!.itemId,
         generation: claim!.generation,
         outcome: { executed: true },
-      })
+      }),
     ).toBe("accepted");
     expect(
       probe.claimReadyWork("agent-wake", {
         workerId: "replacement-worker",
         now: Date.now(),
         limit: 1,
-      })
+      }),
     ).toEqual([]);
   });
 });
@@ -2199,7 +2425,9 @@ class SubagentSpawnProbe extends TestVessel {
   failExternalReleaseCount = 0;
   failDestroyContextCount = 0;
   ownerRuntimeContextId = "ctx-1";
-  readonly handleIncomingSpy = vi.fn(async (_channelId: string, _incoming: unknown) => {});
+  readonly handleIncomingSpy = vi.fn(
+    async (_channelId: string, _incoming: unknown) => {},
+  );
   readonly wakeSpy = vi.fn(async (_channelId: string) => {});
   deferredPostTurnQueueForTest: Array<{
     metadata?: { supervisedTerminalRunId?: string };
@@ -2233,10 +2461,16 @@ class SubagentSpawnProbe extends TestVessel {
         }
         if (target === "main" && method === "vcs.status") {
           const contextId = String(
-            (args[0] as { contextId?: unknown } | undefined)?.contextId ?? "ctx-1"
+            (args[0] as { contextId?: unknown } | undefined)?.contextId ??
+              "ctx-1",
           );
           const eventId = `event:${contextId}`;
-          return semanticStatus(contextId, eventId, { kind: "event", eventId }, true);
+          return semanticStatus(
+            contextId,
+            eventId,
+            { kind: "event", eventId },
+            true,
+          );
         }
         if (target === "main" && method === "runtime.resolveContext") {
           return this.ownerRuntimeContextId;
@@ -2285,15 +2519,24 @@ class SubagentSpawnProbe extends TestVessel {
           };
         }
         if (target === "main" && method === "extensions.invokeProvider") {
-          const [provider, providerMethod] = args as [string, string, unknown[]];
-          if (provider === "claudeCode" && providerMethod === "launchSubagent") {
+          const [provider, providerMethod] = args as [
+            string,
+            string,
+            unknown[],
+          ];
+          if (
+            provider === "claudeCode" &&
+            providerMethod === "launchSubagent"
+          ) {
             if (this.failClaudeLaunch) throw new Error("launchSubagent boom");
             return {
               entityId: "session:cc-1",
               contextId: "ctx-child",
               channelId: "task-inv-cc",
-              vesselRef: "do:workers/linked-agent:LinkedAgentWorker:linked:session-cc-1",
-              vesselEntityId: "do:workers/linked-agent:LinkedAgentWorker:linked:session-cc-1",
+              vesselRef:
+                "do:workers/linked-agent:LinkedAgentWorker:linked:session-cc-1",
+              vesselEntityId:
+                "do:workers/linked-agent:LinkedAgentWorker:linked:session-cc-1",
               vesselParticipantId: "participant-linked",
               launchId: "claude-code:inv-cc",
               generationId: "generation:cc-1",
@@ -2320,13 +2563,18 @@ class SubagentSpawnProbe extends TestVessel {
         }
         if (target === "main" && method === "extensions.invoke") {
           const [ext, extMethod] = args as [string, string, unknown[]];
-          if (ext === "@workspace-extensions/codex" && extMethod === "launchSubagent") {
+          if (
+            ext === "@workspace-extensions/codex" &&
+            extMethod === "launchSubagent"
+          ) {
             return {
               entityId: "session:codex-1",
               contextId: "ctx-child",
               channelId: "task-inv-codex",
-              vesselRef: "do:workers/linked-agent:LinkedAgentWorker:linked:session-codex-1",
-              vesselEntityId: "do:workers/linked-agent:LinkedAgentWorker:linked:session-codex-1",
+              vesselRef:
+                "do:workers/linked-agent:LinkedAgentWorker:linked:session-codex-1",
+              vesselEntityId:
+                "do:workers/linked-agent:LinkedAgentWorker:linked:session-codex-1",
               vesselParticipantId: "participant-linked",
               launchId: "codex:inv-codex",
               generationId: "generation:codex-1",
@@ -2334,7 +2582,10 @@ class SubagentSpawnProbe extends TestVessel {
               logPath: "/state/agent-launch/session:codex-1/headless.log",
             };
           }
-          if (ext === "@workspace-extensions/codex" && extMethod === "release") {
+          if (
+            ext === "@workspace-extensions/codex" &&
+            extMethod === "release"
+          ) {
             if (this.failExternalReleaseCount > 0) {
               this.failExternalReleaseCount -= 1;
               throw new Error("release boom");
@@ -2413,19 +2664,35 @@ class SubagentSpawnProbe extends TestVessel {
       externalGenerationId: null,
     });
   }
-  async inspectSubagentForTest(runId: string, query: string, parentChannelId = CHANNEL) {
+  async inspectSubagentForTest(
+    runId: string,
+    query: string,
+    parentChannelId = CHANNEL,
+  ) {
     return this.inspectSubagent(runId, query, parentChannelId);
   }
-  async mergeSubagentForTest(runId: string, parentChannelId = CHANNEL, intent?: string) {
+  async mergeSubagentForTest(
+    runId: string,
+    parentChannelId = CHANNEL,
+    intent?: string,
+  ) {
     return this.mergeSubagent(runId, parentChannelId, [], intent);
   }
   respondToVcs(method: string, ...responses: unknown[]) {
     this.vcsResponses.set(`vcs.${method}`, [...responses]);
   }
-  async readSubagentForTest(runId: string, afterSeq: number, parentChannelId = CHANNEL) {
+  async readSubagentForTest(
+    runId: string,
+    afterSeq: number,
+    parentChannelId = CHANNEL,
+  ) {
     return this.readSubagent(runId, afterSeq, parentChannelId);
   }
-  async sendToSubagentForTest(runId: string, message: string, parentChannelId = CHANNEL) {
+  async sendToSubagentForTest(
+    runId: string,
+    message: string,
+    parentChannelId = CHANNEL,
+  ) {
     return this.sendToSubagent("send-test", runId, message, parentChannelId);
   }
   async cancelSubagentForTest(runId: string, reason = "cancelled by test") {
@@ -2434,13 +2701,17 @@ class SubagentSpawnProbe extends TestVessel {
   async settleSubagentForTest(
     runId: string,
     outcome: "completed" | "failed" | "cancelled" | "abandoned",
-    text: string
+    text: string,
   ) {
     const run = this.subagentRuns.get(runId);
     if (!run) throw new Error(`missing run ${runId}`);
     return this.settleSubagentTerminal(run, outcome, text);
   }
-  async completeSubagentForTest(runId: string, report: string, outcome: "success" | "failed") {
+  async completeSubagentForTest(
+    runId: string,
+    report: string,
+    outcome: "success" | "failed",
+  ) {
     const run = this.subagentRuns.get(runId);
     if (!run) throw new Error(`missing run ${runId}`);
     const terminal = outcome === "success" ? "completed" : "failed";
@@ -2482,11 +2753,16 @@ class SubagentSpawnProbe extends TestVessel {
   async completeOwnRunForTest(report: string, outcome: "success" | "failed") {
     return this.completeAsSubagent(report, outcome);
   }
-  async closeOwnTurnForTest(input: { finalMessage?: string; reason?: string; summary?: string }) {
+  async closeOwnTurnForTest(input: {
+    finalMessage?: string;
+    reason?: string;
+    summary?: string;
+  }) {
     await this.onTurnClosed({
       channelId: "task-child-run-1",
       turnId: "turn-child-1",
       metadata: { origin: "agent-initiated" },
+      effectFailures: [],
       ...input,
     });
   }
@@ -2496,7 +2772,7 @@ class SubagentSpawnProbe extends TestVessel {
         `SELECT payload_json, disposition
            FROM agent_wake_queue
           WHERE wake_id = ?`,
-        "subagent-terminal-publish:child-run-1"
+        "subagent-terminal-publish:child-run-1",
       )
       .toArray()[0];
     return row
@@ -2517,7 +2793,9 @@ class SubagentSpawnProbe extends TestVessel {
   }
 }
 
-async function makeSubagentSpawnProbe(config?: unknown): Promise<SubagentSpawnProbe> {
+async function makeSubagentSpawnProbe(
+  config?: unknown,
+): Promise<SubagentSpawnProbe> {
   const { instance } = await createTestDO(SubagentSpawnProbe, TEST_AGENT_ENV);
   await instance.registerSubscriptionForTest(CHANNEL, config);
   return instance;
@@ -2547,9 +2825,11 @@ async function makeChildCompletionProbe(): Promise<SubagentSpawnProbe> {
 function semanticStatus(
   contextId: string,
   committedEventId: string,
-  workingHead: { kind: "event"; eventId: string } | { kind: "application"; applicationId: string },
+  workingHead:
+    | { kind: "event"; eventId: string }
+    | { kind: "application"; applicationId: string },
   clean: boolean,
-  integrating: VcsStatusResult["integrating"] = []
+  integrating: VcsStatusResult["integrating"] = [],
 ) {
   return {
     contextId,
@@ -2568,12 +2848,16 @@ function semanticStatus(
 }
 
 function semanticComparison(
-  target: { kind: "event"; eventId: string } | { kind: "application"; applicationId: string },
+  target:
+    | { kind: "event"; eventId: string }
+    | { kind: "application"; applicationId: string },
   sourceEventId: string,
   coordinates: Array<{ id: string; status: "adopt" | "conflict" }>,
-  concluded = coordinates.length === 0
+  concluded = coordinates.length === 0,
 ): VcsCompareResult {
-  const conflict = coordinates.filter((coordinate) => coordinate.status === "conflict").length;
+  const conflict = coordinates.filter(
+    (coordinate) => coordinate.status === "conflict",
+  ).length;
   const adopt = coordinates.length - conflict;
   return {
     target,
@@ -2610,7 +2894,9 @@ function semanticComparison(
       ],
       attribution: {
         ours: [],
-        theirs: [{ changeId: `change:${entry.id}`, workUnitId: `work:${entry.id}` }],
+        theirs: [
+          { changeId: `change:${entry.id}`, workUnitId: `work:${entry.id}` },
+        ],
       },
       resolutions: ["theirs", "ours", "current"],
       summary: entry.id,
@@ -2641,8 +2927,10 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     expect(probe.rpcCalls.some((c) => c.method === "eval.get")).toBe(true);
     expect(
       probe.channelStub.published.find(
-        (entry) => entry.idempotencyKey === `eval-pending:${ids.invocationEffect("inv-1")}`
-      )
+        (entry) =>
+          entry.idempotencyKey ===
+          `eval-pending:${ids.invocationEffect("inv-1")}`,
+      ),
     ).toMatchObject({
       event: {
         kind: "invocation.progress",
@@ -2665,12 +2953,14 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     const probe = await makeGateProbe();
     probe.getRunStatus = { status: "running" };
 
-    await expect(probe.callGate(CHANNEL, "inv-retire", { code: "await wait()" })).resolves.toEqual({
+    await expect(
+      probe.callGate(CHANNEL, "inv-retire", { code: "await wait()" }),
+    ).resolves.toEqual({
       deferred: true,
       reason: "external-result",
     });
     expect((probe as any).deferredEvalRuns.get(CHANNEL)).toEqual(
-      new Set([ids.invocationEffect("inv-retire")])
+      new Set([ids.invocationEffect("inv-retire")]),
     );
 
     await (probe as any).cancelDeferredEvalRuns(CHANNEL);
@@ -2695,20 +2985,28 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
 
     // NEVER throws: the outage class this hardens against must not block
     // channel retirement. The cancel obligation survives as a durable intent.
-    await expect((probe as any).cancelDeferredEvalRuns(CHANNEL)).resolves.toBeUndefined();
+    await expect(
+      (probe as any).cancelDeferredEvalRuns(CHANNEL),
+    ).resolves.toBeUndefined();
     const intents = (probe as any).sql
       .exec(`SELECT channel_id, run_id FROM deferred_eval_cancel_intents`)
       .toArray();
-    expect(intents).toEqual([{ channel_id: CHANNEL, run_id: ids.invocationEffect("inv-retry") }]);
+    expect(intents).toEqual([
+      { channel_id: CHANNEL, run_id: ids.invocationEffect("inv-retry") },
+    ]);
 
     // A later lifecycle drain (resume / backstop alarm) redrives the cancel;
     // the intent is deleted only on an acknowledged eval.cancel. Idempotent.
     probe.cancelError = null;
     await (probe as any).drainEvalCancelIntents();
     expect(
-      (probe as any).sql.exec(`SELECT count(*) AS n FROM deferred_eval_cancel_intents`).toArray()
+      (probe as any).sql
+        .exec(`SELECT count(*) AS n FROM deferred_eval_cancel_intents`)
+        .toArray(),
     ).toEqual([{ n: 0 }]);
-    expect(probe.rpcCalls.filter((call) => call.method === "eval.cancel")).toEqual([
+    expect(
+      probe.rpcCalls.filter((call) => call.method === "eval.cancel"),
+    ).toEqual([
       {
         method: "eval.cancel",
         args: [{ scopeKey: CHANNEL, runId: ids.invocationEffect("inv-retry") }],
@@ -2742,7 +3040,7 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
         tool: "eval",
         args: {},
       } as never,
-      null
+      null,
     );
 
     await (probe as any).cancelDeferredEvalRuns(CHANNEL);
@@ -2779,7 +3077,7 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     await expect(
       probe.callGate(CHANNEL, "inv-failed", {
         code: "throw new Error('boom')",
-      })
+      }),
     ).resolves.toMatchObject({
       isError: true,
       result: { details: { success: false, error: "boom" } },
@@ -2800,7 +3098,7 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     };
 
     await expect(
-      probe.callGate(CHANNEL, "inv-infra", { code: "import('broken')" })
+      probe.callGate(CHANNEL, "inv-infra", { code: "import('broken')" }),
     ).resolves.toMatchObject({
       isError: true,
       terminalOutcome: "infrastructure_error",
@@ -2825,9 +3123,11 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
         code: "x",
         path: "meta",
         sourcePath: "src/probe.ts",
-      })
+      }),
     ).resolves.toEqual({ deferred: true, reason: "external-result" });
-    expect(probe.rpcCalls.find((call) => call.method === "eval.start")?.args[0]).toMatchObject({
+    expect(
+      probe.rpcCalls.find((call) => call.method === "eval.start")?.args[0],
+    ).toMatchObject({
       source: { kind: "inline", code: "x", pathHint: "src/probe.ts" },
     });
 
@@ -2839,9 +3139,11 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     const probe = await makeGateProbe();
     probe.getRunStatus = { status: "pending" };
     await expect(
-      probe.callGate(CHANNEL, "inv-empty-path", { code: "1+1", path: "" })
+      probe.callGate(CHANNEL, "inv-empty-path", { code: "1+1", path: "" }),
     ).resolves.toEqual({ deferred: true, reason: "external-result" });
-    expect(probe.rpcCalls.find((call) => call.method === "eval.start")?.args[0]).toMatchObject({
+    expect(
+      probe.rpcCalls.find((call) => call.method === "eval.start")?.args[0],
+    ).toMatchObject({
       source: { kind: "inline", code: "1+1", pathHint: undefined },
     });
   });
@@ -2854,10 +3156,12 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
       probe.callGate(CHANNEL, "inv-reset", {
         reset: true,
         code: "return Object.keys(scope)",
-      })
+      }),
     ).resolves.toEqual({ deferred: true, reason: "external-result" });
 
-    expect(probe.rpcCalls.find((call) => call.method === "eval.start")?.args[0]).toMatchObject({
+    expect(
+      probe.rpcCalls.find((call) => call.method === "eval.start")?.args[0],
+    ).toMatchObject({
       runId: ids.invocationEffect("inv-reset"),
       reset: true,
       source: { kind: "inline", code: "return Object.keys(scope)" },
@@ -2872,10 +3176,12 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
       probe.callGate(CHANNEL, "inv-timeout", {
         code: "await new Promise(() => {})",
         timeoutMs: 250,
-      })
+      }),
     ).resolves.toEqual({ deferred: true, reason: "external-result" });
 
-    expect(probe.rpcCalls.find((call) => call.method === "eval.start")?.args[0]).toMatchObject({
+    expect(
+      probe.rpcCalls.find((call) => call.method === "eval.start")?.args[0],
+    ).toMatchObject({
       runId: ids.invocationEffect("inv-timeout"),
       timeoutMs: 250,
     });
@@ -2888,12 +3194,14 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
       probe.callGate(CHANNEL, "inv-bad-timeout", {
         code: "return 1",
         authority: { effects: "read-write", timeoutMs: 250 },
-      })
+      }),
     ).rejects.toMatchObject({
       code: "invalid_tool_arguments",
       message: expect.stringContaining("/authority/timeoutMs"),
     });
-    expect(probe.rpcCalls.some((call) => call.method === "eval.start")).toBe(false);
+    expect(probe.rpcCalls.some((call) => call.method === "eval.start")).toBe(
+      false,
+    );
   });
 
   it("settles invalid cross-field authority before fencing a deferred run", async () => {
@@ -2907,15 +3215,19 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
           approvals: "pregranted-only",
           preauthorize: [{ service: "missions", method: "create", args: [{}] }],
         },
-      })
+      }),
     ).resolves.toMatchObject({
       isError: true,
       result: expect.stringContaining(
-        "preauthorize is valid only when authority.approvals is prompt"
+        "preauthorize is valid only when authority.approvals is prompt",
       ),
     });
-    expect(probe.rpcCalls.some((call) => call.method === "eval.start")).toBe(false);
-    expect(probe.rpcCalls.some((call) => call.method === "eval.get")).toBe(false);
+    expect(probe.rpcCalls.some((call) => call.method === "eval.start")).toBe(
+      false,
+    );
+    expect(probe.rpcCalls.some((call) => call.method === "eval.get")).toBe(
+      false,
+    );
   });
 
   it("F4: PARKS (deferred) when the getRun poll throws AFTER startRun succeeded — never a spurious error", async () => {
@@ -2931,7 +3243,9 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     expect(out).toEqual({ deferred: true, reason: "external-result" });
     expect((out as { isError?: boolean }).isError).toBeUndefined();
     // startRun still kicked off the run (so the result can arrive out-of-band).
-    expect(probe.rpcCalls.find((c) => c.method === "eval.start")?.args[0]).toMatchObject({
+    expect(
+      probe.rpcCalls.find((c) => c.method === "eval.start")?.args[0],
+    ).toMatchObject({
       runId: ids.invocationEffect("inv-park"),
     });
     // The poll WAS attempted (and threw).
@@ -2942,11 +3256,13 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
     const probe = await makeGateProbe();
     probe.startRunError = new RemoteRpcError(
       "[workerdInspector.getEndpoint] Invalid args: expected string",
-      "service"
+      "service",
     );
     probe.getRunStatus = { status: "unknown" };
 
-    await expect(probe.callGate(CHANNEL, "inv-rejected", { code: "1+1" })).resolves.toMatchObject({
+    await expect(
+      probe.callGate(CHANNEL, "inv-rejected", { code: "1+1" }),
+    ).resolves.toMatchObject({
       isError: true,
       result: {
         details: {
@@ -2955,47 +3271,75 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
         },
       },
     });
-    expect(probe.rpcCalls.filter((call) => call.method === "eval.start")).toHaveLength(1);
-    expect(probe.rpcCalls.some((call) => call.method === "eval.get")).toBe(false);
+    expect(
+      probe.rpcCalls.filter((call) => call.method === "eval.start"),
+    ).toHaveLength(1);
+    expect(probe.rpcCalls.some((call) => call.method === "eval.get")).toBe(
+      false,
+    );
   });
 
   it("F4: treats a rejected startRun response as ambiguous and never dispatches twice", async () => {
     const probe = await makeGateProbe();
     probe.seedDeferredEvalForTest(ids.invocationEffect("inv-ambiguous"), false);
-    probe.startRunError = new Error("response lost after EvalDO accepted the run");
+    probe.startRunError = new Error(
+      "response lost after EvalDO accepted the run",
+    );
     probe.getRunStatus = { status: "running" };
 
-    await expect(probe.callGate(CHANNEL, "inv-ambiguous", { code: "1+1" })).resolves.toEqual({
+    await expect(
+      probe.callGate(CHANNEL, "inv-ambiguous", { code: "1+1" }),
+    ).resolves.toEqual({
       deferred: true,
       reason: "external-result",
     });
     expect(
       probe
         .driverForTest()
-        .hasDeferredEvalStartAttempted(CHANNEL, ids.invocationEffect("inv-ambiguous"))
+        .hasDeferredEvalStartAttempted(
+          CHANNEL,
+          ids.invocationEffect("inv-ambiguous"),
+        ),
     ).toBe(true);
     probe.startRunError = null;
-    await expect(probe.callGate(CHANNEL, "inv-ambiguous", { code: "1+1" })).resolves.toEqual({
+    await expect(
+      probe.callGate(CHANNEL, "inv-ambiguous", { code: "1+1" }),
+    ).resolves.toEqual({
       deferred: true,
       reason: "external-result",
     });
 
-    expect(probe.rpcCalls.filter((call) => call.method === "eval.start")).toHaveLength(1);
-    expect(probe.rpcCalls.filter((call) => call.method === "eval.get")).toHaveLength(2);
+    expect(
+      probe.rpcCalls.filter((call) => call.method === "eval.start"),
+    ).toHaveLength(1);
+    expect(
+      probe.rpcCalls.filter((call) => call.method === "eval.get"),
+    ).toHaveLength(2);
   });
 
   it("parks an ambiguously acknowledged start while host admission reconciliation is pending", async () => {
     const probe = await makeGateProbe();
-    probe.seedDeferredEvalForTest(ids.invocationEffect("inv-admission-race"), false);
-    probe.startRunError = new Error("response lost before admission was observable");
+    probe.seedDeferredEvalForTest(
+      ids.invocationEffect("inv-admission-race"),
+      false,
+    );
+    probe.startRunError = new Error(
+      "response lost before admission was observable",
+    );
     probe.getRunStatus = { status: "unknown" };
 
-    await expect(probe.callGate(CHANNEL, "inv-admission-race", { code: "1+1" })).resolves.toEqual({
+    await expect(
+      probe.callGate(CHANNEL, "inv-admission-race", { code: "1+1" }),
+    ).resolves.toEqual({
       deferred: true,
       reason: "external-result",
     });
-    expect(probe.rpcCalls.filter((call) => call.method === "eval.start")).toHaveLength(1);
-    expect(probe.rpcCalls.filter((call) => call.method === "eval.get")).toHaveLength(1);
+    expect(
+      probe.rpcCalls.filter((call) => call.method === "eval.start"),
+    ).toHaveLength(1);
+    expect(
+      probe.rpcCalls.filter((call) => call.method === "eval.get"),
+    ).toHaveLength(1);
   });
 });
 
@@ -3023,7 +3367,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const probe = await makeChildCompletionProbe();
 
     await expect(
-      probe.completeOwnRunForTest("Five concise design bullets.", "success")
+      probe.completeOwnRunForTest("Five concise design bullets.", "success"),
     ).resolves.toMatchObject({
       terminate: true,
       details: { runId: "child-run-1", outcome: "success" },
@@ -3055,7 +3399,8 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
 
     expect(out).toMatchObject({ isError: false });
     const create = probe.rpcCalls.find(
-      (call) => call.target === "main" && call.method === "runtime.createEntity"
+      (call) =>
+        call.target === "main" && call.method === "runtime.createEntity",
     );
     expect(create?.args[0]).toMatchObject({
       stateArgs: {
@@ -3099,7 +3444,8 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       },
     });
     const create = probe.rpcCalls.find(
-      (call) => call.target === "main" && call.method === "runtime.createEntity"
+      (call) =>
+        call.target === "main" && call.method === "runtime.createEntity",
     );
     expect(create?.args[0]).toMatchObject({
       stateArgs: {
@@ -3131,8 +3477,8 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
           call.target === "main" &&
           (call.method === "runtime.createSubagentContext" ||
             call.method === "runtime.createEntity" ||
-            call.method === "runtime.destroyContext")
-      )
+            call.method === "runtime.destroyContext"),
+      ),
     ).toBe(false);
   });
 
@@ -3148,7 +3494,8 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
 
     const create = probe.rpcCalls.find(
-      (call) => call.target === "main" && call.method === "runtime.createEntity"
+      (call) =>
+        call.target === "main" && call.method === "runtime.createEntity",
     );
     expect(create?.args[0]).toMatchObject({
       execution: { surface: "code", source: "test" },
@@ -3168,8 +3515,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
     expect(
       probe.rpcCalls.some(
-        (call) => call.target === "main" && call.method === "runtime.createSubagentContext"
-      )
+        (call) =>
+          call.target === "main" &&
+          call.method === "runtime.createSubagentContext",
+      ),
     ).toBe(false);
   });
 
@@ -3199,7 +3548,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
 
     const forkCall = probe.rpcCalls.find(
-      (call) => call.target === "gad" && call.method === "forkLog"
+      (call) => call.target === "gad" && call.method === "forkLog",
     );
     expect(forkCall?.args[0]).toMatchObject({
       fromLogId: parentLogId,
@@ -3220,12 +3569,14 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
 
     expect(out).toMatchObject({ isError: false });
-    const forkIndex = probe.operationLog.findIndex((entry) => entry === "rpc:gad:forkLog");
+    const forkIndex = probe.operationLog.findIndex(
+      (entry) => entry === "rpc:gad:forkLog",
+    );
     const initIndex = probe.operationLog.findIndex((entry) =>
-      entry.includes(":initFromTrajectoryFork")
+      entry.includes(":initFromTrajectoryFork"),
     );
     const supervisorSubscribeIndex = probe.operationLog.findIndex(
-      (entry) => entry === "channel:task-inv-1:join"
+      (entry) => entry === "channel:task-inv-1:join",
     );
     expect(forkIndex).toBeGreaterThanOrEqual(0);
     expect(initIndex).toBeGreaterThanOrEqual(0);
@@ -3233,7 +3584,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     expect(forkIndex).toBeLessThan(initIndex);
     expect(initIndex).toBeLessThan(supervisorSubscribeIndex);
     const seed = probe.channelStub.published.find(
-      (published) => published.idempotencyKey === "subagent-seed:inv-1"
+      (published) => published.idempotencyKey === "subagent-seed:inv-1",
     );
     expect(seed?.event).toMatchObject({
       payload: {
@@ -3246,10 +3597,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       },
     });
     expect(JSON.stringify(seed?.event)).toContain(
-      "inherited parent trajectory is reference context only"
+      "inherited parent trajectory is reference context only",
     );
     expect(JSON.stringify(seed?.event)).toContain(
-      "<assigned_task>\\nstart the forked child\\n</assigned_task>"
+      "<assigned_task>\\nstart the forked child\\n</assigned_task>",
     );
   });
 
@@ -3265,13 +3616,15 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     expect(out).toMatchObject({
       isError: true,
       result: expect.stringContaining(
-        "spawn_subagent context mismatch: owner do:test:TestAgent:agent-key is registered in ctx-original, but channel chan-1 is subscribed as ctx-1"
+        "spawn_subagent context mismatch: owner do:test:TestAgent:agent-key is registered in ctx-original, but channel chan-1 is subscribed as ctx-1",
       ),
     });
     expect(
       probe.rpcCalls.some(
-        (call) => call.target === "main" && call.method === "runtime.createSubagentContext"
-      )
+        (call) =>
+          call.target === "main" &&
+          call.method === "runtime.createSubagentContext",
+      ),
     ).toBe(false);
   });
 
@@ -3300,16 +3653,18 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       isError: true,
       result: `subagent task trajectory already exists with different fork lineage: ${childLogId}:${childLogId}`,
     });
-    expect(probe.operationLog.some((entry) => entry.includes(":initFromTrajectoryFork"))).toBe(
-      false
-    );
+    expect(
+      probe.operationLog.some((entry) =>
+        entry.includes(":initFromTrajectoryFork"),
+      ),
+    ).toBe(false);
     expect(
       probe.rpcCalls.some(
         (call) =>
           call.target === "main" &&
           call.method === "runtime.destroyContext" &&
-          JSON.stringify(call.args).includes("ctx-child")
-      )
+          JSON.stringify(call.args).includes("ctx-child"),
+      ),
     ).toBe(true);
   });
 
@@ -3342,18 +3697,22 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       taskChannelId: "task-inv-1",
       childContextId: "ctx-child",
     });
-    expect(probe.rpcCalls.some((call) => call.method === "runtime.createEntity")).toBe(true);
-    expect(probe.channelStub.published.some((p) => p.event.kind === "task.started")).toBe(true);
+    expect(
+      probe.rpcCalls.some((call) => call.method === "runtime.createEntity"),
+    ).toBe(true);
+    expect(
+      probe.channelStub.published.some((p) => p.event.kind === "task.started"),
+    ).toBe(true);
     const startedIndex = probe.channelStub.published.findIndex(
-      (p) => p.idempotencyKey === "subagent-started:inv-1"
+      (p) => p.idempotencyKey === "subagent-started:inv-1",
     );
     const seedIndex = probe.channelStub.published.findIndex(
-      (p) => p.idempotencyKey === "subagent-seed:inv-1"
+      (p) => p.idempotencyKey === "subagent-seed:inv-1",
     );
     expect(startedIndex).toBeGreaterThanOrEqual(0);
     expect(seedIndex).toBeGreaterThan(startedIndex);
     const seed = probe.channelStub.published.find(
-      (p) => p.idempotencyKey === "subagent-seed:inv-1"
+      (p) => p.idempotencyKey === "subagent-seed:inv-1",
     );
     expect(seed?.event).toMatchObject({
       kind: "message.completed",
@@ -3363,7 +3722,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         to: [{ kind: "participant", participantId: "participant-child" }],
       },
     });
-    expect(probe.rpcCalls.some((call) => call.method === "onChannelEnvelope")).toBe(false);
+    expect(
+      probe.rpcCalls.some((call) => call.method === "onChannelEnvelope"),
+    ).toBe(false);
   });
 
   it("tears down a stale starting row and retries spawn setup on re-drive", async () => {
@@ -3411,8 +3772,8 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         (call) =>
           call.target === "main" &&
           call.method === "runtime.destroyContext" &&
-          JSON.stringify(call.args).includes("ctx-child")
-      )
+          JSON.stringify(call.args).includes("ctx-child"),
+      ),
     ).toBe(false);
   });
 
@@ -3435,11 +3796,13 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         (call) =>
           call.target === "main" &&
           call.method === "runtime.destroyContext" &&
-          JSON.stringify(call.args).includes("ctx-child")
-      )
+          JSON.stringify(call.args).includes("ctx-child"),
+      ),
     ).toBe(true);
     expect(
-      probe.channelStub.published.some((p) => p.idempotencyKey === "subagent-seed:inv-1")
+      probe.channelStub.published.some(
+        (p) => p.idempotencyKey === "subagent-seed:inv-1",
+      ),
     ).toBe(false);
   });
 
@@ -3464,11 +3827,13 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         (call) =>
           call.target === "main" &&
           call.method === "runtime.destroyContext" &&
-          JSON.stringify(call.args).includes("ctx-child")
-      )
+          JSON.stringify(call.args).includes("ctx-child"),
+      ),
     ).toBe(false);
     expect(
-      probe.channelStub.published.some((p) => p.idempotencyKey === "subagent-terminal:inv-1")
+      probe.channelStub.published.some(
+        (p) => p.idempotencyKey === "subagent-terminal:inv-1",
+      ),
     ).toBe(true);
   });
 
@@ -3486,7 +3851,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       result: { details: { runId: "inv-1", status: "running" } },
     });
     const seed = probe.channelStub.published.find(
-      (p) => p.idempotencyKey === "subagent-seed:inv-1"
+      (p) => p.idempotencyKey === "subagent-seed:inv-1",
     );
     expect(seed?.event).toMatchObject({
       kind: "message.completed",
@@ -3511,7 +3876,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
 
     const seeds = probe.channelStub.published.filter(
-      (entry) => entry.idempotencyKey === "subagent-seed:inv-1"
+      (entry) => entry.idempotencyKey === "subagent-seed:inv-1",
     );
     expect(seeds).toHaveLength(2);
     expect(seeds[1]?.event).toEqual(seeds[0]?.event);
@@ -3526,8 +3891,8 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         "ctx-inv-recovered",
         "event:recovered",
         { kind: "event", eventId: "event:recovered" },
-        true
-      )
+        true,
+      ),
     );
 
     const out = await probe.inspectSubagentForTest("inv-recovered", "status");
@@ -3561,11 +3926,13 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     probe.respondToVcs(
       "status",
       semanticStatus("ctx-inv-diff-stale", "event:child", childHead, true),
-      semanticStatus("ctx-1", "event:parent", parentHead, false)
+      semanticStatus("ctx-1", "event:parent", parentHead, false),
     );
     probe.respondToVcs(
       "compare",
-      semanticComparison(parentHead, "event:child", [{ id: "child", status: "adopt" }])
+      semanticComparison(parentHead, "event:child", [
+        { id: "child", status: "adopt" },
+      ]),
     );
 
     const out = await probe.inspectSubagentForTest(runId, "diff");
@@ -3575,7 +3942,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     expect(text).toContain("Coordinate: file:child · adopt · child");
     expect(text).toContain("Child source is committed and clean");
     expect(text.length).toBeLessThan(20_000);
-    expect(probe.rpcCalls.filter(({ method }) => method.startsWith("vcs."))).toEqual([
+    expect(
+      probe.rpcCalls.filter(({ method }) => method.startsWith("vcs.")),
+    ).toEqual([
       {
         target: "main",
         method: "vcs.status",
@@ -3598,7 +3967,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         ],
       },
     ]);
-    expect(probe.rpcCalls.some(({ method }) => method === "vcs.inspect")).toBe(false);
+    expect(probe.rpcCalls.some(({ method }) => method === "vcs.inspect")).toBe(
+      false,
+    );
   });
 
   it("pages child log history from the committed event when the working head is an application", async () => {
@@ -3612,20 +3983,29 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     };
     probe.respondToVcs(
       "status",
-      semanticStatus("ctx-inv-log-stale", committed.eventId, workingHead, false)
+      semanticStatus(
+        "ctx-inv-log-stale",
+        committed.eventId,
+        workingHead,
+        false,
+      ),
     );
     probe.respondToVcs("history", {
       root: committed,
-      entries: [{ node: committed, createdAt: null, summary: "Child fixture commit" }],
+      entries: [
+        { node: committed, createdAt: null, summary: "Child fixture commit" },
+      ],
       nextCursor: null,
     });
 
     const out = await probe.inspectSubagentForTest(runId, "log");
 
     expect((out.content[0] as { text?: string } | undefined)?.text).toContain(
-      "Child fixture commit"
+      "Child fixture commit",
     );
-    expect(probe.rpcCalls.filter(({ method }) => method.startsWith("vcs."))).toEqual([
+    expect(
+      probe.rpcCalls.filter(({ method }) => method.startsWith("vcs.")),
+    ).toEqual([
       {
         target: "main",
         method: "vcs.status",
@@ -3669,7 +4049,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const out = await probe.readSubagentForTest("inv-recovered", 0);
 
     expect((out.content[0] as { text?: string } | undefined)?.text).toContain(
-      "Recovered transcript line."
+      "Recovered transcript line.",
     );
     expect(out.details).toMatchObject({
       runId: "inv-recovered",
@@ -3704,7 +4084,12 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     probe.respondToVcs(
       "status",
       semanticStatus("ctx-1", "event:parent", target, false),
-      semanticStatus("ctx-child", sourceEventId, { kind: "event", eventId: sourceEventId }, true)
+      semanticStatus(
+        "ctx-child",
+        sourceEventId,
+        { kind: "event", eventId: sourceEventId },
+        true,
+      ),
     );
     const initialComparison = semanticComparison(target, sourceEventId, [
       { id: "one", status: "adopt" },
@@ -3724,7 +4109,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     probe.respondToVcs(
       "compare",
       initialComparison,
-      semanticComparison(integrated, sourceEventId, [])
+      semanticComparison(integrated, sourceEventId, []),
     );
     probe.respondToVcs("merge", {
       ...integration,
@@ -3762,7 +4147,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const result = await probe.mergeSubagentForTest(
       runId,
       CHANNEL,
-      "Integrate the reviewed fixture corpus"
+      "Integrate the reviewed fixture corpus",
     );
 
     expect(result.details).toMatchObject({
@@ -3780,25 +4165,30 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     expect(result.content[0]).toMatchObject({
       type: "text",
       text: expect.stringMatching(
-        /Resolution: complete=true; concluded=true; remaining=0[\s\S]*Source: asked by user:owner[\s\S]*Composed: file:one/
+        /Resolution: complete=true; concluded=true; remaining=0[\s\S]*Source: asked by user:owner[\s\S]*Composed: file:one/,
       ),
     });
     expect(probe.subagentRunForTest(runId)?.sourceEventId).toBe(sourceEventId);
     const vcsCalls = probe.rpcCalls.filter(
-      ({ target: callTarget, method }) => callTarget === "main" && method.startsWith("vcs.")
+      ({ target: callTarget, method }) =>
+        callTarget === "main" && method.startsWith("vcs."),
     );
-    expect(vcsCalls.map(({ method }) => method)).toEqual(["vcs.status", "vcs.status", "vcs.merge"]);
-    const integrateInput = vcsCalls.find(({ method }) => method === "vcs.merge")?.args[0] as Record<
-      string,
-      unknown
-    >;
+    expect(vcsCalls.map(({ method }) => method)).toEqual([
+      "vcs.status",
+      "vcs.status",
+      "vcs.merge",
+    ]);
+    const integrateInput = vcsCalls.find(({ method }) => method === "vcs.merge")
+      ?.args[0] as Record<string, unknown>;
     expect(integrateInput).toMatchObject({
       contextId: "ctx-1",
       expectedWorkingHead: target,
       source: { kind: "event", eventId: sourceEventId },
       intentSummary: "Integrate the reviewed fixture corpus",
     });
-    expect(integrateInput["commandId"]).toMatch(/^subagent-merge:[a-f0-9]{64}$/);
+    expect(integrateInput["commandId"]).toMatch(
+      /^subagent-merge:[a-f0-9]{64}$/,
+    );
     expect(vcsCalls.some(({ method }) => method === "vcs.commit")).toBe(false);
   });
 
@@ -3814,7 +4204,12 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     probe.respondToVcs(
       "status",
       semanticStatus("ctx-1", "event:parent", target, false),
-      semanticStatus("ctx-child", sourceEventId, { kind: "event", eventId: sourceEventId }, true)
+      semanticStatus(
+        "ctx-child",
+        sourceEventId,
+        { kind: "event", eventId: sourceEventId },
+        true,
+      ),
     );
     probe.respondToVcs("merge", {
       status: "unchanged",
@@ -3873,13 +4268,18 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     probe.respondToVcs(
       "status",
       semanticStatus("ctx-1", "event:parent", target, false),
-      semanticStatus("ctx-child", sourceEventId, { kind: "event", eventId: sourceEventId }, true)
+      semanticStatus(
+        "ctx-child",
+        sourceEventId,
+        { kind: "event", eventId: sourceEventId },
+        true,
+      ),
     );
     const latePage = semanticComparison(
       target,
       sourceEventId,
       [{ id: "late-conflict", status: "conflict" }],
-      true
+      true,
     );
     probe.respondToVcs("merge", {
       status: "unchanged",
@@ -3909,8 +4309,12 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         ],
       }),
     });
-    expect(probe.rpcCalls.filter(({ method }) => method === "vcs.compare")).toHaveLength(0);
-    expect(probe.rpcCalls.filter(({ method }) => method === "vcs.merge")).toHaveLength(1);
+    expect(
+      probe.rpcCalls.filter(({ method }) => method === "vcs.compare"),
+    ).toHaveLength(0);
+    expect(
+      probe.rpcCalls.filter(({ method }) => method === "vcs.merge"),
+    ).toHaveLength(1);
   });
 
   it("keeps adopted changes local and reports remaining conflicting changes", async () => {
@@ -3930,7 +4334,12 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     probe.respondToVcs(
       "status",
       semanticStatus("ctx-1", "event:parent", target, false),
-      semanticStatus("ctx-child", sourceEventId, { kind: "event", eventId: sourceEventId }, true)
+      semanticStatus(
+        "ctx-child",
+        sourceEventId,
+        { kind: "event", eventId: sourceEventId },
+        true,
+      ),
     );
     probe.respondToVcs(
       "compare",
@@ -3938,7 +4347,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         { id: "applicable", status: "adopt" },
         conflicting,
       ]),
-      semanticComparison(integrated, sourceEventId, [conflicting], true)
+      semanticComparison(integrated, sourceEventId, [conflicting], true),
     );
     probe.respondToVcs("merge", {
       status: "working",
@@ -3968,7 +4377,12 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         conflict: 1,
         resolved: 1,
       },
-      conflicts: semanticComparison(integrated, sourceEventId, [conflicting], true).coordinates,
+      conflicts: semanticComparison(
+        integrated,
+        sourceEventId,
+        [conflicting],
+        true,
+      ).coordinates,
       nextConflictCursor: null,
       composed: [],
     });
@@ -4002,9 +4416,18 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       "call_nnrl4WyxSSNYE7v57Bm9QPtD|fc_028d12fc097db4d5016a549442191c81918d66c1c1c324a9eb";
     probe.insertSubagentRunForTest({ runId, status: "running" });
 
-    const withEllipsis = await probe.readSubagentForTest("call_nnrl4WyxSSNYE7v57Bm9P...", 0);
-    const exactPrefix = await probe.readSubagentForTest("call_nnrl4WyxSSNYE7v57Bm9QPtD", 0);
-    const displayPrefix = await probe.readSubagentForTest("call_nnrWyxSSNYE7v57Bm…", 0);
+    const withEllipsis = await probe.readSubagentForTest(
+      "call_nnrl4WyxSSNYE7v57Bm9P...",
+      0,
+    );
+    const exactPrefix = await probe.readSubagentForTest(
+      "call_nnrl4WyxSSNYE7v57Bm9QPtD",
+      0,
+    );
+    const displayPrefix = await probe.readSubagentForTest(
+      "call_nnrWyxSSNYE7v57Bm…",
+      0,
+    );
 
     expect(withEllipsis.details).toMatchObject({
       runId: "call_nnrl4WyxSSNYE7v57Bm…",
@@ -4026,7 +4449,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
 
     await expect(
-      probe.readSubagentForTest("call_shared_prefix_1234567890_...", 0)
+      probe.readSubagentForTest("call_shared_prefix_1234567890_...", 0),
     ).rejects.toMatchObject({
       code: "InvalidReference",
       errorData: expect.objectContaining({
@@ -4035,9 +4458,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       }),
       message: expect.stringContaining("ambiguous subagent run reference"),
     });
-    await expect(probe.readSubagentForTest("call_shared...", 0)).rejects.toThrow(
-      "unknown subagent run"
-    );
+    await expect(
+      probe.readSubagentForTest("call_shared...", 0),
+    ).rejects.toThrow("unknown subagent run");
   });
 
   it("does not project supervised-run or VCS state into the system prompt", async () => {
@@ -4066,8 +4489,8 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
             },
             stale: false,
           },
-        ]
-      )
+        ],
+      ),
     );
 
     const prompt = await probe.systemPromptForTest();
@@ -4085,7 +4508,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       task: "audit this in the child",
     });
 
-    await probe.sendToSubagentForTest("inv-1", "Correct the focused verification.");
+    await probe.sendToSubagentForTest(
+      "inv-1",
+      "Correct the focused verification.",
+    );
 
     expect(probe.channelStub.sent).toContainEqual({
       channelId: "task-inv-1",
@@ -4131,15 +4557,21 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       task: "audit this in the child",
     });
 
-    await probe.completeSubagentForTest("inv-1", "All checks passed.", "success");
+    await probe.completeSubagentForTest(
+      "inv-1",
+      "All checks passed.",
+      "success",
+    );
 
     expect(probe.subagentRunForTest("inv-1")).toMatchObject({
       status: "completed",
     });
     expect(
       probe.channelStub.published.find(
-        (entry) => entry.channelId === CHANNEL && entry.idempotencyKey === "subagent-terminal:inv-1"
-      )?.event
+        (entry) =>
+          entry.channelId === CHANNEL &&
+          entry.idempotencyKey === "subagent-terminal:inv-1",
+      )?.event,
     ).toMatchObject({ kind: "task.completed", causality: { taskId: "inv-1" } });
     expect(probe.handleIncomingSpy).toHaveBeenCalledWith(
       CHANNEL,
@@ -4152,7 +4584,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
           sourceMessageId: "subagent-terminal:inv-1:completed",
           content: expect.stringContaining("All checks passed."),
         }),
-      })
+      }),
     );
     expect(probe.handleIncomingSpy.mock.calls[0]?.[1]).toMatchObject({
       command: {
@@ -4164,8 +4596,12 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         command?: { content?: string };
       }
     ).command?.content;
-    expect(terminalPrompt).toContain("Integrate it only when incorporating the child's work");
-    expect(terminalPrompt).not.toContain("Review and integrate retained results");
+    expect(terminalPrompt).toContain(
+      "Integrate it only when incorporating the child's work",
+    );
+    expect(terminalPrompt).not.toContain(
+      "Review and integrate retained results",
+    );
   });
 
   it("projects the task-channel terminal winner across a competing supervisor terminal", async () => {
@@ -4189,24 +4625,33 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       },
       createdAt: new Date().toISOString(),
     } as unknown as AgenticEvent;
-    probe.channelStub.channelEnvelopes.set(`task-inv-1\u0000ik:subagent-terminal:inv-1`, {
-      id: 99,
-      messageId: "ik:subagent-terminal:inv-1",
-      type: AGENTIC_EVENT_PAYLOAD_KIND,
-      payload: canonicalEvent,
-      senderId: "participant-child",
-      ts: Date.now(),
-    } as ChannelEvent);
+    probe.channelStub.channelEnvelopes.set(
+      `task-inv-1\u0000ik:subagent-terminal:inv-1`,
+      {
+        id: 99,
+        messageId: "ik:subagent-terminal:inv-1",
+        type: AGENTIC_EVENT_PAYLOAD_KIND,
+        payload: canonicalEvent,
+        senderId: "participant-child",
+        ts: Date.now(),
+      } as ChannelEvent,
+    );
 
-    await probe.settleSubagentForTest("inv-1", "abandoned", "supervisor retired");
+    await probe.settleSubagentForTest(
+      "inv-1",
+      "abandoned",
+      "supervisor retired",
+    );
 
     expect(probe.subagentRunForTest("inv-1")).toMatchObject({
       status: "completed",
     });
     expect(
       probe.channelStub.published.find(
-        (entry) => entry.channelId === CHANNEL && entry.idempotencyKey === "subagent-terminal:inv-1"
-      )?.event
+        (entry) =>
+          entry.channelId === CHANNEL &&
+          entry.idempotencyKey === "subagent-terminal:inv-1",
+      )?.event,
     ).toMatchObject({
       kind: "task.completed",
       payload: { summary: "Child completed first." },
@@ -4231,25 +4676,30 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       },
       createdAt: new Date().toISOString(),
     } as unknown as AgenticEvent;
-    probe.channelStub.channelEnvelopes.set(`task-inv-1\u0000ik:subagent-terminal:inv-1`, {
-      id: 100,
-      messageId: "ik:subagent-terminal:inv-1",
-      type: AGENTIC_EVENT_PAYLOAD_KIND,
-      payload: forgedEvent,
-      senderId: "participant-child",
-      ts: Date.now(),
-    } as ChannelEvent);
+    probe.channelStub.channelEnvelopes.set(
+      `task-inv-1\u0000ik:subagent-terminal:inv-1`,
+      {
+        id: 100,
+        messageId: "ik:subagent-terminal:inv-1",
+        type: AGENTIC_EVENT_PAYLOAD_KIND,
+        payload: forgedEvent,
+        senderId: "participant-child",
+        ts: Date.now(),
+      } as ChannelEvent,
+    );
 
     await expect(
-      probe.settleSubagentForTest("inv-1", "abandoned", "supervisor retired")
+      probe.settleSubagentForTest("inv-1", "abandoned", "supervisor retired"),
     ).rejects.toThrow(/no authorized canonical task-channel event/);
     expect(probe.subagentRunForTest("inv-1")).toMatchObject({
       status: "running",
     });
     expect(
       probe.channelStub.published.some(
-        (entry) => entry.channelId === CHANNEL && entry.idempotencyKey === "subagent-terminal:inv-1"
-      )
+        (entry) =>
+          entry.channelId === CHANNEL &&
+          entry.idempotencyKey === "subagent-terminal:inv-1",
+      ),
     ).toBe(false);
   });
 
@@ -4278,16 +4728,24 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const firstWake = probe.handleIncomingSpy.mock.calls[0]?.[1] as {
       command?: { source?: { envelopeId?: string }; content?: string };
     };
-    expect(firstWake.command?.source?.envelopeId).toBe("subagent-terminal:inv-1:completed");
+    expect(firstWake.command?.source?.envelopeId).toBe(
+      "subagent-terminal:inv-1:completed",
+    );
     expect(firstWake.command).toMatchObject({
       metadata: { deliverAfterTurn: true },
     });
     expect(firstWake.command?.content).toContain("First result.");
-    expect(firstWake.command?.content).toContain("1 other supervised subagent remains live");
-    expect(firstWake.command?.content).toContain("inv-1 (first audit): completed");
-    expect(firstWake.command?.content).toContain("inv-2 (second audit): running");
     expect(firstWake.command?.content).toContain(
-      "continue useful foreground work or suspend again"
+      "1 other supervised subagent remains live",
+    );
+    expect(firstWake.command?.content).toContain(
+      "inv-1 (first audit): completed",
+    );
+    expect(firstWake.command?.content).toContain(
+      "inv-2 (second audit): running",
+    );
+    expect(firstWake.command?.content).toContain(
+      "continue useful foreground work or suspend again",
     );
 
     await probe.completeSubagentForTest("inv-2", "Second result.", "success");
@@ -4299,11 +4757,19 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     const secondWake = probe.handleIncomingSpy.mock.calls[1]?.[1] as {
       command?: { source?: { envelopeId?: string }; content?: string };
     };
-    expect(secondWake.command?.source?.envelopeId).toBe("subagent-terminal:inv-2:completed");
+    expect(secondWake.command?.source?.envelopeId).toBe(
+      "subagent-terminal:inv-2:completed",
+    );
     expect(secondWake.command?.content).toContain("Second result.");
-    expect(secondWake.command?.content).toContain("No supervised subagents remain live");
-    expect(secondWake.command?.content).toContain("inv-1 (first audit): completed");
-    expect(secondWake.command?.content).toContain("inv-2 (second audit): completed");
+    expect(secondWake.command?.content).toContain(
+      "No supervised subagents remain live",
+    );
+    expect(secondWake.command?.content).toContain(
+      "inv-1 (first audit): completed",
+    );
+    expect(secondWake.command?.content).toContain(
+      "inv-2 (second audit): completed",
+    );
   });
 
   it("notifies the supervisor for a failed child while a sibling remains live", async () => {
@@ -4319,7 +4785,11 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       task: "audit the continuing area",
     });
 
-    await probe.completeSubagentForTest("inv-1", "Blocked by invalid input.", "failed");
+    await probe.completeSubagentForTest(
+      "inv-1",
+      "Blocked by invalid input.",
+      "failed",
+    );
 
     expect(probe.subagentRunForTest("inv-1")).toMatchObject({
       status: "failed",
@@ -4363,31 +4833,35 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     expect(probe.handleIncomingSpy).toHaveBeenCalledTimes(2);
     const envelopeIds = probe.handleIncomingSpy.mock.calls.map(
       (call) =>
-        (call[1] as { command?: { source?: { envelopeId?: string } } }).command?.source?.envelopeId
+        (call[1] as { command?: { source?: { envelopeId?: string } } }).command
+          ?.source?.envelopeId,
     );
     expect(envelopeIds).toEqual(
       expect.arrayContaining([
         "subagent-terminal:inv-1:completed",
         "subagent-terminal:inv-2:completed",
-      ])
+      ]),
     );
     const wakeContents = probe.handleIncomingSpy.mock.calls.map(
-      (call) => (call[1] as { command?: { content?: string } }).command?.content
+      (call) =>
+        (call[1] as { command?: { content?: string } }).command?.content,
     );
     expect(wakeContents).toHaveLength(2);
     expect(
       wakeContents.filter((content) =>
-        content?.includes("1 other supervised subagent remains live")
-      )
+        content?.includes("1 other supervised subagent remains live"),
+      ),
     ).toHaveLength(1);
     expect(
-      wakeContents.filter((content) => content?.includes("No supervised subagents remain live"))
+      wakeContents.filter((content) =>
+        content?.includes("No supervised subagents remain live"),
+      ),
     ).toHaveLength(1);
     expect(wakeContents).toEqual(
       expect.arrayContaining([
         expect.stringContaining("First result."),
         expect.stringContaining("Second result."),
-      ])
+      ]),
     );
   });
 
@@ -4401,14 +4875,18 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     probe.handleIncomingSpy.mockRejectedValueOnce(new Error("wake failed"));
 
     await expect(
-      probe.completeSubagentForTest("inv-1", "All checks passed.", "success")
+      probe.completeSubagentForTest("inv-1", "All checks passed.", "success"),
     ).rejects.toThrow("wake failed");
 
     expect(probe.subagentRunForTest("inv-1")).toMatchObject({
       status: "running",
     });
 
-    await probe.completeSubagentForTest("inv-1", "All checks passed.", "success");
+    await probe.completeSubagentForTest(
+      "inv-1",
+      "All checks passed.",
+      "success",
+    );
 
     expect(probe.subagentRunForTest("inv-1")).toMatchObject({
       status: "completed",
@@ -4423,7 +4901,11 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       label: "background audit",
       task: "audit this in the child",
     });
-    await probe.completeSubagentForTest("inv-1", "All checks passed.", "success");
+    await probe.completeSubagentForTest(
+      "inv-1",
+      "All checks passed.",
+      "success",
+    );
 
     expect(probe.handleIncomingSpy).toHaveBeenCalledWith(
       CHANNEL,
@@ -4434,15 +4916,19 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
             supervisedTerminalRunId: "inv-1",
           },
         }),
-      })
+      }),
     );
-    probe.deferredPostTurnQueueForTest = [{ metadata: { supervisedTerminalRunId: "inv-1" } }];
+    probe.deferredPostTurnQueueForTest = [
+      { metadata: { supervisedTerminalRunId: "inv-1" } },
+    ];
     await expect(probe.guardBackgroundSuspensionForTest()).resolves.toEqual({
       suspend: true,
     });
 
     probe.deferredPostTurnQueueForTest = [];
-    await expect(probe.guardBackgroundSuspensionForTest()).resolves.toMatchObject({
+    await expect(
+      probe.guardBackgroundSuspensionForTest(),
+    ).resolves.toMatchObject({
       suspend: false,
       reason: "no_live_supervised_runs",
     });
@@ -4461,8 +4947,14 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
     probe.handleIncomingSpy.mockImplementationOnce(async () => reportAdmission);
 
-    const completion = probe.completeSubagentForTest("inv-1", "All checks passed.", "success");
-    await vi.waitFor(() => expect(probe.handleIncomingSpy).toHaveBeenCalledOnce());
+    const completion = probe.completeSubagentForTest(
+      "inv-1",
+      "All checks passed.",
+      "success",
+    );
+    await vi.waitFor(() =>
+      expect(probe.handleIncomingSpy).toHaveBeenCalledOnce(),
+    );
 
     expect(probe.subagentRunForTest("inv-1")).toMatchObject({
       status: "running",
@@ -4506,7 +4998,8 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       runId: "inv-cc",
       status: "running",
       agentKind: "claude-code",
-      childEntityId: "do:workers/linked-agent:LinkedAgentWorker:linked:session-cc-1",
+      childEntityId:
+        "do:workers/linked-agent:LinkedAgentWorker:linked:session-cc-1",
       childParticipantId: "participant-linked",
       externalSessionEntityId: "session:cc-1",
       externalGenerationId: "generation:cc-1",
@@ -4516,7 +5009,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     // The extension's subagent launch was invoked on the task channel WITH
     // subagent duty and the task; argv/cwd/env stay private to the extension.
     const launchCall = probe.rpcCalls.find(
-      (c) => c.method === "extensions.invokeProvider" && (c.args[1] as string) === "launchSubagent"
+      (c) =>
+        c.method === "extensions.invokeProvider" &&
+        (c.args[1] as string) === "launchSubagent",
     );
     expect(launchCall).toBeDefined();
     expect(launchCall!.args[0]).toBe("claudeCode");
@@ -4544,10 +5039,14 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
 
     // The started card + task seed still flow through the shared pipeline.
     expect(
-      probe.channelStub.published.some((p) => p.idempotencyKey === "subagent-started:inv-cc")
+      probe.channelStub.published.some(
+        (p) => p.idempotencyKey === "subagent-started:inv-cc",
+      ),
     ).toBe(true);
     expect(
-      probe.channelStub.published.some((p) => p.idempotencyKey === "subagent-seed:inv-cc")
+      probe.channelStub.published.some(
+        (p) => p.idempotencyKey === "subagent-seed:inv-cc",
+      ),
     ).toBe(true);
   });
 
@@ -4575,7 +5074,9 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
 
     const launchCall = probe.rpcCalls.find(
-      (c) => c.method === "extensions.invoke" && (c.args[1] as string) === "launchSubagent"
+      (c) =>
+        c.method === "extensions.invoke" &&
+        (c.args[1] as string) === "launchSubagent",
     );
     expect(launchCall!.args[0]).toBe("@workspace-extensions/codex");
 
@@ -4584,7 +5085,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
       (c) =>
         c.method === "extensions.invoke" &&
         c.args[0] === "@workspace-extensions/codex" &&
-        c.args[1] === "release"
+        c.args[1] === "release",
     );
     expect(releaseCall).toBeDefined();
     expect((releaseCall!.args[2] as unknown[])[0]).toMatchObject({
@@ -4608,8 +5109,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     expect(probe.subagentRunForTest("inv-cc")).toBeNull();
     expect(
       probe.rpcCalls.some(
-        (c) => c.method === "runtime.destroyContext" && JSON.stringify(c.args).includes("ctx-child")
-      )
+        (c) =>
+          c.method === "runtime.destroyContext" &&
+          JSON.stringify(c.args).includes("ctx-child"),
+      ),
     ).toBe(true);
   });
 
@@ -4632,9 +5135,10 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     expect(
       probe.rpcCalls.some(
         (call) =>
-          (call.method === "extensions.invoke" || call.method === "extensions.invokeProvider") &&
-          call.args[1] === "inspectLaunch"
-      )
+          (call.method === "extensions.invoke" ||
+            call.method === "extensions.invokeProvider") &&
+          call.args[1] === "inspectLaunch",
+      ),
     ).toBe(false);
   });
 });
@@ -4740,7 +5244,7 @@ describe("AgentVesselBase.onEvalProgress (live eval console streaming)", () => {
     });
 
     const published = vessel.channelStub.published.find(
-      (p) => p.event.kind === "invocation.output"
+      (p) => p.event.kind === "invocation.output",
     );
     expect(published?.event).toMatchObject({
       kind: "invocation.output",
@@ -4758,7 +5262,7 @@ describe("AgentVesselBase.onEvalProgress (live eval console streaming)", () => {
         agentInvocationId: "inv-6",
         channelId: CHANNEL,
         output: "x",
-      })
+      }),
     ).rejects.toThrow(/only this agent's own EvalDO/);
   });
 
@@ -4771,9 +5275,11 @@ describe("AgentVesselBase.onEvalProgress (live eval console streaming)", () => {
       channelId: CHANNEL,
       output: "",
     });
-    expect(vessel.channelStub.published.some((p) => p.event.kind === "invocation.output")).toBe(
-      false
-    );
+    expect(
+      vessel.channelStub.published.some(
+        (p) => p.event.kind === "invocation.output",
+      ),
+    ).toBe(false);
   });
 });
 
@@ -4793,8 +5299,9 @@ describe("AgentVesselBase.onEvalProgress authority lifecycle", () => {
     });
 
     expect(
-      vessel.channelStub.published.find((entry) => entry.event.kind === "invocation.progress")
-        ?.event
+      vessel.channelStub.published.find(
+        (entry) => entry.event.kind === "invocation.progress",
+      )?.event,
     ).toMatchObject({
       kind: "invocation.progress",
       causality: { invocationId: "inv-authority" },

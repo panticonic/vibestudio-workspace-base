@@ -12,6 +12,7 @@ import type {
   MissionExecution,
   MissionAuthorityPlanReference,
   MissionRecord,
+  MissionRunEffectFailure,
   MissionRunFailure,
   MissionRunOutcome,
   MissionRunPhase,
@@ -27,6 +28,8 @@ import {
   validateMissionCharter,
 } from "@vibestudio/shared/authority/mission";
 import { canonicalJson } from "@vibestudio/shared/canonicalJson";
+import { createGadServiceClient } from "@vibestudio/shared/workspaceServiceRpc";
+import type { PutUserNotificationInput } from "@vibestudio/shared/userNotifications";
 
 const CHANNEL_SOURCE = "workers/pubsub-channel";
 const CHANNEL_CLASS = "PubSubChannel";
@@ -85,6 +88,7 @@ interface RunRow {
   final_message: string | null;
   completion_response: string | null;
   failure_json: string | null;
+  effect_failures_json: string | null;
 }
 
 interface AdmissionResult {
@@ -92,8 +96,18 @@ interface AdmissionResult {
   nonce: string;
 }
 
+type MissionEffect =
+  | {
+      kind: "retire-authority";
+      subject: `mission:${string}@${string}`;
+    }
+  | {
+      kind: "user-notification";
+      notification: PutUserNotificationInput;
+    };
+
 export class MissionsDO extends DurableObjectBase {
-  static override schemaVersion = 2;
+  static override schemaVersion = 3;
   static override rpcMethods = missionsMethods;
 
   constructor(ctx: DurableObjectContext, env: unknown) {
@@ -135,7 +149,7 @@ export class MissionsDO extends DurableObjectBase {
       mission_revision INTEGER NOT NULL,
       trigger_kind TEXT NOT NULL CHECK (trigger_kind IN ('manual','scheduled')),
       phase TEXT NOT NULL CHECK (phase IN ('admitted','execution-admitting','context-preparing','executor-preparing','dispatching','executing','terminal')),
-      outcome TEXT CHECK (outcome IS NULL OR outcome IN ('succeeded','failed','skipped','interrupted','cancelled')),
+      outcome TEXT CHECK (outcome IS NULL OR outcome IN ('succeeded','completed-with-errors','failed','skipped','interrupted','cancelled')),
       started_at INTEGER NOT NULL,
       progress_at INTEGER NOT NULL,
       run_number INTEGER,
@@ -146,7 +160,8 @@ export class MissionsDO extends DurableObjectBase {
       executor_id TEXT,
       final_message TEXT,
       completion_response TEXT,
-      failure_json TEXT
+      failure_json TEXT,
+      effect_failures_json TEXT
     )`);
     this.sql.exec(`CREATE TABLE mission_launches (
       owner_user_id TEXT NOT NULL,
@@ -172,8 +187,8 @@ export class MissionsDO extends DurableObjectBase {
     )`);
     this.sql.exec(`CREATE TABLE mission_effects (
       effect_id TEXT PRIMARY KEY,
-      kind TEXT NOT NULL CHECK (kind IN ('retire-authority')),
-      subject TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('retire-authority','user-notification')),
+      payload_json TEXT NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0,
       next_attempt_at INTEGER NOT NULL,
       last_error TEXT
@@ -222,7 +237,7 @@ export class MissionsDO extends DurableObjectBase {
          CAST(json_extract(charter_json,'$.trigger.untilAt') AS INTEGER)<=?)
       ) ORDER BY COALESCE(next_run_at,CAST(json_extract(charter_json,'$.trigger.untilAt') AS INTEGER)),mission_id`,
         now,
-        now
+        now,
       )
       .toArray();
     for (const row of due) {
@@ -266,7 +281,7 @@ export class MissionsDO extends DurableObjectBase {
     const query = options.query?.trim().toLocaleLowerCase();
     if (query) {
       conditions.push(
-        "(instr(lower(name),?)>0 OR instr(lower(json_extract(charter_json,'$.summary')),?)>0)"
+        "(instr(lower(name),?)>0 OR instr(lower(json_extract(charter_json,'$.summary')),?)>0)",
       );
       bindings.push(query, query);
     }
@@ -275,19 +290,23 @@ export class MissionsDO extends DurableObjectBase {
     if (options.filter === "completed") conditions.push("state='completed'");
     if (options.filter === "attention") {
       conditions.push(
-        "EXISTS (SELECT 1 FROM mission_runs r WHERE r.mission_id=missions.mission_id AND r.outcome='failed' AND r.started_at>=?)",
+        "EXISTS (SELECT 1 FROM mission_runs r WHERE r.mission_id=missions.mission_id AND r.outcome IN ('failed','completed-with-errors') AND r.started_at>=?)",
       );
       bindings.push(cutoff);
     }
     if (options.cursor) {
       conditions.push("(updated_at<? OR (updated_at=? AND mission_id<?))");
-      bindings.push(options.cursor.updatedAt, options.cursor.updatedAt, options.cursor.missionId);
+      bindings.push(
+        options.cursor.updatedAt,
+        options.cursor.updatedAt,
+        options.cursor.missionId,
+      );
     }
     const rows = this.sql
       .exec(
         `SELECT * FROM missions WHERE ${conditions.join(" AND ")} ORDER BY updated_at DESC,mission_id DESC LIMIT ?`,
         ...bindings,
-        limit + 1
+        limit + 1,
       )
       .toArray() as unknown as MissionRow[];
     const page = rows.slice(0, limit);
@@ -303,7 +322,7 @@ export class MissionsDO extends DurableObjectBase {
         .exec(
           `SELECT COUNT(*) AS total,
         SUM(CASE WHEN phase!='terminal' THEN 1 ELSE 0 END) AS active,
-        SUM(CASE WHEN outcome='failed' AND started_at>=? THEN 1 ELSE 0 END) AS failed
+        SUM(CASE WHEN outcome IN ('failed','completed-with-errors') AND started_at>=? THEN 1 ELSE 0 END) AS failed
         FROM mission_runs WHERE mission_id=?`,
           cutoff,
           row.mission_id,
@@ -314,7 +333,7 @@ export class MissionsDO extends DurableObjectBase {
         recentRuns: recent.map((run) => this.rowToRun(run)),
         totalRuns: Number(counts["total"] ?? 0),
         activeRuns: Number(counts["active"] ?? 0),
-        failedRunsSince: Number(counts["failed"] ?? 0),
+        issueRunsSince: Number(counts["failed"] ?? 0),
       };
     });
     const definitionStats = this.sql
@@ -325,17 +344,17 @@ export class MissionsDO extends DurableObjectBase {
       .one();
     const runStats = this.sql
       .exec(
-        `SELECT SUM(r.phase!='terminal') AS running,SUM(r.outcome='failed' AND r.started_at>=?) AS failed FROM mission_runs r JOIN missions m ON m.mission_id=r.mission_id WHERE m.seeded=1 OR m.owner_user_id=?`,
+        `SELECT SUM(r.phase!='terminal') AS running,SUM(r.outcome IN ('failed','completed-with-errors') AND r.started_at>=?) AS failed FROM mission_runs r JOIN missions m ON m.mission_id=r.mission_id WHERE m.seeded=1 OR m.owner_user_id=?`,
         cutoff,
-        userId
+        userId,
       )
       .one();
     const attention = this.sql
       .exec(
-        `SELECT r.*,m.name AS mission_name FROM mission_runs r JOIN missions m ON m.mission_id=r.mission_id WHERE r.outcome='failed' AND r.started_at>=? AND (m.seeded=1 OR m.owner_user_id=?) ORDER BY r.started_at DESC LIMIT ?`,
+        `SELECT r.*,m.name AS mission_name FROM mission_runs r JOIN missions m ON m.mission_id=r.mission_id WHERE r.outcome IN ('failed','completed-with-errors') AND r.started_at>=? AND (m.seeded=1 OR m.owner_user_id=?) ORDER BY r.started_at DESC LIMIT ?`,
         cutoff,
         userId,
-        ATTENTION_LIMIT
+        ATTENTION_LIMIT,
       )
       .toArray()
       .map((row) => ({
@@ -349,7 +368,7 @@ export class MissionsDO extends DurableObjectBase {
         total: Number(definitionStats["total"] ?? 0),
         active: Number(definitionStats["active"] ?? 0),
         running: Number(runStats["running"] ?? 0),
-        failedLast24Hours: Number(runStats["failed"] ?? 0),
+        issueRunsLast24Hours: Number(runStats["failed"] ?? 0),
         completed: Number(definitionStats["completed"] ?? 0),
       },
       items,
@@ -400,12 +419,12 @@ export class MissionsDO extends DurableObjectBase {
           options.cursor.startedAt,
           options.cursor.startedAt,
           options.cursor.runId,
-          limit + 1
+          limit + 1,
         )
       : this.sql.exec(
           "SELECT * FROM mission_runs WHERE mission_id=? ORDER BY started_at DESC,run_id DESC LIMIT ?",
           missionId,
-          limit + 1
+          limit + 1,
         )
     ).toArray() as unknown as RunRow[];
     const page = rows.slice(0, limit);
@@ -507,7 +526,7 @@ export class MissionsDO extends DurableObjectBase {
           nextRunAt,
           now,
           now,
-          now
+          now,
         );
         this.sql.exec(
           "UPDATE mission_launches SET state='active' WHERE owner_user_id=? AND launch_key=?",
@@ -546,7 +565,8 @@ export class MissionsDO extends DurableObjectBase {
         charter: input.charter ?? current.charter,
       });
     const editKey = this.rpcIdempotencyKey ?? this.rpcRequestId;
-    if (!editKey) throw new Error("Automation edit requires a command identity");
+    if (!editKey)
+      throw new Error("Automation edit requires a command identity");
     const intentJson = canonicalJson({ missionId, input });
     const prior = this.sql
       .exec(
@@ -560,7 +580,9 @@ export class MissionsDO extends DurableObjectBase {
       : current.revision + 1;
     if (prior) {
       if (String(prior["intent_json"]) !== intentJson)
-        throw denied("Edit idempotency key was reused for a different automation change");
+        throw denied(
+          "Edit idempotency key was reused for a different automation change",
+        );
       if (prior["state"] === "active" && prior["result_json"])
         return JSON.parse(String(prior["result_json"])) as MissionRecord;
     } else {
@@ -582,7 +604,9 @@ export class MissionsDO extends DurableObjectBase {
     const digest = missionRevisionDigest(charter, policy.digest);
     if (current.revision === targetRevision) {
       if (current.revisionDigest !== digest)
-        throw new Error("Prepared automation edit conflicts with the active revision");
+        throw new Error(
+          "Prepared automation edit conflicts with the active revision",
+        );
       await this.resumeRuns();
       await this.ensureAuthority(current);
       await this.reconcileEffects(true);
@@ -596,7 +620,9 @@ export class MissionsDO extends DurableObjectBase {
       return result;
     }
     if (current.revision + 1 !== targetRevision)
-      throw new Error("Prepared automation edit no longer follows the active revision");
+      throw new Error(
+        "Prepared automation edit no longer follows the active revision",
+      );
     const now = Date.now();
     const origin = scheduleOrigin(charter, now);
     const next = initialNextRunAt(charter, now, origin);
@@ -649,7 +675,8 @@ export class MissionsDO extends DurableObjectBase {
     this.requireActive(mission);
     await this.ensureAuthority(mission);
     const requestKey = this.rpcIdempotencyKey ?? this.rpcRequestId;
-    if (!requestKey) throw new Error("Manual automation run requires a command identity");
+    if (!requestKey)
+      throw new Error("Manual automation run requires a command identity");
     return this.startExecution(mission, "manual", `manual:${requestKey}`);
   }
 
@@ -660,7 +687,7 @@ export class MissionsDO extends DurableObjectBase {
     this.sql.exec(
       "UPDATE missions SET state='paused',next_run_at=NULL,updated_at=? WHERE mission_id=?",
       Date.now(),
-      missionId
+      missionId,
     );
     return this.requireMission(missionId);
   }
@@ -714,22 +741,34 @@ export class MissionsDO extends DurableObjectBase {
   @schemaRpc()
   async finishRun(input: {
     runId: string;
-    outcome: "succeeded" | "failed" | "interrupted" | "cancelled";
+    outcome: MissionRunOutcome;
     finalMessage?: string;
     completionResponse?: string;
     failure?: MissionRunFailure;
+    effectFailures?: MissionRunEffectFailure[];
   }): Promise<void> {
     const row = this.getRunRow(input.runId);
     if (!row) throw notFound(`Unknown automation run ${input.runId}`);
     if (row.phase === "terminal") return;
     if (!row.executor_id || this.rpcCallerId !== row.executor_id)
       throw denied("Only the admitted automation executor can finish this run");
+    if (input.effectFailures?.length) {
+      this.enqueueRunIssue(
+        this.requireMission(row.mission_id, true),
+        row.run_id,
+        input.effectFailures
+          .map((effect) => `${effect.name}: ${effect.message}`)
+          .join("\n"),
+      );
+    }
     await this.closeAdmission(row);
     this.terminalizeRun(row, input.outcome, {
       finalMessage: input.finalMessage,
       completionResponse: input.completionResponse,
       failure: input.failure,
+      effectFailures: input.effectFailures,
     });
+    await this.reconcileEffects(false);
   }
 
   private async compilePolicy(
@@ -800,30 +839,85 @@ export class MissionsDO extends DurableObjectBase {
     subject: `mission:${string}@${string}`,
     now: number,
   ): void {
+    const effect: MissionEffect = { kind: "retire-authority", subject };
     this.sql.exec(
-      "INSERT OR IGNORE INTO mission_effects (effect_id,kind,subject,next_attempt_at) VALUES (?,'retire-authority',?,?)",
+      "INSERT OR IGNORE INTO mission_effects (effect_id,kind,payload_json,next_attempt_at) VALUES (?,'retire-authority',?,?)",
       `retire:${subject}`,
-      subject,
+      canonicalJson(effect),
       now,
     );
+  }
+
+  private enqueueRunIssue(
+    mission: MissionRecord,
+    runId: string,
+    detail: string,
+    now = Date.now(),
+  ): void {
+    const effectId = `run-issue:${runId}`;
+    const effect: MissionEffect = {
+      kind: "user-notification",
+      notification: {
+        id: `automation.run.issue:${runId}`,
+        userId: mission.owner.userId,
+        kind: "automation.run.issue",
+        title: `${mission.name} needs attention`,
+        message: detail.slice(0, 2_000),
+        data: { missionId: mission.missionId, runId },
+        createdAt: now,
+        revision: 1,
+      },
+    };
+    this.sql.exec(
+      "INSERT OR IGNORE INTO mission_effects (effect_id,kind,payload_json,next_attempt_at) VALUES (?,'user-notification',?,?)",
+      effectId,
+      canonicalJson(effect),
+      now,
+    );
+  }
+
+  private _gad: ReturnType<typeof createGadServiceClient> | null = null;
+
+  private gad() {
+    this._gad ??= createGadServiceClient({
+      call: <T>(
+        targetId: string,
+        method: string,
+        args: unknown[],
+        options?: unknown,
+      ) => this.rpc.call<T>(targetId, method, args, options as never),
+    });
+    return this._gad;
+  }
+
+  private async executeEffect(effect: MissionEffect): Promise<void> {
+    if (effect.kind === "retire-authority") {
+      await this.retireAuthority(effect.subject);
+      return;
+    }
+    // The GAD upsert is idempotent by the producer-stable notification id and
+    // revision. Replaying this outbox row therefore converges without a second
+    // transport-level idempotency protocol.
+    await this.gad().call("putUserNotification", effect.notification);
   }
 
   private async reconcileEffects(throwOnFailure: boolean): Promise<void> {
     const now = Date.now();
     const rows = this.sql
       .exec(
-        "SELECT effect_id,subject,attempts FROM mission_effects WHERE next_attempt_at<=? ORDER BY next_attempt_at,effect_id",
+        "SELECT effect_id,payload_json,attempts FROM mission_effects WHERE next_attempt_at<=? ORDER BY next_attempt_at,effect_id",
         now,
       )
       .toArray();
     for (const row of rows) {
+      const effectId = String(row["effect_id"]);
       try {
-        await this.retireAuthority(
-          String(row["subject"]) as `mission:${string}@${string}`,
+        await this.executeEffect(
+          JSON.parse(String(row["payload_json"])) as MissionEffect,
         );
         this.sql.exec(
           "DELETE FROM mission_effects WHERE effect_id=?",
-          String(row["effect_id"]),
+          effectId,
         );
       } catch (error) {
         const attempts = Number(row["attempts"]) + 1;
@@ -833,7 +927,7 @@ export class MissionsDO extends DurableObjectBase {
           attempts,
           now + delay,
           describeError(error),
-          String(row["effect_id"]),
+          effectId,
         );
         if (throwOnFailure) throw error;
       }
@@ -895,7 +989,8 @@ export class MissionsDO extends DurableObjectBase {
           ),
         ),
       );
-      if (trigger === "scheduled") this.advanceSchedule(mission, now, mission.runCount);
+      if (trigger === "scheduled")
+        this.advanceSchedule(mission, now, mission.runCount);
       return this.requireRun(runId);
     }
     const runNumber = mission.runCount + 1;
@@ -909,16 +1004,17 @@ export class MissionsDO extends DurableObjectBase {
         trigger,
         now,
         now,
-        runNumber
+        runNumber,
       );
       this.sql.exec(
         "UPDATE missions SET last_run_at=?,updated_at=?,run_count=? WHERE mission_id=?",
         now,
         now,
         runNumber,
-        mission.missionId
+        mission.missionId,
       );
-      if (trigger === "scheduled") this.advanceSchedule(mission, now, runNumber);
+      if (trigger === "scheduled")
+        this.advanceSchedule(mission, now, runNumber);
     });
     await this.advanceRun(runId);
     return this.requireRun(runId);
@@ -937,7 +1033,8 @@ export class MissionsDO extends DurableObjectBase {
     try {
       let row = this.getRunRow(runId);
       if (!row || row.phase === "terminal") return;
-      if (row.phase === "executing" && row.progress_at + 60_000 > Date.now()) return;
+      if (row.phase === "executing" && row.progress_at + 60_000 > Date.now())
+        return;
       const mission = this.requireMission(row.mission_id, true);
       if (
         row.mission_subject !==
@@ -1052,19 +1149,22 @@ export class MissionsDO extends DurableObjectBase {
         this.deferRun(row, error);
         return;
       }
-      await this.closeAdmission(row).catch(() => undefined);
-      this.terminalizeRun(row, "failed", {
-        failure: failure(
-          errorCode(error),
-          row.phase,
-          describeError(error),
-          retryFor(error),
-        ),
-      });
-      await this.notifyFailure(
+      const detail = describeError(error);
+      this.enqueueRunIssue(
         this.requireMission(row.mission_id, true),
-        describeError(error),
+        row.run_id,
+        detail,
       );
+      try {
+        await this.closeAdmission(row);
+      } catch (closeError) {
+        this.deferRun(row, closeError);
+        return;
+      }
+      this.terminalizeRun(row, "failed", {
+        failure: failure(errorCode(error), row.phase, detail, retryFor(error)),
+      });
+      await this.reconcileEffects(false);
     }
   }
 
@@ -1146,9 +1246,7 @@ export class MissionsDO extends DurableObjectBase {
         this.deferRun(current, error);
         return;
       }
-      await this.closeAdmission(this.requireRunRow(row.run_id)).catch(
-        () => undefined,
-      );
+      await this.closeAdmission(this.requireRunRow(row.run_id));
       this.terminalizeRun(this.requireRunRow(row.run_id), "failed", {
         failure: failure(
           errorCode(error),
@@ -1317,38 +1415,52 @@ export class MissionsDO extends DurableObjectBase {
       finalMessage?: string;
       completionResponse?: string;
       failure?: MissionRunFailure;
+      effectFailures?: MissionRunEffectFailure[];
     },
   ): void {
     const now = Date.now();
     const mission = this.requireMission(row.mission_id, true);
     const completion =
-      outcome === "succeeded" &&
       row.mission_revision === mission.revision &&
       (mission.state === "active" || mission.state === "paused")
-        ? this.completionAfterRun(mission, now, input.completionResponse)
+        ? this.completionAfterRun(
+            mission,
+            now,
+            outcome === "succeeded" ? input.completionResponse : undefined,
+          )
         : null;
     this.ctx.storage.transactionSync(() => {
       this.sql.exec(
-        "UPDATE mission_runs SET phase='terminal',outcome=?,progress_at=?,finished_at=?,final_message=?,completion_response=?,failure_json=? WHERE run_id=? AND phase!='terminal'",
+        "UPDATE mission_runs SET phase='terminal',outcome=?,progress_at=?,finished_at=?,final_message=?,completion_response=?,failure_json=?,effect_failures_json=? WHERE run_id=? AND phase!='terminal'",
         outcome,
         now,
         now,
         bounded(input.finalMessage) ?? null,
         bounded(input.completionResponse) ?? null,
         input.failure ? canonicalJson(input.failure) : null,
+        input.effectFailures?.length
+          ? canonicalJson(input.effectFailures)
+          : null,
         row.run_id,
       );
       if (completion) this.markCompleted(mission.missionId, completion, now);
     });
   }
 
-  private advanceSchedule(mission: MissionRecord, now: number, runCount: number): void {
+  private advanceSchedule(
+    mission: MissionRecord,
+    now: number,
+    runCount: number,
+  ): void {
     const trigger = mission.charter.trigger;
     if (trigger.kind === "manual") return;
     const origin = this.getRow(mission.missionId)?.schedule_origin_at;
     const candidate =
       trigger.kind === "schedule"
-        ? withJitter(missionNextRunAt(trigger, now, Number(origin)), trigger.jitterMs)
+        ? withJitter(
+            missionNextRunAt(trigger, now, Number(origin)),
+            trigger.jitterMs,
+          )
         : missionNextRunAt(trigger, now);
     const next =
       (trigger.maxRuns !== undefined && runCount >= trigger.maxRuns) ||
@@ -1359,13 +1471,13 @@ export class MissionsDO extends DurableObjectBase {
       "UPDATE missions SET next_run_at=?,updated_at=? WHERE mission_id=?",
       next,
       now,
-      mission.missionId
+      mission.missionId,
     );
   }
 
   private completionBeforeRun(
     mission: MissionRecord,
-    now: number
+    now: number,
   ): { reason: Exclude<MissionCompletionReason, "response"> } | null {
     const trigger = mission.charter.trigger;
     if (trigger.kind === "manual") return null;
@@ -1379,7 +1491,7 @@ export class MissionsDO extends DurableObjectBase {
   private completionAfterRun(
     mission: MissionRecord,
     now: number,
-    response?: string
+    response?: string,
   ): { reason: MissionCompletionReason; response?: string } | null {
     const normalized = response?.trim();
     return normalized
@@ -1390,7 +1502,7 @@ export class MissionsDO extends DurableObjectBase {
   private markCompleted(
     missionId: string,
     completion: { reason: MissionCompletionReason; response?: string },
-    now: number
+    now: number,
   ): void {
     this.sql.exec(
       "UPDATE missions SET state='completed',next_run_at=NULL,updated_at=?,completed_at=?,completion_reason=?,completion_response=? WHERE mission_id=? AND state IN ('active','paused')",
@@ -1398,7 +1510,7 @@ export class MissionsDO extends DurableObjectBase {
       now,
       completion.reason,
       bounded(completion.response) ?? null,
-      missionId
+      missionId,
     );
   }
 
@@ -1564,50 +1676,36 @@ export class MissionsDO extends DurableObjectBase {
       ...(row.failure_json
         ? { failure: JSON.parse(row.failure_json) as MissionRunFailure }
         : {}),
+      ...(row.effect_failures_json
+        ? {
+            effectFailures: JSON.parse(
+              row.effect_failures_json,
+            ) as MissionRunEffectFailure[],
+          }
+        : {}),
     };
-  }
-
-  private async notifyFailure(
-    mission: MissionRecord,
-    detail: string,
-  ): Promise<void> {
-    await this.rpc
-      .call("main", "notification.showToUser", [
-        mission.owner.userId,
-        {
-          type: "error",
-          title: `${mission.name} failed`,
-          message: detail.slice(0, 2_000),
-          actions: [
-            {
-              id: "view-automation",
-              label: "View automation",
-              variant: "soft",
-              command: {
-                type: "panel.open",
-                source: "about/automations",
-                stateArgs: { missionId: mission.missionId },
-              },
-            },
-          ],
-        },
-      ])
-      .catch(() => undefined);
   }
 }
 
 function scheduleOrigin(charter: MissionCharter, now: number): number | null {
-  return charter.trigger.kind === "schedule" ? (charter.trigger.anchorAt ?? now) : null;
+  return charter.trigger.kind === "schedule"
+    ? (charter.trigger.anchorAt ?? now)
+    : null;
 }
 function initialNextRunAt(
   charter: MissionCharter,
   now: number,
-  origin: number | null
+  origin: number | null,
 ): number | null {
   if (charter.trigger.kind === "manual") return null;
-  if (charter.trigger.kind === "cron") return missionNextRunAt(charter.trigger, now);
-  if (origin == null) throw new Error("Interval automation requires a cadence origin");
-  return withJitter(missionNextRunAt(charter.trigger, now, origin), charter.trigger.jitterMs);
+  if (charter.trigger.kind === "cron")
+    return missionNextRunAt(charter.trigger, now);
+  if (origin == null)
+    throw new Error("Interval automation requires a cadence origin");
+  return withJitter(
+    missionNextRunAt(charter.trigger, now, origin),
+    charter.trigger.jitterMs,
+  );
 }
 function withJitter(value: number, jitterMs = 0): number {
   return value + (jitterMs > 0 ? Math.floor(Math.random() * jitterMs) : 0);
@@ -1645,18 +1743,30 @@ function automationActivity(mission: MissionRecord, run: MissionRunRecord) {
         ? {
             kind: "interval" as const,
             everyMs: trigger.everyMs,
-            ...(trigger.anchorAt === undefined ? {} : { anchorAt: trigger.anchorAt }),
-            ...(trigger.jitterMs === undefined ? {} : { jitterMs: trigger.jitterMs }),
-            ...(trigger.untilAt === undefined ? {} : { untilAt: trigger.untilAt }),
-            ...(trigger.maxRuns === undefined ? {} : { maxRuns: trigger.maxRuns }),
+            ...(trigger.anchorAt === undefined
+              ? {}
+              : { anchorAt: trigger.anchorAt }),
+            ...(trigger.jitterMs === undefined
+              ? {}
+              : { jitterMs: trigger.jitterMs }),
+            ...(trigger.untilAt === undefined
+              ? {}
+              : { untilAt: trigger.untilAt }),
+            ...(trigger.maxRuns === undefined
+              ? {}
+              : { maxRuns: trigger.maxRuns }),
           }
         : trigger.kind === "cron"
           ? {
               kind: "cron" as const,
               expression: trigger.expression,
               timezone: trigger.timezone,
-              ...(trigger.untilAt === undefined ? {} : { untilAt: trigger.untilAt }),
-              ...(trigger.maxRuns === undefined ? {} : { maxRuns: trigger.maxRuns }),
+              ...(trigger.untilAt === undefined
+                ? {}
+                : { untilAt: trigger.untilAt }),
+              ...(trigger.maxRuns === undefined
+                ? {}
+                : { maxRuns: trigger.maxRuns }),
             }
           : null,
   };
@@ -1694,7 +1804,9 @@ function describeError(value: unknown): string {
 }
 function bounded(value: string | undefined): string | undefined {
   if (value === undefined) return undefined;
-  return value.length <= MAX_RUN_TEXT ? value : `${value.slice(0, MAX_RUN_TEXT)}\n…`;
+  return value.length <= MAX_RUN_TEXT
+    ? value
+    : `${value.slice(0, MAX_RUN_TEXT)}\n…`;
 }
 function denied(message: string): Error {
   return Object.assign(new Error(message), { code: "EACCES" });

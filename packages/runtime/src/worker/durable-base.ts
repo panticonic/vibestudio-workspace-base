@@ -67,6 +67,7 @@ import { _initFsWithRpc } from "./fs.js";
 import type { AuthenticatedCaller } from "@vibestudio/rpc";
 import {
   DIRECT_AUTHORITY_ACCEPTED_AT_HEADER,
+  createCausalRpcOperationTracker,
   createInternalConnectionlessRpcClient,
   type AttestedCaller,
 } from "@vibestudio/rpc/internal";
@@ -292,6 +293,9 @@ export abstract class DurableObjectBase {
   private _currentVerifiedCaller: AttestedCaller | null = null;
   private readonly _invocationContext =
     new InvocationContext<RpcInvocationContext>();
+  private readonly _causalRpcOperations = createCausalRpcOperationTracker(
+    () => this.activeInvocationContext ?? undefined,
+  );
   private _credentials: CredentialClient | null = null;
   private _notifications: NotificationClient | null = null;
   private _fs: RuntimeFs | null = null;
@@ -639,6 +643,7 @@ export abstract class DurableObjectBase {
         // dispatch restores its caller, alarms and later work carry no nonce.
         authorityParentNonce: () =>
           this.activeInvocationContext?.verifiedCaller?.authorization?.nonce,
+        onOutboundOperation: this._causalRpcOperations.observe,
       });
       // Expose ONLY this DO's `@rpc`-marked methods (opt-in / default-deny). Private/protected helpers
       // and all framework plumbing (`dispatchInboundEnvelope`, state KV, panel/alarm helpers) are
@@ -1657,7 +1662,13 @@ export abstract class DurableObjectBase {
       readyQueues: new Set(),
     };
     try {
-      return await this._invocationContext.run(context, callback);
+      return await this._invocationContext.run(context, async () => {
+        try {
+          return await callback();
+        } finally {
+          await this._causalRpcOperations.drain(context);
+        }
+      });
     } finally {
       context.authorityActive = false;
     }
@@ -1681,7 +1692,13 @@ export abstract class DurableObjectBase {
     };
     try {
       const result = await this._invocationContext.run(context, async () => {
-        const result = await callback();
+        const result = await (async () => {
+          try {
+            return await callback();
+          } finally {
+            await this._causalRpcOperations.drain(context);
+          }
+        })();
         const nextAlarm = this.nextAlarmAfterRequest();
         if (nextAlarm === null) this.deleteAlarm();
         else if (nextAlarm !== undefined) this.setAlarmAt(nextAlarm.wakeAt);
