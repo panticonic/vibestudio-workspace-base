@@ -240,6 +240,7 @@ function QuickfireCard(
   }, [newestId]);
 
   const conversing = compose !== null;
+  const replyingToConversation = compose?.kind === "conversation";
   return (
     <div
       className="quickfire-card"
@@ -299,9 +300,11 @@ function QuickfireCard(
             aria-label={
               argSession
                 ? argSession.activeLabel
+                : replyingToConversation
+                  ? "Reply to this conversation"
                 : "Run a command, go to a panel, or ask"
             }
-            placeholder={placeholder}
+            placeholder={replyingToConversation ? "Reply…" : placeholder}
             defaultValue={inputValue}
             onChange={(event) => {
               fitInputToContent(event.currentTarget);

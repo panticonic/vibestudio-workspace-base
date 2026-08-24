@@ -54,6 +54,15 @@ function renderSurface(
 }
 
 describe("QuickfireSurface conversation", () => {
+  it("presents a notification-bound conversation as a reply surface", () => {
+    renderSurface({ kind: "conversation", streaming: false });
+
+    const input = screen.getByRole("combobox", {
+      name: "Reply to this conversation",
+    });
+    expect(input.getAttribute("placeholder")).toBe("Reply…");
+  });
+
   it("grows the composer with wrapped input while keeping it bounded by CSS", () => {
     const emitIntent = renderSurface({ streaming: false });
     const input = screen.getByRole("combobox") as HTMLTextAreaElement;
