@@ -210,7 +210,7 @@ describe("scheduled automation notification system test validator", () => {
       kind: "prompt",
       text: "Notify the owner with One minute has passed.",
     },
-    trigger: { kind: "schedule", everyMs: 60_000, maxRuns: 1 },
+    trigger: { kind: "schedule", everyMs: 60_000, maxRuns: 2 },
     conversation: {
       mode: "continue",
       channelId: "headless-proof",
@@ -237,13 +237,26 @@ describe("scheduled automation notification system test validator", () => {
           executorId: "do:workers/agent-worker:AiChatWorker:headless-proof",
         },
         redundantInviteCount: 0,
-        run: { phase: "terminal", outcome: "succeeded" },
-        notification: {
-          kind: "agent.message",
-          title: "Talk timer",
-          message: "One minute has passed.",
-          channelId: "headless-proof",
-        },
+        runs: [
+          { runId: "run-1", phase: "terminal", outcome: "succeeded" },
+          { runId: "run-2", phase: "terminal", outcome: "succeeded" },
+        ],
+        notifications: [
+          {
+            id: "notification-1",
+            kind: "agent.message",
+            title: "Talk timer",
+            message: "One minute has passed.",
+            channelId: "headless-proof",
+          },
+          {
+            id: "notification-2",
+            kind: "agent.message",
+            title: "Talk timer",
+            message: "One minute has passed.",
+            channelId: "headless-proof",
+          },
+        ],
       },
     };
     expect(scheduledNotificationTest.validate(result)).toEqual({
@@ -284,20 +297,24 @@ describe("scheduled automation notification system test validator", () => {
           executorId: "do:workers/agent-worker:AiChatWorker:headless-proof",
         },
         redundantInviteCount: 0,
-        run: {
-          phase: "terminal",
-          outcome: "completed-with-errors",
-          effectFailures: [
-            {
-              invocationId: "notify-call",
-              name: "notify",
-              outcome: "tool_error",
-              code: "EDELIVERY",
-              message: "Live inbox invalidation failed",
-            },
-          ],
-        },
-        notification: null,
+        runs: [
+          { runId: "run-1", phase: "terminal", outcome: "succeeded" },
+          {
+            runId: "run-2",
+            phase: "terminal",
+            outcome: "completed-with-errors",
+            effectFailures: [
+              {
+                invocationId: "notify-call",
+                name: "notify",
+                outcome: "tool_error",
+                code: "EDELIVERY",
+                message: "Live inbox invalidation failed",
+              },
+            ],
+          },
+        ],
+        notifications: [],
       },
     };
     expect(scheduledNotificationTest.validate(result)).toMatchObject({

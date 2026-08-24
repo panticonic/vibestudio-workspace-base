@@ -36,9 +36,17 @@ each run. Use that only for a separate topic or intentionally independent
 background work; it is not the default for an automation requested in an
 ongoing conversation.
 
-Operations express concrete behavior known at launch. Do not supply capability names, permission rows, grants, runtime identities, or channel IDs. The host compiles each operation against the live receiver-owned method contract for durable pre-acquisition. The artifact is not a runtime allowlist: omitted or dynamic operations use ordinary prompt-capable authority acquisition when actually invoked.
+Operations express concrete external service calls predictable at launch. Do not supply
+capability names, permission rows, grants, runtime identities, or channel IDs.
+The host compiles each operation against the live receiver-owned method contract
+for durable pre-acquisition. Include predictable service calls selected by a
+prompt action. The artifact is not a runtime allowlist: genuinely dynamic or
+accidentally omitted operations use ordinary prompt-capable acquisition when
+actually invoked.
 
-Model-facing agent tools are not service methods. In particular, `notify` is available to a prompt action and is not an eval JavaScript global; do not invent a `notification.*` operation as its implementation. Eval actions import the ordinary `@workspace/runtime` APIs they use.
+Model-facing agent tools are not eval JavaScript globals. `notify` remains a
+prompt tool and is not translated into its internal service implementation.
+Eval actions import the ordinary `@workspace/runtime` APIs they use.
 
 `action.text` for a prompt action is the future turn's instruction, not its final output. Keep the semantic verb from the user's request: “Notify the owner with the exact text …” is a notification instruction, while the bare text alone is only a request for an ordinary chat response.
 
@@ -126,18 +134,33 @@ recreates source state; the effective version identifies the compiled installed 
 
 ## Launch and authority acquisition
 
-`launch({ name, charter })` performs one idempotent durable launch:
+`launch({ name, charter })` performs one idempotent durable launch. Authority
+depends on executor mode:
+
+- `continue`: the native launch tool compiles the declared operations and
+  initiates acquisition for the authenticated current agent task before
+  installing the schedule. Scheduled turns then use ordinary agent authority.
+- `fresh` or `method`: MissionsDO registers the immutable mission revision and
+  initiates acquisition for its mission subject. The fresh agent, method, and
+  child eval inherit that authority through execution admission.
+
+The durable launch then:
 
 1. Validate and seal the charter.
 2. Ask the host to compile a content-addressed authority plan.
 3. Persist an active revision and its authority-plan reference.
-4. Register `mission:<missionId>@<revisionDigest>` with the host under the attributed requesting user.
-5. Start durable acquisition for mission-grantable gated leaves.
+4. For an isolated executor, register `mission:<missionId>@<revisionDigest>` with the host under the attributed requesting user.
+5. Start durable acquisition for eligible gated leaves on the selected subject.
 6. Return the active record with pending, granted, and denied request IDs.
 
 Launch institution is immediate. Individual capability decisions may still be pending; they target the durable mission revision and survive the launch execution and host restart without duplicate cards.
 
-At execution, the Missions service asks the host for an admission bound to the exact revision, authority-plan digest, execution image, executor identity, and idempotent admission key. The returned nonce is attached to the concrete method invocation or agent turn. Causal eval and service calls inherit that admission through the ordinary RPC authorization context. The authority plan records launch-time acquisition hints; it does not allow or deny runtime calls.
+For an isolated execution, MissionsDO asks the host for admission bound to the
+exact revision, plan, image, executor, and idempotent key. Causal eval and
+service calls inherit it through ordinary RPC authorization context. A
+continuing turn receives no mission admission or nonce; it is ordinary input to
+the existing agent. The authority plan records launch-time acquisition intent;
+it does not allow or deny runtime calls.
 
 If no matching standing grant exists, dispatcher acquisition follows the ordinary prompt-capable path. The concrete agent/eval invocation owns that approval wait while the mission run remains `executing`; it is not restricted to pregranted authority and MissionsDO does not copy a second acquisition lifecycle.
 
@@ -177,7 +200,11 @@ type MissionRecord = {
 };
 ```
 
-Lifecycle state is not part of the revision digest. Pause and resume therefore preserve the same subject and grants. Editing changes behavior, creates a new digest and subject, and starts acquisition for the new revision.
+Lifecycle state is not part of the revision digest. Pause and resume therefore
+preserve isolated mission grants and never revoke authority from a shared
+continuing agent task. Editing isolated behavior creates a new digest and
+mission subject; editing a continuing definition re-plans predictable
+operations for the existing agent task.
 
 ## Run record
 

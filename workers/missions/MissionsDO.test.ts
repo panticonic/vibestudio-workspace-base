@@ -418,20 +418,13 @@ describe("MissionsDO", () => {
     ).toBe(true);
   });
 
-  it("dispatches a continuing turn to its sealed existing executor without creating a parallel agent", async () => {
+  it("dispatches a continuing turn through the existing agent authority path", async () => {
     const harness = await createMissions();
     harness.rpcCall.mockImplementation(
       async (target, method, args = [], options) => {
         harness.calls.push({ target, method, args, options });
         if (target === "main" && method === "authority.compileAuthorityPlan")
           return policy();
-        if (target === "main" && method === "authority.acquireForTarget")
-          return { requestIds: [], grantIds: [], denialIds: [] };
-        if (target === "main" && method === "authority.admitExecution")
-          return {
-            authoritySessionId: "admission:continuing",
-            nonce: "nonce:continuing",
-          };
         if (
           target === "do:workers/summary:SummaryAgent:daily" &&
           method === "runAutomationTurn"
@@ -478,9 +471,94 @@ describe("MissionsDO", () => {
         prompt: "Prepare a daily summary",
       }),
     ]);
-    expect(executionSessionNonceFor(dispatch?.options as never)).toBe(
-      "nonce:continuing",
+    expect(
+      executionSessionNonceFor(dispatch?.options as never),
+    ).toBeUndefined();
+    expect(
+      harness.calls.filter(
+        ({ method }) =>
+          method === "authority.acquireForTarget" ||
+          method === "authority.admitExecution",
+      ),
+    ).toEqual([]);
+
+    await harness.callAs<MissionRecord>(alice, "retire", mission.missionId);
+    expect(
+      harness.sql
+        .exec(
+          "SELECT phase,outcome FROM mission_runs WHERE run_id=?",
+          run.runId,
+        )
+        .one(),
+    ).toEqual({ phase: "terminal", outcome: "interrupted" });
+    expect(
+      harness.calls.some(({ method }) => method === "authority.retireTarget"),
+    ).toBe(false);
+  });
+
+  it("records an overlapping occurrence and raises one persistent run issue", async () => {
+    const harness = await createMissions();
+    const executorId = "do:workers/summary:SummaryAgent:daily";
+    const gadTarget = "do:workers/workspace-source:GadWorkspaceDO:workspace";
+    const notifications: Array<Record<string, unknown>> = [];
+    harness.rpcCall.mockImplementation(async (target, method, args = []) => {
+      if (target === "main" && method === "authority.compileAuthorityPlan")
+        return policy();
+      if (target === "main" && method === "authority.acquireForTarget")
+        return { requestIds: [], grantIds: [], denialIds: [] };
+      if (target === "main" && method === "authority.admitExecution")
+        return {
+          authoritySessionId: "admission:continuing",
+          nonce: "nonce:continuing",
+        };
+      if (target === executorId && method === "runAutomationTurn")
+        return undefined;
+      if (target === "main" && method === "workers.resolveService")
+        return { kind: "durable-object", targetId: gadTarget };
+      if (target === gadTarget && method === "putUserNotification") {
+        notifications.push(args[0] as Record<string, unknown>);
+        return args[0];
+      }
+      if (target === "main" && method.startsWith("workspace-state.alarm"))
+        return undefined;
+      throw new Error(`Unexpected RPC ${target}.${method}`);
+    });
+    const mission = await harness.callAs<MissionRecord>(alice, "launch", {
+      name: "Conversation reminder",
+      charter: continuingAgentCharter(),
+    });
+    const active = await harness.callAs<MissionRunRecord>(
+      alice,
+      "runNow",
+      mission.missionId,
     );
+    const blocked = await harness.callAs<MissionRunRecord>(
+      alice,
+      "runNow",
+      mission.missionId,
+    );
+
+    expect(active.phase).toBe("executing");
+    expect(blocked).toMatchObject({
+      phase: "terminal",
+      outcome: "skipped",
+      failure: {
+        code: "ERUNACTIVE",
+        retry: "automatic",
+      },
+    });
+    expect(notifications).toEqual([
+      expect.objectContaining({
+        id: `automation.run.overrun:${active.runId}`,
+        kind: "automation.run.issue",
+        title: "Conversation reminder is delayed",
+        data: {
+          missionId: mission.missionId,
+          runId: active.runId,
+          blockedRunId: blocked.runId,
+        },
+      }),
+    ]);
   });
 
   it("deduplicates a retried manual run by its durable command identity", async () => {

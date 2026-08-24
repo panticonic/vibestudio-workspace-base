@@ -125,17 +125,20 @@ integrity latch on reads. Never accept caller-supplied content class, copy
 content to disguise origin, or invent/parse lineage-set coordinates. Use
 `contextIntegrity.explain` for bounded diagnostics from the current session.
 
-A mission revision is a durable principal over an exact charter and
-host-compiled authority plan. Userland declares semantic service operations;
-it never authors capability rows. The host derives capability and resource
-leaves from receiver contracts, stores the immutable authority-plan artifact, and
-acquires eligible grants for `mission:<id>@<revisionDigest>` under the
-attributed requesting user. Editing creates a new subject. Pausing only stops
-new admission and preserves the existing subject and grants.
+A continuing automation is an ordinary wake-up of its existing agent and uses
+that conversation task's authority. A fresh-agent or non-agentic automation
+revision is a durable mission principal over an exact charter and host-compiled
+authority plan. Userland declares semantic service operations; it never authors
+capability rows. The host derives capability and resource leaves from receiver
+contracts, stores the immutable authority-plan artifact, and acquires eligible
+grants for the existing task or `mission:<id>@<revisionDigest>` as appropriate.
+Editing an isolated mission creates a new subject. Pausing stops new admission
+without revoking existing task or mission grants.
 
-Execution admission binds that subject and plan provenance to one authenticated agent
-turn, eval run, or method invocation. Causal child calls inherit the ordinary
-authorization context. Channel IDs are routing facts, never authority subjects.
+Mission execution admission binds the isolated subject and plan provenance to
+one authenticated agent turn, eval run, or method invocation. A continuing
+turn uses ordinary task execution instead. Causal child calls inherit the
+ordinary authorization context. Channel IDs are routing facts, never authority subjects.
 Missing runtime authority uses ordinary acquisition; do not force automation
 eval into `pregranted-only` mode. The plan predicts launch-time acquisition; it
 does not authorize, deny, or structurally expose a runtime call.
@@ -157,12 +160,12 @@ the checklist for exact invariants and verification.
 Read the live method and provider contract, then follow the structured reason
 and remediation:
 
-| Outcome | Action |
-| --- | --- |
-| Missing grant/content-lineage decision with user-approval remediation | Let the acquisition flow request the exact decision. Retry only after it resolves. |
-| Installed code didn't request the capability | Add the narrow request to the manifest and submit a newly sealed unit for review. |
-| Undeclared receiver | Add or repair the provider's reviewed receiver contract. Caller grants can't authorize it. |
-| Principal, relationship, session, attestation, or explicit denial | Terminal for that invocation — follow its exact remediation. |
+| Outcome                                                               | Action                                                                                     |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| Missing grant/content-lineage decision with user-approval remediation | Let the acquisition flow request the exact decision. Retry only after it resolves.         |
+| Installed code didn't request the capability                          | Add the narrow request to the manifest and submit a newly sealed unit for review.          |
+| Undeclared receiver                                                   | Add or repair the provider's reviewed receiver contract. Caller grants can't authorize it. |
+| Principal, relationship, session, attestation, or explicit denial     | Terminal for that invocation — follow its exact remediation.                               |
 
 Inspect sealed build metadata and execution identity, not only mutable source.
 Preserve structured errors and the original caller across internal legs. Unknown

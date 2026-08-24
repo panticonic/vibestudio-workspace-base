@@ -645,12 +645,14 @@ export class MissionsDO extends DurableObjectBase {
         now,
         missionId,
       );
-      this.enqueueRetirement(
-        missionPrincipal(current.missionId, current.revisionDigest),
-        now,
-      );
+      if (usesMissionAuthority(current.charter)) {
+        this.enqueueRetirement(
+          missionPrincipal(current.missionId, current.revisionDigest),
+          now,
+        );
+      }
     });
-    await this.interruptRunsForSubject(
+    await this.interruptRunsForRevision(
       missionPrincipal(current.missionId, current.revisionDigest),
       "Automation revision was replaced",
     );
@@ -722,12 +724,14 @@ export class MissionsDO extends DurableObjectBase {
         now,
         missionId,
       );
-      this.enqueueRetirement(
-        missionPrincipal(mission.missionId, mission.revisionDigest),
-        now,
-      );
+      if (usesMissionAuthority(mission.charter)) {
+        this.enqueueRetirement(
+          missionPrincipal(mission.missionId, mission.revisionDigest),
+          now,
+        );
+      }
     });
-    await this.interruptRunsForSubject(
+    await this.interruptRunsForRevision(
       missionPrincipal(mission.missionId, mission.revisionDigest),
       "Automation was retired",
     );
@@ -795,6 +799,7 @@ export class MissionsDO extends DurableObjectBase {
   }
 
   private async ensureAuthority(mission: MissionRecord): Promise<void> {
+    if (!usesMissionAuthority(mission.charter)) return;
     const subject = missionPrincipal(mission.missionId, mission.revisionDigest);
     const projection = await this.acquireAuthority(
       subject,
@@ -873,6 +878,43 @@ export class MissionsDO extends DurableObjectBase {
     );
   }
 
+  /** One persistent attention item per stalled execution. Repeated schedule
+   * occurrences remain individually visible in the run ledger, while the
+   * user's inbox is not flooded once per cadence interval. */
+  private enqueueOverrunIssue(
+    mission: MissionRecord,
+    activeRunId: string,
+    blockedRunId: string,
+    now = Date.now(),
+  ): void {
+    const effectId = `run-overrun:${activeRunId}`;
+    const effect: MissionEffect = {
+      kind: "user-notification",
+      notification: {
+        id: `automation.run.overrun:${activeRunId}`,
+        userId: mission.owner.userId,
+        kind: "automation.run.issue",
+        title: `${mission.name} is delayed`,
+        message:
+          "A scheduled occurrence was blocked because the previous run is still active. " +
+          "Open the automation to inspect or stop the active run.",
+        data: {
+          missionId: mission.missionId,
+          runId: activeRunId,
+          blockedRunId,
+        },
+        createdAt: now,
+        revision: 1,
+      },
+    };
+    this.sql.exec(
+      "INSERT OR IGNORE INTO mission_effects (effect_id,kind,payload_json,next_attempt_at) VALUES (?,'user-notification',?,?)",
+      effectId,
+      canonicalJson(effect),
+      now,
+    );
+  }
+
   private _gad: ReturnType<typeof createGadServiceClient> | null = null;
 
   private gad() {
@@ -931,14 +973,14 @@ export class MissionsDO extends DurableObjectBase {
     }
   }
 
-  private async interruptRunsForSubject(
-    subject: `mission:${string}@${string}`,
+  private async interruptRunsForRevision(
+    revisionCoordinate: `mission:${string}@${string}`,
     message: string,
   ): Promise<void> {
     const rows = this.sql
       .exec(
         "SELECT * FROM mission_runs WHERE mission_subject=? AND phase!='terminal' ORDER BY started_at,run_id",
-        subject,
+        revisionCoordinate,
       )
       .toArray() as unknown as RunRow[];
     for (const row of rows) {
@@ -988,6 +1030,8 @@ export class MissionsDO extends DurableObjectBase {
       );
       if (trigger === "scheduled")
         this.advanceSchedule(mission, now, mission.runCount);
+      this.enqueueOverrunIssue(mission, active.run_id, runId, now);
+      await this.reconcileEffects(false);
       return this.requireRun(runId);
     }
     const runNumber = mission.runCount + 1;
@@ -1124,23 +1168,23 @@ export class MissionsDO extends DurableObjectBase {
         this.sql.exec(
           "UPDATE mission_runs SET phase='dispatching',progress_at=?,failure_json=NULL,authority_session_id=? WHERE run_id=? AND phase='execution-admitting'",
           Date.now(),
-          admission.authoritySessionId,
+          admission?.authoritySessionId ?? null,
           runId,
         );
         row = this.requireRunRow(runId);
       }
       if (row.phase === "dispatching") {
         const admission = await this.admit(mission, row);
-        this.recordAdmission(runId, admission);
+        if (admission) this.recordAdmission(runId, admission);
         if (execution.kind === "method")
-          await this.dispatchMethod(mission, row, admission);
+          await this.dispatchMethod(mission, row, requireAdmission(admission));
         else await this.dispatchAgent(mission, row, admission);
       }
       if (row.phase === "executing") {
         const admission = await this.admit(mission, row);
-        this.recordAdmission(runId, admission);
+        if (admission) this.recordAdmission(runId, admission);
         if (execution.kind === "method")
-          await this.dispatchMethod(mission, row, admission);
+          await this.dispatchMethod(mission, row, requireAdmission(admission));
         else await this.dispatchAgent(mission, row, admission);
       }
     } catch (error) {
@@ -1172,10 +1216,19 @@ export class MissionsDO extends DurableObjectBase {
   private async admit(
     mission: MissionRecord,
     row: RunRow,
-  ): Promise<AdmissionResult> {
+  ): Promise<AdmissionResult | null> {
     if (!row.executor_id || !row.context_id)
       throw new Error("Automation executor is not prepared");
     const execution = mission.charter.execution;
+    // A continuing schedule is ordinary input to an already-authorized agent.
+    // Installing mission authority here would let scheduled work change the
+    // authority identity of unrelated turns sharing this conversation.
+    if (
+      execution.kind === "agent" &&
+      execution.conversation.mode === "continue"
+    ) {
+      return null;
+    }
     return this.rpc.call<AdmissionResult>(
       "main",
       "authority.admitExecution",
@@ -1262,19 +1315,21 @@ export class MissionsDO extends DurableObjectBase {
   private async dispatchAgent(
     mission: MissionRecord,
     row: RunRow,
-    admission: AdmissionResult,
+    admission: AdmissionResult | null,
   ): Promise<void> {
     const execution = mission.charter.execution;
     if (execution.kind !== "agent" || !row.executor_id || !row.channel_id)
       throw new Error("Expected prepared agent executor");
     const activity = {
       ...automationActivity(mission, this.rowToRun(row)),
-      authoritySessionNonce: admission.nonce,
+      ...(admission ? { authoritySessionNonce: admission.nonce } : {}),
     };
     this.setPhase(row.run_id, "executing");
-    const admittedRpc = withExecutionAdmission(this.rpc, admission.nonce);
+    const executorRpc = admission
+      ? withExecutionAdmission(this.rpc, admission.nonce)
+      : this.rpc;
     if (execution.action.kind === "prompt")
-      await admittedRpc.call(
+      await executorRpc.call(
         row.executor_id,
         "runAutomationTurn",
         [
@@ -1287,7 +1342,7 @@ export class MissionsDO extends DurableObjectBase {
         { idempotencyKey: `${row.run_id}:dispatch` },
       );
     else
-      await admittedRpc.call(
+      await executorRpc.call(
         row.executor_id,
         "runAutomationEval",
         [
@@ -1782,6 +1837,17 @@ function automationActivity(mission: MissionRecord, run: MissionRunRecord) {
             }
           : null,
   };
+}
+function requireAdmission(admission: AdmissionResult | null): AdmissionResult {
+  if (!admission)
+    throw new Error("An isolated automation execution requires admission");
+  return admission;
+}
+function usesMissionAuthority(charter: MissionCharter): boolean {
+  return !(
+    charter.execution.kind === "agent" &&
+    charter.execution.conversation.mode === "continue"
+  );
 }
 function failure(
   code: string,

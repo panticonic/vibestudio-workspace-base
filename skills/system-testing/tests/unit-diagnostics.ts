@@ -282,7 +282,7 @@ async function scheduledNotificationProof(
     const { gad, rpc, workers } = await import("@workspace/runtime");
     await context.sendAndWait(
       session,
-      `I'm giving a talk. Start an automation called “${SCHEDULED_NOTIFICATION_NAME}” that sends me a notification in one minute saying exactly “${SCHEDULED_NOTIFICATION_TEXT}” Stop it after that first notification. Tell me where I can inspect or stop it.`,
+      `I'm giving a talk. Start an automation called “${SCHEDULED_NOTIFICATION_NAME}” that notifies me every minute saying exactly “${SCHEDULED_NOTIFICATION_TEXT}”, and stop it after two notifications. Tell me where I can inspect or stop it.`,
       "scheduled notification launch",
     );
     const service = await workers.resolveService("vibestudio.missions.v1");
@@ -292,7 +292,7 @@ async function scheduledNotificationProof(
       );
     }
     const deadline =
-      Date.now() + Math.min(100_000, context.remainingTimeMs() ?? 100_000);
+      Date.now() + Math.min(190_000, context.remainingTimeMs() ?? 190_000);
     while (Date.now() < deadline) {
       const overview = await rpc.call<Record<string, unknown>>(
         service.targetId,
@@ -309,25 +309,23 @@ async function scheduledNotificationProof(
       const recentRuns = Array.isArray(itemRecord?.["recentRuns"])
         ? itemRecord?.["recentRuns"]
         : [];
-      const run = recentRuns.find(
+      const runs = recentRuns.filter(
         (candidate) => isRecord(candidate) && candidate["phase"] === "terminal",
       );
       if (
         automation?.["name"] === SCHEDULED_NOTIFICATION_NAME &&
-        isRecord(run)
+        automation["runCount"] === 2 &&
+        runs.length >= 2
       ) {
         const notifications = await gad.listUserNotificationsForMe({
           includeAcknowledged: true,
           limit: 100,
         });
-        const notification = notifications.find(
+        const matchingNotifications = notifications.filter(
           (candidate) =>
             candidate.kind === "agent.message" &&
             candidate.message === SCHEDULED_NOTIFICATION_TEXT,
         );
-        const notificationData = isRecord(notification?.data)
-          ? notification.data
-          : undefined;
         const conversation = isRecord(automation["charter"])
           ? isRecord(automation["charter"]["execution"])
             ? automation["charter"]["execution"]["conversation"]
@@ -345,32 +343,30 @@ async function scheduledNotificationProof(
               isRecord(candidate.data) &&
               candidate.data["channelId"] === session.channelId,
           ).length,
-          run: {
+          runs: runs.slice(0, 2).map((run) => ({
             runId: run["runId"],
             phase: run["phase"],
             outcome: run["outcome"],
             finalMessage: run["finalMessage"],
             failure: run["failure"],
             effectFailures: run["effectFailures"],
-          },
-          notification: notification
-            ? {
-                id: notification.id,
-                kind: notification.kind,
-                title: notification.title,
-                message: notification.message,
-                channelId: notificationData?.["channelId"],
-              }
-            : null,
+          })),
+          notifications: matchingNotifications.map((notification) => ({
+            id: notification.id,
+            kind: notification.kind,
+            title: notification.title,
+            message: notification.message,
+            channelId: isRecord(notification.data)
+              ? notification.data["channelId"]
+              : undefined,
+          })),
         };
         break;
       }
       await new Promise((resolve) => setTimeout(resolve, 1_000));
     }
     if (!observation)
-      throw new Error(
-        "The first scheduled run did not become terminal in time",
-      );
+      throw new Error("Two scheduled runs did not become terminal in time");
   } catch (cause) {
     error = cause instanceof Error ? cause.message : String(cause);
   }
@@ -422,26 +418,29 @@ function scheduledNotificationChecked(result: TestExecutionResult) {
     !isRecord(trigger) ||
     trigger["kind"] !== "schedule" ||
     trigger["everyMs"] !== 60_000 ||
-    trigger["maxRuns"] !== 1
+    trigger["maxRuns"] !== 2
   ) {
     return {
       passed: false,
       reason:
-        "The agent did not infer a one-minute automation that stops after its first run",
+        "The agent did not infer a one-minute automation that stops after two runs",
     };
   }
   const observed = result.diagnostics?.["scheduledNotification"];
-  if (!isRecord(observed) || !isRecord(observed["run"])) {
+  if (!isRecord(observed) || !Array.isArray(observed["runs"])) {
     return {
       passed: false,
       reason: "No durable scheduled-run evidence was observed",
     };
   }
-  const run = observed["run"];
-  if (run["phase"] !== "terminal" || run["outcome"] !== "succeeded") {
+  const runs = observed["runs"].filter(isRecord);
+  const failedRun = runs.find(
+    (run) => run["phase"] !== "terminal" || run["outcome"] !== "succeeded",
+  );
+  if (runs.length !== 2 || failedRun) {
     return {
       passed: false,
-      reason: `The first scheduled run or one of its requested effects did not succeed: ${JSON.stringify(run)}`,
+      reason: `Both scheduled runs and their requested effects must succeed: ${JSON.stringify(runs)}`,
     };
   }
   const conversation = observed["conversation"];
@@ -456,18 +455,29 @@ function scheduledNotificationChecked(result: TestExecutionResult) {
         "The short-cadence automation did not wake the launching agent in its existing conversation",
     };
   }
-  const notification = observed["notification"];
+  const notifications = Array.isArray(observed["notifications"])
+    ? observed["notifications"].filter(isRecord)
+    : [];
   if (
-    !isRecord(notification) ||
-    notification["message"] !== SCHEDULED_NOTIFICATION_TEXT
+    notifications.length !== 2 ||
+    new Set(notifications.map((notification) => notification["id"])).size !==
+      2 ||
+    notifications.some(
+      (notification) => notification["message"] !== SCHEDULED_NOTIFICATION_TEXT,
+    )
   ) {
     return {
       passed: false,
       reason:
-        "The successful run did not produce the requested durable user notification",
+        "The two successful runs did not produce two distinct durable user notifications",
     };
   }
-  if (notification["channelId"] !== observed["launchChannelId"]) {
+  if (
+    notifications.some(
+      (notification) =>
+        notification["channelId"] !== observed["launchChannelId"],
+    )
+  ) {
     return {
       passed: false,
       reason:
@@ -595,9 +605,9 @@ export const unitDiagnosticsTests: TestCase[] = [
   {
     name: "automation-scheduled-notification",
     description:
-      "A launched one-minute automation completes a real run and notifies its owner",
+      "A launched one-minute automation completes two real runs and notifies its owner twice",
     category: "unit-diagnostics",
-    timeoutMs: 150_000,
+    timeoutMs: 240_000,
     prompt: "Harness-orchestrated scheduled automation outcome proof.",
     authorityPolicy: {
       authority: [

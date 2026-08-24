@@ -26,7 +26,14 @@ Use `conversation: { mode: "fresh" }` only when the automation is a genuinely se
 ## Launch correctly
 
 1. Resolve only user choices that materially alter the job: behavior, cadence and timezone, optional end condition, and—only for an ambiguous shared-context job with wake-ups more than one hour apart—fresh versus continuing conversation. Do not ask for a conversation-mode choice for ordinary short-cadence work in the current conversation; continue it.
-2. Enumerate the concrete external service operations known in advance. Declare each as `{ service, method, args?, use }`, where `use` is `action` or `conditional`. These are launch-time acquisition hints, not capability names, grants, or a runtime allowlist. A prompt action can choose tools dynamically; do not invent low-level service calls for a model-facing tool such as `notify`.
+2. Before scheduling, enumerate every external service operation reasonably
+   predictable from the task, including service calls a future prompt action is
+   expected to choose. Declare each as `{ service, method, args?, use }`, where `use` is
+   `action` or `conditional`. These are launch-time acquisition plans, not
+   capability names, grants, or a runtime allowlist. Do not leave a foreseeable
+   gated service call for an unattended run to discover. Model-facing tools
+   such as `notify` already own their internal effects; do not reverse-engineer
+   them into service operations.
    Declare only external service calls made by the action. Scheduling, fresh-conversation creation, delivery of the eval result into that conversation, and the `automation-completion.v1` return are intrinsic mission behavior: do not invent `missions.finishRun`, `chat.publish`, or similar operations for them.
 3. Call `launch_automation` once with the action, trigger, conversation mode, and operations. Do not wrap it in eval and do not discover the current agent’s build, class, object key, channel, or context first; the receiver seals those facts atomically.
 4. Report the active automation’s name and cadence. Point to its pill for inspection or control; do not publish a second card or ask for a second launch approval.
@@ -80,9 +87,22 @@ For a small model-free project-status check, return the status text from eval; t
 
 ## Authority
 
-The agent never authors capability rows. At launch, the host compiles declared operations against receiver-owned method contracts into an immutable, content-addressed authority plan. It derives the exact capability and resource for each declared operation and starts durable acquisition for every gated operation eligible for standing mission authority.
+The agent never authors capability rows. At launch, the host compiles declared
+operations against receiver-owned method contracts into an immutable,
+content-addressed authority plan. It derives the exact capability and resource
+for each operation and starts ordinary durable acquisition for the actual
+authority-bearing executor.
 
-The authenticated user who requested launch is recorded as the owner of the revision subject `mission:<id>@<revisionDigest>`. Grants belong to that subject, not to a channel, transient eval runtime, or model-authored identity. Channel IDs are routing facts, never authority subjects; context IDs are conversation facts.
+- A continuing automation is an ordinary wake-up of this existing agent. It
+  pre-acquires for the agent task and later tools/eval use the same authority
+  path as an ordinary user-driven turn. It never overlays mission authority on
+  the shared conversation.
+- A fresh agent or non-agentic method/eval executes for the revision subject
+  `mission:<id>@<revisionDigest>`. Its executor and child eval inherit that
+  mission authority through ordinary execution admission.
+
+Channel IDs are routing facts, never authority subjects; context IDs are
+conversation facts.
 
 Pre-acquisition is the normal authoring path, but the authority plan is not a runtime allowlist, grant, tool surface, or network ceiling. If an operation was omitted or authority is absent when an admitted run reaches it, ordinary acquisition presents the exact approval, durably parks the invocation, and resumes after the decision. Structural reach still comes from the immutable code manifest and ordinary agent/eval tool exposure. Critical or otherwise non-standing authority always uses the invocation-time path. In particular, do not force automation eval into `pregranted-only`.
 
@@ -120,11 +140,17 @@ The minimum cadence is one minute. `untilAt` prevents a run starting at or after
 
 ## Lifecycle and recovery
 
-- `pause` stops new admission and preserves the revision’s standing grants.
+- `pause` stops new admission, preserves isolated mission grants, and never
+  revokes authority from a shared continuing agent task.
 - `resume` re-enables the same revision.
 - `edit` creates a new immutable revision, authority plan, subject, and authority acquisition.
 - `retire` permanently prevents new runs and retires revision authority after live executions close.
 - A failure is recorded on the run; it does not silently pause the automation.
+- One run remains active at a time. If another tick becomes due first, it is
+  recorded as skipped and one persistent inbox item says that the automation is
+  delayed; repeated overlaps for that run do not create an alert storm.
+- `already_handled`, `not_addressed`, and `no_foreground_work` finish the
+  current turn. Only concrete outstanding background work keeps it suspended.
 - A turn that reaches a final response after one or more child effects fail is
   recorded as `completed-with-errors`, never `succeeded`. The run retains each
   failed invocation's tool name, code, outcome, and message. The mission owner

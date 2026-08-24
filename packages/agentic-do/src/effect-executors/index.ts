@@ -40,7 +40,7 @@ function objectValue(value: unknown): Record<string, unknown> | null {
 }
 
 function turnControlFromToolResult(
-  result: unknown
+  result: unknown,
 ): Extract<EffectOutcome, { kind: "tool" }>["turnControl"] {
   const details = objectValue(objectValue(result)?.["details"]);
   if (details?.["suspendTurn"] !== true) return undefined;
@@ -52,6 +52,14 @@ function turnControlFromToolResult(
     typeof details["noteToSelf"] === "string" && details["noteToSelf"].trim()
       ? details["noteToSelf"].trim()
       : undefined;
+  // Only a concrete outstanding background dependency keeps a turn open.
+  // The other suspend_turn reasons mean that this invocation has no more work
+  // to perform; retaining an open turn for them leaks execution ownership into
+  // an unrelated future input and prevents finite workflow parents from
+  // observing completion.
+  if (reason !== "waiting_for_background") {
+    return { kind: "terminate" };
+  }
   return {
     kind: "suspend",
     reason,
@@ -72,11 +80,16 @@ function resultRecord(value: unknown): Record<string, unknown> | null {
     : null;
 }
 
-function attachFailureToResult(result: unknown, failure: ReturnType<typeof agentToolFailureFromUnknown>) {
+function attachFailureToResult(
+  result: unknown,
+  failure: ReturnType<typeof agentToolFailureFromUnknown>,
+) {
   const record = resultRecord(result);
   if (!record) {
     return {
-      protocolContent: [{ type: "text", text: renderAgentToolFailure(failure) }],
+      protocolContent: [
+        { type: "text", text: renderAgentToolFailure(failure) },
+      ],
       details: { failure, originalResult: result },
     };
   }
@@ -98,7 +111,9 @@ async function artifactBackedToolResult(
   result: unknown,
   tool: string,
   invocationId: string,
-  blobstore: { putText(value: string): Promise<{ digest: string; size: number }> }
+  blobstore: {
+    putText(value: string): Promise<{ digest: string; size: number }>;
+  },
 ): Promise<unknown> {
   let json: string;
   try {
@@ -117,10 +132,13 @@ async function artifactBackedToolResult(
       typeof resultRecord(block)?.["text"] === "string"
         ? String(resultRecord(block)?.["text"]).length
         : 0),
-    0
+    0,
   );
   const bytes = new TextEncoder().encode(json).byteLength;
-  if (bytes <= TOOL_ARTIFACT_THRESHOLD_BYTES && textChars <= MAX_MODEL_TOOL_RESULT_CHARS) {
+  if (
+    bytes <= TOOL_ARTIFACT_THRESHOLD_BYTES &&
+    textChars <= MAX_MODEL_TOOL_RESULT_CHARS
+  ) {
     return result;
   }
   const stored = await blobstore.putText(json);
@@ -155,7 +173,10 @@ export const localToolExecutor: EffectExecutor<LocalToolEffect> = {
   async execute({ descriptor, state, signal, deps, onEphemeral }) {
     // §1.4.2 retry rule: a mutating tool whose applied worktree mutation is
     // already folded synthesizes success instead of re-executing.
-    const replayEvidence = await deps.localTools.alreadyApplied(state, descriptor.invocationId);
+    const replayEvidence = await deps.localTools.alreadyApplied(
+      state,
+      descriptor.invocationId,
+    );
     if (replayEvidence) {
       return {
         kind: "tool",
@@ -206,13 +227,13 @@ export const localToolExecutor: EffectExecutor<LocalToolEffect> = {
         failure?: ReturnType<typeof agentToolFailureFromUnknown>;
       };
       const failure = toolOutcome.isError
-        ? toolOutcome.failure ??
+        ? (toolOutcome.failure ??
           agentToolFailureFromUnknown(toolOutcome.result, {
             operation: `tool.${descriptor.tool}`,
             stage: signal.aborted ? "cancel" : "execute",
             causal: { invocationId: descriptor.invocationId },
             ...(signal.aborted ? { kind: "cancelled" as const } : {}),
-          })
+          }))
         : undefined;
       const resultWithFailure = failure
         ? attachFailureToResult(toolOutcome.result, failure)
@@ -221,7 +242,7 @@ export const localToolExecutor: EffectExecutor<LocalToolEffect> = {
         resultWithFailure,
         descriptor.tool,
         descriptor.invocationId,
-        deps.blobstore
+        deps.blobstore,
       );
       const turnControl = toolOutcome.isError
         ? undefined
@@ -251,7 +272,9 @@ export const localToolExecutor: EffectExecutor<LocalToolEffect> = {
       return {
         kind: "tool",
         result: {
-          protocolContent: [{ type: "text", text: renderAgentToolFailure(failure) }],
+          protocolContent: [
+            { type: "text", text: renderAgentToolFailure(failure) },
+          ],
           details: { failure },
         },
         isError: true,
@@ -269,7 +292,10 @@ export const promptArtifactsExecutor: EffectExecutor<PromptArtifactsEffect> = {
     if (!deps.promptArtifacts) {
       throw new Error("prompt artifact preparation is unavailable");
     }
-    const patch = await deps.promptArtifacts.prepare(descriptor.channelId, signal);
+    const patch = await deps.promptArtifacts.prepare(
+      descriptor.channelId,
+      signal,
+    );
     return { kind: "prompt-artifacts", patch } satisfies EffectOutcome;
   },
 };
@@ -282,7 +308,8 @@ export const channelCallExecutor: EffectExecutor<ChannelCallEffect> = {
     await deps.channel.callMethod({
       channelId: descriptor.channelId,
       targetParticipantId:
-        (descriptor.target as { participantId?: string }).participantId ?? descriptor.target.id,
+        (descriptor.target as { participantId?: string }).participantId ??
+        descriptor.target.id,
       transportCallId: descriptor.transportCallId,
       method: descriptor.method,
       args: descriptor.args,
@@ -331,10 +358,14 @@ export const credentialWaitExecutor: EffectExecutor<CredentialWaitEffect> = {
         credKey: descriptor.credKey,
         providerId: descriptor.providerId,
         connectSpec: descriptor.connectSpec,
-        ...(descriptor.modelBaseUrl ? { modelBaseUrl: descriptor.modelBaseUrl } : {}),
+        ...(descriptor.modelBaseUrl
+          ? { modelBaseUrl: descriptor.modelBaseUrl }
+          : {}),
         ...(descriptor.waitReason ? { waitReason: descriptor.waitReason } : {}),
         ...(descriptor.reason ? { reason: descriptor.reason } : {}),
-        ...(descriptor.failureCode ? { failureCode: descriptor.failureCode } : {}),
+        ...(descriptor.failureCode
+          ? { failureCode: descriptor.failureCode }
+          : {}),
         expiresAt: descriptor.expiresAt,
       },
       // Include the occurrence discriminator (startedAtSeq) so a LATER wait for
@@ -361,7 +392,11 @@ export const receiptExecutor: EffectExecutor<RecordReceiptEffect> = {
       messageId: descriptor.messageId,
       turnId: descriptor.turnId,
     });
-    return { kind: "tool", result: null, isError: false } satisfies EffectOutcome;
+    return {
+      kind: "tool",
+      result: null,
+      isError: false,
+    } satisfies EffectOutcome;
   },
 };
 

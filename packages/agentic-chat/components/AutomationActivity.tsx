@@ -986,19 +986,36 @@ function Inspector({
         </Box>
         <Box>
           <Text as="div" size="1" color="gray" mb="1">
-            Standing authority
+            {execution.kind === "agent" &&
+            execution.conversation.mode === "continue"
+              ? "Execution authority"
+              : "Standing authority"}
           </Text>
-          <Text size="2">
-            {current.authority.grantIds.length} granted ·{" "}
-            {current.authority.requestIds.length} pending ·{" "}
-            {current.authority.denialIds.length} denied
-          </Text>
-          <Code
-            size="1"
-            style={{ display: "block", overflowWrap: "anywhere", marginTop: 4 }}
-          >
-            {current.authorityPlan.artifactRef}
-          </Code>
+          {execution.kind === "agent" &&
+          execution.conversation.mode === "continue" ? (
+            <Text size="2">
+              Uses this existing agent task&apos;s ordinary authority. Scheduled
+              turns do not install mission authority on the conversation.
+            </Text>
+          ) : (
+            <>
+              <Text size="2">
+                {current.authority.grantIds.length} granted ·{" "}
+                {current.authority.requestIds.length} pending ·{" "}
+                {current.authority.denialIds.length} denied
+              </Text>
+              <Code
+                size="1"
+                style={{
+                  display: "block",
+                  overflowWrap: "anywhere",
+                  marginTop: 4,
+                }}
+              >
+                {current.authorityPlan.artifactRef}
+              </Code>
+            </>
+          )}
         </Box>
       </Grid>
       {current.charter.trigger.kind !== "manual" ? (

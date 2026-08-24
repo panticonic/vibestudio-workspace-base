@@ -50,11 +50,11 @@ async function waitForCall(
   throw new Error("relay never issued a channel call");
 }
 
-const AGENT_ID = "do:test:TestAgent:agent-key";
+const AGENT_ID = "do:workers/test:TestAgent:agent-key";
 const CHANNEL = "chan-1";
 const TEST_AGENT_ENV = {
   __objectKey: "agent-key",
-  WORKER_SOURCE: "test",
+  WORKER_SOURCE: "workers/test",
   WORKER_CLASS_NAME: "TestAgent",
   WORKER_EFFECTIVE_VERSION: "a".repeat(64),
   WORKER_SOURCE_REF: `state:${"b".repeat(64)}`,
@@ -125,6 +125,10 @@ class TestVessel extends AgentVesselBase {
   readonly automationLaunchCalls: Array<{
     args: unknown[];
     options?: unknown;
+  }> = [];
+  readonly automationAuthorityCalls: Array<{
+    method: string;
+    args: unknown[];
   }> = [];
   readonly channelPublishFailures = new Set<string>();
   readonly channelStub = {
@@ -307,6 +311,32 @@ class TestVessel extends AgentVesselBase {
               vessel.blobTextReaderForTest
             ) {
               return vessel.blobTextReaderForTest(String(args[0]));
+            }
+            if (
+              vessel.automationLaunchForTest &&
+              targetId === "main" &&
+              method === "authority.compileAuthorityPlan"
+            ) {
+              vessel.automationAuthorityCalls.push({ method, args });
+              return {
+                schemaVersion: 1,
+                digest: "c".repeat(64),
+                artifactRef: `authority-plan:${"c".repeat(64)}`,
+                compilerVersion: "test",
+                catalogDigest: "d".repeat(64),
+              };
+            }
+            if (
+              vessel.automationLaunchForTest &&
+              targetId === "main" &&
+              method === "authority.acquireForCurrentTask"
+            ) {
+              vessel.automationAuthorityCalls.push({ method, args });
+              return {
+                requestIds: [],
+                grantIds: ["grant:task"],
+                denialIds: [],
+              };
             }
             if (
               vessel.automationLaunchForTest &&
@@ -1610,7 +1640,7 @@ describe("AgentVesselBase.chatOp", () => {
               execution: {
                 kind: "agent",
                 image: {
-                  source: "test",
+                  source: "workers/test",
                   effectiveVersion: "a".repeat(64),
                   ref: `state:${"b".repeat(64)}`,
                   className: "TestAgent",
@@ -1666,9 +1696,26 @@ describe("AgentVesselBase.chatOp", () => {
 
     await vessel.executeAutomationLaunchForTest({
       ...input,
+      operations: [
+        {
+          service: "accounts",
+          method: "connect",
+          use: "action",
+        },
+      ],
+    });
+    expect(vessel.automationAuthorityCalls.map(({ method }) => method)).toEqual(
+      ["authority.compileAuthorityPlan", "authority.acquireForCurrentTask"],
+    );
+    expect(vessel.automationAuthorityCalls[1]!.args).toEqual([
+      { authorityPlanDigest: "c".repeat(64) },
+    ]);
+
+    await vessel.executeAutomationLaunchForTest({
+      ...input,
       conversation: { mode: "fresh" },
     });
-    expect(vessel.automationLaunchCalls[2]!.args).toMatchObject([
+    expect(vessel.automationLaunchCalls[3]!.args).toMatchObject([
       {
         charter: {
           execution: { conversation: { mode: "fresh" } },
@@ -3515,7 +3562,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
         call.target === "main" && call.method === "runtime.createEntity",
     );
     expect(create?.args[0]).toMatchObject({
-      execution: { surface: "code", source: "test" },
+      execution: { surface: "code", source: "workers/test" },
     });
   });
 
@@ -3633,7 +3680,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     expect(out).toMatchObject({
       isError: true,
       result: expect.stringContaining(
-        "spawn_subagent context mismatch: owner do:test:TestAgent:agent-key is registered in ctx-original, but channel chan-1 is subscribed as ctx-1",
+        "spawn_subagent context mismatch: owner do:workers/test:TestAgent:agent-key is registered in ctx-original, but channel chan-1 is subscribed as ctx-1",
       ),
     });
     expect(

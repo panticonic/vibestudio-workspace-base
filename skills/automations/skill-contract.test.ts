@@ -25,11 +25,14 @@ describe("Automations skill contract", () => {
 
   it("keeps semantic operations separate from host-derived authority", () => {
     const value = docs();
-    expect(value).toContain("launch-time acquisition hints");
+    expect(value).toContain("launch-time acquisition plans");
     expect(value).toContain("never authors capability rows");
     expect(value).toContain("mission:<id>@<revisionDigest>");
     expect(value).toContain(
       "Channel IDs are routing facts, never authority subjects",
+    );
+    expect(value).toContain(
+      "A continuing automation is an ordinary wake-up of this existing agent",
     );
     expect(value).not.toContain("MissionPermission");
     expect(value).not.toContain("toolExposure");
@@ -43,7 +46,7 @@ describe("Automations skill contract", () => {
       "do not force automation eval into `pregranted-only`",
     );
     expect(value).toContain(
-      "Pause and resume therefore preserve the same subject and grants",
+      "Pause and resume therefore\npreserve isolated mission grants",
     );
   });
 
@@ -55,7 +58,7 @@ describe("Automations skill contract", () => {
     expect(value).toContain('protocol: "automation-completion.v1"');
     expect(value).toContain('"executing"');
     expect(value).toContain(
-      "The authority plan records launch-time acquisition hints; it does not allow or deny runtime calls.",
+      "The authority plan records launch-time acquisition intent;\nit does not allow or deny runtime calls.",
     );
     expect(value).toContain(
       "resumes existing nonterminal runs before admitting newly due runs",

@@ -110,7 +110,10 @@ import type { DoAlarmSchedule } from "@vibestudio/shared/doDispatcher";
 import {
   MISSION_COMPLETION_PROTOCOL,
   missionCompletionResponse,
+  missionExecutionImageDigest,
   type MissionAgentAction,
+  type MissionAuthorityPlanReference,
+  type MissionAuthorityProjection,
   type MissionOperationIntent,
   type MissionRecord,
   type MissionTrigger,
@@ -3026,7 +3029,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
           operations: {
             type: "array",
             description:
-              "Concrete external service calls known in advance for an eval action, used only for launch-time authority acquisition. Omit for prompt actions and model-facing tools such as notify.",
+              "Concrete external service operations reasonably predictable across future runs, used only for launch-time authority acquisition. Include service calls selected by prompt actions as well as calls made by inline eval, but do not translate model-facing tools such as notify into internal service calls; this is not a runtime allowlist.",
             items: {
               type: "object",
               properties: {
@@ -5756,6 +5759,48 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     requestIdentity: string,
     callerRpc: RpcClient,
   ): Promise<MissionRecord> {
+    const definition = this.selfAutomationDefinition(channelId, input);
+    if (
+      definition.charter.execution.kind === "agent" &&
+      definition.charter.execution.conversation.mode === "continue" &&
+      definition.charter.execution.operations.length > 0
+    ) {
+      const authorityPlan = await callerRpc.call<MissionAuthorityPlanReference>(
+        "main",
+        "authority.compileAuthorityPlan",
+        [
+          {
+            executionImageDigest: missionExecutionImageDigest(
+              definition.charter.execution.image,
+            ),
+            operations: definition.charter.execution.operations.map(
+              (operation) => ({
+                service: operation.service,
+                method: operation.method,
+                ...(operation.args ? { args: [...operation.args] } : {}),
+                use: operation.use,
+              }),
+            ),
+          },
+        ],
+        {
+          idempotencyKey: `automation:task-authority-plan:${sha256HexSyncText(requestIdentity)}`,
+        },
+      );
+      const authority = await callerRpc.call<MissionAuthorityProjection>(
+        "main",
+        "authority.acquireForCurrentTask",
+        [{ authorityPlanDigest: authorityPlan.digest }],
+        {
+          idempotencyKey: `automation:task-authority:${sha256HexSyncText(requestIdentity)}`,
+        },
+      );
+      if (authority.denialIds.length > 0) {
+        throw new Error(
+          "Automation launch was denied required authority for this agent task",
+        );
+      }
+    }
     const service = await callerRpc.call<{
       kind?: unknown;
       targetId?: unknown;
@@ -5769,7 +5814,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     const automation = await callerRpc.call<MissionRecord>(
       service.targetId,
       "launch",
-      [this.selfAutomationDefinition(channelId, input)],
+      [definition],
       {
         idempotencyKey: `automation:launch:${this.objectKey}:${sha256HexSyncText(requestIdentity)}`,
       },
