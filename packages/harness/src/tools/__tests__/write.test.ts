@@ -64,6 +64,14 @@ describe("canonical write tool", () => {
     expect(createWriteTool(CWD, new StubVcs(), authority).cancellationMode).toBe("settle");
   });
 
+  it("does not advertise a file mode that scratch writes cannot honor", () => {
+    const tool = createWriteTool(CWD, new StubVcs(), authority);
+
+    expect(tool.parameters.properties).not.toHaveProperty("mode");
+    expect(tool.description).toContain("apply_patch");
+    expect(tool.description).toContain("explicit file mode");
+  });
+
   it("creates a new repository file through a state-checked change", async () => {
     const vcs = new StubVcs();
     const tool = createWriteTool(CWD, vcs, authority);

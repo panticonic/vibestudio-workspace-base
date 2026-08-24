@@ -24,13 +24,6 @@ const writeSchema = Type.Object(
         description: "Require the path to be absent; return a conflict instead of overwriting.",
       })
     ),
-    mode: Type.Optional(
-      Type.Integer({
-        minimum: 0,
-        maximum: 0o777,
-        description: "Resulting POSIX permission bits for a managed file, such as 420 for 0644.",
-      })
-    ),
     intent: Type.Optional(
       Type.String({
         minLength: 1,
@@ -56,7 +49,7 @@ export function createWriteTool(
     name: "write",
     label: "Write file",
     description:
-      "Create or replace one complete text file. Managed files are authored as a state-checked semantic VCS work unit tied to this invocation and optional stated intent; .tmp files are explicitly reported as scratch. Files read earlier are protected against stale overwrites automatically; createOnly: true requires an absent path. Identical content is an unchanged success. Use edit for a targeted text change and apply_patch for an atomic multi-file transaction.",
+      "Create or replace one complete text file. Managed files are authored as a state-checked semantic VCS work unit tied to this invocation and optional stated intent; .tmp files are explicitly reported as scratch. Files read earlier are protected against stale overwrites automatically; createOnly: true requires an absent path. Identical content is an unchanged success. Use edit for a targeted text change and apply_patch for an atomic multi-file transaction or explicit file mode.",
     parameters: writeSchema,
     cancellationMode: "settle",
     execute: async (_toolCallId, input, signal): Promise<AgentToolResult<WriteToolDetails>> => {
@@ -77,7 +70,6 @@ export function createWriteTool(
               path,
               content,
               ...(input.createOnly ? { createOnly: true } : {}),
-              ...(input.mode !== undefined ? { mode: input.mode } : {}),
             },
           ],
           ...(input.intent ? { intent: input.intent } : {}),
