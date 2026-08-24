@@ -17,11 +17,15 @@ For work performed by the current agent, call `launch_automation` directly. A su
 - Use agent `eval` for a small exact script that should run as the same agent and use its ordinary channel-bound EvalDO. Eval code has the ordinary module API; model-facing tools such as `notify` are not JavaScript globals. If a run must use an agent tool, use a prompt action.
 - Use a lower-level `method` charter for a reusable deterministic method on another exact Durable Object image.
 
-Choose `conversation: { mode: "fresh" }` for isolated runs. Choose `continue` only when the current conversation’s accumulated context is part of the task; the tool binds the channel and context itself.
+A prompt action is an instruction for the future agent turn, not a message payload. Preserve the user's requested action in that instruction. For example, if the user asks for a notification, the prompt must tell the future agent to notify the owner; a prompt containing only the notification's text merely asks the agent to say that text in the conversation.
+
+An automation launched during an ongoing conversation continues with the current agent in that conversation by default. This keeps its results and notifications where the user asked for them and lets later wake-ups benefit from shared context. Omit `conversation` or use `conversation: { mode: "continue" }`; the tool binds the current channel and context itself.
+
+Use `conversation: { mode: "fresh" }` only when the automation is a genuinely separate topic or a long-running background task that should have its own context. For an interval of one hour or less, continue the existing conversation whenever the work benefits from shared context. If wake-ups may be more than one hour apart, shared context would still help, and the user's intent is unclear, ask whether they want the existing conversation or a fresh one before launching. The one-hour boundary is a product decision about conversational continuity and likely provider-cache reuse, not a reason to discard context the user asked to retain.
 
 ## Launch correctly
 
-1. Resolve only user choices that materially alter the job: behavior, cadence and timezone, optional end condition, and fresh versus continuing conversation.
+1. Resolve only user choices that materially alter the job: behavior, cadence and timezone, optional end condition, and—only for an ambiguous shared-context job with wake-ups more than one hour apart—fresh versus continuing conversation. Do not ask for a conversation-mode choice for ordinary short-cadence work in the current conversation; continue it.
 2. Enumerate the concrete external service operations known in advance. Declare each as `{ service, method, args?, use }`, where `use` is `action` or `conditional`. These are launch-time acquisition hints, not capability names, grants, or a runtime allowlist. A prompt action can choose tools dynamically; do not invent low-level service calls for a model-facing tool such as `notify`.
    Declare only external service calls made by the action. Scheduling, fresh-conversation creation, delivery of the eval result into that conversation, and the `automation-completion.v1` return are intrinsic mission behavior: do not invent `missions.finishRun`, `chat.publish`, or similar operations for them.
 3. Call `launch_automation` once with the action, trigger, conversation mode, and operations. Do not wrap it in eval and do not discover the current agent’s build, class, object key, channel, or context first; the receiver seals those facts atomically.
@@ -38,7 +42,7 @@ Example:
     text: "Notify the owner with the exact text: ⏱️ One minute has passed.",
   },
   trigger: { kind: "schedule", everyMs: 60_000 },
-  conversation: { mode: "fresh" },
+  conversation: { mode: "continue" },
   operations: [],
 });
 ```

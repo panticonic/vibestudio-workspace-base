@@ -80,8 +80,9 @@ Automations are immediately launched recurring tasks. A reusable deterministic j
 a method on an exact Durable Object build. A smaller exact script can run inline
 in an existing agent's channel-bound EvalDO without publishing a new worker;
 agent work can instead send a prompt through the ordinary turn loop. Both agent
-actions use either a fresh conversation for every run or one specific
-continuing conversation. Agents launch and edit active definitions; the running
+actions normally wake the same agent in the conversation where the automation
+was requested. A genuinely separate topic or independent long-running job can
+instead use a fresh conversation for each run. Agents launch and edit active definitions; the running
 pill exposes the exact target, schedule, end policy, reach, standing authority,
 history, and controls. Schedules can use elapsed intervals or five-field cron
 in an explicit IANA timezone. They can end

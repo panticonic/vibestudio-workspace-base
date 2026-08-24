@@ -223,7 +223,7 @@ describe("transcript delivery markers", () => {
       }
       if (method === "overview") {
         const automation = {
-          schemaVersion: 2,
+          schemaVersion: 3,
           missionId: "mission-talk-timer",
           name: "Talk timer",
           revision: 1,
@@ -244,7 +244,7 @@ describe("transcript delivery markers", () => {
             },
             trigger: { kind: "schedule", everyMs: 60_000 },
           },
-          owner: { userId: "alice", deviceId: "panel:alice" },
+          owner: { userId: "alice" },
           state: "active",
           revisionDigest: "b".repeat(64),
           authorityPlan: {

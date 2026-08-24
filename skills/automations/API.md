@@ -30,9 +30,17 @@ type MissionOperationIntent = {
 };
 ```
 
+When `conversation` is omitted, the native tool seals the current channel and
+context as `mode: "continue"`. Explicit `fresh` creates a separate context for
+each run. Use that only for a separate topic or intentionally independent
+background work; it is not the default for an automation requested in an
+ongoing conversation.
+
 Operations express concrete behavior known at launch. Do not supply capability names, permission rows, grants, runtime identities, or channel IDs. The host compiles each operation against the live receiver-owned method contract for durable pre-acquisition. The artifact is not a runtime allowlist: omitted or dynamic operations use ordinary prompt-capable authority acquisition when actually invoked.
 
 Model-facing agent tools are not service methods. In particular, `notify` is available to a prompt action and is not an eval JavaScript global; do not invent a `notification.*` operation as its implementation. Eval actions import the ordinary `@workspace/runtime` APIs they use.
+
+`action.text` for a prompt action is the future turn's instruction, not its final output. Keep the semantic verb from the user's request: “Notify the owner with the exact text …” is a notification instruction, while the bare text alone is only a request for an ordinary chat response.
 
 Only external service methods invoked by the action belong in `operations`.
 The mission service itself owns scheduling, run admission, fresh-conversation
@@ -81,7 +89,12 @@ type MissionCharter = {
             };
         conversation:
           | { mode: "fresh" }
-          | { mode: "continue"; channelId: string; contextId: string };
+          | {
+              mode: "continue";
+              channelId: string;
+              contextId: string;
+              executorId: string;
+            };
         operations: MissionOperationIntent[];
       };
   trigger: MissionTrigger;
@@ -132,7 +145,7 @@ If no matching standing grant exists, dispatcher acquisition follows the ordinar
 
 ```ts
 type MissionRecord = {
-  schemaVersion: 2;
+  schemaVersion: 3;
   missionId: string;
   name: string;
   revision: number;
@@ -144,7 +157,7 @@ type MissionRecord = {
     compilerVersion: string;
     catalogDigest: string;
   };
-  owner: { userId: string; deviceId?: string };
+  owner: { userId: string };
   state: "active" | "paused" | "completed" | "retired";
   revisionDigest: string;
   authority: {

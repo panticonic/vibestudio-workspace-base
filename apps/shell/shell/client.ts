@@ -29,7 +29,7 @@ import {
 } from "@vibestudio/service-schemas/menu";
 import { notificationMethods } from "@vibestudio/service-schemas/notification";
 import { panelRuntimeMethods } from "@vibestudio/service-schemas/panelRuntime";
-import { createPanelRuntime } from "@workspace/runtime/panel-runtime";
+import { createShellPanelRuntime } from "./panelRuntime.js";
 import {
   remoteCredMethods,
   type RemoteCredCurrent as RemoteCredCurrentContract,
@@ -183,16 +183,6 @@ const menuClient = createTypedServiceClient(
   menuMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const productPanelRuntime = createPanelRuntime({ rpc });
-const focusPanel = async (panelId: string): Promise<PanelFocusResult> => {
-  await productPanelRuntime.panelTree.get(panelId).focus();
-  return {
-    panelId,
-    status: "loaded",
-    focused: true,
-    loaded: true,
-  };
-};
 const notificationClient = createTypedServiceClient(
   "notification",
   notificationMethods,
@@ -213,6 +203,21 @@ const viewClient = createTypedServiceClient(
   viewMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
+const productPanelRuntime = createShellPanelRuntime({
+  rpc,
+  focusPanel: async (panelId, options) => {
+    await viewClient.focusPanel(panelId, options);
+  },
+});
+const focusPanel = async (panelId: string): Promise<PanelFocusResult> => {
+  await productPanelRuntime.panelTree.get(panelId).focus();
+  return {
+    panelId,
+    status: "loaded",
+    focused: true,
+    loaded: true,
+  };
+};
 const browserSiteActions = createBrowserSiteActions({
   native: {
     getBrowserPageIdentity: (panelId) =>

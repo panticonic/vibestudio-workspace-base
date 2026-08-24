@@ -2946,7 +2946,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
       name: "launch_automation",
       label: "launch_automation",
       description:
-        "Create and immediately start one recurring or manual automation. Use a prompt action when a run must call model-facing tools such as notify; those tools are not eval JavaScript globals. List concrete external service operations known at launch so the host can pre-acquire eligible standing grants; this list is not a runtime allowlist, and omitted authority falls back to ordinary user approval during a run. The running automation is added to this chat as an inspectable pill before the tool returns.",
+        "Create and immediately start one recurring or manual automation. By default the current agent wakes in this conversation; choose a fresh conversation only for a separate topic or genuinely long-running background task. If shared context would help and wake-ups can be more than one hour apart, ask the user which mode they want when their intent is unclear. A prompt action is an instruction for the future agent, not a final message payload: preserve requested effects such as notifying the owner instead of supplying only the text to send. Model-facing tools such as notify are available to prompt actions, not as eval JavaScript globals. List concrete external service operations known at launch so the host can pre-acquire eligible standing grants; this list is not a runtime allowlist, and omitted authority falls back to ordinary user approval during a run. The running automation is added to this chat as an inspectable pill before the tool returns.",
       parameters: {
         type: "object",
         properties: {
@@ -3017,6 +3017,8 @@ export abstract class AgentVesselBase extends DurableObjectBase {
           },
           conversation: {
             type: "object",
+            description:
+              "Where agent wake-ups run. Omit to continue the current agent and conversation. Use fresh only when the automation is a separate topic or intentionally independent background conversation.",
             properties: { mode: { enum: ["fresh", "continue"] } },
             required: ["mode"],
             additionalProperties: false,
@@ -5864,13 +5866,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       );
     }
     const conversation =
-      conversationInput?.mode === "continue"
-        ? {
+      conversationInput?.mode === "fresh"
+        ? { mode: "fresh" as const }
+        : {
             mode: "continue" as const,
             channelId,
             contextId: this.subscriptions.getContextId(channelId),
-          }
-        : { mode: "fresh" as const };
+            executorId: this.participantId(),
+          };
     const operations = (input["operations"] ?? []) as MissionOperationIntent[];
     return {
       name,

@@ -268,8 +268,8 @@ function automationNativeLaunchChecked(
   return noIncompleteInvocations(result);
 }
 
-const SCHEDULED_NOTIFICATION_NAME = "Scheduled notification proof";
-const SCHEDULED_NOTIFICATION_TEXT = "SYSTEM_AUTOMATION_TICK_OK";
+const SCHEDULED_NOTIFICATION_NAME = "One-minute talk timer";
+const SCHEDULED_NOTIFICATION_TEXT = "One minute has passed.";
 
 async function scheduledNotificationProof(
   context: TestOrchestrationContext,
@@ -282,7 +282,7 @@ async function scheduledNotificationProof(
     const { gad, rpc, workers } = await import("@workspace/runtime");
     await context.sendAndWait(
       session,
-      `Launch an automation named “${SCHEDULED_NOTIFICATION_NAME}” that runs every minute and stops after one admitted run. Use an agent prompt action so the scheduled agent invokes its notify tool (not an eval script). Each run must notify the owner at the inbox rung with title “Automation system proof” and exact content “${SCHEDULED_NOTIFICATION_TEXT}”. Use a fresh conversation for the run. Start it immediately and tell me where I can inspect it.`,
+      `I'm giving a talk. Start an automation called “${SCHEDULED_NOTIFICATION_NAME}” that sends me a notification in one minute saying exactly “${SCHEDULED_NOTIFICATION_TEXT}” Stop it after that first notification. Tell me where I can inspect or stop it.`,
       "scheduled notification launch",
     );
     const service = await workers.resolveService("vibestudio.missions.v1");
@@ -323,13 +323,28 @@ async function scheduledNotificationProof(
         const notification = notifications.find(
           (candidate) =>
             candidate.kind === "agent.message" &&
-            (candidate.title === "Automation system proof" ||
-              candidate.message === SCHEDULED_NOTIFICATION_TEXT),
+            candidate.message === SCHEDULED_NOTIFICATION_TEXT,
         );
+        const notificationData = isRecord(notification?.data)
+          ? notification.data
+          : undefined;
+        const conversation = isRecord(automation["charter"])
+          ? isRecord(automation["charter"]["execution"])
+            ? automation["charter"]["execution"]["conversation"]
+            : undefined
+          : undefined;
         observation = {
           missionId: automation["missionId"],
           missionState: automation["state"],
           runCount: automation["runCount"],
+          launchChannelId: session.channelId,
+          conversation,
+          redundantInviteCount: notifications.filter(
+            (candidate) =>
+              candidate.kind === "channel.invite" &&
+              isRecord(candidate.data) &&
+              candidate.data["channelId"] === session.channelId,
+          ).length,
           run: {
             runId: run["runId"],
             phase: run["phase"],
@@ -344,6 +359,7 @@ async function scheduledNotificationProof(
                 kind: notification.kind,
                 title: notification.title,
                 message: notification.message,
+                channelId: notificationData?.["channelId"],
               }
             : null,
         };
@@ -401,6 +417,19 @@ function scheduledNotificationChecked(result: TestExecutionResult) {
       reason: "The prompt-execution proof launched a different executor",
     };
   }
+  const trigger = launches[0]?.arguments?.["trigger"];
+  if (
+    !isRecord(trigger) ||
+    trigger["kind"] !== "schedule" ||
+    trigger["everyMs"] !== 60_000 ||
+    trigger["maxRuns"] !== 1
+  ) {
+    return {
+      passed: false,
+      reason:
+        "The agent did not infer a one-minute automation that stops after its first run",
+    };
+  }
   const observed = result.diagnostics?.["scheduledNotification"];
   if (!isRecord(observed) || !isRecord(observed["run"])) {
     return {
@@ -415,16 +444,41 @@ function scheduledNotificationChecked(result: TestExecutionResult) {
       reason: `The first scheduled run or one of its requested effects did not succeed: ${JSON.stringify(run)}`,
     };
   }
+  const conversation = observed["conversation"];
+  if (
+    !isRecord(conversation) ||
+    conversation["mode"] !== "continue" ||
+    conversation["channelId"] !== observed["launchChannelId"]
+  ) {
+    return {
+      passed: false,
+      reason:
+        "The short-cadence automation did not wake the launching agent in its existing conversation",
+    };
+  }
   const notification = observed["notification"];
   if (
     !isRecord(notification) ||
-    (notification["title"] !== "Automation system proof" &&
-      notification["message"] !== SCHEDULED_NOTIFICATION_TEXT)
+    notification["message"] !== SCHEDULED_NOTIFICATION_TEXT
   ) {
     return {
       passed: false,
       reason:
         "The successful run did not produce the requested durable user notification",
+    };
+  }
+  if (notification["channelId"] !== observed["launchChannelId"]) {
+    return {
+      passed: false,
+      reason:
+        "The notification did not route back to the launching conversation",
+    };
+  }
+  if (observed["redundantInviteCount"] !== 0) {
+    return {
+      passed: false,
+      reason:
+        "The direct automation message leaked a redundant channel invitation into the inbox",
     };
   }
   return { passed: true };

@@ -14,7 +14,7 @@ import {
 } from "./AutomationActivity.js";
 
 const automation: MissionRecord = {
-  schemaVersion: 2,
+  schemaVersion: 3,
   missionId: "mission-daily",
   name: "Daily check",
   revision: 2,
@@ -35,7 +35,7 @@ const automation: MissionRecord = {
     },
     trigger: { kind: "schedule", everyMs: 86_400_000 },
   },
-  owner: { userId: "alice", deviceId: "panel:alice" },
+  owner: { userId: "alice" },
   state: "active",
   revisionDigest: "b".repeat(64),
   authorityPlan: {
@@ -305,6 +305,7 @@ describe("AutomationActivity", () => {
             mode: "continue",
             channelId: "project-research",
             contextId: "ctx-project-research",
+            executorId: "do:workers/agent-worker:AiChatWorker:project-research",
           },
         },
       },

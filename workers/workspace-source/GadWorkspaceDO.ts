@@ -7173,9 +7173,22 @@ export class GadWorkspaceDO extends DurableObjectBase {
     // is what still wants attention; history is opt-in and bounded.
     const rows = this.sql
       .exec(
-        `SELECT user_id, notification_id, kind, title, message, data_json, created_at, producer_revision, acknowledged_at
-           FROM user_notifications WHERE user_id = ?${includeAcknowledged ? "" : " AND acknowledged_at IS NULL"}
-           ORDER BY created_at DESC, notification_id ASC${limit ? ` LIMIT ${limit}` : ""}`,
+        `SELECT inbox.user_id, inbox.notification_id, inbox.kind, inbox.title, inbox.message,
+                inbox.data_json, inbox.created_at, inbox.producer_revision, inbox.acknowledged_at
+           FROM user_notifications AS inbox
+          WHERE inbox.user_id = ?${includeAcknowledged ? "" : " AND inbox.acknowledged_at IS NULL"}
+            AND NOT (
+              inbox.kind = 'channel.invite'
+              AND EXISTS (
+                SELECT 1
+                  FROM user_notifications AS message
+                 WHERE message.user_id = inbox.user_id
+                   AND message.kind = 'agent.message'
+                   AND json_extract(message.data_json, '$.channelId') =
+                       json_extract(inbox.data_json, '$.channelId')
+              )
+            )
+          ORDER BY inbox.created_at DESC, inbox.notification_id ASC${limit ? ` LIMIT ${limit}` : ""}`,
         userId,
       )
       .toArray();

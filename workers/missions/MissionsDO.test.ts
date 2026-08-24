@@ -59,6 +59,18 @@ function agentCharter(summary = "Prepare a daily summary"): MissionCharter {
   };
 }
 
+function continuingAgentCharter(): MissionCharter {
+  const charter = agentCharter("Continue the current conversation");
+  if (charter.execution.kind !== "agent") throw new Error("Expected agent");
+  charter.execution.conversation = {
+    mode: "continue",
+    channelId: "conversation:daily",
+    contextId: "context:daily",
+    executorId: "do:workers/summary:SummaryAgent:daily",
+  };
+  return charter;
+}
+
 function methodCharter(): MissionCharter {
   return {
     summary: "Check whether the rollout is complete",
@@ -191,11 +203,11 @@ describe("MissionsDO", () => {
       charter: agentCharter(),
     });
     expect(created).toMatchObject({
-      schemaVersion: 2,
+      schemaVersion: 3,
       name: "Daily summary",
       state: "active",
       revision: 1,
-      owner: { userId: "alice", deviceId: "panel:alice" },
+      owner: { userId: "alice" },
       authorityPlan: policy(),
       authority: { requestIds: [], grantIds: ["grant:mission"], denialIds: [] },
     });
@@ -404,6 +416,71 @@ describe("MissionsDO", () => {
         ({ method }) => method === "authority.finishExecution",
       ),
     ).toBe(true);
+  });
+
+  it("dispatches a continuing turn to its sealed existing executor without creating a parallel agent", async () => {
+    const harness = await createMissions();
+    harness.rpcCall.mockImplementation(
+      async (target, method, args = [], options) => {
+        harness.calls.push({ target, method, args, options });
+        if (target === "main" && method === "authority.compileAuthorityPlan")
+          return policy();
+        if (target === "main" && method === "authority.acquireForTarget")
+          return { requestIds: [], grantIds: [], denialIds: [] };
+        if (target === "main" && method === "authority.admitExecution")
+          return {
+            authoritySessionId: "admission:continuing",
+            nonce: "nonce:continuing",
+          };
+        if (
+          target === "do:workers/summary:SummaryAgent:daily" &&
+          method === "runAutomationTurn"
+        )
+          return undefined;
+        if (target === "main" && method.startsWith("workspace-state.alarm"))
+          return undefined;
+        throw new Error(`Unexpected RPC ${target}.${method}`);
+      },
+    );
+    const mission = await harness.callAs<MissionRecord>(alice, "launch", {
+      name: "Conversation reminder",
+      charter: continuingAgentCharter(),
+    });
+
+    const run = await harness.callAs<MissionRunRecord>(
+      alice,
+      "runNow",
+      mission.missionId,
+    );
+
+    expect(run).toMatchObject({
+      phase: "executing",
+      contextId: "context:daily",
+      channelId: "conversation:daily",
+      executorId: "do:workers/summary:SummaryAgent:daily",
+    });
+    expect(
+      harness.calls.filter(
+        ({ method }) =>
+          method === "runtime.createContext" ||
+          method === "runtime.createEntity" ||
+          method === "subscribeChannel",
+      ),
+    ).toEqual([]);
+    const dispatch = harness.calls.find(
+      ({ target, method }) =>
+        target === "do:workers/summary:SummaryAgent:daily" &&
+        method === "runAutomationTurn",
+    );
+    expect(dispatch?.args).toEqual([
+      expect.objectContaining({
+        channelId: "conversation:daily",
+        prompt: "Prepare a daily summary",
+      }),
+    ]);
+    expect(executionSessionNonceFor(dispatch?.options as never)).toBe(
+      "nonce:continuing",
+    );
   });
 
   it("deduplicates a retried manual run by its durable command identity", async () => {

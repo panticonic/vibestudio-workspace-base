@@ -599,6 +599,47 @@ describe("GadWorkspaceDO unified log and semantic VCS schema", () => {
     );
   });
 
+  it("lets a direct agent message supersede the same channel's redundant invitation", async () => {
+    const { callAs } = await createTestDO(GadWorkspaceDO);
+    await callAs(channelCaller("channel-jokes"), "putChannelMembership", {
+      channelId: "channel-jokes",
+      userId: "usr_bob",
+      memberId: "user:usr_bob",
+      handle: "bob",
+      addedBy: "do:agent:joker",
+      addedAt: 10,
+      revision: 1,
+    });
+    await callAs(channelCaller("channel-jokes"), "putUserNotification", {
+      id: "agent.message:joke-1:usr_bob",
+      userId: "usr_bob",
+      kind: "agent.message",
+      title: "Minute joke",
+      message: "A joke",
+      data: {
+        channelId: "channel-jokes",
+        messageId: "joke-1",
+        senderParticipantId: "do:agent:joker",
+        rung: "inbox",
+      },
+      createdAt: 11,
+      revision: 1,
+    });
+
+    await expect(
+      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe"),
+    ).resolves.toMatchObject({
+      notifications: [{ id: "agent.message:joke-1:usr_bob" }],
+    });
+    await expect(
+      callAs(verifiedUserCaller("usr_bob"), "listUserNotificationsForMe", {
+        includeAcknowledged: true,
+      }),
+    ).resolves.toMatchObject({
+      notifications: [{ id: "agent.message:joke-1:usr_bob" }],
+    });
+  });
+
   it("does not report a durable notification as delivered when live invalidation fails", async () => {
     let signalAvailable = false;
     let signalAttempts = 0;

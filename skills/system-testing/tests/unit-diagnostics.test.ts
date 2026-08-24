@@ -204,14 +204,19 @@ describe("automation native launch system test validator", () => {
 
 describe("scheduled automation notification system test validator", () => {
   const scheduledLaunch = {
-    name: "Scheduled notification proof",
+    name: "One-minute talk timer",
     summary: "Notify after one minute.",
     action: {
       kind: "prompt",
-      text: "Notify the owner with SYSTEM_AUTOMATION_TICK_OK.",
+      text: "Notify the owner with One minute has passed.",
     },
     trigger: { kind: "schedule", everyMs: 60_000, maxRuns: 1 },
-    conversation: { mode: "fresh" },
+    conversation: {
+      mode: "continue",
+      channelId: "headless-proof",
+      contextId: "ctx-proof",
+      executorId: "do:workers/agent-worker:AiChatWorker:headless-proof",
+    },
     operations: [],
   };
 
@@ -224,11 +229,20 @@ describe("scheduled automation notification system test validator", () => {
     );
     result.diagnostics = {
       scheduledNotification: {
+        launchChannelId: "headless-proof",
+        conversation: {
+          mode: "continue",
+          channelId: "headless-proof",
+          contextId: "ctx-proof",
+          executorId: "do:workers/agent-worker:AiChatWorker:headless-proof",
+        },
+        redundantInviteCount: 0,
         run: { phase: "terminal", outcome: "succeeded" },
         notification: {
           kind: "agent.message",
-          title: "Automation system proof",
-          message: "SYSTEM_AUTOMATION_TICK_OK",
+          title: "Talk timer",
+          message: "One minute has passed.",
+          channelId: "headless-proof",
         },
       },
     };
@@ -262,6 +276,14 @@ describe("scheduled automation notification system test validator", () => {
     );
     result.diagnostics = {
       scheduledNotification: {
+        launchChannelId: "headless-proof",
+        conversation: {
+          mode: "continue",
+          channelId: "headless-proof",
+          contextId: "ctx-proof",
+          executorId: "do:workers/agent-worker:AiChatWorker:headless-proof",
+        },
+        redundantInviteCount: 0,
         run: {
           phase: "terminal",
           outcome: "completed-with-errors",

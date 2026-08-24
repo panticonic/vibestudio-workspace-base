@@ -1532,7 +1532,7 @@ describe("AgentVesselBase.chatOp", () => {
     const vessel = await makeVessel();
     vessel.callerIdForTest = await expectedEvalCaller();
     vessel.automationLaunchForTest = {
-      schemaVersion: 2,
+      schemaVersion: 3,
       missionId: "mission-daily",
       name: "Daily check",
       revision: 1,
@@ -1557,7 +1557,7 @@ describe("AgentVesselBase.chatOp", () => {
           timezone: "America/New_York",
         },
       },
-      owner: { userId: "alice", deviceId: AGENT_ID },
+      owner: { userId: "alice" },
       state: "active",
       revisionDigest: "b".repeat(64),
       authorityPlan: {
@@ -1617,7 +1617,12 @@ describe("AgentVesselBase.chatOp", () => {
                   objectKey: "agent-key",
                 },
                 action: { kind: "prompt", text: "Check the project." },
-                conversation: { mode: "fresh" },
+                conversation: {
+                  mode: "continue",
+                  channelId: CHANNEL,
+                  contextId: "ctx-1",
+                  executorId: AGENT_ID,
+                },
                 operations: [],
               },
               trigger: {
@@ -1658,6 +1663,18 @@ describe("AgentVesselBase.chatOp", () => {
         }),
       }),
     );
+
+    await vessel.executeAutomationLaunchForTest({
+      ...input,
+      conversation: { mode: "fresh" },
+    });
+    expect(vessel.automationLaunchCalls[2]!.args).toMatchObject([
+      {
+        charter: {
+          execution: { conversation: { mode: "fresh" } },
+        },
+      },
+    ]);
   });
 
   it("updateCustomMessage publishes custom.updated AS the agent and returns its pubsubId", async () => {

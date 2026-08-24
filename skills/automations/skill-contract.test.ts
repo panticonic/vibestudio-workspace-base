@@ -11,6 +11,11 @@ describe("Automations skill contract", () => {
   it("teaches immediate launch and a durable inspector instead of a proposal flow", () => {
     const value = docs();
     expect(value).toContain("call `launch_automation` directly");
+    expect(value).toContain(
+      "continues with the current agent in that conversation by default",
+    );
+    expect(value).toContain("one hour or less");
+    expect(value).toContain("ask whether they want the existing conversation");
     expect(value).toContain("creates an active automation immediately");
     expect(value).toContain("controller, not an approval gate");
     expect(value).not.toMatch(
@@ -54,6 +59,16 @@ describe("Automations skill contract", () => {
     );
     expect(value).toContain(
       "resumes existing nonterminal runs before admitting newly due runs",
+    );
+  });
+
+  it("preserves the requested effect in future-turn prompt actions", () => {
+    const value = docs();
+    expect(value).toContain(
+      "A prompt action is an instruction for the future agent turn, not a message payload",
+    );
+    expect(value).toContain(
+      "a prompt containing only the notification's text merely asks the agent to say that text",
     );
   });
 });

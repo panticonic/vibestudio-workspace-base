@@ -52,7 +52,6 @@ interface MissionRow {
   charter_json: string;
   authority_plan_json: string;
   owner_user_id: string;
-  owner_device_id: string | null;
   state: MissionState;
   revision_digest: string;
   authority_json: string;
@@ -107,7 +106,7 @@ type MissionEffect =
     };
 
 export class MissionsDO extends DurableObjectBase {
-  static override schemaVersion = 3;
+  static override schemaVersion = 4;
   static override rpcMethods = missionsMethods;
 
   constructor(ctx: DurableObjectContext, env: unknown) {
@@ -122,7 +121,6 @@ export class MissionsDO extends DurableObjectBase {
       charter_json TEXT NOT NULL,
       authority_plan_json TEXT NOT NULL,
       owner_user_id TEXT NOT NULL,
-      owner_device_id TEXT,
       state TEXT NOT NULL CHECK (state IN ('active','paused','completed','retired')),
       revision_digest TEXT NOT NULL,
       authority_json TEXT NOT NULL,
@@ -512,14 +510,13 @@ export class MissionsDO extends DurableObjectBase {
       this.ctx.storage.transactionSync(() => {
         this.sql.exec(
           `INSERT INTO missions
-          (mission_id,name,revision,charter_json,authority_plan_json,owner_user_id,owner_device_id,state,revision_digest,authority_json,seeded,schedule_origin_at,next_run_at,last_run_at,created_at,updated_at,activated_at,run_count)
-          VALUES (?,?,1,?,?,?,?, 'active',?,?,0,?,?,NULL,?,?,?,0)`,
+          (mission_id,name,revision,charter_json,authority_plan_json,owner_user_id,state,revision_digest,authority_json,seeded,schedule_origin_at,next_run_at,last_run_at,created_at,updated_at,activated_at,run_count)
+          VALUES (?,?,1,?,?,?, 'active',?,?,0,?,?,NULL,?,?,?,0)`,
           missionId,
           input.name,
           canonicalJson(input.charter),
           canonicalJson(authorityPlan),
           caller.userId,
-          caller.callerId,
           revisionDigest,
           canonicalJson(authority),
           origin,
@@ -1086,12 +1083,16 @@ export class MissionsDO extends DurableObjectBase {
         row = this.requireRunRow(runId);
       }
       if (row.phase === "executor-preparing") {
-        const target = await this.activateTarget(
-          execution,
-          runId,
-          row.context_id ?? undefined,
-          row.channel_id ?? undefined,
-        );
+        const target =
+          execution.kind === "agent" &&
+          execution.conversation.mode === "continue"
+            ? this.continuingTarget(execution)
+            : await this.activateTarget(
+                execution,
+                runId,
+                row.context_id ?? undefined,
+                row.channel_id ?? undefined,
+              );
         if (
           execution.kind === "agent" &&
           execution.conversation.mode === "fresh"
@@ -1348,6 +1349,20 @@ export class MissionsDO extends DurableObjectBase {
     return { targetId: value.targetId };
   }
 
+  private continuingTarget(
+    execution: Extract<MissionExecution, { kind: "agent" }>,
+  ): { targetId: string } {
+    if (execution.conversation.mode !== "continue")
+      throw new Error("Expected a continuing automation conversation");
+    const expected = `do:${execution.image.source}:${execution.image.className}:${execution.image.objectKey}`;
+    if (execution.conversation.executorId !== expected) {
+      throw new Error(
+        "Continuing automation executor does not match its sealed execution image",
+      );
+    }
+    return { targetId: execution.conversation.executorId };
+  }
+
   private async activateChannel(
     channelId: string,
     contextId: string,
@@ -1594,12 +1609,12 @@ export class MissionsDO extends DurableObjectBase {
     return user;
   }
 
-  private requireOwnerCaller(): { userId: string; callerId: string } {
+  private requireOwnerCaller(): { userId: string } {
     const caller = this.caller;
     const userId = this.requireUser();
     if (!caller)
       throw denied("Automation mutation requires an authenticated caller");
-    return { userId, callerId: caller.callerId };
+    return { userId };
   }
 
   private rowToMission(row: MissionRow): MissionRecord {
@@ -1613,16 +1628,13 @@ export class MissionsDO extends DurableObjectBase {
         `Automation ${row.mission_id} has an invalid revision digest`,
       );
     return {
-      schemaVersion: 2,
+      schemaVersion: 3,
       missionId: row.mission_id,
       name: row.name,
       revision: Number(row.revision),
       charter,
       authorityPlan,
-      owner: {
-        userId: row.owner_user_id,
-        ...(row.owner_device_id ? { deviceId: row.owner_device_id } : {}),
-      },
+      owner: { userId: row.owner_user_id },
       state: row.state,
       revisionDigest: digest,
       authority: JSON.parse(row.authority_json) as MissionAuthorityProjection,
