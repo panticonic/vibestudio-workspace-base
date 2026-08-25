@@ -23,7 +23,6 @@ import {
   Cross2Icon,
   CubeIcon,
   DrawingPinFilledIcon,
-  FileMinusIcon,
   MagnifyingGlassIcon,
   PlusIcon,
 } from "@radix-ui/react-icons";
@@ -632,7 +631,7 @@ const SortableTreeItem = memo(
                   margin: 0,
                 }}
               >
-                <FileMinusIcon width={12} height={12} />
+                <Cross2Icon width={12} height={12} />
               </IconButton>
             </>
           )}
