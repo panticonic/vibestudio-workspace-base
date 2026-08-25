@@ -39,6 +39,7 @@
     "./cli": "./cli.ts",
     "./deterministic": "./deterministic.ts",
     "./diagnostics": "./diagnostics.ts",
+    "./record-analysis": "./record-analysis.ts",
     "./report": "./messages/report.ts",
     "./runner": "./runner.ts",
     "./scenario-validation": "./scenario-validation.ts",

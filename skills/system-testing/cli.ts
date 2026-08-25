@@ -1,11 +1,17 @@
 import { rpc, workers } from "@workspace/runtime";
 import { logIdForChannel } from "@vibestudio/trajectory-identity";
-import { summarizeEntry, summarizeFailures, type DiagnosticLimits } from "./diagnostics.js";
 import { HeadlessRunner } from "./runner.js";
 import { allTests } from "./stages.js";
 import { TestRunner } from "./test-runner.js";
 import type { TestCase, TestSuiteResult, TestSuiteResultEntry } from "./types.js";
 import { isUnexpectedToolFailure } from "./tool-failure-classification.js";
+import {
+  failedSystemTestNames,
+  inspectSystemTestRun,
+  systemTestTrajectory,
+} from "./record-analysis.js";
+
+export { failedSystemTestNames, inspectSystemTestRun, systemTestTrajectory };
 import {
   SYSTEM_TEST_AGENT_MODEL,
   systemTestModelRoute,
@@ -390,45 +396,6 @@ export function getSystemTestRun(runs: unknown, runId: string): SystemTestRunRec
     : null;
 }
 
-export function inspectSystemTestRun(
-  record: SystemTestRunRecord,
-  options?: { testName?: string; limits?: Partial<DiagnosticLimits> }
-): unknown {
-  if (options?.testName) {
-    return summarizeEntry(requireEntry(record, options.testName), options.limits);
-  }
-  return {
-    ...record.summary,
-    config: record.config,
-    startedAt: record.startedAt,
-    updatedAt: record.updatedAt ?? record.completedAt,
-    ...(record.completedAt ? { completedAt: record.completedAt } : {}),
-    provenance: record.provenance,
-    diagnostics: summarizeFailures(record.suite, options?.limits),
-  };
-}
-
-export function systemTestTrajectory(
-  record: SystemTestRunRecord,
-  testName: string,
-  options?: { full?: boolean; limits?: Partial<DiagnosticLimits> }
-): unknown {
-  const entry = requireEntry(record, testName);
-  if (options?.full) return entry;
-  return summarizeEntry(entry, options?.limits);
-}
-
-export function failedSystemTestNames(record: SystemTestRunRecord): string[] {
-  return record.suite.results
-    .filter(
-      (entry) =>
-        !entry.result.passed ||
-        Boolean(entry.execution.error) ||
-        (entry.execution.toolFailures ?? []).some(isUnexpectedToolFailure)
-    )
-    .map((entry) => entry.test.name);
-}
-
 export async function systemTestDoctor(
   expectedModel?: string | null
 ): Promise<SystemTestDoctorResult> {
@@ -716,12 +683,6 @@ async function runSelectedTests(
   concurrency: number
 ): Promise<TestSuiteResult> {
   return tester.runSuite(selected, { concurrency });
-}
-
-function requireEntry(record: SystemTestRunRecord, testName: string): TestSuiteResultEntry {
-  const entry = record.suite.results.find((candidate) => candidate.test.name === testName);
-  if (!entry) throw new Error(`Run ${record.runId} has no test named ${testName}`);
-  return entry;
 }
 
 function normalizePositiveInt(value: number | undefined, fallback: number): number {
