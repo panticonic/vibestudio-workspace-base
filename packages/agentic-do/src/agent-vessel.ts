@@ -238,9 +238,6 @@ const CHANNEL_STATE_CACHE_MS = 5_000;
  * primary triggers are lifecycle events (resume, retire); this alarm only
  * covers an EvalDO outage that outlives them. */
 const EVAL_CANCEL_INTENT_RETRY_MS = 60_000;
-/** Agent turns must always regain control. Long-running evals remain possible
- * by opting into an explicit larger timeout, up to the eval service maximum. */
-const DEFAULT_AGENT_EVAL_TIMEOUT_MS = 5 * 60_000;
 const BLOB_TEXT_CACHE_MAX_BYTES = 8 * 1024 * 1024;
 /** ~256KB of serialized session entries before compaction — comfortably
  *  under modern model context windows while keeping plenty of recent
@@ -5381,7 +5378,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     channelId: string,
     flushDeferred = false,
   ): Promise<{ interrupted: true }> {
-    await this.driver.interruptChannel(channelId, flushDeferred);
+    await this.interruptChannelAndCancelDeferredEvals(channelId, flushDeferred);
     return { interrupted: true };
   }
 
@@ -5403,7 +5400,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     ];
     await Promise.all(
       channelIds.map((channelId) =>
-        this.driver.interruptChannel(channelId, flushDeferred),
+        this.interruptChannelAndCancelDeferredEvals(channelId, flushDeferred),
       ),
     );
     return { interrupted: channelIds.length };
@@ -5423,7 +5420,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       case "pause": {
         const flushDeferred =
           (args as { flushDeferred?: unknown } | null)?.flushDeferred === true;
-        await this.driver.interruptChannel(channelId, flushDeferred);
+        await this.interruptChannelAndCancelDeferredEvals(
+          channelId,
+          flushDeferred,
+        );
         return { result: { paused: true } };
       }
       case "cancelEval": {
@@ -6626,7 +6626,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         reset: p.reset === true,
         source,
         imports: p.imports,
-        timeoutMs: p.timeoutMs ?? DEFAULT_AGENT_EVAL_TIMEOUT_MS,
+        ...(p.timeoutMs === undefined ? {} : { timeoutMs: p.timeoutMs }),
         authority,
         runId,
       });
@@ -6853,21 +6853,10 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     if (runs.size === 0) this.deferredEvalRuns.delete(channelId);
   }
 
-  /**
-   * Retire every deferred eval owned by a channel. NEVER throws: an EvalDO
-   * outage is exactly the failure class this hardens against, and it must not
-   * block unsubscribe/retire. Each run's cancellation is first recorded as a
-   * durable, idempotent cancel intent; the intent is deleted only after
-   * EvalDO acknowledges `eval.cancel`, and surviving intents are redriven by
-   * lifecycle events (resume) with the cancel-intent alarm as the final
-   * backstop. EvalDO's own cancelRunsForLifecycle + reconcileOrphanedRuns
-   * bound any residual leak.
-   *
-   * The run set is enumerated from DURABLE state (the parked local_tool:eval
-   * outbox rows) — the in-memory map is only a cache and is empty right after
-   * a generation change.
-   */
-  private async cancelDeferredEvalRuns(channelId: string): Promise<void> {
+  /** Persist the cancellation obligation while the deferred outbox row still
+   * names the exact EvalDO run. Interrupt/abort may remove that row, so every
+   * terminal channel lifecycle must call this before changing loop state. */
+  private recordDeferredEvalCancelIntents(channelId: string): void {
     const runIds = new Set<string>(this.deferredEvalRuns.get(channelId) ?? []);
     for (const row of this.driver.deferredEvalRows(channelId))
       runIds.add(row.effectId);
@@ -6885,6 +6874,39 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       );
     }
     this.deferredEvalRuns.delete(channelId);
+  }
+
+  /** Close the turn only after its EvalDO cancellation obligation is durable,
+   * then deliver that cancellation after the loop can no longer resume from a
+   * racing eval terminal. Delivery failure remains a durable retry intent. */
+  private async interruptChannelAndCancelDeferredEvals(
+    channelId: string,
+    flushDeferred: boolean,
+  ): Promise<void> {
+    this.recordDeferredEvalCancelIntents(channelId);
+    try {
+      await this.driver.interruptChannel(channelId, flushDeferred);
+    } finally {
+      await this.drainEvalCancelIntents();
+    }
+  }
+
+  /**
+   * Retire every deferred eval owned by a channel. NEVER throws: an EvalDO
+   * outage is exactly the failure class this hardens against, and it must not
+   * block unsubscribe/retire. Each run's cancellation is first recorded as a
+   * durable, idempotent cancel intent; the intent is deleted only after
+   * EvalDO acknowledges `eval.cancel`, and surviving intents are redriven by
+   * lifecycle events (resume) with the cancel-intent alarm as the final
+   * backstop. EvalDO's own cancelRunsForLifecycle + reconcileOrphanedRuns
+   * bound any residual leak.
+   *
+   * The run set is enumerated from DURABLE state (the parked local_tool:eval
+   * outbox rows) — the in-memory map is only a cache and is empty right after
+   * a generation change.
+   */
+  private async cancelDeferredEvalRuns(channelId: string): Promise<void> {
+    this.recordDeferredEvalCancelIntents(channelId);
     await this.drainEvalCancelIntents();
   }
 

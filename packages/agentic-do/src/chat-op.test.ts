@@ -2599,7 +2599,10 @@ class EvalGateProbe extends TestVessel {
     interruptChannel: ReturnType<typeof vi.fn>;
   } {
     const interruptChannel = vi.fn(async () => {});
-    (this as unknown as { _driver: unknown })._driver = { interruptChannel };
+    (this as unknown as { _driver: unknown })._driver = {
+      interruptChannel,
+      deferredEvalRows: vi.fn(() => []),
+    };
     return { interruptChannel };
   }
 
@@ -3177,8 +3180,8 @@ describe("AgentVesselBase.runDeferredEval (the agent's eval-tool deferral gate)"
       scope: { key: CHANNEL },
       source: { kind: "inline", code: "1+1" },
       resultReceiver: { kind: "caller" },
-      timeoutMs: 300_000,
     });
+    expect(start?.args[0]).not.toHaveProperty("timeoutMs");
     // The poll backstop check happened even on the first dispatch.
     expect(probe.rpcCalls.some((c) => c.method === "eval.get")).toBe(true);
     expect(
@@ -5434,7 +5437,7 @@ describe("AgentVesselBase.cancelEval (pill cancel → server-side eval run)", ()
 });
 
 describe("AgentVesselBase pause", () => {
-  it("makes the channel interruption terminal without crossing into EvalDO lifecycle", async () => {
+  it("makes the channel interruption terminal when no eval is pending", async () => {
     const probe = await makeGateProbe();
     const { interruptChannel } = probe.stubDriverForPause();
 
@@ -5442,6 +5445,66 @@ describe("AgentVesselBase pause", () => {
 
     expect(out).toEqual({ result: { paused: true } });
     expect(interruptChannel).toHaveBeenCalledWith(CHANNEL, false);
+  });
+
+  it("records eval cancellation before interrupting the turn, then delivers it", async () => {
+    const probe = await makeGateProbe();
+    probe.getRunStatus = { status: "running" };
+    await probe.callGate(CHANNEL, "inv-pause", {
+      code: "await new Promise(() => {})",
+    });
+    const runId = ids.invocationEffect("inv-pause");
+    const { interruptChannel } = probe.stubDriverForPause();
+    interruptChannel.mockImplementation(async () => {
+      expect(
+        (probe as any).sql
+          .exec(
+            `SELECT run_id FROM deferred_eval_cancel_intents WHERE channel_id = ?`,
+            CHANNEL,
+          )
+          .toArray(),
+      ).toEqual([{ run_id: runId }]);
+      expect(probe.rpcCalls.some((call) => call.method === "eval.cancel")).toBe(
+        false,
+      );
+    });
+
+    await expect(probe.callAgentMethod(CHANNEL, "pause", {})).resolves.toEqual({
+      result: { paused: true },
+    });
+
+    expect(probe.rpcCalls).toContainEqual({
+      method: "eval.cancel",
+      args: [{ scopeKey: CHANNEL, runId }],
+    });
+    expect(
+      (probe as any).sql
+        .exec(`SELECT run_id FROM deferred_eval_cancel_intents`)
+        .toArray(),
+    ).toEqual([]);
+  });
+
+  it("keeps an undelivered pause cancellation durable", async () => {
+    const probe = await makeGateProbe();
+    probe.getRunStatus = { status: "running" };
+    await probe.callGate(CHANNEL, "inv-pause-retry", {
+      code: "await new Promise(() => {})",
+    });
+    const runId = ids.invocationEffect("inv-pause-retry");
+    probe.cancelError = new Error("eval cancellation unavailable");
+    probe.stubDriverForPause();
+
+    await expect(probe.callAgentMethod(CHANNEL, "pause", {})).resolves.toEqual({
+      result: { paused: true },
+    });
+    expect(
+      (probe as any).sql
+        .exec(
+          `SELECT channel_id, run_id, attempts
+             FROM deferred_eval_cancel_intents`,
+        )
+        .toArray(),
+    ).toEqual([{ channel_id: CHANNEL, run_id: runId, attempts: 1 }]);
   });
 
   it("does not report completion before the aborted effect has settled", async () => {

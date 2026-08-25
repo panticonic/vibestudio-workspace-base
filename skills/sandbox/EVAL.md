@@ -140,7 +140,7 @@ multi-file work, prefer a real entry file.
 | `sourcePath` | string                                           | —                       | Virtual context-relative filename for inline code and relative imports                                                                     |
 | `syntax`     | `"javascript" \| "typescript" \| "jsx" \| "tsx"` | `"tsx"`                 | Source syntax                                                                                                                              |
 | `imports`    | `Record<string, string>`                         | —                       | Packages to build on-demand (workspace or npm)                                                                                             |
-| `timeoutMs`  | positive integer                                 | —                       | Optional wall-clock deadline in milliseconds; an agent tool call defaults to five minutes                                                  |
+| `timeoutMs`  | positive integer                                 | —                       | Optional wall-clock deadline in milliseconds; omitted means no deadline                                                                    |
 | `authority`  | per-run authority intent                         | adaptive mutable prompt | Attenuate this run with an exact `requests` allowlist, read-only effects, pregranted-only execution, or exact prospective preauthorization |
 
 The table above is the ergonomic agent tool. Code that calls the server service
@@ -1137,10 +1137,9 @@ eval({ code: `
 
 ## Timeouts
 
-Agent-owned eval tool calls have a five-minute wall-clock deadline by default,
-so a lost or non-settling dependency becomes a terminal failure instead of
-redriving the turn forever. Pass a positive integer `timeoutMs` when one call
-needs a different bound. At a deadline, async work is cancelled normally;
+Eval runs have no implicit wall-clock deadline. Pass a positive integer
+`timeoutMs` when one call must finish within a known bound, especially for a
+probe that may stall. At an explicit deadline, async work is cancelled normally;
 synchronous authored loops and functions are stopped by cooperative sandbox
 checkpoints and reported as a visible eval error rather than hanging the agent
 runtime. Split long work into shorter runs when useful and carry state in
