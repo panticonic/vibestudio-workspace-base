@@ -137,12 +137,12 @@ function completedLifecycleCodeProvesCleanup(evidence: ScenarioEvidence): boolea
         /\b(?:const\s+|let\s+|var\s+)?([A-Za-z_$][\w$]*)\s*=\s*await\s+rpc\.call\s*\(\s*["']main["']\s*,\s*["']runtime\.createEntity["']/gu
       ),
     ];
-    const directResolutions = [
+    const directDurableCreates = [
       ...code.matchAll(
-        /\b(?:const\s+|let\s+|var\s+)?([A-Za-z_$][\w$]*)\s*=\s*await\s+workers\.resolveDurableObject\s*\(/gu
+        /\b(?:const\s+|let\s+|var\s+)?([A-Za-z_$][\w$]*)\s*=\s*await\s+workers\.createDurableObject\s*\(/gu
       ),
     ];
-    const boundLifecycle = [...directCreates, ...rpcCreates, ...directResolutions].some((match) => {
+    const boundLifecycle = [...directCreates, ...directDurableCreates, ...rpcCreates].some((match) => {
       const handle = match[1]!;
       const suffix = code.slice((match.index ?? 0) + match[0].length);
       const escaped = handle.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
@@ -158,14 +158,13 @@ function completedLifecycleCodeProvesCleanup(evidence: ScenarioEvidence): boolea
     });
     if (boundLifecycle) return true;
 
-    // Resolution is often wrapped in a small helper so the scenario can prove
-    // that a later resolve reaches the same object. In that form there is no
-    // direct syntactic binding between `resolveDurableObject` and the target
+    // Creation is sometimes wrapped in a small helper. In that form there is no
+    // direct syntactic binding between `createDurableObject` and the target
     // variable. A completed eval still proves cleanup when resolution occurs
     // before an awaited canonical retirement in the same invocation.
-    const resolvedAt = code.indexOf("workers.resolveDurableObject");
-    if (resolvedAt === -1) return false;
-    const suffix = code.slice(resolvedAt);
+    const createdAt = code.indexOf("workers.createDurableObject");
+    if (createdAt === -1) return false;
+    const suffix = code.slice(createdAt);
     return (
       /\bawait\s+workers\.destroy\s*\(/u.test(suffix) ||
       /\bawait\s+rpc\.call\s*\(\s*["']main["']\s*,\s*["']runtime\.retireEntity["']/u.test(suffix)
@@ -189,7 +188,7 @@ function requireCleanup(evidence: ScenarioEvidence) {
 function requireSqlPersistenceEvidence(result: TestExecutionResult) {
   const base = lifecycleEvidence(result, [
     ["workers.create", "workers.destroy"],
-    ["workers.resolveDurableObject", "workers.destroy"],
+    ["workers.createDurableObject", "workers.destroy"],
     ["runtime.createEntity", "runtime.retireEntity"],
   ]);
   if (!base.passed) return base;

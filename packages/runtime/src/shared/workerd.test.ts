@@ -36,6 +36,7 @@ describe("createWorkerdClient", () => {
     expect(Object.keys(client).sort()).toEqual(
       [
         "create",
+        "createDurableObject",
         "destroy",
         "durableObjectService",
         "list",
@@ -50,16 +51,19 @@ describe("createWorkerdClient", () => {
     );
   });
 
-  it("creates, lists, and destroys workers through runtime entity methods", async () => {
+  it("creates and destroys owned workers and Durable Objects through runtime entities", async () => {
     await client.create("workers/example", {
       key: "probe",
       contextId: "ctx-1",
       env: { NON_SECRET_PROBE: "configured" },
     });
     await client.list();
+    await client.createDurableObject("workers/example", "ExampleDO", {
+      key: "probe-do",
+      contextId: "ctx-1",
+    });
     await client.destroy({ id: "worker:workers/example:probe" });
     await client.destroy("worker:workers/example:probe-2");
-    await client.destroy({ targetId: "do:workers/example:ExampleDO:probe" });
 
     expect(mock.rpc.call).toHaveBeenCalledWith("main", "runtime.createEntity", [
       {
@@ -73,14 +77,20 @@ describe("createWorkerdClient", () => {
     expect(mock.rpc.call).toHaveBeenCalledWith("main", "runtime.listEntities", [
       { kind: "worker" },
     ]);
+    expect(mock.rpc.call).toHaveBeenCalledWith("main", "runtime.createEntity", [
+      {
+        kind: "do",
+        execution: { surface: "code", source: "workers/example" },
+        className: "ExampleDO",
+        key: "probe-do",
+        contextId: "ctx-1",
+      },
+    ]);
     expect(mock.rpc.call).toHaveBeenCalledWith("main", "runtime.retireEntity", [
       { id: "worker:workers/example:probe" },
     ]);
     expect(mock.rpc.call).toHaveBeenCalledWith("main", "runtime.retireEntity", [
       { id: "worker:workers/example:probe-2" },
-    ]);
-    expect(mock.rpc.call).toHaveBeenCalledWith("main", "runtime.retireEntity", [
-      { id: "do:workers/example:ExampleDO:probe" },
     ]);
   });
 

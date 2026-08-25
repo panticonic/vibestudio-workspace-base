@@ -66,11 +66,17 @@ export type WorkerCreateOptions = Omit<
 
 export type WorkerEntityHandle = RuntimeEntityHandle & { kind: "worker" };
 
+export type DurableObjectCreateOptions = Omit<
+  Extract<RuntimeEntityCreateSpec, { kind: "do" }>,
+  "kind" | "execution" | "className"
+> & {
+  ref?: string;
+};
+
+export type DurableObjectEntityHandle = RuntimeEntityHandle & { kind: "do" };
+
 /** Any runtime entity reference accepted by the shared retirement path. */
-export type RuntimeEntityReference =
-  | string
-  | Pick<RuntimeEntityHandle, "id">
-  | Pick<ResolvedDurableObjectTarget, "targetId">;
+export type RuntimeEntityReference = string | Pick<RuntimeEntityHandle, "id">;
 
 export type DurableObjectStorageTarget = Pick<
   ResolvedDurableObjectTarget,
@@ -154,9 +160,19 @@ export interface WorkerdClient {
    * need an explicit owner and retirement lifecycle.
    */
   create(source: string, options?: WorkerCreateOptions): Promise<WorkerEntityHandle>;
+  /**
+   * Create a Durable Object whose lifecycle belongs to this caller. Resolve an
+   * existing/shared object with resolveDurableObject() instead; resolution does
+   * not confer destruction authority.
+   */
+  createDurableObject(
+    source: string,
+    className: string,
+    options?: DurableObjectCreateOptions
+  ): Promise<DurableObjectEntityHandle>;
   /** List live regular-worker instances. */
   list(): Promise<WorkerEntityInfo[]>;
-  /** Retire a regular worker or disposable resolved Durable Object. */
+  /** Retire an entity created by this caller. */
   destroy(entity: RuntimeEntityReference): Promise<void>;
   /** Back up and reset one exact DO storage target. */
   resetStorage(
@@ -200,11 +216,22 @@ export function createWorkerdClient(rpc: RpcCaller): WorkerdClient {
         },
       ]);
     },
+    createDurableObject: (source, className, options = {}) => {
+      const { ref, ...entityOptions } = options;
+      return rpc.call<DurableObjectEntityHandle>("main", "runtime.createEntity", [
+        {
+          kind: "do",
+          execution: { surface: "code", source, ...(ref ? { ref } : {}) },
+          className,
+          ...entityOptions,
+        },
+      ]);
+    },
     list: () => rpc.call<WorkerEntityInfo[]>("main", "runtime.listEntities", [{ kind: "worker" }]),
     destroy: (entity) =>
       rpc.call<void>("main", "runtime.retireEntity", [
         {
-          id: typeof entity === "string" ? entity : "id" in entity ? entity.id : entity.targetId,
+          id: typeof entity === "string" ? entity : entity.id,
         },
       ]),
     resetStorage: (target, intent) =>

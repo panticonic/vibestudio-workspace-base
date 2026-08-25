@@ -272,7 +272,7 @@ describe("worker test validators", () => {
 
   it("accepts the documented disposable Durable Object lifecycle", () => {
     const code = [
-      "const target = await workers.resolveDurableObject('workers/probe', 'ProbeDO', 'temporary');",
+      "const target = await workers.createDurableObject('workers/probe', 'ProbeDO', { key: 'temporary' });",
       "await rpc.call(target.targetId, 'write', []);",
       "const rows = await rpc.call(target.targetId, 'read', []);",
       "await workers.destroy(target);",
@@ -293,12 +293,11 @@ describe("worker test validators", () => {
     const result = execution(
       "The disposable object persisted two rows across calls and was retired.",
       [
-        "const resolve = () => workers.resolveDurableObject('workers/probe', 'ProbeDO', 'temporary');",
-        "const first = await resolve();",
+        "const create = () => workers.createDurableObject('workers/probe', 'ProbeDO', { key: 'temporary' });",
+        "const first = await create();",
         "await rpc.call(first.targetId, 'seed', []);",
-        "const second = await resolve();",
-        "await rpc.call(second.targetId, 'read', []);",
-        "await workers.destroy(second);",
+        "await rpc.call(first.targetId, 'read', []);",
+        "await workers.destroy(first);",
       ].join("\n"),
       undefined,
       "complete",
