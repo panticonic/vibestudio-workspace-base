@@ -5508,6 +5508,14 @@ export class PubSubChannel extends DurableObjectBase {
             className: ce.className!,
             objectKey: ce.newKey,
           };
+          // cloneContext creates an unbound entity deliberately: the child
+          // channel identity does not exist until the channel clone is known.
+          // Commit the host-authenticated binding before the clone subscribes,
+          // so its first delivery cannot run with split host/local identity.
+          await this.callMain("runtime.rebindAgentChannel", {
+            entityId: ce.newId,
+            channelId: forkedChannelId,
+          });
           await this.rpc.call(doTarget(clonedRef), "postClone", [
             agent.ref.objectKey,
             forkedChannelId,

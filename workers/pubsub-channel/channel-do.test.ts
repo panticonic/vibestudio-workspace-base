@@ -3054,7 +3054,15 @@ describe("PubSubChannel", () => {
   it("listForks folds this channel's own log into its direct-child fork projection", async () => {
     const selfTarget =
       "do:workers/pubsub-channel:PubSubChannel:channel-lf-parent";
+    const agentTarget = "do:workers/agent-worker:AiChatWorker:agent-lf-parent";
+    const clonedAgentTarget =
+      "do:workers/agent-worker:AiChatWorker:agent-lf-child";
     let cloneCalls = 0;
+    const lifecycleCalls: Array<{
+      target: string;
+      method: string;
+      args: unknown[];
+    }> = [];
     const parent = await createGadBackedChannel({
       channelKey: "channel-lf-parent",
       rpcCall: (target, method, args) => {
@@ -3070,7 +3078,14 @@ describe("PubSubChannel", () => {
             objectKey: args[1] as string,
           };
         }
-        // Clone the (only) channel entity into a fresh context.
+        if (
+          target === "main" &&
+          method === "workspace-state.entity.resolveActive"
+        ) {
+          return { id: args[0], kind: "do" };
+        }
+        if (target === agentTarget && method === "canFork") return { ok: true };
+        // Clone the channel and its subscribed agent into a fresh context.
         if (target === "main" && method === "runtime.cloneContext") {
           cloneCalls += 1;
           return {
@@ -3088,11 +3103,24 @@ describe("PubSubChannel", () => {
                 targetId:
                   "do:workers/pubsub-channel:PubSubChannel:channel-lf-child",
               },
+              {
+                sourceId: agentTarget,
+                newId: clonedAgentTarget,
+                kind: "do",
+                source: "workers/agent-worker",
+                className: "AiChatWorker",
+                sourceKey: "agent-lf-parent",
+                newKey: "agent-lf-child",
+                targetId: clonedAgentTarget,
+              },
             ],
           };
         }
         // The cloned child's postClone is driven over RPC; ack it.
-        if (method === "postClone") return null;
+        if (method === "postClone" || method === "runtime.rebindAgentChannel") {
+          lifecycleCalls.push({ target, method, args });
+          return null;
+        }
         return undefined;
       },
     });
@@ -3102,10 +3130,22 @@ describe("PubSubChannel", () => {
       name: "User",
       type: "panel",
     });
+    setRpcCaller(parent.instance, agentTarget, "durable-object");
+    await parent.instance.join({
+      participantId: agentTarget,
+      revision: 1,
+      contextId: "ctx-lf",
+      metadata: { name: "Agent", type: "agent" },
+      delivery: "all",
+      endpoint: { kind: "entity", entityId: agentTarget, invocation: "direct" },
+      applicationConfig: null,
+      replay: true,
+    });
+    setRpcCaller(parent.instance, "panel:user", "panel");
 
     expect(await parent.instance.listForks()).toEqual({
       forks: [],
-      headSeq: 1,
+      headSeq: expect.any(Number),
     });
 
     const forkInput = {
@@ -3118,6 +3158,21 @@ describe("PubSubChannel", () => {
     expect(result.forkedChannelId).toBe("channel-lf-child");
     await expect(parent.instance.fork(forkInput)).resolves.toEqual(result);
     expect(cloneCalls).toBe(1);
+    expect(lifecycleCalls).toEqual([
+      expect.objectContaining({
+        target: "do:workers/pubsub-channel:PubSubChannel:channel-lf-child",
+        method: "postClone",
+      }),
+      {
+        target: "main",
+        method: "runtime.rebindAgentChannel",
+        args: [{ entityId: clonedAgentTarget, channelId: "channel-lf-child" }],
+      },
+      expect.objectContaining({
+        target: clonedAgentTarget,
+        method: "postClone",
+      }),
+    ]);
 
     const { forks } = await parent.instance.listForks();
     expect(forks).toHaveLength(1);
@@ -3125,7 +3180,7 @@ describe("PubSubChannel", () => {
       forkId: result.forkId,
       forkedChannelId: "channel-lf-child",
       forkedContextId: "ctx-lf-fork",
-      forkPointId: 1,
+      forkPointId: 2,
       label: "My fork",
       reason: "deep dive",
       archived: false,
