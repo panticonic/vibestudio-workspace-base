@@ -15,12 +15,20 @@ describe("PanelIcon", () => {
   });
 
   it("resolves a real image through the immutable unit-icon route", () => {
+    const iconVersion = "a".repeat(64);
+    const iconState = "b".repeat(64);
     const { container } = render(
-      <PanelIcon icon="./assets/icon.svg" source="workers/mail" fallback="worker" />
+      <PanelIcon
+        icon="./assets/icon.svg"
+        iconVersion={iconVersion}
+        iconState={iconState}
+        source="workers/mail"
+        fallback="worker"
+      />
     );
     const image = container.querySelector("img");
     expect(image?.getAttribute("src")).toBe(
-      "../../__vibestudio/unit-icon?source=workers%2Fmail&path=assets%2Ficon.svg"
+      `../../__vibestudio/unit-icon?source=workers%2Fmail&path=assets%2Ficon.svg&v=${iconVersion}&s=${iconState}`
     );
   });
 

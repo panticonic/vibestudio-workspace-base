@@ -42,6 +42,8 @@ export interface PanelTreeViewNode {
   id: string;
   title: string;
   icon?: string;
+  iconVersion?: string;
+  iconState?: string;
   source?: string;
   favicon?: PanelNavigationState["favicon"];
   owner: string | null;
@@ -60,6 +62,8 @@ export interface FullPanel {
   id: string;
   title: string;
   icon?: string;
+  iconVersion?: string;
+  iconState?: string;
   contextId?: string;
   runtimeEntityId?: string | null;
   buildKey?: string | null;
@@ -103,6 +107,8 @@ export function flattenTree(
         id: panel.id,
         title: panel.title,
         ...(panel.icon ? { icon: panel.icon } : {}),
+        ...(panel.iconVersion ? { iconVersion: panel.iconVersion } : {}),
+        ...(panel.iconState ? { iconState: panel.iconState } : {}),
         ...(panel.source ? { source: panel.source } : {}),
         ...(panel.favicon ? { favicon: panel.favicon } : {}),
         childCount: panel.childCount,
@@ -230,6 +236,8 @@ function nodeTree(
   const children = cachedChildren?.nodes ?? [];
   const presentation = presentations.get(node.slotId);
   const icon = presentation?.icon ?? node.icon;
+  const iconVersion = presentation?.iconVersion ?? node.iconVersion;
+  const iconState = presentation?.iconState ?? node.iconState;
   const source = presentation?.snapshot?.source ?? node.source;
   const favicon = faviconForPresentation(presentation);
   return {
@@ -239,6 +247,8 @@ function nodeTree(
     parentId: node.parentSlotId,
     childCount: node.childCount,
     ...(icon ? { icon } : {}),
+    ...(iconVersion ? { iconVersion } : {}),
+    ...(iconState ? { iconState } : {}),
     ...(source ? { source } : {}),
     ...(favicon ? { favicon } : {}),
     children: children.map((child) =>
@@ -691,6 +701,8 @@ function summary(node: PanelTreeViewNode, position: number): PanelSummary {
     id: node.id,
     title: node.title,
     ...(node.icon ? { icon: node.icon } : {}),
+    ...(node.iconVersion ? { iconVersion: node.iconVersion } : {}),
+    ...(node.iconState ? { iconState: node.iconState } : {}),
     ...(node.source ? { source: node.source } : {}),
     ...(node.favicon ? { favicon: node.favicon } : {}),
     childCount: node.childCount,
@@ -740,6 +752,12 @@ export function useFullPanel(panelId: string | null): {
         id: presentation.id,
         title: presentation.title,
         ...(presentation.icon ? { icon: presentation.icon } : {}),
+        ...(presentation.iconVersion
+          ? { iconVersion: presentation.iconVersion }
+          : {}),
+        ...(presentation.iconState
+          ? { iconState: presentation.iconState }
+          : {}),
         contextId: presentation.snapshot.contextId,
         runtimeEntityId: presentation.runtimeEntityId,
         buildKey: presentation.buildKey,
@@ -894,6 +912,12 @@ export function useAncestors(panelId: string | null): {
               title: node.title,
               ...((presentation?.icon ?? node.icon)
                 ? { icon: presentation?.icon ?? node.icon }
+                : {}),
+              ...((presentation?.iconVersion ?? node.iconVersion)
+                ? { iconVersion: presentation?.iconVersion ?? node.iconVersion }
+                : {}),
+              ...((presentation?.iconState ?? node.iconState)
+                ? { iconState: presentation?.iconState ?? node.iconState }
                 : {}),
               ...(source ? { source } : {}),
               ...(favicon ? { favicon } : {}),

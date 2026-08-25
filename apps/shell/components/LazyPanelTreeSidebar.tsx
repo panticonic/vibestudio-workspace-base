@@ -549,6 +549,8 @@ const SortableTreeItem = memo(
 
           <PanelIcon
             icon={panel.icon}
+            iconVersion={panel.iconVersion}
+            iconState={panel.iconState}
             source={panel.source}
             favicon={panel.favicon}
             size={PANEL_ICON_SIZE}

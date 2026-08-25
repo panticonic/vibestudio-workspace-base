@@ -79,6 +79,8 @@ export function LayoutBlueprint({
               <>
                 <PanelIcon
                   icon={panel?.icon}
+                  iconVersion={panel?.iconVersion}
+                  iconState={panel?.iconState}
                   source={panel?.source}
                   favicon={panel?.favicon}
                   size={16}
@@ -113,6 +115,8 @@ export function LayoutBlueprint({
           <Flex className="layout-blueprint__label" align="center" gap="2">
             <PanelIcon
               icon={sourcePanel?.icon}
+              iconVersion={sourcePanel?.iconVersion}
+              iconState={sourcePanel?.iconState}
               source={sourcePanel?.source}
               favicon={sourcePanel?.favicon}
               size={14}

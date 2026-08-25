@@ -1298,6 +1298,8 @@ interface HoverableBreadcrumbItemProps {
   title: string;
   hasChildren: boolean;
   icon?: string;
+  iconVersion?: string;
+  iconState?: string;
   source?: string;
   favicon?: PanelSummary["favicon"];
   isActive: boolean;
@@ -1318,6 +1320,8 @@ function HoverableBreadcrumbItem({
   title,
   hasChildren,
   icon,
+  iconVersion,
+  iconState,
   source,
   favicon,
   isActive,
@@ -1416,6 +1420,8 @@ function HoverableBreadcrumbItem({
       >
         <PanelIcon
           icon={icon}
+          iconVersion={iconVersion}
+          iconState={iconState}
           source={source}
           favicon={favicon}
           size={BREADCRUMB_ICON_SIZE}
@@ -1722,6 +1728,8 @@ function BreadcrumbBar({
       title={panel.title}
       hasChildren={panel.childCount > 0}
       icon={panel.icon}
+      iconVersion={panel.iconVersion}
+      iconState={panel.iconState}
       source={panel.source}
       favicon={panel.favicon}
       isActive={isActive}
@@ -1742,6 +1750,8 @@ function BreadcrumbBar({
       title={ancestor.title}
       hasChildren={ancestor.childCount > 0}
       icon={ancestor.icon}
+      iconVersion={ancestor.iconVersion}
+      iconState={ancestor.iconState}
       source={ancestor.source}
       favicon={ancestor.favicon}
       isActive={true}

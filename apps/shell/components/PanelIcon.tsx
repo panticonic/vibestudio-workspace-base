@@ -18,6 +18,7 @@ const BrowserFavicon = lazy(async () => {
 export function PanelIcon({
   icon,
   iconVersion,
+  iconState,
   source,
   favicon,
   size = 16,
@@ -26,6 +27,8 @@ export function PanelIcon({
   icon?: string;
   /** Names the icon's content so the fetched glyph can be stored forever. */
   iconVersion?: string;
+  /** Exact workspace state from which a historical icon can be retrieved. */
+  iconState?: string;
   source?: string;
   favicon?: PanelNavigationState["favicon"];
   size?: number;
@@ -33,7 +36,7 @@ export function PanelIcon({
 }) {
   const imageSource =
     icon?.startsWith("./") && source
-      ? `../../${unitIconTarget(source, icon, iconVersion)}`
+      ? `../../${unitIconTarget(source, icon, iconVersion, iconState)}`
       : icon?.startsWith("data:image/")
         ? icon
         : null;
