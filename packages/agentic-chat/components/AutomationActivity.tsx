@@ -34,12 +34,12 @@ import type {
   MissionCharter,
   MissionRecord,
   MissionRunRecord,
-} from "@vibestudio/shared/authority/mission";
+} from "@vibestudio/automation/mission";
 import {
   canonicalCronExpression,
   canonicalCronTimeZone,
   describeCronSchedule,
-} from "@vibestudio/shared/authority/cronSchedule";
+} from "@vibestudio/automation/cronSchedule";
 import {
   CronScheduleDisplay,
   CronScheduleEditor,

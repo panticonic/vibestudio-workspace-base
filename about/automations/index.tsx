@@ -50,7 +50,7 @@ import {
 import type {
   MissionRecord,
   MissionRunRecord,
-} from "@vibestudio/shared/authority/mission";
+} from "@vibestudio/automation/mission";
 import { AboutPage, AboutThemeRoot } from "../../packages/about-shared/ui";
 
 type Filter = "all" | "attention" | "active" | "paused" | "completed";

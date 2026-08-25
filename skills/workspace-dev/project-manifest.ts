@@ -5,7 +5,7 @@ import {
   moduleCoordinate,
   type ModuleImportKind,
   type ModuleImportSyntax,
-} from "@vibestudio/shared/moduleImports";
+} from "@vibestudio/module-imports";
 import { parse as parseSvelte } from "svelte/compiler";
 
 export const PROJECT_TYPES = ["panel", "package", "skill", "project", "worker"] as const;

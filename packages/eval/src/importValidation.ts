@@ -12,7 +12,7 @@
  */
 
 import { EVAL_AMBIENT_ONLY } from "@vibestudio/service-schemas/runtime/runtimeSurface.eval";
-import { analyzeModuleImports } from "@vibestudio/shared/moduleImports";
+import { analyzeModuleImports } from "@vibestudio/module-imports";
 
 /**
  * Eval globals that are injected ambiently, NOT exported by `@workspace/runtime`

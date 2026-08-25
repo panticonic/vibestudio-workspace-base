@@ -9,6 +9,7 @@
     "./agent-worker-base": "./src/agent-worker-base.ts"
   },
   "dependencies": {
+    "@vibestudio/automation": "workspace:*",
     "@cfworker/json-schema": "4.1.1",
     "@sinclair/typebox": "0.27.12",
     "@vibestudio/content-addressing": "workspace:*",

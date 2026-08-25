@@ -22,7 +22,7 @@ import {
   describeCronSchedule,
   formatCronOccurrence,
   type CronVisualSchedule,
-} from "@vibestudio/shared/authority/cronSchedule";
+} from "@vibestudio/automation/cronSchedule";
 
 const WEEKDAYS = [
   { value: 1, short: "Mon", long: "Monday" },

@@ -13,6 +13,7 @@
     "./result-images": "./src/result-images.ts"
   },
   "dependencies": {
+    "@vibestudio/module-imports": "workspace:*",
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/shell-core": "workspace:*",
     "@vibestudio/shared": "workspace:*",

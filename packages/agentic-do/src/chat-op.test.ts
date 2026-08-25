@@ -33,7 +33,7 @@ import type {
   VcsCompareResult,
   VcsStatusResult,
 } from "@vibestudio/service-schemas/vcs";
-import type { MissionRecord } from "@vibestudio/shared/authority/mission";
+import type { MissionRecord } from "@vibestudio/automation/mission";
 import { AgentVesselBase } from "./agent-vessel.js";
 import type { ChannelClient } from "./channel-client.js";
 import type { AgentLoopDriver } from "./agent-loop-driver.js";

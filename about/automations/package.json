@@ -88,6 +88,7 @@
     }
   },
   "dependencies": {
+    "@vibestudio/automation": "workspace:*",
     "@workspace/runtime": "workspace:*",
     "@workspace/about-shared": "workspace:*",
     "@workspace/agentic-chat": "workspace:*",

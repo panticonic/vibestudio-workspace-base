@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from "vitest";
 import type {
   MissionRecord,
   MissionRunRecord,
-} from "@vibestudio/shared/authority/mission";
+} from "@vibestudio/automation/mission";
 import {
   AutomationActivity,
   createAutomationUiClient,

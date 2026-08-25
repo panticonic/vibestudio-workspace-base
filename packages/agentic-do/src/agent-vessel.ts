@@ -118,7 +118,7 @@ import {
   type MissionOperationIntent,
   type MissionRecord,
   type MissionTrigger,
-} from "@vibestudio/shared/authority/mission";
+} from "@vibestudio/automation/mission";
 import type {
   ClaimRequest,
   ClaimSettlement,

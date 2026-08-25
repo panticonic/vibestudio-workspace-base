@@ -9,8 +9,8 @@ import type {
   MissionAuthorityPlanReference,
   MissionRecord,
   MissionRunRecord,
-} from "@vibestudio/shared/authority/mission";
-import { missionPrincipal } from "@vibestudio/shared/authority/mission";
+} from "@vibestudio/automation/mission";
+import { missionPrincipal } from "@vibestudio/automation/mission";
 import { MissionsDO } from "./MissionsDO.js";
 
 const HASH_A = "a".repeat(64);

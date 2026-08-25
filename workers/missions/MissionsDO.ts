@@ -19,7 +19,7 @@ import type {
   MissionRunPhase,
   MissionRunRecord,
   MissionState,
-} from "@vibestudio/shared/authority/mission";
+} from "@vibestudio/automation/mission";
 import {
   missionCompletionResponse,
   missionExecutionImageDigest,
@@ -27,7 +27,7 @@ import {
   missionPrincipal,
   missionRevisionDigest,
   validateMissionCharter,
-} from "@vibestudio/shared/authority/mission";
+} from "@vibestudio/automation/mission";
 import { canonicalJson } from "@vibestudio/shared/canonicalJson";
 import { createGadServiceClient } from "@vibestudio/shared/workspaceServiceRpc";
 import type { PutUserNotificationInput } from "@vibestudio/shared/userNotifications";

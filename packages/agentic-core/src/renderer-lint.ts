@@ -10,7 +10,7 @@
  * render time in someone else's panel.
  */
 
-import { analyzeModuleImports } from "@vibestudio/shared/moduleImports";
+import { analyzeModuleImports } from "@vibestudio/module-imports";
 
 /** Modules the chat panel exposes to sandbox components (its exposeModules). */
 export const DEFAULT_HOST_MODULES: readonly string[] = [

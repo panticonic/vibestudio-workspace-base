@@ -11,6 +11,7 @@
     "./styles.css": "./styles.css"
   },
   "dependencies": {
+    "@vibestudio/automation": "workspace:*",
     "@mdx-js/mdx": "3.1.1",
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/shared": "workspace:*",
