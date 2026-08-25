@@ -326,6 +326,32 @@ export const interactionSurfaceTests: TestCase[] = [
     },
   },
   {
+    name: "automatic-conversation-title",
+    description: "Give an ordinary new conversation a concise semantic title",
+    category: "interaction-surfaces",
+    prompt:
+      "Help me plan a small herb garden for a sunny apartment windowsill. I have room for three pots.",
+    validate: (result) => {
+      const pending = noIncompleteInvocations(result);
+      if (!pending.passed) return pending;
+      const titleCalls = completedNamedToolCalls(result, "set_title");
+      if (titleCalls.length !== 1) {
+        return {
+          passed: false,
+          reason: `Expected exactly one completed set_title call for an ordinary new conversation; observed ${titleCalls.length}`,
+        };
+      }
+      const title = titleCalls[0]?.arguments?.["title"];
+      if (typeof title !== "string" || title.trim().length < 3 || title.length > 60) {
+        return {
+          passed: false,
+          reason: `Expected a concise semantic title, received ${JSON.stringify(title)}`,
+        };
+      }
+      return agentMessageHasAll(result, ["herb"]);
+    },
+  },
+  {
     name: "custom-message-update-clear",
     description: "Update a published custom message in place and clear its renderer",
     category: "interaction-surfaces",

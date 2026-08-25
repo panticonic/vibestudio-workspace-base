@@ -102,6 +102,16 @@ describe("composeSystemPrompt", () => {
     );
   });
 
+  it("asks ordinary agents to replace first-message titles with stable conversation identity", () => {
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("When `set_title` is available");
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "Replace the automatic first-message title with a compact noun phrase"
+    );
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(
+      "retitle only when the conversation's enduring purpose materially changes"
+    );
+  });
+
   it("makes live docs the bounded platform-discovery contract", () => {
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("start with the relevant skill docs");
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("`docs_search`/`docs_open`");
