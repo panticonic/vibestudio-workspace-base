@@ -165,6 +165,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@vibestudio/durable": "workspace:*",
     "@workspace-workers/workspace-source": "workspace:*",
     "@panticonic/builtin": "workspace:*",
     "vitest": "3.2.7"
