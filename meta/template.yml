@@ -134,7 +134,7 @@ templates:
   registry:
     url: git+https://github.com/panticonic/vibestudio-template-registry.git
     ref: refs/heads/main
-systemEpoch: 62
+systemEpoch: 0
 defaultRepo: projects/default
 defaultAgentConfig:
   model: openai-codex:gpt-5.6-sol

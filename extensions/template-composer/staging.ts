@@ -866,7 +866,15 @@ function nextWorkspaceSource(
         }
       : {}),
   };
-  return { ...observation.top, templates };
+  const epochs = [
+    ...new Set(
+      inspection.plan.nodes.map((node) => node.fragment.systemEpoch),
+    ),
+  ];
+  if (epochs.length !== 1) {
+    throw new Error("A template composition must resolve one system epoch");
+  }
+  return { ...observation.top, systemEpoch: epochs[0]!, templates };
 }
 
 function flattenedRuntimeYaml(
@@ -1103,6 +1111,10 @@ export function createTemplateOperationPorts(
           contextId,
           expectedCommittedEventId: current.committed.eventId,
           expectedMainEventId,
+          ...((record?.intent as { targetSystemEpoch?: number } | undefined)
+            ?.targetSystemEpoch !== undefined
+            ? { epochTransition: true as const }
+            : {}),
         },
       );
       return { mainEventId: result.mainEventId };

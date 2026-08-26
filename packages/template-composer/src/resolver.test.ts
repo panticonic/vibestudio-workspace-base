@@ -44,10 +44,11 @@ function snapshot(
   repoPath: string,
   presentation?: { name?: string; description?: string },
   extraFiles: ReadonlyArray<{ path: string; text: string }> = [],
+  systemEpoch = epoch,
 ): ExactGitSnapshot {
   const manifest = new TextEncoder().encode(
     [
-      `systemEpoch: ${epoch}`,
+      `systemEpoch: ${systemEpoch}`,
       "template:",
       `  repositories: [${repoPath}]`,
       "  files: []",
@@ -155,6 +156,50 @@ describe("D1 template declarations", () => {
 });
 
 describe("resolveTemplateComposition", () => {
+  it("resolves every installed source again for a selected target generation", async () => {
+    const oldBase = pin(baseUrl, "a");
+    const nextBase = { ...pin(baseUrl, "b"), ref: "refs/tags/v60" };
+    const initial = await resolveTemplateComposition({
+      roots: [{ url: baseUrl }],
+      expectedSystemEpoch: epoch,
+      ports: ports(
+        [oldBase],
+        new Map([[normalizeTemplateGitUrl(baseUrl), snapshot(oldBase, [], "packages/runtime")]]),
+      ),
+    });
+    const installedLayers = Object.fromEntries(
+      initial.nodes.map((node) => [node.nodeId, node.fragmentYaml]),
+    );
+    const targetPorts = ports(
+      [nextBase],
+      new Map([
+        [
+          normalizeTemplateGitUrl(baseUrl),
+          snapshot(nextBase, [], "packages/runtime", undefined, [], 60),
+        ],
+      ]),
+    );
+
+    const next = await resolveTemplateComposition({
+      roots: [{ url: baseUrl }],
+      previousState: initial.state,
+      installedLayers,
+      expectedSystemEpoch: 60,
+      replaceInstalledPins: true,
+      ports: targetPorts,
+    });
+
+    expect(next.nodes[0]?.pin).toMatchObject({
+      ref: nextBase.ref,
+      commit: nextBase.commit,
+      snapshot: nextBase.snapshot,
+    });
+    expect(next.nodes[0]?.fragment.systemEpoch).toBe(60);
+    expect(targetPorts.resolvePromoted).toHaveBeenCalledWith({
+      url: normalizeTemplateGitUrl(baseUrl),
+    });
+  });
+
   it("keeps installed sources exact, accepts edited layers, and resolves only a new URL", async () => {
     const base = pin(baseUrl, "a");
     const news = pin(newsUrl, "b");

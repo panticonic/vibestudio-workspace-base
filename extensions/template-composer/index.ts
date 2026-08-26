@@ -154,20 +154,16 @@ function invokingContextId(ctx: ExtensionContextLike): string | undefined {
 
 export function templatePullInitiator(
   ctx: Pick<ExtensionContextLike, "invocation">,
-  hasExactPin: boolean,
 ): TemplateOperationRecord["initiator"] {
-  if (!hasExactPin) return "user";
   const invocation = ctx.invocation.current();
   if (
-    invocation?.caller.callerKind !== "server" ||
-    invocation.caller.callerId !== "server" ||
-    invocation.chainCaller
+    invocation?.caller.callerKind === "server" &&
+    invocation.caller.callerId === "server" &&
+    !invocation.chainCaller
   ) {
-    throw new Error(
-      "Exact template pins are reserved for the host release handshake",
-    );
+    return "host-release";
   }
-  return "host-release";
+  return "user";
 }
 
 /**
@@ -296,7 +292,11 @@ async function completedOperationResult(
 
 async function environment(
   ctx: ExtensionContextLike,
-  options: { refresh?: boolean; requireCatalog?: boolean } = {},
+  options: {
+    refresh?: boolean;
+    requireCatalog?: boolean;
+    systemEpoch?: number;
+  } = {},
 ): Promise<Environment> {
   const info = await ctx.workspace.getInfo();
   const observation = await observeWorkspace(ctx);
@@ -309,7 +309,7 @@ async function environment(
   }
   const client = await createRegistryClient(ctx, {
     statePath: info.statePath,
-    systemEpoch: observation.expectedSystemEpoch,
+    systemEpoch: options.systemEpoch ?? observation.expectedSystemEpoch,
     registry,
   });
   const catalog = await loadTemplateCatalog(client, options);
@@ -1327,6 +1327,13 @@ export async function activate(ctx: ExtensionContextLike) {
         return api.pull({
           commandId: input.operationId,
           alias: intent.alias,
+          ...(typeof (intent as { targetSystemEpoch?: unknown }).targetSystemEpoch ===
+          "number"
+            ? {
+                targetSystemEpoch: (intent as { targetSystemEpoch: number })
+                  .targetSystemEpoch,
+              }
+            : {}),
         });
       }
       if (intent.kind === "remove" && intent.alias) {
@@ -1724,11 +1731,19 @@ export async function activate(ctx: ExtensionContextLike) {
       alias: string;
       toRef?: string;
       pin?: WorkspaceTemplatePin;
+      targetSystemEpoch?: number;
     }) {
+      if (
+        input.targetSystemEpoch !== undefined &&
+        (!Number.isSafeInteger(input.targetSystemEpoch) ||
+          input.targetSystemEpoch < 0)
+      ) {
+        throw new Error("Template pull targetSystemEpoch must be a non-negative integer");
+      }
       const requestedPin = input.pin
         ? WorkspaceTemplatePinSchema.parse(input.pin)
         : null;
-      const initiator = templatePullInitiator(ctx, requestedPin !== null);
+      const initiator = templatePullInitiator(ctx);
       let env = await environment(ctx);
       const record = await operationRecordForMutation(
         ctx,
@@ -1742,8 +1757,30 @@ export async function activate(ctx: ExtensionContextLike) {
       }
       const completed = await completedOperationResult(ctx, record);
       if (completed) return completed;
+      const recordedTargetSystemEpoch = record
+        ? (record.intent as { targetSystemEpoch?: number }).targetSystemEpoch
+        : undefined;
+      if (
+        recordedTargetSystemEpoch !== undefined &&
+        input.targetSystemEpoch !== undefined &&
+        input.targetSystemEpoch !== recordedTargetSystemEpoch
+      ) {
+        throw new Error(
+          `Template command ${input.commandId} was already bound to system epoch ${recordedTargetSystemEpoch}`,
+        );
+      }
       if (!record && !requestedPin && !env.catalog) {
         env = await environment(ctx, { requireCatalog: true });
+      }
+      const targetSystemEpoch = record
+        ? recordedTargetSystemEpoch ?? env.observation.expectedSystemEpoch
+        : input.targetSystemEpoch ?? env.observation.expectedSystemEpoch;
+      if (targetSystemEpoch !== env.observation.expectedSystemEpoch) {
+        env = await environment(ctx, {
+          requireCatalog: true,
+          refresh: !record,
+          systemEpoch: targetSystemEpoch,
+        });
       }
       const node = env.observation.state?.nodes.find(
         (candidate) => candidate.alias === input.alias,
@@ -1799,7 +1836,12 @@ export async function activate(ctx: ExtensionContextLike) {
       const inspection = await inspectTemplateOperation({
         kind: "pull",
         pin,
-        workspace: env.observation,
+        workspace: {
+          ...env.observation,
+          expectedSystemEpoch: targetSystemEpoch,
+          replaceInstalledPins:
+            targetSystemEpoch !== env.observation.expectedSystemEpoch,
+        },
         sources: createPinnedTemplateSourcePorts(
           ordinarySources,
           record?.pins ?? [],
@@ -1814,6 +1856,9 @@ export async function activate(ctx: ExtensionContextLike) {
           kind: "pull",
           alias: input.alias,
           target: pin,
+          ...(targetSystemEpoch !== env.observation.expectedSystemEpoch
+            ? { targetSystemEpoch }
+            : {}),
         },
         initiator,
       );

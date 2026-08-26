@@ -156,6 +156,7 @@ interface ResolveTemplateCompositionInputBase {
   pinOverrides?: Readonly<Record<string, WorkspaceTemplatePin>>;
   localRepoPaths?: ReadonlySet<string>;
   expectedSystemEpoch: number;
+  replaceInstalledPins?: boolean;
   ports: TemplateSourcePorts;
 }
 
@@ -438,7 +439,9 @@ export async function resolveTemplateComposition(
     const override = overrides.get(dependency.url);
     const installed = installedByUrl.get(dependency.url);
     const resolved =
-      override ?? installed ?? (await input.ports.resolvePromoted(dependency));
+      override ??
+      (input.replaceInstalledPins ? undefined : installed) ??
+      (await input.ports.resolvePromoted(dependency));
     if (override) usedOverrides.add(dependency.url);
     const pin = normalizePin({
       ...resolved,

@@ -24,6 +24,8 @@ export interface TemplateWorkspaceObservation {
   localRepoPaths: ReadonlySet<string>;
   overrides?: Readonly<Record<string, WorkspaceTemplatePin>>;
   expectedSystemEpoch: number;
+  /** Resolve every installed template again from the selected target source. */
+  replaceInstalledPins?: boolean;
 }
 
 export interface InspectTemplateAddInput {
@@ -155,6 +157,7 @@ export async function inspectTemplateOperation(
     previousState: input.workspace.state,
     installedLayers: input.workspace.installedLayers,
     expectedSystemEpoch: input.workspace.expectedSystemEpoch,
+    replaceInstalledPins: input.workspace.replaceInstalledPins,
     ports: input.sources,
   });
   return {

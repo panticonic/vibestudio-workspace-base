@@ -59,7 +59,7 @@
     },
     "pull": {
       "tier": "write; exact protected-main review",
-      "arguments": ["{ commandId, alias, toRef?, pin? (authenticated host release only) }"],
+      "arguments": ["{ commandId, alias, toRef?, pin?, targetSystemEpoch? }"],
       "returns": "PendingTemplateOperation"
     },
     "remove": {
@@ -115,8 +115,8 @@
     "templates have ordered repository contributions, never exclusive repository ownership; overlap is merged through ordinary VCS external deltas",
     "the installed source selection is the update cursor for every already-resolved URL; catalog selections and unseen dependencies resolve from the reviewed registry revision, while direct URLs use inspect's independently discovered exact pin",
     "pending review items are opened through normal VCS compare/merge using their context and delta ids; approval record identifiers are host-internal",
-    "contract-breaking releases use one new exact system epoch and are admitted only in fresh workspaces; templates carry no compatibility readers or migration notes",
-    "an exact pin on pull is accepted only from the authenticated direct host caller; its operation is marked host-release and cannot be cancelled or silently discarded",
+    "a cross-epoch pull is ordinary userland work: targetSystemEpoch selects that generation's verified registry, every installed template is resolved to its exact promoted target, and the successor publishes through the epoch-transition review path",
+    "a direct host pull is marked host-release and cannot be cancelled or silently discarded; user-selected exact pins remain user operations",
     "protected main owns the only build, typecheck, schema, and authority gate; failures retain the staged context and structured diagnostics for agentic repair",
     "when protected main advances during review, the operation returns the new main event and retained context so an agent can merge main semantically and resume instead of discarding the plan",
     "catalog rendering is cache-only; network refresh occurs only through catalog({ refresh: true })",

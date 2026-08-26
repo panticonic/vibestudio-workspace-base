@@ -140,7 +140,11 @@ export async function createRegistryClient(
       sink: contentSink(ctx),
     }),
     cache: new FileTemplateRegistryCache(
-      path.join(input.statePath, "template-registry", "cache-v1.json")
+      path.join(
+        input.statePath,
+        "template-registry",
+        `cache-v1-epoch-${input.systemEpoch}.json`,
+      ),
     ),
   };
   return new TemplateRegistryClient(options);

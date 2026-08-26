@@ -341,7 +341,7 @@ describe("template composer operation resumption", () => {
     expect(persist).not.toHaveBeenCalled();
   });
 
-  it("derives exact host pulls only from the authenticated server caller", () => {
+  it("derives operation ownership from the caller rather than the selected pin", () => {
     expect(
       templatePullInitiator(
         {
@@ -351,10 +351,9 @@ describe("template composer operation resumption", () => {
             }),
           },
         },
-        true,
       ),
     ).toBe("host-release");
-    expect(() =>
+    expect(
       templatePullInitiator(
         {
           invocation: {
@@ -363,9 +362,8 @@ describe("template composer operation resumption", () => {
             }),
           },
         },
-        true,
       ),
-    ).toThrow("reserved for the host release handshake");
+    ).toBe("user");
   });
 
   it("keeps every exact in-flight pin when the registry refreshes", async () => {

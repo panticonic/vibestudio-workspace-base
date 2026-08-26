@@ -403,6 +403,46 @@ describe("template composer staging", () => {
     );
   });
 
+  it("marks only a recorded cross-epoch composition as an epoch transition", async () => {
+    const call = vi.fn(async (_target: string, method: string) => {
+      if (method === "vcs.status") {
+        return {
+          committed: BASE,
+          workingHead: BASE,
+          clean: true,
+          mainRelation: "at",
+          mainEventId: "event:old-main",
+        };
+      }
+      if (method === "vcs.push") return { mainEventId: "event:new-main" };
+      throw new Error(`unexpected RPC ${method}`);
+    });
+    const ports = createTemplateOperationPorts(
+      { rpc: { call } } as never,
+      "/state",
+      { localRepoPaths: [] } as never,
+      {
+        version: 1,
+        operationId: "pull-next-major",
+        kind: "pull",
+        initiator: "user",
+        fingerprint: `v1-sha256:${"a".repeat(64)}`,
+        intent: { kind: "pull", targetSystemEpoch: 60 },
+        pins: [],
+        affectedParts: [],
+      },
+    );
+
+    await expect(ports.publish("operation-context", "event:old-main")).resolves.toEqual({
+      mainEventId: "event:new-main",
+    });
+    expect(call).toHaveBeenCalledWith(
+      "main",
+      "vcs.push",
+      expect.objectContaining({ epochTransition: true }),
+    );
+  });
+
   it("records adopted lineage metadata without replaying repository contributions", async () => {
     const call = vi.fn(async (_target: string, method: string) => {
       if (method === "vcs.status") {

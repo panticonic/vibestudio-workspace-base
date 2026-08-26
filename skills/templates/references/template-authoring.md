@@ -123,12 +123,11 @@ and installation, not chosen during authoring.
 
 ## Publish one current contract
 
-This pre-release system supports one exact host/Base/template generation. A
-contract-breaking release bumps `systemEpoch`, republishes the full official
-set, and is validated only in a fresh workspace. Do not add migration notes,
-old-format readers, compatibility branches, or applied markers. If user-level
-data matters, export it through the ordinary product interface before the cut
-and import it into the fresh current product afterward.
+Application major versions define `systemEpoch`. A contract-breaking release
+republishes the full official set at that epoch. Existing workspaces update by
+pulling the exact target Base through Composer, resolving their local changes
+semantically, and publishing the reviewed epoch transition. Templates carry no
+host migration DSL, compatibility readers, or applied markers.
 
 ## Make releases usable
 

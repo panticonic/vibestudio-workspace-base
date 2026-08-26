@@ -100,6 +100,14 @@ For updates, run `check` for the selected alias, then `pull` only after the user
 chooses to update. Resolve each returned delta through ordinary semantic merge
 and resume when every decision is accounted for.
 
+For a major-version workspace update, call `pull` for the installed Base alias
+with `targetSystemEpoch`. Composer refreshes that generation's verified
+registry, resolves the complete installed template set to exact promoted pins,
+performs ordinary retained userland composition, rewrites the workspace
+generation, and marks its final reviewed publication as the epoch transition.
+An explicitly selected exact `pin` may replace the target Base registry entry.
+Do not edit `systemEpoch` directly or ask the host to plan the source changes.
+
 Only directly configured templates can be removed. If a template arrives as a
 dependency, identify the direct parent instead. Removal preserves other
 templates' contributions and local edits per the semantic merge.
