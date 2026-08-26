@@ -763,6 +763,29 @@ describe("MissionsDO", () => {
     expect(wake?.wakeAt).toBeGreaterThan(Date.now());
   });
 
+  it("skips a scheduled occurrence that was missed while the workspace was unavailable", async () => {
+    const harness = await createMissions();
+    const charter = agentCharter();
+    charter.trigger = { kind: "schedule", everyMs: 60_000 };
+    const mission = await harness.callAs<MissionRecord>(alice, "launch", {
+      name: "Daily summary",
+      charter,
+    });
+    const now = Date.now();
+    harness.sql.exec(
+      "UPDATE missions SET next_run_at=? WHERE mission_id=?",
+      now - 5_001,
+      mission.missionId,
+    );
+
+    const wake = await harness.instance.alarm();
+
+    expect(
+      harness.sql.exec("SELECT COUNT(*) AS count FROM mission_runs").one(),
+    ).toEqual({ count: 0 });
+    expect(wake?.wakeAt).toBeGreaterThan(now);
+  });
+
   it("records failed child effects without misreporting the run as succeeded", async () => {
     const harness = await createMissions(IdempotentCommandMissionsDO);
     const executorId = "do:workers/summary:SummaryAgent:daily-run";

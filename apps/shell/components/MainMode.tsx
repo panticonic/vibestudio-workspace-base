@@ -7,7 +7,7 @@ import {
   workspaceChooserDialogOpenAtom,
   shellOverlayActiveAtom,
 } from "../state/appModeAtoms";
-import { connectNativePanelAdapter, view } from "../shell/client";
+import { view } from "../shell/client";
 import { useShellEvent } from "../shell/useShellEvent";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { ConnectionSettingsDialog } from "./ConnectionSettingsDialog";
@@ -33,8 +33,8 @@ export default function MainMode() {
     "open-settings",
     useCallback(
       ({ section }) => setSettingsSection(section),
-      [setSettingsSection]
-    )
+      [setSettingsSection],
+    ),
   );
 
   // Register shell overlays — hides panel views so dialogs aren't obscured
@@ -45,15 +45,9 @@ export default function MainMode() {
     void view
       .setShellOverlay(shellOverlayActive)
       .catch((error: unknown) =>
-        console.warn("[MainMode] Shell overlay sync failed:", error)
+        console.warn("[MainMode] Shell overlay sync failed:", error),
       );
   }, [shellOverlayActive]);
-
-  useEffect(() => {
-    void connectNativePanelAdapter().catch((err: unknown) =>
-      console.warn("[MainMode] Panel host connection failed:", err)
-    );
-  }, []);
 
   useEffect(() => {
     const bridge = (
@@ -66,7 +60,7 @@ export default function MainMode() {
     const isInteractive = (target: EventTarget | null) =>
       target instanceof Element &&
       target.closest(
-        'input, textarea, select, button, a[href], [contenteditable="true"], [role="button"], [role="treeitem"], [role="dialog"], [tabindex]:not([tabindex="-1"])'
+        'input, textarea, select, button, a[href], [contenteditable="true"], [role="button"], [role="treeitem"], [role="dialog"], [tabindex]:not([tabindex="-1"])',
       ) !== null;
     const sync = (event: FocusEvent) =>
       bridge?.setChromeInteractiveFocus?.(isInteractive(event.target));

@@ -3,7 +3,10 @@ import { useSetAtom } from "jotai";
 import { Theme, Flex, Spinner, Text } from "@radix-ui/themes";
 import { VibestudioLogo } from "@workspace/ui/brand";
 
-import { workspaceChooserDialogOpenAtom, activeWorkspaceNameAtom } from "../state/appModeAtoms";
+import {
+  workspaceChooserDialogOpenAtom,
+  activeWorkspaceNameAtom,
+} from "../state/appModeAtoms";
 import {
   effectiveThemeAtom,
   loadThemePreferenceAtom,
@@ -21,6 +24,7 @@ import {
   panel,
   workspace,
   shellNetwork,
+  connectNativePanelAdapter,
 } from "../shell/client";
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 
@@ -31,7 +35,13 @@ let LazyMainMode = lazy(() => import("./MainMode"));
 
 function LoadingSpinner() {
   return (
-    <Flex direction="column" align="center" justify="center" gap="3" style={{ height: "100dvh" }}>
+    <Flex
+      direction="column"
+      align="center"
+      justify="center"
+      gap="3"
+      style={{ height: "100dvh" }}
+    >
       <VibestudioLogo size={144} variant="logo" />
       <Spinner size="3" />
       <Text size="2" color="gray">
@@ -54,6 +64,16 @@ export function App() {
   const setActiveWorkspaceName = useSetAtom(activeWorkspaceNameAtom);
   // Counter to force remount of lazy component after a chunk load failure.
   const [lazyRetryKey, setLazyRetryKey] = useState(0);
+
+  // Hand the window to the lightweight hosted shell immediately. MainMode is
+  // intentionally a large lazy chunk; keeping the bootstrap launch gate above
+  // this component's real loading surface makes that split invisible and
+  // serializes user-visible startup behind panel-layout code.
+  useEffect(() => {
+    void connectNativePanelAdapter().catch((error: unknown) =>
+      console.warn("[App] Panel host connection failed:", error),
+    );
+  }, []);
 
   // Load theme preference on mount
   useEffect(() => {
@@ -94,7 +114,9 @@ export function App() {
       .then((name) => {
         setActiveWorkspaceName(name);
       })
-      .catch((err) => console.error("[App] Failed to get active workspace:", err));
+      .catch((err) =>
+        console.error("[App] Failed to get active workspace:", err),
+      );
   }, [setActiveWorkspaceName]);
 
   // Listen for system theme changes via shell event
@@ -114,7 +136,10 @@ export function App() {
     try {
       await panel.createAboutPanel(payload.page);
     } catch (error) {
-      console.error(`[App] Failed to create shell panel for ${payload.page}:`, error);
+      console.error(
+        `[App] Failed to create shell panel for ${payload.page}:`,
+        error,
+      );
       void notification.show({
         type: "error",
         title: "Couldn't open page",
@@ -131,7 +156,7 @@ export function App() {
     (payload: { panelId: string; commandId: string }) => {
       void hostCommands.run(payload.panelId, payload.commandId);
     },
-    []
+    [],
   );
   useShellEvent("run-panel-command", handleRunPanelCommand);
 
@@ -151,7 +176,11 @@ export function App() {
   }, []);
 
   return (
-    <Theme appearance={effectiveTheme} {...themeConfig} className="app-shell-theme">
+    <Theme
+      appearance={effectiveTheme}
+      {...themeConfig}
+      className="app-shell-theme"
+    >
       <ChunkErrorBoundary
         onRetry={() => {
           // Reassign to create a fresh lazy() with a new import() promise

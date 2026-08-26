@@ -20,6 +20,11 @@ import type {
   MissionRunRecord,
   MissionState,
 } from "@vibestudio/automation/mission";
+
+// Local schedules are opportunities, not a durable backlog. A small delivery
+// window absorbs ordinary timer jitter while ensuring an occurrence missed
+// during shutdown advances directly to the next future time.
+const SCHEDULE_DELIVERY_WINDOW_MS = 5_000;
 import {
   missionCompletionResponse,
   missionExecutionImageDigest,
@@ -252,6 +257,13 @@ export class MissionsDO extends DurableObjectBase {
       if (completion) {
         if (!this.hasActiveRun(mission.missionId))
           this.markCompleted(mission.missionId, completion, now);
+        continue;
+      }
+      if (
+        mission.nextRunAt !== undefined &&
+        mission.nextRunAt <= now - SCHEDULE_DELIVERY_WINDOW_MS
+      ) {
+        this.advanceSchedule(mission, now, mission.runCount);
         continue;
       }
       if (mission.nextRunAt !== undefined && mission.nextRunAt <= now)
