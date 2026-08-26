@@ -30,9 +30,18 @@ const verification = await extensions.invoke("mobile-debug", "verify", [
 return { devices, install, verification };
 ```
 
-`installAndroid` emits the normal scoped user approval. Automated system tests
-must satisfy that request through a host-attested case authority policy; they
-must not add an extension flag or alternate no-approval method.
+The extension is a thin userland facade over the host's typed mobile service.
+Android build and install operations require the complete Vibestudio source
+checkout and always target its internal development package. The host owns every
+Gradle, Xcode, adb, and `xcrun` process; workspace source paths never select native code. Calls emit the
+normal scoped `native.mobile.execute` approval. Automated system tests must
+satisfy that request through a host-attested case authority policy; they must
+not add an extension flag or alternate no-approval method.
+
+This debug service lives on the workspace server so headless tests and userland
+can reach raw diagnostics. It reuses the same native CLI primitives as the
+desktop-owned phone provisioning service; ordinary install-and-pair UX remains
+owned by that desktop service rather than being duplicated here.
 
 `verify` returns bounded status evidence (`installed`, `rendering`,
 `screenshotCaptured`, `screenshotBytes`, and `issues`). It deliberately does
@@ -49,7 +58,7 @@ extension selects its ABI or pass an explicit architecture list:
 const devices = await extensions.invoke("mobile-debug", "listDevices", []);
 const startedAt = Date.now();
 const build = await extensions.invoke("mobile-debug", "buildAndroid", [
-  { variant: "internal", device: devices[0]?.serial },
+  { device: devices[0]?.serial },
 ]);
 const ready = await extensions.invoke("mobile-debug", "verifyWorkspaceReady", [
   { device: devices[0]?.serial, sinceMs: startedAt, timeoutMs: 180_000 },
@@ -57,8 +66,8 @@ const ready = await extensions.invoke("mobile-debug", "verifyWorkspaceReady", [
 return { build, ready };
 ```
 
-The build receipt contains `durationMs`, `architectures`, `apkPath`, and
-`apkBytes`. The canonical build is deliberately resource-bounded
+The build receipt contains `durationMs`, `architectures`, and `apkBytes`; host
+filesystem paths never cross into workspace code. The canonical build is deliberately resource-bounded
 (`--no-daemon`, two Gradle workers, in-process Kotlin compilation); there is no
 separate profiling build path. A device-targeted measurement must report the
 selected ABI. An empty `architectures` array means the caller intentionally
@@ -70,9 +79,11 @@ than stopping at process liveness:
 ```ts
 const startedAt = Date.now();
 // Run the pairing/provisioning operation here.
-const workspace = await extensions.invoke("mobile-debug", "verifyWorkspaceReady", [
-  { device: devices[0]?.serial, sinceMs: startedAt, timeoutMs: 180_000 },
-]);
+const workspace = await extensions.invoke(
+  "mobile-debug",
+  "verifyWorkspaceReady",
+  [{ device: devices[0]?.serial, sinceMs: startedAt, timeoutMs: 180_000 }],
+);
 ```
 
 `verifyWorkspaceReady` waits for the workspace initialization and connection

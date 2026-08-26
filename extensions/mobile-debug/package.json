@@ -14,6 +14,7 @@
       ],
       "streamingMethods": [
         "logcat",
+        "logsIos",
         "shell"
       ],
       "methodAuthority": {
@@ -39,20 +40,12 @@
         },
         "installAndroid": {
           "effect": {
-            "kind": "userland-capability",
-            "capability": "native.mobile.execute",
-            "resource": {
-              "kind": "receiver"
-            }
+            "kind": "open"
           }
         },
         "installIos": {
           "effect": {
-            "kind": "userland-capability",
-            "capability": "native.mobile.execute",
-            "resource": {
-              "kind": "receiver"
-            }
+            "kind": "open"
           }
         },
         "launchAndroid": {
@@ -67,11 +60,7 @@
         },
         "clearAndroidApp": {
           "effect": {
-            "kind": "userland-capability",
-            "capability": "native.mobile.execute",
-            "resource": {
-              "kind": "receiver"
-            }
+            "kind": "open"
           }
         },
         "adbReverse": {
@@ -111,36 +100,13 @@
         },
         "shell": {
           "effect": {
-            "kind": "userland-capability",
-            "capability": "native.mobile.execute",
-            "resource": {
-              "kind": "receiver"
-            }
+            "kind": "open"
           }
         }
       }
     },
     "authority": {
-      "provides": [
-        {
-          "name": "native.mobile.execute",
-          "title": "Change a mobile runtime",
-          "action": "run a build, install, reset, or device command",
-          "tier": "gated",
-          "sensitivity": "write",
-          "resourceType": "native.mobile",
-          "presentation": {
-            "domain": "people",
-            "verb": "manage"
-          },
-          "notability": "headline",
-          "grantScopes": [
-            "once",
-            "task",
-            "session"
-          ]
-        }
-      ],
+      "provides": [],
       "requests": [
         {
           "capability": "context.boundary",
@@ -150,6 +116,15 @@
           },
           "tier": "critical",
           "evidence": "intentional-broad"
+        },
+        {
+          "capability": "native.mobile.execute",
+          "resource": {
+            "kind": "exact",
+            "key": "native.mobile"
+          },
+          "tier": "gated",
+          "evidence": "exact"
         }
       ]
     }
