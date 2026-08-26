@@ -94,6 +94,7 @@ import {
   useQuickfireSession,
   type QuickfireSessionSource,
 } from "./useQuickfireSession";
+import { acquireFocusedPanelIdAfterRestore } from "./quickfirePanelFocus";
 
 /**
  * Id of the panel-region div (rendered by `PanelApp`) whose rect anchors the
@@ -189,6 +190,12 @@ export function QuickfireOwner() {
   const recallRef = useRef(-1);
   /** Panel focused when the overlay opened, restored on dismiss (§2.3). */
   const returnFocusPanelIdRef = useRef<string | null>(null);
+  /**
+   * A dismissal's in-flight focus restoration. Reopening must observe the
+   * restored panel before acquiring its context; otherwise an immediate
+   * Escape, Ctrl/Cmd+K chord can briefly see no focused panel.
+   */
+  const focusRestoreRef = useRef<Promise<void> | null>(null);
   /** Chat panels this shell opened for a promoted conversation, by channel id. */
   const promotedPanelIdsRef = useRef(new Map<string, string>());
 
@@ -337,24 +344,38 @@ export function QuickfireOwner() {
       },
     ) => {
       setPanelLost(false);
-      setState((current) => ({
-        ...CLOSED,
-        open: true,
-        mode,
-        query: options?.prompt
-          ? `${QUICKFIRE_MODE_PREFIX[mode]}${options.prompt}`
-          : "",
-        inputEpoch: current.inputEpoch + 1,
-        conversation: options?.conversation ?? null,
-      }));
-      setFocusRequest((sequence) => sequence + 1);
       void (async () => {
+        let focused: string | null = null;
+        try {
+          // Acquire panel context before mounting/focusing the overlay. Once
+          // its WebContents takes focus, the panel registry intentionally has
+          // no focused panel and can no longer answer this question.
+          focused = await acquireFocusedPanelIdAfterRestore(
+            focusRestoreRef,
+            () => panel.getFocusedPanelId(),
+          );
+        } catch {
+          // A palette that cannot describe the panel is still a working palette;
+          // only the panel-scoped commands drop out.
+        }
+
+        returnFocusPanelIdRef.current = focused;
+        setState((current) => ({
+          ...CLOSED,
+          open: true,
+          mode,
+          query: options?.prompt
+            ? `${QUICKFIRE_MODE_PREFIX[mode]}${options.prompt}`
+            : "",
+          inputEpoch: current.inputEpoch + 1,
+          conversation: options?.conversation ?? null,
+        }));
+        setFocusRequest((sequence) => sequence + 1);
+
         try {
           // Focus restore always names the panel the user was actually on, even
           // when the overlay was opened *about* a different one (a context menu
           // on a background tree node): dismissing must not move them.
-          const focused = await panel.getFocusedPanelId();
-          returnFocusPanelIdRef.current = focused;
           const target = options?.panelId ?? focused;
           if (mode === "all" && target) resumeIntoConversation(target);
           setChromeState(target ? await panel.getChromeState(target) : null);
@@ -459,7 +480,7 @@ export function QuickfireOwner() {
     const returnTo = returnFocusPanelIdRef.current;
     returnFocusPanelIdRef.current = null;
     if (options?.restoreFocus !== false && returnTo) {
-      void panel.focus(returnTo).catch(() => {});
+      focusRestoreRef.current = panel.focus(returnTo).catch(() => {});
     }
   }, []);
 
