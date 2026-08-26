@@ -72,6 +72,30 @@ describe("ModelCredentialRequiredCard", () => {
     expect(screen.getByRole("button", { name: /Refresh in system browser/i })).toBeTruthy();
   });
 
+  it("only offers the native system browser on mobile hosts", () => {
+    Object.assign(globalThis, { __vibestudioHostPlatform: "mobile" });
+    try {
+      render(
+        <Theme>
+          <ModelCredentialRequiredCard
+            chat={{ callMethod: vi.fn(async () => ({ ok: true })) }}
+            props={{
+              providerId: "openai-codex",
+              modelBaseUrl: "https://chatgpt.com/backend-api",
+              agentParticipantId: "do:agent",
+              flow: { type: "oauth2-auth-code-pkce" },
+            }}
+          />
+        </Theme>
+      );
+
+      expect(screen.getByRole("button", { name: /Use system browser/i })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: /Use workspace browser/i })).toBeNull();
+    } finally {
+      delete (globalThis as { __vibestudioHostPlatform?: unknown }).__vibestudioHostPlatform;
+    }
+  });
+
   it("switches the selected model before connecting credentials and persists best-effort", async () => {
     const calls: Array<{ participantId: string; method: string; args: unknown }> = [];
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -79,7 +103,6 @@ describe("ModelCredentialRequiredCard", () => {
       callMethod: vi.fn(async (participantId: string, method: string, args: unknown) => {
         calls.push({ participantId, method, args });
         if (method === "persist_agent_model") throw new Error("approval denied");
-        if (method === "credentialConnected") return { resumed: true };
         return { ok: true };
       }),
     };
@@ -96,7 +119,6 @@ describe("ModelCredentialRequiredCard", () => {
             browserHandoffCallerId: "panel:runtime-1",
             browserHandoffCallerKind: "panel",
             modelPersistenceParticipantId: "panel:chat-participant",
-            resumeAfterConnect: true,
             providerOptions: [
               {
                 providerId: "openai-codex",
@@ -123,12 +145,11 @@ describe("ModelCredentialRequiredCard", () => {
     fireEvent.click(screen.getByText("Anthropic"));
     fireEvent.click(screen.getByRole("button", { name: /Enter API Key/i }));
 
-    await waitFor(() => expect(chat.callMethod).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(chat.callMethod).toHaveBeenCalledTimes(3));
     expect(calls.map((call) => [call.participantId, call.method])).toEqual([
       ["do:agent", "setModel"],
       ["panel:chat-participant", "persist_agent_model"],
       ["do:agent", "connectModelCredential"],
-      ["do:agent", "credentialConnected"],
     ]);
     expect(calls[1]?.args).toEqual({
       participantId: "do:agent",

@@ -460,7 +460,7 @@ describe("useDeferredAgent", () => {
     expect(result.current.deferredAgent?.launching).toBe(false);
   });
 
-  it("keeps first-run setup active when OAuth makes the selected model ready", async () => {
+  it("launches a connectable cloud agent before its credential is configured", async () => {
     const m = freshMocks();
     const needsSetupCatalog: ModelCatalog = {
       providers: [],
@@ -480,7 +480,7 @@ describe("useDeferredAgent", () => {
       defaultModelRef: WORKSPACE_MODEL,
       defaultAgentConfig: { model: WORKSPACE_MODEL },
     };
-    const { result, rerender } = renderHook((p: Params) => useDeferredAgent(p), {
+    const { result } = renderHook((p: Params) => useDeferredAgent(p), {
       initialProps: makeParams(m, {
         ...configured,
         modelCatalog: needsSetupCatalog,
@@ -490,21 +490,6 @@ describe("useDeferredAgent", () => {
 
     await waitFor(() => expect(result.current.deferredAgent?.queued).toHaveLength(1));
     expect(result.current.deferredAgent?.setupActive).toBe(true);
-    expect(m.onAddAgent).not.toHaveBeenCalled();
-
-    // Successful OAuth refreshes the catalog and makes the host preflight
-    // ready. The explicit first-run choice remains active so the Start action
-    // is not replaced by a generic empty-chat screen.
-    rerender(
-      makeParams(m, {
-        ...configured,
-        modelCatalog: MODEL_CATALOG,
-        firstAgentModelPreflight: "ready",
-      })
-    );
-
-    expect(result.current.deferredAgent?.setupActive).toBe(true);
-    expect(result.current.deferredAgent?.modelSelectionRequired).toBe(true);
     expect(m.onAddAgent).not.toHaveBeenCalled();
 
     act(() => result.current.deferredAgent?.startQueued());

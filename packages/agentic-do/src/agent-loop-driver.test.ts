@@ -2348,6 +2348,20 @@ describe("AgentLoopDriver", () => {
     expect(harness.driver.outbox.all()).toEqual([
       expect.objectContaining({ kind: "credential_wait" }),
     ]);
+    const effectId = ids.credentialWaitEffect(
+      ids.credKey(CHANNEL, "openai-codex"),
+    );
+    await expect(
+      harness.driver.deliverEffectOutcome(
+        effectId,
+        { kind: "credential", resolved: true },
+        { channelId: CHANNEL },
+      ),
+    ).resolves.toBe(true);
+    const resumed = await harness.driver.loop(CHANNEL);
+    expect(resumed.state.pendingCredentialWaits).toEqual({});
+    expect(resumed.state.openTurn).not.toBeNull();
+    expect(resumed.state.inFlightModelCall).not.toBeNull();
   });
 
   it("lets unattended executor auth throws continue on local fallback", async () => {

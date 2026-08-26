@@ -1,7 +1,7 @@
 import type { HeadlessSession, ChatMessage } from "@workspace/agentic-session";
 import {
   PROVIDER_CONNECT_PRESETS,
-  toPanelConnectRequest,
+  toCredentialConnectRequest,
 } from "@workspace/model-catalog/providerConnect";
 
 /**
@@ -182,7 +182,7 @@ export class ChatViewModel {
       return;
     }
     try {
-      const request = toPanelConnectRequest(provider, { browser: "external" });
+      const request = toCredentialConnectRequest(provider, { browser: "external" });
       if (!request) {
         this.addNotice(`Could not build a connect request for ${provider}.`);
         return;

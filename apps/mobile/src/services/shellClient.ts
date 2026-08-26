@@ -3,7 +3,7 @@ import type { RpcEnvelope } from "@vibestudio/rpc";
 import { decodePanelStateArgs } from "@vibestudio/shared/panelStateArgs";
 import type { ThemeAppearance } from "@vibestudio/shared/types";
 import type { WorkspaceConfig } from "@vibestudio/workspace-contracts/types";
-import { Appearance, Platform } from "react-native";
+import { Appearance } from "react-native";
 import { WorkspaceClient } from "@vibestudio/service-schemas/clients/shellWorkspaceClient";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import type { EventName, EventPayloads } from "@vibestudio/shared/events";
@@ -182,39 +182,8 @@ function createCredentialsClient(transport: MobileRpcClient) {
     "credentials",
     credentialsMethods,
     (service, method, args) =>
-      transport.call(
-        "main",
-        `${service}.${method}`,
-        rewriteCredentialArgsForPlatform(method, args),
-      ),
+      transport.call("main", `${service}.${method}`, args),
   );
-}
-
-function rewriteCredentialArgsForPlatform(
-  method: string,
-  args: unknown[],
-): unknown[] {
-  if (method !== "connect" || Platform.OS !== "ios") return args;
-  const [request, ...rest] = args as [unknown, ...unknown[]];
-  if (!request || typeof request !== "object" || Array.isArray(request))
-    return args;
-  const redirect = (request as { redirect?: unknown }).redirect;
-  if (!redirect || typeof redirect !== "object" || Array.isArray(redirect))
-    return args;
-  if ((redirect as { type?: unknown }).type !== "client-loopback") return args;
-  const callbackUri = (redirect as { callbackUri?: unknown }).callbackUri;
-  return [
-    {
-      ...(request as Record<string, unknown>),
-      redirect: {
-        ...(redirect as Record<string, unknown>),
-        type: "app-scheme",
-        ...(typeof callbackUri === "string" ? { callbackUri } : {}),
-      },
-      browser: "external",
-    },
-    ...rest,
-  ];
 }
 
 function createPushClient(transport: MobileRpcClient) {

@@ -2039,8 +2039,9 @@ export abstract class AgentVesselBase extends DurableObjectBase {
           };
         },
         registerCredentialInterest: async () => {
-          // Resolution arrives via the `credentialConnected` agent method —
-          // panel-driven, no server-side interest registry required.
+          // The agent-owned connect method resolves this durable wait after the
+          // host has stored the credential; no separate panel acknowledgement
+          // or server-side interest registry is required.
         },
       },
       localTools: {
@@ -5483,15 +5484,6 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             isError: true,
           };
         }
-        const setup = this.getModelCredentialSetupProps(input.providerId);
-        if (!setup) {
-          return {
-            result: {
-              error: `no credential setup for provider ${input.providerId}`,
-            },
-            isError: true,
-          };
-        }
         const browser = normalizeBrowserOpenMode(input.browserOpenMode);
         const request = toCredentialConnectRequest(input.providerId, {
           browser,
@@ -5516,15 +5508,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           [connectParams],
           { signal },
         );
-        return { result: credential };
-      }
-      case "credentialConnected": {
-        const input = (args ?? {}) as { providerId?: string };
-        const providerId = input.providerId ?? "";
         const effectId = ids.credentialWaitEffect(
-          ids.credKey(channelId, providerId),
+          ids.credKey(channelId, input.providerId),
         );
-        // This is the only reconnect success path that resumes the waiting loop.
         const resumed = await this.driver.deliverEffectOutcome(
           effectId,
           {
@@ -5534,7 +5520,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           { channelId },
         );
         if (resumed) await this.driver.wake(channelId);
-        return { result: { resumed } };
+        return { result: { credential, resumed } };
       }
       case "setModel": {
         const model = (args as { model?: unknown } | null)?.model;
@@ -6526,7 +6512,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     this.assertServerCaller("onAuthorityChanged");
     // Authority acquisition and credential availability are independent
     // continuations. Only authority-deferred HTTP calls are eligible here;
-    // credential waits resume exclusively through credentialConnected.
+    // Credential waits resume exclusively when the agent-owned connect
+    // operation succeeds; authority changes cannot imply credential presence.
     this.driver.nudgeAuthorityRedrive();
   }
 

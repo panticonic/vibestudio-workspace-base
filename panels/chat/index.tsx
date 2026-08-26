@@ -40,14 +40,12 @@ import type {
   AvailableAgent,
   ModelCatalog,
   AgentSubscriptionConfig,
-  ConnectProviderResult,
   ModelSetupResult,
 } from "@workspace/agentic-core";
 import {
   ProvisionalAgentLifecycle,
   type ProvisionalAgentIntent,
 } from "@workspace/agentic-core/provisional-agent-lifecycle";
-import { toPanelConnectRequest } from "@workspace/model-catalog/providerConnect";
 import {
   DEFAULT_AGENT_MODEL_REF,
   LOCAL_MODELS_EXTENSION_ID,
@@ -1063,29 +1061,6 @@ export default function ChatPanel() {
     [availableAgents, buildSubscribeConfig, resolveWorkspaceDefaultAgentConfig]
   );
 
-  const handleConnectProvider = useCallback(
-    async (
-      providerId: string,
-      _modelBaseUrl: string,
-      opts?: { browser?: "internal" | "external" }
-    ): Promise<ConnectProviderResult> => {
-      const request = toPanelConnectRequest(providerId, { browser: opts?.browser });
-      if (!request) {
-        return { ok: false, error: `No connect flow available for ${providerId}` };
-      }
-      try {
-        await rpc.call("main", "credentials.connect", [request]);
-        // Refetch the snapshot — availability is worker-computed, so the new
-        // credential shows up as `ready` entries in the next catalog.
-        await loadModelSettings(true);
-        return { ok: true };
-      } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
-      }
-    },
-    [loadModelSettings]
-  );
-
   const handleInstallLocalModel = useCallback(
     async (modelRef: string): Promise<ModelSetupResult> => {
       try {
@@ -1161,7 +1136,6 @@ export default function ChatPanel() {
       onAddAgent: handleAddAgent,
       onPrepareAgent: handlePrepareAgent,
       onReplaceAgent: handleReplaceAgent,
-      onConnectProvider: handleConnectProvider,
       onInstallLocalModel: handleInstallLocalModel,
       onPersistAgentModel: handlePersistAgentModel,
       onSaveDefaults: saveDefaultAgentConfig,
@@ -1191,7 +1165,6 @@ export default function ChatPanel() {
       handleAddAgent,
       handlePrepareAgent,
       handleReplaceAgent,
-      handleConnectProvider,
       handleInstallLocalModel,
       handlePersistAgentModel,
       saveDefaultAgentConfig,

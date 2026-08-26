@@ -19,6 +19,7 @@ import type {
 } from "@vibestudio/rpc";
 import type { RecoveryKind } from "@vibestudio/rpc/protocol/recoveryCoordinator";
 import type { ReconnectProgress, WebRtcSession } from "@vibestudio/rpc/transports/webrtcClient";
+import { Platform } from "react-native";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import { authMethods } from "@vibestudio/service-schemas/auth";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
@@ -256,6 +257,7 @@ export class MobileRpcClient implements Pick<
       // responses match their recorded origin.
       connectionId,
       clientPlatform: "mobile",
+      oauthCallbackMode: Platform.OS === "ios" ? "app-scheme" : "client-loopback",
       getToken: async () => {
         const grant = await authClient.grantConnection(runtimeEntityId);
         return grant.token;
@@ -326,7 +328,11 @@ export class MobileRpcClient implements Pick<
       room: stored.phase === "routed" ? stored.workspacePairing.room : stored.controlPairing.room,
       ice: stored.phase === "routed" ? stored.workspacePairing.ice : stored.controlPairing.ice,
     });
-    const connection = await reconnectMobileSession(stored, (kind) => this.emitRecovery(kind));
+    const connection = await reconnectMobileSession(
+      stored,
+      Platform.OS === "ios" ? "app-scheme" : "client-loopback",
+      (kind) => this.emitRecovery(kind)
+    );
     if (this.activeConnectToken !== token) {
       // A disconnect()/updateConfig()/reconnect() ran while this handshake was in
       // flight. Close the pipe we just produced (and its keepalive) rather than

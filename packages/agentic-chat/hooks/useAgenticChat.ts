@@ -1433,22 +1433,10 @@ Use package imports available to inline_ui plus relative imports for local helpe
     },
     [channelName, actions]
   );
-  const handleConnectProvider = useCallback(
-    async (
-      providerId: string,
-      modelBaseUrl: string,
-      opts?: { browser?: "internal" | "external" }
-    ) => {
-      if (!actions?.onConnectProvider) return { ok: false, error: "Connect is not available" };
-      return actions.onConnectProvider(providerId, modelBaseUrl, opts);
-    },
-    [actions]
-  );
   const sessionEnabled = true; // Always persistent: transcript state is projected from the durable PubSub log.
   const onAddAgent = actions?.onAddAgent ? handleAddAgent : undefined;
   const onPrepareAgent = actions?.onPrepareAgent ? handlePrepareAgent : undefined;
   const onReplaceAgent = actions?.onReplaceAgent ? handleReplaceAgent : undefined;
-  const onConnectProvider = actions?.onConnectProvider ? handleConnectProvider : undefined;
   const onInstallLocalModel = actions?.onInstallLocalModel;
   const availableAgents = actions?.availableAgents;
   const modelCatalog = actions?.modelCatalog;
@@ -1562,7 +1550,6 @@ Use package imports available to inline_ui plus relative imports for local helpe
       onDismissDirtyWarning: core.onDismissDirtyWarning,
       onAddAgent,
       onReplaceAgent,
-      onConnectProvider,
       onInstallLocalModel,
       availableAgents,
       modelCatalog,
@@ -1641,7 +1628,6 @@ Use package imports available to inline_ui plus relative imports for local helpe
       core.onDismissDirtyWarning,
       onAddAgent,
       onReplaceAgent,
-      onConnectProvider,
       onInstallLocalModel,
       availableAgents,
       modelCatalog,

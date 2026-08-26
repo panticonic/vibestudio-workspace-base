@@ -126,7 +126,11 @@ describe("MobileRpcClient WebRTC transport", () => {
     await client.connectAndWait();
 
     expect(mockLoadShellCredential).toHaveBeenCalledTimes(1);
-    expect(mockReconnectMobileSession).toHaveBeenCalledWith(storedCredential, expect.any(Function));
+    expect(mockReconnectMobileSession).toHaveBeenCalledWith(
+      storedCredential,
+      expect.stringMatching(/^(app-scheme|client-loopback)$/),
+      expect.any(Function)
+    );
     expect(client.selfId).toBe(`shell:${DEVICE_ID}`);
     expect(client.status).toBe("connected");
     await expect(client.call("main", "demo.hello", ["world"])).resolves.toEqual({ ok: true });
@@ -375,7 +379,7 @@ describe("MobileRpcClient WebRTC transport", () => {
 
   it("forwards WebRTC recovery notifications to registered listeners", async () => {
     let emitRecovery: ((kind: RecoveryKind) => void | Promise<void>) | undefined;
-    mockReconnectMobileSession.mockImplementation(async (_stored, onRecovery) => {
+    mockReconnectMobileSession.mockImplementation(async (_stored, _callbackMode, onRecovery) => {
       emitRecovery = onRecovery;
       return makeConnection();
     });

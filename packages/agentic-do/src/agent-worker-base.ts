@@ -58,7 +58,6 @@ type StandardAgentMethodName =
   | "pause"
   | "resume"
   | "scheduleResumeAtReset"
-  | "credentialConnected"
   | "connectModelCredential"
   | "setModel"
   | "setThinkingLevel"
@@ -1733,10 +1732,6 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         name: "scheduleResumeAtReset",
         description:
           "Schedule a paused model turn to resume when its usage limit resets",
-      },
-      {
-        name: "credentialConnected",
-        description: "Resume after model credential connection",
       },
       {
         name: "connectModelCredential",

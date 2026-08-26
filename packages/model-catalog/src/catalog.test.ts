@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isModelUsable, type ModelAvailability } from "./catalog";
+import { isModelAgentLaunchable, isModelUsable, type ModelAvailability } from "./catalog";
 
 describe("isModelUsable", () => {
   it.each<ModelAvailability>([
@@ -26,5 +26,34 @@ describe("isModelUsable", () => {
 
   it("treats a missing catalog entry as unavailable", () => {
     expect(isModelUsable(null)).toBe(false);
+  });
+});
+
+describe("isModelAgentLaunchable", () => {
+  it("allows a connectable remote model to park for agent-owned credential setup", () => {
+    expect(
+      isModelAgentLaunchable({
+        provider: "openai-codex",
+        connectable: true,
+        availability: { state: "needs-setup", detail: "no-credential" },
+      })
+    ).toBe(true);
+  });
+
+  it("still blocks uninstalled local and non-connectable remote models", () => {
+    expect(
+      isModelAgentLaunchable({
+        provider: "local",
+        connectable: false,
+        availability: { state: "needs-setup", detail: "not-installed" },
+      })
+    ).toBe(false);
+    expect(
+      isModelAgentLaunchable({
+        provider: "custom",
+        connectable: false,
+        availability: { state: "needs-setup", detail: "no-credential" },
+      })
+    ).toBe(false);
   });
 });

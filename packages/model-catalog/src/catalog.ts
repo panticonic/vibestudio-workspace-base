@@ -186,6 +186,23 @@ export function isModelUsable(
   return model?.availability.state === "ready" || model?.availability.state === "startable";
 }
 
+/** Whether an agent can be created with this model. Remote credential setup is
+ * agent-owned: the agent may start, park before provider use, and ask the user
+ * to connect. Local models still have to be installed before an agent starts. */
+export function isModelAgentLaunchable(
+  model:
+    | Pick<ModelCatalogEntry, "availability" | "provider" | "connectable">
+    | null
+    | undefined
+): boolean {
+  return (
+    isModelUsable(model) ||
+    (model?.provider !== "local" &&
+      model?.connectable === true &&
+      model.availability.state === "needs-setup")
+  );
+}
+
 export interface ModelSettingsSnapshot {
   catalog: ModelCatalog;
   /** Resolved/validated default model (equals `defaultAgentConfig.model`). */

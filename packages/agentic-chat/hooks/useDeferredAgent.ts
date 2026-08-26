@@ -6,7 +6,10 @@ import type {
   AvailableAgent,
   ModelCatalog,
 } from "@workspace/agentic-core";
-import { isModelUsable, type DefaultAgentConfig } from "@workspace/model-catalog/catalog";
+import {
+  isModelAgentLaunchable,
+  type DefaultAgentConfig,
+} from "@workspace/model-catalog/catalog";
 import type { AttachmentInput, Participant } from "@workspace/pubsub";
 import type { MessageTier } from "@workspace/agentic-protocol";
 import type {
@@ -327,7 +330,7 @@ export function useDeferredAgent(params: UseDeferredAgentParams): {
       !everHadAgentRef.current &&
       availableAgents.length > 0 &&
       modelChoiceAllowsPrewarm &&
-      isModelUsable(selectedModel);
+      isModelAgentLaunchable(selectedModel);
     const explicitAgentId = agentTypeTouchedRef.current ? agentId : undefined;
     const config = shouldPrepare ? spawnConfigFromDraft(latestDraft) : null;
     const fingerprint = config
@@ -371,7 +374,7 @@ export function useDeferredAgent(params: UseDeferredAgentParams): {
     const s = stateRef.current;
     if (s.agentPresent || s.armed || queuedRef.current.length === 0 || !s.draft.model) return;
     const selectedModel = modelCatalog?.models.find((model) => model.ref === s.draft.model);
-    if (!isModelUsable(selectedModel)) return;
+    if (!isModelAgentLaunchable(selectedModel)) return;
     spawnIntentRef.current = {
       agentId: agentTypeTouchedRef.current ? s.agentId : undefined,
       config: spawnConfigFromDraft(s.draft),

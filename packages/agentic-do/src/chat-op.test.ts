@@ -176,6 +176,7 @@ class TestVessel extends AgentVesselBase {
     null;
   automationLaunchForTest: MissionRecord | null = null;
   automationVisibleForTest: MissionRecord[] | null = null;
+  credentialConnectForTest: (() => Promise<Record<string, unknown>>) | null = null;
   readonly automationLaunchCalls: Array<{
     args: unknown[];
     options?: unknown;
@@ -363,6 +364,13 @@ class TestVessel extends AgentVesselBase {
             if (targetId === "main" && method === "contextIntegrity.ingest") {
               vessel.operationLog.push("rpc:main:contextIntegrity.ingest");
               return { class: "internal", latchEpoch: 0, externalKeys: [] };
+            }
+            if (
+              targetId === "main" &&
+              method === "credentials.connect" &&
+              vessel.credentialConnectForTest
+            ) {
+              return vessel.credentialConnectForTest();
             }
             if (
               targetId === "main" &&
@@ -2427,8 +2435,9 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     expect(deliverSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("credentialConnected reports whether it actually resumed a pending credential wait", async () => {
+  it("connectModelCredential resumes its pending credential wait atomically", async () => {
     const vessel = await makeVessel();
+    vessel.credentialConnectForTest = async () => ({ id: "credential-1" });
     const deliverSpy = vi.fn(async () => true);
     const wakeSpy = vi.fn(async () => {});
     (vessel as unknown as { _driver: unknown })._driver = {
@@ -2440,10 +2449,12 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     vessel.callerIdForTest = "do:workers/pubsub-channel:PubSubChannel:chan-1";
 
     await expect(
-      vessel.onMethodCall(CHANNEL, "call-1", "credentialConnected", {
+      vessel.onMethodCall(CHANNEL, "call-1", "connectModelCredential", {
         providerId: "openai-codex",
       }),
-    ).resolves.toEqual({ result: { resumed: true } });
+    ).resolves.toEqual({
+      result: { credential: { id: "credential-1" }, resumed: true },
+    });
     expect(deliverSpy).toHaveBeenCalledWith(
       ids.credentialWaitEffect(ids.credKey(CHANNEL, "openai-codex")),
       { kind: "credential", resolved: true },
@@ -2454,15 +2465,18 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     deliverSpy.mockResolvedValueOnce(false);
     wakeSpy.mockClear();
     await expect(
-      vessel.onMethodCall(CHANNEL, "call-2", "credentialConnected", {
+      vessel.onMethodCall(CHANNEL, "call-2", "connectModelCredential", {
         providerId: "openai-codex",
       }),
-    ).resolves.toEqual({ result: { resumed: false } });
+    ).resolves.toEqual({
+      result: { credential: { id: "credential-1" }, resumed: false },
+    });
     expect(wakeSpy).not.toHaveBeenCalled();
   });
 
   it("scopes direct provider calls and cancellation to the authenticated channel", async () => {
     const vessel = await makeVessel();
+    vessel.credentialConnectForTest = async () => ({ id: "credential-1" });
     let release!: (value: boolean) => void;
     const gate = new Promise<boolean>((resolve) => {
       release = resolve;
@@ -2477,9 +2491,9 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     const first = vessel.onMethodCall(
       "chan-1",
       "shared-transport",
-      "credentialConnected",
+      "connectModelCredential",
       {
-        providerId: "provider-a",
+        providerId: "openai-codex",
       },
     );
     await vi.waitFor(() =>
@@ -2496,9 +2510,9 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     const second = vessel.onMethodCall(
       "chan-2",
       "shared-transport",
-      "credentialConnected",
+      "connectModelCredential",
       {
-        providerId: "provider-b",
+        providerId: "openai-codex",
       },
     );
     await vi.waitFor(() =>

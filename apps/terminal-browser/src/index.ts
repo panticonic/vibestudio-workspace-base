@@ -54,6 +54,7 @@ async function connect(appId: string, logSink: LogSink) {
       connectionId,
       clientLabel: "Vibestudio Terminal",
       clientPlatform: "desktop",
+      oauthCallbackMode: "client-loopback",
     }),
     adapter: {
       now: () => Date.now(),

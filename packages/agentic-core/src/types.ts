@@ -101,8 +101,6 @@ export interface ModelSetupResult {
   error?: string;
 }
 
-export type ConnectProviderResult = ModelSetupResult;
-
 export interface NewConversationOptions {
   /** Optional first user message for the new conversation. */
   initialPrompt?: string;
@@ -153,12 +151,6 @@ export interface AgenticChatActions {
     config?: AgentSubscriptionConfig
   ) => Promise<{ agentId: string; handle: string } | void>;
   onRemoveAgent?: (channelName: string, handle: string) => Promise<void>;
-  /** Connect a model provider's credential (model picker "Connect" affordance). */
-  onConnectProvider?: (
-    providerId: string,
-    modelBaseUrl: string,
-    opts?: { browser?: "internal" | "external" }
-  ) => Promise<ConnectProviderResult>;
   /** Start installing a local model. Availability/progress remains catalog-owned. */
   onInstallLocalModel?: (modelRef: string) => Promise<ModelSetupResult>;
   onPersistAgentModel?: (

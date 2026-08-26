@@ -7,7 +7,11 @@ import { AgentConfigForm, type AgentConfigDraft } from "./AgentConfigForm";
 import { draftForAgent as seedDraftForAgent, draftToConfig } from "./agentConfigDraft";
 import { AgentTypeCard } from "./AgentTypeCard";
 import { ModelSetupStatus } from "./ModelSetupStatus";
-import { isModelUsable, LOCAL_FALLBACK_MODEL_REF } from "@workspace/model-catalog/catalog";
+import {
+  isModelAgentLaunchable,
+  isModelUsable,
+  LOCAL_FALLBACK_MODEL_REF,
+} from "@workspace/model-catalog/catalog";
 
 export interface AgentDialogProps {
   open: boolean;
@@ -43,7 +47,6 @@ export function AgentDialog({ open, onOpenChange, editParticipantId }: AgentDial
     onSaveDefaults,
     onAddAgent,
     onReplaceAgent,
-    onConnectProvider,
     onInstallLocalModel,
     onCallMethodResult,
     onOpenLocalModels,
@@ -172,9 +175,11 @@ export function AgentDialog({ open, onOpenChange, editParticipantId }: AgentDial
     () => modelCatalog?.models.find((m) => m.ref === draft.model) ?? null,
     [modelCatalog, draft.model]
   );
-  // Availability is the worker-computed truth (design §7.1). Agent creation
-  // remains blocked until setup moves the model to startable/ready.
+  // Local runtimes must be installed before launch. Connectable remote models
+  // may launch without a credential; the agent parks before provider use and
+  // owns the connection request.
   const modelUsable = isModelUsable(selectedModel);
+  const modelLaunchable = isModelAgentLaunchable(selectedModel);
   const selectedProviderLabel =
     modelCatalog?.providers.find((provider) => provider.id === selectedModel?.provider)?.label ??
     selectedModel?.provider ??
@@ -258,22 +263,14 @@ export function AgentDialog({ open, onOpenChange, editParticipantId }: AgentDial
   }, [targetParticipantId, draft, targetParticipant, onReplaceAgent, onOpenChange]);
 
   const setupModel = useCallback(
-    async (browser: "internal" | "external" = "external") => {
+    async () => {
       if (!selectedModel) return;
       setBusy(true);
       setError(null);
       try {
-        const result =
-          selectedModel.provider === "local"
-            ? await onInstallLocalModel?.(selectedModel.ref)
-            : await onConnectProvider?.(selectedModel.provider, selectedModel.baseUrl, { browser });
+        const result = await onInstallLocalModel?.(selectedModel.ref);
         if (!result?.ok) {
-          setError(
-            result?.error ??
-              (selectedModel.provider === "local"
-                ? "Local model installation is not available."
-                : "Provider connection is not available.")
-          );
+          setError(result?.error ?? "Local model installation is not available.");
         }
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -281,10 +278,10 @@ export function AgentDialog({ open, onOpenChange, editParticipantId }: AgentDial
         setBusy(false);
       }
     },
-    [selectedModel, onInstallLocalModel, onConnectProvider]
+    [selectedModel, onInstallLocalModel]
   );
 
-  const canSubmit = !!draft.model && !busy && (mode === "edit" || modelUsable);
+  const canSubmit = !!draft.model && !busy && (mode === "edit" || modelLaunchable);
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -362,7 +359,9 @@ export function AgentDialog({ open, onOpenChange, editParticipantId }: AgentDial
                   model={selectedModel}
                   providerLabel={selectedProviderLabel}
                   pending={busy}
-                  onSetup={(browser) => void setupModel(browser)}
+                  onSetup={
+                    selectedModel.provider === "local" ? () => void setupModel() : undefined
+                  }
                   onOpenLocalModels={onOpenLocalModels}
                   onOpenLocalModelLog={
                     onOpenLocalModelsLog && selectedModel.provider === "local"
@@ -414,7 +413,7 @@ export function AgentDialog({ open, onOpenChange, editParticipantId }: AgentDial
                 </Button>
               </Flex>
             </Flex>
-            {!modelUsable && mode !== "edit" ? (
+            {!modelLaunchable && mode !== "edit" ? (
               <Text size="1" color="gray" as="p" mt="2">
                 Finish model setup above before {verb.toLowerCase()}ing this agent.
               </Text>

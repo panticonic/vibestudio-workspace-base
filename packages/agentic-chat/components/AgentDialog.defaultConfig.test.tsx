@@ -83,7 +83,6 @@ function context(overrides: Partial<ChatContextValue> = {}): ChatContextValue {
     defaultModelRef: "prov:model-a",
     onAddAgent: vi.fn(),
     onReplaceAgent: vi.fn(),
-    onConnectProvider: vi.fn(),
     onCallMethodResult: vi.fn(),
     ...overrides,
   } as unknown as ChatContextValue;

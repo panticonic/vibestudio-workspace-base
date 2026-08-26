@@ -25,9 +25,7 @@ interface ModelCredentialRequiredCardProps {
   agentParticipantId?: string;
   browserHandoffCallerId?: string;
   browserHandoffCallerKind?: string;
-  browserHandoffPlatform?: string;
   modelPersistenceParticipantId?: string;
-  resumeAfterConnect?: boolean;
   reason?: string;
   diagnosticReason?: string;
   failureCode?: string;
@@ -35,17 +33,6 @@ interface ModelCredentialRequiredCardProps {
 
 interface ChatApi {
   callMethod: (participantId: string, method: string, args: unknown) => Promise<unknown>;
-}
-
-function resolveBrowserHandoffPlatform(
-  props: ModelCredentialRequiredCardProps
-): string | undefined {
-  if (props.browserHandoffPlatform) return props.browserHandoffPlatform;
-  return getVibestudioHostPlatform() === "mobile" ? "mobile" : undefined;
-}
-
-function isResumed(value: unknown): boolean {
-  return !!value && typeof value === "object" && (value as { resumed?: unknown }).resumed === true;
 }
 
 export default function ModelCredentialRequiredCard({
@@ -123,17 +110,7 @@ export default function ModelCredentialRequiredCard({
         browserOpenMode: openMode,
         browserHandoffCallerId: props.browserHandoffCallerId,
         browserHandoffCallerKind: props.browserHandoffCallerKind,
-        browserHandoffPlatform: resolveBrowserHandoffPlatform(props),
       });
-      if (props.resumeAfterConnect !== false) {
-        const result = await chat.callMethod(props.agentParticipantId, "credentialConnected", {
-          providerId: selectedProviderId,
-          modelBaseUrl: selectedModelBaseUrl,
-        });
-        if (!isResumed(result)) {
-          throw new Error("Credential connected, but there was no interrupted turn to continue.");
-        }
-      }
       setStatus("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -144,6 +121,7 @@ export default function ModelCredentialRequiredCard({
   };
 
   const busy = status === "starting" || status === "waiting";
+  const workspaceBrowserAvailable = getVibestudioHostPlatform() !== "mobile";
   const unsupported = !selectedFlow || !selectedModelBaseUrl;
   const apiKeyFlow = selectedFlow?.type === "api-key";
   const browserChoicePrompt = reconnectReason
@@ -229,11 +207,7 @@ export default function ModelCredentialRequiredCard({
         ) : null}
         {status === "done" ? (
           <Callout.Root color="green" size="1">
-            <Callout.Text>
-              {props.resumeAfterConnect === false
-                ? "Credential connected."
-                : "Credential connected. Continuing..."}
-            </Callout.Text>
+            <Callout.Text>Credential connected. Continuing...</Callout.Text>
           </Callout.Root>
         ) : null}
         {error ? (
@@ -258,30 +232,32 @@ export default function ModelCredentialRequiredCard({
               {browserChoicePrompt}
             </Text>
             <Flex direction="column" gap="2">
-              <Button
-                size="1"
-                onClick={() => void startCredential("internal")}
-                disabled={busy || unsupported || status === "done"}
-                style={{
-                  alignItems: "flex-start",
-                  height: "auto",
-                  justifyContent: "flex-start",
-                  paddingBottom: 8,
-                  paddingTop: 8,
-                  textAlign: "left",
-                  whiteSpace: "normal",
-                }}
-              >
-                {busy && activeOpenMode === "internal" ? <Spinner size="1" /> : null}
-                <Flex direction="column" gap="1" align="start">
-                  <Text as="span" size="1" weight="medium">
-                    {internalBrowserLabel}
-                  </Text>
-                  <Text as="span" size="1">
-                    Choose this when the account is signed in inside this workspace.
-                  </Text>
-                </Flex>
-              </Button>
+              {workspaceBrowserAvailable ? (
+                <Button
+                  size="1"
+                  onClick={() => void startCredential("internal")}
+                  disabled={busy || unsupported || status === "done"}
+                  style={{
+                    alignItems: "flex-start",
+                    height: "auto",
+                    justifyContent: "flex-start",
+                    paddingBottom: 8,
+                    paddingTop: 8,
+                    textAlign: "left",
+                    whiteSpace: "normal",
+                  }}
+                >
+                  {busy && activeOpenMode === "internal" ? <Spinner size="1" /> : null}
+                  <Flex direction="column" gap="1" align="start">
+                    <Text as="span" size="1" weight="medium">
+                      {internalBrowserLabel}
+                    </Text>
+                    <Text as="span" size="1">
+                      Choose this when the account is signed in inside this workspace.
+                    </Text>
+                  </Flex>
+                </Button>
+              ) : null}
               <Button
                 size="1"
                 variant="soft"

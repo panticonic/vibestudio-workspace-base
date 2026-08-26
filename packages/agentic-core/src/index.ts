@@ -20,7 +20,6 @@ export type {
   ConnectionConfig,
   AgenticChatActions,
   AvailableAgent,
-  ConnectProviderResult,
   ModelSetupResult,
   ChatSandboxValue,
   ToolProviderDeps,

@@ -60,7 +60,6 @@ import type {
   PendingAgent,
   DirtyRepoDetails,
   AvailableAgent,
-  ConnectProviderResult,
   ModelSetupResult,
   ModelCatalog,
   AgentSubscriptionConfig,
@@ -496,12 +495,6 @@ export interface ChatContextValue {
     agentId?: string,
     config?: AgentSubscriptionConfig,
   ) => Promise<void> | void;
-  /** Connect a model provider credential; resolves to success/failure. */
-  onConnectProvider?: (
-    providerId: string,
-    modelBaseUrl: string,
-    opts?: { browser?: "internal" | "external" },
-  ) => Promise<ConnectProviderResult>;
   /** Start installing a local model; live progress arrives through modelCatalog. */
   onInstallLocalModel?: (modelRef: string) => Promise<ModelSetupResult>;
   availableAgents?: AvailableAgent[];

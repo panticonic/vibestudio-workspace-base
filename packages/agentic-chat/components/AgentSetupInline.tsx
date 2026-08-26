@@ -1,10 +1,12 @@
 import { useState } from "react";
 import { Box, Button, Callout, Card, Flex, Heading, Text } from "@radix-ui/themes";
 import { ArrowDownIcon, ExclamationTriangleIcon, LightningBoltIcon } from "@radix-ui/react-icons";
-import { isModelUsable, LOCAL_FALLBACK_MODEL_REF } from "@workspace/model-catalog/catalog";
+import {
+  isModelAgentLaunchable,
+  LOCAL_FALLBACK_MODEL_REF,
+} from "@workspace/model-catalog/catalog";
 import { useChatContext } from "../context/ChatContext";
 import { AgentConfigForm } from "./AgentConfigForm";
-import { FirstAgentModelChoices } from "./FirstAgentModelChoices";
 import { ModelSetupStatus } from "./ModelSetupStatus";
 
 /**
@@ -20,14 +22,12 @@ export function AgentSetupInline() {
     modelCatalog,
     defaultAgentConfig,
     onSaveDefaults,
-    onConnectProvider,
     onInstallLocalModel,
     onOpenLocalModels,
     onOpenLocalModelsLog,
   } = useChatContext();
   const [setupPending, setSetupPending] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
+  const [setupError, setSetupError] = useState<string | null>(null);
   if (!deferredAgent) return null;
   const { draft, setDraft, modelSelectionRequired, startQueued, queued } = deferredAgent;
   const selectedModel = modelCatalog?.models.find((model) => model.ref === draft.model) ?? null;
@@ -35,38 +35,24 @@ export function AgentSetupInline() {
     modelCatalog?.providers.find((provider) => provider.id === selectedModel?.provider)?.label ??
     selectedModel?.provider ??
     "";
-  const needsConnect =
-    selectedModel?.availability.state === "needs-setup" &&
-    selectedModel.provider !== "local" &&
-    selectedModel.connectable &&
-    !!onConnectProvider;
   const needsInstall =
     selectedModel?.provider === "local" &&
     selectedModel.availability.state === "needs-setup" &&
     selectedModel.availability.detail === "not-installed" &&
     !!onInstallLocalModel;
-  const canStart = isModelUsable(selectedModel);
+  const canStart = isModelAgentLaunchable(selectedModel);
   const hasInjectedPrompt = queued.some((message) => message.tier === "secondary");
   const showStart = modelSelectionRequired && queued.length > 0;
 
-  const handleSetup = async (browser: "internal" | "external" = "external") => {
-    if (!selectedModel) return;
+  const installSelectedLocalModel = async () => {
+    if (!selectedModel || selectedModel.provider !== "local" || !onInstallLocalModel) return;
     setSetupPending(true);
-    setError(null);
+    setSetupError(null);
     try {
-      if (needsConnect && onConnectProvider) {
-        const result = await onConnectProvider(selectedModel.provider, selectedModel.baseUrl, {
-          browser,
-        });
-        if (!result.ok) {
-          setError(result.error ?? `Couldn't connect ${selectedProvider}.`);
-        }
-      } else if (selectedModel.provider === "local" && onInstallLocalModel) {
-        const result = await onInstallLocalModel(selectedModel.ref);
-        if (!result.ok) setError(result.error ?? `Couldn't install ${selectedModel.name}.`);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const result = await onInstallLocalModel(selectedModel.ref);
+      if (!result.ok) setSetupError(result.error ?? `Couldn't install ${selectedModel.name}.`);
+    } catch (error) {
+      setSetupError(error instanceof Error ? error.message : String(error));
     } finally {
       setSetupPending(false);
     }
@@ -114,29 +100,19 @@ export function AgentSetupInline() {
                 </Text>
               </Flex>
             </Flex>
-            {error && (
+            {setupError ? (
               <Callout.Root color="red" size="1">
                 <Callout.Icon>
                   <ExclamationTriangleIcon />
                 </Callout.Icon>
-                <Callout.Text>{error}</Callout.Text>
+                <Callout.Text>{setupError}</Callout.Text>
               </Callout.Root>
-            )}
-            {modelSelectionRequired ? (
-              <FirstAgentModelChoices
-                catalog={modelCatalog ?? null}
-                value={draft.model}
-                onChange={(model) => {
-                  setError(null);
-                  setDraft({ ...draft, model });
-                }}
-              />
             ) : null}
             <AgentConfigForm
               catalog={modelCatalog ?? null}
               value={draft}
               onChange={(next) => {
-                setError(null);
+                setSetupError(null);
                 setDraft(next);
               }}
               modelEditable
@@ -151,7 +127,11 @@ export function AgentSetupInline() {
                 model={selectedModel}
                 providerLabel={selectedProvider}
                 pending={setupPending}
-                onSetup={(browser) => void handleSetup(browser)}
+                onSetup={
+                  selectedModel.provider === "local" && onInstallLocalModel
+                    ? () => void installSelectedLocalModel()
+                    : undefined
+                }
                 onOpenLocalModels={onOpenLocalModels}
                 onOpenLocalModelLog={
                   onOpenLocalModelsLog && selectedModel.provider === "local"
@@ -168,7 +148,7 @@ export function AgentSetupInline() {
                 {selectedModel?.provider === "local" ? "Start with local model" : "Start agent"}
               </Button>
             )}
-            {showStart && selectedModel && !canStart && !needsConnect && !needsInstall && (
+            {showStart && selectedModel && !canStart && !needsInstall && (
               <Text size="1" color={selectedModel.availability.state === "error" ? "red" : "gray"}>
                 {selectedModel.availability.state === "downloading"
                   ? "Start unlocks automatically when the download and installation finish."

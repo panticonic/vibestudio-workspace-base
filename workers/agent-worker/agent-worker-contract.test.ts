@@ -9,7 +9,6 @@ import { TestAgentWorker } from "../test-agent/test-agent-worker.js";
 const STANDARD_METHODS = [
   "pause",
   "resume",
-  "credentialConnected",
   "connectModelCredential",
   "setModel",
   "setThinkingLevel",

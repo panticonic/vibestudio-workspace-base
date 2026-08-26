@@ -15,7 +15,6 @@ import {
   DownloadIcon,
   ExclamationTriangleIcon,
   ExternalLinkIcon,
-  Link2Icon,
 } from "@radix-ui/react-icons";
 import type { ModelCatalogEntry } from "@workspace/agentic-core";
 import {
@@ -23,15 +22,12 @@ import {
   LOCAL_FALLBACK_MODEL_REF,
   LOCAL_PROVIDER_ID,
 } from "@workspace/model-catalog/catalog";
-import { getProviderConnectPreset } from "@workspace/model-catalog/providerConnect";
-
-type BrowserOpenMode = "internal" | "external";
 
 export interface ModelSetupStatusProps {
   model: ModelCatalogEntry;
   providerLabel: string;
   pending: boolean;
-  onSetup: (browser?: BrowserOpenMode) => void;
+  onSetup?: () => void;
   onOpenLocalModels?: () => void;
   onOpenLocalModelLog?: () => void;
 }
@@ -102,8 +98,6 @@ export function ModelSetupStatus({
 }: ModelSetupStatusProps) {
   const availability = model.availability;
   const local = model.provider === LOCAL_PROVIDER_ID;
-  const browserOAuth =
-    getProviderConnectPreset(model.provider)?.flow.type === "oauth2-auth-code-pkce";
 
   if (availability.state === "downloading") {
     return <DownloadProgress availability={availability} onOpenLocalModels={onOpenLocalModels} />;
@@ -192,7 +186,7 @@ export function ModelSetupStatus({
             </Box>
           </Flex>
           <Flex gap="2" wrap="wrap">
-            <Button size="2" loading={pending} onClick={() => onSetup()}>
+            <Button size="2" loading={pending} onClick={() => onSetup?.()}>
               <DownloadIcon /> Download & install
             </Button>
             {onOpenLocalModels ? (
@@ -225,41 +219,8 @@ export function ModelSetupStatus({
     );
   }
 
-  return (
-    <Card size="2" variant="surface" data-surface-tone="selected">
-      <Flex direction="column" gap="3">
-        <Flex align="start" gap="3">
-          <Box className="first-agent-setup-status-icon">
-            <Link2Icon />
-          </Box>
-          <Box>
-            <Heading size="3">Connect {providerLabel}</Heading>
-            <Text size="1" color="gray" as="p" mt="1">
-              Sign in securely to make this provider available. Your queued opening prompt will not
-              be sent during setup.
-            </Text>
-          </Box>
-        </Flex>
-        {browserOAuth ? (
-          <Flex gap="2" wrap="wrap">
-            <Button size="2" loading={pending} onClick={() => onSetup("external")}>
-              Use system browser
-            </Button>
-            <Button size="2" variant="soft" disabled={pending} onClick={() => onSetup("internal")}>
-              Use workspace browser
-            </Button>
-          </Flex>
-        ) : (
-          <Button size="2" loading={pending} onClick={() => onSetup()}>
-            Connect {providerLabel}
-          </Button>
-        )}
-        {pending ? (
-          <Text size="1" color="gray">
-            Complete the secure sign-in flow. Your opening prompt remains queued.
-          </Text>
-        ) : null}
-      </Flex>
-    </Card>
-  );
+  // A connectable remote model is launchable. Credential acquisition belongs
+  // to the running agent, so there is no prerequisite or procedure to explain
+  // on this configuration surface.
+  return null;
 }

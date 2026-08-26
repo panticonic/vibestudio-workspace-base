@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { ReactNode } from "react";
 import { makeTestCatalogEntry } from "@workspace/model-catalog/testing";
@@ -37,8 +37,7 @@ vi.mock("@radix-ui/themes", async () => {
 });
 
 describe("ModelSetupStatus", () => {
-  it("makes the system browser primary and keeps the workspace browser explicit for OAuth", () => {
-    const onSetup = vi.fn();
+  it("does not narrate deferred credential acquisition for a launchable remote model", () => {
     const model = makeTestCatalogEntry({
       ref: "openai-codex:gpt-5.6-sol",
       id: "gpt-5.6-sol",
@@ -49,17 +48,9 @@ describe("ModelSetupStatus", () => {
     });
 
     render(
-      <ModelSetupStatus model={model} providerLabel="GPT Codex" pending={false} onSetup={onSetup} />
+      <ModelSetupStatus model={model} providerLabel="GPT Codex" pending={false} />
     );
-
-    const systemBrowser = screen.getByRole("button", { name: "Use system browser" });
-    const workspaceBrowser = screen.getByRole("button", { name: "Use workspace browser" });
-    expect(systemBrowser.getAttribute("data-variant")).toBe("solid");
-    expect(workspaceBrowser.getAttribute("data-variant")).toBe("soft");
-
-    fireEvent.click(systemBrowser);
-    fireEvent.click(workspaceBrowser);
-    expect(onSetup).toHaveBeenNthCalledWith(1, "external");
-    expect(onSetup).toHaveBeenNthCalledWith(2, "internal");
+    expect(screen.queryByText(/connect gpt codex/i)).toBeNull();
+    expect(screen.queryByRole("button")).toBeNull();
   });
 });

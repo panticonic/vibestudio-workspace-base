@@ -6,7 +6,7 @@ import {
   LightningBoltIcon,
   ReloadIcon,
 } from "@radix-ui/react-icons";
-import { isModelUsable } from "@workspace/model-catalog/catalog";
+import { isModelAgentLaunchable } from "@workspace/model-catalog/catalog";
 import { useChatContext } from "../context/ChatContext";
 
 /**
@@ -37,9 +37,9 @@ export function PendingDeliveryQueue() {
       ? `Installing ${selectedModel.name} — this sends when setup finishes.`
       : selectedModel?.availability.state === "starting"
         ? `Preparing ${selectedModel.name} — this sends when it is ready.`
-        : selectedModel?.availability.state === "needs-setup"
-          ? `Finish ${selectedModel.provider === "local" ? "local model installation" : "provider setup"} above — this stays queued.`
-          : isModelUsable(selectedModel)
+        : selectedModel?.availability.state === "needs-setup" && selectedModel.provider === "local"
+          ? "Finish local model installation above — this stays queued."
+          : isModelAgentLaunchable(selectedModel)
             ? `${selectedModel?.name ?? "Your model"} is ready — start your agent above.`
             : "Choose a model above — this sends when your agent starts.";
 

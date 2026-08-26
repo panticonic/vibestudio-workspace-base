@@ -36,6 +36,7 @@ async function connect() {
       connectionId,
       clientLabel: "Vibestudio Remote CLI",
       clientPlatform: "desktop",
+      oauthCallbackMode: "client-loopback",
     }),
     adapter: {
       now: () => Date.now(),
