@@ -258,10 +258,8 @@ function templateInstalledThroughSingleTransaction(result: TestExecutionResult) 
   );
   const final = findLastAgentMessage(result);
   const reportedCompletion =
-    /examples?[\s\S]*(?:added|installed|connected)|(?:added|installed|connected)[\s\S]*examples?/iu.test(
-      final
-    ) ||
-    /(?:completed|finished|successful)[\s\S]*install[\s\S]*examples?|install[\s\S]*examples?[\s\S]*(?:completed|finished|successful)/iu.test(
+    /examples?/iu.test(final) &&
+    /(?:added|installed|connected|completed|finished|successful|state\s*:\s*["'`]?applied)/iu.test(
       final
     );
   return applied && reportedCompletion
