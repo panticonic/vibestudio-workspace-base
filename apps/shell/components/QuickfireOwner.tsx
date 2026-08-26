@@ -480,7 +480,10 @@ export function QuickfireOwner() {
     const returnTo = returnFocusPanelIdRef.current;
     returnFocusPanelIdRef.current = null;
     if (options?.restoreFocus !== false && returnTo) {
-      focusRestoreRef.current = panel.focus(returnTo).catch(() => {});
+      focusRestoreRef.current = panel.focus(returnTo).then(
+        () => undefined,
+        () => undefined,
+      );
     }
   }, []);
 
