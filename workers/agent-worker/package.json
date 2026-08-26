@@ -219,19 +219,19 @@
     }
   },
   "dependencies": {
-    "@sinclair/typebox": "0.27.12",
+    "@sinclair/typebox": "^0.27.12",
     "@workspace/agentic-core": "workspace:*",
     "@workspace/runtime": "workspace:*",
     "@workspace/agentic-do": "workspace:*",
     "@workspace/pubsub": "workspace:*",
     "@workspace/harness": "workspace:*",
     "@workspace/pi-core": "workspace:*",
-    "zod": "3.25.76"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/rpc": "workspace:*",
     "@workspace/agentic-protocol": "workspace:*",
-    "vitest": "3.2.7"
+    "vitest": "^3.2.7"
   }
 }

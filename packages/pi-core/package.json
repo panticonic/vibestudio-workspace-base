@@ -12,11 +12,11 @@
   },
   "dependencies": {
     "@workspace/pi-ai": "workspace:*",
-    "ignore": "7.0.5",
-    "typebox": "1.1.38",
-    "yaml": "2.9.0"
+    "ignore": "^7.0.5",
+    "typebox": "^1.1.38",
+    "yaml": "^2.8.0"
   },
   "devDependencies": {
-    "typescript": "7.0.2"
+    "typescript": "^7.0.2"
   }
 }

@@ -11,8 +11,8 @@
     "test": "node ../node_modules/vitest/vitest.mjs run --root .. --config vitest.userland.config.ts"
   },
   "devDependencies": {
-    "@types/node": "24.10.9",
-    "typescript": "7.0.2",
-    "vitest": "3.2.7"
+    "@types/node": "^24.10.9",
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.7"
   }
 }

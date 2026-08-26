@@ -70,7 +70,7 @@
     "@workspace/vcs-engine": "workspace:*"
   },
   "devDependencies": {
-    "sql.js": "1.14.1",
-    "vitest": "3.2.7"
+    "sql.js": "^1.14.1",
+    "vitest": "^3.2.7"
   }
 }

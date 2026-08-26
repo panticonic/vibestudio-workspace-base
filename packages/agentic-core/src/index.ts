@@ -10,9 +10,6 @@
 // - Connection management primitives
 // =============================================================================
 
-// --- Pi message/event type re-exports ---
-export type { AgentMessage, AgentEvent } from "@workspace/pi-core";
-
 // --- Headless types ---
 export type {
   ChatParticipantMetadata,

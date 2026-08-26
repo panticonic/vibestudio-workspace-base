@@ -22,6 +22,6 @@ export type {
   ChatMessage,
   ChatParticipantMetadata,
   ConnectionConfig,
-  AgentMessage,
   ChatMethodResult,
 } from "@workspace/agentic-core";
+export type { AgentMessage } from "@workspace/pi-core";

@@ -13,10 +13,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "yoga-layout": "3.2.1"
+    "yoga-layout": "^3.2.1"
   },
   "devDependencies": {
-    "typescript": "7.0.2",
-    "vitest": "3.2.7"
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.7"
   }
 }

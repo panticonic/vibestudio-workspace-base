@@ -230,6 +230,6 @@
     "@vibestudio/workspace-contracts": "workspace:*",
     "@workspace/template-composer": "workspace:*",
     "@workspace/template-registry": "workspace:*",
-    "yaml": "2.9.0"
+    "yaml": "^2.8.0"
   }
 }

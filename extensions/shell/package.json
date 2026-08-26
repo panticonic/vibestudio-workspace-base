@@ -193,8 +193,8 @@
     }
   },
   "dependencies": {
-    "node-pty": "1.1.0",
-    "zod": "3.25.76"
+    "node-pty": "^1.1.0",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@vibestudio/extension": "workspace:*"

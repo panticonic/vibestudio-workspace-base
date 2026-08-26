@@ -152,9 +152,9 @@
     "@workspace/pubsub": "workspace:*",
     "@workspace/harness": "workspace:*",
     "@workspace/pi-core": "workspace:*",
-    "zod": "3.25.76"
+    "zod": "^3.25.76"
   },
   "devDependencies": {
-    "vitest": "3.2.7"
+    "vitest": "^3.2.7"
   }
 }

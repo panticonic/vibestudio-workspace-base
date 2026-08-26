@@ -9,10 +9,10 @@
     "@workspace/runtime": "workspace:*"
   },
   "peerDependencies": {
-    "svelte": "5.56.9"
+    "svelte": "^5.56.9"
   },
   "devDependencies": {
-    "svelte": "5.56.9",
-    "typescript": "7.0.2"
+    "svelte": "^5.56.9",
+    "typescript": "^7.0.2"
   }
 }

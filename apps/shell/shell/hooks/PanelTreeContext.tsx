@@ -412,7 +412,13 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         const loaded = await Promise.all(
           [...groups.values()].map((group) => cache.loadFirst(group)),
         );
-        await hydratePresentations(loaded.flatMap((group) => group.nodes));
+        // Tree topology is usable before exact-state visual presentation has
+        // resolved. Let icons and other decoration arrive without holding the
+        // initial shell behind build metadata and asset reads.
+        void hydratePresentations(loaded.flatMap((group) => group.nodes)).catch(
+          (error: unknown) =>
+            console.warn("[PanelTree] Failed to hydrate presentations:", error),
+        );
         if (options.reconcilePinState) await reconcilePins();
         setTreeLoadError(null);
         setInitialized(true);
@@ -533,7 +539,9 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         kind: "children",
         parentSlotId: panelId as PanelSlotId,
       });
-      await hydratePresentations(loaded.nodes);
+      void hydratePresentations(loaded.nodes).catch((error: unknown) =>
+        console.warn("[PanelTree] Failed to hydrate child presentations:", error),
+      );
     },
     [cache, hydratePresentations],
   );
@@ -574,7 +582,9 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
   const loadMore = useCallback(
     async (group: PanelTreeGroup) => {
       const loaded = await cache.loadMore(group);
-      await hydratePresentations(loaded.nodes);
+      void hydratePresentations(loaded.nodes).catch((error: unknown) =>
+        console.warn("[PanelTree] Failed to hydrate additional presentations:", error),
+      );
     },
     [cache, hydratePresentations],
   );
@@ -589,7 +599,10 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         return cache.getGroup(group) ?? cache.loadFirst(group);
       }),
     );
-    await hydratePresentations(loaded.flatMap((group) => group.nodes));
+    void hydratePresentations(loaded.flatMap((group) => group.nodes)).catch(
+      (error: unknown) =>
+        console.warn("[PanelTree] Failed to hydrate root presentations:", error),
+    );
   }, [cache, hydratePresentations]);
   const search = useCallback(
     (query: string, cursor?: string) =>

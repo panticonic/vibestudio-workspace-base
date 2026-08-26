@@ -18,27 +18,27 @@
   },
   "dependencies": {
     "@vibestudio/content-addressing": "workspace:*",
-    "@mozilla/readability": "0.6.0",
+    "@mozilla/readability": "^0.6.0",
     "@vibestudio/extension": "workspace:*",
     "@vibestudio/rpc": "workspace:*",
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/shared": "workspace:*",
-    "@sinclair/typebox": "0.27.12",
+    "@sinclair/typebox": "^0.27.12",
     "@workspace/pi-core": "workspace:*",
     "@workspace/pi-ai": "workspace:*",
     "@workspace/agentic-protocol": "workspace:*",
-    "diff": "7.0.0",
-    "linkedom": "0.18.13",
-    "ignore": "7.0.5",
-    "unpdf": "1.8.0",
-    "yaml": "2.9.0"
+    "diff": "^7.0.0",
+    "linkedom": "^0.18.13",
+    "ignore": "^7.0.5",
+    "unpdf": "^1.8.0",
+    "yaml": "^2.8.0"
   },
   "optionalDependencies": {
-    "re2": "1.24.1"
+    "re2": "^1.24.1"
   },
   "//": "re2 1.24.1 contains the Node >=22 compatibility fix previously carried as a host-root pnpm patch.",
   "devDependencies": {
-    "@types/diff": "7.0.2",
-    "typescript": "7.0.2"
+    "@types/diff": "^7.0.2",
+    "typescript": "^7.0.2"
   }
 }

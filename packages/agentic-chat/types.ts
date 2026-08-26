@@ -15,9 +15,6 @@ export type {
   ModelSetupResult,
 } from "@workspace/agentic-core";
 
-// Pi message/event types — re-exported via agentic-core
-export type { AgentMessage, AgentEvent } from "@workspace/agentic-core";
-
 // ===========================================================================
 // Re-export derived UI types from agentic-core (ChatMessage, pending agent state, …)
 // ===========================================================================

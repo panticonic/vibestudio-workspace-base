@@ -16,10 +16,10 @@
     "@vibestudio/shared": "workspace:*",
     "@vibestudio/workspace": "workspace:*",
     "@vibestudio/workspace-contracts": "workspace:*",
-    "yaml": "2.9.0"
+    "yaml": "^2.8.0"
   },
   "devDependencies": {
-    "typescript": "7.0.2",
-    "vitest": "3.2.7"
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.7"
   }
 }

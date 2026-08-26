@@ -48,7 +48,7 @@
     "@vibestudio/types": "workspace:*",
     "@workspace/agentic-protocol": "workspace:*",
     "@workspace/cdp-client": "workspace:*",
-    "sql.js": "1.14.1",
-    "zod": "3.25.76"
+    "sql.js": "^1.14.1",
+    "zod": "^3.25.76"
   }
 }

@@ -10,19 +10,19 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@cfworker/json-schema": "4.1.1",
+    "@cfworker/json-schema": "^4.1.1",
     "@workspace/agentic-protocol": "workspace:*",
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/shell-core": "workspace:*",
     "@vibestudio/shared": "workspace:*",
     "@vibestudio/types": "workspace:*",
-    "zod": "3.25.76",
-    "zod-to-json-schema": "3.25.2"
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "^3.25.0"
   },
   "devDependencies": {
-    "@types/ws": "8.18.1",
-    "typescript": "7.0.2",
-    "vitest": "3.2.7",
-    "ws": "8.21.1"
+    "@types/ws": "^8.18.1",
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.7",
+    "ws": "^8.21.1"
   }
 }

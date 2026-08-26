@@ -47,6 +47,6 @@
     }
   },
   "dependencies": {
-    "@vscode/ripgrep": "1.18.0"
+    "@vscode/ripgrep": "^1.18.0"
   }
 }

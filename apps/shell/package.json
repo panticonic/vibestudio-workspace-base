@@ -5,7 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "Vibestudio Shell",
-    "icon": "\ud83d\udda5\ufe0f",
+    "icon": "🖥️",
     "app": {
       "target": "electron",
       "renderer": "index.tsx",
@@ -462,12 +462,12 @@
     }
   },
   "dependencies": {
-    "@dnd-kit/core": "6.3.1",
-    "@dnd-kit/sortable": "10.0.0",
-    "@dnd-kit/utilities": "3.2.2",
-    "@radix-ui/react-icons": "1.3.2",
-    "@radix-ui/themes": "3.3.0",
-    "@tanstack/react-virtual": "3.14.9",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@radix-ui/react-icons": "^1.3.2",
+    "@radix-ui/themes": "^3.3.0",
+    "@tanstack/react-virtual": "^3.13.0",
     "@vibestudio/browser-data": "workspace:*",
     "@vibestudio/identity": "workspace:*",
     "@vibestudio/rpc": "workspace:*",
@@ -483,10 +483,10 @@
     "@workspace/runtime": "workspace:*",
     "@workspace/template-management": "workspace:*",
     "@workspace/ui": "workspace:*",
-    "highlight.js": "11.12.0",
-    "jotai": "2.20.2",
-    "qrcode-terminal": "0.12.0",
-    "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "highlight.js": "^11.12.0",
+    "jotai": "^2.17.0",
+    "qrcode-terminal": "^0.12.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
   }
 }
