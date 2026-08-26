@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { panelTests } from "./panels.js";
 
-const createPanelTest = panelTests.find((test) => test.name === "create-panel")!;
+const createPanelTest = panelTests.find(
+  (test) => test.name === "create-panel",
+)!;
 
 describe("panel system-test declarations", () => {
   it("preauthorizes inspection of the panel that the unattended test creates", () => {
@@ -23,7 +25,10 @@ describe("panel system-test declarations", () => {
         },
         {
           ruleId: "use-testkit-driver",
-          capability: { kind: "exact", key: "workspace-service:testkit-driver" },
+          capability: {
+            kind: "exact",
+            key: "workspace-service:testkit-driver",
+          },
           resource: {
             kind: "exact",
             key: "do:workers/testkit-driver:TestkitDriverDO:workspace-testkit-driver",
@@ -42,25 +47,39 @@ describe("panel system-test declarations", () => {
     });
   });
 
+  it("places the chat panel inside the isolated agent context before asking it to inspect", () => {
+    expect(createPanelTest.orchestrate).toEqual(expect.any(Function));
+    expect(createPanelTest.prompt).toContain("base chat interface");
+  });
+
   it("guards every scenario that can create a panel", () => {
-    for (const test of panelTests.filter((candidate) => candidate.name !== "panel-list-sources")) {
+    for (const test of panelTests.filter(
+      (candidate) => candidate.name !== "panel-list-sources",
+    )) {
       expect(test.orchestrate).toEqual(expect.any(Function));
     }
   });
 
   it("uses the navigation case for a vague user reference instead of panel ids", () => {
-    const navigation = panelTests.find((test) => test.name === "panel-tree-navigation");
+    const navigation = panelTests.find(
+      (test) => test.name === "panel-tree-navigation",
+    );
 
     expect(navigation).toMatchObject({
-      description: "Resolve a vague browser-view reference through the panel tree",
+      description:
+        "Resolve a vague browser-view reference through the panel tree",
     });
     expect(navigation?.prompt).toContain("that browser view");
-    expect(navigation?.prompt).not.toMatch(/\b(?:panel[- ]?id|slot[- ]?id|parent[- ]?id)\b/iu);
+    expect(navigation?.prompt).not.toMatch(
+      /\b(?:panel[- ]?id|slot[- ]?id|parent[- ]?id)\b/iu,
+    );
     expect(navigation?.validation).toBe("agent-evidence");
   });
 
   it("requires independent same-panel navigation evidence", () => {
-    const navigation = panelTests.find((test) => test.name === "panel-tree-navigation")!;
+    const navigation = panelTests.find(
+      (test) => test.name === "panel-tree-navigation",
+    )!;
     const evidence = {
       panelId: "seeded-browser",
       expectedFinalUrl: "https://example.org/",
@@ -81,7 +100,7 @@ describe("panel system-test declarations", () => {
         messages: [],
         duration: 1,
         diagnostics: { seededPanelGoal: evidence },
-      })
+      }),
     ).toEqual({ passed: true, reason: undefined });
     expect(
       navigation.validate({
@@ -90,13 +109,13 @@ describe("panel system-test declarations", () => {
         diagnostics: {
           seededPanelGoal: { ...evidence, finalUrl: "https://example.com/" },
         },
-      })
+      }),
     ).toMatchObject({ passed: false });
   });
 
   it("seeds Browser Import and requires independent ready-phase evidence", () => {
     const browserImport = panelTests.find(
-      (test) => test.name === "browser-import-panel-lifecycle"
+      (test) => test.name === "browser-import-panel-lifecycle",
     )!;
     const evidence = {
       panelId: "seeded-browser-import",
@@ -113,7 +132,7 @@ describe("panel system-test declarations", () => {
         messages: [],
         duration: 1,
         diagnostics: { seededPanelGoal: evidence },
-      })
+      }),
     ).toEqual({ passed: true, reason: undefined });
     expect(
       browserImport.validate({
@@ -122,7 +141,7 @@ describe("panel system-test declarations", () => {
         diagnostics: {
           seededPanelGoal: { ...evidence, finalPhase: "failed" },
         },
-      })
+      }),
     ).toMatchObject({ passed: false });
   });
 });

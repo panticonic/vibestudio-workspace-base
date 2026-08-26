@@ -61,6 +61,16 @@ interface StoredSystemTestRecord {
   length: number;
 }
 
+interface PagedSystemTestRecord {
+  kind: "paged-system-test-record-v1";
+  length: number;
+  pageCount: number;
+}
+
+export interface SystemTestRunCompletion {
+  summary: SystemTestRunRecord["summary"];
+}
+
 export interface SystemTestRunnerSnapshot {
   status: EvalRunStatus["status"];
   progress?: unknown;
@@ -74,6 +84,60 @@ const SYSTEM_TEST_OPERATOR = anyOf(
   methodCapability("host"),
   relationship("workspace-role", "root"),
 );
+
+// JavaScript slices by UTF-16 code unit. A page is therefore at most 64K code
+// units and at most 256KiB once SQLite encodes it as UTF-8.
+const SYSTEM_TEST_RECORD_PAGE_CODE_UNITS = 64 * 1024;
+
+export function splitSystemTestRecord(text: string): string[] {
+  if (text.length === 0) return [""];
+  const pages: string[] = [];
+  for (
+    let offset = 0;
+    offset < text.length;
+    offset += SYSTEM_TEST_RECORD_PAGE_CODE_UNITS
+  ) {
+    pages.push(text.slice(offset, offset + SYSTEM_TEST_RECORD_PAGE_CODE_UNITS));
+  }
+  return pages;
+}
+
+export function assembleSystemTestRecord(
+  expectedLength: number,
+  expectedPageCount: number,
+  pages: ReadonlyArray<{ page_index: number; page_text: string }>,
+): string {
+  if (
+    pages.length !== expectedPageCount ||
+    pages.some((page, index) => page.page_index !== index)
+  ) {
+    throw new Error("system-test record has incomplete durable pages");
+  }
+  const text = pages.map((page) => page.page_text).join("");
+  if (text.length !== expectedLength) {
+    throw new Error(
+      `system-test record has invalid durable length (${text.length}/${expectedLength})`,
+    );
+  }
+  return text;
+}
+
+function parsePagedSystemTestRecord(
+  value: string,
+): PagedSystemTestRecord | null {
+  try {
+    const parsed = JSON.parse(value) as Partial<PagedSystemTestRecord>;
+    return parsed.kind === "paged-system-test-record-v1" &&
+      Number.isSafeInteger(parsed.length) &&
+      Number(parsed.length) >= 0 &&
+      Number.isSafeInteger(parsed.pageCount) &&
+      Number(parsed.pageCount) >= 1
+      ? (parsed as PagedSystemTestRecord)
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 function systemTestEvalCode(options: SystemTestRunConfig): string {
   return `
@@ -166,6 +230,16 @@ export class SystemTestRunnerDO extends DurableObjectBase {
       record_json TEXT NOT NULL,
       completed_at INTEGER NOT NULL
     )`);
+    this.createRecordPagesTable();
+  }
+
+  private createRecordPagesTable(): void {
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS system_test_record_pages (
+      run_id TEXT NOT NULL,
+      page_index INTEGER NOT NULL,
+      page_text TEXT NOT NULL,
+      PRIMARY KEY (run_id, page_index)
+    )`);
   }
 
   private persistedRecord(runId: string): SystemTestRunRecord | null {
@@ -175,7 +249,30 @@ export class SystemTestRunnerDO extends DurableObjectBase {
       }>(`SELECT record_json FROM system_test_records WHERE run_id = ?`, runId)
       .toArray()[0];
     if (!row) return null;
-    return JSON.parse(row.record_json) as SystemTestRunRecord;
+    const paged = parsePagedSystemTestRecord(row.record_json);
+    if (!paged) return JSON.parse(row.record_json) as SystemTestRunRecord;
+    this.createRecordPagesTable();
+    const pages = this.sql
+      .exec<{ page_index: number; page_text: string }>(
+        `SELECT page_index, page_text
+         FROM system_test_record_pages
+         WHERE run_id = ?
+         ORDER BY page_index`,
+        runId,
+      )
+      .toArray();
+    let text: string;
+    try {
+      text = assembleSystemTestRecord(paged.length, paged.pageCount, pages);
+    } catch (error) {
+      throw new Error(
+        `system-test record ${runId} is incomplete: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+        { cause: error },
+      );
+    }
+    return JSON.parse(text) as SystemTestRunRecord;
   }
 
   private persistRecord(runId: string, value: unknown): SystemTestRunRecord {
@@ -183,16 +280,39 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     if (record?.runId !== runId || record.schemaVersion !== 1) {
       throw new Error(`system-test record ${runId} has an invalid identity`);
     }
-    this.sql.exec(
-      `INSERT INTO system_test_records (run_id, record_json, completed_at)
-       VALUES (?, ?, ?)
-       ON CONFLICT(run_id) DO UPDATE SET
-         record_json = excluded.record_json,
-         completed_at = excluded.completed_at`,
-      runId,
-      JSON.stringify(record),
-      Date.now(),
-    );
+    const serialized = JSON.stringify(record);
+    const pages = splitSystemTestRecord(serialized);
+    this.createRecordPagesTable();
+    const envelope: PagedSystemTestRecord = {
+      kind: "paged-system-test-record-v1",
+      length: serialized.length,
+      pageCount: pages.length,
+    };
+    this.ctx.storage.transactionSync(() => {
+      this.sql.exec(
+        `DELETE FROM system_test_record_pages WHERE run_id = ?`,
+        runId,
+      );
+      for (const [pageIndex, pageText] of pages.entries()) {
+        this.sql.exec(
+          `INSERT INTO system_test_record_pages (run_id, page_index, page_text)
+           VALUES (?, ?, ?)`,
+          runId,
+          pageIndex,
+          pageText,
+        );
+      }
+      this.sql.exec(
+        `INSERT INTO system_test_records (run_id, record_json, completed_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(run_id) DO UPDATE SET
+           record_json = excluded.record_json,
+           completed_at = excluded.completed_at`,
+        runId,
+        JSON.stringify(envelope),
+        Date.now(),
+      );
+    });
     return record;
   }
 
@@ -388,9 +508,11 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     tier: "open",
     sensitivity: "read",
   })
-  async getSystemTestRunResult(runId: string): Promise<unknown> {
+  async getSystemTestRunResult(
+    runId: string,
+  ): Promise<SystemTestRunCompletion> {
     const persisted = this.persistedRecord(runId);
-    if (persisted) return persisted;
+    if (persisted) return { summary: persisted.summary };
     const status = await this.readSystemTestEvalStatus(runId);
     if (status.status !== "done") {
       throw new Error(
@@ -402,13 +524,14 @@ export class SystemTestRunnerDO extends DurableObjectBase {
         status.result?.error ?? `System-test run ${runId} failed`,
       );
     }
-    return this.persistRecord(
+    const record = this.persistRecord(
       runId,
       await this.readStoredSystemTestRecord(
         runId,
         parseStoredSystemTestRecord(status.result.returnValue),
       ),
     );
+    return { summary: record.summary };
   }
 
   @rpc({
@@ -435,7 +558,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     tier: "open",
     sensitivity: "write",
   })
-  async cancelSystemTestRun(runId: string): Promise<unknown | null> {
+  async cancelSystemTestRun(runId: string): Promise<SystemTestRunCompletion> {
     let cancellation: EvalCancelResult;
     try {
       cancellation = await this.evalRunObserver(runId).cancel();
@@ -480,7 +603,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
         { cause: error },
       );
     }
-    return this.persistRecord(
+    const record = this.persistRecord(
       runId,
       await this.readStoredSystemTestRecord(runId, {
         kind: "system-test-record-v1",
@@ -488,6 +611,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
         length: recovered.length,
       }),
     );
+    return { summary: record.summary };
   }
 
   @rpc({

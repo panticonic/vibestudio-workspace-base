@@ -329,13 +329,10 @@ export class TestRunner {
           const taskPrompt = test.workspaceRepoFixture
             ? testRunner.withTaskResources(prompt)
             : prompt;
-          const wait = targetSession.sendAndWait(
-            taskPrompt,
-            {
-              signal: controller.signal,
-              terminalWaitingReasons: NON_INTERACTIVE_TERMINAL_WAIT_REASONS,
-            },
-          );
+          const wait = targetSession.sendAndWait(taskPrompt, {
+            signal: controller.signal,
+            terminalWaitingReasons: NON_INTERACTIVE_TERMINAL_WAIT_REASONS,
+          });
           response = (await this.withTimeout(
             authorityFailure ? Promise.race([wait, authorityFailure]) : wait,
             remaining,
@@ -780,21 +777,20 @@ export class TestRunner {
       const invalidTransition = [...callsByTurn.values()].some((turnCalls) => {
         const refs = turnCalls.map((call) => String(call?.["ref"] ?? ""));
         const fallbackIndex = fallbackModel ? refs.indexOf(fallbackModel) : -1;
+        const primaryCalls = turnCalls.slice(0, fallbackIndex);
         return fallbackIndex < 0
           ? refs.some((ref) => ref !== policy.primaryModel)
-          : turnCalls
-              .slice(0, fallbackIndex)
-              .some(
-                (call) =>
-                  call?.["ref"] !== policy.primaryModel ||
-                  call?.["outcome"] !== "failed",
+          : primaryCalls.length === 0 ||
+              primaryCalls.some(
+                (call) => call?.["ref"] !== policy.primaryModel,
               ) ||
+              primaryCalls.at(-1)?.["outcome"] !== "failed" ||
               refs.slice(fallbackIndex).some((ref) => ref !== fallbackModel);
       });
       if (invalidTransition) {
         throw new Error(
           `System test "${testName}" has an invalid model transition during ${phase}; ` +
-            `expected each turn to use primary-only calls or failed ${policy.primaryModel} call(s) followed only by ${fallbackModel}`,
+            `expected each turn to use primary-only calls or ${policy.primaryModel} calls ending in failure followed only by ${fallbackModel}`,
         );
       }
     }

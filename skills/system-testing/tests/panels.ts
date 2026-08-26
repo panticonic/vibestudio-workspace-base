@@ -1,8 +1,10 @@
 import type { TestCase } from "../types.js";
 import { validateAgentCompletionReport } from "../test-runner.js";
-import { panelControlAuthorityPolicy, PANEL_AUTOMATION_RESOURCE } from "../panel-authority.js";
 import {
-  orchestratePanelGoal,
+  panelControlAuthorityPolicy,
+  PANEL_AUTOMATION_RESOURCE,
+} from "../panel-authority.js";
+import {
   orchestrateSeededPanelGoal,
   type SeededPanelGoalEvidence,
 } from "./_panel-tree-invariant.js";
@@ -11,7 +13,7 @@ const CREATE_PANEL_PROMPT =
   "Please inspect the base chat interface itself and tell me its exact visible heading or interface label. Also check whether its console is clean and confirm that a small JavaScript expression runs in that interface.";
 
 const BROWSER_PANEL_PROMPT =
-  "Compare the visible heading on https://example.com/ with what you see after moving the same browser view to https://example.org/. Base the comparison on the rendered pages, and tell me where that view ends up.";
+  "In the browser view that is already open at https://example.com/, compare its visible heading with what you see after moving that same view to https://example.org/. Base the comparison on the rendered pages, and tell me where that view ends up.";
 
 const PANEL_TREE_NAVIGATION_PROMPT =
   "I lost track of that browser view in the panel tree. Compare https://example.com/ with https://example.org/ there, then tell me where the investigation lived and which destination it ended on.";
@@ -19,7 +21,9 @@ const PANEL_TREE_NAVIGATION_PROMPT =
 const BROWSER_IMPORT_PROMPT =
   "Check the Browser Import inspector that is already open and tell me its exact panel identity, source, and lifecycle phase once it is usable.";
 
-function validateSeededPanelNavigation(result: Parameters<TestCase["validate"]>[0]) {
+function validateSeededPanelNavigation(
+  result: Parameters<TestCase["validate"]>[0],
+) {
   const evidence = result.diagnostics?.["seededPanelGoal"] as
     | Partial<SeededPanelGoalEvidence>
     | undefined;
@@ -39,7 +43,9 @@ function validateSeededPanelNavigation(result: Parameters<TestCase["validate"]>[
       };
 }
 
-function validateSeededBrowserImportPanel(result: Parameters<TestCase["validate"]>[0]) {
+function validateSeededBrowserImportPanel(
+  result: Parameters<TestCase["validate"]>[0],
+) {
   const evidence = result.diagnostics?.["seededPanelGoal"] as
     | Partial<SeededPanelGoalEvidence>
     | undefined;
@@ -65,23 +71,37 @@ export const panelTests: TestCase[] = [
     resources: [PANEL_AUTOMATION_RESOURCE],
     prompt: CREATE_PANEL_PROMPT,
     orchestrate: (context) =>
-      orchestratePanelGoal(context, CREATE_PANEL_PROMPT, "inspect the base chat interface"),
+      orchestrateSeededPanelGoal(
+        context,
+        CREATE_PANEL_PROMPT,
+        "inspect the base chat interface",
+        "panels/chat",
+        { finalSource: "panels/chat", finalPhase: "ready" },
+      ),
     validate: validateAgentCompletionReport,
   },
   {
     name: "browser-panel",
     description: "Inspect and navigate one temporary browser panel",
     category: "panels",
+    validation: "agent-evidence",
     authorityPolicy: panelControlAuthorityPolicy("inspect-browser-panel"),
     resources: [PANEL_AUTOMATION_RESOURCE],
     prompt: BROWSER_PANEL_PROMPT,
     orchestrate: (context) =>
-      orchestratePanelGoal(context, BROWSER_PANEL_PROMPT, "compare two rendered web pages"),
-    validate: validateAgentCompletionReport,
+      orchestrateSeededPanelGoal(
+        context,
+        BROWSER_PANEL_PROMPT,
+        "compare two rendered web pages",
+        "https://example.com/",
+        { finalUrl: "https://example.org/" },
+      ),
+    validate: validateSeededPanelNavigation,
   },
   {
     name: "panel-tree-navigation",
-    description: "Resolve a vague browser-view reference through the panel tree",
+    description:
+      "Resolve a vague browser-view reference through the panel tree",
     category: "panels",
     validation: "agent-evidence",
     authorityPolicy: panelControlAuthorityPolicy("inspect-tree-panel"),
@@ -93,7 +113,7 @@ export const panelTests: TestCase[] = [
         PANEL_TREE_NAVIGATION_PROMPT,
         "locate and navigate the browser investigation",
         "https://example.com/",
-        { finalUrl: "https://example.org/" }
+        { finalUrl: "https://example.org/" },
       ),
     validate: validateSeededPanelNavigation,
   },
@@ -107,10 +127,13 @@ export const panelTests: TestCase[] = [
   },
   {
     name: "browser-import-panel-lifecycle",
-    description: "Inspect the first-party Browser Import panel through its real lifecycle",
+    description:
+      "Inspect the first-party Browser Import panel through its real lifecycle",
     category: "panels",
     validation: "agent-evidence",
-    authorityPolicy: panelControlAuthorityPolicy("inspect-browser-import-panel"),
+    authorityPolicy: panelControlAuthorityPolicy(
+      "inspect-browser-import-panel",
+    ),
     resources: [PANEL_AUTOMATION_RESOURCE],
     prompt: BROWSER_IMPORT_PROMPT,
     orchestrate: (context) =>
@@ -119,7 +142,7 @@ export const panelTests: TestCase[] = [
         BROWSER_IMPORT_PROMPT,
         "inspect the Browser Import lifecycle",
         "about/browser-import-inspector",
-        { finalSource: "about/browser-import-inspector", finalPhase: "ready" }
+        { finalSource: "about/browser-import-inspector", finalPhase: "ready" },
       ),
     validate: validateSeededBrowserImportPanel,
   },

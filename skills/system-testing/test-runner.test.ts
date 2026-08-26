@@ -5,7 +5,11 @@ import {
   TestRunner,
   validateAgentCompletionReport,
 } from "./test-runner.js";
-import type { TestExecutionResult, TestSuiteResult, TestSuiteResultEntry } from "./types.js";
+import type {
+  TestExecutionResult,
+  TestSuiteResult,
+  TestSuiteResultEntry,
+} from "./types.js";
 import type { HeadlessRunner } from "./runner.js";
 import { CONTENT_WORKSPACE_REPO_FIXTURE, type TestCase } from "./types.js";
 
@@ -91,12 +95,15 @@ describe("TestRunner", () => {
       sendAndWait: vi.fn(
         (
           _prompt: string,
-          opts?: { signal?: AbortSignal; terminalWaitingReasons?: readonly string[] }
+          opts?: {
+            signal?: AbortSignal;
+            terminalWaitingReasons?: readonly string[];
+          },
         ) => {
           waitSignal = opts?.signal;
           terminalWaitingReasons = opts?.terminalWaitingReasons;
           return new Promise(() => undefined);
-        }
+        },
       ),
       captureModelExecutionEvidence: vi.fn(async () => modelEvidence()),
       snapshot: vi.fn(() => ({
@@ -135,20 +142,24 @@ describe("TestRunner", () => {
     });
 
     expect(result.passed).toBe(false);
-    expect(execution.error).toContain('Timed out waiting for agent to finish test "timeout-test"');
+    expect(execution.error).toContain(
+      'Timed out waiting for agent to finish test "timeout-test"',
+    );
     expect(execution.error).toContain("Pending invocations: eval:pending.");
     expect(execution.error).toContain(
-      'Last lifecycle: waiting reason=model_credential_required "Waiting for model credential approval".'
+      'Last lifecycle: waiting reason=model_credential_required "Waiting for model credential approval".',
     );
     expect(execution.error).toContain(
-      'Last diagnostic: code=message_empty "No assistant response".'
+      'Last diagnostic: code=message_empty "No assistant response".',
     );
     expect(waitSignal?.aborted).toBe(true);
     expect(terminalWaitingReasons).toEqual([
       "model_credential_required",
       "model_credential_reconnect_required",
     ]);
-    expect(runner.collectDiagnostics).toHaveBeenCalledWith({ channelId: "chat-timeout" });
+    expect(runner.collectDiagnostics).toHaveBeenCalledWith({
+      channelId: "chat-timeout",
+    });
     expect(session.close).toHaveBeenCalledWith({
       onPhase: expect.any(Function),
     });
@@ -222,7 +233,9 @@ describe("TestRunner", () => {
         error: { name: "Error", message: "diagnostics fetch failed" },
       },
     });
-    expect(execution.diagnostics).not.toHaveProperty("diagnosticCollectionError");
+    expect(execution.diagnostics).not.toHaveProperty(
+      "diagnosticCollectionError",
+    );
   });
 
   it("persists a thrown validator as one terminal test result and still retires the session", async () => {
@@ -290,7 +303,8 @@ describe("TestRunner", () => {
       close: vi.fn(async () => undefined),
     };
     const onTestResult = vi.fn(
-      async (_entry: TestSuiteResultEntry, _aggregate: TestSuiteResult) => undefined
+      async (_entry: TestSuiteResultEntry, _aggregate: TestSuiteResult) =>
+        undefined,
     );
     const runner = {
       modelRef: TEST_MODEL,
@@ -316,7 +330,8 @@ describe("TestRunner", () => {
     expect(suite.results[0]).toMatchObject({
       result: {
         passed: false,
-        reason: "Error: Cannot read properties of undefined (reading 'includes')",
+        reason:
+          "Error: Cannot read properties of undefined (reading 'includes')",
       },
       execution: {
         error: "Cannot read properties of undefined (reading 'includes')",
@@ -375,18 +390,20 @@ describe("TestRunner", () => {
     });
     expect(onTestResult).toHaveBeenCalledOnce();
     expect(onTestResult.mock.calls[0]![0]).toMatchObject({
-      execution: { validationFailure: suite.results[0]!.execution.validationFailure },
+      execution: {
+        validationFailure: suite.results[0]!.execution.validationFailure,
+      },
     });
-    expect(JSON.stringify(suite.results[0]!.execution.validationFailure)).not.toContain(
-      "must-not-persist"
-    );
+    expect(
+      JSON.stringify(suite.results[0]!.execution.validationFailure),
+    ).not.toContain("must-not-persist");
     expect(session.close).toHaveBeenCalledOnce();
   });
 
   it("preserves typed fixture setup failures without changing error semantics", async () => {
     const failure = remoteRpcFailure(
       "[vcs.importSnapshot] fixture publication failed",
-      "diagnostic:vcs:fixture-setup"
+      "diagnostic:vcs:fixture-setup",
     );
     const childRunner = {
       modelRef: TEST_MODEL,
@@ -414,7 +431,9 @@ describe("TestRunner", () => {
       passed: false,
       reason: "Error: [vcs.importSnapshot] fixture publication failed",
     });
-    expect(execution.error).toBe("[vcs.importSnapshot] fixture publication failed");
+    expect(execution.error).toBe(
+      "[vcs.importSnapshot] fixture publication failed",
+    );
     expect(execution.failure).toEqual({
       phase: "workspace-fixture-setup",
       error: {
@@ -430,7 +449,9 @@ describe("TestRunner", () => {
         diagnosticHandles: ["diagnostic:vcs:fixture-setup"],
       },
     });
-    expect(childRunner.collectDiagnostics).toHaveBeenCalledWith({ channelId: undefined });
+    expect(childRunner.collectDiagnostics).toHaveBeenCalledWith({
+      channelId: undefined,
+    });
   });
 
   it("reports failed tool calls without converting a passing task into a failed test", async () => {
@@ -622,7 +643,7 @@ describe("TestRunner", () => {
           terminalReasonCode: "guest_execution_failed",
           failureKind: "user-code",
         }),
-      ])
+      ]),
     );
 
     const expectedSuite = await tester.runSuite([
@@ -649,7 +670,7 @@ describe("TestRunner", () => {
           name: "vcs",
           classification: "domain-rejection",
         }),
-      ])
+      ]),
     );
   });
 
@@ -722,7 +743,9 @@ describe("TestRunner", () => {
 
     const { result, execution } = await running;
     expect(result.passed).toBe(false);
-    expect(execution.error).toContain("Unexpected authority prompt in system test");
+    expect(execution.error).toContain(
+      "Unexpected authority prompt in system test",
+    );
     expect(execution.error).toContain("workspace.runtime-state.manage");
     expect(session.interrupt).toHaveBeenCalledWith("target-authority-failure", {
       timeoutMs: 30_000,
@@ -792,7 +815,9 @@ describe("TestRunner", () => {
       },
       validation: "harness" as const,
       validate: (value) => ({
-        passed: value.messages.some((message) => message.content === "ORCHESTRATED_OK"),
+        passed: value.messages.some(
+          (message) => message.content === "ORCHESTRATED_OK",
+        ),
       }),
     });
 
@@ -802,10 +827,12 @@ describe("TestRunner", () => {
       orchestratedEvidence: { recovered: true },
       channelDelivery: { deliveryLifecycle: { latencyHistogram: [] } },
     });
-    expect(runner.collectDiagnostics).toHaveBeenCalledWith({ channelId: "chat-orchestrated" });
+    expect(runner.collectDiagnostics).toHaveBeenCalledWith({
+      channelId: "chat-orchestrated",
+    });
     expect(session.sendAndWait).toHaveBeenCalledWith(
       "phase prompt",
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     );
   });
 
@@ -900,12 +927,18 @@ describe("TestRunner", () => {
     } as unknown as HeadlessRunner;
 
     try {
-      const { result } = await new TestRunner(runner, { testTimeoutMs: 1_000 }).runOne({
+      const { result } = await new TestRunner(runner, {
+        testTimeoutMs: 1_000,
+      }).runOne({
         name: "orchestrated-budget",
         category: "test",
         description: "one shared deadline",
         prompt: "unused",
-        orchestrate: async ({ runner: orchestrationRunner, remainingTimeMs, sendAndWait }) => {
+        orchestrate: async ({
+          runner: orchestrationRunner,
+          remainingTimeMs,
+          sendAndWait,
+        }) => {
           const target = await orchestrationRunner.spawn();
           expect(remainingTimeMs()).toBe(1_000);
           await sendAndWait(target, "first", "phase one");
@@ -926,7 +959,7 @@ describe("TestRunner", () => {
       expect(
         timeout.mock.calls
           .map((call) => call[1])
-          .filter((delay): delay is number => typeof delay === "number")
+          .filter((delay): delay is number => typeof delay === "number"),
       ).toEqual([1_000, 750]);
     } finally {
       dateNow.mockRestore();
@@ -994,7 +1027,7 @@ describe("TestRunner", () => {
         test("git-b", ["workspace-config:git"]),
         test("unrelated"),
       ],
-      { concurrency: 3 }
+      { concurrency: 3 },
     );
 
     expect(suite.passed).toBe(3);
@@ -1083,7 +1116,7 @@ describe("TestRunner", () => {
 
     const suite = await tester.runSuite(
       [fixtureTest("alpha"), fixtureTest("beta"), unrelatedTest],
-      { concurrency: 3 }
+      { concurrency: 3 },
     );
 
     expect(suite.passed).toBe(3);
@@ -1098,12 +1131,19 @@ describe("TestRunner", () => {
       agentTargetId: "target-cancelled-fixture",
       messages: [] as ChatMessage[],
       sendAndWait: vi.fn(
-        async (_prompt: string, opts?: { signal?: AbortSignal }): Promise<never> =>
+        async (
+          _prompt: string,
+          opts?: { signal?: AbortSignal },
+        ): Promise<never> =>
           await new Promise<never>((_resolve, reject) => {
-            const rejectCancelled = () => reject(new Error("agent wait aborted"));
+            const rejectCancelled = () =>
+              reject(new Error("agent wait aborted"));
             if (opts?.signal?.aborted) rejectCancelled();
-            else opts?.signal?.addEventListener("abort", rejectCancelled, { once: true });
-          })
+            else
+              opts?.signal?.addEventListener("abort", rejectCancelled, {
+                once: true,
+              });
+          }),
       ),
       captureModelExecutionEvidence: vi.fn(async () => modelEvidence()),
       snapshot: vi.fn(() => ({
@@ -1180,8 +1220,12 @@ describe("TestRunner", () => {
 
     expect(tester.cancelled).toBe(true);
     expect(suite).toMatchObject({ total: 1, errored: 1 });
-    expect(suite.results[0]!.execution.error).toContain("System-test run cancelled");
-    expect(suite.results[0]!.execution.diagnostics?.["workspaceRepoFixture"]).toMatchObject({
+    expect(suite.results[0]!.execution.error).toContain(
+      "System-test run cancelled",
+    );
+    expect(
+      suite.results[0]!.execution.diagnostics?.["workspaceRepoFixture"],
+    ).toMatchObject({
       repositoryId: fixtureState.repositoryId,
       publishedFixtureRemoved: { repoPath: fixtureState.repoPath },
     });
@@ -1241,7 +1285,7 @@ describe("TestRunner", () => {
       cleanupWorkspaceRepoFixture: vi.fn(async () => {
         throw remoteRpcFailure(
           "delete approval transport failed",
-          "diagnostic:vcs:fixture-cleanup"
+          "diagnostic:vcs:fixture-cleanup",
         );
       }),
     };
@@ -1262,10 +1306,11 @@ describe("TestRunner", () => {
 
     expect(result).toMatchObject({
       passed: false,
-      reason: "Headless cleanup failed: workspace-repo-fixture: delete approval transport failed",
+      reason:
+        "Headless cleanup failed: workspace-repo-fixture: delete approval transport failed",
     });
     expect(execution.error).toBe(
-      "Headless cleanup failed: workspace-repo-fixture: delete approval transport failed"
+      "Headless cleanup failed: workspace-repo-fixture: delete approval transport failed",
     );
     expect(execution.cleanupErrors).toEqual([
       "workspace-repo-fixture: delete approval transport failed",
@@ -1305,7 +1350,7 @@ describe("TestRunner", () => {
       },
     ] satisfies ChatMessage[];
     const evidence = {
-      totalCalls: 4,
+      totalCalls: 5,
       calls: [
         {
           messageId: "m:t:chat-fallback:first:agent:0",
@@ -1314,10 +1359,20 @@ describe("TestRunner", () => {
           model: "gpt-5.3-codex-spark",
           api: "openai-codex-responses",
           auth: "url-bound",
-          outcome: "failed",
+          outcome: "completed",
+          usage: { input: 8, output: 2, totalTokens: 10 },
         },
         {
           messageId: "m:t:chat-fallback:first:agent:1",
+          ref: TEST_MODEL,
+          provider: "openai-codex",
+          model: "gpt-5.3-codex-spark",
+          api: "openai-codex-responses",
+          auth: "url-bound",
+          outcome: "failed",
+        },
+        {
+          messageId: "m:t:chat-fallback:first:agent:2",
           ref: fallbackModel,
           provider: "openai-codex",
           model: "gpt-5.6-luna",
@@ -1422,9 +1477,9 @@ describe("validateAgentCompletionReport", () => {
     expect(
       validateAgentCompletionReport(
         execution(
-          "Task completed.\n\nAll requested lifecycle behavior was verified.\n\nWhat I could not verify: automatic cleanup after a process crash."
-        )
-      )
+          "Task completed.\n\nAll requested lifecycle behavior was verified.\n\nWhat I could not verify: automatic cleanup after a process crash.",
+        ),
+      ),
     ).toMatchObject({
       passed: true,
       details: {
@@ -1436,8 +1491,8 @@ describe("validateAgentCompletionReport", () => {
   it("accepts a summary immediately after the completed status marker", () => {
     expect(
       validateAgentCompletionReport(
-        execution("Task completed. I verified a full write/read round-trip.")
-      )
+        execution("Task completed. I verified a full write/read round-trip."),
+      ),
     ).toMatchObject({
       passed: true,
       details: {
@@ -1450,9 +1505,9 @@ describe("validateAgentCompletionReport", () => {
     expect(
       validateAgentCompletionReport(
         execution(
-          "Comparing the read output against the write payload.\n\nTask completed.\nThe contents matched exactly."
-        )
-      )
+          "Comparing the read output against the write payload.\n\nTask completed.\nThe contents matched exactly.",
+        ),
+      ),
     ).toMatchObject({
       passed: true,
       details: {
@@ -1465,9 +1520,9 @@ describe("validateAgentCompletionReport", () => {
     expect(
       validateAgentCompletionReport(
         execution(
-          "Task not completed.\n\nThe documented operation returned an infrastructure error."
-        )
-      )
+          "Task not completed.\n\nThe documented operation returned an infrastructure error.",
+        ),
+      ),
     ).toMatchObject({
       passed: false,
       reason: expect.stringContaining("did not complete"),
@@ -1476,7 +1531,9 @@ describe("validateAgentCompletionReport", () => {
 
   it("accepts a natural completion report without requiring marker syntax", () => {
     expect(
-      validateAgentCompletionReport(execution("All requested lifecycle behavior was verified."))
+      validateAgentCompletionReport(
+        execution("All requested lifecycle behavior was verified."),
+      ),
     ).toEqual({
       passed: true,
       details: {
@@ -1489,7 +1546,9 @@ describe("validateAgentCompletionReport", () => {
   });
 
   it("rejects a completion report when harness-observed execution invariants failed", () => {
-    const result = execution("Task completed. The temporary panel was inspected.");
+    const result = execution(
+      "Task completed. The temporary panel was inspected.",
+    );
     result.error = "Agent left temporary panels in the tree: panel-leak";
 
     expect(validateAgentCompletionReport(result)).toEqual({
@@ -1500,7 +1559,9 @@ describe("validateAgentCompletionReport", () => {
   });
 
   it("rejects a completion report when harness cleanup did not finish", () => {
-    const result = execution("Task completed. The panel lifecycle was verified.");
+    const result = execution(
+      "Task completed. The panel lifecycle was verified.",
+    );
     result.cleanupErrors = ["archive leaked panel panel-leak: unavailable"];
 
     expect(validateAgentCompletionReport(result)).toEqual({
@@ -1537,7 +1598,9 @@ describe("validateAgentCompletionReport", () => {
   });
 
   it("flags duplicate substantial completion reports without failing the scenario", () => {
-    const result = execution(`First complete synthesis. ${"detail ".repeat(90)}`);
+    const result = execution(
+      `First complete synthesis. ${"detail ".repeat(90)}`,
+    );
     result.messages.push({
       ...result.messages[1]!,
       id: "agent-second-completion",
@@ -1548,7 +1611,9 @@ describe("validateAgentCompletionReport", () => {
       passed: true,
       details: {
         trajectoryReview: {
-          potentialConfusionSignals: ["multiple-substantial-completion-reports"],
+          potentialConfusionSignals: [
+            "multiple-substantial-completion-reports",
+          ],
         },
       },
     });
@@ -1574,17 +1639,21 @@ describe("validateAgentCompletionReport", () => {
   });
 
   it("recognizes the agent when recipient delivery omits every self-authored message", () => {
-    const result = execution("The retained child result was reviewed without integration.");
+    const result = execution(
+      "The retained child result was reviewed without integration.",
+    );
     result.messages = result.messages.slice(1);
 
-    expect(validateAgentCompletionReport(result)).toMatchObject({ passed: true });
+    expect(validateAgentCompletionReport(result)).toMatchObject({
+      passed: true,
+    });
   });
 
   it("rejects conflicting terminal declarations", () => {
     expect(
       validateAgentCompletionReport(
-        execution("Task not completed.\nRetry succeeded.\nTask completed.")
-      )
+        execution("Task not completed.\nRetry succeeded.\nTask completed."),
+      ),
     ).toMatchObject({
       passed: false,
       reason: expect.stringContaining("conflicting"),
@@ -1607,7 +1676,9 @@ describe("system-test implementation boundary", () => {
           invocation: {
             id: "call:fixture",
             name: "read",
-            arguments: { path: "skills/system-testing/workspace-repo-fixture.ts" },
+            arguments: {
+              path: "skills/system-testing/workspace-repo-fixture.ts",
+            },
           },
         },
         {
