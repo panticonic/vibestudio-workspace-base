@@ -91,6 +91,26 @@ describe("template agentic validator", () => {
     ).toMatchObject({ passed: false });
   });
 
+  it("accepts a truthful completed-install report", () => {
+    const test = templateTests.find(({ name }) => name === "templates-install-examples")!;
+    expect(
+      test.validate(
+        execution(
+          {
+            operationId: "template-add-success",
+            state: "applied",
+            affectedParts: ["panels/hello-svelte"],
+          },
+          "Completed the canonical install for Examples successfully.",
+          {
+            code:
+              'return await extensions.invoke("@workspace-extensions/template-composer", "add", [{ commandId: "template-add-success", source: { catalogId: "examples" } }]);',
+          }
+        )
+      )
+    ).toEqual({ passed: true, reason: undefined });
+  });
+
   it("accepts a fresh workspace with no connected or featured templates", () => {
     const test = templateTests.find(({ name }) => name === "templates-status-catalog")!;
     expect(
