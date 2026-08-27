@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { describe, expect, it, vi } from "vitest";
 import type { ModelCatalog } from "@workspace/agentic-core";
@@ -60,5 +60,9 @@ describe("AgentSetupInline", () => {
     expect(screen.queryByText(/connect gpt codex/i)).toBeNull();
     expect(screen.queryByRole("button", { name: "Use system browser" })).toBeNull();
     expect(screen.getByRole("button", { name: "Start agent" })).toBeTruthy();
+    expect(screen.queryByText("Autonomy")).toBeNull();
+
+    fireEvent.click(screen.getByText("▸ Advanced"));
+    expect(screen.getByText("Autonomy")).toBeTruthy();
   });
 });

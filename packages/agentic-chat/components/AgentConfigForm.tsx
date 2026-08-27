@@ -226,19 +226,6 @@ export function AgentConfigForm({
         </Field>
       )}
 
-      {/* Autonomy */}
-      <Field label="Autonomy" hint="Manual asks before each tool call; Full-auto runs everything.">
-        <SegmentedControl.Root
-          value={String(value.approvalLevel ?? 2)}
-          style={{ width: "100%" }}
-          onValueChange={(v) => set({ approvalLevel: Number(v) as AgentApprovalLevel })}
-        >
-          <SegmentedControl.Item value="0">{APPROVAL_LABELS["0"]}</SegmentedControl.Item>
-          <SegmentedControl.Item value="1">{APPROVAL_LABELS["1"]}</SegmentedControl.Item>
-          <SegmentedControl.Item value="2">{APPROVAL_LABELS["2"]}</SegmentedControl.Item>
-        </SegmentedControl.Root>
-      </Field>
-
       {/* Reactiveness — only with >1 agent */}
       {showReactiveness && (
         <Field label="Reactiveness" hint="When this agent replies in a multi-agent channel.">
@@ -320,7 +307,21 @@ export function AgentConfigForm({
           {showAdvanced ? "▾ Advanced" : "▸ Advanced"}
         </Text>
         {showAdvanced && (
-          <Box mt="2">
+          <Flex direction="column" gap="3" mt="2">
+            <Field
+              label="Autonomy"
+              hint="Manual asks before each tool call; Full-auto runs everything."
+            >
+              <SegmentedControl.Root
+                value={String(value.approvalLevel ?? 2)}
+                style={{ width: "100%" }}
+                onValueChange={(v) => set({ approvalLevel: Number(v) as AgentApprovalLevel })}
+              >
+                <SegmentedControl.Item value="0">{APPROVAL_LABELS["0"]}</SegmentedControl.Item>
+                <SegmentedControl.Item value="1">{APPROVAL_LABELS["1"]}</SegmentedControl.Item>
+                <SegmentedControl.Item value="2">{APPROVAL_LABELS["2"]}</SegmentedControl.Item>
+              </SegmentedControl.Root>
+            </Field>
             <Field label="System prompt (optional)" hint="Appended to the workspace system prompt.">
               <TextArea
                 value={value.systemPrompt ?? ""}
@@ -329,7 +330,7 @@ export function AgentConfigForm({
                 rows={4}
               />
             </Field>
-          </Box>
+          </Flex>
         )}
       </Box>
 
