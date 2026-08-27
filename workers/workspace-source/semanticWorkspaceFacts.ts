@@ -710,6 +710,62 @@ export class SemanticWorkspaceFacts {
     };
   }
 
+  /** Resolve complete snapshots for several present repositories against one
+   * immutable workspace root. Sharing the aggregate-file radix cache and one
+   * batched state read avoids repeating the same authenticated root traversal
+   * independently for every repository during full workspace publication. */
+  materializationSnapshotsAt(
+    workspaceFactRootId: string,
+    repositories: readonly Extract<WorkspaceRepositoryMember, { presence: "present" }>[]
+  ): Map<string, Array<{ path: string; contentHash: string; mode: number }>> {
+    const coordinates: Array<{
+      repository: Extract<WorkspaceRepositoryMember, { presence: "present" }>;
+      path: string;
+      fileId: string;
+    }> = [];
+    for (const repository of repositories) {
+      let afterPath: string | undefined;
+      do {
+        const page = this.pageManifest(repository.fileManifestId, {
+          ...(afterPath ? { afterPath } : {}),
+          limit: 500,
+        });
+        for (const entry of page.values) coordinates.push({ repository, ...entry });
+        afterPath = page.next ?? undefined;
+      } while (afterPath !== undefined);
+    }
+    const states = this.fileStatesAt(
+      workspaceFactRootId,
+      coordinates.map(({ fileId }) => fileId)
+    );
+    const snapshots = new Map<
+      string,
+      Array<{ path: string; contentHash: string; mode: number }>
+    >();
+    for (const repository of repositories) snapshots.set(repository.repositoryId, []);
+    for (const { repository, path, fileId } of coordinates) {
+      const state = states.get(fileId);
+      if (
+        !state ||
+        state.presence !== "placed" ||
+        state.repositoryId !== repository.repositoryId ||
+        state.path !== path
+      ) {
+        throw new SemanticWorkspaceFactsError(
+          "IndexMismatch",
+          `Manifest ${repository.fileManifestId} has no exact file state for ${fileId}`,
+          [repository.fileManifestId, fileId]
+        );
+      }
+      snapshots.get(repository.repositoryId)!.push({
+        path,
+        contentHash: state.contentHash,
+        mode: state.mode,
+      });
+    }
+    return snapshots;
+  }
+
   assertIndexParity(workspaceFactRootId: string): void {
     const root = this.root(workspaceFactRootId);
     const repositories = this.entries(workspaceFactRootId, "repository");

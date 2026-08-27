@@ -7857,6 +7857,45 @@ export class SemanticWorkspace {
         : draft
           ? this.materializationDraftRepositoryIds(draft)
           : [];
+    if (fullReplacement) {
+      const present = repositoryIds
+        .sort(compareUtf16CodeUnits)
+        .map((repositoryId) => this.deps.store.facts.member(root, repositoryId))
+        .filter(
+          (
+            repository
+          ): repository is Extract<WorkspaceRepositoryMember, { presence: "present" }> =>
+            repository?.presence === "present"
+        );
+      const contentRoots = new Map(
+        present.flatMap((repository) => {
+          const contentRoot = this.deps.store.materializedRepositoryContentRoot(
+            root,
+            repository.repositoryId
+          );
+          return contentRoot ? [[repository.repositoryId, contentRoot] as const] : [];
+        })
+      );
+      const snapshots = this.deps.store.facts.materializationSnapshotsAt(
+        root,
+        present.filter((repository) => !contentRoots.has(repository.repositoryId))
+      );
+      return present.map((repository) => {
+        const contentRoot = contentRoots.get(repository.repositoryId);
+        return {
+          repositoryId: repository.repositoryId,
+          presence: "present" as const,
+          repoPath: repository.repoPath,
+          fileManifestId: repository.fileManifestId,
+          source: contentRoot
+            ? ({ kind: "content-root", contentRoot } as const)
+            : ({
+                kind: "snapshot",
+                files: snapshots.get(repository.repositoryId) ?? [],
+              } as const),
+        };
+      });
+    }
     return repositoryIds
       .sort(compareUtf16CodeUnits)
       .flatMap((key): WorkspaceMaterializationRepository[] => {

@@ -98,6 +98,139 @@ describe("SemanticWorkspaceFacts", () => {
     expect(() => facts.assertIndexParity(proof.resultRoot.workspaceFactRootId)).not.toThrow();
   });
 
+  it("resolves paged snapshots for several repositories with one batched state read", async () => {
+    const sql = await createInMemorySql();
+    createSemanticVcsSchema(sql);
+    const facts = new SemanticWorkspaceFacts(sql);
+    const basis = facts.empty();
+    const repositoryUpdates = [];
+    const manifestUpdates = [];
+    const fileUpdates = [];
+
+    for (const fixture of [
+      { repositoryId: "repo-a", repoPath: "packages/a", fileCount: 501 },
+      { repositoryId: "repo-b", repoPath: "packages/b", fileCount: 1 },
+    ]) {
+      const emptyManifest = emptyFileManifest(fixture.repositoryId);
+      const manifestNodes = new Map<string, PersistentRadixNode>([
+        [emptyManifest.node.nodeId, emptyManifest.node],
+      ]);
+      const pathUpdates = Array.from(
+        { length: fixture.fileCount },
+        (_, index) => ({
+          fileId: `${fixture.repositoryId}-file-${index.toString().padStart(3, "0")}`,
+          expectedPath: null,
+          resultPath: `src/file-${index.toString().padStart(3, "0")}.ts`,
+        }),
+      );
+      const manifestProof = composeFileManifest({
+        basis: emptyManifest.manifest,
+        updates: pathUpdates,
+        readNode: (_kind, _route, nodeId) => manifestNodes.get(nodeId) ?? null,
+      });
+      const repository = workspaceRepositoryStateIdentity({
+        repositoryId: fixture.repositoryId,
+        presence: "present",
+        repoPath: fixture.repoPath,
+        fileManifestId: manifestProof.resultManifest.fileManifestId,
+      });
+      if (repository.presence !== "present")
+        throw new Error("repository fixture is absent");
+      sql.exec(
+        `INSERT INTO vcs_repository_states
+         (repository_state_id, repository_id, repo_path, presence, file_manifest_id,
+          prior_repository_state_id, tombstone_change_id)
+         VALUES (?, ?, ?, 'present', ?, NULL, NULL)`,
+        repository.repositoryStateId,
+        repository.repositoryId,
+        repository.repoPath,
+        repository.fileManifestId,
+      );
+      repositoryUpdates.push({
+        repositoryId: repository.repositoryId,
+        expected: null,
+        result: repository,
+      });
+      manifestUpdates.push({
+        repositoryId: repository.repositoryId,
+        expectedFileManifestId: null,
+        resultManifest: manifestProof.resultManifest,
+        pathUpdates: manifestProof.updates,
+      });
+
+      for (const [index, pathUpdate] of pathUpdates.entries()) {
+        const file = workspaceFileStateIdentity({
+          fileId: pathUpdate.fileId,
+          presence: "placed",
+          repositoryId: repository.repositoryId,
+          path: pathUpdate.resultPath,
+          contentHash: `blob-${repository.repositoryId}-${index}`,
+          mode: 0o100644,
+          contentKind: "text",
+          byteLength: index + 1,
+          coordinateExtent: index + 1,
+        });
+        if (file.presence !== "placed")
+          throw new Error("file fixture is absent");
+        sql.exec(
+          `INSERT INTO vcs_file_states
+           (file_state_id, file_id, presence, repository_id, path, content_hash, mode,
+            content_kind, byte_length, coordinate_extent, prior_file_state_id,
+            tombstone_change_id)
+           VALUES (?, ?, 'placed', ?, ?, ?, ?, ?, ?, ?, NULL, NULL)`,
+          file.fileStateId,
+          file.fileId,
+          file.repositoryId,
+          file.path,
+          file.contentHash,
+          file.mode,
+          file.contentKind,
+          file.byteLength,
+          file.coordinateExtent,
+        );
+        fileUpdates.push({ fileId: file.fileId, expected: null, result: file });
+      }
+    }
+
+    const planned = planWorkspaceFactChangeSet({
+      basisWorkspaceFactRootId: basis.workspaceFactRootId,
+      repositoryUpdates,
+      manifestUpdates,
+      fileUpdates,
+    });
+    expect(planned.kind).toBe("planned");
+    if (planned.kind !== "planned") return;
+    const root = facts.apply(facts.prepare(planned.changeSet)).resultRoot
+      .workspaceFactRootId;
+    const repositories = repositoryUpdates.map(({ result }) => result);
+    const stateReads = vi.spyOn(facts, "fileStatesAt");
+    const manifestPages = vi.spyOn(facts, "pageManifest");
+
+    const snapshots = facts.materializationSnapshotsAt(root, repositories);
+
+    expect(stateReads).toHaveBeenCalledTimes(1);
+    expect(stateReads.mock.calls[0]![1]).toHaveLength(502);
+    expect(manifestPages).toHaveBeenCalledTimes(3);
+    expect(snapshots.get("repo-a")).toHaveLength(501);
+    expect(snapshots.get("repo-a")?.[0]).toEqual({
+      path: "src/file-000.ts",
+      contentHash: "blob-repo-a-0",
+      mode: 0o100644,
+    });
+    expect(snapshots.get("repo-a")?.[500]).toEqual({
+      path: "src/file-500.ts",
+      contentHash: "blob-repo-a-500",
+      mode: 0o100644,
+    });
+    expect(snapshots.get("repo-b")).toEqual([
+      {
+        path: "src/file-000.ts",
+        contentHash: "blob-repo-b-0",
+        mode: 0o100644,
+      },
+    ]);
+  });
+
   it("seeks and pages one lexical fact kind without hydrating the aggregate root", async () => {
     const sql = await createInMemorySql();
     createSemanticVcsSchema(sql);
