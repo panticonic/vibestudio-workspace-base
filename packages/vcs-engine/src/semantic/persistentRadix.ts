@@ -610,6 +610,61 @@ function reachableCreatedNodes(
   return [...created.values()].filter((node) => reachable.has(node.nodeId));
 }
 
+/** Construct the canonical compressed radix for a complete set of entries.
+ * This is equivalent to repeated setAt() calls but avoids rebuilding the
+ * immutable root path after every insertion when the authenticated basis is
+ * empty. */
+function buildCompleteRadix(
+  composition: MutableComposition,
+  indexKind: PersistentRadixIndexKind,
+  entries: readonly PersistentRadixLeafEntry[],
+  expectedPrefix: string
+): PersistentRadixNode {
+  if (entries.length === 0) {
+    return rememberNode(composition, indexKind, { kind: "empty" });
+  }
+  const firstRoute = entries[0]!.keyDigest;
+  if (entries.every((entry) => entry.keyDigest === firstRoute)) {
+    return rememberNode(composition, indexKind, { kind: "leaf", entries });
+  }
+  let divergence = expectedPrefix.length;
+  while (
+    divergence < firstRoute.length &&
+    entries.every((entry) => entry.keyDigest[divergence] === firstRoute[divergence])
+  ) {
+    divergence += 1;
+  }
+  if (divergence >= firstRoute.length) {
+    throw new PersistentRadixError(
+      "InvalidUpdate",
+      "distinct persistent radix entries produced a non-divergent route"
+    );
+  }
+  const prefix = firstRoute.slice(0, divergence);
+  const bySlot = new Map<number, PersistentRadixLeafEntry[]>();
+  for (const entry of entries) {
+    const slot = slotAt(entry.keyDigest, divergence);
+    const group = bySlot.get(slot) ?? [];
+    group.push(entry);
+    bySlot.set(slot, group);
+  }
+  const children = [...bySlot.entries()].map(([slot, group]) => ({
+    slot,
+    childNodeId: buildCompleteRadix(
+      composition,
+      indexKind,
+      group,
+      `${prefix}${slot.toString(16)}`
+    ).nodeId,
+  }));
+  return rememberNode(composition, indexKind, {
+    kind: "branch",
+    depth: divergence,
+    prefix,
+    children,
+  });
+}
+
 export function composePersistentRadix(input: {
   basis: PersistentRadixRoot;
   updates: readonly PersistentRadixUpdate[];
@@ -638,6 +693,43 @@ export function composePersistentRadix(input: {
     created: new Map(),
     reused: new Set(),
   };
+  const completeInitialization =
+    input.basis.entryCount === 0 &&
+    updates.every((update) => update.expectedValue === null && update.resultValue !== null);
+  if (completeInitialization) {
+    const basisNode = loadNode(
+      composition,
+      input.basis.indexKind,
+      input.basis.rootNodeId,
+      "",
+      new Set()
+    );
+    if (basisNode.shape.kind !== "empty") {
+      throw new PersistentRadixError(
+        "InvalidRoot",
+        "zero-entry persistent radix basis is not empty",
+        [input.basis.rootNodeId]
+      );
+    }
+    const entries = updates.map((update) => ({
+      key: update.key,
+      value: update.resultValue!,
+      keyDigest: persistentRadixRoute(input.basis.routeStrategy, update.key),
+    }));
+    const result = buildCompleteRadix(composition, input.basis.indexKind, entries, "");
+    return {
+      basisRootNodeId: input.basis.rootNodeId,
+      resultRoot: persistentRadixRootIdentity({
+        indexKind: input.basis.indexKind,
+        routeStrategy: input.basis.routeStrategy,
+        rootNodeId: result.nodeId,
+        entryCount: entries.length,
+      }),
+      updates,
+      createdNodes: reachableCreatedNodes(result.nodeId, composition.created),
+      reusedNodeIds: [input.basis.rootNodeId],
+    };
+  }
   let rootNodeId = input.basis.rootNodeId;
   let entryCount = input.basis.entryCount;
   for (const update of updates) {

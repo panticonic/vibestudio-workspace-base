@@ -46,4 +46,37 @@ describe("persistent radix mutation proofs", () => {
       ).toEqual({ key, value: `value:${key}` });
     }
   });
+
+  it.each(["hashed", "utf16"] as const)(
+    "constructs the same canonical %s root in bulk as successive point mutations",
+    (routeStrategy) => {
+      const empty = emptyPersistentRadixRoot("test-index", routeStrategy);
+      const entries = Array.from({ length: 200 }, (_, index) => ({
+        key: `key-${index.toString().padStart(3, "0")}`,
+        expectedValue: null,
+        resultValue: `value:${index}`,
+      }));
+      const bulk = composePersistentRadix({
+        basis: empty.root,
+        updates: entries,
+        readNode: (_kind, _route, nodeId) => (nodeId === empty.node.nodeId ? empty.node : null),
+      });
+
+      const incrementalNodes = new Map<string, PersistentRadixNode>([
+        [empty.node.nodeId, empty.node],
+      ]);
+      let incrementalRoot = empty.root;
+      for (const update of [...entries].reverse()) {
+        const proof = composePersistentRadix({
+          basis: incrementalRoot,
+          updates: [update],
+          readNode: (_kind, _route, nodeId) => incrementalNodes.get(nodeId) ?? null,
+        });
+        for (const node of proof.createdNodes) incrementalNodes.set(node.nodeId, node);
+        incrementalRoot = proof.resultRoot;
+      }
+
+      expect(bulk.resultRoot).toEqual(incrementalRoot);
+    }
+  );
 });
