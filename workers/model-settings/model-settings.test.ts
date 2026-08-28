@@ -316,8 +316,30 @@ describe("ModelSettingsDO", () => {
     });
   });
 
+  it("keeps an unavailable configured model selected for provider setup", async () => {
+    TestModelSettingsDO.config = {
+      ...BASE_CONFIG,
+      defaultAgentConfig: { model: "openai:gpt-5", thinkingLevel: "low" },
+    };
+    const { call } = await createTestDO(OfflineModelSettingsDO);
+
+    await expect(call("getSettings")).resolves.toMatchObject({
+      defaultModel: "openai:gpt-5",
+      defaultModelSource: "workspace",
+      defaultAgentConfig: { model: "openai:gpt-5", thinkingLevel: "low" },
+      catalog: {
+        models: expect.arrayContaining([
+          expect.objectContaining({
+            ref: "openai:gpt-5",
+            availability: { state: "needs-setup", detail: "no-credential" },
+          }),
+        ]),
+      },
+    });
+  });
+
   it("falls back to the local floor when nothing is credentialed (offline first-run)", async () => {
-    OfflineModelSettingsDO.config = { ...BASE_CONFIG };
+    TestModelSettingsDO.config = { ...BASE_CONFIG };
     const { call } = await createTestDO(OfflineModelSettingsDO);
 
     const snapshot = await call("getSettings");
@@ -344,7 +366,7 @@ describe("ModelSettingsDO", () => {
   });
 
   it("reports the deterministic inference runtime as usable without a fake credential", async () => {
-    OfflineModelSettingsDO.config = { ...BASE_CONFIG };
+    TestModelSettingsDO.config = { ...BASE_CONFIG };
     const { call } = await createTestDO(OfflineModelSettingsDO, {
       VIBESTUDIO_TEST_MODE: "1",
     });
@@ -362,7 +384,7 @@ describe("ModelSettingsDO", () => {
   });
 
   it("does not report an expired credential without persisted refresh material as ready", async () => {
-    ExpiredModelSettingsDO.config = { ...BASE_CONFIG };
+    TestModelSettingsDO.config = { ...BASE_CONFIG };
     ExpiredModelSettingsDO.lifecycle = { state: "expired", canRefresh: false };
     const { call } = await createTestDO(ExpiredModelSettingsDO);
 
@@ -373,7 +395,7 @@ describe("ModelSettingsDO", () => {
   });
 
   it("keeps an expired credential ready when persisted material can renew it", async () => {
-    ExpiredModelSettingsDO.config = { ...BASE_CONFIG };
+    TestModelSettingsDO.config = { ...BASE_CONFIG };
     ExpiredModelSettingsDO.lifecycle = { state: "expired", canRefresh: true };
     const { call } = await createTestDO(ExpiredModelSettingsDO);
 

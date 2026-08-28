@@ -453,10 +453,11 @@ export class ModelSettingsDO extends DurableObjectBase {
     const storedEntry = stored.model
       ? catalog.models.find((model) => model.ref === stored.model)
       : undefined;
-    // The stored default wins while it is usable; a present-but-unavailable
-    // default falls back WITHOUT being treated as invalid (design §8) — it
-    // comes back the moment its provider does.
-    if (storedEntry && isModelUsable(storedEntry)) {
+    // A configured model is an explicit workspace preference, not an
+    // availability heuristic. Keep it selected while it needs setup so the
+    // first-agent preflight can guide the user through connecting that provider.
+    // Availability only chooses a fallback when no valid preference exists.
+    if (storedEntry) {
       return {
         catalog,
         defaultModel: storedEntry.ref,
@@ -471,8 +472,8 @@ export class ModelSettingsDO extends DurableObjectBase {
       defaultModelSource: "fallback",
       ...(stored.model
         ? {
-            defaultModelFallbackReason: storedEntry ? "unavailable" : "missing",
-            ...(storedEntry ? {} : { invalidDefaultModel: stored.model }),
+            defaultModelFallbackReason: "missing",
+            invalidDefaultModel: stored.model,
           }
         : {}),
       defaultAgentConfig: { model: fallback.ref, ...behavior },
