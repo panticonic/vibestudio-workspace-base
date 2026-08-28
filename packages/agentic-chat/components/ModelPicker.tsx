@@ -1,32 +1,29 @@
 /**
- * Provider-tiered model picker. Supported cloud providers are sorted by live
- * availability. Experimental providers are separated before sorting so a warm
- * local process never becomes the apparent happy path.
+ * Two-step provider/model selection for agent setup.
+ *
+ * Provider and model are separate decisions: the provider menu establishes
+ * where the agent runs, then the model menu shows only that provider's models.
+ * The workspace recommendation stays first instead of being displaced by live
+ * availability or by the user's current exploratory selection.
  */
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef } from "react";
 import {
   Badge,
   Box,
-  Button,
   Flex,
-  Popover,
   Progress,
-  ScrollArea,
+  Select,
   Spinner,
   Text,
-  TextField,
   Tooltip,
 } from "@radix-ui/themes";
-import {
-  CheckIcon,
-  ChevronDownIcon,
-  MagnifyingGlassIcon,
-  LightningBoltIcon,
-  ImageIcon,
-  HomeIcon,
-} from "@radix-ui/react-icons";
-import type { ModelCatalog, ModelCatalogEntry } from "@workspace/agentic-core";
+import { HomeIcon, ImageIcon, LightningBoltIcon } from "@radix-ui/react-icons";
+import type {
+  ModelCatalog,
+  ModelCatalogEntry,
+  ModelCatalogProvider,
+} from "@workspace/agentic-core";
 import {
   isModelUsable,
   LOCAL_FALLBACK_MODEL_REF,
@@ -39,22 +36,25 @@ export interface ModelPickerProps {
   /** Currently selected "provider:modelId" ref. */
   value: string;
   onChange: (ref: string) => void;
-  /** Deep-link into the Local Models panel's failing-server log (item 6).
-   *  Wired only when the host can open panels; when set, a local model's red
-   *  error dot becomes a one-click jump to that server's log. */
+  /** Workspace-recommended model. Its provider and model remain first. */
+  recommendedModelRef?: string | null;
+  /** Deep-link a failing local model to its server log. */
   onOpenServerLog?: (server: "utility" | "main") => void;
 }
 
-/** Which local server backs a model ref — the fallback rides the utility
- *  server (design §3), every other local model rides the main router. */
-function serverForLocalRef(ref: string): "utility" | "main" {
-  return ref === LOCAL_FALLBACK_MODEL_REF ? "utility" : "main";
-}
-
-const NEEDS_SETUP: ModelAvailability = { state: "needs-setup", detail: "no-credential" };
+const NEEDS_SETUP: ModelAvailability = {
+  state: "needs-setup",
+  detail: "no-credential",
+};
 
 function availabilityOf(model: ModelCatalogEntry): ModelAvailability {
   return model.availability ?? NEEDS_SETUP;
+}
+
+function providerIdFromRef(ref: string | null | undefined): string | null {
+  if (!ref) return null;
+  const separator = ref.indexOf(":");
+  return separator > 0 ? ref.slice(0, separator) : null;
 }
 
 function formatContext(tokens: number): string {
@@ -65,46 +65,76 @@ function formatContext(tokens: number): string {
 
 function measuredTokensPerSec(model: ModelCatalogEntry): number | null {
   const tokensPerSec = model.tokensPerSec;
-  return typeof tokensPerSec === "number" && Number.isFinite(tokensPerSec) ? tokensPerSec : null;
+  return typeof tokensPerSec === "number" && Number.isFinite(tokensPerSec)
+    ? tokensPerSec
+    : null;
 }
 
-function sortReadyModels(models: ModelCatalogEntry[]): ModelCatalogEntry[] {
-  return models
-    .map((model, index) => ({ model, index, tokensPerSec: measuredTokensPerSec(model) }))
-    .sort((a, b) => {
-      if (a.tokensPerSec !== null || b.tokensPerSec !== null) {
-        if (a.tokensPerSec === null) return 1;
-        if (b.tokensPerSec === null) return -1;
-        if (a.tokensPerSec !== b.tokensPerSec) return b.tokensPerSec - a.tokensPerSec;
-      }
-      return a.index - b.index;
-    })
-    .map(({ model }) => model);
+function availabilityRank(model: ModelCatalogEntry): number {
+  switch (availabilityOf(model).state) {
+    case "ready":
+      return 0;
+    case "startable":
+      return 1;
+    case "starting":
+    case "downloading":
+      return 2;
+    case "needs-setup":
+      return 3;
+    case "error":
+      return 4;
+  }
 }
 
-export interface ModelPickerPartition {
-  standard: ModelCatalogEntry[];
-  experimentalLocal: ModelCatalogEntry[];
+/** Stable product ordering: recommendation first, experimental local last. */
+export function orderModelPickerProviders(
+  providers: readonly ModelCatalogProvider[],
+  recommendedModelRef: string | null | undefined,
+): ModelCatalogProvider[] {
+  const recommendedProviderId = providerIdFromRef(recommendedModelRef);
+  return [...providers].sort((left, right) => {
+    if (left.id === recommendedProviderId)
+      return right.id === recommendedProviderId ? 0 : -1;
+    if (right.id === recommendedProviderId) return 1;
+    if (left.id === LOCAL_PROVIDER_ID)
+      return right.id === LOCAL_PROVIDER_ID ? 0 : 1;
+    if (right.id === LOCAL_PROVIDER_ID) return -1;
+    return left.label.localeCompare(right.label);
+  });
 }
 
-/** Provider maturity outranks runtime availability in the picker hierarchy. */
-export function partitionModelPickerModels(
+/** Recommended model first, then live usability, then a predictable name sort. */
+export function orderProviderModels(
   models: readonly ModelCatalogEntry[],
-  query: string
-): ModelPickerPartition {
-  const normalizedQuery = query.trim().toLowerCase();
-  const matching = normalizedQuery
-    ? models.filter(
-        (model) =>
-          model.name.toLowerCase().includes(normalizedQuery) ||
-          model.provider.toLowerCase().includes(normalizedQuery) ||
-          model.ref.toLowerCase().includes(normalizedQuery)
-      )
-    : [...models];
-  return {
-    standard: matching.filter((model) => model.provider !== LOCAL_PROVIDER_ID),
-    experimentalLocal: matching.filter((model) => model.provider === LOCAL_PROVIDER_ID),
-  };
+  provider: ModelCatalogProvider | null,
+  recommendedModelRef: string | null | undefined,
+): ModelCatalogEntry[] {
+  const recommendation =
+    providerIdFromRef(recommendedModelRef) === provider?.id
+      ? recommendedModelRef
+      : provider?.recommendedModelRef;
+  return [...models].sort((left, right) => {
+    if (left.ref === recommendation)
+      return right.ref === recommendation ? 0 : -1;
+    if (right.ref === recommendation) return 1;
+    const availability = availabilityRank(left) - availabilityRank(right);
+    return availability || left.name.localeCompare(right.name);
+  });
+}
+
+/** Select the provider's natural default without hiding setup-required models. */
+export function modelRefForProvider(
+  models: readonly ModelCatalogEntry[],
+  provider: ModelCatalogProvider,
+  recommendedModelRef: string | null | undefined,
+): string | null {
+  return (
+    orderProviderModels(
+      models.filter((model) => model.provider === provider.id),
+      provider,
+      recommendedModelRef,
+    )[0]?.ref ?? null
+  );
 }
 
 function dotColor(availability: ModelAvailability): string {
@@ -125,27 +155,27 @@ function dotColor(availability: ModelAvailability): string {
 function statusLabel(availability: ModelAvailability): string | null {
   switch (availability.state) {
     case "ready":
-      return null;
+      return "Ready";
     case "startable":
-      return "loads on use";
+      return "Loads on use";
     case "starting":
-      return "starting…";
+      return "Starting…";
     case "downloading":
       return availability.phase === "paused"
-        ? "download paused"
+        ? "Download paused"
         : availability.phase === "queued"
-          ? "download queued"
-          : `downloading ${Math.round(availability.progress * 100)}%`;
+          ? "Download queued"
+          : `Downloading ${Math.round(availability.progress * 100)}%`;
     case "error":
       return availability.message;
     case "needs-setup":
       switch (availability.detail) {
         case "no-credential":
-          return "not connected";
+          return "Not connected";
         case "credential-expired":
-          return "connection expired";
+          return "Connection expired";
         case "not-installed":
-          return "not installed";
+          return "Not installed";
       }
   }
 }
@@ -155,9 +185,11 @@ function StatusDot({
   onOpenLog,
 }: {
   availability: ModelAvailability;
-  /** When set on an error dot, the dot becomes a button that opens the log. */
   onOpenLog?: () => void;
 }) {
+  if (availability.state === "downloading" && availability.phase === "active") {
+    return <Spinner size="1" />;
+  }
   const dot = (
     <Box
       as="span"
@@ -171,381 +203,232 @@ function StatusDot({
       }}
     />
   );
-  if (availability.state === "downloading" && availability.phase === "active") {
-    return <Spinner size="1" />;
-  }
-  if (availability.state === "error") {
-    if (onOpenLog) {
-      return (
-        <Tooltip content={`${availability.message} — click to open the server log`}>
-          <button
-            type="button"
-            aria-label="Open the failing server's log"
-            onClick={(e) => {
-              e.stopPropagation();
-              onOpenLog();
-            }}
-            style={{ all: "unset", cursor: "pointer", display: "inline-flex", lineHeight: 0 }}
-          >
-            {dot}
-          </button>
-        </Tooltip>
-      );
-    }
-    return <Tooltip content={availability.message}>{dot}</Tooltip>;
-  }
-  return dot;
+  if (availability.state !== "error") return dot;
+  const content = onOpenLog
+    ? `${availability.message} — click to open the server log`
+    : availability.message;
+  return (
+    <Tooltip content={content}>
+      {onOpenLog ? (
+        <button
+          type="button"
+          aria-label="Open the failing server's log"
+          onClick={onOpenLog}
+          style={{
+            all: "unset",
+            cursor: "pointer",
+            display: "inline-flex",
+            lineHeight: 0,
+          }}
+        >
+          {dot}
+        </button>
+      ) : (
+        dot
+      )}
+    </Tooltip>
+  );
 }
 
 function ModelChips({ model }: { model: ModelCatalogEntry }) {
-  const onDevice = model.provider === "local";
   const tokensPerSec = measuredTokensPerSec(model);
-  const throughputBadge =
-    tokensPerSec !== null ? (
-      <Badge color={tokensPerSec < 10 ? "amber" : "gray"} variant="soft" size="1">
-        {Math.round(tokensPerSec)} tok/s
-      </Badge>
-    ) : null;
   return (
     <Flex gap="2" align="center" wrap="wrap">
-      {onDevice && (
+      {model.provider === LOCAL_PROVIDER_ID ? (
         <Badge color="amber" variant="soft" size="1">
           <HomeIcon width="10" height="10" /> experimental
         </Badge>
-      )}
-      {model.reasoning && (
+      ) : null}
+      {model.reasoning ? (
         <Badge color="purple" variant="soft" size="1">
           <LightningBoltIcon width="10" height="10" /> reasoning
         </Badge>
-      )}
-      {model.vision && (
+      ) : null}
+      {model.vision ? (
         <Badge color="blue" variant="soft" size="1">
           <ImageIcon width="10" height="10" /> vision
         </Badge>
-      )}
+      ) : null}
       <Badge color="gray" variant="soft" size="1">
-        {formatContext(model.contextWindow)}
+        {formatContext(model.contextWindow)} context
       </Badge>
-      {tokensPerSec !== null && tokensPerSec < 10 ? (
-        <Tooltip content="slow on this hardware">{throughputBadge}</Tooltip>
-      ) : (
-        throughputBadge
-      )}
+      {tokensPerSec !== null ? (
+        <Badge
+          color={tokensPerSec < 10 ? "amber" : "gray"}
+          variant="soft"
+          size="1"
+        >
+          {Math.round(tokensPerSec)} tok/s
+        </Badge>
+      ) : null}
     </Flex>
   );
 }
 
-function ModelRow({
-  model,
-  providerLabel,
-  selected,
-  onSelect,
+function PickerLabel({ children }: { children: string }) {
+  return (
+    <Text size="2" weight="medium">
+      {children}
+    </Text>
+  );
+}
+
+export function ModelPicker({
+  catalog,
+  value,
+  onChange,
+  recommendedModelRef,
   onOpenServerLog,
-}: {
-  model: ModelCatalogEntry;
-  providerLabel: string;
-  selected: boolean;
-  onSelect: () => void;
-  onOpenServerLog?: (server: "utility" | "main") => void;
-}) {
-  const availability = availabilityOf(model);
-  const label = statusLabel(availability);
-  const openLog =
-    onOpenServerLog && model.provider === "local" && availability.state === "error"
-      ? () => onOpenServerLog(serverForLocalRef(model.ref))
-      : undefined;
-  return (
-    <button
-      type="button"
-      onClick={onSelect}
-      style={{
-        all: "unset",
-        cursor: "pointer",
-        display: "block",
-        width: "100%",
-        borderRadius: 6,
-        padding: "6px 8px",
-        background: selected ? "var(--accent-a3)" : undefined,
-        opacity: isModelUsable(model) ? 1 : 0.75,
-      }}
-    >
-      <Flex justify="between" align="center" gap="2">
-        <Box style={{ minWidth: 0, flex: 1 }}>
-          <Flex align="center" gap="2">
-            <StatusDot availability={availability} onOpenLog={openLog} />
-            {selected && <CheckIcon />}
-            <Text size="2" weight="medium" truncate>
-              {model.name}
-            </Text>
-          </Flex>
-          <Text size="1" color={availability.state === "error" ? "red" : "gray"}>
-            {providerLabel}
-            {label ? ` · ${label}` : ""}
-          </Text>
-          {availability.state === "downloading" ? (
-            <Progress value={Math.round(availability.progress * 100)} size="1" mt="1" />
-          ) : null}
-        </Box>
-        <ModelChips model={model} />
-      </Flex>
-    </button>
-  );
-}
-
-/** One collapsed setup row for a provider with nothing usable. Selecting it
- * chooses the provider's best model; the surrounding agent setup surface then
- * owns connection or installation and blocks launch until availability flips. */
-function ProviderSetupRow({
-  providerLabel,
-  models,
-  onSelect,
-}: {
-  providerLabel: string;
-  models: ModelCatalogEntry[];
-  onSelect: (ref: string) => void;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const best = models.find((m) => m.recommended) ?? models[0];
-  if (!best) return null;
-  return (
-    <Box>
-      <Flex align="center" justify="between" gap="2" style={{ padding: "4px 8px" }}>
-        <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-          <StatusDot availability={NEEDS_SETUP} />
-          <Text size="2" truncate>
-            {providerLabel}
-          </Text>
-          <Text size="1" color="gray">
-            {models.length} models
-          </Text>
-        </Flex>
-        <Flex align="center" gap="2">
-          <Button size="1" variant="soft" onClick={() => onSelect(best.ref)}>
-            Choose
-          </Button>
-          <Button size="1" variant="ghost" color="gray" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? "Hide" : "Show"}
-          </Button>
-        </Flex>
-      </Flex>
-      {expanded && (
-        <Flex direction="column" gap="1" ml="4">
-          {models.map((m) => (
-            <ModelRow
-              key={m.ref}
-              model={m}
-              providerLabel={providerLabel}
-              selected={false}
-              onSelect={() => onSelect(m.ref)}
-            />
-          ))}
-        </Flex>
-      )}
-    </Box>
-  );
-}
-
-export function ModelPicker({ catalog, value, onChange, onOpenServerLog }: ModelPickerProps) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [showExperimental, setShowExperimental] = useState(false);
-
+}: ModelPickerProps) {
   const models = useMemo(() => catalog?.models ?? [], [catalog]);
-  const providerLabels = useMemo(
-    () => new Map((catalog?.providers ?? []).map((provider) => [provider.id, provider.label])),
-    [catalog]
+  const selectedModel = models.find((model) => model.ref === value) ?? null;
+  const selectedProviderId =
+    selectedModel?.provider ?? providerIdFromRef(value) ?? "";
+  const initialModelRef = useRef<string | null>(null);
+  if (!initialModelRef.current && value) initialModelRef.current = value;
+  const recommendedRef = recommendedModelRef ?? initialModelRef.current ?? value;
+  const recommendedProviderId = providerIdFromRef(recommendedRef);
+  const providers = useMemo(
+    () => {
+      const providerIdsWithModels = new Set(models.map((model) => model.provider));
+      return orderModelPickerProviders(
+        (catalog?.providers ?? []).filter((provider) => providerIdsWithModels.has(provider.id)),
+        recommendedRef,
+      );
+    },
+    [catalog?.providers, models, recommendedRef],
   );
-  const selected = models.find((m) => m.ref === value) ?? null;
+  const selectedProvider =
+    providers.find((provider) => provider.id === selectedProviderId) ??
+    providers[0] ??
+    null;
+  const providerModels = useMemo(
+    () =>
+      orderProviderModels(
+        models.filter((model) => model.provider === selectedProvider?.id),
+        selectedProvider,
+        recommendedRef,
+      ),
+    [models, recommendedRef, selectedProvider],
+  );
+  const providerRecommendation =
+    providerIdFromRef(recommendedRef) === selectedProvider?.id
+      ? recommendedRef
+      : selectedProvider?.recommendedModelRef;
 
-  const partition = useMemo(() => partitionModelPickerModels(models, query), [models, query]);
-
-  const groups = useMemo(() => {
-    const ready: ModelCatalogEntry[] = [];
-    const startable: ModelCatalogEntry[] = [];
-    const busy: ModelCatalogEntry[] = []; // starting / downloading / error — visible, actionable
-    const needsSetup = new Map<string, ModelCatalogEntry[]>();
-    for (const model of partition.standard) {
-      const availability = availabilityOf(model);
-      switch (availability.state) {
-        case "ready":
-          ready.push(model);
-          break;
-        case "startable":
-          startable.push(model);
-          break;
-        case "starting":
-        case "downloading":
-        case "error":
-          busy.push(model);
-          break;
-        case "needs-setup": {
-          const list = needsSetup.get(model.provider) ?? [];
-          list.push(model);
-          needsSetup.set(model.provider, list);
-          break;
-        }
-      }
-    }
-    return { ready: sortReadyModels(ready), startable, busy, needsSetup };
-  }, [partition.standard]);
-
-  const select = (ref: string) => {
-    onChange(ref);
-    setOpen(false);
+  const handleProviderChange = (providerId: string) => {
+    const provider = providers.find((candidate) => candidate.id === providerId);
+    if (!provider) return;
+    const next = modelRefForProvider(models, provider, recommendedRef);
+    if (next) onChange(next);
   };
 
-  const renderGroup = (label: string, list: ModelCatalogEntry[]) =>
-    list.length > 0 && (
-      <Box mb="2">
-        <Text size="1" color="gray" weight="bold" style={{ textTransform: "uppercase" }}>
-          {label}
-        </Text>
-        <Flex direction="column" gap="1" mt="1">
-          {list.map((m) => (
-            <ModelRow
-              key={m.ref}
-              model={m}
-              providerLabel={providerLabels.get(m.provider) ?? m.provider}
-              selected={m.ref === value}
-              onSelect={() => select(m.ref)}
-              onOpenServerLog={onOpenServerLog}
-            />
-          ))}
-        </Flex>
-      </Box>
-    );
-
-  const selectedAvailability = selected ? availabilityOf(selected) : null;
-  const selectedLabel = selectedAvailability ? statusLabel(selectedAvailability) : null;
+  const selectedAvailability = selectedModel
+    ? availabilityOf(selectedModel)
+    : null;
+  const selectedStatus = selectedAvailability
+    ? statusLabel(selectedAvailability)
+    : null;
   const selectedOpenLog =
-    onOpenServerLog && selected?.provider === "local" && selectedAvailability?.state === "error"
-      ? () => onOpenServerLog(serverForLocalRef(selected.ref))
+    onOpenServerLog &&
+    selectedModel?.provider === LOCAL_PROVIDER_ID &&
+    selectedAvailability?.state === "error"
+      ? () =>
+          onOpenServerLog(
+            selectedModel.ref === LOCAL_FALLBACK_MODEL_REF ? "utility" : "main",
+          )
       : undefined;
-  const experimentalForcedOpen =
-    selected?.provider === LOCAL_PROVIDER_ID || query.trim().length > 0;
-  const experimentalExpanded = experimentalForcedOpen || showExperimental;
 
   return (
-    <Popover.Root open={open} onOpenChange={setOpen}>
-      <Popover.Trigger>
-        <Button
-          variant="surface"
-          color="gray"
-          style={{ justifyContent: "space-between", width: "100%" }}
+    <Flex direction="column" gap="3">
+      <Flex direction="column" gap="1">
+        <PickerLabel>Provider</PickerLabel>
+        <Select.Root
+          value={selectedProvider?.id ?? ""}
+          onValueChange={handleProviderChange}
         >
-          <Flex align="center" gap="2" style={{ minWidth: 0 }}>
-            {selectedAvailability && (
-              <StatusDot availability={selectedAvailability} onOpenLog={selectedOpenLog} />
-            )}
-            <Text truncate>{selected ? selected.name : value || "Choose a model"}</Text>
-            {selectedLabel && (
-              <Badge
-                color={selectedAvailability?.state === "error" ? "red" : "amber"}
-                variant="soft"
-                size="1"
-              >
-                {selectedLabel}
-              </Badge>
-            )}
-          </Flex>
-          <ChevronDownIcon />
-        </Button>
-      </Popover.Trigger>
-      <Popover.Content style={{ width: "min(440px, calc(100vw - 32px))" }}>
-        <TextField.Root
-          placeholder="Search models…"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          mb="2"
-          autoFocus
+          <Select.Trigger aria-label="Provider" style={{ width: "100%" }} />
+          <Select.Content position="popper">
+            {providers.map((provider) => (
+              <Select.Item key={provider.id} value={provider.id}>
+                {provider.label}
+                {provider.id === recommendedProviderId ? " — Recommended" : ""}
+                {provider.id === LOCAL_PROVIDER_ID ? " — Experimental" : ""}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
+        <Text size="1" color="gray">
+          {selectedProvider?.id === recommendedProviderId
+            ? "Recommended for this workspace"
+            : selectedProvider?.id === LOCAL_PROVIDER_ID
+              ? "Runs on this device; local inference is experimental"
+              : "Choose where model requests are handled"}
+        </Text>
+      </Flex>
+
+      <Flex direction="column" gap="1">
+        <PickerLabel>Model</PickerLabel>
+        <Select.Root value={selectedModel?.ref ?? ""} onValueChange={onChange}>
+          <Select.Trigger aria-label="Model" style={{ width: "100%" }} />
+          <Select.Content position="popper">
+            {providerModels.map((model) => (
+              <Select.Item key={model.ref} value={model.ref}>
+                {model.name}
+                {model.ref === providerRecommendation ? " — Recommended" : ""}
+                {!isModelUsable(model)
+                  ? ` — ${statusLabel(availabilityOf(model))}`
+                  : ""}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
+      </Flex>
+
+      {selectedModel && selectedAvailability ? (
+        <Box
+          p="3"
+          style={{
+            borderRadius: "var(--radius-3)",
+            background: "var(--gray-a2)",
+            border: "1px solid var(--gray-a4)",
+          }}
         >
-          <TextField.Slot>
-            <MagnifyingGlassIcon />
-          </TextField.Slot>
-        </TextField.Root>
-        <ScrollArea type="auto" scrollbars="vertical" style={{ maxHeight: 360 }}>
-          <Box pr="2">
-            {renderGroup("Ready", groups.ready)}
-            {renderGroup("Available to start", groups.startable)}
-            {renderGroup("Setup in progress or needs attention", groups.busy)}
-            {groups.needsSetup.size > 0 && (
-              <Box mb="2">
-                <Text size="1" color="gray" weight="bold" style={{ textTransform: "uppercase" }}>
-                  Needs setup
+          <Flex direction="column" gap="2">
+            <Flex align="center" justify="between" gap="3">
+              <Flex align="center" gap="2" style={{ minWidth: 0 }}>
+                <StatusDot
+                  availability={selectedAvailability}
+                  onOpenLog={selectedOpenLog}
+                />
+                <Text size="2" weight="medium" truncate>
+                  {selectedModel.name}
                 </Text>
-                <Flex direction="column" gap="1" mt="1">
-                  {[...groups.needsSetup.entries()].map(([providerId, list]) => (
-                    <ProviderSetupRow
-                      key={providerId}
-                      providerLabel={providerLabels.get(providerId) ?? providerId}
-                      models={list}
-                      onSelect={select}
-                    />
-                  ))}
-                </Flex>
-              </Box>
-            )}
-            {partition.experimentalLocal.length > 0 && (
-              <Box mt="3" mb="2" pt="2" style={{ borderTop: "1px solid var(--gray-a5)" }}>
-                <Button
-                  type="button"
-                  size="1"
-                  variant="ghost"
-                  color="gray"
-                  aria-expanded={experimentalExpanded}
-                  onClick={() => setShowExperimental((visible) => !visible)}
-                  style={{ width: "100%", justifyContent: "space-between" }}
-                >
-                  <Flex align="center" gap="2">
-                    <Badge size="1" color="amber" variant="soft">
-                      Experimental
-                    </Badge>
-                    <Text size="2">Local inference</Text>
-                  </Flex>
-                  <ChevronDownIcon
-                    style={{
-                      transform: experimentalExpanded ? "rotate(180deg)" : undefined,
-                      transition: "transform 120ms ease",
-                    }}
-                  />
-                </Button>
-                {experimentalExpanded ? (
-                  <Box mt="1">
-                    <Text
-                      size="1"
-                      color="gray"
-                      as="p"
-                      mb="2"
-                      style={{ paddingInline: "var(--space-2)" }}
-                    >
-                      Early preview. Agent tool use and response times may be unreliable.
-                    </Text>
-                    <Flex direction="column" gap="1">
-                      {partition.experimentalLocal.map((model) => (
-                        <ModelRow
-                          key={model.ref}
-                          model={model}
-                          providerLabel={
-                            providerLabels.get(model.provider) ?? "Local inference (experimental)"
-                          }
-                          selected={model.ref === value}
-                          onSelect={() => select(model.ref)}
-                          onOpenServerLog={onOpenServerLog}
-                        />
-                      ))}
-                    </Flex>
-                  </Box>
-                ) : null}
-              </Box>
-            )}
-            {partition.standard.length === 0 && partition.experimentalLocal.length === 0 && (
-              <Text size="2" color="gray">
-                No models match “{query}”.
-              </Text>
-            )}
-          </Box>
-        </ScrollArea>
-      </Popover.Content>
-    </Popover.Root>
+              </Flex>
+              <Badge
+                size="1"
+                variant="soft"
+                color={
+                  selectedAvailability.state === "ready"
+                    ? "green"
+                    : selectedAvailability.state === "error"
+                      ? "red"
+                      : "amber"
+                }
+              >
+                {selectedStatus}
+              </Badge>
+            </Flex>
+            <ModelChips model={selectedModel} />
+            {selectedAvailability.state === "downloading" ? (
+              <Progress
+                value={Math.round(selectedAvailability.progress * 100)}
+                size="1"
+              />
+            ) : null}
+          </Flex>
+        </Box>
+      ) : null}
+    </Flex>
   );
 }

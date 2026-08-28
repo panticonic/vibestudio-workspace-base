@@ -145,16 +145,17 @@ export function AgentConfigForm({
 
   return (
     <Flex direction="column" gap="4">
-      {/* Model */}
-      <Field label="Model">
-        {modelEditable ? (
-          <ModelPicker
-            catalog={catalog}
-            value={value.model}
-            onChange={(ref) => set({ model: ref })}
-            onOpenServerLog={onOpenServerLog}
-          />
-        ) : (
+      {/* Provider + model */}
+      {modelEditable ? (
+        <ModelPicker
+          catalog={catalog}
+          value={value.model}
+          recommendedModelRef={defaultAgentConfig?.model}
+          onChange={(ref) => set({ model: ref })}
+          onOpenServerLog={onOpenServerLog}
+        />
+      ) : (
+        <Field label="Model">
           <Flex align="center" gap="2">
             <Badge variant="soft" color="gray" size="2">
               {selectedModel?.name ?? value.model}
@@ -163,8 +164,8 @@ export function AgentConfigForm({
               Switching the model restarts this agent.
             </Text>
           </Flex>
-        )}
-      </Field>
+        </Field>
+      )}
 
       {/* Effort — only for reasoning models */}
       {showEffort && (
