@@ -122,6 +122,7 @@ interface LocalModelEntry {
   server: "utility" | "main";
   contextWindow: number;
   toolsCapable: boolean;
+  reasoningCapable: boolean;
   fit: { fit: string; estTokensPerSec: number | null; notes: string[] };
   state: "ready" | "startable" | "not-installed" | "starting" | "downloading" | "error";
   download: {

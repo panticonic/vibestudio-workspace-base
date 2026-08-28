@@ -15,8 +15,16 @@ export const MODEL_SETTINGS_SERVICE_PROTOCOL = "vibestudio.models.v1";
 /** Workspace config field holding the full default agent config (model + behavior). */
 export const WORKSPACE_DEFAULT_AGENT_CONFIG_FIELD = "defaultAgentConfig";
 export const DEFAULT_AGENT_MODEL_REF = "openai-codex:gpt-5.6-sol";
-/** The local provider id and its bundled, explicitly installable fallback. */
+/** The local provider id, preferred model, and guaranteed small fallback. */
 export const LOCAL_PROVIDER_ID = "local";
+export const LOCAL_DEFAULT_MODEL = {
+  id: "qwen3.8-27b",
+  ref: "local:qwen3.8-27b",
+  name: "Qwen3.8 27B",
+  contextWindow: 262_144,
+  downloadSizeBytes: 16_464_440_224,
+} as const;
+export const LOCAL_DEFAULT_MODEL_REF = LOCAL_DEFAULT_MODEL.ref;
 export const LOCAL_FALLBACK_MODEL = {
   id: "lfm2.5-2.6b",
   ref: "local:lfm2.5-2.6b",

@@ -12,6 +12,7 @@ import type {
   QuantName,
 } from "@workspace/model-catalog/localModels";
 import {
+  detectReasoningCapable,
   detectToolsCapable,
   GgufHeaderTruncatedError,
   parseGgufHeader,
@@ -22,6 +23,7 @@ import { FALLBACK_MODEL, ROOT_LAYOUT } from "./constants.js";
 export interface ModelLibraryDeps {
   rootDir: string;
   fetch: typeof fetch;
+  fallbackSha256: string;
   log(msg: string, data?: unknown): void;
   emit(event: { kind: "models.changed" } | { kind: "download.progress"; job: DownloadJob }): void;
   now(): number;
@@ -530,6 +532,7 @@ export function createModelLibrary(deps: ModelLibraryDeps): {
       arch: meta.arch,
       trainedContextLength,
       toolsCapable: detectToolsCapable(meta.chatTemplate),
+      reasoningCapable: detectReasoningCapable(meta.chatTemplate),
       sha256: input.sha256,
       importedInPlace: input.importedInPlace,
       config: { contextLength: null, gpuLayers: null },
@@ -587,6 +590,7 @@ export function createModelLibrary(deps: ModelLibraryDeps): {
         {
           hfRepo: FALLBACK_MODEL.hfRepo,
           file,
+          expectedSha256: deps.fallbackSha256,
           displayName: FALLBACK_MODEL.displayName,
         },
         { slugOverride: FALLBACK_MODEL.slug, onProgress }

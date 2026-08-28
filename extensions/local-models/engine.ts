@@ -49,7 +49,7 @@ export function resolveAssetNames(
     case "linux": {
       // Verified against current llama.cpp releases: the CPU build is the PLAIN
       // arch asset (no "-cpu" segment), and GPU variants put the backend
-      // BEFORE the arch (e.g. llama-b10107-bin-ubuntu-vulkan-x64.tar.gz).
+      // BEFORE the arch (e.g. llama-b10621-bin-ubuntu-vulkan-x64.tar.gz).
       const cpu = `llama-${buildTag}-bin-ubuntu-${profile.arch}.tar.gz`;
       const gpu =
         profile.chosenBackend === "cpu"
@@ -130,7 +130,7 @@ function windowsBackendSegment(backend: EngineBackend): string {
     case "vulkan":
       return "vulkan-x64";
     case "rocm":
-      return "hip-radeon-x64";
+      return "rocm-7.14-x64";
     case "cpu":
       return "cpu-x64";
     case "metal":
@@ -148,7 +148,7 @@ function linuxBackendSegment(backend: EngineBackend): string {
     case "vulkan":
       return "vulkan";
     case "rocm":
-      return "rocm-7.2";
+      return "rocm-7.14";
     case "cpu":
       return "cpu";
     case "metal":

@@ -52,6 +52,7 @@ export interface LocalModelDescriptor {
   contextWindow: number;
   maxTokens: number;
   toolsCapable: boolean;
+  reasoningCapable: boolean;
 }
 
 type PiModelLike = PiModelInput;
@@ -63,7 +64,7 @@ export function localEntryToSpec(entry: LocalModelDescriptor): AgentModelSpec {
     api: "openai-completions",
     provider: LOCAL_PROVIDER_ID,
     baseUrl: entry.baseUrl,
-    reasoning: false,
+    reasoning: entry.reasoningCapable,
     input: ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: entry.contextWindow,
@@ -90,6 +91,7 @@ export function bundledLocalFallbackModel(): MaterializedModel {
     contextWindow: LOCAL_FALLBACK_MODEL.contextWindow,
     maxTokens: LOCAL_FALLBACK_MODEL.contextWindow,
     toolsCapable: true,
+    reasoningCapable: false,
   });
 }
 

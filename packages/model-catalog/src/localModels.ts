@@ -86,6 +86,8 @@ export interface ModelRecord {
   arch: string;
   trainedContextLength: number;
   toolsCapable: boolean;
+  /** Missing only on records created before reasoning-capability inspection. */
+  reasoningCapable?: boolean;
   sha256: string;
   importedInPlace: boolean;
   config: ModelRuntimeConfig;
@@ -179,6 +181,7 @@ export interface LocalModelEntry {
   contextWindow: number;
   maxTokens: number;
   toolsCapable: boolean;
+  reasoningCapable: boolean;
   fit: FitEstimate;
   measuredTokensPerSec: number | null;
   state: "ready" | "startable" | "not-installed" | "starting" | "downloading" | "error";

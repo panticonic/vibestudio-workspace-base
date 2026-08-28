@@ -2628,6 +2628,7 @@ export abstract class AgentVesselBase extends DurableObjectBase {
           contextWindow: entry.contextWindow,
           maxTokens: entry.maxTokens,
           toolsCapable: entry.toolsCapable,
+          reasoningCapable: entry.reasoningCapable,
         } satisfies LocalModelDescriptor),
       );
     } catch (err) {

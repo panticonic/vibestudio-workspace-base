@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModelRecord } from "@workspace/model-catalog/localModels";
-import { FALLBACK_MODEL } from "./constants.js";
+import { DEFAULT_MODEL, FALLBACK_MODEL } from "./constants.js";
 
 interface TestDownloadJob {
   id: string;
@@ -16,12 +16,18 @@ interface TestDownloadJob {
   error: string | null;
 }
 
+interface TestDownloadRequest {
+  slug?: string;
+  hfRepo: string;
+  file: string;
+}
+
 const modelLibraryMock = vi.hoisted(() => {
-  const initialJob = (id = "job-1"): TestDownloadJob => ({
+  const initialJob = (id = "job-1", request?: TestDownloadRequest): TestDownloadJob => ({
     id,
-    slug: "lfm2.5-2.6b",
-    hfRepo: "LiquidAI/LFM2.5-2.6B-GGUF",
-    file: "LFM2.5-2.6B-Q4_K_M.gguf",
+    slug: request?.slug ?? "lfm2.5-2.6b",
+    hfRepo: request?.hfRepo ?? "LiquidAI/LFM2.5-2.6B-GGUF",
+    file: request?.file ?? "LFM2.5-2.6B-Q4_K_M.gguf",
     totalBytes: 100,
     receivedBytes: 25,
     phase: "active",
@@ -56,8 +62,10 @@ const modelLibraryMock = vi.hoisted(() => {
       ensureFallback: vi.fn<() => Promise<unknown>>(async () => {
         throw new Error("not used");
       }),
-      startDownload: vi.fn(() => ensureDownload().promise),
-      startDownloadJob: vi.fn(async () => ({ ...ensureDownload().job })),
+      startDownload: vi.fn((request: TestDownloadRequest) => ensureDownload(request).promise),
+      startDownloadJob: vi.fn(async (request: TestDownloadRequest) => ({
+        ...ensureDownload(request).job,
+      })),
       pauseDownload: vi.fn(async () => {}),
       resumeDownload: vi.fn(async () => {}),
       cancelDownload: vi.fn(async () => {}),
@@ -69,13 +77,13 @@ const modelLibraryMock = vi.hoisted(() => {
       setRuntimeValidation: vi.fn(async () => {}),
     },
   };
-  function ensureDownload(): {
+  function ensureDownload(request?: TestDownloadRequest): {
     job: TestDownloadJob;
     promise: Promise<TestDownloadJob>;
     resolve(job: TestDownloadJob): void;
   } {
     if (pendingDownload) return pendingDownload;
-    const job = initialJob(`job-${state.nextDownloadOrdinal}`);
+    const job = initialJob(`job-${state.nextDownloadOrdinal}`, request);
     state.nextDownloadOrdinal += 1;
     state.downloads = [...state.downloads, job];
     let resolve!: (job: TestDownloadJob) => void;
@@ -240,6 +248,35 @@ describe("local-models extension", () => {
         sha256ByQuant: expect.objectContaining({ Q4_K_M: expect.any(String) }),
       }),
     ]);
+  });
+
+  it("offers Qwen3.8 27B as the preferred one-click model on large GPUs", async () => {
+    hardwareMock.tier = "gpu-large";
+    const { activate } = await import("./index.js");
+    const api = await activate({
+      log: { info: vi.fn(), warn: vi.fn() },
+      emit: vi.fn(),
+    });
+
+    await expect(api.searchCatalog("Qwen3.8")).resolves.toEqual([
+      expect.objectContaining({
+        slug: DEFAULT_MODEL.slug,
+        hfRepo: DEFAULT_MODEL.hfRepo,
+        quantByTier: { "gpu-large": DEFAULT_MODEL.quant },
+        sha256ByQuant: { [DEFAULT_MODEL.quant]: DEFAULT_MODEL.sha256 },
+      }),
+    ]);
+    await expect(api.listModels()).resolves.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          slug: DEFAULT_MODEL.slug,
+          contextWindow: DEFAULT_MODEL.contextLength,
+          state: "not-installed",
+          server: "main",
+          reasoningCapable: true,
+        }),
+      ])
+    );
   });
 
   it("describes its navigation surfaces as capabilities", async () => {
@@ -410,6 +447,26 @@ describe("local-models extension", () => {
         }),
       }),
     ]);
+  });
+
+  it("installs the preferred Qwen model with its pinned artifact identity", async () => {
+    hardwareMock.tier = "gpu-large";
+    const { activate } = await import("./index.js");
+    const api = await activate({
+      log: { info: vi.fn(), warn: vi.fn() },
+      emit: vi.fn(),
+    });
+
+    await expect(api.installModel(DEFAULT_MODEL.ref)).resolves.toMatchObject({
+      slug: DEFAULT_MODEL.slug,
+      hfRepo: DEFAULT_MODEL.hfRepo,
+      file: DEFAULT_MODEL.file,
+    });
+    expect(modelLibraryMock.library.startDownloadJob).toHaveBeenCalledWith(
+      expect.objectContaining({
+        expectedSha256: DEFAULT_MODEL.sha256,
+      })
+    );
   });
 
   it("does not expose a stale fallback artifact as installed", async () => {

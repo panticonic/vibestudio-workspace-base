@@ -38,7 +38,7 @@ import { createModelLibrary, estimateFit, isCurrentFallbackRecord } from "./libr
 import { createServerSupervisor } from "./supervisor.js";
 import { runtimeContextLengthFor } from "./runtime-profiles.js";
 import { runModelBenchmark } from "./benchmark.js";
-import { FALLBACK_MODEL, ROOT_LAYOUT } from "./constants.js";
+import { DEFAULT_MODEL, FALLBACK_MODEL, ROOT_LAYOUT } from "./constants.js";
 
 /**
  * Pinned llama.cpp build (design §4.2, risk #3): bumped with extension
@@ -47,57 +47,40 @@ import { FALLBACK_MODEL, ROOT_LAYOUT } from "./constants.js";
  * extraction/execution.
  */
 const ENGINE_PIN: EnginePin = {
-  buildTag: "b10107", // published 2026-07-24; asset names locked by engine tests
+  buildTag: "b10621", // llama.cpp v0.3.0, published 2026-08-25
   checksums: {
     "cudart-llama-bin-win-cuda-12.4-x64.zip":
       "8c79a9b226de4b3cacfd1f83d24f962d0773be79f1e7b75c6af4ded7e32ae1d6",
     "cudart-llama-bin-win-cuda-13.3-x64.zip":
       "1462a050eb4c684921ba51dcc4cc488a036674c3e73e9945ee705b854808d03e",
-    "llama-b10107-bin-android-arm64.tar.gz":
-      "aec87eb7ca00f0e331e13312c90a9ff0aa0e310f2eb12f97b9d2763ef5a2f10c",
-    "llama-b10107-bin-macos-arm64.tar.gz":
-      "b9554ab4c9f6e91199f48387cb4ab27466fb1d724881f81463ef03f6370cfa32",
-    "llama-b10107-bin-macos-x64.tar.gz":
-      "6f35c90a6e9f33c905d09694946b82a29b4ab530a358226d95d832262f526ea2",
-    "llama-b10107-bin-ubuntu-arm64.tar.gz":
-      "1f93c35122865287824ef0dc040e24190b18edc6e163152be9ac10b8aaeafeef",
-    "llama-b10107-bin-ubuntu-openvino-2026.2.1-x64.tar.gz":
-      "828ed66fc7936c4b49bda2c667bf5ef38acb0f77de02c75955af666a94858667",
-    "llama-b10107-bin-ubuntu-rocm-7.2-x64.tar.gz":
-      "c7a3c6332add60718a26e2986ede21f74ce658ac8beb04630b65409f485699ad",
-    "llama-b10107-bin-ubuntu-s390x.tar.gz":
-      "274af6f7fe0b40f6053b1f3e7e1659228ba24cc8aa638467644b6f3669804ee5",
-    "llama-b10107-bin-ubuntu-sycl-fp16-x64.tar.gz":
-      "8bc558d669c0769859fd7617e1870706ea82e86e4a0ab20c362464ac985b5d59",
-    "llama-b10107-bin-ubuntu-sycl-fp32-x64.tar.gz":
-      "58fe78ef6d6f77b87c7e580262bc03e98b69d6711aa8939c778f1286c8bdc98d",
-    "llama-b10107-bin-ubuntu-vulkan-arm64.tar.gz":
-      "c786b0f5269964e6c9385bf68ffeb275c070b5a5bfcc7d9cea0d8ae6d6790bc1",
-    "llama-b10107-bin-ubuntu-vulkan-x64.tar.gz":
-      "28f86dfce8c3723d4e9fd971b8456d946e09324708880533091399d284fe9add",
-    "llama-b10107-bin-ubuntu-x64.tar.gz":
-      "afe1ae0b706c4a0830b218a9249037b7a6cc723f81deb78825662128b25453e6",
-    "llama-b10107-bin-win-cpu-arm64.zip":
-      "5fc3757d28de88902665091c27d34011fa4fe569d7b57b19fcc9c3431bb02a06",
-    "llama-b10107-bin-win-cpu-x64.zip":
-      "52133a0a5a8f6035b1bdd2f89c3425ea8b742413d9bdb9a2dee30e3a1681b18c",
-    "llama-b10107-bin-win-cuda-12.4-x64.zip":
-      "1e43bbec9691cd0bc636603c366769148fa6265fd261c5f7c67050b450bbc237",
-    "llama-b10107-bin-win-cuda-13.3-x64.zip":
-      "ee48a48839f07b8ac3b5929783bf0320dc370e7ff6cfa567473c8ca11c9b2336",
-    "llama-b10107-bin-win-hip-radeon-x64.zip":
-      "b55e43c94c80c222de5854db32e6ac00e0f27cd6cba1d41c04de585aab623014",
-    "llama-b10107-bin-win-opencl-adreno-arm64.zip":
-      "1adca072b5ef8203409bb75258faa5ab7476d93fcf1bd38fbc44cb68cb3b1eef",
-    "llama-b10107-bin-win-openvino-2026.2.1-x64.zip":
-      "2d67cb0b3970a08b668d4fee056a5fdacdaeb54163a20b40fdd0acec9f48a60b",
-    "llama-b10107-bin-win-sycl-x64.zip":
-      "8232f68d1e6e8b29dcc4cf8a3b1832cd155652062de92292e443b426f47e910c",
-    "llama-b10107-bin-win-vulkan-x64.zip":
-      "c5b3a5ee8319b1eccbb748a54390aa806bbf7d1aceeea452e4c57921d113e53e",
-    "llama-b10107-ui.tar.gz": "eb661eb8709398e3d825663d261847dea73708c09db540bb5fa267cb04224a91",
-    "llama-b10107-xcframework.zip":
-      "d640b6679bb7092832dcd96dc7b78af1bee4af54582f85edf990ce4444c2401e",
+    "llama-b10621-bin-macos-arm64.tar.gz":
+      "429c8270608600188035e5e92f7d78dffb7900904fe7dd7e6a84f48068cd13cf",
+    "llama-b10621-bin-macos-x64.tar.gz":
+      "33c44e036e0e223f71a29fc74a0ab3e130ca9eadeb032ecc1c7af25985b8b91b",
+    "llama-b10621-bin-ubuntu-arm64.tar.gz":
+      "95940151be63492f70f659da420b268244cc83a6ee70e310d2600ccdb7ea4deb",
+    "llama-b10621-bin-ubuntu-rocm-7.14-x64.tar.gz":
+      "aa0b3b566f8e61d3a0c00b41ad6ca5aac4fb0e31d23bc4dc249f7040901d3794",
+    "llama-b10621-bin-ubuntu-vulkan-arm64.tar.gz":
+      "1267a0e918c37be5ef568b37f9a5de377e47cbe1ea77d4d42e38a20dfff1b358",
+    "llama-b10621-bin-ubuntu-vulkan-x64.tar.gz":
+      "3db8e4411033ef4531072be43377e859bcdbf9640c7bb36f9656e538eabd0978",
+    "llama-b10621-bin-ubuntu-x64.tar.gz":
+      "91d7b03ddae498a39f28fdb85d84d2b4a0fd3838d10b4f897e0ef8975bb9b583",
+    "llama-b10621-bin-win-cpu-arm64.zip":
+      "c072e8bb057751587243c1e0ed28d82e23c7e0544a426e0d476f1e77792bf3ce",
+    "llama-b10621-bin-win-cpu-x64.zip":
+      "0e8b65e650e369f70f8307d890508886f171ef4fb00facccddd4a1b7ffdaca51",
+    "llama-b10621-bin-win-cuda-12.4-x64.zip":
+      "81c2ff62e14b549cd5c766ccdd5c61f09e821a171655c3047bdccfddc2d1a1e2",
+    "llama-b10621-bin-win-cuda-13.3-x64.zip":
+      "23549ccc00b6a18d74348e95d4789f7e96c9efb11cf6e3f1b185baef34d7449f",
+    "llama-b10621-bin-win-opencl-adreno-arm64.zip":
+      "46e551fc6a4b1074cda5e0fcff20712e83ece24194d431d677bf99db20e487e0",
+    "llama-b10621-bin-win-rocm-7.14-x64.zip":
+      "4d9549449ae0d1c3d81446e440623b8fcaf117cff4f0a8ade991f428d9b086e9",
+    "llama-b10621-bin-win-vulkan-x64.zip":
+      "2672d85bf87c8280d94dee01eb6a86280046878f70a07d786a93637fa9081163",
   },
 };
 
@@ -126,6 +109,15 @@ const CURATED_CATALOG: CuratedModel[] = [
     blurb: "The local agent fallback: compact, tool-capable, and tuned for multi-step work.",
   },
   {
+    slug: DEFAULT_MODEL.slug,
+    displayName: DEFAULT_MODEL.displayName,
+    hfRepo: DEFAULT_MODEL.hfRepo,
+    quantByTier: { "gpu-large": DEFAULT_MODEL.quant },
+    sha256ByQuant: { [DEFAULT_MODEL.quant]: DEFAULT_MODEL.sha256 },
+    toolsCapable: true,
+    blurb: "The preferred local agent model for long-horizon coding and tool use.",
+  },
+  {
     slug: "qwen3.5-4b",
     displayName: "Qwen3.5 4B",
     hfRepo: "unsloth/Qwen3.5-4B-GGUF",
@@ -141,7 +133,7 @@ const CURATED_CATALOG: CuratedModel[] = [
       Q8_0: "10cc391b403021dd11c614679d2fd92f611c3681d29e29651b717316965d61e1",
     },
     toolsCapable: true,
-    blurb: "Current-generation Qwen agent model for modest GPUs and strong CPUs.",
+    blurb: "Compact Qwen agent model for modest GPUs and strong CPUs.",
   },
   {
     slug: "qwen3.5-9b",
@@ -153,7 +145,7 @@ const CURATED_CATALOG: CuratedModel[] = [
       Q8_0: "809626574d0cb43d4becfa56169980da2bb448f2299270f7be443cb89d0a6ae4",
     },
     toolsCapable: true,
-    blurb: "Higher-capacity current-generation Qwen model for GPU-backed agent work.",
+    blurb: "Mid-size Qwen model for GPU-backed agent work.",
   },
   {
     slug: "gpt-oss-20b",
@@ -353,6 +345,7 @@ export async function activate(ctx: Ctx) {
   const library = createModelLibrary({
     rootDir,
     fetch: globalThis.fetch,
+    fallbackSha256: FALLBACK_MODEL.sha256,
     log,
     emit,
     now: () => Date.now(),
@@ -769,6 +762,74 @@ export async function activate(ctx: Ctx) {
     };
   }
 
+  function oneClickModel(slug: string): typeof DEFAULT_MODEL | typeof FALLBACK_MODEL | null {
+    if (slug === DEFAULT_MODEL.slug) return DEFAULT_MODEL;
+    if (slug === FALLBACK_MODEL.slug) return FALLBACK_MODEL;
+    return null;
+  }
+
+  function shouldOfferOneClickModel(
+    model: typeof DEFAULT_MODEL | typeof FALLBACK_MODEL,
+    hw: HardwareProfile | null
+  ): boolean {
+    return (
+      model.slug === FALLBACK_MODEL.slug ||
+      hw === null ||
+      DEFAULT_MODEL.supportedTiers.some((tier) => tier === hw.tier)
+    );
+  }
+
+  function missingOneClickEntry(
+    model: typeof DEFAULT_MODEL | typeof FALLBACK_MODEL,
+    hw: HardwareProfile | null,
+    servers: Record<ServerKind, ServerState>,
+    downloads: DownloadJob[]
+  ): LocalModelEntry {
+    const server = model.slug === FALLBACK_MODEL.slug ? "utility" : "main";
+    const download = downloads.find((job) => job.slug === model.slug && !job.error);
+    const failure = downloads.find((job) => job.slug === model.slug && job.error);
+    const fit = hw
+      ? estimateFit(
+          {
+            sizeBytes: model.downloadSizeBytes,
+            trainedContextLength: model.contextLength,
+          },
+          hw
+        )
+      : {
+          fit: "cpu-only" as const,
+          estTokensPerSec: null,
+          contextLength: model.contextLength,
+          gpuLayers: 0,
+          notes: ["hardware profile unavailable"],
+        };
+    return {
+      slug: model.slug,
+      displayName: model.displayName,
+      baseUrl: baseUrlFor(server, servers),
+      server,
+      contextWindow: model.contextLength,
+      maxTokens: model.contextLength,
+      toolsCapable: true,
+      reasoningCapable: model.slug === DEFAULT_MODEL.slug,
+      fit,
+      measuredTokensPerSec: null,
+      state: download
+        ? "downloading"
+        : failure
+          ? "error"
+          : bootstrapStage === "error"
+            ? "error"
+            : "not-installed",
+      download: download ? downloadStatus(download) : null,
+      errorMessage: failure?.error
+        ? failure.error
+        : bootstrapStage === "error"
+          ? (bootstrapError ?? "local-models bootstrap failed")
+          : null,
+    };
+  }
+
   async function listModels(): Promise<LocalModelEntry[]> {
     const [records, hw] = await Promise.all([
       library.list(),
@@ -790,6 +851,7 @@ export async function activate(ctx: Ctx) {
           contextWindow,
           maxTokens: contextWindow,
           toolsCapable: record.toolsCapable,
+          reasoningCapable: record.reasoningCapable === true,
           fit: hw
             ? estimateFit(record, hw)
             : {
@@ -806,48 +868,15 @@ export async function activate(ctx: Ctx) {
         } satisfies LocalModelEntry;
       });
 
-    // The fallback floor must stay visible in the picker even before it is
-    // downloaded (design §5/§8): it is installable, not absent. An absent file
-    // is explicitly not-installed; the chat/model picker starts the download
-    // and blocks agent launch until the record exists.
-    if (!entries.some((entry) => entry.slug === FALLBACK_MODEL.slug)) {
-      const fallbackDownload = downloads.find(
-        (job) => job.slug === FALLBACK_MODEL.slug && !job.error
-      );
-      const fallbackFailure = downloads.find(
-        (job) => job.slug === FALLBACK_MODEL.slug && job.error
-      );
-      const contextWindow = FALLBACK_MODEL.contextLength;
-      entries.unshift({
-        slug: FALLBACK_MODEL.slug,
-        displayName: FALLBACK_MODEL.displayName,
-        baseUrl: baseUrlFor("utility", servers),
-        server: "utility",
-        contextWindow,
-        maxTokens: contextWindow,
-        toolsCapable: true,
-        fit: {
-          fit: "cpu-only",
-          estTokensPerSec: null,
-          contextLength: contextWindow,
-          gpuLayers: 0,
-          notes: ["explicit installation required"],
-        },
-        measuredTokensPerSec: null,
-        state: fallbackDownload
-          ? "downloading"
-          : fallbackFailure
-            ? "error"
-            : bootstrapStage === "error"
-              ? "error"
-              : "not-installed",
-        download: fallbackDownload ? downloadStatus(fallbackDownload) : null,
-        errorMessage: fallbackFailure?.error
-          ? fallbackFailure.error
-          : bootstrapStage === "error"
-            ? (bootstrapError ?? "local-models bootstrap failed")
-            : null,
-      } satisfies LocalModelEntry);
+    // One-click models stay visible before download. The small fallback is
+    // universal; the preferred 27B model is offered only where its quant fits.
+    for (const model of [FALLBACK_MODEL, DEFAULT_MODEL] as const) {
+      if (
+        !entries.some((entry) => entry.slug === model.slug) &&
+        shouldOfferOneClickModel(model, hw)
+      ) {
+        entries.unshift(missingOneClickEntry(model, hw, servers, downloads));
+      }
     }
     return entries;
   }
@@ -940,32 +969,41 @@ export async function activate(ctx: Ctx) {
      */
     async installModel(modelId: string): Promise<DownloadJob | null> {
       const slug = bareSlug(modelId);
-      if (slug !== FALLBACK_MODEL.slug) {
+      const model = oneClickModel(slug);
+      if (!model) {
         throw new Error(`Model ${modelId} is not available for one-click installation`);
       }
-      if (isCurrentFallbackRecord(await library.get(slug))) return null;
+      const existing = await library.get(slug);
+      if (
+        model.slug === FALLBACK_MODEL.slug ? isCurrentFallbackRecord(existing) : existing !== null
+      ) {
+        return null;
+      }
       await awaitInvocation(ensureBootstrap());
-      const cachedFallbackPath = path.join(
-        rootDir,
-        ROOT_LAYOUT.modelsDir,
-        ...FALLBACK_MODEL.hfRepo.split("/"),
-        FALLBACK_MODEL.file
-      );
-      try {
-        const cached = await fs.stat(cachedFallbackPath);
-        if (cached.isFile()) {
-          const record = await library.ensureFallback();
-          await validateAddedModel(record.slug);
-          return null;
+      if (model.slug === FALLBACK_MODEL.slug) {
+        const cachedFallbackPath = path.join(
+          rootDir,
+          ROOT_LAYOUT.modelsDir,
+          ...FALLBACK_MODEL.hfRepo.split("/"),
+          FALLBACK_MODEL.file
+        );
+        try {
+          const cached = await fs.stat(cachedFallbackPath);
+          if (cached.isFile()) {
+            const record = await library.ensureFallback();
+            await validateAddedModel(record.slug);
+            return null;
+          }
+        } catch (error) {
+          if (!isNodeErrorWithCode(error, "ENOENT")) throw error;
         }
-      } catch (error) {
-        if (!isNodeErrorWithCode(error, "ENOENT")) throw error;
       }
       return startDownloadJobWithBenchmark({
-        hfRepo: FALLBACK_MODEL.hfRepo,
-        file: FALLBACK_MODEL.file,
-        displayName: FALLBACK_MODEL.displayName,
-        slug: FALLBACK_MODEL.slug,
+        hfRepo: model.hfRepo,
+        file: model.file,
+        expectedSha256: model.sha256,
+        displayName: model.displayName,
+        slug: model.slug,
       });
     },
 

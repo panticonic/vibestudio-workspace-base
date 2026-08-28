@@ -283,6 +283,19 @@ export function detectToolsCapable(chatTemplate: string | null): boolean {
   ].some((pattern) => pattern.test(text));
 }
 
+/** Reasoning is a chat-template capability, not an architecture-name guess.
+ * llama.cpp projects these templates into a separate reasoning stream. */
+export function detectReasoningCapable(chatTemplate: string | null): boolean {
+  if (chatTemplate === null) {
+    return false;
+  }
+
+  const text = chatTemplate.toLowerCase();
+  return [/<think>/, /<\|think\|>/, /\benable_thinking\b/, /\breasoning_content\b/].some(
+    (pattern) => pattern.test(text)
+  );
+}
+
 function skipValue(reader: GgufReader, type: number): void {
   switch (type) {
     case VALUE_TYPE.uint8:

@@ -18,6 +18,8 @@ import {
 } from "@radix-ui/react-icons";
 import type { ModelCatalogEntry } from "@workspace/agentic-core";
 import {
+  LOCAL_DEFAULT_MODEL,
+  LOCAL_DEFAULT_MODEL_REF,
   LOCAL_FALLBACK_MODEL,
   LOCAL_FALLBACK_MODEL_REF,
   LOCAL_PROVIDER_ID,
@@ -37,6 +39,12 @@ function formatBytes(bytes: number): string {
   if (bytes >= 1024 ** 2) return `${Math.round(bytes / 1024 ** 2)} MB`;
   if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${bytes} B`;
+}
+
+function bundledDownloadSize(modelRef: string): number | null {
+  if (modelRef === LOCAL_DEFAULT_MODEL_REF) return LOCAL_DEFAULT_MODEL.downloadSizeBytes;
+  if (modelRef === LOCAL_FALLBACK_MODEL_REF) return LOCAL_FALLBACK_MODEL.downloadSizeBytes;
+  return null;
 }
 
 function DownloadProgress({
@@ -162,7 +170,7 @@ export function ModelSetupStatus({
   }
 
   if (local) {
-    const fallback = model.ref === LOCAL_FALLBACK_MODEL_REF;
+    const downloadSize = bundledDownloadSize(model.ref);
     return (
       <Card size="2" variant="surface" data-surface-tone="selected">
         <Flex direction="column" gap="3">
@@ -173,9 +181,9 @@ export function ModelSetupStatus({
             <Box>
               <Flex align="center" gap="2" wrap="wrap">
                 <Heading size="3">Install {model.name}</Heading>
-                {fallback ? (
+                {downloadSize !== null ? (
                   <Badge size="1" variant="soft" color="gray">
-                    approximately {formatBytes(LOCAL_FALLBACK_MODEL.downloadSizeBytes)}
+                    approximately {formatBytes(downloadSize)}
                   </Badge>
                 ) : null}
               </Flex>

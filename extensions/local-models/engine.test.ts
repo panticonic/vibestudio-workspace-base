@@ -54,6 +54,19 @@ describe("resolveAssetNames", () => {
     });
   });
 
+  it("resolves current ROCm release assets", () => {
+    expect(resolveAssetNames(profile({ os: "linux", chosenBackend: "rocm" }), "b9999")).toEqual({
+      cpu: "llama-b9999-bin-ubuntu-x64.tar.gz",
+      gpu: "llama-b9999-bin-ubuntu-rocm-7.14-x64.tar.gz",
+      extra: [],
+    });
+    expect(resolveAssetNames(profile({ os: "win32", chosenBackend: "rocm" }), "b9999")).toEqual({
+      cpu: "llama-b9999-bin-win-cpu-x64.zip",
+      gpu: "llama-b9999-bin-win-rocm-7.14-x64.zip",
+      extra: [],
+    });
+  });
+
   it("resolves Linux CPU arm64 assets", () => {
     expect(
       resolveAssetNames(profile({ os: "linux", arch: "arm64", chosenBackend: "cpu" }), "b9999")

@@ -1,6 +1,6 @@
 ---
 name: local-models
-description: Inspect local-model readiness, install the bundled local model when requested, and run agent tasks on an installed local model.
+description: Inspect local-model readiness, install a one-click local model when requested, and run agent tasks on an installed local model.
 ---
 
 # Local models
@@ -21,22 +21,23 @@ const [status, models] = await Promise.all([
 return { status, models };
 ```
 
-The bundled model reference is `status.fallback.modelRef`. Its model row is
-usable when `state` is `startable` or `ready`; `ready` means warm, while
-`startable` is a healthy downloaded-but-cold state. Report `downloading`,
-`starting`, and `error` honestly rather than treating absence of readiness as a
-generic failure. Use `getHardwareProfile` only when selection or performance
-depends on the machine.
+The preferred local model is `local:qwen3.8-27b` on hardware where `listModels`
+offers it. `status.fallback.modelRef` is the compact emergency floor, not the
+quality default. A model row is usable when `state` is `startable` or `ready`;
+`ready` means warm, while `startable` is a healthy downloaded-but-cold state.
+Report `downloading`, `starting`, and `error` honestly rather than treating
+absence of readiness as a generic failure. Use `getHardwareProfile` only when
+selection or performance depends on the machine.
 
 ## Install only on user intent
 
 Downloading model weights is a large persistent effect. Do it only when the
 user asked to install, download, prepare, or run a model that is not installed.
-For the bundled fallback, start its idempotent installation with:
+Start an offered one-click model's idempotent installation with its exact ref:
 
 ```ts
 await services.extensions.invoke("@workspace-extensions/local-models", "installModel", [
-  status.fallback.modelRef,
+  "local:qwen3.8-27b",
 ]);
 ```
 
@@ -55,7 +56,7 @@ the parent. Use `mode: "fork"` only when the local child needs the parent's
 conversation trajectory. A local child cannot reuse a cloud provider's context
 cache, so forking across that model boundary carries input without the cache
 savings of a compatible same-model fork. The runtime joins an in-progress
-bundled download, starts the correct server, and injects loopback authentication
+one-click download, starts the correct server, and injects loopback authentication
 at the trusted execution edge.
 
 Continue useful foreground work, then suspend while the child runs. Do not poll

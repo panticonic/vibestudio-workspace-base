@@ -13,6 +13,7 @@ import { DurableObjectBase, rpc } from "@workspace/runtime/worker/kernel";
 import type { WorkspaceConfig } from "@workspace/runtime/worker";
 import {
   DEFAULT_AGENT_MODEL_REF,
+  LOCAL_DEFAULT_MODEL_REF,
   LOCAL_FALLBACK_MODEL_REF,
   LOCAL_MODELS_EXTENSION_ID,
   LOCAL_PROVIDER_ID,
@@ -156,7 +157,7 @@ export function localEntryToCatalogEntry(entry: LocalModelEntry): ModelCatalogEn
     name: entry.displayName,
     provider: LOCAL_PROVIDER_ID,
     baseUrl: entry.baseUrl,
-    reasoning: false,
+    reasoning: entry.reasoningCapable,
     vision: false,
     contextWindow: entry.contextWindow,
     maxTokens: entry.maxTokens,
@@ -166,7 +167,7 @@ export function localEntryToCatalogEntry(entry: LocalModelEntry): ModelCatalogEn
     // Local models are never "connectable" — no credential flow exists for
     // them; availability comes from live server state (design §6.3/§7.1).
     connectable: false,
-    recommended: `${LOCAL_PROVIDER_ID}:${entry.slug}` === LOCAL_FALLBACK_MODEL_REF,
+    recommended: `${LOCAL_PROVIDER_ID}:${entry.slug}` === LOCAL_DEFAULT_MODEL_REF,
     auth: "loopback",
     availability: localAvailability(entry),
     modelSpec: {
@@ -175,7 +176,7 @@ export function localEntryToCatalogEntry(entry: LocalModelEntry): ModelCatalogEn
       api: "openai-completions",
       provider: LOCAL_PROVIDER_ID,
       baseUrl: entry.baseUrl,
-      reasoning: false,
+      reasoning: entry.reasoningCapable,
       input: ["text"],
       cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       contextWindow: entry.contextWindow,
@@ -380,6 +381,15 @@ export class ModelSettingsDO extends DurableObjectBase {
       ...base.models.map((entry) => applyCloudAvailability(entry, credentials, executionMode)),
       ...localEntries.map(localEntryToCatalogEntry),
     ];
+    const recommendedLocalModelRef = localEntries.some(
+      (entry) => `${LOCAL_PROVIDER_ID}:${entry.slug}` === LOCAL_DEFAULT_MODEL_REF
+    )
+      ? LOCAL_DEFAULT_MODEL_REF
+      : localEntries.some(
+            (entry) => `${LOCAL_PROVIDER_ID}:${entry.slug}` === LOCAL_FALLBACK_MODEL_REF
+          )
+        ? LOCAL_FALLBACK_MODEL_REF
+        : null;
     const providers: ModelCatalogProvider[] = localEntries.length
       ? [
           ...base.providers,
@@ -387,7 +397,7 @@ export class ModelSettingsDO extends DurableObjectBase {
             id: LOCAL_PROVIDER_ID,
             label: "Local inference (experimental)",
             baseUrls: Array.from(new Set(localEntries.map((entry) => entry.baseUrl))),
-            recommendedModelRef: LOCAL_FALLBACK_MODEL_REF,
+            recommendedModelRef: recommendedLocalModelRef,
             connectable: false,
           },
         ]

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createTestDO } from "@workspace/runtime/worker/test-utils";
 import type { WorkspaceConfig } from "@workspace/runtime/worker";
-import { DEFAULT_AGENT_MODEL_REF, type ModelCatalog } from "@workspace/model-catalog/catalog";
+import {
+  DEFAULT_AGENT_MODEL_REF,
+  LOCAL_DEFAULT_MODEL_REF,
+  LOCAL_FALLBACK_MODEL_REF,
+  type ModelCatalog,
+} from "@workspace/model-catalog/catalog";
 import type { LocalModelEntry } from "@workspace/model-catalog/localModels";
 import { makeTestCatalogEntry } from "@workspace/model-catalog/testing";
 import type { StoredCredentialSummary } from "@vibestudio/credential-client";
@@ -20,6 +25,7 @@ function localEntry(fields: Partial<LocalModelEntry> = {}): LocalModelEntry {
     maxTokens: 32_768,
     measuredTokensPerSec: null,
     toolsCapable: true,
+    reasoningCapable: false,
     fit: {
       fit: "cpu-only",
       estTokensPerSec: null,
@@ -207,6 +213,29 @@ describe("ModelSettingsDO", () => {
         })
       ).availability
     ).toEqual({ state: "starting" });
+  });
+
+  it("recommends Qwen3.8 while keeping the compact model as fallback only", () => {
+    expect(
+      localEntryToCatalogEntry(
+        localEntry({
+          slug: "qwen3.8-27b",
+          displayName: "Qwen3.8 27B",
+          server: "main",
+          reasoningCapable: true,
+        })
+      ).recommended
+    ).toBe(true);
+    expect(localEntryToCatalogEntry(localEntry()).recommended).toBe(false);
+    expect(LOCAL_DEFAULT_MODEL_REF).toBe("local:qwen3.8-27b");
+    expect(LOCAL_FALLBACK_MODEL_REF).toBe("local:lfm2.5-2.6b");
+  });
+
+  it("projects local reasoning capability into the pi model spec", () => {
+    expect(localEntryToCatalogEntry(localEntry({ reasoningCapable: true }))).toMatchObject({
+      reasoning: true,
+      modelSpec: { reasoning: true },
+    });
   });
 
   it("projects the Codex 5.6 Sol registry entry and all enabled effort levels", async () => {

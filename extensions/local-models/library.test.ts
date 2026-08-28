@@ -324,7 +324,7 @@ describe("ModelLibrary", () => {
       ])}\n`,
       "utf8"
     );
-    const { library } = createTestLibrary(root, server);
+    const { library } = createTestLibrary(root, server, sha256Hex(body));
 
     await expect(library.ensureFallback()).resolves.toMatchObject({
       slug: FALLBACK_MODEL.slug,
@@ -383,7 +383,13 @@ describe("ModelLibrary", () => {
         ],
         ["general.size_label", { kind: "string", value: "2B" }],
         ["qwen35.context_length", { kind: "uint32", value: 262_144 }],
-        ["tokenizer.chat_template", { kind: "string", value: "{{ tools }}{{ tool_calls }}" }],
+        [
+          "tokenizer.chat_template",
+          {
+            kind: "string",
+            value: "{% if enable_thinking %}<think>{% endif %}{{ tools }}{{ tool_calls }}",
+          },
+        ],
         ["general.file_type", { kind: "uint32", value: 15 }],
       ])
     );
@@ -395,6 +401,7 @@ describe("ModelLibrary", () => {
         arch: "qwen35",
         trainedContextLength: 262_144,
         toolsCapable: true,
+        reasoningCapable: true,
       }),
     ]);
   });
@@ -609,7 +616,8 @@ async function tempRoot(): Promise<string> {
 
 function createTestLibrary(
   root: string,
-  server?: RangeServer
+  server?: RangeServer,
+  fallbackSha256: string = FALLBACK_MODEL.sha256
 ): {
   library: ReturnType<typeof createModelLibrary>;
   events: Array<Parameters<ModelLibraryDeps["emit"]>[0]>;
@@ -619,6 +627,7 @@ function createTestLibrary(
     library: createModelLibrary({
       rootDir: root,
       fetch: server ? (server.fetch ?? fetchThrough(server.baseUrl)) : fetch,
+      fallbackSha256,
       log: vi.fn(),
       emit(event) {
         events.push(event);

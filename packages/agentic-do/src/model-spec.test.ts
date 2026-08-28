@@ -23,6 +23,7 @@ describe("local model materialization", () => {
       contextWindow: 131_072,
       maxTokens: 8192,
       toolsCapable: true,
+      reasoningCapable: false,
     };
 
     expect(materializeModel("local", entry.slug, entry)?.spec).toMatchObject({
@@ -30,6 +31,20 @@ describe("local model materialization", () => {
       maxTokens: 8192,
       streamIdleTimeoutMs: 60_000,
     });
+  });
+
+  it("preserves GGUF-declared reasoning support", () => {
+    const entry: LocalModelDescriptor = {
+      slug: "reasoning-model",
+      displayName: "Reasoning model",
+      baseUrl: "http://127.0.0.1:1234/v1",
+      contextWindow: 262_144,
+      maxTokens: 65_536,
+      toolsCapable: true,
+      reasoningCapable: true,
+    };
+
+    expect(materializeModel("local", entry.slug, entry)?.spec.reasoning).toBe(true);
   });
 
   it("does not invent metadata for an unknown local model", () => {
