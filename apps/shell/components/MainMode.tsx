@@ -16,9 +16,9 @@ import { WorkspaceChooser } from "./WorkspaceChooser";
 import { WorkspaceWizard } from "./WorkspaceWizard";
 
 /**
- * Main mode: shows panel app with dialogs for workspace chooser and wizard.
- * Extracted for React.lazy code splitting — this pulls in PanelApp, PanelStack,
- * TitleBar, LazyPanelTreeSidebar, @dnd-kit/*, and all transitive deps.
+ * Main mode: the normal desktop startup surface with the panel app and its
+ * workspace dialogs. Optional feature toolchains below this boundary remain
+ * lazy, but the panel chrome itself is required for first useful paint.
  */
 export default function MainMode() {
   const workspaceChooserOpen = useAtomValue(workspaceChooserDialogOpenAtom);

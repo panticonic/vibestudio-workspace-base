@@ -189,7 +189,9 @@ function storageFor(root: string) {
     mkdir: (filePath: string, opts?: { recursive?: boolean }) =>
       fs.mkdir(path.join(root, filePath), { recursive: opts?.recursive ?? true }),
     readFile: (filePath: string, encoding?: BufferEncoding) =>
-      fs.readFile(path.join(root, filePath), encoding),
+      encoding === undefined
+        ? fs.readFile(path.join(root, filePath))
+        : fs.readFile(path.join(root, filePath), encoding),
     writeFile: async (filePath: string, data: string | Uint8Array) => {
       await fs.mkdir(path.dirname(path.join(root, filePath)), { recursive: true });
       await fs.writeFile(path.join(root, filePath), data);

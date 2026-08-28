@@ -1,7 +1,6 @@
-import { useEffect, useCallback, useState, lazy, Suspense } from "react";
+import { useEffect, useCallback } from "react";
 import { useSetAtom } from "jotai";
-import { Theme, Flex, Spinner, Text } from "@radix-ui/themes";
-import { VibestudioLogo } from "@workspace/ui/brand";
+import { Theme } from "@radix-ui/themes";
 
 import {
   workspaceChooserDialogOpenAtom,
@@ -27,29 +26,7 @@ import {
   connectNativePanelAdapter,
 } from "../shell/client";
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
-
-// Lazy-load MainMode — this creates a separate chunk containing PanelApp,
-// PanelStack, TitleBar, LazyPanelTreeSidebar, @dnd-kit/*, and all transitive deps.
-// Mutable: reassigned on retry because React.lazy caches rejected promises permanently.
-let LazyMainMode = lazy(() => import("./MainMode"));
-
-function LoadingSpinner() {
-  return (
-    <Flex
-      direction="column"
-      align="center"
-      justify="center"
-      gap="3"
-      style={{ height: "100dvh" }}
-    >
-      <VibestudioLogo size={144} variant="logo" />
-      <Spinner size="3" />
-      <Text size="2" color="gray">
-        Loading Vibestudio
-      </Text>
-    </Flex>
-  );
-}
+import MainMode from "./MainMode";
 
 /**
  * Root App component that renders the main panel app.
@@ -62,13 +39,9 @@ export function App() {
   const loadThemeConfig = useSetAtom(loadThemeConfigAtom);
   const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
   const setActiveWorkspaceName = useSetAtom(activeWorkspaceNameAtom);
-  // Counter to force remount of lazy component after a chunk load failure.
-  const [lazyRetryKey, setLazyRetryKey] = useState(0);
-
-  // Hand the window to the lightweight hosted shell immediately. MainMode is
-  // intentionally a large lazy chunk; keeping the bootstrap launch gate above
-  // this component's real loading surface makes that split invisible and
-  // serializes user-visible startup behind panel-layout code.
+  // Hand the window to the hosted shell immediately. MainMode belongs to the
+  // normal startup surface and is bundled with it; optional heavyweight
+  // features inside that surface retain their own lazy boundaries.
   useEffect(() => {
     void connectNativePanelAdapter().catch((error: unknown) =>
       console.warn("[App] Panel host connection failed:", error),
@@ -181,16 +154,8 @@ export function App() {
       {...themeConfig}
       className="app-shell-theme"
     >
-      <ChunkErrorBoundary
-        onRetry={() => {
-          // Reassign to create a fresh lazy() with a new import() promise
-          LazyMainMode = lazy(() => import("./MainMode"));
-          setLazyRetryKey((k) => k + 1);
-        }}
-      >
-        <Suspense key={lazyRetryKey} fallback={<LoadingSpinner />}>
-          <LazyMainMode />
-        </Suspense>
+      <ChunkErrorBoundary>
+        <MainMode />
       </ChunkErrorBoundary>
     </Theme>
   );

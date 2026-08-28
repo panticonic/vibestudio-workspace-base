@@ -9,6 +9,9 @@
     "app": {
       "target": "electron",
       "renderer": "index.tsx",
+      "startupModules": [
+        "./components/App"
+      ],
       "capabilities": [
         "native-menus",
         "notifications",

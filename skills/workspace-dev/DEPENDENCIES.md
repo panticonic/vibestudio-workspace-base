@@ -9,6 +9,7 @@ materialized source being built. It never inherits root package-manager policy.
 
 - [Declare dependencies](#declare-dependencies)
 - [Own it, or let the realm provide it](#own-it-or-let-the-realm-provide-it)
+- [Use ranges by default](#use-ranges-by-default)
 - [Override a resolution](#override-a-resolution)
 - [Patch an exact dependency](#patch-an-exact-dependency)
 - [Own a patched integration](#own-a-patched-integration)
@@ -36,6 +37,26 @@ Declare everything you import. Nothing is added on your behalf: a package that
 appears in no manifest is not installed, even when something you depend on
 names it as its own peer. A gap surfaces as an unresolved import naming the
 specifier, never as a version the registry picked for you.
+
+## Use ranges by default
+
+An exact dependency pin is a claim that no other compatible release can run the
+integration. Do not make that claim incidentally. Use the narrowest truthful
+semver range so canonical builds can reuse the dependency realm packaged with
+the Host.
+
+Exact pins require a concrete byte-identity or ABI reason. Current legitimate
+classes are a source patch whose selector names exact bytes, and JavaScript for
+a native module or renderer that must match the version compiled into the
+mobile APK. The manifest must carry that policy through
+`vibestudio.dependencyResolution`, the mobile native-module policy, or an
+adjacent dependency comment. Test tooling, preference, and “this is what was
+installed when I wrote it” are not reasons to pin.
+
+`pnpm check:userland-dependencies` enforces both sides of reuse: undocumented
+exact pins fail, and every Host runtime range shared with Base must be wholly
+contained by Base's accepted range. Mere overlap is unstable because a later
+Host installation may legally select a lower version.
 
 ## Own it, or let the realm provide it
 
@@ -228,16 +249,23 @@ For each build, Build V2:
 1. Collects policies and patch bytes from the exact internal source closure,
    splitting externals into what the unit owns and what its peers leave to the
    composing realm.
-2. Installs the derived registry dependency environment -- both halves, since a
-   typecheck needs a peer's declarations, and nothing beyond them: npm does not
-   add unmet peers on its own, and peer ranges between installed packages are
-   proven from the resulting tree.
+2. Reuses one complete package-owned Host dependency realm when it satisfies the
+   whole closure and no override or patch changes the requested bytes. Otherwise
+   it installs the derived registry dependency environment -- both halves, since
+   a typecheck needs a peer's declarations, and nothing beyond them.
 3. Applies each patch to every installed package whose name and version exactly
    match the selector, including hoisted and nested copies.
 4. Seals dependency versions, overrides, patch roots, and patch-content digests
    into the cache key and build recipe.
 5. Records the digest of every patched or deleted file and rejects a modified
    or incomplete cache receipt.
+
+The compiler resolves every bare import through that prepared realm. It does
+not perform Node-style ancestor discovery from the materialized source path;
+an undeclared `~/node_modules` package is never a build input. Installed package
+manifests and their nesting are fingerprinted into the build key, so reinstalling
+the Host with a different valid dependency graph cannot reuse an artifact built
+from the old graph.
 
 Patch application is strict. The build fails for an absent patch file, unsafe
 path, duplicate owner, conflicting override, missing declared root, selector
