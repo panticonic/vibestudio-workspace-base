@@ -92,7 +92,7 @@ export function ConnectionSettingsDialog({ section, onSectionChange }: Props) {
 
   useEffect(() => {
     // A `vibestudio://connect` link received while the app is already running
-    // carries the full WebRTC pairing material (room/fp/code/sig). The
+    // carries the full Iroh pairing material (Endpoint ID, relays, and code). The
     // bootstrap chooser owns launch-time links, so do not drain its pending
     // buffer here: doing that races the chooser and can reopen a second
     // connection dialog after a successful launch pairing.

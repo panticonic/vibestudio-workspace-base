@@ -4,7 +4,7 @@
  *
  * The desktop overlay and the mobile sheet resolve, join, reduce and drive the
  * same durable conversation; only the way they reach the workspace differs
- * (Electron's preload RPC bridge vs. the mobile WebRTC pipe). So the whole
+ * (Electron's preload RPC bridge vs. the mobile Iroh connection). So the whole
  * lifecycle lives here and each client injects a `QuickfireTransport`.
  *
  * Three deliberate choices, unchanged from the desktop original:

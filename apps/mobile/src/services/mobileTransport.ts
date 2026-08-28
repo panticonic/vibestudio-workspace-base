@@ -1,12 +1,9 @@
 /**
- * Mobile RPC client for React Native — WebRTC transport.
+ * Mobile RPC client for React Native — Iroh transport.
  *
- * After the native bootstrap pairs over WebRTC and reloads onto this workspace
- * app, the JS pipe is gone but the signaling room + the server answerer persist.
- * This client re-pairs to the SAME room with the stored shell credential
- * (`@vibestudio/mobile-webrtc` `reconnectViaWebRtc`) and drives ALL RPC over that
- * `WebRtcSession`. There is no WebSocket transport on mobile anymore — the
- * server is only reachable through the pinned, fail-closed DTLS pipe.
+ * Native bootstrap and the workspace app share one Keychain-backed endpoint
+ * identity. Returning connections authenticate that Endpoint ID plus the stored
+ * device credential, and every RPC owns an independent QUIC stream.
  */
 
 import type {
@@ -18,7 +15,7 @@ import type {
   RpcStreamOptions,
 } from "@vibestudio/rpc";
 import type { RecoveryKind } from "@vibestudio/rpc/protocol/recoveryCoordinator";
-import type { ReconnectProgress, WebRtcSession } from "@vibestudio/rpc/transports/webrtcClient";
+import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
 import { Platform } from "react-native";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import { authMethods } from "@vibestudio/service-schemas/auth";
@@ -27,8 +24,15 @@ import {
   loadShellCredential,
   MobileConnectionAggregateError,
   reconnectMobileSession,
-  type WebRtcConnection,
-} from "@vibestudio/mobile-webrtc";
+  type IrohConnection,
+} from "@vibestudio/mobile-iroh";
+
+export interface ReconnectProgress {
+  attempt: number;
+  phase: "scheduled" | "connecting" | "failed";
+  reason: string;
+  nextRetryInMs?: number;
+}
 
 function smokePhase(phase: string, details?: Record<string, unknown>): void {
   const suffix = details ? ` ${JSON.stringify(details)}` : "";
@@ -45,7 +49,9 @@ export interface MobileRpcClientConfig {
   };
 }
 
-export function createMobileRpcClient(config: MobileRpcClientConfig = {}): MobileRpcClient {
+export function createMobileRpcClient(
+  config: MobileRpcClientConfig = {},
+): MobileRpcClient {
   return new MobileRpcClient(config);
 }
 
@@ -54,10 +60,10 @@ export class MobileRpcClient implements Pick<
   "selfId" | "expose" | "call" | "emit" | "on" | "stream" | "streamReadable"
 > {
   private config: MobileRpcClientConfig;
-  private connection: WebRtcConnection | null = null;
+  private connection: IrohConnection | null = null;
   private rpc: RpcClient | null = null;
   private controlRpc: RpcClient | null = null;
-  // Dedupes concurrent connect attempts: the WebRTC handshake is eager + async,
+  // Dedupes concurrent connect attempts: the Iroh handshake is eager + async,
   // so a stray call() racing connectAndWait() must not open a second pipe.
   private connecting: Promise<RpcClient> | null = null;
   // Identity token for the in-flight `establishConnection()`. `teardown()` clears
@@ -70,12 +76,25 @@ export class MobileRpcClient implements Pick<
   private activeConnectToken: object | null = null;
   private currentCallerId: string | null = null;
   private statusState: ConnectionStatus = "disconnected";
-  private readonly statusListeners = new Set<(status: ConnectionStatus) => void>();
-  private readonly reconnectProgressListeners = new Set<(progress: ReconnectProgress) => void>();
-  private readonly recoveryListeners = new Map<RecoveryKind, Set<() => void | Promise<void>>>();
-  private readonly eventSubscriptions = new Map<string, Set<(event: RpcEventContext) => void>>();
+  private readonly statusListeners = new Set<
+    (status: ConnectionStatus) => void
+  >();
+  private readonly reconnectProgressListeners = new Set<
+    (progress: ReconnectProgress) => void
+  >();
+  private readonly recoveryListeners = new Map<
+    RecoveryKind,
+    Set<() => void | Promise<void>>
+  >();
+  private readonly eventSubscriptions = new Map<
+    string,
+    Set<(event: RpcEventContext) => void>
+  >();
   private readonly activeEventUnsubs = new Map<string, () => void>();
-  private readonly exposedHandlers = new Map<string, RpcContextHandler<any, any>>();
+  private readonly exposedHandlers = new Map<
+    string,
+    RpcContextHandler<any, any>
+  >();
 
   constructor(config: MobileRpcClientConfig) {
     this.config = config;
@@ -95,7 +114,7 @@ export class MobileRpcClient implements Pick<
       // A superseded connect means a newer teardown/connect already owns the
       // status — don't clobber it or log a scary failure.
       if (error instanceof ConnectSupersededError) return;
-      console.warn("[MobileRpcClient] Failed to connect WebRTC pipe:", error);
+      console.warn("[MobileRpcClient] Failed to connect Iroh pipe:", error);
       this.setStatus("disconnected");
     });
   }
@@ -110,7 +129,10 @@ export class MobileRpcClient implements Pick<
         // without a spurious "disconnected" flash — a new connect owns status.
         throw error;
       }
-      console.warn("[MobileRpcClient] Failed to connect mobile RPC transport:", error);
+      console.warn(
+        "[MobileRpcClient] Failed to connect mobile RPC transport:",
+        error,
+      );
       this.setStatus("disconnected");
       throw error;
     }
@@ -119,10 +141,14 @@ export class MobileRpcClient implements Pick<
   reconnect(): void {
     void this.teardown()
       .then(() => this.connect())
-      .catch((error) => this.reportTransportFailure("Reconnect teardown failed", error));
+      .catch((error) =>
+        this.reportTransportFailure("Reconnect teardown failed", error),
+      );
   }
 
-  onReconnectProgress(listener: (progress: ReconnectProgress) => void): () => void {
+  onReconnectProgress(
+    listener: (progress: ReconnectProgress) => void,
+  ): () => void {
     this.reconnectProgressListeners.add(listener);
     return () => this.reconnectProgressListeners.delete(listener);
   }
@@ -140,9 +166,13 @@ export class MobileRpcClient implements Pick<
       timeout = setTimeout(
         () => {
           remove();
-          reject(new Error("The secure workspace connection did not recover in time"));
+          reject(
+            new Error(
+              "The secure workspace connection did not recover in time",
+            ),
+          );
         },
-        Math.max(1, timeoutMs)
+        Math.max(1, timeoutMs),
       );
     });
   }
@@ -157,7 +187,7 @@ export class MobileRpcClient implements Pick<
       return;
     }
     void this.close().catch((error) =>
-      this.reportTransportFailure("Disconnect teardown failed", error)
+      this.reportTransportFailure("Disconnect teardown failed", error),
     );
   }
 
@@ -178,24 +208,29 @@ export class MobileRpcClient implements Pick<
     this.config = config;
     void this.teardown()
       .then(() => this.setStatus("disconnected"))
-      .catch((error) => this.reportTransportFailure("Configuration teardown failed", error));
+      .catch((error) =>
+        this.reportTransportFailure("Configuration teardown failed", error),
+      );
   }
 
   async call<T = unknown>(
     targetId: string,
     method: string,
     args: unknown[],
-    options?: RpcCallOptions
+    options?: RpcCallOptions,
   ): Promise<T> {
     const workspaceRpc = await this.ensureRpc();
-    const selected = method.startsWith("hubControl.") ? this.controlRpc : workspaceRpc;
-    if (!selected) throw new Error("Stable hub control connection not established");
+    const selected = method.startsWith("hubControl.")
+      ? this.controlRpc
+      : workspaceRpc;
+    if (!selected)
+      throw new Error("Stable hub control connection not established");
     return selected.call<T>(targetId, method, args, options);
   }
 
   expose<TArgs extends unknown[], TReturn>(
     method: string,
-    handler: RpcContextHandler<TArgs, TReturn>
+    handler: RpcContextHandler<TArgs, TReturn>,
   ): void {
     if (this.exposedHandlers.has(method)) {
       throw new Error(`Mobile RPC method "${method}" is already exposed`);
@@ -208,7 +243,7 @@ export class MobileRpcClient implements Pick<
     targetId: string,
     method: string,
     args: unknown[],
-    options?: RpcStreamOptions
+    options?: RpcStreamOptions,
   ): Promise<Response> {
     return (await this.ensureRpc()).stream(targetId, method, args, options);
   }
@@ -217,15 +252,20 @@ export class MobileRpcClient implements Pick<
    * Like {@link stream} but yields the decoded head + a raw `ReadableStream`
    * body — RN's whatwg-fetch `Response` cannot consume a ReadableStream. The
    * panel-asset façade (B2) reads panel bundles through this. `options.body`
-   * streams a REQUEST body out over the pipe's bulk channel (plan §1.6).
+   * streams a request body on the same request-owned QUIC stream.
    */
   async streamReadable(
     targetId: string,
     method: string,
     args: unknown[],
-    options?: RpcStreamOptions
+    options?: RpcStreamOptions,
   ): ReturnType<RpcClient["streamReadable"]> {
-    return (await this.ensureRpc()).streamReadable(targetId, method, args, options);
+    return (await this.ensureRpc()).streamReadable(
+      targetId,
+      method,
+      args,
+      options,
+    );
   }
 
   /**
@@ -240,13 +280,15 @@ export class MobileRpcClient implements Pick<
    */
   async openPanelSession(
     runtimeEntityId: PanelEntityId,
-    connectionId: string
-  ): Promise<WebRtcSession> {
+    connectionId: string,
+  ): Promise<IrohClientSession> {
     const rpc = await this.ensureRpc();
     const connection = this.connection;
-    if (!connection) throw new Error("WebRTC connection not established");
-    const authClient = createTypedServiceClient("auth", authMethods, (service, method, args) =>
-      rpc.call("main", `${service}.${method}`, args)
+    if (!connection) throw new Error("Iroh connection not established");
+    const authClient = createTypedServiceClient(
+      "auth",
+      authMethods,
+      (service, method, args) => rpc.call("main", `${service}.${method}`, args),
     );
     const session = connection.transport.openSession({
       // Reuse the lease's connectionId and grant for the runtime ENTITY id (not
@@ -257,7 +299,8 @@ export class MobileRpcClient implements Pick<
       // responses match their recorded origin.
       connectionId,
       clientPlatform: "mobile",
-      oauthCallbackMode: Platform.OS === "ios" ? "app-scheme" : "client-loopback",
+      oauthCallbackMode:
+        Platform.OS === "ios" ? "app-scheme" : "client-loopback",
       getToken: async () => {
         const grant = await authClient.grantConnection(runtimeEntityId);
         return grant.token;
@@ -293,7 +336,10 @@ export class MobileRpcClient implements Pick<
     return this.onRecovery("resubscribe", listener);
   }
 
-  onRecovery(kind: RecoveryKind, listener: () => void | Promise<void>): () => void {
+  onRecovery(
+    kind: RecoveryKind,
+    listener: () => void | Promise<void>,
+  ): () => void {
     let listeners = this.recoveryListeners.get(kind);
     if (!listeners) {
       listeners = new Set();
@@ -321,17 +367,19 @@ export class MobileRpcClient implements Pick<
     this.activeConnectToken = token;
     const stored = await loadShellCredential();
     if (!stored) {
-      throw new Error("No stored WebRTC shell credential — re-pair this device");
+      throw new Error("No stored Iroh shell credential — re-pair this device");
     }
-    smokePhase("workspace-webrtc-connect-start", {
+    smokePhase("workspace-iroh-connect-start", {
       phase: stored.phase,
-      room: stored.phase === "routed" ? stored.workspacePairing.room : stored.controlPairing.room,
-      ice: stored.phase === "routed" ? stored.workspacePairing.ice : stored.controlPairing.ice,
+      endpointId:
+        stored.phase === "routed"
+          ? stored.workspacePairing.endpointId.slice(0, 12)
+          : stored.controlPairing.endpointId.slice(0, 12),
     });
     const connection = await reconnectMobileSession(
       stored,
       Platform.OS === "ios" ? "app-scheme" : "client-loopback",
-      (kind) => this.emitRecovery(kind)
+      (kind) => this.emitRecovery(kind),
     );
     if (this.activeConnectToken !== token) {
       // A disconnect()/updateConfig()/reconnect() ran while this handshake was in
@@ -340,7 +388,7 @@ export class MobileRpcClient implements Pick<
       return closeThenThrow(
         connection,
         new ConnectSupersededError(),
-        "Superseded mobile connection"
+        "Superseded mobile connection",
       );
     }
     this.activeConnectToken = null;
@@ -352,28 +400,32 @@ export class MobileRpcClient implements Pick<
       return closeThenThrow(
         connection,
         new Error("Mobile session did not retain its stable hub control pipe"),
-        "Invalid mobile session"
+        "Invalid mobile session",
       );
     }
     for (const [method, handler] of this.exposedHandlers) {
       this.rpc.expose(method, handler);
     }
-    // The session reports keepalive/ICE state (hardened in Part A); surface it as
-    // the client's connection status so the UI + the recovery hook react to drops.
+    // Surface authenticated session state so UI and recovery react to drops.
     connection.session.onStatusChange?.((status) => this.setStatus(status));
     // Reconnect progress is an additive transport capability. Production
-    // WebRTC transports expose it; older injected/test transports can omit it
+    // Iroh transports expose it; older injected/test transports can omit it
     // without turning a successful connection into a retry loop.
     if (typeof connection.transport.onReconnectProgress === "function") {
-      connection.transport.onReconnectProgress((progress) => this.emitReconnectProgress(progress));
+      connection.transport.onReconnectProgress((progress) =>
+        this.emitReconnectProgress(progress),
+      );
     }
-    for (const event of this.eventSubscriptions.keys()) this.attachEventSubscription(event);
+    for (const event of this.eventSubscriptions.keys())
+      this.attachEventSubscription(event);
     this.setStatus(connection.session.status?.() ?? "connected");
-    smokePhase("workspace-webrtc-connected", { callerId: connection.callerId });
+    smokePhase("workspace-iroh-connected", { callerId: connection.callerId });
     return this.rpc;
   }
 
-  private async connectAndWaitWithRetry(timeoutMs?: number | null): Promise<void> {
+  private async connectAndWaitWithRetry(
+    timeoutMs?: number | null,
+  ): Promise<void> {
     const retry = this.config.initialConnectionRetry ?? {};
     const startedAt = Date.now();
     const maxMs =
@@ -384,9 +436,13 @@ export class MobileRpcClient implements Pick<
           : 120_000;
     const deadline = startedAt + maxMs;
     const baseDelayMs =
-      typeof retry.delayMs === "number" && retry.delayMs >= 0 ? retry.delayMs : 750;
+      typeof retry.delayMs === "number" && retry.delayMs >= 0
+        ? retry.delayMs
+        : 750;
     const maxDelayMs =
-      typeof retry.maxDelayMs === "number" && retry.maxDelayMs >= 0 ? retry.maxDelayMs : 5_000;
+      typeof retry.maxDelayMs === "number" && retry.maxDelayMs >= 0
+        ? retry.maxDelayMs
+        : 5_000;
     let attempt = 0;
     let lastError: unknown = null;
 
@@ -397,12 +453,11 @@ export class MobileRpcClient implements Pick<
         attempt,
         phase: "connecting",
         reason: attempt === 1 ? "initial connection" : "retry",
-        layer: null,
       });
       try {
         await this.ensureRpc();
         if (attempt > 1) {
-          smokePhase("workspace-webrtc-retry-connected", { attempt });
+          smokePhase("workspace-iroh-retry-connected", { attempt });
         }
         return;
       } catch (error) {
@@ -415,14 +470,13 @@ export class MobileRpcClient implements Pick<
           attempt,
           phase: "failed",
           reason: error instanceof Error ? error.message : String(error),
-          layer: null,
         });
         try {
           await this.teardown();
         } catch (cleanupError) {
           throw new MobileConnectionAggregateError(
             [error, cleanupError],
-            "Mobile connection failed and its resources could not all be closed"
+            "Mobile connection failed and its resources could not all be closed",
           );
         }
         const remainingMs = deadline - Date.now();
@@ -430,22 +484,22 @@ export class MobileRpcClient implements Pick<
         const delayMs = Math.min(
           baseDelayMs * 2 ** Math.max(0, attempt - 1),
           maxDelayMs,
-          remainingMs
+          remainingMs,
         );
-        smokePhase("workspace-webrtc-retry", {
+        smokePhase("workspace-iroh-retry", {
           attempt,
           delayMs,
           message: errorMessage(error),
         });
         console.warn(
-          `[MobileRpcClient] Initial WebRTC connection failed; retrying in ${delayMs}ms`,
-          error
+          `[MobileRpcClient] Initial Iroh connection failed; retrying in ${delayMs}ms`,
+          error,
         );
         this.emitReconnectProgress({
           attempt,
           phase: "scheduled",
           reason: errorMessage(error),
-          layer: null,
+          nextRetryInMs: delayMs,
         });
         await sleep(delayMs);
       }
@@ -454,7 +508,7 @@ export class MobileRpcClient implements Pick<
     throw lastError instanceof Error
       ? lastError
       : new Error(
-          `Could not reach your workspace server after ${Math.round(maxMs / 1000)} seconds. It may be asleep or offline — retry, or re-pair only if the server was replaced.`
+          `Could not reach your workspace server after ${Math.round(maxMs / 1000)} seconds. It may be asleep or offline — retry, or re-pair only if the server was replaced.`,
         );
   }
 
@@ -475,14 +529,15 @@ export class MobileRpcClient implements Pick<
   private reportTransportFailure(context: string, error: unknown): void {
     const reason = `${context}: ${errorMessage(error)}`;
     console.error(`[MobileRpcClient] ${reason}`, error);
-    this.emitReconnectProgress({ attempt: 0, phase: "failed", reason, layer: null });
+    this.emitReconnectProgress({ attempt: 0, phase: "failed", reason });
     this.setStatus("disconnected");
   }
 
   private attachEventSubscription(event: string): void {
     if (!this.rpc || this.activeEventUnsubs.has(event)) return;
     const unsubscribe = this.rpc.on(event, (ev) => {
-      for (const listener of this.eventSubscriptions.get(event) ?? []) listener(ev);
+      for (const listener of this.eventSubscriptions.get(event) ?? [])
+        listener(ev);
     });
     this.activeEventUnsubs.set(event, unsubscribe);
   }
@@ -493,21 +548,22 @@ export class MobileRpcClient implements Pick<
   }
 
   /**
-   * Fire the recovery listeners for `kind`. Driven by the WebRtcSession's
-   * post-auth onRecovery signal (wired into reconnectViaWebRtc): "resubscribe" on
+   * Fire the recovery listeners for `kind`. Driven by the Iroh session's
+   * post-auth recovery signal: "resubscribe" on
    * a normal reconnect, "cold-recover" when the server restarted (serverBootId
    * changed) / the session was dirty — so ShellClient's cold-recover listener
    * actually fires instead of only ever running the lighter resubscribe.
    */
   private emitRecovery(kind: RecoveryKind): void {
-    for (const listener of this.recoveryListeners.get(kind) ?? []) void listener();
+    for (const listener of this.recoveryListeners.get(kind) ?? [])
+      void listener();
   }
 }
 
 /** Thrown by an in-flight establishConnection() that teardown() invalidated. */
 class ConnectSupersededError extends Error {
   constructor() {
-    super("WebRTC connect superseded by disconnect/reconnect");
+    super("Iroh connect superseded by disconnect/reconnect");
     this.name = "ConnectSupersededError";
   }
 }
@@ -521,16 +577,16 @@ function errorMessage(error: unknown): string {
 }
 
 async function closeThenThrow(
-  connection: WebRtcConnection,
+  connection: IrohConnection,
   failure: Error,
-  context: string
+  context: string,
 ): Promise<never> {
   try {
     await connection.close();
   } catch (cleanupError) {
     throw new MobileConnectionAggregateError(
       [failure, cleanupError],
-      `${context} failed and its resources could not all be closed`
+      `${context} failed and its resources could not all be closed`,
     );
   }
   throw failure;

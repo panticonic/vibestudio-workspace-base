@@ -140,7 +140,7 @@ Run the narrow deterministic tests first, then:
 2. host, workerd, userland, and mobile type checks;
 3. host and workspace conventional test suites;
 4. desktop and mobile approval/lifecycle coverage;
-5. WebRTC smoke coverage; and
+5. Iroh remote-transport smoke coverage; and
 6. vague model-backed system tests only when model capacity is available.
 
 Model-backed failures are evidence about infrastructure, APIs, or guidance. Do not

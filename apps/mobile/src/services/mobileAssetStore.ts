@@ -4,8 +4,8 @@ import { Buffer } from "buffer";
 export const MOBILE_ASSET_STORE_MAX_BYTES = 256 * 1024 * 1024;
 
 export interface MobileAssetStoreNamespace {
-  /** Pinned control-pairing DTLS fingerprint. */
-  serverIdentity: string;
+  /** Pinned hub-control Iroh Endpoint ID. */
+  serverEndpointId: string;
   /** Authoritative workspace id returned by workspaces.getInfo. */
   workspaceIdentity: string;
 }
@@ -27,13 +27,16 @@ export interface MobileStoredAsset {
 export interface NativeMobileAssetStoreHost {
   assetStoreLookup(
     namespace: MobileAssetStoreNamespace,
-    key: string
+    key: string,
   ): Promise<{ handle: string; size: number; metadataJson: string } | null>;
-  assetStoreOpenWrite(namespace: MobileAssetStoreNamespace, key: string): Promise<string>;
+  assetStoreOpenWrite(
+    namespace: MobileAssetStoreNamespace,
+    key: string,
+  ): Promise<string>;
   assetStoreAppend(writeId: string, bytesBase64: string): Promise<void>;
   assetStoreCommit(
     writeId: string,
-    metadataJson: string
+    metadataJson: string,
   ): Promise<{ handle: string; size: number; metadataJson: string }>;
   assetStoreAbort(writeId: string): Promise<void>;
   assetStoreTrim(maxBytes: number): Promise<void>;
@@ -53,7 +56,7 @@ export type MobileAssetAcquisition =
     };
 
 const STORED_HANDLE = /^vibestudio-asset-v1:[a-f0-9]{64}$/u;
-const SERVER_IDENTITY = /^[a-f0-9]{64}$/u;
+const ENDPOINT_ID = /^[a-f0-9]{64}$/u;
 
 /**
  * Native durable store adapter plus JS-owned single-flight coordination.
@@ -67,7 +70,7 @@ export class MobileAssetStore {
 
   constructor(
     readonly namespace: MobileAssetStoreNamespace,
-    private readonly nativeHost: NativeMobileAssetStoreHost = requireNativeAssetStoreHost()
+    private readonly nativeHost: NativeMobileAssetStoreHost = requireNativeAssetStoreHost(),
   ) {
     validateNamespace(namespace);
   }
@@ -102,7 +105,9 @@ export class MobileAssetStore {
       };
       try {
         const hit = parseStoredAsset(
-          await this.track(this.nativeHost.assetStoreLookup(this.namespace, key))
+          await this.track(
+            this.nativeHost.assetStoreLookup(this.namespace, key),
+          ),
         );
         if (hit) {
           finish({ kind: "complete", asset: hit });
@@ -128,13 +133,20 @@ export class MobileAssetStore {
 
   append(writeId: string, bytes: Uint8Array): Promise<void> {
     if (!writeId) throw new Error("Asset-store write handle is required");
-    return this.track(this.nativeHost.assetStoreAppend(writeId, uint8ToBase64(bytes)));
+    return this.track(
+      this.nativeHost.assetStoreAppend(writeId, uint8ToBase64(bytes)),
+    );
   }
 
-  async commit(writeId: string, metadata: MobileStoredAssetMetadata): Promise<MobileStoredAsset> {
+  async commit(
+    writeId: string,
+    metadata: MobileStoredAssetMetadata,
+  ): Promise<MobileStoredAsset> {
     validateMetadata(metadata);
     return parseRequiredStoredAsset(
-      await this.track(this.nativeHost.assetStoreCommit(writeId, JSON.stringify(metadata)))
+      await this.track(
+        this.nativeHost.assetStoreCommit(writeId, JSON.stringify(metadata)),
+      ),
     );
   }
 
@@ -163,7 +175,8 @@ export class MobileAssetStore {
         return;
       }
       for (const result of await Promise.allSettled(pending)) {
-        if (result.status === "rejected" && firstError === null) firstError = result.reason;
+        if (result.status === "rejected" && firstError === null)
+          firstError = result.reason;
       }
     }
   }
@@ -172,7 +185,7 @@ export class MobileAssetStore {
     this.operations.add(operation);
     void operation.then(
       () => this.operations.delete(operation),
-      () => this.operations.delete(operation)
+      () => this.operations.delete(operation),
     );
     return operation;
   }
@@ -183,7 +196,9 @@ export class MobileAssetStore {
 }
 
 function requireNativeAssetStoreHost(): NativeMobileAssetStoreHost {
-  const host = NativeModules["VibestudioMobileHost"] as NativeMobileAssetStoreHost | undefined;
+  const host = NativeModules["VibestudioMobileHost"] as
+    | NativeMobileAssetStoreHost
+    | undefined;
   const required: Array<keyof NativeMobileAssetStoreHost> = [
     "assetStoreLookup",
     "assetStoreOpenWrite",
@@ -200,8 +215,8 @@ function requireNativeAssetStoreHost(): NativeMobileAssetStoreHost {
 }
 
 function validateNamespace(namespace: MobileAssetStoreNamespace): void {
-  if (!SERVER_IDENTITY.test(namespace.serverIdentity.toLowerCase())) {
-    throw new Error("Mobile asset namespace has an invalid server identity");
+  if (!ENDPOINT_ID.test(namespace.serverEndpointId.toLowerCase())) {
+    throw new Error("Mobile asset namespace has an invalid server Endpoint ID");
   }
   if (
     !namespace.workspaceIdentity ||
@@ -220,9 +235,11 @@ function validateKey(key: string): void {
 
 function validateMetadata(metadata: MobileStoredAssetMetadata): void {
   const cacheControl = Object.entries(metadata.replayHeaders).find(
-    ([key]) => key.toLowerCase() === "cache-control"
+    ([key]) => key.toLowerCase() === "cache-control",
   )?.[1];
-  const cacheDirectives = cacheControl?.split(",").map((token) => token.trim().toLowerCase());
+  const cacheDirectives = cacheControl
+    ?.split(",")
+    .map((token) => token.trim().toLowerCase());
   if (
     metadata.status !== 200 ||
     !metadata.contentType ||
@@ -230,12 +247,14 @@ function validateMetadata(metadata: MobileStoredAssetMetadata): void {
     !cacheDirectives?.includes("immutable") ||
     cacheDirectives.includes("no-store")
   ) {
-    throw new Error("Only successful immutable responses can enter the mobile asset store");
+    throw new Error(
+      "Only successful immutable responses can enter the mobile asset store",
+    );
   }
 }
 
 function parseStoredAsset(
-  raw: { handle: string; size: number; metadataJson: string } | null
+  raw: { handle: string; size: number; metadataJson: string } | null,
 ): MobileStoredAsset | null {
   return raw === null ? null : parseRequiredStoredAsset(raw);
 }

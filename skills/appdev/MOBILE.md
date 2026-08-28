@@ -14,15 +14,15 @@ mobile UX can be updated through workspace app builds.
 The native host owns:
 
 - `vibestudio://connect` and `https://vibestudio.app/p#...` clean-install pairing
-- WebRTC shell credential persistence in JS secure storage
-- `/auth/mobile-app-bootstrap` over the active WebRTC pipe
+- Iroh Endpoint secret and shell credential persistence in OS-backed secure storage
+- `/auth/mobile-app-bootstrap` over the active Iroh connection
 - streamed bundle writes from JS (`appendBundleChunk` / `finalizeBundleWrite`)
 - integrity verification
 - writing the bundle to native-owned storage
 - React Native reload onto the active bundle
 
 The bootstrap must not depend on workspace app code for first pairing. A clean
-install has no workspace bundle and no stored WebRTC credential yet.
+install has no workspace bundle and no stored Iroh credential yet.
 
 ## Workspace Mobile App Responsibilities
 
@@ -36,8 +36,8 @@ The workspace mobile app owns:
 - RPC transport using a principal grant
 
 It should not directly hold long-lived refresh tokens. It should call native
-host wrappers only for reset/activation; WebRTC transport credentials live in
-`@vibestudio/mobile-webrtc`.
+host wrappers only for reset/activation; Iroh transport credentials live in
+`@vibestudio/mobile-iroh`.
 
 The workspace app bundle entry must register the same root component name the
 native host requests. The current native host requests `Vibestudio`, so the active
@@ -64,20 +64,22 @@ Clean install:
 3. Native bootstrap consumes the initial URL or URL event.
 4. Native bootstrap shows a trusted recovery-surface confirmation with the
    target server/workspace label from the link.
-5. After user confirmation, native bootstrap dials the WebRTC room, pins `fp`,
-   and presents the one-time `code` as the first shell-session token.
-6. JS stores the returned device credential plus `room`/`fp`/`sig`.
-7. JS fetches `/auth/mobile-app-bootstrap` over the same WebRTC pipe.
+5. After user confirmation, native bootstrap dials the advertised hub Endpoint
+   ID through its ordered relay set and presents the one-time `code`.
+6. Native stores its Endpoint secret, the returned device credential, and the
+   durable hub-control reach.
+7. JS routes the selected workspace and fetches `/auth/mobile-app-bootstrap`
+   over Iroh.
 8. JS streams the chosen platform artifact to native chunk-by-chunk.
 9. Native verifies the decompressed bundle integrity, writes it to disk, and
    reloads into the workspace app.
 
 Already paired:
 
-1. Bootstrap reads the stored WebRTC credential from `@vibestudio/mobile-webrtc`.
-2. Bootstrap reconnects to the same signaling room with a refresh token.
+1. Bootstrap reads the stored Iroh identity and credential from `@vibestudio/mobile-iroh`.
+2. Bootstrap reconnects to the hub Endpoint and refreshes the selected workspace reach.
 3. Bootstrap gates approvals, streams any required bundle update, and reloads.
-4. The workspace app uses the active WebRTC transport; native no longer issues
+4. The workspace app uses the active Iroh transport; native no longer issues
    HTTP grants or lists/selects workspaces.
 
 ## Bootstrap Payload

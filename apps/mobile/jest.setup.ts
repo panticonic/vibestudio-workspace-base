@@ -11,7 +11,7 @@ jest.mock(
     }));
     return messaging;
   },
-  { virtual: true }
+  { virtual: true },
 );
 
 jest.mock(
@@ -32,7 +32,7 @@ jest.mock(
     EventType: { ACTION_PRESS: 1, PRESS: 2, DISMISSED: 3 },
     IOSNotificationCategoryActionForeground: true,
   }),
-  { virtual: true }
+  { virtual: true },
 );
 
 jest.mock(
@@ -46,11 +46,13 @@ jest.mock(
     multiRemove: jest.fn(async () => undefined),
     clear: jest.fn(async () => undefined),
   }),
-  { virtual: true }
+  { virtual: true },
 );
 
 jest.mock("react-native-keychain", () => ({
-  ACCESSIBLE: { WHEN_UNLOCKED_THIS_DEVICE_ONLY: "WHEN_UNLOCKED_THIS_DEVICE_ONLY" },
+  ACCESSIBLE: {
+    WHEN_UNLOCKED_THIS_DEVICE_ONLY: "WHEN_UNLOCKED_THIS_DEVICE_ONLY",
+  },
   getGenericPassword: jest.fn(async () => false),
   resetGenericPassword: jest.fn(async () => true),
   setGenericPassword: jest.fn(async () => true),
@@ -65,10 +67,11 @@ jest.mock("react-native-svg", () => {
   const { View } = require("react-native");
   const NativeSvgElement = React.forwardRef(
     ({ children, ...props }: { children?: unknown }, ref: unknown) =>
-      React.createElement(View, { ...props, ref }, children)
+      React.createElement(View, { ...props, ref }, children),
   );
-  const SvgUri = React.forwardRef((props: Record<string, unknown>, ref: unknown) =>
-    React.createElement(View, { ...props, ref })
+  const SvgUri = React.forwardRef(
+    (props: Record<string, unknown>, ref: unknown) =>
+      React.createElement(View, { ...props, ref }),
   );
   NativeSvgElement.displayName = "NativeSvgElement";
   SvgUri.displayName = "SvgUri";
@@ -102,15 +105,11 @@ jest.mock("@react-native-community/netinfo", () => ({
   __esModule: true,
   default: {
     addEventListener: jest.fn(() => jest.fn()),
-    fetch: jest.fn(async () => ({ isConnected: true, isInternetReachable: true })),
+    fetch: jest.fn(async () => ({
+      isConnected: true,
+      isInternetReachable: true,
+    })),
   },
-}));
-
-jest.mock("react-native-webrtc", () => ({
-  mediaDevices: {},
-  RTCIceCandidate: jest.fn(),
-  RTCPeerConnection: jest.fn(),
-  RTCSessionDescription: jest.fn(),
 }));
 
 jest.mock(
@@ -124,7 +123,7 @@ jest.mock(
       getImageJPG: jest.fn(async () => ""),
     },
   }),
-  { virtual: true }
+  { virtual: true },
 );
 
 jest.mock("react-native-safe-area-context", () => ({

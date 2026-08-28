@@ -29,7 +29,7 @@ describe("React Native provider Metro projection", () => {
         blockedImports: {
           "react-native-keychain": ["src/services/pushNotifications.ts"],
         },
-      })
+      }),
     );
     const input: BuildProviderInput = {
       target: "react-native",
@@ -39,7 +39,7 @@ describe("React Native provider Metro projection", () => {
         nodeModulesPath: path.resolve("node_modules"),
         modules: {
           "@workspace-apps/mobile": sourcePath,
-          "@vibestudio/mobile-webrtc": path.resolve("packages/mobile-webrtc"),
+          "@vibestudio/mobile-iroh": path.resolve("packages/mobile-iroh"),
         },
       },
       effectiveVersion: "ev-test",
@@ -58,7 +58,9 @@ describe("React Native provider Metro projection", () => {
     expect(config).toContain(JSON.stringify(sourcePath));
     expect(config).toContain(JSON.stringify(path.resolve("node_modules")));
     expect(config).toContain(require.resolve("@react-native/metro-config"));
-    expect(config).toContain(JSON.stringify(path.resolve("packages/mobile-webrtc")));
+    expect(config).toContain(
+      JSON.stringify(path.resolve("packages/mobile-iroh")),
+    );
     expect(config).toContain("react-native-keychain");
     expect(config).not.toContain("process.cwd");
     expect(config).not.toContain("VIBESTUDIO_REPO_ROOT");
@@ -72,9 +74,16 @@ describe("React Native provider Metro projection", () => {
     };
     expect(loaded.resolver.nodeModulesPaths).toEqual([
       path.resolve("node_modules"),
-      path.resolve(require.resolve("@react-native/metro-config/package.json"), "..", "..", ".."),
+      path.resolve(
+        require.resolve("@react-native/metro-config/package.json"),
+        "..",
+        "..",
+        "..",
+      ),
     ]);
-    expect(loaded.resolver.extraNodeModules["@workspace-apps/mobile"]).toBe(sourcePath);
+    expect(loaded.resolver.extraNodeModules["@workspace-apps/mobile"]).toBe(
+      sourcePath,
+    );
     expect(config).not.toContain("packageExportTarget");
   });
 
@@ -105,9 +114,11 @@ describe("React Native provider Metro projection", () => {
     expect(fs.existsSync(transformerPath)).toBe(true);
 
     const transformerSource = fs.readFileSync(transformerPath, "utf8");
-    expect(transformerSource).toContain("@babel/plugin-transform-export-namespace-from");
     expect(transformerSource).toContain(
-      require.resolve("@react-native/metro-babel-transformer")
+      "@babel/plugin-transform-export-namespace-from",
+    );
+    expect(transformerSource).toContain(
+      require.resolve("@react-native/metro-babel-transformer"),
     );
 
     // Injected plugins run after whatever Metro already asked for, and
@@ -120,7 +131,9 @@ describe("React Native provider Metro projection", () => {
     };
     const seen: string[][] = [];
     const original = upstream.transform;
-    (upstream as { transform: unknown }).transform = (args: { plugins: string[] }) => {
+    (upstream as { transform: unknown }).transform = (args: {
+      plugins: string[];
+    }) => {
       seen.push(args.plugins);
       return {};
     };
@@ -142,17 +155,22 @@ describe("React Native provider Metro projection", () => {
     fs.mkdirSync(sourcePath, { recursive: true });
     fs.mkdirSync(path.join(runtimePath, "src", "shared"), { recursive: true });
     fs.mkdirSync(outputPath, { recursive: true });
-    fs.writeFileSync(path.join(sourcePath, "native-module-policy.json"), '{"blockedImports":{}}');
+    fs.writeFileSync(
+      path.join(sourcePath, "native-module-policy.json"),
+      '{"blockedImports":{}}',
+    );
     fs.writeFileSync(
       path.join(runtimePath, "package.json"),
       JSON.stringify({
         name: "@workspace/runtime",
-        exports: { "./workspace-presentation": "./src/shared/workspacePresentation.ts" },
-      })
+        exports: {
+          "./workspace-presentation": "./src/shared/workspacePresentation.ts",
+        },
+      }),
     );
     fs.writeFileSync(
       path.join(runtimePath, "src", "shared", "workspacePresentation.ts"),
-      "export const presentation = true;\n"
+      "export const presentation = true;\n",
     );
     const configPath = writeProjectedMetroConfig(
       {
@@ -166,14 +184,17 @@ describe("React Native provider Metro projection", () => {
         effectiveVersion: "ev-test",
         manifest: { app: { nativeModulePolicy: "native-module-policy.json" } },
       },
-      outputPath
+      outputPath,
     );
     const config = require(configPath) as {
       resolver: {
         resolveRequest(
-          context: { originModulePath: string; resolveRequest: (...args: unknown[]) => unknown },
+          context: {
+            originModulePath: string;
+            resolveRequest: (...args: unknown[]) => unknown;
+          },
           moduleName: string,
-          platform: string
+          platform: string,
         ): unknown;
       };
     };
@@ -183,13 +204,13 @@ describe("React Native provider Metro projection", () => {
       config.resolver.resolveRequest(
         { originModulePath: path.join(sourcePath, "App.tsx"), resolveRequest },
         "@workspace/runtime/workspace-presentation",
-        "android"
-      )
+        "android",
+      ),
     ).toBe("@workspace/runtime/workspace-presentation");
     expect(resolveRequest).toHaveBeenCalledWith(
       expect.any(Object),
       "@workspace/runtime/workspace-presentation",
-      "android"
+      "android",
     );
   });
 });

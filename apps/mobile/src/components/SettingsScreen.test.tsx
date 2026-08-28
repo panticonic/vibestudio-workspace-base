@@ -6,7 +6,7 @@ import {
   clearShellCredential,
   loadShellCredential,
   persistStoredMobileConnection,
-} from "@vibestudio/mobile-webrtc";
+} from "@vibestudio/mobile-iroh";
 import { SettingsScreen } from "./SettingsScreen";
 import { connectionStatusAtom } from "../state/connectionAtoms";
 import { shellClientAtom } from "../state/shellClientAtom";
@@ -23,7 +23,7 @@ jest.mock("../services/workspaceSelection", () => ({
   selectMobileWorkspace: jest.fn(),
 }));
 
-jest.mock("@vibestudio/mobile-webrtc", () => ({
+jest.mock("@vibestudio/mobile-iroh", () => ({
   clearShellCredential: jest.fn(async () => undefined),
   loadShellCredential: jest.fn(),
   persistStoredMobileConnection: jest.fn(async () => undefined),
@@ -120,25 +120,23 @@ describe("SettingsScreen workspace selector", () => {
     dependenciesMock.mockClear();
     clearCredentialMock.mockReset().mockResolvedValue(undefined);
     loadCredentialMock.mockReset().mockResolvedValue({
-      schemaVersion: 4,
+      schemaVersion: 5,
+      transport: "iroh",
       phase: "routed",
+      endpointIdentityId: "identity-1",
       credential: {
         deviceId: `dev_${"d".repeat(24)}`,
         refreshToken: "r".repeat(43),
       },
       controlPairing: {
-        room: "control-1111",
-        fp: "AA".repeat(32),
-        sig: "wss://signal.example/",
-        v: 3,
-        ice: "all",
+        endpointId: "aa".repeat(32),
+        relays: ["https://relay.example/"],
+        v: 4,
       },
       workspacePairing: {
-        room: "workspace-a-1111",
-        fp: "BB".repeat(32),
-        sig: "wss://signal.example/",
-        v: 3,
-        ice: "all",
+        endpointId: "bb".repeat(32),
+        relays: ["https://relay.example/"],
+        v: 4,
       },
       selectedWorkspaceId: "ws-a",
       pairedAt: 123,

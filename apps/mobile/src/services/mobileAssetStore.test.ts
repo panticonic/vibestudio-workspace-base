@@ -8,7 +8,7 @@ import {
 jest.mock("react-native", () => ({ NativeModules: {} }), { virtual: true });
 
 const namespace = {
-  serverIdentity: "a".repeat(64),
+  serverEndpointId: "a".repeat(64),
   workspaceIdentity: "workspace-one",
 };
 const metadata: MobileStoredAssetMetadata = {
@@ -73,8 +73,14 @@ describe("MobileAssetStore", () => {
     const committed = await store.commit(writeId, metadata);
     if (acquisition.kind === "owner") acquisition.complete(committed);
 
-    expect(native.assetStoreLookup).toHaveBeenCalledWith(namespace, "/panel.js");
-    expect(native.assetStoreOpenWrite).toHaveBeenCalledWith(namespace, "/panel.js");
+    expect(native.assetStoreLookup).toHaveBeenCalledWith(
+      namespace,
+      "/panel.js",
+    );
+    expect(native.assetStoreOpenWrite).toHaveBeenCalledWith(
+      namespace,
+      "/panel.js",
+    );
     expect(native.assetStoreAppend).toHaveBeenCalledWith("write-one", "AQID");
     expect(committed).toEqual(asset);
   });
@@ -96,7 +102,7 @@ describe("MobileAssetStore", () => {
     const native = fakeNative();
     let resolveLookup!: (value: null) => void;
     native.assetStoreLookup.mockImplementationOnce(
-      () => new Promise<null>((resolve) => (resolveLookup = resolve))
+      () => new Promise<null>((resolve) => (resolveLookup = resolve)),
     );
     const store = new MobileAssetStore(namespace, native);
 
@@ -130,7 +136,7 @@ describe("MobileAssetStore", () => {
       store.commit("write-one", {
         ...metadata,
         replayHeaders: { "cache-control": "no-store" },
-      })
+      }),
     ).rejects.toThrow(/successful immutable/u);
     expect(native.assetStoreCommit).not.toHaveBeenCalled();
   });
@@ -142,7 +148,7 @@ describe("MobileAssetStore", () => {
       store.commit("write-one", {
         ...metadata,
         replayHeaders: { "cache-control": "immutable, no-store" },
-      })
+      }),
     ).rejects.toThrow(/successful immutable/u);
     expect(native.assetStoreCommit).not.toHaveBeenCalled();
   });

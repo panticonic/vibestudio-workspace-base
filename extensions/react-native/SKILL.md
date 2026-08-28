@@ -19,11 +19,11 @@ This extension builds mobile app artifacts served to native hosts.
   `nativeModulePolicy` JSON. The build provider reads it from the immutable app
   source projection; the native development host consumes the same data.
 - Each primary artifact must include `platform: "android" | "ios"`, `role:
-  "primary"`, `integrity`, content type, encoding, and URL.
+"primary"`, `integrity`, content type, encoding, and URL.
 - The server bootstrap manifest must include `rnHostAbi`, app/build identity,
   capabilities, artifact set integrity, and provider identity.
 - Read the native-host ABI from the workspace app package and keep it aligned
-  with the delivery constant in `@vibestudio/mobile-webrtc`. Change both only
+  with the delivery constant in `@vibestudio/mobile-iroh`. Change both only
   when the native contract changes.
 
 ## Failure Modes

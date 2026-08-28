@@ -5,7 +5,7 @@
  * A cold panel load was measured on device at ~92 sequential `gateway.fetch`
  * calls for ~1.4 MB. The server spent ~7 ms answering each; the device observed
  * ~560 ms each. Nothing either end computes explains that gap — the cost is
- * simply the number of trips across the WebRTC pipe, so the only lever is to
+ * simply the number of remote round trips, so the primary lever is to
  * take fewer of them.
  *
  * The build namespace already exposes what that needs (`panelHttpServer`):
@@ -70,14 +70,21 @@ export interface PanelBuildPrefetchCandidate {
   contentType: string;
 }
 
-export function panelBuildResourcePath(buildKey: string, resource: string): string {
+export function panelBuildResourcePath(
+  buildKey: string,
+  resource: string,
+): string {
   if (!BUILD_KEY.test(buildKey)) {
-    throw new Error(`Panel build key must be 64 lowercase hex chars: ${buildKey}`);
+    throw new Error(
+      `Panel build key must be 64 lowercase hex chars: ${buildKey}`,
+    );
   }
   return `/__vibestudio/panel-build/${buildKey}/${resource}`;
 }
 
-export function parsePanelBuildManifest(text: string): PanelBuildManifestEntry[] {
+export function parsePanelBuildManifest(
+  text: string,
+): PanelBuildManifestEntry[] {
   const parsed: unknown = JSON.parse(text);
   const artifacts = (parsed as { artifacts?: unknown } | null)?.artifacts;
   if (!Array.isArray(artifacts)) {
@@ -95,7 +102,7 @@ export function parsePanelBuildManifest(text: string): PanelBuildManifestEntry[]
  */
 export function planPanelBuildPrefetch(
   buildKey: string,
-  entries: readonly PanelBuildManifestEntry[]
+  entries: readonly PanelBuildManifestEntry[],
 ): PanelBuildPrefetchCandidate[] {
   const candidates: PanelBuildPrefetchCandidate[] = [];
   entries.forEach((entry, index) => {
@@ -158,9 +165,14 @@ export interface PanelBuildBodyReader {
 }
 
 export interface PanelBuildPrefetchDeps {
-  store: Pick<MobileAssetStore, "acquire" | "openWrite" | "append" | "commit" | "abort">;
+  store: Pick<
+    MobileAssetStore,
+    "acquire" | "openWrite" | "append" | "commit" | "abort"
+  >;
   /** Issue one `gateway.fetch` for a panel-origin path and return its body. */
-  fetchPath(path: string): Promise<{ status: number; body: PanelBuildBodyReader }>;
+  fetchPath(
+    path: string,
+  ): Promise<{ status: number; body: PanelBuildBodyReader }>;
   now?: () => number;
 }
 
@@ -202,7 +214,7 @@ const decodeUtf8 = (bytes: Uint8Array): string => {
  */
 export async function prefetchPanelBuild(
   buildKey: string,
-  deps: PanelBuildPrefetchDeps
+  deps: PanelBuildPrefetchDeps,
 ): Promise<PanelBuildPrefetchReport> {
   const now = deps.now ?? Date.now;
   const startedAt = now();
@@ -219,19 +231,26 @@ export async function prefetchPanelBuild(
   };
 
   const manifestResponse = await deps.fetchPath(
-    panelBuildResourcePath(buildKey, "__manifest.json")
+    panelBuildResourcePath(buildKey, "__manifest.json"),
   );
   if (manifestResponse.status !== 200) {
-    throw new Error(`Panel build manifest responded ${manifestResponse.status}`);
+    throw new Error(
+      `Panel build manifest responded ${manifestResponse.status}`,
+    );
   }
-  const entries = parsePanelBuildManifest(decodeUtf8(await readAll(manifestResponse.body)));
+  const entries = parsePanelBuildManifest(
+    decodeUtf8(await readAll(manifestResponse.body)),
+  );
   const candidates = planPanelBuildPrefetch(buildKey, entries);
   report.candidates = candidates.length;
 
   // Claim every key up front. Two candidates can share a digest (identical files
   // under different names), so the pending map is keyed by digest and holds a
   // list — one blob may satisfy several claims.
-  const pending = new Map<string, (PanelBuildPrefetchCandidate & { release: Release })[]>();
+  const pending = new Map<
+    string,
+    (PanelBuildPrefetchCandidate & { release: Release })[]
+  >();
   const wanted: number[] = [];
   // Declared out here so the sweep below can wait for writes that were still in
   // flight when the transfer threw. Abandoning them would let a store write race
@@ -263,7 +282,7 @@ export async function prefetchPanelBuild(
     // a low-latency link (4.2 s to first paint against 1.9 s) even while saving
     // ninety round trips.
     const bundle = await deps.fetchPath(
-      `${panelBuildResourcePath(buildKey, "__bundle")}?want=${wanted.join(",")}&enc=gzip`
+      `${panelBuildResourcePath(buildKey, "__bundle")}?want=${wanted.join(",")}&enc=gzip`,
     );
     if (bundle.status !== 200) {
       throw new Error(`Panel build bundle responded ${bundle.status}`);
@@ -279,11 +298,17 @@ export async function prefetchPanelBuild(
       claim: PanelBuildPrefetchCandidate & { release: Release },
       payloadDigest: string,
       bytes: Uint8Array,
-      gzip: boolean
+      gzip: boolean,
     ): Promise<void> => {
       let stored: MobileStoredAsset | null = null;
       try {
-        stored = await commitBlob(deps.store, claim, payloadDigest, bytes, gzip);
+        stored = await commitBlob(
+          deps.store,
+          claim,
+          payloadDigest,
+          bytes,
+          gzip,
+        );
         if (!stored) {
           report.rejected += 1;
           stored = await refetchArtifact(deps, claim);
@@ -294,7 +319,7 @@ export async function prefetchPanelBuild(
         console.warn(
           `[panel-prefetch] could not store ${claim.path}: ${
             error instanceof Error ? error.message : String(error)
-          }`
+          }`,
         );
       }
       claim.release.complete(stored);
@@ -323,7 +348,12 @@ export async function prefetchPanelBuild(
           // record says which it is, and why the response needs no per-artifact
           // encoding field.
           writes.push(
-            storeBlob(claim, blob.payloadDigest, blob.bytes, blob.payloadDigest !== blob.digest)
+            storeBlob(
+              claim,
+              blob.payloadDigest,
+              blob.bytes,
+              blob.payloadDigest !== blob.digest,
+            ),
           );
         }
         while (writes.length >= MAX_INFLIGHT_WRITES) await writes.shift();
@@ -356,7 +386,10 @@ export async function prefetchPanelBuild(
  */
 type Release = { complete(asset: MobileStoredAsset | null): void };
 
-function artifactMetadata(contentType: string, gzip: boolean): MobileStoredAssetMetadata {
+function artifactMetadata(
+  contentType: string,
+  gzip: boolean,
+): MobileStoredAssetMetadata {
   return {
     status: 200,
     statusText: "OK",
@@ -390,7 +423,7 @@ async function commitBlob(
   claim: PanelBuildPrefetchCandidate & { release: Release },
   payloadDigest: string,
   bytes: Uint8Array,
-  gzip: boolean
+  gzip: boolean,
 ): Promise<MobileStoredAsset | null> {
   const writeId = await store.openWrite(claim.cacheKey);
   let committed = false;
@@ -399,10 +432,20 @@ async function commitBlob(
     // the bridge as one string, so a whole ~1 MB artifact in one call is a
     // single ~1.4 MB allocation that blocks everything else on that thread —
     // including the pipe's own reads and keepalives.
-    for (let offset = 0; offset < bytes.byteLength; offset += APPEND_SLICE_BYTES) {
-      await store.append(writeId, bytes.subarray(offset, offset + APPEND_SLICE_BYTES));
+    for (
+      let offset = 0;
+      offset < bytes.byteLength;
+      offset += APPEND_SLICE_BYTES
+    ) {
+      await store.append(
+        writeId,
+        bytes.subarray(offset, offset + APPEND_SLICE_BYTES),
+      );
     }
-    const stored = await store.commit(writeId, artifactMetadata(claim.contentType, gzip));
+    const stored = await store.commit(
+      writeId,
+      artifactMetadata(claim.contentType, gzip),
+    );
     committed = true;
     return stored.handle.endsWith(`:${payloadDigest}`) ? stored : null;
   } finally {
@@ -421,7 +464,7 @@ async function commitBlob(
  */
 async function refetchArtifact(
   deps: PanelBuildPrefetchDeps,
-  claim: PanelBuildPrefetchCandidate & { release: Release }
+  claim: PanelBuildPrefetchCandidate & { release: Release },
 ): Promise<MobileStoredAsset | null> {
   try {
     const response = await deps.fetchPath(claim.path);
@@ -430,7 +473,10 @@ async function refetchArtifact(
     const writeId = await deps.store.openWrite(claim.cacheKey);
     try {
       await deps.store.append(writeId, bytes);
-      return await deps.store.commit(writeId, artifactMetadata(claim.contentType, false));
+      return await deps.store.commit(
+        writeId,
+        artifactMetadata(claim.contentType, false),
+      );
     } catch (error) {
       await deps.store.abort(writeId).catch(() => undefined);
       throw error;
@@ -439,7 +485,7 @@ async function refetchArtifact(
     console.warn(
       `[panel-prefetch] could not replace a mismatched artifact at ${claim.path}: ${
         error instanceof Error ? error.message : String(error)
-      }`
+      }`,
     );
     return null;
   }

@@ -15,7 +15,10 @@ import { AppState, type AppStateStatus } from "react-native";
 import NetInfo, { type NetInfoState } from "@react-native-community/netinfo";
 import { useSetAtom } from "jotai";
 import type { ShellClient } from "../services/shellClient";
-import { connectionStatusAtom, networkReachableAtom } from "../state/connectionAtoms";
+import {
+  connectionStatusAtom,
+  networkReachableAtom,
+} from "../state/connectionAtoms";
 
 /**
  * Coordinate app lifecycle events: AppState, NetInfo, and cleanup.
@@ -64,7 +67,10 @@ export function useAppLifecycle(shellClient: ShellClient | null): void {
       // backgrounding and are reclaimed only under an actual memory warning.
     };
 
-    const appStateSub = AppState.addEventListener("change", handleAppStateChange);
+    const appStateSub = AppState.addEventListener(
+      "change",
+      handleAppStateChange,
+    );
     // iOS raises `memoryWarning` under pressure; drop the 256 MiB asset LRU.
     const memoryWarningSub = AppState.addEventListener("memoryWarning", () => {
       shellClient.trimMemory();
@@ -75,8 +81,8 @@ export function useAppLifecycle(shellClient: ShellClient | null): void {
     const handleNetInfoChange = (state: NetInfoState) => {
       const wasReachable = isNetworkReachableRef.current;
       // Reachability = a network LINK is present, NOT "the internet is reachable".
-      // A home server on Wi-Fi-without-internet (LAN ICE candidates) is exactly
-      // reachable over the WebRTC pipe, so `isInternetReachable === false` must
+      // A home server on Wi-Fi without internet can still be reachable directly
+      // over Iroh, so `isInternetReachable === false` must
       // NOT be treated as offline — that would paint a red "No network" over a
       // live LAN-only connection. Only a genuine absence of link (airplane mode,
       // no Wi-Fi/cell) counts as unreachable.
@@ -87,7 +93,10 @@ export function useAppLifecycle(shellClient: ShellClient | null): void {
       if (isReachable && !wasReachable) {
         // Link came back -- reconnect if we're in the foreground
         // and the transport is not already connected
-        if (appStateRef.current === "active" && transport.status !== "connected") {
+        if (
+          appStateRef.current === "active" &&
+          transport.status !== "connected"
+        ) {
           transport.reconnect();
         }
       }

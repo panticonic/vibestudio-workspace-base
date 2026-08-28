@@ -4,10 +4,9 @@ import {
   markConnectLinkConsumed,
   consumeConnectLinkReplay,
   parseConnectLink,
-} from "@vibestudio/mobile-webrtc/connectLink";
+} from "@vibestudio/mobile-iroh/connectLink";
 import {
   createConnectDeepLink,
-  derivePairingRoom,
   PAIRING_PROTOCOL_VERSION,
 } from "@vibestudio/shared/connect";
 
@@ -18,12 +17,10 @@ const storage = AsyncStorage as jest.Mocked<typeof AsyncStorage>;
 // start failing on a fixed date.
 const CODE = "abcdefghijklmnopqrstuvwxyzABCDEF";
 const VALID_LINK = createConnectDeepLink({
-  room: derivePairingRoom(CODE),
-  fp: "a".repeat(64),
+  endpointId: "a".repeat(64),
+  relays: ["https://relay.example/"],
   code: CODE,
-  sig: "wss://signal.example/",
   v: PAIRING_PROTOCOL_VERSION,
-  ice: "all",
   exp: Date.now() + 10 * 60 * 1000,
 });
 
@@ -49,12 +46,12 @@ describe("connectLink", () => {
   });
 
   describe("parseConnectLink (shared parser re-export)", () => {
-    it("parses a valid compact-v3 link", () => {
+    it("parses a valid compact-v4 link", () => {
       const parsed = parseConnectLink(VALID_LINK);
       expect(parsed.kind).toBe("ok");
     });
     it("rejects a stale/old-version link", () => {
-      const stale = "vibestudio://connect?room=old-query-format&v=2";
+      const stale = "vibestudio://connect/old-compact-format";
       const parsed = parseConnectLink(stale);
       expect(parsed.kind).toBe("error");
     });

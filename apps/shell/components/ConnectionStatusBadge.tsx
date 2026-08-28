@@ -13,17 +13,25 @@ import { useShellEvent } from "../shell/useShellEvent";
 
 type ConnectionStatus = "connected" | "connecting" | "disconnected";
 type ConnectionMode = "local" | "remote";
-/** Selected ICE path: host/srflx/prflx = direct P2P, relay = TURN, null = unknown. */
-type CandidateType = "host" | "srflx" | "prflx" | "relay" | null;
+interface RemoteTransport {
+  path: "direct" | "relay";
+  relayUrl?: string;
+  rttMs?: number;
+  endpointGeneration?: number;
+}
 
 interface ConnectionSnapshot {
   mode: ConnectionMode;
   status: ConnectionStatus;
   remoteHost?: string;
-  candidateType?: CandidateType;
+  remoteTransport?: RemoteTransport | null;
 }
 
-export function ConnectionStatusBadge({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function ConnectionStatusBadge({
+  onOpenSettings,
+}: {
+  onOpenSettings: () => void;
+}) {
   const [snap, setSnap] = useState<ConnectionSnapshot | null>(null);
   const [hasConnected, setHasConnected] = useState(false);
 
@@ -35,12 +43,16 @@ export function ConnectionStatusBadge({ onOpenSettings }: { onOpenSettings: () =
           mode: info.connectionMode ?? "local",
           status: info.connectionStatus ?? "connected",
           remoteHost: info.remoteHost,
-          candidateType: info.connectionCandidateType ?? null,
+          remoteTransport: info.remoteTransport ?? null,
         });
-        if ((info.connectionStatus ?? "connected") === "connected") setHasConnected(true);
+        if ((info.connectionStatus ?? "connected") === "connected")
+          setHasConnected(true);
       })
       .catch((error) => {
-        console.warn("[ConnectionStatusBadge] Failed to load connection status:", error);
+        console.warn(
+          "[ConnectionStatusBadge] Failed to load connection status:",
+          error,
+        );
       });
   }, []);
 
@@ -51,18 +63,18 @@ export function ConnectionStatusBadge({ onOpenSettings }: { onOpenSettings: () =
         status: ConnectionStatus;
         isRemote: boolean;
         remoteHost?: string;
-        candidateType?: CandidateType;
+        remoteTransport?: RemoteTransport;
       }) => {
         setSnap({
           mode: payload.isRemote ? "remote" : "local",
           status: payload.status,
           remoteHost: payload.remoteHost,
-          candidateType: payload.candidateType ?? null,
+          remoteTransport: payload.remoteTransport ?? null,
         });
         if (payload.status === "connected") setHasConnected(true);
       },
-      []
-    )
+      [],
+    ),
   );
 
   if (!snap) return null;
@@ -78,15 +90,20 @@ export function ConnectionStatusBadge({ onOpenSettings }: { onOpenSettings: () =
           ? `Connected to ${snap.remoteHost ?? "remote server"}`
           : "Connected locally — open connection settings and pair devices";
 
-  // Surface the selected network path on a live remote pipe: a TURN relay works
-  // but is slower, so telling the user why is a kindness (not an alarm). Direct
-  // (P2P) is noted quietly in the tooltip only — no visible chrome for the happy path.
+  // Relay fallback is expected behavior; surface the active path without
+  // presenting it as a security downgrade.
   const isRelayed =
-    snap.status === "connected" && snap.mode === "remote" && snap.candidateType === "relay";
-  if (snap.status === "connected" && snap.mode === "remote" && snap.candidateType) {
+    snap.status === "connected" &&
+    snap.mode === "remote" &&
+    snap.remoteTransport?.path === "relay";
+  if (
+    snap.status === "connected" &&
+    snap.mode === "remote" &&
+    snap.remoteTransport
+  ) {
     tooltip += isRelayed
-      ? "\nRelayed via TURN — direct peer-to-peer wasn't available, so traffic is slower."
-      : "\nDirect peer-to-peer connection.";
+      ? `\nRelayed${snap.remoteTransport.relayUrl ? ` via ${snap.remoteTransport.relayUrl}` : ""}.`
+      : "\nDirect Iroh connection.";
   }
 
   const badgeColor =
@@ -116,7 +133,12 @@ export function ConnectionStatusBadge({ onOpenSettings }: { onOpenSettings: () =
         onClick={onOpenSettings}
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       >
-        <Badge color={badgeColor} variant="soft" radius="full" style={{ padding: "2px 6px" }}>
+        <Badge
+          color={badgeColor}
+          variant="soft"
+          radius="full"
+          style={{ padding: "2px 6px" }}
+        >
           {icon}
           {snap.mode === "remote" && snap.remoteHost ? (
             <span style={{ marginLeft: 4 }}>{snap.remoteHost}</span>

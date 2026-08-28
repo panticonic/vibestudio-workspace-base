@@ -8,20 +8,20 @@ by an authenticated human account.
 
 | Concept           | Purpose                                                                                |
 | ----------------- | -------------------------------------------------------------------------------------- |
-| Pairing invite    | One-time WebRTC bootstrap material: room, DTLS fingerprint, code, signaling endpoint   |
+| Pairing invite    | One-time Iroh bootstrap material: Endpoint ID, ordered relay set, code, expiry         |
 | Device credential | Long-lived device id plus refresh token, stored by the client/native host              |
 | Shell token       | Remote shell credential presented as `refresh:<deviceId>:<refreshToken>` over the pipe |
 | Principal grant   | Short-lived grant scoped to one app/runtime principal                                  |
-| Connection info   | WebRTC pairing metadata plus server/workspace identity                                 |
+| Connection info   | Iroh reach plus server/workspace identity                                              |
 
 ## Desktop Remote Shell
 
-Remote startup is a two-step WebRTC flow:
+Remote startup is a two-step Iroh flow:
 
 1. Redeem a user-bound or root-bootstrap invite and store the global device
    credential.
 2. Select a workspace through `hubControl.routeWorkspace`, which returns that
-   child's current WebRTC reach information without minting another identity.
+   child's current Iroh reach information without minting another identity.
 
 `vibestudio remote pair "https://vibestudio.app/p#<compact-payload>"`
 or the equivalent `vibestudio://connect/<compact-payload>` link exchanges a pairing invite
@@ -99,14 +99,14 @@ the authenticated shell's account; `inviteUser` is root/admin-gated.
 
 ## URL And Transport Rules
 
-- Remote clients pair through WebRTC using a signaling room plus DTLS
-  fingerprint pinning. Do not add public-ingress, VPN, or cleartext-host
+- Remote clients pair through Iroh using an Endpoint ID and ordered explicit
+  HTTPS relay set. Do not add public-ingress, VPN, or cleartext-host
   exceptions for RPC reachability.
 - Pairing QR codes should use the HTTPS carrier
   `https://vibestudio.app/p#...`; native carriers use
-  `vibestudio://connect/...`. Both use the same compact-v3 parser and payload.
-- Pairing invites are complete artifacts: `deepLink`, `pairUrl`, `room`, `fp`,
-  `code`, and `sig` are non-null. Do not reintroduce bare-code or nullable-link
+  `vibestudio://connect/...`. Both use the same compact-v4 parser and payload.
+- Pairing invites are complete artifacts: `deepLink`, `pairUrl`, `endpointId`,
+  `relays`, and `code` are non-null. Do not reintroduce bare-code or nullable-link
   handling.
 - `vibestudio://connect` is for pairing bootstrap. OAuth callbacks use the
   platform-specific OAuth seam and must not trigger pairing reset.
@@ -116,9 +116,9 @@ the authenticated shell's account; `inviteUser` is root/admin-gated.
 Remote-client UX should handle:
 
 - revoked device credential
-- stale server boot id
-- expired or unreachable signaling room
-- DTLS fingerprint mismatch
+- stale endpoint reach
+- expired pairing code or unreachable configured relays
+- Endpoint ID mismatch after an explicit server identity rotation
 - no active mobile app bootstrap
 - terminal app build available but process not started
 - terminal app process exited or failed session auth

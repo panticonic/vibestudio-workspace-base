@@ -6,13 +6,15 @@ import {
   type MobileHubWorkspace,
   type MobileHubWorkspaceRoute,
   type StoredMobileConnection,
-} from "@vibestudio/mobile-webrtc";
+} from "@vibestudio/mobile-iroh";
 import { resetToNativeBootstrap } from "./auth";
 
 export interface MobileWorkspaceSelectionDependencies {
   control: {
     listWorkspaces(): Promise<MobileHubWorkspace[]>;
-    routeWorkspace(input: { workspaceId: string }): Promise<MobileHubWorkspaceRoute>;
+    routeWorkspace(input: {
+      workspaceId: string;
+    }): Promise<MobileHubWorkspaceRoute>;
   };
   loadCredential(): ReturnType<typeof loadShellCredential>;
   persistCredential(stored: StoredMobileConnection): Promise<void>;
@@ -20,7 +22,7 @@ export interface MobileWorkspaceSelectionDependencies {
 }
 
 export function mobileWorkspaceSelectionDependencies(
-  control: MobileWorkspaceSelectionDependencies["control"]
+  control: MobileWorkspaceSelectionDependencies["control"],
 ): MobileWorkspaceSelectionDependencies {
   return {
     control,
@@ -31,12 +33,14 @@ export function mobileWorkspaceSelectionDependencies(
 }
 
 function missingCredentialError(): Error {
-  return new Error("No current mobile device credential is stored. Pair this device again.");
+  return new Error(
+    "No current mobile device credential is stored. Pair this device again.",
+  );
 }
 
 /** List account-visible workspaces through the already-retained hub session. */
 export async function listMobileWorkspaces(
-  dependencies: MobileWorkspaceSelectionDependencies
+  dependencies: MobileWorkspaceSelectionDependencies,
 ): Promise<MobileHubWorkspace[]> {
   return dependencies.control.listWorkspaces();
 }
@@ -49,7 +53,7 @@ export async function listMobileWorkspaces(
  */
 export async function selectMobileWorkspace(
   workspaceId: string,
-  dependencies: MobileWorkspaceSelectionDependencies
+  dependencies: MobileWorkspaceSelectionDependencies,
 ): Promise<MobileHubWorkspaceRoute> {
   if (!workspaceId.trim() || workspaceId !== workspaceId.trim()) {
     throw new Error("Choose a valid workspace.");
@@ -57,7 +61,9 @@ export async function selectMobileWorkspace(
   const initialStored = await dependencies.loadCredential();
   if (!initialStored) throw missingCredentialError();
   if (initialStored.phase !== "routed") {
-    throw new Error("Finish preparing the selected workspace before switching workspaces.");
+    throw new Error(
+      "Finish preparing the selected workspace before switching workspaces.",
+    );
   }
 
   const baseline = initialStored;
@@ -70,7 +76,9 @@ export async function selectMobileWorkspace(
     await dependencies.persistCredential(paired);
     const route = await dependencies.control.routeWorkspace({ workspaceId });
     if (route.workspaceId !== workspaceId) {
-      throw new Error("The server routed a different workspace than the one selected.");
+      throw new Error(
+        "The server routed a different workspace than the one selected.",
+      );
     }
     const selected = createRoutedMobileConnection(paired, route.workspaceReach);
     await dependencies.persistCredential(selected);
@@ -85,11 +93,14 @@ export async function selectMobileWorkspace(
       try {
         await dependencies.persistCredential(baseline);
       } catch (rollbackError) {
-        const selectionMessage = error instanceof Error ? error.message : String(error);
+        const selectionMessage =
+          error instanceof Error ? error.message : String(error);
         const rollbackMessage =
-          rollbackError instanceof Error ? rollbackError.message : String(rollbackError);
+          rollbackError instanceof Error
+            ? rollbackError.message
+            : String(rollbackError);
         throw new Error(
-          `Workspace selection failed (${selectionMessage}) and the previous secure credential could not be restored (${rollbackMessage}).`
+          `Workspace selection failed (${selectionMessage}) and the previous secure credential could not be restored (${rollbackMessage}).`,
         );
       }
     }

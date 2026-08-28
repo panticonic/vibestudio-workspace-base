@@ -129,7 +129,7 @@ function smokePhase(phase: string, details?: Record<string, unknown>): void {
 
 export interface ShellClientConfig {
   credentials: Credentials;
-  serverIdentity: string;
+  serverEndpointId: string;
   onTreeInvalidated?: (event: PanelTreeInvalidation) => void;
   onPanelsChanged?: () => void;
   onStatusChange?: (status: ConnectionStatus) => void;
@@ -212,7 +212,10 @@ function createWorkspaceRpcClient(transport: MobileRpcClient) {
  * client directly.
  */
 function createQuickfireClient(transport: MobileRpcClient) {
-  const client = createDurableObjectServiceClient(transport, QUICKFIRE_SERVICE_PROTOCOL);
+  const client = createDurableObjectServiceClient(
+    transport,
+    QUICKFIRE_SERVICE_PROTOCOL,
+  );
   return {
     sessionFor: (input: { slotId: string; fresh?: boolean }) =>
       client.call<QuickfireSession>("sessionFor", input),
@@ -1080,7 +1083,9 @@ class MobilePanels implements PanelHost {
    * another client holds the runtime after all, which is the one case where
    * dropping the tracked route is correct.
    */
-  private async repairRuntimeLeases(panelIds: readonly string[]): Promise<void> {
+  private async repairRuntimeLeases(
+    panelIds: readonly string[],
+  ): Promise<void> {
     for (const panelId of panelIds) {
       const tracked = this.runtimeConnectionBySlot.get(panelId);
       if (!tracked) continue;
@@ -1104,16 +1109,7 @@ class MobilePanels implements PanelHost {
     }
   }
 }
-/**
- * Mobile loopback origin fronting the WebRTC pipe (plan §4). Post-cutover the
- * mobile `Credentials` no longer carry a remote `serverUrl` (§8c) — remote is
- * WebRTC, paired by QR (room/fp/sig). SEAM: the mobile WebRTC transport wiring
- * (react-native-webrtc provider + signaling client + on-device loopback bridge)
- * is the mobile analog of the desktop `serverClient` WebRTC selection and is not
- * yet built; `MobileRpcClient` is constructed against this loopback origin, which
- * the on-device bridge will front once wired. Tracked in
- * docs/webrtc-rpc-implementation-log.md.
- */
+/** Stable on-device origin used only by the panel asset façade. */
 export const MOBILE_SERVER_LOOPBACK_ORIGIN = "http://127.0.0.1";
 
 export class ShellClient {
@@ -1147,14 +1143,19 @@ export class ShellClient {
   readonly browserPrivacy: ReturnType<typeof createShellBrowserPrivacyClient>;
   readonly recovery: RecoveryCoordinator;
   readonly userNotifications: {
-    list(input?: { includeAcknowledged?: boolean; limit?: number }): Promise<UserNotification[]>;
+    list(input?: {
+      includeAcknowledged?: boolean;
+      limit?: number;
+    }): Promise<UserNotification[]>;
     acknowledge(id: string): Promise<boolean>;
     openChannel(channelId: string): Promise<{ id: string; title: string }>;
     /** Facts the conversation sheet binds to (messaging plan §4.8). */
-    describeConversation(channelId: string): Promise<{ contextId: string; title: string | null }>;
+    describeConversation(
+      channelId: string,
+    ): Promise<{ contextId: string; title: string | null }>;
   };
   readonly credentials: Credentials;
-  private readonly serverIdentity: string;
+  private readonly serverEndpointId: string;
   // Mutable: starts as the loopback placeholder, then becomes
   // `http://127.0.0.1:<facadePort>` once the panel-asset façade binds (init).
   // `MainScreen` reads this for `buildPanelUrl`, so panel URLs hit the façade.
@@ -1233,11 +1234,10 @@ export class ShellClient {
   private readonly onReadinessChange?: ShellClientConfig["onReadinessChange"];
   constructor(config: ShellClientConfig) {
     this.credentials = config.credentials;
-    this.serverIdentity = config.serverIdentity.toLowerCase();
+    this.serverEndpointId = config.serverEndpointId.toLowerCase();
     this.onReadinessChange = config.onReadinessChange;
     this.serverUrl = MOBILE_SERVER_LOOPBACK_ORIGIN;
-    // Remote is WebRTC: the client re-pairs to the stored shell credential's
-    // signaling room (no server URL, no native WS grant) — see mobileTransport.ts.
+    // Remote RPC uses the stored Iroh endpoint identity and device credential.
     this.transport = new MobileRpcClient({});
     this.transport.expose("mobileBrowserPrivacyPresentation.open", ({ args }) =>
       this.browserPrivacyPresentation.accept(args[0]),
@@ -1390,7 +1390,7 @@ export class ShellClient {
         const info = await this.connectWorkspace();
         await this.startPanelAssetFacade(info.config.id);
         let restored = await loadMobileShellStartupSnapshot(
-          this.serverIdentity,
+          this.serverEndpointId,
           info.config.id,
         );
         try {
@@ -1403,7 +1403,7 @@ export class ShellClient {
         } catch (error) {
           if (!restored) throw error;
           await clearMobileShellStartupSnapshot(
-            this.serverIdentity,
+            this.serverEndpointId,
             info.config.id,
           );
           restored = null;
@@ -1444,7 +1444,7 @@ export class ShellClient {
   /**
    * Start the on-device panel-asset façade now that the pipe is up, and point
    * panel URLs at it: panels load `http://127.0.0.1:<port>/{source}/` and the
-   * façade proxies each asset request to the remote gateway over the WebRTC pipe.
+   * façade proxies each asset request to the remote gateway over Iroh.
    * `MainScreen` reads `shellClient.serverUrl` for `buildPanelUrl`, so this must
    * land before the client is published to the UI (`finishConnectedClient`).
    */
@@ -1453,7 +1453,7 @@ export class ShellClient {
   ): Promise<void> {
     if (this.facade) return;
     this.facade = await startPanelAssetFacade(this.transport, {
-      serverIdentity: this.serverIdentity,
+      serverEndpointId: this.serverEndpointId,
       workspaceIdentity,
     });
     this.serverUrl = `http://127.0.0.1:${this.facade.port}`;
@@ -1603,8 +1603,8 @@ export class ShellClient {
     const snapshot = this.panels.startupSnapshot();
     if (!snapshot) return;
     const record: MobileShellStartupSnapshot = {
-      schemaVersion: 1,
-      serverIdentity: this.serverIdentity,
+      schemaVersion: 2,
+      serverEndpointId: this.serverEndpointId,
       workspaceIdentity,
       capturedAt: Date.now(),
       preferredPanelId: this.panels.getPreferredRootId(),

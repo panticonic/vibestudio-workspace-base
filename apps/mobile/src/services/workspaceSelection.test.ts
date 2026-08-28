@@ -3,14 +3,14 @@ import type {
   MobileHubWorkspaceRoute,
   StoredMobileConnection,
   StoredRoutedMobileConnection,
-} from "@vibestudio/mobile-webrtc";
+} from "@vibestudio/mobile-iroh";
 import {
   listMobileWorkspaces,
   selectMobileWorkspace,
   type MobileWorkspaceSelectionDependencies,
 } from "./workspaceSelection";
 
-jest.mock("@vibestudio/mobile-webrtc", () => ({
+jest.mock("@vibestudio/mobile-iroh", () => ({
   loadShellCredential: jest.fn(),
   persistStoredMobileConnection: jest.fn(),
   // Switching re-targets the stored connection: same credential and control
@@ -21,10 +21,12 @@ jest.mock("@vibestudio/mobile-webrtc", () => ({
       controlPairing: Record<string, unknown>;
       pairedAt: number;
     },
-    selectedWorkspaceId: string
+    selectedWorkspaceId: string,
   ) => ({
-    schemaVersion: 4,
+    schemaVersion: 5,
+    transport: "iroh",
     phase: "paired",
+    endpointIdentityId: "identity-1",
     credential: connection.credential,
     controlPairing: connection.controlPairing,
     selectedWorkspaceId,
@@ -32,7 +34,7 @@ jest.mock("@vibestudio/mobile-webrtc", () => ({
   }),
   createRoutedMobileConnection: (
     paired: Record<string, unknown>,
-    workspacePairing: Record<string, unknown>
+    workspacePairing: Record<string, unknown>,
   ) => ({ ...paired, phase: "routed", workspacePairing }),
 }));
 
@@ -40,29 +42,25 @@ const DEVICE_ID = `dev_${"d".repeat(24)}`;
 const REFRESH_TOKEN = "r".repeat(43);
 const ROTATED_TOKEN = "n".repeat(43);
 const CONTROL_PAIRING = {
-  room: "control-1111",
-  fp: "AA".repeat(32),
-  sig: "wss://signal.example/",
-  v: 3 as const,
-  ice: "all" as const,
+  endpointId: "aa".repeat(32),
+  relays: ["https://relay.example/"],
+  v: 4 as const,
 };
 const WORKSPACE_A_PAIRING = {
-  room: "workspace-a-1111",
-  fp: "BB".repeat(32),
-  sig: "wss://signal.example/",
-  v: 3 as const,
-  ice: "all" as const,
+  endpointId: "bb".repeat(32),
+  relays: ["https://relay.example/"],
+  v: 4 as const,
 };
 const WORKSPACE_B_PAIRING = {
-  room: "workspace-b-2222",
-  fp: "CC".repeat(32),
-  sig: "wss://signal.example/",
-  v: 3 as const,
-  ice: "relay" as const,
+  endpointId: "cc".repeat(32),
+  relays: ["https://relay.example/"],
+  v: 4 as const,
 };
 const storedA: StoredRoutedMobileConnection = {
-  schemaVersion: 4,
+  schemaVersion: 5,
+  transport: "iroh",
   phase: "routed",
+  endpointIdentityId: "identity-1",
   credential: { deviceId: DEVICE_ID, refreshToken: REFRESH_TOKEN },
   controlPairing: CONTROL_PAIRING,
   selectedWorkspaceId: "ws-a",
@@ -103,7 +101,7 @@ function dependencies(
     route?: () => Promise<MobileHubWorkspaceRoute>;
     reload?: () => Promise<{ reloading: boolean }>;
     persist?: (stored: StoredMobileConnection) => Promise<void>;
-  } = {}
+  } = {},
 ): {
   deps: MobileWorkspaceSelectionDependencies;
   listWorkspaces: jest.Mock;
@@ -115,13 +113,19 @@ function dependencies(
     events.push("list");
     return workspaces;
   });
-  const routeWorkspace = jest.fn(async ({ workspaceId }: { workspaceId: string }) => {
-    events.push(`route:${workspaceId}`);
-    return options.route ? options.route() : routeB;
-  });
+  const routeWorkspace = jest.fn(
+    async ({ workspaceId }: { workspaceId: string }) => {
+      events.push(`route:${workspaceId}`);
+      return options.route ? options.route() : routeB;
+    },
+  );
   const persistCredential = jest.fn(async (stored: StoredMobileConnection) => {
     events.push(
-      `persist:${stored.phase === "routed" ? stored.workspacePairing.room : stored.phase}`
+      `persist:${
+        stored.phase === "routed"
+          ? stored.workspacePairing.endpointId.slice(0, 12)
+          : stored.phase
+      }`,
     );
     await options.persist?.(stored);
   });
@@ -129,7 +133,9 @@ function dependencies(
     deps: {
       control: { listWorkspaces, routeWorkspace },
       loadCredential: async () =>
-        options.stored === undefined ? (options.currentStored ?? storedA) : options.stored,
+        options.stored === undefined
+          ? (options.currentStored ?? storedA)
+          : options.stored,
       persistCredential,
       reloadBootstrap: async () => {
         events.push("reload");
@@ -182,7 +188,12 @@ describe("mobile workspace selection", () => {
         workspacePairing: WORKSPACE_B_PAIRING,
       },
     ]);
-    expect(events).toEqual(["persist:paired", "route:ws-b", "persist:workspace-b-2222", "reload"]);
+    expect(events).toEqual([
+      "persist:paired",
+      "route:ws-b",
+      "persist:cccccccccccc",
+      "reload",
+    ]);
   });
 
   it("restores the prior reach and leaves the active session untouched when reload fails", async () => {
@@ -195,7 +206,9 @@ describe("mobile workspace selection", () => {
       },
     });
 
-    await expect(selectMobileWorkspace("ws-b", deps)).rejects.toThrow("native reload unavailable");
+    await expect(selectMobileWorkspace("ws-b", deps)).rejects.toThrow(
+      "native reload unavailable",
+    );
 
     expect(persistCredential.mock.calls.map((call) => call[0])).toEqual([
       {
@@ -215,9 +228,9 @@ describe("mobile workspace selection", () => {
     expect(events).toEqual([
       "persist:paired",
       "route:ws-b",
-      "persist:workspace-b-2222",
+      "persist:cccccccccccc",
       "reload",
-      "persist:workspace-a-1111",
+      "persist:bbbbbbbbbbbb",
     ]);
     expect(activeWorkspaceClose).not.toHaveBeenCalled();
   });
@@ -231,7 +244,9 @@ describe("mobile workspace selection", () => {
       },
     });
 
-    await expect(selectMobileWorkspace("ws-b", deps)).rejects.toThrow("membership denied");
+    await expect(selectMobileWorkspace("ws-b", deps)).rejects.toThrow(
+      "membership denied",
+    );
     expect(persistCredential.mock.calls.map((call) => call[0])).toEqual([
       {
         ...storedA,
@@ -241,6 +256,10 @@ describe("mobile workspace selection", () => {
       },
       storedA,
     ]);
-    expect(events).toEqual(["persist:paired", "route:ws-b", "persist:workspace-a-1111"]);
+    expect(events).toEqual([
+      "persist:paired",
+      "route:ws-b",
+      "persist:bbbbbbbbbbbb",
+    ]);
   });
 });

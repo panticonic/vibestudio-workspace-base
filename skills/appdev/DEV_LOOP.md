@@ -164,7 +164,7 @@ vibestudio mobile smoke --platform ios
 iOS shell builds require macOS + Xcode + signing configuration. Use
 `vibestudio mobile doctor` to inspect signing, generated entitlements, Firebase,
 and APNs provisioning. The iOS workspace bundle is still built by the server and
-served over the same WebRTC pipe as Android.
+served over the same Iroh connection as Android.
 
 Full composition smoke:
 
@@ -173,9 +173,8 @@ pnpm smoke:full
 ```
 
 That command runs the branded desktop pairing smoke, desktop Playwright e2e, and
-Android mobile smoke through the deployed signaling service, writing logs under
-`test-results/full-system-smoke/`. Pass `--local-signaling` when intentionally
-testing against local Miniflare/coturn instead.
+Android mobile smoke through the configured Iroh relay set, writing logs under
+`test-results/full-system-smoke/`.
 
 ## Terminal App Loop
 

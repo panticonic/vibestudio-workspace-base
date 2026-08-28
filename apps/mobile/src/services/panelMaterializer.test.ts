@@ -35,9 +35,15 @@ function makeDeps(overrides?: {
   acquireResult?: { acquired: boolean; lease?: { holderLabel: string } };
 }) {
   return {
-    getPanelInit: jest.fn(async () => overrides?.panelInit ?? { entityId: "panel:nav-1" }),
-    acquireLease: jest.fn(async () => overrides?.acquireResult ?? { acquired: true }),
-    takeOverLease: jest.fn(async () => overrides?.acquireResult ?? { acquired: true }),
+    getPanelInit: jest.fn(
+      async () => overrides?.panelInit ?? { entityId: "panel:nav-1" },
+    ),
+    acquireLease: jest.fn(
+      async () => overrides?.acquireResult ?? { acquired: true },
+    ),
+    takeOverLease: jest.fn(
+      async () => overrides?.acquireResult ?? { acquired: true },
+    ),
   };
 }
 
@@ -50,13 +56,13 @@ describe("needsMobilePanelMaterialization", () => {
       mobilePanelMaterializationState(panel, {
         url: "about:blank",
         runtimeEntityId: "panel:nav-1",
-      })
+      }),
     ).toBe("pending");
     expect(
       needsMobilePanelMaterialization(panel, {
         url: "about:blank",
         runtimeEntityId: "panel:nav-1",
-      })
+      }),
     ).toBe(false);
   });
 
@@ -68,7 +74,7 @@ describe("needsMobilePanelMaterialization", () => {
       mobilePanelMaterializationState(panel, {
         url: "about:blank",
         runtimeEntityId: null,
-      })
+      }),
     ).toBe("pending");
   });
 
@@ -77,13 +83,13 @@ describe("needsMobilePanelMaterialization", () => {
       mobilePanelMaterializationState(makePanel("panels/editor"), {
         url: "about:blank",
         runtimeEntityId: "panel:nav-1",
-      })
+      }),
     ).toBe("needed");
     expect(
       needsMobilePanelMaterialization(makePanel("panels/editor"), {
         url: "about:blank",
         runtimeEntityId: "panel:nav-1",
-      })
+      }),
     ).toBe(true);
   });
 
@@ -95,19 +101,19 @@ describe("needsMobilePanelMaterialization", () => {
       needsMobilePanelMaterialization(panel, {
         url: "http://127.0.0.1/panels/editor/",
         runtimeEntityId: "panel:nav-1",
-      })
+      }),
     ).toBe(true);
     expect(
       needsMobilePanelMaterialization(panel, {
         url: "http://127.0.0.1/panels/chat/",
         runtimeEntityId: "panel:nav-2",
-      })
+      }),
     ).toBe(false);
     expect(
       mobilePanelMaterializationState(panel, {
         url: "http://127.0.0.1/panels/chat/",
         runtimeEntityId: "panel:nav-2",
-      })
+      }),
     ).toBe("current");
   });
 
@@ -120,13 +126,13 @@ describe("needsMobilePanelMaterialization", () => {
       needsMobilePanelMaterialization(panel, {
         url: "https://example.com/current",
         runtimeEntityId: "panel:nav-browser-current",
-      })
+      }),
     ).toBe(true);
     expect(
       needsMobilePanelMaterialization(panel, {
         url: "https://example.com/next",
         runtimeEntityId: "panel:nav-browser-next",
-      })
+      }),
     ).toBe(false);
   });
 });
@@ -145,7 +151,7 @@ describe("materializeMobilePanel", () => {
         hostConfig,
         ...deps,
         leaseMode: "acquire",
-      })
+      }),
     ).resolves.toEqual({
       panelId: "panel-1",
       runtimeEntityId: "panel:nav-1",
@@ -213,12 +219,14 @@ describe("materializeMobilePanel", () => {
         hostConfig,
         ...deps,
         leaseMode: "acquire",
-      })
+      }),
     ).rejects.toThrow("Panel panel-1 is running on Desktop");
   });
 
   it("keeps managed panel materialization payloads lease-bound", async () => {
-    const deps = makeDeps({ panelInit: { entityId: "panel:nav-1", slotId: "panel-1" } });
+    const deps = makeDeps({
+      panelInit: { entityId: "panel:nav-1", slotId: "panel-1" },
+    });
 
     const result = await materializeMobilePanel({
       panelId: "panel-1",
@@ -231,7 +239,7 @@ describe("materializeMobilePanel", () => {
     expect(result).toMatchObject({
       panelId: "panel-1",
       // Mobile serves panels through the local asset façade (127.0.0.1:<port>) over
-      // the WebRTC pipe, not the remote host directly.
+      // the authenticated Iroh session, not the remote host directly.
       url: `http://127.0.0.1:3000/_workspace/dev/panels/editor/?contextId=ctx-panel-1&buildKey=${"b".repeat(64)}`,
       managed: true,
       panelInit: {
@@ -253,7 +261,7 @@ describe("materializeMobilePanel", () => {
         hostConfig,
         ...deps,
         leaseMode: "acquire",
-      })
+      }),
     ).rejects.toThrow("changed runtime identity");
     expect(deps.acquireLease).not.toHaveBeenCalled();
   });

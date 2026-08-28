@@ -3,7 +3,7 @@
  *
  * The mobile sibling of `src/node/panelAssets/panelAssetFacade.ts`. Panels load from a fixed
  * loopback origin (`buildPanelUrl` → `http://127.0.0.1:<facadePort>/{source}/…`).
- * On mobile there is no local gateway — the RPC plane rides the WebRTC pipe — so
+ * On mobile there is no local gateway — the RPC plane rides Iroh — so
  * this tiny loopback TCP server stands in for it: it parses each webview asset
  * request, proxies it to the remote gateway over the pipe via the STREAMING
  * `gateway.fetch` RPC. Mutable responses stream back chunked; immutable
@@ -11,8 +11,7 @@
  * transient pipe loss can be retried without exposing a truncated module.
  *
  * Panel bundles are multiple MB. Requesting `gzip` on the wire + chunked transfer
- * keeps each payload inside react-native-webrtc's serialized-receive throughput
- * (the same constraint that forced gzip on the Part A native bundle stream). The
+ * reduces remote transfer size. The
  * gateway marks a gzipped body with `x-vibestudio-content-gzip` (NOT
  * `Content-Encoding`, so the pipe's fetch never auto-inflates it); we translate
  * that to a real `Content-Encoding: gzip` and the webview inflates natively — the
@@ -47,7 +46,6 @@ import {
 export { panelAssetCacheKey } from "@vibestudio/shared/panel/assetPathPolicy";
 import type { MobileRpcClient } from "./mobileTransport";
 import { getNativeAppStorage } from "./nativeAppStorage";
-import { createPipeGate, type PipeGate } from "./panelAssetPipeGate";
 import {
   prefetchPanelBuild,
   type PanelBuildBodyReader,
@@ -120,41 +118,14 @@ export interface MobileFetchedResponse {
 }
 
 /**
- * Concurrent asset fetches allowed to occupy the WebRTC pipe at once.
- *
- * The point is to stop a webview's fan-out from being answered as one
- * back-to-back burst, which react-native-webrtc's receive bridge drops whole
- * (six simultaneous streams lost, single streams of 126 KB fine — see
- * panelAssetPipeGate). It is NOT meant to serialize the panel.
- *
- * This started at 1, which was wrong in a way worth recording: a limit of one
- * makes every fetch a single point of failure for the whole panel. A request
- * that hangs after its response arrives holds the only slot forever, so no
- * later asset is even requested and the panel dies on a load timeout with no
- * error anywhere — observed on device. A small window keeps the anti-burst
- * property while leaving the panel alive when one fetch misbehaves.
- *
- * Now that lost bulk messages announce themselves (the mux's sequence gap or a
- * response-HEAD timeout), this is measurable rather than guessed. Four is
- * still too wide: an Android smoke run lost the response heads for all four
- * occupied slots even though the server completed every fetch. Two preserves
- * an independent lane when one stream stalls without recreating that burst.
- *
- * Store hits never take the gate: they cost zero pipe bytes, so a warm panel
- * still loads fully parallel.
- */
-const MAX_CONCURRENT_PIPE_FETCHES = 2;
-
-/**
  * Start the loopback panel-asset façade. Resolves once the port is bound; point
  * `buildPanelUrl` (via `hostConfig.port`) at the returned `port`.
  */
 export async function startPanelAssetFacade(
   transport: MobileRpcClient,
-  namespace: MobileAssetStoreNamespace
+  namespace: MobileAssetStoreNamespace,
 ): Promise<PanelAssetFacade> {
   const store = new MobileAssetStore(namespace);
-  const pipeGate = createPipeGate(MAX_CONCURRENT_PIPE_FETCHES);
   const preferredPort = await readPersistedPort();
   const activeSockets = new Set<TcpSocketConn>();
   const activeRequests = new Set<Promise<void>>();
@@ -169,11 +140,11 @@ export async function startPanelAssetFacade(
     }
     activeSockets.add(connection);
     connection.once("close", () => activeSockets.delete(connection));
-    handleConnection(transport, store, pipeGate, connection, (request) => {
+    handleConnection(transport, store, connection, (request) => {
       activeRequests.add(request);
       void request.then(
         () => activeRequests.delete(request),
-        () => activeRequests.delete(request)
+        () => activeRequests.delete(request),
       );
     });
   });
@@ -185,7 +156,11 @@ export async function startPanelAssetFacade(
       server.listen({ port: requested, host: "127.0.0.1" }, () => {
         server.removeListener("error", onError);
         const address = server.address();
-        if (!address || typeof address !== "object" || typeof address.port !== "number") {
+        if (
+          !address ||
+          typeof address !== "object" ||
+          typeof address.port !== "number"
+        ) {
           reject(new Error("Panel asset façade failed to bind a TCP port"));
           return;
         }
@@ -194,11 +169,13 @@ export async function startPanelAssetFacade(
     });
 
   const port =
-    preferredPort !== null ? await bind(preferredPort).catch(() => bind(0)) : await bind(0);
+    preferredPort !== null
+      ? await bind(preferredPort).catch(() => bind(0))
+      : await bind(0);
   if (port !== preferredPort) void writePersistedPort(port);
 
   console.log(
-    `[VibestudioMobileSmoke] phase=workspace-panel-facade-listening ${JSON.stringify({ port })}`
+    `[VibestudioMobileSmoke] phase=workspace-panel-facade-listening ${JSON.stringify({ port })}`,
   );
 
   // One prefetch per build for the life of the façade. The build key is a
@@ -208,15 +185,22 @@ export async function startPanelAssetFacade(
   const prefetchBuild = (buildKey: string): void => {
     // Callers hand this whatever `panel.buildKey` holds, which is empty for an
     // unmanaged (browser:) panel and absent until a build completes.
-    if (closing || !/^[0-9a-f]{64}$/u.test(buildKey) || prefetched.has(buildKey)) return;
+    if (
+      closing ||
+      !/^[0-9a-f]{64}$/u.test(buildKey) ||
+      prefetched.has(buildKey)
+    )
+      return;
     prefetched.add(buildKey);
     // Start and failure both carry the smoke prefix: the device log capture
     // keeps only lines that have it, so a bare console.warn would make a failed
     // prefetch indistinguishable from one that was never requested.
     console.log(
-      `[VibestudioMobileSmoke] phase=workspace-panel-build-prefetch-start ${JSON.stringify({
-        buildKey,
-      })}`
+      `[VibestudioMobileSmoke] phase=workspace-panel-build-prefetch-start ${JSON.stringify(
+        {
+          buildKey,
+        },
+      )}`,
     );
     const flight = prefetchPanelBuild(buildKey, {
       store,
@@ -226,28 +210,19 @@ export async function startPanelAssetFacade(
       // the path. The per-asset path still asks for gzip, because there the
       // WebView inflates natively and nothing in JS touches the bytes.
       fetchPath: async (path) => {
-        const release = await pipeGate.acquire();
-        try {
-          const result = await transport.streamReadable("main", "gateway.fetch", [
-            { path, method: "GET", headers: {}, gzip: false },
-          ]);
-          if (result.status !== 200) {
-            // The caller abandons a non-200 without reading it, so the slot has
-            // to be given back here rather than by the iterator it never runs.
-            void result.body.cancel().catch(() => undefined);
-            release();
-            return { status: result.status, body: EMPTY_BODY };
-          }
-          return { status: result.status, body: streamReader(result.body, release) };
-        } catch (error) {
-          release();
-          throw error;
+        const result = await transport.streamReadable("main", "gateway.fetch", [
+          { path, method: "GET", headers: {}, gzip: false },
+        ]);
+        if (result.status !== 200) {
+          void result.body.cancel().catch(() => undefined);
+          return { status: result.status, body: EMPTY_BODY };
         }
+        return { status: result.status, body: streamReader(result.body) };
       },
     })
       .then((report) => {
         console.log(
-          `[VibestudioMobileSmoke] phase=workspace-panel-build-prefetched ${JSON.stringify(report)}`
+          `[VibestudioMobileSmoke] phase=workspace-panel-build-prefetched ${JSON.stringify(report)}`,
         );
       })
       .catch((error: unknown) => {
@@ -255,10 +230,12 @@ export async function startPanelAssetFacade(
         // released, so each WebView request falls back to its own fetch.
         prefetched.delete(buildKey);
         console.warn(
-          `[VibestudioMobileSmoke] phase=workspace-panel-build-prefetch-failed ${JSON.stringify({
-            buildKey,
-            message: error instanceof Error ? error.message : String(error),
-          })}`
+          `[VibestudioMobileSmoke] phase=workspace-panel-build-prefetch-failed ${JSON.stringify(
+            {
+              buildKey,
+              message: error instanceof Error ? error.message : String(error),
+            },
+          )}`,
         );
       });
     // Tracked like a served request: `close()` must not tear the store down
@@ -266,7 +243,7 @@ export async function startPanelAssetFacade(
     activeRequests.add(flight);
     void flight.then(
       () => activeRequests.delete(flight),
-      () => activeRequests.delete(flight)
+      () => activeRequests.delete(flight),
     );
   };
 
@@ -277,10 +254,15 @@ export async function startPanelAssetFacade(
       void store
         .trim()
         .then(() =>
-          console.log("[VibestudioMobileSmoke] phase=workspace-panel-facade-cache-trimmed")
+          console.log(
+            "[VibestudioMobileSmoke] phase=workspace-panel-facade-cache-trimmed",
+          ),
         )
         .catch((error: unknown) =>
-          console.error("[panel-facade] durable asset-store trim failed", error)
+          console.error(
+            "[panel-facade] durable asset-store trim failed",
+            error,
+          ),
         );
     },
     close: () => {
@@ -305,12 +287,7 @@ export async function startPanelAssetFacade(
 }
 
 /**
- * Expose a fetched body as a pull reader, releasing the pipe slot exactly once
- * the last chunk is read (or a read fails).
- *
- * The slot is held across the BODY, not just the request — the frames that get
- * lost are the response's, so releasing earlier would let the next stream's
- * frames interleave and rebuild the burst the gate exists to prevent.
+ * Expose a fetched body as a pull reader.
  *
  * A pull reader rather than an async iterable because Hermes does not define
  * `Symbol.asyncIterator`: an object literal keyed by it becomes a property named
@@ -320,14 +297,13 @@ export async function startPanelAssetFacade(
  */
 const EMPTY_BODY: PanelBuildBodyReader = { read: () => Promise.resolve(null) };
 
-function streamReader(body: ReadableStream<Uint8Array>, release: () => void): PanelBuildBodyReader {
+function streamReader(body: ReadableStream<Uint8Array>): PanelBuildBodyReader {
   const reader = body.getReader();
   let finished = false;
   const finish = (): void => {
     if (finished) return;
     finished = true;
     reader.releaseLock();
-    release();
   };
   return {
     async read() {
@@ -351,9 +327,8 @@ function streamReader(body: ReadableStream<Uint8Array>, release: () => void): Pa
 function handleConnection(
   transport: MobileRpcClient,
   store: MobileAssetStore,
-  pipeGate: PipeGate,
   socket: TcpSocketConn,
-  trackRequest: (request: Promise<void>) => void
+  trackRequest: (request: Promise<void>) => void,
 ): void {
   let head = "";
   let dispatched = false;
@@ -368,7 +343,7 @@ function handleConnection(
     dispatched = true;
     try {
       socket.write(
-        `HTTP/1.1 ${status} ${statusText}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`
+        `HTTP/1.1 ${status} ${statusText}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`,
       );
       socket.end();
     } catch {
@@ -382,7 +357,8 @@ function handleConnection(
 
   socket.on("data", (data: string | Uint8Array) => {
     if (dispatched) return;
-    const text = typeof data === "string" ? data : Buffer.from(data).toString("latin1");
+    const text =
+      typeof data === "string" ? data : Buffer.from(data).toString("latin1");
     head += text;
     const end = head.indexOf("\r\n\r\n");
     if (end === -1) {
@@ -403,16 +379,18 @@ function handleConnection(
     // device can reach. It therefore serves ONLY non-secret GET asset reads.
     // State-changing methods are rejected here (405) before any body is read —
     // real panel RPC, uploads (§1.6), and worker-route calls ride the
-    // authenticated WebRTC bridge (postMessage → session.streamReadable), never
+    // authenticated Iroh bridge (postMessage → session.streamReadable), never
     // this socket. See panels' gatewayFetch (tunnels over the bridge, not the
     // loopback origin).
     if (method.toUpperCase() !== "GET") {
-      console.warn(`[panel-facade] rejecting non-GET ${method} request — GET-only asset façade`);
+      console.warn(
+        `[panel-facade] rejecting non-GET ${method} request — GET-only asset façade`,
+      );
       failRequest(405, "Method Not Allowed");
       return;
     }
     dispatched = true;
-    trackRequest(handleRequest(transport, store, pipeGate, socket, head));
+    trackRequest(handleRequest(transport, store, socket, head));
   });
   socket.on("error", () => {
     try {
@@ -426,9 +404,8 @@ function handleConnection(
 async function handleRequest(
   transport: MobileRpcClient,
   store: MobileAssetStore,
-  pipeGate: PipeGate,
   socket: TcpSocketConn,
-  rawHead: string
+  rawHead: string,
 ): Promise<void> {
   const startedAt = Date.now();
   const lines = rawHead.split("\r\n");
@@ -441,9 +418,11 @@ async function handleRequest(
   // are state-changing gateway surfaces that must NOT be proxied through this
   // unauthenticated loopback origin. Reject them at the façade only — the shared
   // policy stays intact so bridge-tunneled gatewayFetch worker calls still work.
-  const denyWorkerRoute = decision.allowed && decision.target.startsWith("/_r/w/");
+  const denyWorkerRoute =
+    decision.allowed && decision.target.startsWith("/_r/w/");
   if (!decision.allowed || denyWorkerRoute) {
-    const status = !decision.allowed && decision.denied === "malformed" ? 400 : 403;
+    const status =
+      !decision.allowed && decision.denied === "malformed" ? 400 : 403;
     await writeToSocket(
       socket,
       buildHead(
@@ -454,8 +433,8 @@ async function handleRequest(
         {},
         {
           contentLength: 0,
-        }
-      )
+        },
+      ),
     );
     socket.end();
     return;
@@ -467,9 +446,6 @@ async function handleRequest(
   let transferredBytes = 0;
   let bridgeCrossings = 0;
   let ttfbMs: number | null = null;
-  // Serialization is a real cost, so it is reported rather than assumed free:
-  // this is what a fetch spent waiting for the pipe instead of using it.
-  let gateWaitMs = 0;
   // Retries spent on transient pipe failures; surfaced so a flapping link shows
   // up as degraded rather than silently costing latency.
   let retriedAttempts = 0;
@@ -500,12 +476,6 @@ async function handleRequest(
       await writeStoredAsset(socket, acquisition.asset, markHeadSent);
       return;
     }
-    // Held across the body, not just the request: the frames that get lost are
-    // the response's, so releasing at `fetcher()` would let the next stream's
-    // frames interleave with this one's and rebuild the burst we are avoiding.
-    const gateQueuedAt = Date.now();
-    const releasePipe = await pipeGate.acquire();
-    gateWaitMs = Date.now() - gateQueuedAt;
     try {
       // A dropped pipe must cost a retry, not the panel. Safe only while
       // nothing has been written: `headSent` is the commit point, after which
@@ -516,24 +486,36 @@ async function handleRequest(
           canRetry: () => !headSent && !socket.destroyed,
           onRetry: (attempt, error) => {
             retriedAttempts = attempt;
-            const detail = error instanceof Error ? error.message : String(error);
+            const detail =
+              error instanceof Error ? error.message : String(error);
             console.warn(
-              `[panel-facade] retry ${attempt} for ${target} after transient pipe failure: ${detail}`
+              `[panel-facade] retry ${attempt} for ${target} after transient pipe failure: ${detail}`,
             );
           },
         },
         async () => {
           const response = await fetcher();
-          if (!response.cacheable) return { kind: "passthrough" as const, response };
+          if (!response.cacheable)
+            return { kind: "passthrough" as const, response };
           cacheableResponse = true;
-          const asset = await populateImmutableAsset(store, cacheKey, response, countTransferred);
+          const asset = await populateImmutableAsset(
+            store,
+            cacheKey,
+            response,
+            countTransferred,
+          );
           return { kind: "stored" as const, asset };
-        }
+        },
       );
       if (fetched.kind === "passthrough") {
         tier = "no-store";
         acquisition.complete(null);
-        await streamPassthrough(socket, fetched.response, markHeadSent, countTransferred);
+        await streamPassthrough(
+          socket,
+          fetched.response,
+          markHeadSent,
+          countTransferred,
+        );
         return;
       }
       acquisition.complete(fetched.asset);
@@ -541,15 +523,15 @@ async function handleRequest(
     } catch (error) {
       acquisition.fail(error);
       throw error;
-    } finally {
-      releasePipe();
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[panel-facade] asset fetch failed for ${target}: ${message}`);
     if (!headSent && !socket.destroyed) {
       try {
-        socket.write("HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n");
+        socket.write(
+          "HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n",
+        );
         socket.end();
         return;
       } catch {
@@ -576,14 +558,13 @@ async function handleRequest(
       transferredBytes,
       bridgeCrossings,
       ttfbMs,
-      gateWaitMs,
       retriedAttempts,
       totalMs: Date.now() - startedAt,
     });
     console.log(`[VibestudioMobileSmoke] phase=${phase} ${telemetry}`);
     if (tier === "miss" && cacheableResponse) {
       console.log(
-        `[VibestudioMobileSmoke] phase=workspace-panel-cacheable-asset-pipe-miss ${telemetry}`
+        `[VibestudioMobileSmoke] phase=workspace-panel-cacheable-asset-pipe-miss ${telemetry}`,
       );
     }
   }
@@ -625,7 +606,8 @@ function normalizeResult(result: {
       continue;
     }
     if (lower === "cache-control") cacheControl = value;
-    if (STRIP_RESPONSE_HEADERS.has(lower) || lower === CONTENT_DIGEST_HEADER) continue;
+    if (STRIP_RESPONSE_HEADERS.has(lower) || lower === CONTENT_DIGEST_HEADER)
+      continue;
     replayHeaders[key] = value;
   }
   return {
@@ -640,7 +622,9 @@ function normalizeResult(result: {
 }
 
 function isImmutableCachePolicy(cacheControl: string): boolean {
-  const directives = cacheControl.split(",").map((token) => token.trim().toLowerCase());
+  const directives = cacheControl
+    .split(",")
+    .map((token) => token.trim().toLowerCase());
   return directives.includes("immutable") && !directives.includes("no-store");
 }
 
@@ -650,13 +634,14 @@ function buildHead(
   contentType: string,
   gzip: boolean,
   replayHeaders: Record<string, string>,
-  framing: { contentLength: number } | { chunked: true }
+  framing: { contentLength: number } | { chunked: true },
 ): string {
   const out: string[] = [
     `HTTP/1.1 ${status} ${statusText || "OK"}`,
     `Content-Type: ${contentType}`,
   ];
-  for (const [key, value] of Object.entries(replayHeaders)) out.push(`${key}: ${value}`);
+  for (const [key, value] of Object.entries(replayHeaders))
+    out.push(`${key}: ${value}`);
   if (gzip) out.push("Content-Encoding: gzip");
   if ("contentLength" in framing) {
     out.push(`Content-Length: ${framing.contentLength}`);
@@ -674,7 +659,7 @@ function buildHead(
 async function writeStoredAsset(
   socket: TcpSocketConn,
   asset: MobileStoredAsset,
-  onHeadSent: () => void
+  onHeadSent: () => void,
 ): Promise<void> {
   const metadata = asset.metadata;
   await writeToSocket(
@@ -687,8 +672,8 @@ async function writeStoredAsset(
       metadata.replayHeaders,
       {
         contentLength: asset.size,
-      }
-    )
+      },
+    ),
   );
   onHeadSent();
   await new Promise<void>((resolve, reject) => {
@@ -711,7 +696,7 @@ export async function populateImmutableAsset(
   store: Pick<MobileAssetStore, "openWrite" | "append" | "commit" | "abort">,
   cacheKey: string,
   response: MobileFetchedResponse & { body: ReadableStream<Uint8Array> },
-  onTransferred: (bytes: number) => void
+  onTransferred: (bytes: number) => void,
 ): Promise<MobileStoredAsset> {
   const writeId = await store.openWrite(cacheKey);
   const reader = response.body.getReader();
@@ -750,7 +735,7 @@ export async function streamPassthrough(
   socket: TcpSocketConn,
   response: MobileFetchedResponse,
   onHeadSent: () => void,
-  onTransferred: (bytes: number) => void = () => undefined
+  onTransferred: (bytes: number) => void = () => undefined,
 ): Promise<void> {
   await writeToSocket(
     socket,
@@ -760,8 +745,8 @@ export async function streamPassthrough(
       response.contentType,
       response.gzip,
       response.replayHeaders,
-      { chunked: true }
-    )
+      { chunked: true },
+    ),
   );
   onHeadSent();
   const reader = response.body.getReader();
@@ -784,7 +769,9 @@ export async function streamPassthrough(
 function frameHttpChunk(value: Uint8Array): Uint8Array {
   const prefix = Buffer.from(`${value.byteLength.toString(16)}\r\n`, "ascii");
   const suffix = Buffer.from("\r\n", "ascii");
-  const framed = new Uint8Array(prefix.byteLength + value.byteLength + suffix.byteLength);
+  const framed = new Uint8Array(
+    prefix.byteLength + value.byteLength + suffix.byteLength,
+  );
   framed.set(prefix, 0);
   framed.set(value, prefix.byteLength);
   framed.set(suffix, prefix.byteLength + value.byteLength);
@@ -809,7 +796,10 @@ function collectForwardHeaders(headerLines: string[]): Record<string, string> {
  * otherwise balloon JS memory). Rejects if the socket closes mid-write so the
  * streaming loop tears down instead of hanging on a `drain` that never comes.
  */
-function writeToSocket(socket: TcpSocketConn, data: string | Uint8Array): Promise<void> {
+function writeToSocket(
+  socket: TcpSocketConn,
+  data: string | Uint8Array,
+): Promise<void> {
   return new Promise((resolve, reject) => {
     if (socket.destroyed) {
       reject(new Error("socket closed"));

@@ -1,141 +1,94 @@
 ---
 name: remote-server-onboarding
-description: Connect a desktop, mobile, or CLI Vibestudio client to a state server running elsewhere (home server, VPS, remote workstation) over WebRTC.
+description: Connect a desktop, mobile, or CLI Vibestudio client to a state server running elsewhere over Iroh.
 ---
 
-# Connecting to a Remote Vibestudio Server
+# Connecting to a remote Vibestudio server
 
-Vibestudio's state server (the piece that owns workspaces, the build system, agents, DOs, and secrets) can run on a different machine from the client UI. Typical setup: the server runs on a home server or VPS, and you connect from a desktop Electron app, the mobile app, or the CLI.
+Vibestudio's state server can run on a home server, VPS, or remote workstation.
+Desktop, mobile, and CLI clients reach it over end-to-end encrypted Iroh QUIC.
+The gateway remains loopback-only: there is no public RPC HTTP endpoint, reverse
+proxy, VPN requirement, negotiation service, or media relay deployment.
 
-Remote reach is **WebRTC**: the client establishes direct DTLS-encrypted pipes
-and pairs by QR. One stable pipe terminates at the hub control ingress; the
-current workspace pipe terminates at its child. There is no public HTTPS data
-endpoint, no TLS cert/CA/fingerprint files, no Tailscale, and no reverse proxy —
-the gateway binds loopback only and remote clients reach it through WebRTC. See
-`docs/webrtc-rpc-transport.md` for the design and `docs/webrtc-local-e2e.md` for
-a runnable local harness.
+The server advertises a stable Iroh Endpoint ID and an ordered set of explicit
+HTTPS relay URLs. Iroh attempts a direct UDP path and uses those relays when a
+direct path is unavailable. Production does not use n0 address lookup or an
+implicit public-relay preset. OAuth and webhook callbacks still use the separate
+callback relay; application RPC and assets never do.
 
-The hub is multi-user and multi-workspace. Root/admin accounts manage users and
-memberships; each person pairs devices to their own account. Workspace members
-share that workspace's panels, approvals, agents, and secrets, with actions
-attributed to the acting user.
+## Start or deploy
 
-## 1. Start the server as a WebRTC answerer
+Install and manage the owned user service locally:
 
-The hub needs a **signaling endpoint** (a tiny Cloudflare Worker/DO that brokers
-the WebRTC offer/answer — it never sees your data). For an always-on Linux
-server on this computer, install and deploy the server through its owned user
-service:
-
-```
+```bash
 npm install -g @panticonic/vibestudio-server
 vibestudio remote deploy local
 ```
 
-Use `vibestudio remote deploy user@host` when the server is a different
-computer. The target is the only difference: both forms install the same
-loopback-only systemd service, enable linger, validate the hub and default
-workspace runtime, and surface the current root pairing QR from protected
-managed ready state. Retrieve it directly with `remote deploy pairing <target>`.
-Manage the same target with `remote deploy status`, `logs`, `update`, and
-`remove`; the service does not write pairing secrets to its journal, and logs
-are diagnostics rather than the pairing interface.
+Use `vibestudio remote deploy user@host` for another computer. Inspect it with
+`remote deploy pairing`, `status`, and `logs`; apply releases with `update`; use
+`remove` only when decommissioning it. For a foreground session:
 
-For a foreground session instead:
-
-```
+```bash
 vibestudio remote serve --port 3030
-# → Root Pair URL: https://vibestudio.app/p#<compact-payload>
 ```
 
-On an empty identity database the hub starts the default workspace child and
-owns one live root-bootstrap invite at a time. If it expires before a device
-claims it, the hub replaces it and publishes the new QR/link; a fresh server
-does not require a restart merely because the operator stepped away.
+The relay set is mandatory server configuration. Run `vibestudio remote doctor
+--relay-url <https-url> --relay-url <https-url>` before exposing an invite. Pass
+`--workspace <name>` to inspect a child Endpoint or `--identity <endpoint.key>`
+to inspect one identity directly. Doctor validates release compatibility,
+identity persistence, relay reachability, endpoint binding, and retired native
+transport absence.
 
-- Signaling resolves as `--signal-url` > `VIBESTUDIO_WEBRTC_SIGNAL_URL` > hosted default (`wss://signal.vibestudio.app`).
-- The QR reaches the hub's persistent control identity at
-  `server-auth/webrtc/identity.pem`. Each workspace child presents its own
-  persistent DTLS identity at `reach/webrtc/identity.pem`, outside semantic
-  workspace state. The certificate SHA-256 is the `fp` in each reach — the
-  client pins it (**fail-closed** on mismatch), so a malicious signaling server
-  cannot MitM.
-- `VIBESTUDIO_WEBRTC_ICE=relay` forces TURN (set the signaling worker's `TURN_KEY_ID`/`TURN_KEY_API_TOKEN` secrets); host candidates suffice for LAN/loopback.
-- `vibestudio remote doctor` checks node-datachannel, signaling, and the stable
-  hub control identity by default. Pass `--workspace <name>` to inspect one
-  child identity explicitly.
-- For local development, run signaling on Cloudflare's local runtime (`cd apps/signaling && wrangler dev --local`) — see `docs/webrtc-local-e2e.md`.
+Each hub and workspace child owns a private persistent endpoint secret. Back up
+the server state that contains it. Endpoint rotation changes the Endpoint ID and
+invalidates saved reaches; it is therefore an explicit recovery operation:
 
-### Dogfood mode from a source checkout
+```bash
+vibestudio remote rotate-endpoint --workspace <name> --yes
+```
 
-When the remote server is meant to edit Vibestudio itself, start it with `pnpm dev:self:server`. This layers a source-checkout workflow on top of pairing: a managed workspace with `projects/vibestudio`, userland pushes routed through the Vibestudio Git gateway and mirrored back into the host checkout when clean and fast-forwardable, then rebuild/restart on the same gateway port. Userland detects the mode via `meta/dogfood.json`.
+Do not rotate an endpoint as a generic connectivity fix.
 
-## 2. Pair a client
+## Pair a client
 
-The compact v3 pairing link / QR carries everything needed to reach its hub
-invite room: one-time secret, DTLS fingerprint pin, expiry, ICE policy, and any
-non-default signaling endpoint. The room is derived one-way from the secret,
-and the hosted-default URL contains no shell metacharacters or remote lookup.
-On first boot, the first valid root invite
-redemption creates the root account. Later, root/admin uses `invite-user` for a
-new person, while any member uses `pair-device` for another device they own.
+The compact v4 HTTPS/deep-link payload contains a one-time code, expiry, hub
+Endpoint ID, and ordered relay set. It contains no certificate fingerprint,
+negotiation-room or candidate-policy fields.
 
-Redemption atomically promotes that hub invite room to the device's durable
-control room and returns a **durable, user-bound device credential** plus the
-exact one-time `PairingContext.workspaceId` selected by the invite. The client
-routes that ID over the same hub connection and saves the returned child
-`workspaceReach`. No process token leaves the server.
+```bash
+vibestudio remote pair "https://vibestudio.app/p#..."
+```
 
-- **CLI** — run `vibestudio remote pair "https://vibestudio.app/p#…"` to pair over WebRTC. The CLI stores the device credential, stable hub control pairing, exact selected workspace ID, and current workspace pairing; later workspace switches preserve the control pairing.
-- **Desktop (Electron)** — run `vibestudio open https://vibestudio.app/p#…` (or open the compact URL directly); the shell pairs over WebRTC and stores the device credential in the OS keychain. Use the connection badge → **Paired devices** → **Connect a device**, or `vibestudio remote pair-device`, for another device on your account; root/admin uses `vibestudio remote invite-user --handle <handle> --workspace <name>` for another person. Selecting another remote workspace reuses this identity without pairing again.
-- **Mobile** — scan the QR or follow a `https://vibestudio.app/p#…` link. Once connected, use **Settings** → **Devices** → **Connect another device** to share a new one-time link with another phone or desktop. The native host stores its own credential via `react-native-keychain`.
+Desktop can open the same URL; mobile can scan its QR or open the HTTPS/deep
+link. Redemption returns a durable user-bound device credential. The client
+retains the hub-control reach, routes the exact selected workspace ID through
+that authenticated connection, and stores the returned child reach. Switching
+workspaces replaces only the child reach and never mints a second identity.
 
-The QR `code` is the one-time pairing secret; the `fp` is the pinned hub DTLS
-fingerprint. A workspace route returns only `workspaceReach`, never a new
-control reach. There is no child pairing activation, proposed credential, or
-legacy pairing shape.
+One-time links cannot be replayed. If redemption has not reached the server, a
+local storage error may be fixed and the same link retried. Once accepted, an
+expired or consumed link requires a fresh `remote pair-device` or administrator
+invite.
 
-One-time use prevents replay by anyone who copied or photographed the bearer
-link. Desktop clients check OS-backed credential storage before redemption: an
-error that says **the pairing link was not used** can be fixed and retried with
-the same link. Once the server accepts a link, it cannot be reused; an
-already-used-or-expired error requires a fresh invite from the server or a
-paired administrator.
+## Connection diagnosis
 
-## 3. OAuth from a remote client
+The UI reports connecting, direct, relayed, reconnecting, and offline states.
+When relayed it may show the active relay region. Diagnostics include the path,
+relay URL, path changes, RTT, close cause, retry attempt, and endpoint generation
+without logging pairing codes or credentials.
 
-When you trigger an OAuth flow from a remotely-connected client, the flow opens through `externalOpen.openExternal` and **the client that started it** opens the URL in its local browser (desktop `shell.openExternal`, mobile `Linking.openURL`). Provider redirect URIs that need a public HTTPS endpoint resolve through the **callback relay** (`VIBESTUDIO_RELAY_URL`, plan §7), which backhauls the callback to your loopback server over the pipe — no public server URL or tunnel required.
+Investigate outside-in:
 
-## 4. Verifying the connection
+1. Run `remote doctor` with the exact configured relay set.
+2. Inspect the server service and endpoint registration logs.
+3. Distinguish the stable hub-control endpoint from the selected workspace
+   endpoint.
+4. Re-route the exact workspace through hub control when only the child reach is
+   stale.
+5. Rotate an endpoint only when its persisted secret is lost or compromised,
+   then deliberately re-pair affected clients.
 
-The Electron connection badge is always visible because it is also the stable
-entry point for connection settings and device pairing. It indicates:
-
-- **Gray globe** — connected to the co-located server.
-- **Green globe with hostname** — connected to a remote server over WebRTC.
-- **Amber "reconnecting"** — the pipe dropped and the client is re-establishing (full ICE re-establish, not a socket retry).
-- **Red "disconnected"** — recovery exhausted.
-
-Clicking the badge opens the connection dialog.
-
-## 5. What lives where
-
-| On the server (host machine)                                                                                    | On the client                                                                               |
-| --------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| Hub identity/membership (`server-auth/identity.db`) and workspaces (`~/.config/vibestudio/workspaces/`)         | Global device credential + stable hub control reach + selected workspace ID and child reach |
-| Credentials + consent state (`~/.config/vibestudio/credentials/`, `credentials-consent.sqlite`)                 | Theme / local UI preferences                                                                |
-| Hub control identity (`server-auth/webrtc/identity.pem`) and per-child identities (`reach/webrtc/identity.pem`) | Electron userData cache for remote mode                                                     |
-| Durable Object state (`.databases/workerd-do/`)                                                                 |                                                                                             |
-| Agent/worker execution                                                                                          |                                                                                             |
-
-Back up the server side; the client is disposable.
-
-## 6. Troubleshooting
-
-| Symptom                               | Likely cause                                                                                                                                                                                                                                                  |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Pairing link is unavailable           | Run `remote deploy pairing <target>` first; it validates the live hub, protected ready state, and default workspace health. If it reports a failure, use `remote deploy status <target>`, `remote deploy logs <target>`, and `remote doctor` for diagnostics. |
-| `fingerprint mismatch` on hub control | The saved control `fp` no longer matches the hub cert — restore the expected hub identity from its exact backup and investigate possible signaling attack. In-place hub identity rotation is intentionally unsupported.                                       |
-| `fingerprint mismatch` on a workspace | The saved workspace `fp` no longer matches that child. Re-route its exact workspace ID through the still-pinned hub control connection; do not replace the device credential.                                                                                 |
-| Client connects then drops repeatedly | Symmetric NAT with no TURN — set `VIBESTUDIO_WEBRTC_ICE=relay` on the server and TURN secrets on the signaling worker.                                                                                                                                        |
-| OAuth dialog never opens a browser    | Check the badge: is the client actually connected? The event only fires to subscribers.                                                                                                                                                                       |
+Back up hub identity/membership, endpoint secrets, workspace state, credentials,
+Durable Objects, and agent/worker state. Client-side credentials and cached panel
+assets are disposable and can be recreated by pairing again.

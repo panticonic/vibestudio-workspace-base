@@ -16,7 +16,10 @@ import { useAtomValue, useSetAtom } from "jotai";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { resetToNativeBootstrap } from "../services/auth";
 import { readClipboardText } from "../services/nativeCapabilities";
-import { loadShellCredential, clearShellCredential } from "../services/mobileCredentials";
+import {
+  loadShellCredential,
+  clearShellCredential,
+} from "../services/mobileCredentials";
 import { parseConnectLink } from "@vibestudio/shared/connect";
 import {
   MobileHostTargetApprovalRequiredError,
@@ -30,8 +33,14 @@ import {
   authErrorAtom,
   pairingIdentityAtom,
 } from "../state/authAtoms";
-import { connectionStatusAtom, workspaceReadinessAtom } from "../state/connectionAtoms";
-import { panelTreeRevisionAtom, shellClientAtom } from "../state/shellClientAtom";
+import {
+  connectionStatusAtom,
+  workspaceReadinessAtom,
+} from "../state/connectionAtoms";
+import {
+  panelTreeRevisionAtom,
+  shellClientAtom,
+} from "../state/shellClientAtom";
 import { themeColorsAtom } from "../state/themeAtoms";
 import { VibestudioLogo } from "./VibestudioLogo";
 
@@ -40,7 +49,10 @@ function smokePhase(phase: string, details?: Record<string, unknown>): void {
   console.log(`[VibestudioMobileSmoke] phase=${phase}${suffix}`);
 }
 
-type LoginScreenNavigationProp = StackNavigationProp<RootStackParamList, "Login">;
+type LoginScreenNavigationProp = StackNavigationProp<
+  RootStackParamList,
+  "Login"
+>;
 
 interface LoginScreenProps {
   navigation: LoginScreenNavigationProp;
@@ -61,7 +73,9 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
   const setPanelTreeRevision = useSetAtom(panelTreeRevisionAtom);
   const authLoading = useAtomValue(authLoadingAtom);
   const authError = useAtomValue(authErrorAtom);
-  const [connectionPhase, setConnectionPhase] = React.useState("Reading saved pairing…");
+  const [connectionPhase, setConnectionPhase] = React.useState(
+    "Reading saved pairing…",
+  );
   const [connectionAttempt, setConnectionAttempt] = React.useState(0);
   const [needsHostApproval, setNeedsHostApproval] = React.useState(false);
   const cancelConnectionRef = React.useRef<(() => void) | null>(null);
@@ -75,10 +89,14 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
         await resetToNativeBootstrap();
       } catch (error) {
         setAuthLoading(false);
-        setAuthError(error instanceof Error ? error.message : "Could not return to pairing.");
+        setAuthError(
+          error instanceof Error
+            ? error.message
+            : "Could not return to pairing.",
+        );
       }
     },
-    [setAuthError, setAuthLoading]
+    [setAuthError, setAuthLoading],
   );
 
   const handleResetToBootstrap = React.useCallback(() => {
@@ -87,8 +105,12 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
       "Retry first if the server may only be temporarily unavailable. Re-pairing removes this device's saved connection.",
       [
         { text: "Cancel", style: "cancel" },
-        { text: "Re-pair", style: "destructive", onPress: () => void resetToBootstrap(true) },
-      ]
+        {
+          text: "Re-pair",
+          style: "destructive",
+          onPress: () => void resetToBootstrap(true),
+        },
+      ],
     );
   }, [resetToBootstrap]);
 
@@ -98,7 +120,9 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
     try {
       const rawUrl = (await readClipboardText()).trim();
       if (!rawUrl) {
-        throw new Error("Clipboard is empty. Copy a Vibestudio pairing link first.");
+        throw new Error(
+          "Clipboard is empty. Copy a Vibestudio pairing link first.",
+        );
       }
       // Validate the pasted link (shape + protocol version) BEFORE touching the
       // stored credential. Clearing first meant clipboard garbage — or an https
@@ -108,14 +132,18 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
       // intact so the device can still reconnect.
       const parsed = parseConnectLink(rawUrl);
       if (parsed.kind === "error") {
-        throw new Error(`That doesn't look like a valid Vibestudio pairing link. ${parsed.reason}`);
+        throw new Error(
+          `That doesn't look like a valid Vibestudio pairing link. ${parsed.reason}`,
+        );
       }
       await Linking.openURL(rawUrl);
       // Opening a URL is not proof that iOS delivered it back to this app. Keep
       // the working credential until a successful pairing overwrites it.
     } catch (error) {
       setAuthLoading(false);
-      setAuthError(error instanceof Error ? error.message : "Could not open pairing link.");
+      setAuthError(
+        error instanceof Error ? error.message : "Could not open pairing link.",
+      );
     }
   }, [setAuthError, setAuthLoading]);
 
@@ -144,19 +172,21 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
       setConnectionPhase("Reading saved pairing…");
       try {
         smokePhase("workspace-login-connect-start");
-        // WebRTC model: the device identity is the stored shell credential
-        // (deviceId + the signaling-room pairing). There is no native "workspace
-        // credential" to read — the bootstrap pairs straight to a room — so the
-        // workspace id is resolved from the server (getInfo) once the pipe is up.
+        // Native bootstrap persists the shared Iroh endpoint identity and the
+        // shell credential. Workspace reach is refreshed after authentication.
         const stored = await loadShellCredential();
-        smokePhase("workspace-login-credentials", { hasShellCredential: Boolean(stored) });
+        smokePhase("workspace-login-credentials", {
+          hasShellCredential: Boolean(stored),
+        });
         if (!stored) {
           throw new Error(
-            "No Vibestudio pairing is stored on this device. Scan a pairing QR code from a trusted desktop or terminal."
+            "No Vibestudio pairing is stored on this device. Scan a pairing QR code from a trusted desktop or terminal.",
           );
         }
-        if (stored.schemaVersion !== 4) {
-          throw new Error("The saved mobile connection has not completed its required migration.");
+        if (stored.schemaVersion !== 5) {
+          throw new Error(
+            "The saved mobile connection has not completed its required migration.",
+          );
         }
         const credentials: Credentials = {
           deviceId: stored.credential.deviceId,
@@ -169,7 +199,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
 
         const client = new ShellClient({
           credentials,
-          serverIdentity: stored.controlPairing.fp,
+          serverEndpointId: stored.controlPairing.endpointId,
           onReadinessChange: setWorkspaceReadiness,
           onStatusChange: (status) => {
             setConnectionStatus(status);
@@ -192,9 +222,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
           setConnectionPhase(
             progress.phase === "scheduled"
               ? "Waiting to retry the server…"
-              : progress.layer === "signaling"
-                ? "Contacting the pairing service…"
-                : "Connecting securely to your workspace…"
+              : "Connecting securely to your workspace…",
           );
         });
         cancelConnectionRef.current = () => {
@@ -202,7 +230,9 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
           offProgress?.();
           client.dispose();
           setAuthLoading(false);
-          setAuthError("Connection cancelled. Your saved pairing is unchanged.");
+          setAuthError(
+            "Connection cancelled. Your saved pairing is unchanged.",
+          );
         };
 
         await client.init();
@@ -220,10 +250,14 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
         if (cancelled) return;
         setAuthLoading(false);
         const message =
-          error instanceof Error ? error.message : "Could not open the selected workspace.";
+          error instanceof Error
+            ? error.message
+            : "Could not open the selected workspace.";
         if (error instanceof MobileHostTargetApprovalRequiredError) {
           setNeedsHostApproval(true);
-          setAuthError("The workspace's mobile app needs your approval before it can run.");
+          setAuthError(
+            "The workspace's mobile app needs your approval before it can run.",
+          );
           return;
         }
         smokePhase("workspace-login-error", {
@@ -259,7 +293,9 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
   ]);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: colors.background }]}>
+    <SafeAreaView
+      style={[styles.container, { backgroundColor: colors.background }]}
+    >
       <ScrollView
         contentContainerStyle={styles.content}
         bounces={false}
@@ -291,13 +327,25 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
             <View
               style={[
                 styles.errorCallout,
-                { backgroundColor: colors.dangerSoft, borderColor: colors.danger },
+                {
+                  backgroundColor: colors.dangerSoft,
+                  borderColor: colors.danger,
+                },
               ]}
             >
-              <Text style={[type.bodyStrong, { color: colors.danger }]} accessibilityRole="alert">
+              <Text
+                style={[type.bodyStrong, { color: colors.danger }]}
+                accessibilityRole="alert"
+              >
                 {authError}
               </Text>
-              <Text style={[type.caption, styles.calloutHint, { color: colors.textSecondary }]}>
+              <Text
+                style={[
+                  type.caption,
+                  styles.calloutHint,
+                  { color: colors.textSecondary },
+                ]}
+              >
                 {needsHostApproval
                   ? "Review the workspace app in the pairing screen. Your saved pairing will stay intact."
                   : "Retry keeps your saved pairing. Only re-pair if you want to replace this connection."}

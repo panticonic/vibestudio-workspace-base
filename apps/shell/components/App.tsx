@@ -64,7 +64,7 @@ export function App() {
   }, [themeMode]);
 
   // When the OS reports the network came back, tell main to nudge the server
-  // pipe awake (a stale WebRTC "connected" can linger ~45s after a flap). Pure
+  // connection awake and detects a stalled transport. Pure
   // signal — main only probes, never tears down a healthy pipe.
   useEffect(() => {
     const handleOnline = () => shellNetwork.notifyOnline();

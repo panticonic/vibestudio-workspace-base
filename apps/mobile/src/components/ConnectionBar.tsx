@@ -1,5 +1,5 @@
 /**
- * ConnectionBar -- Status bar showing the WebRTC pipe connection state.
+ * ConnectionBar -- Status bar showing the Iroh connection state.
  *
  * Displays a thin colored bar at the top of the screen:
  * - Connected: green, auto-hides after 3 seconds
@@ -10,7 +10,14 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { View, Text, StyleSheet, Animated, Pressable, Alert } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Animated,
+  Pressable,
+  Alert,
+} from "react-native";
 import { useAtomValue } from "jotai";
 import {
   connectionStatusAtom,
@@ -46,7 +53,7 @@ const STATUS_CONFIG: Record<ConnectionStatus, StatusConfig> = {
  * Derive the display config from connection status + network reachability.
  * - Connected: a live pipe IS reachable by definition — never overridden by a
  *   NetInfo "no internet" signal. This is what makes a LAN-only home server
- *   (Wi-Fi without internet, ICE over the local link) show "Connected".
+ *   (Wi-Fi without internet, direct Iroh path) show "Connected".
  * - No network: "No network" only when there's genuinely no link AND the pipe
  *   isn't up.
  * - Connecting after a disconnect: "Reconnecting..." if transport was previously connected
@@ -55,7 +62,7 @@ const STATUS_CONFIG: Record<ConnectionStatus, StatusConfig> = {
 function getDisplayConfig(
   status: ConnectionStatus,
   networkReachable: boolean,
-  wasConnected: boolean
+  wasConnected: boolean,
 ): StatusConfig {
   if (status === "connected") {
     return STATUS_CONFIG.connected;
@@ -158,7 +165,12 @@ export function ConnectionBar({ onRepair }: ConnectionBarProps = {}) {
     const reconnect = () => shellClient?.transport.reconnect();
     const buttons: Parameters<typeof Alert.alert>[2] =
       workspaceReadiness === "failed"
-        ? [{ text: "Retry setup", onPress: () => shellClient?.retryWorkspaceSetup() }]
+        ? [
+            {
+              text: "Retry setup",
+              onPress: () => shellClient?.retryWorkspaceSetup(),
+            },
+          ]
         : [{ text: "Reconnect", onPress: reconnect }];
     if (onRepair) {
       buttons.push({ text: "Re-pair device", onPress: onRepair });
@@ -176,11 +188,15 @@ export function ConnectionBar({ onRepair }: ConnectionBarProps = {}) {
           ? "Vibestudio isn't connected to your server."
           : "Your device appears to be offline. Reconnect once your network is back.",
       buttons,
-      { cancelable: true }
+      { cancelable: true },
     );
   }, [networkReachable, onRepair, shellClient, workspaceReadiness]);
 
-  const config = getDisplayConfig(status, networkReachable, wasConnectedRef.current);
+  const config = getDisplayConfig(
+    status,
+    networkReachable,
+    wasConnectedRef.current,
+  );
   const readinessColorKey =
     status === "connected" && workspaceReadiness === "failed"
       ? "statusDisconnected"
@@ -221,8 +237,12 @@ export function ConnectionBar({ onRepair }: ConnectionBarProps = {}) {
         },
       ]}
     >
-      <View style={[styles.dot, { backgroundColor: statusPalette.foreground }]} />
-      <Text style={[styles.text, { color: statusPalette.foreground }]}>{label}</Text>
+      <View
+        style={[styles.dot, { backgroundColor: statusPalette.foreground }]}
+      />
+      <Text style={[styles.text, { color: statusPalette.foreground }]}>
+        {label}
+      </Text>
     </Animated.View>
   );
 

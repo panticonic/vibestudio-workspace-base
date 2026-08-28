@@ -11,8 +11,10 @@
       "src/services/notificationCategories.ts",
       "src/services/pushNotifications.ts"
     ],
-    "@react-native-async-storage/async-storage": ["src/services/nativeAppStorage.ts"],
-    "@vibestudio/mobile-webrtc": [
+    "@react-native-async-storage/async-storage": [
+      "src/services/nativeAppStorage.ts"
+    ],
+    "@vibestudio/mobile-iroh": [
       "src/services/mobileTransport.ts",
       "src/services/mobileCredentials.ts",
       "src/services/workspaceSelection.ts",

@@ -1,5 +1,8 @@
 import type { PanelManager } from "@vibestudio/shell-core/panelManager";
-import { asPanelSlotId, type PanelEntityId } from "@vibestudio/shared/panel/ids";
+import {
+  asPanelSlotId,
+  type PanelEntityId,
+} from "@vibestudio/shared/panel/ids";
 import type { OpenExternalOptions } from "@vibestudio/shared/externalOpen";
 import { externalOpenMethods } from "@vibestudio/service-schemas/externalOpen";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
@@ -11,7 +14,7 @@ import {
   type BridgeStreamRelay,
   type RpcEnvelope,
 } from "@vibestudio/rpc";
-import { PIPE_CLOSED_CODE, type WebRtcSession } from "@vibestudio/rpc/transports/webrtcClient";
+import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
 import type { MobileRpcClient } from "./mobileTransport";
 
 export interface BridgeAdapterCallbacks {
@@ -23,7 +26,7 @@ export interface BridgeAdapterCallbacks {
 type PanelLease = { runtimeEntityId: PanelEntityId; connectionId: string };
 
 type PanelSessionEntry = {
-  session: WebRtcSession;
+  session: IrohClientSession;
   leaseKey: string;
 };
 
@@ -57,12 +60,14 @@ export function createBridgeAdapter(deps: {
   function requirePanelLease(panelId: string): PanelLease {
     const lease = deps.getPanelLease(panelId);
     if (!lease) {
-      throw new Error(`Panel ${panelId} has no runtime lease yet — cannot open panel session`);
+      throw new Error(
+        `Panel ${panelId} has no runtime lease yet — cannot open panel session`,
+      );
     }
     return lease;
   }
 
-  function ensurePanelSession(panelId: string): Promise<WebRtcSession> {
+  function ensurePanelSession(panelId: string): Promise<IrohClientSession> {
     let lease: PanelLease;
     try {
       lease = requirePanelLease(panelId);
@@ -75,17 +80,22 @@ export function createBridgeAdapter(deps: {
     if (existing) {
       return existing.then(
         (entry) => {
-          if (entry.leaseKey === expectedLeaseKey && isPanelSessionLive(entry.session)) {
+          if (
+            entry.leaseKey === expectedLeaseKey &&
+            isPanelSessionLive(entry.session)
+          ) {
             return entry.session;
           }
-          if (panelSessions.get(panelId) === existing) panelSessions.delete(panelId);
+          if (panelSessions.get(panelId) === existing)
+            panelSessions.delete(panelId);
           entry.session.close();
           return ensurePanelSession(panelId);
         },
         (error) => {
-          if (panelSessions.get(panelId) === existing) panelSessions.delete(panelId);
+          if (panelSessions.get(panelId) === existing)
+            panelSessions.delete(panelId);
           throw error;
-        }
+        },
       );
     }
 
@@ -101,11 +111,11 @@ export function createBridgeAdapter(deps: {
 
   async function openPanelSessionEntry(
     panelId: string,
-    lease: PanelLease
+    lease: PanelLease,
   ): Promise<PanelSessionEntry> {
     const session = await deps.transport.openPanelSession(
       lease.runtimeEntityId,
-      lease.connectionId
+      lease.connectionId,
     );
     session.onMessage((envelope) => deps.deliverToPanel(panelId, envelope));
     return { session, leaseKey: panelLeaseKey(lease) };
@@ -114,7 +124,7 @@ export function createBridgeAdapter(deps: {
   // §1.6 upload relays, one per panel (see @vibestudio/rpc bridgeStream.ts). The
   // RN postMessage bridge is string-only, so chunks cross as base64 (~256 KiB);
   // the relay reassembles the request body (8 MiB cap, fail-loud) and feeds the
-  // panel's WebRTC session streamReadable(). Response head/chunks/end go back
+  // panel's Iroh session streamReadable(). Response head/chunks/end go back
   // through deliverToPanel tagged `__vibestudioBridgeStream` (the injected bootstrap
   // demuxes them off the envelope path), ack-gated so the webview buffer stays
   // bounded.
@@ -142,51 +152,47 @@ export function createBridgeAdapter(deps: {
         const lease = requirePanelLease(panelId);
         if (typeof session.streamReadable !== "function") {
           throw new Error(
-            "Streaming request bodies (uploads) require the WebRTC transport; " +
-              "this panel's host session cannot stream a request body"
+            "Streaming request bodies (uploads) require the Iroh transport; " +
+              "this panel's host session cannot stream a request body",
           );
         }
         return session.streamReadable(
-          stampEnvelopeCaller(envelope, { callerId: lease.runtimeEntityId, callerKind: "panel" }),
+          stampEnvelopeCaller(envelope, {
+            callerId: lease.runtimeEntityId,
+            callerKind: "panel",
+          }),
           signal,
-          body
+          body,
         );
       },
-      sendToPanel: (msg) => deps.deliverToPanel(panelId, { __vibestudioBridgeStream: true, msg }),
+      sendToPanel: (msg) =>
+        deps.deliverToPanel(panelId, { __vibestudioBridgeStream: true, msg }),
     });
     streamRelays.set(panelId, relay);
     return relay;
   }
 
-  async function sendPanelEnvelope(panelId: string, envelope: RpcEnvelope): Promise<void> {
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        const session = await ensurePanelSession(panelId);
-        const lease = requirePanelLease(panelId);
-        await session.send(
-          stampEnvelopeCaller(envelope, {
-            callerId: lease.runtimeEntityId,
-            callerKind: "panel",
-          })
-        );
-        return;
-      } catch (error) {
-        if (attempt > 0 || (error as { code?: unknown } | null)?.code !== PIPE_CLOSED_CODE) {
-          throw error;
-        }
-        // A logical panel session survives a recoverable pipe drop and reopens
-        // with the transport. Its `isClosed()` flag is intentionally terminal-
-        // only, so rejecting immediately here strands every panel RPC that
-        // races a mobile network transition. The failed send wrote no frame;
-        // wait for the shared pipe and retry that exact envelope once.
-        await deps.transport.waitUntilConnected(45_000);
-      }
-    }
+  async function sendPanelEnvelope(
+    panelId: string,
+    envelope: RpcEnvelope,
+  ): Promise<void> {
+    const session = await ensurePanelSession(panelId);
+    const lease = requirePanelLease(panelId);
+    await session.send(
+      stampEnvelopeCaller(envelope, {
+        callerId: lease.runtimeEntityId,
+        callerKind: "panel",
+      }),
+    );
   }
 
   return {
     closePanelSession,
-    async handle(panelId: string, method: string, args: unknown[]): Promise<unknown> {
+    async handle(
+      panelId: string,
+      method: string,
+      args: unknown[],
+    ): Promise<unknown> {
       const slotId = asPanelSlotId(panelId);
       switch (method) {
         case "getPanelInit":
@@ -217,14 +223,19 @@ export function createBridgeAdapter(deps: {
           if (options?.focus !== false) {
             deps.callbacks.navigateToPanel(created.panelId);
           }
-          return { id: created.panelId, title: created.title, kind: "workspace" };
+          return {
+            id: created.panelId,
+            title: created.title,
+            kind: "workspace",
+          };
         }
         case "openExternal": {
           const [url, options] = args as [string, OpenExternalOptions?];
           const externalOpen = createTypedServiceClient(
             "externalOpen",
             externalOpenMethods,
-            (svc, method, callArgs) => deps.transport.call("main", `${svc}.${method}`, callArgs)
+            (svc, method, callArgs) =>
+              deps.transport.call("main", `${svc}.${method}`, callArgs),
           );
           await externalOpen.openExternal(url, options);
           return;
@@ -235,7 +246,7 @@ export function createBridgeAdapter(deps: {
         case "goForward":
         case "stop":
           throw new Error(
-            "CDP automation is routed through the server broker and is not available for mobile-held WebViews"
+            "CDP automation is routed through the server broker and is not available for mobile-held WebViews",
           );
         case "openDevtools":
           return;
@@ -269,7 +280,10 @@ export function createBridgeAdapter(deps: {
         case "streamBodyChunk": {
           const [msg] = args as [BridgeBodyChunk];
           const relay = streamRelays.get(panelId);
-          if (!relay) throw new Error(`No open bridge upload stream for panel ${panelId}`);
+          if (!relay)
+            throw new Error(
+              `No open bridge upload stream for panel ${panelId}`,
+            );
           // The returned promise IS the backpressure: it resolves (→ the panel's
           // pending callHost ack) once the reassembly buffer is under the watermark.
           return relay.pushBodyChunk(msg);
@@ -295,6 +309,6 @@ function panelLeaseKey(lease: PanelLease): string {
   return `${lease.runtimeEntityId}\u0000${lease.connectionId}`;
 }
 
-function isPanelSessionLive(session: WebRtcSession): boolean {
+function isPanelSessionLive(session: IrohClientSession): boolean {
   return !session.isClosed();
 }

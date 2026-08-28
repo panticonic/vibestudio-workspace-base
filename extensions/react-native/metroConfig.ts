@@ -7,22 +7,34 @@ interface NativeModulePolicy {
   blockedImports: Record<string, string[]>;
 }
 
-export function writeProjectedMetroConfig(input: BuildProviderInput, tempDir: string): string {
+export function writeProjectedMetroConfig(
+  input: BuildProviderInput,
+  tempDir: string,
+): string {
   const nodeModulesPath = input.dependencyProjection.nodeModulesPath;
   if (!nodeModulesPath) {
-    throw new Error("React Native builds require a Build V2 dependency projection");
+    throw new Error(
+      "React Native builds require a Build V2 dependency projection",
+    );
   }
   const app = appManifest(input);
-  const policy = readNativeModulePolicy(input.sourcePath, app["nativeModulePolicy"]);
+  const policy = readNativeModulePolicy(
+    input.sourcePath,
+    app["nativeModulePolicy"],
+  );
   // Metro is the build provider's tool, not an application runtime dependency.
   // Resolve it from this extension's exact dependency environment so a mobile
   // app does not have to duplicate the provider's implementation dependency.
   const providerRequire = createRequire(import.meta.url);
-  const metroConfigPackage = providerRequire.resolve("@react-native/metro-config");
+  const metroConfigPackage = providerRequire.resolve(
+    "@react-native/metro-config",
+  );
   const providerNodeModulesPath = path.resolve(
-    path.dirname(providerRequire.resolve("@react-native/metro-config/package.json")),
+    path.dirname(
+      providerRequire.resolve("@react-native/metro-config/package.json"),
+    ),
     "..",
-    ".."
+    "..",
   );
   const babelTransformerPath = writeBabelTransformer({
     tempDir,
@@ -43,7 +55,10 @@ export function writeProjectedMetroConfig(input: BuildProviderInput, tempDir: st
   return configPath;
 }
 
-function tryResolve(resolve: (specifier: string) => string, specifier: string): string | null {
+function tryResolve(
+  resolve: (specifier: string) => string,
+  specifier: string,
+): string | null {
   try {
     return resolve(specifier);
   } catch {
@@ -74,15 +89,20 @@ function writeBabelTransformer(input: {
   nodeModulesPath: string;
   providerRequire: NodeJS.Require;
 }): string {
-  const upstream = input.providerRequire.resolve("@react-native/metro-babel-transformer");
+  const upstream = input.providerRequire.resolve(
+    "@react-native/metro-babel-transformer",
+  );
   // Reanimated's plugin is versioned with the app's Reanimated, so it comes
   // from the app's dependency projection; apps without it simply get no plugin.
   const reanimated = tryResolve(
-    (specifier) => input.providerRequire.resolve(specifier, { paths: [input.nodeModulesPath] }),
-    "react-native-reanimated/plugin"
+    (specifier) =>
+      input.providerRequire.resolve(specifier, {
+        paths: [input.nodeModulesPath],
+      }),
+    "react-native-reanimated/plugin",
   );
   const exportNamespace = input.providerRequire.resolve(
-    "@babel/plugin-transform-export-namespace-from"
+    "@babel/plugin-transform-export-namespace-from",
   );
   const transformerPath = path.join(input.tempDir, "babel-transformer.cjs");
   fs.writeFileSync(
@@ -112,7 +132,7 @@ module.exports = {
     return upstream.transform({ ...args, plugins: [...(args.plugins ?? []), ...injected] });
   },
 };
-`
+`,
   );
   return transformerPath;
 }
@@ -123,7 +143,10 @@ function appManifest(input: BuildProviderInput): Record<string, unknown> {
     : input.manifest;
 }
 
-function readNativeModulePolicy(sourcePath: string, declaration: unknown): NativeModulePolicy {
+function readNativeModulePolicy(
+  sourcePath: string,
+  declaration: unknown,
+): NativeModulePolicy {
   if (typeof declaration !== "string" || declaration.length === 0) {
     return { blockedImports: {} };
   }
@@ -132,9 +155,13 @@ function readNativeModulePolicy(sourcePath: string, declaration: unknown): Nativ
   if (!policyPath.startsWith(`${appRoot}${path.sep}`)) {
     throw new Error("React Native nativeModulePolicy escapes the app source");
   }
-  const parsed = JSON.parse(fs.readFileSync(policyPath, "utf8")) as Partial<NativeModulePolicy>;
+  const parsed = JSON.parse(
+    fs.readFileSync(policyPath, "utf8"),
+  ) as Partial<NativeModulePolicy>;
   if (!parsed.blockedImports || typeof parsed.blockedImports !== "object") {
-    throw new Error("React Native nativeModulePolicy must declare blockedImports");
+    throw new Error(
+      "React Native nativeModulePolicy must declare blockedImports",
+    );
   }
   for (const [moduleName, importers] of Object.entries(parsed.blockedImports)) {
     if (
@@ -142,7 +169,9 @@ function readNativeModulePolicy(sourcePath: string, declaration: unknown): Nativ
       !Array.isArray(importers) ||
       importers.some((item) => typeof item !== "string")
     ) {
-      throw new Error("React Native nativeModulePolicy contains an invalid blocked import");
+      throw new Error(
+        "React Native nativeModulePolicy contains an invalid blocked import",
+      );
     }
   }
   return { blockedImports: parsed.blockedImports };
@@ -161,14 +190,11 @@ const allowedByModule = new Map(
     new Set(importers.map((importer) => normalize(path.join(data.sourcePath, importer)))),
   ]),
 );
-const mobileWebRtc = data.modules["@vibestudio/mobile-webrtc"];
-if (mobileWebRtc) {
-  allowedByModule.get("react-native-keychain")?.add(normalize(path.join(mobileWebRtc, "src/connect.ts")));
+const mobileIroh = data.modules["@vibestudio/mobile-iroh"];
+if (mobileIroh) {
+  allowedByModule.get("react-native-keychain")?.add(normalize(path.join(mobileIroh, "src/connect.ts")));
   allowedByModule.get("@react-native-async-storage/async-storage")?.add(
-    normalize(path.join(mobileWebRtc, "src/connect.ts")),
-  );
-  allowedByModule.get("@react-native-async-storage/async-storage")?.add(
-    normalize(path.join(mobileWebRtc, "src/connectLink.ts")),
+    normalize(path.join(mobileIroh, "src/connectLink.ts")),
   );
 }
 const blockedImportFor = (moduleName) =>
@@ -214,9 +240,7 @@ const config = {
       if (
         moduleName === "react" ||
         moduleName === "react/jsx-runtime" ||
-        moduleName === "react/jsx-dev-runtime" ||
-        moduleName === "react-native-webrtc" ||
-        moduleName.startsWith("react-native-webrtc/")
+        moduleName === "react/jsx-dev-runtime"
       ) {
         return context.resolveRequest(
           context,

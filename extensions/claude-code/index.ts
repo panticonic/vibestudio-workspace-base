@@ -84,7 +84,13 @@ export interface SubagentCliOptions {
   /** `--permission-mode`. Defaults to 'auto': the child runs autonomously —
    *  the parent's spawn is the authorization, and a headless `-p` run blocked
    *  on interactive permission prompts would hang the subagent. */
-  permissionMode?: "auto" | "acceptEdits" | "bypassPermissions" | "manual" | "dontAsk" | "plan";
+  permissionMode?:
+    | "auto"
+    | "acceptEdits"
+    | "bypassPermissions"
+    | "manual"
+    | "dontAsk"
+    | "plan";
   /** `--fallback-model`: automatic fallback when the model is overloaded. */
   fallbackModel?: string;
   /** `--max-budget-usd`: hard spend ceiling for the session. */
@@ -102,14 +108,17 @@ const PERMISSION_MODES = new Set([
 ]);
 
 /** Map whitelisted {@link SubagentCliOptions} onto `claude` argv flags. */
-export function subagentCliArgs(options: Record<string, unknown> | undefined): string[] {
+export function subagentCliArgs(
+  options: Record<string, unknown> | undefined,
+): string[] {
   const o = (options ?? {}) as Record<string, unknown>;
   // A value that parses as a flag would reorder the argv contract; refuse it.
   const flagSafe = (v: unknown): v is string =>
     typeof v === "string" && v.trim().length > 0 && !v.startsWith("-");
   const args: string[] = [];
   const mode =
-    typeof o["permissionMode"] === "string" && PERMISSION_MODES.has(o["permissionMode"])
+    typeof o["permissionMode"] === "string" &&
+    PERMISSION_MODES.has(o["permissionMode"])
       ? o["permissionMode"]
       : "auto";
   args.push("--permission-mode", mode);
@@ -117,7 +126,8 @@ export function subagentCliArgs(options: Record<string, unknown> | undefined): s
   if (typeof o["effort"] === "string" && EFFORT_LEVELS.has(o["effort"])) {
     args.push("--effort", o["effort"]);
   }
-  if (flagSafe(o["fallbackModel"])) args.push("--fallback-model", o["fallbackModel"]);
+  if (flagSafe(o["fallbackModel"]))
+    args.push("--fallback-model", o["fallbackModel"]);
   const budget = o["maxBudgetUsd"];
   if (typeof budget === "number" && Number.isFinite(budget) && budget > 0) {
     args.push("--max-budget-usd", String(budget));
@@ -197,7 +207,9 @@ function boundedUtf8Tail(value: string, maxBytes: number): string {
  * tail. Stderr may be interleaved with stdout, so malformed/non-JSON lines are
  * ignored and only an outer `type:"result"` record can settle a run.
  */
-export function parseClaudeStreamCompletion(logTail: string): ClaudeStreamCompletion | null {
+export function parseClaudeStreamCompletion(
+  logTail: string,
+): ClaudeStreamCompletion | null {
   const lines = logTail.split(/\r?\n/);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index]?.trim();
@@ -205,13 +217,15 @@ export function parseClaudeStreamCompletion(logTail: string): ClaudeStreamComple
     let record: Record<string, unknown>;
     try {
       const parsed = JSON.parse(line) as unknown;
-      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+        continue;
       record = parsed as Record<string, unknown>;
     } catch {
       continue;
     }
     if (record["type"] !== "result") continue;
-    const success = record["subtype"] === "success" && record["is_error"] !== true;
+    const success =
+      record["subtype"] === "success" && record["is_error"] !== true;
     const rawReport =
       typeof record["result"] === "string" && record["result"].trim()
         ? record["result"].trim()
@@ -252,7 +266,7 @@ export async function activate(ctx: ExtensionContext) {
   const failAfterSpawnCleanup = async (
     owner: OwnedProcessGroupHandle,
     failure: unknown,
-    message: string
+    message: string,
   ): Promise<never> => {
     const failures = [failure];
     try {
@@ -331,13 +345,15 @@ export async function activate(ctx: ExtensionContext) {
       throw error;
     }
     try {
-      return JSON.parse(typeof raw === "string" ? raw : raw.toString("utf8")) as T;
+      return JSON.parse(
+        typeof raw === "string" ? raw : raw.toString("utf8"),
+      ) as T;
     } catch (error) {
       throw Object.assign(
         new Error(
-          `Corrupt Claude extension record ${key}: ${error instanceof Error ? error.message : String(error)}`
+          `Corrupt Claude extension record ${key}: ${error instanceof Error ? error.message : String(error)}`,
         ),
-        { code: "ECORRUPT" }
+        { code: "ECORRUPT" },
       );
     }
   }
@@ -347,7 +363,9 @@ export async function activate(ctx: ExtensionContext) {
     await ctx.storage.replaceFile(key, JSON.stringify(value, null, 2));
   }
 
-  async function readLaunchRecord(key: string): Promise<ClaudeLaunchRecord | null> {
+  async function readLaunchRecord(
+    key: string,
+  ): Promise<ClaudeLaunchRecord | null> {
     const value = await readJson<unknown>(key);
     return value === null ? null : parseClaudeLaunchRecord(value, key);
   }
@@ -360,10 +378,13 @@ export async function activate(ctx: ExtensionContext) {
   async function resolveChannelTarget(channelId: string): Promise<string> {
     const resolved = (await ctx.workers.resolveService(
       CHANNEL_SERVICE_PROTOCOL,
-      channelId
+      channelId,
     )) as ResolvedService;
     if (resolved?.kind !== "durable-object" || !resolved.targetId) {
-      throw error("ENOENT", `Channel service did not resolve to a Durable Object for ${channelId}`);
+      throw error(
+        "ENOENT",
+        `Channel service did not resolve to a Durable Object for ${channelId}`,
+      );
     }
     return resolved.targetId;
   }
@@ -382,7 +403,7 @@ export async function activate(ctx: ExtensionContext) {
     if (!gatewayUrl) {
       throw error(
         "ENOGATEWAY",
-        "Claude Code extension host did not receive VIBESTUDIO_EXTENSION_GATEWAY_URL"
+        "Claude Code extension host did not receive VIBESTUDIO_EXTENSION_GATEWAY_URL",
       );
     }
     return toServerBaseUrl(gatewayUrl);
@@ -392,10 +413,20 @@ export async function activate(ctx: ExtensionContext) {
     const invocation = ctx.invocation.current();
     const callerKind = invocation?.caller.callerKind;
     if (callerKind !== "do" && callerKind !== "worker") {
-      throw error("EACCES", "Claude Code subagent launch requires a parent agent vessel caller");
+      throw error(
+        "EACCES",
+        "Claude Code subagent launch requires a parent agent vessel caller",
+      );
     }
-    if (!input.subagent?.runId || !input.subagent.parentChannelId || !input.subagent.parentRef) {
-      throw error("EINVAL", "launchSubagent requires a complete subagent binding");
+    if (
+      !input.subagent?.runId ||
+      !input.subagent.parentChannelId ||
+      !input.subagent.parentRef
+    ) {
+      throw error(
+        "EINVAL",
+        "launchSubagent requires a complete subagent binding",
+      );
     }
     if (!input.subagent.task.trim()) {
       throw error("EINVAL", "launchSubagent requires a non-empty task");
@@ -407,13 +438,20 @@ export async function activate(ctx: ExtensionContext) {
     return path.join(workspace.statePath, "agent-launch");
   }
 
-  function finalizeRecord(fallback: ClaudeLaunchRecord, live?: HeadlessLaunch): Promise<boolean> {
+  function finalizeRecord(
+    fallback: ClaudeLaunchRecord,
+    live?: HeadlessLaunch,
+  ): Promise<boolean> {
     const existing = finalizations.get(fallback.launchId);
     if (existing) return existing;
     const finalization = (async () => {
-      let record = (await readLaunchRecord(launchKey(fallback.launchId))) ?? fallback;
+      let record =
+        (await readLaunchRecord(launchKey(fallback.launchId))) ?? fallback;
       if (record.entityId !== fallback.entityId) {
-        throw error("ECORRUPT", `Launch ${record.launchId} changed entity ownership`);
+        throw error(
+          "ECORRUPT",
+          `Launch ${record.launchId} changed entity ownership`,
+        );
       }
       if (record.phase === "released") return false;
       record = { ...record, phase: "retiring" };
@@ -429,18 +467,25 @@ export async function activate(ctx: ExtensionContext) {
         await writeLaunchRecord(record);
       }
 
-      const materialized = recoverMaterializedLaunch(record, await profilesRoot());
+      const materialized = recoverMaterializedLaunch(
+        record,
+        await profilesRoot(),
+      );
       if (materialized) {
         const credential = await reconcileClaudeLaunchCredential(materialized);
         if (credential.status === "conflict") {
           ctx.log.warn?.(
             "Claude refreshed its isolated credential, but the host login changed concurrently; preserving the newer host state",
-            { entityId: record.entityId, generationId: record.launchId }
+            { entityId: record.entityId, generationId: record.launchId },
           );
         }
       }
       if (record.agentId) {
-        await ctx.rpc.call("main", "auth.revokeAgentCredential", record.agentId);
+        await ctx.rpc.call(
+          "main",
+          "auth.revokeAgentCredential",
+          record.agentId,
+        );
         record = { ...record, agentId: null };
         await writeLaunchRecord(record);
       }
@@ -493,8 +538,12 @@ export async function activate(ctx: ExtensionContext) {
         // The launch record is the canonical effect receipt. Once its matching
         // pointer is durable, the lookup indexes can be reconstructed after a
         // crash between their independent file commits.
-        await writeJson(entityKey(record.entityId), { channelId: record.channelId });
-        await writeJson(contextKey(record.contextId), { channelId: record.channelId });
+        await writeJson(entityKey(record.entityId), {
+          channelId: record.channelId,
+        });
+        await writeJson(contextKey(record.contextId), {
+          channelId: record.channelId,
+        });
         continue;
       }
       await finalizeRecord(record);
@@ -505,7 +554,10 @@ export async function activate(ctx: ExtensionContext) {
     }
   }
 
-  function readLaunchLog(logPath: string, maxLogBytes: number): InspectLaunchResult["log"] {
+  function readLaunchLog(
+    logPath: string,
+    maxLogBytes: number,
+  ): InspectLaunchResult["log"] {
     let bytes = 0;
     let tail = "";
     try {
@@ -540,15 +592,21 @@ export async function activate(ctx: ExtensionContext) {
       throw error("EINVAL", "inspectLaunch requires entityId and generationId");
     }
     const requested =
-      typeof input.maxLogBytes === "number" && Number.isInteger(input.maxLogBytes)
+      typeof input.maxLogBytes === "number" &&
+      Number.isInteger(input.maxLogBytes)
         ? input.maxLogBytes
         : 16_384;
     const maxLogBytes = Math.max(1_024, Math.min(65_536, requested));
     const launch = headlessLaunches.get(generationId);
     if (!launch || launch.entityId !== entityId) {
-      const terminal = terminalLaunches.get(terminalLaunchKey(entityId, generationId));
+      const terminal = terminalLaunches.get(
+        terminalLaunchKey(entityId, generationId),
+      );
       if (!terminal) {
-        throw error("ENOENT", `No Claude launch ${generationId} for entity ${entityId}`);
+        throw error(
+          "ENOENT",
+          `No Claude launch ${generationId} for entity ${entityId}`,
+        );
       }
       const tailBytes = Buffer.byteLength(terminal.log.tail);
       const tail =
@@ -583,7 +641,7 @@ export async function activate(ctx: ExtensionContext) {
     prepared: PrepareResult,
     input: LaunchSubagentInput,
     materialized: MaterializedClaudeLaunch,
-    contextFolder: string
+    contextFolder: string,
   ): Promise<LaunchSubagentResult> {
     const launchId = `claude-code:${input.subagent.runId}`;
     const logPath = path.join(materialized.profileDir, "headless.log");
@@ -626,12 +684,12 @@ export async function activate(ctx: ExtensionContext) {
     if (!owner.identity) {
       const failure = error(
         "EEXECUTOR_UNAVAILABLE",
-        "Durable Claude process ownership is unavailable"
+        "Durable Claude process ownership is unavailable",
       );
       return failAfterSpawnCleanup(
         owner,
         failure,
-        "Claude process ownership failed and its process group could not be retired"
+        "Claude process ownership failed and its process group could not be retired",
       );
     }
     let log: BoundedLaunchLog;
@@ -641,7 +699,7 @@ export async function activate(ctx: ExtensionContext) {
       return failAfterSpawnCleanup(
         owner,
         failure,
-        "Claude log ownership failed and its process group could not be retired"
+        "Claude log ownership failed and its process group could not be retired",
       );
     }
 
@@ -661,7 +719,7 @@ export async function activate(ctx: ExtensionContext) {
     headlessLaunches.set(launch.generationId, launch);
     child.once("exit", (code, signal) => {
       void serializeByKey(channelTransactions, prepared.channelId, () =>
-        finalizeHeadlessLaunch(launch, code, signal)
+        finalizeHeadlessLaunch(launch, code, signal),
       ).catch((err: unknown) => {
         ctx.log.warn?.("Claude Code launch cleanup failed", {
           entityId: prepared.entityId,
@@ -679,7 +737,11 @@ export async function activate(ctx: ExtensionContext) {
     });
 
     let record = await readLaunchRecord(launchKey(prepared.profile.launchId));
-    if (!record) throw error("ECORRUPT", `Missing preparing launch ${prepared.profile.launchId}`);
+    if (!record)
+      throw error(
+        "ECORRUPT",
+        `Missing preparing launch ${prepared.profile.launchId}`,
+      );
     record = { ...record, process: owner.identity };
     try {
       await writeLaunchRecord(record);
@@ -691,7 +753,7 @@ export async function activate(ctx: ExtensionContext) {
       } catch (cleanupFailure) {
         throw new AggregateError(
           [failure, cleanupFailure],
-          "Claude headless activation failed and its preparing generation could not be retired"
+          "Claude headless activation failed and its preparing generation could not be retired",
         );
       }
       throw failure;
@@ -714,14 +776,17 @@ export async function activate(ctx: ExtensionContext) {
   async function finalizeHeadlessLaunch(
     launch: HeadlessLaunch,
     code: number | null,
-    signal: NodeJS.Signals | null
+    signal: NodeJS.Signals | null,
   ): Promise<void> {
     const record = await readLaunchRecord(launchKey(launch.generationId));
-    if (!record) throw error("ECORRUPT", `Missing owned launch ${launch.generationId}`);
+    if (!record)
+      throw error("ECORRUPT", `Missing owned launch ${launch.generationId}`);
     await retireHeadlessLaunch(launch);
     const inspectedLog = readLaunchLog(launch.logPath, 262_144);
     const completion =
-      code === 0 && signal === null ? parseClaudeStreamCompletion(inspectedLog.tail) : null;
+      code === 0 && signal === null
+        ? parseClaudeStreamCompletion(inspectedLog.tail)
+        : null;
     const terminal: InspectLaunchResult = {
       entityId: launch.entityId,
       generationId: launch.generationId,
@@ -738,7 +803,10 @@ export async function activate(ctx: ExtensionContext) {
       },
     };
     await finalizeRecord(record, launch);
-    terminalLaunches.set(terminalLaunchKey(terminal.entityId, terminal.generationId), terminal);
+    terminalLaunches.set(
+      terminalLaunchKey(terminal.entityId, terminal.generationId),
+      terminal,
+    );
     while (terminalLaunches.size > 64) {
       const oldest = terminalLaunches.keys().next().value as string | undefined;
       if (!oldest) break;
@@ -775,7 +843,7 @@ export async function activate(ctx: ExtensionContext) {
       title?: string;
       subagent?: PrepareSubagentBinding;
     },
-    ownerKind: ClaudeLaunchOwnerKind
+    ownerKind: ClaudeLaunchOwnerKind,
   ): Promise<PrepareResult> {
     const { channelId } = input;
     if (!channelId) throw error("EINVAL", "prepare requires a channelId");
@@ -788,19 +856,18 @@ export async function activate(ctx: ExtensionContext) {
     // context effects before they occur.
     // 2. Ensure the runtime session entity (idempotent by canonical key) and
     //    eagerly materialize the context folder.
-    const sessionHandle = await ctx.rpc.call<{ id: string; contextId?: string }>(
-      "main",
-      "runtime.createEntity",
-      {
-        kind: "session",
-        execution: { surface: "inert" },
-        source: "claude-code",
-        key: channelId,
-        contextId,
-        agentChannelId: channelId,
-        ...(input.title ? { title: input.title } : {}),
-      }
-    );
+    const sessionHandle = await ctx.rpc.call<{
+      id: string;
+      contextId?: string;
+    }>("main", "runtime.createEntity", {
+      kind: "session",
+      execution: { surface: "inert" },
+      source: "claude-code",
+      key: channelId,
+      contextId,
+      agentChannelId: channelId,
+      ...(input.title ? { title: input.title } : {}),
+    });
     const entityId = sessionHandle.id;
 
     // 4. Ensure the linked-agent vessel and invite it into the channel with the
@@ -826,11 +893,10 @@ export async function activate(ctx: ExtensionContext) {
 
     // Mint and durably stage the replacement before changing or revoking the
     // active generation. The channel pointer moves only in activatePreparedGeneration.
-    const credential = await ctx.rpc.call<{ agentId: string; agentToken: string }>(
-      "main",
-      "auth.mintAgentCredential",
-      { entityId }
-    );
+    const credential = await ctx.rpc.call<{
+      agentId: string;
+      agentToken: string;
+    }>("main", "auth.mintAgentCredential", { entityId });
 
     try {
       // 6. Return a path-free launch declaration. Workspace skills are exposed
@@ -849,10 +915,14 @@ export async function activate(ctx: ExtensionContext) {
           ...(input.subagent
             ? {
                 VIBESTUDIO_SUBAGENT_RUN_ID: input.subagent.runId,
-                VIBESTUDIO_SUBAGENT_PARENT_CHANNEL_ID: input.subagent.parentChannelId,
-                VIBESTUDIO_SUBAGENT_CONTRACT: subagentRuntimePrompt(input.subagent, {
-                  completionMode: "supervised-process",
-                }),
+                VIBESTUDIO_SUBAGENT_PARENT_CHANNEL_ID:
+                  input.subagent.parentChannelId,
+                VIBESTUDIO_SUBAGENT_CONTRACT: subagentRuntimePrompt(
+                  input.subagent,
+                  {
+                    completionMode: "supervised-process",
+                  },
+                ),
               }
             : {}),
         },
@@ -886,11 +956,15 @@ export async function activate(ctx: ExtensionContext) {
       };
     } catch (error) {
       try {
-        await ctx.rpc.call("main", "auth.revokeAgentCredential", credential.agentId);
+        await ctx.rpc.call(
+          "main",
+          "auth.revokeAgentCredential",
+          credential.agentId,
+        );
       } catch (cleanupError) {
         throw new AggregateError(
           [error, cleanupError],
-          "Claude launch preparation failed and credential revocation also failed"
+          "Claude launch preparation failed and credential revocation also failed",
         );
       }
       throw error;
@@ -898,13 +972,17 @@ export async function activate(ctx: ExtensionContext) {
   }
 
   async function activatePreparedGeneration(
-    preparing: ClaudeLaunchRecord
+    preparing: ClaudeLaunchRecord,
   ): Promise<ClaudeLaunchRecord> {
     if (preparing.phase !== "preparing") {
       throw error("ECORRUPT", `Launch ${preparing.launchId} is not preparing`);
     }
     const prior = await readLaunchRecord(channelKey(preparing.channelId));
-    if (prior && prior.launchId !== preparing.launchId && prior.phase !== "released") {
+    if (
+      prior &&
+      prior.launchId !== preparing.launchId &&
+      prior.phase !== "released"
+    ) {
       const priorLive = headlessLaunches.get(prior.launchId);
       if (priorLive) priorLive.deliberate = true;
       const retiring = { ...prior, phase: "retiring" as const };
@@ -917,7 +995,8 @@ export async function activate(ctx: ExtensionContext) {
         const ownershipUnchanged =
           failed?.agentId === prior.agentId &&
           JSON.stringify(failed?.process) === JSON.stringify(prior.process) &&
-          JSON.stringify(failed?.materialization) === JSON.stringify(prior.materialization);
+          JSON.stringify(failed?.materialization) ===
+            JSON.stringify(prior.materialization);
         if (prior.phase === "active" && ownershipUnchanged) {
           await writeLaunchRecord(prior);
           await writeJson(channelKey(prior.channelId), prior);
@@ -938,8 +1017,14 @@ export async function activate(ctx: ExtensionContext) {
   }): Promise<PrepareResult> {
     return serializeByKey(channelTransactions, input.channelId, async () => {
       const prepared = await prepareGeneration(input, "external-cli");
-      const record = await readLaunchRecord(launchKey(prepared.profile.launchId));
-      if (!record) throw error("ECORRUPT", `Missing preparing launch ${prepared.profile.launchId}`);
+      const record = await readLaunchRecord(
+        launchKey(prepared.profile.launchId),
+      );
+      if (!record)
+        throw error(
+          "ECORRUPT",
+          `Missing preparing launch ${prepared.profile.launchId}`,
+        );
       try {
         await activatePreparedGeneration(record);
         return prepared;
@@ -949,7 +1034,7 @@ export async function activate(ctx: ExtensionContext) {
         } catch (cleanupFailure) {
           throw new AggregateError(
             [failure, cleanupFailure],
-            "Claude CLI preparation failed and its staged credential could not be revoked"
+            "Claude CLI preparation failed and its staged credential could not be revoked",
           );
         }
         throw failure;
@@ -970,10 +1055,12 @@ export async function activate(ctx: ExtensionContext) {
     if (connection.workspaceId !== workspace.id) {
       throw error(
         "EIDENTITY",
-        `Claude launch route belongs to workspace ${connection.workspaceId}, not ${workspace.id}`
+        `Claude launch route belongs to workspace ${connection.workspaceId}, not ${workspace.id}`,
       );
     }
-    const { dir: contextFolder } = await ctx.workspace.ensureContextFolder(prepared.contextId);
+    const { dir: contextFolder } = await ctx.workspace.ensureContextFolder(
+      prepared.contextId,
+    );
     const launch = await materializeClaudeLaunch({
       profile: prepared.profile,
       profilesRoot: path.join(workspace.statePath, "agent-launch"),
@@ -982,15 +1069,26 @@ export async function activate(ctx: ExtensionContext) {
         serverId: connection.serverId,
         workspaceId: connection.workspaceId,
         workspaceName: workspace.name,
+        transport: "local",
       },
     });
     const record = await readLaunchRecord(launchKey(prepared.profile.launchId));
-    if (!record || record.ownerKind !== "extension-headless" || record.phase !== "preparing") {
+    if (
+      !record ||
+      record.ownerKind !== "extension-headless" ||
+      record.phase !== "preparing"
+    ) {
       await removeMaterializedClaudeLaunch(launch);
-      throw error("ECORRUPT", `Launch ${prepared.profile.launchId} cannot own a local profile`);
+      throw error(
+        "ECORRUPT",
+        `Launch ${prepared.profile.launchId} cannot own a local profile`,
+      );
     }
     try {
-      await writeLaunchRecord({ ...record, materialization: materializationReceipt(launch) });
+      await writeLaunchRecord({
+        ...record,
+        materialization: materializationReceipt(launch),
+      });
     } catch (failure) {
       await removeMaterializedClaudeLaunch(launch);
       throw failure;
@@ -1008,7 +1106,10 @@ export async function activate(ctx: ExtensionContext) {
     }
     const record = await readLaunchRecord(launchKey(generationId));
     if (record && record.entityId !== entityId) {
-      throw error("EINVAL", `Launch ${generationId} does not belong to entity ${entityId}`);
+      throw error(
+        "EINVAL",
+        `Launch ${generationId} does not belong to entity ${entityId}`,
+      );
     }
     if (!record) return { released: false };
     return serializeByKey(channelTransactions, record.channelId, async () => {
@@ -1024,25 +1125,39 @@ export async function activate(ctx: ExtensionContext) {
     });
   }
 
-  async function launchSubagent(input: LaunchSubagentInput): Promise<LaunchSubagentResult> {
+  async function launchSubagent(
+    input: LaunchSubagentInput,
+  ): Promise<LaunchSubagentResult> {
     assertHeadlessSubagentCaller(input);
     return serializeByKey(channelTransactions, input.channelId, async () => {
       const prepared = await prepareGeneration(
-        { channelId: input.channelId, title: input.title, subagent: input.subagent },
-        "extension-headless"
+        {
+          channelId: input.channelId,
+          title: input.title,
+          subagent: input.subagent,
+        },
+        "extension-headless",
       );
       try {
-        const { launch, contextFolder } = await materializeLocalLaunch(prepared);
-        return await spawnHeadlessClaude(prepared, input, launch, contextFolder);
+        const { launch, contextFolder } =
+          await materializeLocalLaunch(prepared);
+        return await spawnHeadlessClaude(
+          prepared,
+          input,
+          launch,
+          contextFolder,
+        );
       } catch (err) {
-        const record = await readLaunchRecord(launchKey(prepared.profile.launchId));
+        const record = await readLaunchRecord(
+          launchKey(prepared.profile.launchId),
+        );
         if (record && record.phase !== "released") {
           try {
             await finalizeRecord(record, headlessLaunches.get(record.launchId));
           } catch (cleanupFailure) {
             throw new AggregateError(
               [err, cleanupFailure],
-              "Claude headless launch failed and its preparing generation could not be retired"
+              "Claude headless launch failed and its preparing generation could not be retired",
             );
           }
         }
@@ -1055,7 +1170,9 @@ export async function activate(ctx: ExtensionContext) {
     contextId: string;
   }): Promise<{ channelId: string } | null> {
     if (!input.contextId) return null;
-    const rec = await readJson<{ channelId: string }>(contextKey(input.contextId));
+    const rec = await readJson<{ channelId: string }>(
+      contextKey(input.contextId),
+    );
     return rec?.channelId ? { channelId: rec.channelId } : null;
   }
 
@@ -1064,7 +1181,13 @@ export async function activate(ctx: ExtensionContext) {
 
   return {
     providerContracts: {
-      claudeCode: { prepare, launchSubagent, inspectLaunch, release, resolvePrimaryChannel },
+      claudeCode: {
+        prepare,
+        launchSubagent,
+        inspectLaunch,
+        release,
+        resolvePrimaryChannel,
+      },
     },
   };
 }

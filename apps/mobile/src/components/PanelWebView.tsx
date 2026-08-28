@@ -7,7 +7,14 @@ import React, {
   useImperativeHandle,
   forwardRef,
 } from "react";
-import { View, Text, StyleSheet, Pressable, ActivityIndicator, Platform } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  Pressable,
+  ActivityIndicator,
+  Platform,
+} from "react-native";
 import { WebView } from "react-native-webview";
 import type {
   WebViewNavigation,
@@ -15,8 +22,15 @@ import type {
   FileDownloadEvent,
   WebViewMessageEvent,
 } from "react-native-webview/lib/WebViewTypes";
-import { isManagedHost, parsePanelUrl, LOOPBACK_PANEL_HOST } from "../services/panelUrls";
-import { tryParsePanelLocationLink, type PanelDisposition } from "@vibestudio/shared/panelLocation";
+import {
+  isManagedHost,
+  parsePanelUrl,
+  LOOPBACK_PANEL_HOST,
+} from "../services/panelUrls";
+import {
+  tryParsePanelLocationLink,
+  type PanelDisposition,
+} from "@vibestudio/shared/panelLocation";
 import { openExternalUrl } from "../services/nativeCapabilities";
 import { shouldOpenPdfExternally } from "../services/mediaNavigation";
 import { VibestudioLogo } from "./VibestudioLogo";
@@ -77,9 +91,13 @@ export interface PanelWebViewProps {
     panelId: string,
     runtimeEntityId: PanelEntityId,
     connectionId: string,
-    observation: PanelPageObservation
+    observation: PanelPageObservation,
   ) => void;
-  onBridgeCall?: (panelId: string, method: string, args: unknown[]) => Promise<unknown>;
+  onBridgeCall?: (
+    panelId: string,
+    method: string,
+    args: unknown[],
+  ) => Promise<unknown>;
   onUnmount?: (panelId: string) => void;
   diagnosticsEnabled?: boolean;
   colors?: {
@@ -139,7 +157,10 @@ function serializeForInjection(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-function buildBridgeBootstrapScript(panelInit: unknown, enableDebug: boolean): string {
+function buildBridgeBootstrapScript(
+  panelInit: unknown,
+  enableDebug: boolean,
+): string {
   return `
     (function () {
       ${RANDOM_UUID_POLYFILL_SCRIPT}
@@ -349,8 +370,8 @@ function buildBridgeBootstrapScript(panelInit: unknown, enableDebug: boolean): s
 
       const shell = {
         // Panel RPC rides the existing postMessage bridge: postEnvelope hands the
-        // panel's envelope to the host, which muxes it onto its WebRTC control
-        // channel as this panel's logical session; inbound envelopes arrive via
+        // panel's envelope to the host, which sends it through this panel's
+        // authenticated Iroh session; inbound envelopes arrive via
         // deliverEnvelope → onEnvelope. (No first-class stream(): the RPC client
         // falls back to the duplex stream-frame envelope path over this bridge.)
         postEnvelope: (envelope) => callHost("postEnvelope", [envelope]),
@@ -450,11 +471,18 @@ function parseBootObservation(value: unknown): PanelBootObservation | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const record = value as Record<string, unknown>;
   const phase = record["phase"];
-  if (phase !== "loading" && phase !== "booting" && phase !== "ready" && phase !== "failed") {
+  if (
+    phase !== "loading" &&
+    phase !== "booting" &&
+    phase !== "ready" &&
+    phase !== "failed"
+  ) {
     return null;
   }
   const error =
-    record["error"] && typeof record["error"] === "object" && !Array.isArray(record["error"])
+    record["error"] &&
+    typeof record["error"] === "object" &&
+    !Array.isArray(record["error"])
       ? (record["error"] as Record<string, unknown>)
       : null;
   return {
@@ -462,15 +490,27 @@ function parseBootObservation(value: unknown): PanelBootObservation | null {
     ...(typeof record["runtimeEntityId"] === "string"
       ? { runtimeEntityId: record["runtimeEntityId"] }
       : {}),
-    ...(typeof record["source"] === "string" ? { source: record["source"] } : {}),
-    ...(typeof record["contextId"] === "string" ? { contextId: record["contextId"] } : {}),
+    ...(typeof record["source"] === "string"
+      ? { source: record["source"] }
+      : {}),
+    ...(typeof record["contextId"] === "string"
+      ? { contextId: record["contextId"] }
+      : {}),
     ...(typeof record["effectiveVersion"] === "string"
       ? { effectiveVersion: record["effectiveVersion"] }
       : {}),
-    ...(typeof record["buildKey"] === "string" ? { buildKey: record["buildKey"] } : {}),
-    ...(typeof record["updatedAt"] === "number" ? { updatedAt: record["updatedAt"] } : {}),
-    ...(typeof error?.["message"] === "string" ? { message: error["message"] } : {}),
-    ...(typeof error?.["name"] === "string" ? { errorName: error["name"] } : {}),
+    ...(typeof record["buildKey"] === "string"
+      ? { buildKey: record["buildKey"] }
+      : {}),
+    ...(typeof record["updatedAt"] === "number"
+      ? { updatedAt: record["updatedAt"] }
+      : {}),
+    ...(typeof error?.["message"] === "string"
+      ? { message: error["message"] }
+      : {}),
+    ...(typeof error?.["name"] === "string"
+      ? { errorName: error["name"] }
+      : {}),
     ...(typeof error?.["stack"] === "string" ? { stack: error["stack"] } : {}),
   };
 }
@@ -489,524 +529,577 @@ function hostAuthorityOf(url: string): string | null {
   return match?.[1]?.toLowerCase() ?? null;
 }
 
-const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(function PanelWebView(
-  {
-    panelId,
-    url,
-    visible,
-    managed,
-    panelInit,
-    managedBasePath = "",
-    onNavigationStateChange,
-    onPanelNavigate,
-    onTitleChange,
-    onBootObservation,
-    onBridgeCall,
-    onUnmount,
-    diagnosticsEnabled = false,
-    colors,
-  },
-  ref
-) {
-  const webViewRef = useRef<WebView>(null);
-  const [hasError, setHasError] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
-  const [errorMessage, setErrorMessage] = useState("");
-  // Track the origin currently loaded in the WebView so we can verify that
-  // host-bridge messages (handleMessage below) actually originate from a
-  // managed panel page on our shell host. A redirect inside the same
-  // WebView (e.g. via `handleShouldStartLoad` chaining or a meta-refresh)
-  // would otherwise let an attacker-controlled origin invoke privileged
-  // bridge methods such as openExternal. Initialised to the configured
-  // panel URL.
-  const currentUrlRef = useRef<string>(url);
-  // Host→panel envelope delivery is a fire-and-forget injectJavaScript, whose
-  // `window.__vibestudioMobileHost && …` guard evaluates false while the webview
-  // is (re)loading or navigating — so an envelope injected in that window used to
-  // silently vanish and the panel's pending RPC call hung until timeout. Queue
-  // envelopes while the bridge isn't ready and flush them once it is (load end).
-  // Bounded: an overflow trims the oldest with a warning rather than growing.
-  const bridgeReadyRef = useRef(false);
-  const pendingEnvelopesRef = useRef<unknown[]>([]);
-  const loadStartedAtRef = useRef<number>(Date.now());
-  const lastLoadProgressAtRef = useRef<number>(Date.now());
-  const lastLoadProgressRef = useRef(0);
-  const managedHostAuthority = useMemo(() => hostAuthorityOf(url) ?? LOOPBACK_PANEL_HOST, [url]);
-
-  const logDiagnostic = useCallback(
-    (message: string, extra?: unknown) => {
-      if (!diagnosticsEnabled) return;
-      if (extra === undefined) {
-        console.log(`[PanelWebView:${panelId}] ${message}`);
-      } else {
-        console.log(`[PanelWebView:${panelId}] ${message}`, extra);
-      }
+const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
+  function PanelWebView(
+    {
+      panelId,
+      url,
+      visible,
+      managed,
+      panelInit,
+      managedBasePath = "",
+      onNavigationStateChange,
+      onPanelNavigate,
+      onTitleChange,
+      onBootObservation,
+      onBridgeCall,
+      onUnmount,
+      diagnosticsEnabled = false,
+      colors,
     },
-    [diagnosticsEnabled, panelId]
-  );
-
-  const externalPdfPanel = !managed && shouldOpenPdfExternally(Platform.OS, url);
-  const externalPdfUrlRef = useRef<string | null>(null);
-
-  const openExternalResource = useCallback(
-    async (targetUrl: string, reason: string): Promise<void> => {
-      try {
-        await openExternalUrl(targetUrl);
-      } catch (error: unknown) {
-        logDiagnostic("external resource open failed", {
-          url: targetUrl,
-          reason,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    },
-    [logDiagnostic]
-  );
-
-  const openExternalPdf = useCallback(
-    (targetUrl: string) => {
-      if (externalPdfUrlRef.current === targetUrl) return;
-      externalPdfUrlRef.current = targetUrl;
-      void openExternalResource(targetUrl, "PDF").then(() => {
-        if (externalPdfUrlRef.current === targetUrl) {
-          externalPdfUrlRef.current = null;
-        }
-      });
-    },
-    [openExternalResource]
-  );
-
-  useEffect(() => {
-    if (externalPdfPanel) {
-      openExternalPdf(url);
-    } else {
-      externalPdfUrlRef.current = null;
-    }
-  }, [externalPdfPanel, openExternalPdf, url]);
-
-  const dispatchHostEvent = useCallback(
-    (event: string, payload: unknown) => {
-      if (!managed) return;
-      webViewRef.current?.injectJavaScript(
-        `window.__vibestudioMobileHost&&window.__vibestudioMobileHost.dispatchEventToListeners(${JSON.stringify(event)}, ${serializeForInjection(payload)}); true;`
-      );
-    },
-    [managed]
-  );
-
-  const MAX_PENDING_ENVELOPES = 512;
-
-  const injectEnvelope = useCallback((envelope: unknown) => {
-    webViewRef.current?.injectJavaScript(
-      `window.__vibestudioMobileHost&&window.__vibestudioMobileHost.deliverEnvelope(${serializeForInjection(envelope)}); true;`
-    );
-  }, []);
-
-  const deliverEnvelope = useCallback(
-    (envelope: unknown) => {
-      if (!managed) return;
-      if (!bridgeReadyRef.current) {
-        const queue = pendingEnvelopesRef.current;
-        queue.push(envelope);
-        if (queue.length > MAX_PENDING_ENVELOPES) {
-          queue.shift();
-          console.warn(
-            `[PanelWebView:${panelId}] envelope queue overflow while bridge not ready — dropping oldest`
-          );
-        }
-        return;
-      }
-      injectEnvelope(envelope);
-    },
-    [injectEnvelope, managed, panelId]
-  );
-
-  const flushPendingEnvelopes = useCallback(() => {
-    bridgeReadyRef.current = true;
-    const queue = pendingEnvelopesRef.current;
-    if (queue.length === 0) return;
-    pendingEnvelopesRef.current = [];
-    for (const envelope of queue) injectEnvelope(envelope);
-  }, [injectEnvelope]);
-
-  const reloadPanel = useCallback(() => {
-    bridgeReadyRef.current = false;
-    setHasError(false);
-    setIsLoading(true);
-    setErrorMessage("");
-    currentUrlRef.current = url;
-    // When an error view replaced the native WebView, clearing hasError mounts
-    // a fresh WebView with the current source. When it is still mounted, reload
-    // the existing document immediately.
-    webViewRef.current?.reload();
-  }, [url]);
-
-  useImperativeHandle(
     ref,
-    () => ({
-      injectTheme: (mode: "light" | "dark") => {
-        dispatchHostEvent("runtime:theme", { theme: mode });
+  ) {
+    const webViewRef = useRef<WebView>(null);
+    const [hasError, setHasError] = useState(false);
+    const [isLoading, setIsLoading] = useState(true);
+    const [errorMessage, setErrorMessage] = useState("");
+    // Track the origin currently loaded in the WebView so we can verify that
+    // host-bridge messages (handleMessage below) actually originate from a
+    // managed panel page on our shell host. A redirect inside the same
+    // WebView (e.g. via `handleShouldStartLoad` chaining or a meta-refresh)
+    // would otherwise let an attacker-controlled origin invoke privileged
+    // bridge methods such as openExternal. Initialised to the configured
+    // panel URL.
+    const currentUrlRef = useRef<string>(url);
+    // Host→panel envelope delivery is a fire-and-forget injectJavaScript, whose
+    // `window.__vibestudioMobileHost && …` guard evaluates false while the webview
+    // is (re)loading or navigating — so an envelope injected in that window used to
+    // silently vanish and the panel's pending RPC call hung until timeout. Queue
+    // envelopes while the bridge isn't ready and flush them once it is (load end).
+    // Bounded: an overflow trims the oldest with a warning rather than growing.
+    const bridgeReadyRef = useRef(false);
+    const pendingEnvelopesRef = useRef<unknown[]>([]);
+    const loadStartedAtRef = useRef<number>(Date.now());
+    const lastLoadProgressAtRef = useRef<number>(Date.now());
+    const lastLoadProgressRef = useRef(0);
+    const managedHostAuthority = useMemo(
+      () => hostAuthorityOf(url) ?? LOOPBACK_PANEL_HOST,
+      [url],
+    );
+
+    const logDiagnostic = useCallback(
+      (message: string, extra?: unknown) => {
+        if (!diagnosticsEnabled) return;
+        if (extra === undefined) {
+          console.log(`[PanelWebView:${panelId}] ${message}`);
+        } else {
+          console.log(`[PanelWebView:${panelId}] ${message}`, extra);
+        }
       },
-      dispatchHostEvent,
-      deliverEnvelope,
-      navigate: (nextUrl: string) => {
-        webViewRef.current?.injectJavaScript(`location.assign(${JSON.stringify(nextUrl)}); true;`);
-      },
-      goBack: () => webViewRef.current?.goBack(),
-      goForward: () => webViewRef.current?.goForward(),
-      reload: reloadPanel,
-      stop: () => webViewRef.current?.stopLoading(),
-    }),
-    [dispatchHostEvent, deliverEnvelope, reloadPanel]
-  );
+      [diagnosticsEnabled, panelId],
+    );
 
-  const onUnmountRef = useRef(onUnmount);
-  useEffect(() => {
-    onUnmountRef.current = onUnmount;
-  }, [onUnmount]);
-  useEffect(() => {
-    return () => {
-      onUnmountRef.current?.(panelId);
-    };
-  }, [panelId]);
+    const externalPdfPanel =
+      !managed && shouldOpenPdfExternally(Platform.OS, url);
+    const externalPdfUrlRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    currentUrlRef.current = url;
-    loadStartedAtRef.current = Date.now();
-    lastLoadProgressAtRef.current = Date.now();
-    lastLoadProgressRef.current = 0;
-    // A new document wipes the injected bridge; hold envelopes until it reloads.
-    bridgeReadyRef.current = false;
-    setHasError(false);
-    setIsLoading(true);
-    setErrorMessage("");
-  }, [url]);
-
-  useEffect(() => {
-    if (!managed || !visible || !isLoading || hasError) return;
-    const timer = setInterval(() => {
-      const now = Date.now();
-      const elapsedMs = now - loadStartedAtRef.current;
-      const stalledMs = now - lastLoadProgressAtRef.current;
-      const progress = lastLoadProgressRef.current;
-      const maxTimedOut = elapsedMs >= MANAGED_PANEL_MAX_LOAD_TIMEOUT_MS;
-      const stalledTimedOut = stalledMs >= MANAGED_PANEL_STALLED_TIMEOUT_MS && progress < 0.95;
-      if (!maxTimedOut && !stalledTimedOut) return;
-
-      const stalledUrl = currentUrlRef.current || url;
-      const seconds = Math.round(elapsedMs / 1000);
-      console.warn("[PanelWebView] Managed panel load timed out", {
-        panelId,
-        url: stalledUrl,
-        elapsedMs,
-        stalledMs,
-        progress,
-        reason: maxTimedOut ? "max-load-time" : "stalled-load",
-      });
-      smokePhase("workspace-panel-webview-timeout", { panelId, url: stalledUrl, progress });
-      logDiagnostic("load timeout", { url: stalledUrl, elapsedMs, stalledMs, progress });
-      webViewRef.current?.stopLoading();
-      setIsLoading(false);
-      setHasError(true);
-      // The real failure is the WebRTC pipe to the workspace, not a network URL:
-      // the panel loads from an on-device loopback façade, so printing that
-      // 127.0.0.1 address only confused. Point the user at the connection status
-      // bar (which knows the live pipe state) instead.
-      setErrorMessage(
-        `The panel didn't finish loading after ${seconds}s.\n\n` +
-          `Check the connection status bar at the top for your workspace connection, then retry.`
-      );
-    }, MANAGED_PANEL_TIMEOUT_CHECK_MS);
-
-    return () => clearInterval(timer);
-  }, [hasError, isLoading, logDiagnostic, managed, panelId, url, visible]);
-
-  const containerStyle = useMemo(() => [styles.container, !visible && styles.hidden], [visible]);
-
-  const emitPanelNavigation = useCallback(
-    (requestUrl: string, fallbackDisposition?: PanelDisposition): boolean => {
-      const canonical = tryParsePanelLocationLink(requestUrl);
-      if (canonical) {
-        onPanelNavigate?.({
-          type: "panel-switch",
-          panelId,
-          source: canonical.source,
-          workspace: canonical.workspace,
-          contextId: canonical.contextId,
-          ref: canonical.ref,
-          disposition: canonical.disposition ?? fallbackDisposition,
-          options: {
-            title: canonical.title,
-            slug: canonical.slug,
-            contextId: canonical.contextId,
-            focus: canonical.focus,
-            ref: canonical.ref,
-          },
-          stateArgs: canonical.stateArgs,
-        });
-        return true;
-      }
-      // Panels are served from this WebView's loopback façade origin. Match the
-      // exact host:port so another local listener cannot use the bridge.
-      if (!isManagedHost(requestUrl, managedHostAuthority)) return false;
-      const parsed = parsePanelUrl(requestUrl, managedHostAuthority, managedBasePath);
-      if (!parsed) return false;
-      onPanelNavigate?.({
-        type: "panel-switch",
-        panelId,
-        source: parsed.source,
-        workspace: parsed.workspace,
-        contextId: parsed.contextId,
-        ref: parsed.ref,
-        disposition: parsed.disposition ?? fallbackDisposition,
-        options: parsed.options,
-        stateArgs: parsed.stateArgs,
-      });
-      return true;
-    },
-    [managedBasePath, managedHostAuthority, onPanelNavigate, panelId]
-  );
-
-  const handleShouldStartLoad = useCallback(
-    (request: ShouldStartLoadRequest): boolean => {
-      const { url: requestUrl, isTopFrame } = request;
-      // Android omits isTopFrame for top-level location.assign navigations.
-      // Only an explicit false is a subframe; treating "missing" as false
-      // bypasses managed panel navigation and leaves the old runtime identity
-      // attached to new panel code.
-      if (isTopFrame === false) return true;
-      if (!managed && shouldOpenPdfExternally(Platform.OS, requestUrl)) {
-        openExternalPdf(requestUrl);
-        return false;
-      }
-      if (requestUrl === url) return true;
-
-      if (emitPanelNavigation(requestUrl)) {
-        return false;
-      }
-
-      if (managed && /^https?:\/\//i.test(requestUrl)) {
-        void onBridgeCall?.(panelId, "openPanelChild", [requestUrl, { focus: true }]);
-        return false;
-      }
-
-      return true;
-    },
-    [emitPanelNavigation, managed, onBridgeCall, openExternalPdf, panelId, url]
-  );
-
-  const handleFileDownload = useCallback(
-    (event: FileDownloadEvent) => {
-      const downloadUrl = event.nativeEvent.downloadUrl;
-      if (!/^https?:\/\//i.test(downloadUrl)) return;
-      void openExternalResource(downloadUrl, "download");
-    },
-    [openExternalResource]
-  );
-
-  const handleNavigationStateChange = useCallback(
-    (navState: WebViewNavigation) => {
-      logDiagnostic("navigation", {
-        url: navState.url,
-        loading: navState.loading,
-        title: navState.title,
-        canGoBack: navState.canGoBack,
-        canGoForward: navState.canGoForward,
-      });
-      setIsLoading(navState.loading ?? false);
-      if (typeof navState.url === "string" && navState.url.length > 0) {
-        currentUrlRef.current = navState.url;
-      }
-      onNavigationStateChange?.(navState);
-    },
-    [logDiagnostic, onNavigationStateChange]
-  );
-
-  const handleMessage = useCallback(
-    async (event: WebViewMessageEvent) => {
-      if (!managed) return;
-
-      // Origin check: bridge calls are only accepted when the
-      // WebView is currently displaying a page on the managed shell host.
-      // If the page redirected itself to an attacker origin, drop the
-      // message. We prefer the event's nativeEvent.url (the source frame
-      // origin reported by react-native-webview); fall back to the last
-      // known top-level navigation URL.
-      const sourceUrl = (event.nativeEvent as { url?: string }).url ?? currentUrlRef.current;
-      if (!sourceUrl || !isManagedHost(sourceUrl, managedHostAuthority)) {
-        console.warn(
-          `[PanelWebView] Rejecting bridge message from non-loopback origin: ${sourceUrl ?? "<unknown>"} (panel=${panelId})`
-        );
-        return;
-      }
-
-      try {
-        const message = JSON.parse(event.nativeEvent.data) as {
-          __vibestudioBridge?: boolean;
-          __vibestudioDebug?: boolean;
-          __vibestudioDomSnapshot?: boolean;
-          __vibestudioTitle?: boolean;
-          __vibestudioPanelBoot?: boolean;
-          id?: string;
-          method?: string;
-          args?: unknown[];
-          level?: "log" | "info" | "warn" | "error";
-          text?: string;
-          childCount?: number;
-          title?: string;
-          url?: string;
-          loading?: boolean;
-          boot?: unknown;
-          runtimeEntityId?: string | null;
-          connectionId?: string | null;
-        };
-        if (message.__vibestudioDebug) {
-          if (!diagnosticsEnabled && !__DEV__) return;
-          const level = message.level ?? "log";
-          const parts = Array.isArray(message.args) ? message.args : [];
-          const text = parts
-            .map((part) => (typeof part === "string" ? part : JSON.stringify(part)))
-            .join(" ");
-          console[level](`[PanelWebView:${panelId}] ${text}`);
-          return;
-        }
-        if (message.__vibestudioDomSnapshot) {
-          if (!diagnosticsEnabled && !__DEV__) return;
-          console.log(
-            `[PanelWebView:${panelId}] DOM title=${message.title ?? ""} childCount=${message.childCount ?? 0} text=${message.text ?? ""}`
-          );
-          return;
-        }
-        if (message.__vibestudioTitle) {
-          const title = typeof message.title === "string" ? message.title.trim() : "";
-          if (title.length > 0) {
-            onTitleChange?.(panelId, title);
-          }
-          return;
-        }
-        if (message.__vibestudioPanelBoot) {
-          const boot = parseBootProbeResult(message.boot);
-          const bootObservation = boot?.kind === "observed" ? boot.observation : null;
-          logDiagnostic("panel boot observation", {
-            phase: bootObservation?.phase ?? null,
-            runtimeEntityId: message.runtimeEntityId ?? null,
-            connectionId: message.connectionId ?? null,
-            source: bootObservation?.source ?? null,
-            contextId: bootObservation?.contextId ?? null,
-            buildKey: bootObservation?.buildKey ?? null,
+    const openExternalResource = useCallback(
+      async (targetUrl: string, reason: string): Promise<void> => {
+        try {
+          await openExternalUrl(targetUrl);
+        } catch (error: unknown) {
+          logDiagnostic("external resource open failed", {
+            url: targetUrl,
+            reason,
+            error: error instanceof Error ? error.message : String(error),
           });
-          if (
-            boot &&
-            typeof message.runtimeEntityId === "string" &&
-            message.runtimeEntityId.startsWith("panel:nav-") &&
-            typeof message.connectionId === "string" &&
-            message.connectionId.length > 0
-          ) {
-            onBootObservation?.(
-              panelId,
-              message.runtimeEntityId as PanelEntityId,
-              message.connectionId,
-              {
-                view: {
-                  url: typeof message.url === "string" ? message.url : sourceUrl,
-                  loading: message.loading === true,
-                },
-                boot,
-              }
+        }
+      },
+      [logDiagnostic],
+    );
+
+    const openExternalPdf = useCallback(
+      (targetUrl: string) => {
+        if (externalPdfUrlRef.current === targetUrl) return;
+        externalPdfUrlRef.current = targetUrl;
+        void openExternalResource(targetUrl, "PDF").then(() => {
+          if (externalPdfUrlRef.current === targetUrl) {
+            externalPdfUrlRef.current = null;
+          }
+        });
+      },
+      [openExternalResource],
+    );
+
+    useEffect(() => {
+      if (externalPdfPanel) {
+        openExternalPdf(url);
+      } else {
+        externalPdfUrlRef.current = null;
+      }
+    }, [externalPdfPanel, openExternalPdf, url]);
+
+    const dispatchHostEvent = useCallback(
+      (event: string, payload: unknown) => {
+        if (!managed) return;
+        webViewRef.current?.injectJavaScript(
+          `window.__vibestudioMobileHost&&window.__vibestudioMobileHost.dispatchEventToListeners(${JSON.stringify(event)}, ${serializeForInjection(payload)}); true;`,
+        );
+      },
+      [managed],
+    );
+
+    const MAX_PENDING_ENVELOPES = 512;
+
+    const injectEnvelope = useCallback((envelope: unknown) => {
+      webViewRef.current?.injectJavaScript(
+        `window.__vibestudioMobileHost&&window.__vibestudioMobileHost.deliverEnvelope(${serializeForInjection(envelope)}); true;`,
+      );
+    }, []);
+
+    const deliverEnvelope = useCallback(
+      (envelope: unknown) => {
+        if (!managed) return;
+        if (!bridgeReadyRef.current) {
+          const queue = pendingEnvelopesRef.current;
+          queue.push(envelope);
+          if (queue.length > MAX_PENDING_ENVELOPES) {
+            queue.shift();
+            console.warn(
+              `[PanelWebView:${panelId}] envelope queue overflow while bridge not ready — dropping oldest`,
             );
           }
           return;
         }
-        if (!onBridgeCall) return;
-        if (!message.__vibestudioBridge || !message.id || !message.method) return;
+        injectEnvelope(envelope);
+      },
+      [injectEnvelope, managed, panelId],
+    );
+
+    const flushPendingEnvelopes = useCallback(() => {
+      bridgeReadyRef.current = true;
+      const queue = pendingEnvelopesRef.current;
+      if (queue.length === 0) return;
+      pendingEnvelopesRef.current = [];
+      for (const envelope of queue) injectEnvelope(envelope);
+    }, [injectEnvelope]);
+
+    const reloadPanel = useCallback(() => {
+      bridgeReadyRef.current = false;
+      setHasError(false);
+      setIsLoading(true);
+      setErrorMessage("");
+      currentUrlRef.current = url;
+      // When an error view replaced the native WebView, clearing hasError mounts
+      // a fresh WebView with the current source. When it is still mounted, reload
+      // the existing document immediately.
+      webViewRef.current?.reload();
+    }, [url]);
+
+    useImperativeHandle(
+      ref,
+      () => ({
+        injectTheme: (mode: "light" | "dark") => {
+          dispatchHostEvent("runtime:theme", { theme: mode });
+        },
+        dispatchHostEvent,
+        deliverEnvelope,
+        navigate: (nextUrl: string) => {
+          webViewRef.current?.injectJavaScript(
+            `location.assign(${JSON.stringify(nextUrl)}); true;`,
+          );
+        },
+        goBack: () => webViewRef.current?.goBack(),
+        goForward: () => webViewRef.current?.goForward(),
+        reload: reloadPanel,
+        stop: () => webViewRef.current?.stopLoading(),
+      }),
+      [dispatchHostEvent, deliverEnvelope, reloadPanel],
+    );
+
+    const onUnmountRef = useRef(onUnmount);
+    useEffect(() => {
+      onUnmountRef.current = onUnmount;
+    }, [onUnmount]);
+    useEffect(() => {
+      return () => {
+        onUnmountRef.current?.(panelId);
+      };
+    }, [panelId]);
+
+    useEffect(() => {
+      currentUrlRef.current = url;
+      loadStartedAtRef.current = Date.now();
+      lastLoadProgressAtRef.current = Date.now();
+      lastLoadProgressRef.current = 0;
+      // A new document wipes the injected bridge; hold envelopes until it reloads.
+      bridgeReadyRef.current = false;
+      setHasError(false);
+      setIsLoading(true);
+      setErrorMessage("");
+    }, [url]);
+
+    useEffect(() => {
+      if (!managed || !visible || !isLoading || hasError) return;
+      const timer = setInterval(() => {
+        const now = Date.now();
+        const elapsedMs = now - loadStartedAtRef.current;
+        const stalledMs = now - lastLoadProgressAtRef.current;
+        const progress = lastLoadProgressRef.current;
+        const maxTimedOut = elapsedMs >= MANAGED_PANEL_MAX_LOAD_TIMEOUT_MS;
+        const stalledTimedOut =
+          stalledMs >= MANAGED_PANEL_STALLED_TIMEOUT_MS && progress < 0.95;
+        if (!maxTimedOut && !stalledTimedOut) return;
+
+        const stalledUrl = currentUrlRef.current || url;
+        const seconds = Math.round(elapsedMs / 1000);
+        console.warn("[PanelWebView] Managed panel load timed out", {
+          panelId,
+          url: stalledUrl,
+          elapsedMs,
+          stalledMs,
+          progress,
+          reason: maxTimedOut ? "max-load-time" : "stalled-load",
+        });
+        smokePhase("workspace-panel-webview-timeout", {
+          panelId,
+          url: stalledUrl,
+          progress,
+        });
+        logDiagnostic("load timeout", {
+          url: stalledUrl,
+          elapsedMs,
+          stalledMs,
+          progress,
+        });
+        webViewRef.current?.stopLoading();
+        setIsLoading(false);
+        setHasError(true);
+        // The real failure is the Iroh connection to the workspace, not a network URL:
+        // the panel loads from an on-device loopback façade, so printing that
+        // 127.0.0.1 address only confused. Point the user at the connection status
+        // bar (which knows the live pipe state) instead.
+        setErrorMessage(
+          `The panel didn't finish loading after ${seconds}s.\n\n` +
+            `Check the connection status bar at the top for your workspace connection, then retry.`,
+        );
+      }, MANAGED_PANEL_TIMEOUT_CHECK_MS);
+
+      return () => clearInterval(timer);
+    }, [hasError, isLoading, logDiagnostic, managed, panelId, url, visible]);
+
+    const containerStyle = useMemo(
+      () => [styles.container, !visible && styles.hidden],
+      [visible],
+    );
+
+    const emitPanelNavigation = useCallback(
+      (requestUrl: string, fallbackDisposition?: PanelDisposition): boolean => {
+        const canonical = tryParsePanelLocationLink(requestUrl);
+        if (canonical) {
+          onPanelNavigate?.({
+            type: "panel-switch",
+            panelId,
+            source: canonical.source,
+            workspace: canonical.workspace,
+            contextId: canonical.contextId,
+            ref: canonical.ref,
+            disposition: canonical.disposition ?? fallbackDisposition,
+            options: {
+              title: canonical.title,
+              slug: canonical.slug,
+              contextId: canonical.contextId,
+              focus: canonical.focus,
+              ref: canonical.ref,
+            },
+            stateArgs: canonical.stateArgs,
+          });
+          return true;
+        }
+        // Panels are served from this WebView's loopback façade origin. Match the
+        // exact host:port so another local listener cannot use the bridge.
+        if (!isManagedHost(requestUrl, managedHostAuthority)) return false;
+        const parsed = parsePanelUrl(
+          requestUrl,
+          managedHostAuthority,
+          managedBasePath,
+        );
+        if (!parsed) return false;
+        onPanelNavigate?.({
+          type: "panel-switch",
+          panelId,
+          source: parsed.source,
+          workspace: parsed.workspace,
+          contextId: parsed.contextId,
+          ref: parsed.ref,
+          disposition: parsed.disposition ?? fallbackDisposition,
+          options: parsed.options,
+          stateArgs: parsed.stateArgs,
+        });
+        return true;
+      },
+      [managedBasePath, managedHostAuthority, onPanelNavigate, panelId],
+    );
+
+    const handleShouldStartLoad = useCallback(
+      (request: ShouldStartLoadRequest): boolean => {
+        const { url: requestUrl, isTopFrame } = request;
+        // Android omits isTopFrame for top-level location.assign navigations.
+        // Only an explicit false is a subframe; treating "missing" as false
+        // bypasses managed panel navigation and leaves the old runtime identity
+        // attached to new panel code.
+        if (isTopFrame === false) return true;
+        if (!managed && shouldOpenPdfExternally(Platform.OS, requestUrl)) {
+          openExternalPdf(requestUrl);
+          return false;
+        }
+        if (requestUrl === url) return true;
+
+        if (emitPanelNavigation(requestUrl)) {
+          return false;
+        }
+
+        if (managed && /^https?:\/\//i.test(requestUrl)) {
+          void onBridgeCall?.(panelId, "openPanelChild", [
+            requestUrl,
+            { focus: true },
+          ]);
+          return false;
+        }
+
+        return true;
+      },
+      [
+        emitPanelNavigation,
+        managed,
+        onBridgeCall,
+        openExternalPdf,
+        panelId,
+        url,
+      ],
+    );
+
+    const handleFileDownload = useCallback(
+      (event: FileDownloadEvent) => {
+        const downloadUrl = event.nativeEvent.downloadUrl;
+        if (!/^https?:\/\//i.test(downloadUrl)) return;
+        void openExternalResource(downloadUrl, "download");
+      },
+      [openExternalResource],
+    );
+
+    const handleNavigationStateChange = useCallback(
+      (navState: WebViewNavigation) => {
+        logDiagnostic("navigation", {
+          url: navState.url,
+          loading: navState.loading,
+          title: navState.title,
+          canGoBack: navState.canGoBack,
+          canGoForward: navState.canGoForward,
+        });
+        setIsLoading(navState.loading ?? false);
+        if (typeof navState.url === "string" && navState.url.length > 0) {
+          currentUrlRef.current = navState.url;
+        }
+        onNavigationStateChange?.(navState);
+      },
+      [logDiagnostic, onNavigationStateChange],
+    );
+
+    const handleMessage = useCallback(
+      async (event: WebViewMessageEvent) => {
+        if (!managed) return;
+
+        // Origin check: bridge calls are only accepted when the
+        // WebView is currently displaying a page on the managed shell host.
+        // If the page redirected itself to an attacker origin, drop the
+        // message. We prefer the event's nativeEvent.url (the source frame
+        // origin reported by react-native-webview); fall back to the last
+        // known top-level navigation URL.
+        const sourceUrl =
+          (event.nativeEvent as { url?: string }).url ?? currentUrlRef.current;
+        if (!sourceUrl || !isManagedHost(sourceUrl, managedHostAuthority)) {
+          console.warn(
+            `[PanelWebView] Rejecting bridge message from non-loopback origin: ${sourceUrl ?? "<unknown>"} (panel=${panelId})`,
+          );
+          return;
+        }
 
         try {
-          const result = await onBridgeCall(panelId, message.method, message.args ?? []);
-          webViewRef.current?.injectJavaScript(
-            `window.__vibestudioMobileHost&&window.__vibestudioMobileHost.resolvePending(${JSON.stringify(message.id)}, true, ${serializeForInjection(result)}); true;`
-          );
-        } catch (error) {
-          const errorMessage = error instanceof Error ? error.message : String(error);
-          webViewRef.current?.injectJavaScript(
-            `window.__vibestudioMobileHost&&window.__vibestudioMobileHost.resolvePending(${JSON.stringify(message.id)}, false, ${serializeForInjection(errorMessage)}); true;`
-          );
+          const message = JSON.parse(event.nativeEvent.data) as {
+            __vibestudioBridge?: boolean;
+            __vibestudioDebug?: boolean;
+            __vibestudioDomSnapshot?: boolean;
+            __vibestudioTitle?: boolean;
+            __vibestudioPanelBoot?: boolean;
+            id?: string;
+            method?: string;
+            args?: unknown[];
+            level?: "log" | "info" | "warn" | "error";
+            text?: string;
+            childCount?: number;
+            title?: string;
+            url?: string;
+            loading?: boolean;
+            boot?: unknown;
+            runtimeEntityId?: string | null;
+            connectionId?: string | null;
+          };
+          if (message.__vibestudioDebug) {
+            if (!diagnosticsEnabled && !__DEV__) return;
+            const level = message.level ?? "log";
+            const parts = Array.isArray(message.args) ? message.args : [];
+            const text = parts
+              .map((part) =>
+                typeof part === "string" ? part : JSON.stringify(part),
+              )
+              .join(" ");
+            console[level](`[PanelWebView:${panelId}] ${text}`);
+            return;
+          }
+          if (message.__vibestudioDomSnapshot) {
+            if (!diagnosticsEnabled && !__DEV__) return;
+            console.log(
+              `[PanelWebView:${panelId}] DOM title=${message.title ?? ""} childCount=${message.childCount ?? 0} text=${message.text ?? ""}`,
+            );
+            return;
+          }
+          if (message.__vibestudioTitle) {
+            const title =
+              typeof message.title === "string" ? message.title.trim() : "";
+            if (title.length > 0) {
+              onTitleChange?.(panelId, title);
+            }
+            return;
+          }
+          if (message.__vibestudioPanelBoot) {
+            const boot = parseBootProbeResult(message.boot);
+            const bootObservation =
+              boot?.kind === "observed" ? boot.observation : null;
+            logDiagnostic("panel boot observation", {
+              phase: bootObservation?.phase ?? null,
+              runtimeEntityId: message.runtimeEntityId ?? null,
+              connectionId: message.connectionId ?? null,
+              source: bootObservation?.source ?? null,
+              contextId: bootObservation?.contextId ?? null,
+              buildKey: bootObservation?.buildKey ?? null,
+            });
+            if (
+              boot &&
+              typeof message.runtimeEntityId === "string" &&
+              message.runtimeEntityId.startsWith("panel:nav-") &&
+              typeof message.connectionId === "string" &&
+              message.connectionId.length > 0
+            ) {
+              onBootObservation?.(
+                panelId,
+                message.runtimeEntityId as PanelEntityId,
+                message.connectionId,
+                {
+                  view: {
+                    url:
+                      typeof message.url === "string" ? message.url : sourceUrl,
+                    loading: message.loading === true,
+                  },
+                  boot,
+                },
+              );
+            }
+            return;
+          }
+          if (!onBridgeCall) return;
+          if (!message.__vibestudioBridge || !message.id || !message.method)
+            return;
+
+          try {
+            const result = await onBridgeCall(
+              panelId,
+              message.method,
+              message.args ?? [],
+            );
+            webViewRef.current?.injectJavaScript(
+              `window.__vibestudioMobileHost&&window.__vibestudioMobileHost.resolvePending(${JSON.stringify(message.id)}, true, ${serializeForInjection(result)}); true;`,
+            );
+          } catch (error) {
+            const errorMessage =
+              error instanceof Error ? error.message : String(error);
+            webViewRef.current?.injectJavaScript(
+              `window.__vibestudioMobileHost&&window.__vibestudioMobileHost.resolvePending(${JSON.stringify(message.id)}, false, ${serializeForInjection(errorMessage)}); true;`,
+            );
+          }
+        } catch {
+          // Ignore non-bridge messages.
         }
-      } catch {
-        // Ignore non-bridge messages.
-      }
-    },
-    [
-      diagnosticsEnabled,
-      logDiagnostic,
-      managed,
-      managedHostAuthority,
-      onBootObservation,
-      onBridgeCall,
-      onTitleChange,
-      panelId,
-    ]
-  );
-
-  const handleError = useCallback(
-    (syntheticEvent: { nativeEvent: { description?: string; code?: number } }) => {
-      const { nativeEvent } = syntheticEvent;
-      logDiagnostic("load error", nativeEvent);
-      smokePhase("workspace-panel-webview-error", {
+      },
+      [
+        diagnosticsEnabled,
+        logDiagnostic,
+        managed,
+        managedHostAuthority,
+        onBootObservation,
+        onBridgeCall,
+        onTitleChange,
         panelId,
-        code: nativeEvent.code,
-        description: nativeEvent.description,
-      });
-      setHasError(true);
-      setIsLoading(false);
-      setErrorMessage(
-        nativeEvent.description || `Failed to load panel (code ${nativeEvent.code ?? "unknown"})`
-      );
-    },
-    [logDiagnostic]
-  );
+      ],
+    );
 
-  const handleHttpError = useCallback(
-    (syntheticEvent: { nativeEvent: { statusCode: number; description: string } }) => {
-      const { statusCode, description } = syntheticEvent.nativeEvent;
-      logDiagnostic("http error", syntheticEvent.nativeEvent);
-      if (statusCode >= 400) {
+    const handleError = useCallback(
+      (syntheticEvent: {
+        nativeEvent: { description?: string; code?: number };
+      }) => {
+        const { nativeEvent } = syntheticEvent;
+        logDiagnostic("load error", nativeEvent);
+        smokePhase("workspace-panel-webview-error", {
+          panelId,
+          code: nativeEvent.code,
+          description: nativeEvent.description,
+        });
         setHasError(true);
         setIsLoading(false);
-        smokePhase("workspace-panel-webview-http-error", {
+        setErrorMessage(
+          nativeEvent.description ||
+            `Failed to load panel (code ${nativeEvent.code ?? "unknown"})`,
+        );
+      },
+      [logDiagnostic],
+    );
+
+    const handleHttpError = useCallback(
+      (syntheticEvent: {
+        nativeEvent: { statusCode: number; description: string };
+      }) => {
+        const { statusCode, description } = syntheticEvent.nativeEvent;
+        logDiagnostic("http error", syntheticEvent.nativeEvent);
+        if (statusCode >= 400) {
+          setHasError(true);
+          setIsLoading(false);
+          smokePhase("workspace-panel-webview-http-error", {
+            panelId,
+            statusCode,
+            description,
+          });
+          setErrorMessage(
+            `HTTP ${statusCode}: ${description || "Server error"}`,
+          );
+        }
+      },
+      [logDiagnostic],
+    );
+
+    const handleRetry = useCallback(() => {
+      reloadPanel();
+    }, [reloadPanel]);
+
+    const handleLoadEnd = useCallback(() => {
+      const loadedUrl = currentUrlRef.current;
+      logDiagnostic("load end", { url: loadedUrl });
+      if (loadedUrl !== "about:blank") {
+        smokePhase("workspace-panel-webview-loaded", {
           panelId,
-          statusCode,
-          description,
+          managed,
+          url: loadedUrl,
         });
-        setErrorMessage(`HTTP ${statusCode}: ${description || "Server error"}`);
       }
-    },
-    [logDiagnostic]
-  );
-
-  const handleRetry = useCallback(() => {
-    reloadPanel();
-  }, [reloadPanel]);
-
-  const handleLoadEnd = useCallback(() => {
-    const loadedUrl = currentUrlRef.current;
-    logDiagnostic("load end", { url: loadedUrl });
-    if (loadedUrl !== "about:blank") {
-      smokePhase("workspace-panel-webview-loaded", {
-        panelId,
-        managed,
-        url: loadedUrl,
-      });
-    }
-    lastLoadProgressAtRef.current = Date.now();
-    lastLoadProgressRef.current = 1;
-    setIsLoading(false);
-    // The injected bridge (injectedJavaScriptBeforeContentLoaded) has run by
-    // load end; deliver anything queued while the webview was (re)loading. The
-    // in-page bootstrap additionally buffers until the panel registers its
-    // onEnvelope/onStreamMessage handlers, so nothing is lost either side.
-    if (managed) flushPendingEnvelopes();
-    if (!managed || (!diagnosticsEnabled && !__DEV__)) return;
-    webViewRef.current?.injectJavaScript(`
+      lastLoadProgressAtRef.current = Date.now();
+      lastLoadProgressRef.current = 1;
+      setIsLoading(false);
+      // The injected bridge (injectedJavaScriptBeforeContentLoaded) has run by
+      // load end; deliver anything queued while the webview was (re)loading. The
+      // in-page bootstrap additionally buffers until the panel registers its
+      // onEnvelope/onStreamMessage handlers, so nothing is lost either side.
+      if (managed) flushPendingEnvelopes();
+      if (!managed || (!diagnosticsEnabled && !__DEV__)) return;
+      webViewRef.current?.injectJavaScript(`
         (function () {
           try {
             const text = (document.body && document.body.innerText ? document.body.innerText : "")
@@ -1030,210 +1123,268 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(funct
           true;
         })();
       `);
-  }, [diagnosticsEnabled, flushPendingEnvelopes, logDiagnostic, managed, panelId]);
+    }, [
+      diagnosticsEnabled,
+      flushPendingEnvelopes,
+      logDiagnostic,
+      managed,
+      panelId,
+    ]);
 
-  const handleLoadStart = useCallback(
-    (syntheticEvent: { nativeEvent: { url?: string } }) => {
-      loadStartedAtRef.current = Date.now();
-      lastLoadProgressAtRef.current = Date.now();
-      lastLoadProgressRef.current = 0;
-      // A (re)load restarts the JS context; hold envelopes until load end.
-      bridgeReadyRef.current = false;
-      if (
-        typeof syntheticEvent.nativeEvent.url === "string" &&
-        syntheticEvent.nativeEvent.url.length > 0
-      ) {
-        currentUrlRef.current = syntheticEvent.nativeEvent.url;
-      }
-      logDiagnostic("load start", syntheticEvent.nativeEvent);
-    },
-    [logDiagnostic]
-  );
-
-  const handleLoadProgress = useCallback(
-    (syntheticEvent: { nativeEvent: { progress?: number; url?: string } }) => {
-      const progress = syntheticEvent.nativeEvent.progress;
-      if (
-        typeof syntheticEvent.nativeEvent.url === "string" &&
-        syntheticEvent.nativeEvent.url.length > 0
-      ) {
-        currentUrlRef.current = syntheticEvent.nativeEvent.url;
-      }
-      if (typeof progress === "number" && progress > lastLoadProgressRef.current) {
-        lastLoadProgressRef.current = progress;
+    const handleLoadStart = useCallback(
+      (syntheticEvent: { nativeEvent: { url?: string } }) => {
+        loadStartedAtRef.current = Date.now();
         lastLoadProgressAtRef.current = Date.now();
-      }
-      if (progress === undefined || progress === 1 || progress < 0.05 || progress > 0.95) {
-        logDiagnostic("load progress", syntheticEvent.nativeEvent);
-      }
-    },
-    [logDiagnostic]
-  );
-
-  const handleRenderProcessGone = useCallback(
-    (syntheticEvent: { nativeEvent: { didCrash?: boolean } }) => {
-      logDiagnostic("render process gone", syntheticEvent.nativeEvent);
-      setHasError(true);
-      setIsLoading(false);
-      setErrorMessage(
-        syntheticEvent.nativeEvent.didCrash
-          ? "Android WebView renderer crashed."
-          : "Android WebView renderer was terminated."
-      );
-    },
-    [logDiagnostic]
-  );
-
-  if (hasError) {
-    return (
-      <View style={containerStyle}>
-        <View
-          style={[
-            styles.errorContainer,
-            colors?.background != null && { backgroundColor: colors.background },
-          ]}
-        >
-          <VibestudioLogo size={72} variant="symbol" style={styles.logo} />
-          <Text style={[styles.errorTitle, colors?.text != null && { color: colors.text }]}>
-            Failed to load panel
-          </Text>
-          <Text
-            style={[
-              styles.errorMessage,
-              colors?.textSecondary != null && { color: colors.textSecondary },
-            ]}
-          >
-            {errorMessage}
-          </Text>
-          <Pressable
-            style={[
-              styles.retryButton,
-              colors?.primary != null && { backgroundColor: colors.primary },
-            ]}
-            onPress={handleRetry}
-          >
-            <Text
-              style={[styles.retryText, colors?.onPrimary != null && { color: colors.onPrimary }]}
-            >
-              Retry
-            </Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  if (externalPdfPanel) {
-    return (
-      <View style={containerStyle}>
-        <View
-          style={[
-            styles.externalAssetContainer,
-            colors?.background != null && { backgroundColor: colors.background },
-          ]}
-        >
-          <VibestudioLogo size={72} variant="symbol" style={styles.logo} />
-          <Text style={[styles.errorTitle, colors?.text != null && { color: colors.text }]}>
-            Opening PDF
-          </Text>
-          <Text
-            style={[
-              styles.errorMessage,
-              colors?.textSecondary != null && { color: colors.textSecondary },
-            ]}
-          >
-            Your device will open this document in its PDF-capable app.
-          </Text>
-          <Pressable
-            style={[
-              styles.retryButton,
-              colors?.primary != null && { backgroundColor: colors.primary },
-            ]}
-            onPress={() => openExternalPdf(url)}
-          >
-            <Text
-              style={[styles.retryText, colors?.onPrimary != null && { color: colors.onPrimary }]}
-            >
-              Open PDF
-            </Text>
-          </Pressable>
-        </View>
-      </View>
-    );
-  }
-
-  return (
-    <View style={containerStyle}>
-      {isLoading && (
-        <View
-          style={[
-            styles.loadingOverlay,
-            colors?.background != null && { backgroundColor: colors.background },
-          ]}
-        >
-          <VibestudioLogo size={64} variant="symbol" style={styles.logo} />
-          <ActivityIndicator size="large" color={colors?.primary ?? "#a874ff"} />
-          <Text
-            style={[
-              styles.loadingText,
-              colors?.textSecondary != null && { color: colors.textSecondary },
-            ]}
-          >
-            Loading panel...
-          </Text>
-        </View>
-      )}
-      <WebView
-        ref={webViewRef}
-        key={panelId}
-        source={{ uri: url }}
-        style={styles.webView}
-        userAgent={VIBESTUDIO_USER_AGENT}
-        cacheEnabled
-        cacheMode="LOAD_DEFAULT"
-        onShouldStartLoadWithRequest={handleShouldStartLoad}
-        onNavigationStateChange={handleNavigationStateChange}
-        onMessage={handleMessage}
-        onLoadStart={handleLoadStart}
-        onLoadProgress={handleLoadProgress}
-        onError={handleError}
-        onHttpError={handleHttpError}
-        onLoadEnd={handleLoadEnd}
-        onRenderProcessGone={handleRenderProcessGone}
-        onFileDownload={Platform.OS === "ios" ? handleFileDownload : undefined}
-        injectedJavaScriptBeforeContentLoaded={
-          managed ? buildBridgeBootstrapScript(panelInit, diagnosticsEnabled || __DEV__) : undefined
+        lastLoadProgressRef.current = 0;
+        // A (re)load restarts the JS context; hold envelopes until load end.
+        bridgeReadyRef.current = false;
+        if (
+          typeof syntheticEvent.nativeEvent.url === "string" &&
+          syntheticEvent.nativeEvent.url.length > 0
+        ) {
+          currentUrlRef.current = syntheticEvent.nativeEvent.url;
         }
-        injectedJavaScript={REFERRER_POLICY_SCRIPT}
-        scalesPageToFit={false}
-        textZoom={100}
-        sharedCookiesEnabled={false}
-        thirdPartyCookiesEnabled={false}
-        setSupportMultipleWindows
-        onOpenWindow={(syntheticEvent) => {
-          const { targetUrl } = syntheticEvent.nativeEvent;
-          if (emitPanelNavigation(targetUrl, "child")) return;
-          if (managed && /^https?:\/\//i.test(targetUrl)) {
-            void onBridgeCall?.(panelId, "openPanelChild", [targetUrl, { focus: true }]);
-            return;
+        logDiagnostic("load start", syntheticEvent.nativeEvent);
+      },
+      [logDiagnostic],
+    );
+
+    const handleLoadProgress = useCallback(
+      (syntheticEvent: {
+        nativeEvent: { progress?: number; url?: string };
+      }) => {
+        const progress = syntheticEvent.nativeEvent.progress;
+        if (
+          typeof syntheticEvent.nativeEvent.url === "string" &&
+          syntheticEvent.nativeEvent.url.length > 0
+        ) {
+          currentUrlRef.current = syntheticEvent.nativeEvent.url;
+        }
+        if (
+          typeof progress === "number" &&
+          progress > lastLoadProgressRef.current
+        ) {
+          lastLoadProgressRef.current = progress;
+          lastLoadProgressAtRef.current = Date.now();
+        }
+        if (
+          progress === undefined ||
+          progress === 1 ||
+          progress < 0.05 ||
+          progress > 0.95
+        ) {
+          logDiagnostic("load progress", syntheticEvent.nativeEvent);
+        }
+      },
+      [logDiagnostic],
+    );
+
+    const handleRenderProcessGone = useCallback(
+      (syntheticEvent: { nativeEvent: { didCrash?: boolean } }) => {
+        logDiagnostic("render process gone", syntheticEvent.nativeEvent);
+        setHasError(true);
+        setIsLoading(false);
+        setErrorMessage(
+          syntheticEvent.nativeEvent.didCrash
+            ? "Android WebView renderer crashed."
+            : "Android WebView renderer was terminated.",
+        );
+      },
+      [logDiagnostic],
+    );
+
+    if (hasError) {
+      return (
+        <View style={containerStyle}>
+          <View
+            style={[
+              styles.errorContainer,
+              colors?.background != null && {
+                backgroundColor: colors.background,
+              },
+            ]}
+          >
+            <VibestudioLogo size={72} variant="symbol" style={styles.logo} />
+            <Text
+              style={[
+                styles.errorTitle,
+                colors?.text != null && { color: colors.text },
+              ]}
+            >
+              Failed to load panel
+            </Text>
+            <Text
+              style={[
+                styles.errorMessage,
+                colors?.textSecondary != null && {
+                  color: colors.textSecondary,
+                },
+              ]}
+            >
+              {errorMessage}
+            </Text>
+            <Pressable
+              style={[
+                styles.retryButton,
+                colors?.primary != null && { backgroundColor: colors.primary },
+              ]}
+              onPress={handleRetry}
+            >
+              <Text
+                style={[
+                  styles.retryText,
+                  colors?.onPrimary != null && { color: colors.onPrimary },
+                ]}
+              >
+                Retry
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    if (externalPdfPanel) {
+      return (
+        <View style={containerStyle}>
+          <View
+            style={[
+              styles.externalAssetContainer,
+              colors?.background != null && {
+                backgroundColor: colors.background,
+              },
+            ]}
+          >
+            <VibestudioLogo size={72} variant="symbol" style={styles.logo} />
+            <Text
+              style={[
+                styles.errorTitle,
+                colors?.text != null && { color: colors.text },
+              ]}
+            >
+              Opening PDF
+            </Text>
+            <Text
+              style={[
+                styles.errorMessage,
+                colors?.textSecondary != null && {
+                  color: colors.textSecondary,
+                },
+              ]}
+            >
+              Your device will open this document in its PDF-capable app.
+            </Text>
+            <Pressable
+              style={[
+                styles.retryButton,
+                colors?.primary != null && { backgroundColor: colors.primary },
+              ]}
+              onPress={() => openExternalPdf(url)}
+            >
+              <Text
+                style={[
+                  styles.retryText,
+                  colors?.onPrimary != null && { color: colors.onPrimary },
+                ]}
+              >
+                Open PDF
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    return (
+      <View style={containerStyle}>
+        {isLoading && (
+          <View
+            style={[
+              styles.loadingOverlay,
+              colors?.background != null && {
+                backgroundColor: colors.background,
+              },
+            ]}
+          >
+            <VibestudioLogo size={64} variant="symbol" style={styles.logo} />
+            <ActivityIndicator
+              size="large"
+              color={colors?.primary ?? "#a874ff"}
+            />
+            <Text
+              style={[
+                styles.loadingText,
+                colors?.textSecondary != null && {
+                  color: colors.textSecondary,
+                },
+              ]}
+            >
+              Loading panel...
+            </Text>
+          </View>
+        )}
+        <WebView
+          ref={webViewRef}
+          key={panelId}
+          source={{ uri: url }}
+          style={styles.webView}
+          userAgent={VIBESTUDIO_USER_AGENT}
+          cacheEnabled
+          cacheMode="LOAD_DEFAULT"
+          onShouldStartLoadWithRequest={handleShouldStartLoad}
+          onNavigationStateChange={handleNavigationStateChange}
+          onMessage={handleMessage}
+          onLoadStart={handleLoadStart}
+          onLoadProgress={handleLoadProgress}
+          onError={handleError}
+          onHttpError={handleHttpError}
+          onLoadEnd={handleLoadEnd}
+          onRenderProcessGone={handleRenderProcessGone}
+          onFileDownload={
+            Platform.OS === "ios" ? handleFileDownload : undefined
           }
-          if (/^https?:\/\//i.test(targetUrl)) {
-            void openExternalResource(targetUrl, "new window");
+          injectedJavaScriptBeforeContentLoaded={
+            managed
+              ? buildBridgeBootstrapScript(
+                  panelInit,
+                  diagnosticsEnabled || __DEV__,
+                )
+              : undefined
           }
-        }}
-        javaScriptEnabled
-        webviewDebuggingEnabled={__DEV__}
-        domStorageEnabled
-        mixedContentMode="never"
-        allowsInlineMediaPlayback
-        allowFileAccess={false}
-        allowFileAccessFromFileURLs={false}
-        allowUniversalAccessFromFileURLs={false}
-        pullToRefreshEnabled={false}
-      />
-    </View>
-  );
-});
+          injectedJavaScript={REFERRER_POLICY_SCRIPT}
+          scalesPageToFit={false}
+          textZoom={100}
+          sharedCookiesEnabled={false}
+          thirdPartyCookiesEnabled={false}
+          setSupportMultipleWindows
+          onOpenWindow={(syntheticEvent) => {
+            const { targetUrl } = syntheticEvent.nativeEvent;
+            if (emitPanelNavigation(targetUrl, "child")) return;
+            if (managed && /^https?:\/\//i.test(targetUrl)) {
+              void onBridgeCall?.(panelId, "openPanelChild", [
+                targetUrl,
+                { focus: true },
+              ]);
+              return;
+            }
+            if (/^https?:\/\//i.test(targetUrl)) {
+              void openExternalResource(targetUrl, "new window");
+            }
+          }}
+          javaScriptEnabled
+          webviewDebuggingEnabled={__DEV__}
+          domStorageEnabled
+          mixedContentMode="never"
+          allowsInlineMediaPlayback
+          allowFileAccess={false}
+          allowFileAccessFromFileURLs={false}
+          allowUniversalAccessFromFileURLs={false}
+          pullToRefreshEnabled={false}
+        />
+      </View>
+    );
+  },
+);
 
 export const PanelWebView = React.memo(PanelWebViewImpl);
 

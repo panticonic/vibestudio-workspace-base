@@ -2,7 +2,10 @@ import { Alert } from "react-native";
 import { act, fireEvent, render } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import { ConnectionBar } from "./ConnectionBar";
-import { connectionStatusAtom, networkReachableAtom } from "../state/connectionAtoms";
+import {
+  connectionStatusAtom,
+  networkReachableAtom,
+} from "../state/connectionAtoms";
 import { shellClientAtom } from "../state/shellClientAtom";
 
 type AlertButton = { text?: string; onPress?: () => void };
@@ -28,12 +31,14 @@ describe("ConnectionBar", () => {
       transport: { reconnect, onReconnectProgress: () => jest.fn() },
     } as never);
 
-    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+    const alertSpy = jest
+      .spyOn(Alert, "alert")
+      .mockImplementation(() => undefined);
 
     const { getByRole } = render(
       <Provider store={store}>
         <ConnectionBar onRepair={onRepair} />
-      </Provider>
+      </Provider>,
     );
 
     act(() => {
@@ -44,7 +49,11 @@ describe("ConnectionBar", () => {
 
     expect(alertSpy).toHaveBeenCalledTimes(1);
     const buttons = (alertSpy.mock.calls[0]?.[2] ?? []) as AlertButton[];
-    expect(buttons.map((button) => button.text)).toEqual(["Reconnect", "Re-pair device", "Cancel"]);
+    expect(buttons.map((button) => button.text)).toEqual([
+      "Reconnect",
+      "Re-pair device",
+      "Cancel",
+    ]);
 
     buttons.find((button) => button.text === "Reconnect")?.onPress?.();
     expect(reconnect).toHaveBeenCalledTimes(1);
@@ -60,12 +69,14 @@ describe("ConnectionBar", () => {
     store.set(connectionStatusAtom, "disconnected");
     store.set(networkReachableAtom, false);
 
-    const alertSpy = jest.spyOn(Alert, "alert").mockImplementation(() => undefined);
+    const alertSpy = jest
+      .spyOn(Alert, "alert")
+      .mockImplementation(() => undefined);
 
     const { getByRole } = render(
       <Provider store={store}>
         <ConnectionBar />
-      </Provider>
+      </Provider>,
     );
 
     act(() => {
@@ -75,7 +86,10 @@ describe("ConnectionBar", () => {
     // Offline forces the actionable state even if the transport reports connected.
     fireEvent.press(getByRole("button"));
     const buttons = (alertSpy.mock.calls[0]?.[2] ?? []) as AlertButton[];
-    expect(buttons.map((button) => button.text)).toEqual(["Reconnect", "Cancel"]);
+    expect(buttons.map((button) => button.text)).toEqual([
+      "Reconnect",
+      "Cancel",
+    ]);
 
     alertSpy.mockRestore();
   });
@@ -87,7 +101,9 @@ describe("ConnectionBar", () => {
     store.set(shellClientAtom, {
       transport: {
         reconnect: jest.fn(),
-        onReconnectProgress: (listener: (value: { attempt: number }) => void) => {
+        onReconnectProgress: (
+          listener: (value: { attempt: number }) => void,
+        ) => {
           progress = listener;
           return jest.fn();
         },
@@ -97,7 +113,7 @@ describe("ConnectionBar", () => {
     const view = render(
       <Provider store={store}>
         <ConnectionBar onRepair={jest.fn()} />
-      </Provider>
+      </Provider>,
     );
     act(() => {
       store.set(connectionStatusAtom, "connecting");
@@ -109,7 +125,7 @@ describe("ConnectionBar", () => {
   });
 
   it("treats a live pipe as connected even when NetInfo reports no internet (LAN-only)", () => {
-    // A home server on Wi-Fi without internet is reachable over the WebRTC pipe:
+    // A home server on Wi-Fi without internet is reachable over a direct Iroh path:
     // a connected status must NOT be overridden with a red "No network" bar.
     const store = createStore();
     store.set(connectionStatusAtom, "connected");
@@ -118,7 +134,7 @@ describe("ConnectionBar", () => {
     const { queryByRole } = render(
       <Provider store={store}>
         <ConnectionBar />
-      </Provider>
+      </Provider>,
     );
 
     // Connected ⇒ not a problem ⇒ not actionable, regardless of NetInfo.
@@ -133,7 +149,7 @@ describe("ConnectionBar", () => {
     const { queryByRole } = render(
       <Provider store={store}>
         <ConnectionBar />
-      </Provider>
+      </Provider>,
     );
 
     act(() => {

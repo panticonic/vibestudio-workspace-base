@@ -1,74 +1,58 @@
 ---
 name: remote-access
-description: Deploy, pair, inspect, repair, update, or remove a Vibestudio remote server; diagnose WebRTC, identity, membership, or device failures.
+description: Deploy, pair, inspect, repair, update, or remove a Vibestudio Iroh remote server; diagnose endpoint, relay, identity, membership, or device failures.
 ---
 
 # Remote access
 
-Run `vibestudio remote --help` for current CLI syntax. Main workflows: deploy,
-serve, pair, doctor, status/logs/update/remove, user invitations, device
-pairing/revocation, membership, and child identity repair.
+Run `vibestudio remote --help` for current syntax. Remote application traffic is
+one RPC request per Iroh QUIC stream. Hub control and the selected workspace are
+separate authenticated endpoint connections; the hub never becomes a generic
+application relay.
 
-## Model
+## Invariants
 
-- A server is a hub hosting users, devices, and workspace children. The first
-  redeemed startup invite establishes the root user. Until then, the hub owns
-  one live root-bootstrap invite at a time and renews it on expiry; later users
-  and devices join through authenticated hub actions.
-- Users may pair several devices. Workspace membership is hub-owned, enforced
-  before routing to a child.
-- Keep one stable hub-control reach per device. Route a workspace by exact ID;
-  replace only the returned workspace reach.
-- Each workspace child owns its own WebRTC ingress and persistent identity. The
-  hub routes control but never relays workspace media or turns internal tokens
-  into user credentials.
-- Pairing links are complete signed URLs. Never construct bare-code or partial
-  invites.
-
-Never infer a workspace from a display name, derive one reach from another, or
-expose pairing secrets. The live hub-control schema is authoritative for method
-arguments and return types.
+- A server is a hub hosting users, devices, and workspace children.
+- Each hub and child owns a persistent Iroh endpoint secret and Endpoint ID.
+- A device keeps one stable hub-control reach and routes an exact workspace ID
+  to obtain that child's current reach.
+- Reaches contain only protocol version, Endpoint ID, and an ordered explicit
+  HTTPS relay set.
+- Pairing links are complete server-minted compact-v4 URLs. Never derive a
+  reach, reconstruct a link, infer a workspace from a display name, or expose a
+  pairing secret.
+- Production endpoints disable n0 address lookup and implicit public relays.
+- The callback relay remains only for OAuth/webhook HTTP callbacks; never route
+  RPC, panels, bundles, or assets through it.
 
 ## Golden paths
 
-Use `vibestudio remote deploy local` when the current computer is the server, or
-`vibestudio remote deploy <user@host>` for a different machine. Both targets use
-the same systemd user-service lifecycle, exact artifact/version, hub plus
-default-workspace diagnostics, and pairing/status/logs/update/remove commands.
-The deployment output includes the fresh server's current root QR through its
-protected managed ready state. Run `vibestudio remote deploy pairing <target>`
-at any time before it is claimed to display the current renewed link and QR;
-the service does not write that secret to its journal. Logs are diagnostic
-output, not a pairing-secret interface.
+Use `vibestudio remote deploy local` for this computer or `remote deploy
+<user@host>` for another host. The deployment commands own the same systemd
+user-service lifecycle and provide `pairing`, `status`, `logs`, `update`, and
+`remove` operations. Pair with the complete link, then use `remote select` to
+switch workspaces without replacing the device credential.
 
-After pairing, select another workspace through the retained hub-control
-identity; workspace switching replaces only child reach and never requires a
-second device pairing. Use the authenticated hub to invite another person or
-pair another device. Desktop exposes connection badge → Paired devices →
-Connect a device; mobile exposes Settings → Devices → Connect another device.
+Use `remote pair-device` for another device on the same account and the
+root/admin invitation command for another person. On mobile, Settings → Devices
+presents the server-minted link. For a phone attached to a paired desktop, use
+[phone setup](../phone-setup/SKILL.md).
 
-For a phone attached to the connected desktop, use [phone
-setup](../phone-setup/SKILL.md) — it routes installation and same-account
-pairing through the trusted desktop. If unavailable, use the shell's Devices
-surface and its HTTPS QR.
+## Diagnosis and repair
 
-## Diagnosis
+1. Run `remote doctor` with the exact configured relay URLs.
+2. Inspect deployment status and endpoint registration logs.
+3. Identify whether hub control, workspace routing, or a child endpoint failed.
+4. Re-route a stale workspace reach through the still-authenticated hub.
+5. Use `remote rotate-endpoint --workspace <name> --yes` only for a lost or
+   compromised endpoint secret. Expect clients pinned to that Endpoint ID to
+   re-pair.
 
-Run the doctor ladder outside-in:
+Relay fallback is normal, not degraded security. Record whether the active path
+is direct or relayed and which configured relay was dialed. Never enable public
+lookup, restore a retired transport, replace endpoint identity, or add an HTTP
+fallback merely to make a connectivity symptom disappear.
 
-1. Verify signaling and TURN/relay availability.
-2. Inspect service status and logs on the target host (`local` or `user@host`).
-3. Distinguish hub-control identity from the selected workspace child's identity
-   before any repair.
-4. Restore a hub identity from its exact backup. Rotate only a damaged child
-   through the explicit repair command, then re-route that workspace from the
-   stable hub connection.
-5. Apply any exact host remediation from deploy or doctor output, then rerun the
-   failed check.
-
-Never replace identity as a generic connectivity fix. Preserve the narrow
-failure state and report which endpoint, route, or dependency failed.
-
-Use the focused desktop-pairing smoke for pairing changes. Use the full mobile
-composition smoke only when changes span desktop pairing, remote transport,
-mobile activation, and panel loading.
+Use focused remote-transport tests for codec, authentication, cancellation,
+reconnect, and routing changes. Use the full mobile composition smoke only when
+native pairing, activation, lifecycle, or panel loading changes.

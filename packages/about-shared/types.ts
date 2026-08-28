@@ -9,4 +9,11 @@ export interface AppInfo {
   connectionMode?: "local" | "remote";
   remoteHost?: string;
   connectionStatus?: string;
+  remoteTransport?: {
+    path: "direct" | "relay";
+    rttMs?: number;
+    remoteAddress?: string;
+    relayUrl?: string;
+    endpointGeneration?: number;
+  } | null;
 }

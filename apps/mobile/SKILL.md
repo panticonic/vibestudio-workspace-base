@@ -13,16 +13,17 @@ pairing.
 - First pairing belongs to the shipped native bootstrap in `apps/mobile`.
 - This app runs only after the native host has paired, fetched the current
   platform artifact, verified integrity, and reloaded React Native.
-- Long-lived device credentials live in `@vibestudio/mobile-webrtc`; this app
-  uses the active WebRTC transport and short-lived app principal grants.
+- Long-lived device credentials and the native Endpoint identity live in
+  `@vibestudio/mobile-iroh`; this app uses the active Iroh transport and
+  short-lived app principal grants.
 - Bundle installation and self-update use the shared streamed delivery helper in
-  `@vibestudio/mobile-webrtc`. Do not add HTTP-direct artifact fetches or native
+  `@vibestudio/mobile-iroh`. Do not add HTTP-direct artifact fetches or native
   workspace-selection APIs.
 
 ## Pairing And Re-Pair
 
 - Accept both `https://vibestudio.app/p#...` and
-  `vibestudio://connect/...` links through the shared compact-v3 parser.
+  `vibestudio://connect/...` links through the shared compact-v4 parser.
 - The login/recovery surface should offer paste-link and scanner entry points
   that delegate to native host capabilities.
 - Consumed or stale links must fail visibly and leave the recovery UI usable.
@@ -42,7 +43,7 @@ pairing.
 - Choosing Roll back changes the trusted server build first, then activates the
   selected bundle.
 - Keep `rnHostAbi` aligned with the native host. Read the value from
-  `apps/mobile/package.json`; `@vibestudio/mobile-webrtc` owns the matching
+  `apps/mobile/package.json`; `@vibestudio/mobile-iroh` owns the matching
   native delivery constant.
 
 ## Desktop Parity
