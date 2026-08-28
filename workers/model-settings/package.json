@@ -96,7 +96,6 @@
   "dependencies": {
     "@vibestudio/credential-client": "workspace:*",
     "@workspace/model-catalog": "workspace:*",
-    "@workspace/pi-ai": "workspace:*",
     "@workspace/runtime": "workspace:*"
   },
   "devDependencies": {

@@ -3,7 +3,7 @@ import {
   sha256HexSyncText,
 } from "@vibestudio/content-addressing";
 import type { SqlStorage } from "@workspace/runtime/worker";
-import type { ChannelEvent } from "@workspace/harness";
+import type { ChannelEvent } from "@workspace/pubsub";
 import type {
   ChannelAgenticContext,
   ChannelConfig,

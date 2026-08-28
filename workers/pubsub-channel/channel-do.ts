@@ -25,7 +25,7 @@ import {
   type DurableObjectServiceClient,
 } from "@workspace/runtime/worker/kernel";
 import { canonicalJson } from "@vibestudio/content-addressing";
-import type { ChannelEvent } from "@workspace/harness";
+import type { ChannelEvent } from "@workspace/pubsub";
 import {
   channelSubscriptionQueuingStrategy,
   encodeChannelSubscriptionRecord,

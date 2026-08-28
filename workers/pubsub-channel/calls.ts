@@ -20,7 +20,7 @@ import {
   type LogEnvelope,
   type ParticipantRef,
 } from "@workspace/agentic-protocol";
-import type { ChannelEvent } from "@workspace/harness";
+import type { ChannelEvent } from "@workspace/pubsub";
 import type { SqlStorage } from "@workspace/runtime/worker";
 import type { ChannelCallEventBuilders } from "@workspace/channel-policies";
 import type { StoredAttachment } from "./types.js";
@@ -85,7 +85,10 @@ export function derivePendingCalls(envelopes: LogEnvelope[]): PendingCallRow[] {
     if (kind === "invocation.started") {
       if (transport["kind"] !== "channel") continue;
       const actor = (event as { actor?: { id?: string; participantId?: string } }).actor ?? {};
-      const target = (transport["target"] ?? {}) as { id?: string; participantId?: string };
+      const target = (transport["target"] ?? {}) as {
+        id?: string;
+        participantId?: string;
+      };
       const invocationId =
         typeof causality["invocationId"] === "string"
           ? (causality["invocationId"] as string)
@@ -276,7 +279,10 @@ export class CallTransport {
       String(existing["provider_id"]) === participantId &&
       String(existing["provider_generation_id"]) === providerGenerationId
     ) {
-      return { claimed: true, generation: Number(existing["claim_generation"]) };
+      return {
+        claimed: true,
+        generation: Number(existing["claim_generation"]),
+      };
     }
     const generation = Number(existing?.["claim_generation"] ?? 0) + 1;
     const claimedAt = Date.now();
@@ -357,7 +363,12 @@ export class CallTransport {
         transport === "entity" ? "cancelDirectMethodCall" : "cancelChannelInvocation",
         transport === "entity"
           ? [this.deps.objectKey, pending.transportCallId]
-          : [{ channelId: this.deps.objectKey, transportCallId: pending.transportCallId }]
+          : [
+              {
+                channelId: this.deps.objectKey,
+                transportCallId: pending.transportCallId,
+              },
+            ]
       );
     } catch (error) {
       console.warn(
@@ -375,8 +386,14 @@ export class CallTransport {
     const causality = (agentic.causality ?? {}) as Record<string, unknown>;
     const payload = (agentic.payload ?? {}) as Record<string, unknown>;
     const transport = (payload["transport"] ?? {}) as Record<string, unknown>;
-    const actor = (agentic.actor ?? {}) as { id?: string; participantId?: string };
-    const target = (transport["target"] ?? {}) as { id?: string; participantId?: string };
+    const actor = (agentic.actor ?? {}) as {
+      id?: string;
+      participantId?: string;
+    };
+    const target = (transport["target"] ?? {}) as {
+      id?: string;
+      participantId?: string;
+    };
     const createdAt =
       typeof agentic.createdAt === "string" ? Date.parse(agentic.createdAt) : Number.NaN;
 
@@ -411,7 +428,12 @@ export class CallTransport {
     callId: string,
     method: string,
     args: unknown,
-    opts?: { invocationId?: string; transportCallId?: string; turnId?: string; timeoutMs?: number }
+    opts?: {
+      invocationId?: string;
+      transportCallId?: string;
+      turnId?: string;
+      timeoutMs?: number;
+    }
   ): Promise<void> {
     const transportCallId = opts?.transportCallId ?? callId;
 
@@ -445,7 +467,12 @@ export class CallTransport {
     callId: string,
     method: string,
     args: unknown,
-    opts?: { invocationId?: string; transportCallId?: string; turnId?: string; timeoutMs?: number }
+    opts?: {
+      invocationId?: string;
+      transportCallId?: string;
+      turnId?: string;
+      timeoutMs?: number;
+    }
   ): Promise<(() => Promise<void>) | null> {
     const transportCallId = opts?.transportCallId ?? callId;
     const invocationId = opts?.invocationId ?? callId;

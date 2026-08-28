@@ -30,8 +30,8 @@
 
 export * from "./types.js";
 export type { PubSubClient } from "./client.js";
-export { connectViaRpc } from "./rpc-client.js";
-export type { RpcConnectOptions } from "./rpc-client.js";
+export { connectViaRpc, resolveRpcChannelTarget } from "./rpc-client.js";
+export type { RpcChannelTargetOptions, RpcConnectOptions } from "./rpc-client.js";
 export { waitForApprovalResolution } from "./review-readiness.js";
 export { draft7MetaSchema } from "./json-schema-draft-07.js";
 export { iterateChannelReplayAfterPages, type ChannelReplayPageReader } from "./channel-replay.js";

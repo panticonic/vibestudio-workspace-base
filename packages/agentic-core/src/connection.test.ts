@@ -59,7 +59,10 @@ describe("ConnectionManager", () => {
     const config = createConfig();
     const manager = new ConnectionManager({ config, metadata, callbacks: {} });
 
-    const connectPromise = manager.connect({ channelId: "chat-1", methods: {} });
+    const connectPromise = manager.connect({
+      channelId: "chat-1",
+      methods: {},
+    });
     await vi.waitFor(() => {
       expect(config.rpc!.stream).toHaveBeenCalledWith(
         CHANNEL_TARGET,
@@ -76,18 +79,17 @@ describe("ConnectionManager", () => {
     await manager.disconnect();
 
     await expect(connectPromise).rejects.toThrow("ready aborted");
-    expect(config.rpc!.call).toHaveBeenCalledWith(
-      CHANNEL_TARGET,
-      "unsubscribe",
-      ["panel:panel-1"]
-    );
+    expect(config.rpc!.call).toHaveBeenCalledWith(CHANNEL_TARGET, "unsubscribe", ["panel:panel-1"]);
   });
 
   it("bounds an explicit replay message limit to the canonical page maximum", async () => {
     const config = { ...createConfig(), replayMessageLimit: 1234 };
     const manager = new ConnectionManager({ config, metadata, callbacks: {} });
 
-    const connectPromise = manager.connect({ channelId: "chat-1", methods: {} });
+    const connectPromise = manager.connect({
+      channelId: "chat-1",
+      methods: {},
+    });
     await vi.waitFor(() => {
       expect(config.rpc.stream).toHaveBeenCalledWith(
         CHANNEL_TARGET,
@@ -110,9 +112,16 @@ describe("ConnectionManager", () => {
     vi.useFakeTimers();
     const config = createConfig();
     const onError = vi.fn();
-    const manager = new ConnectionManager({ config, metadata, callbacks: { onError } });
+    const manager = new ConnectionManager({
+      config,
+      metadata,
+      callbacks: { onError },
+    });
 
-    const connectPromise = manager.connect({ channelId: "chat-1", methods: {} });
+    const connectPromise = manager.connect({
+      channelId: "chat-1",
+      methods: {},
+    });
     const rejected = expect(connectPromise).rejects.toThrow(
       "Channel chat-1 did not finish loading within 15 seconds"
     );
@@ -124,6 +133,46 @@ describe("ConnectionManager", () => {
       expect.objectContaining({
         message: "Channel chat-1 did not finish loading within 15 seconds",
       })
+    );
+  });
+
+  it("starts the replay deadline after channel service readiness", async () => {
+    vi.useFakeTimers();
+    let releaseService!: () => void;
+    const serviceReady = new Promise<void>((resolve) => {
+      releaseService = resolve;
+    });
+    const config = createConfig();
+    const originalCall = config.rpc!.call;
+    config.rpc!.call = vi.fn(async (target: string, method: string, args: unknown[]) => {
+      if (target === "main" && method === "workers.resolveService") {
+        await serviceReady;
+      }
+      return originalCall(target, method, args);
+    }) as typeof originalCall;
+    const manager = new ConnectionManager({ config, metadata, callbacks: {} });
+
+    const connectPromise = manager.connect({
+      channelId: "chat-1",
+      methods: {},
+    });
+    let settled = false;
+    void connectPromise.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      }
+    );
+
+    await vi.advanceTimersByTimeAsync(CONNECTION_READY_TIMEOUT_MS * 2);
+    expect(settled).toBe(false);
+
+    releaseService();
+    await vi.advanceTimersByTimeAsync(CONNECTION_READY_TIMEOUT_MS);
+    await expect(connectPromise).rejects.toThrow(
+      "Channel chat-1 did not finish loading within 15 seconds"
     );
   });
 });

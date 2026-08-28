@@ -419,7 +419,8 @@
 }
 
 .inline-ui-content > *,
-.inline-ui-content :where(.rt-Box, .rt-Card, .rt-Flex, .rt-Grid, .rt-TextFieldRoot) {
+.inline-ui-content
+  :where(.rt-Box, .rt-Card, .rt-Flex, .rt-Grid, .rt-TextFieldRoot) {
   min-inline-size: 0;
   max-inline-size: 100%;
 }
@@ -821,7 +822,26 @@
 
 .markdown-preview,
 .markdown-preview
-  :where(p, h1, h2, h3, h4, h5, h6, blockquote, ul, ol, li, table, thead, tbody, tr, th, td, pre) {
+  :where(
+    p,
+    h1,
+    h2,
+    h3,
+    h4,
+    h5,
+    h6,
+    blockquote,
+    ul,
+    ol,
+    li,
+    table,
+    thead,
+    tbody,
+    tr,
+    th,
+    td,
+    pre
+  ) {
   display: inline;
   margin: 0;
   padding: 0;
@@ -844,7 +864,13 @@
 
 .markdown-preview-code,
 .markdown-preview-codeblock {
-  font-family: var(--code-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(
+    --code-font-family,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace
+  );
   font-size: 0.95em;
   border-radius: 3px;
   background: var(--gray-a3);
@@ -950,7 +976,12 @@
 .subagent-turn-rule {
   block-size: 1px;
   margin-block: 3px;
-  background: linear-gradient(90deg, var(--gray-a5), var(--gray-a3) 40%, transparent);
+  background: linear-gradient(
+    90deg,
+    var(--gray-a5),
+    var(--gray-a3) 40%,
+    transparent
+  );
 }
 
 /* ----- child messages ----- */
@@ -1075,7 +1106,13 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-family: var(--code-font-family, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-family: var(
+    --code-font-family,
+    ui-monospace,
+    SFMono-Regular,
+    Menlo,
+    monospace
+  );
   color: var(--gray-12);
 }
 
@@ -1397,7 +1434,6 @@
   font-weight: 600;
 }
 
-
 /* ===========================================================================
    Delivery model: ack badges, outbox, send button, narration, undo snackbar.
    Built on the presentation-neutral foundation layer. No hard-coded hex; the
@@ -1627,7 +1663,12 @@
 
 /* Ambient turn rhythm: a soft shimmer on the typing row. */
 .typing-indicator-shimmer {
-  background-image: linear-gradient(90deg, transparent 0%, var(--gray-a4) 50%, transparent 100%);
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--gray-a4) 50%,
+    transparent 100%
+  );
   background-size: 200% 100%;
   animation: ambient-shimmer 2.4s linear infinite;
 }
@@ -1699,14 +1740,71 @@
   background: var(--accent-a3);
 }
 
+.chat-startup-status-root {
+  min-block-size: clamp(180px, 34vh, 320px);
+  padding: var(--space-4) var(--space-3);
+}
+.chat-startup-status-card {
+  inline-size: min(100%, 360px);
+  padding: var(--space-5);
+  border: 1px solid var(--gray-a5);
+  border-radius: var(--radius-4);
+  background:
+    radial-gradient(circle at 50% 0%, var(--accent-a3), transparent 58%),
+    var(--gray-a2);
+  box-shadow: 0 12px 36px var(--black-a4);
+}
+.chat-startup-status-glyph {
+  inline-size: 42px;
+  block-size: 42px;
+  margin-block-end: var(--space-3);
+  border: 1px solid var(--accent-a6);
+  border-radius: 9999px;
+  color: var(--accent-11);
+  background: var(--accent-a3);
+}
+.chat-startup-status-title {
+  letter-spacing: -0.01em;
+}
+.chat-startup-status-detail {
+  max-inline-size: 28ch;
+  margin-block-start: var(--space-1);
+  line-height: 1.45;
+}
+.chat-startup-status-steps {
+  inline-size: 100%;
+  margin-block-start: var(--space-4);
+  padding-block-start: var(--space-3);
+  border-block-start: 1px solid var(--gray-a4);
+}
+.chat-startup-status-step {
+  min-inline-size: 0;
+}
+.chat-startup-status-dot {
+  inline-size: 6px;
+  block-size: 6px;
+  flex: 0 0 auto;
+  border-radius: 9999px;
+  background: var(--gray-a6);
+}
+.chat-startup-status-dot.is-complete {
+  background: var(--accent-a8);
+}
+.chat-startup-status-dot.is-active {
+  background: var(--accent-9);
+  box-shadow: 0 0 0 4px var(--accent-a4);
+}
+
 /* Pre-send queue: messages held until the spawned agent joins. Left-railed like
    the outbox (it's "your" pending content), with an amber "launching" header. */
 .pending-delivery-root {
   min-width: 0;
 }
 .pending-delivery-card {
-  border: 1px solid var(--agentic-border);
-  border-left: 2px solid var(--agentic-player-rail);
+  border: 1px solid var(--gray-a5);
+  border-left: 2px solid var(--accent-8);
+  border-radius: var(--radius-3);
+  background: var(--gray-a2);
 }
 .pending-delivery-card-failed {
   border-left-color: var(--red-7);

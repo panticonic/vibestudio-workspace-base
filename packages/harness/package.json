@@ -27,6 +27,7 @@
     "@workspace/pi-core": "workspace:*",
     "@workspace/pi-ai": "workspace:*",
     "@workspace/agentic-protocol": "workspace:*",
+    "@workspace/pubsub": "workspace:*",
     "diff": "^7.0.0",
     "linkedom": "^0.18.13",
     "ignore": "^7.0.5",

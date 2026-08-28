@@ -67,7 +67,9 @@ import {
 import { createAndSubscribeAgent, waitForPanelReview } from "./agentLifecycle.js";
 
 const AgenticChat = lazy(() =>
-  import("@workspace/agentic-chat/chat").then((module) => ({ default: module.AgenticChat }))
+  import("@workspace/agentic-chat/chat").then((module) => ({
+    default: module.AgenticChat,
+  }))
 );
 
 /** Default DO worker source and class for the AI chat agent */
@@ -217,6 +219,7 @@ export default function ChatPanel() {
   const modelSettingsServiceRef = useRef<DurableObjectServiceClient | null>(null);
   const modelSettingsSnapshotRef = useRef<ModelSettingsSnapshot | null>(null);
   const modelSettingsRequestRef = useRef<Promise<ModelSettingsSnapshot> | null>(null);
+  const preparedAgentRuntimeRefs = useRef(new Set<string>());
   const [modelCatalog, setModelCatalog] = useState<ModelCatalog | null>(null);
   const [workspaceDefaultModelRef, setWorkspaceDefaultModelRef] = useState<string | null>(null);
   const [workspaceDefaultAgentConfig, setWorkspaceDefaultAgentConfig] =
@@ -324,7 +327,9 @@ export default function ChatPanel() {
     try {
       const settings = await loadModelSettings();
       return (
-        settings.defaultAgentConfig ?? { model: settings.defaultModel || DEFAULT_AGENT_MODEL_REF }
+        settings.defaultAgentConfig ?? {
+          model: settings.defaultModel || DEFAULT_AGENT_MODEL_REF,
+        }
       );
     } catch (err) {
       console.warn("[ChatPanel] Failed to load workspace model default:", err);
@@ -662,6 +667,47 @@ export default function ChatPanel() {
     []
   );
 
+  const prepareInitialAgentRuntime = useCallback(
+    (agents: AvailableAgent[]) => {
+      if (agents.length === 0) return;
+      const preferredSource = panel.stateArgs.get<ChatStateArgs>().agentSource;
+      const source =
+        agents.find((agent) => agent.id === preferredSource)?.id ??
+        agents.find((agent) => agent.id === DEFAULT_WORKER_SOURCE)?.id ??
+        agents[0]!.id;
+      const ref = `ctx:${resolvedContextId}`;
+      const preparationKey = `${ref}\0${source}`;
+      if (preparedAgentRuntimeRefs.current.has(preparationKey)) return;
+      preparedAgentRuntimeRefs.current.add(preparationKey);
+
+      // The panel owns the product choice; the host only prepares immutable
+      // bytes at speculative priority. No entity is created and no credential
+      // is inspected until the ordinary launch path commits this intent.
+      void rpc
+        .call<{ status: string }>("main", "build.getBuildReport", [
+          source,
+          ref,
+          { priority: "speculative" },
+        ])
+        .then((report) => {
+          if (report.status === "ok") return;
+          preparedAgentRuntimeRefs.current.delete(preparationKey);
+          console.warn("[ChatPanel] Initial agent runtime preparation failed", {
+            source,
+            status: report.status,
+          });
+        })
+        .catch((error) => {
+          preparedAgentRuntimeRefs.current.delete(preparationKey);
+          console.warn(
+            "[ChatPanel] Initial agent runtime preparation failed:",
+            error instanceof Error ? error.message : String(error)
+          );
+        });
+    },
+    [resolvedContextId]
+  );
+
   // Fetch available worker sources (DO agents) on mount. Only sources that
   // declare an `agent` manifest block are chat agents — this filters out
   // service DOs (pubsub-channel, semantic control plane, fork, …).
@@ -731,6 +777,15 @@ export default function ChatPanel() {
       if (retryTimer !== null) window.clearTimeout(retryTimer);
     };
   }, [connectionRetrySignal]);
+
+  // Speculation begins only after model discovery has crossed its user-visible
+  // readiness boundary. This effect runs after React commits the chooser, so a
+  // cold agent dependency install can never delay the setup decision it is
+  // intended to accelerate.
+  useEffect(() => {
+    if (firstAgentModelPreflight === "checking") return;
+    prepareInitialAgentRuntime(availableAgents);
+  }, [availableAgents, firstAgentModelPreflight, prepareInitialAgentRuntime]);
 
   // Availability (connected/startable/needs-setup) now arrives on every
   // catalog entry from the model-settings worker — one shared source for all
@@ -1068,7 +1123,10 @@ export default function ChatPanel() {
         await loadModelSettings(true);
         return { ok: true };
       } catch (err) {
-        return { ok: false, error: err instanceof Error ? err.message : String(err) };
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
       }
     },
     [loadModelSettings]

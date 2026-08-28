@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { createInMemorySql } from "@workspace/runtime/worker/test-utils";
 import type { SqlStorage } from "@workspace/runtime/worker";
-import type { ChannelEvent } from "@workspace/harness";
+import type { ChannelEvent } from "@workspace/pubsub";
 import type { ChannelAgenticContext } from "@workspace/pubsub";
 import {
   CHANNEL_DELIVERY_PROJECTION_VERSION,
@@ -18,7 +18,14 @@ function event(
   senderId = "panel:user",
   messageId = `event-${id}`
 ): ChannelEvent {
-  return { id, type, payload, senderId, messageId, ts: id * 1_000 } as ChannelEvent;
+  return {
+    id,
+    type,
+    payload,
+    senderId,
+    messageId,
+    ts: id * 1_000,
+  } as ChannelEvent;
 }
 
 function relationship(
@@ -43,7 +50,11 @@ function relationship(
           participantId: AGENT_ID,
           revision,
           delivery: "all",
-          endpoint: { kind: "entity", entityId: AGENT_ID, invocation: "direct" },
+          endpoint: {
+            kind: "entity",
+            entityId: AGENT_ID,
+            invocation: "direct",
+          },
           metadata: { type: "agent", handle: "agent-a" },
           applicationConfig: { version: 1, value: { respondPolicy: "always" } },
         },
@@ -62,7 +73,10 @@ function message(
     "agentic.trajectory.v1/event",
     {
       kind: "message.completed",
-      actor: { kind: senderId.startsWith("do:") ? "agent" : "user", id: senderId },
+      actor: {
+        kind: senderId.startsWith("do:") ? "agent" : "user",
+        id: senderId,
+      },
       causality: { messageId },
       payload: {
         protocol: "agentic.trajectory.v1",
@@ -133,7 +147,10 @@ describe("ChannelDeliveryProjection", () => {
     sql = (await createInMemorySql()) as unknown as SqlStorage;
     ChannelDeliveryProjection.createTables(sql);
     projection = new ChannelDeliveryProjection(sql, (callback) => callback(), CHANNEL_ID);
-    projection.initializeChannelConfig({ conversationPolicy: "directed", agentHopLimit: 4 });
+    projection.initializeChannelConfig({
+      conversationPolicy: "directed",
+      agentHopLimit: 4,
+    });
   });
 
   it("replays a canonical append omitted before a simulated activation loss", () => {
@@ -173,7 +190,11 @@ describe("ChannelDeliveryProjection", () => {
       )
       .toArray();
     expect(rows).toEqual([
-      { event_sequence: 2, subscription_revision: 1, state: "terminal-departed" },
+      {
+        event_sequence: 2,
+        subscription_revision: 1,
+        state: "terminal-departed",
+      },
       { event_sequence: 6, subscription_revision: 3, state: "ready" },
     ]);
   });
@@ -241,7 +262,11 @@ describe("ChannelDeliveryProjection", () => {
         )
         .toArray()
     ).toEqual([
-      { event_sequence: 2, subscription_revision: 1, state: "terminal-retired" },
+      {
+        event_sequence: 2,
+        subscription_revision: 1,
+        state: "terminal-retired",
+      },
       { event_sequence: 2, subscription_revision: 3, state: "ready" },
       { event_sequence: 4, subscription_revision: 3, state: "ready" },
     ]);
@@ -342,7 +367,11 @@ describe("ChannelDeliveryProjection", () => {
         participantId: otherAgent,
         revision: 1,
         delivery: "addressed",
-        endpoint: { kind: "entity", entityId: otherAgent, invocation: "direct" },
+        endpoint: {
+          kind: "entity",
+          entityId: otherAgent,
+          invocation: "direct",
+        },
         metadata: { type: "agent" },
       })
     );
@@ -468,7 +497,11 @@ describe("ChannelDeliveryProjection", () => {
             participantId,
             revision: 1,
             delivery: "all",
-            endpoint: { kind: "entity", entityId: participantId, invocation: "direct" },
+            endpoint: {
+              kind: "entity",
+              entityId: participantId,
+              invocation: "direct",
+            },
             metadata: { type: "agent", handle: `agent-${index}` },
             applicationConfig: null,
           },

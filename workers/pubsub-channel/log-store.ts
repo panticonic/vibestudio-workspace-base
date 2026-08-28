@@ -9,7 +9,7 @@
  * append txn.
  */
 
-import type { ChannelEvent } from "@workspace/harness";
+import type { ChannelEvent } from "@workspace/pubsub";
 import {
   collectChannelEnvelopePages,
   type ChannelEnvelopePage,
@@ -96,7 +96,11 @@ interface GadChannelEnvelopeView {
   envelopeId: string;
   channelId: string;
   seq: number;
-  from: { id: string; participantId?: string; metadata?: Record<string, unknown> };
+  from: {
+    id: string;
+    participantId?: string;
+    metadata?: Record<string, unknown>;
+  };
   payload: unknown;
   payloadKind?: string;
   metadata?: Record<string, unknown>;
@@ -155,7 +159,9 @@ export class ChannelLog {
 
   async append(input: ChannelAppendInput): Promise<ChannelEvent> {
     const payload = await this.encodePayload(input.payload);
-    const annotations: Record<string, unknown> = { ...(input.annotations ?? {}) };
+    const annotations: Record<string, unknown> = {
+      ...(input.annotations ?? {}),
+    };
     const publicMetadata = publicParticipantMetadata(input.senderMetadata);
     if (publicMetadata !== undefined) annotations["metadata"] = publicMetadata;
     if (input.attachments !== undefined) annotations["attachments"] = input.attachments;
@@ -271,7 +277,10 @@ export class ChannelLog {
 
   /** Hydrated ascending events for deterministic local projection folds. */
   async readEvents(opts: { afterSeq: number; limit?: number }): Promise<ChannelEvent[]> {
-    const rows = await this.read({ afterSeq: opts.afterSeq, limit: opts.limit ?? 500 });
+    const rows = await this.read({
+      afterSeq: opts.afterSeq,
+      limit: opts.limit ?? 500,
+    });
     return Promise.all(rows.map(async (row) => this.eventFromLogEnvelope(await this.hydrate(row))));
   }
 
@@ -426,7 +435,10 @@ export class ChannelLog {
       Date.parse(envelope.publishedAt),
       envelope.attachments as StoredAttachment[] | undefined,
       policyAnnotations((envelope as { annotations?: Record<string, unknown> }).annotations),
-      { contentClass: envelope.contentClass, externalKeys: envelope.externalKeys }
+      {
+        contentClass: envelope.contentClass,
+        externalKeys: envelope.externalKeys,
+      }
     );
   }
 

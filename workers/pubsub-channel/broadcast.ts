@@ -9,7 +9,7 @@
  */
 
 import type { SqlStorage } from "@workspace/runtime/worker";
-import type { ChannelEvent } from "@workspace/harness";
+import type { ChannelEvent } from "@workspace/pubsub";
 import type { BroadcastEnvelope } from "./types.js";
 import type { RpcChannelMessage, RpcSignalMessage } from "@workspace/pubsub";
 
@@ -81,7 +81,13 @@ export function buildChannelEvent(
   senderId: string,
   senderMetadata: Record<string, unknown> | undefined,
   ts: number,
-  attachments?: Array<{ id: string; data: string; mimeType: string; name?: string; size: number }>,
+  attachments?: Array<{
+    id: string;
+    data: string;
+    mimeType: string;
+    name?: string;
+    size: number;
+  }>,
   annotations?: Record<string, unknown>,
   contentIntegrity: {
     contentClass: "internal" | "external";

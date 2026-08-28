@@ -5,7 +5,7 @@
  * Manages connect/disconnect, event loop, roster, reconnect.
  */
 
-import { connectViaRpc } from "@workspace/pubsub";
+import { connectViaRpc, resolveRpcChannelTarget } from "@workspace/pubsub";
 import type {
   PubSubClient,
   RosterUpdate,
@@ -117,17 +117,32 @@ export class ConnectionManager {
     const readyAbort = new AbortController();
     this.connectAbortController = readyAbort;
     let readyTimedOut = false;
-    const readyTimer = setTimeout(() => {
-      readyTimedOut = true;
-      readyAbort.abort();
-    }, CONNECTION_READY_TIMEOUT_MS);
+    let readyTimer: ReturnType<typeof setTimeout> | null = null;
 
     let newClient: PubSubClient<ChatParticipantMetadata> | null = null;
     try {
+      const resolvedChannelTargetId =
+        channelTargetId ??
+        (await resolveRpcChannelTarget({
+          rpc: this.config.rpc,
+          reviewRpc: this.config.rpc,
+          channel: channelId,
+          protocol: this.config.protocol,
+          signal: readyAbort.signal,
+        }));
+      if (this.connectAbortController !== readyAbort) {
+        throw new Error("Connection attempt was superseded");
+      }
+      // The replay deadline begins only after the service is runnable. A human
+      // reviewing a fresh workspace is not a slow or half-open channel.
+      readyTimer = setTimeout(() => {
+        readyTimedOut = true;
+        readyAbort.abort();
+      }, CONNECTION_READY_TIMEOUT_MS);
       newClient = connectViaRpc<ChatParticipantMetadata>({
         rpc: this.config.rpc,
         channel: channelId,
-        ...(channelTargetId ? { channelTargetId } : {}),
+        channelTargetId: resolvedChannelTargetId,
         contextId,
         channelConfig,
         // No asserted HUMAN handle (WP6 §5): the channel stamps human identity
@@ -185,7 +200,10 @@ export class ConnectionManager {
       // the application handler inside the finite delivery RPC above so the
       // durable sender cannot acknowledge an unprojected event.
       if (this.config.deliveryMode !== "resident") {
-        const eventIterator = newClient.events({ includeReplay: true, includeSignals: true });
+        const eventIterator = newClient.events({
+          includeReplay: true,
+          includeSignals: true,
+        });
         let eventLoopRunning = true;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         let eventIteratorRef: AsyncIterableIterator<any> | null = eventIterator;
@@ -195,7 +213,7 @@ export class ConnectionManager {
             for await (const event of eventIterator) {
               if (!eventLoopRunning) break;
               try {
-              await this.callbacks.onEvent?.(event as IncomingEvent);
+                await this.callbacks.onEvent?.(event as IncomingEvent);
               } catch (eventError) {
                 console.error("[ConnectionManager] Event callback error:", eventError);
                 this.callbacks.onError?.(
@@ -264,7 +282,7 @@ export class ConnectionManager {
       await this.disconnect().catch(() => undefined);
       throw error;
     } finally {
-      clearTimeout(readyTimer);
+      if (readyTimer !== null) clearTimeout(readyTimer);
     }
   }
 

@@ -198,6 +198,47 @@ interface ResolvedService {
   targetId?: string;
 }
 
+export interface RpcChannelTargetOptions {
+  /** Transport used for the context-bound service resolution call. */
+  rpc: Pick<RpcConnectOptions["rpc"], "call">;
+  /** Stable host transport that carries workspace review events. */
+  reviewRpc: Pick<RpcConnectOptions["rpc"], "stream">;
+  channel: string;
+  protocol?: string;
+  signal?: AbortSignal;
+}
+
+/**
+ * Resolve the channel service's concrete target without charging time spent in
+ * a human workspace review against channel activation. Callers that impose a
+ * replay deadline can await this boundary first, then start that deadline for
+ * the actual subscription and replay work.
+ */
+export async function resolveRpcChannelTarget({
+  rpc,
+  reviewRpc,
+  channel,
+  protocol = DEFAULT_CHANNEL_SERVICE_PROTOCOL,
+  signal,
+}: RpcChannelTargetOptions): Promise<string> {
+  while (true) {
+    try {
+      const service = await rpc.call<ResolvedService>("main", "workers.resolveService", [
+        protocol,
+        channel,
+      ]);
+      if (service.kind !== "durable-object" || !service.targetId) {
+        throw new Error("Channel service must resolve to a Durable Object service");
+      }
+      return service.targetId;
+    } catch (error) {
+      const review = pendingReviewNotice(error);
+      if (!review) throw error;
+      await waitForApprovalResolution(reviewRpc, review.approvalId, signal);
+    }
+  }
+}
+
 /** Convert wire-format attachments (base64) to client Attachment[] (Uint8Array). */
 function convertWireAttachments(wireAtts: WireAttachment[] | undefined): Attachment[] | undefined {
   if (!wireAtts || wireAtts.length === 0) return undefined;
@@ -302,30 +343,14 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
   let doTargetPromise: Promise<string> | null = opts.channelTargetId
     ? Promise.resolve(opts.channelTargetId)
     : null;
-  const resolveDoTarget = async (signal?: AbortSignal): Promise<string> => {
-    while (true) {
-      try {
-        const service = await sessionTransport().call<ResolvedService>(
-          "main",
-          "workers.resolveService",
-          [protocol, channel]
-        );
-        if (service.kind !== "durable-object" || !service.targetId) {
-          throw new Error("Channel service must resolve to a Durable Object service");
-        }
-        return service.targetId;
-      } catch (error) {
-        // Workspace creation deliberately exposes services before their units
-        // may run, so an initial panel can arrive while the one adoption review
-        // is still open. That is readiness, not a failed connection: keep this
-        // exact subscription attempt pending and resolve it as soon as the
-        // review is answered. Other failures retain their normal error path.
-        const review = pendingReviewNotice(error);
-        if (!review) throw error;
-        await waitForApprovalResolution(rpc, review.approvalId, signal);
-      }
-    }
-  };
+  const resolveDoTarget = (signal?: AbortSignal): Promise<string> =>
+    resolveRpcChannelTarget({
+      rpc: sessionTransport(),
+      reviewRpc: rpc,
+      channel,
+      protocol,
+      signal,
+    });
   const getDoTarget = (signal?: AbortSignal): Promise<string> => {
     if (doTargetPromise) return doTargetPromise;
     const request = resolveDoTarget(signal);
@@ -480,7 +505,9 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
   const MAX_ROSTER_OP_IDS = 1000;
 
   // Method auto-execution
-  const registeredMethods: Record<string, MethodDefinitionLike> = { ...(providedMethods ?? {}) };
+  const registeredMethods: Record<string, MethodDefinitionLike> = {
+    ...(providedMethods ?? {}),
+  };
 
   // Track AbortControllers (+ start time) for methods we're executing, keyed by callId. When a caller
   // cancels, we abort the controller so the handler sees signal.aborted; duplicate durable delivery
@@ -761,7 +788,10 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
         );
       }
       try {
-        msg = { ...msg, payload: await hydrateStoredTransportValue(msg.payload) };
+        msg = {
+          ...msg,
+          payload: await hydrateStoredTransportValue(msg.payload),
+        };
       } catch (error) {
         if (error instanceof Error && /Stored transport blob is missing/.test(error.message)) {
           throw Object.assign(error, { code: "PermanentChannelDelivery" });
@@ -1569,7 +1599,11 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
           event.transportCallId,
           result,
           false,
-          { callerId: event.senderId, turnId: event.turnId, providerClaimGeneration }
+          {
+            callerId: event.senderId,
+            turnId: event.turnId,
+            providerClaimGeneration,
+          }
         );
       }
     } catch (err) {
@@ -1610,9 +1644,13 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
     }
   }
 
-  function toStoredAttachments(
-    attachments: AttachmentInput[]
-  ): Array<{ id: string; data: string; mimeType: string; name?: string; size: number }> {
+  function toStoredAttachments(attachments: AttachmentInput[]): Array<{
+    id: string;
+    data: string;
+    mimeType: string;
+    name?: string;
+    size: number;
+  }> {
     return attachments.map((a, i) => ({
       id: `att_${i}`,
       data: uint8ArrayToBase64(a.data),
@@ -1903,7 +1941,11 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
             contextId: String(opts.contextId ?? ""),
             metadata,
             delivery: "all",
-            endpoint: { kind: "entity", entityId: deliveryId, invocation: "mailbox" },
+            endpoint: {
+              kind: "entity",
+              entityId: deliveryId,
+              invocation: "mailbox",
+            },
             applicationConfig: null,
             replay: replayMode !== "skip",
           });
@@ -1918,7 +1960,9 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
           await applySubscribeAckFallback(result);
           await new Promise<void>((resolve) => {
             if (controller.signal.aborted) return resolve();
-            controller.signal.addEventListener("abort", () => resolve(), { once: true });
+            controller.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            });
           });
           return;
         }
@@ -2022,7 +2066,11 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
           // Replacing the stream generation cancels the exact old resource.
           // The durable replay cursor catches this generation up without a
           // liveness lease, timer, or best-effort unary cleanup call.
-          const resubMeta = { ...subscribeMetadata, sinceId: lastSeenSeq, replay: true };
+          const resubMeta = {
+            ...subscribeMetadata,
+            sinceId: lastSeenSeq,
+            replay: true,
+          };
           await openSubscription(resubMeta, { resetOnAck: true });
           subscribeAckResolve?.();
           subscribeAckResolve = null;
@@ -2178,7 +2226,11 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
       contentType?: string;
       mentions?: string[];
       /** Explicit direction: only the selected participants should respond. */
-      to?: Array<{ kind: "all" | "role" | "participant"; role?: string; participantId?: string }>;
+      to?: Array<{
+        kind: "all" | "role" | "participant";
+        role?: string;
+        participantId?: string;
+      }>;
       metadata?: Record<string, unknown>;
       idempotencyKey?: string;
       /** Salience tier stamped onto the message; absent ⇒ "primary". */
@@ -2355,7 +2407,9 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
           resolve();
         };
         const timer = setTimeout(finish, delayMs);
-        startRecoveryController.signal.addEventListener("abort", finish, { once: true });
+        startRecoveryController.signal.addEventListener("abort", finish, {
+          once: true,
+        });
       });
     };
 
@@ -2544,10 +2598,10 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
         // anchor and closing the response stream.
         if (subscription?.acknowledged) {
           if (opts.deliveryMode === "resident") {
-            const relationship = await callChannel<{ revision: number; active: boolean }>(
-              "relationshipState",
-              pid
-            );
+            const relationship = await callChannel<{
+              revision: number;
+              active: boolean;
+            }>("relationshipState", pid);
             if (!relationship.active) {
               await residentRegistration?.relationshipEnded?.();
               return;
@@ -2648,7 +2702,11 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
   }
 
   async function publishCustomMessage(
-    input: { typeId: string; initialState?: unknown; displayMode?: "inline" | "row" },
+    input: {
+      typeId: string;
+      initialState?: unknown;
+      displayMode?: "inline" | "row";
+    },
     options?: { idempotencyKey?: string }
   ): Promise<{ messageId: string; pubsubId: number | undefined }> {
     const messageId = crypto.randomUUID();

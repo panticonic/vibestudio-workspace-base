@@ -71,6 +71,15 @@ export interface Attachment extends AttachmentInput {
 
 export type LogRootKind = "chat" | "method" | "presence" | "system";
 
+export interface StoredChannelAttachment {
+  id: string;
+  type?: string;
+  data: string;
+  mimeType: string;
+  filename?: string;
+  size: number;
+}
+
 export interface ServerLogEvent<T = unknown> {
   id: number;
   messageId: string;
@@ -84,14 +93,21 @@ export interface ServerLogEvent<T = unknown> {
   externalKeys?: string[];
   contentType?: string;
   ts: number;
-  attachments?: Array<{
-    id: string;
-    type?: string;
-    data: string;
-    mimeType: string;
-    filename?: string;
-    size: number;
-  }>;
+  attachments?: StoredChannelAttachment[];
+  /** Durable envelope annotations used by channel policy folds. */
+  annotations?: Record<string, unknown>;
+}
+
+/** Canonical durable channel event shared by the service and agent runtime. */
+export type ChannelEvent<T = unknown> = ServerLogEvent<T>;
+
+/** Options accepted by the Durable Object channel publication boundary. */
+export interface SendMessageOptions {
+  contentType?: string;
+  senderMetadata?: Record<string, unknown>;
+  replyTo?: string;
+  idempotencyKey?: string;
+  attachments?: Array<{ data: string; mimeType: string }>;
 }
 
 export interface ParticipantSnapshot {
@@ -221,7 +237,7 @@ export class PubSubError extends Error {
   constructor(
     message: string,
     public readonly code: PubSubErrorCode,
-    options?: PubSubErrorOptions
+    options?: PubSubErrorOptions,
   ) {
     super(message);
     this.name = "PubSubError";
@@ -293,7 +309,9 @@ export type ParticipantMetadata = Record<string, unknown>;
 /**
  * A participant in a channel with their metadata.
  */
-export interface Participant<T extends ParticipantMetadata = ParticipantMetadata> {
+export interface Participant<
+  T extends ParticipantMetadata = ParticipantMetadata,
+> {
   /** The client's unique ID */
   id: string;
   /** Canonical identity assigned by the channel. */
@@ -330,7 +348,9 @@ export interface RosterChange {
  * Sent whenever a client joins or leaves the channel.
  * This is idempotent - it contains the complete current state.
  */
-export interface RosterUpdate<T extends ParticipantMetadata = ParticipantMetadata> {
+export interface RosterUpdate<
+  T extends ParticipantMetadata = ParticipantMetadata,
+> {
   /** Map of client ID to participant info (including metadata) */
   participants: Record<string, Participant<T>>;
   /** Timestamp of the update */

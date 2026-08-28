@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ChannelEvent } from "@workspace/harness";
+import type { ChannelEvent } from "@workspace/pubsub";
 import { broadcast, loadBroadcastParticipants } from "./broadcast.js";
 
 function channelEvent(senderId: string): ChannelEvent {

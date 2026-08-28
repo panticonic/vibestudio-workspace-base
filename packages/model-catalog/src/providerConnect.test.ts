@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getBuiltinModels } from "@workspace/pi-ai/providers/all";
+import { getBuiltinModels } from "./builtinCatalog";
 import { ConnectCredentialParamsSchema } from "@vibestudio/service-schemas/credentials";
 import {
   listProviderConnectPresets,
@@ -11,7 +11,9 @@ import { toCredentialConnectRequest } from "./providerConnect";
 
 describe("provider connect presets", () => {
   it("builds a schema-valid OpenAI Codex external-browser credential request", () => {
-    const request = toCredentialConnectRequest("openai-codex", { browser: "external" });
+    const request = toCredentialConnectRequest("openai-codex", {
+      browser: "external",
+    });
 
     expect(request).toMatchObject({
       flow: { type: "oauth2-auth-code-pkce", persistRefreshToken: true },
@@ -35,7 +37,9 @@ describe("provider connect presets", () => {
   });
 
   it("uses the in-process loopback redirect for internal OAuth", () => {
-    const request = toCredentialConnectRequest("openai-codex", { browser: "internal" });
+    const request = toCredentialConnectRequest("openai-codex", {
+      browser: "internal",
+    });
 
     expect(request?.redirect).toMatchObject({
       type: "loopback",
@@ -52,7 +56,9 @@ describe("provider connect presets", () => {
 
   it("keeps every provider preset schema-valid", () => {
     for (const preset of listProviderConnectPresets()) {
-      const request = toCredentialConnectRequest(preset.providerId, { browser: "external" });
+      const request = toCredentialConnectRequest(preset.providerId, {
+        browser: "external",
+      });
       expect(
         ConnectCredentialParamsSchema.safeParse(request),
         `${preset.providerId} connect request`

@@ -160,7 +160,6 @@
     "@workspace/agentic-protocol": "workspace:*",
     "@workspace/runtime": "workspace:*",
     "@workspace/pubsub": "workspace:*",
-    "@workspace/harness": "workspace:*",
     "@workspace/channel-policies": "workspace:*",
     "zod": "^3.25.76"
   },

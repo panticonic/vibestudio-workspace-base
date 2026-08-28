@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Workspace model catalog types, recommendations, and provider connect presets",
   "exports": {
+    "./builtinCatalog": "./src/builtinCatalog.ts",
     "./catalog": "./src/catalog.ts",
     "./localModels": "./src/localModels.ts",
     "./modelRecommendations": "./src/modelRecommendations.ts",
@@ -16,7 +17,7 @@
     "@vibestudio/shared": "workspace:*"
   },
   "devDependencies": {
-    "@workspace/pi-ai": "workspace:*",
+    "@earendil-works/pi-ai": "^0.82.0",
     "vitest": "^3.2.7"
   }
 }

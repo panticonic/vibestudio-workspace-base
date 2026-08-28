@@ -3,12 +3,22 @@
  */
 
 import { z } from "zod";
-import type { ChannelEvent, SendMessageOptions } from "@workspace/harness";
-import type { ChannelReplayEnvelope } from "@workspace/pubsub";
+import type {
+  ChannelEvent,
+  ChannelReplayEnvelope,
+  SendMessageOptions,
+} from "@workspace/pubsub";
 import { MAX_CHANNEL_REPLAY_PAGE_LIMIT } from "@workspace/pubsub";
 
 const METHOD_NAME_PATTERN = /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/;
-const RESERVED_METHOD_NAMES = new Set(["read", "edit", "write", "grep", "find", "ls"]);
+const RESERVED_METHOD_NAMES = new Set([
+  "read",
+  "edit",
+  "write",
+  "grep",
+  "find",
+  "ls",
+]);
 
 /** Subscribe-time participant metadata validation (WS2 §8.4). Unknown metadata
  * keys pass through, while every advertised method uses the canonical shape. */
@@ -25,21 +35,27 @@ export const participantMetadataSchema = z
             name: z
               .string()
               .regex(METHOD_NAME_PATTERN, {
-                message: "method names must match /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/",
+                message:
+                  "method names must match /^[a-zA-Z][a-zA-Z0-9_-]{0,63}$/",
               })
               .refine((name) => !RESERVED_METHOD_NAMES.has(name), {
                 message:
                   "method name collides with a built-in tool name (read, edit, write, grep, find, ls)",
               }),
           })
-          .passthrough()
+          .passthrough(),
       )
       .optional(),
     contextId: z.string().optional(),
     channelConfig: z.record(z.string(), z.unknown()).optional(),
     replay: z.boolean().optional(),
     sinceId: z.number().int().nonnegative().optional(),
-    replayMessageLimit: z.number().int().positive().max(MAX_CHANNEL_REPLAY_PAGE_LIMIT).optional(),
+    replayMessageLimit: z
+      .number()
+      .int()
+      .positive()
+      .max(MAX_CHANNEL_REPLAY_PAGE_LIMIT)
+      .optional(),
   })
   .passthrough();
 

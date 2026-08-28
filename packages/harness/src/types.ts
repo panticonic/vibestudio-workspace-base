@@ -12,54 +12,20 @@ export interface TurnUsage {
   cacheWriteTokens?: number;
 }
 
-/** Attachment on a channel message — canonical format for all transports. */
-export interface Attachment {
-  /** Stable ID for binary frame correlation. */
-  id: string;
-  /** Derived convenience: "image" | "file". */
-  type?: string;
-  /** Base64-encoded content. */
-  data: string;
-  mimeType: string;
-  filename?: string;
-  /** Byte size for binary frame slicing. */
-  size: number;
-}
+import type { StoredChannelAttachment } from "@workspace/pubsub";
 
-/** Channel event — canonical format for all transports (WS + DO). */
-export interface ChannelEvent {
-  id: number;
-  messageId: string;
-  type: string;
-  payload: unknown;
-  senderId: string;
-  senderMetadata?: Record<string, unknown>;
-  /** Content type from the payload (e.g., "typing" for typing indicators). */
-  contentType?: string;
-  ts: number;
-  attachments?: Attachment[];
-  /** Host-attested content provenance from the durable channel envelope. */
-  contentClass?: "internal" | "external";
-  externalKeys?: string[];
-  /** Durable envelope annotations (policy folds — e.g. agentHops). */
-  annotations?: Record<string, unknown>;
-}
-
-/** Options for sending a channel message through a Durable Object-backed service. */
-export interface SendMessageOptions {
-  contentType?: string;
-  senderMetadata?: Record<string, unknown>;
-  replyTo?: string;
-  idempotencyKey?: string;
-  attachments?: Array<{ data: string; mimeType: string }>;
-}
+export type {
+  ChannelEvent,
+  SendMessageOptions,
+  StoredChannelAttachment as Attachment,
+} from "@workspace/pubsub";
 
 /** Input for starting a new agent turn. */
 export interface TurnInput {
   content: string;
   senderId: string;
   context?: string;
-  attachments?: Attachment[];
+  attachments?: StoredChannelAttachment[];
 }
 
 /** Channel participant identity — returned by subscribeChannel(). */

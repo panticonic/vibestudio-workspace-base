@@ -36,35 +36,30 @@ import {
 } from "@workspace/model-catalog/providerConnect";
 import { pickRecommendedModelId } from "@workspace/model-catalog/modelRecommendations";
 import type { LocalModelEntry } from "@workspace/model-catalog/localModels";
+import {
+  getBuiltinModels,
+  getBuiltinProviders,
+  getSupportedThinkingLevels,
+} from "@workspace/model-catalog/builtinCatalog";
 import { findMatchingUrlAudience } from "@vibestudio/credential-client/urlAudience";
 import {
   isStoredCredentialUsable,
   type StoredCredentialSummary,
 } from "@vibestudio/credential-client";
 
-const AGENT_THINKING_LEVELS = new Set<string>(["minimal", "low", "medium", "high", "xhigh", "max"]);
-
-type PiAiModule = {
-  getModels: typeof import("@workspace/pi-ai/providers/all").getBuiltinModels;
-  getProviders: typeof import("@workspace/pi-ai/providers/all").getBuiltinProviders;
-  getSupportedThinkingLevels: typeof import("@workspace/pi-ai").getSupportedThinkingLevels;
-};
-
-async function loadPiAi(): Promise<PiAiModule> {
-  const [{ getSupportedThinkingLevels }, { getBuiltinModels, getBuiltinProviders }] =
-    await Promise.all([
-      import("@workspace/pi-ai"),
-      import("@workspace/pi-ai/providers/all"),
-    ]);
-  return {
-    getModels: getBuiltinModels,
-    getProviders: getBuiltinProviders,
-    getSupportedThinkingLevels,
-  };
-}
+const AGENT_THINKING_LEVELS = new Set<string>([
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+  "max",
+]);
 
 /** llama-server quirks (design §6.4); mirrors agentic-do's model-spec.ts. */
-const LLAMA_SERVER_COMPAT: Record<string, unknown> = { supportsReasoningEffort: false };
+const LLAMA_SERVER_COMPAT: Record<string, unknown> = {
+  supportsReasoningEffort: false,
+};
 
 let cachedCatalog: Promise<ModelCatalog> | null = null;
 
@@ -89,36 +84,40 @@ function providerLabel(providerId: string): string {
 /** Static pi-ai registry projection. Availability here is a placeholder —
  *  the snapshot overlay (applyCloudAvailability) is authoritative. */
 export async function buildModelCatalog(): Promise<ModelCatalog> {
-  const { getModels, getProviders, getSupportedThinkingLevels } = await loadPiAi();
-  const providerIds = getProviders();
+  const providerIds = getBuiltinProviders();
   const providers: ModelCatalogProvider[] = [];
   const models: ModelCatalogEntry[] = [];
   const recommendedRefs = new Set<string>();
 
   for (const providerId of providerIds) {
-    const provModels = getModels(providerId);
+    const provModels = getBuiltinModels(providerId);
     const recommendedId = pickRecommendedModelId(providerId, provModels);
     if (recommendedId) recommendedRefs.add(`${providerId}:${recommendedId}`);
   }
 
   for (const providerId of providerIds) {
-    const provModels = getModels(providerId);
-    const baseUrls = Array.from(new Set(provModels.map((model) => model.baseUrl)));
+    const provModels = getBuiltinModels(providerId);
+    const baseUrls = Array.from(
+      new Set(provModels.map((model) => model.baseUrl)),
+    );
     const recommendedModelId = pickRecommendedModelId(providerId, provModels);
     providers.push({
       id: providerId,
       label: providerLabel(providerId),
       baseUrls,
-      recommendedModelRef: recommendedModelId ? `${providerId}:${recommendedModelId}` : null,
+      recommendedModelRef: recommendedModelId
+        ? `${providerId}:${recommendedModelId}`
+        : null,
       connectable:
-        providerIsConnectable(providerId) && baseUrls.some((url) => !isTemplatedBaseUrl(url)),
+        providerIsConnectable(providerId) &&
+        baseUrls.some((url) => !isTemplatedBaseUrl(url)),
     });
 
     for (const model of provModels) {
       const ref = `${providerId}:${model.id}`;
       const thinkingLevels = model.reasoning
         ? (getSupportedThinkingLevels(model).filter((level) =>
-            AGENT_THINKING_LEVELS.has(level)
+            AGENT_THINKING_LEVELS.has(level),
           ) as AgentThinkingLevel[])
         : [];
       const connectable = modelIsConnectable(providerId, model.baseUrl);
@@ -150,7 +149,9 @@ export async function buildModelCatalog(): Promise<ModelCatalog> {
   return { providers, models };
 }
 
-export function localEntryToCatalogEntry(entry: LocalModelEntry): ModelCatalogEntry {
+export function localEntryToCatalogEntry(
+  entry: LocalModelEntry,
+): ModelCatalogEntry {
   return {
     ref: `${LOCAL_PROVIDER_ID}:${entry.slug}`,
     id: entry.slug,
@@ -206,14 +207,17 @@ function localAvailability(entry: LocalModelEntry): ModelAvailability {
         totalBytes: entry.download?.totalBytes ?? null,
       };
     case "error":
-      return { state: "error", message: entry.errorMessage ?? "local server error" };
+      return {
+        state: "error",
+        message: entry.errorMessage ?? "local server error",
+      };
   }
 }
 
 export function applyCloudAvailability(
   entry: ModelCatalogEntry,
   credentials: readonly StoredCredentialSummary[],
-  executionMode: "provider-credentials" | "deterministic-test"
+  executionMode: "provider-credentials" | "deterministic-test",
 ): ModelCatalogEntry {
   if (entry.auth !== "url-bound") return entry;
   if (executionMode === "deterministic-test") {
@@ -227,14 +231,18 @@ export function applyCloudAvailability(
   // or carry persisted material that can renew it.
   const matching = credentials.filter((credential) => {
     try {
-      return findMatchingUrlAudience(entry.baseUrl, credential.audience) !== null;
+      return (
+        findMatchingUrlAudience(entry.baseUrl, credential.audience) !== null
+      );
     } catch {
       return false;
     }
   });
   const matchedUsable = matching.some(isStoredCredentialUsable);
   const matchedExpired = matching.some(
-    (credential) => credential.lifecycle.state === "expired" && !credential.lifecycle.canRefresh
+    (credential) =>
+      credential.lifecycle.state === "expired" &&
+      !credential.lifecycle.canRefresh,
   );
   const availability: ModelAvailability = matchedUsable
     ? { state: "ready", detail: "credentialed" }
@@ -253,11 +261,14 @@ export function pickFallbackModel(catalog: ModelCatalog): {
   ref: string;
   reason?: "missing" | "unavailable";
 } {
-  const byRef = (ref: string) => catalog.models.find((model) => model.ref === ref);
+  const byRef = (ref: string) =>
+    catalog.models.find((model) => model.ref === ref);
   const preferred = byRef(DEFAULT_AGENT_MODEL_REF);
   const preferredRef = preferred?.ref;
   if (preferred && isModelUsable(preferred)) return { ref: preferred.ref };
-  const recommended = catalog.models.find((model) => model.recommended && isModelUsable(model));
+  const recommended = catalog.models.find(
+    (model) => model.recommended && isModelUsable(model),
+  );
   if (recommended) return { ref: recommended.ref };
   // Prefer the local floor once the user has explicitly installed it.
   const localFloor = byRef(LOCAL_FALLBACK_MODEL_REF);
@@ -321,7 +332,9 @@ export class ModelSettingsDO extends DurableObjectBase {
     return {
       defaultModel: settings.defaultModel,
       models: uniqueRefs.map((ref) => {
-        const model = settings.catalog.models.find((entry) => entry.ref === ref);
+        const model = settings.catalog.models.find(
+          (entry) => entry.ref === ref,
+        );
         return {
           ref,
           availability: model?.availability ?? {
@@ -339,7 +352,9 @@ export class ModelSettingsDO extends DurableObjectBase {
     tier: "open",
     sensitivity: "write",
   })
-  async setDefaultAgentConfig(input: DefaultAgentConfig): Promise<ModelSettingsSnapshot> {
+  async setDefaultAgentConfig(
+    input: DefaultAgentConfig,
+  ): Promise<ModelSettingsSnapshot> {
     const requested = parseDefaultAgentConfig(input, true);
     const catalog = await this.assembleCatalog();
     const model = catalog.models.find((entry) => entry.ref === requested.model);
@@ -348,11 +363,20 @@ export class ModelSettingsDO extends DurableObjectBase {
     }
     const config: DefaultAgentConfig = {
       model: model.ref,
-      ...(requested.thinkingLevel ? { thinkingLevel: requested.thinkingLevel } : {}),
-      ...(requested.fastMode !== undefined ? { fastMode: requested.fastMode } : {}),
-      ...(requested.approvalLevel !== undefined ? { approvalLevel: requested.approvalLevel } : {}),
+      ...(requested.thinkingLevel
+        ? { thinkingLevel: requested.thinkingLevel }
+        : {}),
+      ...(requested.fastMode !== undefined
+        ? { fastMode: requested.fastMode }
+        : {}),
+      ...(requested.approvalLevel !== undefined
+        ? { approvalLevel: requested.approvalLevel }
+        : {}),
     };
-    await this.setWorkspaceConfigField(WORKSPACE_DEFAULT_AGENT_CONFIG_FIELD, config);
+    await this.setWorkspaceConfigField(
+      WORKSPACE_DEFAULT_AGENT_CONFIG_FIELD,
+      config,
+    );
     return {
       catalog,
       defaultModel: model.ref,
@@ -378,7 +402,9 @@ export class ModelSettingsDO extends DurableObjectBase {
         ? ("deterministic-test" as const)
         : ("provider-credentials" as const);
     const models = [
-      ...base.models.map((entry) => applyCloudAvailability(entry, credentials, executionMode)),
+      ...base.models.map((entry) =>
+        applyCloudAvailability(entry, credentials, executionMode),
+      ),
       ...localEntries.map(localEntryToCatalogEntry),
     ];
     const recommendedLocalModelRef = localEntries.some(
@@ -412,7 +438,7 @@ export class ModelSettingsDO extends DurableObjectBase {
       const credentials = await this.rpc.call<StoredCredentialSummary[]>(
         "main",
         "credentials.listStoredCredentials",
-        []
+        [],
       );
       return Array.isArray(credentials) ? credentials : [];
     } catch (err) {
@@ -424,11 +450,11 @@ export class ModelSettingsDO extends DurableObjectBase {
   /** Live local-models extension entries. Absent extension ⇒ no local models. */
   protected async fetchLocalModels(): Promise<LocalModelEntry[]> {
     try {
-      const entries = await this.rpc.call<LocalModelEntry[]>("main", "extensions.invoke", [
-        LOCAL_MODELS_EXTENSION_ID,
-        "listModels",
-        [],
-      ]);
+      const entries = await this.rpc.call<LocalModelEntry[]>(
+        "main",
+        "extensions.invoke",
+        [LOCAL_MODELS_EXTENSION_ID, "listModels", []],
+      );
       return Array.isArray(entries) ? entries : [];
     } catch {
       return [];
@@ -439,16 +465,27 @@ export class ModelSettingsDO extends DurableObjectBase {
     return this.rpc.call<WorkspaceConfig>("main", "workspace.getConfig", []);
   }
 
-  protected setWorkspaceConfigField(key: string, value: unknown): Promise<void> {
-    return this.rpc.call<void>("main", "workspace.setConfigField", [key, value]);
+  protected setWorkspaceConfigField(
+    key: string,
+    value: unknown,
+  ): Promise<void> {
+    return this.rpc.call<void>("main", "workspace.setConfigField", [
+      key,
+      value,
+    ]);
   }
 
-  private resolveSettings(catalog: ModelCatalog, config: WorkspaceConfig): ModelSettingsSnapshot {
+  private resolveSettings(
+    catalog: ModelCatalog,
+    config: WorkspaceConfig,
+  ): ModelSettingsSnapshot {
     const stored = parseDefaultAgentConfig(config.defaultAgentConfig);
     const behavior = {
       ...(stored.thinkingLevel ? { thinkingLevel: stored.thinkingLevel } : {}),
       ...(stored.fastMode !== undefined ? { fastMode: stored.fastMode } : {}),
-      ...(stored.approvalLevel !== undefined ? { approvalLevel: stored.approvalLevel } : {}),
+      ...(stored.approvalLevel !== undefined
+        ? { approvalLevel: stored.approvalLevel }
+        : {}),
     };
     const storedEntry = stored.model
       ? catalog.models.find((model) => model.ref === stored.model)
@@ -484,7 +521,7 @@ export class ModelSettingsDO extends DurableObjectBase {
 /** Parse the one current default-agent configuration shape. */
 function parseDefaultAgentConfig(
   value: unknown,
-  required = false
+  required = false,
 ): {
   model: string | null;
   thinkingLevel?: AgentThinkingLevel;
@@ -504,10 +541,12 @@ function parseDefaultAgentConfig(
       key !== "model" &&
       key !== "thinkingLevel" &&
       key !== "fastMode" &&
-      key !== "approvalLevel"
+      key !== "approvalLevel",
   );
   if (unknownKeys.length > 0) {
-    throw new Error(`defaultAgentConfig has unknown field(s): ${unknownKeys.join(", ")}`);
+    throw new Error(
+      `defaultAgentConfig has unknown field(s): ${unknownKeys.join(", ")}`,
+    );
   }
   const rawModel = v["model"];
   if (typeof rawModel !== "string" || rawModel.trim().length === 0) {
@@ -515,17 +554,31 @@ function parseDefaultAgentConfig(
   }
   const model = rawModel.trim();
   const rawThinking = v["thinkingLevel"];
-  if (rawThinking !== undefined && !AGENT_THINKING_LEVELS.has(rawThinking as string)) {
-    throw new Error(`Invalid defaultAgentConfig.thinkingLevel: ${String(rawThinking)}`);
+  if (
+    rawThinking !== undefined &&
+    !AGENT_THINKING_LEVELS.has(rawThinking as string)
+  ) {
+    throw new Error(
+      `Invalid defaultAgentConfig.thinkingLevel: ${String(rawThinking)}`,
+    );
   }
   const thinkingLevel = rawThinking as AgentThinkingLevel | undefined;
   const rawFastMode = v["fastMode"];
   if (rawFastMode !== undefined && typeof rawFastMode !== "boolean") {
-    throw new Error(`Invalid defaultAgentConfig.fastMode: ${String(rawFastMode)}`);
+    throw new Error(
+      `Invalid defaultAgentConfig.fastMode: ${String(rawFastMode)}`,
+    );
   }
   const rawApproval = v["approvalLevel"];
-  if (rawApproval !== undefined && rawApproval !== 0 && rawApproval !== 1 && rawApproval !== 2) {
-    throw new Error(`Invalid defaultAgentConfig.approvalLevel: ${String(rawApproval)}`);
+  if (
+    rawApproval !== undefined &&
+    rawApproval !== 0 &&
+    rawApproval !== 1 &&
+    rawApproval !== 2
+  ) {
+    throw new Error(
+      `Invalid defaultAgentConfig.approvalLevel: ${String(rawApproval)}`,
+    );
   }
   const approvalLevel = rawApproval as 0 | 1 | 2 | undefined;
   return {
@@ -540,7 +593,7 @@ export default {
   async fetch() {
     return new Response(
       "Model Settings service.\nMethods: listCatalog, getSettings, getDefaultModel, inspectModels, setDefaultAgentConfig.\n",
-      { headers: { "Content-Type": "text/plain" } }
+      { headers: { "Content-Type": "text/plain" } },
     );
   },
 };
