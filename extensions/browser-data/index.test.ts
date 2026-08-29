@@ -195,14 +195,16 @@ function makeContext(callerKind: string | null = "shell", callerId = "shell") {
       method: string,
       ...args: unknown[]
     ): Promise<unknown> => {
-      if (method === "browserEnvironment.getImportHost") {
-        return {
-          hostId: "server:workspace-1",
-          displayName: "Server",
-          platform: "linux",
-          location: "server",
-          connected: true,
-        };
+      if (method === "browserEnvironment.listImportHosts") {
+        return [
+          {
+            hostId: "server:workspace-1",
+            displayName: "Server",
+            platform: "linux",
+            location: "server",
+            connected: true,
+          },
+        ];
       }
       if (method === "addBookmarksBatch") return 1;
       if (method === "addBookmark") return 42;
@@ -653,14 +655,16 @@ describe("@workspace-extensions/browser-data", () => {
     const { ctx, rpcCall } = makeContext();
     rpcCall.mockImplementation(
       async (_targetId: string, method: string, ...args: unknown[]) => {
-        if (method === "browserEnvironment.getImportHost") {
-          return {
-            hostId: "desktop-1",
-            displayName: "This device",
-            platform: "linux",
-            location: "desktop",
-            connected: true,
-          };
+        if (method === "browserEnvironment.listImportHosts") {
+          return [
+            {
+              hostId: "desktop-1",
+              displayName: "This device",
+              platform: "linux",
+              location: "device",
+              connected: true,
+            },
+          ];
         }
         if (method === "browserEnvironment.previewSensitiveImport") {
           return {
@@ -682,7 +686,7 @@ describe("@workspace-extensions/browser-data", () => {
         }
         if (method === "browserEnvironment.startSensitiveImport") {
           return {
-            operationId: args[2],
+            operationId: args[3],
             state: "running",
             counts: [
               {
@@ -733,6 +737,7 @@ describe("@workspace-extensions/browser-data", () => {
     expect(rpcCall).toHaveBeenCalledWith(
       "main",
       "browserEnvironment.startSensitiveImport",
+      "desktop-1",
       "opaque-chrome",
       ["cookies"],
       "sensitive-op-1",

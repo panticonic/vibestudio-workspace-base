@@ -24,7 +24,7 @@ const desktopSelection = {
     hostId: "desktop-1",
     displayName: "This device",
     platform: "linux" as const,
-    location: "desktop" as const,
+    location: "device" as const,
     connected: true,
   },
   source: {

@@ -49,7 +49,7 @@
           "evidence": "bounded-dynamic"
         },
         {
-          "capability": "service:browserEnvironment.getImportHost",
+          "capability": "service:browserEnvironment.listImportHosts",
           "resource": {
             "kind": "prefix",
             "prefix": ""

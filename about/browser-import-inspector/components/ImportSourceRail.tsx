@@ -24,7 +24,7 @@ export function ImportSourceRail(props: {
   const availableHosts = hosts.state.data ?? [];
   const preferredHost = useMemo(
     () =>
-      availableHosts.find((host) => host.location === "desktop" && host.connected) ??
+      availableHosts.find((host) => host.location === "device" && host.connected) ??
       availableHosts.find((host) => host.connected) ??
       availableHosts[0],
     [availableHosts]
@@ -99,7 +99,7 @@ export function ImportSourceRail(props: {
             <Select.Content>
               {availableHosts.map((host) => (
                 <Select.Item key={host.hostId} value={host.hostId} disabled={!host.connected}>
-                  {host.displayName} · {host.location === "desktop" ? "This device" : "Server"}
+                  {host.displayName} · {host.location === "device" ? "This device" : "Server"}
                 </Select.Item>
               ))}
             </Select.Content>
@@ -150,7 +150,7 @@ export function ImportSourceRail(props: {
                 >
                   {host.displayName}
                   <Badge size="1" color={host.connected ? "green" : "gray"}>
-                    {host.location === "desktop" ? "This device" : "Server"}
+                    {host.location === "device" ? "This device" : "Server"}
                   </Badge>
                 </Button>
                 {active && (

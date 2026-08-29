@@ -140,9 +140,10 @@ export async function activate(ctx: ExtensionContextLike) {
     Promise<{ identity: BrowserEnvironmentIdentity; dataTargetId: string }>
   >();
   const targetsByEnvironment = new Map<string, string>();
-  const importHosts = new Map<string, { hostId: string; unregister: () => void }>();
+  const importHosts = new Map<string, Map<string, { unregister: () => void }>>();
   const hostLabels = new Map<string, string>();
   const sourceBrowsers = new Map<string, string>();
+  const sourceKey = (hostId: string, sourceId: string) => `${hostId.length}:${hostId}${sourceId}`;
 
   const currentIdentity = async (): Promise<{
     identity: BrowserEnvironmentIdentity;
@@ -236,7 +237,7 @@ export async function activate(ctx: ExtensionContextLike) {
         hostId: job.hostId,
         hostLabel: hostLabels.get(job.hostId) ?? "Browser host",
         sourceId: job.sourceId,
-        browser: sourceBrowsers.get(job.sourceId) ?? "unknown",
+        browser: sourceBrowsers.get(sourceKey(job.hostId, job.sourceId)) ?? "unknown",
         phase: job.phase,
         startedAt: job.startedAt,
         updatedAt: job.updatedAt,
@@ -259,40 +260,47 @@ export async function activate(ctx: ExtensionContextLike) {
     });
   });
 
-  const ensureImportHost = async (
+  const ensureImportHosts = async (
     identity: BrowserEnvironmentIdentity
-  ): Promise<ImportHostSummary | null> => {
+  ): Promise<ImportHostSummary[]> => {
     try {
-      const summary = await ctx.rpc.call<ImportHostSummary>(
+      const summaries = await ctx.rpc.call<ImportHostSummary[]>(
         "main",
-        "browserEnvironment.getImportHost"
+        "browserEnvironment.listImportHosts"
       );
-      const current = importHosts.get(identity.environmentKey);
-      if (current?.hostId === summary.hostId) return summary;
-      current?.unregister();
-      const remoteProvider = new RemoteBrowserImportProvider((method, ...args) =>
-        ctx.rpc.call("main", `browserEnvironment.${method}`, ...args)
-      );
-      const unregister = coordinator.registerHost({
-        ...summary,
-        ownerUserId: identity.ownerUserId,
-        provider: remoteProvider,
-      });
-      importHosts.set(identity.environmentKey, {
-        hostId: summary.hostId,
-        unregister,
-      });
-      hostLabels.set(summary.hostId, summary.displayName);
-      return summary;
+      const current = importHosts.get(identity.environmentKey) ?? new Map();
+      const available = new Set(summaries.map((summary) => summary.hostId));
+      for (const [hostId, registration] of current) {
+        if (!available.has(hostId)) {
+          registration.unregister();
+          current.delete(hostId);
+        }
+      }
+      for (const summary of summaries) {
+        if (!current.has(summary.hostId)) {
+          const remoteProvider = new RemoteBrowserImportProvider(
+            summary.hostId,
+            (method, ...args) => ctx.rpc.call("main", `browserEnvironment.${method}`, ...args)
+          );
+          current.set(summary.hostId, {
+            unregister: coordinator.registerHost({
+              ...summary,
+              ownerUserId: identity.ownerUserId,
+              provider: remoteProvider,
+            }),
+          });
+        }
+        hostLabels.set(summary.hostId, summary.displayName);
+      }
+      importHosts.set(identity.environmentKey, current);
+      return summaries;
     } catch {
-      importHosts.get(identity.environmentKey)?.unregister();
+      for (const registration of importHosts.get(identity.environmentKey)?.values() ?? []) {
+        registration.unregister();
+      }
       importHosts.delete(identity.environmentKey);
-      return null;
+      return [];
     }
-  };
-
-  const ensureImportHosts = async (identity: BrowserEnvironmentIdentity): Promise<void> => {
-    await ensureImportHost(identity);
   };
 
   const guarded =
@@ -344,7 +352,7 @@ export async function activate(ctx: ExtensionContextLike) {
         withAvailableSensitiveImportPath(source, host !== undefined)
       );
       for (const source of availableSources) {
-        sourceBrowsers.set(source.sourceId, source.browser);
+        sourceBrowsers.set(sourceKey(hostId, source.sourceId), source.browser);
       }
       return availableSources;
     }),
@@ -358,12 +366,13 @@ export async function activate(ctx: ExtensionContextLike) {
       "previewSensitiveImport",
       async (request: SensitiveBrowserImportSelection) => {
         const { identity } = await currentIdentity();
-        const host = await ensureImportHost(identity);
-        assertSelectedImportHost(host, request.hostId);
+        const hosts = await ensureImportHosts(identity);
+        assertSelectedImportHost(hosts, request.hostId);
         assertSensitiveImportSelection(request);
         return ctx.rpc.call(
           "main",
           "browserEnvironment.previewSensitiveImport",
+          request.hostId,
           request.sourceId,
           request.dataTypes
         );
@@ -384,12 +393,13 @@ export async function activate(ctx: ExtensionContextLike) {
       "startSensitiveImport",
       async (request: SensitiveBrowserImportRequest): Promise<SensitiveBrowserImportStatus> => {
         const { identity } = await currentIdentity();
-        const host = await ensureImportHost(identity);
-        assertSelectedImportHost(host, request.hostId);
+        const hosts = await ensureImportHosts(identity);
+        assertSelectedImportHost(hosts, request.hostId);
         assertSensitiveImportRequest(request);
         return ctx.rpc.call<SensitiveBrowserImportStatus>(
           "main",
           "browserEnvironment.startSensitiveImport",
+          request.hostId,
           request.sourceId,
           request.dataTypes,
           request.operationId
@@ -400,7 +410,7 @@ export async function activate(ctx: ExtensionContextLike) {
       "observeSensitiveImport",
       async (operationId: string): Promise<SensitiveBrowserImportStatus> => {
         const { identity } = await currentIdentity();
-        await ensureImportHost(identity);
+        await ensureImportHosts(identity);
         assertSensitiveImportOperationId(operationId);
         return ctx.rpc.call("main", "browserEnvironment.observeSensitiveImport", operationId);
       }
@@ -409,7 +419,7 @@ export async function activate(ctx: ExtensionContextLike) {
       "cancelSensitiveImport",
       async (operationId: string): Promise<SensitiveBrowserImportStatus> => {
         const { identity } = await currentIdentity();
-        await ensureImportHost(identity);
+        await ensureImportHosts(identity);
         assertSensitiveImportOperationId(operationId);
         return ctx.rpc.call("main", "browserEnvironment.cancelSensitiveImport", operationId);
       }
@@ -589,11 +599,8 @@ function assertSensitiveImportOperationId(operationId: string): void {
   if (!operationId.trim()) throw new Error("Sensitive import operation id is required");
 }
 
-function assertSelectedImportHost(
-  host: ImportHostSummary | null,
-  requestedHostId: string
-): asserts host is ImportHostSummary {
-  if (!host || host.hostId !== requestedHostId) {
+function assertSelectedImportHost(hosts: ImportHostSummary[], requestedHostId: string): void {
+  if (!hosts.some((host) => host.hostId === requestedHostId && host.connected)) {
     throw new Error("Sensitive browser operations require the selected protected import host");
   }
 }
