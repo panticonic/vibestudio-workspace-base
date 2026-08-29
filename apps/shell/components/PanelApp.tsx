@@ -17,6 +17,7 @@ import { ConsentApprovalBar, APPROVAL_OVERLAY_HOST_ID } from "./ConsentApprovalB
 import { QuickfireOwner, QUICKFIRE_OVERLAY_HOST_ID } from "./QuickfireOwner";
 import type { PanelChromeState } from "@vibestudio/shared/panelChrome";
 import type { FocusedPaneChromeState, PaneChromeCommand } from "./paneChrome";
+import { NextPanelBuildWarmup } from "./NextPanelBuildWarmup";
 
 export function PanelApp() {
   return (
@@ -236,6 +237,7 @@ function PanelAppContent() {
 
   return (
     <Flex direction="column" height="100dvh" style={{ overflow: "hidden" }}>
+      <NextPanelBuildWarmup />
       <TitleBar
         title={currentTitle}
         chromeState={chromeState}

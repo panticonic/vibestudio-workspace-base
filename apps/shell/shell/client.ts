@@ -1417,6 +1417,7 @@ export const supervisedUnits = {
 };
 export const buildUnits = {
   list: () => buildClient.listUnits(),
+  warmPanel: (source: string, ref?: string) => buildClient.getPanelMetadata(source, ref),
 };
 // =============================================================================
 // Shell Approval Service (consent approval queue)

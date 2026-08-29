@@ -14,6 +14,7 @@ import { ConnectionSettingsDialog } from "./ConnectionSettingsDialog";
 import { PanelApp } from "./PanelApp";
 import { WorkspaceChooser } from "./WorkspaceChooser";
 import { WorkspaceWizard } from "./WorkspaceWizard";
+import { WorkspaceConnectionOverlay } from "./WorkspaceConnectionOverlay";
 
 /**
  * Main mode: the normal desktop startup surface with the panel app and its
@@ -88,6 +89,9 @@ export default function MainMode() {
         <WorkspaceChooser />
       </AppDialog>
 
+      <WorkspaceConnectionOverlay
+        onOpenSettings={() => setSettingsSection("connection")}
+      />
       <ConnectionSettingsDialog
         section={settingsSection}
         onSectionChange={setSettingsSection}
