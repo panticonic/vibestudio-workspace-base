@@ -1,6 +1,7 @@
 // Builtin semantic-authority tests.
 import { describe, expect, it } from "vitest";
 import {
+  buildWorktreeManifest,
   canonicalSnapshotDigest,
   sha256Hex,
 } from "@vibestudio/content-addressing";
@@ -71,6 +72,9 @@ describe("WorkspaceSourceProviderV1", () => {
         mode: 0o100644,
       },
     ]);
+    const contentRoot = buildWorktreeManifest([
+      { path: "vibestudio.yml", contentHash, mode: 0o100644 },
+    ]).stateHash as `state:${string}`;
     const input: InitializeExactWorkspaceSnapshotInput = {
       commandId: "initialize:one",
       pin: {
@@ -84,6 +88,7 @@ describe("WorkspaceSourceProviderV1", () => {
           repoPath: "meta",
           subdir: "meta",
           snapshot: repositorySnapshot,
+          contentRoot,
           files: [{ path: "vibestudio.yml", contentHash, mode: 0o644 }],
         },
         {
@@ -97,6 +102,9 @@ describe("WorkspaceSourceProviderV1", () => {
               mode: 0o100644,
             },
           ]),
+          contentRoot: buildWorktreeManifest([
+            { path: "index.tsx", contentHash, mode: 0o100644 },
+          ]).stateHash as `state:${string}`,
           files: [{ path: "index.tsx", contentHash, mode: 0o644 }],
         },
       ],
@@ -159,6 +167,36 @@ describe("WorkspaceSourceProviderV1", () => {
       ok: true,
       protocol: "vibestudio.workspace-source.v1",
     });
+
+    const ensured = (await instance.vcsEnsureContext({
+      contextId: "context-after-initialization",
+      commandId: "ensure:after-initialization",
+      ingress: {
+        causalParent: null,
+        contextIntegrity: { class: "internal", externalKeys: [] },
+      },
+    })) as {
+      kind: string;
+      effects?: Array<{
+        payload: { repositories?: Array<{ source?: unknown }> };
+      }>;
+    };
+    expect(ensured.kind).toBe("effects-pending");
+    expect(ensured.effects?.[0]?.payload.repositories).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: { kind: "content-root", contentRoot },
+        }),
+        expect.objectContaining({
+          source: {
+            kind: "content-root",
+            contentRoot: buildWorktreeManifest([
+              { path: "index.tsx", contentHash, mode: 0o100644 },
+            ]).stateHash,
+          },
+        }),
+      ]),
+    );
   });
 
   it("rejects divergent command reuse before changing semantic state", async () => {
@@ -179,6 +217,7 @@ describe("WorkspaceSourceProviderV1", () => {
           repoPath: "meta",
           subdir: "meta",
           snapshot: `v1-sha256:${"6".repeat(64)}`,
+          contentRoot: buildWorktreeManifest([]).stateHash as `state:${string}`,
           files: [],
         },
       ],

@@ -1326,6 +1326,75 @@ export class SemanticVcsStore {
     return root;
   }
 
+  /**
+   * Record roots authenticated by the exact workspace-source import. Unlike a
+   * later materialization receipt, these trees already exist because the host
+   * published the reconstructable root-template closure before invoking the
+   * semantic initializer.
+   */
+  recordInitializedRepositoryContentRoots(input: {
+    workspaceFactRootId: string;
+    provenanceId: string;
+    repositories: readonly { repoPath: string; contentRoot: string }[];
+  }): void {
+    if (!input.provenanceId) {
+      throw new SemanticVcsError("IntegrityFailure", "Initialized content roots lack provenance");
+    }
+    const members = this.facts
+      .entries(input.workspaceFactRootId, "repository")
+      .map(({ key }) => this.facts.member(input.workspaceFactRootId, key))
+      .filter(
+        (member): member is Extract<NonNullable<typeof member>, { presence: "present" }> =>
+          member?.presence === "present"
+      );
+    const byPath = new Map(members.map((member) => [member.repoPath, member]));
+    if (byPath.size !== members.length || input.repositories.length !== members.length) {
+      throw new SemanticVcsError(
+        "IntegrityFailure",
+        "Initialized content roots do not cover the exact workspace repository set"
+      );
+    }
+    const seen = new Set<string>();
+    for (const repository of input.repositories) {
+      if (seen.has(repository.repoPath) || !/^state:[0-9a-f]{64}$/.test(repository.contentRoot)) {
+        throw new SemanticVcsError(
+          "IntegrityFailure",
+          `Initialized content root is invalid for ${repository.repoPath}`
+        );
+      }
+      seen.add(repository.repoPath);
+      const member = byPath.get(repository.repoPath);
+      if (!member) {
+        throw new SemanticVcsError(
+          "IntegrityFailure",
+          `Initialized content root names absent repository ${repository.repoPath}`
+        );
+      }
+      const existing = this.materializedRepositoryContentRoot(
+        input.workspaceFactRootId,
+        member.repositoryId
+      );
+      if (existing !== null) {
+        if (existing !== repository.contentRoot) {
+          throw new SemanticVcsError(
+            "IntegrityFailure",
+            `Initialized repository ${repository.repoPath} changed its immutable content root`
+          );
+        }
+        continue;
+      }
+      this.sql.exec(
+        `INSERT INTO gad_materialized_repository_states
+           (workspace_fact_root_id, repository_id, content_root, receipt_effect_id)
+         VALUES (?, ?, ?, ?)`,
+        input.workspaceFactRootId,
+        member.repositoryId,
+        repository.contentRoot,
+        input.provenanceId
+      );
+    }
+  }
+
   acknowledgeEffect(input: {
     effectId: string;
     payloadDigest: string;

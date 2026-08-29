@@ -136,6 +136,7 @@ import {
   type LogEnvelopeSemanticInput,
 } from "@workspace/agentic-protocol";
 import {
+  buildWorktreeManifest,
   sha256HexSyncText,
   sortForCanonicalJson,
   canonicalJson,
@@ -1468,6 +1469,21 @@ export class GadWorkspaceDO extends DurableObjectBase {
           );
         }
         repoPaths.add(repository.repoPath);
+        const contentRoot = buildWorktreeManifest(
+          repository.files.map((file) => ({
+            path: file.path,
+            contentHash: file.contentHash,
+            mode:
+              file.mode === 0o755 || file.mode === 0o100755
+                ? 0o100755
+                : 0o100644,
+          })),
+        ).stateHash;
+        if (contentRoot !== repository.contentRoot) {
+          throw new Error(
+            `Workspace source content root for ${repository.repoPath} does not match its exact snapshot`,
+          );
+        }
       }
       if (!repoPaths.has("meta")) {
         throw new Error("Workspace source snapshot has no meta repository");
@@ -1585,6 +1601,15 @@ export class GadWorkspaceDO extends DurableObjectBase {
           )
           .toArray()[0] as JsonRecord | undefined;
         if (command?.["status"] === "complete") {
+          const context = store.contextRequired(contextId);
+          store.recordInitializedRepositoryContentRoots({
+            workspaceFactRootId: context.committed.workspaceFactRootId,
+            provenanceId: `workspace-source:${input.commandId}`,
+            repositories: input.repositories.map((repository) => ({
+              repoPath: repository.repoPath,
+              contentRoot: repository.contentRoot,
+            })),
+          });
           this.sql.exec(
             `UPDATE workspace_source_initializations
                 SET phase = 'publish', updated_at = ? WHERE command_id = ?`,
