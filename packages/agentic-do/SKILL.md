@@ -5,6 +5,9 @@ description: Develop @workspace/agentic-do agent runtime behavior, including mod
 
 # Agentic DO
 
+For a change spanning the chat panel, default agent, channel, or shared event
+contract, read [agentic development](../../skills/agentic-development/SKILL.md).
+
 Read the local reference that matches the task before editing:
 
 - [Agent tuning](references/agent-tuning.md) for default model/provider changes,

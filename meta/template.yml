@@ -74,6 +74,7 @@ template:
     - panels/tour
     - projects/default
     - skills/agents
+    - skills/agentic-development
     - skills/api-integrations
     - skills/appdev
     - skills/architecture

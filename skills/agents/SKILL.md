@@ -5,6 +5,10 @@ description: Add or remove a worker-backed agent from a chat channel.
 
 # Adding an agent to a channel
 
+This skill operates existing agent implementations. To author or change the
+chat panel, agent worker/runtime, channel, or protocol, read
+[agentic development](../agentic-development/SKILL.md).
+
 An agent is a workspace worker DO (e.g. `workers/explorer-agent` /
 `ExplorerAgentWorker`). Use the general helper to create an instance and
 subscribe it:

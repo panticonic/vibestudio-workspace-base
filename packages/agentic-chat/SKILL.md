@@ -10,6 +10,9 @@ and composer behavior with product-owned presentation. For a wholly custom
 layout, compose `useAgenticChat`, `ChatProvider`, and the exported individual
 chat components instead.
 
+For a change spanning the chat panel, agent worker, channel, or shared event
+contract, read [agentic development](../../skills/agentic-development/SKILL.md).
+
 ## Capabilities are explicit
 
 Pass `features` on every `AgenticChat` mount. Supported browser-owned
