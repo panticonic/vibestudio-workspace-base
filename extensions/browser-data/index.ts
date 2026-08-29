@@ -7,6 +7,8 @@ import {
   BrowserImportCoordinator,
   RemoteBrowserImportProvider,
   type BrowserEnvironmentIdentity,
+  type BrowserImportAcquisitionOption,
+  type BrowserImportAcquisitionResult,
   type BrowserImportDataType,
   type BrowserImportSelection,
   type BrowserImportSource,
@@ -339,6 +341,43 @@ export async function activate(ctx: ExtensionContextLike) {
       await ensureImportHosts(identity);
       return coordinator.listHosts(identity);
     }),
+    listImportAcquisitionOptions: guarded(
+      "listImportAcquisitionOptions",
+      async (hostId: string): Promise<BrowserImportAcquisitionOption[]> => {
+        const { identity } = await currentIdentity();
+        const hosts = await ensureImportHosts(identity);
+        assertSelectedImportHost(hosts, hostId);
+        return ctx.rpc.call("main", "browserEnvironment.listImportAcquisitionOptions", hostId);
+      }
+    ),
+    beginImportAcquisition: guarded(
+      "beginImportAcquisition",
+      async (hostId: string, acquisitionId: string): Promise<BrowserImportAcquisitionResult> => {
+        const { identity } = await currentIdentity();
+        const hosts = await ensureImportHosts(identity);
+        assertSelectedImportHost(hosts, hostId);
+        const result = await ctx.rpc.call<BrowserImportAcquisitionResult>(
+          "main",
+          "browserEnvironment.beginImportAcquisition",
+          hostId,
+          acquisitionId
+        );
+        if (result.state === "selected") {
+          sourceBrowsers.set(sourceKey(hostId, result.source.sourceId), result.source.browser);
+        }
+        return result;
+      }
+    ),
+    releaseImportSource: guarded(
+      "releaseImportSource",
+      async (hostId: string, sourceId: string): Promise<void> => {
+        const { identity } = await currentIdentity();
+        const hosts = await ensureImportHosts(identity);
+        assertSelectedImportHost(hosts, hostId);
+        await ctx.rpc.call("main", "browserEnvironment.releaseImportSource", hostId, sourceId);
+        sourceBrowsers.delete(sourceKey(hostId, sourceId));
+      }
+    ),
     listImportSources: guarded("listImportSources", async (hostId: string) => {
       const { identity } = await currentIdentity();
       await ensureImportHosts(identity);

@@ -80,6 +80,7 @@ import {
   BrowserPrivacyPresentationState,
   type MobileBrowserPrivacySection,
 } from "./browserPrivacyPresentation";
+import { MobileBrowserImportProvider } from "./mobileBrowserImportProvider";
 export type { MobileBrowserPrivacySection } from "./browserPrivacyPresentation";
 import {
   createDurableObjectServiceClient,
@@ -1188,6 +1189,7 @@ export class ShellClient {
   private navigationListeners = new Set<(panelId: string) => void>();
   private readonly browserPrivacyPresentation =
     new BrowserPrivacyPresentationState();
+  private readonly browserImportProvider: MobileBrowserImportProvider;
 
   /**
    * Join a channel as this device. The quickfire sheet needs live delivery (not
@@ -1239,6 +1241,11 @@ export class ShellClient {
     this.serverUrl = MOBILE_SERVER_LOOPBACK_ORIGIN;
     // Remote RPC uses the stored Iroh endpoint identity and device credential.
     this.transport = new MobileRpcClient({});
+    this.browserImportProvider = new MobileBrowserImportProvider(
+      this.transport,
+      config.credentials.deviceId,
+    );
+    this.browserImportProvider.expose();
     this.transport.expose("mobileBrowserPrivacyPresentation.open", ({ args }) =>
       this.browserPrivacyPresentation.accept(args[0]),
     );
@@ -1720,6 +1727,7 @@ export class ShellClient {
         .catch(() => {});
       await this.facade?.close().catch(() => {});
       this.facade = null;
+      await this.browserImportProvider.dispose();
       this.transport.disconnect();
     })();
     this.statusUnsub?.();

@@ -39,6 +39,9 @@
       "@vibestudio/browser-data/source-reader-internals": [
         "../packages/browser-data/src/sourceReaderInternals.ts"
       ],
+      "@vibestudio/browser-import-archive": [
+        "../packages/browser-import-archive/src/index.ts"
+      ],
       "@vibestudio/content-addressing": [
         "../packages/content-addressing/src/index.ts"
       ],

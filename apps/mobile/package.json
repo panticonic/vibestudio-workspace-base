@@ -23,12 +23,13 @@
       "renderer": "App.tsx",
       "nativeModulePolicy": "native-module-policy.json",
       "rnComponentName": "Vibestudio",
-      "rnHostAbi": "rn-host-3",
+      "rnHostAbi": "rn-host-4",
       "capabilities": [
         "notifications",
         "keychain",
         "clipboard",
         "open-external",
+        "browser-import",
         "panel-hosting"
       ]
     },
@@ -450,6 +451,7 @@
   },
   "dependencies": {
     "@vibestudio/browser-data": "workspace:*",
+    "@vibestudio/browser-import-archive": "workspace:*",
     "@vibestudio/mobile-iroh": "workspace:*",
     "@vibestudio/rpc": "workspace:*",
     "@vibestudio/identity": "workspace:*",

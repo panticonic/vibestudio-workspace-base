@@ -58,6 +58,33 @@
           "evidence": "intentional-broad"
         },
         {
+          "capability": "service:browserEnvironment.listImportAcquisitionOptions",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.beginImportAcquisition",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
+          "capability": "service:browserEnvironment.releaseImportSource",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
           "capability": "service:browserEnvironment.listImportSources",
           "resource": {
             "kind": "prefix",
@@ -221,6 +248,9 @@
           "methods": [
             "getBrowserEnvironment",
             "listImportHosts",
+            "listImportAcquisitionOptions",
+            "beginImportAcquisition",
+            "releaseImportSource",
             "listImportSources",
             "previewImport",
             "previewSensitiveImport",

@@ -206,6 +206,33 @@ function makeContext(callerKind: string | null = "shell", callerId = "shell") {
           },
         ];
       }
+      if (method === "browserEnvironment.listImportAcquisitionOptions") {
+        return [
+          {
+            acquisitionId: "choose-export",
+            browser: "safari",
+            displayName: "Choose export",
+            description: "Choose a browser export from this device.",
+            kind: "file-picker",
+            primary: true,
+          },
+        ];
+      }
+      if (method === "browserEnvironment.beginImportAcquisition") {
+        return {
+          state: "selected",
+          source: {
+            sourceId: "temporary-export",
+            browser: "safari",
+            displayName: "Safari export",
+            status: "readable",
+            localDataSetCount: 1,
+            supportedDataTypes: ["bookmarks"],
+            transient: true,
+          },
+        };
+      }
+      if (method === "browserEnvironment.releaseImportSource") return undefined;
       if (method === "addBookmarksBatch") return 1;
       if (method === "addBookmark") return 42;
       if (method === "getBookmarks") return [{ id: 1, title: "Example" }];
@@ -595,6 +622,40 @@ describe("@workspace-extensions/browser-data", () => {
     ]);
     expect(JSON.stringify(sources)).not.toMatch(
       /profile|[/\\\\]Users[/\\\\]|[/\\\\]home[/\\\\]/i,
+    );
+  });
+
+  it("acquires and releases transient exports through the selected host", async () => {
+    const { ctx, rpcCall } = makeContext();
+    const api = (await activate(ctx as never)).providerContracts.browserData;
+    const [host] = await api.listImportHosts();
+
+    await expect(
+      api.listImportAcquisitionOptions(host!.hostId),
+    ).resolves.toEqual([
+      expect.objectContaining({ acquisitionId: "choose-export" }),
+    ]);
+    const result = await api.beginImportAcquisition(
+      host!.hostId,
+      "choose-export",
+    );
+    expect(result).toMatchObject({
+      state: "selected",
+      source: { sourceId: "temporary-export", transient: true },
+    });
+    await api.releaseImportSource(host!.hostId, "temporary-export");
+
+    expect(rpcCall).toHaveBeenCalledWith(
+      "main",
+      "browserEnvironment.beginImportAcquisition",
+      host!.hostId,
+      "choose-export",
+    );
+    expect(rpcCall).toHaveBeenCalledWith(
+      "main",
+      "browserEnvironment.releaseImportSource",
+      host!.hostId,
+      "temporary-export",
     );
   });
 

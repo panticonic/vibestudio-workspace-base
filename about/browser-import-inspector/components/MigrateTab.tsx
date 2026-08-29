@@ -104,10 +104,11 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
         : null;
     }
   );
-  const [busy, setBusy] = useState<"preview" | "import" | null>(null);
+  const [busy, setBusy] = useState<"preview" | "import" | "release" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [step, setStep] = useState<Step>("data");
   const [reimporting, setReimporting] = useState(false);
+  const [released, setReleased] = useState(false);
 
   useEffect(() => {
     setTypes(new Set(available));
@@ -118,6 +119,7 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
       checkpointMatchesSelection(checkpoint, props.selection) ? (checkpoint?.status ?? null) : null
     );
     setError(null);
+    setReleased(false);
     setBusy(null);
     setStep("data");
     setReimporting(false);
@@ -277,6 +279,22 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
     }
   };
 
+  const releaseTransientExport = async () => {
+    setBusy("release");
+    setError(null);
+    try {
+      await browserData.releaseImportSource(
+        props.selection.host.hostId,
+        props.selection.source.sourceId
+      );
+      setReleased(true);
+    } catch (cause) {
+      setError(classifyError(cause).message);
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const allSelected = types.size === selectableTypes.length && selectableTypes.length > 0;
   // Whether this source has ever been imported, not merely whether it was
   // imported in this mount: the panel is routinely revisited, and a footer that
@@ -405,6 +423,28 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
               detail="Protected data stayed inside the trusted host; this panel receives aggregate counts only."
             />
           )}
+          {currentImportComplete && props.selection.source.transient && (
+            <Callout.Root color={released ? "green" : "amber"}>
+              <Flex justify="between" align="center" gap="3" wrap="wrap">
+                <Callout.Text>
+                  {released
+                    ? "Vibestudio's temporary copy has been removed. You can now delete the original export from Files or Downloads."
+                    : "This export can contain unencrypted browser data. Remove Vibestudio's temporary copy, then delete the original from Files or Downloads."}
+                </Callout.Text>
+                {!released && (
+                  <Button
+                    size="1"
+                    variant="soft"
+                    disabled={busy !== null}
+                    onClick={() => void releaseTransientExport()}
+                  >
+                    {busy === "release" ? <Spinner size="1" /> : null}
+                    Remove temporary copy
+                  </Button>
+                )}
+              </Flex>
+            </Callout.Root>
+          )}
           {!showImportOptions && error && (
             <Callout.Root color="red">
               <Flex justify="between" align="center" gap="3" wrap="wrap">
@@ -428,6 +468,7 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
             busy={busy}
             running={running}
             imported={imported}
+            canReimport={!released}
             choosing={showImportOptions}
             canReturnToResult={hasCurrentResult && reimporting}
             selectedCount={types.size}
@@ -583,9 +624,10 @@ type Step = "data" | "tabs";
  * only wants tabs, rather than a "Next" that quietly abandons the import.
  */
 function DataStepFooter(props: {
-  busy: "preview" | "import" | null;
+  busy: "preview" | "import" | "release" | null;
   running: boolean;
   imported: boolean;
+  canReimport: boolean;
   choosing: boolean;
   canReturnToResult: boolean;
   selectedCount: number;
@@ -621,9 +663,11 @@ function DataStepFooter(props: {
           </Button>
         ) : props.imported && !props.choosing ? (
           <>
-            <Button variant="soft" onClick={props.onChooseImportAgain}>
-              <DownloadIcon /> Import again
-            </Button>
+            {props.canReimport && (
+              <Button variant="soft" onClick={props.onChooseImportAgain}>
+                <DownloadIcon /> Import again
+              </Button>
+            )}
             <Button onClick={props.onContinue}>
               Open tabs as panels <ArrowRightIcon />
             </Button>

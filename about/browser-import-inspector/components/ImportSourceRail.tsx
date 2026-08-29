@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Box, Button, Flex, Heading, Select, Spinner, Text } from "@radix-ui/themes";
 import { LockClosedIcon, ReloadIcon } from "@radix-ui/react-icons";
-import type { BrowserImportSource, ImportHostSummary } from "@vibestudio/browser-data/client";
+import type {
+  BrowserImportAcquisitionOption,
+  BrowserImportSource,
+  ImportHostSummary,
+} from "@vibestudio/browser-data/client";
 import { browserData, useAsync } from "../useBrowserData";
 import { useIsMobile } from "@workspace/react/responsive";
 
@@ -20,6 +24,9 @@ export function ImportSourceRail(props: {
 }) {
   const isMobile = useIsMobile();
   const [requestedHostId, setRequestedHostId] = useState<string | null>(null);
+  const [acquiringId, setAcquiringId] = useState<string | null>(null);
+  const [acquisitionMessage, setAcquisitionMessage] = useState<string | null>(null);
+  const [acquisitionError, setAcquisitionError] = useState<string | null>(null);
   const hosts = useAsync<ImportHostSummary[]>(() => browserData.listImportHosts(), []);
   const availableHosts = hosts.state.data ?? [];
   const preferredHost = useMemo(
@@ -37,7 +44,16 @@ export function ImportSourceRail(props: {
     () => (selectedHost ? browserData.listImportSources(selectedHost.hostId) : Promise.resolve([])),
     [selectedHost?.hostId]
   );
+  const acquisitions = useAsync<BrowserImportAcquisitionOption[]>(
+    () =>
+      selectedHost
+        ? browserData.listImportAcquisitionOptions(selectedHost.hostId)
+        : Promise.resolve([]),
+    [selectedHost?.hostId]
+  );
   const availableSources = sources.state.status === "ready" ? (sources.state.data ?? []) : [];
+  const acquisitionOptions =
+    acquisitions.state.status === "ready" ? (acquisitions.state.data ?? []) : [];
 
   useEffect(() => {
     if (!selectedHost || availableSources.length === 0) return;
@@ -57,6 +73,57 @@ export function ImportSourceRail(props: {
     const source = availableSources.find((candidate) => candidate.sourceId === sourceId);
     if (selectedHost && source) props.onSelect({ host: selectedHost, source });
   };
+
+  const beginAcquisition = async (option: BrowserImportAcquisitionOption) => {
+    if (!selectedHost) return;
+    setAcquiringId(option.acquisitionId);
+    setAcquisitionMessage(null);
+    setAcquisitionError(null);
+    try {
+      const result = await browserData.beginImportAcquisition(
+        selectedHost.hostId,
+        option.acquisitionId
+      );
+      if (result.state === "presented") setAcquisitionMessage(result.message);
+      if (result.state === "selected") {
+        props.onSelect({ host: selectedHost, source: result.source });
+        sources.reload();
+      }
+    } catch (cause) {
+      setAcquisitionError(cause instanceof Error ? cause.message : "Could not choose an export.");
+    } finally {
+      setAcquiringId(null);
+    }
+  };
+
+  const acquisitionControls = acquisitionOptions.length > 0 && (
+    <Flex direction="column" gap="1" mt="2" style={{ flexBasis: "100%" }}>
+      {acquisitionOptions.map((option) => (
+        <Button
+          key={option.acquisitionId}
+          size="1"
+          variant={option.primary ? "soft" : "ghost"}
+          disabled={acquiringId !== null}
+          onClick={() => void beginAcquisition(option)}
+          title={option.description}
+          style={{ justifyContent: "flex-start" }}
+        >
+          {acquiringId === option.acquisitionId ? <Spinner size="1" /> : null}
+          {option.displayName}
+        </Button>
+      ))}
+      {acquisitionMessage && (
+        <Text size="1" color="gray">
+          {acquisitionMessage}
+        </Text>
+      )}
+      {(acquisitionError ?? acquisitions.state.error) && (
+        <Text size="1" color="red">
+          {acquisitionError ?? acquisitions.state.error}
+        </Text>
+      )}
+    </Flex>
+  );
 
   return (
     <Box
@@ -132,6 +199,7 @@ export function ImportSourceRail(props: {
               {sources.state.error}
             </Text>
           )}
+          {acquisitionControls}
         </Flex>
       ) : (
         <Flex direction="column" gap="3">
@@ -155,6 +223,7 @@ export function ImportSourceRail(props: {
                 </Button>
                 {active && (
                   <Flex direction="column" gap="1" mt="2">
+                    {acquisitionControls}
                     {sources.state.status === "loading" && <Spinner size="1" />}
                     {sources.state.error && (
                       <Text color="red" size="1">
