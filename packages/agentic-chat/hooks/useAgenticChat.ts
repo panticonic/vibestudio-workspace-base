@@ -803,6 +803,28 @@ export function useAgenticChat({
   feedbackRef.current = feedback;
   chatToolsRef.current = chatTools;
   actionsRef.current = actions;
+  const connectionMethodsRef = useRef({
+    clearActionBar,
+    loadActionBarFromFile,
+    metadata,
+    publishTypedAgenticEvent,
+    importLoader,
+    boundExecuteSandbox,
+    loadSourceFile,
+    chat,
+    scopeManager,
+  });
+  connectionMethodsRef.current = {
+    clearActionBar,
+    loadActionBarFromFile,
+    metadata,
+    publishTypedAgenticEvent,
+    importLoader,
+    boundExecuteSandbox,
+    loadSourceFile,
+    chat,
+    scopeManager,
+  };
   // Live snapshot for the inspect_card method: agents debug a card by reading
   // the same data the UI's "Copy details" produces.
   const cardInspectionRef = useRef<{
@@ -819,11 +841,13 @@ export function useAgenticChat({
     if (core.hasConnectedRef.current) return;
     core.hasConnectedRef.current = true;
     let cancelled = false;
+    let connected = false;
     let retryTimer: ReturnType<typeof setTimeout> | undefined;
     async function doConnect() {
       let transientAttempt = 0;
       for (;;) {
         try {
+          const methodRuntime = connectionMethodsRef.current;
           const toolMethods = chatToolsRef.current.buildToolMethods();
           const methods = composeAgenticChatMethods(
             toolMethods,
@@ -1096,7 +1120,7 @@ export default function App({ props, chat, scope }) {
                       };
                       const trimmedPath = path?.trim();
                       if (trimmedPath) {
-                        await loadSourceFile(trimmedPath);
+                        await methodRuntime.loadSourceFile(trimmedPath);
                       } else if (!code) {
                         return { ok: false, error: "Missing code or path" };
                       }
@@ -1104,7 +1128,9 @@ export default function App({ props, chat, scope }) {
                         const { executeSandbox } = await import("@workspace/eval/sandbox");
                         await executeSandbox("", {
                           imports,
-                          ...(importLoader ? { loadImport: importLoader } : {}),
+                          ...(methodRuntime.importLoader
+                            ? { loadImport: methodRuntime.importLoader }
+                            : {}),
                         });
                       }
                       const client = core.clientRef.current;
@@ -1121,10 +1147,10 @@ export default function App({ props, chat, scope }) {
                       };
                       if (imports !== undefined) eventPayload.imports = imports;
                       if (props !== undefined) eventPayload.props = props;
-                      await publishTypedAgenticEvent(
+                      await methodRuntime.publishTypedAgenticEvent(
                         {
                           kind: "ui.inline_rendered",
-                          actor: actorForClient(client, metadata),
+                          actor: actorForClient(client, methodRuntime.metadata),
                           payload: eventPayload,
                           createdAt: new Date().toISOString(),
                         },
@@ -1189,11 +1215,16 @@ Use package imports available to inline_ui plus relative imports for local helpe
                         clear?: boolean;
                       };
                       if (clear) {
-                        await clearActionBar();
+                        await methodRuntime.clearActionBar();
                         return { ok: true, cleared: true };
                       }
                       if (!path) return { ok: false, error: "Missing path" };
-                      return loadActionBarFromFile({ path, imports, props, maxHeight });
+                      return methodRuntime.loadActionBarFromFile({
+                        path,
+                        imports,
+                        props,
+                        maxHeight,
+                      });
                     },
                   },
                 }
@@ -1340,11 +1371,11 @@ Use package imports available to inline_ui plus relative imports for local helpe
             features.clientEval
               ? {
                   client_eval: buildClientEvalMethod({
-                    importLoader,
-                    executeSandbox: boundExecuteSandbox,
-                    loadSourceFile,
-                    getChat: () => chat,
-                    scopeManager,
+                    importLoader: methodRuntime.importLoader,
+                    executeSandbox: methodRuntime.boundExecuteSandbox,
+                    loadSourceFile: methodRuntime.loadSourceFile,
+                    getChat: () => methodRuntime.chat,
+                    scopeManager: methodRuntime.scopeManager,
                   }),
                 }
               : undefined
@@ -1355,15 +1386,14 @@ Use package imports available to inline_ui plus relative imports for local helpe
             channelConfig,
             contextId,
           });
+          connected = true;
           return;
         } catch (err) {
-          core.hasConnectedRef.current = false;
           if (cancelled) return;
           if (!isTransientConnectionFailure(err)) {
             console.error("[Chat] Connection error:", err);
             return;
           }
-          core.dismissConnectionError();
           const delayMs = connectionRetryDelayMs(transientAttempt++);
           console.warn(`[Chat] Transient connection failure; retrying in ${delayMs}ms`, err);
           await new Promise<void>((resolve) => {
@@ -1378,29 +1408,20 @@ Use package imports available to inline_ui plus relative imports for local helpe
     return () => {
       cancelled = true;
       if (retryTimer !== undefined) clearTimeout(retryTimer);
+      if (!connected) core.hasConnectedRef.current = false;
     };
   }, [
     channelName,
     channelConfig,
     contextId,
     core.connectToChannel,
-    core.dismissConnectionError,
     config.rpc,
     core.hasConnectedRef,
     core.selfIdRef,
     core.clientRef,
-    clearActionBar,
-    loadActionBarFromFile,
-    metadata,
-    publishTypedAgenticEvent,
     connectionAttempt,
     connectionRetrySignal,
     features,
-    importLoader,
-    boundExecuteSandbox,
-    loadSourceFile,
-    chat,
-    scopeManager,
   ]);
   // --- Wrap platform actions ---
   const handleAddAgent = useCallback(

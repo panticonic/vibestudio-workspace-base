@@ -45,6 +45,7 @@ export async function updatePanelStateArgs(
   const metadata = detail.entity.activeBuildKey
     ? await rpc.call<PanelBuildMetadata | null>("main", "build.getBuildMetadata", [
         detail.entity.activeBuildKey,
+        { includeExecutableModules: false },
       ])
     : null;
   const validation = await validateStateArgsAsync(merged, metadata?.stateArgsSchema);

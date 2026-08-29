@@ -55,7 +55,7 @@ function createClient(
 function createRpcCall() {
   return vi.fn(async (_target: string, method: string) => {
     if (method === "workers.resolveService") {
-      return { targetId: "do:channel:chat-title-test" };
+      return { kind: "durable-object", targetId: "do:channel:chat-title-test" };
     }
     if (method === "getProvenance") {
       return { kind: "root" };
@@ -133,6 +133,44 @@ describe("useAgenticChat set_title", () => {
     expect(pubsubMock.connectViaRpc).toHaveBeenCalledWith(
       expect.objectContaining({ clientId: "panel:slot-id" })
     );
+
+    unmount();
+  });
+
+  it("keeps a transient connection failure visible while automatic retry is pending", async () => {
+    const client = createClient();
+    client.close = vi.fn(async () => undefined);
+    client.ready = vi.fn(async () => {
+      throw new Error("ReadError(Reset(513))");
+    });
+    pubsubMock.connectViaRpc.mockReturnValue(client);
+    const latestContext: { current: ChatContextValue | null } = { current: null };
+    const config: ConnectionConfig = {
+      clientId: "panel:chat",
+      rpc: {
+        selfId: "panel:chat",
+        call: createRpcCall(),
+        stream: vi.fn(async () => new Response()),
+        on: vi.fn(() => () => undefined),
+      },
+    };
+
+    const { unmount } = render(
+      <Probe
+        config={config}
+        onContext={(value) => {
+          latestContext.current = value;
+        }}
+      />
+    );
+
+    await waitFor(
+      () => {
+        expect(latestContext.current?.connectionError?.message).toBe("ReadError(Reset(513))");
+      },
+      { timeout: 200 }
+    );
+    expect(pubsubMock.connectViaRpc).toHaveBeenCalledOnce();
 
     unmount();
   });
