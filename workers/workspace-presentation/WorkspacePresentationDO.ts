@@ -180,7 +180,7 @@ export class WorkspacePresentationDO extends DurableObjectBase {
   updatePanelTitle(
     slotId: string,
     entityId: string,
-    title: string,
+    title: string | null,
     options?: { explicit?: boolean },
   ): string {
     if (this.isEntityTitleExplicit(entityId) && !options?.explicit)

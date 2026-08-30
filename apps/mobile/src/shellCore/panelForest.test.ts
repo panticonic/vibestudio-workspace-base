@@ -1,5 +1,6 @@
 import {
   buildMobilePanelForestRows,
+  mobilePanelTreeTitle,
   orderMobilePanelForest,
   presentMobilePanelRow,
   type MobilePanelTreeGroup,
@@ -26,6 +27,13 @@ describe("mobile panel forest", () => {
       rootPanels: [panel("alice-root", [panel("alice-child")])],
     },
   ];
+
+  it("uses a refreshed resident title over the durable tree snapshot", () => {
+    expect(mobilePanelTreeTitle("Agentic Chat", { title: "Workspace onboarding" })).toBe(
+      "Workspace onboarding"
+    );
+    expect(mobilePanelTreeTitle("Agentic Chat", null)).toBe("Agentic Chat");
+  });
 
   it("orders the verified account's roots first", () => {
     expect(orderMobilePanelForest(forest, "alice").map((group) => group.owner)).toEqual([

@@ -20,6 +20,17 @@ export interface MobilePanelTreeGroup {
   rootPanels: MobilePanelTreeNode[];
 }
 
+/**
+ * Tree pages carry a durable title snapshot for cold and non-resident rows.
+ * Once a panel is resident, its refreshed presentation owns visible chrome.
+ */
+export function mobilePanelTreeTitle(
+  snapshotTitle: string,
+  presentation: { title: string } | null | undefined
+): string {
+  return presentation?.title ?? snapshotTitle;
+}
+
 export interface MobileOwnerProfile {
   userId: string;
   handle: string;

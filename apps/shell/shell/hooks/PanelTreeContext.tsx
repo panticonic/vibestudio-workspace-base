@@ -183,6 +183,7 @@ interface PanelTreeContextValue {
   allRootPanels: PanelTreeViewNode[];
   panelMap: Map<string, PanelTreeViewNode>;
   parentMap: Map<string, string | null>;
+  presentations: ReadonlyMap<string, FullPanel>;
   ownerGroups: Array<{
     owner: string;
     rootCount: number;
@@ -242,7 +243,9 @@ function nodeTree(
   const favicon = faviconForPresentation(presentation);
   return {
     id: node.slotId,
-    title: node.title,
+    // Tree pages are durable, bounded snapshots. A live presentation is the
+    // authoritative chrome projection once it has been hydrated.
+    title: presentation?.title ?? node.title,
     owner: node.ownerUserId,
     parentId: node.parentSlotId,
     childCount: node.childCount,
@@ -289,6 +292,7 @@ function hasSameTreePresentation(
   const currentFavicon = faviconForPresentation(current);
   const nextFavicon = faviconForPresentation(next);
   return (
+    current?.title === next.title &&
     current?.icon === next.icon &&
     current?.snapshot?.source === next.snapshot.source &&
     currentFavicon?.pageUrl === nextFavicon?.pageUrl &&
@@ -687,6 +691,7 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
     allRootPanels,
     panelMap,
     parentMap,
+    presentations,
     ownerGroups,
     selfUserId,
     selfIdentityError: currentAccount.error,
@@ -893,6 +898,7 @@ export function useAncestors(panelId: string | null): {
   ancestors: PanelAncestor[];
   loading: boolean;
 } {
+  const { presentations: livePresentations } = usePanelTreeContext();
   const [ancestors, setAncestors] = useState<PanelAncestor[]>([]);
   const [loading, setLoading] = useState(Boolean(panelId));
   useEffect(() => {
@@ -922,7 +928,7 @@ export function useAncestors(panelId: string | null): {
             const favicon = faviconForPresentation(presentation);
             return {
               id: node.slotId,
-              title: node.title,
+              title: presentation?.title ?? node.title,
               ...((presentation?.icon ?? node.icon)
                 ? { icon: presentation?.icon ?? node.icon }
                 : {}),
@@ -947,7 +953,17 @@ export function useAncestors(panelId: string | null): {
       cancelled = true;
     };
   }, [panelId]);
-  return { ancestors, loading };
+  const presentedAncestors = useMemo(
+    () =>
+      ancestors.map((ancestor) => {
+        const presentation = livePresentations.get(ancestor.id);
+        if (!presentation || presentation.title === ancestor.title)
+          return ancestor;
+        return { ...ancestor, title: presentation.title };
+      }),
+    [ancestors, livePresentations],
+  );
+  return { ancestors: presentedAncestors, loading };
 }
 
 export const DEFAULT_DESCENDANT_DEPTH = 3;
