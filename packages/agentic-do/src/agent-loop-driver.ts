@@ -51,6 +51,7 @@ import {
 import { serializeByKey } from "@vibestudio/shared/keyedSerializer";
 import type { SqlStorage } from "@workspace/runtime/worker";
 import {
+  backoffMs,
   EffectOutbox,
   ensureOutboxSchema,
   maxAttempts,
@@ -131,6 +132,11 @@ const BOUNDED_MODEL_TRANSPORT_FAILURE_CODES = new Set<ModelFailureClass>([
   "model_stream_stalled_retryable",
   "unknown_retryable",
 ]);
+
+// This is containment for a genuinely abandoned turn, not an availability
+// policy. At the normal 30-second backoff ceiling it permits more than three
+// weeks of provider/network recovery while remaining durable and cancellable.
+export const MODEL_TRANSPORT_CATASTROPHIC_ATTEMPT_LIMIT = 65_536;
 
 function isBoundedModelTransportFailureCode(
   code: string | undefined,
@@ -2129,23 +2135,22 @@ export class AgentLoopDriver {
     row: OutboxRow,
     outcome: { reason: string; retryAfterMs?: number; code?: string },
   ): Promise<EffectOutcome | null> {
+    const boundedModelTransportFailureCode =
+      row.descriptor.kind === "model_call" &&
+      isBoundedModelTransportFailureCode(outcome.code)
+        ? outcome.code
+        : null;
+    const retryAfterMs = boundedModelTransportFailureCode
+      ? Math.max(outcome.retryAfterMs ?? 0, backoffMs(row.attempts + 1))
+      : outcome.retryAfterMs;
     const updated = this.outbox.recordFailure(
       row.branchId,
       row.effectId,
       this.deps.now(),
-      outcome.retryAfterMs,
+      retryAfterMs,
     );
-    // Explicit provider backpressure has its own reviewed delay/reset policy.
-    // An unclassified transport failure does not: retry it once for a transient
-    // disconnect, then settle visibly instead of leaving an interactive turn
-    // in a permanent typing state.
-    const boundedModelTransportFailureCode =
-      updated?.descriptor.kind === "model_call" &&
-      isBoundedModelTransportFailureCode(outcome.code)
-        ? outcome.code
-        : null;
     const attemptLimit = boundedModelTransportFailureCode
-      ? 2
+      ? MODEL_TRANSPORT_CATASTROPHIC_ATTEMPT_LIMIT
       : maxAttempts(updated?.descriptor ?? row.descriptor);
     if (updated && updated.attempts >= attemptLimit) {
       if (boundedModelTransportFailureCode) {

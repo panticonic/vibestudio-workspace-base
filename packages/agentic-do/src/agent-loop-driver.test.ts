@@ -11,7 +11,11 @@ import {
   type EffectOutcome,
   type StepPolicy,
 } from "@workspace/agent-loop";
-import { AgentLoopDriver, type DriverDeps } from "./agent-loop-driver.js";
+import {
+  AgentLoopDriver,
+  MODEL_TRANSPORT_CATASTROPHIC_ATTEMPT_LIMIT,
+  type DriverDeps,
+} from "./agent-loop-driver.js";
 import type {
   ChannelCallPort,
   EffectExecutor,
@@ -3190,7 +3194,7 @@ describe("AgentLoopDriver", () => {
     ]);
   });
 
-  it("terminalizes a persistent unclassified model transport failure after one retry", async () => {
+  it("keeps a persistent unclassified model transport failure durably retrying", async () => {
     let attempts = 0;
     const harness = await makeHarness({
       script: { model: [], tool: [] },
@@ -3221,6 +3225,56 @@ describe("AgentLoopDriver", () => {
     }
 
     expect(attempts).toBe(2);
+    expect(harness.driver.outbox.all()).toEqual([
+      expect.objectContaining({
+        descriptor: expect.objectContaining({ kind: "model_call" }),
+        disposition: "retrying",
+        attempts: 2,
+        nextAttemptAt: expect.any(Number),
+      }),
+    ]);
+    expect(await logKinds(harness.gad)).toEqual([
+      "message.completed",
+      "turn.opened",
+      "message.started",
+    ]);
+    const loop = await harness.driver.loop(CHANNEL);
+    expect(loop.state.openTurn).not.toBeNull();
+    expect(loop.state.inFlightModelCall).not.toBeNull();
+  });
+
+  it("settles only after the catastrophic model transport recovery budget", async () => {
+    const harness = await makeHarness({
+      script: { model: [], tool: [] },
+      executorOverride: (descriptor) =>
+        descriptor.kind === "model_call"
+          ? ({
+              kind: "model_call",
+              async execute() {
+                return {
+                  kind: "retry",
+                  reason: "provider network remained unavailable",
+                  retryAfterMs: 1_000,
+                  code: "unknown_retryable",
+                };
+              },
+            } satisfies EffectExecutor)
+          : null,
+    });
+
+    await harness.driver.handleIncoming(
+      CHANNEL,
+      promptIncoming("env-catastrophic-network-outage"),
+    );
+    harness.setNow(10_000);
+    await harness.driver.dispatchReadyEffectsForTest();
+    harness.driverHost.sql.exec(
+      `UPDATE effect_outbox SET attempts = ? WHERE kind = 'model_call'`,
+      MODEL_TRANSPORT_CATASTROPHIC_ATTEMPT_LIMIT - 1,
+    );
+    harness.setNow(100_000);
+    await harness.driver.dispatchReadyEffectsForTest();
+
     expect(harness.driver.outbox.all()).toEqual([]);
     expect(await logKinds(harness.gad)).toEqual([
       "message.completed",
@@ -3229,9 +3283,6 @@ describe("AgentLoopDriver", () => {
       "message.failed",
       "turn.closed",
     ]);
-    const loop = await harness.driver.loop(CHANNEL);
-    expect(loop.state.openTurn).toBeNull();
-    expect(loop.state.inFlightModelCall).toBeNull();
   });
 
   it("does not mark a locally running model call failed when wake arrives during credential approval", async () => {

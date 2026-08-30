@@ -110,7 +110,7 @@ export function createDocsSearchTool(
         content: [
           {
             type: "text",
-            text: `${lines.join("\n")}\n\n(${hits.length} result${hits.length === 1 ? "" : "s"}. Use docs_open("<id>") for the full schema, access rules, and examples.)`,
+            text: `${lines.join("\n")}\n\n(${hits.length} result${hits.length === 1 ? "" : "s"}. Use docs_open({ id: "<result-id>" }) for the full schema, access rules, and examples.)`,
           },
         ],
         details: hits,
@@ -312,7 +312,11 @@ export function renderEntry(entry: CatalogEntry): string {
     const breakdown = argBreakdown(entry.argsSchema, entry.argumentNames);
     if (breakdown) parts.push(clamp(breakdown, MAX_SCHEMA_CHARS));
     if (entry.surface === "service") {
-      const rpcExample = serviceRpcExample(entry.qualifiedName, entry.argsSchema, entry.argumentNames);
+      const rpcExample = serviceRpcExample(
+        entry.qualifiedName,
+        entry.argsSchema,
+        entry.argumentNames
+      );
       if (rpcExample) {
         parts.push(
           `Eval/raw RPC call:\n${rpcExample}\n\n` +
@@ -411,7 +415,10 @@ export function createDocsOpenTool(
           details: null,
         };
       }
-      return { content: [{ type: "text", text: renderEntry(entry) }], details: entry };
+      return {
+        content: [{ type: "text", text: renderEntry(entry) }],
+        details: entry,
+      };
     },
   };
 }

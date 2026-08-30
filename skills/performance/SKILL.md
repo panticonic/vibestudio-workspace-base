@@ -10,17 +10,17 @@ optimize only measured bottlenecks, and repeat the same experiment afterward.
 
 ## Choose the evidence surface
 
-| Question | Surface |
-| --- | --- |
-| Panel action/reload latency | `profilePanelInteraction`, `profilePanelReload` |
-| Panel CPU or retained objects | `profilePanel`, `heapSnapshot` |
-| Build time, cache, or bundle size | `profileBuild` |
-| Server/workerd resources | `profileHost` |
-| Startup phases | `readStartupProfile` |
-| Worker or DO isolate CPU | `profileWorkerd`, `profileDO` |
-| Electron process resources | `electronPerformanceSnapshot` via `client_eval` |
-| Android build and readiness | `mobile-debug.buildAndroid`, `verifyWorkspaceReady` |
-| Agent/chat e2e latency | system-test evidence + panel/host profiling |
+| Question                          | Surface                                             |
+| --------------------------------- | --------------------------------------------------- |
+| Panel action/reload latency       | `profilePanelInteraction`, `profilePanelReload`     |
+| Panel CPU or retained objects     | `profilePanel`, `heapSnapshot`                      |
+| Build time, cache, or bundle size | `profileBuild`                                      |
+| Server/workerd resources          | `profileHost`                                       |
+| Startup phases                    | `readStartupProfile`                                |
+| Worker or DO isolate CPU          | `profileWorkerd`, `profileDO`                       |
+| Electron process resources        | `electronPerformanceSnapshot` via `client_eval`     |
+| Android build and readiness       | `mobile-debug.buildAndroid`, `verifyWorkspaceReady` |
+| Agent/chat e2e latency            | system-test evidence + panel/host profiling         |
 
 These helpers come from `@workspace/testkit`. Use its public exports and live
 docs for exact signatures. They return bounded summaries or artifact references,
@@ -35,10 +35,13 @@ real action and await semantic completion inside the callback:
 const handle = panelTree.get(panelId);
 const page = await handle.cdp.page();
 try {
-  return await page.profile(async () => {
-    await page.getByRole("button", { name: "Open settings" }).click();
-    await page.getByRole("dialog", { name: "Settings" }).waitFor();
-  }, { label: "open settings" });
+  return await page.profile(
+    async () => {
+      await page.getByRole("button", { name: "Open settings" }).click();
+      await page.getByRole("dialog", { name: "Settings" }).waitFor();
+    },
+    { label: "open settings" }
+  );
 } finally {
   await page.close();
 }
@@ -48,6 +51,26 @@ Use the lifecycle handle for workspace-panel reloads, `page.goto` only for
 browser pages. Cache disabling affects Chromium's HTTP cache, not application
 state, service workers, DOs, or server build caches — reset only the layer the
 experiment calls cold.
+
+For a workspace-panel reload, use the canonical helper instead of composing a
+second CDP reload probe or inspecting its implementation:
+
+```ts
+import { openPanel, profilePanelReload } from "@workspace/testkit";
+
+const handle = await openPanel("panels/tour");
+try {
+  const result = await profilePanelReload(handle, {
+    label: "panel reload",
+    disableCache: true,
+  });
+  // markerResetAfterReload proves the browser document was replaced. An
+  // in-place reload intentionally keeps the same panel attempt identity.
+  return result;
+} finally {
+  await handle.archive().catch(() => undefined);
+}
+```
 
 Run JS coverage separately from latency (coverage changes profiler overhead).
 After navigation, rebuild, or runtime replacement, discard the stale page and

@@ -238,17 +238,26 @@ export async function profilePanelReload(
 ): Promise<{
   beforeAttemptId: string | null;
   afterAttemptId: string | null;
+  markerResetAfterReload: boolean;
   report: CdpProfileReport;
 }> {
   const beforeAttemptId = (await handle.snapshot()).attemptId ?? null;
+  let markerResetAfterReload = false;
   const report = await profilePanelInteraction(
     handle,
     async (page) => {
+      await page.evaluate(() => {
+        Reflect.set(globalThis, "__vibestudioProfilePanelReloadProbe", true);
+      });
       await handle.reload();
       await page.waitForLoadState("networkidle");
+      markerResetAfterReload =
+        (await page.evaluate(() =>
+          Reflect.get(globalThis, "__vibestudioProfilePanelReloadProbe")
+        )) === undefined;
     },
     options
   );
   const afterAttemptId = (await handle.snapshot()).attemptId ?? null;
-  return { beforeAttemptId, afterAttemptId, report };
+  return { beforeAttemptId, afterAttemptId, markerResetAfterReload, report };
 }

@@ -3,7 +3,7 @@ import type { HostPerformanceSnapshot } from "@vibestudio/service-schemas/hostPe
 
 vi.mock("@workspace/runtime", () => ({ rpc: { call: vi.fn() } }));
 
-import { summarizeHostSpan } from "./performance.js";
+import { profilePanelReload, summarizeHostSpan } from "./performance.js";
 
 function snapshot(overrides: {
   rss: number;
@@ -107,5 +107,36 @@ describe("performance summaries", () => {
         maxUtilization: 0.5,
       },
     });
+  });
+
+  it("profiles one in-place reload and returns browser-lifecycle proof", async () => {
+    const evaluate = vi.fn().mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+    const page = {
+      evaluate,
+      profile: vi.fn(async (action: () => Promise<void>) => {
+        await action();
+        return { elapsedMs: 17 };
+      }),
+      waitForLoadState: vi.fn().mockResolvedValue(undefined),
+      close: vi.fn().mockResolvedValue(undefined),
+    };
+    const handle = {
+      snapshot: vi
+        .fn()
+        .mockResolvedValueOnce({ attemptId: "attempt-1" })
+        .mockResolvedValueOnce({ attemptId: "attempt-1" }),
+      reload: vi.fn().mockResolvedValue(undefined),
+      cdp: { page: vi.fn().mockResolvedValue(page) },
+    };
+
+    await expect(profilePanelReload(handle as never, { label: "reload" })).resolves.toMatchObject({
+      beforeAttemptId: "attempt-1",
+      afterAttemptId: "attempt-1",
+      markerResetAfterReload: true,
+      report: { elapsedMs: 17 },
+    });
+    expect(handle.reload).toHaveBeenCalledOnce();
+    expect(page.waitForLoadState).toHaveBeenCalledWith("networkidle");
+    expect(page.close).toHaveBeenCalledOnce();
   });
 });

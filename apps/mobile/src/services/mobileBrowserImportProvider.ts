@@ -27,6 +27,8 @@ import {
   type NativeBrowserImportArchive,
 } from "./mobileBrowserImportNative";
 import { getNativeAppStorage, type NativeAppStorage } from "./nativeAppStorage";
+import { browserVaultNativeMethods } from "@vibestudio/service-schemas/browserVaultNative";
+import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
 
 type PublicDataType = Extract<BrowserImportDataType, "bookmarks" | "history">;
 type ProviderFrame =
@@ -452,6 +454,12 @@ export class MobileBrowserImportProvider {
 
   private async runSensitive(operation: SensitiveOperation): Promise<void> {
     try {
+      const browserVault = createTypedServiceClient(
+        "browserVaultNative",
+        browserVaultNativeMethods,
+        (service, method, args) =>
+          this.rpc.call("main", `${service}.${method}`, args),
+      );
       const parsed = await this.parse(operation.sourceId, ["passwords"]);
       const passwords = parsed.items.passwords;
       const count =
@@ -464,11 +472,9 @@ export class MobileBrowserImportProvider {
       ) {
         if (operation.cancelled) return;
         const batch = passwords.slice(start, start + PASSWORD_BATCH_ITEMS);
-        const stored = await this.rpc.call<number>(
-          "main",
-          "browserVaultNative.addPasswordsBatch",
-          [batch, { sourceId: operation.sourceId }],
-        );
+        const stored = await browserVault.addPasswordsBatch(batch, {
+          sourceId: operation.sourceId,
+        });
         count.stored += stored;
         await this.writeLedger(operation.status);
       }

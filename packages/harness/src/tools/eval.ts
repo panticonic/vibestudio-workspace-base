@@ -35,11 +35,26 @@ const evalCommonSchema = {
             Type.Object({
               capability: Type.String(),
               resource: Type.Union([
-                Type.Object({ kind: Type.Literal("exact"), key: Type.String() }),
-                Type.Object({ kind: Type.Literal("prefix"), prefix: Type.String() }),
-                Type.Object({ kind: Type.Literal("origin"), origin: Type.String() }),
-                Type.Object({ kind: Type.Literal("domain"), domain: Type.String() }),
-                Type.Object({ kind: Type.Literal("network"), value: Type.Literal("*") }),
+                Type.Object({
+                  kind: Type.Literal("exact"),
+                  key: Type.String(),
+                }),
+                Type.Object({
+                  kind: Type.Literal("prefix"),
+                  prefix: Type.String(),
+                }),
+                Type.Object({
+                  kind: Type.Literal("origin"),
+                  origin: Type.String(),
+                }),
+                Type.Object({
+                  kind: Type.Literal("domain"),
+                  domain: Type.String(),
+                }),
+                Type.Object({
+                  kind: Type.Literal("network"),
+                  value: Type.Literal("*"),
+                }),
               ]),
             }),
             {
@@ -124,7 +139,7 @@ export const evalToolParameters = Type.Object(
   {
     additionalProperties: false,
     description:
-      "Execute inline code or a context-relative file. Supply exactly one of top-level code or path for ordinary use. Authority, timeoutMs, reset, syntax, and imports are independent top-level options.",
+      "Execute inline code or a context-relative file. Supply exactly one of top-level code or path for ordinary use. Authority, timeoutMs, reset, syntax, and imports are independent top-level options. Results are bounded automatically; there is no output limit parameter.",
   }
 );
 

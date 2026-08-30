@@ -182,7 +182,7 @@ export async function startPanelAssetFacade(
   // One prefetch per build for the life of the façade. The build key is a
   // content digest, so a second pass could only re-confirm store hits — and it
   // would do so on the panel's own critical path.
-  const prefetched = new Set<string>();
+  const prefetched = new Map<string, true>();
   const prefetchBuild = (buildKey: string): void => {
     // Callers hand this whatever `panel.buildKey` holds, which is empty for an
     // unmanaged (browser:) panel and absent until a build completes.
@@ -192,7 +192,11 @@ export async function startPanelAssetFacade(
       prefetched.has(buildKey)
     )
       return;
-    prefetched.add(buildKey);
+    prefetched.set(buildKey, true);
+    if (prefetched.size > 4_096) {
+      const oldest = prefetched.keys().next().value as string | undefined;
+      if (oldest) prefetched.delete(oldest);
+    }
     // Start and failure both carry the smoke prefix: the device log capture
     // keeps only lines that have it, so a bare console.warn would make a failed
     // prefetch indistinguishable from one that was never requested.

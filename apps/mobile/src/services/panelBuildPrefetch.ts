@@ -136,6 +136,7 @@ export interface PanelBuildPrefetchReport {
 
 /** Bytes handed to one `append` call. See the call site for why it is sliced. */
 const APPEND_SLICE_BYTES = 128 * 1024;
+const CATASTROPHIC_MANIFEST_BYTES = 64 * 1024 * 1024;
 
 /**
  * A pull-based body, deliberately NOT an `AsyncIterable`.
@@ -162,7 +163,10 @@ export interface PanelBuildPrefetchDeps {
   now?: () => number;
 }
 
-async function readAll(body: PanelBuildBodyReader): Promise<Uint8Array> {
+async function readAll(
+  body: PanelBuildBodyReader,
+  maximumBytes: number,
+): Promise<Uint8Array> {
   const parts: Uint8Array[] = [];
   let total = 0;
   for (;;) {
@@ -170,6 +174,11 @@ async function readAll(body: PanelBuildBodyReader): Promise<Uint8Array> {
     if (part === null) break;
     parts.push(part);
     total += part.byteLength;
+    if (total > maximumBytes) {
+      throw new Error(
+        `Panel build manifest exceeded catastrophic ${maximumBytes}-byte boundary`,
+      );
+    }
   }
   const out = new Uint8Array(total);
   let offset = 0;
@@ -225,7 +234,9 @@ export async function prefetchPanelBuild(
     );
   }
   const entries = parsePanelBuildManifest(
-    decodeUtf8(await readAll(manifestResponse.body)),
+    decodeUtf8(
+      await readAll(manifestResponse.body, CATASTROPHIC_MANIFEST_BYTES),
+    ),
   );
   const candidates = planPanelBuildPrefetch(buildKey, entries);
   report.candidates = candidates.length;
@@ -249,27 +260,27 @@ export async function prefetchPanelBuild(
 
         const transferAt = now();
         const response = await deps.fetchPath(candidate.path);
+        report.transferMs += now() - transferAt;
         if (response.status !== 200) {
           throw new Error(
             `Panel asset ${candidate.path} responded ${response.status}`,
           );
         }
-        const bytes = await readAll(response.body);
-        report.transferMs += now() - transferAt;
-
-        const storeAt = now();
-        let stored = await commitBlob(
+        const committed = await commitBody(
           deps.store,
           { ...candidate, release },
           candidate.digest,
-          bytes,
+          response.body,
           false,
+          now,
         );
+        report.transferMs += committed.transferMs;
+        report.storeDrainMs += committed.storeDrainMs;
+        let stored = committed.asset;
         if (!stored) {
           report.rejected += 1;
           stored = await refetchArtifact(deps, { ...candidate, release });
         }
-        report.storeDrainMs += now() - storeAt;
         release.complete(stored);
         release = null;
         if (stored) {
@@ -333,36 +344,57 @@ function artifactMetadata(
  * wrong bytes until the caller overwrites it. `refetchArtifact` is that
  * overwrite, and it is why this returns null instead of throwing.
  */
-async function commitBlob(
+async function commitBody(
   store: PanelBuildPrefetchDeps["store"],
   claim: PanelBuildPrefetchCandidate & { release: Release },
   payloadDigest: string,
-  bytes: Uint8Array,
+  body: PanelBuildBodyReader,
   gzip: boolean,
-): Promise<MobileStoredAsset | null> {
+  now: () => number,
+): Promise<{
+  asset: MobileStoredAsset | null;
+  transferMs: number;
+  storeDrainMs: number;
+}> {
   const writeId = await store.openWrite(claim.cacheKey);
   let committed = false;
+  let transferMs = 0;
+  let storeDrainMs = 0;
   try {
-    // Appended in slices: `append` base64-encodes on the JS thread and crosses
-    // the bridge as one string, so a whole ~1 MB artifact in one call is a
-    // single ~1.4 MB allocation that blocks everything else on that thread —
-    // including the pipe's own reads and keepalives.
-    for (
-      let offset = 0;
-      offset < bytes.byteLength;
-      offset += APPEND_SLICE_BYTES
-    ) {
-      await store.append(
-        writeId,
-        bytes.subarray(offset, offset + APPEND_SLICE_BYTES),
-      );
+    for (;;) {
+      const transferAt = now();
+      const bytes = await body.read();
+      transferMs += now() - transferAt;
+      if (bytes === null) break;
+      // Appended in slices: `append` base64-encodes on the JS thread and crosses
+      // the bridge as one string. Streaming keeps a whole artifact out of
+      // Hermes and yields between bridge messages so pipe reads and keepalives
+      // continue making progress.
+      for (
+        let offset = 0;
+        offset < bytes.byteLength;
+        offset += APPEND_SLICE_BYTES
+      ) {
+        const storeAt = now();
+        await store.append(
+          writeId,
+          bytes.subarray(offset, offset + APPEND_SLICE_BYTES),
+        );
+        storeDrainMs += now() - storeAt;
+      }
     }
+    const commitAt = now();
     const stored = await store.commit(
       writeId,
       artifactMetadata(claim.contentType, gzip),
     );
+    storeDrainMs += now() - commitAt;
     committed = true;
-    return stored.handle.endsWith(`:${payloadDigest}`) ? stored : null;
+    return {
+      asset: stored.handle.endsWith(`:${payloadDigest}`) ? stored : null,
+      transferMs,
+      storeDrainMs,
+    };
   } finally {
     if (!committed) await store.abort(writeId).catch(() => undefined);
   }
@@ -384,10 +416,22 @@ async function refetchArtifact(
   try {
     const response = await deps.fetchPath(claim.path);
     if (response.status !== 200) return null;
-    const bytes = await readAll(response.body);
     const writeId = await deps.store.openWrite(claim.cacheKey);
     try {
-      await deps.store.append(writeId, bytes);
+      for (;;) {
+        const bytes = await response.body.read();
+        if (bytes === null) break;
+        for (
+          let offset = 0;
+          offset < bytes.byteLength;
+          offset += APPEND_SLICE_BYTES
+        ) {
+          await deps.store.append(
+            writeId,
+            bytes.subarray(offset, offset + APPEND_SLICE_BYTES),
+          );
+        }
+      }
       return await deps.store.commit(
         writeId,
         artifactMetadata(claim.contentType, false),
