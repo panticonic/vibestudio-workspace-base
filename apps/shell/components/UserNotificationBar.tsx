@@ -1,7 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
 import { Badge, Button, Flex, IconButton, Spinner, Text } from "@radix-ui/themes";
-import { ChatBubbleIcon, Cross2Icon, InfoCircledIcon, ReloadIcon } from "@radix-ui/react-icons";
+import {
+  ChatBubbleIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  Cross2Icon,
+  InfoCircledIcon,
+  ReloadIcon,
+} from "@radix-ui/react-icons";
 import {
   userNotifications,
   type ShellChannelInvite,
@@ -68,6 +75,9 @@ export function UserNotificationBar() {
    */
   const [awaitingReview, setAwaitingReview] = useState<PendingReviewNotice | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [expandedMessages, setExpandedMessages] = useState<ReadonlySet<string>>(
+    () => new Set()
+  );
   /** History (acknowledged entries), loaded only when the person asks (§4.10.8). */
   const [history, setHistory] = useState<ShellUserNotification[] | null>(null);
   const [historyBusy, setHistoryBusy] = useState(false);
@@ -195,6 +205,12 @@ export function UserNotificationBar() {
     requestVersion.current += 1;
     setNotifications((current) => current.filter((notification) => notification.id !== id));
     setOpenedNotificationId((current) => (current === id ? null : current));
+    setExpandedMessages((current) => {
+      if (!current.has(id)) return current;
+      const next = new Set(current);
+      next.delete(id);
+      return next;
+    });
     setError(null);
   }, []);
 
@@ -397,14 +413,68 @@ export function UserNotificationBar() {
   const agentMessage = notification.agentMessage;
   const busy = busyNotificationId === notification.id;
   const opened = openedNotificationId === notification.id;
-  const inviter = invite
-    ? invite.inviter
-      ? invite.inviter.displayName || `@${invite.inviter.handle}`
-      : invite.addedBy.startsWith("user:")
-        ? "a workspace member"
-        : invite.addedBy
-    : null;
   const others = notifications.length - 1;
+
+  const toggleMessage = (id: string) => {
+    setExpandedMessages((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const renderSummary = (entry: ShellUserNotification) => {
+    const entryInvite = entry.channelInvite;
+    const entryMessage = entry.agentMessage;
+    const messageExpanded = expandedMessages.has(entry.id);
+    if (entryMessage && entry.message) {
+      return (
+        <button
+          type="button"
+          className="user-notification-message-summary"
+          data-expanded={messageExpanded ? "true" : "false"}
+          aria-expanded={messageExpanded}
+          aria-label={
+            messageExpanded
+              ? `Collapse message from ${entry.title}`
+              : `Show full message from ${entry.title}`
+          }
+          onClick={() => toggleMessage(entry.id)}
+        >
+          <span className="user-notification-message-copy">
+            <Text weight="medium">{entry.title}</Text>
+            {entryMessage.senderHandle ? (
+              <Text color="gray"> · from @{entryMessage.senderHandle}</Text>
+            ) : null}
+            <Text color="gray">
+              {messageExpanded ? ` · ${entry.message}` : ` · ${firstLine(entry.message)}`}
+            </Text>
+          </span>
+          {messageExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
+        </button>
+      );
+    }
+    const inviter = entryInvite
+      ? entryInvite.inviter
+        ? entryInvite.inviter.displayName || `@${entryInvite.inviter.handle}`
+        : entryInvite.addedBy.startsWith("user:")
+          ? "a workspace member"
+          : entryInvite.addedBy
+      : null;
+    return (
+      <Text size="2" style={{ flex: "1 1 220px", minWidth: 0 }} truncate>
+        <Text weight="medium">{entryInvite?.channelTitle ?? entry.title}</Text>
+        {entryInvite ? <Text color="gray"> · invited by {inviter}</Text> : null}
+        {entryMessage?.senderHandle ? (
+          <Text color="gray"> · from @{entryMessage.senderHandle}</Text>
+        ) : null}
+        {!entryInvite && entry.message ? (
+          <Text color="gray"> · {firstLine(entry.message)}</Text>
+        ) : null}
+      </Text>
+    );
+  };
 
   const renderRow = (entry: ShellUserNotification, options: { count?: number }) => {
     const rowInvite = entry.channelInvite;
@@ -414,20 +484,7 @@ export function UserNotificationBar() {
     return (
       <Flex key={entry.id} align="center" gap="2" wrap="wrap" style={{ minHeight: 30 }}>
         {rowInvite || rowMessage ? <ChatBubbleIcon aria-hidden /> : <InfoCircledIcon aria-hidden />}
-        <Text size="2" style={{ flex: "1 1 220px", minWidth: 0 }} truncate>
-          <Text weight="medium">{rowInvite?.channelTitle ?? entry.title}</Text>
-          {rowInvite ? (
-            <Text color="gray">
-              {" "}
-              · invited by{" "}
-              {rowInvite.inviter
-                ? rowInvite.inviter.displayName || `@${rowInvite.inviter.handle}`
-                : "a workspace member"}
-            </Text>
-          ) : null}
-          {rowMessage?.senderHandle ? <Text color="gray"> · from @{rowMessage.senderHandle}</Text> : null}
-          {!rowInvite && entry.message ? <Text color="gray"> · {firstLine(entry.message)}</Text> : null}
-        </Text>
+        {renderSummary(entry)}
         {options.count && options.count > 1 ? (
           <Badge color="gray" variant="soft" title={`${options.count} messages from this agent`}>
             ×{options.count}
@@ -501,16 +558,7 @@ export function UserNotificationBar() {
         <Badge color="blue" variant="soft" radius="full">
           {invite ? "Invitation" : agentMessage ? "Message" : "Notification"}
         </Badge>
-        <Text size="2" style={{ flex: "1 1 220px", minWidth: 0 }} truncate>
-          <Text weight="medium">{invite?.channelTitle ?? notification.title}</Text>
-          {invite ? <Text color="gray"> · invited by {inviter}</Text> : null}
-          {agentMessage?.senderHandle ? (
-            <Text color="gray"> · from @{agentMessage.senderHandle}</Text>
-          ) : null}
-          {!invite && notification.message ? (
-            <Text color="gray"> · {firstLine(notification.message)}</Text>
-          ) : null}
-        </Text>
+        {renderSummary(notification)}
         {groupSize > 1 ? (
           <Badge color="gray" variant="soft" title={`${groupSize} messages from this agent`}>
             ×{groupSize}

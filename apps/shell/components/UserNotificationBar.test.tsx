@@ -65,6 +65,8 @@ vi.mock("@radix-ui/themes", () => ({
 }));
 vi.mock("@radix-ui/react-icons", () => ({
   ChatBubbleIcon: () => <span />,
+  ChevronDownIcon: () => <span />,
+  ChevronUpIcon: () => <span />,
   Cross2Icon: () => <span />,
   InfoCircledIcon: () => <span />,
   ReloadIcon: () => <span />,
@@ -250,6 +252,30 @@ describe("UserNotificationBar", () => {
     expect(await screen.findByText("The nightly build is red.")).toBeTruthy();
     expect(screen.getByText(/from @builder/)).toBeTruthy();
     expect(screen.getByText("Message")).toBeTruthy();
+  });
+
+  it("expands and collapses a message in place without opening or acknowledging it", async () => {
+    shellClient.list.mockResolvedValue([agentMessageNotification()]);
+    render(<UserNotificationBar />);
+
+    const disclosure = await screen.findByRole("button", {
+      name: "Show full message from The nightly build is red.",
+    });
+    expect(disclosure.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText(/Here is what broke/)).toBeNull();
+
+    fireEvent.click(disclosure);
+
+    const collapse = screen.getByRole("button", {
+      name: "Collapse message from The nightly build is red.",
+    });
+    expect(collapse.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText(/Here is what broke/)).toBeTruthy();
+    expect(shellClient.openChannel).not.toHaveBeenCalled();
+    expect(shellClient.acknowledge).not.toHaveBeenCalled();
+
+    fireEvent.click(collapse);
+    expect(screen.queryByText(/Here is what broke/)).toBeNull();
   });
 
   it("opens the notified message in its channel, then acknowledges it", async () => {

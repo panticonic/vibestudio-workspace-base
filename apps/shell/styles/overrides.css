@@ -1445,3 +1445,30 @@ html[data-overlay-dragging] * {
   -webkit-backdrop-filter: blur(8px) saturate(140%);
   color: var(--accent-12);
 }
+.user-notification-message-summary {
+  display: flex;
+  flex: 1 1 220px;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.user-notification-message-copy {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-notification-message-summary[data-expanded="true"] .user-notification-message-copy {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
