@@ -30,6 +30,8 @@ describe("PanelIcon", () => {
     expect(image?.getAttribute("src")).toBe(
       `../../__vibestudio/unit-icon?source=workers%2Fmail&path=assets%2Ficon.svg&v=${iconVersion}&s=${iconState}`
     );
+    expect(image?.getAttribute("loading")).toBe("lazy");
+    expect(image?.getAttribute("decoding")).toBe("async");
   });
 
   it("uses the typed fallback if a declared image cannot be loaded", () => {

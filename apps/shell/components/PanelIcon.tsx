@@ -55,6 +55,8 @@ export function PanelIcon({
         src={imageSource}
         alt=""
         aria-hidden="true"
+        loading="lazy"
+        decoding="async"
         width={size}
         height={size}
         style={{

@@ -470,6 +470,8 @@ describe("ApprovalCard", () => {
         kind: "extension",
         category: "extension",
         title: "@workspace-extensions/git-bridge",
+        icon: "./assets/icon.svg",
+        iconSourcePath: "extensions/git-bridge",
         repoPath: "extensions/git-bridge",
         effectiveVersion: "ev",
         stableIdentityKey: "ev",
@@ -480,6 +482,9 @@ describe("ApprovalCard", () => {
 
     renderCard(credential);
 
+    expect(document.querySelector(".approval-caller-chip img")?.getAttribute("src")).toBe(
+      "../../__vibestudio/unit-icon?source=extensions%2Fgit-bridge&path=assets%2Ficon.svg"
+    );
     expect(screen.getByText("extension")).toBeTruthy();
     expect(screen.getByText("as")).toBeTruthy();
     expect(screen.getAllByText("octocat").length).toBeGreaterThan(0);
@@ -558,6 +563,43 @@ describe("ApprovalCard", () => {
 
     expect(screen.getByText(/Task Board Store · Agent · everything allowed now/u)).toBeTruthy();
   });
+
+  it.each([
+    ["adopt-root", "panel", "panels/chat"],
+    ["install", "app", "apps/desktop"],
+    ["install", "extension", "extensions/browser"],
+    ["part-changed", "worker", "workers/agent"],
+  ] as const)(
+    "keeps a custom icon in %s reviews for %s units",
+    (mode, kind, repoPath) => {
+      renderCard(
+        installReviewApproval({
+          approvalId: `${mode}-${kind}-icon`,
+          mode,
+          parts: [
+            installReviewPart({
+              identityKey: `${repoPath}@ev-1`,
+              kind,
+              label:
+                kind === "panel"
+                  ? "Panel"
+                  : kind === "worker"
+                    ? "Agent"
+                    : kind === "app"
+                      ? "Client App"
+                      : "Extension",
+              repoPath,
+              icon: "./assets/icon.svg",
+            }),
+          ],
+        })
+      );
+
+      expect(document.querySelector(".install-review-part-icon img")?.getAttribute("src")).toBe(
+        `../../__vibestudio/unit-icon?source=${encodeURIComponent(repoPath)}&path=assets%2Ficon.svg`
+      );
+    }
+  );
 
   it("offers a checkbox only for what this decision can actually grant", () => {
     const cleared = reviewRow("workspace.files.write");
