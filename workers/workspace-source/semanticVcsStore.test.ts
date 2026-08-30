@@ -178,6 +178,61 @@ describe("SemanticVcsStore reduced spine", () => {
     );
   });
 
+  it("deduplicates merged ancestry by event instead of enumerating every path", async () => {
+    const sql = await createInMemorySql();
+    createSemanticVcsSchema(sql);
+    const store = new SemanticVcsStore(sql, () => timestamp);
+    const initial = store.initializeWorkspace("context:diamonds", "command:genesis");
+    const genesis = initial.committed.ref.eventId;
+    const root = store.stateRoot(initial.committed.ref);
+    let previous = genesis;
+
+    // Eighteen diamonds contain only 55 distinct events but 2^18 paths back
+    // to genesis. The ancestry query must scale with facts, not path count.
+    for (let level = 0; level < 18; level += 1) {
+      const left = `event:diamond:${level}:left`;
+      const right = `event:diamond:${level}:right`;
+      const merged = `event:diamond:${level}:merged`;
+      for (const eventId of [left, right, merged]) {
+        sql.exec(
+          `INSERT INTO gad_workspace_events
+           (event_id, command_id, kind, result_workspace_fact_root_id, message, created_at)
+           VALUES (?, ?, 'commit', ?, NULL, ?)`,
+          eventId,
+          `command:${eventId}`,
+          root,
+          timestamp
+        );
+      }
+      sql.exec(
+        `INSERT INTO gad_workspace_event_parents (event_id, ordinal, parent_event_id)
+         VALUES (?, 0, ?), (?, 0, ?), (?, 0, ?), (?, 1, ?)`,
+        left,
+        previous,
+        right,
+        previous,
+        merged,
+        left,
+        merged,
+        right
+      );
+      previous = merged;
+    }
+    sql.exec(
+      `INSERT INTO gad_workspace_events
+       (event_id, command_id, kind, result_workspace_fact_root_id, message, created_at)
+       VALUES ('event:unrelated', 'command:unrelated', 'commit', ?, NULL, ?)`,
+      root,
+      timestamp
+    );
+
+    expect(store.isEventAncestor(genesis, previous, 100)).toBe(true);
+    expect(store.isEventAncestor("event:unrelated", previous, 100)).toBe(false);
+    expect(() => store.isEventAncestor("event:unrelated", previous, 10)).toThrowError(
+      expect.objectContaining({ code: "ScopeTooLarge" })
+    );
+  });
+
   it("stores intrinsic content coordinates and has no applied-change mapping side table", async () => {
     const sql = await createInMemorySql();
     createSemanticVcsSchema(sql);

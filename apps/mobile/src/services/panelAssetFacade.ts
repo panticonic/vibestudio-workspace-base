@@ -71,9 +71,10 @@ const PERSISTED_PORT_KEY = "vibestudio:panel-asset-facade:port";
 export interface PanelAssetFacade {
   port: number;
   /**
-   * Fill the durable store for a panel build before its WebView asks, in one
-   * transfer instead of one round trip per file. Never rejects and never has to
-   * be awaited: a panel that races it simply waits on the same store claims.
+   * Fill the durable store for a panel build before its WebView asks. Every
+   * asset uses the same per-key claim as a demanded request, so either arrival
+   * order produces one transfer and unrelated assets remain independently live.
+   * Never rejects and never has to be awaited.
    */
   prefetchBuild(buildKey: string): void;
   /** Enforce the durable store byte cap after a native memory warning. */
@@ -204,11 +205,10 @@ export async function startPanelAssetFacade(
     );
     const flight = prefetchPanelBuild(buildKey, {
       store,
-      // Identity bytes (`gzip: false`): these pass through Hermes, which has no
-      // cheap inflate, and a compressed body would hash to something other than
-      // the digest the bundle claims — discarding the only integrity check in
-      // the path. The per-asset path still asks for gzip, because there the
-      // WebView inflates natively and nothing in JS touches the bytes.
+      // Identity bytes (`gzip: false`): the manifest digest describes this
+      // representation, so the native store's returned content-addressed handle
+      // verifies the exact bytes before releasing the shared key claim. A live
+      // WebView miss still asks for gzip and remains the owner if it arrived first.
       fetchPath: async (path) => {
         const result = await transport.streamReadable("main", "gateway.fetch", [
           { path, method: "GET", headers: {}, gzip: false },

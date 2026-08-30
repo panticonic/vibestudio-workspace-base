@@ -72,6 +72,8 @@ export function UserNotificationBar() {
   const [history, setHistory] = useState<ShellUserNotification[] | null>(null);
   const [historyBusy, setHistoryBusy] = useState(false);
   const requestVersion = useRef(0);
+  const refreshFlight = useRef<Promise<void> | null>(null);
+  const refreshAgain = useRef(false);
   const openConversationSurface = useSetAtom(openConversationSurfaceAtom);
   /**
    * `interrupt` mirrors (plan §4.10.9): a transient toast is issued by this
@@ -82,7 +84,7 @@ export function UserNotificationBar() {
   const seenIds = useRef<Set<string> | null>(null);
   const toastTargets = useRef(new Map<string, ShellUserNotification>());
 
-  const refresh = useCallback(async () => {
+  const loadSnapshot = useCallback(async () => {
     const version = ++requestVersion.current;
     try {
       const next = await userNotifications.list();
@@ -117,9 +119,32 @@ export function UserNotificationBar() {
     }
   }, []);
 
+  /**
+   * Events invalidate one logical inbox projection. Coalesce every invalidation
+   * that arrives while its read is in flight, then perform at most one follow-up
+   * read so a change racing the first snapshot cannot be missed. This keeps the
+   * query owner single-flight without dropping freshness or making a caller's
+   * cancellation own shared work.
+   */
+  const refresh = useCallback((): Promise<void> => {
+    refreshAgain.current = true;
+    if (refreshFlight.current) return refreshFlight.current;
+    const flight = (async () => {
+      while (refreshAgain.current) {
+        refreshAgain.current = false;
+        await loadSnapshot();
+      }
+    })().finally(() => {
+      if (refreshFlight.current === flight) refreshFlight.current = null;
+    });
+    refreshFlight.current = flight;
+    return flight;
+  }, [loadSnapshot]);
+
   useEffect(() => {
     void refresh();
     return () => {
+      refreshAgain.current = false;
       requestVersion.current += 1;
     };
   }, [refresh]);

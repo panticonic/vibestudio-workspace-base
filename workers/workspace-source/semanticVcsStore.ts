@@ -1012,45 +1012,29 @@ export class SemanticVcsStore {
     if (!Number.isSafeInteger(maxEdges) || maxEdges < 0) {
       throw new SemanticVcsError("ScopeTooLarge", "Invalid ancestry bound");
     }
-    const rows = this.sql
-      .exec(
-        `WITH RECURSIVE ancestry(event_id, depth) AS (
-           SELECT ?, 0
-           UNION
-           SELECT parent.parent_event_id, ancestry.depth + 1
-             FROM ancestry
-             JOIN gad_workspace_event_parents parent ON parent.event_id = ancestry.event_id
-            WHERE ancestry.depth < ?
-         )
-         SELECT event_id, depth FROM ancestry WHERE event_id = ? LIMIT 1`,
-        descendantEventId,
-        maxEdges,
-        ancestorEventId
-      )
-      .toArray() as Row[];
-    if (rows.length > 0) return true;
-    const boundary = this.sql
-      .exec(
-        `WITH RECURSIVE ancestry(event_id, depth) AS (
-           SELECT ?, 0
-           UNION
-           SELECT parent.parent_event_id, ancestry.depth + 1
-             FROM ancestry
-             JOIN gad_workspace_event_parents parent ON parent.event_id = ancestry.event_id
-            WHERE ancestry.depth < ?
-         )
-         SELECT 1 FROM ancestry a
-         JOIN gad_workspace_event_parents p ON p.event_id = a.event_id
-         WHERE a.depth = ? LIMIT 1`,
-        descendantEventId,
-        maxEdges,
-        maxEdges
-      )
-      .toArray();
-    if (boundary.length > 0) {
-      throw new SemanticVcsError("ScopeTooLarge", `Ancestry exceeds ${maxEdges} edges`);
+    // Breadth-first traversal preserves the hard edge-distance contract while
+    // deduplicating by semantic identity. A recursive SQL UNION over
+    // (event_id, depth) retained the same merge ancestor at every path depth;
+    // repeated diamonds therefore consumed exponential actor CPU and blocked
+    // every unrelated method on this Durable Object.
+    let frontier = [descendantEventId];
+    const visited = new Set(frontier);
+    for (let depth = 0; ; depth += 1) {
+      if (frontier.includes(ancestorEventId)) return true;
+      const next = this.eventParents(frontier).filter((eventId) => {
+        if (visited.has(eventId)) return false;
+        visited.add(eventId);
+        return true;
+      });
+      if (depth === maxEdges) {
+        if (next.length > 0) {
+          throw new SemanticVcsError("ScopeTooLarge", `Ancestry exceeds ${maxEdges} edges`);
+        }
+        return false;
+      }
+      if (next.length === 0) return false;
+      frontier = next;
     }
-    return false;
   }
 
   /**
@@ -1067,82 +1051,105 @@ export class SemanticVcsStore {
     // recursive query can turn it into an authorization fact.
     this.stateRoot(ancestor);
     this.stateRoot(descendant);
-    const [ancestorKind, ancestorId] = stateKindAndId(ancestor);
-    const [descendantKind, descendantId] = stateKindAndId(descendant);
-    const ancestryCte = `WITH RECURSIVE ancestry(kind, id, depth) AS (
-      SELECT ?, ?, 0
-      UNION
-      SELECT application.basis_kind, application.basis_id, ancestry.depth + 1
-        FROM ancestry
-        JOIN gad_work_unit_applications application
-          ON ancestry.kind = 'application'
-         AND application.application_id = ancestry.id
-       WHERE ancestry.depth < ?
-      UNION
-      SELECT 'event', parent.parent_event_id, ancestry.depth + 1
-        FROM ancestry
-        JOIN gad_workspace_event_parents parent
-          ON ancestry.kind = 'event'
-         AND parent.event_id = ancestry.id
-       WHERE ancestry.depth < ?
-      UNION
-      SELECT 'application', committed.application_id, ancestry.depth + 1
-        FROM ancestry
-        JOIN gad_workspace_event_applications committed
-          ON ancestry.kind = 'event'
-         AND committed.event_id = ancestry.id
-       WHERE ancestry.depth < ?
-    )`;
-    const found = this.sql
-      .exec(
-        `${ancestryCte}
-         SELECT 1 FROM ancestry WHERE kind = ? AND id = ? LIMIT 1`,
-        descendantKind,
-        descendantId,
-        maxEdges,
-        maxEdges,
-        maxEdges,
-        ancestorKind,
-        ancestorId
-      )
-      .toArray();
-    if (found.length > 0) return true;
-    const boundary = this.sql
-      .exec(
-        `${ancestryCte}
-         SELECT 1
-           FROM ancestry
-          WHERE depth = ?
-            AND (
-              (kind = 'application' AND EXISTS (
-                SELECT 1 FROM gad_work_unit_applications application
-                 WHERE application.application_id = ancestry.id
-              ))
-              OR
-              (kind = 'event' AND (
-                EXISTS (
-                  SELECT 1 FROM gad_workspace_event_parents parent
-                   WHERE parent.event_id = ancestry.id
-                )
-                OR EXISTS (
-                  SELECT 1 FROM gad_workspace_event_applications committed
-                   WHERE committed.event_id = ancestry.id
-                )
-              ))
-            )
-          LIMIT 1`,
-        descendantKind,
-        descendantId,
-        maxEdges,
-        maxEdges,
-        maxEdges,
-        maxEdges
-      )
-      .toArray();
-    if (boundary.length > 0) {
-      throw new SemanticVcsError("ScopeTooLarge", `State ancestry exceeds ${maxEdges} edges`);
+    const targetKey = stateNodeKey(ancestor);
+    let frontier = [descendant];
+    const visited = new Set(frontier.map(stateNodeKey));
+    for (let depth = 0; ; depth += 1) {
+      if (frontier.some((state) => stateNodeKey(state) === targetKey)) return true;
+      const next = this.stateParents(frontier).filter((state) => {
+        const key = stateNodeKey(state);
+        if (visited.has(key)) return false;
+        visited.add(key);
+        return true;
+      });
+      if (depth === maxEdges) {
+        if (next.length > 0) {
+          throw new SemanticVcsError("ScopeTooLarge", `State ancestry exceeds ${maxEdges} edges`);
+        }
+        return false;
+      }
+      if (next.length === 0) return false;
+      frontier = next;
     }
-    return false;
+  }
+
+  private eventParents(eventIds: readonly string[]): string[] {
+    if (eventIds.length === 0) return [];
+    const parents: string[] = [];
+    for (let offset = 0; offset < eventIds.length; offset += 400) {
+      const batch = eventIds.slice(offset, offset + 400);
+      const placeholders = batch.map(() => "?").join(", ");
+      const rows = this.sql
+        .exec(
+          `SELECT parent_event_id FROM gad_workspace_event_parents
+            WHERE event_id IN (${placeholders})
+            ORDER BY event_id, ordinal`,
+          ...batch
+        )
+        .toArray() as Row[];
+      parents.push(...rows.map((row) => text(row, "parent_event_id")));
+    }
+    return parents;
+  }
+
+  private stateParents(states: readonly StateNodeRef[]): StateNodeRef[] {
+    const applications = states.flatMap((state) =>
+      state.kind === "application" ? [state.applicationId] : []
+    );
+    const events = states.flatMap((state) => (state.kind === "event" ? [state.eventId] : []));
+    const parents: StateNodeRef[] = [];
+    for (let offset = 0; offset < applications.length; offset += 400) {
+      const batch = applications.slice(offset, offset + 400);
+      const placeholders = batch.map(() => "?").join(", ");
+      const rows = this.sql
+        .exec(
+          `SELECT basis_kind, basis_id FROM gad_work_unit_applications
+            WHERE application_id IN (${placeholders})
+            ORDER BY application_id`,
+          ...batch
+        )
+        .toArray() as Row[];
+      for (const row of rows) {
+        parents.push(
+          row["basis_kind"] === "event"
+            ? { kind: "event", eventId: text(row, "basis_id") }
+            : { kind: "application", applicationId: text(row, "basis_id") }
+        );
+      }
+    }
+    for (let offset = 0; offset < events.length; offset += 400) {
+      const batch = events.slice(offset, offset + 400);
+      const placeholders = batch.map(() => "?").join(", ");
+      const eventRows = this.sql
+        .exec(
+          `SELECT parent_event_id FROM gad_workspace_event_parents
+            WHERE event_id IN (${placeholders})
+            ORDER BY event_id, ordinal`,
+          ...batch
+        )
+        .toArray() as Row[];
+      parents.push(
+        ...eventRows.map((row) => ({
+          kind: "event" as const,
+          eventId: text(row, "parent_event_id")
+        }))
+      );
+      const applicationRows = this.sql
+        .exec(
+          `SELECT application_id FROM gad_workspace_event_applications
+            WHERE event_id IN (${placeholders})
+            ORDER BY event_id, ordinal`,
+          ...batch
+        )
+        .toArray() as Row[];
+      parents.push(
+        ...applicationRows.map((row) => ({
+          kind: "application" as const,
+          applicationId: text(row, "application_id")
+        }))
+      );
+    }
+    return parents;
   }
 
   beginCommand(input: Omit<JournalCommand, "status" | "result">): JournalCommand | null {

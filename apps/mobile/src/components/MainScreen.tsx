@@ -859,11 +859,10 @@ export function MainScreen() {
           // Fill the asset store only once materialization's own round trips are
           // done, and at the same moment the WebView is given its URL.
           //
-          // Starting it any earlier measured badly on device: a multi-megabyte
-          // bulk transfer ahead of the lease and panel-init calls put those
-          // round trips behind it on the same pipe, and activate-to-ready went
-          // from 1.9 s to 8.4 s. The prefetch is not on anyone's critical path;
-          // the calls it was overtaking are.
+          // Starting it any earlier would compete with the lease and panel-init
+          // calls that make a usable WebView possible. Once the URL is ready,
+          // independent per-asset Iroh streams can interleave; a WebView demand
+          // joins the exact same store claim instead of downloading twice.
           shellClient.prefetchPanelBuild(currentPanel.buildKey);
           updateWebViewStack((current) =>
             current.map((currentEntry) =>

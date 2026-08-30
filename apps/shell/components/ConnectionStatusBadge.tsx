@@ -65,13 +65,30 @@ export function ConnectionStatusBadge({
         remoteHost?: string;
         remoteTransport?: RemoteTransport;
       }) => {
-        setSnap({
+        setSnap((current) => ({
           mode: payload.isRemote ? "remote" : "local",
           status: payload.status,
           remoteHost: payload.remoteHost,
-          remoteTransport: payload.remoteTransport ?? null,
-        });
+          remoteTransport:
+            payload.status === "connected"
+              ? (payload.remoteTransport ?? current?.remoteTransport ?? null)
+              : null,
+        }));
         if (payload.status === "connected") setHasConnected(true);
+      },
+      [],
+    ),
+  );
+
+  useShellEvent(
+    "remote-transport-diagnostics-changed",
+    useCallback(
+      (payload: { remoteTransport: RemoteTransport | null }) => {
+        setSnap((current) =>
+          current && current.mode === "remote"
+            ? { ...current, remoteTransport: payload.remoteTransport }
+            : current,
+        );
       },
       [],
     ),

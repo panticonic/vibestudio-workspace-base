@@ -1,6 +1,6 @@
 /**
- * panelBuildPrefetch — fill the durable asset store for a panel build in ONE
- * transfer instead of one round trip per file.
+ * panelBuildPrefetch — fill the durable asset store through the same per-key
+ * work registry used by demanded WebView requests.
  *
  * A cold panel load was measured on device at ~92 sequential `gateway.fetch`
  * calls for ~1.4 MB. The server spent ~7 ms answering each; the device observed
@@ -8,12 +8,11 @@
  * simply the number of remote round trips, so the primary lever is to
  * take fewer of them.
  *
- * The build namespace already exposes what that needs (`panelHttpServer`):
- * `__manifest.json` names every artifact with the sha256 the bundle keys it
- * under, and `__bundle?want=<indices>` streams exactly the requested ones as a
- * `blobBundle`. Both live inside `/__vibestudio/panel-build/<buildKey>/`, which
- * is already panel-reachable and already content-addressed, so this adds no new
- * authority surface.
+ * The build manifest names the initial artifacts and their digests. Each one is
+ * fetched independently over Iroh after claiming its ordinary cache key. A
+ * WebView demand and the prewarmer therefore join one transfer and one durable
+ * publication regardless of which arrives first. Independent QUIC streams let
+ * useful work interleave; one slow artifact cannot become a build-wide barrier.
  *
  * Three decisions worth keeping:
  *
@@ -22,14 +21,10 @@
  *    absent would move 25× more bytes than the trips it saved were worth. Lazy
  *    chunks keep taking the ordinary per-request path; they are rare and often
  *    never requested at all.
- *  - **Compressed bytes, never inflated here.** Identity bytes were tried first
- *    and measured as a LOSS on a low-latency link — 4.2 s to first paint against
- *    1.9 s — because saving ninety round trips does not pay for four times the
- *    payload when a round trip costs 40 ms. The bundle now carries each
- *    artifact's gzip derivative, the store keeps it compressed, and the WebView
- *    inflates it natively, exactly as on the per-asset path. Hermes never
- *    touches an inflate. The record's second digest is what makes this possible
- *    without giving up the integrity check.
+ *  - **Verified bytes, never a blind cache fill.** The prewarmer requests
+ *    identity bytes because the manifest digest describes that representation;
+ *    native storage hashes the committed bytes and the returned handle proves
+ *    they match before any waiter is released.
  *  - **The store's single-flight IS the handoff.** Each candidate key is claimed
  *    via `store.acquire` BEFORE the transfer starts, so a WebView request for
  *    the same asset waits on this one transfer rather than racing it with a
@@ -39,7 +34,6 @@
  */
 
 import { panelAssetCacheKey } from "@vibestudio/shared/panel/assetPathPolicy";
-import { createBlobBundleReader } from "@vibestudio/shared/panel/blobBundle";
 import type {
   MobileAssetStore,
   MobileStoredAsset,
@@ -126,12 +120,12 @@ export interface PanelBuildPrefetchReport {
   candidates: number;
   /** Of those, the ones this device already held. */
   alreadyStored: number;
-  /** Asked for in the bundle. */
+  /** Cache keys this prewarm invocation owned and fetched. */
   requested: number;
   /** Committed to the store, and so removed from the WebView's critical path. */
   stored: number;
   bytes: number;
-  /** Records whose bytes hashed to something other than their claimed digest. */
+  /** Responses whose bytes hashed to something other than their claimed digest. */
   rejected: number;
   /** Time spent waiting on the pipe — the part a faster link would shorten. */
   transferMs: number;
@@ -139,14 +133,6 @@ export interface PanelBuildPrefetchReport {
   storeDrainMs: number;
   ms: number;
 }
-
-/**
- * Blob writes allowed to be outstanding while the transfer continues.
- *
- * Small on purpose: each one holds its blob's bytes in Hermes until native has
- * them, so this is the buffer's ceiling, not a throughput dial.
- */
-const MAX_INFLIGHT_WRITES = 3;
 
 /** Bytes handed to one `append` call. See the call site for why it is sliced. */
 const APPEND_SLICE_BYTES = 128 * 1024;
@@ -244,137 +230,66 @@ export async function prefetchPanelBuild(
   const candidates = planPanelBuildPrefetch(buildKey, entries);
   report.candidates = candidates.length;
 
-  // Claim every key up front. Two candidates can share a digest (identical files
-  // under different names), so the pending map is keyed by digest and holds a
-  // list — one blob may satisfy several claims.
-  const pending = new Map<
-    string,
-    (PanelBuildPrefetchCandidate & { release: Release })[]
-  >();
-  const wanted: number[] = [];
-  // Declared out here so the sweep below can wait for writes that were still in
-  // flight when the transfer threw. Abandoning them would let a store write race
-  // the facade close that follows a failed prefetch.
-  const writes: Promise<void>[] = [];
-  try {
-    for (const candidate of candidates) {
-      const acquisition = await deps.store.acquire(candidate.cacheKey);
-      if (acquisition.kind === "hit") {
-        report.alreadyStored += 1;
-        continue;
-      }
-      const claims = pending.get(candidate.digest) ?? [];
-      claims.push({ ...candidate, release: acquisition });
-      pending.set(candidate.digest, claims);
-      wanted.push(candidate.index);
-    }
-    report.requested = wanted.length;
-    if (wanted.length === 0) {
-      report.ms = now() - startedAt;
-      return report;
-    }
-
-    // `enc=gzip` asks the server to frame each artifact's gzip derivative — the
-    // same bytes its per-asset route already serves, so it costs no new
-    // compression there and no inflate here: the store keeps them compressed and
-    // the WebView inflates natively, exactly as on the per-asset path. Without
-    // it a build moves roughly four times the bytes, which measured as a LOSS on
-    // a low-latency link (4.2 s to first paint against 1.9 s) even while saving
-    // ninety round trips.
-    const bundle = await deps.fetchPath(
-      `${panelBuildResourcePath(buildKey, "__bundle")}?want=${wanted.join(",")}&enc=gzip`,
-    );
-    if (bundle.status !== 200) {
-      throw new Error(`Panel build bundle responded ${bundle.status}`);
-    }
-    // Writing a blob must not stop reading the next one.
-    //
-    // Committing inline measured badly: a single ~1 MB artifact's base64 hop and
-    // native write held the read loop, so the pipe idled and the shell build
-    // moved at 157 KB/s where a build of 22 smaller artifacts over the same link
-    // in the same run managed 950 KB/s. Storage runs alongside the transfer
-    // instead, bounded so a slow disk cannot make this buffer the whole build.
-    const storeBlob = async (
-      claim: PanelBuildPrefetchCandidate & { release: Release },
-      payloadDigest: string,
-      bytes: Uint8Array,
-      gzip: boolean,
-    ): Promise<void> => {
-      let stored: MobileStoredAsset | null = null;
+  // Every candidate begins independently. There is no build-wide queue and no
+  // private prefetch registry: store.acquire is the same single-flight gate the
+  // WebView miss path uses. A demand-first owner turns this into a hit; a
+  // prewarm-first owner hands its completed asset directly to the waiter.
+  const failures: unknown[] = [];
+  await Promise.all(
+    candidates.map(async (candidate) => {
+      let release: Release | null = null;
       try {
-        stored = await commitBlob(
+        const acquisition = await deps.store.acquire(candidate.cacheKey);
+        if (acquisition.kind === "hit") {
+          report.alreadyStored += 1;
+          return;
+        }
+        release = acquisition;
+        report.requested += 1;
+
+        const transferAt = now();
+        const response = await deps.fetchPath(candidate.path);
+        if (response.status !== 200) {
+          throw new Error(
+            `Panel asset ${candidate.path} responded ${response.status}`,
+          );
+        }
+        const bytes = await readAll(response.body);
+        report.transferMs += now() - transferAt;
+
+        const storeAt = now();
+        let stored = await commitBlob(
           deps.store,
-          claim,
-          payloadDigest,
+          { ...candidate, release },
+          candidate.digest,
           bytes,
-          gzip,
+          false,
         );
         if (!stored) {
           report.rejected += 1;
-          stored = await refetchArtifact(deps, claim);
+          stored = await refetchArtifact(deps, { ...candidate, release });
+        }
+        report.storeDrainMs += now() - storeAt;
+        release.complete(stored);
+        release = null;
+        if (stored) {
+          report.stored += 1;
+          report.bytes += stored.size;
         }
       } catch (error) {
-        // One artifact failing to reach the store is not a reason to strand the
-        // rest. Release this claim and let the WebView fetch it.
-        console.warn(
-          `[panel-prefetch] could not store ${claim.path}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
+        release?.complete(null);
+        failures.push(error);
       }
-      claim.release.complete(stored);
-      if (stored) {
-        report.stored += 1;
-        report.bytes += stored.size;
-      }
-    };
-
-    const reader = createBlobBundleReader();
-    for (;;) {
-      const readAt = now();
-      const chunk = await bundle.body.read();
-      report.transferMs += now() - readAt;
-      if (chunk === null) break;
-      for (const blob of reader.push(chunk)) {
-        const claims = pending.get(blob.digest);
-        if (!claims) continue;
-        // Removed before the writes: whatever happens below, this key is
-        // released here and must not be released a second time by the
-        // finally-block sweep.
-        pending.delete(blob.digest);
-        for (const claim of claims) {
-          // An identity record's two digests are equal by construction; a gzip
-          // payload cannot hash to the digest of what it encodes. That is how a
-          // record says which it is, and why the response needs no per-artifact
-          // encoding field.
-          writes.push(
-            storeBlob(
-              claim,
-              blob.payloadDigest,
-              blob.bytes,
-              blob.payloadDigest !== blob.digest,
-            ),
-          );
-        }
-        while (writes.length >= MAX_INFLIGHT_WRITES) await writes.shift();
-      }
-    }
-    // A short stream means the answer was incomplete, not that the missing
-    // artifacts do not exist; the claims released below send those to the
-    // ordinary path.
-    reader.end();
-    const drainAt = now();
-    await Promise.all(writes);
-    report.storeDrainMs = now() - drainAt;
-  } finally {
-    await Promise.allSettled(writes);
-    for (const claims of pending.values()) {
-      for (const claim of claims) claim.release.complete(null);
-    }
-    pending.clear();
-  }
+    }),
+  );
 
   report.ms = now() - startedAt;
+  if (failures.length > 0) {
+    throw new AggregateError(
+      failures,
+      `${failures.length} panel asset prewarm job(s) failed`,
+    );
+  }
   return report;
 }
 

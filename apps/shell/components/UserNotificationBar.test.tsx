@@ -161,6 +161,41 @@ describe("UserNotificationBar", () => {
     expect(watchedEventHandlers.has("user-notifications-changed")).toBe(false);
   });
 
+  it("coalesces an event storm into one in-flight read and one freshness follow-up", async () => {
+    const releases: Array<() => void> = [];
+    let active = 0;
+    let peakActive = 0;
+    shellClient.list.mockImplementation(
+      () =>
+        new Promise<ShellUserNotification[]>((resolve) => {
+          active += 1;
+          peakActive = Math.max(peakActive, active);
+          releases.push(() => {
+            active -= 1;
+            resolve([]);
+          });
+        })
+    );
+    render(<UserNotificationBar />);
+    await waitFor(() => expect(shellClient.list).toHaveBeenCalledTimes(1));
+
+    for (let changedAt = 1; changedAt <= 1_000; changedAt += 1) {
+      directEventHandlers.get("user-notifications-changed")?.({ changedAt });
+      watchedEventHandlers.get("server-connection-changed")?.({
+        status: "connected",
+        isRemote: true
+      });
+    }
+    expect(shellClient.list).toHaveBeenCalledTimes(1);
+    releases.shift()?.();
+
+    await waitFor(() => expect(shellClient.list).toHaveBeenCalledTimes(2));
+    expect(peakActive).toBe(1);
+    releases.shift()?.();
+    await waitFor(() => expect(screen.queryByText("Loading")).toBeNull());
+    expect(shellClient.list).toHaveBeenCalledTimes(2);
+  });
+
   it("opens a channel before acknowledging its generic notification", async () => {
     const order: string[] = [];
     shellClient.list.mockResolvedValue([channelNotification("one")]);
