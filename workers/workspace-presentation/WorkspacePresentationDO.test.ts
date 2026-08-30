@@ -64,6 +64,22 @@ describe("WorkspacePresentationDO", () => {
     db.close();
   });
 
+  it("clears a panel and entity title together", () => {
+    const { instance, db } = createPresentation();
+    instance.bindSlot("slot-1", "entity-1", "panels/chat");
+    instance.updatePanelTitle("slot-1", "entity-1", "Support inbox", {
+      explicit: true,
+    });
+
+    instance.updatePanelTitle("slot-1", "entity-1", null, {
+      explicit: true,
+    });
+
+    expect(instance.titlesForSlots(["slot-1"])).toEqual({});
+    expect(instance.listEntityTitles()).toEqual([]);
+    db.close();
+  });
+
   it("names a slot from the title the binder knew, without ever presenting a slot id", () => {
     const { instance, db } = createPresentation();
     // A panel is bound the moment it is created, long before its document has

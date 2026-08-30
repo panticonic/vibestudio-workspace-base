@@ -60,6 +60,7 @@ import {
   flattenTree,
   PanelTreeProvider,
   type PanelTreeViewNode,
+  useAncestors,
   useDescendantSiblingGroups,
   useFullPanel,
   usePanelTree,
@@ -126,6 +127,35 @@ function SelectionProbe({ panelId }: { panelId: string }) {
       {panelMap.get(panelId)?.selectedChildId ?? ""}
     </div>
   );
+}
+
+function TreeTitleProbe({ panelId }: { panelId: string }) {
+  const { panelMap } = usePanelTree();
+  return <div data-testid="tree-title">{panelMap.get(panelId)?.title ?? ""}</div>;
+}
+
+function AncestorTitleProbe({ panelId }: { panelId: string }) {
+  const { ancestors } = useAncestors(panelId);
+  return (
+    <div data-testid="ancestor-title">{ancestors.map((entry) => entry.title).join(" › ")}</div>
+  );
+}
+
+function fullPresentation(id: string, title: string) {
+  return {
+    id,
+    title,
+    parentId: null,
+    position: 0,
+    selectedChildId: null,
+    snapshot: {
+      source: "panels/chat",
+      contextId: "context-chat",
+      options: { ref: "main" },
+    },
+    artifacts: { buildState: "ready", htmlPath: "http://localhost/panel" },
+    hostViewRevision: 1,
+  };
 }
 
 function ChildrenLoader({ panelId }: { panelId: string }) {
@@ -532,6 +562,58 @@ describe("useFullPanel local presentation", () => {
 });
 
 describe("PanelTreeProvider pin reconciliation", () => {
+  it("propagates a page-title presentation into the tree and breadcrumbs", async () => {
+    listPinnedPanelIds.mockResolvedValue([]);
+    setRootGroups([{ ownerUserId: "alice", slotIds: ["panel:parent"] }]);
+    getTreePath.mockResolvedValue({
+      revision: 1,
+      nodes: [
+        {
+          slotId: "panel:parent",
+          parentSlotId: null,
+          ownerUserId: "alice",
+          title: "Agentic Chat",
+          createdAt: 2,
+          childCount: 1,
+        },
+        {
+          slotId: "panel:child",
+          parentSlotId: "panel:parent",
+          ownerUserId: "alice",
+          title: "Child",
+          createdAt: 1,
+          childCount: 0,
+        },
+      ],
+    });
+    let liveTitle = "Agentic Chat";
+    getPresentation.mockImplementation((panelId: string) =>
+      Promise.resolve(fullPresentation(panelId, panelId === "panel:parent" ? liveTitle : "Child"))
+    );
+
+    render(
+      <PanelTreeProvider>
+        <TreeTitleProbe panelId="panel:parent" />
+        <AncestorTitleProbe panelId="panel:child" />
+      </PanelTreeProvider>
+    );
+
+    await waitFor(() => expect(screen.getByTestId("tree-title").textContent).toBe("Agentic Chat"));
+    await waitFor(() =>
+      expect(screen.getByTestId("ancestor-title").textContent).toBe("Agentic Chat")
+    );
+
+    liveTitle = "Workspace onboarding";
+    act(() => {
+      presentationChangeHandler?.({ revision: 2, panelIds: ["panel:parent"] });
+    });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("tree-title").textContent).toBe("Workspace onboarding")
+    );
+    expect(screen.getByTestId("ancestor-title").textContent).toBe("Workspace onboarding");
+  });
+
   it("seeds the pin atom from listPinnedPanelIds on the initial snapshot", async () => {
     listPinnedPanelIds.mockResolvedValue(["panel:tree/a"]);
     setRootGroups([{ ownerUserId: "alice", slotIds: ["panel:tree/a"] }]);

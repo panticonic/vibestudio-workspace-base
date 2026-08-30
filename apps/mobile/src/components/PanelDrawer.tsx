@@ -40,6 +40,7 @@ import { getPanelCommandDefinitions, type PanelCommandId } from "@vibestudio/sha
 import { copyToClipboard, openExternalUrl, shareText } from "../services/nativeCapabilities";
 import {
   buildMobilePanelForestRows,
+  mobilePanelTreeTitle,
   presentMobilePanelRow,
   type MobilePanelTreeGroup,
   type MobilePanelTreeNode,
@@ -118,9 +119,10 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
     ): MobilePanelTreeNode => {
       const children = cache.getGroup({ kind: "children", parentSlotId: node.slotId })?.nodes ?? [];
       const childGroup = cache.getGroup({ kind: "children", parentSlotId: node.slotId });
+      const presentation = shellClient.panels.registry.getPanel(node.slotId);
       return {
         id: node.slotId,
-        title: node.title,
+        title: mobilePanelTreeTitle(node.title, presentation),
         parentId: node.parentSlotId,
         owner: node.ownerUserId,
         icon: node.icon,
