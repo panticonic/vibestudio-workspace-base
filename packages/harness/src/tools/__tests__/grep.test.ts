@@ -152,7 +152,7 @@ describe("createGrepTool", () => {
     });
   });
 
-  it("passes cancellation and bounded search options to the host", async () => {
+  it("passes cancellation and useful context ranges to the bounded host search", async () => {
     const rpc = {
       call: vi.fn().mockResolvedValue({ matches: [], matchCount: 0, truncated: false }),
     };
@@ -161,14 +161,14 @@ describe("createGrepTool", () => {
 
     await tool.execute(
       "call-1",
-      { pattern: "needle", limit: 7, context: 2, includeIgnored: true },
+      { pattern: "needle", limit: 7, context: 20, includeIgnored: true },
       controller.signal
     );
 
     expect(rpc.call).toHaveBeenCalledWith(
       "main",
       "fs.grep",
-      ["needle", expect.objectContaining({ maxMatches: 7, contextLines: 2, includeIgnored: true })],
+      ["needle", expect.objectContaining({ maxMatches: 7, contextLines: 20, includeIgnored: true })],
       { signal: controller.signal }
     );
   });

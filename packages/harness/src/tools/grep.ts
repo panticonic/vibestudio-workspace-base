@@ -165,8 +165,8 @@ const grepSchema = Type.Object({
   context: Type.Optional(
     Type.Integer({
       minimum: 0,
-      maximum: 10,
-      description: "Number of lines to show before and after each match (default: 0; maximum: 10)",
+      description:
+        "Requested number of lines to show before and after each match (default: 0). Total output remains bounded.",
     })
   ),
   limit: Type.Optional(
@@ -201,6 +201,7 @@ export interface GrepToolDeps {
 }
 
 const DEFAULT_LIMIT = 100;
+const MAX_RESULT_LINES = 10_000;
 const READ_CONCURRENCY = 8;
 const PROGRESS_EVERY_FILES = 250;
 
@@ -343,8 +344,12 @@ export function createGrepTool(
       if (deps?.visibility && (await deps.visibility.isHidden(searchPath))) {
         return { content: [{ type: "text", text: "No matches found" }], details: undefined };
       }
-      const contextValue = context && context > 0 ? context : 0;
-      const effectiveLimit = Math.max(1, limit ?? DEFAULT_LIMIT);
+      const requestedContext = context && context > 0 ? context : 0;
+      const contextValue = Math.min(requestedContext, Math.floor((MAX_RESULT_LINES - 1) / 2));
+      const effectiveLimit = Math.min(
+        Math.max(1, limit ?? DEFAULT_LIMIT),
+        Math.max(1, Math.floor(MAX_RESULT_LINES / (2 * contextValue + 1)))
+      );
 
       // Stat the entry point so we know whether to walk a tree or open a file.
       let isDirectory: boolean;
