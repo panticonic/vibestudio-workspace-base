@@ -77,7 +77,6 @@ function makeSession(
   overrides: Partial<IrohClientSession> = {},
 ): IrohClientSession {
   return {
-    sid: "shell-session",
     callerId: jest.fn(() => `shell:${DEVICE_ID}`),
     isClosed: jest.fn(() => false),
     close: jest.fn(),

@@ -21,7 +21,6 @@ function makePanelSession(
   overrides: Partial<IrohClientSession> = {},
 ): IrohClientSession {
   return {
-    sid: "panel-session",
     callerId: jest.fn(() => "panel:runtime-a"),
     isClosed: jest.fn(() => false),
     close: jest.fn(),
@@ -221,7 +220,6 @@ describe("bridgeAdapter panel session relay", () => {
       isClosed: jest.fn(() => firstClosed),
     });
     const secondSession = makePanelSession({
-      sid: "panel-session-2",
       callerId: jest.fn(() => "panel:runtime-a"),
     });
     const openPanelSession = jest
@@ -284,7 +282,6 @@ describe("bridgeAdapter panel session relay", () => {
     };
     const firstSession = makePanelSession();
     const secondSession = makePanelSession({
-      sid: "panel-session-2",
       callerId: jest.fn(() => "panel:runtime-a"),
     });
     const openPanelSession = jest
