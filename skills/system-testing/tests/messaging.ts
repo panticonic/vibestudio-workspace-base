@@ -166,7 +166,7 @@ export const messagingTests: TestCase[] = [
     validation: "agent-evidence",
     timeoutMs: 600_000,
     prompt:
-      "Have a helper count the markdown files under the skills directory in the background. " +
+      "Delegate to a subagent to count the markdown files under the skills directory in the background. " +
       "Once it is under way, tell it you also want the total line count, then give me both numbers.",
     validate: (result) => {
       const base = validateAgentCompletionReport(result);

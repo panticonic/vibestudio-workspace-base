@@ -1008,8 +1008,39 @@ function subagentDetails(value: unknown): SubagentRunState | undefined {
   const candidate = (value as Record<string, unknown>)["subagent"];
   if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return undefined;
   const record = candidate as Record<string, unknown>;
-  if (typeof record["runId"] !== "string") return undefined;
-  return record as SubagentRunState;
+  if (
+    typeof record["runId"] !== "string" ||
+    typeof record["childParticipantId"] !== "string" ||
+    !record["childParticipantId"].trim()
+  ) {
+    return undefined;
+  }
+  return {
+    runId: record["runId"],
+    childParticipantId: record["childParticipantId"],
+    ...(record["mode"] === "fresh" || record["mode"] === "fork"
+      ? { mode: record["mode"] }
+      : {}),
+    ...(typeof record["taskChannelId"] === "string"
+      ? { taskChannelId: record["taskChannelId"] }
+      : {}),
+    ...(typeof record["contextId"] === "string" ? { contextId: record["contextId"] } : {}),
+    ...(typeof record["parentContextId"] === "string" || record["parentContextId"] === null
+      ? { parentContextId: record["parentContextId"] }
+      : {}),
+    ...(typeof record["childEntityId"] === "string"
+      ? { childEntityId: record["childEntityId"] }
+      : {}),
+    ...(typeof record["label"] === "string" ? { label: record["label"] } : {}),
+    ...(typeof record["agentKind"] === "string" ? { agentKind: record["agentKind"] } : {}),
+    ...(record["launchConfig"] &&
+    typeof record["launchConfig"] === "object" &&
+    !Array.isArray(record["launchConfig"])
+      ? { launchConfig: record["launchConfig"] as Record<string, unknown> }
+      : record["launchConfig"] === null
+        ? { launchConfig: null }
+        : {}),
+  };
 }
 
 function projectedTaskToChatMessage(task: ProjectedTask): ChatMessage & { sortTime: number } {

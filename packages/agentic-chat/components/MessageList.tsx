@@ -364,7 +364,7 @@ export const MessageList = React.memo(function MessageList({
     viewport.addEventListener("scroll", handleViewportScroll, { passive: true });
     handleViewportScroll();
     return () => viewport.removeEventListener("scroll", handleViewportScroll);
-  }, [handleViewportScroll, scrollRef]);
+  }, [handleViewportScroll, scrollRef, hasMoreHistory, loadingMore]);
 
   useEffect(() => {
     if (isAtBottom) {

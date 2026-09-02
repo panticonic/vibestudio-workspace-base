@@ -137,6 +137,43 @@ describe("useAgenticChat set_title", () => {
     unmount();
   });
 
+  it("keeps child transcript connection material stable across parent updates", async () => {
+    const client = createClient();
+    let publishConfig: ((config: { title?: string }) => void) | undefined;
+    client.onConfigChange = vi.fn((callback: (config: { title?: string }) => void) => {
+      publishConfig = callback;
+      return () => undefined;
+    }) as never;
+    pubsubMock.connectViaRpc.mockReturnValue(client);
+    const latestContext: { current: ChatContextValue | null } = { current: null };
+    const config: ConnectionConfig = {
+      clientId: "panel:slot-id",
+      rpc: {
+        selfId: "panel:runtime-entity",
+        call: createRpcCall(),
+        stream: vi.fn(async () => new Response()),
+        on: vi.fn(() => () => undefined),
+      },
+    };
+
+    const { unmount } = render(
+      <Probe
+        config={config}
+        onContext={(value) => {
+          latestContext.current = value;
+        }}
+      />
+    );
+    await waitFor(() => expect(publishConfig).toBeDefined());
+    const initialConnection = latestContext.current!.childTranscript;
+
+    act(() => publishConfig?.({ title: "Parent changed" }));
+
+    await waitFor(() => expect(latestContext.current?.channelTitle).toBe("Parent changed"));
+    expect(latestContext.current?.childTranscript).toBe(initialConnection);
+    unmount();
+  });
+
   it("keeps a transient connection failure visible while automatic retry is pending", async () => {
     const client = createClient();
     client.close = vi.fn(async () => undefined);

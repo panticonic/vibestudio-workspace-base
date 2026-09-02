@@ -350,13 +350,20 @@ export function useChannelMessages<T extends ParticipantMetadata = ParticipantMe
       return;
     }
     if (client.connected) {
+      setHasMoreHistory(Boolean(client.hasMoreBefore));
       setReplaySettled(true);
       return;
     }
     setReplaySettled(false);
     let cancelled = false;
     const off = client.onReady(() => {
-      if (!cancelled) setReplaySettled(true);
+      if (!cancelled) {
+        // The ready marker finalizes replay pagination. Sampling this only when
+        // the client object arrives races replay and can hide all earlier
+        // history behind a false `hasMoreBefore` value.
+        setHasMoreHistory(Boolean(client.hasMoreBefore));
+        setReplaySettled(true);
+      }
     });
     return () => {
       cancelled = true;

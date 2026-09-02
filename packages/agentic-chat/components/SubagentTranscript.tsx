@@ -92,6 +92,9 @@ export function SubagentTranscriptContent({
         participants={participants}
         selfId={selfId as never}
         allParticipants={participants}
+        hasMoreHistory={transcript.hasMoreHistory}
+        loadingMore={transcript.loadingMore}
+        onLoadEarlierMessages={transcript.loadEarlierMessages}
         {...(chat ? { chat } : {})}
       />
     </Box>

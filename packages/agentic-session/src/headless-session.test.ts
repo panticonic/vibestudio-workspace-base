@@ -1115,6 +1115,7 @@ describe("HeadlessSession", () => {
           runId: invocationId,
           mode: "fresh" as const,
           taskChannelId: "task-1",
+          childParticipantId: "participant-child",
         },
       },
     } satisfies ChatMessage;

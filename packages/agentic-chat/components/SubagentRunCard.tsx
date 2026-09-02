@@ -37,54 +37,67 @@ function compactActivity(value: string, max = 180): string {
   return normalized.length > max ? `${normalized.slice(0, max - 1)}…` : normalized;
 }
 
+/** Convert one child-authored transcript row into compact parent-card copy. */
+function activityPreview(message: ChatMessage): SubagentActivityPreview | null {
+  if (message.invocation) {
+    const presentation = toolPresentation(message.invocation);
+    const content = compactActivity(
+      presentation.preview
+        ? `${presentation.displayName} · ${presentation.preview}`
+        : presentation.displayName
+    );
+    const invocationStatus = message.invocation.execution.status;
+    return {
+      prefix:
+        invocationStatus === "error"
+          ? "Failed"
+          : invocationStatus === "cancelled" || invocationStatus === "abandoned"
+            ? "Stopped"
+            : invocationStatus === "pending" || invocationStatus === "running"
+              ? "Using"
+              : "Used",
+      content,
+    };
+  }
+
+  const content = compactActivity(message.content);
+  if (message.contentType === "typing") {
+    return { prefix: "Working", content: "Composing a response" };
+  }
+  if (!content) return null;
+  if (message.contentType === "thinking") return { prefix: "Thinking", content };
+  if (message.contentType === "toolcall-progress") return { prefix: "Preparing", content };
+  if (message.contentType === "diagnostic" || message.error) {
+    return { prefix: "Issue", content };
+  }
+  return { prefix: message.saliency === "say" ? "Update" : "Said", content };
+}
+
 /**
- * Project one concise live update from the child's canonical transcript. Only
- * child-authored agent rows qualify: task seeds and later steering messages
- * describe assigned work, not evidence that the child is making progress.
+ * Project a compact live trail from the child's canonical transcript. The run
+ * event carries the exact participant id; no author inference is permitted at
+ * this authority boundary.
  */
-export function latestSubagentActivity(
+export function latestSubagentActivities(
   messages: ChatMessage[],
-  childParticipantId: string | undefined
-): SubagentActivityPreview | null {
-  if (!childParticipantId) return null;
+  childParticipantId: string | undefined,
+  limit = 3
+): SubagentActivityPreview[] {
+  if (!childParticipantId) return [];
+  const activities: SubagentActivityPreview[] = [];
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]!;
     if (message.task || message.senderId !== childParticipantId) continue;
-
-    if (message.invocation) {
-      const presentation = toolPresentation(message.invocation);
-      const content = compactActivity(
-        presentation.preview
-          ? `${presentation.displayName} · ${presentation.preview}`
-          : presentation.displayName
-      );
-      const invocationStatus = message.invocation.execution.status;
-      return {
-        prefix:
-          invocationStatus === "error"
-            ? "Failed"
-            : invocationStatus === "cancelled" || invocationStatus === "abandoned"
-              ? "Stopped"
-              : invocationStatus === "pending" || invocationStatus === "running"
-                ? "Using"
-                : "Used",
-        content,
-      };
+    const activity = activityPreview(message);
+    if (!activity) continue;
+    const previous = activities[activities.length - 1];
+    if (previous && previous.prefix === activity.prefix && previous.content === activity.content) {
+      continue;
     }
-
-    const content = compactActivity(message.content);
-    if (message.contentType === "typing") {
-      return { prefix: "Working", content: "Composing a response" };
-    }
-    if (!content) continue;
-    if (message.contentType === "thinking") return { prefix: "Thinking", content };
-    if (message.contentType === "toolcall-progress") return { prefix: "Preparing", content };
-    if (message.contentType === "diagnostic" || message.error) {
-      return { prefix: "Issue", content };
-    }
-    return { prefix: message.saliency === "say" ? "Update" : "Said", content };
+    activities.push(activity);
+    if (activities.length >= limit) break;
   }
-  return null;
+  return activities;
 }
 
 function IdentifiersPopover({ rows }: { rows: Array<[string, string]> }) {
@@ -166,8 +179,8 @@ export function SubagentRunCard({ msg }: { msg: ChatMessage }) {
   useEffect(() => {
     if (terminalTask) setObservedTerminal(terminalTask);
   }, [terminalTask]);
-  const activity = useMemo(
-    () => latestSubagentActivity(observed.messages, subagent?.childParticipantId),
+  const activities = useMemo(
+    () => latestSubagentActivities(observed.messages, subagent?.childParticipantId),
     [observed.messages, subagent?.childParticipantId]
   );
 
@@ -179,16 +192,18 @@ export function SubagentRunCard({ msg }: { msg: ChatMessage }) {
   const description = effectiveTask.execution.description.trim();
   const label = subagent.label || task.title || "Subagent";
   const canOpenPanel = Boolean(forkState && subagent.taskChannelId && subagent.contextId);
-  const preview: SubagentActivityPreview = isLive
-    ? activity ??
-      (observed.error
-        ? { prefix: "Updates paused", content: "Open the card to retry the live transcript" }
-        : observed.loading
-          ? { prefix: "Starting", content: "Connecting to the child transcript" }
-          : { prefix: "Working", content: "Waiting for the first child update" })
-    : description
-      ? { content: description }
-      : { content: "No summary yet" };
+  const previews: SubagentActivityPreview[] = isLive
+    ? activities.length > 0
+      ? activities
+      : [
+          observed.error
+            ? { prefix: "Updates paused", content: "Open the card to retry the live transcript" }
+            : observed.loading
+              ? { prefix: "Starting", content: "Connecting to the child transcript" }
+              : { prefix: "Starting", content: "No child activity recorded yet" },
+        ]
+    : [{ content: description || "No summary yet" }];
+  const preview = previews[0]!;
 
   const detailRows = (
     [
@@ -291,6 +306,17 @@ export function SubagentRunCard({ msg }: { msg: ChatMessage }) {
                 ) : null}
                 <MarkdownPreview content={preview.content} />
               </span>
+              {previews.length > 1 ? (
+                <span className="subagent-activity-history" aria-label="Recent child activity">
+                  {previews.slice(1).map((item, index) => (
+                    <span className="subagent-activity-history-item" key={`${item.prefix}-${item.content}`}>
+                      {index > 0 ? <span aria-hidden="true"> · </span> : null}
+                      {item.prefix ? `${item.prefix} ` : ""}
+                      {item.content}
+                    </span>
+                  ))}
+                </span>
+              ) : null}
             </button>
           )}
         </div>

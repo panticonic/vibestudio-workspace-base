@@ -78,9 +78,12 @@ export class SubscriptionManager {
     const current = this.getStored(opts.channelId);
     const metadata: Record<string, unknown> = {
       name: opts.descriptor.name,
-      type: opts.descriptor.type,
       handle: opts.descriptor.handle,
       ...opts.descriptor.metadata,
+      // A supervisor is present only to receive addressed lifecycle facts. It
+      // must not appear as a selectable responding agent in a task-channel UI,
+      // even if descriptor extras carry a general agent type.
+      type: opts.delivery === "addressed" ? "observer" : opts.descriptor.type,
       ...(opts.descriptor.methods?.length ? { methods: opts.descriptor.methods } : {}),
     };
     const config = opts.config && typeof opts.config === "object" ? opts.config : null;
@@ -173,6 +176,15 @@ export class SubscriptionManager {
     const stored = this.getStored(channelId);
     const parsed = stored?.config;
     return parsed && typeof parsed === "object" ? (parsed as ChannelSubscriptionConfig) : null;
+  }
+
+  /** Addressed-only memberships receive targeted lifecycle traffic but do not
+   * make the observed channel an execution home for this agent. */
+  ownsReasoningLoop(channelId: string): boolean {
+    const stored = this.getStored(channelId);
+    if (!stored) return false;
+    const relationship = JSON.parse(stored.relationshipJson) as { delivery?: unknown };
+    return relationship.delivery !== "addressed";
   }
 
   listAll(): Array<{ channelId: string; participantId: string | null }> {

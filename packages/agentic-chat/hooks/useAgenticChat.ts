@@ -1510,6 +1510,33 @@ Use package imports available to inline_ui plus relative imports for local helpe
     [core.inputContextValue, deferredSendMessage]
   );
 
+  // Keep the observer transport identity independent from transcript and UI
+  // updates. Recreating this wrapper as the parent conversation changes makes
+  // every mounted child transcript disconnect and start a fresh replay.
+  const childTranscript = useMemo(
+    () => ({
+      config,
+      metadata: {
+        name: metadata.name,
+        type: metadata.type,
+        ...(metadata.handle ? { handle: metadata.handle } : {}),
+        ...(metadata.panelId ? { panelId: metadata.panelId } : {}),
+      },
+    }),
+    [
+      config.clientId,
+      config.rpc,
+      config.protocol,
+      config.recoveryCoordinator,
+      config.replayMessageLimit,
+      config.deliveryMode,
+      metadata.name,
+      metadata.type,
+      metadata.handle,
+      metadata.panelId,
+    ]
+  );
+
   // --- Assemble context values ---
   const contextValue: ChatContextValue = useMemo(
     () => ({
@@ -1591,7 +1618,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
       forkState: forkNav ? forkState : undefined,
       // Lets subagent cards open an observer connection on a child's task
       // channel; reuses this panel's own transport config.
-      childTranscript: { config, metadata },
+      childTranscript,
     }),
     [
       core.connected,
@@ -1667,8 +1694,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
       chatTools.toolApprovalValue,
       forkNav,
       forkState,
-      config,
-      metadata,
+      childTranscript,
     ]
   );
   return { contextValue, inputContextValue, features };

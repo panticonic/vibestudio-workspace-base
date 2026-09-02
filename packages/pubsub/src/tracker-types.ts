@@ -9,9 +9,10 @@ import type { AgenticParticipantMetadata } from "./protocol-types.js";
 import type { ContextWindowUsage } from "./context-tracker.js";
 
 /**
- * Two participant roles exist on a channel:
+ * Three participant roles exist on a channel:
  * - **clients** ("panel", "headless") — sources of user input
  * - **agents** ("agent") — AI workers responding to user input
+ * - **observers** ("observer") — lifecycle recipients that never reason here
  *
  * The helpers below are positive-match predicates: any new participant type
  * defaults to neither role until it's added explicitly. This is intentional.
@@ -41,11 +42,12 @@ export interface ChatParticipantMetadata extends AgenticParticipantMetadata {
    * - `"panel"` — non-canonical interactive UI provider
    * - `"headless"` — programmatic client without a UI (worker, test harness, server)
    * - `"agent"` — AI agent worker responding to user input
+   * - `"observer"` — non-interactive lifecycle observer/supervisor
    *
    * Adding a new value? Update `isAgentParticipantType` / `isClientParticipantType`
    * in this file so the role-based filters classify it correctly.
    */
-  type: "user" | "panel" | "headless" | "agent";
+  type: "user" | "panel" | "headless" | "agent" | "observer";
   /** Runtime panel/worker ID — allows chat panel to link participant to child panel for focus/reload */
   panelId?: string;
   /** Worker source identifier for agent identification/recovery (e.g., "workers/agent-worker"). */

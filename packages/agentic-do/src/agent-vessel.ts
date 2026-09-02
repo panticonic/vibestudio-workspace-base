@@ -1653,8 +1653,13 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
       const failed = Boolean(
         input.reason && input.reason !== "tool_terminated",
       );
+      const primaryFailure = input.effectFailures[0];
+      const failureReport = primaryFailure
+        ? `${primaryFailure.name} failed (${primaryFailure.code}): ${primaryFailure.message}`
+        : undefined;
       const report =
         input.finalMessage?.trim() ||
+        failureReport ||
         input.summary?.trim() ||
         (failed ? input.reason : undefined);
       if (report) {
@@ -3321,7 +3326,15 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
     // installed local model is bootable, not only the bundled model with a
     // static fallback descriptor.
     await this.refreshLocalModelEntry(opts.channelId);
-    this.driver.activateChannel(opts.channelId);
+    // Addressed-only memberships are supervision endpoints, not alternate
+    // execution homes. Activating one lets recovery fold the child's open turn
+    // under the supervisor's identity and corrupts both transcript ownership
+    // and host-bound tool causality.
+    if (opts.delivery !== "addressed") {
+      this.driver.activateChannel(opts.channelId);
+    } else {
+      this.driver.dropLoop(opts.channelId);
+    }
     const descriptor = this.getEffectiveParticipantInfo(
       opts.channelId,
       opts.config,
@@ -3370,7 +3383,9 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
     ) {
       const recovery = (async () => {
         for (const channelId of this.subscriptions.listChannelIds()) {
-          await this.driver.wake(channelId);
+          if (this.subscriptions.ownsReasoningLoop(channelId)) {
+            await this.driver.wake(channelId);
+          }
         }
         this._durableWorkActivationRecovered = true;
       })();
@@ -8043,7 +8058,6 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         observableSubagentLaunchConfig(effectiveChildSettings) ??
         observableSubagentLaunchConfig(childConfig);
       this.subagentRuns.setLaunchConfig(runId, effectiveLaunchConfig);
-      run.launchConfig = effectiveLaunchConfig;
 
       // 6) Supervisor stance on the task channel (§9): delivery interest
       // "addressed" — child tool activity stays in the canonical task log
@@ -8070,10 +8084,14 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
       // 6) Durable run record on the parent's home channel (the subagent card),
       // then transition from setup to live before the child sees a task prompt.
-      await this.publishSubagentStarted(run);
+      const startedRun = this.subagentRuns.get(runId);
+      if (!startedRun?.childParticipantId) {
+        throw new Error(`Subagent ${runId} reached publication without its participant identity`);
+      }
+      await this.publishSubagentStarted(startedRun);
       this.subagentRuns.setStatus(runId, "running");
       const runningRun = this.subagentRuns.get(runId) ?? {
-        ...run,
+        ...startedRun,
         status: "running" as const,
       };
 
@@ -8406,7 +8424,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
           if (
             typeof taskChannelId !== "string" ||
             typeof contextId !== "string" ||
-            typeof childEntityId !== "string"
+            typeof childEntityId !== "string" ||
+            typeof childParticipantId !== "string" ||
+            !childParticipantId.trim()
           ) {
             continue;
           }
@@ -8426,10 +8446,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
                 : this.subscriptionContextOrNull(parentChannelId),
             childContextId: contextId,
             childEntityId,
-            childParticipantId:
-              typeof childParticipantId === "string"
-                ? childParticipantId
-                : null,
+            childParticipantId,
             parentChannelId,
             mode,
             label:
@@ -9418,7 +9435,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     const event = envelope.payload as AgenticEvent;
     const status = this.subagentTerminalStatus(event, run.runId);
     if (!status) return null;
-    const childParticipantId = run.childParticipantId ?? run.childEntityId;
+    const childParticipantId = run.childParticipantId;
+    if (!childParticipantId) return null;
     const actorParticipantId = event.actor.participantId ?? event.actor.id;
     if (
       envelope.senderId === childParticipantId &&

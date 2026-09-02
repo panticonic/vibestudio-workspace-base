@@ -108,4 +108,36 @@ describe("SubscriptionManager finite relationships", () => {
     expect(leave).toHaveBeenCalledWith(expect.stringContaining("agent-1"), 2);
     expect(manager.listAll()).toEqual([]);
   });
+
+  it("distinguishes reasoning memberships from addressed-only supervision", async () => {
+    const join = vi.fn().mockImplementation(async (input) => ({
+      ok: true,
+      participantId: "agent-1",
+      revision: input.revision,
+    }));
+    const manager = await makeManager({
+      join,
+      relationshipState: vi.fn().mockResolvedValue(null),
+    });
+
+    await manager.subscribe({
+      channelId: "work",
+      contextId: "ctx-1",
+      descriptor,
+      delivery: "all",
+    });
+    await manager.subscribe({
+      channelId: "supervised-task",
+      contextId: "ctx-2",
+      descriptor,
+      delivery: "addressed",
+    });
+
+    expect(manager.ownsReasoningLoop("work")).toBe(true);
+    expect(manager.ownsReasoningLoop("supervised-task")).toBe(false);
+    expect(manager.ownsReasoningLoop("missing")).toBe(false);
+    expect(join.mock.calls[1]![0]).toMatchObject({
+      metadata: { type: "observer" },
+    });
+  });
 });

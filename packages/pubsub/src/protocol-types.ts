@@ -51,9 +51,9 @@ export interface AgenticParticipantMetadata extends ParticipantMetadata {
   /** Display name for this participant */
   name: string;
   /**
-   * Participant type. Canonical values are `"panel"`, `"headless"`, `"agent"`
-   * (see `ChatParticipantMetadata.type`); kept as `string` here for transport
-   * flexibility.
+   * Participant type. Canonical values are `"panel"`, `"headless"`, `"agent"`,
+   * and `"observer"` (see `ChatParticipantMetadata.type`); kept as `string`
+   * here for transport flexibility.
    */
   type: string;
   /**

@@ -224,6 +224,57 @@ function Probe({
 }
 
 describe("useChannelMessages", () => {
+  it("reads pagination metadata from a client that is already replay-ready", async () => {
+    let latest: UseChannelMessagesResult | undefined;
+    const client = createClient([], {
+      connected: true,
+      hasMoreBefore: true,
+    });
+
+    render(
+      <Probe
+        client={client}
+        onValue={(value) => {
+          latest = value;
+        }}
+      />
+    );
+
+    await waitFor(() => expect(latest!.replaySettled).toBe(true));
+    expect(latest!.hasMoreHistory).toBe(true);
+  });
+
+  it("reads finalized pagination metadata when replay becomes ready", async () => {
+    let latest: UseChannelMessagesResult | undefined;
+    let ready: (() => void) | undefined;
+    let hasMoreBefore = false;
+    const client = createClient([], {
+      onReady: vi.fn((callback: () => void) => {
+        ready = callback;
+        return () => {};
+      }),
+    });
+    Object.defineProperty(client, "hasMoreBefore", {
+      configurable: true,
+      get: () => hasMoreBefore,
+    });
+
+    render(
+      <Probe
+        client={client}
+        onValue={(value) => {
+          latest = value;
+        }}
+      />
+    );
+    expect(latest!.hasMoreHistory).toBe(false);
+
+    hasMoreBefore = true;
+    act(() => ready?.());
+
+    await waitFor(() => expect(latest!.hasMoreHistory).toBe(true));
+  });
+
   it("backfills a locally published envelope through replay instead of optimistic transcript state", async () => {
     let latest: UseChannelMessagesResult | undefined;
     const initialPrompt = messageCompleted("initial-prompt", "Read the docs first");

@@ -44,7 +44,7 @@ import type { ChatMessage, TaskCardPayload } from "@workspace/agentic-core";
 import { LOCAL_FALLBACK_MODEL_REF } from "@workspace/model-catalog/catalog";
 import { ChatMessageActionsContext } from "../context/ChatContext.js";
 import { MessageList } from "./MessageList.js";
-import { latestSubagentActivity, SubagentRunCard } from "./SubagentRunCard.js";
+import { latestSubagentActivities, SubagentRunCard } from "./SubagentRunCard.js";
 import { SubagentTranscriptContent } from "./SubagentTranscript.js";
 
 function makeMessage(overrides: Record<string, unknown>) {
@@ -967,6 +967,7 @@ describe("SubagentRunCard", () => {
             taskChannelId: "task-run-description",
             contextId: "ctx-run-description",
             childEntityId: "do:workers/agent-worker:AiChatWorker:subagent-run-description",
+            childParticipantId: "participant-run-description",
             label: "Report renderer",
           },
           complete: true,
@@ -995,6 +996,7 @@ describe("SubagentRunCard", () => {
             taskChannelId: "task-run-2",
             contextId: "ctx-run-2",
             childEntityId: "do:workers/agent-worker:AiChatWorker:subagent-run-2",
+            childParticipantId: "participant-run-2",
             label: "Drive helper fix",
           },
           complete: false,
@@ -1002,8 +1004,8 @@ describe("SubagentRunCard", () => {
       })
     );
 
-    expect(screen.getByText("Working")).toBeTruthy();
-    expect(screen.getByText("Waiting for the first child update")).toBeTruthy();
+    expect(screen.getByText("Starting")).toBeTruthy();
+    expect(screen.getByText("No child activity recorded yet")).toBeTruthy();
     expect(screen.getByText("Pending")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Expand run details"));
 
@@ -1053,16 +1055,23 @@ describe("SubagentRunCard", () => {
       }) as ChatMessage,
     ];
 
-    expect(latestSubagentActivity(messages, "child-participant")).toEqual({
-      prefix: "Using",
-      content: "Verify · operation: build, target: rich-storage",
-    });
-    expect(latestSubagentActivity(messages, undefined)).toBeNull();
+    expect(
+      latestSubagentActivities(messages, "child-participant")
+    ).toEqual([
+      {
+        prefix: "Using",
+        content: "Verify · operation: build, target: rich-storage",
+      },
+      {
+        prefix: "Thinking",
+        content: "I should inspect the schema migration contract first.",
+      },
+    ]);
   });
 
   it("compacts child narration into a bounded live update", () => {
     expect(
-      latestSubagentActivity(
+      latestSubagentActivities(
         [
           makeMessage({
             id: "child-update",
@@ -1075,10 +1084,12 @@ describe("SubagentRunCard", () => {
         ],
         "child-participant"
       )
-    ).toMatchObject({
-      prefix: "Update",
-      content: expect.stringMatching(/^Found the migration boundary\..*…$/),
-    });
+    ).toEqual([
+      {
+        prefix: "Update",
+        content: expect.stringMatching(/^Found the migration boundary\..*…$/),
+      },
+    ]);
   });
 });
 
@@ -1134,6 +1145,35 @@ describe("ordinary task presentation", () => {
 });
 
 describe("SubagentTranscriptContent", () => {
+  it("exposes retained history pagination inside the embedded transcript", () => {
+    const loadEarlierMessages = vi.fn();
+    render(
+      React.createElement(SubagentTranscriptContent, {
+        transcript: {
+          messages: [
+            makeMessage({
+              id: "child-history-tail",
+              content: "Most recent retained child message.",
+              complete: true,
+            }) as ChatMessage,
+          ],
+          participants: {},
+          selfId: null,
+          loading: false,
+          error: null,
+          hasMoreHistory: true,
+          loadingMore: false,
+          loadEarlierMessages,
+          retry: vi.fn(),
+        },
+      })
+    );
+
+    loadEarlierMessages.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Load earlier messages" }));
+    expect(loadEarlierMessages).toHaveBeenCalledOnce();
+  });
+
   it("keeps loaded child history visible when live refresh fails", () => {
     const retry = vi.fn();
     render(
@@ -1150,6 +1190,9 @@ describe("SubagentTranscriptContent", () => {
           selfId: null,
           loading: false,
           error: "connection interrupted",
+          hasMoreHistory: false,
+          loadingMore: false,
+          loadEarlierMessages: vi.fn(),
           retry,
         },
       })
@@ -1171,6 +1214,9 @@ describe("SubagentTranscriptContent", () => {
           selfId: null,
           loading: false,
           error: "channel replay timed out",
+          hasMoreHistory: false,
+          loadingMore: false,
+          loadEarlierMessages: vi.fn(),
           retry,
         },
       })

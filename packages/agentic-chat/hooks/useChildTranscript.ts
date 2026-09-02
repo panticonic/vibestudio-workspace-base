@@ -32,6 +32,9 @@ export interface ChildTranscriptResult {
   /** True until the child's history has replayed. */
   loading: boolean;
   error: string | null;
+  hasMoreHistory: boolean;
+  loadingMore: boolean;
+  loadEarlierMessages: () => Promise<void>;
   /** Start a fresh observer generation after a terminal connection failure. */
   retry: () => void;
 }
@@ -130,6 +133,9 @@ export function useChildTranscript(options: {
       selfId: client?.clientId ?? null,
       loading: active && (connecting || !transcript.replaySettled),
       error,
+      hasMoreHistory: transcript.hasMoreHistory,
+      loadingMore: transcript.loadingMore,
+      loadEarlierMessages: transcript.loadEarlierMessages,
       retry,
     }),
     [
@@ -140,6 +146,9 @@ export function useChildTranscript(options: {
       active,
       connecting,
       error,
+      transcript.hasMoreHistory,
+      transcript.loadingMore,
+      transcript.loadEarlierMessages,
       retry,
     ]
   );

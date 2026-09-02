@@ -2080,6 +2080,7 @@ describe("chatMessagesFromChannelView", () => {
             taskChannelId: "task-inv-subagent-started",
             contextId: "ctx-inv-subagent-started",
             parentContextId: "ctx-parent",
+            childParticipantId: "participant-subagent-started",
             label: "background fork",
           },
         },
@@ -2098,6 +2099,37 @@ describe("chatMessagesFromChannelView", () => {
       },
     });
   });
+
+  it.each([undefined, "", "   "])(
+    "does not project unbound subagent details for participant identity %j",
+    (childParticipantId) => {
+      const started = {
+        kind: "task.started",
+        actor: agent,
+        causality: { taskId: brandId<TaskId>("inv-unbound-subagent") },
+        payload: {
+          protocol: AGENTIC_PROTOCOL_VERSION,
+          taskType: "subagent",
+          title: "unbound child",
+          details: {
+            subagent: {
+              runId: "inv-unbound-subagent",
+              taskChannelId: "task-inv-unbound-subagent",
+              ...(childParticipantId === undefined ? {} : { childParticipantId }),
+            },
+          },
+        },
+        createdAt: "2026-05-20T12:00:01.000Z",
+      } as unknown as AgenticEvent<"task.started">;
+
+      const state = [envelope(started, 1)].reduce(
+        reduceChannelView,
+        createInitialChannelViewState(),
+      );
+
+      expect(chatMessagesFromChannelView(state)[0]?.task?.subagent).toBeUndefined();
+    },
+  );
 
   it("uses the actor display name for a terminal-only task", () => {
     const completed: AgenticEvent<"task.completed"> = {
@@ -2159,6 +2191,7 @@ describe("chatMessagesFromChannelView", () => {
               mode: "fresh",
               taskChannelId: "task-spawn-separated",
               contextId: "ctx-spawn-separated",
+              childParticipantId: "participant-spawn-separated",
               label: "repo audit",
             },
           },
