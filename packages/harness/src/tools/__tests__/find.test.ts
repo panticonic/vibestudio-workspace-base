@@ -131,6 +131,29 @@ describe("createFindTool", () => {
     expect(rpc.call).toHaveBeenCalledTimes(1);
   });
 
+  it("returns a diagnostic empty result when the host search root is a file", async () => {
+    const rpc = {
+      call: vi
+        .fn()
+        .mockRejectedValue(Object.assign(new Error("not a directory"), { code: "ENOTDIR" })),
+    };
+    const tool = createFindTool(CWD, new StubFs({ files: {} }), { rpc: rpc as never });
+
+    const result = await tool.execute("call-1", {
+      pattern: "handle.close",
+      path: "packages/runtime/src/shared/rpcFs.test.ts",
+      limit: 20,
+    });
+
+    expect((result.content[0] as { text: string }).text).toContain(
+      "search path is not a directory: packages/runtime/src/shared/rpcFs.test.ts"
+    );
+    expect(result.details).toMatchObject({
+      engine: "fs-service",
+      nonDirectorySearchPath: "packages/runtime/src/shared/rpcFs.test.ts",
+    });
+  });
+
   it("propagates host authorization and infrastructure failures", async () => {
     const rpc = {
       call: vi.fn().mockRejectedValue(Object.assign(new Error("denied"), { code: "EACCES" })),

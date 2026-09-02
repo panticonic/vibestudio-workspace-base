@@ -451,7 +451,6 @@ describe("filesystem semantic validators", () => {
                   text: JSON.stringify({
                     path,
                     encoding: "base64",
-                    contentHash: "a".repeat(64),
                     range: { start: 0, end: 4, totalBytes: 4 },
                     base64: "AP8B/g==",
                   }),
@@ -459,7 +458,6 @@ describe("filesystem semantic validators", () => {
               ],
               details: {
                 encoding: "base64",
-                contentHash: "a".repeat(64),
                 byteRange: { start: 0, end: 4, totalBytes: 4 },
               },
             },

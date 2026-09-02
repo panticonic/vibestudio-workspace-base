@@ -50,5 +50,6 @@ deployed servers. Never assume a workspace agent can read host filesystem paths
 directly.
 
 Treat the in-memory ring as a current-boot diagnostic surface, not an archive.
-Keep queries bounded, preserve boot and sequence coordinates in reports, and
-quote only the records needed to explain the incident.
+Keep queries bounded. In every report, preserve the snapshot's exact
+`serverBootId` and `latestSeq` so the evidence can be located again, and quote
+only the records needed to explain the incident.

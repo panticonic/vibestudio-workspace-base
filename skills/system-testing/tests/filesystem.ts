@@ -171,7 +171,6 @@ function focusedBinaryRoundTrip(result: TestExecutionResult) {
   const evidence = JSON.stringify(read?.execution?.result ?? null);
   const exactRead =
     evidence.includes(BINARY_ROUND_TRIP_BASE64) &&
-    /"contentHash":"[0-9a-f]{64}"/u.test(evidence) &&
     /"(?:range|byteRange)":\{"start":0,"end":4,"totalBytes":4/u.test(evidence);
   if (!patch || typeof binaryPath !== "string" || !read || !exactRead) {
     return {

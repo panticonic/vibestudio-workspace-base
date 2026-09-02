@@ -775,7 +775,7 @@ try {
   await handle.write(new TextEncoder().encode("H"), 0, 1, 0);
   console.log({ bytesRead, text: new TextDecoder().decode(buffer) });
 } finally {
-  await handle.archive();
+  await handle.close();
   await fs.rm(path, { force: true });
 }
 ```

@@ -57,6 +57,7 @@ export interface FindToolDetails {
   engine?: "fs-service" | "runtime-fs";
   nextCursor?: string;
   missingSearchPath?: string;
+  nonDirectorySearchPath?: string;
   extensionFallback?: string;
 }
 
@@ -123,16 +124,22 @@ export function createFindTool(
             signal ? { signal } : undefined
           );
         } catch (error) {
-          if ((error as NodeJS.ErrnoException | null)?.code !== "ENOENT") throw error;
+          const code = (error as NodeJS.ErrnoException | null)?.code;
+          if (code !== "ENOENT" && code !== "ENOTDIR") throw error;
           const displayPath = searchDir || ".";
+          const nonDirectory = code === "ENOTDIR";
           return {
             content: [
               {
                 type: "text",
-                text: `No files found matching pattern (search path does not exist: ${displayPath})`,
+                text: nonDirectory
+                  ? `No files found matching pattern (search path is not a directory: ${displayPath})`
+                  : `No files found matching pattern (search path does not exist: ${displayPath})`,
               },
             ],
-            details: { engine: "fs-service", missingSearchPath: displayPath },
+            details: nonDirectory
+              ? { engine: "fs-service", nonDirectorySearchPath: displayPath }
+              : { engine: "fs-service", missingSearchPath: displayPath },
           };
         }
         const visibleFiles = deps.visibility

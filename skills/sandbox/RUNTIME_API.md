@@ -122,10 +122,10 @@ declared source/build readiness, and `runtime.supervision` for exact live
 executions:
 
 ```ts
-import { contextId, runtime, workspace } from "@workspace/runtime";
+import { contextId, rpc, runtime, workspace } from "@workspace/runtime";
 
 const active = await workspace.getActive();
-const units = await build.listUnits();
+const units = await rpc.call("main", "build.listUnits", []);
 const live = await runtime.supervision.list();
 
 console.log({ contextId, active });
