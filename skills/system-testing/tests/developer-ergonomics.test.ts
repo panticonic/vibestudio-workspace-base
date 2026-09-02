@@ -65,7 +65,9 @@ function failure(code: string, data: Record<string, unknown>) {
 
 function receipt(target: string, status: "ok" | "failed") {
   return {
-    protocol: "build-verification-receipt.v1",
+    protocol: "unit-verification-receipt.v1",
+    operation: "build",
+    stateHash: `state:${"a".repeat(64)}`,
     target,
     contextId: "context:test",
     ref: "ctx:context:test",

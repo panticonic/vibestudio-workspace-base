@@ -19,6 +19,11 @@ import type { ThinkingLevel } from "@workspace/agent-loop";
 import { channelTrajectoryFor } from "@vibestudio/trajectory-identity";
 import type { RpcClient } from "@vibestudio/rpc";
 import type { VcsCommitResult } from "@vibestudio/service-schemas/vcs";
+import {
+  testExecutionResultV1Schema,
+  type TestExecutionResultV1,
+  type WorkspaceTestArtifactV1,
+} from "@vibestudio/service-schemas/build";
 import { SUPPORTED_IMAGE_TYPES } from "@workspace/pubsub";
 import {
   AGENT_MESSAGE_NOTIFICATION_KIND,
@@ -404,6 +409,112 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         <T>(method: string, methodArgs: unknown[], signal?: AbortSignal) =>
           toolRpc.call<T>("main", method, methodArgs, { signal }),
         contextId,
+        async (
+          artifact: WorkspaceTestArtifactV1,
+          testName: string | undefined,
+          signal?: AbortSignal,
+        ): Promise<TestExecutionResultV1> => {
+          const parentId = this.getParent()?.id ?? null;
+          const testsPanel = await this.openPanel("about/testbench", {
+            parentId,
+            operationId: `verify-testbench:${channelId}`,
+            contextId: contextId(),
+            ref: `ctx:${contextId()}`,
+            signal,
+          });
+          const testbenchCall = testsPanel.call as Record<
+            string,
+            (request: unknown) => Promise<unknown>
+          >;
+          const request = {
+            protocol: "workspace-test-execution-request.v1",
+            artifactKey: artifact.artifactKey,
+            executionDigest: artifact.execution.executionDigest,
+            ...(testName ? { testName } : {}),
+            limits: { timeoutMs: 10_000, memoryMb: 128 },
+          };
+          const identity = {
+            target: artifact.target,
+            suite: artifact.suite,
+            artifactKey: artifact.artifactKey,
+            runtime: artifact.runtime,
+            selectedFiles: artifact.selectedFiles,
+          };
+          await testbenchCall["tests.record"]!({
+            phase: "running",
+            ...identity,
+          });
+          let runtimeEntityId: string | undefined;
+          try {
+            let raw: unknown;
+            if (artifact.runtime === "browser") {
+              const targetPanel = await this.openPanel(artifact.target, {
+                parentId: testsPanel.id,
+                operationId: `verify-test:${channelId}:${crypto.randomUUID()}`,
+                contextId: contextId(),
+                artifact: {
+                  buildKey: artifact.execution.buildKey,
+                  executionDigest: artifact.execution.executionDigest,
+                },
+                signal,
+              });
+              runtimeEntityId =
+                (await targetPanel.observe()).runtimeEntityId ?? targetPanel.id;
+              const call = targetPanel.call as Record<
+                string,
+                (request: unknown) => Promise<unknown>
+              >;
+              raw = await call["tests.run"]!(request);
+            } else {
+              const worker = await toolRpc.call<{ id: string }>(
+                "main",
+                "runtime.createEntity",
+                [
+                  {
+                    kind: "worker",
+                    execution: {
+                      surface: "code",
+                      source: artifact.target,
+                      artifact: {
+                        buildKey: artifact.execution.buildKey,
+                        executionDigest: artifact.execution.executionDigest,
+                      },
+                    },
+                    key: `test-${crypto.randomUUID()}`,
+                    contextId: contextId(),
+                  },
+                ],
+                { signal },
+              );
+              runtimeEntityId = worker.id;
+              raw = await toolRpc.call(worker.id, "tests.run", [request], {
+                signal,
+              });
+            }
+            const result = testExecutionResultV1Schema.parse(raw);
+            await testbenchCall["tests.record"]!({
+              phase: "done",
+              ...identity,
+              runtimeEntityId,
+              result,
+            });
+            return result;
+          } catch (error) {
+            await testbenchCall["tests.record"]!({
+              phase: "error",
+              ...identity,
+              ...(runtimeEntityId ? { runtimeEntityId } : {}),
+              error: error instanceof Error ? error.message : String(error),
+            }).catch(() => undefined);
+            throw error;
+          } finally {
+            if (artifact.runtime === "workerd" && runtimeEntityId) {
+              await toolRpc
+                .call("main", "runtime.retireEntity", [{ id: runtimeEntityId }])
+                .catch(() => undefined);
+            }
+          }
+        },
       ),
       createSuspendTurnTool({
         guard: async ({ reason }) => {

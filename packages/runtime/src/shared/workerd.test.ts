@@ -94,6 +94,32 @@ describe("createWorkerdClient", () => {
     ]);
   });
 
+  it("creates a worker from an exact sealed artifact", async () => {
+    const artifact = {
+      buildKey: "build-test-worker",
+      executionDigest: "b".repeat(64),
+    };
+
+    await client.create("workers/example", {
+      key: "test-worker",
+      contextId: "ctx-1",
+      artifact,
+    });
+
+    expect(mock.rpc.call).toHaveBeenCalledWith("main", "runtime.createEntity", [
+      {
+        kind: "worker",
+        execution: {
+          surface: "code",
+          source: "workers/example",
+          artifact,
+        },
+        key: "test-worker",
+        contextId: "ctx-1",
+      },
+    ]);
+  });
+
   it("listSources calls workers.listSources", async () => {
     await client.listSources();
     expect(mock.rpc.call).toHaveBeenCalledWith("main", "workers.listSources", []);

@@ -335,7 +335,9 @@ function finalBuild(unit = OPTIMIZATION_UNIT, contextId = OPTIMIZATION_CONTEXT):
       target: unit,
       status: "ok",
       receipt: {
-        protocol: "build-verification-receipt.v1",
+        protocol: "unit-verification-receipt.v1",
+        operation: "build",
+        stateHash: `state:${"a".repeat(64)}`,
         contextId,
         ref: `ctx:${contextId}`,
         target: unit,
@@ -448,7 +450,9 @@ function successfulPackageBuild(unit: string, contextId: string): ChatMessage {
       status: "ok",
       report: { repoPath: unit, kind: "package", status: "ok", diagnostics: [], builds: [] },
       receipt: {
-        protocol: "build-verification-receipt.v1",
+        protocol: "unit-verification-receipt.v1",
+        operation: "build",
+        stateHash: `state:${"a".repeat(64)}`,
         contextId,
         ref: `ctx:${contextId}`,
         target: unit,

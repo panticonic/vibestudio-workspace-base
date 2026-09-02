@@ -108,7 +108,12 @@ function createdScaffold(
 
 function successfulBuildReceipt(record: Record<string, unknown>, target: string): boolean {
   const receipt = record["receipt"];
-  if (!isRecord(receipt) || receipt["protocol"] !== "build-verification-receipt.v1") {
+  if (
+    !isRecord(receipt) ||
+    receipt["protocol"] !== "unit-verification-receipt.v1" ||
+    receipt["operation"] !== "build" ||
+    typeof receipt["stateHash"] !== "string"
+  ) {
     return false;
   }
   const unit = receipt["unit"];

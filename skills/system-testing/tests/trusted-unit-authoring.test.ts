@@ -100,7 +100,9 @@ function buildVerification(unit: string, contextId = "context:task"): Operation 
       target: unit,
       status: "ok",
       receipt: {
-        protocol: "build-verification-receipt.v1",
+        protocol: "unit-verification-receipt.v1",
+        operation: "build",
+        stateHash: `state:${"a".repeat(64)}`,
         contextId,
         ref: `ctx:${contextId}`,
         target: unit,

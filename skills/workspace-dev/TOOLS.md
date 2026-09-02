@@ -603,12 +603,18 @@ canonical build result used by panel launch and includes every build target.
 installed caller's context. Pass `{ contextId }` only when intentionally
 checking a different context.
 
-#### @workspace-extensions/test-runner.run
+#### `verify({ operation: "test" })`
 
-Agents run Vitest tests through the first-class verification boundary. It
-materializes the exact conversation context and preserves authority, progress,
-cancellation, and bounded structured evidence. Test execution goes through the
-approval service because tests are code execution.
+Agents run manifest-declared suites through the first-class verification
+boundary. It materializes the exact conversation context, builds a sealed test
+artifact, and preserves runtime identity, progress, cancellation, and bounded
+structured evidence. Browser suites run as visible child panels of the ordinary
+Testbench panel with the complete production panel runtime. Workerd suites run
+as disposable complete worker entities with the normal workerd compatibility
+surface. Neither route requires native approval.
+Only a suite explicitly declared with `runtime: "native"` reaches
+`@workspace-extensions/test-runner.runNative` and requests the
+`native.code.execute-tests` capability.
 
 ```
 verify({ operation: "test", target: "packages/my-lib" })
@@ -620,14 +626,16 @@ For a single file or test name:
 verify({
   operation: "test",
   target: "packages/my-lib",
+  suite: "unit",
   file: "src/index.test.ts",
   testName: "handles empty input"
 })
 ```
 
 A failed run or zero discovered tests is an explicit error result with its
-structured report intact. Do not replace this boundary with generic `eval`, a
-shell command, or direct `extensions.invoke` plumbing.
+structured report intact. The declared runtime is never guessed and never
+falls back to native execution. Do not replace this boundary with generic
+`eval`, a shell command, or direct `extensions.invoke` plumbing.
 
 ### Browser Data
 

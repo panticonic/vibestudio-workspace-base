@@ -1,29 +1,28 @@
 ---
-name: workspace-test-runner
-description: Run focused Vitest tests for workspace panels, packages, workers, or extensions through the context-aware verify tool.
+name: workspace-native-test-adapter
+description: Run explicitly native workspace test suites through the context-aware verify tool.
 ---
 
-# Workspace Test Runner
+# Workspace Native Test Adapter
 
-Use `verify`, the first-class verification boundary. It preserves the conversation's
-exact semantic context, execution authority, cancellation, progress, and
-bounded structured results:
+Use `verify`, never invoke this extension directly:
 
 ```ts
 verify({
   operation: "test",
   target: "extensions/test-runner",
+  suite: "native",
   file: "index.test.ts",
 });
 ```
 
-`target` is a workspace repository path. `file` is relative to that target and
-may select one file; `testName` optionally selects matching tests. The returned
-details include a bounded report with `summary`, `passed`, `failed`, `total`,
-`contextId`, `target`, `pattern`, and per-file results. A failing test run or
-zero discovered tests is an explicit tool error with the report preserved for
-diagnosis.
+The unit manifest must declare the named suite with `runtime: "native"`.
+Only that declaration routes here and requests `native.code.execute-tests`.
+The adapter rechecks the declaration against the exact materialized context,
+then launches Vitest in a fresh Node child with an allow-listed environment,
+read access limited to that context/dependency closure, and a fresh writable
+scratch directory. It never imports selected workspace modules into the
+long-lived extension process.
 
-Tests execute code and therefore go through the approval service. Surface a
-denial as a denial. Do not bypass `verify` with a shell command, generic `eval`,
-or a direct extension invocation.
+Browser and workerd suites do not use this extension and do not request native
+approval. A compatibility or build failure never falls back to this adapter.

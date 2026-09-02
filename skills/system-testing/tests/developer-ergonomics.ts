@@ -134,7 +134,9 @@ function validateRecoverableInfrastructureContinuation(result: TestExecutionResu
 function buildReceipt(record: Record<string, unknown>, status: "ok" | "failed") {
   const receipt = record["receipt"];
   return isRecord(receipt) &&
-    receipt["protocol"] === "build-verification-receipt.v1" &&
+    receipt["protocol"] === "unit-verification-receipt.v1" &&
+    receipt["operation"] === "build" &&
+    typeof receipt["stateHash"] === "string" &&
     receipt["status"] === status
     ? receipt
     : null;

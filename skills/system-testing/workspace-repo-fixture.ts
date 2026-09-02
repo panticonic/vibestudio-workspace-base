@@ -49,6 +49,7 @@ export type WorkspaceRepoCreationScope =
   | { kind: "buildable-app"; section: "apps" }
   | { kind: "buildable-worker"; section: "workers" }
   | { kind: "buildable-regular-worker"; section: "workers" }
+  | { kind: "buildable-panel"; section: "panels" }
   | { kind: "optimizable-panel"; section: "panels" }
   | { kind: "created-repository"; section: WorkspaceRepoSection }
   | { kind: "buildable-panel-with-derived"; section: "panels" };
@@ -1040,6 +1041,9 @@ function repositorySeedFiles(
   if (fixture.kind === "optimizable-panel") {
     return buildablePanelFiles(repoName, { repeatedStatusLabels: 512 });
   }
+  if (fixture.kind === "buildable-panel") {
+    return buildablePanelFiles(repoName);
+  }
   if (fixture.kind === "buildable-worker") {
     return [
       {
@@ -1100,8 +1104,12 @@ function repositorySeedFiles(
               kind: "worker",
               entry: "index.ts",
               authority: { requests: [], provides: [] },
+              tests: [{ name: "unit", runtime: "workerd", include: ["**/*.test.ts"] }],
             },
-            dependencies: { "@workspace/runtime": "workspace:*" },
+            dependencies: {
+              "@workspace/runtime": "workspace:*",
+              "@workspace/test-runtime": "workspace:*",
+            },
           },
           null,
           2
@@ -1111,6 +1119,8 @@ function repositorySeedFiles(
         path: "index.ts",
         content: [
           'import { createWorkerRuntime, handleWorkerRpc, type ExecutionContext, type WorkerEnv } from "@workspace/runtime/worker";',
+          "",
+          'export const fixtureValue = "baseline";',
           "",
           "let exposedFor: string | null = null;",
           "",
@@ -1145,6 +1155,12 @@ function repositorySeedFiles(
           private: true,
           type: "module",
           exports: { ".": "./src/index.ts" },
+          vibestudio: {
+            tests: [
+              { name: "unit", runtime: "workerd", include: ["**/*.test.ts"] },
+            ],
+          },
+          dependencies: { "@workspace/test-runtime": "workspace:*" },
         },
         null,
         2
@@ -1198,8 +1214,17 @@ function buildablePanelFiles(
               "react/jsx-dev-runtime",
               "@workspace/ui",
             ],
+            tests: [
+              { name: "unit", runtime: "browser", include: ["**/*.test.ts"] },
+            ],
           },
-          dependencies: { "@workspace/ui": "workspace:*", react: "^19.0.0" },
+          dependencies: {
+            "@workspace/runtime": "workspace:*",
+            "@workspace/test-runtime": "workspace:*",
+            "@workspace/ui": "workspace:*",
+            react: "^19.0.0",
+            "react-dom": "^19.0.0",
+          },
         },
         null,
         2

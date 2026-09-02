@@ -36,6 +36,7 @@ export interface PanelHandleMetadata {
 }
 
 export interface PanelHandleHostOps {
+  call?(id: string, method: string, args: unknown[]): Promise<unknown>;
   refresh?(id: string): Promise<PanelHandleMetadata>;
   observe?(id: string): Promise<PanelObservation>;
   diagnose?(id: string): Promise<PanelDiagnosticPacket>;
@@ -65,6 +66,15 @@ export function createCallProxy<T extends Rpc.ExposedMethods>(
   rpc: Pick<RpcClient, "call">,
   targetId: RpcTargetResolver
 ): TypedCallProxy<T> {
+  return createInvocationProxy(async (method, args) => {
+    const resolvedTargetId = typeof targetId === "function" ? await targetId() : targetId;
+    return rpc.call(resolvedTargetId, method, args);
+  });
+}
+
+function createInvocationProxy<T extends Rpc.ExposedMethods>(
+  invoke: (method: string, args: unknown[]) => Promise<unknown>
+): TypedCallProxy<T> {
   const target = {} as TypedCallProxy<T>;
   return new Proxy(target, {
     get(_target, method: string | symbol) {
@@ -75,10 +85,7 @@ export function createCallProxy<T extends Rpc.ExposedMethods>(
       // invoke a remote method merely by observing the value.
       if (method === "then") return undefined;
       if (typeof method !== "string") return Reflect.get(target, method);
-      return async (...args: unknown[]) => {
-        const resolvedTargetId = typeof targetId === "function" ? await targetId() : targetId;
-        return rpc.call(resolvedTargetId, method, [...args]);
-      };
+      return (...args: unknown[]) => invoke(method, args);
     },
   });
 }
@@ -119,7 +126,9 @@ export function createPanelHandle<
     });
     return rpcTargetResolvePromise;
   };
-  const call = createCallProxy<T>(rpc, resolveRpcTargetId);
+  const call = ops?.call
+    ? createInvocationProxy<T>((method, args) => ops.call!(metadata.id, method, args))
+    : createCallProxy<T>(rpc, resolveRpcTargetId);
   const rememberObservation = (observation: PanelObservation): PanelObservation => {
     metadata = normalizeMetadata({
       ...metadata,

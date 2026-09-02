@@ -55,6 +55,7 @@ import {
 } from "@workspace/testkit";
 import { allSuites } from "@workspace/testkit/suites";
 import { Flamegraph } from "./Flamegraph.js";
+import type { TestExecutionResultV1 } from "@vibestudio/service-schemas/build";
 
 type RunPhase = "idle" | "running" | "done";
 
@@ -67,6 +68,119 @@ const STATUS_COLOR: Record<TestCaseResult["status"], "green" | "red" | "orange" 
 };
 
 let lastRunResult: SuiteRunResult | null = null;
+type WorkspaceRunView = {
+  phase: "running" | "done" | "error";
+  target: string;
+  suite: string;
+  artifactKey: string;
+  runtime: "browser" | "workerd";
+  selectedFiles: string[];
+  runtimeEntityId?: string;
+  result?: TestExecutionResultV1;
+  error?: string;
+};
+
+let lastWorkspaceRun: WorkspaceRunView | null = null;
+const WORKSPACE_RUN_EVENT = "testbench:workspace-run";
+
+function useWorkspaceRun(): WorkspaceRunView | null {
+  const [run, setRun] = useState(lastWorkspaceRun);
+  useEffect(() => {
+    const update = (event: Event) => setRun((event as CustomEvent<WorkspaceRunView>).detail);
+    window.addEventListener(WORKSPACE_RUN_EVENT, update);
+    return () => window.removeEventListener(WORKSPACE_RUN_EVENT, update);
+  }, []);
+  return run;
+}
+
+function WorkspaceRunCard() {
+  const run = useWorkspaceRun();
+  if (!run) return null;
+  if (run.phase === "running") {
+    return (
+      <Callout.Root color="blue" size="1">
+        <Callout.Text>
+          Running workspace suite {run.target} › {run.suite}…
+        </Callout.Text>
+      </Callout.Root>
+    );
+  }
+  if (run.phase === "error") {
+    return (
+      <Callout.Root color="red" size="1" role="alert">
+        <Callout.Text>{run.error}</Callout.Text>
+      </Callout.Root>
+    );
+  }
+  const result = run.result!;
+  return (
+    <Callout.Root color={result.status === "passed" ? "green" : "red"} size="1">
+      <Callout.Text>
+        {run.target} › {run.suite}: {result.passed} passed · {result.failed} failed ·{" "}
+        {result.skipped} skipped · {Math.round(result.durationMs)}ms
+      </Callout.Text>
+    </Callout.Root>
+  );
+}
+
+function WorkspaceTab() {
+  const run = useWorkspaceRun();
+  if (!run) {
+    return (
+      <Text size="2" color="gray">
+        Run a declared panel or worker suite with Verify to inspect its results here.
+      </Text>
+    );
+  }
+  return (
+    <Stack gap="3">
+      <WorkspaceRunCard />
+      <Card size="1">
+        <Flex direction="column" gap="1">
+          <Text size="2" weight="bold">{run.target} › {run.suite}</Text>
+          <Text size="1" color="gray">
+            Complete {run.runtime === "browser" ? "panel" : "worker"} runtime · artifact{" "}
+            <Code>{run.artifactKey.slice(0, 16)}</Code>
+          </Text>
+        </Flex>
+      </Card>
+      {run.runtimeEntityId ? (
+        <Text size="1" color="gray">
+          Runtime <Code>{run.runtimeEntityId}</Code>
+          {run.runtime === "browser" ? " is a visible child panel of Testbench." : " ran in workerd."}
+        </Text>
+      ) : null}
+      {run.phase === "done" ? (
+        <Flex direction="column" gap="2">
+          {run.result!.files.map((file) => (
+            <Card key={file.file} size="1">
+              <Flex justify="between" align="center" gap="2">
+                <Text size="2" truncate>{file.file}</Text>
+                <Badge color={file.status === "pass" ? "green" : file.status === "fail" ? "red" : "gray"}>
+                  {file.status}
+                </Badge>
+              </Flex>
+              {file.duration !== undefined ? (
+                <Text size="1" color="gray" as="div">{Math.round(file.duration)}ms</Text>
+              ) : null}
+              {file.errors?.map((error, index) => (
+                <Callout.Root key={index} color="red" size="1" mt="2">
+                  <Callout.Text style={{ whiteSpace: "pre-wrap", fontFamily: "monospace" }}>
+                    {error}
+                  </Callout.Text>
+                </Callout.Root>
+              ))}
+            </Card>
+          ))}
+        </Flex>
+      ) : (
+        <Text size="2" color="gray">
+          {run.selectedFiles.length} file{run.selectedFiles.length === 1 ? "" : "s"} selected.
+        </Text>
+      )}
+    </Stack>
+  );
+}
 
 function TestRow({ result }: { result: TestCaseResult }) {
   const [open, setOpen] = useState(false);
@@ -178,6 +292,7 @@ function SuitesTab({ runAllNonce = 0 }: { runAllNonce?: number }) {
 
   return (
     <Stack gap="3">
+      <WorkspaceRunCard />
       <Card>
         <Flex direction="column" gap="2">
           {suites.map((s) => (
@@ -402,6 +517,11 @@ function App() {
       setRunAllNonce((value) => value + 1);
     }
   });
+  useEffect(() => {
+    const showWorkspaceRun = () => setActiveTab("workspace");
+    window.addEventListener(WORKSPACE_RUN_EVENT, showWorkspaceRun);
+    return () => window.removeEventListener(WORKSPACE_RUN_EVENT, showWorkspaceRun);
+  }, []);
 
   return (
     <Theme appearance={theme} {...appTheme}>
@@ -420,6 +540,7 @@ function App() {
           >
             <Tabs.List style={{ paddingInline: "var(--space-3)", flexShrink: 0 }}>
               <Tabs.Trigger value="suites">Suites</Tabs.Trigger>
+              <Tabs.Trigger value="workspace">Workspace</Tabs.Trigger>
               <Tabs.Trigger value="history">History</Tabs.Trigger>
               <Tabs.Trigger value="profiles">Profiles</Tabs.Trigger>
             </Tabs.List>
@@ -430,6 +551,9 @@ function App() {
                 </Tabs.Content>
                 <Tabs.Content value="history">
                   <HistoryTab />
+                </Tabs.Content>
+                <Tabs.Content value="workspace">
+                  <WorkspaceTab />
                 </Tabs.Content>
                 <Tabs.Content value="profiles">
                   <ProfilesTab />
@@ -451,6 +575,10 @@ expose("runSuites", async (filter?: { suite?: string; test?: string }) => {
   return summarize(result);
 });
 expose("lastRun", () => (lastRunResult ? summarize(lastRunResult) : null));
+expose("tests.record", (run: WorkspaceRunView) => {
+  lastWorkspaceRun = run;
+  window.dispatchEvent(new CustomEvent(WORKSPACE_RUN_EVENT, { detail: run }));
+});
 
 const rootElement = document.getElementById("root");
 if (rootElement) {

@@ -118,7 +118,9 @@ export function verificationMatches(
   const receipt = record(details["receipt"]);
   const receiptUnit = record(receipt?.["unit"]);
   return (
-    receipt?.["protocol"] === "build-verification-receipt.v1" &&
+    receipt?.["protocol"] === "unit-verification-receipt.v1" &&
+    receipt["operation"] === "build" &&
+    typeof receipt["stateHash"] === "string" &&
     receipt["contextId"] === contextId &&
     receipt["ref"] === `ctx:${contextId}` &&
     workspacePath(receipt["target"]) === unit &&

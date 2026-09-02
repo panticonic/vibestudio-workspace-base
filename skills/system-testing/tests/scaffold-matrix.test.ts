@@ -72,7 +72,9 @@ function buildReceipt(target: string) {
     target,
     status: "ok",
     receipt: {
-      protocol: "build-verification-receipt.v1",
+      protocol: "unit-verification-receipt.v1",
+      operation: "build",
+      stateHash: `state:${"a".repeat(64)}`,
       target,
       contextId,
       ref: `ctx:${contextId}`,

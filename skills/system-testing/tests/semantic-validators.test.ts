@@ -610,11 +610,12 @@ describe("semantic system-test validators", () => {
           ruleId: "workspace-test-runner-execution",
           capability: {
             kind: "prefix",
-            prefix: "userland:extensions/test-runner/native.tests.execute#",
+            prefix:
+              "userland:extensions/test-runner/native.code.execute-tests#",
           },
           resource: {
             kind: "exact",
-            key: "native.tests:extension:@workspace-extensions/test-runner",
+            key: "native.code.tests:extension:@workspace-extensions/test-runner",
           },
           tier: "gated",
           decision: "once",

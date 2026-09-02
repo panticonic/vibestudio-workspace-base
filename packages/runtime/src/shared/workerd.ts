@@ -62,6 +62,7 @@ export type WorkerCreateOptions = Omit<
   "kind" | "execution"
 > & {
   ref?: string;
+  artifact?: { buildKey: string; executionDigest: string };
 };
 
 export type WorkerEntityHandle = RuntimeEntityHandle & { kind: "worker" };
@@ -207,11 +208,16 @@ export function createWorkerdClient(rpc: RpcCaller): WorkerdClient {
   return {
     listSources: () => callWorkers<WorkerSourceInfo[]>("listSources"),
     create: (source, options = {}) => {
-      const { ref, ...entityOptions } = options;
+      const { ref, artifact, ...entityOptions } = options;
       return rpc.call<WorkerEntityHandle>("main", "runtime.createEntity", [
         {
           kind: "worker",
-          execution: { surface: "code", source, ...(ref ? { ref } : {}) },
+          execution: {
+            surface: "code",
+            source,
+            ...(ref ? { ref } : {}),
+            ...(artifact ? { artifact } : {}),
+          },
           ...entityOptions,
         },
       ]);

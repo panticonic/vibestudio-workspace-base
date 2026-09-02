@@ -664,7 +664,9 @@ function hasCleanPanelBuild(call: InvocationCardPayloadLike, expectedSource: str
     const unit = isRecord(receipt) ? receipt["unit"] : null;
     if (
       isRecord(receipt) &&
-      receipt["protocol"] === "build-verification-receipt.v1" &&
+      receipt["protocol"] === "unit-verification-receipt.v1" &&
+      receipt["operation"] === "build" &&
+      typeof receipt["stateHash"] === "string" &&
       receipt["status"] === "ok" &&
       receipt["target"] === expectedSource &&
       isRecord(unit) &&

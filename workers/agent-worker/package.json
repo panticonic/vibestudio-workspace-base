@@ -162,10 +162,10 @@
           "evidence": "intentional-broad"
         },
         {
-          "capability": "userland:extensions/test-runner/native.tests.execute#*",
+          "capability": "userland:extensions/test-runner/native.code.execute-tests#*",
           "resource": {
             "kind": "exact",
-            "key": "native.tests:extension:@workspace-extensions/test-runner"
+            "key": "native.code.tests:extension:@workspace-extensions/test-runner"
           },
           "tier": "gated",
           "evidence": "bounded-dynamic"

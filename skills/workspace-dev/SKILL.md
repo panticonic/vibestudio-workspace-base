@@ -66,6 +66,26 @@ purpose, workflow, ownership, invariants, and diagnostics.
 - Use structured read/edit/write/move/copy and semantic VCS tools for managed
   files. Use eval for runtime operations, not as a file editor or shell.
 - Use `verify` for exact-context build checks and focused tests.
+- Declare every in-app test suite in `package.json#vibestudio.tests`. Choose the
+  production-matched runtime explicitly: `browser` for panels/DOM behavior,
+  `workerd` for workers and portable logic, and `native` only for Node,
+  Electron, extension, filesystem, socket, or process behavior. Runtime is
+  reviewed source and never falls back to native.
+- Browser/workerd suite files import test primitives from
+  `@workspace/test-runtime`, which must be a declared `workspace:*` production
+  dependency. Test artifacts use the semantic executable dependency projection,
+  so `devDependencies` are intentionally unavailable in the sandboxed realm.
+  Native suites may use Vitest. When a unit has multiple suites, pass `suite`
+  to `verify`; `file` is always relative to the unit and must belong to that
+  suite.
+- Browser verification opens the ordinary visible `about/testbench` panel and
+  launches the exact sealed test artifact as a visible child panel. The child
+  receives the complete production panel runtime, including the real document,
+  RPC, and the normal `fs`/`path` build shims. Workerd suites likewise launch as
+  complete disposable worker entities with normal workerd compatibility. An
+  interactive client displays the child; the managed headless client is the
+  always-available hosting fallback. A hosting failure is infrastructure,
+  never permission to reroute code to Node.
 - In eval, use ambient `scope`, `scopes`, `db`, `ctx`, `help`, `chat`, and
   `agent` directly. Portable runtime bindings are also importable from
   `@workspace/runtime`; see [sandbox eval](../sandbox/EVAL.md).
@@ -90,6 +110,17 @@ version-controlled files under `projects/` for content benefiting from history,
 diffing, and collaboration. Panel state args, eval scope, component state, and
 process memory are presentation or scratch state, never the sole home of
 meaningful application data.
+
+For a panel or app backed by a workspace service, work contract-first before
+building the UI:
+
+1. Read [the service-backed data workflow](WORKERS.md#durable-object-backed-app-databases).
+2. Define and verify the provider's real `@rpc` methods and its service declaration.
+   Never invent a placeholder method name.
+3. Add the consumer's `authority.serviceRequests` declaration in the same change.
+4. In the consumer, narrow `workers.resolveService(...)` by `kind` before using
+   kind-specific fields such as `targetId` or `routeBasePath`.
+5. Verify the provider, then a minimal consumer call, before expanding the UI.
 
 Expose application operations as narrow, app-shaped RPC methods with explicit
 receiver contracts. Use channels and structured events when collaboration is

@@ -132,7 +132,7 @@ export type {
   WorkspaceFileObservationStore,
   VerifyToolInput,
   VerifyToolDetails,
-  BuildVerificationReceipt,
+  UnitVerificationReceiptV1,
   TruncationResult,
   TruncationOptions,
   LineEnding,

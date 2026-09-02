@@ -475,6 +475,8 @@ describe("createProjects", () => {
       mocks.files.get("panels/minimal/package.json") as string,
     );
     expect(manifest.dependencies).toEqual({
+      "@workspace/runtime": "workspace:*",
+      "@workspace/test-runtime": "workspace:*",
       react: "19.2.4",
       "react-dom": "19.2.4",
     });
@@ -1023,6 +1025,8 @@ describe("scaffold runtime contract", () => {
       dependencies?: Record<string, string>;
     };
     expect(manifest.dependencies).toEqual({
+      "@workspace/runtime": "workspace:*",
+      "@workspace/test-runtime": "workspace:*",
       react: BASE_PANEL_REACT_VERSION,
       "react-dom": BASE_PANEL_REACT_VERSION,
     });

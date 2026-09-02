@@ -101,6 +101,8 @@ function runtimeHarness(
         }
         case "_agent.tree":
           return { target: _target } as T;
+        case "tests.run":
+          return { target: _target } as T;
         case "build.getPanelMetadata":
           return { title: "New" } as T;
         case "workspace-state.panel.index":
@@ -458,6 +460,37 @@ describe("panel runtime topology composition", () => {
     expect(methods).not.toContain("panelTree.observe");
   });
 
+  it("reserves a panel from an exact sealed artifact when requested", async () => {
+    const { runtime, call } = runtimeHarness();
+    const artifact = {
+      buildKey: "build-test-panel",
+      executionDigest: "a".repeat(64),
+    };
+
+    await runtime.openPanel("panels/new", {
+      operationId: "exact-test-panel",
+      artifact,
+      focus: false,
+    });
+
+    expect(call).toHaveBeenCalledWith("main", "runtime.reserveEntity", [
+      expect.objectContaining({
+        execution: {
+          surface: "code",
+          source: "panels/new",
+          artifact,
+        },
+      }),
+    ]);
+    expect(call).toHaveBeenCalledWith("main", "workspace-state.slot.create", [
+      expect.objectContaining({
+        initialEntry: expect.objectContaining({
+          options: expect.objectContaining({ artifact }),
+        }),
+      }),
+    ]);
+  });
+
   it("reports an unassigned presentation as explicit pending state", async () => {
     const { runtime } = runtimeHarness({ hostAvailable: false });
 
@@ -517,6 +550,20 @@ describe("panel runtime topology composition", () => {
         (entry) => entry[1] === "panelRuntime.observeSlot",
       ),
     ).toHaveLength(1);
+  });
+
+  it("routes exposed panel calls through the ready presentation target", async () => {
+    const { runtime, call } = runtimeHarness();
+    const panel = await runtime.openPanel("panels/new", {
+      operationId: "run-tests",
+    });
+
+    await expect(panel.call["tests.run"]!({})).resolves.toEqual({
+      target: "panel:nav-new",
+    });
+    expect(
+      call.mock.calls.filter((entry) => entry[1] === "panelRuntime.ensureSlot"),
+    ).toHaveLength(2);
   });
 
   it("returns a committed slot receipt without observing application readiness", async () => {

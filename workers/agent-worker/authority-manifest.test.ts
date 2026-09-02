@@ -72,10 +72,10 @@ describe("agent-worker authority manifest", () => {
       vibestudio: { authority: { requests: AuthorityRequest[] } };
     };
     expect(manifest.vibestudio.authority.requests).toContainEqual({
-      capability: "userland:extensions/test-runner/native.tests.execute#*",
+      capability: "userland:extensions/test-runner/native.code.execute-tests#*",
       resource: {
         kind: "exact",
-        key: "native.tests:extension:@workspace-extensions/test-runner",
+        key: "native.code.tests:extension:@workspace-extensions/test-runner",
       },
       tier: "gated",
       evidence: "bounded-dynamic",

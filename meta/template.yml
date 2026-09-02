@@ -65,6 +65,7 @@ template:
     - packages/template-registry
     - packages/terminal-host-protocol
     - packages/terminal-shim
+    - packages/test-runtime
     - packages/testkit
     - packages/tool-ui
     - packages/ui

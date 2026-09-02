@@ -129,6 +129,8 @@ function canonicalRecord<T>(value: Record<string, T> | undefined): Record<string
 export function buildProjectManifest(input: BuildProjectManifestInput): Record<string, unknown> {
   assertProjectIdentity(input.name, input.title);
   const executable = input.projectType === "panel" || input.projectType === "worker";
+  const testRuntime =
+    input.projectType === "panel" ? "browser" : input.projectType === "worker" ? "workerd" : null;
   if (executable && !input.entry) {
     throw new Error(`${input.projectType} manifests require an explicit entry`);
   }
@@ -157,9 +159,22 @@ export function buildProjectManifest(input: BuildProjectManifestInput): Record<s
             },
           }
         : {}),
+      tests: [
+        {
+          name: "unit",
+          runtime: testRuntime,
+          include: ["**/*.test.ts", "**/*.test.tsx"],
+        },
+      ],
     };
   }
-  if (input.dependencies) manifest["dependencies"] = canonicalRecord(input.dependencies);
+  if (input.dependencies || testRuntime) {
+    manifest["dependencies"] = canonicalRecord({
+      ...(input.dependencies ?? {}),
+      ...(testRuntime === "browser" ? { "@workspace/runtime": "workspace:*" } : {}),
+      ...(testRuntime ? { "@workspace/test-runtime": "workspace:*" } : {}),
+    });
+  }
   if (input.devDependencies) manifest["devDependencies"] = canonicalRecord(input.devDependencies);
   return manifest;
 }

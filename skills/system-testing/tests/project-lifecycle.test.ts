@@ -174,7 +174,9 @@ describe("project lifecycle prompts", () => {
       }),
       invocation("build", "verify", { operation: "build", target: source }, {
         receipt: {
-          protocol: "build-verification-receipt.v1",
+          protocol: "unit-verification-receipt.v1",
+          operation: "build",
+          stateHash: `state:${"a".repeat(64)}`,
           status: "ok",
           target: source,
           unit: { repoPath: source },

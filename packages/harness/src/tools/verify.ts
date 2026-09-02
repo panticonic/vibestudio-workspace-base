@@ -4,6 +4,11 @@ import type { AgentTool, AgentToolResult } from "@workspace/pi-core";
 import type { UnitBuildReportWire } from "@vibestudio/service-schemas/build";
 import { sha256Hex } from "@vibestudio/content-addressing";
 import type { AgentToolFailure } from "@workspace/agentic-protocol";
+import type {
+  TestExecutionResultV1,
+  WorkspaceTestArtifactV1,
+  WorkspaceTestPlan,
+} from "@vibestudio/service-schemas/build";
 import { encodeUtf8 } from "./portable-bytes.js";
 
 const buildVerificationSchema = Type.Object(
@@ -11,10 +16,11 @@ const buildVerificationSchema = Type.Object(
     operation: Type.Literal("build"),
     target: Type.String({
       minLength: 1,
-      description: "Workspace unit name or path, for example packages/parser or panels/editor.",
+      description:
+        "Workspace unit name or path, for example packages/parser or panels/editor.",
     }),
   },
-  { additionalProperties: false }
+  { additionalProperties: false },
 );
 
 const testVerificationSchema = Type.Object(
@@ -28,21 +34,39 @@ const testVerificationSchema = Type.Object(
       Type.String({
         minLength: 1,
         description: "Optional test file path relative to target.",
-      })
+      }),
     ),
     testName: Type.Optional(
-      Type.String({ minLength: 1, description: "Optional Vitest test-name pattern." })
+      Type.String({
+        minLength: 1,
+        description: "Optional Vitest test-name pattern.",
+      }),
+    ),
+    suite: Type.Optional(
+      Type.String({ minLength: 1, description: "Declared test-suite name." }),
     ),
   },
-  { additionalProperties: false }
+  { additionalProperties: false },
 );
 
-export const verifySchema = Type.Union([buildVerificationSchema, testVerificationSchema]);
+export const verifySchema = Type.Union([
+  buildVerificationSchema,
+  testVerificationSchema,
+]);
 export type VerifyToolInput =
   | { operation: "build"; target: string }
-  | { operation: "test"; target: string; file?: string; testName?: string };
+  | {
+      operation: "test";
+      target: string;
+      suite?: string;
+      file?: string;
+      testName?: string;
+    };
 
 interface TestRunResult {
+  runtime: "browser" | "workerd" | "native";
+  artifactKey?: string;
+  executionDigest?: string;
   summary: string;
   passed: number;
   failed: number;
@@ -69,7 +93,7 @@ export type VerifyToolDetails =
       target: string;
       status: UnitBuildReportWire["status"];
       report: UnitBuildReportWire;
-      receipt: BuildVerificationReceipt;
+      receipt: UnitVerificationReceiptV1;
       truncatedDiagnostics: number;
       truncatedDiagnosticText: number;
       failure?: AgentToolFailure;
@@ -79,32 +103,39 @@ export type VerifyToolDetails =
       target: string;
       status: "passed" | "failed" | "no-tests";
       report: TestRunResult;
+      receipt: UnitVerificationReceiptV1;
       truncatedFiles: number;
       truncatedErrors: number;
       failure?: AgentToolFailure;
     };
 
-export interface BuildVerificationReceipt {
-  protocol: "build-verification-receipt.v1";
+export interface UnitVerificationReceiptV1 {
+  protocol: "unit-verification-receipt.v1";
+  operation: "build" | "test";
   target: string;
   contextId: string;
   ref: string;
-  reportRequest: {
+  stateHash: string;
+  reportDigest: string;
+  suite?: string;
+  runtime?: "browser" | "workerd" | "native";
+  artifactKey?: string | null;
+  executionDigest?: string | null;
+  reportRequest?: {
     method: "build.getBuildReport";
     args: [target: string, ref: string];
   };
-  reportDigest: string;
-  unit: {
+  unit?: {
     repoPath: string;
     unitName?: string;
     kind: string;
   };
-  status: UnitBuildReportWire["status"];
-  builds: Array<{
+  status?: string;
+  builds?: Array<{
     target: UnitBuildReportWire["builds"][number]["target"];
     buildKey: string | null;
   }>;
-  diagnostics: { total: number; retained: number; truncated: number };
+  diagnostics?: { total: number; retained: number; truncated: number };
 }
 
 const MAX_DIAGNOSTICS = 40;
@@ -115,22 +146,32 @@ const MAX_ERRORS_PER_FILE = 20;
 const MAX_ERROR_CHARS = 4_000;
 
 export function createVerifyTool(
-  callMain: <T>(method: string, args: unknown[], signal?: AbortSignal) => Promise<T>,
-  contextId: () => string
+  callMain: <T>(
+    method: string,
+    args: unknown[],
+    signal?: AbortSignal,
+  ) => Promise<T>,
+  contextId: () => string,
+  executeSandboxTest?: (
+    artifact: WorkspaceTestArtifactV1,
+    testName: string | undefined,
+    signal?: AbortSignal,
+  ) => Promise<TestExecutionResultV1>,
 ): AgentTool<typeof verifySchema, VerifyToolDetails> {
   return {
     name: "verify",
     label: "verify",
     description:
-      'Build or test one workspace unit against this conversation\'s exact semantic working state. Use { operation:"build", target } for compiler/bundler diagnostics and { operation:"test", target, file?, testName? } for Vitest. This is the supported code-verification boundary: it materializes the exact context, preserves execution authority and approvals, returns structured bounded evidence plus a reusable build receipt, and never treats zero discovered tests as success. Do not emulate it with a shell command or generic eval wrapper.',
+      'Build or test one workspace unit against this conversation\'s exact semantic working state. Use { operation:"build", target } for compiler/bundler diagnostics and { operation:"test", target, suite?, file?, testName? } for a manifest-declared browser, workerd, or native suite. Browser and workerd code stays sandboxed; only an explicitly native suite can request native approval. This boundary materializes the exact context, returns bounded evidence, and never treats zero discovered tests as success.',
     parameters: verifySchema,
     execute: async (
       _toolCallId,
       input,
       signal,
-      onUpdate
+      onUpdate,
     ): Promise<AgentToolResult<VerifyToolDetails>> => {
-      if (signal?.aborted) throw signal.reason ?? new Error("Operation aborted");
+      if (signal?.aborted)
+        throw signal.reason ?? new Error("Operation aborted");
       const command = input as VerifyToolInput;
       onUpdate?.({
         content: [
@@ -139,18 +180,27 @@ export function createVerifyTool(
             text: `${command.operation === "build" ? "Building" : "Testing"} ${command.target}…`,
           },
         ],
-        details: { operation: command.operation, target: command.target, status: "running" },
+        details: {
+          operation: command.operation,
+          target: command.target,
+          status: "running",
+        },
       });
       if (command.operation === "build") {
         const exactContextId = contextId();
         const report = await callMain<UnitBuildReportWire>(
           "build.getBuildReport",
           [command.target, `ctx:${exactContextId}`],
-          signal
+          signal,
         );
         const bounded = boundBuildReport(report);
         const failed = report.status !== "ok";
-        const receipt = buildVerificationReceipt(command.target, exactContextId, report, bounded);
+        const receipt = buildVerificationReceipt(
+          command.target,
+          exactContextId,
+          report,
+          bounded,
+        );
         const failure =
           report.status === "failed"
             ? verificationFailure({
@@ -178,7 +228,11 @@ export function createVerifyTool(
           content: [
             {
               type: "text",
-              text: renderBuild(command.target, bounded.report, receipt.diagnostics),
+              text: renderBuild(
+                command.target,
+                bounded.report,
+                receipt.diagnostics!,
+              ),
             },
           ],
           details: {
@@ -195,24 +249,117 @@ export function createVerifyTool(
         };
       }
 
-      const report = await callMain<TestRunResult>(
-        "extensions.invoke",
-        [
-          "@workspace-extensions/test-runner",
-          "run",
-          [
-            {
+      const exactContextId = contextId();
+      const ref = `ctx:${exactContextId}`;
+      const plan = await callMain<WorkspaceTestPlan>(
+        "build.resolveTestSuite",
+        [command.target, ref, command.suite],
+        signal,
+      );
+      let report: TestRunResult;
+      let artifactKey: string;
+      let executionDigest: string;
+      if (plan.runtime === "native") {
+        executionDigest = sha256Hex(
+          encodeUtf8(
+            JSON.stringify({
+              protocol: "native-test-execution.v1",
+              stateHash: plan.stateHash,
               target: command.target,
-              contextId: contextId(),
-              ...(command.file ? { fileFilter: command.file } : {}),
-              ...(command.testName ? { testName: command.testName } : {}),
+              suite: plan.suite,
+              file: command.file ?? null,
+            }),
+          ),
+        );
+        artifactKey = `native:${executionDigest}`;
+        report = await callMain<TestRunResult>(
+          "extensions.invoke",
+          [
+            "@workspace-extensions/test-runner",
+            "runNative",
+            [
+              {
+                target: command.target,
+                suite: plan.suite,
+                contextId: exactContextId,
+                artifactKey,
+                executionDigest,
+                ...(command.file ? { fileFilter: command.file } : {}),
+                ...(command.testName ? { testName: command.testName } : {}),
+              },
+            ],
+          ],
+          signal,
+        );
+        if (
+          report.artifactKey !== artifactKey ||
+          report.executionDigest !== executionDigest
+        ) {
+          throw new Error("Native test adapter returned a mismatched execution identity");
+        }
+      } else {
+        if (!executeSandboxTest) {
+          throw new Error(
+            `No ${plan.runtime} test executor is installed for verify`,
+          );
+        }
+        const artifact = await callMain<WorkspaceTestArtifactV1>(
+          "build.getTestArtifact",
+          [
+            command.target,
+            ref,
+            {
+              suite: plan.suite,
+              ...(command.file ? { file: command.file } : {}),
             },
           ],
-        ],
-        signal
-      );
+          signal,
+        );
+        const result = await executeSandboxTest(
+          artifact,
+          command.testName,
+          signal,
+        );
+        artifactKey = artifact.artifactKey;
+        executionDigest = artifact.execution.executionDigest;
+        report = {
+          runtime: plan.runtime,
+          summary:
+            result.status === "no-tests"
+              ? "No tests matched the execution filter"
+              : result.failed > 0
+                ? `${result.failed} of ${result.passed + result.failed} tests failed`
+                : `${result.passed} tests passed`,
+          passed: result.passed,
+          failed: result.failed,
+          total: result.passed + result.failed,
+          contextId: exactContextId,
+          target: command.target,
+          pattern: `${plan.suite} (${plan.runtime})`,
+          details: result.files,
+        };
+      }
+      const status =
+        report.total === 0
+          ? "no-tests"
+          : report.failed > 0
+            ? "failed"
+            : "passed";
       const bounded = boundTestReport(report);
-      const status = report.total === 0 ? "no-tests" : report.failed > 0 ? "failed" : "passed";
+      const receipt: UnitVerificationReceiptV1 = {
+        protocol: "unit-verification-receipt.v1",
+        operation: "test",
+        target: command.target,
+        contextId: exactContextId,
+        ref,
+        stateHash: plan.stateHash,
+        reportDigest: sha256Hex(encodeUtf8(JSON.stringify(report))),
+        suite: plan.suite,
+        runtime: plan.runtime,
+        artifactKey,
+        executionDigest,
+        status,
+      };
       const failure =
         status === "failed"
           ? verificationFailure({
@@ -237,12 +384,18 @@ export function createVerifyTool(
               })
             : undefined;
       return {
-        content: [{ type: "text", text: renderTests(command.target, bounded.report, status) }],
+        content: [
+          {
+            type: "text",
+            text: renderTests(command.target, bounded.report, status),
+          },
+        ],
         details: {
           operation: "test",
           target: command.target,
           status,
           report: bounded.report,
+          receipt,
           truncatedFiles: bounded.truncatedFiles,
           truncatedErrors: bounded.truncatedErrors,
           ...(failure ? { failure } : {}),
@@ -279,13 +432,15 @@ function buildVerificationReceipt(
   target: string,
   contextId: string,
   report: UnitBuildReportWire,
-  bounded: ReturnType<typeof boundBuildReport>
-): BuildVerificationReceipt {
+  bounded: ReturnType<typeof boundBuildReport>,
+): UnitVerificationReceiptV1 {
   return {
-    protocol: "build-verification-receipt.v1",
+    protocol: "unit-verification-receipt.v1",
+    operation: "build",
     target,
     contextId,
     ref: `ctx:${contextId}`,
+    stateHash: report.stateHash,
     reportRequest: {
       method: "build.getBuildReport",
       args: [target, `ctx:${contextId}`],
@@ -315,38 +470,60 @@ function boundBuildReport(report: UnitBuildReportWire): {
   truncatedDiagnosticText: number;
 } {
   let truncatedDiagnosticText = 0;
-  const clamp = (value: string | undefined, limit: number): string | undefined => {
+  const clamp = (
+    value: string | undefined,
+    limit: number,
+  ): string | undefined => {
     if (value === undefined || value.length <= limit) return value;
     truncatedDiagnosticText += value.length - limit;
     return `${value.slice(0, limit)}… [truncated]`;
   };
-  const diagnostics = report.diagnostics.slice(0, MAX_DIAGNOSTICS).map((diagnostic) => {
-    // Host-derived structured repairs are bounded by construction; the size
-    // valve only guards a malformed oversized payload. Never rewrite repair
-    // contents — a truncated edit instruction is worse than none.
-    const repair = (diagnostic as { repair?: unknown }).repair;
-    const repairOversized =
-      repair !== undefined && JSON.stringify(repair).length > MAX_DIAGNOSTIC_CONTEXT_CHARS;
-    if (repairOversized) truncatedDiagnosticText += JSON.stringify(repair).length;
-    return {
-      ...diagnostic,
-      message: clamp(diagnostic.message, MAX_DIAGNOSTIC_MESSAGE_CHARS)!,
-      ...(diagnostic.lineText === undefined
-        ? {}
-        : { lineText: clamp(diagnostic.lineText, MAX_DIAGNOSTIC_CONTEXT_CHARS) }),
-      ...(diagnostic.suggestion === undefined
-        ? {}
-        : { suggestion: clamp(diagnostic.suggestion, MAX_DIAGNOSTIC_CONTEXT_CHARS) }),
-      ...(repairOversized ? { repair: undefined } : {}),
-    };
-  });
+  const diagnostics = report.diagnostics
+    .slice(0, MAX_DIAGNOSTICS)
+    .map((diagnostic) => {
+      // Host-derived structured repairs are bounded by construction; the size
+      // valve only guards a malformed oversized payload. Never rewrite repair
+      // contents — a truncated edit instruction is worse than none.
+      const repair = (diagnostic as { repair?: unknown }).repair;
+      const repairOversized =
+        repair !== undefined &&
+        JSON.stringify(repair).length > MAX_DIAGNOSTIC_CONTEXT_CHARS;
+      if (repairOversized)
+        truncatedDiagnosticText += JSON.stringify(repair).length;
+      return {
+        ...diagnostic,
+        message: clamp(diagnostic.message, MAX_DIAGNOSTIC_MESSAGE_CHARS)!,
+        ...(diagnostic.lineText === undefined
+          ? {}
+          : {
+              lineText: clamp(
+                diagnostic.lineText,
+                MAX_DIAGNOSTIC_CONTEXT_CHARS,
+              ),
+            }),
+        ...(diagnostic.suggestion === undefined
+          ? {}
+          : {
+              suggestion: clamp(
+                diagnostic.suggestion,
+                MAX_DIAGNOSTIC_CONTEXT_CHARS,
+              ),
+            }),
+        ...(repairOversized ? { repair: undefined } : {}),
+      };
+    });
   const builds = report.builds.map((build) => ({
     ...build,
-    diagnosticIndexes: build.diagnosticIndexes.filter((index) => index < diagnostics.length),
+    diagnosticIndexes: build.diagnosticIndexes.filter(
+      (index) => index < diagnostics.length,
+    ),
   }));
   return {
     report: { ...report, diagnostics, builds },
-    truncatedDiagnostics: Math.max(0, report.diagnostics.length - MAX_DIAGNOSTICS),
+    truncatedDiagnostics: Math.max(
+      0,
+      report.diagnostics.length - MAX_DIAGNOSTICS,
+    ),
     truncatedDiagnosticText,
   };
 }
@@ -369,7 +546,7 @@ function boundTestReport(report: TestRunResult): {
               .map((error) =>
                 error.length <= MAX_ERROR_CHARS
                   ? error
-                  : `${error.slice(0, MAX_ERROR_CHARS)}… [truncated]`
+                  : `${error.slice(0, MAX_ERROR_CHARS)}… [truncated]`,
               ),
           }
         : {}),
@@ -385,7 +562,7 @@ function boundTestReport(report: TestRunResult): {
 function renderBuild(
   target: string,
   report: UnitBuildReportWire,
-  diagnostics: BuildVerificationReceipt["diagnostics"]
+  diagnostics: NonNullable<UnitVerificationReceiptV1["diagnostics"]>,
 ): string {
   const diagnosticSummary =
     diagnostics.total === diagnostics.retained
@@ -403,15 +580,15 @@ function renderBuild(
 function renderTests(
   target: string,
   report: TestRunResult,
-  status: "passed" | "failed" | "no-tests"
+  status: "passed" | "failed" | "no-tests",
 ): string {
   const errors = report.details.flatMap((file) =>
-    (file.errors ?? []).map((error) => `${file.file}: ${error}`)
+    (file.errors ?? []).map((error) => `${file.file}: ${error}`),
   );
   return [
     status === "no-tests"
       ? `No tests were discovered for ${target}; verification did not pass.`
-      : `Tests ${status} for ${target}: ${report.passed} passed, ${report.failed} failed, ${report.total} total.`,
+      : `Tests ${status} for ${target} in ${report.runtime}: ${report.passed} passed, ${report.failed} failed, ${report.total} total.`,
     ...errors,
   ].join("\n");
 }

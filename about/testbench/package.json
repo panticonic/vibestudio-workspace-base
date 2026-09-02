@@ -105,6 +105,7 @@
     }
   },
   "dependencies": {
+    "@vibestudio/service-schemas": "workspace:*",
     "@workspace/runtime": "workspace:*",
     "@workspace/react": "workspace:*",
     "@workspace/testkit": "workspace:*",

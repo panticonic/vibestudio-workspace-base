@@ -20,6 +20,7 @@ export type {
 export { summarizeFailures, summarizeEntry } from "./diagnostics.js";
 export type { FailureDiagnostic, FailureReport, DiagnosticLimits } from "./diagnostics.js";
 export {
+  BUILDABLE_PANEL_WORKSPACE_REPO_FIXTURE,
   BUILDABLE_PACKAGE_WORKSPACE_REPO_FIXTURE,
   BUILDABLE_REGULAR_WORKER_WORKSPACE_REPO_FIXTURE,
   BUILDABLE_WORKER_WORKSPACE_REPO_FIXTURE,

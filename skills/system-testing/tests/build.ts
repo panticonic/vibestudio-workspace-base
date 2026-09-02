@@ -1,6 +1,8 @@
 import type { TestCase, TestExecutionResult } from "../types.js";
 import {
+  BUILDABLE_PANEL_WORKSPACE_REPO_FIXTURE,
   BUILDABLE_PACKAGE_WORKSPACE_REPO_FIXTURE,
+  BUILDABLE_REGULAR_WORKER_WORKSPACE_REPO_FIXTURE,
   OPTIMIZABLE_PANEL_WORKSPACE_REPO_FIXTURE,
 } from "../types.js";
 import {
@@ -39,6 +41,40 @@ function validateWorkspaceBuild(result: TestExecutionResult) {
         passed: false,
         reason: "No successful exact-context package build verification was observed",
       };
+}
+
+function validateSandboxedWorkspaceTest(
+  result: TestExecutionResult,
+  runtime: "browser" | "workerd",
+) {
+  const base = completedScenarioEvidence(result, ["verify"]);
+  if (!base.passed) return base;
+  const contextId = result.provenance?.contextId;
+  if (!contextId) return { passed: false, reason: "Test verification exposed no exact task context" };
+  if (base.evidence.calls.some((call) => call.name === "extensions.invoke")) {
+    return { passed: false, reason: "Sandboxed verification reached the native extension route" };
+  }
+  const verified = base.evidence.calls.some((call) => {
+    if (call.arguments?.["operation"] !== "test") return false;
+    const details = successfulToolDetails(call, "verify");
+    const receipt = record(details?.["receipt"]);
+    const report = record(details?.["report"]);
+    return (
+      details?.["status"] === "passed" &&
+      receipt?.["protocol"] === "unit-verification-receipt.v1" &&
+      receipt["operation"] === "test" &&
+      receipt["runtime"] === runtime &&
+      receipt["contextId"] === contextId &&
+      typeof receipt["artifactKey"] === "string" &&
+      typeof receipt["executionDigest"] === "string" &&
+      typeof report?.["total"] === "number" &&
+      report["total"] > 0 &&
+      report["failed"] === 0
+    );
+  });
+  return verified
+    ? { passed: true, reason: undefined }
+    : { passed: false, reason: `No prompt-free ${runtime} test receipt was observed` };
 }
 
 function buildPerformanceResult(values: readonly unknown[]): boolean {
@@ -340,6 +376,26 @@ export const buildTests: TestCase[] = [
       "Build and type-check the small disposable workspace package prepared for this task and tell me whether it succeeded, including any diagnostics you observed.",
     validation: "agent-evidence",
     validate: validateWorkspaceBuild,
+  },
+  {
+    name: "test-workspace-worker-workerd",
+    description: "Run a worker suite in its complete workerd runtime without native approval",
+    category: "build",
+    workspaceRepoFixture: BUILDABLE_REGULAR_WORKER_WORKSPACE_REPO_FIXTURE,
+    prompt:
+      "Add one small test for the disposable worker's exported baseline value, run its declared workerd suite in the complete worker runtime, and tell me the result. Do not publish.",
+    validation: "agent-evidence",
+    validate: (result) => validateSandboxedWorkspaceTest(result, "workerd"),
+  },
+  {
+    name: "test-workspace-panel-browser",
+    description: "Run a panel suite in a visible complete panel runtime under Testbench",
+    category: "build",
+    workspaceRepoFixture: BUILDABLE_PANEL_WORKSPACE_REPO_FIXTURE,
+    prompt:
+      "Add one small test proving that the declared browser suite has a real panel document and injected panel runtime, run that suite, and tell me the result. Do not publish.",
+    validation: "agent-evidence",
+    validate: (result) => validateSandboxedWorkspaceTest(result, "browser"),
   },
   {
     name: "build-npm-package",

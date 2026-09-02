@@ -88,6 +88,11 @@ export const BUILDABLE_PANEL_WITH_DERIVED_WORKSPACE_REPO_FIXTURE = {
   section: "panels",
 } as const satisfies WorkspaceRepoCreationScope;
 
+export const BUILDABLE_PANEL_WORKSPACE_REPO_FIXTURE = {
+  kind: "buildable-panel",
+  section: "panels",
+} as const satisfies WorkspaceRepoCreationScope;
+
 export const OPTIMIZABLE_PANEL_WORKSPACE_REPO_FIXTURE = {
   kind: "optimizable-panel",
   section: "panels",

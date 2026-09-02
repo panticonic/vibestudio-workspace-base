@@ -140,6 +140,8 @@ export interface CreatePanelSlotOptions {
   operationId?: string;
   contextId?: string;
   ref?: string;
+  /** Select an exact sealed BuildV2 incarnation instead of resolving a mutable ref. */
+  artifact?: { buildKey: string; executionDigest: string };
   stateArgs?: Record<string, unknown>;
   /** Per-call visual placement override; wins over the target manifest default. */
   placement?: PanelPlacementHint;
@@ -1277,6 +1279,8 @@ export function createPanelRuntime(
   };
 
   const ops: PanelHandleHostOps = {
+    call: async (id, method, args) =>
+      (await invokeReadyPanelAgent(id, method, args)).result,
     refresh: async (id) => {
       const meta = await readMetadata(id);
       return meta
@@ -1522,6 +1526,7 @@ export function createPanelRuntime(
           surface: "code",
           source,
           ...(openOptions?.ref ? { ref: openOptions.ref } : {}),
+          ...(openOptions?.artifact ? { artifact: openOptions.artifact } : {}),
         } as const);
     const parsedUrl = external ? new URL(source) : null;
     const identitySource = parsedUrl
@@ -1674,6 +1679,9 @@ export function createPanelRuntime(
             stateArgs,
             options: {
               ...(openOptions?.ref ? { ref: openOptions.ref } : {}),
+              ...(openOptions?.artifact
+                ? { artifact: openOptions.artifact }
+                : {}),
               ...(placement ? { placement } : {}),
             },
           },

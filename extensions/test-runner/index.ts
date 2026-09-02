@@ -1,16 +1,24 @@
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath } from "node:url";
+import { spawn } from "node:child_process";
+import { createRequire } from "node:module";
+import { pathToFileURL } from "node:url";
 
 export interface TestRunRequest {
   target: string;
+  suite: string;
   contextId?: string;
   fileFilter?: string;
   testName?: string;
+  artifactKey: string;
+  executionDigest: string;
 }
 
 export interface TestRunResult {
+  runtime: "native";
+  artifactKey: string;
+  executionDigest: string;
   summary: string;
   passed: number;
   failed: number;
@@ -30,18 +38,28 @@ interface ExtensionContextLike {
   workspace: {
     getInfo(): Promise<{ path: string; contextProjectionsPath: string }>;
   };
-  fs: {
-    ensureMaterialized(scope: string | string[] | "all"): Promise<void>;
-  };
+  fs: { ensureMaterialized(scope: string | string[] | "all"): Promise<void> };
   invocation: {
     current(): {
       caller: { callerId: string; callerKind?: string; contextId?: string };
       chainCaller?: { contextId?: string };
     } | null;
   };
-  log: {
-    info(message: string, fields?: Record<string, unknown>): void;
-  };
+  log: { info(message: string, fields?: Record<string, unknown>): void };
+}
+
+interface JsonReport {
+  numPassedTests?: number;
+  numFailedTests?: number;
+  numTotalTests?: number;
+  testResults?: Array<{
+    name: string;
+    status: string;
+    startTime?: number;
+    endTime?: number;
+    message?: string;
+    assertionResults?: Array<{ failureMessages?: string[] }>;
+  }>;
 }
 
 const WORKSPACE_ROOTS = new Set([
@@ -56,207 +74,319 @@ const WORKSPACE_ROOTS = new Set([
   "workers",
 ]);
 
-const PANEL_SETUP_SOURCE = `
-export {};
-globalThis.__vibestudioModuleMap__ = globalThis.__vibestudioModuleMap__ ?? {};
-globalThis.__vibestudioRequire__ = (id) => globalThis.__vibestudioModuleMap__[id];
-globalThis.__vibestudioRequireAsync__ = async (id) => globalThis.__vibestudioModuleMap__[id];
-globalThis.__vibestudioEntityId = "test-panel";
-globalThis.__vibestudioContextId = "ctx-test";
-`;
-
-function validateContextId(contextId: string): void {
-  if (!contextId || contextId.length > 63) {
-    throw new Error(`Invalid context ID: length must be 1-63, got ${contextId.length}`);
-  }
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(contextId)) {
-    throw new Error(`Invalid context ID: ${contextId}`);
+function assertContextId(value: string): void {
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u.test(value)) {
+    throw new Error(`Invalid context ID: ${value}`);
   }
 }
 
-function assertWorkspaceTarget(target: string): void {
-  if (!target || path.isAbsolute(target)) {
-    throw new Error(`Target must be a workspace-relative path: ${target}`);
-  }
-  const normalized = target.replace(/\\/g, "/");
-  if (normalized.split("/").some((part) => part === "..")) {
-    throw new Error(`Target must not contain parent traversal: ${target}`);
-  }
-  const [root] = normalized.split("/");
-  if (!root || !WORKSPACE_ROOTS.has(root)) {
-    throw new Error(`Target must start with a workspace unit root: ${target}`);
+function assertTarget(value: string): void {
+  const normalized = value.replace(/\\/gu, "/");
+  const root = normalized.split("/")[0];
+  if (
+    !value ||
+    path.isAbsolute(value) ||
+    normalized.split("/").includes("..") ||
+    !root ||
+    !WORKSPACE_ROOTS.has(root)
+  ) {
+    throw new Error(`Target must be a contained workspace unit path: ${value}`);
   }
 }
 
-function resolveWithin(root: string, relativePath: string): string {
-  const resolved = path.resolve(root, relativePath);
-  const rel = path.relative(root, resolved);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error(`Path escapes test root: ${relativePath}`);
+function within(root: string, relative: string): string {
+  const resolved = path.resolve(root, relative);
+  const remainder = path.relative(root, resolved);
+  if (remainder.startsWith("..") || path.isAbsolute(remainder)) {
+    throw new Error(`Path escapes test root: ${relative}`);
   }
   return resolved;
 }
 
-function currentInvocationContextId(ctx: ExtensionContextLike): string | undefined {
-  const invocation = ctx.invocation.current();
-  return invocation?.chainCaller?.contextId ?? invocation?.caller.contextId;
+function declaredNativeSuite(targetPath: string, name: string): string[] {
+  const pkg = JSON.parse(
+    fs.readFileSync(path.join(targetPath, "package.json"), "utf8"),
+  ) as {
+    vibestudio?: {
+      tests?: Array<{ name?: unknown; runtime?: unknown; include?: unknown }>;
+    };
+  };
+  const suite = pkg.vibestudio?.tests?.find(
+    (candidate) => candidate.name === name,
+  );
+  if (!suite)
+    throw new Error(`Unknown declared test suite ${JSON.stringify(name)}`);
+  if (suite.runtime !== "native") {
+    throw new Error(
+      `Native adapter refuses ${String(suite.runtime)} suite ${JSON.stringify(name)}; fallback is forbidden`,
+    );
+  }
+  if (
+    !Array.isArray(suite.include) ||
+    !suite.include.every((value) => typeof value === "string")
+  ) {
+    throw new Error(
+      `Native suite ${JSON.stringify(name)} has invalid include patterns`,
+    );
+  }
+  return suite.include as string[];
 }
 
-function normalizeRunRequest(
-  requestOrTarget: TestRunRequest | string,
-  options: Omit<TestRunRequest, "target"> = {}
-): TestRunRequest {
-  if (typeof requestOrTarget === "string") return { ...options, target: requestOrTarget };
-  return requestOrTarget;
+function nodeModulesRoot(file: string): string {
+  let cursor = path.dirname(file);
+  while (path.dirname(cursor) !== cursor) {
+    if (path.basename(cursor) === "node_modules") return cursor;
+    cursor = path.dirname(cursor);
+  }
+  throw new Error(`Could not locate dependency root for ${file}`);
 }
 
-function testPatternFor(targetPath: string, fileFilter?: string): string {
-  const stat = fs.statSync(targetPath);
-  if (stat.isFile()) return targetPath;
-  if (!stat.isDirectory()) throw new Error(`Target must be a file or directory: ${targetPath}`);
-  if (fileFilter) return resolveWithin(targetPath, fileFilter);
-  // Select the unit and let Vitest own test-file discovery. Repeating Vitest's
-  // include rules here drifted from its actual semantics: in particular, the
-  // recursive glob missed a unit-root index.test.ts and excluded valid spec,
-  // JavaScript, MTS, and CTS tests.
-  return targetPath;
+function workspaceRootProbePaths(root: string): string[] {
+  const probes: string[] = [];
+  let cursor = path.resolve(root);
+  while (true) {
+    probes.push(
+      path.join(cursor, "package.json"),
+      path.join(cursor, "tsconfig.json"),
+      path.join(cursor, "pnpm-workspace.yaml"),
+      path.join(cursor, "lerna.json"),
+    );
+    const parent = path.dirname(cursor);
+    if (parent === cursor) return probes;
+    cursor = parent;
+  }
 }
 
-function ensurePanelSetupFile(): string {
-  const setupDir = path.join(os.tmpdir(), "vibestudio-workspace-test-runner");
-  fs.mkdirSync(setupDir, { recursive: true });
-  const setupFile = path.join(setupDir, "panel-test-setup.mjs");
-  fs.writeFileSync(setupFile, PANEL_SETUP_SOURCE);
-  return setupFile;
+function nativeRunnerSource(input: {
+  vitestNodeUrl: string;
+  root: string;
+  pattern: string;
+  include: string[];
+  testName?: string;
+  reportPath: string;
+}): string {
+  return `
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { startVitest } from ${JSON.stringify(input.vitestNodeUrl)};
+const root = ${JSON.stringify(input.root)};
+const vitest = await startVitest("test", [${JSON.stringify(input.pattern)}], {
+  root,
+  run: true,
+  pool: "threads",
+  config: false,
+  include: ${JSON.stringify(input.include)},
+  exclude: ["**/node_modules/**", "**/dist/**"],
+  testNamePattern: ${JSON.stringify(input.testName)},
+  passWithNoTests: true,
+  reporters: [],
+  silent: true,
+}, { server: { host: "127.0.0.1" } });
+const report = { numPassedTests: 0, numFailedTests: 0, numTotalTests: 0, testResults: [] };
+for (const module of vitest.state.getTestModules()) {
+    const errors = module.errors().map((error) => error?.stack ?? error?.message ?? String(error));
+    let passed = 0;
+    let failed = 0;
+    for (const test of module.children.allTests()) {
+      const result = test.result();
+      if (result.state === "passed") passed += 1;
+      if (result.state === "failed") {
+        failed += 1;
+        for (const error of result.errors ?? []) errors.push(test.fullName + ": " + (error?.message ?? String(error)));
+      }
+    }
+    if (module.state() === "failed" && failed === 0) failed = 1;
+    report.numPassedTests += passed;
+    report.numFailedTests += failed;
+    report.numTotalTests += passed + failed;
+    const moduleId = module.moduleId.startsWith("file:") ? fileURLToPath(module.moduleId) : module.moduleId;
+    report.testResults.push({
+      name: moduleId,
+      status: module.state() === "failed" ? "failed" : module.state() === "passed" ? "passed" : "skipped",
+      startTime: 0,
+      endTime: module.diagnostic().duration,
+      assertionResults: errors.length ? [{ failureMessages: errors }] : [],
+    });
+}
+fs.writeFileSync(${JSON.stringify(input.reportPath)}, JSON.stringify(report));
+await vitest.close();
+if (report.numFailedTests > 0) process.exitCode = 1;
+`;
 }
 
-function formatErrors(name: string | undefined, errors: readonly unknown[] | undefined): string[] {
-  return (errors ?? []).map((error) => {
-    const message =
-      error instanceof Error
-        ? error.message
-        : error && typeof error === "object" && "message" in error
-          ? String((error as { message?: unknown }).message)
-          : String(error);
-    return name ? `${name}: ${message}` : message;
+async function runChild(
+  args: string[],
+  cwd: string,
+  env: Record<string, string>,
+  timeoutMs: number,
+): Promise<{ code: number | null; stderr: string; stdout: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      cwd,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: process.platform !== "win32",
+    });
+    let stderr = "";
+    let stdout = "";
+    const timer = setTimeout(() => {
+      if (process.platform === "win32") child.kill("SIGKILL");
+      else process.kill(-child.pid!, "SIGKILL");
+    }, timeoutMs);
+    child.stderr.on("data", (chunk: Buffer) => {
+      if (stderr.length < 128_000)
+        stderr += chunk.toString("utf8", 0, 128_000 - stderr.length);
+    });
+    child.stdout.on("data", (chunk: Buffer) => {
+      if (stdout.length < 128_000)
+        stdout += chunk.toString("utf8", 0, 128_000 - stdout.length);
+    });
+    child.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once("close", (code) => {
+      clearTimeout(timer);
+      resolve({ code, stderr, stdout });
+    });
   });
 }
 
-function modulePath(moduleId: string): string {
-  return moduleId.startsWith("file:") ? fileURLToPath(moduleId) : moduleId;
-}
-
-/** Public API surface of this extension — the awaited return of {@link activate}. */
 export type Api = Awaited<ReturnType<typeof activate>>;
-// Intentionally NOT registered in the WorkspaceExtensions type registry.
-// test-runner is agent/host infrastructure and imports Node/Vitest modules;
-// registering it would drag that type graph into every panel type-check.
 
 export async function activate(ctx: ExtensionContextLike) {
-  ctx.log.info("test-runner activating");
+  ctx.log.info("native test adapter activating");
   return {
-    async run(
-      requestOrTarget: TestRunRequest | string,
-      options?: Omit<TestRunRequest, "target">
-    ): Promise<TestRunResult> {
-      const request = normalizeRunRequest(requestOrTarget, options);
-      assertWorkspaceTarget(request.target);
-
+    async runNative(request: TestRunRequest): Promise<TestRunResult> {
+      assertTarget(request.target);
+      if (!request.artifactKey || !/^[0-9a-f]{64}$/u.test(request.executionDigest)) {
+        throw new Error("runNative requires a sealed execution identity");
+      }
       const info = await ctx.workspace.getInfo();
-      const contextId = request.contextId ?? currentInvocationContextId(ctx);
-      if (!contextId) {
-        throw new Error("test-runner.run requires a contextId");
-      }
-      validateContextId(contextId);
-      const root = path.join(info.contextProjectionsPath, contextId);
+      const invocation = ctx.invocation.current();
+      const contextId =
+        request.contextId ??
+        invocation?.chainCaller?.contextId ??
+        invocation?.caller.contextId;
+      if (!contextId)
+        throw new Error("test-runner.runNative requires a contextId");
+      assertContextId(contextId);
       await ctx.fs.ensureMaterialized(request.target);
-      const targetPath = resolveWithin(root, request.target);
-      if (!fs.existsSync(targetPath)) {
-        throw new Error(`Target does not exist: ${request.target}`);
-      }
+      const root = path.join(info.contextProjectionsPath, contextId);
+      const targetPath = within(root, request.target);
+      const suiteIncludes = declaredNativeSuite(targetPath, request.suite);
+      if (request.fileFilter) within(targetPath, request.fileFilter);
 
-      const pattern = testPatternFor(targetPath, request.fileFilter);
-      const setupFiles = request.target.startsWith("panels/") ? [ensurePanelSetupFile()] : [];
-      const { startVitest } = await import("vitest/node");
-      const vitest = await startVitest("test", [pattern], {
-        // The projection is the caller's exact semantic context. Rooting
-        // Vitest at the source checkout makes an absolute projected file look
-        // external, so Vitest silently discovers zero files and can resolve
-        // config from the wrong workspace state.
-        root,
-        exclude: ["**/node_modules/**", "dist"],
-        setupFiles,
-        testNamePattern: request.testName,
-        reporters: ["default"],
-        silent: true,
-      });
-
-      if (!vitest) {
-        return {
-          summary: "Vitest failed to start",
-          passed: 0,
-          failed: 0,
-          total: 0,
-          contextId,
-          target: request.target,
-          pattern,
-          details: [],
-        };
-      }
-
+      const scratch = fs.mkdtempSync(
+        path.join(os.tmpdir(), "vibestudio-native-tests-"),
+      );
       try {
-        const modules = vitest.state.getTestModules();
-        let passed = 0;
-        let failed = 0;
-        const details: TestRunResult["details"] = [];
-
-        for (const module of modules) {
-          const moduleErrors = formatErrors(undefined, module.errors());
-          let moduleFailedTests = 0;
-          for (const test of module.children.allTests()) {
-            const result = test.result();
-            if (result.state === "passed") {
-              passed++;
-            } else if (result.state === "failed") {
-              failed++;
-              moduleFailedTests++;
-              moduleErrors.push(...formatErrors(test.fullName, result.errors));
-            }
-          }
-          const moduleState = module.state();
-          if (moduleState === "failed" && moduleFailedTests === 0) {
-            failed++;
-          }
-          const fileStatus: "pass" | "fail" | "skip" =
-            moduleState === "failed" ? "fail" : moduleState === "passed" ? "pass" : "skip";
-          details.push({
-            file: path.relative(root, modulePath(module.moduleId)),
-            status: fileStatus,
-            duration: module.diagnostic().duration,
-            ...(moduleErrors.length > 0 ? { errors: moduleErrors } : {}),
-          });
+        const reportPath = path.join(scratch, "report.json");
+        const runnerPath = path.join(scratch, "runner.mjs");
+        const include = suiteIncludes;
+        const filePattern = request.fileFilter
+          ? within(targetPath, request.fileFilter)
+          : targetPath;
+        const vitestNode = createRequire(import.meta.url).resolve("vitest/node");
+        fs.writeFileSync(
+          runnerPath,
+          nativeRunnerSource({
+            vitestNodeUrl: pathToFileURL(vitestNode).href,
+            root,
+            pattern: filePattern,
+            include,
+            testName: request.testName,
+            reportPath,
+          }),
+        );
+        const dependencyRoot = nodeModulesRoot(vitestNode);
+        const outcome = await runChild(
+          [
+            "--permission",
+            "--allow-addons",
+            "--allow-child-process",
+            "--allow-worker",
+            `--allow-fs-read=${root}`,
+            `--allow-fs-read=${dependencyRoot}`,
+            `--allow-fs-read=${scratch}`,
+            ...workspaceRootProbePaths(root).map(
+              (probe) => `--allow-fs-read=${probe}`,
+            ),
+            `--allow-fs-write=${scratch}`,
+            runnerPath,
+          ],
+          root,
+          {
+            NODE_ENV: "test",
+            FORCE_COLOR: "0",
+            // The test engine belongs to the host-created dependency realm,
+            // not to the materialized workspace projection. Expose that one
+            // exact realm to code executed by Vitest so nested, declared test
+            // runs and runtime imports resolve the same engine consistently.
+            NODE_PATH: dependencyRoot,
+            TMPDIR: scratch,
+            TMP: scratch,
+            TEMP: scratch,
+          },
+          120_000,
+        );
+        if (!fs.existsSync(reportPath)) {
+          throw new Error(
+            `Native test child exited ${outcome.code ?? "without a code"} without a report${outcome.stderr || outcome.stdout ? `: ${outcome.stderr}${outcome.stdout}` : ""}`,
+          );
         }
-
-        const total = passed + failed;
-        const summary =
-          modules.length === 0
-            ? `No test files found matching: ${request.target}${request.fileFilter ? `/${request.fileFilter}` : ""}`
-            : failed > 0
-              ? `${failed} of ${total} test${total !== 1 ? "s" : ""} failed`
-              : `${total} test${total !== 1 ? "s" : ""} passed`;
-
+        const report = JSON.parse(
+          fs.readFileSync(reportPath, "utf8"),
+        ) as JsonReport;
+        const details = (report.testResults ?? []).map((file) => ({
+          file: path.relative(root, file.name),
+          status:
+            file.status === "failed"
+              ? ("fail" as const)
+              : file.status === "passed"
+                ? ("pass" as const)
+                : ("skip" as const),
+          ...(file.startTime !== undefined && file.endTime !== undefined
+            ? { duration: Math.max(0, file.endTime - file.startTime) }
+            : {}),
+          ...(file.status === "failed"
+            ? {
+                errors: [
+                  ...(file.message ? [file.message] : []),
+                  ...(file.assertionResults ?? []).flatMap(
+                    (result) => result.failureMessages ?? [],
+                  ),
+                ].slice(0, 20),
+              }
+            : {}),
+        }));
+        const passed = report.numPassedTests ?? 0;
+        const failed = report.numFailedTests ?? 0;
+        const total = report.numTotalTests ?? passed + failed;
+        if (total === 0) {
+          throw new Error(
+            `Native suite ${JSON.stringify(request.suite)} discovered no tests${outcome.stdout ? `: ${outcome.stdout}` : ""}`,
+          );
+        }
         return {
-          summary,
+          runtime: "native",
+          artifactKey: request.artifactKey,
+          executionDigest: request.executionDigest,
+          summary:
+            failed
+                ? `${failed} of ${total} tests failed`
+                : `${passed} tests passed`,
           passed,
           failed,
           total,
           contextId,
           target: request.target,
-          pattern,
+          pattern: `${request.suite} (native)`,
           details,
         };
       } finally {
-        await vitest.close();
+        fs.rmSync(scratch, { recursive: true, force: true });
       }
     },
   };

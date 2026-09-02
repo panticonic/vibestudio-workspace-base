@@ -6,7 +6,11 @@ function rpcResult<T>(value: T) {
   const calls = vi.fn();
   return {
     calls,
-    callMain: async <R>(method: string, args: unknown[], signal?: AbortSignal) => {
+    callMain: async <R>(
+      method: string,
+      args: unknown[],
+      signal?: AbortSignal,
+    ) => {
       calls(method, args, signal);
       return value as unknown as R;
     },
@@ -16,6 +20,7 @@ function rpcResult<T>(value: T) {
 describe("context-exact verify tool", () => {
   it("builds the current semantic context and reports success", async () => {
     const { callMain, calls } = rpcResult({
+      stateHash: `state:${"b".repeat(64)}`,
       repoPath: "packages/parser",
       unitName: "@workspace/parser",
       kind: "package",
@@ -35,20 +40,22 @@ describe("context-exact verify tool", () => {
     const result = await tool.execute(
       "call-build",
       { operation: "build", target: "packages/parser" },
-      controller.signal
+      controller.signal,
     );
 
     expect(calls).toHaveBeenCalledWith(
       "build.getBuildReport",
       ["packages/parser", "ctx:context-7"],
-      controller.signal
+      controller.signal,
     );
     expect(result.isError).toBe(false);
     expect(result.details).toMatchObject({
       operation: "build",
       status: "ok",
       receipt: {
-        protocol: "build-verification-receipt.v1",
+        protocol: "unit-verification-receipt.v1",
+        operation: "build",
+        stateHash: `state:${"b".repeat(64)}`,
         target: "packages/parser",
         contextId: "context-7",
         ref: "ctx:context-7",
@@ -80,17 +87,22 @@ describe("context-exact verify tool", () => {
       "call-progress",
       { operation: "build", target: "packages/example" },
       undefined,
-      (update) => updates.push(update)
+      (update) => updates.push(update),
     );
 
     expect(updates).toEqual([
       {
         content: [{ type: "text", text: "Building packages/example…" }],
-        details: { operation: "build", target: "packages/example", status: "running" },
+        details: {
+          operation: "build",
+          target: "packages/example",
+          status: "running",
+        },
       },
     ]);
 
     release({
+      stateHash: `state:${"b".repeat(64)}`,
       repoPath: "packages/example",
       kind: "package",
       status: "ok",
@@ -102,6 +114,7 @@ describe("context-exact verify tool", () => {
 
   it("keeps structured build diagnostics while marking a failed build as an error", async () => {
     const { callMain } = rpcResult({
+      stateHash: `state:${"b".repeat(64)}`,
       repoPath: "panels/editor",
       kind: "panel",
       status: "failed" as const,
@@ -117,19 +130,24 @@ describe("context-exact verify tool", () => {
       ],
       builds: [{ target: "runtime" as const, diagnosticIndexes: [0] }],
     });
-    const result = await createVerifyTool(callMain, () => "context-7").execute("call-build", {
-      operation: "build",
-      target: "panels/editor",
-    });
+    const result = await createVerifyTool(callMain, () => "context-7").execute(
+      "call-build",
+      {
+        operation: "build",
+        target: "panels/editor",
+      },
+    );
 
     expect(result.isError).toBe(true);
     expect(result.content[0]).toMatchObject({
       type: "text",
       text: expect.stringContaining("1 diagnostic"),
     });
-    expect((result.content[0] as { text: string }).text).not.toContain("Cannot find name");
+    expect((result.content[0] as { text: string }).text).not.toContain(
+      "Cannot find name",
+    );
     expect((result.content[0] as { text: string }).text).toContain(
-      "Do not rerun this unchanged build."
+      "Do not rerun this unchanged build.",
     );
     expect(result.details).toMatchObject({
       operation: "build",
@@ -143,7 +161,8 @@ describe("context-exact verify tool", () => {
         recovery: { action: "repair-source" },
       },
     });
-    const failure = (result.details as { failure?: Record<string, unknown> }).failure;
+    const failure = (result.details as { failure?: Record<string, unknown> })
+      .failure;
     expect(failure).not.toHaveProperty("data");
     expect(failure).not.toHaveProperty("report");
     expect(failure).not.toHaveProperty("receipt");
@@ -164,6 +183,7 @@ describe("context-exact verify tool", () => {
       docsId: "workspace:notes",
     };
     const { callMain } = rpcResult({
+      stateHash: `state:${"b".repeat(64)}`,
       repoPath: "panels/editor",
       kind: "panel",
       status: "failed" as const,
@@ -174,24 +194,30 @@ describe("context-exact verify tool", () => {
           file: "panels/editor/index.tsx",
           line: 4,
           column: 9,
-          message: "Calling notes.delete requires 'workspace-service:notes' at gated tier",
+          message:
+            "Calling notes.delete requires 'workspace-service:notes' at gated tier",
           repair,
         } as never,
       ],
       builds: [{ target: "runtime" as const, diagnosticIndexes: [0] }],
     });
-    const result = await createVerifyTool(callMain, () => "context-7").execute("call-build", {
-      operation: "build",
-      target: "panels/editor",
-    });
+    const result = await createVerifyTool(callMain, () => "context-7").execute(
+      "call-build",
+      {
+        operation: "build",
+        target: "panels/editor",
+      },
+    );
 
-    const report = (result.details as { report: { diagnostics: Array<{ repair?: unknown }> } })
-      .report;
+    const report = (
+      result.details as { report: { diagnostics: Array<{ repair?: unknown }> } }
+    ).report;
     expect(report.diagnostics[0]!.repair).toEqual(repair);
   });
 
   it("classifies a skipped content target as a correctable request", async () => {
     const { callMain } = rpcResult({
+      stateHash: `state:${"b".repeat(64)}`,
       repoPath: "packages/docs",
       kind: "content",
       status: "skipped" as const,
@@ -199,10 +225,13 @@ describe("context-exact verify tool", () => {
       builds: [],
     });
 
-    const result = await createVerifyTool(callMain, () => "context-7").execute("call-build", {
-      operation: "build",
-      target: "packages/docs",
-    });
+    const result = await createVerifyTool(callMain, () => "context-7").execute(
+      "call-build",
+      {
+        operation: "build",
+        target: "packages/docs",
+      },
+    );
 
     expect(result.isError).toBe(true);
     expect(result.content[0]).toMatchObject({
@@ -230,17 +259,23 @@ describe("context-exact verify tool", () => {
       message: index === 0 ? "x".repeat(3_000) : `failure ${index}`,
     }));
     const { callMain } = rpcResult({
+      stateHash: `state:${"b".repeat(64)}`,
       repoPath: "panels/editor",
       kind: "panel",
       status: "failed" as const,
       diagnostics,
-      builds: [{ target: "runtime" as const, diagnosticIndexes: [0, 39, 40, 44] }],
+      builds: [
+        { target: "runtime" as const, diagnosticIndexes: [0, 39, 40, 44] },
+      ],
     });
 
-    const result = await createVerifyTool(callMain, () => "context-7").execute("call-build", {
-      operation: "build",
-      target: "panels/editor",
-    });
+    const result = await createVerifyTool(callMain, () => "context-7").execute(
+      "call-build",
+      {
+        operation: "build",
+        target: "panels/editor",
+      },
+    );
 
     expect(result.details).toMatchObject({
       truncatedDiagnostics: 5,
@@ -250,71 +285,128 @@ describe("context-exact verify tool", () => {
       },
       report: {
         diagnostics: expect.arrayContaining([
-          expect.objectContaining({ message: expect.stringMatching(/\[truncated\]$/u) }),
+          expect.objectContaining({
+            message: expect.stringMatching(/\[truncated\]$/u),
+          }),
         ]),
         builds: [{ target: "runtime", diagnosticIndexes: [0, 39] }],
       },
     });
-    expect((result.details as { report: UnitBuildReportWire }).report.diagnostics).toHaveLength(40);
+    expect(
+      (result.details as { report: UnitBuildReportWire }).report.diagnostics,
+    ).toHaveLength(40);
     expect(result.content[0]).toMatchObject({
       type: "text",
       text: expect.stringContaining("45 diagnostics; 40 retained"),
     });
   });
 
-  it("runs one focused test selection through the approved extension", async () => {
-    const { callMain, calls } = rpcResult({
-      summary: "1 passed",
+  it("runs one focused browser selection without reaching the native extension", async () => {
+    const calls = vi.fn();
+    const callMain = async <T>(method: string, args: unknown[]) => {
+      calls(method, args);
+      if (method === "build.resolveTestSuite") {
+        return {
+          protocol: "workspace-test-plan.v1",
+          target: "packages/parser",
+          suite: "unit",
+          runtime: "browser",
+          stateHash: `state:${"a".repeat(64)}`,
+        } as T;
+      }
+      return {
+        protocol: "workspace-test-artifact.v1",
+        artifactKey: "b".repeat(64),
+        target: "packages/parser",
+        suite: "unit",
+        runtime: "browser",
+        selectedFiles: ["parser.test.ts"],
+        bundle: "",
+        format: "async-cjs",
+        execution: { executionDigest: "c".repeat(64) },
+      } as T;
+    };
+    const executeSandboxTest = vi.fn(async () => ({
+      protocol: "workspace-test-execution-result.v1" as const,
+      artifactKey: "b".repeat(64),
+      executionDigest: "c".repeat(64),
+      runtime: "browser" as const,
+      status: "passed" as const,
       passed: 1,
       failed: 0,
-      total: 1,
-      contextId: "context-7",
-      target: "packages/parser",
-      pattern: "parser.test.ts",
-      details: [{ file: "parser.test.ts", status: "pass" as const }],
-    });
-    const result = await createVerifyTool(callMain, () => "context-7").execute("call-test", {
+      skipped: 0,
+      durationMs: 2,
+      files: [{ file: "parser.test.ts", status: "pass" as const }],
+    }));
+    const result = await createVerifyTool(
+      callMain,
+      () => "context-7",
+      executeSandboxTest,
+    ).execute("call-test", {
       operation: "test",
       target: "packages/parser",
       file: "parser.test.ts",
       testName: "parses empty input",
     });
 
-    expect(calls).toHaveBeenCalledWith(
-      "extensions.invoke",
-      [
-        "@workspace-extensions/test-runner",
-        "run",
-        [
-          {
-            target: "packages/parser",
-            contextId: "context-7",
-            fileFilter: "parser.test.ts",
-            testName: "parses empty input",
-          },
-        ],
-      ],
-      undefined
-    );
+    expect(calls).toHaveBeenCalledWith("build.resolveTestSuite", [
+      "packages/parser",
+      "ctx:context-7",
+      undefined,
+    ]);
+    expect(calls).toHaveBeenCalledWith("build.getTestArtifact", [
+      "packages/parser",
+      "ctx:context-7",
+      { suite: "unit", file: "parser.test.ts" },
+    ]);
+    expect(
+      calls.mock.calls.some(([method]) => method === "extensions.invoke"),
+    ).toBe(false);
+    expect(executeSandboxTest).toHaveBeenCalledOnce();
     expect(result.isError).toBe(false);
-    expect(result.details).toMatchObject({ operation: "test", status: "passed" });
+    expect(result.details).toMatchObject({
+      operation: "test",
+      status: "passed",
+    });
   });
 
   it("does not present zero discovered tests as successful verification", async () => {
-    const { callMain } = rpcResult({
-      summary: "No tests",
-      passed: 0,
-      failed: 0,
-      total: 0,
-      contextId: "context-7",
-      target: "packages/parser",
-      pattern: "**/*.test.ts",
-      details: [],
-    });
-    const result = await createVerifyTool(callMain, () => "context-7").execute("call-test", {
-      operation: "test",
-      target: "packages/parser",
-    });
+    const callMain = async <T>(method: string) =>
+      (method === "build.resolveTestSuite"
+        ? {
+            protocol: "workspace-test-plan.v1",
+            target: "packages/parser",
+            suite: "unit",
+            runtime: "workerd",
+            stateHash: `state:${"a".repeat(64)}`,
+          }
+        : {
+            protocol: "workspace-test-artifact.v1",
+            artifactKey: "b".repeat(64),
+            target: "packages/parser",
+            suite: "unit",
+            runtime: "workerd",
+            selectedFiles: ["parser.test.ts"],
+            bundle: "",
+            format: "async-cjs",
+            execution: { executionDigest: "c".repeat(64) },
+          }) as T;
+    const result = await createVerifyTool(
+      callMain,
+      () => "context-7",
+      async () => ({
+        protocol: "workspace-test-execution-result.v1",
+        artifactKey: "b".repeat(64),
+        executionDigest: "c".repeat(64),
+        runtime: "workerd",
+        status: "no-tests",
+        passed: 0,
+        failed: 0,
+        skipped: 0,
+        durationMs: 1,
+        files: [],
+      }),
+    ).execute("call-test", { operation: "test", target: "packages/parser" });
 
     expect(result.isError).toBe(true);
     expect(result.details).toMatchObject({

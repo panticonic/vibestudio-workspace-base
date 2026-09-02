@@ -96,7 +96,7 @@ export type {
 } from "./workspace-service.js";
 
 export { createVerifyTool, verifySchema } from "./verify.js";
-export type { VerifyToolInput, VerifyToolDetails, BuildVerificationReceipt } from "./verify.js";
+export type { VerifyToolInput, VerifyToolDetails, UnitVerificationReceiptV1 } from "./verify.js";
 
 // Pure helpers
 export { resolveToCwd, expandPath } from "./path-utils.js";
