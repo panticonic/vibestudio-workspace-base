@@ -144,6 +144,31 @@ describe("WorkspacePresentationDO", () => {
     db.close();
   });
 
+  it("treats punctuation in copied titles as separators rather than required FTS terms", () => {
+    const { instance, db } = createPresentation();
+    instance.indexPanel(
+      {
+        id: "trello-slot",
+        source: "browser:https://trello.com/b/example/vibestudio",
+        title: "vibestudio | Trello",
+        path: "https://trello.com/b/example/vibestudio",
+      },
+      "trello-entity",
+    );
+
+    expect(instance.search("vibestudio | Trello").results).toEqual([
+      expect.objectContaining({
+        id: "trello-slot",
+        title: "vibestudio | Trello",
+      }),
+    ]);
+    expect(instance.search("https://trello.com/b/example").results).toEqual([
+      expect.objectContaining({ id: "trello-slot" }),
+    ]);
+    expect(instance.search(" | / : ").results).toEqual([]);
+    db.close();
+  });
+
   it("owns explicit-title precedence without a host-side hook", () => {
     const { instance, db } = createPresentation();
     instance.bindSlot("slot-1", "entity-1", "panels/chat");

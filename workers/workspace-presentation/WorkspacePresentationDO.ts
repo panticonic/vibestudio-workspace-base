@@ -372,11 +372,7 @@ export class WorkspacePresentationDO extends DurableObjectBase {
   }
 
   private sanitizeSearchQuery(query: string): string {
-    return query
-      .trim()
-      .replace(/["*():^]/g, " ")
-      .split(/\s+/)
-      .filter(Boolean)
+    return (query.normalize("NFKC").match(/[\p{L}\p{M}\p{N}]+/gu) ?? [])
       .map((token) => `"${token}"*`)
       .join(" AND ");
   }

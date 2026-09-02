@@ -171,10 +171,12 @@ sibling group directly. There are deliberately no whole-tree or whole-sibling
 reads. Continue from `nextCursor` only while the page revision is unchanged;
 restart the group from its first page after a revision change. The scalar fields
 `id`, `title`, `source`, `kind`, and `parentId` are the handle’s last observed
-descriptor. `search({ query })` matches indexed titles, source paths, manifest
-descriptions/dependencies, tags, and keywords; it includes committed slots even
-when their runtime is not ready. Use `observe()` whenever correctness depends
-on live runtime state.
+descriptor. `search({ query })` accepts plain text and matches indexed titles,
+source paths, manifest descriptions/dependencies, tags, and keywords. Punctuation
+separates terms rather than acting as query-language syntax, so a copied title
+such as `vibestudio | Trello` is a valid query. Search includes committed slots
+even when their runtime is not ready. Use `observe()` whenever correctness
+depends on live runtime state.
 
 Root groups are attribution bands, not access-control boundaries. A root whose
 `ownerUserId` is the current user appears as **Your panels**; an ownerless root
