@@ -7,6 +7,7 @@ import { InlineGroup, type InlineItem, type InvocationRenderer } from "./InlineG
 import { NewContentIndicator } from "./NewContentIndicator";
 import { MessageCard } from "./MessageCard";
 import { SubagentRunCard } from "./SubagentRunCard";
+import { TaskRunCard } from "./TaskRunCard";
 import type { InvocationCardPayload } from "@workspace/agentic-core";
 import type {
   BrowserHandoffCaller,
@@ -700,8 +701,12 @@ export const MessageList = React.memo(function MessageList({
       // User messages are published as `message.completed`, so streaming is
       // determined solely by the canonical completion flag.
       const isStreaming = msg.kind === "message" && !msg.complete;
-      const defaultContent = msg.task?.subagent ? (
-        <SubagentRunCard msg={msg} />
+      const defaultContent = msg.task ? (
+        msg.task.subagent ? (
+          <SubagentRunCard msg={msg} />
+        ) : (
+          <TaskRunCard msg={msg} />
+        )
       ) : (
         <MessageCard
           key={msg.id || `fallback-msg-${msgIndex}`}

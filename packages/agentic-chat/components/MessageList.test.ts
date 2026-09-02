@@ -1013,6 +1013,57 @@ describe("SubagentRunCard", () => {
   });
 });
 
+describe("ordinary task presentation", () => {
+  it("renders a terminal task as a structured card instead of serialized protocol JSON", async () => {
+    const task: TaskCardPayload = {
+      id: "call-terminal",
+      taskType: "task",
+      title: "Subagent",
+      execution: {
+        status: "complete",
+        description: "Committed the Flowboard UX upgrade.",
+        result: {
+          protocolContent: [
+            { type: "text", text: "Committed the Flowboard UX upgrade." },
+          ],
+          details: { sourceEventId: "workspace-event:abc123" },
+        },
+        isError: false,
+      },
+    };
+    const serialized = JSON.stringify(task);
+
+    render(
+      React.createElement(MessageList, {
+        messages: [
+          makeMessage({
+            id: "task-call-terminal",
+            content: serialized,
+            contentType: "task",
+            complete: true,
+            task,
+          }) as ChatMessage,
+        ],
+        participants: {},
+        selfId: "user-1",
+        allParticipants: {},
+      } as never)
+    );
+
+    expect(screen.getByTestId("task-run-card")).toBeTruthy();
+    expect(screen.getByText("Subagent")).toBeTruthy();
+    expect(screen.getByText("Complete")).toBeTruthy();
+    expect(screen.getByText("Committed the Flowboard UX upgrade.")).toBeTruthy();
+    expect(document.body.textContent).not.toContain(serialized);
+
+    fireEvent.click(screen.getByText("Result details"));
+    expect(screen.getByText("Task result")).toBeTruthy();
+    await waitFor(() => {
+      expect(document.body.textContent).toContain("workspace-event:abc123");
+    });
+  });
+});
+
 describe("SubagentTranscriptContent", () => {
   it("keeps loaded child history visible when live refresh fails", () => {
     const retry = vi.fn();

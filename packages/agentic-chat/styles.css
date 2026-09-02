@@ -592,6 +592,83 @@
   border-color: var(--gray-a6);
 }
 
+/* Ordinary task events are structured transcript records, never chat prose.
+   Keep their result inspectable without exposing the projection's JSON
+   compatibility encoding as the visible message body. */
+.message-row:has(> .message-card-task) {
+  inline-size: 100%;
+}
+
+.message-card-task {
+  inline-size: 100%;
+  min-inline-size: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--gray-a5);
+  border-inline-start: 3px solid var(--gray-a7);
+  border-radius: 8px;
+  background: var(--gray-2);
+  box-shadow: var(--elevation-1);
+}
+
+.message-card-task.task-status-running {
+  border-inline-start-color: var(--blue-9);
+}
+
+.message-card-task.task-status-complete {
+  border-inline-start-color: var(--green-9);
+}
+
+.message-card-task.task-status-error {
+  border-inline-start-color: var(--red-9);
+}
+
+.message-card-task.task-status-cancelled,
+.message-card-task.task-status-abandoned {
+  border-inline-start-color: var(--amber-9);
+}
+
+.task-card-header {
+  min-inline-size: 0;
+}
+
+.task-card-title {
+  min-inline-size: 0;
+}
+
+.task-card-status {
+  flex: 0 0 auto;
+  margin-inline-start: auto;
+  border-radius: 4px;
+}
+
+.task-card-description,
+.task-card-empty {
+  display: block;
+  margin-block-start: 6px;
+  color: var(--gray-11);
+  overflow-wrap: anywhere;
+}
+
+.task-card-description .message-prose,
+.task-card-description .message-prose :where(p, li, blockquote) {
+  font-size: var(--font-size-1);
+  line-height: var(--line-height-1);
+}
+
+.task-card-description .message-prose > :first-child {
+  margin-block-start: 0;
+}
+
+.task-card-description .message-prose > :last-child {
+  margin-block-end: 0;
+}
+
+.task-card-result {
+  margin-block-start: 7px;
+  padding-block-start: 7px;
+  border-block-start: 1px solid var(--gray-a4);
+}
+
 /* A run card holds transcript-shaped content (pills, prose, an embedded
    transcript), not a chat bubble, so it claims the full column rather than
    sizing to its longest line — nested content gets real room to wrap. */

@@ -2099,6 +2099,37 @@ describe("chatMessagesFromChannelView", () => {
     });
   });
 
+  it("uses the actor display name for a terminal-only task", () => {
+    const completed: AgenticEvent<"task.completed"> = {
+      kind: "task.completed",
+      actor: { ...agent, displayName: "Subagent" },
+      causality: { taskId: brandId<TaskId>("terminal-only") },
+      payload: {
+        protocol: AGENTIC_PROTOCOL_VERSION,
+        terminalOutcome: "success",
+        summary: "Finished the assigned work.",
+        result: { protocolContent: [{ type: "text", text: "Finished the assigned work." }] },
+      },
+      createdAt: "2026-05-20T12:00:01.000Z",
+    };
+
+    const state = [envelope(completed, 1)].reduce(
+      reduceChannelView,
+      createInitialChannelViewState()
+    );
+
+    expect(chatMessagesFromChannelView(state)[0]).toMatchObject({
+      contentType: "task",
+      task: {
+        title: "Subagent",
+        execution: {
+          status: "complete",
+          description: "Finished the assigned work.",
+        },
+      },
+    });
+  });
+
   it("keeps the completed spawn invocation separate from the running child task", () => {
     const invocationId = brandId<InvocationId>("spawn-separated");
     const taskId = brandId<TaskId>("spawn-separated");

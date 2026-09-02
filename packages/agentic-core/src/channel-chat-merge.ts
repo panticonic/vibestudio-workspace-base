@@ -1027,7 +1027,7 @@ function projectedTaskToChatMessage(task: ProjectedTask): ChatMessage & { sortTi
   const payload: TaskCardPayload = {
     id: task.taskId,
     taskType: task.taskType ?? "task",
-    title: task.title ?? "Background task",
+    title: task.title ?? task.actor.displayName ?? "Background task",
     execution: {
       status,
       ...(task.terminalOutcome ? { terminalOutcome: task.terminalOutcome } : {}),
