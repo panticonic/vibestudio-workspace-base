@@ -45,6 +45,7 @@ export type StepFn = (state: AgentState, incoming: Incoming, ctx: StepContext) =
 
 const EMPTY: StepOutput = { append: [], effects: [] };
 const FALLBACK_NOTICE_KIND = "model.fallback_continued";
+const CONSECUTIVE_TOOL_INFRASTRUCTURE_FAILURE_LIMIT = 3;
 
 const PROVIDER_LEVEL_FAILURE_CODES = new Set<ModelFailureInfo["code"]>([
   "usage_limit_terminal",
@@ -553,7 +554,8 @@ function turnClosedItem(
 function infrastructureFailureDiagnostic(
   turn: OpenTurn,
   invocationId: string,
-  code: string
+  code: string,
+  reason: "explicit-stop" | "circuit-open"
 ): AppendItem {
   const messageId = `diag:${turn.turnId}:infrastructure:${invocationId}`;
   return {
@@ -566,9 +568,11 @@ function infrastructureFailureDiagnostic(
         {
           type: "diagnostic",
           content:
-            "I stopped because the tool infrastructure failed while completing this task. " +
-            "Earlier workspace changes may have been partially applied. Send “continue” to let " +
-            "me inspect the current workspace state and resume safely.",
+            reason === "circuit-open"
+              ? "I paused after the same tool encountered three consecutive infrastructure failures. " +
+                "This prevents an automatic retry loop; send “continue” after the underlying service changes."
+              : "I paused because the tool explicitly reported that continuing this turn is unsafe. " +
+                "Send “continue” after the reported recovery condition has been resolved.",
           metadata: {
             code,
             severity: "error",
@@ -596,7 +600,34 @@ function recoveryActionFromFailurePayload(payload: Record<string, unknown>): str
 function infrastructureFailureTerminatesTurn(payload: Record<string, unknown>): boolean {
   if (payload["terminalOutcome"] !== "infrastructure_error") return false;
   const action = recoveryActionFromFailurePayload(payload);
-  return action === undefined || action === "stop";
+  return action === "stop";
+}
+
+function consecutiveToolInfrastructureFailureCount(
+  state: AgentState,
+  turn: OpenTurn,
+  invocationId: string,
+  payload: Record<string, unknown>
+): number {
+  if (payload["terminalOutcome"] !== "infrastructure_error") return 0;
+  const foldedCurrent = [...state.entries]
+    .reverse()
+    .find(
+      (entry): entry is Extract<SessionEntry, { kind: "tool-result" }> =>
+        entry.kind === "tool-result" && entry.invocationId === invocationId
+    );
+  const name = foldedCurrent?.name ?? state.pendingInvocations[invocationId]?.name ?? "unknown";
+  let count = foldedCurrent ? 0 : 1;
+  for (let index = state.entries.length - 1; index >= 0; index -= 1) {
+    const entry = state.entries[index];
+    if (!entry || entry.seq < turn.openedAtSeq) break;
+    if (entry.kind !== "tool-result") continue;
+    if (entry.terminalOutcome !== "infrastructure_error" || entry.name !== name) {
+      break;
+    }
+    count += 1;
+  }
+  return count;
 }
 
 function turnWaitingItem(
@@ -1709,8 +1740,9 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
     // Origin and recoverability are independent. A typed recovery action can
     // make an infrastructure-origin failure actionable inside this turn
     // (repair source, reacquire a handle, reobserve, or retry). Only failures
-    // with no recovery contract or an explicit stop action terminate after
-    // every sibling invocation settles.
+    // with an explicit stop action terminate immediately. Legacy/malformed
+    // failures without recovery metadata get another reasoning step instead
+    // of silently turning missing metadata into a stop instruction.
     const currentInvocationId = String(causality["invocationId"] ?? "");
     const priorInfrastructureFailure = [...state.entries]
       .reverse()
@@ -1719,21 +1751,32 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
           entry.seq >= turn.openedAtSeq &&
           entry.kind === "tool-result" &&
           entry.terminalOutcome === "infrastructure_error" &&
-          (entry.failureRecovery?.action === undefined || entry.failureRecovery.action === "stop")
+          entry.failureRecovery?.action === "stop"
       );
+    const currentInfrastructureFailure =
+      kind === "invocation.failed" && payload["terminalOutcome"] === "infrastructure_error";
+    const repeatedInfrastructureFailure =
+      currentInfrastructureFailure &&
+      consecutiveToolInfrastructureFailureCount(state, turn, currentInvocationId, payload) >=
+        CONSECUTIVE_TOOL_INFRASTRUCTURE_FAILURE_LIMIT;
     const infrastructureFailure =
-      kind === "invocation.failed" && infrastructureFailureTerminatesTurn(payload)
+      currentInfrastructureFailure &&
+      (infrastructureFailureTerminatesTurn(payload) || repeatedInfrastructureFailure)
         ? {
             invocationId: currentInvocationId,
             code:
               typeof payload["terminalReasonCode"] === "string"
                 ? payload["terminalReasonCode"]
                 : "infrastructure_error",
+            reason: infrastructureFailureTerminatesTurn(payload)
+              ? ("explicit-stop" as const)
+              : ("circuit-open" as const),
           }
         : priorInfrastructureFailure?.kind === "tool-result"
           ? {
               invocationId: priorInfrastructureFailure.invocationId,
               code: priorInfrastructureFailure.terminalReasonCode ?? "infrastructure_error",
+              reason: "explicit-stop" as const,
             }
           : null;
     if (infrastructureFailure) {
@@ -1742,7 +1785,8 @@ function eventStep(state: AgentState, envelope: LogEnvelope, ctx: StepContext): 
           infrastructureFailureDiagnostic(
             turn,
             infrastructureFailure.invocationId,
-            infrastructureFailure.code
+            infrastructureFailure.code,
+            infrastructureFailure.reason
           ),
           turnClosedItem(turn, { reason: "work_failed" }),
         ],

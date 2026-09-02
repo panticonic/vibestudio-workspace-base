@@ -507,7 +507,7 @@ describe("agent-loop core lifecycle", () => {
     expect(pendingEffectIds(s)).toEqual([]);
   });
 
-  it("publishes a deterministic diagnostic before closing an infrastructure-failed turn", () => {
+  it("keeps legacy infrastructure failures without recovery metadata in the current turn", () => {
     const s = scenario();
     prompt(s);
     resolveEffect(s, ids.modelEffect(msg0), {
@@ -545,46 +545,125 @@ describe("agent-loop core lifecycle", () => {
         reason: "package linker unavailable",
       },
     });
-    const diagnostics = s.log.filter(
-      (row) =>
-        row.payloadKind === "message.completed" &&
-        (row.payload as { blocks?: Array<{ type?: string }> }).blocks?.[0]
-          ?.type === "diagnostic",
-    );
-    expect(diagnostics).toHaveLength(1);
-    expect(diagnostics[0]).toMatchObject({
-      publish: true,
-      payload: {
-        outcome: "completed",
-        blocks: [
+    expect(
+      s.log.some((row) => row.envelopeId.includes(":infrastructure:")),
+    ).toBe(false);
+    expect(s.state.openTurn).not.toBeNull();
+    expect(pendingEffectIds(s)).toEqual([
+      ids.modelEffect(ids.messageId(turn1, 1)),
+    ]);
+  });
+
+  it("honors an explicit infrastructure stop action", () => {
+    const s = scenario();
+    prompt(s);
+    resolveEffect(s, ids.modelEffect(msg0), {
+      kind: "model",
+      blocks: [
+        {
+          type: "toolCall",
+          id: "tc-infra-stop",
+          name: "read",
+          arguments: { path: "a.ts" },
+        },
+      ],
+      stopReason: "completed",
+    });
+
+    resolveEffect(s, ids.invocationEffect("tc-infra-stop"), {
+      kind: "tool",
+      result: { error: "event log integrity is unknown" },
+      isError: true,
+      reason: "event log integrity is unknown",
+      terminalOutcome: "infrastructure_error",
+      terminalReasonCode: "event_log_integrity_unknown",
+      failure: {
+        protocol: "agent-tool-failure.v1",
+        code: "event_log_integrity_unknown",
+        kind: "integrity",
+        message: "event log integrity is unknown",
+        operation: "tool.read",
+        stage: "execute",
+        retry: { policy: "none", commandIdPolicy: "not-applicable" },
+        recovery: {
+          action: "stop",
+          instruction: "Do not continue from unverified event state.",
+        },
+        causes: [
           {
-            type: "diagnostic",
-            metadata: {
-              code: "package_load_failed",
-              severity: "error",
-              invocationId: "tc-infra",
-              recoverableByNewTurn: true,
-            },
+            role: "primary",
+            code: "event_log_integrity_unknown",
+            message: "event log integrity is unknown",
           },
         ],
       },
     });
-    expect(s.log.slice(-2).map((row) => row.payloadKind)).toEqual([
-      "message.completed",
-      "turn.closed",
-    ]);
+
     expect(s.state.openTurn).toBeNull();
     expect(pendingEffectIds(s)).toEqual([]);
-
-    dispatch(s, {
-      type: "event-appended",
-      envelope: terminal as never,
-    });
     expect(
-      s.log.filter((row) =>
-        row.envelopeId.includes(":infrastructure:tc-infra"),
+      s.log.some((row) =>
+        row.envelopeId.includes(":infrastructure:tc-infra-stop"),
       ),
-    ).toHaveLength(1);
+    ).toBe(true);
+  });
+
+  it("opens the circuit after three consecutive infrastructure failures from one tool", () => {
+    const s = scenario();
+    prompt(s);
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const invocationId = `tc-infra-repeat-${attempt + 1}`;
+      resolveEffect(s, ids.modelEffect(ids.messageId(turn1, attempt)), {
+        kind: "model",
+        blocks: [
+          {
+            type: "toolCall",
+            id: invocationId,
+            name: "read",
+            arguments: { path: "a.ts" },
+          },
+        ],
+        stopReason: "completed",
+      });
+      resolveEffect(s, ids.invocationEffect(invocationId), {
+        kind: "tool",
+        result: { error: "package linker unavailable" },
+        isError: true,
+        reason: "package linker unavailable",
+        terminalOutcome: "infrastructure_error",
+        terminalReasonCode: "package_load_failed",
+      });
+
+      if (attempt < 2) {
+        expect(s.state.openTurn).not.toBeNull();
+        expect(pendingEffectIds(s)).toEqual([
+          ids.modelEffect(ids.messageId(turn1, attempt + 1)),
+        ]);
+      }
+    }
+
+    expect(s.state.openTurn).toBeNull();
+    expect(pendingEffectIds(s)).toEqual([]);
+    expect(
+      s.log.some((row) =>
+        row.envelopeId.includes(":infrastructure:tc-infra-repeat-3"),
+      ),
+    ).toBe(true);
+    expect(
+      s.log.find((row) =>
+        row.envelopeId.includes(":infrastructure:tc-infra-repeat-3"),
+      ),
+    ).toMatchObject({
+      payload: {
+        blocks: [
+          {
+            type: "diagnostic",
+            content: expect.stringContaining("three consecutive"),
+          },
+        ],
+      },
+    });
   });
 
   it("continues the same turn when infrastructure failure has typed recovery", () => {
@@ -708,7 +787,7 @@ describe("agent-loop core lifecycle", () => {
     ]);
   });
 
-  it("waits for parallel siblings before publishing an infrastructure diagnostic", () => {
+  it("waits for parallel siblings before continuing after legacy infrastructure failure", () => {
     const s = scenario();
     prompt(s);
     resolveEffect(s, ids.modelEffect(msg0), {
@@ -748,11 +827,13 @@ describe("agent-loop core lifecycle", () => {
       result: { ok: true },
       isError: false,
     });
-    expect(s.log.slice(-2).map((row) => row.payloadKind)).toEqual([
-      "message.completed",
-      "turn.closed",
+    expect(
+      s.log.some((row) => row.envelopeId.includes(":infrastructure:")),
+    ).toBe(false);
+    expect(s.state.openTurn).not.toBeNull();
+    expect(pendingEffectIds(s)).toEqual([
+      ids.modelEffect(ids.messageId(turn1, 1)),
     ]);
-    expect(pendingEffectIds(s)).toEqual([]);
   });
 
   it("keeps an authored tool failure recoverable inside the turn", () => {
