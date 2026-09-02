@@ -584,8 +584,10 @@ const next = await handle.stateArgs.get();
 
 ## CDP
 
-`handle.cdp.page()` is the sole Playwright-style automation surface.
-Do not install Playwright. For historical diagnostics use `diagnose()`; use
+`handle.cdp.session().page` is the preferred generation-fenced Playwright-style
+automation surface; `handle.cdp.page()` is the one-off connection form. Both are
+the same client, and their caller must close the session/page it owns. Do not
+install Playwright. For historical diagnostics use `diagnose()`; use
 `handle.cdp.consoleHistory()` only when you specifically need a filtered console
 read. CDP access is served by the active desktop/headless host and rejects when
 a non-CDP mobile host owns the target.

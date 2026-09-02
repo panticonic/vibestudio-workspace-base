@@ -27,6 +27,7 @@ await handle.cdp.goBack();
 await handle.cdp.reload();
 
 await openExternal("https://docs.example.com");
+await session.close();
 ```
 
 For ordinary eval calls, omit `authority.requests` and let the run adapt to the
@@ -79,9 +80,12 @@ bypassing the panel lifecycle. Use
 
 For bulk navigation or imported browser tabs that should remain unloaded until
 the user visits them, use `createPanelSlot(url)` instead. It commits the durable
-browser slot and returns without focusing or waiting for the document; use the
-returned handle's `observe()` or `cdp.page()` when materialization is actually
-needed.
+browser slot and returns without focusing or waiting for the document. Such a
+slot observes as `pending` and has no CDP generation. When materialization is
+needed, call `await handle.focus()` from a read-write eval, require its returned
+observation to be `ready`, and then acquire `handle.cdp.session()`. `focus()`
+invokes the write-sensitive `panelRuntime.ensureSlot` lifecycle operation and is
+intentionally unavailable to an eval constrained to read-only authority.
 
 ## Ownership and lifetime contract
 
@@ -253,6 +257,12 @@ await page.locator(".box").boundingBox();
 await page.locator(".box").inspect();
 ```
 
+String locators use normalized, case-insensitive substring matching by default;
+`{ exact: true }` selects a case-sensitive whole-string match. The `isVisible`,
+`isChecked`, `isEnabled`, `isDisabled`, and `isEditable` methods are immediate
+snapshots and return `false` when there is no current match. Use `waitFor` when
+absence should be retried.
+
 Accessible names are computed from the live DOM. Descendant text such as a
 numeric badge is part of a button's name, so a visually grouped `Done` + `3`
 button may be named `"Done 3"`. Discover the names first, then use the exact
@@ -262,10 +272,13 @@ If the accessible name exists under another role, the error reports those
 role/name pairs as well; use the rendered role rather than guessing from text.
 
 Automation failures are structured as `CdpError.errorData` with `code`,
-`operation`, `failureKind`, and `recovery`. A locator miss directs the caller to
-re-observe current roles/names. A command timeout or closed target directs the
-caller to inspect panel diagnostics and acquire a fresh page from the stable
-panel handle; the old page connection is no longer reusable.
+`operation`, `failureKind`, and `recovery`. An exhausted auto-wait is
+`cdp_locator_state_mismatch` and includes its locator, requested state, and
+timeout. A failed `click({ expect })` is
+`cdp_interaction_outcome_not_observed` and includes both the dispatched and
+expected locators. A command timeout or closed target directs the caller to
+inspect panel diagnostics and acquire a fresh page from the stable panel handle;
+the old page connection is no longer reusable.
 
 Controls repeated for collection items must have item-specific accessible
 names. Treat repeated `"Mark task as completed"` buttons as an accessibility
@@ -395,15 +408,19 @@ startup/shutdown. Query `services.serverLog.query(...)` from eval or open
 `about/server-logs` to follow live; the full contract is in
 `../server-logs/SKILL.md`.
 
-Use the page object returned by `handle.cdp.page()` for automation:
+Prefer a generation-fenced session for automation:
 
 ```ts
-const page = await handle.cdp.page();
-console.log(page.url(), await page.title());
-await page.locator("button.submit").click();
-await page.locator(".status").innerText();
-await page.waitForSelector(".ready");
-await page.waitForLoadState("load");
+const session = await handle.cdp.session();
+try {
+  const page = session.page;
+  console.log(page.url(), await page.title());
+  await page.locator("button.submit").click();
+  await page.locator(".status").innerText();
+  await page.waitForSelector(".ready");
+} finally {
+  await session.close();
+}
 ```
 
 `page.url()` is a synchronous Playwright-style accessor. Do not `await` it or
@@ -433,13 +450,16 @@ await sibling.cdp.navigate("https://example.com/status");
 ```
 
 Readiness-bearing operations establish a live, booted target. For a discovered
-panel, call `observe()` and require `phase === "ready"` before custom RPC or
-`_agent` inspection. Use `diagnose()` when it is failed or stalled.
+panel, call `observe()` and require `phase === "ready"` before custom RPC, CDP,
+or `_agent` inspection. If it is `pending` and the task authorizes presenting
+it, call `focus()` under read-write authority. Use `diagnose()` when it is failed
+or stalled.
 
 ## Methods
 
 | Method                                             | Description                                                                       |
 | -------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `handle.cdp.session()`                             | Acquire or reuse one generation-fenced CDP session for a multi-step workflow      |
 | `handle.cdp.page()`                                | Connect the canonical CDP client and return the Playwright-style page             |
 | `handle.cdp.getCdpEndpoint()`                      | Get `{ wsEndpoint, token }` for raw `CdpConnection.connect`                       |
 | `handle.cdp.consoleHistory({ limit, errorLimit })` | Read host-captured historical console logs and the separate error buffer          |

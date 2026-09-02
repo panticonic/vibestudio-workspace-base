@@ -93,8 +93,9 @@ and publish explicitly.
 
 ## Browser and credential safety
 
-Use `handle.cdp.page()` for browser automation — it returns the canonical
-Playwright-style client. Never install a separate Playwright package. Acquire
+Use `handle.cdp.session()` for multi-step browser automation and its
+generation-fenced canonical Playwright-style page; reserve `handle.cdp.page()`
+for one-off work. Never install a separate Playwright package. Acquire
 protocol-level CDP only when needed; close every page/session you own.
 
 For authenticated HTTP, call the host-mediated credential operation directly.

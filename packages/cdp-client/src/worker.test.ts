@@ -187,12 +187,37 @@ class FakeWebSocket {
         token?: string;
       } | null;
       descriptor: { steps: Array<Record<string, unknown>> };
+      state?: "attached" | "detached" | "visible" | "hidden" | null;
     };
     const targetsMissing = payload.descriptor.steps.some(
       (s) =>
         (s["by"] === "testid" && s["value"] === "missing") ||
-        (s["by"] === "role" && (s["name"] === "Done" || s["name"] === "Completed"))
+        (s["by"] === "role" &&
+          (s["name"] === "Done" || s["name"] === "Completed" || s["name"] === "Add another column"))
     );
+    const requiredState = {
+      waitFor: payload.state ?? "visible",
+      innerText: "attached",
+      inputValue: "attached",
+      getAttribute: "attached",
+      evaluate: "attached",
+      fill: "visible",
+      clear: "visible",
+      selectOption: "visible",
+      focus: "visible",
+      blur: "attached",
+      scrollIntoView: "attached",
+      selectText: "visible",
+      dispatchEvent: "attached",
+      focusForKey: "visible",
+    }[payload.op];
+    if (targetsMissing && requiredState) {
+      return {
+        __nsLocatorFailure: "state-timeout",
+        state: requiredState,
+        timeout: 30_000,
+      };
+    }
     switch (payload.op) {
       case "probe":
         if (payload.arg?.retainToken) this.checking = true;
@@ -213,7 +238,7 @@ class FakeWebSocket {
       case "isVisible":
       case "isEnabled":
       case "isEditable":
-        return true;
+        return !targetsMissing;
       case "checkedState":
         this.checking = true;
         return this.checked;
@@ -580,6 +605,9 @@ describe("worker CDP client", () => {
     );
     await expect(page.getByRole("button", { name: "Sign in" }).isVisible()).resolves.toBe(true);
     await expect(page.getByTestId("widget").isEnabled()).resolves.toBe(true);
+    await expect(
+      page.getByRole("button", { name: "Add another column" }).isEnabled()
+    ).resolves.toBe(false);
     await expect(page.getByLabel("Email").getAttribute("id")).resolves.toBe("main");
     await expect(page.locator("li").allInnerTexts()).resolves.toEqual(["Hello"]);
     await expect(
@@ -605,6 +633,55 @@ describe("worker CDP client", () => {
     });
     expect("innerText" in page).toBe(false);
     expect("isVisible" in page).toBe(false);
+
+    const locatorRuntime = FakeWebSocket.sent
+      .filter((entry) => entry.method === "Runtime.evaluate")
+      .map((entry) => String(entry.params?.["expression"] ?? ""))
+      .find((expression) => expression.includes('"op":"isEnabled"'));
+    expect(locatorRuntime).toContain(
+      "return exact ? t===n : t.toLowerCase().indexOf(n.toLowerCase())!==-1"
+    );
+    expect(locatorRuntime).toContain(
+      'case "isEnabled": { var e=nsFirst(d); return !!e && nsEnabled(e); }'
+    );
+  });
+
+  it("reports locator wait timeouts as state mismatches with recovery data", async () => {
+    installFakeWebSocket();
+    const browser = await BrowserImpl.connect("ws://cdp");
+    const page = browser.contexts()[0]!.pages()[0]!;
+
+    const failure = await page
+      .getByRole("button", { name: "Add another column" })
+      .waitFor({ state: "visible", timeout: 25 })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(CdpError);
+    expect(failure).toMatchObject({
+      code: "cdp_locator_state_mismatch",
+      errorData: {
+        code: "cdp_locator_state_mismatch",
+        operation: "waitFor",
+        recovery: "reobserve-locator",
+        locator: 'getByRole("button", { name: "Add another column" })',
+        timeoutMs: 25,
+        state: "visible",
+      },
+    });
+
+    const readFailure = await page
+      .getByTestId("missing")
+      .innerText({ timeout: 15 })
+      .catch((error: unknown) => error);
+    expect(readFailure).toMatchObject({
+      code: "cdp_locator_state_mismatch",
+      errorData: {
+        operation: "innerText",
+        locator: 'getByTestId("missing")',
+        timeoutMs: 15,
+        state: "attached",
+      },
+    });
   });
 
   it("disconnects page automation without implying target ownership", async () => {
@@ -724,6 +801,29 @@ describe("worker CDP client", () => {
         status: "observed",
         locator: 'getByRole("dialog", { name: "Card details" })',
         state: "visible",
+      },
+    });
+  });
+
+  it("describes the missing postcondition when a dispatched click has no observed effect", async () => {
+    installFakeWebSocket();
+    const browser = await BrowserImpl.connect("ws://cdp");
+    const page = browser.contexts()[0]!.pages()[0]!;
+    const expected = page.getByRole("button", { name: "Add another column" });
+
+    const failure = await page
+      .getByRole("button", { name: "Create task", exact: true })
+      .click({ expect: { locator: expected, state: "visible", timeout: 40 } })
+      .catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      code: "cdp_interaction_outcome_not_observed",
+      errorData: {
+        code: "cdp_interaction_outcome_not_observed",
+        locator: 'getByRole("button", { name: "Create task", exact: true })',
+        expectedLocator: 'getByRole("button", { name: "Add another column" })',
+        state: "visible",
+        timeoutMs: 40,
       },
     });
   });

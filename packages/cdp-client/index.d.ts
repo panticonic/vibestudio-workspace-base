@@ -168,6 +168,7 @@ export interface CdpInteractionOutcome {
   effect: { status: "not-asserted" } | { status: "observed"; locator: string; state: WaitState };
 }
 export interface ByTextOptions {
+  /** Case-sensitive whole-string matching. Strings otherwise match case-insensitive substrings. */
   exact?: boolean;
 }
 export type TextMatcher = string | RegExp;
@@ -219,10 +220,15 @@ export interface CdpLocator {
   // State / reads
   waitFor(options?: { state?: WaitState; timeout?: number }): Promise<void>;
   count(): Promise<number>;
+  /** Immediate snapshot; false when there is no current match. */
   isVisible(): Promise<boolean>;
+  /** Immediate snapshot; false when there is no current match. */
   isChecked(opts?: ActionOptions): Promise<boolean>;
+  /** Immediate snapshot; false when there is no current match. */
   isEnabled(opts?: ActionOptions): Promise<boolean>;
+  /** Immediate snapshot; false when there is no current match. */
   isDisabled(opts?: ActionOptions): Promise<boolean>;
+  /** Immediate snapshot; false when there is no current match. */
   isEditable(opts?: ActionOptions): Promise<boolean>;
   getAttribute(name: string, opts?: ActionOptions): Promise<string | null>;
   inputValue(opts?: ActionOptions): Promise<string>;
@@ -363,6 +369,8 @@ export interface CdpFailureData {
     | "use-panel-handle-lifecycle";
   locator?: string;
   timeoutMs?: number;
+  state?: WaitState;
+  expectedLocator?: string;
   instruction?: string;
 }
 
@@ -382,6 +390,8 @@ export class CdpError extends Error {
       failureKind?: CdpFailureData["failureKind"];
       recovery?: CdpFailureData["recovery"];
       timeoutMs?: number;
+      state?: WaitState;
+      expectedLocator?: string;
       instruction?: string;
     }
   );

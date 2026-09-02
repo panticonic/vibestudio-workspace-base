@@ -15,24 +15,37 @@ Chromium runtime, page, network, and optional precise JavaScript-coverage
 evidence without exporting an unbounded trace. Await the workflow's actual
 completion condition inside `action`; coverage and cold-cache modes are opt-in.
 
-## Getting a page
+## Getting a session
 
 From any panel handle (panels, workers, server-side eval — anywhere you hold a
 handle):
 
 ```ts
-const page = await handle.cdp.page();
-await page.goto("https://example.com");
-await page.getByRole("button", { name: "Sign in" }).click();
+const session = await handle.cdp.session();
+try {
+  await session.page.getByRole("button", { name: "Sign in" }).click();
+} finally {
+  await session.close();
+}
 ```
 
-The handle owns the panel target; the page owns one automation connection to a
-runtime incarnation. `await page.close()` disconnects that client without
-archiving the panel. `await handle.archive()` archives an owned panel subtree. Browser
-navigation and reload keep the page connected while the target survives.
-Workspace-panel `handle.navigate()` and `handle.rebuild()` replace the runtime
-incarnation and disconnect the old page; acquire one fresh page from the same
-handle after either operation.
+The handle owns the panel target; the session owns one generation-fenced
+automation connection to a runtime incarnation. Prefer one session for a related
+operation sequence and close it in `finally`. The one-off `handle.cdp.page()` is
+available, but its caller owns the returned connection and must call
+`page.close()`. Neither close operation archives the panel; `handle.archive()`
+archives an owned panel subtree.
+
+Raw `page.goto()`, `page.reload()`, `page.goBack()`, and `page.goForward()` are
+browser-panel operations. Workspace pages reject them so navigation cannot
+bypass panel readiness and generation tracking. Use `handle.navigate()`,
+`handle.reload()`, or `handle.rebuild()`, then call `session.refresh()` (or close
+the old session and acquire a new one).
+
+A deferred panel observation has phase `pending` and no CDP generation. Run
+`await handle.focus()` to materialize it before acquiring a session. In
+server-side eval, that lifecycle call requires `authority.effects:
+"read-write"`; it is intentionally rejected in read-only mode.
 
 ## Playwright compatibility notes
 
@@ -109,10 +122,11 @@ await page.setViewportSize({ width: 390, height: 844 });
 page.viewportSize(); // synchronous current CSS viewport
 ```
 
-Text matchers accept strings or `RegExp`. Matcher source/flags are serialized
-explicitly instead of degrading to `{}` at the CDP boundary. Form actions use
-native DOM property setters plus input/change events, including for controlled
-React inputs.
+Text matchers accept strings or `RegExp`. Strings use normalized,
+case-insensitive substring matching by default; `{ exact: true }` selects a
+case-sensitive whole-string match. Matcher source/flags are serialized explicitly
+instead of degrading to `{}` at the CDP boundary. Form actions use native DOM
+property setters plus input/change events, including for controlled React inputs.
 
 ## Reads & state
 
@@ -127,6 +141,11 @@ await loc.inspect();
 // { tagName, id, className, text, role, accessibleName, visible, attributes,
 //   boundingBox }
 ```
+
+The `isVisible`, `isChecked`, `isEnabled`, `isDisabled`, and `isEditable`
+methods are immediate snapshots and return `false` when there is no current
+match. Use `waitFor` when absence should be retried. Other single-element reads
+and actions auto-wait.
 
 Before acting on a newly rendered UI, inspect its live accessibility names:
 
@@ -147,6 +166,10 @@ await page.waitForLoadState("domcontentloaded");
 await page.waitForFunction(() => document.readyState === "complete");
 await page.waitForSelector(".ready");
 ```
+
+An exhausted locator wait is reported as `cdp_locator_state_mismatch`, with the
+locator, requested state, and timeout in `errorData`. It is not collapsed into a
+generic `cdp_evaluation_failed` error.
 
 ## Screenshots
 
@@ -193,6 +216,13 @@ preserve the browser exception description and stack. The message begins with
 `Browser evaluation failed:` and includes the actual error name/message instead
 of collapsing every exception to CDP's generic `Uncaught` label. Locator
 operations wrap that detail in `CdpError` without discarding it.
+
+Use locator actions for interaction. Calling `element.click()`, `form.submit()`,
+or `form.requestSubmit()` through `evaluate()` bypasses locator actionability,
+real CDP input dispatch, and semantic postcondition reporting. A failed
+`click({ expect })` includes the dispatched locator, expected locator/state, and
+timeout in `errorData`, so the caller can distinguish delivery from an
+unobserved application outcome.
 
 Functions passed to `page.evaluate`, `waitForFunction`, `locator.evaluate`, or
 `locator.evaluateAll` are serialized into the page realm. They must be

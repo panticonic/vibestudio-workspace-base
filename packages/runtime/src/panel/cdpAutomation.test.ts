@@ -74,6 +74,32 @@ describe("createCdpAutomation screenshot", () => {
     expect(call).not.toHaveBeenCalled();
   });
 
+  it("gives an actionable materialization recovery when a session target is pending", async () => {
+    const cdp = createCdpAutomation({ call: vi.fn() } as never, "panel:deferred", {
+      observe: vi.fn(async () => ({
+        panelId: "panel:deferred",
+        phase: "pending",
+        attemptId: "unknown-attempt",
+        runtimeEntityId: null,
+      })) as never,
+    });
+
+    const failure = await cdp.session().catch((error: unknown) => error);
+
+    expect(failure).toMatchObject({
+      code: "panel_cdp_generation_unavailable",
+      errorData: {
+        code: "panel_cdp_generation_unavailable",
+        phase: "pending",
+        recovery: {
+          action: "materialize",
+          instruction: expect.stringContaining("authority.effects set to read-write"),
+        },
+      },
+    });
+    expect((failure as Error).message).toContain("await handle.focus()");
+  });
+
   it("fences a CDP session to one panel attempt and explicitly replaces a stale page", async () => {
     const oldPage = {
       close: vi.fn(async () => undefined),

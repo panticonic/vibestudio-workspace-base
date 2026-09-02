@@ -150,9 +150,12 @@ export function createCdpAutomation(
 
   const generationOf = (observation: PanelObservation): PanelCdpGeneration => {
     if (observation.phase !== "ready" || !observation.runtimeEntityId) {
+      const pending = observation.phase === "pending";
       throw Object.assign(
         new Error(
-          `Panel ${JSON.stringify(id)} is ${observation.phase}; acquire a CDP session only after it is ready.`
+          pending
+            ? `Panel ${JSON.stringify(id)} is pending and has no CDP generation; materialize it with await handle.focus() in a read-write eval, then acquire the session.`
+            : `Panel ${JSON.stringify(id)} is ${observation.phase}; acquire a CDP session only after it is ready.`
         ),
         {
           code: "panel_cdp_generation_unavailable",
@@ -162,9 +165,10 @@ export function createCdpAutomation(
             phase: observation.phase,
             attemptId: observation.attemptId,
             recovery: {
-              action: "reobserve",
-              instruction:
-                "Observe the panel lifecycle and acquire a session after phase becomes ready.",
+              action: pending ? "materialize" : "reobserve",
+              instruction: pending
+                ? "Run await handle.focus() with authority.effects set to read-write, confirm the returned observation is ready, then call handle.cdp.session()."
+                : "Observe the panel lifecycle and acquire a session after phase becomes ready.",
             },
           },
         }

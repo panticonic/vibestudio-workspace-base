@@ -541,7 +541,7 @@ function nsDedupe(a){ return a.filter(function(e,i){ return a.indexOf(e)===i; })
 function nsRetainedElements(){ var key=Symbol.for("@workspace/cdp-client/retained-elements"); var registry=globalThis[key]; if(!(registry instanceof Map)){ registry=new Map(); globalThis[key]=registry; } return registry; }
 function nsRetainedElement(token){ var e=nsRetainedElements().get(token); if(!e) throw new Error("Retained element lease is no longer available"); return e; }
 function nsText(el){ return nsNorm((el && (el.innerText!=null?el.innerText:el.textContent)) || ""); }
-function nsValueMatch(value, q, exact){ var t=nsNorm(value); if(q&&typeof q==="object"&&q.regex){ return new RegExp(q.regex.source,q.regex.flags).test(t); } var n=nsNorm(q); return exact ? t===n : t.indexOf(n)!==-1; }
+function nsValueMatch(value, q, exact){ var t=nsNorm(value); if(q&&typeof q==="object"&&q.regex){ return new RegExp(q.regex.source,q.regex.flags).test(t); } var n=nsNorm(q); return exact ? t===n : t.toLowerCase().indexOf(n.toLowerCase())!==-1; }
 function nsTextMatch(el, q, exact){ return nsValueMatch(nsText(el),q,exact); }
 function nsHasTextMatchingDescendant(el,q,exact){ var all=el&&el.querySelectorAll?el.querySelectorAll("*"):[]; for(var i=0;i<all.length;i++){ if(nsTextMatch(all[i],q,exact)) return true; } return false; }
 function nsAttr(el, name){ return el && el.getAttribute ? el.getAttribute(name) : null; }
@@ -671,7 +671,7 @@ async function nsWaitForState(descriptor, state, timeout){
     else if(state==="hidden") ok=!el||!nsVisible(el);
     else ok=!!el&&nsVisible(el);
     if(ok) return el;
-    if(Date.now()>deadline) throw new Error("Timeout "+timeout+"ms waiting for element to be "+state);
+    if(Date.now()>deadline){ var failure=new Error("Timeout "+timeout+"ms waiting for element to be "+state); failure.__nsLocatorFailure={__nsLocatorFailure:"state-timeout",state:state,timeout:timeout}; throw failure; }
     await nsSleep(50);
   }
 }
@@ -704,19 +704,19 @@ async function nsActionable(descriptor, timeout, retainToken){
 }
 async function __nsRun(P){
   var d=P.descriptor, a=P.arg, t=P.timeout;
-  switch(P.op){
+  try { switch(P.op){
     case "probe": return await nsActionable(d, t, a&&a.retainToken);
     case "waitFor": { await nsWaitForState(d, P.state||"visible", t); return true; }
     case "count": return nsLocate(d).length;
     case "exists": return !!nsFirst(d);
     case "isVisible": { var e=nsFirst(d); return !!e && nsVisible(e); }
     case "checkedState":
-    case "isChecked": { var e=await nsWaitForState(d,"attached",t); return nsCheckedState(e); }
+    case "isChecked": { var e=nsFirst(d); return !!e && nsCheckedState(e); }
     case "retainedCheckedState": { var e=nsRetainedElement(a.token); if(!e.isConnected) throw new Error("Retained element was detached during the action"); return nsCheckedState(e); }
     case "releaseRetainedElement": return nsRetainedElements().delete(a.token);
-    case "isEnabled": { var e=await nsWaitForState(d,"attached",t); return nsEnabled(e); }
-    case "isDisabled": { var e=await nsWaitForState(d,"attached",t); return !nsEnabled(e); }
-    case "isEditable": { var e=await nsWaitForState(d,"attached",t); return nsEditable(e); }
+    case "isEnabled": { var e=nsFirst(d); return !!e && nsEnabled(e); }
+    case "isDisabled": { var e=nsFirst(d); return !!e && !nsEnabled(e); }
+    case "isEditable": { var e=nsFirst(d); return !!e && nsEditable(e); }
     case "textContent": { var e=nsFirst(d); return e?e.textContent:null; }
     case "innerText": { var e=await nsWaitForState(d,"attached",t); return e.innerText!=null?e.innerText:(e.textContent||""); }
     case "inputValue": { var e=await nsWaitForState(d,"attached",t); return "value" in e ? e.value : ""; }
@@ -771,7 +771,7 @@ async function __nsRun(P){
     case "dispatchEvent": { var e=await nsWaitForState(d,"attached",t); e.dispatchEvent(new Event(a.type,{bubbles:true})); await nsAfterAction(); return true; }
     case "focusForKey": { var e=await nsWaitForState(d,"visible",t); e.focus&&e.focus(); await nsAfterAction(); return true; }
     default: throw new Error("Unknown op: "+P.op);
-  }
+  }} catch(error) { if(error&&error.__nsLocatorFailure) return error.__nsLocatorFailure; throw error; }
 }
 `;
 
@@ -887,6 +887,8 @@ export interface CdpFailureData {
     | "use-panel-handle-lifecycle";
   locator?: string;
   timeoutMs?: number;
+  state?: WaitState;
+  expectedLocator?: string;
   instruction?: string;
 }
 
@@ -905,6 +907,8 @@ export class CdpError extends Error {
       failureKind?: CdpFailureData["failureKind"];
       recovery?: CdpFailureData["recovery"];
       timeoutMs?: number;
+      state?: WaitState;
+      expectedLocator?: string;
       instruction?: string;
     } = {}
   ) {
@@ -921,6 +925,8 @@ export class CdpError extends Error {
       recovery: options.recovery ?? "reobserve-locator",
       ...(options.locator ? { locator: options.locator } : {}),
       ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      ...(options.state ? { state: options.state } : {}),
+      ...(options.expectedLocator ? { expectedLocator: options.expectedLocator } : {}),
       ...(options.instruction ? { instruction: options.instruction } : {}),
     };
     if (options.cause !== undefined) (this as { cause?: unknown }).cause = options.cause;
@@ -1291,10 +1297,25 @@ class WorkerCdpPage {
     )})`;
     try {
       const timeout = payload.timeout;
-      return await this.evaluate(expr, undefined, {
+      const result = await this.evaluate(expr, undefined, {
         timeout: timeout + 1_000,
         operation: `locator.${op}`,
       });
+      if (
+        result &&
+        typeof result === "object" &&
+        (result as { __nsLocatorFailure?: unknown }).__nsLocatorFailure === "state-timeout"
+      ) {
+        const state = (result as { state?: WaitState }).state ?? opts.state ?? "visible";
+        throw new CdpError(`Timeout ${timeout}ms waiting for element to be ${state}`, {
+          code: "cdp_locator_state_mismatch",
+          operation: op,
+          recovery: "reobserve-locator",
+          timeoutMs: timeout,
+          state,
+        });
+      }
+      return result;
     } catch (err) {
       const where = describeLocator(descriptor);
       const detail = err instanceof Error ? err.message : String(err);
@@ -1307,6 +1328,8 @@ class WorkerCdpPage {
           failureKind: err.errorData.failureKind,
           recovery: err.errorData.recovery,
           timeoutMs: err.errorData.timeoutMs,
+          state: err.errorData.state,
+          expectedLocator: err.errorData.expectedLocator,
           instruction: err.errorData.instruction,
         });
       }
@@ -1590,6 +1613,7 @@ class WorkerCdpPage {
       });
     } catch (cause) {
       const expectedLocator = opts.expect.locator.toString();
+      const timeoutMs = opts.expect.timeout ?? opts.timeout ?? this.defaultTimeout;
       throw new CdpError(
         `${action} was dispatched to ${describeLocator(descriptor)}, but expected ${expectedLocator} to become ${state}`,
         {
@@ -1598,6 +1622,9 @@ class WorkerCdpPage {
           code: "cdp_interaction_outcome_not_observed",
           operation: action,
           recovery: "reobserve-locator",
+          timeoutMs,
+          state,
+          expectedLocator,
         }
       );
     }

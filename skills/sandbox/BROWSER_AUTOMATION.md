@@ -14,28 +14,34 @@ debugging that app, but do not use them as disposable web pages.
 > shape; the `eval` snippets show the same page API. (`browserData` from
 > `@workspace/runtime` is shell-only and not reachable from server-side eval.)
 
-## Open Once, Reuse Across Calls (component refs)
+## Open Once, Reuse Across an Operation Sequence
 
-The primary pattern: open a browser panel once, hold the handle/page (e.g. in a
-component `useRef`/`useState`), and reuse it across interactions — do not
-re-open or re-connect for the same target.
+The primary pattern: open a browser panel once, hold one generation-fenced
+session, and reuse it across related interactions. Do not re-open or re-connect
+for the same target.
 
 ```tsx
 // Open browser panel once, hold the handle
 const handle = await openPanel("https://example.com");
-const page = await handle.cdp.page();
-console.log("Opened:", await page.title());
+const session = await handle.cdp.session();
+const page = session.page;
 
-// Reuse — no new panel, same page
-await page.getByRole("button", { name: "Sign in" }).click();
-await page.getByLabel("Email").fill("user@example.com");
-await page.getByRole("button", { name: "Submit" }).click();
-await page.waitForSelector(".dashboard");
+try {
+  console.log("Opened:", await page.title());
 
-const results = await page.evaluate(() =>
-  Array.from(document.querySelectorAll(".item")).map((el) => el.textContent)
-);
-console.log("Scraped", results.length, "items");
+  // Reuse — no new panel, same page
+  await page.getByRole("button", { name: "Sign in" }).click();
+  await page.getByLabel("Email").fill("user@example.com");
+  await page.getByRole("button", { name: "Submit" }).click();
+  await page.waitForSelector(".dashboard");
+
+  const results = await page.evaluate(() =>
+    Array.from(document.querySelectorAll(".item")).map((el) => el.textContent)
+  );
+  console.log("Scraped", results.length, "items");
+} finally {
+  await session.close();
+}
 ```
 
 Three lines to get started for multi-step work:
@@ -98,9 +104,12 @@ const browserTargets = firstPage.entries
 
 Restart affected groups from the first page after tree mutations. Imported
 browser targets may be deferred; `createPanelSlot(url)` is the receipt-oriented
-creation primitive for bulk imports, and acquiring CDP materializes a deferred
-target. Automate mass imports with bounded concurrency rather than an unbounded
-`Promise.all`.
+creation primitive for bulk imports. A deferred target has observation phase
+`pending` and no CDP generation. Materialize it explicitly with `handle.focus()`
+before acquiring CDP. That lifecycle operation calls `panelRuntime.ensureSlot`,
+so an eval that invokes it must use `authority.effects: "read-write"`; a
+read-only eval cannot widen its own authority. Automate mass imports with bounded
+concurrency rather than an unbounded `Promise.all`.
 
 When the root is an `about/collection` panel, read its co-located
 [collection conductor skill](../../about/collection/SKILL.md) for recursive
@@ -112,9 +121,17 @@ With a known slot id:
 import { panelTree } from "@workspace/runtime";
 
 const handle = panelTree.get("panel-slot-id");
-const observation = await handle.observe(); // exact attempt, host state, and provenance
-const page = await handle.cdp.page();
+let observation = await handle.observe(); // exact attempt, host state, and provenance
+if (observation.phase === "pending") {
+  observation = await handle.focus(); // materializes it; requires read-write eval authority
+}
+if (observation.phase !== "ready") throw new Error(`Panel is ${observation.phase}`);
+const session = await handle.cdp.session();
+const page = session.page;
 ```
+
+Keep that session for the related operation sequence and close it in a
+`finally` block as shown in the Page API example below.
 
 `openPanel()` returns only at application boot-ready. Existing-panel handles are
 non-owned: observe first, and do not call `handle.navigate`,
@@ -161,8 +178,12 @@ persist is the panel **id** (a string). Re-acquire a handle from a known id with
 import { getPanelHandle } from "@workspace/runtime";
 
 const handle = getPanelHandle(savedBrowserId); // panel id survives as a plain string
-const page = await handle.cdp.page();
-console.log("Reconnected:", await page.title());
+const session = await handle.cdp.session();
+try {
+  console.log("Reconnected:", await session.page.title());
+} finally {
+  await session.close();
+}
 ```
 
 Keep the panel id somewhere durable for the surface you're on (component
@@ -172,11 +193,13 @@ handle persisting.
 ## Page API Reference
 
 Obtain a generation-fenced session from a panel handle, then use its page.
-`handle.cdp.session()` and the one-off `handle.cdp.page()` use the same
+Prefer `handle.cdp.session()` for a sequence of observations and actions, and
+close it in `finally`. The one-off `handle.cdp.page()` exposes the same
 canonical Playwright-style page driven by our workerd-native CDP client
 (`@workspace/cdp-client`). This is one browser-automation surface — there is no
 separate compatibility tier to choose, and you do not import or install any
-`playwright*` package.
+`playwright*` package. A caller that uses the one-off page owns it and must call
+`page.close()`.
 
 ```typescript
 const browser = await openPanel("https://example.com");
@@ -344,7 +367,9 @@ await page.locator('input[name="email"]').fill("user@example.com");
 ```
 
 Text locators accept strings or `RegExp`; regular expressions retain their
-source and flags across the workerd/CDP boundary. `fill()`, `type()`, `clear()`,
+source and flags across the workerd/CDP boundary. String matching is normalized,
+case-insensitive substring matching by default. `{ exact: true }` selects a
+case-sensitive whole-string match. `fill()`, `type()`, `clear()`,
 and checked-state actions use the element's native property setter before
 dispatching browser events, so controlled React inputs observe the same state
 change as a user edit.
@@ -370,6 +395,13 @@ await page.locator(".box").boundingBox();
 await page.locator(".box").inspect();
 // inspect() includes role and accessibleName in addition to DOM/visibility data.
 ```
+
+`isVisible()`, `isChecked()`, `isEnabled()`, `isDisabled()`, and
+`isEditable()` are immediate snapshots. They return `false` when the locator has
+no current match; use `waitFor(...)` when absence should be retried. Other
+single-element reads and actions auto-wait. An exhausted locator wait fails as
+`cdp_locator_state_mismatch` with the locator, requested state, and timeout in
+`errorData`, rather than as a generic browser-evaluation failure.
 
 ### DOM waits
 
@@ -398,17 +430,21 @@ const items = await page.evaluate(() =>
 // Pass arguments
 const text = await page.evaluate((sel) => document.querySelector(sel)?.textContent, ".my-class");
 
-// Interact with the page
-await page.evaluate(() => {
-  document.querySelector("form")?.submit();
-});
+// Compute a page-specific value that the locator API does not expose
+const selectedIds = await page.evaluate(() =>
+  Array.from(document.querySelectorAll("[aria-selected=true]"), (element) => element.id)
+);
 ```
 
 `page.evaluate`, `waitForFunction`, and `locator.evaluateAll` serialize the
 callback into the browser realm. Pass outside data through the explicit
 argument instead of closing over eval variables. Browser exceptions retain
 their real exception description and stack; locator failures additionally name
-the rendered locator. If an error only says `Uncaught`, that is a platform
+the rendered locator. Use locator actions such as `click()`, `fill()`, and
+`press()` for interaction: they provide actionability checks, real CDP input,
+and optional postcondition evidence. Calling `element.click()`, `form.submit()`,
+or `form.requestSubmit()` through `evaluate()` bypasses those guarantees. If an
+error only says `Uncaught`, that is a platform
 regression—capture it with `handle.diagnose()` rather than guessing.
 
 ### Screenshots
@@ -677,12 +713,12 @@ export default function BrowserController({ props, chat }) {
 
 - **Acquire or create one handle and reuse it** — `openPanel`/`panelTree`/`getPanelHandle` work from server-side eval, panels, workers, and DOs; once you hold the handle, `handle.cdp.session()` drives multi-step browser work with immutable-generation provenance.
 - **Hold one session and refresh it across lifecycle changes** — after `handle.navigate()` or `handle.rebuild()`, call `session = (await session.refresh()).session` and continue with `session.page`. Refresh reports `current`, `reconnected`, or `replaced` and never replays an action.
-- **Prefer locators with auto-wait** — `page.getByRole(...)` / `page.locator(...)` wait for the element automatically; reach for `page.evaluate()` for complex DOM queries that need full DOM API access.
+- **Prefer locators with auto-wait** — `page.getByRole(...)` / `page.locator(...)` wait for the element automatically; reach for `page.evaluate()` only for page-specific computation that needs DOM APIs, not to dispatch interactions.
 - **For SPAs, wait for application state** — after `page.goto(url)`, use
   `page.waitForFunction(...)` or a stable locator that represents the loaded
   application. The CDP page does not claim full-Playwright
   `waitUntil: "networkidle"` semantics.
-- **Use `page.waitForSelector()` or `locator.waitFor()` before interacting** — ensures elements exist before clicking/filling.
+- **Wait only for a distinct prerequisite or postcondition** — actions already wait for their own target, so a separate pre-action wait is redundant.
 - **Wait on the page condition you need** — prefer explicit page state checks over wall-clock limits.
 - **Protected imports stay sealed** — cookie, password, and form-fill plaintext is read and stored entirely by the host; Base receives aggregate counts only.
 - **Connection lifetime follows the runtime incarnation** — browser
