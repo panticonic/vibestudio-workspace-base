@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "@workspace/agentic-core";
 import { useForkLineage, type UseForkLineageOptions } from "./useForkLineage";
 
@@ -228,5 +228,63 @@ describe("useForkLineage render stability", () => {
     expect(result.current.error).toBe(
       "Could not save the conversation read position: storage unavailable"
     );
+  });
+
+  it("quietly retries a read cursor after the workspace review resolves", async () => {
+    const rpc: UseForkLineageOptions["rpc"] = {
+      selfId: "panel-1",
+      call: async <Result,>(target: string, method: string, args: unknown[]) => {
+        if (target === "main" && method === "workers.resolveService") {
+          return { targetId: `do:channel:${String(args[1])}` } as Result;
+        }
+        if (method === "getProvenance") return { kind: "root" } as Result;
+        if (method === "listForks") return { headSeq: 12, forks: [] } as Result;
+        throw new Error(`unexpected ${target}.${method}`);
+      },
+    };
+    const pending = Object.assign(new Error("Waiting for workspace review"), {
+      code: "EREVIEWPENDING",
+      errorData: {
+        authorityFailure: {
+          reasonCode: "review-pending",
+          remediation: {
+            review: { approvalId: "workspace-review", title: "what's in your workspace" },
+          },
+        },
+      },
+    });
+    const markForkRead = vi
+      .fn<(channelId: string, headSeq: number) => Promise<void>>()
+      .mockRejectedValueOnce(pending)
+      .mockResolvedValue(undefined);
+    const nav = {
+      switchTo: () => {},
+      openInNewPanel: () => {},
+      readForkCursors: () => ({}),
+      markForkRead,
+    };
+    const { result, rerender } = renderHook(
+      ({ retrySignal }: { retrySignal: number }) =>
+        useForkLineage({
+          rpc,
+          channelId: "root-channel",
+          contextId: "root-context",
+          selfId: "panel-1",
+          messages: [],
+          replaySettled: true,
+          retrySignal,
+          client: {} as UseForkLineageOptions["client"],
+          nav,
+        }),
+      { initialProps: { retrySignal: 0 } }
+    );
+
+    await waitFor(() => expect(markForkRead).toHaveBeenCalledTimes(1));
+    expect(result.current.error).toBeUndefined();
+
+    rerender({ retrySignal: 1 });
+    await waitFor(() => expect(markForkRead).toHaveBeenCalledTimes(2));
+    expect(markForkRead).toHaveBeenLastCalledWith("root-channel", 12);
+    expect(result.current.error).toBeUndefined();
   });
 });

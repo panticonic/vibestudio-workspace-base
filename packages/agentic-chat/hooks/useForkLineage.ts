@@ -5,6 +5,7 @@ import { forkConversation, type ForkLocus } from "@workspace/channel-fork";
 import type { ChatMessage } from "@workspace/agentic-core";
 import type { ForkProjection, MessageBlockInput } from "@workspace/agentic-protocol";
 import { readChannelSubscriptionRecords, type PubSubClient } from "@workspace/pubsub";
+import { isReviewPending } from "@vibestudio/shared/authority/reviewPending";
 import type {
   ChannelProvenance,
   ChatParticipantMetadata,
@@ -48,6 +49,8 @@ export interface UseForkLineageOptions {
   selfMetadata?: { name?: string; type?: string; handle?: string };
   messages: ChatMessage[];
   replaySettled: boolean;
+  /** Changes when a workspace review may have unblocked cursor persistence. */
+  retrySignal?: number;
   /** Connection readiness only; lineage has its own response-owned stream. */
   client?: PubSubClient<ChatParticipantMetadata> | null;
   nav?: ForkNavHandlers;
@@ -96,7 +99,7 @@ function messageExcerpt(message: ChatMessage): string {
 }
 
 export function useForkLineage(options: UseForkLineageOptions): ForkUiState {
-  const { rpc, channelId, contextId, selfId, replaySettled, client, nav } = options;
+  const { rpc, channelId, contextId, selfId, replaySettled, retrySignal, client, nav } = options;
   const enabled = Boolean(nav);
   const connected = Boolean(client);
   const navRef = useRef(nav);
@@ -125,7 +128,15 @@ export function useForkLineage(options: UseForkLineageOptions): ForkUiState {
       readCursorsRef.current[readChannelId] ??
       0;
     if (prior >= headSeq) return;
-    await navRef.current?.markForkRead?.(readChannelId, headSeq);
+    try {
+      await navRef.current?.markForkRead?.(readChannelId, headSeq);
+    } catch (cause) {
+      // A workspace creation/install review temporarily holds gated panel
+      // state writes. It is not a persistence failure: leave the cursor stale
+      // so the approval-change retry can write the same monotone head later.
+      if (isReviewPending(cause)) return;
+      throw cause;
+    }
     setReadCursors((current) => {
       const next = {
         ...current,
@@ -181,7 +192,7 @@ export function useForkLineage(options: UseForkLineageOptions): ForkUiState {
     void markRead(channelId, currentHead).catch((cause) =>
       reportError("Could not save the conversation read position", cause)
     );
-  }, [enabled, replaySettled, channelId, currentHead, markRead, reportError]);
+  }, [enabled, replaySettled, channelId, currentHead, retrySignal, markRead, reportError]);
 
   const lineageRootId =
     !channelId || !provenance
