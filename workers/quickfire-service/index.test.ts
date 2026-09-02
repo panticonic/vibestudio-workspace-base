@@ -106,6 +106,11 @@ describe("QuickfireSessionsDO", () => {
         capabilities: ["panel.inspect"],
         scope: { kind: "agent-channel", channelId: session.channelId },
       },
+      {
+        resource: { kind: "workspace-diagnostics", id: "server-logs" },
+        capabilities: ["server-logs.read"],
+        scope: { kind: "agent-channel", channelId: session.channelId },
+      },
     ]);
     expect(channelCreate?.args[0]).toMatchObject({
       resourceBindings: [

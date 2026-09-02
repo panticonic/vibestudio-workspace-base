@@ -233,6 +233,11 @@ export class QuickfireSessionsDO extends DurableObjectBase {
           capabilities: ["panel.inspect"],
           scope: { kind: "agent-channel", channelId },
         },
+        {
+          resource: { kind: "workspace-diagnostics", id: "server-logs" },
+          capabilities: ["server-logs.read"],
+          scope: { kind: "agent-channel", channelId },
+        },
       ],
       replay: true,
       retireEntityOnSubscribeFailure: true,

@@ -51,6 +51,20 @@ describe("agent-worker authority manifest", () => {
     });
   });
 
+  it("declares the redacted server-log capability that Quickfire binds at launch", () => {
+    const manifest = JSON.parse(
+      readFileSync(new URL("./package.json", import.meta.url), "utf8"),
+    ) as {
+      vibestudio: { authority: { requests: AuthorityRequest[] } };
+    };
+    expect(manifest.vibestudio.authority.requests).toContainEqual({
+      capability: "server-logs.read",
+      resource: { kind: "prefix", prefix: "" },
+      tier: "gated",
+      evidence: "intentional-broad",
+    });
+  });
+
   it("declares the provider-bound test capability used by first-class verification", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("./package.json", import.meta.url), "utf8"),

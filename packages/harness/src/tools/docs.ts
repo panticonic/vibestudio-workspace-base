@@ -342,16 +342,23 @@ export function renderEntry(entry: CatalogEntry): string {
           target?: { kind?: string; defaultObjectKey?: string | null };
           source?: string;
           capability?: string;
+          declarationCapability?: string;
+          binding?: "consent" | "declared";
         }
       | undefined;
     const protocol = access?.protocols?.[0];
     if (protocol) {
       parts.push(`Protocol: ${protocol}`);
-      if (!entry.parent && access?.capability) {
+      const manifestCapability = access?.declarationCapability ?? access?.capability;
+      if (!entry.parent && manifestCapability) {
         parts.push(
-          `Installed-unit authority: declare an exact ${JSON.stringify(
-            access.capability
-          )} request in the caller's package.json with resource { "kind": "prefix", "prefix": "" }, tier "gated", and evidence "bounded-dynamic". Manifest tiers are only "gated" or "critical"; the provider method's RPC tier "open" is a separate receiver policy. This request may exist before the provider; the live declaration, provider version, context visibility, and grant are still checked at runtime.`
+          access?.binding === "declared"
+            ? `Installed-unit declaration: declare an exact ${JSON.stringify(
+                manifestCapability
+              )} request in the caller's package.json with resource { "kind": "prefix", "prefix": "" }, tier "gated", and evidence "bounded-dynamic". This records reviewed structural wiring; it is not a runtime permission and must not be added to eval authority requests. Individual receiver methods and their semantic effects remain authoritative.`
+            : `Installed-unit authority: declare an exact ${JSON.stringify(
+                manifestCapability
+              )} request in the caller's package.json with resource { "kind": "prefix", "prefix": "" }, tier "gated", and evidence "bounded-dynamic". Manifest tiers are only "gated" or "critical"; the provider method's RPC tier "open" is a separate receiver policy. This request may exist before the provider; the live declaration, provider version, context visibility, and grant are still checked at runtime.`
         );
       }
       const callExample = entry.parent

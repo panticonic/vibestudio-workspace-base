@@ -144,6 +144,15 @@
           "evidence": "exact"
         },
         {
+          "capability": "server-logs.read",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
           "capability": "subagents.create",
           "resource": {
             "kind": "prefix",

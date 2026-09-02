@@ -201,6 +201,34 @@ describe("renderEntry (readable docs_open text)", () => {
     expect(text).toContain("Resolve and call it directly through the runtime");
   });
 
+  it("distinguishes declared service wiring from eval authority", () => {
+    const entry: CatalogEntry = {
+      id: "workspace:gad.workspace",
+      surface: "workspace",
+      qualifiedName: "gad.workspace",
+      title: "Workspace source",
+      members: ["vcsStatus"],
+      access: {
+        protocols: ["vibestudio.gad.workspace.v1"],
+        binding: "declared",
+        declarationCapability: "workspace-service:gad.workspace",
+        source: "workers/workspace-source",
+        target: {
+          kind: "durable-object",
+          className: "GadWorkspaceDO",
+          defaultObjectKey: "workspace",
+        },
+      },
+    };
+
+    const text = renderEntry(entry);
+    expect(text).toContain("Installed-unit declaration");
+    expect(text).toContain('"workspace-service:gad.workspace"');
+    expect(text).toContain("not a runtime permission");
+    expect(text).toContain("must not be added to eval authority requests");
+    expect(text).not.toContain("Installed-unit authority");
+  });
+
   it("requires an explicit object key when workspace docs describe a DO factory", () => {
     const entry: CatalogEntry = {
       id: "workspace:channel.publish",
