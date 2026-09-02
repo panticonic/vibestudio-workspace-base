@@ -64,6 +64,7 @@ import {
   getInstallReviewActionCopy,
   originForUrl,
   shouldOpenApprovalDetails,
+  shouldShowOperationSubstance,
 } from "@vibestudio/shared/approvalCopy";
 import { HOST_APPROVAL_COPY } from "@vibestudio/shared/hostApprovalCopy";
 import {
@@ -548,7 +549,7 @@ export function ApprovalSheet({
                     }
                   />
                 ) : null}
-                {current.kind === "capability" && current.operationSubstance ? (
+                {current.kind === "capability" && shouldShowOperationSubstance(current) ? (
                   <View style={styles.detailCard}>
                     <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
                       What exactly
@@ -1175,6 +1176,23 @@ function ApprovalDetails({
               }`}
               code
             />
+          ) : null}
+          {approval.kind === "capability" && approval.snapshot ? (
+            <>
+              <DetailRow
+                icon={Settings2}
+                label="RPC"
+                value={`${approval.snapshot.service}.${approval.snapshot.method}`}
+                code
+              />
+              <DetailRow icon={Lock} label="Authority" value={approval.capability} code />
+              <DetailRow
+                icon={Lock}
+                label="Authority target"
+                value={approval.grantResourceKey ?? approval.snapshot.resourceKey}
+                code
+              />
+            </>
           ) : null}
           <DetailRow icon={Globe} label="Requester repo" value={approval.repoPath} code />
           <DetailRow icon={Lock} label="Requester version" value={approval.effectiveVersion} code />

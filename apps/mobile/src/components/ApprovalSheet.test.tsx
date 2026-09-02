@@ -42,6 +42,30 @@ const consequentialCapability: PendingApproval = {
     statement: "prospective",
     provenance: { source: "receiver" },
   }),
+  snapshot: {
+    v: 2,
+    service: "push",
+    method: "send",
+    capability: "push.send",
+    capabilityDefinitionDigest: "-",
+    resourceType: "publishing",
+    provider: "-",
+    providerExecutionDigest: "-",
+    resourceKey: "channel:briefings",
+    argsDigest: "args:briefing-1",
+    preparedStateDigest: "prepared:briefing-1",
+    callerPrincipal: "code:news",
+    sessionId: "session:news",
+    taskRef: "task:nightly-briefing",
+    agentName: "News",
+    agentScopeEligible: true,
+    missionSubject: "-",
+    snippetDigest: "snippet:news",
+    codeLineage: { class: "internal", chain: ["code:news"] },
+    contextLineage: null,
+    initiatorChain: ["user:alice"],
+    at: 1,
+  },
   operationSubstance: {
     kind: "send",
     summary: "Send 1 briefing to Briefings",
@@ -747,7 +771,7 @@ describe("ApprovalSheet", () => {
 
   it("shows the exact prepared effect and eligible agent scope on mobile", async () => {
     const onResolve = jest.fn(async () => undefined);
-    const { getByText, getByTestId } = renderSheet(consequentialCapability, { onResolve });
+    const { getAllByText, getByText, getByTestId } = renderSheet(consequentialCapability, { onResolve });
     expect(getByText("Publishing & sending")).toBeTruthy();
     expect(getByText("What exactly")).toBeTruthy();
     expect(getByText("Send 1 briefing to Briefings")).toBeTruthy();
@@ -756,8 +780,28 @@ describe("ApprovalSheet", () => {
     expect(getByText("Briefings")).toBeTruthy();
     expect(getByText("Delivery")).toBeTruthy();
     expect(getByText("Send now")).toBeTruthy();
+    fireEvent.press(getByText("Request details"));
+    expect(getAllByText("push.send")).toHaveLength(2);
+    expect(getByText("channel:briefings")).toBeTruthy();
     fireEvent.press(getByTestId("approval-action-agent"));
     await waitFor(() => expect(onResolve).toHaveBeenCalledWith("approval-1", "agent"));
+  });
+
+  it("does not repeat a plain approval heading in an exact-effect card", () => {
+    const repetitive = {
+      ...capability,
+      title: "Inspect a panel with developer tools",
+      description: "Inspect a panel with developer tools.",
+      resource: { type: "panel", label: "Panel", value: "panel.inspect" },
+      operationSubstance: {
+        kind: "custom" as const,
+        summary: "Inspect a panel with developer tools",
+        digest: "prepared",
+      },
+    };
+    const { queryByText } = renderSheet(repetitive);
+
+    expect(queryByText("What exactly")).toBeNull();
   });
 
   it("renders only the credential lifetimes advertised by the host", () => {

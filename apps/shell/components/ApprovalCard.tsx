@@ -64,6 +64,7 @@ import {
   getStandardApprovalDecisionActions,
   originForUrl,
   shouldOpenApprovalDetails,
+  shouldShowOperationSubstance,
 } from "@vibestudio/shared/approvalCopy";
 import type { ApprovalDecision } from "@vibestudio/shared/approvals";
 import { HOST_APPROVAL_COPY } from "@vibestudio/shared/hostApprovalCopy";
@@ -634,7 +635,8 @@ export function ApprovalCard({
               />
             ) : null}
 
-            {approval.kind === "capability" && approval.operationSubstance ? (
+            {approval.kind === "capability" &&
+            shouldShowOperationSubstance(approval) ? (
               <Box className="approval-operation-substance">
                 <Text as="div" size="1" color="gray" weight="bold">
                   What exactly
@@ -1546,6 +1548,33 @@ function ApprovalDetails({
                 </Flex>
               }
             />
+          ) : null}
+          {approval.kind === "capability" && approval.snapshot ? (
+            <>
+              <Detail
+                icon={<GearIcon />}
+                label="RPC"
+                value={
+                  <InlineCode>
+                    {approval.snapshot.service}.{approval.snapshot.method}
+                  </InlineCode>
+                }
+              />
+              <Detail
+                icon={<LockClosedIcon />}
+                label="Authority"
+                value={<InlineCode>{approval.capability}</InlineCode>}
+              />
+              <Detail
+                icon={<LockClosedIcon />}
+                label="Authority target"
+                value={
+                  <InlineCode>
+                    {approval.grantResourceKey ?? approval.snapshot.resourceKey}
+                  </InlineCode>
+                }
+              />
+            </>
           ) : null}
           <Detail
             icon={<GlobeIcon />}

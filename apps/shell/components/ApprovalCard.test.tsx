@@ -480,6 +480,9 @@ describe("ApprovalCard", () => {
     expect(screen.getByText("Briefings")).toBeTruthy();
     expect(screen.getByText("Delivery")).toBeTruthy();
     expect(screen.getByText("Send now")).toBeTruthy();
+    fireEvent.click(screen.getByText("Developer details"));
+    expect(screen.getByText("push.send", { selector: "code" })).toBeTruthy();
+    expect(screen.getByText("channel:briefings", { selector: "code" })).toBeTruthy();
     fireEvent.click(screen.getByText("Allow for this task"));
     expect(emit).toHaveBeenCalledWith({
       type: "decide",
@@ -487,6 +490,24 @@ describe("ApprovalCard", () => {
       approvalId: "cap-substance",
     });
     expect(screen.getByText("Always for News")).toBeTruthy();
+  });
+
+  it("does not repeat a plain approval heading in an exact-effect panel", () => {
+    renderCard(
+      capabilityApproval({
+        approvalId: "cap-repeated-substance",
+        title: "Inspect a panel with developer tools",
+        description: "Inspect a panel with developer tools.",
+        resource: { type: "panel", label: "Panel", value: "panel.inspect" },
+        operationSubstance: {
+          kind: "custom",
+          summary: "Inspect a panel with developer tools",
+          digest: "prepared",
+        },
+      }),
+    );
+
+    expect(screen.queryByText("What exactly")).toBeNull();
   });
 
   it("makes task scope the primary and keyboard-default action when offered", () => {
