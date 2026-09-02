@@ -104,6 +104,7 @@ export class AgentToolFailureError extends Error {
 
 const CODE_KIND: ReadonlyArray<[RegExp, AgentToolFailureKind]> = [
   [/^EVAL_READ_ONLY\b/i, "authority"],
+  [/^guest_type_error\b/i, "invalid-input"],
   // Messaging (plan §4.10.11): an addressee that could not be resolved is a
   // correctable request; a channel that refuses guests is a domain refusal the
   // agent must not retry.
@@ -139,6 +140,7 @@ function errorMessage(error: unknown): string {
 function errorCode(error: unknown, data: Record<string, unknown> | null): string {
   return (
     nonempty(data?.["code"]) ??
+    nonempty(data?.["failureCode"]) ??
     nonempty(record(error)?.["code"]) ??
     nonempty(record(error)?.["failureCode"]) ??
     "unknown_tool_failure"
@@ -230,6 +232,7 @@ function retryFor(
 }
 
 function recoveryFor(
+  kind: AgentToolFailureKind,
   retry: AgentToolFailure["retry"],
   data: Record<string, unknown> | null
 ): NonNullable<AgentToolFailure["recovery"]> {
@@ -287,6 +290,13 @@ function recoveryFor(
         'Issue a new eval with authority.effects set to "read-write"; a read-only eval cannot widen itself.',
     };
   }
+  if (data?.["reason"] === "shape-drift" && Array.isArray(data["safeActions"])) {
+    return {
+      action: "repair-source",
+      instruction:
+        "The Durable Object schema changed without a new coordinated schema generation. Restore the exact compatible build, or repair the declared schema version/system epoch and recreate only explicitly disposable state; export valuable state before any reset.",
+    };
+  }
   switch (retry.policy) {
     case "correct-input":
       return {
@@ -311,6 +321,14 @@ function recoveryFor(
           explicitInstruction ?? "Complete the declared authority decision before retrying.",
       };
     default:
+      if (kind === "infrastructure") {
+        return {
+          action: "reobserve",
+          instruction:
+            explicitInstruction ??
+            "Do not retry the failed invocation automatically. Inspect current state and the primary cause, then choose a safe recovery path.",
+        };
+      }
       return {
         action: "stop",
         instruction:
@@ -379,9 +397,14 @@ export function agentToolFailureFromUnknown(
   const data = record(dataValue);
   const primaryValue = data?.["primary"];
   const primary = record(primaryValue);
-  const message = primary ? errorMessage(primaryValue) : errorMessage(error);
-  const code = errorCode(primaryValue ?? error, primary ?? data);
-  const explicitKind = nonempty(data?.["failureKind"]);
+  const message = primary
+    ? errorMessage(primaryValue)
+    : (nonempty(details?.["error"]) ?? errorMessage(error));
+  const code =
+    nonempty(root?.["failureCode"]) ??
+    nonempty(details?.["failureCode"]) ??
+    errorCode(primaryValue ?? error, primary ?? data);
+  const explicitKind = nonempty(data?.["failureKind"]) ?? nonempty(details?.["failureKind"]);
   const kind =
     context.kind ??
     (AGENT_TOOL_FAILURE_KINDS.includes(
@@ -398,7 +421,7 @@ export function agentToolFailureFromUnknown(
     operation: context.operation,
     stage: context.stage,
     retry,
-    recovery: recoveryFor(retry, data),
+    recovery: recoveryFor(kind, retry, data),
     ...(context.causal && Object.keys(context.causal).length > 0 ? { causal: context.causal } : {}),
     causes: [
       {

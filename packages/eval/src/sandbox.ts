@@ -187,6 +187,15 @@ function structuredFailureCode(error: unknown): string | undefined {
   return typeof code === "string" && code.length > 0 ? code : undefined;
 }
 
+function guestFailureCode(error: unknown): string {
+  const structured = structuredFailureCode(error);
+  if (structured) return structured;
+  if (error && typeof error === "object" && (error as { name?: unknown }).name === "TypeError") {
+    return "guest_type_error";
+  }
+  return "guest_execution_failed";
+}
+
 function structuredFailureData(error: unknown): unknown | undefined {
   if (!error || typeof error !== "object") return undefined;
   const errorData = (error as { errorData?: unknown }).errorData;
@@ -1894,7 +1903,7 @@ export async function executeSandbox(
           ? err.code
           : signal?.aborted
             ? "eval_cancelled"
-            : (structuredFailureCode(err) ?? "guest_execution_failed"),
+            : guestFailureCode(err),
       ...(errorData === undefined ? {} : { errorData }),
     };
   } finally {

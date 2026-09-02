@@ -189,6 +189,74 @@ describe("agent tool failure contract", () => {
     expect(renderAgentToolFailure(failure)).toContain("Correct the request");
   });
 
+  it("keeps eval TypeErrors correctable instead of terminal and unknown", () => {
+    const failure = agentToolFailureFromUnknown(
+      {
+        details: {
+          error: "scope.panel.cdp.evaluate is not a function",
+          failureKind: "user-code",
+          failureCode: "guest_type_error",
+        },
+      },
+      { operation: "tool.eval", stage: "execute" }
+    );
+
+    expect(failure).toMatchObject({
+      code: "guest_type_error",
+      kind: "invalid-input",
+      retry: { policy: "correct-input" },
+      recovery: { action: "correct-request" },
+    });
+  });
+
+  it("preserves actionable recovery for Durable Object schema shape drift", () => {
+    const failure = agentToolFailureFromUnknown(
+      {
+        details: {
+          error: "TaskBoardStore cannot open persisted schema v1 with build schema v1",
+          failureKind: "infrastructure",
+          failureCode: "DO_SCHEMA_INCOMPATIBLE",
+          errorData: {
+            reason: "shape-drift",
+            persistedVersion: 1,
+            targetVersion: 1,
+            safeActions: ["deploy-current-build", "reset-storage"],
+          },
+        },
+      },
+      { operation: "tool.eval", stage: "execute" }
+    );
+
+    expect(failure).toMatchObject({
+      code: "DO_SCHEMA_INCOMPATIBLE",
+      kind: "infrastructure",
+      retry: { policy: "none" },
+      recovery: {
+        action: "repair-source",
+        instruction: expect.stringContaining("schema changed"),
+      },
+    });
+  });
+
+  it("keeps generic infrastructure failures available for in-turn diagnosis", () => {
+    const failure = agentToolFailureFromUnknown(
+      {
+        message: "package linker unavailable",
+        code: "package_load_failed",
+      },
+      { operation: "tool.eval", stage: "execute", kind: "infrastructure" }
+    );
+
+    expect(failure).toMatchObject({
+      kind: "infrastructure",
+      retry: { policy: "none", commandIdPolicy: "not-applicable" },
+      recovery: {
+        action: "reobserve",
+        instruction: expect.stringContaining("Do not retry"),
+      },
+    });
+  });
+
   it("turns read-only authority containment into a new writable eval request", () => {
     const failure = agentToolFailureFromUnknown(
       Object.assign(new Error("read-only eval cannot call a write method"), {

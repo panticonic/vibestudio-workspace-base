@@ -71,6 +71,11 @@ browser-automation surface, not separate clients or compatibility tiers. Do
 not import or install any `playwright*` package, and do not import
 `@workspace/cdp-client` directly for ordinary page work.
 
+`handle.cdp` does not proxy page methods. In particular,
+`handle.cdp.evaluate()` does not exist: acquire a session and call
+`session.page.evaluate(...)`. Page evaluation returns the decoded callback
+value directly, so do not append `.result?.value` as if using raw CDP.
+
 Navigation belongs to browser panels. On a workspace app panel, `page.goto()`,
 `page.reload()`, `page.goBack()`, and `page.goForward()` reject instead of
 bypassing the panel lifecycle. Use

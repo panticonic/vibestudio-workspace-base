@@ -752,6 +752,19 @@ return fs.readFileSync("/tmp/a");`,
     });
   });
 
+  it("classifies guest TypeErrors as correctable code failures", async () => {
+    const result = await executeSandbox("const cdp: any = {}; return cdp.evaluate();", {
+      syntax: "typescript",
+    });
+
+    expect(result).toMatchObject({
+      success: false,
+      error: expect.stringContaining("is not a function"),
+      failureKind: "user-code",
+      failureCode: "guest_type_error",
+    });
+  });
+
   it("classifies structured Durable Object schema refusals as infrastructure", async () => {
     const result = await executeSandbox(
       `const error = new Error("ExampleStore cannot open persisted schema v1 with build schema v2");

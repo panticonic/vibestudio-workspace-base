@@ -201,6 +201,11 @@ separate compatibility tier to choose, and you do not import or install any
 `playwright*` package. A caller that uses the one-off page owns it and must call
 `page.close()`.
 
+The boundary is literal: `handle.cdp` contains connection, lifecycle, console,
+and host-capture methods; it does not proxy page methods. There is no
+`handle.cdp.evaluate()`. Use `session.page.evaluate(...)`; that method returns
+the decoded callback value directly, not a CDP `{ result: { value } }` envelope.
+
 ```typescript
 const browser = await openPanel("https://example.com");
 const session = await browser.cdp.session();
@@ -465,6 +470,11 @@ return {
   height: shot.height,
 };
 ```
+
+If host capture fails, inspect `await handle.diagnose()` and its observation,
+console history, and ready document. Reading `document.body.innerText` is useful
+DOM evidence but is not an alternative screenshot and cannot establish visual
+layout.
 
 Blobstore proves persistence, but it does not put pixels into an agent model's
 input. When the agent must visually diagnose a panel, write the capture to
