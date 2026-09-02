@@ -7,16 +7,19 @@ const CATALOG_DEFAULT = "openai-codex:gpt-5.6-sol";
 const EFFECTIVE_DEFAULT = "openai-codex:gpt-5.3-codex-spark";
 const WORKER_DEFAULT = "anthropic:claude-sonnet-4-6";
 
+const catalogDefault = makeTestCatalogEntry({
+  ref: CATALOG_DEFAULT,
+  id: "gpt-5.6-sol",
+  name: "GPT-5.6 Sol",
+  provider: "openai-codex",
+  baseUrl: "https://chatgpt.com/backend-api",
+});
+catalogDefault.modelSpec.serviceTiers = ["priority"];
+
 const CATALOG: ModelCatalog = {
   providers: [],
   models: [
-    makeTestCatalogEntry({
-      ref: CATALOG_DEFAULT,
-      id: "gpt-5.6-sol",
-      name: "GPT-5.6 Sol",
-      provider: "openai-codex",
-      baseUrl: "https://chatgpt.com/backend-api",
-    }),
+    catalogDefault,
     makeTestCatalogEntry({
       ref: EFFECTIVE_DEFAULT,
       id: "gpt-5.3-codex-spark",
@@ -98,5 +101,16 @@ describe("draftForAgent", () => {
 
     expect(draft.model).toBe(CATALOG_DEFAULT);
     expect(draft.thinkingLevel).toBe("medium");
+    expect(draft.fastMode).toBe(true);
+  });
+
+  it("preserves an explicit Fast mode opt-out for a supported Codex model", () => {
+    const draft = draftForAgent(AGENT, {
+      modelCatalog: CATALOG,
+      defaultModelRef: CATALOG_DEFAULT,
+      defaultAgentConfig: { model: CATALOG_DEFAULT, fastMode: false },
+    });
+
+    expect(draft.fastMode).toBe(false);
   });
 });

@@ -5,6 +5,7 @@ import {
   DEFAULT_AGENT_MODEL_REF,
   LOCAL_DEFAULT_MODEL_REF,
   LOCAL_FALLBACK_MODEL_REF,
+  type DefaultAgentConfig,
   type ModelCatalog,
 } from "@workspace/model-catalog/catalog";
 import type { LocalModelEntry } from "@workspace/model-catalog/localModels";
@@ -106,6 +107,20 @@ const CATALOG: ModelCatalog = {
   ],
 };
 
+const CODEX_CATALOG_ENTRY = makeTestCatalogEntry({
+  ref: "openai-codex:gpt-5.6-sol",
+  id: "gpt-5.6-sol",
+  name: "GPT-5.6 Sol",
+  provider: "openai-codex",
+  baseUrl: "https://chatgpt.com/backend-api/codex",
+  recommended: true,
+});
+CODEX_CATALOG_ENTRY.modelSpec.serviceTiers = ["priority"];
+const CODEX_CATALOG: ModelCatalog = {
+  providers: [],
+  models: [CODEX_CATALOG_ENTRY],
+};
+
 class TestModelSettingsDO extends ModelSettingsDO {
   static config: WorkspaceConfig = { ...BASE_CONFIG };
   static writes: Array<{ key: string; value: unknown }> = [];
@@ -169,6 +184,12 @@ class ExpiredModelSettingsDO extends TestModelSettingsDO {
     return Promise.resolve([
       storedCredential("openai", "https://api.openai.com/v1", ExpiredModelSettingsDO.lifecycle),
     ]);
+  }
+}
+
+class CodexModelSettingsDO extends TestModelSettingsDO {
+  protected override getCatalog(): Promise<ModelCatalog> {
+    return Promise.resolve(CODEX_CATALOG);
   }
 }
 
@@ -276,6 +297,62 @@ describe("ModelSettingsDO", () => {
         model: "anthropic:claude-opus-4-1",
         thinkingLevel: "high",
         approvalLevel: 1,
+      },
+    });
+  });
+
+  it("defaults supported Codex models to Fast mode without overriding an opt-out", async () => {
+    TestModelSettingsDO.config = { ...BASE_CONFIG };
+    const { call } = await createTestDO(CodexModelSettingsDO);
+
+    await expect(call("getSettings")).resolves.toMatchObject({
+      defaultAgentConfig: {
+        model: "openai-codex:gpt-5.6-sol",
+        fastMode: true,
+      },
+    });
+
+    TestModelSettingsDO.config = {
+      ...BASE_CONFIG,
+      defaultAgentConfig: {
+        model: "openai-codex:gpt-5.6-sol",
+        fastMode: false,
+      },
+    };
+    await expect(call("getSettings")).resolves.toMatchObject({
+      defaultAgentConfig: {
+        model: "openai-codex:gpt-5.6-sol",
+        fastMode: false,
+      },
+    });
+  });
+
+  it("returns the same resolved Fast mode that a subsequent settings read observes", async () => {
+    TestModelSettingsDO.config = { ...BASE_CONFIG };
+    TestModelSettingsDO.writes = [];
+    const { call } = await createTestDO(CodexModelSettingsDO);
+
+    await expect(
+      call("setDefaultAgentConfig", { model: "openai-codex:gpt-5.6-sol" })
+    ).resolves.toMatchObject({
+      defaultAgentConfig: {
+        model: "openai-codex:gpt-5.6-sol",
+        fastMode: true,
+      },
+    });
+    expect(TestModelSettingsDO.writes.at(-1)?.value).toEqual({
+      model: "openai-codex:gpt-5.6-sol",
+      fastMode: true,
+    });
+
+    TestModelSettingsDO.config = {
+      ...BASE_CONFIG,
+      defaultAgentConfig: TestModelSettingsDO.writes.at(-1)?.value as DefaultAgentConfig,
+    };
+    await expect(call("getSettings")).resolves.toMatchObject({
+      defaultAgentConfig: {
+        model: "openai-codex:gpt-5.6-sol",
+        fastMode: true,
       },
     });
   });
@@ -454,7 +531,12 @@ describe("ModelSettingsDO", () => {
     expect(TestModelSettingsDO.writes).toEqual([
       {
         key: "defaultAgentConfig",
-        value: { model: "openai:gpt-5", thinkingLevel: "max", approvalLevel: 2 },
+        value: {
+          model: "openai:gpt-5",
+          thinkingLevel: "max",
+          fastMode: false,
+          approvalLevel: 2,
+        },
       },
     ]);
   });

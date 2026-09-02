@@ -18,6 +18,7 @@ import type {
   ModelCatalog,
 } from "@workspace/agentic-core";
 import type { DefaultAgentConfig } from "@workspace/model-catalog/catalog";
+import { defaultFastModeForModel } from "@workspace/model-catalog/catalog";
 import { ModelPicker } from "./ModelPicker";
 
 export interface AgentConfigDraft {
@@ -66,6 +67,17 @@ const APPROVAL_LABELS: Record<string, string> = {
   "1": "Auto-safe",
   "2": "Full-auto",
 };
+
+/** Selecting a model starts from that model's product defaults. Existing
+ * agents are edited elsewhere with a locked model, so this never overwrites a
+ * persisted per-agent choice. */
+export function configForSelectedModel(
+  catalog: ModelCatalog | null,
+  ref: string,
+): Pick<AgentConfigDraft, "model" | "fastMode"> {
+  const model = catalog?.models.find((entry) => entry.ref === ref);
+  return { model: ref, fastMode: defaultFastModeForModel(model) };
+}
 
 function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
   return (
@@ -151,7 +163,7 @@ export function AgentConfigForm({
           catalog={catalog}
           value={value.model}
           recommendedModelRef={defaultAgentConfig?.model}
-          onChange={(ref) => set({ model: ref })}
+          onChange={(ref) => set(configForSelectedModel(catalog, ref))}
           onOpenServerLog={onOpenServerLog}
         />
       ) : (

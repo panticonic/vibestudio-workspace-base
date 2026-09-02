@@ -4,7 +4,11 @@ import React from "react";
 import { act, render, screen, fireEvent } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Theme } from "@radix-ui/themes";
-import { AgentConfigForm, type AgentConfigDraft } from "./AgentConfigForm";
+import {
+  AgentConfigForm,
+  configForSelectedModel,
+  type AgentConfigDraft,
+} from "./AgentConfigForm";
 import type { ModelCatalog } from "@workspace/agentic-core";
 
 const catalog = {
@@ -141,6 +145,16 @@ describe("AgentConfigForm — save as defaults", () => {
       model: "openai-codex:gpt-5.6-sol",
       fastMode: true,
       approvalLevel: 2,
+    });
+  });
+
+  it("defaults each newly selected model from its advertised service tiers", () => {
+    expect(
+      configForSelectedModel(fastCodexCatalog, "openai-codex:gpt-5.6-sol"),
+    ).toEqual({ model: "openai-codex:gpt-5.6-sol", fastMode: true });
+    expect(configForSelectedModel(catalog, "prov:model-b")).toEqual({
+      model: "prov:model-b",
+      fastMode: false,
     });
   });
 });

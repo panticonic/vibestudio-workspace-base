@@ -18,6 +18,7 @@ import {
   LOCAL_MODELS_EXTENSION_ID,
   LOCAL_PROVIDER_ID,
   WORKSPACE_DEFAULT_AGENT_CONFIG_FIELD,
+  defaultFastModeForModel,
   isModelUsable,
   piModelToSpec,
   type AgentThinkingLevel,
@@ -368,7 +369,7 @@ export class ModelSettingsDO extends DurableObjectBase {
         : {}),
       ...(requested.fastMode !== undefined
         ? { fastMode: requested.fastMode }
-        : {}),
+        : { fastMode: defaultFastModeForModel(model) }),
       ...(requested.approvalLevel !== undefined
         ? { approvalLevel: requested.approvalLevel }
         : {}),
@@ -480,13 +481,17 @@ export class ModelSettingsDO extends DurableObjectBase {
     config: WorkspaceConfig,
   ): ModelSettingsSnapshot {
     const stored = parseDefaultAgentConfig(config.defaultAgentConfig);
-    const behavior = {
+    const behaviorFor = (entry: ModelCatalogEntry | undefined) => ({
       ...(stored.thinkingLevel ? { thinkingLevel: stored.thinkingLevel } : {}),
-      ...(stored.fastMode !== undefined ? { fastMode: stored.fastMode } : {}),
+      ...(stored.fastMode !== undefined
+        ? { fastMode: stored.fastMode }
+        : defaultFastModeForModel(entry)
+          ? { fastMode: true }
+          : {}),
       ...(stored.approvalLevel !== undefined
         ? { approvalLevel: stored.approvalLevel }
         : {}),
-    };
+    });
     const storedEntry = stored.model
       ? catalog.models.find((model) => model.ref === stored.model)
       : undefined;
@@ -499,10 +504,11 @@ export class ModelSettingsDO extends DurableObjectBase {
         catalog,
         defaultModel: storedEntry.ref,
         defaultModelSource: "workspace",
-        defaultAgentConfig: { model: storedEntry.ref, ...behavior },
+        defaultAgentConfig: { model: storedEntry.ref, ...behaviorFor(storedEntry) },
       };
     }
     const fallback = pickFallbackModel(catalog);
+    const fallbackEntry = catalog.models.find((model) => model.ref === fallback.ref);
     return {
       catalog,
       defaultModel: fallback.ref,
@@ -513,7 +519,7 @@ export class ModelSettingsDO extends DurableObjectBase {
             invalidDefaultModel: stored.model,
           }
         : {}),
-      defaultAgentConfig: { model: fallback.ref, ...behavior },
+      defaultAgentConfig: { model: fallback.ref, ...behaviorFor(fallbackEntry) },
     };
   }
 }
