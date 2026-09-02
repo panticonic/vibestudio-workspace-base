@@ -6,7 +6,12 @@
  * values stay local and are only emitted on submit.
  */
 import { useEffect, useState } from "react";
-import type { ComponentProps, CSSProperties, KeyboardEvent, ReactNode } from "react";
+import type {
+  ComponentProps,
+  CSSProperties,
+  KeyboardEvent,
+  ReactNode,
+} from "react";
 import {
   Badge,
   Box,
@@ -67,7 +72,11 @@ import {
   parseApprovalMarkdown,
   type ApprovalMarkdownInline,
 } from "@vibestudio/shared/approvalMarkdown";
-import { DiffViewer, type DiffContentFetcher, type DiffReviewEntry } from "@workspace/ui/diff";
+import {
+  DiffViewer,
+  type DiffContentFetcher,
+  type DiffReviewEntry,
+} from "@workspace/ui/diff";
 import {
   InstallReview,
   InstallReviewActions,
@@ -132,11 +141,15 @@ export function ApprovalCard({
   useEffect(() => {
     if (lifecycleState !== "preparing") return;
     setLifecycleNow(Date.now());
-    const interval = window.setInterval(() => setLifecycleNow(Date.now()), 1_000);
+    const interval = window.setInterval(
+      () => setLifecycleNow(Date.now()),
+      1_000,
+    );
     return () => window.clearInterval(interval);
   }, [lifecycleState]);
   const validationPending = lifecycleState === "preparing";
-  const validationTerminal = lifecycleState === "failed" || lifecycleState === "cancelled";
+  const validationTerminal =
+    lifecycleState === "failed" || lifecycleState === "cancelled";
   // Secret-config / credential-input values are held locally and only leave the
   // surface on submit.
   const [secretConfigValues, setSecretConfigValues] = useState<
@@ -144,8 +157,11 @@ export function ApprovalCard({
   >({});
   // The install review's selection lives here so the keyboard shortcuts accept
   // what is actually on screen rather than recomputing the default slate.
-  const [installSelection, setInstallSelection] = useState<InstallSelection>(() =>
-    approval.kind === "unit-install-review" ? defaultInstallSelection(approval.parts) : new Map()
+  const [installSelection, setInstallSelection] = useState<InstallSelection>(
+    () =>
+      approval.kind === "unit-install-review"
+        ? defaultInstallSelection(approval.parts)
+        : new Map(),
   );
   // A pending review can be refreshed underneath an open card — another device
   // resolves something, the server re-derives the snapshot. The selection is
@@ -153,7 +169,9 @@ export function ApprovalCard({
   // an acceptance naming an identity key the snapshot no longer carries is one
   // the server rejects wholesale, and the user never did anything wrong.
   const installOffer =
-    approval.kind === "unit-install-review" ? installSelectionSignature(approval.parts) : "";
+    approval.kind === "unit-install-review"
+      ? installSelectionSignature(approval.parts)
+      : "";
   const [seenInstallOffer, setSeenInstallOffer] = useState(installOffer);
   if (installOffer !== seenInstallOffer) {
     setSeenInstallOffer(installOffer);
@@ -166,7 +184,11 @@ export function ApprovalCard({
     emit({ ...intent, approvalId: approval.approvalId });
   };
   const handleKeyboardDecision = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.target instanceof Element && event.target.closest("input, textarea, select")) return;
+    if (
+      event.target instanceof Element &&
+      event.target.closest("input, textarea, select")
+    )
+      return;
     // Enter belongs to whatever control has focus. Without this, opening a part
     // of an install review from the keyboard would expand the row and accept the
     // whole review in the same keystroke, and Enter on "Not now" would cancel and
@@ -205,12 +227,22 @@ export function ApprovalCard({
       } else if (approval.kind !== "device-code") {
         emitForApproval({ type: "decide", decision: "deny" });
       }
-    } else if (event.key === "Enter" && !actionPending && lifecycleState === "ready") {
+    } else if (
+      event.key === "Enter" &&
+      !actionPending &&
+      lifecycleState === "ready"
+    ) {
       event.preventDefault();
       if (approval.kind === "client-config") {
-        emitForApproval({ type: "submit-client-config", values: secretConfigValues });
+        emitForApproval({
+          type: "submit-client-config",
+          values: secretConfigValues,
+        });
       } else if (approval.kind === "credential-input") {
-        emitForApproval({ type: "submit-credential-input", values: secretConfigValues });
+        emitForApproval({
+          type: "submit-credential-input",
+          values: secretConfigValues,
+        });
       } else if (approval.kind === "secret-input") {
         emitForApproval({
           type: "submit-secret-input",
@@ -240,7 +272,11 @@ export function ApprovalCard({
   const accent = approvalAccent(approval);
 
   const lifecycleActions = validationPending ? (
-    <Button variant="soft" color="gray" onClick={() => emitForApproval({ type: "minimize" })}>
+    <Button
+      variant="soft"
+      color="gray"
+      onClick={() => emitForApproval({ type: "minimize" })}
+    >
       Run in background
     </Button>
   ) : validationTerminal ? (
@@ -258,23 +294,35 @@ export function ApprovalCard({
         approval={approval}
         values={secretConfigValues}
         onSubmit={() =>
-          emitForApproval({ type: "submit-client-config", values: secretConfigValues })
+          emitForApproval({
+            type: "submit-client-config",
+            values: secretConfigValues,
+          })
         }
         onDeny={() => emitForApproval({ type: "decide", decision: "deny" })}
-        onDismiss={() => emitForApproval({ type: "decide", decision: "dismiss" })}
+        onDismiss={() =>
+          emitForApproval({ type: "decide", decision: "dismiss" })
+        }
       />
     ) : approval.kind === "credential-input" ? (
       <CredentialInputActions
         approval={approval}
         values={secretConfigValues}
         onSubmit={() =>
-          emitForApproval({ type: "submit-credential-input", values: secretConfigValues })
+          emitForApproval({
+            type: "submit-credential-input",
+            values: secretConfigValues,
+          })
         }
         onDeny={() => emitForApproval({ type: "decide", decision: "deny" })}
-        onDismiss={() => emitForApproval({ type: "decide", decision: "dismiss" })}
+        onDismiss={() =>
+          emitForApproval({ type: "decide", decision: "dismiss" })
+        }
       />
     ) : approval.kind === "device-code" ? (
-      <DeviceCodeActions onCancel={() => emitForApproval({ type: "device-cancel" })} />
+      <DeviceCodeActions
+        onCancel={() => emitForApproval({ type: "device-cancel" })}
+      />
     ) : approval.kind === "browser-permission" ? (
       <BrowserPermissionActions
         approval={approval}
@@ -288,10 +336,15 @@ export function ApprovalCard({
         approval={approval}
         values={secretConfigValues}
         onSubmit={() =>
-          emitForApproval({ type: "submit-secret-input", values: secretConfigValues })
+          emitForApproval({
+            type: "submit-secret-input",
+            values: secretConfigValues,
+          })
         }
         onDeny={() => emitForApproval({ type: "decide", decision: "deny" })}
-        onDismiss={() => emitForApproval({ type: "decide", decision: "dismiss" })}
+        onDismiss={() =>
+          emitForApproval({ type: "decide", decision: "dismiss" })
+        }
       />
     ) : (
       <StandardApprovalActions
@@ -328,7 +381,11 @@ export function ApprovalCard({
       aria-describedby={`approval-summary-${approval.approvalId}`}
       aria-busy={actionPending}
     >
-      <span key={approval.approvalId} className="approval-attention-pulse" aria-hidden="true" />
+      <span
+        key={approval.approvalId}
+        className="approval-attention-pulse"
+        aria-hidden="true"
+      />
       <div className="approval-card-scroll">
         <Flex align="start" gap="3" className="approval-card-body">
           <Box className="approval-icon-box" data-beacon="true">
@@ -344,7 +401,11 @@ export function ApprovalCard({
             {approval.kind === "capability" && approval.authorityRow ? (
               <Flex gap="1" wrap="wrap">
                 {(approval.authorityFacets?.length
-                  ? [...new Set(approval.authorityFacets.map(({ row }) => row.domain))]
+                  ? [
+                      ...new Set(
+                        approval.authorityFacets.map(({ row }) => row.domain),
+                      ),
+                    ]
                   : [approval.authorityRow.domain]
                 ).map((domain) => (
                   <Badge key={domain} color="blue" variant="soft">
@@ -363,7 +424,11 @@ export function ApprovalCard({
                 id={`approval-title-${approval.approvalId}`}
                 size="3"
                 weight="bold"
-                style={{ lineHeight: 1.25, color: "var(--gray-12)", overflowWrap: "anywhere" }}
+                style={{
+                  lineHeight: 1.25,
+                  color: "var(--gray-12)",
+                  overflowWrap: "anywhere",
+                }}
               >
                 {copy.title}
               </Text>
@@ -373,8 +438,12 @@ export function ApprovalCard({
                   total={queue.total}
                   canPrev={queue.canPrev}
                   canNext={queue.canNext}
-                  onPrev={() => emitForApproval({ type: "browse", dir: "prev" })}
-                  onNext={() => emitForApproval({ type: "browse", dir: "next" })}
+                  onPrev={() =>
+                    emitForApproval({ type: "browse", dir: "prev" })
+                  }
+                  onNext={() =>
+                    emitForApproval({ type: "browse", dir: "next" })
+                  }
                 />
               ) : null}
             </Flex>
@@ -385,18 +454,36 @@ export function ApprovalCard({
             {approval.kind === "capability" &&
             approval.authorityFacets &&
             approval.authorityFacets.length > 1 ? (
-              <Flex direction="column" gap="1" mt="1" p="2" style={{
-                border: "1px solid var(--gray-a5)",
-                borderRadius: 6,
-                background: "var(--gray-a2)",
-              }}>
-                <Text size="1" weight="medium">This decision allows all of these:</Text>
+              <Flex
+                direction="column"
+                gap="1"
+                mt="1"
+                p="2"
+                style={{
+                  border: "1px solid var(--gray-a5)",
+                  borderRadius: 6,
+                  background: "var(--gray-a2)",
+                }}
+              >
+                <Text size="1" weight="medium">
+                  This decision allows all of these:
+                </Text>
                 {approval.authorityFacets.map((facet) => (
-                  <Flex key={`${facet.capability}:${facet.row.resource}`} gap="2" align="start">
-                    <Text size="1" color="gray" aria-hidden>•</Text>
+                  <Flex
+                    key={`${facet.capability}:${facet.row.resource}`}
+                    gap="2"
+                    align="start"
+                  >
+                    <Text size="1" color="gray" aria-hidden>
+                      •
+                    </Text>
                     <Flex direction="column" gap="0" style={{ minWidth: 0 }}>
                       <Text size="1">{facet.title}</Text>
-                      <Text size="1" color="gray" style={{ overflowWrap: "anywhere" }}>
+                      <Text
+                        size="1"
+                        color="gray"
+                        style={{ overflowWrap: "anywhere" }}
+                      >
                         {facet.resource
                           ? `${facet.resource.label}: ${facet.resource.value}`
                           : facet.row.resource}
@@ -412,7 +499,9 @@ export function ApprovalCard({
                   {lifecycleState === "preparing" ? (
                     <ReloadIcon
                       aria-hidden
-                      style={{ animation: "app-tree-spin 0.7s linear infinite" }}
+                      style={{
+                        animation: "app-tree-spin 0.7s linear infinite",
+                      }}
                     />
                   ) : null}
                   <Text
@@ -433,7 +522,8 @@ export function ApprovalCard({
                           : "Workspace validation failed."))}
                   </Text>
                 </Flex>
-                {lifecycleState === "preparing" && approval.lifecycle?.progress?.detail ? (
+                {lifecycleState === "preparing" &&
+                approval.lifecycle?.progress?.detail ? (
                   <Text size="1" color="gray">
                     {approval.lifecycle.progress.detail}
                   </Text>
@@ -442,7 +532,10 @@ export function ApprovalCard({
             ) : null}
 
             <Flex align="center" gap="1" wrap="wrap" style={{ minWidth: 0 }}>
-              <CallerChip caller={caller} onShow={() => emitForApproval({ type: "show-panel" })} />
+              <CallerChip
+                caller={caller}
+                onShow={() => emitForApproval({ type: "show-panel" })}
+              />
               <Text size="1" color="gray" style={{ flexShrink: 0 }}>
                 {caller.kindLabel.toLowerCase()}
               </Text>
@@ -452,7 +545,9 @@ export function ApprovalCard({
                     {attribution.relation ?? "for"}
                   </Text>
                   <span className="approval-caller-chip" data-clickable="false">
-                    <span className="approval-caller-chip-title">{attribution.target}</span>
+                    <span className="approval-caller-chip-title">
+                      {attribution.target}
+                    </span>
                   </span>
                 </>
               ) : null}
@@ -467,7 +562,9 @@ export function ApprovalCard({
               <Flex
                 align="start"
                 gap="1"
-                style={{ color: accent === "red" ? "var(--red-11)" : "var(--amber-11)" }}
+                style={{
+                  color: accent === "red" ? "var(--red-11)" : "var(--amber-11)",
+                }}
               >
                 <Box style={{ flexShrink: 0, paddingTop: 2 }}>
                   <ExclamationTriangleIcon width={13} height={13} />
@@ -546,14 +643,22 @@ export function ApprovalCard({
                   {approval.operationSubstance.summary}
                 </Text>
                 {approval.operationSubstance.detail ? (
-                  <Text as="div" size="1" color="gray" style={{ whiteSpace: "pre-wrap" }}>
+                  <Text
+                    as="div"
+                    size="1"
+                    color="gray"
+                    style={{ whiteSpace: "pre-wrap" }}
+                  >
                     {approval.operationSubstance.detail}
                   </Text>
                 ) : null}
                 {approval.operationSubstance.facts?.length ? (
                   <dl className="approval-operation-facts">
                     {approval.operationSubstance.facts.map((fact) => (
-                      <div key={`${fact.label}:${fact.value}`} className="approval-operation-fact">
+                      <div
+                        key={`${fact.label}:${fact.value}`}
+                        className="approval-operation-fact"
+                      >
                         <dt>
                           <Text as="span" size="1" color="gray">
                             {fact.label}
@@ -588,7 +693,9 @@ export function ApprovalCard({
                 defaultOpen={shouldOpenApprovalDetails(approval)}
               />
             )}
-            {approval.kind === "device-code" ? <DeviceCodeBody approval={approval} /> : null}
+            {approval.kind === "device-code" ? (
+              <DeviceCodeBody approval={approval} />
+            ) : null}
             {approval.kind === "client-config" ||
             approval.kind === "credential-input" ||
             approval.kind === "secret-input" ? (
@@ -596,7 +703,10 @@ export function ApprovalCard({
                 approval={approval}
                 values={secretConfigValues}
                 onChange={(name, value) =>
-                  setSecretConfigValues((previous) => ({ ...previous, [name]: value }))
+                  setSecretConfigValues((previous) => ({
+                    ...previous,
+                    [name]: value,
+                  }))
                 }
               />
             ) : null}
@@ -636,8 +746,14 @@ export function ApprovalCard({
           review's actions live here rather than at the end of its list, because
           `Add to workspace` under fifty-three parts is a decision you have to go
           looking for. */}
-      <fieldset className="approval-card-footer" disabled={actionPending} aria-busy={actionPending}>
-        {!validationPending && !validationTerminal && approval.kind === "unit-install-review" ? (
+      <fieldset
+        className="approval-card-footer"
+        disabled={actionPending}
+        aria-busy={actionPending}
+      >
+        {!validationPending &&
+        !validationTerminal &&
+        approval.kind === "unit-install-review" ? (
           <InstallReviewActions
             approval={approval}
             selection={installSelection}
@@ -674,19 +790,23 @@ function DiffReviewSection({
   entries: DiffReviewEntry[];
   fetchContent: DiffContentFetcher;
   appearance: "light" | "dark";
-  onOpenInWorkspaceHistory: ComponentProps<typeof DiffViewer>["onOpenInWorkspaceHistory"];
+  onOpenInWorkspaceHistory: ComponentProps<
+    typeof DiffViewer
+  >["onOpenInWorkspaceHistory"];
 }) {
   // Line totals are shown only when EVERY entry carries them — the host omits
   // insertions/deletions for any entry with a skipped (binary/oversized/
   // truncated) file, and a partial batch total would mislead.
-  const hasLineTotals = entries.every((entry) => entry.diffStat.insertions != null);
+  const hasLineTotals = entries.every(
+    (entry) => entry.diffStat.insertions != null,
+  );
   const totals = entries.reduce(
     (acc, entry) => ({
       filesChanged: acc.filesChanged + entry.diffStat.filesChanged,
       insertions: acc.insertions + (entry.diffStat.insertions ?? 0),
       deletions: acc.deletions + (entry.diffStat.deletions ?? 0),
     }),
-    { filesChanged: 0, insertions: 0, deletions: 0 }
+    { filesChanged: 0, insertions: 0, deletions: 0 },
   );
   const isBatch = entries.length > 1;
   return (
@@ -722,7 +842,10 @@ function DiffReviewSection({
           ) : null}
         </Flex>
         {entries.map((entry) => (
-          <Box key={`${entry.repoPath}:${entry.newState}`} style={{ minWidth: 0 }}>
+          <Box
+            key={`${entry.repoPath}:${entry.newState}`}
+            style={{ minWidth: 0 }}
+          >
             <Flex align="center" gap="2" mb="1" wrap="wrap">
               <Badge color="sky" variant="soft" radius="full">
                 {entry.repoPath}
@@ -759,10 +882,14 @@ export function ApprovalKindIcon({
   // what's in your workspace` told every new user their own base template was
   // dangerous, and an icon that means "danger" everywhere means nothing once it
   // is also the icon for "here is your workspace".
-  if (approval.kind === "unit-install-review") return <CubeIcon width={size} height={size} />;
-  if (approval.kind === "device-code") return <ExternalLinkIcon width={size} height={size} />;
-  if (approval.kind === "capability") return <GlobeIcon width={size} height={size} />;
-  if (approval.kind === "browser-permission") return <GlobeIcon width={size} height={size} />;
+  if (approval.kind === "unit-install-review")
+    return <CubeIcon width={size} height={size} />;
+  if (approval.kind === "device-code")
+    return <ExternalLinkIcon width={size} height={size} />;
+  if (approval.kind === "capability")
+    return <GlobeIcon width={size} height={size} />;
+  if (approval.kind === "browser-permission")
+    return <GlobeIcon width={size} height={size} />;
   if (approval.kind === "client-config" || approval.kind === "credential-input")
     return <GearIcon width={size} height={size} />;
   return <LockClosedIcon width={size} height={size} />;
@@ -785,7 +912,9 @@ function QueueNavigator({
 }) {
   return (
     <Flex align="center" gap="1" style={{ marginLeft: "auto", flexShrink: 0 }}>
-      <Tooltip content={canPrev ? "Previous pending approval" : "No earlier approvals"}>
+      <Tooltip
+        content={canPrev ? "Previous pending approval" : "No earlier approvals"}
+      >
         <IconButton
           size="1"
           variant="ghost"
@@ -800,7 +929,9 @@ function QueueNavigator({
       <Text size="1" color="gray" style={{ minWidth: 32, textAlign: "center" }}>
         {index + 1} / {total}
       </Text>
-      <Tooltip content={canNext ? "Next pending approval" : "No more approvals"}>
+      <Tooltip
+        content={canNext ? "Next pending approval" : "No more approvals"}
+      >
         <IconButton
           size="1"
           variant="ghost"
@@ -818,7 +949,13 @@ function QueueNavigator({
 
 const APPROVAL_CALLER_ICON_SIZE = 14;
 
-function CallerChip({ caller, onShow }: { caller: CallerInfo; onShow: () => void }) {
+function CallerChip({
+  caller,
+  onShow,
+}: {
+  caller: CallerInfo;
+  onShow: () => void;
+}) {
   const clickable = caller.panelId !== undefined;
   const tooltip = clickable ? `Show panel — ${caller.label}` : caller.label;
   return (
@@ -874,13 +1011,15 @@ function StandardApprovalActions({
   onBlock: () => void;
 }) {
   const recommendedDecision = getRecommendedStandardDecision(approval);
-  const isSevereCapability = approval.kind === "capability" && approval.severity === "severe";
+  const isSevereCapability =
+    approval.kind === "capability" && approval.severity === "severe";
   const actions = getStandardApprovalDecisionActions(approval);
   return (
     <Flex align="center" className="approval-actions" gap="2" wrap="wrap">
       {actions.map((action) => {
         const recommended = action.decision === recommendedDecision;
-        const destructive = action.decision === "deny" || action.decision === "lock";
+        const destructive =
+          action.decision === "deny" || action.decision === "lock";
         return (
           <DecisionButton
             key={action.decision}
@@ -902,12 +1041,19 @@ function StandardApprovalActions({
             {...(action.decision === "deny"
               ? { icon: <CrossCircledIcon />, style: { marginLeft: 6 } }
               : {})}
-            onClick={() => (action.decision === "lock" ? onBlock() : decide(action.decision))}
+            onClick={() =>
+              action.decision === "lock" ? onBlock() : decide(action.decision)
+            }
           />
         );
       })}
       <Tooltip content={HOST_APPROVAL_COPY.chrome.dismiss}>
-        <IconButton size="1" variant="ghost" color="gray" onClick={() => decide("dismiss")}>
+        <IconButton
+          size="1"
+          variant="ghost"
+          color="gray"
+          onClick={() => decide("dismiss")}
+        >
           <Cross2Icon />
         </IconButton>
       </Tooltip>
@@ -956,7 +1102,12 @@ function BrowserPermissionActions({
         onClick={() => decide("block")}
       />
       <Tooltip content={HOST_APPROVAL_COPY.chrome.dismiss}>
-        <IconButton size="1" variant="ghost" color="gray" onClick={() => decide("dismiss")}>
+        <IconButton
+          size="1"
+          variant="ghost"
+          color="gray"
+          onClick={() => decide("dismiss")}
+        >
           <Cross2Icon />
         </IconButton>
       </Tooltip>
@@ -978,7 +1129,7 @@ function ClientConfigActions({
   onDismiss: () => void;
 }) {
   const missingRequired = approval.fields.some(
-    (field) => field.required && !values[field.name]?.trim()
+    (field) => field.required && !values[field.name]?.trim(),
   );
   return (
     <Flex align="center" className="approval-actions" gap="2" wrap="wrap">
@@ -989,7 +1140,13 @@ function ClientConfigActions({
             : HOST_APPROVAL_COPY.forms.saveServiceDescription
         }
       >
-        <Button size="1" variant="solid" color="sky" disabled={missingRequired} onClick={onSubmit}>
+        <Button
+          size="1"
+          variant="solid"
+          color="sky"
+          disabled={missingRequired}
+          onClick={onSubmit}
+        >
           <CheckCircledIcon />
           {HOST_APPROVAL_COPY.forms.saveService}
         </Button>
@@ -1025,7 +1182,7 @@ function SecretInputActions({
   onDismiss: () => void;
 }) {
   const missingRequired = approval.fields.some(
-    (field) => field.required && !values[field.name]?.trim()
+    (field) => field.required && !values[field.name]?.trim(),
   );
   return (
     <Flex align="center" className="approval-actions" gap="2" wrap="wrap">
@@ -1036,7 +1193,13 @@ function SecretInputActions({
             : HOST_APPROVAL_COPY.forms.submitDescription
         }
       >
-        <Button size="1" variant="solid" color="sky" disabled={missingRequired} onClick={onSubmit}>
+        <Button
+          size="1"
+          variant="solid"
+          color="sky"
+          disabled={missingRequired}
+          onClick={onSubmit}
+        >
           <CheckCircledIcon />
           {HOST_APPROVAL_COPY.forms.submit}
         </Button>
@@ -1072,7 +1235,7 @@ function CredentialInputActions({
   onDismiss: () => void;
 }) {
   const missingRequired = approval.fields.some(
-    (field) => field.required && !values[field.name]?.trim()
+    (field) => field.required && !values[field.name]?.trim(),
   );
   return (
     <Flex align="center" className="approval-actions" gap="2" wrap="wrap">
@@ -1083,7 +1246,13 @@ function CredentialInputActions({
             : HOST_APPROVAL_COPY.forms.saveServiceDescription
         }
       >
-        <Button size="1" variant="solid" color="sky" disabled={missingRequired} onClick={onSubmit}>
+        <Button
+          size="1"
+          variant="solid"
+          color="sky"
+          disabled={missingRequired}
+          onClick={onSubmit}
+        >
           <CheckCircledIcon />
           {HOST_APPROVAL_COPY.forms.saveService}
         </Button>
@@ -1189,7 +1358,11 @@ function DeviceCodeActions({ onCancel }: { onCancel: () => void }) {
   );
 }
 
-function DeviceCodeDetails({ approval }: { approval: PendingDeviceCodeApproval }) {
+function DeviceCodeDetails({
+  approval,
+}: {
+  approval: PendingDeviceCodeApproval;
+}) {
   return (
     <>
       <Detail
@@ -1205,16 +1378,32 @@ function DeviceCodeDetails({ approval }: { approval: PendingDeviceCodeApproval }
       <Detail
         icon={<LockClosedIcon />}
         label="Provider"
-        value={<InlineCode>{originForUrl(approval.oauthTokenOrigin)}</InlineCode>}
+        value={
+          <InlineCode>{originForUrl(approval.oauthTokenOrigin)}</InlineCode>
+        }
       />
     </>
   );
 }
 
-function Detail({ icon, label, value }: { icon: ReactNode; label: string; value: ReactNode }) {
+function Detail({
+  icon,
+  label,
+  value,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: ReactNode;
+}) {
   return (
-    <Flex align="start" gap="2" style={{ minWidth: 0, color: "var(--gray-11)" }}>
-      <Box style={{ display: "inline-flex", flexShrink: 0, paddingTop: 2 }}>{icon}</Box>
+    <Flex
+      align="start"
+      gap="2"
+      style={{ minWidth: 0, color: "var(--gray-11)" }}
+    >
+      <Box style={{ display: "inline-flex", flexShrink: 0, paddingTop: 2 }}>
+        {icon}
+      </Box>
       <Text size="1" color="gray" style={{ width: 78, flexShrink: 0 }}>
         {label}
       </Text>
@@ -1237,7 +1426,11 @@ function ApprovalDetails({
     <>
       <details className="approval-details" {...detailsProps}>
         <summary>
-          <ChevronDownIcon className="approval-details-chevron" width={13} height={13} />
+          <ChevronDownIcon
+            className="approval-details-chevron"
+            width={13}
+            height={13}
+          />
           Request details
         </summary>
         <Flex direction="column" gap="2" pt="2">
@@ -1250,7 +1443,8 @@ function ApprovalDetails({
               </InlineCode>
             }
           />
-          {approval.requester?.breadcrumbs && approval.requester.breadcrumbs.length > 1 ? (
+          {approval.requester?.breadcrumbs &&
+          approval.requester.breadcrumbs.length > 1 ? (
             <Detail
               icon={<GearIcon />}
               label="Chain"
@@ -1265,7 +1459,8 @@ function ApprovalDetails({
             <CredentialInputDetails approval={approval} />
           ) : approval.kind === "device-code" ? (
             <DeviceCodeDetails approval={approval} />
-          ) : approval.kind === "unit-install-review" ? null : approval.kind === "secret-input" ? (
+          ) : approval.kind === "unit-install-review" ? null : approval.kind ===
+            "secret-input" ? (
             <SecretInputDetails approval={approval} />
           ) : approval.kind === "browser-permission" ? (
             <BrowserPermissionDetails approval={approval} />
@@ -1276,7 +1471,11 @@ function ApprovalDetails({
       </details>
       <details className="approval-details">
         <summary>
-          <ChevronDownIcon className="approval-details-chevron" width={13} height={13} />
+          <ChevronDownIcon
+            className="approval-details-chevron"
+            width={13}
+            height={13}
+          />
           Developer details
         </summary>
         <Flex direction="column" gap="2" pt="2">
@@ -1315,10 +1514,14 @@ function ApprovalDetails({
               value={
                 <Flex align="center" gap="1" wrap="wrap">
                   {approval.requester.eval.ownerId ? (
-                    <InlineCode>owner {approval.requester.eval.ownerId}</InlineCode>
+                    <InlineCode>
+                      owner {approval.requester.eval.ownerId}
+                    </InlineCode>
                   ) : null}
                   {approval.requester.eval.subKey ? (
-                    <InlineCode>scope {approval.requester.eval.subKey}</InlineCode>
+                    <InlineCode>
+                      scope {approval.requester.eval.subKey}
+                    </InlineCode>
                   ) : null}
                   {approval.requester.eval.runId ? (
                     <InlineCode>run {approval.requester.eval.runId}</InlineCode>
@@ -1366,7 +1569,9 @@ function RequesterBreadcrumbs({ approval }: { approval: PendingApproval }) {
     <Flex align="center" gap="1" wrap="wrap" style={{ minWidth: 0 }}>
       {breadcrumbs.flatMap((breadcrumb, index) => {
         const categoryLabel =
-          breadcrumb.category === "unknown" ? null : getRequesterCategoryLabel(breadcrumb.category);
+          breadcrumb.category === "unknown"
+            ? null
+            : getRequesterCategoryLabel(breadcrumb.category);
         const text = categoryLabel
           ? breadcrumb.label
             ? `${categoryLabel}: ${breadcrumb.label}`
@@ -1374,7 +1579,12 @@ function RequesterBreadcrumbs({ approval }: { approval: PendingApproval }) {
           : breadcrumb.label;
         if (!text) return [];
         return [
-          <Flex key={`${breadcrumb.id}:${index}`} align="center" gap="1" style={{ minWidth: 0 }}>
+          <Flex
+            key={`${breadcrumb.id}:${index}`}
+            align="center"
+            gap="1"
+            style={{ minWidth: 0 }}
+          >
             {index > 0 ? (
               <Text size="1" color="gray" style={{ flexShrink: 0 }}>
                 &gt;
@@ -1431,7 +1641,9 @@ function SecretConfigFields({
             type={field.type === "secret" ? "password" : "text"}
             value={values[field.name] ?? ""}
             placeholder={field.label}
-            onChange={(event) => onChange(field.name, event.currentTarget.value)}
+            onChange={(event) =>
+              onChange(field.name, event.currentTarget.value)
+            }
           />
           {field.description ? (
             <Text size="1" color="gray">
@@ -1444,7 +1656,11 @@ function SecretConfigFields({
   );
 }
 
-function ClientConfigDetails({ approval }: { approval: PendingClientConfigApproval }) {
+function ClientConfigDetails({
+  approval,
+}: {
+  approval: PendingClientConfigApproval;
+}) {
   const authorizeOrigin = originForUrl(approval.authorizeUrl);
   const tokenOrigin = originForUrl(approval.tokenUrl);
   return (
@@ -1458,7 +1674,11 @@ function ClientConfigDetails({ approval }: { approval: PendingClientConfigApprov
         icon={<GlobeIcon />}
         label="Authorize"
         value={
-          <Code size="1" variant="soft" style={{ maxWidth: 520, overflowWrap: "anywhere" }}>
+          <Code
+            size="1"
+            variant="soft"
+            style={{ maxWidth: 520, overflowWrap: "anywhere" }}
+          >
             {approval.authorizeUrl}
           </Code>
         }
@@ -1515,7 +1735,11 @@ function ClientConfigDetails({ approval }: { approval: PendingClientConfigApprov
   );
 }
 
-function SecretInputDetails({ approval }: { approval: PendingSecretInputApproval }) {
+function SecretInputDetails({
+  approval,
+}: {
+  approval: PendingSecretInputApproval;
+}) {
   return (
     <>
       {approval.description ? (
@@ -1523,7 +1747,10 @@ function SecretInputDetails({ approval }: { approval: PendingSecretInputApproval
           icon={<LockClosedIcon />}
           label="Request"
           value={
-            <Text size="1" style={{ lineHeight: 1.35, overflowWrap: "anywhere" }}>
+            <Text
+              size="1"
+              style={{ lineHeight: 1.35, overflowWrap: "anywhere" }}
+            >
               {approval.description}
             </Text>
           }
@@ -1534,14 +1761,20 @@ function SecretInputDetails({ approval }: { approval: PendingSecretInputApproval
           key={detail.label}
           icon={<LockClosedIcon />}
           label={detail.label}
-          value={<FormattedDetailValue value={detail.value} format={detail.format} />}
+          value={
+            <FormattedDetailValue value={detail.value} format={detail.format} />
+          }
         />
       ))}
     </>
   );
 }
 
-function CredentialInputDetails({ approval }: { approval: PendingCredentialInputApproval }) {
+function CredentialInputDetails({
+  approval,
+}: {
+  approval: PendingCredentialInputApproval;
+}) {
   return (
     <>
       <Detail
@@ -1609,12 +1842,19 @@ function CredentialInputDetails({ approval }: { approval: PendingCredentialInput
   );
 }
 
-function CredentialDetails({ approval }: { approval: PendingCredentialApproval }) {
+function CredentialDetails({
+  approval,
+}: {
+  approval: PendingCredentialApproval;
+}) {
   const oauthOrigins = [
     approval.oauthAuthorizeOrigin,
     approval.oauthTokenOrigin,
     approval.oauthUserinfoOrigin,
-  ].filter((origin): origin is string => typeof origin === "string" && origin.length > 0);
+  ].filter(
+    (origin): origin is string =>
+      typeof origin === "string" && origin.length > 0,
+  );
 
   return (
     <>
@@ -1730,7 +1970,11 @@ function CredentialDetails({ approval }: { approval: PendingCredentialApproval }
   );
 }
 
-function CapabilityDetails({ approval }: { approval: PendingCapabilityApproval }) {
+function CapabilityDetails({
+  approval,
+}: {
+  approval: PendingCapabilityApproval;
+}) {
   const detailRows = approval.details ?? [];
   return (
     <>
@@ -1753,7 +1997,11 @@ function CapabilityDetails({ approval }: { approval: PendingCapabilityApproval }
   );
 }
 
-function BrowserPermissionDetails({ approval }: { approval: PendingBrowserPermissionApproval }) {
+function BrowserPermissionDetails({
+  approval,
+}: {
+  approval: PendingBrowserPermissionApproval;
+}) {
   return (
     <>
       <Detail
@@ -1834,7 +2082,11 @@ function ApprovalMarkdown({
           );
         }
         return (
-          <Text key={index} size="1" style={{ lineHeight: 1.4, overflowWrap: "anywhere" }}>
+          <Text
+            key={index}
+            size="1"
+            style={{ lineHeight: 1.4, overflowWrap: "anywhere" }}
+          >
             <ApprovalMarkdownInlineNodes nodes={block.children} />
           </Text>
         );
@@ -1843,7 +2095,11 @@ function ApprovalMarkdown({
   );
 }
 
-function ApprovalMarkdownInlineNodes({ nodes }: { nodes: ApprovalMarkdownInline[] }) {
+function ApprovalMarkdownInlineNodes({
+  nodes,
+}: {
+  nodes: ApprovalMarkdownInline[];
+}) {
   return (
     <>
       {nodes.map((node, index) => {
@@ -1874,7 +2130,13 @@ function ApprovalMarkdownInlineNodes({ nodes }: { nodes: ApprovalMarkdownInline[
   );
 }
 
-function FormattedDetailValue({ value, format }: { value: string; format?: ApprovalDetailFormat }) {
+function FormattedDetailValue({
+  value,
+  format,
+}: {
+  value: string;
+  format?: ApprovalDetailFormat;
+}) {
   if (format === "markdown") return <ApprovalMarkdown source={value} compact />;
   if (format === "tree") return <CollapsibleTree value={value} />;
   if (format === "plain") {
@@ -1907,7 +2169,10 @@ function CollapsibleTree({ value }: { value: string }) {
         onClick={() => setOpen((prev) => !prev)}
         style={{ cursor: "pointer", userSelect: "none" }}
       >
-        <Text size="1" style={{ lineHeight: 1.35, color: "var(--gray-11)", flexShrink: 0 }}>
+        <Text
+          size="1"
+          style={{ lineHeight: 1.35, color: "var(--gray-11)", flexShrink: 0 }}
+        >
           {open ? "▾" : "▸"}
         </Text>
         <Text size="1" style={{ lineHeight: 1.35, overflowWrap: "anywhere" }}>
