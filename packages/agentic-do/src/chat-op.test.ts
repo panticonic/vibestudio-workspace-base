@@ -2374,6 +2374,49 @@ describe("AgentVesselBase.onEvalComplete (deferred-eval resume)", () => {
     });
   });
 
+  it("keeps admission-loss recovery in-turn so the agent can inspect before a fresh eval", async () => {
+    const vessel = await makeVessel();
+    const deliverSpy = stubDriver(vessel);
+    vessel.callerKindForTest = "do";
+    vessel.callerIdForTest = await expectedEvalCaller();
+    await vessel.onEvalComplete({
+      runId: "inv-admission-lost",
+      agentInvocationId: "call-admission-lost",
+      result: {
+        success: false,
+        console: "",
+        error: "Evaluated execution session is not active",
+        failureKind: "infrastructure",
+        failureCode: "eval_execution_admission_lost",
+        errorData: {
+          retry: {
+            policy: "reobserve",
+            commandIdPolicy: "use-new-after-reobserve",
+          },
+          recovery: {
+            action: "reobserve",
+            instruction:
+              "Inspect current state, then issue a new eval for only unfinished work.",
+          },
+        },
+      },
+      channelId: CHANNEL,
+    });
+
+    expect(deliverSpy.mock.calls[0]![1]).toMatchObject({
+      kind: "tool",
+      isError: true,
+      terminalOutcome: "infrastructure_error",
+      terminalReasonCode: "eval_execution_admission_lost",
+      failure: {
+        kind: "infrastructure",
+        retry: { policy: "reobserve" },
+        recovery: { action: "reobserve" },
+        causal: { invocationId: "call-admission-lost" },
+      },
+    });
+  });
+
   it("is a no-op without a channelId or result (can't route the resume)", async () => {
     const vessel = await makeVessel();
     const deliverSpy = stubDriver(vessel);

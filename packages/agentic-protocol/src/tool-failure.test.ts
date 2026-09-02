@@ -189,6 +189,63 @@ describe("agent tool failure contract", () => {
     expect(renderAgentToolFailure(failure)).toContain("Correct the request");
   });
 
+  it("turns read-only authority containment into a new writable eval request", () => {
+    const failure = agentToolFailureFromUnknown(
+      Object.assign(new Error("read-only eval cannot call a write method"), {
+        code: "EVAL_READ_ONLY",
+        errorData: {
+          authorityFailure: {
+            reasonCode: "eval-read-only",
+            reason: "The current eval is read-only.",
+            remediation: {
+              kind: "use-writable-session",
+              message: 'Issue a new eval with authority.effects set to "read-write".',
+            },
+          },
+        },
+      }),
+      { operation: "tool.eval", stage: "execute" }
+    );
+
+    expect(failure).toMatchObject({
+      code: "EVAL_READ_ONLY",
+      kind: "authority",
+      retry: { policy: "correct-input", commandIdPolicy: "not-applicable" },
+      recovery: {
+        action: "correct-request",
+        instruction: 'Issue a new eval with authority.effects set to "read-write".',
+      },
+    });
+  });
+
+  it("continues in-turn after eval admission loss by reobserving before a fresh cell", () => {
+    const failure = agentToolFailureFromUnknown(
+      Object.assign(new Error("Evaluated execution session is not active"), {
+        code: "eval_execution_admission_lost",
+        errorData: {
+          failureKind: "infrastructure",
+          retry: { policy: "reobserve", commandIdPolicy: "use-new-after-reobserve" },
+          recovery: {
+            action: "reobserve",
+            instruction:
+              "Inspect current state, then issue a new eval for only unfinished work.",
+          },
+        },
+      }),
+      { operation: "tool.eval", stage: "execute" }
+    );
+
+    expect(failure).toMatchObject({
+      code: "eval_execution_admission_lost",
+      kind: "infrastructure",
+      retry: { policy: "reobserve", commandIdPolicy: "use-new-after-reobserve" },
+      recovery: {
+        action: "reobserve",
+        instruction: "Inspect current state, then issue a new eval for only unfinished work.",
+      },
+    });
+  });
+
   it("preserves build-gate source repair semantics instead of inferring a push retry", () => {
     const failure = agentToolFailureFromUnknown(
       Object.assign(new Error("Protected main push rejected"), {

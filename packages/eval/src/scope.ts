@@ -57,7 +57,7 @@ export class ScopeManager {
   private backing: Map<string, unknown>;
   private proxy: Record<string, unknown>;
   private changeListeners = new Set<() => void>();
-  private persistence: ScopePersistence;
+  private persistence: ScopePersistence | undefined;
   private channelId: string;
   private panelId: string;
   private currentScopeId: string;
@@ -66,7 +66,7 @@ export class ScopeManager {
   private dirty = false;
   private disposed = false;
 
-  constructor(opts: { channelId: string; panelId: string; persistence: ScopePersistence }) {
+  constructor(opts: { channelId: string; panelId: string; persistence?: ScopePersistence }) {
     this.channelId = opts.channelId;
     this.panelId = opts.panelId;
     this.persistence = opts.persistence;
@@ -129,16 +129,42 @@ export class ScopeManager {
 
   /** The scopes API (pre-injected as `scopes` binding) */
   get api(): ScopesApi {
+    return this.apiFor(this.requirePersistence());
+  }
+
+  /**
+   * Bind the public scopes API to one explicit persistence capability.
+   * Long-lived managers may therefore keep state without retaining the
+   * authority of whichever operation happened to construct them.
+   */
+  apiFor(persistence: ScopePersistence): ScopesApi {
+    return this.apiFrom(() => persistence);
+  }
+
+  /**
+   * Bind the public API to an operation-time capability resolver. Runtime
+   * facades retained across eval cells can therefore use the invoking cell's
+   * admission without retaining the cell that created the facade.
+   */
+  apiFrom(resolvePersistence: () => ScopePersistence): ScopesApi {
     const readCurrentId = () => this.currentScopeId;
     return {
       get currentId() {
         return readCurrentId();
       },
-      push: () => this.push(),
-      get: (id: string) => this.getScope(id),
-      list: () => this.listScopes(),
-      save: () => this.persist(),
+      push: () => this.push(resolvePersistence()),
+      get: (id: string) => this.getScope(id, resolvePersistence()),
+      list: () => this.listScopes(resolvePersistence()),
+      save: () => this.persist(resolvePersistence()),
     };
+  }
+
+  private requirePersistence(override?: ScopePersistence): ScopePersistence {
+    const persistence = override ?? this.persistence;
+    if (!persistence) {
+      throw new Error("ScopeManager operation requires an explicit persistence capability");
+    }
+    return persistence;
   }
 
   // -------------------------------------------------------------------------
@@ -146,8 +172,9 @@ export class ScopeManager {
   // -------------------------------------------------------------------------
 
   /** Hydrate from persistence on init. Async — call once on mount. */
-  async hydrate(): Promise<HydrateResult> {
-    const entry = await this.persistence.loadCurrent(this.channelId, this.panelId);
+  async hydrate(persistence?: ScopePersistence): Promise<HydrateResult> {
+    const p = this.requirePersistence(persistence);
+    const entry = await p.loadCurrent(this.channelId, this.panelId);
     if (!entry) {
       return { restored: [], lost: [] };
     }
@@ -160,7 +187,7 @@ export class ScopeManager {
     const validDigests = new Set(entry.blobRefs ?? []);
     const blobFailures: string[] = [];
     for (const [key, value] of restoredMap) {
-      const resolved = await this.resolveBlobRef(value, validDigests);
+      const resolved = await this.resolveBlobRef(value, validDigests, p);
       if (resolved === BLOB_RESOLVE_FAILED) {
         // A referenced blob was missing/corrupt — surface it as lost rather than silently
         // setting `undefined`, and don't brick the rest of the scope.
@@ -183,7 +210,7 @@ export class ScopeManager {
   // -------------------------------------------------------------------------
 
   /** Persist current state. Called by save triggers. */
-  async persist(): Promise<void> {
+  async persist(persistence?: ScopePersistence): Promise<void> {
     if (this.disposed) return;
     // Snapshot dirty before the await — if a mutation arrives during the
     // upsert, dirty will be re-set to true and we must not clear it.
@@ -191,7 +218,7 @@ export class ScopeManager {
     const { serialized, spills, serializedKeys, droppedPaths, volatileKeys } = serializeScope(
       this.backing
     );
-    const p = this.persistence;
+    const p = this.requirePersistence(persistence);
     const blobRefs: string[] = [];
     if (spills.length > 0) {
       // Spill large values to the content-addressed blob store (lossless), stamping each
@@ -229,38 +256,41 @@ export class ScopeManager {
   }
 
   /** Mark eval end — trigger one batched reactivity notification + persist */
-  async exitEval(): Promise<void> {
+  async exitEval(persistence?: ScopePersistence): Promise<void> {
     this.evalInProgress = false;
     this.notifyChangeListeners();
-    await this.persist();
+    await this.persist(persistence);
   }
 
   // -------------------------------------------------------------------------
   // Scope history
   // -------------------------------------------------------------------------
 
-  private async push(): Promise<string> {
+  private async push(persistence: ScopePersistence): Promise<string> {
     // Persist current scope first
-    await this.persist();
+    await this.persist(persistence);
 
     // Create new scope inheriting serializable values
     this.currentScopeId = crypto.randomUUID();
     this.currentCreatedAt = Date.now();
 
     // Persist the new scope immediately (inherits current backing data)
-    await this.persist();
+    await this.persist(persistence);
 
     return this.currentScopeId;
   }
 
-  private async getScope(id: string): Promise<Record<string, unknown> | null> {
-    const entry = await this.persistence.get(id);
+  private async getScope(
+    id: string,
+    persistence: ScopePersistence
+  ): Promise<Record<string, unknown> | null> {
+    const entry = await persistence.get(id);
     if (!entry) return null;
     const map = deserializeScope(entry.data);
     const validDigests = new Set(entry.blobRefs ?? []);
     const obj: Record<string, unknown> = {};
     for (const [key, value] of map) {
-      const resolved = await this.resolveBlobRef(value, validDigests);
+      const resolved = await this.resolveBlobRef(value, validDigests, persistence);
       if (resolved !== BLOB_RESOLVE_FAILED) obj[key] = resolved; // omit a key whose blob is unreadable
     }
     return obj;
@@ -275,14 +305,15 @@ export class ScopeManager {
    */
   private async resolveBlobRef(
     value: unknown,
-    validDigests: Set<string>
+    validDigests: Set<string>,
+    persistence: ScopePersistence
   ): Promise<unknown | typeof BLOB_RESOLVE_FAILED> {
     if (!isScopeBlobRef(value)) return value;
     const digest = value[SCOPE_BLOB_REF] as string;
-    if (!validDigests.has(digest) || !this.persistence.getBlob) return value;
+    if (!validDigests.has(digest) || !persistence.getBlob) return value;
     let blobJson: string | null;
     try {
-      blobJson = await this.persistence.getBlob(digest);
+      blobJson = await persistence.getBlob(digest);
     } catch {
       return BLOB_RESOLVE_FAILED; // store read failed
     }
@@ -294,8 +325,8 @@ export class ScopeManager {
     }
   }
 
-  private async listScopes(): Promise<ScopeListEntry[]> {
-    return this.persistence.list(this.channelId);
+  private async listScopes(persistence: ScopePersistence): Promise<ScopeListEntry[]> {
+    return persistence.list(this.channelId);
   }
 
   // -------------------------------------------------------------------------
@@ -324,9 +355,10 @@ export class ScopeManager {
   // Cleanup
   // -------------------------------------------------------------------------
 
-  dispose(): void {
+  dispose(persistence?: ScopePersistence): void {
     if (this.dirty) {
-      this.persist().catch((err) => console.warn("[ScopeManager] Dispose persist failed:", err));
+      const p = this.requirePersistence(persistence);
+      this.persist(p).catch((err) => console.warn("[ScopeManager] Dispose persist failed:", err));
     }
     this.disposed = true;
     this.changeListeners.clear();

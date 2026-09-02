@@ -103,6 +103,7 @@ export class AgentToolFailureError extends Error {
 }
 
 const CODE_KIND: ReadonlyArray<[RegExp, AgentToolFailureKind]> = [
+  [/^EVAL_READ_ONLY\b/i, "authority"],
   // Messaging (plan §4.10.11): an addressee that could not be resolved is a
   // correctable request; a channel that refuses guests is a domain refusal the
   // agent must not retry.
@@ -171,6 +172,11 @@ function kindFor(code: string, message: string): AgentToolFailureKind {
   return CODE_KIND.find(([pattern]) => pattern.test(candidate))?.[1] ?? "unknown";
 }
 
+function authorityRemediation(data: Record<string, unknown> | null): Record<string, unknown> | null {
+  const failure = record(data?.["authorityFailure"]) ?? record(data?.["failure"]);
+  return record(failure?.["remediation"]);
+}
+
 function retryFor(
   kind: AgentToolFailureKind,
   data: Record<string, unknown> | null
@@ -204,6 +210,9 @@ function retryFor(
   }
   if (policy === "reobserve-status-and-use-new-command") {
     return { policy: "reobserve", commandIdPolicy: "use-new-after-reobserve" };
+  }
+  if (nonempty(authorityRemediation(data)?.["kind"]) === "use-writable-session") {
+    return { policy: "correct-input", commandIdPolicy: "not-applicable" };
   }
   switch (kind) {
     case "invalid-input":
@@ -267,6 +276,15 @@ function recoveryFor(
     return {
       action: "reobserve",
       instruction: "Inspect the current DOM and form a locator from current accessible facts.",
+    };
+  }
+  const authorityRepair = authorityRemediation(data);
+  if (nonempty(authorityRepair?.["kind"]) === "use-writable-session") {
+    return {
+      action: "correct-request",
+      instruction:
+        nonempty(authorityRepair?.["message"]) ??
+        'Issue a new eval with authority.effects set to "read-write"; a read-only eval cannot widen itself.',
     };
   }
   switch (retry.policy) {

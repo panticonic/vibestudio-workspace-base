@@ -563,7 +563,6 @@ function validateLiveKernelContinuity(result: TestExecutionResult) {
     return (
       index > writer &&
       /scope\.__kernelContinuityProbe\b/u.test(code) &&
-      /\.ping\s*\(/u.test(code) &&
       !/scope\.__kernelContinuityProbe\s*=/u.test(code)
     );
   });

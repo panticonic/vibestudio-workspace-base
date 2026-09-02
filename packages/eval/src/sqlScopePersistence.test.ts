@@ -104,6 +104,41 @@ function blobBackend() {
 }
 
 describe("SqlScopePersistence", () => {
+  it("supports operation-scoped persistence without retaining it as a default", async () => {
+    const sql = new FakeSql();
+    const { backend } = blobBackend();
+    const persistence = new SqlScopePersistence(sql as never, backend);
+    const manager = new ScopeManager({ channelId: "c", panelId: "eval" });
+
+    await expect(manager.hydrate()).rejects.toThrow(/explicit persistence capability/);
+    expect(() => manager.api).toThrow(/explicit persistence capability/);
+
+    await expect(manager.hydrate(persistence)).resolves.toEqual({ restored: [], lost: [] });
+    manager.current["value"] = 42;
+    await manager.apiFor(persistence).save();
+    expect([...sql.rows.values()][0]?.data).toContain("42");
+
+    const restarted = new ScopeManager({ channelId: "c", panelId: "eval" });
+    await expect(restarted.hydrate(persistence)).resolves.toEqual({
+      restored: ["value"],
+      lost: [],
+    });
+    expect(restarted.current["value"]).toBe(42);
+
+    const secondSql = new FakeSql();
+    const secondPersistence = new SqlScopePersistence(secondSql as never, blobBackend().backend);
+    let activePersistence = persistence;
+    const retainedApi = manager.apiFrom(() => activePersistence);
+    activePersistence = secondPersistence;
+    manager.current["value"] = 84;
+    await retainedApi.save();
+    expect([...secondSql.rows.values()][0]?.data).toContain("84");
+
+    await expect(manager.persist()).rejects.toThrow(/explicit persistence capability/);
+    manager.current["unsaved"] = true;
+    expect(() => manager.dispose()).toThrow(/explicit persistence capability/);
+  });
+
   it("creates only the scope row schema", () => {
     const sql = new FakeSql();
     new SqlScopeRowBackend(sql as never);

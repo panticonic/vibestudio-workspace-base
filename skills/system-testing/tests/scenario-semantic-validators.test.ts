@@ -874,6 +874,22 @@ describe("eval lifecycle semantic validators", () => {
     expect(validator.validate(result).passed).toBe(true);
     expect(
       validator.validate(
+        execution("The unchanged method was invoked through Function.call.", [
+          {
+            code: "scope.__kernelContinuityProbe = { ping: () => 'LIVE_KERNEL_OK' }; return true;",
+            returnValue: true,
+            kernelIncarnationId: "kernel-1",
+          },
+          {
+            code: "const probe = scope.__kernelContinuityProbe; const ping = probe.ping; return { methodType: typeof ping, value: ping.call(probe) };",
+            returnValue: { methodType: "function", value: "LIVE_KERNEL_OK" },
+            kernelIncarnationId: "kernel-1",
+          },
+        ])
+      ).passed
+    ).toBe(true);
+    expect(
+      validator.validate(
         execution("I recreated it.", [
           {
             code: "scope.__kernelContinuityProbe = { ping: () => 'LIVE_KERNEL_OK' }; return true;",

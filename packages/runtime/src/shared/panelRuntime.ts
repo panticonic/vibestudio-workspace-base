@@ -210,6 +210,7 @@ export interface PanelRuntimeTreePath {
 
 export interface PanelRuntimeTreeSearchPage {
   revision: number;
+  /** Search results live in `hits`; `entries` belongs to structural tree pages. */
   hits: Array<{
     entry: PanelRuntimeTreeEntry;
     ancestors: PanelRuntimeTreeEntry[];
