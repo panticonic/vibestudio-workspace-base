@@ -74,30 +74,51 @@ describe("createCdpAutomation screenshot", () => {
     expect(call).not.toHaveBeenCalled();
   });
 
-  it("gives an actionable materialization recovery when a session target is pending", async () => {
-    const cdp = createCdpAutomation({ call: vi.fn() } as never, "panel:deferred", {
-      observe: vi.fn(async () => ({
-        panelId: "panel:deferred",
-        phase: "pending",
-        attemptId: "unknown-attempt",
-        runtimeEntityId: null,
-      })) as never,
+  it("materializes a deferred target without requiring panel focus", async () => {
+    const page = {
+      close: vi.fn(async () => undefined),
+      isClosed: () => false,
+    };
+    const connect = vi.fn(async () => ({
+      contexts: () => [{ pages: () => [page] }],
+      close: vi.fn(async () => undefined),
+    }));
+    const loadModule = vi.fn(async () => ({ BrowserImpl: { connect }, CdpError }));
+    const call = vi.fn(async (_target: string, method: string) => {
+      if (method === "panelCdp.getCdpEndpoint") {
+        return { wsEndpoint: "ws://panel", token: "grant" };
+      }
+      throw new Error(`Unexpected RPC method: ${method}`);
+    });
+    const ready = {
+      panelId: "panel:deferred",
+      phase: "ready",
+      attemptId: "attempt-materialized",
+      runtimeEntityId: "panel:runtime-materialized",
+      buildKey: "build-materialized",
+    } as const;
+    const ensureReady = vi.fn(async () => ready);
+    const observe = vi.fn(async () => ({
+      ...ready,
+      phase: "pending" as const,
+      attemptId: "unknown-attempt",
+      runtimeEntityId: null,
+    }));
+    const cdp = createCdpAutomation({ call } as never, "panel:deferred", {
+      loadModule,
+      observe: observe as never,
+      ensureReady: ensureReady as never,
     });
 
-    const failure = await cdp.session().catch((error: unknown) => error);
+    const session = await cdp.session();
 
-    expect(failure).toMatchObject({
-      code: "panel_cdp_generation_unavailable",
-      errorData: {
-        code: "panel_cdp_generation_unavailable",
-        phase: "pending",
-        recovery: {
-          action: "materialize",
-          instruction: expect.stringContaining("authority.effects set to read-write"),
-        },
-      },
+    expect(ensureReady).toHaveBeenCalledTimes(2);
+    expect(observe).not.toHaveBeenCalled();
+    expect(session.generation).toMatchObject({
+      attemptId: "attempt-materialized",
+      runtimeEntityId: "panel:runtime-materialized",
     });
-    expect((failure as Error).message).toContain("await handle.focus()");
+    await session.close();
   });
 
   it("fences a CDP session to one panel attempt and explicitly replaces a stale page", async () => {

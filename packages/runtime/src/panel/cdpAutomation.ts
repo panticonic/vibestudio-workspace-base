@@ -30,6 +30,8 @@ interface CdpAutomationOptions {
   navigateHistory?: (delta: -1 | 1) => Promise<void>;
   reload?: () => Promise<void>;
   observe?: () => Promise<PanelObservation>;
+  /** Express active inspection demand without changing desktop focus. */
+  ensureReady?: () => Promise<PanelObservation>;
 }
 
 function isCdpClientModule(value: unknown): value is CdpClientModule {
@@ -150,12 +152,9 @@ export function createCdpAutomation(
 
   const generationOf = (observation: PanelObservation): PanelCdpGeneration => {
     if (observation.phase !== "ready" || !observation.runtimeEntityId) {
-      const pending = observation.phase === "pending";
       throw Object.assign(
         new Error(
-          pending
-            ? `Panel ${JSON.stringify(id)} is pending and has no CDP generation; materialize it with await handle.focus() in a read-write eval, then acquire the session.`
-            : `Panel ${JSON.stringify(id)} is ${observation.phase}; acquire a CDP session only after it is ready.`
+          `Panel ${JSON.stringify(id)} is ${observation.phase}; CDP acquisition could not obtain a ready generation.`
         ),
         {
           code: "panel_cdp_generation_unavailable",
@@ -165,10 +164,11 @@ export function createCdpAutomation(
             phase: observation.phase,
             attemptId: observation.attemptId,
             recovery: {
-              action: pending ? "materialize" : "reobserve",
-              instruction: pending
-                ? "Run await handle.focus() with authority.effects set to read-write, confirm the returned observation is ready, then call handle.cdp.session()."
-                : "Observe the panel lifecycle and acquire a session after phase becomes ready.",
+              action: "reobserve",
+              instruction:
+                observation.phase === "pending"
+                  ? "Inspect panel diagnostics: CDP acquisition requested materialization, but the panel did not become ready."
+                  : "Inspect the panel lifecycle and repair its failed or stopped attempt before reacquiring CDP.",
             },
           },
         }
@@ -191,16 +191,22 @@ export function createCdpAutomation(
   let activeSession: PanelCdpSession | null = null;
   let sessionAcquisition: Promise<PanelCdpSession> | null = null;
 
-  const createSession = async (): Promise<PanelCdpSession> => {
+  const ensureReady = (): Promise<PanelObservation> => {
     if (!options.observe) {
       throw new Error(
         "Generation-fenced CDP sessions are unavailable in this runtime; use a PanelHandle created by panelTree/openPanel."
       );
     }
+    return options.ensureReady ? options.ensureReady() : options.observe();
+  };
+
+  const createSession = async (): Promise<PanelCdpSession> => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const before = generationOf(await options.observe());
+      // A session is active inspection demand. Ensure residency/readiness here
+      // without coupling automation to desktop focus.
+      const before = generationOf(await ensureReady());
       const page = await connectPage();
-      const after = generationOf(await options.observe());
+      const after = generationOf(await ensureReady());
       if (!sameGeneration(before, after)) {
         await page.close();
         continue;
@@ -213,7 +219,7 @@ export function createCdpAutomation(
         generation: after,
         page,
         refresh: async (): Promise<PanelCdpSessionRefresh> => {
-          const current = generationOf(await options.observe!());
+          const current = generationOf(await ensureReady());
           if (sameGeneration(session.generation, current) && !page.isClosed()) {
             return { status: "current", session };
           }
@@ -264,7 +270,7 @@ export function createCdpAutomation(
     if (sessionAcquisition) return sessionAcquisition;
     const pending = (async () => {
       if (activeSession) {
-        const current = generationOf(await options.observe!());
+        const current = generationOf(await ensureReady());
         if (sameGeneration(activeSession.generation, current) && !activeSession.page.isClosed()) {
           return activeSession;
         }

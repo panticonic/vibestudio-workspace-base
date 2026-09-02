@@ -105,11 +105,13 @@ const browserTargets = firstPage.entries
 Restart affected groups from the first page after tree mutations. Imported
 browser targets may be deferred; `createPanelSlot(url)` is the receipt-oriented
 creation primitive for bulk imports. A deferred target has observation phase
-`pending` and no CDP generation. Materialize it explicitly with `handle.focus()`
-before acquiring CDP. That lifecycle operation calls `panelRuntime.ensureSlot`,
-so an eval that invokes it must use `authority.effects: "read-write"`; a
-read-only eval cannot widen its own authority. Automate mass imports with bounded
-concurrency rather than an unbounded `Promise.all`.
+`pending` and no CDP generation. Acquiring `handle.cdp.session()` expresses
+active inspection demand: it materializes the target without changing desktop
+focus, waits for application readiness, and then fences the connection to that
+generation. Raw CDP can mutate the page, so acquire a session from a read-write
+eval. Read-only diagnostics can use `handle.cdp.screenshot()` or
+`handle.cdp.consoleHistory()`, which also materialize on demand. Automate mass
+imports with bounded concurrency rather than an unbounded `Promise.all`.
 
 When the root is an `about/collection` panel, read its co-located
 [collection conductor skill](../../about/collection/SKILL.md) for recursive

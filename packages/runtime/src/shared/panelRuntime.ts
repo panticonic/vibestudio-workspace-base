@@ -458,6 +458,7 @@ export function createPanelRuntime(
         navigateHistory(metadata.id, delta).then(() => undefined),
       reload: () => restartPanel(metadata.id),
       observe: () => observePanel(metadata.id),
+      ensureReady: async () => waitUntilReady(await observePanel(metadata.id)),
     });
 
   const observePanel = async (id: string): Promise<PanelObservation> => {

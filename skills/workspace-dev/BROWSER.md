@@ -87,10 +87,12 @@ For bulk navigation or imported browser tabs that should remain unloaded until
 the user visits them, use `createPanelSlot(url)` instead. It commits the durable
 browser slot and returns without focusing or waiting for the document. Such a
 slot observes as `pending` and has no CDP generation. When materialization is
-needed, call `await handle.focus()` from a read-write eval, require its returned
-observation to be `ready`, and then acquire `handle.cdp.session()`. `focus()`
-invokes the write-sensitive `panelRuntime.ensureSlot` lifecycle operation and is
-intentionally unavailable to an eval constrained to read-only authority.
+needed for automation, acquire `await handle.cdp.session()`. Session acquisition
+expresses active inspection demand, materializes without changing desktop focus,
+waits for application readiness, and then fences the connection to that exact
+generation. Raw CDP can mutate the page, so session acquisition belongs in a
+read-write eval. A read-only eval can use bounded read helpers such as
+`handle.cdp.screenshot()` and `handle.cdp.consoleHistory()` instead.
 
 ## Ownership and lifetime contract
 
