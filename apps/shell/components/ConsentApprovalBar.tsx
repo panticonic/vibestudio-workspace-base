@@ -103,7 +103,10 @@ export function ConsentApprovalBar() {
     : transientWorkspaceReady
       ? 5_000
       : 8_000;
-  const [minimized, setMinimized] = useState(false);
+  // Minimize is a decision about one exact prompt. Keying it by approval id
+  // prevents that choice from leaking into the next approval when the queue
+  // advances or a higher-priority request arrives.
+  const [minimizedApprovalId, setMinimizedApprovalId] = useState<string | null>(null);
   const [browseIndex, setBrowseIndex] = useState(0);
   const [attentionSeq, setAttentionSeq] = useState(0);
   const currentApprovalIdRef = useRef<string | null>(null);
@@ -118,12 +121,6 @@ export function ConsentApprovalBar() {
   blobResultsRef.current = blobResults;
   const inFlightBlobsRef = useRef<Set<string>>(new Set());
   const seenApprovalIdsRef = useRef<Set<string>>(new Set());
-  const reviewingQueuedRef = useRef(false);
-  // A review can drain the pending queue before the protected operation resumes
-  // and asks for its next approval. Remember the requester across that empty
-  // edge so the continuation stays on the surface the user is already using.
-  // A queued request from anyone else still arrives quietly in the pill.
-  const reviewContinuationCallerIdRef = useRef<string | null>(null);
   const { navigateToId } = useNavigationActions();
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
   const themeConfig = useAtomValue(themeConfigAtom);
@@ -150,10 +147,9 @@ export function ConsentApprovalBar() {
   }, []);
 
   const focusCurrentApproval = useCallback(() => {
-    reviewingQueuedRef.current = true;
-    setMinimized(false);
     const approvalId = currentApprovalIdRef.current;
     if (approvalId) {
+      setMinimizedApprovalId(null);
       setKeyboardFocusRequest((previous) => ({
         approvalId,
         sequence: (previous?.sequence ?? 0) + 1,
@@ -217,14 +213,21 @@ export function ConsentApprovalBar() {
       pendingAccess
         .map((approval, index) => ({ approval, index }))
         .sort((left, right) => {
-          const priority = (approval: PendingApproval) => (approval.attention === "queue" ? 1 : 0);
-          return priority(left.approval) - priority(right.approval) || left.index - right.index;
+          const isPreparing = (approval: PendingApproval) =>
+            approval.lifecycle?.state === "preparing" ? 1 : 0;
+          return isPreparing(left.approval) - isPreparing(right.approval) || left.index - right.index;
         })
         .map(({ approval }) => approval),
     [pendingAccess]
   );
   const current = orderedPending[browseIndex] ?? orderedPending[0] ?? null;
   currentApprovalIdRef.current = current?.approvalId ?? null;
+  // Preparation is progress, not a decision yet. Every actionable approval is
+  // visible in app; `attention` only controls out-of-app notification policy.
+  const minimized =
+    current != null &&
+    (minimizedApprovalId === current.approvalId ||
+      current.lifecycle?.state === "preparing");
   const queueLength = orderedPending.length;
   const canPrev = queueLength > 1 && browseIndex > 0;
   const canNext = queueLength > 1 && browseIndex < queueLength - 1;
@@ -235,25 +238,13 @@ export function ConsentApprovalBar() {
 
   useLayoutEffect(() => {
     if (!current) {
-      reviewingQueuedRef.current = false;
-      setMinimized(false);
+      setMinimizedApprovalId(null);
       return;
     }
-    if (current.attention === "queue") {
-      const continuesResolvedReview = reviewContinuationCallerIdRef.current === current.callerId;
-      if (!reviewingQueuedRef.current && !continuesResolvedReview) {
-        reviewContinuationCallerIdRef.current = null;
-        setMinimized(true);
-        return;
-      }
-      reviewingQueuedRef.current = true;
-      setMinimized(false);
-      return;
-    }
-    reviewingQueuedRef.current = false;
-    reviewContinuationCallerIdRef.current = null;
-    setMinimized(false);
-  }, [current?.approvalId, current?.attention, current?.callerId]);
+    setMinimizedApprovalId((approvalId) =>
+      approvalId === current.approvalId ? approvalId : null
+    );
+  }, [current?.approvalId]);
 
   useEffect(() => {
     setDecisionError((error) => (error && error.approvalId !== current?.approvalId ? null : error));
@@ -295,11 +286,6 @@ export function ConsentApprovalBar() {
       )
       .finally(() => inFlightBlobsRef.current.delete(hash));
   };
-
-  // Drained queue → reset to expanded so the next approval greets as a card.
-  useEffect(() => {
-    if (queueLength === 0 && minimized) setMinimized(false);
-  }, [queueLength, minimized]);
 
   // Measure the panel-region rect (the overlay anchor). Re-measure on resize.
   const [anchorBounds, setAnchorBounds] = useState<ContentOverlayBounds | null>(null);
@@ -505,9 +491,7 @@ export function ConsentApprovalBar() {
   };
 
   const minimizeReview = () => {
-    reviewingQueuedRef.current = false;
-    reviewContinuationCallerIdRef.current = null;
-    setMinimized(true);
+    setMinimizedApprovalId(current?.approvalId ?? null);
   };
 
   const handleIntent = (payload: unknown) => {
@@ -516,15 +500,6 @@ export function ConsentApprovalBar() {
     if (typeof candidate.type !== "string" || typeof candidate.approvalId !== "string") return;
     const intent = payload as ApprovalCardIntent;
     if (!current || intent.approvalId !== current.approvalId) return;
-    const continueReviewSession = () => {
-      // A requester may replace one review with its own queued follow-up while
-      // the decision is being recorded. Keep that continuation on the surface,
-      // including across a briefly empty queue. Do not turn an interrupt into
-      // a general queue-review session: unrelated background work must remain
-      // in the notification pill. An explicitly opened queued review already
-      // has `reviewingQueuedRef` set and therefore continues normally.
-      reviewContinuationCallerIdRef.current = current.callerId;
-    };
     switch (intent.type) {
       case "minimize":
         minimizeReview();
@@ -538,27 +513,21 @@ export function ConsentApprovalBar() {
         if (currentCaller?.panelId) navigateToId(currentCaller.panelId);
         return;
       case "decide":
-        continueReviewSession();
         decide(intent.decision);
         return;
       case "device-cancel":
-        continueReviewSession();
         decide("dismiss");
         return;
       case "submit-client-config":
-        continueReviewSession();
         submitClientConfig(intent.values);
         return;
       case "submit-credential-input":
-        continueReviewSession();
         submitCredentialInput(intent.values);
         return;
       case "submit-secret-input":
-        continueReviewSession();
         submitSecretInput(intent.values);
         return;
       case "resolve-install-review":
-        continueReviewSession();
         resolveInstallReview(intent.resolution);
         return;
       case "fetch-blob":
@@ -733,13 +702,11 @@ export function ConsentApprovalBar() {
         count={queueLength}
         attentionSeq={attentionSeq}
         onExpand={() => {
-          reviewingQueuedRef.current = true;
-          reviewContinuationCallerIdRef.current = current.callerId;
           setKeyboardFocusRequest((previous) => ({
             approvalId: current.approvalId,
             sequence: (previous?.sequence ?? 0) + 1,
           }));
-          setMinimized(false);
+          setMinimizedApprovalId(null);
         }}
       />
     </>

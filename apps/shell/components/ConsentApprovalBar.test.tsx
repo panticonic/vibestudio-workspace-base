@@ -416,7 +416,7 @@ describe("ConsentApprovalBar coordinator", () => {
     ).toBeNull();
   });
 
-  it("keeps queued attention in the pill until the user chooses to review it", async () => {
+  it("opens queued attention when it is the current in-app decision", async () => {
     shellClient.listPending.mockResolvedValueOnce([
       capabilityApproval({
         approvalId: "queued",
@@ -427,14 +427,12 @@ describe("ConsentApprovalBar coordinator", () => {
     ]);
     mountBar();
 
-    const pill = await screen.findByRole("button", {
-      name: "Review approval: Queued approval",
-    });
-    expect(overlay.options).toBeNull();
-    fireEvent.click(pill);
     await waitFor(() =>
       expect(overlay.options?.props?.approval?.approvalId).toBe("queued"),
     );
+    expect(
+      screen.queryByRole("button", { name: "Review approval: Queued approval" }),
+    ).toBeNull();
   });
 
   it("keeps publication preparation non-blocking until its review is ready", async () => {
@@ -452,9 +450,28 @@ describe("ConsentApprovalBar coordinator", () => {
       name: "Review approval: Preparing workspace update…",
     });
     expect(overlay.options).toBeNull();
+
+    const pendingChangedListener = shellClient.onEvent.mock.calls.find(
+      ([event]) => event === "shell-approval:pending-changed",
+    )?.[1];
+    act(() =>
+      pendingChangedListener?.({
+        pending: [
+          capabilityApproval({
+            approvalId: "preparing",
+            title: "Review workspace update",
+            attention: "queue",
+            lifecycle: { state: "ready" },
+          }),
+        ],
+      }),
+    );
+    await waitFor(() =>
+      expect(overlay.options?.props?.approval?.approvalId).toBe("preparing"),
+    );
   });
 
-  it("shows an interrupting approval ahead of earlier queued attention", async () => {
+  it("keeps actionable approvals in arrival order regardless of attention hint", async () => {
     shellClient.listPending.mockResolvedValueOnce([
       capabilityApproval({
         approvalId: "queued",
@@ -469,7 +486,7 @@ describe("ConsentApprovalBar coordinator", () => {
     ]);
     mountBar();
     await waitFor(() => {
-      expect(overlay.options?.props?.approval?.approvalId).toBe("interrupt");
+      expect(overlay.options?.props?.approval?.approvalId).toBe("queued");
     });
   });
 
@@ -477,16 +494,16 @@ describe("ConsentApprovalBar coordinator", () => {
     shellClient.resolve.mockImplementation(() => new Promise(() => undefined));
     shellClient.listPending.mockResolvedValueOnce([
       capabilityApproval({
-        approvalId: "queued",
-        title: "Queued",
-        callerId: "extension:publisher",
-        attention: "queue",
-      }),
-      capabilityApproval({
         approvalId: "interrupt",
         title: "Interrupt",
         callerId: "extension:publisher",
         attention: "interrupt",
+      }),
+      capabilityApproval({
+        approvalId: "queued",
+        title: "Queued",
+        callerId: "extension:publisher",
+        attention: "queue",
       }),
     ]);
     mountBar();
@@ -1002,7 +1019,7 @@ describe("ConsentApprovalBar coordinator", () => {
     ).toBeNull();
   });
 
-  it("does not pop open an unrelated queued approval after a review drains", async () => {
+  it("opens an unrelated queued approval when it reaches the front", async () => {
     shellClient.resolveInstallReview.mockResolvedValueOnce(undefined);
     const first = {
       ...installReviewApproval("first"),
@@ -1032,10 +1049,10 @@ describe("ConsentApprovalBar coordinator", () => {
     act(() => pendingChangedListener?.({ pending: [] }));
     act(() => pendingChangedListener?.({ pending: [unrelated] }));
 
-    expect(
-      await screen.findByRole("button", { name: /Review approval/u }),
-    ).toBeTruthy();
-    expect(screen.queryByTestId("full-surface")).toBeNull();
+    await waitFor(() =>
+      expect(fullSurface.props?.approval?.approvalId).toBe("unrelated"),
+    );
+    expect(screen.queryByRole("button", { name: /Review approval/u })).toBeNull();
   });
 
   /**
