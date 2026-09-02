@@ -44,7 +44,7 @@ import type { ChatMessage, TaskCardPayload } from "@workspace/agentic-core";
 import { LOCAL_FALLBACK_MODEL_REF } from "@workspace/model-catalog/catalog";
 import { ChatMessageActionsContext } from "../context/ChatContext.js";
 import { MessageList } from "./MessageList.js";
-import { SubagentRunCard } from "./SubagentRunCard.js";
+import { latestSubagentActivity, SubagentRunCard } from "./SubagentRunCard.js";
 import { SubagentTranscriptContent } from "./SubagentTranscript.js";
 
 function makeMessage(overrides: Record<string, unknown>) {
@@ -1002,7 +1002,8 @@ describe("SubagentRunCard", () => {
       })
     );
 
-    expect(screen.getByText("Working — open the card to watch the transcript")).toBeTruthy();
+    expect(screen.getByText("Working")).toBeTruthy();
+    expect(screen.getByText("Waiting for the first child update")).toBeTruthy();
     expect(screen.getByText("Pending")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Expand run details"));
 
@@ -1010,6 +1011,74 @@ describe("SubagentRunCard", () => {
     expect(screen.getByText("run-2")).toBeTruthy();
     expect(screen.getByText("task-run-2")).toBeTruthy();
     expect(screen.getByText("ctx-run-2")).toBeTruthy();
+  });
+
+  it("projects the latest child-authored tool activity without mistaking steering for progress", () => {
+    const messages: ChatMessage[] = [
+      makeMessage({
+        id: "task-seed",
+        senderId: "parent-participant",
+        senderMetadata: { type: "headless", name: "Subagent task" },
+        content: "Implement the storage layer",
+        complete: true,
+      }) as ChatMessage,
+      makeMessage({
+        id: "child-thinking",
+        senderId: "child-participant",
+        senderMetadata: { type: "agent", name: "Subagent" },
+        contentType: "thinking",
+        content: "I should inspect the schema migration contract first.",
+        complete: true,
+      }) as ChatMessage,
+      makeMessage({
+        id: "child-verify",
+        senderId: "child-participant",
+        senderMetadata: { type: "agent", name: "Subagent" },
+        contentType: "invocation",
+        content: "",
+        invocation: {
+          id: "verify-storage",
+          name: "verify",
+          arguments: { operation: "build", target: "workers/rich-storage" },
+          execution: { status: "running", description: "" },
+        },
+        complete: false,
+      }) as ChatMessage,
+      makeMessage({
+        id: "parent-steer",
+        senderId: "parent-participant",
+        senderMetadata: { type: "agent", name: "Supervisor" },
+        content: "Remember to preserve imported labels.",
+        complete: true,
+      }) as ChatMessage,
+    ];
+
+    expect(latestSubagentActivity(messages, "child-participant")).toEqual({
+      prefix: "Using",
+      content: "Verify · operation: build, target: rich-storage",
+    });
+    expect(latestSubagentActivity(messages, undefined)).toBeNull();
+  });
+
+  it("compacts child narration into a bounded live update", () => {
+    expect(
+      latestSubagentActivity(
+        [
+          makeMessage({
+            id: "child-update",
+            senderId: "child-participant",
+            senderMetadata: { type: "agent", name: "Subagent" },
+            saliency: "say",
+            content: `Found the migration boundary. ${"detail ".repeat(40)}`,
+            complete: true,
+          }) as ChatMessage,
+        ],
+        "child-participant"
+      )
+    ).toMatchObject({
+      prefix: "Update",
+      content: expect.stringMatching(/^Found the migration boundary\..*…$/),
+    });
   });
 });
 

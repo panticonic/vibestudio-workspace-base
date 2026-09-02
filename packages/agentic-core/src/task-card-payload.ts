@@ -7,6 +7,7 @@ export interface SubagentRunState {
   contextId?: string;
   parentContextId?: string | null;
   childEntityId?: string;
+  childParticipantId?: string;
   label?: string;
   agentKind?: string;
   launchConfig?: Record<string, unknown> | null;
