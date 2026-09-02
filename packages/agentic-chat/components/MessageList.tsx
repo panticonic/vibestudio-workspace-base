@@ -234,7 +234,7 @@ export interface MessageListProps {
   browserHandoffCaller?: BrowserHandoffCaller;
   hasMoreHistory?: boolean;
   loadingMore?: boolean;
-  onLoadEarlierMessages?: () => void;
+  onLoadEarlierMessages?: () => void | Promise<void>;
   onInterrupt?: (agentId: string, messageId?: string, agentHandle?: string) => void;
   onCancelInvocation?: (invocation: InvocationCardPayload, senderId: string) => void;
   onFocusPanel?: (panelId: string) => void;
@@ -337,6 +337,8 @@ export const MessageList = React.memo(function MessageList({
   const hasMoreHistoryRef = useRef(hasMoreHistory);
   const loadingMoreRef = useRef(loadingMore);
   const onLoadEarlierMessagesRef = useRef(onLoadEarlierMessages);
+  const localHistoryHiddenRef = useRef(false);
+  const revealLocalHistoryRef = useRef<() => void>(() => {});
   hasMoreHistoryRef.current = hasMoreHistory;
   loadingMoreRef.current = loadingMore;
   onLoadEarlierMessagesRef.current = onLoadEarlierMessages;
@@ -344,8 +346,11 @@ export const MessageList = React.memo(function MessageList({
   const handleViewportScroll = useCallback(() => {
     const viewport = scrollRef.current;
     if (!viewport) return;
-    if (viewport.scrollTop < 200 && hasMoreHistoryRef.current && !loadingMoreRef.current) {
-      onLoadEarlierMessagesRef.current?.();
+    if (viewport.scrollTop >= 200 || loadingMoreRef.current) return;
+    if (localHistoryHiddenRef.current) {
+      revealLocalHistoryRef.current();
+    } else if (hasMoreHistoryRef.current) {
+      void onLoadEarlierMessagesRef.current?.();
     }
   }, [scrollRef]);
 
@@ -604,6 +609,27 @@ export const MessageList = React.memo(function MessageList({
     () => groupedItems.slice(Math.max(0, groupedItems.length - renderLimit)),
     [groupedItems, renderLimit]
   );
+  const localHistoryHidden = visibleGroupedItems.length < groupedItems.length;
+  localHistoryHiddenRef.current = localHistoryHidden;
+  revealLocalHistoryRef.current = () => {
+    setRenderLimit((limit) => limit + INITIAL_RENDERED_ITEMS);
+  };
+
+  // Server pagination prepends into `messages`, while this component keeps a
+  // separate bounded render window. Grow that window by the prepended count so
+  // a successful history fetch is immediately visible instead of landing
+  // behind the same newest-N slice.
+  const previousMessagesRef = useRef(messages);
+  useEffect(() => {
+    const previous = previousMessagesRef.current;
+    previousMessagesRef.current = messages;
+    const previousFirstId = previous[0]?.id;
+    if (!previousFirstId || messages.length <= previous.length) return;
+    const previousFirstIndex = messages.findIndex((message) => message.id === previousFirstId);
+    if (previousFirstIndex > 0) {
+      setRenderLimit((limit) => limit + previousFirstIndex);
+    }
+  }, [messages]);
   const scrollAnchorItems = useMemo<ScrollAnchorItem[]>(
     () =>
       visibleGroupedItems.map((item) => ({
@@ -791,7 +817,7 @@ export const MessageList = React.memo(function MessageList({
           style={{ padding: "var(--agentic-message-list-padding)" }}
         >
           {/* Load earlier messages button */}
-          {visibleGroupedItems.length < groupedItems.length ? (
+          {localHistoryHidden ? (
             <Flex justify="center" py="1">
               <Button
                 size="1"
@@ -804,7 +830,7 @@ export const MessageList = React.memo(function MessageList({
               </Button>
             </Flex>
           ) : null}
-          {hasMoreHistory && onLoadEarlierMessages && (
+          {!localHistoryHidden && hasMoreHistory && onLoadEarlierMessages && (
             <Flex justify="center" py="1">
               <Button
                 size="1"

@@ -130,6 +130,63 @@ describe("MessageList scroll behavior", () => {
     expect(onLoadEarlierMessages).toHaveBeenCalledTimes(1);
   });
 
+  it("reveals locally buffered history before offering another server page", () => {
+    hookState.scrollElement.scrollTop = 300;
+    const messages = Array.from({ length: 201 }, (_, index) => makeMessage(`m${index}`));
+    const onLoadEarlierMessages = vi.fn();
+    render(
+      <MessageList
+        messages={messages}
+        participants={{}}
+        selfId={null}
+        allParticipants={{}}
+        hasMoreHistory={true}
+        loadingMore={false}
+        onLoadEarlierMessages={onLoadEarlierMessages}
+      />
+    );
+
+    expect(screen.queryByText("m0")).toBeNull();
+    expect(screen.queryByText("Load earlier messages")).toBeNull();
+    fireEvent.click(screen.getByText("Show 1 earlier messages"));
+    expect(screen.getByText("m0")).toBeTruthy();
+    expect(screen.getByText("Load earlier messages")).toBeTruthy();
+    expect(onLoadEarlierMessages).not.toHaveBeenCalled();
+  });
+
+  it("makes a prepended server history page visible immediately", async () => {
+    hookState.scrollElement.scrollTop = 300;
+    const current = Array.from({ length: 200 }, (_, index) => makeMessage(`m${index}`));
+    const onLoadEarlierMessages = vi.fn(async () => {});
+    const { rerender } = render(
+      <MessageList
+        messages={current}
+        participants={{}}
+        selfId={null}
+        allParticipants={{}}
+        hasMoreHistory={true}
+        loadingMore={false}
+        onLoadEarlierMessages={onLoadEarlierMessages}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Load earlier messages"));
+    expect(onLoadEarlierMessages).toHaveBeenCalledOnce();
+    rerender(
+      <MessageList
+        messages={[makeMessage("older"), ...current]}
+        participants={{}}
+        selfId={null}
+        allParticipants={{}}
+        hasMoreHistory={false}
+        loadingMore={false}
+        onLoadEarlierMessages={onLoadEarlierMessages}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByText("older")).toBeTruthy());
+  });
+
   it("preserves the visible position when older messages are prepended away from bottom", () => {
     hookState.isAtBottom = false;
     hookState.scrollElement.scrollTop = 120;
