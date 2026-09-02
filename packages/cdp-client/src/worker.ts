@@ -528,7 +528,9 @@ export class CdpConnection {
 // ---------------------------------------------------------------------------
 // In-page runtime. A single self-contained program injected into the target
 // page via Runtime.evaluate. It owns element resolution (CSS + getBy* engines),
-// visibility/actionability checks, and all DOM-side actions/reads. Pointer
+// atomic visibility/state probes, and all DOM-side actions/reads. The client
+// repeats failed state probes between evaluations so the renderer remains free
+// to process queued input and UI work while a locator is waiting. Pointer
 // actions (click/hover/...) only *probe* here for a stable hit point; the
 // actual mouse/key events are dispatched client-side via CDP Input.
 //
@@ -662,18 +664,16 @@ function nsBox(el){ var r=el.getBoundingClientRect(); return {x:r.x,y:r.y,width:
 function nsSleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
 function nsAfterAction(){ return nsSleep(0); }
 async function nsWaitForState(descriptor, state, timeout){
-  var deadline=Date.now()+timeout;
-  for(;;){
-    var el=state==="visible"?nsFirstVisible(descriptor):nsFirst(descriptor);
-    var ok;
-    if(state==="detached") ok=!el;
-    else if(state==="attached") ok=!!el;
-    else if(state==="hidden") ok=!el||!nsVisible(el);
-    else ok=!!el&&nsVisible(el);
-    if(ok) return el;
-    if(Date.now()>deadline){ var failure=new Error("Timeout "+timeout+"ms waiting for element to be "+state); failure.__nsLocatorFailure={__nsLocatorFailure:"state-timeout",state:state,timeout:timeout}; throw failure; }
-    await nsSleep(50);
-  }
+  var el=state==="visible"?nsFirstVisible(descriptor):nsFirst(descriptor);
+  var ok;
+  if(state==="detached") ok=!el;
+  else if(state==="attached") ok=!!el;
+  else if(state==="hidden") ok=!el||!nsVisible(el);
+  else ok=!!el&&nsVisible(el);
+  if(ok) return el;
+  var failure=new Error("Timeout "+timeout+"ms waiting for element to be "+state);
+  failure.__nsLocatorFailure={__nsLocatorFailure:"state-timeout",state:state,timeout:timeout};
+  throw failure;
 }
 async function nsActionable(descriptor, timeout, retainToken){
   var deadline=Date.now()+timeout; var prev=null; var reason="not found";
@@ -1285,37 +1285,48 @@ class WorkerCdpPage {
     arg: unknown,
     opts: { timeout?: number; state?: WaitState } = {}
   ): Promise<unknown> {
+    const timeout = opts.timeout ?? this.defaultTimeout;
     const payload = {
       op,
       descriptor,
       arg: arg ?? null,
-      timeout: opts.timeout ?? this.defaultTimeout,
+      timeout,
       state: opts.state ?? null,
     };
-    const expr = `(async function(P){ ${INPAGE}\n return await __nsRun(P); })(${JSON.stringify(
-      payload
-    )})`;
     try {
-      const timeout = payload.timeout;
-      const result = await this.evaluate(expr, undefined, {
-        timeout: timeout + 1_000,
-        operation: `locator.${op}`,
-      });
-      if (
-        result &&
-        typeof result === "object" &&
-        (result as { __nsLocatorFailure?: unknown }).__nsLocatorFailure === "state-timeout"
-      ) {
-        const state = (result as { state?: WaitState }).state ?? opts.state ?? "visible";
-        throw new CdpError(`Timeout ${timeout}ms waiting for element to be ${state}`, {
-          code: "cdp_locator_state_mismatch",
-          operation: op,
-          recovery: "reobserve-locator",
-          timeoutMs: timeout,
-          state,
+      const deadline = Date.now() + timeout;
+      for (;;) {
+        const expr = `(async function(P){ ${INPAGE}\n return await __nsRun(P); })(${JSON.stringify(
+          payload
+        )})`;
+        const result = await this.evaluate(expr, undefined, {
+          timeout: timeout + 1_000,
+          operation: `locator.${op}`,
         });
+        if (
+          !result ||
+          typeof result !== "object" ||
+          (result as { __nsLocatorFailure?: unknown }).__nsLocatorFailure !== "state-timeout"
+        ) {
+          return result;
+        }
+        const state = (result as { state?: WaitState }).state ?? opts.state ?? "visible";
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) {
+          throw new CdpError(`Timeout ${timeout}ms waiting for element to be ${state}`, {
+            code: "cdp_locator_state_mismatch",
+            operation: op,
+            recovery: "reobserve-locator",
+            timeoutMs: timeout,
+            state,
+          });
+        }
+        // Yield outside Runtime.evaluate. A long-lived in-page polling promise
+        // can prevent Chromium from delivering a preceding CDP Input event to
+        // the renderer, making the click's effect appear only after the wait
+        // itself times out.
+        await new Promise((resolve) => setTimeout(resolve, Math.min(50, remaining)));
       }
-      return result;
     } catch (err) {
       const where = describeLocator(descriptor);
       const detail = err instanceof Error ? err.message : String(err);

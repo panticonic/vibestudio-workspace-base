@@ -16,6 +16,7 @@ class FakeWebSocket {
   static sent: Array<{ method: string; params?: Record<string, unknown> }> = [];
   static dropMethods = new Set<string>();
   static emitNavigationEventBeforeResponse = false;
+  static deferNextClickEffect = false;
 
   private listeners = new Map<string, Set<(event: { data?: string }) => void>>();
   private nextTitle = "Example";
@@ -24,6 +25,8 @@ class FakeWebSocket {
   private inputValue = "";
   private checked = false;
   private checking = false;
+  private revealAfterLocatorEvaluation = false;
+  private revealed = false;
   closed = false;
 
   constructor(
@@ -65,6 +68,14 @@ class FakeWebSocket {
       this.checked = !this.checked;
       this.checking = false;
     }
+    if (
+      message.method === "Input.dispatchMouseEvent" &&
+      message.params?.["type"] === "mouseReleased" &&
+      FakeWebSocket.deferNextClickEffect
+    ) {
+      this.revealAfterLocatorEvaluation = true;
+      FakeWebSocket.deferNextClickEffect = false;
+    }
     if (message.method === "Runtime.enable") {
       setTimeout(
         () =>
@@ -90,10 +101,19 @@ class FakeWebSocket {
       });
     }
     setTimeout(
-      () =>
+      () => {
+        if (
+          message.method === "Runtime.evaluate" &&
+          String(message.params?.["expression"] ?? "").includes("__nsRun") &&
+          this.revealAfterLocatorEvaluation
+        ) {
+          this.revealAfterLocatorEvaluation = false;
+          this.revealed = true;
+        }
         this.dispatch("message", {
           data: JSON.stringify({ id: message.id, result }),
-        }),
+        });
+      },
       0
     );
     if (message.method === "Page.navigate") {
@@ -192,6 +212,7 @@ class FakeWebSocket {
     const targetsMissing = payload.descriptor.steps.some(
       (s) =>
         (s["by"] === "testid" && s["value"] === "missing") ||
+        (s["by"] === "role" && s["name"] === "Revealed" && !this.revealed) ||
         (s["by"] === "role" &&
           (s["name"] === "Done" || s["name"] === "Completed" || s["name"] === "Add another column"))
     );
@@ -345,6 +366,7 @@ describe("worker CDP client", () => {
     FakeWebSocket.sent = [];
     FakeWebSocket.dropMethods.clear();
     FakeWebSocket.emitNavigationEventBeforeResponse = false;
+    FakeWebSocket.deferNextClickEffect = false;
     vi.restoreAllMocks();
     Object.defineProperty(globalThis, "WebSocket", {
       configurable: true,
@@ -682,6 +704,16 @@ describe("worker CDP client", () => {
         state: "attached",
       },
     });
+
+    const waitEvaluations = FakeWebSocket.sent.filter(
+      (entry) =>
+        entry.method === "Runtime.evaluate" &&
+        String(entry.params?.["expression"] ?? "").includes('"op":"waitFor"')
+    );
+    expect(waitEvaluations.length).toBeGreaterThan(1);
+    expect(String(waitEvaluations[0]?.params?.["expression"] ?? "")).not.toContain(
+      "await nsSleep(50)"
+    );
   });
 
   it("disconnects page automation without implying target ownership", async () => {
@@ -803,6 +835,24 @@ describe("worker CDP client", () => {
         state: "visible",
       },
     });
+  });
+
+  it("lets queued input run between locator wait probes", async () => {
+    installFakeWebSocket();
+    FakeWebSocket.deferNextClickEffect = true;
+    const browser = await BrowserImpl.connect("ws://cdp");
+    const page = browser.contexts()[0]!.pages()[0]!;
+
+    await page.getByRole("button", { name: "Trigger" }).click();
+    await page.getByRole("dialog", { name: "Revealed" }).waitFor({ timeout: 200 });
+
+    const probes = FakeWebSocket.sent.filter(
+      (entry) =>
+        entry.method === "Runtime.evaluate" &&
+        String(entry.params?.["expression"] ?? "").includes('"op":"waitFor"') &&
+        String(entry.params?.["expression"] ?? "").includes('"name":"Revealed"')
+    );
+    expect(probes.length).toBeGreaterThan(1);
   });
 
   it("describes the missing postcondition when a dispatched click has no observed effect", async () => {
