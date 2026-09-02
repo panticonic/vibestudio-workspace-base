@@ -41,7 +41,9 @@ function capabilityApproval(
     cardType: partial.cardType,
     allowedDecisions: partial.allowedDecisions,
     authorityRow: partial.authorityRow,
+    authorityFacets: partial.authorityFacets,
     operationSubstance: partial.operationSubstance,
+    target: partial.target,
     approvalId: partial.approvalId,
     lifecycle: partial.lifecycle,
   };
@@ -311,6 +313,59 @@ describe("ApprovalCard", () => {
       decision: "version",
       approvalId: "cap-severe",
     });
+  });
+
+  it("renders one decision with every independently enforced authority facet", () => {
+    const inspection = authorityRow({
+      capability: "panel.inspect",
+      resource: { kind: "exact", key: "panel.inspect" },
+      tier: "gated",
+      statement: "prospective",
+      provenance: { source: "receiver" },
+    });
+    const boundary = authorityRow({
+      capability: "context.boundary",
+      resource: { kind: "exact", key: "context/project-planning/requester/agent" },
+      resourcePhrase: "Project planning",
+      tier: "gated",
+      statement: "prospective",
+      provenance: { source: "receiver" },
+    });
+    renderCard(
+      capabilityApproval({
+        approvalId: "composed-panel-control",
+        title: "Inspect Example dashboard with developer tools",
+        capability: "panel.inspect",
+        authorityRow: inspection,
+        target: { id: "panel:stable", kind: "panel", title: "Example dashboard" },
+        authorityFacets: [
+          {
+            capability: "panel.inspect",
+            title: "Inspect a panel with developer tools",
+            resource: { type: "panel", label: "Panel", value: "Example dashboard" },
+            row: inspection,
+          },
+          {
+            capability: "context.boundary",
+            title: "Automate panel in another context",
+            resource: {
+              type: "context",
+              label: "Workspace branch",
+              value: "Project planning",
+            },
+            row: boundary,
+          },
+        ],
+      })
+    );
+
+    expect(screen.getByText("This decision allows all of these:")).toBeTruthy();
+    expect(screen.getByText("Inspect a panel with developer tools")).toBeTruthy();
+    expect(screen.getByText("Panel: Example dashboard")).toBeTruthy();
+    expect(screen.getByText("Automate panel in another context")).toBeTruthy();
+    expect(screen.getByText("Workspace branch: Project planning")).toBeTruthy();
+    expect(screen.getByText("This computer")).toBeTruthy();
+    expect(screen.getByText("Your files & work")).toBeTruthy();
   });
 
   it("shows the exact prepared effect and the eligible task and agent scope ladder", () => {

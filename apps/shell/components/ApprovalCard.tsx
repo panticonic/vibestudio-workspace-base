@@ -342,13 +342,20 @@ export function ApprovalCard({
             style={{ minWidth: 0, flex: 1 }}
           >
             {approval.kind === "capability" && approval.authorityRow ? (
-              <Flex>
-                <Badge color="blue" variant="soft">
-                  {AUTHORITY_DOMAINS[approval.authorityRow.domain].label}
-                  {approval.authorityRow.provenance.surface
-                    ? ` · ${approval.authorityRow.provenance.surface}`
-                    : ""}
-                </Badge>
+              <Flex gap="1" wrap="wrap">
+                {(approval.authorityFacets?.length
+                  ? [...new Set(approval.authorityFacets.map(({ row }) => row.domain))]
+                  : [approval.authorityRow.domain]
+                ).map((domain) => (
+                  <Badge key={domain} color="blue" variant="soft">
+                    {AUTHORITY_DOMAINS[domain].label}
+                  </Badge>
+                ))}
+                {approval.authorityRow.provenance.surface ? (
+                  <Badge color="blue" variant="soft">
+                    {approval.authorityRow.provenance.surface}
+                  </Badge>
+                ) : null}
               </Flex>
             ) : null}
             <Flex align="center" gap="2" wrap="wrap" style={{ minWidth: 0 }}>
@@ -375,6 +382,30 @@ export function ApprovalCard({
             <Box id={`approval-summary-${approval.approvalId}`}>
               <ApprovalMarkdown source={copy.summary} tone="muted" compact />
             </Box>
+            {approval.kind === "capability" &&
+            approval.authorityFacets &&
+            approval.authorityFacets.length > 1 ? (
+              <Flex direction="column" gap="1" mt="1" p="2" style={{
+                border: "1px solid var(--gray-a5)",
+                borderRadius: 6,
+                background: "var(--gray-a2)",
+              }}>
+                <Text size="1" weight="medium">This decision allows all of these:</Text>
+                {approval.authorityFacets.map((facet) => (
+                  <Flex key={`${facet.capability}:${facet.row.resource}`} gap="2" align="start">
+                    <Text size="1" color="gray" aria-hidden>•</Text>
+                    <Flex direction="column" gap="0" style={{ minWidth: 0 }}>
+                      <Text size="1">{facet.title}</Text>
+                      <Text size="1" color="gray" style={{ overflowWrap: "anywhere" }}>
+                        {facet.resource
+                          ? `${facet.resource.label}: ${facet.resource.value}`
+                          : facet.row.resource}
+                      </Text>
+                    </Flex>
+                  </Flex>
+                ))}
+              </Flex>
+            ) : null}
             {lifecycleState !== "ready" ? (
               <Flex direction="column" gap="1">
                 <Flex align="center" gap="2">

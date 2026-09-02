@@ -456,7 +456,7 @@ export function createPanelRuntime(
       navigate: (url) => navigatePanel(metadata.id, url).then(() => undefined),
       navigateHistory: (delta) =>
         navigateHistory(metadata.id, delta).then(() => undefined),
-      reload: () => restartPanel(metadata.id),
+      reload: () => options.rpc.call("main", "panelCdp.reload", [metadata.id]),
       observe: () => observePanel(metadata.id),
       ensureReady: async () => waitUntilReady(await observePanel(metadata.id)),
     });

@@ -955,11 +955,9 @@ describe("PanelHandle", () => {
     expect(rpcCall).toHaveBeenCalledWith("main", "panelCdp.getCdpEndpoint", [
       "panel:tree/workspace-1",
     ]);
-    expect(rpcCall).toHaveBeenCalledWith(
-      "main",
-      "runtime.supervision.restart",
-      [{ kind: "panel", entityId: "panel:nav-panel-self-entity" }],
-    );
+    expect(rpcCall).toHaveBeenCalledWith("main", "panelCdp.reload", [
+      "panel:tree/panel-self",
+    ]);
   });
 
   it("hydrates direct children through bounded pages", async () => {
