@@ -269,7 +269,11 @@ export interface CdpPage {
     action: () => unknown | Promise<unknown>,
     options?: CdpProfileOptions
   ): Promise<CdpProfileReport>;
-  evaluate(pageFunction: string | ((arg?: unknown) => unknown), arg?: unknown): Promise<unknown>;
+  evaluate(
+    pageFunction: string | ((arg?: unknown) => unknown),
+    arg?: unknown,
+    options?: { timeout?: number; operation?: string }
+  ): Promise<unknown>;
   /**
    * Find by CSS or `text=...`. A quoted JSON string is exact text; unquoted
    * text is substring matching. Prefer getBy* helpers for resilient locators.
@@ -323,7 +327,15 @@ export class CdpConnection {
     preferFetchUpgrade?: boolean,
     options?: { commandTimeoutMs?: number }
   ): Promise<CdpConnection>;
-  send(method: string, params?: Record<string, unknown>): Promise<unknown>;
+  send(
+    method: string,
+    params?: Record<string, unknown>,
+    options?: {
+      timeoutMs?: number;
+      timeoutBehavior?: "disconnect" | "reject";
+      timeoutError?: (timeoutMs: number) => Error;
+    }
+  ): Promise<unknown>;
   on(method: string, listener: (params: unknown) => void): () => void;
   close(): void;
   isClosed(): boolean;
@@ -334,19 +346,24 @@ export interface CdpFailureData {
     | "cdp_target_connection_failed"
     | "cdp_target_closed"
     | "cdp_command_timeout"
+    | "cdp_evaluation_timeout"
     | "cdp_evaluation_failed"
     | "cdp_locator_operation_failed"
     | "cdp_locator_not_actionable"
     | "cdp_locator_state_mismatch"
-    | "cdp_interaction_outcome_not_observed";
+    | "cdp_interaction_outcome_not_observed"
+    | "cdp_workspace_navigation_forbidden";
   operation: string;
   failureKind: "user-code" | "infrastructure";
   recovery:
     | "correct-page-function"
     | "reobserve-locator"
     | "reacquire-page"
-    | "inspect-panel-and-reacquire-page";
+    | "inspect-panel-and-reacquire-page"
+    | "use-panel-handle-lifecycle";
   locator?: string;
+  timeoutMs?: number;
+  instruction?: string;
 }
 
 /** Structured error thrown by CDP evaluation, connection, and locator operations. */
@@ -355,6 +372,19 @@ export class CdpError extends Error {
   readonly code: CdpFailureData["code"];
   readonly errorKind: "application" | "infrastructure";
   readonly errorData: CdpFailureData;
+  constructor(
+    message: string,
+    options?: {
+      cause?: unknown;
+      locator?: string;
+      code?: CdpFailureData["code"];
+      operation?: string;
+      failureKind?: CdpFailureData["failureKind"];
+      recovery?: CdpFailureData["recovery"];
+      timeoutMs?: number;
+      instruction?: string;
+    }
+  );
 }
 
 export interface Browser {

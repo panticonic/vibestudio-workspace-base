@@ -51,7 +51,11 @@ class FakeWebSocket {
       params?: Record<string, unknown>;
     };
     if (typeof message.id !== "number") return;
-    if (message.method) FakeWebSocket.sent.push({ method: message.method, params: message.params });
+    if (message.method)
+      FakeWebSocket.sent.push({
+        method: message.method,
+        params: message.params,
+      });
     if (message.method && FakeWebSocket.dropMethods.has(message.method)) return;
     if (
       message.method === "Input.dispatchMouseEvent" &&
@@ -67,7 +71,10 @@ class FakeWebSocket {
           this.dispatch("message", {
             data: JSON.stringify({
               method: "Runtime.consoleAPICalled",
-              params: { type: "log", args: [{ value: "ready" }, { value: 42 }] },
+              params: {
+                type: "log",
+                args: [{ value: "ready" }, { value: 42 }],
+              },
             }),
           }),
         0
@@ -76,11 +83,17 @@ class FakeWebSocket {
     const result = this.resultFor(message.method, message.params);
     if (message.method === "Page.navigate" && FakeWebSocket.emitNavigationEventBeforeResponse) {
       this.dispatch("message", {
-        data: JSON.stringify({ method: "Page.loadEventFired", params: { timestamp: 0 } }),
+        data: JSON.stringify({
+          method: "Page.loadEventFired",
+          params: { timestamp: 0 },
+        }),
       });
     }
     setTimeout(
-      () => this.dispatch("message", { data: JSON.stringify({ id: message.id, result }) }),
+      () =>
+        this.dispatch("message", {
+          data: JSON.stringify({ id: message.id, result }),
+        }),
       0
     );
     if (message.method === "Page.navigate") {
@@ -91,7 +104,10 @@ class FakeWebSocket {
         setTimeout(
           () =>
             this.dispatch("message", {
-              data: JSON.stringify({ method: "Page.loadEventFired", params: { timestamp: 0 } }),
+              data: JSON.stringify({
+                method: "Page.loadEventFired",
+                params: { timestamp: 0 },
+              }),
             }),
           0
         );
@@ -107,6 +123,12 @@ class FakeWebSocket {
   remoteClose(): void {
     this.closed = true;
     this.dispatch("close", {});
+  }
+
+  emitCdpEvent(method: string, params: Record<string, unknown> = {}): void {
+    this.dispatch("message", {
+      data: JSON.stringify({ method, params }),
+    });
   }
 
   private resultFor(method?: string, params?: Record<string, unknown>): unknown {
@@ -176,7 +198,12 @@ class FakeWebSocket {
         if (payload.arg?.retainToken) this.checking = true;
         return targetsMissing
           ? { ok: false, reason: "not found" }
-          : { ok: true, x: 50, y: 10, box: { x: 0, y: 0, width: 100, height: 20 } };
+          : {
+              ok: true,
+              x: 50,
+              y: 10,
+              box: { x: 0, y: 0, width: 100, height: 20 },
+            };
       case "waitFor":
         return true;
       case "count":
@@ -444,9 +471,29 @@ describe("worker CDP client", () => {
     expect(page.url()).toBe("https://example.com/fast");
   });
 
+  it("waits for navigation settling after Page.reload is acknowledged", async () => {
+    installFakeWebSocket();
+    const browser = await BrowserImpl.connect("ws://cdp");
+    const page = browser.contexts()[0]!.pages()[0]!;
+    const socket = FakeWebSocket.instances[0]!;
+    let resolved = false;
+
+    const reload = page.reload().then(() => {
+      resolved = true;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(resolved).toBe(false);
+    socket.emitCdpEvent("Page.loadEventFired", { timestamp: 0 });
+    await reload;
+    expect(resolved).toBe(true);
+  });
+
   it("bounds a command that the relay never answers and closes the page connection", async () => {
     installFakeWebSocket();
-    const browser = await BrowserImpl.connect("ws://cdp", { commandTimeoutMs: 10 });
+    const browser = await BrowserImpl.connect("ws://cdp", {
+      commandTimeoutMs: 10,
+    });
     const page = browser.contexts()[0]!.pages()[0]!;
     const socket = FakeWebSocket.instances[0]!;
     FakeWebSocket.dropMethods.add("Runtime.evaluate");
@@ -467,6 +514,39 @@ describe("worker CDP client", () => {
       recovery: "inspect-panel-and-reacquire-page",
     });
     expect(socket.closed).toBe(true);
+  });
+
+  it("times out evaluation independently without closing the healthy transport", async () => {
+    installFakeWebSocket();
+    const browser = await BrowserImpl.connect("ws://cdp", {
+      commandTimeoutMs: 1_000,
+    });
+    const page = browser.contexts()[0]!.pages()[0]!;
+    const socket = FakeWebSocket.instances[0]!;
+    FakeWebSocket.dropMethods.add("Runtime.evaluate");
+
+    const failure = await page
+      .evaluate("new Promise(() => {})", undefined, {
+        timeout: 10,
+        operation: "agent-probe",
+      })
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(CdpError);
+    expect(failure).toMatchObject({
+      code: "cdp_evaluation_timeout",
+      errorData: {
+        code: "cdp_evaluation_timeout",
+        operation: "agent-probe",
+        failureKind: "user-code",
+        timeoutMs: 10,
+      },
+    });
+    expect(socket.closed).toBe(false);
+    expect((page.connection as unknown as { pending: Map<number, unknown> }).pending.size).toBe(0);
+
+    FakeWebSocket.dropMethods.delete("Runtime.evaluate");
+    await expect(page.title()).resolves.toBe("Example");
   });
 
   it("compiles CSS, text selectors, and getBy locators into one descriptor model", async () => {
@@ -608,7 +688,12 @@ describe("worker CDP client", () => {
       "mousePressed",
       "mouseReleased",
     ]);
-    expect(mouse[1]?.params).toMatchObject({ x: 50, y: 10, button: "left", clickCount: 1 });
+    expect(mouse[1]?.params).toMatchObject({
+      x: 50,
+      y: 10,
+      button: "left",
+      clickCount: 1,
+    });
     const releaseIndex = FakeWebSocket.sent.findIndex(
       (event) =>
         event.method === "Input.dispatchMouseEvent" && event.params?.["type"] === "mouseReleased"
@@ -787,7 +872,9 @@ describe("worker CDP client", () => {
       params: { captureBeyondViewport: true },
     });
     await expect(
-      page.screenshot({ path: ".tmp/panel.png" } as unknown as { type?: "png" })
+      page.screenshot({ path: ".tmp/panel.png" } as unknown as {
+        type?: "png";
+      })
     ).rejects.toThrow("store it explicitly with @workspace/runtime blobstore.putBytes");
   });
 
@@ -844,6 +931,37 @@ describe("worker CDP client", () => {
       failureKind: "user-code",
       recovery: "reobserve-locator",
       locator: 'getByTestId("missing")',
+      timeoutMs: 30_000,
+    });
+  });
+
+  it("adds locator context without replacing a typed CDP failure", async () => {
+    installFakeWebSocket();
+    const browser = await BrowserImpl.connect("ws://cdp");
+    const page = browser.contexts()[0]!.pages()[0]!;
+    vi.spyOn(page, "evaluate").mockRejectedValueOnce(
+      new CdpError("Browser evaluation failed", {
+        code: "cdp_evaluation_failed",
+        operation: "Runtime.evaluate",
+        recovery: "correct-page-function",
+      })
+    );
+
+    const failure = await page
+      .getByTestId("save")
+      .count()
+      .catch((error: unknown) => error);
+
+    expect(failure).toBeInstanceOf(CdpError);
+    expect(failure).toMatchObject({
+      code: "cdp_evaluation_failed",
+      locator: 'getByTestId("save")',
+      errorData: {
+        code: "cdp_evaluation_failed",
+        operation: "count",
+        recovery: "correct-page-function",
+        locator: 'getByTestId("save")',
+      },
     });
   });
 

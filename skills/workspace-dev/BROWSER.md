@@ -20,7 +20,8 @@ await page.locator("input[name=query]").fill("Vibestudio");
 await page.locator(".search-button").click();
 await handle.click(".search-button"); // same target, convenience wrapper
 
-// Browser panels only: these intentionally reject for workspace app panels.
+// Prefer the top-level handle lifecycle methods for workspace panels because
+// they return the resulting PanelObservation.
 await handle.cdp.navigate("https://other.com");
 await handle.cdp.goBack();
 await handle.cdp.reload();
@@ -70,8 +71,8 @@ not import or install any `playwright*` package, and do not import
 `@workspace/cdp-client` directly for ordinary page work.
 
 Navigation belongs to browser panels. On a workspace app panel, `page.goto()`,
-`page.reload()`, `page.goBack()`, `page.goForward()`, and their `handle.cdp`
-counterparts reject instead of bypassing the panel lifecycle. Use
+`page.reload()`, `page.goBack()`, and `page.goForward()` reject instead of
+bypassing the panel lifecycle. Use
 `await handle.reload()` for the current workspace build or
 `await handle.rebuild()` after source changes; both return a
 `PanelObservation`, while the original `handle` remains the handle.
@@ -90,6 +91,8 @@ target. The boundary is exact:
 - `await handle.cdp.session()` creates one authenticated CDP connection fenced
   to the handle's current immutable panel generation. `session.page` owns the
   automation connection and `session.generation` records its provenance.
+  Concurrent or repeated calls on the same handle reuse that active session
+  until it is closed or the generation changes.
 - `await handle.cdp.page()` creates the same connection without a generation
   lease for one-off work.
 - `await page.close()` disconnects only that automation client. It does not
@@ -115,6 +118,17 @@ target. The boundary is exact:
   the generation remained current. Refresh never replays the interrupted
   browser action.
 
+```ts
+const session = await handle.cdp.session();
+try {
+  const page = session.page;
+  await page.getByRole("button", { name: "Add list" }).click();
+  await page.getByPlaceholder("List name").waitFor({ state: "visible" });
+} finally {
+  await session.close();
+}
+```
+
 Use bounded `panelTree.roots`/`panelTree.children`/`panelTree.search` or
 addressed `panelTree.get` for existing panels. Use `rootOwners()` and
 `rootsForOwner(ownerUserId)` when explicitly inspecting another ownership
@@ -135,9 +149,10 @@ delete scope.page;
 
 Reuse one handle and one generation-fenced session per multi-step workflow.
 Repeated `openPanel()` calls without the same `operationId` create distinct panels, and repeated
-`handle.cdp.session()` or `handle.cdp.page()` calls within an unchanged
-incarnation create duplicate CDP connections. After a possible replacement,
-refresh the existing session and use the returned session.
+`handle.cdp.page()` calls create duplicate one-off CDP connections. Repeated
+`handle.cdp.session()` calls on the same handle reuse its active session. After
+a possible replacement, refresh the existing session and use the returned
+session.
 
 ## Where it runs
 
@@ -278,6 +293,7 @@ await page.title();
 page.url(); // string, synchronous like Playwright
 await page.content(); // full HTML
 await page.evaluate(() => document.title);
+await page.evaluate(() => new Promise(() => {}), undefined, { timeout: 5_000 });
 const bytes = await page.screenshot({ fullPage: true });
 await page.waitForSelector(".ready");
 await page.waitForLoadState("domcontentloaded"); // or "load"
@@ -396,10 +412,12 @@ only when the URL must be computed inside the page after client-side routing.
 
 `handle.reload()` is panel lifecycle reload for the named workspace panel's
 renderer; it does not rebuild code and does not unload the panel's runtime
-lease. `page.reload()` and `handle.cdp.reload()` are raw Chromium navigation and
-are available only for browser panel targets. Reloading the panel currently
-executing eval can cancel that eval after the command is sent; run that reload
-from a stable/root context when possible.
+lease. Raw `page.reload()` is available only for browser panel targets.
+`handle.cdp.reload()` delegates to the composed handle runtime, but prefer
+`handle.reload()` for workspace panels because it waits for readiness and
+returns the resulting observation. Reloading the panel currently executing
+eval can cancel that eval after the command is sent; run that reload from a
+stable/root context when possible.
 
 Tree relationships do not bypass approval. To drive a parent or sibling, obtain
 that target's handle and use the same `handle.cdp` namespace:
@@ -427,9 +445,9 @@ panel, call `observe()` and require `phase === "ready"` before custom RPC or
 | `handle.cdp.consoleHistory({ limit, errorLimit })` | Read host-captured historical console logs and the separate error buffer          |
 | `handle.diagnose()`                                | Read canonical observation, bounded console/lifecycle history, and ready document |
 | `handle.click(selector)`                           | Click in the target panel through CDP                                             |
-| `handle.cdp.navigate(url)`                         | Load a URL in a browser panel; rejects for workspace panels                       |
-| `handle.cdp.goBack()` / `goForward()`              | Browser-panel Chromium history                                                    |
-| `handle.cdp.reload()`                              | Browser-panel Chromium page reload                                                |
+| `handle.cdp.navigate(url)`                         | Low-level handle-runtime navigation alias                                         |
+| `handle.cdp.goBack()` / `goForward()`              | Low-level handle-runtime history aliases                                          |
+| `handle.cdp.reload()`                              | Low-level reload alias; prefer `handle.reload()` for workspace panels             |
 | `handle.cdp.stop()`                                | Stop loading                                                                      |
 | `handle.archive()`                                 | Archive the panel and its subtree                                                 |
 

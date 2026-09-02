@@ -858,8 +858,9 @@ describe("PanelHandle", () => {
 
   it("supports handle.click as a CDP automation convenience", async () => {
     const click = vi.fn(async () => undefined);
+    const close = vi.fn(async () => undefined);
     const locator = vi.fn(() => ({ click }));
-    const page = { locator };
+    const page = { locator, close };
     const connect = vi.fn(async () => ({
       contexts: () => [{ pages: () => [page] }],
     }));
@@ -880,6 +881,7 @@ describe("PanelHandle", () => {
     ]);
     expect(locator).toHaveBeenCalledWith("button.submit");
     expect(click).toHaveBeenCalledWith();
+    expect(close).toHaveBeenCalledOnce();
     expect(loadCdpClient).toHaveBeenCalledOnce();
   });
 

@@ -80,6 +80,27 @@ export function createCdpAutomation(
     return rpc.call<CdpEndpoint>("main", "panelCdp.getCdpEndpoint", [id]);
   };
 
+  const workspaceNavigationError = (operation: string, lifecycleMethod: string): Error =>
+    Object.assign(
+      new Error(
+        `Direct ${operation} is unavailable for workspace panel ${JSON.stringify(
+          id
+        )}; use ${lifecycleMethod} so panel generation and readiness remain coherent.`
+      ),
+      {
+        name: "CdpError",
+        code: "cdp_workspace_navigation_forbidden" as const,
+        errorKind: "application" as const,
+        errorData: {
+          code: "cdp_workspace_navigation_forbidden" as const,
+          operation,
+          failureKind: "user-code" as const,
+          recovery: "use-panel-handle-lifecycle" as const,
+          instruction: `Use ${lifecycleMethod}, then call session.refresh() before continuing with automation.`,
+        },
+      }
+    );
+
   const connectPage = async (): Promise<CdpPage> => {
     const { BrowserImpl } = await loadCdpClient(options.loadModule);
     const endpoint = await getCdpEndpoint();
@@ -105,7 +126,26 @@ export function createCdpAutomation(
           "handle.diagnose() and retry handle.cdp.page() once the panel is ready."
       );
     }
-    return resolvedPage;
+    if (options.kind !== "workspace") return resolvedPage;
+
+    const navigationMethods = new Map<PropertyKey, string>([
+      ["goto", "handle.navigate(...)"],
+      ["reload", "handle.reload()"],
+      ["goBack", "handle.navigate(...)"],
+      ["goForward", "handle.navigate(...)"],
+    ]);
+    return new Proxy(resolvedPage as CdpPage & object, {
+      get(target, property) {
+        const lifecycleMethod = navigationMethods.get(property);
+        if (lifecycleMethod) {
+          return async () => {
+            throw workspaceNavigationError(`page.${String(property)}()`, lifecycleMethod);
+          };
+        }
+        const value = Reflect.get(target, property, target) as unknown;
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    }) as CdpPage;
   };
 
   const generationOf = (observation: PanelObservation): PanelCdpGeneration => {
@@ -144,7 +184,10 @@ export function createCdpAutomation(
     left.attemptId === right.attemptId &&
     left.runtimeEntityId === right.runtimeEntityId;
 
-  const acquireSession = async (): Promise<PanelCdpSession> => {
+  let activeSession: PanelCdpSession | null = null;
+  let sessionAcquisition: Promise<PanelCdpSession> | null = null;
+
+  const createSession = async (): Promise<PanelCdpSession> => {
     if (!options.observe) {
       throw new Error(
         "Generation-fenced CDP sessions are unavailable in this runtime; use a PanelHandle created by panelTree/openPanel."
@@ -159,6 +202,7 @@ export function createCdpAutomation(
         continue;
       }
 
+      let closed = false;
       let session!: PanelCdpSession;
       session = {
         protocol: "panel-cdp-session.v1",
@@ -169,7 +213,7 @@ export function createCdpAutomation(
           if (sameGeneration(session.generation, current) && !page.isClosed()) {
             return { status: "current", session };
           }
-          await page.close();
+          await session.close();
           if (sameGeneration(session.generation, current)) {
             return {
               status: "reconnected",
@@ -183,8 +227,17 @@ export function createCdpAutomation(
             session: await acquireSession(),
           };
         },
-        close: () => page.close(),
+        close: async () => {
+          if (closed) return;
+          closed = true;
+          try {
+            await page.close();
+          } finally {
+            if (activeSession === session) activeSession = null;
+          }
+        },
       };
+      activeSession = session;
       return session;
     }
     throw Object.assign(
@@ -201,6 +254,26 @@ export function createCdpAutomation(
         },
       }
     );
+  };
+
+  const acquireSession = (): Promise<PanelCdpSession> => {
+    if (sessionAcquisition) return sessionAcquisition;
+    const pending = (async () => {
+      if (activeSession) {
+        const current = generationOf(await options.observe!());
+        if (sameGeneration(activeSession.generation, current) && !activeSession.page.isClosed()) {
+          return activeSession;
+        }
+        await activeSession.close();
+      }
+      return createSession();
+    })();
+    sessionAcquisition = pending;
+    const clearPending = () => {
+      if (sessionAcquisition === pending) sessionAcquisition = null;
+    };
+    void pending.then(clearPending, clearPending);
+    return pending;
   };
 
   return {
@@ -235,7 +308,11 @@ export function createCdpAutomation(
     },
     click: async (selector) => {
       const p = await connectPage();
-      await p.locator(selector).click();
+      try {
+        await p.locator(selector).click();
+      } finally {
+        await p.close();
+      }
     },
     screenshot: (options?: PanelScreenshotOptions) => {
       return rpc.call<PanelScreenshotResult>("main", "panelCdp.screenshot", [id, options]);

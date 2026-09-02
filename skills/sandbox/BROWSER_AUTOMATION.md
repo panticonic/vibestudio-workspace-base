@@ -45,8 +45,9 @@ Three lines to get started for multi-step work:
 3. `let page = session.page` — uses the page fenced to that generation
 
 Do not call `openPanel()`, `handle.cdp.session()`, or `handle.cdp.page()`
-repeatedly for one runtime incarnation: repeated opens create duplicate panels
-and repeated acquisition creates duplicate CDP connections.
+repeatedly for one runtime incarnation: repeated opens create duplicate panels,
+and repeated one-off `page()` acquisition creates duplicate CDP connections.
+Repeated `session()` acquisition on one handle reuses its active session.
 `handle.navigate()` and `handle.rebuild()` replace the runtime incarnation;
 after either resolves, refresh the session and continue with the returned
 session and page.
@@ -181,6 +182,13 @@ separate compatibility tier to choose, and you do not import or install any
 const browser = await openPanel("https://example.com");
 const session = await browser.cdp.session();
 const page = session.page;
+
+try {
+  await page.getByRole("button", { name: "Add list" }).click();
+  await page.getByPlaceholder("List name").waitFor({ state: "visible" });
+} finally {
+  await session.close();
+}
 ```
 
 The handle loads `@workspace/cdp-client` internally; do not import that package
@@ -283,6 +291,11 @@ const rows = await page.locator(".row").all();
 
 ### Navigation
 
+Raw page navigation is browser-panel-only. Workspace pages reject `goto()`,
+`reload()`, `goBack()`, and `goForward()` with
+`cdp_workspace_navigation_forbidden`; use `handle.navigate()`,
+`handle.reload()`, or `handle.rebuild()`, then refresh the active session.
+
 ```typescript
 await page.goto(url); // navigate (waits for load)
 await page.reload();
@@ -290,9 +303,14 @@ await page.goBack();
 await page.goForward();
 page.url(); // current URL
 await page.evaluate(() => location.href); // current URL computed in page context
+await page.evaluate(() => new Promise(() => {}), undefined, { timeout: 5_000 });
 await page.title(); // page title
 await page.content(); // full HTML source
 ```
+
+Pass an evaluation timeout when page code may return a non-settling promise.
+It fails as `cdp_evaluation_timeout` without converting the failure into a
+transport timeout or leaving the request in the client's pending registry.
 
 ### Interaction (auto-wait)
 

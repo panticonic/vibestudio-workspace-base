@@ -178,7 +178,11 @@ export type PanelDiagnosticsResult = PanelDiagnosticPacket;
 export interface CdpAutomation {
   /** The canonical @workspace/cdp-client automation page for this panel target. */
   page(): Promise<CdpPage>;
-  /** Acquire a page fenced to the panel's current immutable runtime attempt. */
+  /**
+   * Acquire the one active page fenced to the panel's current immutable
+   * runtime attempt. Concurrent and repeated acquisition reuses that session
+   * until it is closed or its generation changes.
+   */
   session(): Promise<PanelCdpSession>;
   /**
    * Historical console messages captured by the Electron host from panel

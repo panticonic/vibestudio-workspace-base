@@ -36,6 +36,12 @@ type PendingCommand = {
   timeout: ReturnType<typeof setTimeout>;
 };
 
+type CdpCommandOptions = {
+  timeoutMs?: number;
+  timeoutBehavior?: "disconnect" | "reject";
+  timeoutError?: (timeoutMs: number) => Error;
+};
+
 type CdpEvent = {
   method: string;
   params?: unknown;
@@ -68,7 +74,12 @@ export type CdpDomInspection = {
   }>;
 };
 
-export type BoundingBox = { x: number; y: number; width: number; height: number };
+export type BoundingBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
 export type CdpViewportSize = { width: number; height: number };
 export type CdpScreenshotOptions = {
   type?: "png" | "jpeg";
@@ -383,7 +394,11 @@ export class CdpConnection {
     return new CdpConnection(ws, options.commandTimeoutMs ?? CDP_COMMAND_TIMEOUT_MS);
   }
 
-  send(method: string, params?: Record<string, unknown>): Promise<unknown> {
+  send(
+    method: string,
+    params?: Record<string, unknown>,
+    options: CdpCommandOptions = {}
+  ): Promise<unknown> {
     if (this.closed) {
       const reason =
         this.closeError?.message ??
@@ -400,24 +415,32 @@ export class CdpConnection {
     const id = this.nextId++;
     const message = params ? { id, method, params } : { id, method };
     return new Promise((resolve, reject) => {
+      const timeoutMs = options.timeoutMs ?? this.commandTimeoutMs;
       const timeout = setTimeout(() => {
-        const error = new CdpError(
-          `CDP command timed out after ${this.commandTimeoutMs}ms: ${method}. ` +
-            "The target connection was closed; acquire a fresh page and inspect panel diagnostics.",
-          {
-            code: "cdp_command_timeout",
-            operation: method,
-            failureKind: "infrastructure",
-            recovery: "inspect-panel-and-reacquire-page",
-          }
-        );
+        const error =
+          options.timeoutError?.(timeoutMs) ??
+          new CdpError(
+            `CDP command timed out after ${timeoutMs}ms: ${method}. ` +
+              "The target connection was closed; acquire a fresh page and inspect panel diagnostics.",
+            {
+              code: "cdp_command_timeout",
+              operation: method,
+              failureKind: "infrastructure",
+              recovery: "inspect-panel-and-reacquire-page",
+            }
+          );
+        if (options.timeoutBehavior === "reject") {
+          this.pending.delete(id);
+          reject(error);
+          return;
+        }
         this.disconnect(error);
         try {
           this.ws.close();
         } catch {
           // The transport may already be closed.
         }
-      }, this.commandTimeoutMs);
+      }, timeoutMs);
       this.pending.set(id, { resolve, reject, timeout });
       try {
         this.ws.send(JSON.stringify(message));
@@ -847,19 +870,24 @@ export interface CdpFailureData {
     | "cdp_target_connection_failed"
     | "cdp_target_closed"
     | "cdp_command_timeout"
+    | "cdp_evaluation_timeout"
     | "cdp_evaluation_failed"
     | "cdp_locator_operation_failed"
     | "cdp_locator_not_actionable"
     | "cdp_locator_state_mismatch"
-    | "cdp_interaction_outcome_not_observed";
+    | "cdp_interaction_outcome_not_observed"
+    | "cdp_workspace_navigation_forbidden";
   operation: string;
   failureKind: "user-code" | "infrastructure";
   recovery:
     | "correct-page-function"
     | "reobserve-locator"
     | "reacquire-page"
-    | "inspect-panel-and-reacquire-page";
+    | "inspect-panel-and-reacquire-page"
+    | "use-panel-handle-lifecycle";
   locator?: string;
+  timeoutMs?: number;
+  instruction?: string;
 }
 
 export class CdpError extends Error {
@@ -876,6 +904,8 @@ export class CdpError extends Error {
       operation?: string;
       failureKind?: CdpFailureData["failureKind"];
       recovery?: CdpFailureData["recovery"];
+      timeoutMs?: number;
+      instruction?: string;
     } = {}
   ) {
     super(message);
@@ -890,6 +920,8 @@ export class CdpError extends Error {
       failureKind,
       recovery: options.recovery ?? "reobserve-locator",
       ...(options.locator ? { locator: options.locator } : {}),
+      ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      ...(options.instruction ? { instruction: options.instruction } : {}),
     };
     if (options.cause !== undefined) (this as { cause?: unknown }).cause = options.cause;
   }
@@ -1089,7 +1121,14 @@ class WorkerCdpPage {
   }
 
   async reload(): Promise<void> {
-    await this.connection.send("Page.reload", {});
+    const settled = this.waitForNavigationSettled(this.defaultTimeout);
+    try {
+      await this.connection.send("Page.reload", {});
+      await settled.promise;
+    } catch (error) {
+      settled.cancel();
+      throw error;
+    }
   }
 
   async goBack(): Promise<void> {
@@ -1107,7 +1146,16 @@ class WorkerCdpPage {
     };
     const target = history.entries[history.currentIndex + delta];
     if (!target) return;
-    await this.connection.send("Page.navigateToHistoryEntry", { entryId: target.id });
+    const settled = this.waitForNavigationSettled(this.defaultTimeout);
+    try {
+      await this.connection.send("Page.navigateToHistoryEntry", {
+        entryId: target.id,
+      });
+      await settled.promise;
+    } catch (error) {
+      settled.cancel();
+      throw error;
+    }
   }
 
   async title(): Promise<string> {
@@ -1178,21 +1226,46 @@ class WorkerCdpPage {
   // ---- Evaluate ---------------------------------------------------------
   async evaluate(
     pageFunction: string | ((arg?: unknown) => unknown),
-    arg?: unknown
+    arg?: unknown,
+    options: { timeout?: number; operation?: string } = {}
   ): Promise<unknown> {
     const expression =
       typeof pageFunction === "function"
         ? `(${pageFunction.toString()})(${JSON.stringify(arg)})`
         : pageFunction;
-    const result = (await this.connection.send("Runtime.evaluate", {
-      expression,
-      awaitPromise: true,
-      returnByValue: true,
-    })) as { result?: { value?: unknown }; exceptionDetails?: RuntimeExceptionDetails };
+    const operation = options.operation ?? "Runtime.evaluate";
+    const result = (await this.connection.send(
+      "Runtime.evaluate",
+      {
+        expression,
+        awaitPromise: true,
+        returnByValue: true,
+      },
+      options.timeout === undefined
+        ? {}
+        : {
+            timeoutMs: options.timeout,
+            timeoutBehavior: "reject",
+            timeoutError: (timeoutMs) =>
+              new CdpError(
+                `Browser evaluation timed out after ${timeoutMs}ms during ${operation}.`,
+                {
+                  code: "cdp_evaluation_timeout",
+                  operation,
+                  failureKind: "user-code",
+                  recovery: "reobserve-locator",
+                  timeoutMs,
+                }
+              ),
+          }
+    )) as {
+      result?: { value?: unknown };
+      exceptionDetails?: RuntimeExceptionDetails;
+    };
     if (result.exceptionDetails) {
       throw new CdpError(formatRuntimeException(result.exceptionDetails), {
         code: "cdp_evaluation_failed",
-        operation: "Runtime.evaluate",
+        operation,
         recovery: "correct-page-function",
       });
     }
@@ -1217,11 +1290,26 @@ class WorkerCdpPage {
       payload
     )})`;
     try {
-      return await this.evaluate(expr);
+      const timeout = payload.timeout;
+      return await this.evaluate(expr, undefined, {
+        timeout: timeout + 1_000,
+        operation: `locator.${op}`,
+      });
     } catch (err) {
-      if (err instanceof CdpError && err.errorData.failureKind === "infrastructure") throw err;
       const where = describeLocator(descriptor);
       const detail = err instanceof Error ? err.message : String(err);
+      if (err instanceof CdpError) {
+        throw new CdpError(`${op} failed on ${where}: ${detail}`, {
+          cause: err,
+          locator: where,
+          code: err.code,
+          operation: op,
+          failureKind: err.errorData.failureKind,
+          recovery: err.errorData.recovery,
+          timeoutMs: err.errorData.timeoutMs,
+          instruction: err.errorData.instruction,
+        });
+      }
       throw new CdpError(`${op} failed on ${where}: ${detail}`, {
         cause: err,
         locator: where,
@@ -1234,7 +1322,9 @@ class WorkerCdpPage {
 
   // ---- Locators ---------------------------------------------------------
   locator(selector: string): WorkerCdpLocator {
-    return new WorkerCdpLocator(this, { steps: [compileLocatorSelector(selector)] });
+    return new WorkerCdpLocator(this, {
+      steps: [compileLocatorSelector(selector)],
+    });
   }
   getByRole(role: string, options: ByRoleOptions = {}): WorkerCdpLocator {
     return new WorkerCdpLocator(this, {
@@ -1255,16 +1345,30 @@ class WorkerCdpPage {
   }
   getByLabel(text: TextMatcher, options: ByTextOptions = {}): WorkerCdpLocator {
     return new WorkerCdpLocator(this, {
-      steps: [{ by: "label", value: serializeTextMatcher(text), exact: options.exact }],
+      steps: [
+        {
+          by: "label",
+          value: serializeTextMatcher(text),
+          exact: options.exact,
+        },
+      ],
     });
   }
   getByPlaceholder(text: TextMatcher, options: ByTextOptions = {}): WorkerCdpLocator {
     return new WorkerCdpLocator(this, {
-      steps: [{ by: "placeholder", value: serializeTextMatcher(text), exact: options.exact }],
+      steps: [
+        {
+          by: "placeholder",
+          value: serializeTextMatcher(text),
+          exact: options.exact,
+        },
+      ],
     });
   }
   getByTestId(testId: string): WorkerCdpLocator {
-    return new WorkerCdpLocator(this, { steps: [{ by: "testid", value: testId }] });
+    return new WorkerCdpLocator(this, {
+      steps: [{ by: "testid", value: testId }],
+    });
   }
   getByAltText(text: TextMatcher, options: ByTextOptions = {}): WorkerCdpLocator {
     return new WorkerCdpLocator(this, {
@@ -1273,7 +1377,13 @@ class WorkerCdpPage {
   }
   getByTitle(text: TextMatcher, options: ByTextOptions = {}): WorkerCdpLocator {
     return new WorkerCdpLocator(this, {
-      steps: [{ by: "title", value: serializeTextMatcher(text), exact: options.exact }],
+      steps: [
+        {
+          by: "title",
+          value: serializeTextMatcher(text),
+          exact: options.exact,
+        },
+      ],
     });
   }
 
@@ -1357,7 +1467,9 @@ class WorkerCdpPage {
     const loc = this.locator(selector);
     await loc.waitFor(options);
     if (options.state === "detached" || options.state === "hidden") return null;
-    return new WorkerCdpElementHandle(this, { steps: [{ by: "css", value: selector }] });
+    return new WorkerCdpElementHandle(this, {
+      steps: [{ by: "css", value: selector }],
+    });
   }
 
   // ---- Pointer / keyboard primitives (CDP Input) ------------------------
@@ -1411,6 +1523,7 @@ class WorkerCdpPage {
           code: "cdp_locator_not_actionable",
           operation: "click",
           recovery: "reobserve-locator",
+          timeoutMs: timeout,
         }
       );
     }
@@ -1471,7 +1584,10 @@ class WorkerCdpPage {
     }
     const state = opts.expect.state ?? "visible";
     try {
-      await opts.expect.locator.waitFor({ state, timeout: opts.expect.timeout ?? opts.timeout });
+      await opts.expect.locator.waitFor({
+        state,
+        timeout: opts.expect.timeout ?? opts.timeout,
+      });
     } catch (cause) {
       const expectedLocator = opts.expect.locator.toString();
       throw new CdpError(
@@ -1514,7 +1630,9 @@ class WorkerCdpPage {
     key: string,
     opts: ActionOptions = {}
   ): Promise<void> {
-    await this.runLocatorOp("focusForKey", descriptor, null, { timeout: opts.timeout });
+    await this.runLocatorOp("focusForKey", descriptor, null, {
+      timeout: opts.timeout,
+    });
     await this.pressKey(key);
   }
 
@@ -1572,7 +1690,10 @@ class WorkerCdpPage {
           windowsVirtualKeyCode: def.keyCode,
           nativeVirtualKeyCode: def.keyCode,
         }
-      : { key: normalized, text: normalized.length === 1 ? normalized : undefined };
+      : {
+          key: normalized,
+          text: normalized.length === 1 ? normalized : undefined,
+        };
   }
 
   private async keyDown(key: string): Promise<void> {
@@ -1695,7 +1816,9 @@ class WorkerCdpLocator {
   ) {}
 
   private extend(step: LocatorStep): WorkerCdpLocator {
-    return new WorkerCdpLocator(this.page, { steps: [...this.descriptor.steps, step] });
+    return new WorkerCdpLocator(this.page, {
+      steps: [...this.descriptor.steps, step],
+    });
   }
 
   /** Playwright-style description, e.g. `getByRole("button", { name: "Go" })`. */
@@ -1716,10 +1839,18 @@ class WorkerCdpLocator {
     });
   }
   getByText(text: TextMatcher, options: ByTextOptions = {}): WorkerCdpLocator {
-    return this.extend({ by: "text", value: serializeTextMatcher(text), exact: options.exact });
+    return this.extend({
+      by: "text",
+      value: serializeTextMatcher(text),
+      exact: options.exact,
+    });
   }
   getByLabel(text: TextMatcher, options: ByTextOptions = {}): WorkerCdpLocator {
-    return this.extend({ by: "label", value: serializeTextMatcher(text), exact: options.exact });
+    return this.extend({
+      by: "label",
+      value: serializeTextMatcher(text),
+      exact: options.exact,
+    });
   }
   getByPlaceholder(text: TextMatcher, options: ByTextOptions = {}): WorkerCdpLocator {
     return this.extend({
@@ -1732,10 +1863,18 @@ class WorkerCdpLocator {
     return this.extend({ by: "testid", value: testId });
   }
   getByAltText(text: TextMatcher, options: ByTextOptions = {}): WorkerCdpLocator {
-    return this.extend({ by: "alt", value: serializeTextMatcher(text), exact: options.exact });
+    return this.extend({
+      by: "alt",
+      value: serializeTextMatcher(text),
+      exact: options.exact,
+    });
   }
   getByTitle(text: TextMatcher, options: ByTextOptions = {}): WorkerCdpLocator {
-    return this.extend({ by: "title", value: serializeTextMatcher(text), exact: options.exact });
+    return this.extend({
+      by: "title",
+      value: serializeTextMatcher(text),
+      exact: options.exact,
+    });
   }
   filter(options: { hasText?: TextMatcher; hasTextExact?: boolean } = {}): WorkerCdpLocator {
     return this.extend({
@@ -1766,7 +1905,10 @@ class WorkerCdpLocator {
     return this.page.clickDescriptor(this.descriptor, opts);
   }
   async dblclick(opts: ClickOptions = {}): Promise<CdpInteractionOutcome> {
-    return this.page.clickDescriptor(this.descriptor, { ...opts, clickCount: 2 });
+    return this.page.clickDescriptor(this.descriptor, {
+      ...opts,
+      clickCount: 2,
+    });
   }
   async hover(opts: ActionOptions = {}): Promise<void> {
     await this.page.hoverDescriptor(this.descriptor, opts);
@@ -1817,15 +1959,9 @@ class WorkerCdpLocator {
       }
       const keys = Object.keys(option);
       if (keys.length === 0 || keys.some((key) => !["value", "label", "index"].includes(key))) {
-        throw new TypeError(
-          "selectOption option objects may only contain value, label, or index"
-        );
+        throw new TypeError("selectOption option objects may only contain value, label, or index");
       }
-      if (
-        option.value === undefined &&
-        option.label === undefined &&
-        option.index === undefined
-      ) {
+      if (option.value === undefined && option.label === undefined && option.index === undefined) {
         throw new TypeError("selectOption option objects require value, label, or index");
       }
       if (option.value !== undefined && typeof option.value !== "string") {
@@ -1834,10 +1970,7 @@ class WorkerCdpLocator {
       if (option.label !== undefined && typeof option.label !== "string") {
         throw new TypeError("selectOption option.label must be a string");
       }
-      if (
-        option.index !== undefined &&
-        (!Number.isInteger(option.index) || option.index < 0)
-      ) {
+      if (option.index !== undefined && (!Number.isInteger(option.index) || option.index < 0)) {
         throw new TypeError("selectOption option.index must be a non-negative integer");
       }
     }
