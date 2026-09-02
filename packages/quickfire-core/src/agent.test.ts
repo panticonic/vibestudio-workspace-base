@@ -22,8 +22,10 @@ describe("quickfire agent referent contract", () => {
       'await panelTree.page({ group: { kind: "children", parentSlotId }, limit: 50 })',
     );
     expect(QUICKFIRE_AGENT_PROMPT).toContain(
-      "await panelTree.search({ query, limit: 20 })",
+      "const { hits } = await panelTree.search({ query, limit: 20 })",
     );
+    expect(QUICKFIRE_AGENT_PROMPT).toContain("{ entry: { node, handle }, ancestors }");
+    expect(QUICKFIRE_AGENT_PROMPT).toContain('require `authority.effects: "read-write"`');
     expect(QUICKFIRE_AGENT_PROMPT).toContain(
       'const handle = await openPanel(source, { parentId, focus: true, placement: { disposition: "side" } })',
     );
