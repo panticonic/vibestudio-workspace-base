@@ -36,7 +36,11 @@ export interface PanelHandleMetadata {
 }
 
 export interface PanelHandleHostOps {
-  call?(id: string, method: string, args: unknown[]): Promise<unknown>;
+  call?(
+    id: string,
+    method: string,
+    args: unknown[],
+  ): Promise<{ result: unknown; observation: PanelObservation }>;
   refresh?(id: string): Promise<PanelHandleMetadata>;
   observe?(id: string): Promise<PanelObservation>;
   diagnose?(id: string): Promise<PanelDiagnosticPacket>;
@@ -126,9 +130,6 @@ export function createPanelHandle<
     });
     return rpcTargetResolvePromise;
   };
-  const call = ops?.call
-    ? createInvocationProxy<T>((method, args) => ops.call!(metadata.id, method, args))
-    : createCallProxy<T>(rpc, resolveRpcTargetId);
   const rememberObservation = (observation: PanelObservation): PanelObservation => {
     metadata = normalizeMetadata({
       ...metadata,
@@ -147,6 +148,13 @@ export function createPanelHandle<
     rpcTargetResolvePromise = null;
     return observation;
   };
+  const call = ops?.call
+    ? createInvocationProxy<T>(async (method, args) => {
+        const invocation = await ops.call!(metadata.id, method, args);
+        rememberObservation(invocation.observation);
+        return invocation.result;
+      })
+    : createCallProxy<T>(rpc, resolveRpcTargetId);
   const lifecycle = async (operation: () => Promise<PanelObservation>) => {
     try {
       return rememberObservation(await operation());

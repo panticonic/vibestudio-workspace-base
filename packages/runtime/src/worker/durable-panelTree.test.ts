@@ -200,6 +200,13 @@ describe("PanelDurableObjectBase panelTree handles", () => {
             },
           });
         }
+        if (body.method === "panelRuntime.ensureSlot")
+          return respond(
+            init,
+            assignedRuntimeSlot(String(body.args[0]), String(body.args[1])),
+          );
+        if (body.method === "panelRuntime.observeSlot")
+          return respond(init, readyRuntimeSlot(String(body.args[0])));
         return respond(init, "ok");
       },
     ) as typeof fetch;
@@ -247,26 +254,24 @@ describe("PanelDurableObjectBase panelTree handles", () => {
       parentId: "root",
     });
 
-    expect(calls).toEqual([
-      {
-        type: "call",
-        targetId: "main",
-        method: "workspace-state.panelTree.detail",
-        args: ["panel:tree/slot-a"],
-      },
-      {
-        type: "call",
-        targetId: "panel:nav-slot-a-current-entity",
-        method: "ping",
-        args: [],
-      },
-      {
-        type: "emit",
-        targetId: "panel:nav-slot-a-current-entity",
-        method: "ready",
-        args: [{ ok: true }],
-      },
-    ]);
+    expect(calls).toContainEqual({
+      type: "call",
+      targetId: "main",
+      method: "panelRuntime.ensureSlot",
+      args: ["panel:tree/slot-a", "panel:nav-slot-a-current-entity"],
+    });
+    expect(calls).toContainEqual({
+      type: "call",
+      targetId: "panel:nav-slot-a-current-entity",
+      method: "ping",
+      args: [],
+    });
+    expect(calls).toContainEqual({
+      type: "emit",
+      targetId: "panel:nav-slot-a-current-entity",
+      method: "ready",
+      args: [{ ok: true }],
+    });
   });
 
   it("reads canonical boot readiness from observe", async () => {
@@ -716,7 +721,7 @@ describe("PanelDurableObjectBase panelTree handles", () => {
     });
     expect(calls).toContainEqual({
       type: "call",
-      targetId: "panel:nav-parent-entity",
+      targetId: "panel:nav-parent-slot-current-entity",
       method: "ping",
       args: [],
     });

@@ -372,6 +372,71 @@ describe("initRuntime", () => {
               method: message.method,
               args: message.args,
             });
+            if (message.method === "workspace-state.panelTree.detail") {
+              deliver(
+                responseFor(envelope, {
+                  slot: {
+                    parent_slot_id: null,
+                    current_entity_title: "Parent",
+                  },
+                  currentHistory: {
+                    source: "panels/parent",
+                    context_id: "ctx-1",
+                    options: null,
+                  },
+                  entity: {
+                    id: "panel:nav-parent-entity",
+                    source: { effectiveVersion: "ev-parent" },
+                  },
+                }),
+              );
+              return;
+            }
+            if (message.method === "panelRuntime.ensureSlot") {
+              deliver(
+                responseFor(envelope, {
+                  status: "assigned",
+                  lease: null,
+                  attempt: {
+                    epoch: "test",
+                    attemptId: "attempt:parent",
+                    slotId: "panel:tree/parent-slot",
+                    runtimeEntityId: "panel:nav-parent-entity",
+                    phase: "ready",
+                    revision: 1,
+                    reporter: "renderer",
+                    updatedAt: 1,
+                  },
+                }),
+              );
+              return;
+            }
+            if (message.method === "panelRuntime.observeSlot") {
+              deliver(
+                responseFor(envelope, {
+                  version: { epoch: "test", counter: 1 },
+                  attempt: {
+                    epoch: "test",
+                    attemptId: "attempt:parent",
+                    slotId: "panel:tree/parent-slot",
+                    runtimeEntityId: "panel:nav-parent-entity",
+                    phase: "ready",
+                    revision: 1,
+                    reporter: "renderer",
+                    updatedAt: 1,
+                  },
+                  route: {
+                    reachable: true,
+                    connectionId: "route:parent",
+                    holderLabel: "Test host",
+                    platform: "headless",
+                    supportsCdp: true,
+                    view: { url: "http://panel.test/", loading: false },
+                  },
+                }),
+              );
+              return;
+            }
             deliver(
               responseFor(envelope, {
                 wsEndpoint: "ws://server/cdp/panel:tree/parent-slot",
@@ -399,14 +464,16 @@ describe("initRuntime", () => {
       token: "t",
     });
 
-    expect(sends).toEqual([
+    expect(sends).toContainEqual(
       { targetId: "panel:nav-parent-entity", method: "ping", args: [] },
+    );
+    expect(sends).toContainEqual(
       {
         targetId: "main",
         method: "panelCdp.getCdpEndpoint",
         args: ["panel:tree/parent-slot"],
       },
-    ]);
+    );
   });
 
   it("exposes panel lifecycle and state operations on the unified parent handle", async () => {

@@ -1280,8 +1280,7 @@ export function createPanelRuntime(
   };
 
   const ops: PanelHandleHostOps = {
-    call: async (id, method, args) =>
-      (await invokeReadyPanelAgent(id, method, args)).result,
+    call: (id, method, args) => invokeReadyPanelAgent(id, method, args),
     refresh: async (id) => {
       const meta = await readMetadata(id);
       return meta

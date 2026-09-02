@@ -385,12 +385,16 @@ describe("PanelHandle", () => {
       payload: { ignored: true },
     });
     eventHandlers[0]?.({
-      caller: { callerId: "panel:child-entity" },
+      caller: { callerId: "panel:nav-child-1-entity" },
       payload: { ok: true },
     });
 
-    expect(rpcCall).toHaveBeenCalledWith("panel:child-entity", "ping", []);
-    expect(rpcEmit).toHaveBeenCalledWith("panel:child-entity", "ready", {
+    expect(rpcCall).toHaveBeenCalledWith(
+      "panel:nav-child-1-entity",
+      "ping",
+      [],
+    );
+    expect(rpcEmit).toHaveBeenCalledWith("panel:nav-child-1-entity", "ready", {
       ok: true,
     });
     expect(rpcOn).toHaveBeenCalledWith("status", expect.any(Function));
@@ -431,8 +435,12 @@ describe("PanelHandle", () => {
       preserved: true,
     });
 
-    expect(rpcCall).toHaveBeenCalledWith("panel:child-entity", "ping", []);
-    expect(rpcEmit).toHaveBeenCalledWith("panel:child-entity", "ready", {
+    expect(rpcCall).toHaveBeenCalledWith(
+      "panel:nav-child-1-entity",
+      "ping",
+      [],
+    );
+    expect(rpcEmit).toHaveBeenCalledWith("panel:nav-child-1-entity", "ready", {
       ok: true,
     });
     expect(rpcCall).toHaveBeenCalledWith(

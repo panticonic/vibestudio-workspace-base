@@ -72,6 +72,7 @@ describe("ConnectionManager", () => {
           expect.objectContaining({
             replayMessageLimit: 50,
           }),
+          expect.any(String),
         ],
         { signal: expect.any(AbortSignal) }
       );
@@ -79,7 +80,10 @@ describe("ConnectionManager", () => {
     await manager.disconnect();
 
     await expect(connectPromise).rejects.toThrow("ready aborted");
-    expect(config.rpc!.call).toHaveBeenCalledWith(CHANNEL_TARGET, "unsubscribe", ["panel:panel-1"]);
+    expect(config.rpc!.call).toHaveBeenCalledWith(CHANNEL_TARGET, "unsubscribe", [
+      "panel:panel-1",
+      expect.any(String),
+    ]);
   });
 
   it("bounds an explicit replay message limit to the canonical page maximum", async () => {
@@ -99,6 +103,7 @@ describe("ConnectionManager", () => {
           expect.objectContaining({
             replayMessageLimit: 500,
           }),
+          expect.any(String),
         ],
         { signal: expect.any(AbortSignal) }
       );
