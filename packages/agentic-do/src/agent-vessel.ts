@@ -13,12 +13,12 @@
  */
 
 import {
-  DurableObjectBase,
   type DurableObjectContext,
   type LifecyclePrepareInput,
   type LifecyclePrepareResult,
   type LifecycleResumeInput,
 } from "@workspace/runtime/worker/durable-base";
+import { PanelDurableObjectBase } from "@workspace/runtime/worker/panel-durable-base";
 import { assertExactSqlTableSchema } from "@workspace/runtime/worker/sql-table-schema";
 import {
   RemoteRpcError,
@@ -720,7 +720,7 @@ type DeferredEvalGateResult =
       failure?: ReturnType<typeof agentToolFailureFromUnknown>;
     };
 
-export abstract class AgentVesselBase extends DurableObjectBase {
+export abstract class AgentVesselBase extends PanelDurableObjectBase {
   static override schemaVersion = 3;
 
   protected readonly identity: DOIdentity;
@@ -5911,15 +5911,11 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       );
     }
     const requestedMissionId =
-      typeof input["missionId"] === "string"
-        ? input["missionId"].trim()
-        : "";
+      typeof input["missionId"] === "string" ? input["missionId"].trim() : "";
     const requestedName =
       typeof input["name"] === "string" ? input["name"].trim() : "";
     if (requestedMissionId && requestedName) {
-      throw new Error(
-        "control_automation accepts missionId or name, not both",
-      );
+      throw new Error("control_automation accepts missionId or name, not both");
     }
 
     const target = await this.automationServiceTarget(callerRpc);
