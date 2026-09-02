@@ -1569,8 +1569,20 @@ export class PubSubChannel extends DurableObjectBase {
       this.sql
         .exec(
           `SELECT 1
-             FROM channel_delivery_mailbox
-            WHERE state IN ('ready', 'retrying') AND next_attempt_at <= ?
+             FROM channel_delivery_mailbox AS current
+             JOIN channel_relationships AS relationship
+               ON relationship.participant_id = current.participant_id
+            WHERE current.state IN ('ready', 'retrying')
+              AND current.next_attempt_at <= ?
+              AND relationship.active = 1
+              AND relationship.attached = 1
+              AND NOT EXISTS (
+                SELECT 1
+                  FROM channel_delivery_mailbox AS blocker
+                 WHERE blocker.participant_id = current.participant_id
+                   AND blocker.event_sequence < current.event_sequence
+                   AND blocker.state NOT LIKE 'terminal-%'
+              )
             LIMIT 1`,
           now,
         )

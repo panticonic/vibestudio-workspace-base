@@ -1706,8 +1706,12 @@ describe("PubSubChannel", () => {
         limit: 1,
       }),
     ).toEqual([]);
-
     const retryAt = (failed as { retryAt: number }).retryAt;
+    expect(instance.durableWorkStatus()).toMatchObject({
+      readyQueues: [],
+      nextRecoveryAt: retryAt,
+    });
+
     const [retry] = instance.claimReadyWork("channel-delivery", {
       workerId: "driver-1",
       now: retryAt,
