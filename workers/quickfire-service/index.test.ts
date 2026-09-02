@@ -49,6 +49,7 @@ class TestQuickfireSessionsDO extends QuickfireSessionsDO {
         if (method === "getReplayAfter")
           return { ready: { snapshotLastSeq: 0 } };
         if (
+          method === "runtime.replaceResourceBindings" ||
           method === "runtime.releaseResourceBindings" ||
           method === "runtime.retireEntity" ||
           method === "interruptChannel" ||
@@ -98,7 +99,9 @@ describe("QuickfireSessionsDO", () => {
     expect(spec.stateArgs.agentConfig["systemPrompt"]).toContain(
       "<initial-panel-context>",
     );
-    expect(spec.stateArgs.agentConfig["systemPrompt"]).toContain("title: Build log");
+    expect(spec.stateArgs.agentConfig["systemPrompt"]).toContain(
+      "title: Build log",
+    );
     expect(spec.stateArgs.agentConfig).not.toHaveProperty("approvalLevel");
     expect(spec.resourceBindings).toEqual([
       {
@@ -141,6 +144,27 @@ describe("QuickfireSessionsDO", () => {
           (args[0] as { className?: string }).className === "AiChatWorker",
       ),
     ).toHaveLength(1);
+    expect(instance.calls).toContainEqual({
+      target: "main",
+      method: "runtime.replaceResourceBindings",
+      args: [
+        {
+          id: resumed.agentEntityId,
+          bindings: [
+            {
+              resource: { kind: "panel-slot", id: "slot-a" },
+              capabilities: ["panel.inspect"],
+              scope: { kind: "agent-channel", channelId: first.channelId },
+            },
+            {
+              resource: { kind: "workspace-diagnostics", id: "server-logs" },
+              capabilities: ["server-logs.read"],
+              scope: { kind: "agent-channel", channelId: first.channelId },
+            },
+          ],
+        },
+      ],
+    });
   });
 
   it("promotion detaches the panel relationship and keeps the same ordinary agent/channel", async () => {

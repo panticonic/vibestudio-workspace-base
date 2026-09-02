@@ -1846,6 +1846,7 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
 
   interface ActiveSubscription {
     generation: number;
+    subscriptionId: string;
     controller: AbortController;
     terminal: Promise<void>;
     acknowledged: boolean;
@@ -1888,6 +1889,7 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
   ): Promise<void> {
     const previous = activeSubscription;
     const generation = ++subscriptionGeneration;
+    const subscriptionId = crypto.randomUUID();
     const controller = new AbortController();
 
     let resolveAck!: () => void;
@@ -1900,6 +1902,7 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
 
     const subscription: ActiveSubscription = {
       generation,
+      subscriptionId,
       controller,
       terminal: Promise.resolve(),
       acknowledged: false,
@@ -1969,7 +1972,7 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
         const response = await rpc.stream(
           await getDoTarget(controller.signal),
           "subscribe",
-          [deliveryId, metadata],
+          [deliveryId, metadata, subscriptionId],
           { signal: controller.signal }
         );
         for await (const record of readChannelSubscriptionRecords<
@@ -2612,7 +2615,7 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
             });
             await residentRegistration?.relationshipEnded?.();
           } else {
-            await callChannel("unsubscribe", pid);
+            await callChannel("unsubscribe", pid, subscription.subscriptionId);
           }
         }
       } catch (error) {

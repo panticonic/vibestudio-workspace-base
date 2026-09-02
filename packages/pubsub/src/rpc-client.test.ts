@@ -375,6 +375,7 @@ describe("connectViaRpc", () => {
             replay: true,
             replayMessageLimit: 500,
           }),
+          expect.any(String),
         ],
         { signal: expect.any(AbortSignal) }
       );
@@ -735,7 +736,10 @@ describe("connectViaRpc", () => {
         settled = true;
       });
       await vi.waitFor(() => {
-        expect(mockRpc.call).toHaveBeenCalledWith(DO_TARGET, "unsubscribe", [SELF_ID]);
+        expect(mockRpc.call).toHaveBeenCalledWith(DO_TARGET, "unsubscribe", [
+          SELF_ID,
+          expect.any(String),
+        ]);
       });
       expect(settled).toBe(false);
 
@@ -843,7 +847,10 @@ describe("connectViaRpc", () => {
       ]);
 
       await client.close();
-      expect(mockRpc.call).toHaveBeenCalledWith(DO_TARGET, "unsubscribe", ["user:usr_alice"]);
+      expect(mockRpc.call).toHaveBeenCalledWith(DO_TARGET, "unsubscribe", [
+        "user:usr_alice",
+        expect.any(String),
+      ]);
     });
 
     it("resolves ready() from the subscribe acknowledgment after applying fallback replay", async () => {
@@ -2362,7 +2369,10 @@ describe("connectViaRpc", () => {
 
       await client.close();
 
-      expect(mockRpc.call).toHaveBeenCalledWith(DO_TARGET, "unsubscribe", [SELF_ID]);
+      expect(mockRpc.call).toHaveBeenCalledWith(DO_TARGET, "unsubscribe", [
+        SELF_ID,
+        expect.any(String),
+      ]);
 
       // Verify disconnect handler fired
       expect(disconnectFn).toHaveBeenCalledTimes(1);

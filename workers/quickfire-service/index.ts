@@ -12,6 +12,21 @@ const CHANNEL_CLASS = "PubSubChannel";
 const AGENT_SOURCE = "workers/agent-worker";
 const AGENT_CLASS = "AiChatWorker";
 
+function agentResourceBindings(slotId: string, channelId: string) {
+  return [
+    {
+      resource: { kind: "panel-slot", id: slotId },
+      capabilities: ["panel.inspect"],
+      scope: { kind: "agent-channel" as const, channelId },
+    },
+    {
+      resource: { kind: "workspace-diagnostics", id: "server-logs" },
+      capabilities: ["server-logs.read"],
+      scope: { kind: "agent-channel" as const, channelId },
+    },
+  ];
+}
+
 interface SessionRow {
   slot_id: string;
   channel_id: string;
@@ -70,7 +85,8 @@ export class QuickfireSessionsDO extends DurableObjectBase {
     )) as PanelTreeDetail | null;
     const contextId = detail?.currentHistory?.context_id;
     const source = detail?.currentHistory?.source;
-    if (!contextId || !source) throw new Error(`Panel slot is not open: ${slotId}`);
+    if (!contextId || !source)
+      throw new Error(`Panel slot is not open: ${slotId}`);
     return {
       contextId,
       title: detail.slot?.current_entity_title ?? null,
@@ -203,6 +219,17 @@ export class QuickfireSessionsDO extends DurableObjectBase {
     }
     if (existing && input.fresh !== true) {
       await this.panelFor(input.slotId);
+      if (existing.promoted_at === null) {
+        // Resource bindings are lifecycle state, not immutable launch state.
+        // Reconcile them when an older durable Quickfire conversation resumes
+        // so newly added built-in grants apply without replacing the agent.
+        await this.rpc.call("main", "runtime.replaceResourceBindings", [
+          {
+            id: existing.agent_entity_id,
+            bindings: agentResourceBindings(input.slotId, existing.channel_id),
+          },
+        ]);
+      }
       return this.present(
         existing,
         existing.promoted_at === null ? "resumed" : "promoted",
@@ -227,18 +254,7 @@ export class QuickfireSessionsDO extends DurableObjectBase {
       key: agentKey,
       channelId,
       config: quickfireAgentConfig(input.slotId, panel),
-      resourceBindings: [
-        {
-          resource: { kind: "panel-slot", id: input.slotId },
-          capabilities: ["panel.inspect"],
-          scope: { kind: "agent-channel", channelId },
-        },
-        {
-          resource: { kind: "workspace-diagnostics", id: "server-logs" },
-          capabilities: ["server-logs.read"],
-          scope: { kind: "agent-channel", channelId },
-        },
-      ],
+      resourceBindings: agentResourceBindings(input.slotId, channelId),
       replay: true,
       retireEntityOnSubscribeFailure: true,
     });

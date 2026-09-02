@@ -28,9 +28,9 @@ const testSubscriptions = new WeakMap<
 
 function testSubscriptionKey(
   participantId: string,
-  deliveryId: string,
+  subscriptionId: string,
 ): string {
-  return `${participantId}\u0000${deliveryId}`;
+  return `${participantId}\u0000${subscriptionId}`;
 }
 
 async function closeTestSubscription(
@@ -74,7 +74,7 @@ function setRpcCaller(
     const original = instance.subscribe.bind(instance);
     (
       instance as unknown as { subscribe: PubSubChannel["subscribe"] }
-    ).subscribe = async (participantId, metadata) => {
+    ).subscribe = async (participantId, metadata, subscriptionId) => {
       const caller = (
         instance as unknown as {
           _currentVerifiedCaller?: {
@@ -85,7 +85,12 @@ function setRpcCaller(
       )._currentVerifiedCaller;
       const deliveryId =
         caller?.callerPanelId ?? caller?.callerId ?? participantId;
-      const response = await original(participantId, metadata);
+      const ownedSubscriptionId = subscriptionId ?? deliveryId;
+      const response = await original(
+        participantId,
+        metadata,
+        ownedSubscriptionId,
+      );
       if (!response.body) throw new Error("test subscription returned no body");
       const reader = response.body.getReader();
       const firstChunk = await reader.read();
@@ -105,7 +110,7 @@ function setRpcCaller(
       const byKey = testSubscriptions.get(instance) ?? new Map();
       testSubscriptions.set(instance, byKey);
       byKey.set(
-        testSubscriptionKey(canonicalParticipantId, deliveryId),
+        testSubscriptionKey(canonicalParticipantId, ownedSubscriptionId),
         reader,
       );
       const sink = subscriptionSinks.get(instance);
@@ -767,10 +772,33 @@ describe("PubSubChannel", () => {
       new Set(["panel:slot-a", "panel:slot-b"]),
     );
 
-    // Each endpoint owns only its response body. Cancelling one releases just
-    // that response even though both share the canonical actor id.
-    await closeTestSubscription(instance, "user:usr_alice", "panel:slot-b");
+    // Cooperative unsubscribe has the same delivery-local ownership as body
+    // cancellation. Closing one UI must not retire another UI's response or
+    // end their shared human relationship.
+    setRpcCaller(instance, "panel:nav-b", "panel", "panel:slot-b", "usr_alice");
+    await expect(
+      instance.unsubscribe("user:usr_alice", "panel:slot-a"),
+    ).rejects.toThrow(/owned by another delivery/u);
+    await expect(instance.getChannelPresence()).resolves.toMatchObject({
+      entries: [{ participantId: "user:usr_alice", sessionCount: 2 }],
+    });
+    await instance.unsubscribe("user:usr_alice");
     expect(sql.exec(`SELECT id FROM participants`).toArray()).toHaveLength(1);
+    await expect(instance.getChannelPresence()).resolves.toMatchObject({
+      entries: [{ participantId: "user:usr_alice", sessionCount: 1 }],
+    });
+
+    emittedTargets.length = 0;
+    await instance.publish(
+      "user:usr_alice",
+      AGENTIC_EVENT_PAYLOAD_KIND,
+      agenticEvent(),
+      {
+        idempotencyKey: "human-publish-after-one-close",
+      },
+    );
+    await Promise.resolve();
+    expect(emittedTargets).toEqual(["panel:slot-a"]);
 
     await closeTestSubscription(instance, "user:usr_alice", "panel:slot-a");
     expect(sql.exec(`SELECT id FROM participants`).toArray()).toHaveLength(0);
@@ -787,6 +815,25 @@ describe("PubSubChannel", () => {
         },
       ],
     });
+  });
+
+  it("does not let a superseded client's late unsubscribe close its replacement", async () => {
+    const { instance } = await createGadBackedChannel();
+    setRpcCaller(instance, "app:apps/shell:main", "app", null, "usr_alice");
+    const metadata = {
+      contextId: "ctx-1",
+      name: "Shell",
+      type: "client",
+    };
+
+    await instance.subscribe("app:apps/shell:main", metadata, "quickfire-old");
+    await instance.subscribe("app:apps/shell:main", metadata, "quickfire-new");
+    await instance.unsubscribe("user:usr_alice", "quickfire-old");
+
+    await expect(instance.getChannelPresence()).resolves.toMatchObject({
+      entries: [{ participantId: "user:usr_alice", sessionCount: 1 }],
+    });
+    await closeTestSubscription(instance, "user:usr_alice", "quickfire-new");
   });
 
   it("uses authenticated delivery identity without a client session namespace", async () => {

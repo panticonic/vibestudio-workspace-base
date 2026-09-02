@@ -401,6 +401,7 @@ export class PubSubChannel extends DurableObjectBase {
     {
       participantId: string;
       deliveryId: string;
+      subscriptionId: string;
       token: symbol;
       openedAt: number;
       controller: ReadableStreamDefaultController<Uint8Array>;
@@ -2184,9 +2185,9 @@ export class PubSubChannel extends DurableObjectBase {
 
   private subscriptionStreamKey(
     participantId: string,
-    deliveryId: string,
+    subscriptionId: string,
   ): string {
-    return `${participantId}\u0000${deliveryId}`;
+    return `${participantId}\u0000${subscriptionId}`;
   }
 
   private async deliverParticipantPayload(
@@ -2235,17 +2236,18 @@ export class PubSubChannel extends DurableObjectBase {
     await this.unsubscribeParticipant(
       stream.participantId,
       "disconnect",
-      stream.deliveryId,
+      stream.subscriptionId,
     );
   }
 
   private openSubscriptionResponse(
     participantId: string,
     deliveryId: string,
+    subscriptionId: string,
     replaceParticipant: boolean,
     result: SubscribeResult,
   ): Response {
-    const key = this.subscriptionStreamKey(participantId, deliveryId);
+    const key = this.subscriptionStreamKey(participantId, subscriptionId);
     const token = Symbol(key);
     for (const [streamKey, previous] of [...this.subscriptionStreams]) {
       if (
@@ -2267,6 +2269,7 @@ export class PubSubChannel extends DurableObjectBase {
           this.subscriptionStreams.set(key, {
             participantId,
             deliveryId,
+            subscriptionId,
             token,
             openedAt: Date.now(),
             controller,
@@ -2290,7 +2293,7 @@ export class PubSubChannel extends DurableObjectBase {
           await this.unsubscribeParticipant(
             participantId,
             "disconnect",
-            deliveryId,
+            subscriptionId,
           );
         },
       },
@@ -2306,9 +2309,9 @@ export class PubSubChannel extends DurableObjectBase {
 
   private closeSubscriptionStream(
     participantId: string,
-    deliveryId: string,
+    subscriptionId: string,
   ): void {
-    const key = this.subscriptionStreamKey(participantId, deliveryId);
+    const key = this.subscriptionStreamKey(participantId, subscriptionId);
     const stream = this.subscriptionStreams.get(key);
     if (!stream) return;
     this.subscriptionStreams.delete(key);
@@ -2735,6 +2738,7 @@ export class PubSubChannel extends DurableObjectBase {
   async subscribe(
     participantId: string,
     metadata: Record<string, unknown>,
+    subscriptionId?: string,
   ): Promise<Response> {
     const doRef = parseDOParticipantId(participantId);
     if (doRef) {
@@ -2788,6 +2792,13 @@ export class PubSubChannel extends DurableObjectBase {
       subscribeCaller?.callerPanelId ?? subscribeCaller?.callerId;
     if (!deliveryId)
       throw new Error("subscribe: authenticated delivery identity is required");
+    if (
+      subscriptionId !== undefined &&
+      (subscriptionId.length === 0 || subscriptionId.length > 128)
+    ) {
+      throw new Error("subscribe: invalid subscription identity");
+    }
+    const ownedSubscriptionId = subscriptionId ?? deliveryId;
 
     const parsedMetadata = participantMetadataSchema.safeParse(metadata);
     if (!parsedMetadata.success) {
@@ -2968,6 +2979,7 @@ export class PubSubChannel extends DurableObjectBase {
     return this.openSubscriptionResponse(
       participantId,
       deliveryId,
+      ownedSubscriptionId,
       !isUserParticipant,
       {
         ok: true,
@@ -3005,10 +3017,43 @@ export class PubSubChannel extends DurableObjectBase {
     tier: "open",
     sensitivity: "write",
   })
-  async unsubscribe(participantId: string): Promise<void> {
+  async unsubscribe(
+    participantId: string,
+    subscriptionId?: string,
+  ): Promise<void> {
     this.assertParticipantCaller(participantId, "unsubscribe");
-    await this.unsubscribeParticipant(participantId, "graceful");
-    await this.endRelationship(participantId);
+    if (
+      subscriptionId !== undefined &&
+      (subscriptionId.length === 0 || subscriptionId.length > 128)
+    ) {
+      throw new Error("unsubscribe: invalid subscription identity");
+    }
+    const deliveryId = this.caller?.callerPanelId ?? this.caller?.callerId;
+    if (!deliveryId) {
+      throw new Error(
+        "unsubscribe: authenticated delivery identity is required",
+      );
+    }
+    const ownedSubscriptionId = subscriptionId ?? deliveryId;
+    const stream = this.subscriptionStreams.get(
+      this.subscriptionStreamKey(participantId, ownedSubscriptionId),
+    );
+    if (stream && stream.deliveryId !== deliveryId) {
+      throw new Error(
+        "unsubscribe: subscription is owned by another delivery",
+      );
+    }
+    await this.unsubscribeParticipant(
+      participantId,
+      "graceful",
+      ownedSubscriptionId,
+    );
+    // A human participant is shared by every surface owned by that account.
+    // Closing one response releases only that authenticated delivery; the
+    // durable relationship remains active until its final response is gone.
+    if (this.participantSubscriptionCount(participantId) === 0) {
+      await this.endRelationship(participantId);
+    }
   }
 
   private async ensureSessionRelationship(
@@ -3071,19 +3116,19 @@ export class PubSubChannel extends DurableObjectBase {
   private async unsubscribeParticipant(
     participantId: string,
     leaveReason: "graceful" | "disconnect" | "replaced",
-    deliveryId?: string,
+    subscriptionId?: string,
   ): Promise<void> {
     const metadata = this.getSenderMetadata(participantId) ?? {};
     const participantExists =
       this.sql
         .exec(`SELECT 1 FROM participants WHERE id = ?`, participantId)
         .toArray().length > 0;
-    if (deliveryId) {
-      this.closeSubscriptionStream(participantId, deliveryId);
+    if (subscriptionId) {
+      this.closeSubscriptionStream(participantId, subscriptionId);
     } else {
       for (const stream of [...this.subscriptionStreams.values()]) {
         if (stream.participantId === participantId) {
-          this.closeSubscriptionStream(participantId, stream.deliveryId);
+          this.closeSubscriptionStream(participantId, stream.subscriptionId);
         }
       }
     }
@@ -6365,6 +6410,7 @@ export class PubSubChannel extends DurableObjectBase {
           kind: "external-session",
           participantId: stream.participantId,
           deliveryId: stream.deliveryId,
+          subscriptionId: stream.subscriptionId,
           openedAt: stream.openedAt,
           ageMs: Math.max(0, Date.now() - stream.openedAt),
         })),
