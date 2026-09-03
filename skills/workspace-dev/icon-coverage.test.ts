@@ -5,6 +5,19 @@ import { describe, expect, it } from "vitest";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 const UNIT_ROOTS = ["about", "panels", "workers", "apps", "extensions"] as const;
+const MOBILE_SOURCE_ROOT = path.join(REPO_ROOT, "apps/mobile/src");
+const MOBILE_ICON_REGISTRY = path.join(MOBILE_SOURCE_ROOT, "design/icons.tsx");
+
+function* sourceFiles(directory: string): Generator<string> {
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      yield* sourceFiles(target);
+    } else if (/\.[cm]?[jt]sx?$/u.test(entry.name) && !entry.name.endsWith(".d.ts")) {
+      yield target;
+    }
+  }
+}
 
 describe("built-in workspace unit icons", () => {
   it("gives every user-visible or executable unit one canonical semantic icon", () => {
@@ -43,5 +56,25 @@ describe("built-in workspace unit icons", () => {
 
     expect(missing).toEqual([]);
     expect(invalid).toEqual([]);
+  });
+
+  it("keeps native Lucide imports inside the tree-shakeable mobile registry", () => {
+    const bypasses = [...sourceFiles(MOBILE_SOURCE_ROOT)]
+      .filter((file) => file !== MOBILE_ICON_REGISTRY)
+      .filter((file) => fs.readFileSync(file, "utf8").includes("lucide-react-native"))
+      .map((file) => path.relative(REPO_ROOT, file));
+
+    expect(bypasses).toEqual([]);
+
+    const registry = fs.readFileSync(MOBILE_ICON_REGISTRY, "utf8");
+    const packageReferences = [...registry.matchAll(/["'](lucide-react-native[^"']*)["']/gu)].map(
+      ([, specifier]) => specifier
+    );
+    const literalPerIconRequires = [
+      ...registry.matchAll(/require\(["'](lucide-react-native\/icons\/[a-z0-9-]+)["']\)/gu),
+    ].map(([, specifier]) => specifier);
+
+    expect(packageReferences.length).toBeGreaterThan(0);
+    expect(packageReferences).toEqual(literalPerIconRequires);
   });
 });

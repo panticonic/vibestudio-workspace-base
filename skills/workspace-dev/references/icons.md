@@ -9,7 +9,11 @@ Use one restrained icon system across workspace UI and unit identity.
   `import { GitBranch, FileText } from "@workspace/ui/icons"`.
 - Imports are tree-shakeable. Import named components only; never import an
   all-icons object, sprite, font, or runtime icon loader.
-- Mobile already uses `lucide-react-native`; use it directly for native UI.
+- For the first-party mobile shell, import named components from
+  `apps/mobile/src/design/icons`. That registry is the sole
+  `lucide-react-native` package boundary: it uses literal per-icon exports so
+  Metro includes only the icons the app renders. Add a missing icon there;
+  never import the package barrel or a package subpath from a caller.
 - Existing Radix icons may remain in established shell surfaces. Do not add
   Font Awesome, Iconify, React Icons, Heroicons, or another general catalog.
 - Give icon-only controls an accessible name (`aria-label` on web,
