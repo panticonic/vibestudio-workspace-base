@@ -147,7 +147,12 @@ describe("@workspace-extensions/shell", () => {
     let snapshot: SessionInfoEvent | null = null;
     for (let i = 0; i < 10; i += 1) {
       const event = await readEvent(reader);
-      if (event.type === "snapshot" && event.sessionId === sessionId) {
+      if (
+        event.type === "snapshot" &&
+        event.sessionId === sessionId &&
+        event.info.detectedPorts.includes(5173) &&
+        event.info.detectedUrls.includes("http://localhost:5173")
+      ) {
         snapshot = event;
         break;
       }
