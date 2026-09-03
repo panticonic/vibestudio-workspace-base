@@ -1,7 +1,13 @@
 import type { Panel } from "@vibestudio/shared/types";
 import { getCurrentSnapshot } from "@vibestudio/shared/panel/accessors";
-import { formatPanelRuntimeLeaseDeniedMessage } from "@vibestudio/shared/panel/panelLease";
-import { asPanelEntityId, type PanelEntityId } from "@vibestudio/shared/panel/ids";
+import {
+  formatPanelRuntimeLeaseDeniedMessage,
+  type PanelRuntimeAcquireResult,
+} from "@vibestudio/shared/panel/panelLease";
+import {
+  asPanelEntityId,
+  type PanelEntityId,
+} from "@vibestudio/shared/panel/ids";
 import { buildPanelUrl, type HostConfig } from "./panelUrls";
 
 export interface MobileMaterializedPanel {
@@ -19,13 +25,13 @@ export interface MobilePanelMaterializationDeps {
   acquireLease(
     panelId: string,
     runtimeEntityId: PanelEntityId,
-    opts: { connectionId: string }
-  ): Promise<{ acquired: boolean; lease?: { holderLabel: string } }>;
+    opts: { connectionId: string },
+  ): Promise<PanelRuntimeAcquireResult>;
   takeOverLease(
     panelId: string,
     runtimeEntityId: PanelEntityId,
-    opts: { connectionId: string }
-  ): Promise<{ acquired: boolean; lease?: { holderLabel: string } }>;
+    opts: { connectionId: string },
+  ): Promise<PanelRuntimeAcquireResult>;
   leaseMode: "acquire" | "takeOver";
 }
 
@@ -48,19 +54,20 @@ export type MobilePanelMaterializationState = "pending" | "needed" | "current";
 
 export function mobilePanelMaterializationState(
   panel: Panel,
-  current: { url: string; runtimeEntityId: string | null }
+  current: { url: string; runtimeEntityId: string | null },
 ): MobilePanelMaterializationState {
   if (!panel.runtimeEntityId) return "pending";
   const managed = !getCurrentSnapshot(panel).source.startsWith("browser:");
   if (managed && !/^[0-9a-f]{64}$/.test(panel.buildKey ?? "")) return "pending";
-  return current.url === "about:blank" || current.runtimeEntityId !== panel.runtimeEntityId
+  return current.url === "about:blank" ||
+    current.runtimeEntityId !== panel.runtimeEntityId
     ? "needed"
     : "current";
 }
 
 export function needsMobilePanelMaterialization(
   panel: Panel,
-  current: { url: string; runtimeEntityId: string | null }
+  current: { url: string; runtimeEntityId: string | null },
 ): boolean {
   return mobilePanelMaterializationState(panel, current) === "needed";
 }
@@ -72,7 +79,7 @@ export function needsMobilePanelMaterialization(
  * state: load URLs and host-injected panel identity.
  */
 export async function materializeMobilePanel(
-  opts: MobilePanelMaterializationDeps & { panel: Panel }
+  opts: MobilePanelMaterializationDeps & { panel: Panel },
 ): Promise<MobileMaterializedPanel> {
   const snapshot = getCurrentSnapshot(opts.panel);
   const managed = !snapshot.source.startsWith("browser:");
@@ -83,12 +90,16 @@ export async function materializeMobilePanel(
       : opts.acquireLease(opts.panelId, runtimeEntityId, { connectionId });
   if (managed && !/^[0-9a-f]{64}$/.test(opts.panel.buildKey ?? "")) {
     if (!opts.panel.runtimeEntityId) {
-      throw new Error(`Panel ${opts.panelId} did not provide a reserved runtime entity id`);
+      throw new Error(
+        `Panel ${opts.panelId} did not provide a reserved runtime entity id`,
+      );
     }
     const runtimeEntityId = asPanelEntityId(opts.panel.runtimeEntityId);
     const lease = await acquireLease(runtimeEntityId);
     if (!lease.acquired) {
-      throw new Error(formatPanelRuntimeLeaseDeniedMessage(opts.panelId, lease.lease));
+      throw new Error(
+        formatPanelRuntimeLeaseDeniedMessage(opts.panelId, lease.lease),
+      );
     }
     return {
       panelId: opts.panelId,
@@ -101,7 +112,9 @@ export async function materializeMobilePanel(
   const panelInit = await opts.getPanelInit(opts.panelId);
   const rawEntityId = panelInitEntityId(panelInit);
   if (!rawEntityId) {
-    throw new Error(`Panel ${opts.panelId} did not provide a runtime entity id`);
+    throw new Error(
+      `Panel ${opts.panelId} did not provide a runtime entity id`,
+    );
   }
   // Validate the SHAPE here (throws loudly on a slot id "panel:tree/…" where an
   // entity id "panel:nav-…" is required) so the slot/entity mix-up cannot reach
@@ -111,12 +124,14 @@ export async function materializeMobilePanel(
   const runtimeEntityId: PanelEntityId = asPanelEntityId(rawEntityId);
   if (runtimeEntityId !== opts.panel.runtimeEntityId) {
     throw new Error(
-      `Panel ${opts.panelId} changed runtime identity while it was being materialized`
+      `Panel ${opts.panelId} changed runtime identity while it was being materialized`,
     );
   }
   const lease = await acquireLease(runtimeEntityId);
   if (!lease.acquired) {
-    throw new Error(formatPanelRuntimeLeaseDeniedMessage(opts.panelId, lease.lease));
+    throw new Error(
+      formatPanelRuntimeLeaseDeniedMessage(opts.panelId, lease.lease),
+    );
   }
   if (!managed) {
     return {
@@ -127,6 +142,14 @@ export async function materializeMobilePanel(
       panelInit: null,
     };
   }
+  if (
+    String(lease.lease.slotId) !== opts.panelId ||
+    String(lease.lease.runtimeEntityId) !== runtimeEntityId
+  ) {
+    throw new Error(
+      `Panel ${opts.panelId} acquired a lease for a different panel runtime`,
+    );
+  }
   return {
     panelId: opts.panelId,
     runtimeEntityId,
@@ -134,14 +157,14 @@ export async function materializeMobilePanel(
       snapshot.source,
       snapshot.contextId,
       opts.panel.buildKey ?? "",
-      opts.hostConfig
+      opts.hostConfig,
     ),
     managed: true,
     panelInit:
       panelInit && typeof panelInit === "object"
         ? {
             ...(panelInit as Record<string, unknown>),
-            connectionId,
+            connectionId: lease.lease.connectionId,
             clientLabel: "Mobile",
           }
         : panelInit,
@@ -167,7 +190,7 @@ function materializationCoordinate(panel: Panel): string {
  * URL with another incarnation's runtime identity.
  */
 export async function materializeLatestMobilePanel(
-  opts: MobilePanelMaterializationDeps & { getPanel(): Panel | null }
+  opts: MobilePanelMaterializationDeps & { getPanel(): Panel | null },
 ): Promise<MobileMaterializedPanel> {
   while (true) {
     const panel = opts.getPanel();
@@ -179,7 +202,8 @@ export async function materializeLatestMobilePanel(
       materialized = await materializeMobilePanel({ ...opts, panel });
     } catch (error) {
       const current = opts.getPanel();
-      if (current && materializationCoordinate(current) !== expectedCoordinate) continue;
+      if (current && materializationCoordinate(current) !== expectedCoordinate)
+        continue;
       throw error;
     }
 
@@ -205,7 +229,7 @@ export class PanelMaterializationRetryQueue {
   constructor(
     private readonly onRetry: () => void,
     private readonly initialDelayMs = 1_000,
-    private readonly maxDelayMs = 30_000
+    private readonly maxDelayMs = 30_000,
   ) {}
 
   cancel(panelId: string, options: { resetAttempts: boolean }): void {
@@ -223,7 +247,10 @@ export class PanelMaterializationRetryQueue {
     const previous = this.retries.get(panelId);
     if (previous?.timer) return;
     const attempt = (previous?.attempt ?? 0) + 1;
-    const delayMs = Math.min(this.maxDelayMs, this.initialDelayMs * 2 ** Math.min(attempt - 1, 10));
+    const delayMs = Math.min(
+      this.maxDelayMs,
+      this.initialDelayMs * 2 ** Math.min(attempt - 1, 10),
+    );
     const timer = setTimeout(() => {
       const current = this.retries.get(panelId);
       if (!current || current.timer !== timer) return;

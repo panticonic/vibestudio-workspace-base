@@ -21,6 +21,7 @@ import type { PanelManager } from "@vibestudio/shell-core/panelManager";
 import type {
   PanelHost,
   PanelHostRegistration,
+  PanelRuntimeAcquireResult,
   PanelRuntimeLease,
   PanelRuntimeLeaseChangedEvent,
   RuntimeLeaseSnapshot,
@@ -55,7 +56,11 @@ import {
   type UpdateHistoryTitleRequest,
 } from "@vibestudio/browser-data/client";
 import { createBridgeAdapter } from "./bridgeAdapter";
-import { MobileRpcClient, type ConnectionStatus } from "./mobileTransport";
+import {
+  isTransientMobileTransportFailure,
+  MobileRpcClient,
+  type ConnectionStatus,
+} from "./mobileTransport";
 import { createMobileShellCore } from "../shellCore/createMobileShellCore";
 import {
   startPanelAssetFacade,
@@ -126,6 +131,20 @@ export type {
 function smokePhase(phase: string, details?: Record<string, unknown>): void {
   const suffix = details ? ` ${JSON.stringify(details)}` : "";
   console.log(`[VibestudioMobileSmoke] phase=${phase}${suffix}`);
+}
+
+function delayUnlessAborted(ms: number, signal: AbortSignal): Promise<boolean> {
+  if (signal.aborted) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    const finish = (completed: boolean) => {
+      clearTimeout(timeout);
+      signal.removeEventListener("abort", onAbort);
+      resolve(completed);
+    };
+    const onAbort = () => finish(false);
+    const timeout = setTimeout(() => finish(true), ms);
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
 export interface ShellClientConfig {
@@ -925,7 +944,7 @@ class MobilePanels implements PanelHost {
     panelId: string,
     runtimeEntityId: PanelEntityId,
     opts: { connectionId: string },
-  ): Promise<{ acquired: boolean; lease?: { holderLabel: string } }> {
+  ): Promise<PanelRuntimeAcquireResult> {
     const result = await this.panelRuntime.acquire(
       runtimeEntityId,
       createPanelRuntimeLeaseRequest({
@@ -935,7 +954,7 @@ class MobilePanels implements PanelHost {
       }),
     );
     if (result.acquired) {
-      this.setTrackedRuntimeLease(panelId, runtimeEntityId, opts.connectionId);
+      this.trackRuntimeLease(result.lease);
     }
     return result;
   }
@@ -943,7 +962,7 @@ class MobilePanels implements PanelHost {
     panelId: string,
     runtimeEntityId: PanelEntityId,
     opts: { connectionId: string },
-  ): Promise<{ acquired: boolean; lease?: { holderLabel: string } }> {
+  ): Promise<PanelRuntimeAcquireResult> {
     const result = await this.panelRuntime.takeOver(
       runtimeEntityId,
       createPanelRuntimeLeaseRequest({
@@ -953,7 +972,7 @@ class MobilePanels implements PanelHost {
       }),
     );
     if (result.acquired) {
-      this.setTrackedRuntimeLease(panelId, runtimeEntityId, opts.connectionId);
+      this.trackRuntimeLease(result.lease);
     }
     return result;
   }
@@ -1232,6 +1251,7 @@ export class ShellClient {
   private workspaceInfo: WorkspaceInfo | null = null;
   private readonly accountProfileClient: MobileAccountProfileClient;
   private reconciliation: Promise<void> | null = null;
+  private reconciliationAbort: AbortController | null = null;
   private disposed = false;
   private readonly onReadinessChange?: ShellClientConfig["onReadinessChange"];
   constructor(config: ShellClientConfig) {
@@ -1429,7 +1449,7 @@ export class ShellClient {
           smokePhase("workspace-shell-ready", { source: "live-tree" });
         }
         this.onReadinessChange?.("shell-ready");
-        this.reconciliation = this.reconcileAfterPaint(info, Boolean(restored));
+        this.startReconciliation(info, Boolean(restored));
         return;
       } catch (error) {
         if (
@@ -1565,43 +1585,106 @@ export class ShellClient {
   private async reconcileAfterPaint(
     info: WorkspaceInfo,
     refreshTree: boolean,
+    signal: AbortSignal,
   ): Promise<void> {
-    try {
-      const deferredResults = Promise.allSettled([
-        this.refreshAccountProfile(),
-        this.ensureReactNativeHostTargetReady(),
-      ]);
-      await (refreshTree
-        ? this.panels.reconcile(info.config)
-        : this.panels.completeColdStart());
-      if (this.disposed) return;
-      await this.events.subscribe("panel:runtimeLeaseChanged");
-      await this.events.subscribe("panel-tree-invalidated");
-      await this.events.subscribe("panel-presentation-changed");
-      await this.events.subscribe("panel:executionActivated");
-      await drainWorkspaceMutationQueue(this);
-      this.registerPanelRecoveryHandlers();
-      const [profile, host] = await deferredResults;
-      if (profile.status === "rejected") {
+    let attempt = 0;
+    for (;;) {
+      attempt += 1;
+      let deferredResults: Promise<
+        [PromiseSettledResult<MobileAccountProfile>, PromiseSettledResult<void>]
+      > | null = null;
+      try {
+        deferredResults = Promise.allSettled([
+          this.refreshAccountProfile(),
+          this.ensureReactNativeHostTargetReady(signal),
+        ]);
+        await (refreshTree
+          ? this.panels.reconcile(info.config)
+          : this.panels.completeColdStart());
+        if (this.disposed || signal.aborted) {
+          await deferredResults;
+          return;
+        }
+        await this.events.subscribe("panel:runtimeLeaseChanged");
+        await this.events.subscribe("panel-tree-invalidated");
+        await this.events.subscribe("panel-presentation-changed");
+        await this.events.subscribe("panel:executionActivated");
+        if (this.disposed || signal.aborted) {
+          await deferredResults;
+          return;
+        }
+        await drainWorkspaceMutationQueue(this);
+        if (this.disposed || signal.aborted) {
+          await deferredResults;
+          return;
+        }
+        this.registerPanelRecoveryHandlers();
+        const [profile, host] = await deferredResults;
+        if (this.disposed || signal.aborted) return;
+        if (profile.status === "rejected") {
+          console.warn(
+            "[ShellClient] Deferred account profile load failed",
+            profile.reason,
+          );
+        }
+        if (host.status === "rejected") throw host.reason;
+        await this.persistStartupSnapshot(info.config.id);
+        if (this.disposed || signal.aborted) return;
+        smokePhase("workspace-reconciled");
+        this.onReadinessChange?.("reconciled");
+        return;
+      } catch (error) {
+        // Do not let a failed panel/event stage orphan the profile or host
+        // readiness work started alongside it. One complete convergence
+        // attempt must settle before another can begin.
+        await deferredResults;
+        if (this.disposed || signal.aborted) return;
+        if (isTransientMobileTransportFailure(error)) {
+          const delayMs = Math.min(5_000, 500 * 2 ** Math.min(attempt - 1, 4));
+          smokePhase("workspace-reconcile-retry", {
+            attempt,
+            delayMs,
+            message: error instanceof Error ? error.message : String(error),
+          });
+          if (!(await delayUnlessAborted(delayMs, signal))) return;
+          // An initial live-tree startup may have gone stale while the request
+          // was wedged. Reconciliation is lifecycle work, not a foreground
+          // request: transient transport loss must not turn into a permanent
+          // failed shell merely because an arbitrary wall-clock budget elapsed.
+          // Every retry therefore performs full authoritative reconciliation,
+          // not merely completion of the earlier cold start.
+          refreshTree = true;
+          continue;
+        }
+        smokePhase("workspace-reconcile-failed", {
+          message: error instanceof Error ? error.message : String(error),
+        });
         console.warn(
-          "[ShellClient] Deferred account profile load failed",
-          profile.reason,
+          "[ShellClient] Deferred workspace reconciliation failed",
+          error,
         );
+        this.onReadinessChange?.("failed");
+        return;
       }
-      if (host.status === "rejected") throw host.reason;
-      await this.persistStartupSnapshot(info.config.id);
-      smokePhase("workspace-reconciled");
-      this.onReadinessChange?.("reconciled");
-    } catch (error) {
-      smokePhase("workspace-reconcile-failed", {
-        message: error instanceof Error ? error.message : String(error),
-      });
-      console.warn(
-        "[ShellClient] Deferred workspace reconciliation failed",
-        error,
-      );
-      this.onReadinessChange?.("failed");
     }
+  }
+
+  private startReconciliation(info: WorkspaceInfo, refreshTree: boolean): void {
+    if (this.reconciliation || this.disposed) return;
+    const controller = new AbortController();
+    this.reconciliationAbort = controller;
+    const reconciliation = this.reconcileAfterPaint(
+      info,
+      refreshTree,
+      controller.signal,
+    );
+    this.reconciliation = reconciliation;
+    const clear = () => {
+      if (this.reconciliation !== reconciliation) return;
+      this.reconciliation = null;
+      this.reconciliationAbort = null;
+    };
+    void reconciliation.then(clear, clear);
   }
 
   private async persistStartupSnapshot(
@@ -1620,10 +1703,14 @@ export class ShellClient {
     await saveMobileShellStartupSnapshot(record);
   }
 
-  private async ensureReactNativeHostTargetReady(): Promise<void> {
+  private async ensureReactNativeHostTargetReady(
+    signal: AbortSignal,
+  ): Promise<void> {
     const deadline = Date.now() + 120_000;
     for (;;) {
+      if (signal.aborted) return;
       const launch = await this.hostLaunch.launch("react-native");
+      if (signal.aborted) return;
       if (launch.status === "ready") {
         smokePhase("workspace-host-target-ready", {
           target: launch.target,
@@ -1644,7 +1731,7 @@ export class ShellClient {
           target: launch.target,
         });
         if (Date.now() >= deadline) throw new Error(launch.reason);
-        await new Promise((resolve) => setTimeout(resolve, 1_000));
+        if (!(await delayUnlessAborted(1_000, signal))) return;
         continue;
       }
       throw new Error(launch.reason);
@@ -1657,7 +1744,7 @@ export class ShellClient {
   retryWorkspaceSetup(): void {
     if (!this.workspaceInfo) return;
     this.onReadinessChange?.("shell-ready");
-    this.reconciliation = this.reconcileAfterPaint(this.workspaceInfo, true);
+    this.startReconciliation(this.workspaceInfo, true);
   }
   /** Test/diagnostic boundary for work intentionally deferred past first paint. */
   async whenReconciled(): Promise<void> {
@@ -1717,6 +1804,7 @@ export class ShellClient {
   }
   dispose(): void {
     this.disposed = true;
+    this.reconciliationAbort?.abort();
     for (const unsubscribe of this.panelRecoveryUnsubs ?? []) unsubscribe();
     this.panelRecoveryUnsubs = null;
     this.recoveryCompleteListeners.clear();

@@ -13,7 +13,11 @@ import {
   type StoredRoutedMobileConnection,
   type IrohConnection,
 } from "@vibestudio/mobile-iroh";
-import { MobileRpcClient, type ReconnectProgress } from "./mobileTransport";
+import {
+  isTransientMobileTransportFailure,
+  MobileRpcClient,
+  type ReconnectProgress,
+} from "./mobileTransport";
 
 jest.mock("@vibestudio/mobile-iroh", () => ({
   loadShellCredential: jest.fn(),
@@ -34,6 +38,25 @@ const mockReconnectMobileSession =
   reconnectMobileSession as jest.MockedFunction<typeof reconnectMobileSession>;
 const DEVICE_ID = `dev_${"d".repeat(24)}`;
 const REFRESH_TOKEN = "r".repeat(43);
+
+describe("isTransientMobileTransportFailure", () => {
+  it("recognizes structured connection and Iroh response timeout failures", () => {
+    expect(isTransientMobileTransportFailure({ code: "CONNECTION_LOST" })).toBe(
+      true,
+    );
+    expect(
+      isTransientMobileTransportFailure({
+        cause: { code: "IROH_RESPONSE_HEAD_TIMEOUT" },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not retry unrelated application failures", () => {
+    expect(isTransientMobileTransportFailure(new Error("access denied"))).toBe(
+      false,
+    );
+  });
+});
 
 const storedCredential: StoredRoutedMobileConnection = {
   schemaVersion: 5,

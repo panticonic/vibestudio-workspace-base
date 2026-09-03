@@ -1,4 +1,9 @@
 import type { Panel } from "@vibestudio/shared/types";
+import type {
+  PanelRuntimeAcquireResult,
+  PanelRuntimeLease,
+} from "@vibestudio/shared/panel/panelLease";
+import { asPanelEntityId } from "@vibestudio/shared/panel/ids";
 import {
   materializeLatestMobilePanel,
   materializeMobilePanel,
@@ -30,19 +35,59 @@ function makePanel(source: string): Panel {
   };
 }
 
+function makeLease(
+  overrides: Partial<PanelRuntimeLease> = {},
+): PanelRuntimeLease {
+  return {
+    slotId: "panel-1" as PanelRuntimeLease["slotId"],
+    runtimeEntityId: asPanelEntityId("panel:nav-1"),
+    clientSessionId: "mobile-device",
+    hostConnectionId: "mobile-device",
+    connectionId: "authoritative-connection",
+    holderLabel: "Mobile",
+    platform: "mobile",
+    supportsCdp: false,
+    loadOnLeaseAssignment: false,
+    acquiredAt: 1,
+    ...overrides,
+  };
+}
+
 function makeDeps(overrides?: {
   panelInit?: unknown;
-  acquireResult?: { acquired: boolean; lease?: { holderLabel: string } };
+  acquireResult?: PanelRuntimeAcquireResult;
 }) {
   return {
     getPanelInit: jest.fn(
       async () => overrides?.panelInit ?? { entityId: "panel:nav-1" },
     ),
     acquireLease: jest.fn(
-      async () => overrides?.acquireResult ?? { acquired: true },
+      async (
+        _panelId: string,
+        runtimeEntityId: string,
+        opts: { connectionId: string },
+      ) =>
+        overrides?.acquireResult ?? {
+          acquired: true,
+          lease: makeLease({
+            runtimeEntityId: asPanelEntityId(runtimeEntityId),
+            connectionId: opts.connectionId,
+          }),
+        },
     ),
     takeOverLease: jest.fn(
-      async () => overrides?.acquireResult ?? { acquired: true },
+      async (
+        _panelId: string,
+        runtimeEntityId: string,
+        opts: { connectionId: string },
+      ) =>
+        overrides?.acquireResult ?? {
+          acquired: true,
+          lease: makeLease({
+            runtimeEntityId: asPanelEntityId(runtimeEntityId),
+            connectionId: opts.connectionId,
+          }),
+        },
     ),
   };
 }
@@ -209,7 +254,10 @@ describe("materializeMobilePanel", () => {
 
   it("rejects browser panel materialization when another client holds the lease", async () => {
     const deps = makeDeps({
-      acquireResult: { acquired: false, lease: { holderLabel: "Desktop" } },
+      acquireResult: {
+        acquired: false,
+        lease: makeLease({ holderLabel: "Desktop" }),
+      },
     });
 
     await expect(
@@ -226,6 +274,10 @@ describe("materializeMobilePanel", () => {
   it("keeps managed panel materialization payloads lease-bound", async () => {
     const deps = makeDeps({
       panelInit: { entityId: "panel:nav-1", slotId: "panel-1" },
+      acquireResult: {
+        acquired: true,
+        lease: makeLease({ connectionId: "recovered-connection" }),
+      },
     });
 
     const result = await materializeMobilePanel({
@@ -246,7 +298,7 @@ describe("materializeMobilePanel", () => {
         entityId: "panel:nav-1",
         slotId: "panel-1",
         clientLabel: "Mobile",
-        connectionId: expect.stringMatching(/^mobile-panel-1-/),
+        connectionId: "recovered-connection",
       },
     });
   });

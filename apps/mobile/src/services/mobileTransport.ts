@@ -41,6 +41,29 @@ function smokePhase(phase: string, details?: Record<string, unknown>): void {
 
 export type ConnectionStatus = RpcConnectionStatus;
 
+const TRANSIENT_TRANSPORT_ERROR_CODES = new Set([
+  "CONNECTION_LOST",
+  "IROH_RESPONSE_HEAD_TIMEOUT",
+]);
+
+/** Whether an idempotent shell operation should be retried on the same pipe. */
+export function isTransientMobileTransportFailure(error: unknown): boolean {
+  let current = error;
+  const seen = new Set<unknown>();
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const candidate = current as { code?: unknown; cause?: unknown };
+    if (
+      typeof candidate.code === "string" &&
+      TRANSIENT_TRANSPORT_ERROR_CODES.has(candidate.code)
+    ) {
+      return true;
+    }
+    current = candidate.cause;
+  }
+  return false;
+}
+
 export interface MobileRpcClientConfig {
   initialConnectionRetry?: {
     maxMs?: number;
