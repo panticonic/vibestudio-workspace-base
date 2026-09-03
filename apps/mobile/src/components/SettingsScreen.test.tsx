@@ -263,11 +263,16 @@ describe("SettingsScreen workspace selector", () => {
 
   it("lets the first paired phone invite a desktop into the same workspace", async () => {
     const view = renderSettings();
-    await waitFor(() =>
-      expect(view.getByText("Connect another device")).toBeTruthy(),
-    );
+    await waitFor(() => {
+      expect(
+        view.getByRole("button", { name: "Connect another device" }).props
+          .accessibilityState,
+      ).toMatchObject({ disabled: false });
+    });
 
-    fireEvent.press(view.getByText("Connect another device"));
+    fireEvent.press(
+      view.getByRole("button", { name: "Connect another device" }),
+    );
 
     await waitFor(() =>
       expect(view.shellClient.hubControl.pairDevice).toHaveBeenCalledWith({
