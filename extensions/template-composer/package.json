@@ -191,7 +191,7 @@
           "evidence": "intentional-broad"
         },
         {
-          "capability": "workspace-main-advance",
+          "capability": "git.publish",
           "resource": {
             "kind": "prefix",
             "prefix": "workspace-source-change:"

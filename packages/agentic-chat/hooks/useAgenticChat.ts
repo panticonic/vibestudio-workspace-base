@@ -15,24 +15,20 @@ import { useCallback, useMemo, useReducer, useRef, useEffect, useState } from "r
 import { z } from "zod";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
 import { fsMethods } from "@vibestudio/service-schemas/fs";
-import type {
-  ChannelConfig,
-  MethodExecutionContext,
-  PubSubClient,
-} from "@workspace/pubsub";
+import type { ChannelConfig, MethodExecutionContext, PubSubClient } from "@workspace/pubsub";
 import { ScopeManager } from "@workspace/eval/scope";
 import type {
   SandboxImportLoader,
   SandboxOptions,
   SandboxResult,
-  ScopeBlobBackend,
+  ScopeBlobBackend
 } from "@workspace/eval";
 import type { ActiveFeedbackSchema, FeedbackResult } from "@workspace/tool-ui";
 import {
   AGENTIC_EVENT_PAYLOAD_KIND,
   AGENTIC_PROTOCOL_VERSION,
   type ActorKind,
-  type AgenticEvent,
+  type AgenticEvent
 } from "@workspace/agentic-protocol";
 import { useChatCore } from "./core/useChatCore";
 import { useForkLineage } from "./useForkLineage";
@@ -55,7 +51,7 @@ import type {
   ChatInputContextValue,
   ActionBarData,
   BrowserHandoffCallerKind,
-  ForkNavHandlers,
+  ForkNavHandlers
 } from "../types";
 import { channelParticipantId, runtimeCallerId } from "../types";
 import type { MessageTypeComponentEntry } from "../types";
@@ -64,7 +60,7 @@ import { unwrapChatMethodResult } from "@workspace/agentic-core";
 import type { ChatMethodResult, AgentSubscriptionConfig } from "@workspace/agentic-core";
 import {
   LocalStorageScopePersistence,
-  panelLocalScopeChannelId,
+  panelLocalScopeChannelId
 } from "../utils/localStorageScopePersistence";
 import { scheduleBackgroundWork } from "../utils/scheduleBackgroundWork";
 import { sendSandboxText, type SandboxSendOptions } from "./sandboxSend";
@@ -73,7 +69,7 @@ import {
   composeAgenticChatMethods,
   resolveAgenticChatFeatures,
   type AgenticChatFeature,
-  type ResolvedAgenticChatFeatures,
+  type ResolvedAgenticChatFeatures
 } from "../features";
 
 const NO_INLINE_UI_MESSAGES: ChatContextValue["messages"] = [];
@@ -125,7 +121,7 @@ function actorForClient(
     kind: actorKindFromMetadata(merged.type ?? metadata.type, id),
     id,
     displayName: merged.name ?? merged.handle ?? id,
-    metadata: { ...merged },
+    metadata: { ...merged }
   };
 }
 
@@ -247,7 +243,7 @@ export function useAgenticChat({
   initialActionBarMaxHeight,
   onActionBarFileChange,
   connectionRetrySignal,
-  features: requestedFeatures,
+  features: requestedFeatures
 }: UseAgenticChatOptions): UseAgenticChatResult {
   const [features] = useState(() => resolveAgenticChatFeatures(requestedFeatures));
   const metadata = useMemo<ClientParticipantMetadata>(
@@ -267,8 +263,15 @@ export function useAgenticChat({
     metadata,
     theme,
     initialPrompt: actions?.onAddAgent ? undefined : initialPrompt,
-    forceInitialPrompt: actions?.onAddAgent ? undefined : forceInitialPrompt,
+    forceInitialPrompt: actions?.onAddAgent ? undefined : forceInitialPrompt
   });
+  useEffect(() => {
+    const title = core.channelTitle?.trim();
+    if (!title || !actions?.onTaskTitleChange) return;
+    void Promise.resolve(actions.onTaskTitleChange(title)).catch((error) =>
+      console.warn("[useAgenticChat] Failed to register task title:", error)
+    );
+  }, [actions, core.channelTitle]);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const retryConnection = useCallback(() => {
     core.dismissConnectionError();
@@ -282,12 +285,16 @@ export function useAgenticChat({
     channelId: channelName,
     contextId,
     selfId: core.selfId,
-    selfMetadata: { type: metadata.type, name: metadata.name, handle: metadata.handle },
+    selfMetadata: {
+      type: metadata.type,
+      name: metadata.name,
+      handle: metadata.handle
+    },
     messages: core.messages,
     replaySettled: core.replaySettled,
     retrySignal: connectionRetrySignal,
     client: core.client,
-    nav: forkNav,
+    nav: forkNav
   });
   const scopeBlobBackend = useMemo<ScopeBlobBackend>(
     () => ({
@@ -297,7 +304,7 @@ export function useAgenticChat({
           size: number;
         }>,
       getText: (digest: string) =>
-        config.rpc.call("main", "blobstore.getText", [digest]) as Promise<string | null>,
+        config.rpc.call("main", "blobstore.getText", [digest]) as Promise<string | null>
     }),
     [config.rpc]
   );
@@ -306,7 +313,7 @@ export function useAgenticChat({
       new ScopeManager({
         channelId: panelLocalScopeChannelId(channelName, config.clientId),
         panelId: "panel-ui",
-        persistence: new LocalStorageScopePersistence(scopeBlobBackend),
+        persistence: new LocalStorageScopePersistence(scopeBlobBackend)
       }),
     [channelName, config.clientId, scopeBlobBackend]
   );
@@ -357,7 +364,7 @@ export function useAgenticChat({
       const client = core.clientRef.current;
       if (!client) return undefined;
       return client.publish(AGENTIC_EVENT_PAYLOAD_KIND, event, {
-        idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID(),
+        idempotencyKey: options?.idempotencyKey ?? crypto.randomUUID()
       });
     },
     [core.clientRef]
@@ -385,17 +392,17 @@ export function useAgenticChat({
       ) => {
         return core.clientRef.current!.publish(eventType, payload, {
           ...opts,
-          idempotencyKey: opts?.idempotencyKey ?? crypto.randomUUID(),
+          idempotencyKey: opts?.idempotencyKey ?? crypto.randomUUID()
         }) as Promise<unknown>;
       },
       publishCustomMessage: (input, opts) => {
         return core.clientRef.current!.publishCustomMessage(input, {
-          idempotencyKey: opts?.idempotencyKey ?? crypto.randomUUID(),
+          idempotencyKey: opts?.idempotencyKey ?? crypto.randomUUID()
         });
       },
       updateCustomMessage: (messageId, update, opts) => {
         return core.clientRef.current!.updateCustomMessage(messageId, update, {
-          idempotencyKey: opts?.idempotencyKey ?? crypto.randomUUID(),
+          idempotencyKey: opts?.idempotencyKey ?? crypto.randomUUID()
         });
       },
       registerMessageType: (input, opts) => {
@@ -425,7 +432,7 @@ export function useAgenticChat({
           isPerson: metadata.type === "user",
           isAgent: metadata.type === "agent",
           ...(metadata.handle ? { handle: metadata.handle } : {}),
-          ...(metadata.methods ? { methods: metadata.methods } : {}),
+          ...(metadata.methods ? { methods: metadata.methods } : {})
         }));
       },
       replayEnvelope: (envelopeId: string) => {
@@ -531,8 +538,11 @@ export function useAgenticChat({
             element.scrollIntoView({ behavior: "smooth", block: "center" });
             element.animate(
               [
-                { boxShadow: "0 0 0 3px var(--accent-a7)", borderRadius: "8px" },
-                { boxShadow: "0 0 0 3px transparent", borderRadius: "8px" },
+                {
+                  boxShadow: "0 0 0 3px var(--accent-a7)",
+                  borderRadius: "8px"
+                },
+                { boxShadow: "0 0 0 3px transparent", borderRadius: "8px" }
               ],
               { duration: 1600, easing: "ease-out" }
             );
@@ -544,7 +554,7 @@ export function useAgenticChat({
       },
       contextId: contextId ?? "",
       channelId: channelName,
-      rpc: config.rpc,
+      rpc: config.rpc
     }),
     [contextId, channelName, config.rpc, core.clientRef, metadata, publishTypedAgenticEvent]
   );
@@ -554,7 +564,7 @@ export function useAgenticChat({
       const { executeSandbox } = await import("@workspace/eval/sandbox");
       return executeSandbox(code, {
         ...opts,
-        ...(opts.loadImport || !importLoader ? {} : { loadImport: importLoader }),
+        ...(opts.loadImport || !importLoader ? {} : { loadImport: importLoader })
       });
     },
     [importLoader]
@@ -572,7 +582,7 @@ export function useAgenticChat({
     chat,
     loadImport: importLoader,
     clientRef: core.clientRef,
-    connected: core.connected,
+    connected: core.connected
   });
   const chatTools = useChatTools({
     clientRef: core.clientRef,
@@ -580,26 +590,26 @@ export function useAgenticChat({
     contextId: contextId ?? "",
     executeSandbox: boundExecuteSandbox,
     chat,
-    scopeManager,
+    scopeManager
   });
   const debug = useChatDebug();
   const inlineUi = useInlineUi({
     messages: features.inlineUi ? core.messages : NO_INLINE_UI_MESSAGES,
     loadSourceFile,
-    loadImport: importLoader,
+    loadImport: importLoader
   });
   const messageTypes = useMessageTypeRegistry({
     client: core.client,
     messages: core.messages,
     definitions: core.messageTypes,
     loadSourceFile,
-    loadImport: importLoader,
+    loadImport: importLoader
   });
   const [actionBarData, setActionBarData] = useState<ActionBarData | null>(null);
   const actionBar = useActionBar({
     data: features.actionBar ? actionBarData : null,
     loadSourceFile,
-    loadImport: importLoader,
+    loadImport: importLoader
   });
   const lastLoadedActionBarKeyRef = useRef<string | null>(null);
   useEffect(() => {
@@ -608,7 +618,7 @@ export function useAgenticChat({
     if (!canonical?.source) return;
     const next: ActionBarData = {
       id: canonical.id ?? "canonical-action-bar",
-      source: canonical.source,
+      source: canonical.source
     };
     if (canonical.imports !== undefined) next.imports = canonical.imports;
     if (canonical.props !== undefined) next.props = canonical.props;
@@ -642,7 +652,7 @@ export function useAgenticChat({
         protocol: AGENTIC_PROTOCOL_VERSION,
         uiType: "action_bar",
         cleared: action === "cleared",
-        result: payload.ok ? { ok: true } : { ok: false, error: payload.error },
+        result: payload.ok ? { ok: true } : { ok: false, error: payload.error }
       };
       if (payload.id !== undefined) eventPayload.id = payload.id;
       if (payload.path !== undefined) eventPayload.source = { type: "file", path: payload.path };
@@ -654,10 +664,10 @@ export function useAgenticChat({
           kind: "ui.action_bar.updated",
           actor: actorForClient(client, metadata),
           payload: eventPayload,
-          createdAt: new Date().toISOString(),
+          createdAt: new Date().toISOString()
         },
         {
-          idempotencyKey: payload.idempotencyKey ?? `ui:action-bar:${crypto.randomUUID()}`,
+          idempotencyKey: payload.idempotencyKey ?? `ui:action-bar:${crypto.randomUUID()}`
         }
       );
     },
@@ -670,7 +680,7 @@ export function useAgenticChat({
       maxHeight,
       imports,
       persistStateArgs = true,
-      idempotencyKey,
+      idempotencyKey
     }: {
       path: string;
       props?: Record<string, unknown>;
@@ -698,11 +708,15 @@ export function useAgenticChat({
           source: { type: "file", path: trimmedPath },
           imports,
           props,
-          maxHeight,
+          maxHeight
         });
         lastLoadedActionBarKeyRef.current = actionBarLoadKey(trimmedPath, props, maxHeight);
         if (persistStateArgs) {
-          await onActionBarFileChange?.({ path: trimmedPath, props, maxHeight });
+          await onActionBarFileChange?.({
+            path: trimmedPath,
+            props,
+            maxHeight
+          });
         }
         await publishActionBarContext("loaded", {
           id,
@@ -711,7 +725,7 @@ export function useAgenticChat({
           props,
           maxHeight,
           ok: true,
-          idempotencyKey,
+          idempotencyKey
         });
         return { ok: true, id };
       } catch (err) {
@@ -723,7 +737,7 @@ export function useAgenticChat({
           maxHeight,
           ok: false,
           error,
-          idempotencyKey,
+          idempotencyKey
         });
         return { ok: false, error };
       }
@@ -733,7 +747,7 @@ export function useAgenticChat({
   const clearActionBar = useCallback(
     async ({
       persistStateArgs = true,
-      idempotencyKey,
+      idempotencyKey
     }: {
       persistStateArgs?: boolean;
       idempotencyKey?: string;
@@ -761,7 +775,7 @@ export function useAgenticChat({
           void onActionBarFileChange?.({
             path: current.source.path,
             props: current.props,
-            maxHeight,
+            maxHeight
           });
         }
         return next;
@@ -785,7 +799,7 @@ export function useAgenticChat({
         props: initialActionBarProps,
         maxHeight: initialActionBarMaxHeight,
         persistStateArgs: false,
-        idempotencyKey: `ui:initial-action-bar:${channelName}:${loadKey}`,
+        idempotencyKey: `ui:initial-action-bar:${channelName}:${loadKey}`
       });
     });
   }, [
@@ -795,7 +809,7 @@ export function useAgenticChat({
     initialActionBarProps,
     initialActionBarMaxHeight,
     loadActionBarFromFile,
-    features.actionBar,
+    features.actionBar
   ]);
   // --- Stable refs for connection effect (avoids unstable object deps) ---
   const feedbackRef = useRef(feedback);
@@ -813,7 +827,7 @@ export function useAgenticChat({
     boundExecuteSandbox,
     loadSourceFile,
     chat,
-    scopeManager,
+    scopeManager
   });
   connectionMethodsRef.current = {
     clearActionBar,
@@ -824,7 +838,7 @@ export function useAgenticChat({
     boundExecuteSandbox,
     loadSourceFile,
     chat,
-    scopeManager,
+    scopeManager
   };
   // Live snapshot for the inspect_card method: agents debug a card by reading
   // the same data the UI's "Copy details" produces.
@@ -834,7 +848,7 @@ export function useAgenticChat({
   }>({ messages: [], registry: new Map() });
   cardInspectionRef.current = {
     messages: core.messages,
-    registry: messageTypes.messageTypeComponents,
+    registry: messageTypes.messageTypeComponents
   };
   // --- Connect to channel on mount ---
   useEffect(() => {
@@ -860,11 +874,14 @@ export function useAgenticChat({
                     parameters: z
                       .object({
                         question: z.string(),
-                        details: z.unknown().optional(),
+                        details: z.unknown().optional()
                       })
                       .passthrough(),
                     execute: async (args: unknown, ctx: MethodExecutionContext) => {
-                      const input = args as { question?: unknown; details?: unknown };
+                      const input = args as {
+                        question?: unknown;
+                        details?: unknown;
+                      };
                       const question =
                         typeof input.question === "string" && input.question.trim()
                           ? input.question
@@ -876,7 +893,10 @@ export function useAgenticChat({
                         );
                       }
                       const fb = feedbackRef.current;
-                      return new Promise<{ granted: boolean; details?: unknown }>((resolve) => {
+                      return new Promise<{
+                        granted: boolean;
+                        details?: unknown;
+                      }>((resolve) => {
                         let settled = false;
                         const finish = (granted: boolean) => {
                           if (settled) return;
@@ -898,8 +918,8 @@ export function useAgenticChat({
                                     default:
                                       typeof input.details === "string"
                                         ? input.details
-                                        : JSON.stringify(input.details, null, 2),
-                                  },
+                                        : JSON.stringify(input.details, null, 2)
+                                  }
                                 ] as ActiveFeedbackSchema["fields"])
                               : []),
                             {
@@ -908,9 +928,13 @@ export function useAgenticChat({
                               submitOnSelect: true,
                               buttons: [
                                 { value: "deny", label: "Deny", color: "gray" },
-                                { value: "allow", label: "Allow", color: "green" },
-                              ],
-                            },
+                                {
+                                  value: "allow",
+                                  label: "Allow",
+                                  color: "green"
+                                }
+                              ]
+                            }
                           ],
                           values: {},
                           hideSubmit: true,
@@ -923,11 +947,11 @@ export function useAgenticChat({
                             } else {
                               finish(false);
                             }
-                          },
+                          }
                         });
                       });
-                    },
-                  },
+                    }
+                  }
                 }
               : undefined,
             {
@@ -938,9 +962,7 @@ export function useAgenticChat({
                   "card you published is not rendering, looks wrong, or a user reports a stuck spinner — it " +
                   "returns exactly what the user's 'Copy details' button shows. Parameters: { messageId: string }.",
                 parameters: z.object({
-                  messageId: z
-                    .string()
-                    .describe("The custom message id (custom.started messageId)"),
+                  messageId: z.string().describe("The custom message id (custom.started messageId)")
                 }),
                 execute: async (args: unknown) => {
                   const { messageId } = args as { messageId?: string };
@@ -956,7 +978,7 @@ export function useAgenticChat({
                     return {
                       ok: false,
                       error: `No custom message "${messageId}" in this channel view.`,
-                      knownCards: known,
+                      knownCards: known
                     };
                   }
                   return {
@@ -964,15 +986,15 @@ export function useAgenticChat({
                     details: customInspectorPayload(
                       message.custom,
                       snapshot.registry.get(message.custom.typeId)
-                    ),
+                    )
                   };
-                },
+                }
               },
               persist_agent_model: {
                 description: "Persist an agent model choice for panel reload/recovery",
                 parameters: z.object({
                   participantId: z.string().describe("Agent participant id"),
-                  model: z.string().describe("Model in provider:model format"),
+                  model: z.string().describe("Model in provider:model format")
                 }),
                 execute: async (args: unknown) => {
                   const { participantId, model } = args as {
@@ -986,11 +1008,15 @@ export function useAgenticChat({
                     return { ok: false, error: "Missing model" };
                   }
                   const persist = actionsRef.current?.onPersistAgentModel;
-                  if (!persist) return { ok: false, error: "Persist agent model is not available" };
+                  if (!persist)
+                    return {
+                      ok: false,
+                      error: "Persist agent model is not available"
+                    };
                   await persist(channelName, participantId, model);
                   return { ok: true };
-                },
-              },
+                }
+              }
             },
             features.inlineUi
               ? {
@@ -1103,7 +1129,7 @@ export default function App({ props, chat, scope }) {
                       props: z
                         .record(z.unknown())
                         .optional()
-                        .describe("Props passed to the component as { props }"),
+                        .describe("Props passed to the component as { props }")
                     }),
                     execute: async (args: unknown) => {
                       const {
@@ -1111,7 +1137,7 @@ export default function App({ props, chat, scope }) {
                         code,
                         path,
                         imports,
-                        props,
+                        props
                       } = args as {
                         id?: string;
                         code?: string;
@@ -1131,7 +1157,7 @@ export default function App({ props, chat, scope }) {
                           imports,
                           ...(methodRuntime.importLoader
                             ? { loadImport: methodRuntime.importLoader }
-                            : {}),
+                            : {})
                         });
                       }
                       const client = core.clientRef.current;
@@ -1144,7 +1170,7 @@ export default function App({ props, chat, scope }) {
                         protocol: AGENTIC_PROTOCOL_VERSION,
                         uiType: "inline",
                         id,
-                        source,
+                        source
                       };
                       if (imports !== undefined) eventPayload.imports = imports;
                       if (props !== undefined) eventPayload.props = props;
@@ -1153,15 +1179,17 @@ export default function App({ props, chat, scope }) {
                           kind: "ui.inline_rendered",
                           actor: actorForClient(client, methodRuntime.metadata),
                           payload: eventPayload,
-                          createdAt: new Date().toISOString(),
+                          createdAt: new Date().toISOString()
                         },
                         // The component ID is intentionally reusable. Event idempotency
                         // remains unique so a later render is reduced as an update.
-                        { idempotencyKey: `ui:inline:${id}:${crypto.randomUUID()}` }
+                        {
+                          idempotencyKey: `ui:inline:${id}:${crypto.randomUUID()}`
+                        }
                       );
                       return { ok: true, id };
-                    },
-                  },
+                    }
+                  }
                 }
               : undefined,
             features.actionBar
@@ -1205,7 +1233,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
                       clear: z
                         .boolean()
                         .optional()
-                        .describe("When true, remove the current action bar."),
+                        .describe("When true, remove the current action bar.")
                     }),
                     execute: async (args: unknown) => {
                       const { path, imports, props, maxHeight, clear } = args as {
@@ -1224,10 +1252,10 @@ Use package imports available to inline_ui plus relative imports for local helpe
                         path,
                         imports,
                         props,
-                        maxHeight,
+                        maxHeight
                       });
-                    },
-                  },
+                    }
+                  }
                 }
               : undefined,
             features.feedback
@@ -1247,7 +1275,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
                         message: z.string().optional(),
                         options: z.array(z.string()).optional(),
                         placeholder: z.string().optional(),
-                        prefill: z.string().optional(),
+                        prefill: z.string().optional()
                       })
                       .passthrough(),
                     execute: async (args: unknown, ctx: MethodExecutionContext) => {
@@ -1277,8 +1305,8 @@ Use package imports available to inline_ui plus relative imports for local helpe
                             label: title,
                             required: true,
                             options: opts.map((o) => ({ value: o, label: o })),
-                            submitOnSelect: true,
-                          },
+                            submitOnSelect: true
+                          }
                         ];
                         hideSubmit = true;
                       } else if (kind === "confirm") {
@@ -1286,7 +1314,12 @@ Use package imports available to inline_ui plus relative imports for local helpe
                         fields = [
                           ...(message
                             ? ([
-                                { key: "__msg", type: "readonly", label: "", default: message },
+                                {
+                                  key: "__msg",
+                                  type: "readonly",
+                                  label: "",
+                                  default: message
+                                }
                               ] as ActiveFeedbackSchema["fields"])
                             : []),
                           {
@@ -1295,9 +1328,9 @@ Use package imports available to inline_ui plus relative imports for local helpe
                             submitOnSelect: true,
                             buttons: [
                               { value: "no", label: "No", color: "gray" },
-                              { value: "yes", label: "Yes", color: "green" },
-                            ],
-                          },
+                              { value: "yes", label: "Yes", color: "green" }
+                            ]
+                          }
                         ];
                         hideSubmit = true;
                       } else if (kind === "input") {
@@ -1307,8 +1340,8 @@ Use package imports available to inline_ui plus relative imports for local helpe
                             key: "value",
                             type: "string",
                             label: title,
-                            placeholder: placeholder ?? "",
-                          },
+                            placeholder: placeholder ?? ""
+                          }
                         ];
                       } else {
                         resolveKey = "value";
@@ -1318,8 +1351,8 @@ Use package imports available to inline_ui plus relative imports for local helpe
                             type: "textarea",
                             label: title,
                             default: prefill ?? "",
-                            maxHeight: 320,
-                          },
+                            maxHeight: 320
+                          }
                         ];
                       }
                       void ctx;
@@ -1361,12 +1394,12 @@ Use package imports available to inline_ui plus relative imports for local helpe
                             } else {
                               finish(kind === "confirm" ? false : undefined, null);
                             }
-                          },
+                          }
                         };
                         fb.addFeedback(entry);
                       });
-                    },
-                  },
+                    }
+                  }
                 }
               : undefined,
             features.clientEval
@@ -1376,8 +1409,8 @@ Use package imports available to inline_ui plus relative imports for local helpe
                     executeSandbox: methodRuntime.boundExecuteSandbox,
                     loadSourceFile: methodRuntime.loadSourceFile,
                     getChat: () => methodRuntime.chat,
-                    scopeManager: methodRuntime.scopeManager,
-                  }),
+                    scopeManager: methodRuntime.scopeManager
+                  })
                 }
               : undefined
           );
@@ -1385,7 +1418,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
             channelId: channelName,
             methods,
             channelConfig,
-            contextId,
+            contextId
           });
           connected = true;
           return;
@@ -1422,7 +1455,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
     core.clientRef,
     connectionAttempt,
     connectionRetrySignal,
-    features,
+    features
   ]);
   // --- Wrap platform actions ---
   const handleAddAgent = useCallback(
@@ -1472,6 +1505,8 @@ Use package imports available to inline_ui plus relative imports for local helpe
   const onReloadPanel = actions?.onReloadPanel;
   const onOpenChannel = actions?.onOpenChannel;
   const onNewConversation = actions?.onNewConversation;
+  const onListTaskRules = actions?.onListTaskRules;
+  const onResetTaskRules = actions?.onResetTaskRules;
   const onOpenClaudeCode = actions?.onOpenClaudeCode;
   const onOpenLocalModelsLog = actions?.onOpenLocalModelsLog;
   const onOpenLocalModels = actions?.onOpenLocalModels;
@@ -1501,7 +1536,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
     forceInitialPrompt,
     channelName,
     messages: core.messages,
-    replaySettled: core.replaySettled,
+    replaySettled: core.replaySettled
   });
   // Pre-send queue intercept: the composer's send becomes the deferred wrapper,
   // which holds the first message(s) until the agent it spawns joins the roster.
@@ -1520,8 +1555,8 @@ Use package imports available to inline_ui plus relative imports for local helpe
         name: metadata.name,
         type: metadata.type,
         ...(metadata.handle ? { handle: metadata.handle } : {}),
-        ...(metadata.panelId ? { panelId: metadata.panelId } : {}),
-      },
+        ...(metadata.panelId ? { panelId: metadata.panelId } : {})
+      }
     }),
     [
       config.clientId,
@@ -1533,7 +1568,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
       metadata.name,
       metadata.type,
       metadata.handle,
-      metadata.panelId,
+      metadata.panelId
     ]
   );
 
@@ -1547,7 +1582,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
       channelTitle: core.channelTitle,
       browserHandoffCaller: {
         id: runtimeCallerId(config.rpc.selfId),
-        kind: browserHandoffCallerKindFromMetadata(metadata.type),
+        kind: browserHandoffCallerKindFromMetadata(metadata.type)
       },
       sessionEnabled,
       connectionError: core.connectionError,
@@ -1610,6 +1645,8 @@ Use package imports available to inline_ui plus relative imports for local helpe
       onReloadPanel,
       onOpenChannel,
       onNewConversation,
+      onListTaskRules,
+      onResetTaskRules,
       onOpenClaudeCode,
       onOpenLocalModelsLog,
       onOpenLocalModels,
@@ -1618,7 +1655,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
       forkState: forkNav ? forkState : undefined,
       // Lets subagent cards open an observer connection on a child's task
       // channel; reuses this panel's own transport config.
-      childTranscript,
+      childTranscript
     }),
     [
       core.connected,
@@ -1688,13 +1725,15 @@ Use package imports available to inline_ui plus relative imports for local helpe
       onReloadPanel,
       onOpenChannel,
       onNewConversation,
+      onListTaskRules,
+      onResetTaskRules,
       onOpenClaudeCode,
       onOpenLocalModelsLog,
       onOpenLocalModels,
       chatTools.toolApprovalValue,
       forkNav,
       forkState,
-      childTranscript,
+      childTranscript
     ]
   );
   return { contextValue, inputContextValue, features };

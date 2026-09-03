@@ -244,13 +244,22 @@ describe("notify", () => {
       notify: { alert: "inbox" },
     });
 
+    await tool.execute("call-4-quiet", {
+      content: "still needs durable delivery",
+      to: ["user:gabriel"],
+      alert: "none",
+    } as never);
+    expect(instance.sends[1]?.opts["metadata"]).toEqual({
+      notify: { alert: "inbox" },
+    });
+
     await tool.execute("call-5", {
       content: "wake up",
       to: ["user:gabriel"],
       alert: "interrupt",
       title: "Deploy blocked",
     } as never);
-    expect(instance.sends[1]?.opts["metadata"]).toEqual({
+    expect(instance.sends[2]?.opts["metadata"]).toEqual({
       notify: { alert: "interrupt", title: "Deploy blocked" },
     });
   });

@@ -10,7 +10,7 @@ import type { TemplateInstallResolution } from "@vibestudio/shared/authority/uni
 import {
   getApprovalCallerPresentation,
   getApprovalRiskTone,
-  type ApprovalCallerPresentation,
+  type ApprovalCallerPresentation
 } from "@vibestudio/shared/approvalCopy";
 import type { DiffChangedFile, DiffReviewEntry } from "@workspace/ui/diff";
 
@@ -43,6 +43,10 @@ export type ApprovalCardIntentBody =
       type: "resolve-install-review";
       resolution: TemplateInstallResolution;
     }
+  | {
+      type: "resolve-task-rules";
+      resolution: { decision: "accept"; selected: string[] } | { decision: "cancel" };
+    }
   | { type: "submit-client-config"; values: Record<string, string> }
   | { type: "submit-credential-input"; values: Record<string, string> }
   | { type: "submit-secret-input"; values: Record<string, string> }
@@ -60,7 +64,9 @@ export type ApprovalCardIntentBody =
   // launch state-args. Emitted both for degraded (binary/oversized) rows and
   // as a quiet secondary action on normal file headers.
   | { type: "open-in-workspace-history"; target: WorkspaceHistoryTarget };
-export type ApprovalCardIntent = { approvalId: string } & ApprovalCardIntentBody;
+export type ApprovalCardIntent = {
+  approvalId: string;
+} & ApprovalCardIntentBody;
 
 /**
  * Deep-link target for the "open in Workspace History" escape hatch. Carries the
@@ -124,7 +130,11 @@ export function getDiffReviewPayload(approval: PendingApproval): DiffReviewEntry
   if (!Array.isArray(candidate) || candidate.length === 0) return null;
   const valid = candidate.every((entry) => {
     if (typeof entry !== "object" || entry === null) return false;
-    const record = entry as { repoPath?: unknown; changedFiles?: unknown; diffStat?: unknown };
+    const record = entry as {
+      repoPath?: unknown;
+      changedFiles?: unknown;
+      diffStat?: unknown;
+    };
     if (typeof record.repoPath !== "string") return false;
     if (!Array.isArray(record.changedFiles)) return false;
     const diffStat = record.diffStat;

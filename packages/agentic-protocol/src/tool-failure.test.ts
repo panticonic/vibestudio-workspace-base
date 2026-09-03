@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   agentToolFailureFromUnknown,
   agentToolFailureSchema,
-  renderAgentToolFailure,
+  renderAgentToolFailure
 } from "./tool-failure.js";
 
 describe("agent tool failure contract", () => {
@@ -13,13 +13,15 @@ describe("agent tool failure contract", () => {
           code: "ExternalEffectFailed",
           effectId: "effect:1",
           cleanupFailure: { code: "EACCES", message: "cleanup denied" },
-          retry: { commandIdPolicy: "reuse-identical-only-if-outcome-uncertain" },
-        },
+          retry: {
+            commandIdPolicy: "reuse-identical-only-if-outcome-uncertain"
+          }
+        }
       }),
       {
         operation: "vcs.push",
         stage: "publish",
-        causal: { invocationId: "inv:1", commandId: "cmd:1" },
+        causal: { invocationId: "inv:1", commandId: "cmd:1" }
       }
     );
 
@@ -32,8 +34,8 @@ describe("agent tool failure contract", () => {
       causal: { invocationId: "inv:1", commandId: "cmd:1" },
       causes: [
         { role: "primary", code: "ExternalEffectFailed" },
-        { role: "cleanup", code: "EACCES" },
-      ],
+        { role: "cleanup", code: "EACCES" }
+      ]
     });
     expect(renderAgentToolFailure(failure)).toContain("cleanup denied");
   });
@@ -47,10 +49,10 @@ describe("agent tool failure contract", () => {
             code: "stale_panel_generation",
             recovery: {
               action: "reacquire-handle",
-              instruction: "Acquire a fresh page from the rebuilt panel generation.",
-            },
-          },
-        },
+              instruction: "Acquire a fresh page from the rebuilt panel generation."
+            }
+          }
+        }
       },
       { operation: "tool.eval", stage: "execute" }
     );
@@ -59,8 +61,8 @@ describe("agent tool failure contract", () => {
       code: "stale_panel_generation",
       recovery: {
         action: "reacquire-handle",
-        instruction: "Acquire a fresh page from the rebuilt panel generation.",
-      },
+        instruction: "Acquire a fresh page from the rebuilt panel generation."
+      }
     });
   });
 
@@ -71,8 +73,8 @@ describe("agent tool failure contract", () => {
         errorData: {
           code: "cdp_target_closed",
           failureKind: "infrastructure",
-          recovery: "reacquire-page",
-        },
+          recovery: "reacquire-page"
+        }
       }),
       { operation: "tool.eval", stage: "execute" }
     );
@@ -80,7 +82,7 @@ describe("agent tool failure contract", () => {
     expect(failure.recovery).toEqual({
       action: "reacquire-handle",
       instruction:
-        "Refresh or reacquire the panel's generation-fenced CDP session. Do not reuse the cached page.",
+        "Refresh or reacquire the panel's generation-fenced CDP session. Do not reuse the cached page."
     });
   });
 
@@ -93,16 +95,17 @@ describe("agent tool failure contract", () => {
           failureKind: "infrastructure",
           recovery: {
             sameInputRetry: "reobserve-first",
-            nextAction: "observe-and-reacquire",
-          },
-        },
+            nextAction: "observe-and-reacquire"
+          }
+        }
       }),
       { operation: "tool.eval", stage: "execute", kind: "infrastructure" }
     );
 
     expect(failure.recovery).toEqual({
       action: "reacquire-handle",
-      instruction: "Observe the committed panel, then reacquire its current handle before continuing.",
+      instruction:
+        "Observe the committed panel, then reacquire its current handle before continuing."
     });
   });
 
@@ -116,7 +119,7 @@ describe("agent tool failure contract", () => {
       {
         operation: "tool.read",
         stage: "execute",
-        causal: { invocationId: "inv:2" },
+        causal: { invocationId: "inv:2" }
       }
     );
     expect(rebound).toMatchObject({
@@ -124,7 +127,7 @@ describe("agent tool failure contract", () => {
       operation: "tool.read",
       stage: "execute",
       causal: { invocationId: "inv:2" },
-      causes: original.causes,
+      causes: original.causes
     });
   });
 
@@ -136,9 +139,12 @@ describe("agent tool failure contract", () => {
           stage: "clone",
           primary: { code: "ENETDOWN", message: "network unavailable" },
           config: {
-            rollbackFailure: { code: "EACCES", message: "rollback cleanup failed" },
-          },
-        },
+            rollbackFailure: {
+              code: "EACCES",
+              message: "rollback cleanup failed"
+            }
+          }
+        }
       }),
       { operation: "git.importProject", stage: "clone" }
     );
@@ -148,8 +154,12 @@ describe("agent tool failure contract", () => {
       message: "network unavailable",
       causes: [
         { role: "primary", code: "ENETDOWN", message: "network unavailable" },
-        { role: "rollback", code: "EACCES", message: "rollback cleanup failed" },
-      ],
+        {
+          role: "rollback",
+          code: "EACCES",
+          message: "rollback cleanup failed"
+        }
+      ]
     });
   });
 
@@ -159,10 +169,10 @@ describe("agent tool failure contract", () => {
         errorData: {
           code: "ExternalEffectFailed",
           effectId: "effect:large",
-          body: "x".repeat(40_000),
-        },
+          body: "x".repeat(40_000)
+        }
       }),
-      { operation: "network.fetch", stage: "response" }
+      { operation: "network.response.read", stage: "response" }
     );
 
     expect(failure).toMatchObject({
@@ -171,8 +181,8 @@ describe("agent tool failure contract", () => {
       data: {
         protocol: "agent-tool-failure-data-summary.v1",
         truncated: true,
-        originalBytes: expect.any(Number),
-      },
+        originalBytes: expect.any(Number)
+      }
     });
     expect(JSON.stringify(failure).length).toBeLessThan(20_000);
   });
@@ -184,7 +194,7 @@ describe("agent tool failure contract", () => {
     );
     expect(failure).toMatchObject({
       kind: "invalid-input",
-      retry: { policy: "correct-input" },
+      retry: { policy: "correct-input" }
     });
     expect(renderAgentToolFailure(failure)).toContain("Correct the request");
   });
@@ -195,8 +205,8 @@ describe("agent tool failure contract", () => {
         details: {
           error: "scope.panel.cdp.evaluate is not a function",
           failureKind: "user-code",
-          failureCode: "guest_type_error",
-        },
+          failureCode: "guest_type_error"
+        }
       },
       { operation: "tool.eval", stage: "execute" }
     );
@@ -205,7 +215,7 @@ describe("agent tool failure contract", () => {
       code: "guest_type_error",
       kind: "invalid-input",
       retry: { policy: "correct-input" },
-      recovery: { action: "correct-request" },
+      recovery: { action: "correct-request" }
     });
   });
 
@@ -220,9 +230,9 @@ describe("agent tool failure contract", () => {
             reason: "shape-drift",
             persistedVersion: 1,
             targetVersion: 1,
-            safeActions: ["deploy-current-build", "reset-storage"],
-          },
-        },
+            safeActions: ["deploy-current-build", "reset-storage"]
+          }
+        }
       },
       { operation: "tool.eval", stage: "execute" }
     );
@@ -233,8 +243,8 @@ describe("agent tool failure contract", () => {
       retry: { policy: "none" },
       recovery: {
         action: "repair-source",
-        instruction: expect.stringContaining("schema changed"),
-      },
+        instruction: expect.stringContaining("schema changed")
+      }
     });
   });
 
@@ -242,7 +252,7 @@ describe("agent tool failure contract", () => {
     const failure = agentToolFailureFromUnknown(
       {
         message: "package linker unavailable",
-        code: "package_load_failed",
+        code: "package_load_failed"
       },
       { operation: "tool.eval", stage: "execute", kind: "infrastructure" }
     );
@@ -252,8 +262,8 @@ describe("agent tool failure contract", () => {
       retry: { policy: "none", commandIdPolicy: "not-applicable" },
       recovery: {
         action: "reobserve",
-        instruction: expect.stringContaining("Do not retry"),
-      },
+        instruction: expect.stringContaining("Do not retry")
+      }
     });
   });
 
@@ -267,10 +277,10 @@ describe("agent tool failure contract", () => {
             reason: "The current eval is read-only.",
             remediation: {
               kind: "use-writable-session",
-              message: 'Issue a new eval with authority.effects set to "read-write".',
-            },
-          },
-        },
+              message: 'Issue a new eval with authority.effects set to "read-write".'
+            }
+          }
+        }
       }),
       { operation: "tool.eval", stage: "execute" }
     );
@@ -281,8 +291,8 @@ describe("agent tool failure contract", () => {
       retry: { policy: "correct-input", commandIdPolicy: "not-applicable" },
       recovery: {
         action: "correct-request",
-        instruction: 'Issue a new eval with authority.effects set to "read-write".',
-      },
+        instruction: 'Issue a new eval with authority.effects set to "read-write".'
+      }
     });
   });
 
@@ -292,13 +302,15 @@ describe("agent tool failure contract", () => {
         code: "eval_execution_admission_lost",
         errorData: {
           failureKind: "infrastructure",
-          retry: { policy: "reobserve", commandIdPolicy: "use-new-after-reobserve" },
+          retry: {
+            policy: "reobserve",
+            commandIdPolicy: "use-new-after-reobserve"
+          },
           recovery: {
             action: "reobserve",
-            instruction:
-              "Inspect current state, then issue a new eval for only unfinished work.",
-          },
-        },
+            instruction: "Inspect current state, then issue a new eval for only unfinished work."
+          }
+        }
       }),
       { operation: "tool.eval", stage: "execute" }
     );
@@ -306,11 +318,14 @@ describe("agent tool failure contract", () => {
     expect(failure).toMatchObject({
       code: "eval_execution_admission_lost",
       kind: "infrastructure",
-      retry: { policy: "reobserve", commandIdPolicy: "use-new-after-reobserve" },
+      retry: {
+        policy: "reobserve",
+        commandIdPolicy: "use-new-after-reobserve"
+      },
       recovery: {
         action: "reobserve",
-        instruction: "Inspect current state, then issue a new eval for only unfinished work.",
-      },
+        instruction: "Inspect current state, then issue a new eval for only unfinished work."
+      }
     });
   });
 
@@ -323,9 +338,9 @@ describe("agent tool failure contract", () => {
           retry: { policy: "none", commandIdPolicy: "not-applicable" },
           recovery: {
             action: "repair-source",
-            instruction: "Repair diagnostics and build a new candidate.",
-          },
-        },
+            instruction: "Repair diagnostics and build a new candidate."
+          }
+        }
       }),
       { operation: "tool.vcs", stage: "execute" }
     );
@@ -335,8 +350,8 @@ describe("agent tool failure contract", () => {
       retry: { policy: "none", commandIdPolicy: "not-applicable" },
       recovery: {
         action: "repair-source",
-        instruction: "Repair diagnostics and build a new candidate.",
-      },
+        instruction: "Repair diagnostics and build a new candidate."
+      }
     });
   });
 
@@ -347,19 +362,27 @@ describe("agent tool failure contract", () => {
         errorData: {
           code: "unknown-handle",
           suggestions: ["@scribe"],
-          recovery: { action: "correct-request", instruction: "Did you mean @scribe?" },
-        },
+          recovery: {
+            action: "correct-request",
+            instruction: "Did you mean @scribe?"
+          }
+        }
       }),
       { operation: "notify", stage: "resolve" }
     );
     expect(unresolved).toMatchObject({
       kind: "not-found",
       retry: { policy: "correct-input" },
-      recovery: { action: "correct-request", instruction: "Did you mean @scribe?" },
+      recovery: {
+        action: "correct-request",
+        instruction: "Did you mean @scribe?"
+      }
     });
 
     const ambiguous = agentToolFailureFromUnknown(
-      Object.assign(new Error("runs in 2 channels"), { code: "ambiguous-agent" }),
+      Object.assign(new Error("runs in 2 channels"), {
+        code: "ambiguous-agent"
+      }),
       { operation: "notify", stage: "resolve" }
     );
     expect(ambiguous.kind).toBe("invalid-input");
@@ -367,14 +390,17 @@ describe("agent tool failure contract", () => {
     const closed = agentToolFailureFromUnknown(
       Object.assign(new Error("locked membership"), {
         code: "ClosedChannel",
-        errorData: { code: "ClosedChannel", recovery: { action: "stop", instruction: "Do not retry." } },
+        errorData: {
+          code: "ClosedChannel",
+          recovery: { action: "stop", instruction: "Do not retry." }
+        }
       }),
       { operation: "notify", stage: "deliver" }
     );
     expect(closed).toMatchObject({
       kind: "domain",
       retry: { policy: "none" },
-      recovery: { action: "stop" },
+      recovery: { action: "stop" }
     });
   });
 });

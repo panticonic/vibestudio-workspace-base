@@ -15,7 +15,7 @@ import type {
   MessageTypeDefinition,
   MethodDefinition,
   Participant,
-  RegisterMessageTypeInput,
+  RegisterMessageTypeInput
 } from "@workspace/pubsub";
 import type { MessageTier, ParticipantRef } from "@workspace/agentic-protocol";
 import type { RecoveryCoordinator } from "@vibestudio/shell-core/recoveryCoordinator";
@@ -112,6 +112,20 @@ export interface NewConversationOptions {
 
 /** Inject platform-specific navigation */
 export interface AgenticChatActions {
+  /** Register the current human title used by task-scoped approval copy. */
+  onTaskTitleChange?: (title: string) => Promise<void> | void;
+  /** Read the reusable authority currently attached to this conversation. */
+  onListTaskRules?: () => Promise<
+    Array<{
+      id: string;
+      capability: string;
+      action: string;
+      resource: string;
+      decidedAt: number;
+    }>
+  >;
+  /** Revoke every reusable authority rule attached to this conversation. */
+  onResetTaskRules?: () => Promise<number>;
   onNewConversation?: (options?: NewConversationOptions) => void | Promise<void>;
   /** Add a new agent to the channel, optionally with a full subscription config. */
   onAddAgent?: (
@@ -184,10 +198,7 @@ export interface AgenticChatActions {
    * `[Open ▸]`, the guest chip's origin link, and the external-conversations
    * menu all route through this. Absent on hosts that cannot open panels.
    */
-  onOpenChannel?: (
-    channelId: string,
-    opts?: { focusMessageId?: string },
-  ) => Promise<void> | void;
+  onOpenChannel?: (channelId: string, opts?: { focusMessageId?: string }) => Promise<void> | void;
   onBecomeVisible?: () => void;
   /** Raise host-level attention for a blocking in-chat question. */
   onAttentionRequired?: (title: string, message?: string) => void;
@@ -224,7 +235,11 @@ export interface ChatSandboxValue {
     }
   ) => Promise<unknown>;
   publishCustomMessage: (
-    input: { typeId: string; initialState?: unknown; displayMode?: CustomMessageDisplayMode },
+    input: {
+      typeId: string;
+      initialState?: unknown;
+      displayMode?: CustomMessageDisplayMode;
+    },
     options?: { idempotencyKey?: string }
   ) => Promise<{ messageId: string; pubsubId: number | undefined }>;
   updateCustomMessage: (
@@ -293,12 +308,16 @@ export interface ChatSandboxValue {
   focusMessage: (messageId: string) => Promise<boolean>;
   contextId: string;
   channelId: string | null;
-  rpc: { call: (target: string, method: string, args: unknown[]) => Promise<unknown> };
+  rpc: {
+    call: (target: string, method: string, args: unknown[]) => Promise<unknown>;
+  };
 }
 
 /** Dependencies provided to the tool provider factory */
 export interface ToolProviderDeps {
-  clientRef: { current: { publish: (eventType: string, payload: unknown) => void } | null };
+  clientRef: {
+    current: { publish: (eventType: string, payload: unknown) => void } | null;
+  };
   contextId: string;
   executeSandbox: (code: string, options: SandboxOptions) => Promise<SandboxResult>;
   chat: ChatSandboxValue;

@@ -12,7 +12,7 @@ export type {
   ToolProviderDeps,
   ToolProvider,
   NewConversationOptions,
-  ModelSetupResult,
+  ModelSetupResult
 } from "@workspace/agentic-core";
 
 // ===========================================================================
@@ -24,7 +24,7 @@ export type {
   PendingAgent,
   PendingAgentStatus,
   DisconnectedAgentInfo,
-  DirtyRepoDetails,
+  DirtyRepoDetails
 } from "@workspace/agentic-core";
 
 // ===========================================================================
@@ -35,7 +35,7 @@ import type {
   Participant,
   AttachmentInput,
   SandboxSource,
-  PubSubClient,
+  PubSubClient
 } from "@workspace/pubsub";
 import type { ActiveFeedback, ToolApprovalProps } from "@workspace/tool-ui";
 import type { PendingImage } from "./utils/imageUtils";
@@ -48,7 +48,7 @@ import type { ChildTranscriptConnection } from "./hooks/useChildTranscript";
 import type {
   ChatParticipantMetadata,
   ChatSandboxValue,
-  InvocationCardPayload,
+  InvocationCardPayload
 } from "@workspace/agentic-core";
 import type { ConsoleCapture } from "@workspace/eval";
 import type {
@@ -60,7 +60,7 @@ import type {
   ModelSetupResult,
   ModelCatalog,
   AgentSubscriptionConfig,
-  NewConversationOptions,
+  NewConversationOptions
 } from "@workspace/agentic-core";
 
 // ===========================================================================
@@ -153,7 +153,7 @@ export interface ChatInputContextValue {
       replyTo?: string;
       /** Written into the published message payload (e.g. deliverAfterTurn). */
       metadata?: Record<string, unknown>;
-    },
+    }
   ) => Promise<void>;
   onImagesChange: (images: PendingImage[]) => void;
   replyTo: string | null;
@@ -306,10 +306,7 @@ export interface ForkNavHandlers {
   /** In-place switch: rebind the panel's channel + context and reconnect. */
   switchTo: (channelId: string, contextId: string) => void | Promise<void>;
   /** Side-by-side: open the fork in a NEW chat panel. */
-  openInNewPanel: (
-    channelId: string,
-    contextId: string,
-  ) => void | Promise<void>;
+  openInNewPanel: (channelId: string, contextId: string) => void | Promise<void>;
   /** Panel-persisted lineage read cursors. */
   readForkCursors?: () => Record<string, number>;
   /** Persist one monotone lineage read cursor. */
@@ -403,10 +400,7 @@ export interface ChatContextValue {
   inlineUiComponents: Map<string, InlineUiComponentEntry>;
   messageTypeComponents: Map<string, MessageTypeComponentEntry>;
   actionBar: ActionBarState | null;
-  onActionBarMaxHeightChange?: (
-    maxHeight: number,
-    options?: { saveState?: boolean },
-  ) => void;
+  onActionBarMaxHeightChange?: (maxHeight: number, options?: { saveState?: boolean }) => void;
   hasMoreHistory: boolean;
   loadingMore: boolean;
 
@@ -463,34 +457,33 @@ export interface ChatContextValue {
 
   // Handlers
   onLoadEarlierMessages: () => void;
-  onInterrupt: (
-    agentId: string,
-    messageId?: string,
-    agentHandle?: string,
-  ) => void;
-  onCancelInvocation: (
-    invocation: InvocationCardPayload,
-    senderId: string,
-  ) => void;
+  onInterrupt: (agentId: string, messageId?: string, agentHandle?: string) => void;
+  onCancelInvocation: (invocation: InvocationCardPayload, senderId: string) => void;
   onCallMethod: (providerId: string, methodName: string, args: unknown) => void;
   /** Awaits and returns the provider's result payload (for settings UIs). */
-  onCallMethodResult: (
-    providerId: string,
-    methodName: string,
-    args: unknown,
-  ) => Promise<unknown>;
+  onCallMethodResult: (providerId: string, methodName: string, args: unknown) => Promise<unknown>;
   onFeedbackDismiss: (callId: string) => void;
   onFeedbackError: (callId: string, error: Error) => void;
   onDebugConsoleChange: (agentHandle: string | null) => void;
   onDismissDirtyWarning: (agentName: string) => void;
 
   // Optional actions (platform-specific)
+  onListTaskRules?: () => Promise<
+    Array<{
+      id: string;
+      capability: string;
+      action: string;
+      resource: string;
+      decidedAt: number;
+    }>
+  >;
+  onResetTaskRules?: () => Promise<number>;
   onAddAgent?: (agentId?: string, config?: AgentSubscriptionConfig) => void;
   /** Replace an existing agent (by participant id), reusing its handle. */
   onReplaceAgent?: (
     participantId: string,
     agentId?: string,
-    config?: AgentSubscriptionConfig,
+    config?: AgentSubscriptionConfig
   ) => Promise<void> | void;
   /** Start installing a local model; live progress arrives through modelCatalog. */
   onInstallLocalModel?: (modelRef: string) => Promise<ModelSetupResult>;
@@ -510,14 +503,9 @@ export interface ChatContextValue {
   onReloadPanel?: (panelId: string) => void;
   /** Find-or-open the chat panel for another channel, landing on an envelope
    *  when given (messaging plan §4.10). */
-  onOpenChannel?: (
-    channelId: string,
-    opts?: { focusMessageId?: string },
-  ) => Promise<void> | void;
+  onOpenChannel?: (channelId: string, opts?: { focusMessageId?: string }) => Promise<void> | void;
   /** Start a fresh conversation (surfaced for the command palette). */
-  onNewConversation?: (
-    options?: NewConversationOptions,
-  ) => void | Promise<void>;
+  onNewConversation?: (options?: NewConversationOptions) => void | Promise<void>;
   /** Launch Claude Code as a linked agent in this conversation (§4.3). */
   onOpenClaudeCode?: (channelId: string) => Promise<void> | void;
   /** Open the Local Models panel focused on a server's log (item 6) — wired
@@ -543,10 +531,7 @@ export interface ChatContextValue {
 }
 
 /** Which await a loading message type is currently parked on. */
-export type MessageTypeLoadingStage =
-  | "fetching-definition"
-  | "loading-source"
-  | "compiling";
+export type MessageTypeLoadingStage = "fetching-definition" | "loading-source" | "compiling";
 
 export type MessageTypeRegistryEntry =
   | {

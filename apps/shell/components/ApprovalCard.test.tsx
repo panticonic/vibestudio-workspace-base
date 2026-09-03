@@ -7,26 +7,23 @@ import type {
   PendingCapabilityApproval,
   PendingClientConfigApproval,
   PendingCredentialApproval,
-  PendingUnitInstallReviewApproval,
+  PendingUnitInstallReviewApproval
 } from "@vibestudio/shared/approvals";
 import type {
   InstallReviewPart,
-  InstallReviewRow,
+  InstallReviewRow
 } from "@vibestudio/shared/authority/unitInstallReview";
 import { authorityRow } from "@vibestudio/shared/authority/authorityRows";
 import { installRowHeadline } from "@vibestudio/shared/authority/unitInstallReview";
 import { ApprovalCard } from "./ApprovalCard";
-import {
-  resolveCallerInfo,
-  type ApprovalCardIntent,
-} from "./approvalCardModel";
+import { resolveCallerInfo, type ApprovalCardIntent } from "./approvalCardModel";
 import { ApprovalCardSurface } from "../overlay/ApprovalCardSurface";
 
 function capabilityApproval(
   partial: Partial<PendingCapabilityApproval> & {
     approvalId: string;
     title: string;
-  },
+  }
 ): PendingCapabilityApproval {
   return {
     kind: "capability",
@@ -42,7 +39,7 @@ function capabilityApproval(
     resource: partial.resource ?? {
       type: "panel",
       label: "Panel",
-      value: "Shell",
+      value: "Shell"
     },
     grantResourceKey: partial.grantResourceKey,
     details: partial.details,
@@ -55,7 +52,7 @@ function capabilityApproval(
     operationSubstance: partial.operationSubstance,
     target: partial.target,
     approvalId: partial.approvalId,
-    lifecycle: partial.lifecycle,
+    lifecycle: partial.lifecycle
   };
 }
 
@@ -66,7 +63,7 @@ function capabilityApproval(
  */
 function reviewRow(
   capability: string,
-  overrides: Partial<InstallReviewRow> = {},
+  overrides: Partial<InstallReviewRow> = {}
 ): InstallReviewRow {
   return {
     kind: "permission",
@@ -76,18 +73,18 @@ function reviewRow(
       resource: { kind: "prefix", prefix: "" },
       tier: "gated",
       statement: "declared",
-      provenance: { source: "manifest" },
+      provenance: { source: "manifest" }
     }),
     timing: "on-add",
     notability: "everyday",
     selectable: true,
     selectedByDefault: true,
-    ...overrides,
+    ...overrides
   } as InstallReviewRow;
 }
 
 function installReviewPart(
-  overrides: Partial<InstallReviewPart> & { identityKey: string },
+  overrides: Partial<InstallReviewPart> & { identityKey: string }
 ): InstallReviewPart {
   return {
     kind: "extension",
@@ -107,26 +104,26 @@ function installReviewPart(
       registrableDomain: null,
       version: "1.4.0",
       isHostBuild: true,
-      firstEncounter: false,
+      firstEncounter: false
     },
     notableRows: [],
     everydayRows: [],
     change: "added",
     section: "template",
-    ...overrides,
+    ...overrides
   };
 }
 
 function installReviewApproval(
-  partial: Partial<PendingUnitInstallReviewApproval> & { approvalId: string },
+  partial: Partial<PendingUnitInstallReviewApproval> & { approvalId: string }
 ): PendingUnitInstallReviewApproval {
   const parts = partial.parts ?? [
     installReviewPart({ identityKey: "ext-1" }),
     installReviewPart({
       identityKey: "ext-2",
       title: "Extension 2",
-      repoPath: "extensions/ext-2",
-    }),
+      repoPath: "extensions/ext-2"
+    })
   ];
   return {
     kind: "unit-install-review",
@@ -137,8 +134,7 @@ function installReviewApproval(
     effectiveVersion: partial.effectiveVersion ?? "",
     requestedAt: partial.requestedAt ?? Date.now(),
     title: partial.title ?? "Add News",
-    description:
-      partial.description ?? "Read and discuss personalized news briefings.",
+    description: partial.description ?? "Read and discuss personalized news briefings.",
     approvalId: partial.approvalId,
     parts,
     summary: partial.summary ?? {
@@ -146,9 +142,9 @@ function installReviewApproval(
       agents: 0,
       services: 0,
       clientApps: 0,
-      extensions: parts.length,
+      extensions: parts.length
     },
-    unchangedPartCount: partial.unchangedPartCount ?? 0,
+    unchangedPartCount: partial.unchangedPartCount ?? 0
   };
 }
 
@@ -156,7 +152,7 @@ function clientConfigApproval(
   partial: Partial<PendingClientConfigApproval> & {
     approvalId: string;
     configId: string;
-  },
+  }
 ): PendingClientConfigApproval {
   return {
     kind: "client-config",
@@ -167,8 +163,7 @@ function clientConfigApproval(
     requestedAt: partial.requestedAt ?? Date.now(),
     approvalId: partial.approvalId,
     configId: partial.configId,
-    authorizeUrl:
-      partial.authorizeUrl ?? "https://accounts.example.test/oauth/authorize",
+    authorizeUrl: partial.authorizeUrl ?? "https://accounts.example.test/oauth/authorize",
     tokenUrl: partial.tokenUrl ?? "https://accounts.example.test/oauth/token",
     title: partial.title ?? partial.configId,
     description: partial.description,
@@ -177,9 +172,9 @@ function clientConfigApproval(
         name: "clientSecret",
         label: "Client Secret",
         type: "secret",
-        required: true,
-      },
-    ],
+        required: true
+      }
+    ]
   };
 }
 
@@ -198,7 +193,7 @@ function stubWindowWidth(wide: boolean) {
     removeEventListener: () => {},
     addListener: () => {},
     removeListener: () => {},
-    dispatchEvent: () => false,
+    dispatchEvent: () => false
   }));
 }
 
@@ -210,7 +205,7 @@ function renderCard(
     fetchContent?: Parameters<typeof ApprovalCard>[0]["fetchContent"];
     actionPending?: boolean;
     layout?: Parameters<typeof ApprovalCard>[0]["layout"];
-  } = {},
+  } = {}
 ) {
   const emit = vi.fn<(intent: ApprovalCardIntent) => void>();
   const tree = (next: typeof approval) => (
@@ -246,31 +241,25 @@ describe("ApprovalCard", () => {
             detail: "2 finished; 4 still running in parallel.",
             completed: 2,
             total: 6,
-            updatedAt: Date.now(),
-          },
-        },
-      }),
+            updatedAt: Date.now()
+          }
+        }
+      })
     );
 
     expect(screen.getByRole("status").textContent).toMatch(
-      /^Building and type-checking workspace projects \(2 of 6\)… \d+s elapsed$/,
+      /^Building and type-checking workspace projects \(2 of 6\)… \d+s elapsed$/
     );
-    expect(screen.getByRole("status").previousElementSibling?.tagName).toBe(
-      "svg",
-    );
-    expect(
-      screen.getByText("2 finished; 4 still running in parallel."),
-    ).toBeTruthy();
+    expect(screen.getByRole("status").previousElementSibling?.tagName).toBe("svg");
+    expect(screen.getByText("2 finished; 4 still running in parallel.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Allow once" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Allow for now" })).toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Trust this version" }),
-    ).toBeNull();
+    expect(screen.queryByRole("button", { name: "Trust this version" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Don't allow" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Run in background" }));
     expect(emit).toHaveBeenCalledWith({
       type: "minimize",
-      approvalId: "publication-preparing",
+      approvalId: "publication-preparing"
     });
   });
 
@@ -281,9 +270,9 @@ describe("ApprovalCard", () => {
         title: "Update workspace repositories",
         lifecycle: {
           state: "failed",
-          diagnostics: ["packages/example.ts:1: Broken type"],
-        },
-      }),
+          diagnostics: ["packages/example.ts:1: Broken type"]
+        }
+      })
     );
 
     expect(screen.getByText("packages/example.ts:1: Broken type")).toBeTruthy();
@@ -292,7 +281,7 @@ describe("ApprovalCard", () => {
     expect(emit).toHaveBeenCalledWith({
       type: "decide",
       decision: "dismiss",
-      approvalId: "publication-failed",
+      approvalId: "publication-failed"
     });
   });
 
@@ -305,18 +294,16 @@ describe("ApprovalCard", () => {
       capabilityApproval({
         approvalId: "localized-long-copy",
         title,
-        description,
+        description
       }),
-      { decisionError: "La décision n’a pas pu être enregistrée." },
+      { decisionError: "La décision n’a pas pu être enregistrée." }
     );
 
     const dialog = screen.getByRole("dialog", { name: title });
-    expect(dialog.getAttribute("aria-describedby")).toBe(
-      "approval-summary-localized-long-copy",
-    );
+    expect(dialog.getAttribute("aria-describedby")).toBe("approval-summary-localized-long-copy");
     expect(screen.getByText(description)).toBeTruthy();
     expect(screen.getByRole("alert").textContent).toContain(
-      "La décision n’a pas pu être enregistrée.",
+      "La décision n’a pas pu être enregistrée."
     );
   });
 
@@ -325,29 +312,24 @@ describe("ApprovalCard", () => {
       capabilityApproval({
         approvalId: "cap-severe",
         title: "Act on Shell's context",
-        severity: "severe",
-      }),
+        severity: "severe"
+      })
     );
     const card = screen
       .getByText("Act on Shell's context")
       .closest(".approval-card") as HTMLElement;
     expect(card.getAttribute("data-approval-tone")).toBe("red");
 
-    const trustButton = screen
-      .getByText("Remember for this version")
-      .closest("button");
+    const trustButton = screen.getByText("Remember for this version").closest("button");
     expect(trustButton?.getAttribute("data-accent-color")).toBe("red");
     expect(
-      screen
-        .getByText("Allow once")
-        .closest("button")
-        ?.getAttribute("data-accent-color"),
+      screen.getByText("Allow once").closest("button")?.getAttribute("data-accent-color")
     ).toBe("");
     fireEvent.click(trustButton as HTMLButtonElement);
     expect(emit).toHaveBeenCalledWith({
       type: "decide",
       decision: "version",
-      approvalId: "cap-severe",
+      approvalId: "cap-severe"
     });
   });
 
@@ -357,18 +339,18 @@ describe("ApprovalCard", () => {
       resource: { kind: "exact", key: "panel.inspect" },
       tier: "gated",
       statement: "prospective",
-      provenance: { source: "receiver" },
+      provenance: { source: "receiver" }
     });
     const boundary = authorityRow({
       capability: "context.boundary",
       resource: {
         kind: "exact",
-        key: "context/project-planning/requester/agent",
+        key: "context/project-planning/requester/agent"
       },
       resourcePhrase: "Project planning",
       tier: "gated",
       statement: "prospective",
-      provenance: { source: "receiver" },
+      provenance: { source: "receiver" }
     });
     renderCard(
       capabilityApproval({
@@ -379,42 +361,116 @@ describe("ApprovalCard", () => {
         target: {
           id: "panel:stable",
           kind: "panel",
-          title: "Example dashboard",
+          title: "Example dashboard"
         },
         authorityFacets: [
           {
+            selectionKey: "inspect",
             capability: "panel.inspect",
             title: "Inspect a panel with developer tools",
             resource: {
               type: "panel",
               label: "Panel",
-              value: "Example dashboard",
+              value: "Example dashboard"
             },
-            row: inspection,
+            row: inspection
           },
           {
+            selectionKey: "boundary",
             capability: "context.boundary",
             title: "Automate panel in another context",
             resource: {
               type: "context",
               label: "Workspace branch",
-              value: "Project planning",
+              value: "Project planning"
             },
-            row: boundary,
-          },
-        ],
-      }),
+            row: boundary
+          }
+        ]
+      })
     );
 
     expect(screen.getByText("This decision allows all of these:")).toBeTruthy();
-    expect(
-      screen.getByText("Inspect a panel with developer tools"),
-    ).toBeTruthy();
+    expect(screen.getByText("Inspect a panel with developer tools")).toBeTruthy();
     expect(screen.getByText("Panel: Example dashboard")).toBeTruthy();
     expect(screen.getByText("Automate panel in another context")).toBeTruthy();
     expect(screen.getByText("Workspace branch: Project planning")).toBeTruthy();
     expect(screen.getByText("This computer")).toBeTruthy();
     expect(screen.getByText("Your files & work")).toBeTruthy();
+  });
+
+  it("returns exactly the selected rows from a chat-rules card", () => {
+    const row = authorityRow({
+      capability: "panel.inspect",
+      resource: { kind: "exact", key: "panel:task-board" },
+      tier: "gated",
+      statement: "prospective",
+      provenance: { source: "receiver" }
+    });
+    const { emit, refresh } = renderCard(
+      capabilityApproval({
+        approvalId: "task-rules",
+        title: "Allow planned actions?",
+        capability: "panel.inspect",
+        cardType: "task.rules",
+        allowedDecisions: ["task", "deny"],
+        authorityRow: row,
+        authorityFacets: [
+          {
+            selectionKey: "storage",
+            defaultSelected: true,
+            capability: "workspace.storage",
+            title: "Use task storage",
+            row: {
+              ...row,
+              capability: "workspace.storage",
+              action: "use task storage"
+            }
+          },
+          {
+            selectionKey: "inspect",
+            defaultSelected: true,
+            capability: "panel.inspect",
+            title: "Inspect the task board",
+            row
+          }
+        ]
+      })
+    );
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Inspect the task board" }));
+    fireEvent.click(screen.getByRole("button", { name: "Allow selected" }));
+    expect(emit).toHaveBeenCalledWith({
+      approvalId: "task-rules",
+      type: "resolve-task-rules",
+      resolution: { decision: "accept", selected: ["storage"] }
+    });
+
+    refresh(
+      capabilityApproval({
+        approvalId: "task-rules-next",
+        title: "Allow another planned action?",
+        capability: "panel.inspect",
+        cardType: "task.rules",
+        allowedDecisions: ["task", "deny"],
+        authorityRow: row,
+        authorityFacets: [
+          {
+            selectionKey: "next",
+            defaultSelected: true,
+            capability: "panel.inspect",
+            title: "Inspect another panel",
+            row
+          }
+        ]
+      })
+    );
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "d" });
+    expect(emit).toHaveBeenLastCalledWith({
+      approvalId: "task-rules-next",
+      type: "resolve-task-rules",
+      resolution: { decision: "cancel" }
+    });
   });
 
   it("shows the exact prepared effect and the eligible task and agent scope ladder", () => {
@@ -424,7 +480,7 @@ describe("ApprovalCard", () => {
       resourcePhrase: "Briefings",
       tier: "gated",
       statement: "prospective",
-      provenance: { source: "receiver" },
+      provenance: { source: "receiver" }
     });
     const { emit } = renderCard(
       capabilityApproval({
@@ -453,7 +509,7 @@ describe("ApprovalCard", () => {
           codeLineage: { class: "internal", chain: ["code:news"] },
           contextLineage: null,
           initiatorChain: ["user:alice"],
-          at: 1,
+          at: 1
         },
         authorityRow: row,
         allowedDecisions: ["once", "task", "agent", "deny", "lock"],
@@ -463,19 +519,17 @@ describe("ApprovalCard", () => {
           detail: "Subject: Overnight workspace summary",
           facts: [
             { label: "Recipient", value: "Briefings" },
-            { label: "Delivery", value: "Send now" },
+            { label: "Delivery", value: "Send now" }
           ],
-          digest: "prepared:briefing-1",
-        },
-      }),
+          digest: "prepared:briefing-1"
+        }
+      })
     );
 
     expect(screen.getByText("Publishing & sending")).toBeTruthy();
     expect(screen.getByText("What exactly")).toBeTruthy();
     expect(screen.getByText("Send 1 briefing to Briefings")).toBeTruthy();
-    expect(
-      screen.getByText("Subject: Overnight workspace summary"),
-    ).toBeTruthy();
+    expect(screen.getByText("Subject: Overnight workspace summary")).toBeTruthy();
     expect(screen.getByText("Recipient")).toBeTruthy();
     expect(screen.getByText("Briefings")).toBeTruthy();
     expect(screen.getByText("Delivery")).toBeTruthy();
@@ -487,7 +541,7 @@ describe("ApprovalCard", () => {
     expect(emit).toHaveBeenCalledWith({
       type: "decide",
       decision: "task",
-      approvalId: "cap-substance",
+      approvalId: "cap-substance"
     });
     expect(screen.getByText("Always for News")).toBeTruthy();
   });
@@ -502,9 +556,9 @@ describe("ApprovalCard", () => {
         operationSubstance: {
           kind: "custom",
           summary: "Inspect a panel with developer tools",
-          digest: "prepared",
-        },
-      }),
+          digest: "prepared"
+        }
+      })
     );
 
     expect(screen.queryByText("What exactly")).toBeNull();
@@ -515,21 +569,18 @@ describe("ApprovalCard", () => {
       capabilityApproval({
         approvalId: "task-default",
         title: "Manage running workspace services",
-        allowedDecisions: ["once", "session", "task", "deny"],
-      }),
+        allowedDecisions: ["once", "session", "task", "deny"]
+      })
     );
 
     expect(
-      screen
-        .getByText("Allow for this task")
-        .closest("button")
-        ?.getAttribute("data-accent-color"),
+      screen.getByText("Allow for this task").closest("button")?.getAttribute("data-accent-color")
     ).toBe("sky");
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
     expect(emit).toHaveBeenCalledWith({
       type: "decide",
       decision: "task",
-      approvalId: "task-default",
+      approvalId: "task-default"
     });
   });
 
@@ -537,7 +588,7 @@ describe("ApprovalCard", () => {
     const credential = {
       ...capabilityApproval({
         approvalId: "credential",
-        title: "Use model credential",
+        title: "Use model credential"
       }),
       kind: "credential" as const,
       credentialId: "openai-codex",
@@ -545,18 +596,18 @@ describe("ApprovalCard", () => {
       audience: [
         {
           match: "path-prefix" as const,
-          url: "https://chatgpt.com/backend-api",
-        },
+          url: "https://chatgpt.com/backend-api"
+        }
       ],
       injection: {
         type: "header" as const,
         name: "Authorization",
-        valueTemplate: "Bearer {{token}}",
+        valueTemplate: "Bearer {{token}}"
       },
       accountIdentity: { providerUserId: "account" },
       scopes: [],
       credentialUse: "fetch" as const,
-      allowedDecisions: ["once", "session", "version", "deny"] as const,
+      allowedDecisions: ["once", "session", "version", "deny"] as const
     };
     const { emit } = renderCard(credential);
 
@@ -564,20 +615,17 @@ describe("ApprovalCard", () => {
       screen
         .getByText("Remember for this version")
         .closest("button")
-        ?.getAttribute("data-accent-color"),
+        ?.getAttribute("data-accent-color")
     ).toBe("sky");
-    expect(
-      screen
-        .getByText("Use once")
-        .closest("button")
-        ?.getAttribute("data-accent-color"),
-    ).toBe("");
+    expect(screen.getByText("Use once").closest("button")?.getAttribute("data-accent-color")).toBe(
+      ""
+    );
 
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Enter" });
     expect(emit).toHaveBeenCalledWith({
       type: "decide",
       decision: "version",
-      approvalId: "credential",
+      approvalId: "credential"
     });
   });
 
@@ -585,7 +633,7 @@ describe("ApprovalCard", () => {
     const credential: PendingCredentialApproval = {
       ...capabilityApproval({
         approvalId: "github-user",
-        title: "Use GitHub account",
+        title: "Use GitHub account"
       }),
       kind: "credential",
       callerId: "extension:@workspace-extensions/git-bridge",
@@ -597,7 +645,7 @@ describe("ApprovalCard", () => {
       injection: {
         type: "header",
         name: "Authorization",
-        valueTemplate: "Bearer {{token}}",
+        valueTemplate: "Bearer {{token}}"
       },
       accountIdentity: { providerUserId: "octocat" },
       scopes: [],
@@ -607,7 +655,7 @@ describe("ApprovalCard", () => {
       grantResource: {
         bindingId: "github-user",
         resource: "https://api.github.com/user/",
-        action: "use",
+        action: "use"
       },
       requester: {
         id: "extension:@workspace-extensions/git-bridge",
@@ -620,24 +668,22 @@ describe("ApprovalCard", () => {
         effectiveVersion: "ev",
         stableIdentityKey: "ev",
         ephemeralInstanceKey: "extension:@workspace-extensions/git-bridge",
-        breadcrumbs: [],
-      },
+        breadcrumbs: []
+      }
     };
 
     renderCard(credential);
 
-    expect(
-      document.querySelector(".approval-caller-chip img")?.getAttribute("src"),
-    ).toBe(
-      "../../__vibestudio/unit-icon?source=extensions%2Fgit-bridge&path=assets%2Ficon.svg",
+    expect(document.querySelector(".approval-caller-chip img")?.getAttribute("src")).toBe(
+      "../../__vibestudio/unit-icon?source=extensions%2Fgit-bridge&path=assets%2Ficon.svg"
     );
     expect(screen.getByText("extension")).toBeTruthy();
     expect(screen.getByText("as")).toBeTruthy();
     expect(screen.getAllByText("octocat").length).toBeGreaterThan(0);
     expect(
       screen.getByText(
-        "Uses GitHub to access GitHub profile and repositories at api.github.com/user.",
-      ),
+        "Uses GitHub to access GitHub profile and repositories at api.github.com/user."
+      )
     ).toBeTruthy();
     expect(screen.queryByText(/something in your workspace/iu)).toBeNull();
     expect(screen.queryByText("Allow for this task")).toBeNull();
@@ -645,38 +691,30 @@ describe("ApprovalCard", () => {
   });
 
   it("shows the queue navigator and emits browse intents", () => {
-    const { emit } = renderCard(
-      capabilityApproval({ approvalId: "a1", title: "First approval" }),
-      {
-        queue: { index: 0, total: 3, canPrev: false, canNext: true },
-      },
-    );
+    const { emit } = renderCard(capabilityApproval({ approvalId: "a1", title: "First approval" }), {
+      queue: { index: 0, total: 3, canPrev: false, canNext: true }
+    });
     expect(screen.getByText("1 / 3")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("Next approval"));
     expect(emit).toHaveBeenCalledWith({
       type: "browse",
       dir: "next",
-      approvalId: "a1",
+      approvalId: "a1"
     });
   });
 
   it("omits the navigator for a single approval", () => {
-    renderCard(
-      capabilityApproval({ approvalId: "solo", title: "Lonely approval" }),
-      {
-        queue: null,
-      },
-    );
+    renderCard(capabilityApproval({ approvalId: "solo", title: "Lonely approval" }), {
+      queue: null
+    });
     expect(screen.queryByLabelText("Next approval")).toBeNull();
   });
 
   it("surfaces a decision error", () => {
     renderCard(capabilityApproval({ approvalId: "err", title: "Boom" }), {
-      decisionError: "resolve blocked",
+      decisionError: "resolve blocked"
     });
-    expect(
-      screen.getByText("Approval action failed: resolve blocked"),
-    ).toBeTruthy();
+    expect(screen.getByText("Approval action failed: resolve blocked")).toBeTruthy();
   });
 
   it("accepts the complete slate in one click, and cancels without touching anything", () => {
@@ -690,16 +728,16 @@ describe("ApprovalCard", () => {
         decision: "install",
         allowNow: [
           { identityKey: "ext-1", permissions: [] },
-          { identityKey: "ext-2", permissions: [] },
-        ],
-      },
+          { identityKey: "ext-2", permissions: [] }
+        ]
+      }
     });
 
     fireEvent.click(screen.getByText("Not now"));
     expect(emit).toHaveBeenCalledWith({
       type: "resolve-install-review",
       approvalId: "news",
-      resolution: { decision: "cancel" },
+      resolution: { decision: "cancel" }
     });
   });
 
@@ -713,57 +751,48 @@ describe("ApprovalCard", () => {
             kind: "worker",
             label: "Agent",
             title: "Task Board Store",
-            repoPath: "workers/task-board-store",
-          }),
-        ],
-      }),
+            repoPath: "workers/task-board-store"
+          })
+        ]
+      })
     );
 
-    expect(
-      screen.getByText(/Task Board Store · Agent · everything allowed now/u),
-    ).toBeTruthy();
+    expect(screen.getByText(/Task Board Store · Agent · everything allowed now/u)).toBeTruthy();
   });
 
   it.each([
     ["adopt-root", "panel", "panels/chat"],
     ["install", "app", "apps/desktop"],
     ["install", "extension", "extensions/browser"],
-    ["part-changed", "worker", "workers/agent"],
-  ] as const)(
-    "keeps a custom icon in %s reviews for %s units",
-    (mode, kind, repoPath) => {
-      renderCard(
-        installReviewApproval({
-          approvalId: `${mode}-${kind}-icon`,
-          mode,
-          parts: [
-            installReviewPart({
-              identityKey: `${repoPath}@ev-1`,
-              kind,
-              label:
-                kind === "panel"
-                  ? "Panel"
-                  : kind === "worker"
-                    ? "Agent"
-                    : kind === "app"
-                      ? "Client App"
-                      : "Extension",
-              repoPath,
-              icon: "./assets/icon.svg",
-            }),
-          ],
-        }),
-      );
+    ["part-changed", "worker", "workers/agent"]
+  ] as const)("keeps a custom icon in %s reviews for %s units", (mode, kind, repoPath) => {
+    renderCard(
+      installReviewApproval({
+        approvalId: `${mode}-${kind}-icon`,
+        mode,
+        parts: [
+          installReviewPart({
+            identityKey: `${repoPath}@ev-1`,
+            kind,
+            label:
+              kind === "panel"
+                ? "Panel"
+                : kind === "worker"
+                  ? "Agent"
+                  : kind === "app"
+                    ? "Client App"
+                    : "Extension",
+            repoPath,
+            icon: "./assets/icon.svg"
+          })
+        ]
+      })
+    );
 
-      expect(
-        document
-          .querySelector(".install-review-part-icon img")
-          ?.getAttribute("src"),
-      ).toBe(
-        `../../__vibestudio/unit-icon?source=${encodeURIComponent(repoPath)}&path=assets%2Ficon.svg`,
-      );
-    },
-  );
+    expect(document.querySelector(".install-review-part-icon img")?.getAttribute("src")).toBe(
+      `../../__vibestudio/unit-icon?source=${encodeURIComponent(repoPath)}&path=assets%2Ficon.svg`
+    );
+  });
 
   it("offers a checkbox only for what this decision can actually grant", () => {
     const cleared = reviewRow("workspace.files.write");
@@ -771,7 +800,7 @@ describe("ApprovalCard", () => {
       timing: "asks-when-needed",
       notability: "headline",
       selectable: false,
-      selectedByDefault: false,
+      selectedByDefault: false
     });
     const { emit } = renderCard(
       installReviewApproval({
@@ -780,10 +809,10 @@ describe("ApprovalCard", () => {
           installReviewPart({
             identityKey: "ext-1",
             notableRows: [asks],
-            everydayRows: [cleared],
-          }),
-        ],
-      }),
+            everydayRows: [cleared]
+          })
+        ]
+      })
     );
 
     // Everything clearable is checked by default: one click adds the complete
@@ -793,9 +822,9 @@ describe("ApprovalCard", () => {
       expect.objectContaining({
         resolution: {
           decision: "install",
-          allowNow: [{ identityKey: "ext-1", permissions: [cleared.key] }],
-        },
-      }),
+          allowNow: [{ identityKey: "ext-1", permissions: [cleared.key] }]
+        }
+      })
     );
 
     // Unchecking the part withholds the grant — the part still arrives.
@@ -805,9 +834,9 @@ describe("ApprovalCard", () => {
       expect.objectContaining({
         resolution: {
           decision: "install",
-          allowNow: [{ identityKey: "ext-1", permissions: [] }],
-        },
-      }),
+          allowNow: [{ identityKey: "ext-1", permissions: [] }]
+        }
+      })
     );
   });
 
@@ -816,10 +845,8 @@ describe("ApprovalCard", () => {
     const { emit } = renderCard(
       installReviewApproval({
         approvalId: "keys",
-        parts: [
-          installReviewPart({ identityKey: "ext-1", everydayRows: [cleared] }),
-        ],
-      }),
+        parts: [installReviewPart({ identityKey: "ext-1", everydayRows: [cleared] })]
+      })
     );
     const card = screen.getByRole("dialog");
 
@@ -832,8 +859,8 @@ describe("ApprovalCard", () => {
       approvalId: "keys",
       resolution: {
         decision: "install",
-        allowNow: [{ identityKey: "ext-1", permissions: [] }],
-      },
+        allowNow: [{ identityKey: "ext-1", permissions: [] }]
+      }
     });
 
     // D is the decline key everywhere else and means the same here. It must
@@ -842,17 +869,15 @@ describe("ApprovalCard", () => {
     expect(emit).toHaveBeenLastCalledWith({
       type: "resolve-install-review",
       approvalId: "keys",
-      resolution: { decision: "cancel" },
+      resolution: { decision: "cancel" }
     });
   });
 
   it("disables the install review's own actions while a decision is in flight", () => {
     renderCard(installReviewApproval({ approvalId: "pending" }), {
-      actionPending: true,
+      actionPending: true
     });
-    expect(screen.getByText("Add template").closest("button")?.disabled).toBe(
-      true,
-    );
+    expect(screen.getByText("Add template").closest("button")?.disabled).toBe(true);
     expect(screen.getByText("Not now").closest("button")?.disabled).toBe(true);
   });
 
@@ -862,12 +887,10 @@ describe("ApprovalCard", () => {
         approvalId: "upgrade",
         mode: "update",
         parts: [],
-        unchangedPartCount: 12,
-      }),
+        unchangedPartCount: 12
+      })
     );
-    expect(
-      screen.getByText("Updates 12 parts. No permission changes."),
-    ).toBeTruthy();
+    expect(screen.getByText("Updates 12 parts. No permission changes.")).toBeTruthy();
     expect(screen.queryByText("Extension 1")).toBeNull();
     expect(screen.getByText("Update")).toBeTruthy();
   });
@@ -877,10 +900,8 @@ describe("ApprovalCard", () => {
     const { emit } = renderCard(
       installReviewApproval({
         approvalId: "keyboard-expand",
-        parts: [
-          installReviewPart({ identityKey: "ext-1", everydayRows: [cleared] }),
-        ],
-      }),
+        parts: [installReviewPart({ identityKey: "ext-1", everydayRows: [cleared] })]
+      })
     );
 
     // The expander is a real button: focusable, Enter/Space activated by the
@@ -906,22 +927,22 @@ describe("ApprovalCard", () => {
   });
 
   it("shows a diff when the review carries changed rows, whatever the mode is called", () => {
-    const added = reviewRow("network.fetch", {
+    const added = reviewRow("network.response.read", {
       key: "added-{}",
       notability: "headline",
-      change: "added",
+      change: "added"
     });
     const part = installReviewPart({
       identityKey: "ext-1",
       notableRows: [added],
-      change: "changed",
+      change: "changed"
     });
     renderCard(
       installReviewApproval({
         approvalId: "part-changed",
         mode: "part-changed",
-        parts: [part],
-      }),
+        parts: [part]
+      })
     );
 
     // §7.4 shows a diff line, not a footprint — the change marks are the signal,
@@ -940,26 +961,24 @@ describe("ApprovalCard", () => {
             kind: "panel",
             label: "Panel",
             title: "Task Board",
-            change: "added",
+            change: "added"
           }),
           installReviewPart({
             identityKey: "extension-updated",
             title: "Git Bridge",
-            change: "changed",
+            change: "changed"
           }),
           installReviewPart({
             identityKey: "extension-removed",
             title: "Old Bridge",
-            change: "removed",
-          }),
-        ],
-      }),
+            change: "removed"
+          })
+        ]
+      })
     );
 
     expect(
-      screen.getByText(
-        "Adds 1 panel · Updates 1 extension · Removes 1 extension",
-      ),
+      screen.getByText("Adds 1 panel · Updates 1 extension · Removes 1 extension")
     ).toBeTruthy();
   });
 
@@ -968,8 +987,8 @@ describe("ApprovalCard", () => {
       reviewRow(`workspace.files.write`, {
         key: `${suffix}-{}`,
         notability: "headline",
-        change: "added",
-      }),
+        change: "added"
+      })
     );
     renderCard(
       installReviewApproval({
@@ -979,10 +998,10 @@ describe("ApprovalCard", () => {
           installReviewPart({
             identityKey: "ext-1",
             notableRows: changed,
-            change: "changed",
-          }),
-        ],
-      }),
+            change: "changed"
+          })
+        ]
+      })
     );
     expect(screen.getByText(/·\s\+1 more$/u)).toBeTruthy();
   });
@@ -991,32 +1010,24 @@ describe("ApprovalCard", () => {
     const dependency = installReviewPart({
       identityKey: "ext-2",
       name: "@workspace-workers/feeds",
-      title: "Feed Service",
+      title: "Feed Service"
     });
     const part = installReviewPart({
       identityKey: "ext-1",
       surfaces: [{ kind: "service", name: "News Feed" }],
-      requiredUnitKeys: ["@workspace-workers/feeds"],
+      requiredUnitKeys: ["@workspace-workers/feeds"]
     });
-    renderCard(
-      installReviewApproval({ approvalId: "shape", parts: [part, dependency] }),
-    );
+    renderCard(installReviewApproval({ approvalId: "shape", parts: [part, dependency] }));
 
-    fireEvent.click(
-      screen.getAllByRole("button", { expanded: false })[0] as HTMLElement,
-    );
+    fireEvent.click(screen.getAllByRole("button", { expanded: false })[0] as HTMLElement);
 
     // What it hosts and what it needs are opposite facts. The hosted surface must
     // never appear under the "needs" label again.
     expect(
-      screen.getByText(
-        "What the rest of your workspace can use it for: News Feed",
-      ),
+      screen.getByText("What the rest of your workspace can use it for: News Feed")
     ).toBeTruthy();
     expect(
-      screen.getByText(
-        "What it needs from the rest of your workspace: Feed Service",
-      ),
+      screen.getByText("What it needs from the rest of your workspace: Feed Service")
     ).toBeTruthy();
   });
 
@@ -1025,16 +1036,13 @@ describe("ApprovalCard", () => {
     const kept = () =>
       installReviewPart({
         identityKey: "ext-1",
-        everydayRows: [reviewRow("workspace.files.write")],
+        everydayRows: [reviewRow("workspace.files.write")]
       });
     const { emit, refresh } = renderCard(
       installReviewApproval({
         approvalId: "refresh",
-        parts: [
-          kept(),
-          installReviewPart({ identityKey: "ext-2", title: "Extension 2" }),
-        ],
-      }),
+        parts: [kept(), installReviewPart({ identityKey: "ext-2", title: "Extension 2" })]
+      })
     );
 
     fireEvent.click(screen.getByLabelText("Allow Extension 1 now"));
@@ -1044,11 +1052,8 @@ describe("ApprovalCard", () => {
     refresh(
       installReviewApproval({
         approvalId: "refresh",
-        parts: [
-          kept(),
-          installReviewPart({ identityKey: "ext-3", title: "Extension 3" }),
-        ],
-      }),
+        parts: [kept(), installReviewPart({ identityKey: "ext-3", title: "Extension 3" })]
+      })
     );
 
     fireEvent.click(screen.getByText("Add template"));
@@ -1060,10 +1065,10 @@ describe("ApprovalCard", () => {
           // the newly arrived part takes the default slate.
           allowNow: [
             { identityKey: "ext-1", permissions: [] },
-            { identityKey: "ext-3", permissions: [] },
-          ],
-        },
-      }),
+            { identityKey: "ext-3", permissions: [] }
+          ]
+        }
+      })
     );
     expect(JSON.stringify(emit.mock.calls)).not.toContain("ext-2");
     expect(cleared.key).toBeTruthy();
@@ -1076,25 +1081,23 @@ describe("ApprovalCard", () => {
         title: index === 0 ? "Feed Importer" : `Extension ${index}`,
         kind: index === 0 ? "panel" : "extension",
         label: index === 0 ? "Panel" : "Extension",
-        everydayRows: [reviewRow("workspace.files.write")],
-      }),
+        everydayRows: [reviewRow("workspace.files.write")]
+      })
     );
-    const { emit } = renderCard(
-      installReviewApproval({ approvalId: "filters", parts }),
-    );
+    const { emit } = renderCard(installReviewApproval({ approvalId: "filters", parts }));
 
     fireEvent.change(screen.getByLabelText("Search parts"), {
-      target: { value: "Feed" },
+      target: { value: "Feed" }
     });
     expect(screen.getByText(/12 parts hidden by your search/u)).toBeTruthy();
     expect(screen.getByText(/12 still allowed now/u)).toBeTruthy();
 
     // The kind filter is the other half of §7.2, on the same threshold.
     fireEvent.change(screen.getByLabelText("Search parts"), {
-      target: { value: "" },
+      target: { value: "" }
     });
     fireEvent.change(screen.getByLabelText("Filter by kind"), {
-      target: { value: "Panel" },
+      target: { value: "Panel" }
     });
     expect(screen.getByText("Feed Importer")).toBeTruthy();
     expect(screen.queryByText("Extension 5")).toBeNull();
@@ -1109,7 +1112,9 @@ describe("ApprovalCard", () => {
   });
 
   it("groups the initial workspace by its useful directories and folds quiet groups", () => {
-    const notable = reviewRow("network.fetch", { notability: "headline" });
+    const notable = reviewRow("network.response.read", {
+      notability: "headline"
+    });
     const parts = [
       installReviewPart({
         identityKey: "app-panel",
@@ -1117,7 +1122,7 @@ describe("ApprovalCard", () => {
         label: "Panel",
         repoPath: "panels/chat",
         title: "Chat",
-        notableRows: [notable],
+        notableRows: [notable]
       }),
       installReviewPart({
         identityKey: "agent",
@@ -1125,7 +1130,7 @@ describe("ApprovalCard", () => {
         label: "Agent",
         repoPath: "workers/researcher",
         title: "Researcher",
-        notableRows: [notable],
+        notableRows: [notable]
       }),
       installReviewPart({
         identityKey: "system-panel",
@@ -1133,7 +1138,7 @@ describe("ApprovalCard", () => {
         label: "Panel",
         repoPath: "about/accounts",
         title: "Accounts",
-        purpose: "Manage workspace accounts.",
+        purpose: "Manage workspace accounts."
       }),
       installReviewPart({
         identityKey: "service",
@@ -1141,36 +1146,38 @@ describe("ApprovalCard", () => {
         label: "Service",
         repoPath: "workers/pubsub",
         title: "Pubsub",
-        purpose: "Connect workspace conversations.",
-      }),
+        purpose: "Connect workspace conversations."
+      })
     ];
     renderCard(
       installReviewApproval({
         approvalId: "grouped-workspace",
         mode: "adopt-root",
-        parts,
-      }),
+        parts
+      })
     );
 
     const headings = [
       screen.getByRole("button", { name: /^App panels/u }),
       screen.getByRole("button", { name: /^Agents and background tasks/u }),
       screen.getByRole("button", { name: /^System panels/u }),
-      screen.getByRole("button", { name: /^Services/u }),
+      screen.getByRole("button", { name: /^Services/u })
     ];
     expect(
-      [...document.querySelectorAll(".install-review-group-toggle")].map(
-        (button) => button.textContent?.trim(),
-      ),
+      [...document.querySelectorAll(".install-review-group-toggle")].map((button) =>
+        button.textContent?.trim()
+      )
     ).toEqual(headings.map((button) => button.textContent?.trim()));
+    expect(headings.map((heading) => heading.getAttribute("aria-expanded"))).toEqual([
+      "true",
+      "true",
+      "false",
+      "false"
+    ]);
     expect(
-      headings.map((heading) => heading.getAttribute("aria-expanded")),
-    ).toEqual(["true", "true", "false", "false"]);
-    expect(
-      [...document.querySelectorAll(".install-review-group-count")].every(
-        (count) =>
-          count.parentElement?.classList.contains("install-review-group-title"),
-      ),
+      [...document.querySelectorAll(".install-review-group-count")].every((count) =>
+        count.parentElement?.classList.contains("install-review-group-title")
+      )
     ).toBe(true);
 
     // A folded heading still tells the reviewer what is inside and why it was
@@ -1193,31 +1200,31 @@ describe("ApprovalCard", () => {
             kind: "panel",
             label: "Panel",
             repoPath: "panels/chat",
-            title: "Chat",
+            title: "Chat"
           }),
           installReviewPart({
             identityKey: "about",
             kind: "panel",
             label: "Panel",
             repoPath: "about/accounts",
-            title: "Accounts",
-          }),
-        ],
-      }),
+            title: "Accounts"
+          })
+        ]
+      })
     );
 
     expect(
-      [...document.querySelectorAll(".install-review-group-toggle")].map(
-        (heading) => heading.getAttribute("aria-expanded"),
-      ),
+      [...document.querySelectorAll(".install-review-group-toggle")].map((heading) =>
+        heading.getAttribute("aria-expanded")
+      )
     ).toEqual(["true", "true"]);
   });
 
   it("restores the rows a user had opted into when they re-check a part", () => {
     const byDefault = reviewRow("workspace.files.write", { key: "default-{}" });
-    const optIn = reviewRow("network.fetch", {
+    const optIn = reviewRow("network.response.read", {
       key: "opt-in-{}",
-      selectedByDefault: false,
+      selectedByDefault: false
     });
     const { emit } = renderCard(
       installReviewApproval({
@@ -1225,19 +1232,15 @@ describe("ApprovalCard", () => {
         parts: [
           installReviewPart({
             identityKey: "ext-1",
-            everydayRows: [byDefault, optIn],
-          }),
-        ],
-      }),
+            everydayRows: [byDefault, optIn]
+          })
+        ]
+      })
     );
 
-    fireEvent.click(
-      screen.getAllByRole("button", { expanded: false })[0] as HTMLElement,
-    );
+    fireEvent.click(screen.getAllByRole("button", { expanded: false })[0] as HTMLElement);
     fireEvent.click(screen.getByText("Plus 2 everyday permissions"));
-    fireEvent.click(
-      screen.getByLabelText(`Allow ${installRowHeadline(optIn)} now`),
-    );
+    fireEvent.click(screen.getByLabelText(`Allow ${installRowHeadline(optIn)} now`));
     fireEvent.click(screen.getByLabelText("Allow Extension 1 now"));
     fireEvent.click(screen.getByLabelText("Allow Extension 1 now"));
     fireEvent.click(screen.getByText("Add template"));
@@ -1246,22 +1249,18 @@ describe("ApprovalCard", () => {
       expect.objectContaining({
         resolution: {
           decision: "install",
-          allowNow: [
-            { identityKey: "ext-1", permissions: [byDefault.key, optIn.key] },
-          ],
-        },
-      }),
+          allowNow: [{ identityKey: "ext-1", permissions: [byDefault.key, optIn.key] }]
+        }
+      })
     );
   });
 
   it("says what did not happen when an install is refused, in the review's own words", () => {
     renderCard(installReviewApproval({ approvalId: "failed" }), {
-      decisionError: "unit extensions/ext is not in this review",
+      decisionError: "unit extensions/ext is not in this review"
     });
     expect(screen.getByText("Couldn't add these parts")).toBeTruthy();
-    expect(
-      screen.getByText("unit extensions/ext is not in this review"),
-    ).toBeTruthy();
+    expect(screen.getByText("unit extensions/ext is not in this review")).toBeTruthy();
     expect(screen.getByText(/Your selection is still here/u)).toBeTruthy();
     expect(screen.queryByText(/Approval action failed/u)).toBeNull();
   });
@@ -1278,7 +1277,7 @@ describe("ApprovalCard", () => {
     /** Two parts, each with one thing this decision can actually grant. */
     const pairedParts = () => {
       const first = reviewRow("workspace.files.write", { key: "row-one-{}" });
-      const second = reviewRow("network.fetch", { key: "row-two-{}" });
+      const second = reviewRow("network.response.read", { key: "row-two-{}" });
       return {
         first,
         second,
@@ -1287,16 +1286,16 @@ describe("ApprovalCard", () => {
           installReviewPart({
             identityKey: "ext-2",
             title: "Extension 2",
-            everydayRows: [second],
-          }),
-        ],
+            everydayRows: [second]
+          })
+        ]
       };
     };
 
     it("stands the detail pane beside the list on a wide window", () => {
       stubWindowWidth(true);
       renderCard(installReviewApproval({ approvalId: "wide" }), {
-        layout: "dialog",
+        layout: "dialog"
       });
 
       // The pane is a labelled region, open on the first part without anyone
@@ -1316,39 +1315,32 @@ describe("ApprovalCard", () => {
     it("collapses to the list/detail model in place below the threshold", () => {
       stubWindowWidth(false);
       renderCard(installReviewApproval({ approvalId: "narrow" }), {
-        layout: "dialog",
+        layout: "dialog"
       });
 
       // No second column at this size — and no clipped one either. The row is a
       // disclosure again and its detail opens under it, one scroll, one column.
       expect(screen.queryByRole("region", { name: "Extension 1" })).toBeNull();
       const expander = screen.getAllByRole("button", {
-        expanded: false,
+        expanded: false
       })[0] as HTMLElement;
       fireEvent.click(expander);
       expect(expander.getAttribute("aria-expanded")).toBe("true");
       expect(
-        document.getElementById(
-          expander.getAttribute("aria-controls") as string,
-        ),
+        document.getElementById(expander.getAttribute("aria-controls") as string)
       ).toBeTruthy();
     });
 
     it("keeps what each part had checked while the pane moves between parts", () => {
       stubWindowWidth(true);
       const { first, second, parts } = pairedParts();
-      const { emit } = renderCard(
-        installReviewApproval({ approvalId: "switch", parts }),
-        {
-          layout: "dialog",
-        },
-      );
+      const { emit } = renderCard(installReviewApproval({ approvalId: "switch", parts }), {
+        layout: "dialog"
+      });
 
       // Withhold one row of the first part, in the pane.
       fireEvent.click(screen.getByText("Plus 1 everyday permission"));
-      fireEvent.click(
-        screen.getByLabelText(`Allow ${installRowHeadline(first)} now`),
-      );
+      fireEvent.click(screen.getByLabelText(`Allow ${installRowHeadline(first)} now`));
 
       // Read the second part, then come back. Moving the pane is looking, never
       // deciding: what was unchecked is still unchecked on return.
@@ -1359,10 +1351,8 @@ describe("ApprovalCard", () => {
       fireEvent.click(screen.getByText("Plus 1 everyday permission"));
       expect(
         (
-          screen.getByLabelText(
-            `Allow ${installRowHeadline(first)} now`,
-          ) as HTMLElement
-        ).getAttribute("aria-checked"),
+          screen.getByLabelText(`Allow ${installRowHeadline(first)} now`) as HTMLElement
+        ).getAttribute("aria-checked")
       ).toBe("false");
 
       fireEvent.click(screen.getByText("Add template"));
@@ -1372,28 +1362,21 @@ describe("ApprovalCard", () => {
             decision: "install",
             allowNow: [
               { identityKey: "ext-1", permissions: [] },
-              { identityKey: "ext-2", permissions: [second.key] },
-            ],
-          },
-        }),
+              { identityKey: "ext-2", permissions: [second.key] }
+            ]
+          }
+        })
       );
     });
 
     it("walks the list from the keyboard and takes the pane with it", () => {
       stubWindowWidth(true);
       const { parts } = pairedParts();
-      renderCard(
-        installReviewApproval({ approvalId: "keys-two-pane", parts }),
-        {
-          layout: "dialog",
-        },
-      );
+      renderCard(installReviewApproval({ approvalId: "keys-two-pane", parts }), {
+        layout: "dialog"
+      });
 
-      const rows = [
-        ...document.querySelectorAll<HTMLButtonElement>(
-          "button[data-part-row]",
-        ),
-      ];
+      const rows = [...document.querySelectorAll<HTMLButtonElement>("button[data-part-row]")];
       expect(rows).toHaveLength(2);
       // Only the current row is a tab stop, so one Tab out of a fifty-three part
       // list lands in the detail pane rather than in part two.
@@ -1403,57 +1386,48 @@ describe("ApprovalCard", () => {
       rows[0]?.focus();
       fireEvent.keyDown(rows[0] as HTMLElement, {
         key: "ArrowDown",
-        bubbles: true,
+        bubbles: true
       });
       expect(screen.getByRole("region", { name: "Extension 2" })).toBeTruthy();
       expect(document.activeElement).toBe(rows[1]);
 
       fireEvent.keyDown(rows[1] as HTMLElement, {
         key: "ArrowUp",
-        bubbles: true,
+        bubbles: true
       });
       expect(screen.getByRole("region", { name: "Extension 1" })).toBeTruthy();
     });
 
     it("keeps the card's own keyboard contract inside the dialog", () => {
       stubWindowWidth(true);
-      const { emit } = renderCard(
-        installReviewApproval({ approvalId: "shortcuts" }),
-        {
-          layout: "dialog",
-        },
-      );
-      const card = document.querySelector(
-        "[data-approval-card]",
-      ) as HTMLElement;
+      const { emit } = renderCard(installReviewApproval({ approvalId: "shortcuts" }), {
+        layout: "dialog"
+      });
+      const card = document.querySelector("[data-approval-card]") as HTMLElement;
       // The surrounding dialog owns `role="dialog"`; the card does not announce a
       // second one, but it still owns Enter and D.
       expect(card.getAttribute("role")).toBe("group");
 
       fireEvent.keyDown(card, { key: "Enter" });
       expect(emit).toHaveBeenLastCalledWith(
-        expect.objectContaining({ type: "resolve-install-review" }),
+        expect.objectContaining({ type: "resolve-install-review" })
       );
       fireEvent.keyDown(card, { key: "d" });
       expect(emit).toHaveBeenLastCalledWith(
-        expect.objectContaining({ resolution: { decision: "cancel" } }),
+        expect.objectContaining({ resolution: { decision: "cancel" } })
       );
     });
 
     it("still opens a floating card for every other kind of approval", () => {
       stubWindowWidth(true);
-      renderCard(
-        capabilityApproval({ approvalId: "plain", title: "Open a URL" }),
-      );
+      renderCard(capabilityApproval({ approvalId: "plain", title: "Open a URL" }));
       expect(screen.getByRole("dialog")).toBeTruthy();
       expect(screen.queryByRole("region", { name: "Extension 1" })).toBeNull();
     });
   });
 
   it("emits a minimize intent from the header control", () => {
-    const { emit } = renderCard(
-      capabilityApproval({ approvalId: "m", title: "Minimizable" }),
-    );
+    const { emit } = renderCard(capabilityApproval({ approvalId: "m", title: "Minimizable" }));
     fireEvent.click(screen.getByLabelText("Minimize approval"));
     expect(emit).toHaveBeenCalledWith({ type: "minimize", approvalId: "m" });
   });
@@ -1461,11 +1435,11 @@ describe("ApprovalCard", () => {
   it("remounts the overlay card when the approval changes so secret inputs reset", () => {
     const first = clientConfigApproval({
       approvalId: "setup-a",
-      configId: "service-a",
+      configId: "service-a"
     });
     const second = clientConfigApproval({
       approvalId: "setup-b",
-      configId: "service-b",
+      configId: "service-b"
     });
     const emitIntent = vi.fn<(intent: unknown) => void>();
     const { rerender } = render(
@@ -1474,12 +1448,10 @@ describe("ApprovalCard", () => {
           props={{ approval: first, queue: null, decisionError: null }}
           emitIntent={emitIntent}
         />
-      </Theme>,
+      </Theme>
     );
 
-    const firstInput = screen.getByPlaceholderText(
-      "Client Secret",
-    ) as HTMLInputElement;
+    const firstInput = screen.getByPlaceholderText("Client Secret") as HTMLInputElement;
     fireEvent.change(firstInput, { target: { value: "first-secret" } });
     expect(firstInput.value).toBe("first-secret");
 
@@ -1489,11 +1461,9 @@ describe("ApprovalCard", () => {
           props={{ approval: second, queue: null, decisionError: null }}
           emitIntent={emitIntent}
         />
-      </Theme>,
+      </Theme>
     );
 
-    expect(
-      (screen.getByPlaceholderText("Client Secret") as HTMLInputElement).value,
-    ).toBe("");
+    expect((screen.getByPlaceholderText("Client Secret") as HTMLInputElement).value).toBe("");
   });
 });

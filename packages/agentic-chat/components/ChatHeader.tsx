@@ -9,7 +9,7 @@ import type { ChatParticipantMetadata, PendingAgent } from "../types";
 import {
   useAccountProfiles,
   type AccountProfile,
-  type AccountRpc,
+  type AccountRpc
 } from "../hooks/useAccountProfiles";
 import { ParticipantBadgeMenu } from "./ParticipantBadgeMenu";
 import { PendingAgentBadge } from "./PendingAgentBadge";
@@ -18,7 +18,7 @@ import { ForkSwitcher } from "./ForkSwitcher";
 import {
   ExternalConversationsMenu,
   externalConversationsFromMessages,
-  type ExternalConversationEntry,
+  type ExternalConversationEntry
 } from "./ExternalConversationsMenu";
 import { ChannelPeopleMenu } from "./ChannelPeopleMenu";
 import { ConversationAgentDialogs, useConversationActions } from "./useConversationActions";
@@ -80,8 +80,10 @@ function DesktopChatHeader() {
     onDebugConsoleChange,
     onRemoveAgent,
     onOpenChannel,
+    onListTaskRules,
+    onResetTaskRules,
     chat,
-    clientRef,
+    clientRef
   } = useChatContext();
 
   // Live account-profile projection for channel-stamped `user:<userId>`
@@ -174,6 +176,8 @@ function DesktopChatHeader() {
       onDebugConsoleChange={onDebugConsoleChange}
       externalConversations={externalConversations}
       onOpenChannel={onOpenChannel}
+      onListTaskRules={onListTaskRules}
+      onResetTaskRules={onResetTaskRules}
     />
   );
 }
@@ -192,6 +196,8 @@ interface ChatHeaderInnerProps {
   /** Other channels this conversation's agents talked to (messaging plan §4.10.7). */
   externalConversations: ExternalConversationEntry[];
   onOpenChannel?: (channelId: string, opts?: { focusMessageId?: string }) => Promise<void> | void;
+  onListTaskRules?: () => Promise<Array<{ id: string; action: string; resource: string }>>;
+  onResetTaskRules?: () => Promise<number>;
   pendingAgents: Map<string, PendingAgent>;
   onCallMethod?: (providerId: string, methodName: string, args: unknown) => void;
   toolApproval?: ToolApprovalProps;
@@ -216,6 +222,8 @@ function chatHeaderInnerPropsEqual(
     prev.onDebugConsoleChange === next.onDebugConsoleChange &&
     prev.externalConversations === next.externalConversations &&
     prev.onOpenChannel === next.onOpenChannel &&
+    prev.onListTaskRules === next.onListTaskRules &&
+    prev.onResetTaskRules === next.onResetTaskRules &&
     mapsShallowEqual(prev.participantActiveStatus, next.participantActiveStatus) &&
     mapsShallowEqual(prev.participantPresenceStatus, next.participantPresenceStatus)
   );
@@ -236,6 +244,8 @@ const ChatHeaderInner = React.memo(function ChatHeaderInner({
   onDebugConsoleChange,
   externalConversations,
   onOpenChannel,
+  onListTaskRules,
+  onResetTaskRules
 }: ChatHeaderInnerProps) {
   const visiblePendingAgents = pendingAgents
     ? Array.from(pendingAgents.entries()).filter(([handle, _info]) => {
@@ -298,7 +308,10 @@ const ChatHeaderInner = React.memo(function ChatHeaderInner({
             />
           ))}
           <ForkSwitcher />
-          <ExternalConversationsMenu entries={externalConversations} onOpenChannel={onOpenChannel} />
+          <ExternalConversationsMenu
+            entries={externalConversations}
+            onOpenChannel={onOpenChannel}
+          />
           <ChatHeaderOverflowMenu
             participants={participants}
             accountProfiles={accountProfiles}
@@ -306,6 +319,8 @@ const ChatHeaderInner = React.memo(function ChatHeaderInner({
             toolApproval={toolApproval}
             onRemoveAgent={onRemoveAgent}
             onDebugConsoleChange={onDebugConsoleChange}
+            onListTaskRules={onListTaskRules}
+            onResetTaskRules={onResetTaskRules}
           />
         </Flex>
       </Flex>
@@ -331,6 +346,8 @@ const ChatHeaderInner = React.memo(function ChatHeaderInner({
           toolApproval={toolApproval}
           onRemoveAgent={onRemoveAgent}
           onDebugConsoleChange={onDebugConsoleChange}
+          onListTaskRules={onListTaskRules}
+          onResetTaskRules={onResetTaskRules}
         />
       </Flex>
     </Card>
@@ -347,6 +364,8 @@ function ChatHeaderOverflowMenu({
   toolApproval,
   onRemoveAgent,
   onDebugConsoleChange,
+  onListTaskRules,
+  onResetTaskRules
 }: {
   participants: Record<string, Participant<ChatParticipantMetadata>>;
   accountProfiles: Map<string, AccountProfile>;
@@ -354,12 +373,14 @@ function ChatHeaderOverflowMenu({
   toolApproval?: ToolApprovalProps;
   onRemoveAgent?: (handle: string) => void;
   onDebugConsoleChange?: (agentHandle: string | null) => void;
+  onListTaskRules?: () => Promise<Array<{ id: string; action: string; resource: string }>>;
+  onResetTaskRules?: () => Promise<number>;
 }) {
   const actions = useConversationActions({
     participants,
     accountProfiles,
     onRemoveAgent,
-    onDebugConsoleChange,
+    onDebugConsoleChange
   });
 
   return (
@@ -377,6 +398,9 @@ function ChatHeaderOverflowMenu({
           </IconButton>
         </DropdownMenu.Trigger>
         <DropdownMenu.Content align="end">
+          {onListTaskRules && onResetTaskRules ? (
+            <TaskRulesMenu onList={onListTaskRules} onReset={onResetTaskRules} />
+          ) : null}
           <ForkSwitcher variant="submenu" />
           <ChannelPeopleMenu variant="submenu" />
           {actions.participants.length > 0 && <DropdownMenu.Separator />}
@@ -399,7 +423,7 @@ function ChatHeaderOverflowMenu({
                               ? "var(--amber-9)"
                               : presenceStatus === "away"
                                 ? "var(--orange-9)"
-                                : "var(--gray-8)",
+                                : "var(--gray-8)"
                       }}
                     />
                     @{handle} · {presenceStatus ?? "offline"}
@@ -458,5 +482,54 @@ function ChatHeaderOverflowMenu({
       </DropdownMenu.Root>
       <ConversationAgentDialogs controller={actions} />
     </>
+  );
+}
+
+function TaskRulesMenu({
+  onList,
+  onReset
+}: {
+  onList: () => Promise<Array<{ id: string; action: string; resource: string }>>;
+  onReset: () => Promise<number>;
+}) {
+  const [rules, setRules] = React.useState<Array<{ id: string; action: string; resource: string }>>(
+    []
+  );
+  const [loaded, setLoaded] = React.useState(false);
+  const refresh = React.useCallback(() => {
+    void onList().then((next) => {
+      setRules(next);
+      setLoaded(true);
+    });
+  }, [onList]);
+  return (
+    <DropdownMenu.Sub onOpenChange={(open) => open && refresh()}>
+      <DropdownMenu.SubTrigger>Chat permissions</DropdownMenu.SubTrigger>
+      <DropdownMenu.SubContent>
+        {!loaded ? <DropdownMenu.Item disabled>Loading…</DropdownMenu.Item> : null}
+        {loaded && rules.length === 0 ? (
+          <DropdownMenu.Item disabled>No saved permissions</DropdownMenu.Item>
+        ) : null}
+        {rules.map((rule) => (
+          <DropdownMenu.Item key={rule.id} disabled>
+            {rule.action} · {rule.resource}
+          </DropdownMenu.Item>
+        ))}
+        {rules.length > 0 ? <DropdownMenu.Separator /> : null}
+        <DropdownMenu.Item
+          color="red"
+          disabled={rules.length === 0}
+          onSelect={(event) => {
+            event.preventDefault();
+            void onReset().then(() => {
+              setRules([]);
+              setLoaded(true);
+            });
+          }}
+        >
+          Reset permissions for this chat
+        </DropdownMenu.Item>
+      </DropdownMenu.SubContent>
+    </DropdownMenu.Sub>
   );
 }

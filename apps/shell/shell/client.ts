@@ -8,35 +8,29 @@ import {
   createRpcClient,
   type EnvelopeRpcTransport,
   type RpcClient,
-  type RpcEnvelope,
+  type RpcEnvelope
 } from "@vibestudio/rpc";
 import { appMethods } from "@vibestudio/service-schemas/app";
-import type {
-  ShellSurfaceDescriptor,
-  ShellSurfaceTarget,
-} from "@vibestudio/shared/shellSurface";
+import type { ShellSurfaceDescriptor, ShellSurfaceTarget } from "@vibestudio/shared/shellSurface";
 import {
   accountMethods,
   type AccountProfile,
-  type AccountProfileUpdate,
+  type AccountProfileUpdate
 } from "@vibestudio/service-schemas/account";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
 import { HostLaunchClient } from "@vibestudio/service-schemas/clients/hostLaunchClient";
 import { extensionsMethods } from "@vibestudio/service-schemas/extensions";
-import {
-  menuMethods,
-  type PanelContextPresentation,
-} from "@vibestudio/service-schemas/menu";
+import { menuMethods, type PanelContextPresentation } from "@vibestudio/service-schemas/menu";
 import { notificationMethods } from "@vibestudio/service-schemas/notification";
 import { panelRuntimeMethods } from "@vibestudio/service-schemas/panelRuntime";
 import { createShellPanelRuntime } from "./panelRuntime.js";
 import {
   remoteCredMethods,
-  type RemoteCredCurrent as RemoteCredCurrentContract,
+  type RemoteCredCurrent as RemoteCredCurrentContract
 } from "@vibestudio/service-schemas/remoteCred";
 import {
   QUICKFIRE_SERVICE_PROTOCOL,
-  type QuickfireSession,
+  type QuickfireSession
 } from "@workspace/quickfire-core/service";
 import { connectViaRpc, type PubSubClient } from "@workspace/pubsub";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
@@ -49,18 +43,18 @@ import { viewMethods } from "@vibestudio/service-schemas/view";
 import { workspaceMethods } from "@vibestudio/service-schemas/workspace";
 import {
   runtimeMethods,
-  type RuntimeSupervisionEntityKey,
+  type RuntimeSupervisionEntityKey
 } from "@vibestudio/service-schemas/runtime";
 import { workspaceStateMethods } from "@vibestudio/service-schemas/workspaceState";
 import {
   vcsMethods,
   type VcsCompareResult,
-  type VcsMergeResolutionKind,
+  type VcsMergeResolutionKind
 } from "@vibestudio/service-schemas/vcs";
 import {
   hubControlMethods,
   type HubDevice,
-  type HubPairingInvite,
+  type HubPairingInvite
 } from "@vibestudio/service-schemas/hubControl";
 import { workspacePresenceMethods } from "@vibestudio/service-schemas/workspacePresence";
 import { browserEnvironmentMethods } from "@vibestudio/service-schemas/browserEnvironment";
@@ -69,7 +63,7 @@ import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient"
 import {
   createDurableObjectServiceClient,
   createGadServiceClient,
-  type DurableObjectServiceClient,
+  type DurableObjectServiceClient
 } from "@vibestudio/shared/workspaceServiceRpc";
 import type { ChannelInvite } from "@vibestudio/shared/channelInvites";
 import {
@@ -78,7 +72,7 @@ import {
   type AgentMessageNotificationData,
   type UserNotification,
   type UserNotificationAcknowledgementResult,
-  type UserNotificationListResult,
+  type UserNotificationListResult
 } from "@vibestudio/shared/userNotifications";
 import type { ConnectPairing } from "@vibestudio/shared/connect";
 import type { PanelLocation } from "@vibestudio/shared/panelLocation";
@@ -88,7 +82,7 @@ import { decodePanelStateArgs } from "@vibestudio/shared/panelStateArgs";
 import {
   browserUrlFromPanelSource,
   getSharedBrowserAddressOptions,
-  type BrowserHistoryAddressRow,
+  type BrowserHistoryAddressRow
 } from "@vibestudio/shared/panelChrome";
 import { getSharedPanelAddressOptions } from "@workspace/omnibox-core";
 import type { WorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
@@ -97,7 +91,7 @@ import { createWorkspacePresentationClient } from "@workspace/runtime/workspace-
 import { HostCommandRegistry } from "@vibestudio/shell-core/panelCommandRegistry";
 import {
   HOST_COMMAND_CONTRIBUTION_EVENT,
-  HOST_COMMAND_RUN_EVENT,
+  HOST_COMMAND_RUN_EVENT
 } from "@vibestudio/shared/hostCommands";
 import { createBrowserSiteActions } from "./browserSiteActions";
 // Type for the shell transport bridge injected by the preload script
@@ -126,16 +120,15 @@ const g = globalThis as unknown as {
 if (!g.__vibestudioTransport) throw new Error("Shell transport not available");
 const transport: EnvelopeRpcTransport = {
   send: (envelope) => assertPresent(g.__vibestudioTransport).send(envelope),
-  onMessage: (handler) =>
-    assertPresent(g.__vibestudioTransport).onMessage(handler),
+  onMessage: (handler) => assertPresent(g.__vibestudioTransport).onMessage(handler),
   status: () => "connected",
   ready: () => Promise.resolve(),
-  onStatusChange: () => () => {},
+  onStatusChange: () => () => {}
 };
 const rpc: RpcClient = createRpcClient({
   selfId: "shell",
   callerKind: "shell",
-  transport,
+  transport
 });
 
 export const hostLaunch = new HostLaunchClient((service, method, args) =>
@@ -151,15 +144,11 @@ const shellPresenceClient = createTypedServiceClient(
   shellPresenceMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const appClient = createTypedServiceClient(
-  "app",
-  appMethods,
-  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
+const appClient = createTypedServiceClient("app", appMethods, (service, method, args) =>
+  rpc.call("main", `${service}.${method}`, args)
 );
-const accountClient = createTypedServiceClient(
-  "account",
-  accountMethods,
-  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
+const accountClient = createTypedServiceClient("account", accountMethods, (service, method, args) =>
+  rpc.call("main", `${service}.${method}`, args)
 );
 // Electron chrome owns a distinct event domain that projects workspace events
 // together with native host state. Other runtimes use the canonical `events`.
@@ -170,18 +159,15 @@ const extensionsClient = createTypedServiceClient(
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
 const browserDataClient = createBrowserDataClient({
-  callService: (service, method, args) =>
-    rpc.call("main", `${service}.${method}`, args),
+  callService: (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 });
 const browserEnvironmentClient = createTypedServiceClient(
   "browserEnvironment",
   browserEnvironmentMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const menuClient = createTypedServiceClient(
-  "menu",
-  menuMethods,
-  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
+const menuClient = createTypedServiceClient("menu", menuMethods, (service, method, args) =>
+  rpc.call("main", `${service}.${method}`, args)
 );
 const notificationClient = createTypedServiceClient(
   "notification",
@@ -198,16 +184,14 @@ const autofillClient = createTypedServiceClient(
   autofillMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const viewClient = createTypedServiceClient(
-  "view",
-  viewMethods,
-  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
+const viewClient = createTypedServiceClient("view", viewMethods, (service, method, args) =>
+  rpc.call("main", `${service}.${method}`, args)
 );
 const productPanelRuntime = createShellPanelRuntime({
   rpc,
   focusPanel: async (panelId, options) => {
     await viewClient.focusPanel(panelId, options);
-  },
+  }
 });
 const focusPanel = async (panelId: string): Promise<PanelFocusResult> => {
   await productPanelRuntime.panelTree.get(panelId).focus();
@@ -215,34 +199,29 @@ const focusPanel = async (panelId: string): Promise<PanelFocusResult> => {
     panelId,
     status: "loaded",
     focused: true,
-    loaded: true,
+    loaded: true
   };
 };
 const browserSiteActions = createBrowserSiteActions({
   native: {
-    getBrowserPageIdentity: (panelId) =>
-      viewClient.getBrowserPageIdentity(panelId),
+    getBrowserPageIdentity: (panelId) => viewClient.getBrowserPageIdentity(panelId),
     setNativeBrowserZoom: (panelId, origin, zoomFactor) =>
       viewClient.setNativeBrowserZoom(panelId, origin, zoomFactor),
     clearNativeBrowserSiteData: (panelId, origin) =>
-      viewClient.clearNativeBrowserSiteData(panelId, origin),
+      viewClient.clearNativeBrowserSiteData(panelId, origin)
   },
-  data: browserDataClient,
+  data: browserDataClient
 });
 const workspaceClient = createTypedServiceClient(
   "workspace",
   workspaceMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const runtimeClient = createTypedServiceClient(
-  "runtime",
-  runtimeMethods,
-  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
+const runtimeClient = createTypedServiceClient("runtime", runtimeMethods, (service, method, args) =>
+  rpc.call("main", `${service}.${method}`, args)
 );
-const buildClient = createTypedServiceClient(
-  "build",
-  buildMethods,
-  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
+const buildClient = createTypedServiceClient("build", buildMethods, (service, method, args) =>
+  rpc.call("main", `${service}.${method}`, args)
 );
 const workspaceStateClient = createTypedServiceClient(
   "workspace-state",
@@ -255,10 +234,8 @@ const panelRuntimeClient = createTypedServiceClient(
   panelRuntimeMethods,
   (service, method, args) => rpc.call("main", `${service}.${method}`, args)
 );
-const vcsClient = createTypedServiceClient(
-  "vcs",
-  vcsMethods,
-  (service, method, args) => rpc.call("main", `${service}.${method}`, args)
+const vcsClient = createTypedServiceClient("vcs", vcsMethods, (service, method, args) =>
+  rpc.call("main", `${service}.${method}`, args)
 );
 const hubControlClient = createTypedServiceClient(
   "hubControl",
@@ -285,7 +262,7 @@ import type {
   ThemeAppearance,
   ThemeConfig,
   PanelFocusResult,
-  MovePanelRequest,
+  MovePanelRequest
 } from "@vibestudio/shared/types";
 import type { BrowserNavigationIntent } from "@vibestudio/shared/panelCommands";
 // =============================================================================
@@ -301,18 +278,16 @@ export const app = {
   applyUpdate: (appId: string) => appClient.applyUpdate(appId),
   listPendingUpdates: () => appClient.listPendingUpdates(),
   openShellSurface: (target: ShellSurfaceTarget) => appClient.openShellSurface(target),
-  describeShellSurfaces: () => appClient.describeShellSurfaces(),
+  describeShellSurfaces: () => appClient.describeShellSurfaces()
 };
 
-async function collectBrowserSessionRows(): Promise<
-  BrowserHistoryAddressRow[]
-> {
+async function collectBrowserSessionRows(): Promise<BrowserHistoryAddressRow[]> {
   const profile = await accountClient.getProfile();
   if (!profile?.userId) return [];
   const rows: BrowserHistoryAddressRow[] = [];
-  const groups: Array<
-    Parameters<typeof workspacePresentation.page>[0]["group"]
-  > = [{ kind: "roots", ownerUserId: profile.userId }];
+  const groups: Array<Parameters<typeof workspacePresentation.page>[0]["group"]> = [
+    { kind: "roots", ownerUserId: profile.userId }
+  ];
   while (groups.length > 0) {
     const group = groups.shift()!;
     let cursor: string | undefined;
@@ -320,25 +295,18 @@ async function collectBrowserSessionRows(): Promise<
       const page = await workspacePresentation.page({
         group,
         ...(cursor ? { cursor } : {}),
-        limit: 200,
+        limit: 200
       });
       for (const node of page.nodes) {
         if (node.childCount > 0) {
           groups.push({ kind: "children", parentSlotId: node.slotId });
         }
-        const sourceUrl = node.source
-          ? browserUrlFromPanelSource(node.source)
-          : null;
+        const sourceUrl = node.source ? browserUrlFromPanelSource(node.source) : null;
         if (!sourceUrl) continue;
-        const chrome = await viewClient
-          .getChromeState(node.slotId)
-          .catch(() => null);
+        const chrome = await viewClient.getChromeState(node.slotId).catch(() => null);
         rows.push({
-          url:
-            chrome?.kind === "browser"
-              ? chrome.resolvedUrl || sourceUrl
-              : sourceUrl,
-          title: chrome?.kind === "browser" ? chrome.title : node.title,
+          url: chrome?.kind === "browser" ? chrome.resolvedUrl || sourceUrl : sourceUrl,
+          title: chrome?.kind === "browser" ? chrome.title : node.title
         });
       }
       cursor = page.nextCursor ?? undefined;
@@ -347,17 +315,13 @@ async function collectBrowserSessionRows(): Promise<
   return rows;
 }
 
-async function getPanelStateArgs(
-  panelId: string
-): Promise<Record<string, unknown>> {
+async function getPanelStateArgs(panelId: string): Promise<Record<string, unknown>> {
   const detail = await workspacePresentation.detail(panelId);
   if (!detail) throw new Error(`Panel not found: ${panelId}`);
   return decodePanelStateArgs(detail.currentHistory.state_args);
 }
 
-async function localPresentationKey(
-  name: "layout" | "collapsed"
-): Promise<string> {
+async function localPresentationKey(name: "layout" | "collapsed"): Promise<string> {
   const workspaceId = await workspaceClient.getActive();
   if (typeof workspaceId !== "string" || workspaceId.length === 0) {
     throw new Error("Active workspace is unavailable");
@@ -371,16 +335,11 @@ async function loadLocalLayout(): Promise<unknown> {
 }
 
 async function saveLocalLayout(layout: PersistedLayout): Promise<void> {
-  window.localStorage.setItem(
-    await localPresentationKey("layout"),
-    JSON.stringify(layout)
-  );
+  window.localStorage.setItem(await localPresentationKey("layout"), JSON.stringify(layout));
 }
 
 async function loadCollapsedPanelIds(): Promise<string[]> {
-  const raw = window.localStorage.getItem(
-    await localPresentationKey("collapsed")
-  );
+  const raw = window.localStorage.getItem(await localPresentationKey("collapsed"));
   if (raw === null) return [];
   const parsed = JSON.parse(raw) as unknown;
   if (
@@ -406,24 +365,17 @@ async function saveCollapsedPanelIds(ids: Iterable<string>): Promise<void> {
 // Panel Service
 // =============================================================================
 export const panel = {
-  getRootGroups: (
-    input: Parameters<typeof workspacePresentation.rootGroups>[0]
-  ) => workspacePresentation.rootGroups(input),
-  getTreePage: (
-    input: Parameters<typeof workspacePresentation.page>[0]
-  ) => workspacePresentation.page(input),
-  getTreePath: (panelId: string) =>
-    workspacePresentation.path(panelId),
-  searchTree: (
-    input: Parameters<typeof workspacePresentation.searchTree>[0]
-  ) => workspacePresentation.searchTree(input),
-  observe: (panelId: string) =>
-    productPanelRuntime.panelTree.get(panelId).observe(),
+  getRootGroups: (input: Parameters<typeof workspacePresentation.rootGroups>[0]) =>
+    workspacePresentation.rootGroups(input),
+  getTreePage: (input: Parameters<typeof workspacePresentation.page>[0]) =>
+    workspacePresentation.page(input),
+  getTreePath: (panelId: string) => workspacePresentation.path(panelId),
+  searchTree: (input: Parameters<typeof workspacePresentation.searchTree>[0]) =>
+    workspacePresentation.searchTree(input),
+  observe: (panelId: string) => productPanelRuntime.panelTree.get(panelId).observe(),
   getPresentation: (panelId: string) => viewClient.getPresentation(panelId),
-  getPresentations: (panelIds: string[]) =>
-    viewClient.getPresentations(panelIds),
-  getLocalPresentation: (panelId: string) =>
-    viewClient.getLocalPresentation(panelId),
+  getPresentations: (panelIds: string[]) => viewClient.getPresentations(panelIds),
+  getLocalPresentation: (panelId: string) => viewClient.getLocalPresentation(panelId),
   getFocusedPanelId: () => viewClient.getFocusedPanelId(),
   setFocusedPanelId: (panelId: string) => viewClient.setFocusedPanelId(panelId),
   focus: focusPanel,
@@ -432,28 +384,22 @@ export const panel = {
   savePanelLayout: saveLocalLayout,
   ensureLoaded: (panelId: string) => viewClient.ensurePanelLoaded(panelId),
   updateTheme: (theme: ThemeAppearance) => viewClient.updateTheme(theme),
-  updateThemeConfig: (config: ThemeConfig) =>
-    viewClient.updateThemeConfig(config),
+  updateThemeConfig: (config: ThemeConfig) => viewClient.updateThemeConfig(config),
   openDevTools: (panelId: string) => viewClient.openPanelDevTools(panelId),
   getChromeState: (panelId: string) => viewClient.getChromeState(panelId),
   getRuntimeLease: async (panelId: string) => {
     const detail = await workspacePresentation.detail(panelId);
     if (!detail) return null;
     const snapshot = await panelRuntimeClient.getSnapshot();
-    return (
-      snapshot.leases.find(
-        (lease) => lease.runtimeEntityId === detail.entity.id
-      ) ?? null
-    );
+    return snapshot.leases.find((lease) => lease.runtimeEntityId === detail.entity.id) ?? null;
   },
-  takeOver: (panelId: string) =>
-    productPanelRuntime.panelTree.get(panelId).takeOver(),
+  takeOver: (panelId: string) => productPanelRuntime.panelTree.get(panelId).takeOver(),
   togglePin: (panelId: string) => viewClient.togglePin(panelId),
   listPinnedPanelIds: () => viewClient.listPinnedPanelIds(),
   getAddressOptions: (source: string) =>
     getSharedPanelAddressOptions({
       source,
-      repoProvider: { sourceTree: () => workspaceClient.sourceTree() },
+      repoProvider: { sourceTree: () => workspaceClient.sourceTree() }
     }),
   getBrowserAddressOptions: async (query: string) =>
     getSharedBrowserAddressOptions({
@@ -464,42 +410,29 @@ export const panel = {
           browserDataClient.searchHistoryForAutocomplete(value, limit),
         getHistory: (input) => browserDataClient.getHistory(input),
         searchBookmarks: (value) => browserDataClient.searchBookmarks(value),
-        getSearchEngines: () => browserDataClient.getSearchEngines(),
-      },
+        getSearchEngines: () => browserDataClient.getSearchEngines()
+      }
     }),
-  markBrowserNavigationIntent: (
-    panelId: string,
-    intent: BrowserNavigationIntent
-  ) => viewClient.markBrowserNavigationIntent(panelId, intent),
-  reload: (panelId: string) =>
-    productPanelRuntime.panelTree.get(panelId).reload(),
-  reloadView: (panelId: string) =>
-    productPanelRuntime.panelTree.get(panelId).reload(),
+  markBrowserNavigationIntent: (panelId: string, intent: BrowserNavigationIntent) =>
+    viewClient.markBrowserNavigationIntent(panelId, intent),
+  reload: (panelId: string) => productPanelRuntime.panelTree.get(panelId).reload(),
+  reloadView: (panelId: string) => productPanelRuntime.panelTree.get(panelId).reload(),
   forceReloadView: (panelId: string) => viewClient.browserForceReload(panelId),
-  findInPage: (
-    panelId: string,
-    text: string,
-    options: { forward: boolean; findNext: boolean }
-  ) => viewClient.findInPage(panelId, text, options),
+  findInPage: (panelId: string, text: string, options: { forward: boolean; findNext: boolean }) =>
+    viewClient.findInPage(panelId, text, options),
   stopFindInPage: (panelId: string) => viewClient.stopFindInPage(panelId),
-  getBrowserSiteState: (panelId: string) =>
-    browserSiteActions.getBrowserSiteState(panelId),
-  toggleBrowserBookmark: (panelId: string) =>
-    browserSiteActions.toggleBrowserBookmark(panelId),
+  getBrowserSiteState: (panelId: string) => browserSiteActions.getBrowserSiteState(panelId),
+  toggleBrowserBookmark: (panelId: string) => browserSiteActions.toggleBrowserBookmark(panelId),
   setBrowserZoom: (panelId: string, zoomFactor: number) =>
     browserSiteActions.setBrowserZoom(panelId, zoomFactor),
-  clearBrowserSiteData: (panelId: string) =>
-    browserSiteActions.clearBrowserSiteData(panelId),
+  clearBrowserSiteData: (panelId: string) => browserSiteActions.clearBrowserSiteData(panelId),
   printBrowserPage: (panelId: string) => viewClient.printBrowserPage(panelId),
-  saveBrowserPagePdf: (panelId: string) =>
-    viewClient.saveBrowserPagePdf(panelId),
+  saveBrowserPagePdf: (panelId: string) => viewClient.saveBrowserPagePdf(panelId),
   stopBrowserMedia: (panelId: string) => viewClient.stopBrowserMedia(panelId),
-  rebuildPanel: (panelId: string) =>
-    productPanelRuntime.panelTree.get(panelId).rebuild(),
+  rebuildPanel: (panelId: string) => productPanelRuntime.panelTree.get(panelId).rebuild(),
   navigateHistory: (panelId: string, delta: -1 | 1) =>
     productPanelRuntime.panelTree.navigateHistory(panelId, delta),
-  unload: (panelId: string) =>
-    productPanelRuntime.panelTree.get(panelId).unload(),
+  unload: (panelId: string) => productPanelRuntime.panelTree.get(panelId).unload(),
   archive: (panelId: string) => productPanelRuntime.panelTree.get(panelId).archive(),
   createAboutPanel: async (page: string) => {
     const createOptions =
@@ -508,15 +441,11 @@ export const panel = {
             slug: `new-${crypto.randomUUID().slice(0, 8)}`,
             focus: true,
             placement: {
-              disposition: "side-if-room" as const,
-            },
+              disposition: "side-if-room" as const
+            }
           }
         : undefined;
-    const result = await viewClient.createPanel(
-      null,
-      `about/${page}`,
-      createOptions
-    );
+    const result = await viewClient.createPanel(null, `about/${page}`, createOptions);
     return { ...result, kind: "workspace" as const };
   },
   /** Create a panel from any source path (not prefixed with "about/"). */
@@ -529,12 +458,10 @@ export const panel = {
       stateArgs?: Record<string, unknown>;
     }
   ) =>
-    productPanelRuntime.panelTree
-      .navigate(panelId, source, options)
-      .then((observation) => ({
-        id: observation.panelId,
-        title: observation.title,
-      })),
+    productPanelRuntime.panelTree.navigate(panelId, source, options).then((observation) => ({
+      id: observation.panelId,
+      title: observation.title
+    })),
   /** Create a root panel; use createChild for an explicit parent relationship. */
   createPanel: async (
     source: string,
@@ -551,9 +478,7 @@ export const panel = {
     }
   ) => {
     const parentIdPromise =
-      options?.isRoot === false
-        ? panel.getFocusedPanelId()
-        : Promise.resolve(null);
+      options?.isRoot === false ? panel.getFocusedPanelId() : Promise.resolve(null);
     return parentIdPromise.then((parentId) =>
       viewClient.createPanel(parentId, source, {
         title: options?.title,
@@ -562,7 +487,7 @@ export const panel = {
         focus: options?.focus ?? true,
         stateArgs: options?.stateArgs,
         placement: options?.placement,
-        ref: options?.ref,
+        ref: options?.ref
       })
     );
   },
@@ -587,7 +512,7 @@ export const panel = {
       contextId: options?.contextId,
       stateArgs: options?.stateArgs,
       placement: options?.placement,
-      ref: options?.ref,
+      ref: options?.ref
     }),
   createBrowser: (
     url: string,
@@ -602,7 +527,7 @@ export const panel = {
       parentId: null,
       title: options?.title,
       slug: options?.slug,
-      focus: options?.focus,
+      focus: options?.focus
     }),
   createBrowserChild: (
     parentId: string,
@@ -618,16 +543,12 @@ export const panel = {
       parentId,
       title: options?.title,
       slug: options?.slug,
-      focus: options?.focus,
+      focus: options?.focus
     }),
   movePanel: (request: MovePanelRequest) =>
     workspaceStateClient.slot.move(request.panelId, request.newParentId, {
-      ...(request.beforePanelId !== undefined
-        ? { beforeSlotId: request.beforePanelId }
-        : {}),
-      ...(request.afterPanelId !== undefined
-        ? { afterSlotId: request.afterPanelId }
-        : {}),
+      ...(request.beforePanelId !== undefined ? { beforeSlotId: request.beforePanelId } : {}),
+      ...(request.afterPanelId !== undefined ? { afterSlotId: request.afterPanelId } : {})
     }),
   getCollapsedIds: loadCollapsedPanelIds,
   setCollapsed: async (panelId: string, collapsed: boolean) => {
@@ -640,26 +561,22 @@ export const panel = {
     const ids = new Set(await loadCollapsedPanelIds());
     for (const panelId of panelIds) ids.delete(panelId);
     await saveCollapsedPanelIds(ids);
-  },
+  }
 };
 // =============================================================================
 // Panel commands (shared registry; desktop presents them in the command palette)
 // =============================================================================
 const hostCommandRegistry = new HostCommandRegistry();
 
-rpc.on(HOST_COMMAND_CONTRIBUTION_EVENT, (event) =>
-  hostCommandRegistry.accept(event)
-);
+rpc.on(HOST_COMMAND_CONTRIBUTION_EVENT, (event) => hostCommandRegistry.accept(event));
 
 export const hostCommands = {
   list: async () => {
-    const focusedPanelId = await viewClient
-      .getFocusedPanelId()
-      .catch(() => null);
+    const focusedPanelId = await viewClient.getFocusedPanelId().catch(() => null);
     return hostCommandRegistry.list(focusedPanelId);
   },
   run: (panelId: string, commandId: string) =>
-    rpc.emit(panelId, HOST_COMMAND_RUN_EVENT, { commandId }),
+    rpc.emit(panelId, HOST_COMMAND_RUN_EVENT, { commandId })
 };
 // =============================================================================
 // View Service
@@ -723,11 +640,10 @@ export const connectNativePanelAdapter = () => {
   nativePanelAdapterConnection ??= viewClient
     .connectNativePanelAdapter({
       sealedLaunchIdentity: "@workspace-apps/shell",
-      supportedProtocolVersions: [1],
+      supportedProtocolVersions: [1]
     })
     .then((result) => {
-      if (!result.accepted)
-        throw new Error(`Panel host rejected shell: ${result.reason}`);
+      if (!result.accepted) throw new Error(`Panel host rejected shell: ${result.reason}`);
       nativePanelAdapterHandshake = result.handshake;
       desiredNativePanelSlotRevision = 0;
     });
@@ -746,12 +662,12 @@ const syncDesiredNativePanelSlots = () => {
         surfaceId: slot.nativeSlotId,
         materialization: {
           runtimeEntityId: slot.panelId,
-          leaseConnectionId: slot.bindingId,
+          leaseConnectionId: slot.bindingId
         },
         visible: true,
         focused: slot.focused,
-        bounds: slot.bounds,
-      })),
+        bounds: slot.bounds
+      }))
     });
     if (!result.accepted)
       throw new Error(`Native panel adapter rejected desired state: ${result.reason}`);
@@ -780,16 +696,14 @@ export const view = {
       bindingId: request.bindingId,
       panelId: request.panelId,
       bounds: request.bounds,
-      focused: request.focused === true,
+      focused: request.focused === true
     });
     const observed = await syncDesiredNativePanelSlots();
-    return observed.surfaces.some(
-      (surface) => surface.surfaceId === request.nativeSlotId
-    )
+    return observed.surfaces.some((surface) => surface.surfaceId === request.nativeSlotId)
       ? { status: "bound" as const }
       : {
           status: "missing" as const,
-          reason: `native adapter did not observe ${request.nativeSlotId}`,
+          reason: `native adapter did not observe ${request.nativeSlotId}`
         };
   },
   updateNativePanelSlot: async (request: {
@@ -802,30 +716,23 @@ export const view = {
     if (!current || current.bindingId !== request.bindingId) {
       return {
         status: "missing" as const,
-        reason: `unknown native panel slot: ${request.nativeSlotId}`,
+        reason: `unknown native panel slot: ${request.nativeSlotId}`
       };
     }
     desiredNativePanelSlots.set(request.nativeSlotId, {
       ...current,
       ...(request.bounds ? { bounds: request.bounds } : {}),
-      ...(typeof request.focused === "boolean"
-        ? { focused: request.focused }
-        : {}),
+      ...(typeof request.focused === "boolean" ? { focused: request.focused } : {})
     });
     const observed = await syncDesiredNativePanelSlots();
-    return observed.surfaces.some(
-      (surface) => surface.surfaceId === request.nativeSlotId
-    )
+    return observed.surfaces.some((surface) => surface.surfaceId === request.nativeSlotId)
       ? { status: "updated" as const }
       : {
           status: "missing" as const,
-          reason: `native adapter did not observe ${request.nativeSlotId}`,
+          reason: `native adapter did not observe ${request.nativeSlotId}`
         };
   },
-  clearNativePanelSlot: async (request: {
-    nativeSlotId: string;
-    bindingId: string;
-  }) => {
+  clearNativePanelSlot: async (request: { nativeSlotId: string; bindingId: string }) => {
     const current = desiredNativePanelSlots.get(request.nativeSlotId);
     if (current?.bindingId === request.bindingId) {
       desiredNativePanelSlots.delete(request.nativeSlotId);
@@ -840,24 +747,18 @@ export const view = {
       id?: string;
     }
   ) => viewClient.updateNativeShellOverlay(options),
-  hideNativeShellOverlay: (id?: string) =>
-    viewClient.hideNativeShellOverlay(id),
-  showContentOverlay: (
-    options: Parameters<typeof viewClient.showContentOverlay>[0]
-  ) => viewClient.showContentOverlay(options),
-  updateContentOverlay: (
-    options: Parameters<typeof viewClient.updateContentOverlay>[0]
-  ) => viewClient.updateContentOverlay(options),
+  hideNativeShellOverlay: (id?: string) => viewClient.hideNativeShellOverlay(id),
+  showContentOverlay: (options: Parameters<typeof viewClient.showContentOverlay>[0]) =>
+    viewClient.showContentOverlay(options),
+  updateContentOverlay: (options: Parameters<typeof viewClient.updateContentOverlay>[0]) =>
+    viewClient.updateContentOverlay(options),
   hideContentOverlay: (surface: string) => viewClient.hideContentOverlay({ surface }),
-  browserNavigate: (browserId: string, url: string) =>
-    viewClient.browserNavigate(browserId, url),
+  browserNavigate: (browserId: string, url: string) => viewClient.browserNavigate(browserId, url),
   browserGoBack: (browserId: string) => viewClient.browserGoBack(browserId),
-  browserGoForward: (browserId: string) =>
-    viewClient.browserGoForward(browserId),
+  browserGoForward: (browserId: string) => viewClient.browserGoForward(browserId),
   browserReload: (browserId: string) => viewClient.browserReload(browserId),
-  browserForceReload: (browserId: string) =>
-    viewClient.browserForceReload(browserId),
-  browserStop: (browserId: string) => viewClient.browserStop(browserId),
+  browserForceReload: (browserId: string) => viewClient.browserForceReload(browserId),
+  browserStop: (browserId: string) => viewClient.browserStop(browserId)
 };
 export const nativeShellOverlay = {
   on: (handler: (event: NativeShellOverlayEvent) => void) => {
@@ -868,7 +769,7 @@ export const nativeShellOverlay = {
     ).__vibestudioShellOverlay;
     if (!bridge) return () => {};
     return bridge.on(handler);
-  },
+  }
 };
 type ContentOverlayHostBridge = {
   on: (handler: (payload: unknown) => void) => () => void;
@@ -887,7 +788,7 @@ export const contentOverlay = {
     ).__vibestudioContentOverlayHost;
     if (!bridge) return () => {};
     return bridge.on(handler);
-  },
+  }
 };
 type ShellNetworkBridge = {
   notifyNetworkOnline?: () => void;
@@ -900,17 +801,15 @@ type ShellNetworkBridge = {
  */
 export const shellNetwork = {
   notifyOnline: () => {
-    const bridge = (
-      globalThis as unknown as { __vibestudioApp?: ShellNetworkBridge }
-    ).__vibestudioApp;
+    const bridge = (globalThis as unknown as { __vibestudioApp?: ShellNetworkBridge })
+      .__vibestudioApp;
     bridge?.notifyNetworkOnline?.();
-  },
+  }
 };
 export const incomingPairLink = {
-  getPending: () =>
-    g.__vibestudioIncomingPairLink?.getPending() ?? Promise.resolve(null),
+  getPending: () => g.__vibestudioIncomingPairLink?.getPending() ?? Promise.resolve(null),
   onLink: (handler: (link: ConnectPairing) => void) =>
-    g.__vibestudioIncomingPairLink?.onLink(handler) ?? (() => {}),
+    g.__vibestudioIncomingPairLink?.onLink(handler) ?? (() => {})
 };
 /**
  * A `vibestudio://ask|about|command|surface` deep link that arrived before this
@@ -918,17 +817,14 @@ export const incomingPairLink = {
  * launch-time path and the live path converge on the host's one dispatcher.
  */
 export const incomingShellSurface = {
-  getPending: () =>
-    g.__vibestudioIncomingShellSurface?.getPending() ?? Promise.resolve(null),
+  getPending: () => g.__vibestudioIncomingShellSurface?.getPending() ?? Promise.resolve(null)
 };
 export const incomingPanelLocation = {
-  getPending: () =>
-    g.__vibestudioIncomingPanelLocation?.getPending() ?? Promise.resolve(null),
+  getPending: () => g.__vibestudioIncomingPanelLocation?.getPending() ?? Promise.resolve(null),
   onLocation: (handler: (location: PanelLocation) => void) =>
     g.__vibestudioIncomingPanelLocation?.onLocation(handler) ?? (() => {}),
   prepareWorkspaceRelaunch: (location: PanelLocation | null) =>
-    g.__vibestudioIncomingPanelLocation?.prepareWorkspaceRelaunch(location) ??
-    Promise.resolve(),
+    g.__vibestudioIncomingPanelLocation?.prepareWorkspaceRelaunch(location) ?? Promise.resolve()
 };
 // =============================================================================
 // Menu Service
@@ -939,15 +835,13 @@ interface Position {
 }
 export const menu = {
   showHamburger: (position: Position) => menuClient.showHamburger(position),
-  showContext: (
-    items: Array<{ id: string; label: string }>,
-    position: Position
-  ) => menuClient.showContext(items, position),
+  showContext: (items: Array<{ id: string; label: string }>, position: Position) =>
+    menuClient.showContext(items, position),
   showPanelContext: (
     panelId: string,
     position: Position,
     presentation?: PanelContextPresentation
-  ) => menuClient.showPanelContext(panelId, position, presentation),
+  ) => menuClient.showPanelContext(panelId, position, presentation)
 };
 // =============================================================================
 // Workspace Service
@@ -964,21 +858,20 @@ export const workspace = {
     hubControlClient.createWorkspace({
       workspace: name,
       ...(opts?.forkFrom ? { forkFrom: opts.forkFrom } : {}),
-      ...(opts?.rootTemplate ? { rootTemplate: opts.rootTemplate } : {}),
+      ...(opts?.rootTemplate ? { rootTemplate: opts.rootTemplate } : {})
     }),
   select: async (name: string) => {
     const entry = (await hubControlClient.listWorkspaces()).find(
       (workspace) => workspace.name === name
     );
-    if (!entry)
-      throw new Error(`Workspace "${name}" is not visible to this account`);
+    if (!entry) throw new Error(`Workspace "${name}" is not visible to this account`);
     return hubControlClient.routeWorkspace({ workspaceId: entry.workspaceId });
   },
   delete: async (name: string) => {
     await hubControlClient.deleteWorkspace({ workspace: name });
   },
   getActive: () => workspaceClient.getActive(),
-  getConfig: () => workspaceClient.getConfig(),
+  getConfig: () => workspaceClient.getConfig()
 };
 
 // =============================================================================
@@ -987,28 +880,23 @@ export const workspace = {
 // Template mutations return immediately after asking through the normal
 // approval surface. The shell intentionally renders that state as a human
 // message rather than exposing the approval record identity.
-export const templates = createTemplateManagementClient(
-  (extension, method, args) => extensionsClient.invoke(extension, method, args)
+export const templates = createTemplateManagementClient((extension, method, args) =>
+  extensionsClient.invoke(extension, method, args)
 );
 export const credentials = {
-  requestCredentialInput: (
-    input: Parameters<typeof credentialsClient.requestCredentialInput>[0]
-  ) => credentialsClient.requestCredentialInput(input),
+  requestCredentialInput: (input: Parameters<typeof credentialsClient.requestCredentialInput>[0]) =>
+    credentialsClient.requestCredentialInput(input)
 };
 /** Standard semantic VCS review flow, including coordinator-owned external deltas. */
 export const vcs = {
   status: (contextId: string) => vcsClient.status({ contextId }),
-  compareDelta: async (
-    contextId: string,
-    sourceDeltaId: string,
-    cursor?: string
-  ) => {
+  compareDelta: async (contextId: string, sourceDeltaId: string, cursor?: string) => {
     const status = await vcsClient.status({ contextId });
     return vcsClient.compare({
       target: status.workingHead,
       source: { kind: "external-delta", deltaId: sourceDeltaId },
       limit: 200,
-      ...(cursor ? { cursor } : {}),
+      ...(cursor ? { cursor } : {})
     });
   },
   mergeDelta: (
@@ -1027,8 +915,8 @@ export const vcs = {
       expectedWorkingHead,
       source: { kind: "external-delta", deltaId: sourceDeltaId },
       coordinates,
-      resolutions,
-    }),
+      resolutions
+    })
 };
 // =============================================================================
 // Remote credential store
@@ -1044,11 +932,10 @@ export type DeviceRecord = HubDevice;
 export type PairingInvite = HubPairingInvite;
 export const remoteCred = {
   getCurrent: () => remoteCredClient.getCurrent(),
-  pair: (link: string, label?: string) =>
-    remoteCredClient.pair({ link, label }),
+  pair: (link: string, label?: string) => remoteCredClient.pair({ link, label }),
   reconnectNow: () => remoteCredClient.reconnectNow(),
   clear: () => remoteCredClient.clear(),
-  relaunch: () => remoteCredClient.relaunch(),
+  relaunch: () => remoteCredClient.relaunch()
 };
 /** The stable server-wide control service, composed directly over the hub pipe. */
 export const hubControl = hubControlClient;
@@ -1059,7 +946,7 @@ export const autofill = {
   confirmSave: (panelId: string, action: "save" | "never" | "dismiss") =>
     autofillClient.confirmSave(panelId, action),
   confirmFormFill: (panelId: string, action: "save" | "dismiss") =>
-    autofillClient.confirmFormFill(panelId, action),
+    autofillClient.confirmFormFill(panelId, action)
 };
 // =============================================================================
 // Blobstore Service (content-addressed read surface — diff-review lazy fetch)
@@ -1067,7 +954,7 @@ export const autofill = {
 export const blobstore = {
   getText: (digest: string) => blobstoreClient.getText(digest),
   getBase64: (digest: string) => blobstoreClient.getBase64(digest),
-  stat: (digest: string) => blobstoreClient.stat(digest),
+  stat: (digest: string) => blobstoreClient.stat(digest)
 };
 // =============================================================================
 // Workspace Presence Service (WP8 §4 — who's connected to this workspace)
@@ -1076,7 +963,7 @@ export const blobstore = {
 // once on mount, then keep fresh via the `workspace-presence-changed` event.
 export type { WorkspacePresenceEntry } from "@vibestudio/shared/workspacePresence";
 export const workspacePresence = {
-  list: () => workspacePresenceClient.list(),
+  list: () => workspacePresenceClient.list()
 };
 // =============================================================================
 // Account profile projection (principal identity + owner labels)
@@ -1088,17 +975,16 @@ export const ACCOUNT_PROFILE_CHANGED_EVENT = "account-profile-changed";
 
 export const account = {
   getProfile: () => accountClient.getProfile(),
-  resolveProfiles: (userIds: readonly string[]) =>
-    accountClient.resolveProfiles([...userIds]),
+  resolveProfiles: (userIds: readonly string[]) => accountClient.resolveProfiles([...userIds]),
   updateProfile: async (input: ShellAccountProfileUpdate) => {
     const profile = await hubControlClient.updateProfile(input);
     window.dispatchEvent(
       new CustomEvent<ShellAccountProfile>(ACCOUNT_PROFILE_CHANGED_EVENT, {
-        detail: profile,
+        detail: profile
       })
     );
     return profile;
-  },
+  }
 };
 // =============================================================================
 // Durable account-scoped user notification inbox
@@ -1110,11 +996,7 @@ const resolvedChannelClients = new Map<string, DurableObjectServiceClient>();
 function channelClient(channelId: string): DurableObjectServiceClient {
   let client = resolvedChannelClients.get(channelId);
   if (!client) {
-    client = createDurableObjectServiceClient(
-      rpc,
-      CHANNEL_SERVICE_PROTOCOL,
-      channelId
-    );
+    client = createDurableObjectServiceClient(rpc, CHANNEL_SERVICE_PROTOCOL, channelId);
     resolvedChannelClients.set(channelId, client);
   }
   return client;
@@ -1132,29 +1014,27 @@ export interface ShellUserNotification extends UserNotification {
   agentMessage?: AgentMessageNotificationData;
 }
 
-async function describeChannelInvite(
-  invite: ChannelInvite
-): Promise<ShellChannelInvite> {
+async function describeChannelInvite(invite: ChannelInvite): Promise<ShellChannelInvite> {
   const config = await channelClient(invite.channelId).call<{
     title?: string;
   } | null>("getConfig");
   return {
     ...invite,
-    channelTitle: config?.title?.trim() || invite.channelId,
+    channelTitle: config?.title?.trim() || invite.channelId
   };
 }
 
 export const userNotifications = {
   /** Read one durable account inbox; never enumerate producer/channel DOs.
    *  `includeAcknowledged` returns the history too (messaging plan §4.10.8). */
-  async list(
-    input?: { includeAcknowledged?: boolean; limit?: number }
-  ): Promise<ShellUserNotification[]> {
-    const { notifications } =
-      await userNotificationStore.call<UserNotificationListResult>(
-        "listUserNotificationsForMe",
-        ...(input ? [input] : [])
-      );
+  async list(input?: {
+    includeAcknowledged?: boolean;
+    limit?: number;
+  }): Promise<ShellUserNotification[]> {
+    const { notifications } = await userNotificationStore.call<UserNotificationListResult>(
+      "listUserNotificationsForMe",
+      ...(input ? [input] : [])
+    );
     const channelInvites = notifications
       .map((notification) => channelInviteFromNotification(notification))
       .filter((invite): invite is ChannelInvite => invite !== null);
@@ -1162,12 +1042,10 @@ export const userNotifications = {
       ...new Set(
         channelInvites
           .map((invite) =>
-            invite.addedBy.startsWith("user:")
-              ? invite.addedBy.slice("user:".length)
-              : null
+            invite.addedBy.startsWith("user:") ? invite.addedBy.slice("user:".length) : null
           )
           .filter((userId): userId is string => Boolean(userId))
-      ),
+      )
     ];
     const profilesPromise = inviterUserIds.length
       ? account
@@ -1179,11 +1057,11 @@ export const userNotifications = {
         channelInvites.map((invite) =>
           describeChannelInvite(invite).catch(() => ({
             ...invite,
-            channelTitle: invite.channelId,
+            channelTitle: invite.channelId
           }))
         )
       ),
-      profilesPromise,
+      profilesPromise
     ]);
     const hydratedInvites = new Map<string, ShellChannelInvite>();
     for (const invite of described) {
@@ -1191,16 +1069,11 @@ export const userNotifications = {
         ? invite.addedBy.slice("user:".length)
         : null;
       const inviter = inviterUserId ? profiles[inviterUserId] : undefined;
-      hydratedInvites.set(
-        invite.channelId,
-        inviter ? { ...invite, inviter } : invite
-      );
+      hydratedInvites.set(invite.channelId, inviter ? { ...invite, inviter } : invite);
     }
     return notifications.map((notification) => {
       const invite = channelInviteFromNotification(notification);
-      const channelInvite = invite
-        ? hydratedInvites.get(invite.channelId)
-        : undefined;
+      const channelInvite = invite ? hydratedInvites.get(invite.channelId) : undefined;
       if (channelInvite) return { ...notification, channelInvite };
       const agentMessage = agentMessageNotificationData(notification);
       return agentMessage ? { ...notification, agentMessage } : notification;
@@ -1208,11 +1081,10 @@ export const userNotifications = {
   },
 
   async acknowledge(id: string): Promise<boolean> {
-    const result =
-      await userNotificationStore.call<UserNotificationAcknowledgementResult>(
-        "acknowledgeUserNotification",
-        { id }
-      );
+    const result = await userNotificationStore.call<UserNotificationAcknowledgementResult>(
+      "acknowledgeUserNotification",
+      { id }
+    );
     return result.acknowledged;
   },
 
@@ -1227,12 +1099,10 @@ export const userNotifications = {
     const service = channelClient(channelId);
     const [config, contextId] = await Promise.all([
       service.call<{ title?: string } | null>("getConfig"),
-      service.call<string | null>("getContextId"),
+      service.call<string | null>("getContextId")
     ]);
     if (!contextId) {
-      throw new Error(
-        "This conversation is not ready yet. Please try again in a moment."
-      );
+      throw new Error("This conversation is not ready yet. Please try again in a moment.");
     }
     return { contextId, title: config?.title?.trim() || null };
   },
@@ -1257,23 +1127,20 @@ export const userNotifications = {
         const page = await workspacePresentation.page({
           group,
           ...(cursor ? { cursor } : {}),
-          limit: 100,
+          limit: 100
         });
         for (const node of page.nodes) {
           const [observation, stateArgs] = await Promise.all([
             productPanelRuntime.panelTree.get(node.slotId).observe(),
-            getPanelStateArgs(node.slotId),
+            getPanelStateArgs(node.slotId)
           ]);
-          if (
-            observation.source === "panels/chat" &&
-            stateArgs["channelName"] === channelId
-          ) {
+          if (observation.source === "panels/chat" && stateArgs["channelName"] === channelId) {
             return node.slotId;
           }
           if (node.childCount > 0) {
             const nested = await findInGroup({
               kind: "children",
-              parentSlotId: node.slotId,
+              parentSlotId: node.slotId
             });
             if (nested) return nested;
           }
@@ -1302,12 +1169,10 @@ export const userNotifications = {
     const service = channelClient(channelId);
     const [config, contextId] = await Promise.all([
       service.call<{ title?: string } | null>("getConfig"),
-      service.call<string | null>("getContextId"),
+      service.call<string | null>("getContextId")
     ]);
     if (!contextId) {
-      throw new Error(
-        "This conversation is not ready yet. Please try again in a moment."
-      );
+      throw new Error("This conversation is not ready yet. Please try again in a moment.");
     }
     const handle = await productPanelRuntime.openPanel("panels/chat", {
       parentId: null,
@@ -1316,11 +1181,11 @@ export const userNotifications = {
       title: config?.title?.trim() || undefined,
       stateArgs: {
         channelName: channelId,
-        ...(opts?.focusMessageId ? { focusMessageId: opts.focusMessageId } : {}),
-      },
+        ...(opts?.focusMessageId ? { focusMessageId: opts.focusMessageId } : {})
+      }
     });
     return { id: handle.id };
-  },
+  }
 };
 // =============================================================================
 // Events Service
@@ -1332,10 +1197,8 @@ export const events = {
   subscribe: (event: EventName) => eventsClient.subscribe(event),
   unsubscribe: (event: EventName) => eventsClient.unsubscribe(event),
   unsubscribeAll: () => eventsClient.unsubscribeAll(),
-  on: <E extends EventName>(
-    event: E,
-    listener: (payload: EventPayloads[E]) => void
-  ) => eventsClient.on(event, listener),
+  on: <E extends EventName>(event: E, listener: (payload: EventPayloads[E]) => void) =>
+    eventsClient.on(event, listener)
 };
 
 /**
@@ -1345,29 +1208,25 @@ export const events = {
  * join an `events.watch` response, and watched broadcasts never arrive here.
  */
 export const directEvents = {
-  on: <E extends EventName>(
-    event: E,
-    listener: (payload: EventPayloads[E]) => void
-  ) => rpc.on(event, ({ payload }) => listener(payload as EventPayloads[E])),
+  on: <E extends EventName>(event: E, listener: (payload: EventPayloads[E]) => void) =>
+    rpc.on(event, ({ payload }) => listener(payload as EventPayloads[E]))
 };
 // =============================================================================
 // Notification Service
 // =============================================================================
 import type { NotificationPayload } from "@vibestudio/shared/events";
 export const notification = {
-  show: (
-    opts: Omit<NotificationPayload, "id" | "sourcePanelId" | "iconDataUrl">
-  ) => notificationClient.show(opts),
-  reportAction: (id: string, actionId: string) =>
-    notificationClient.reportAction(id, actionId),
-  dismiss: (id: string) => notificationClient.dismiss(id),
+  show: (opts: Omit<NotificationPayload, "id" | "sourcePanelId" | "iconDataUrl">) =>
+    notificationClient.show(opts),
+  reportAction: (id: string, actionId: string) => notificationClient.reportAction(id, actionId),
+  dismiss: (id: string) => notificationClient.dismiss(id)
 };
 // =============================================================================
 // Extensions Service
 // =============================================================================
 export const extensions = {
   invoke: (name: string, method: string, args: unknown[] = []) =>
-    extensionsClient.invoke(name, method, args),
+    extensionsClient.invoke(name, method, args)
 };
 export const browserData = browserDataClient;
 export const browserEnvironment = browserEnvironmentClient;
@@ -1376,12 +1235,10 @@ export const browserEnvironment = browserEnvironmentClient;
 // =============================================================================
 export const supervisedUnits = {
   list: () => runtimeClient.supervision.list(),
-  versions: (releaseId: string) =>
-    runtimeClient.supervision.versions({ kind: "app", releaseId }),
+  versions: (releaseId: string) => runtimeClient.supervision.versions({ kind: "app", releaseId }),
   rollback: (releaseId: string, opts?: { buildKey?: string }) =>
     runtimeClient.supervision.rollback({ kind: "app", releaseId }, opts),
-  restart: (identity: RuntimeSupervisionEntityKey) =>
-    runtimeClient.supervision.restart(identity),
+  restart: (identity: RuntimeSupervisionEntityKey) => runtimeClient.supervision.restart(identity),
   recoverExecution: (
     entityId: string,
     expectedExecutionDigest: string,
@@ -1390,7 +1247,7 @@ export const supervisedUnits = {
     runtimeClient.recoverExecution({
       entityId,
       expectedExecutionDigest,
-      strategy,
+      strategy
     }),
   activate: (kind: "app" | "extension", releaseId: string) =>
     runtimeClient.supervision.activate({ kind, releaseId }),
@@ -1413,11 +1270,11 @@ export const supervisedUnits = {
       limit?: number;
       errorLimit?: number;
     }
-  ) => runtimeClient.supervision.health(identity, opts),
+  ) => runtimeClient.supervision.health(identity, opts)
 };
 export const buildUnits = {
   list: () => buildClient.listUnits(),
-  warmPanel: (source: string, ref?: string) => buildClient.getPanelMetadata(source, ref),
+  warmPanel: (source: string, ref?: string) => buildClient.getPanelMetadata(source, ref)
 };
 // =============================================================================
 // Shell Approval Service (consent approval queue)
@@ -1427,27 +1284,29 @@ import { assertPresent } from "../utils/assertPresent";
 export const shellApproval = {
   resolve: (approvalId: string, decision: ApprovalDecision) =>
     shellApprovalClient.resolve(approvalId, decision),
-  resolveBootstrap: (
-    approvalId: string,
-    decision: Extract<ApprovalDecision, "once" | "deny">
-  ) => shellApprovalClient.resolveBootstrap([approvalId], decision),
+  resolveBootstrap: (approvalId: string, decision: Extract<ApprovalDecision, "once" | "deny">) =>
+    shellApprovalClient.resolveBootstrap([approvalId], decision),
   resolveInstallReview: (
     approvalId: string,
     resolution: import("@vibestudio/shared/authority/unitInstallReview").TemplateInstallResolution
   ) => shellApprovalClient.resolveInstallReview(approvalId, resolution),
+  resolveTaskRules: (
+    approvalId: string,
+    resolution: { decision: "accept"; selected: string[] } | { decision: "cancel" }
+  ) => shellApprovalClient.resolveTaskRules(approvalId, resolution),
   submitClientConfig: (approvalId: string, values: Record<string, string>) =>
     shellApprovalClient.submitClientConfig(approvalId, values),
   submitCredentialInput: (approvalId: string, values: Record<string, string>) =>
     shellApprovalClient.submitCredentialInput(approvalId, values),
   submitSecretInput: (approvalId: string, values: Record<string, string>) =>
     shellApprovalClient.submitSecretInput(approvalId, values),
-  listPending: () => shellApprovalClient.listPending(),
+  listPending: () => shellApprovalClient.listPending()
 };
 // =============================================================================
 // Shell Presence Service
 // =============================================================================
 export const shellPresence = {
-  heartbeat: () => shellPresenceClient.heartbeat(),
+  heartbeat: () => shellPresenceClient.heartbeat()
 };
 
 // =============================================================================
@@ -1464,13 +1323,11 @@ export const quickfire = {
   sessionFor: (slotId: string, options?: { fresh?: boolean }) =>
     quickfireClient.call<QuickfireSession>("sessionFor", {
       slotId,
-      ...(options?.fresh ? { fresh: true } : {}),
+      ...(options?.fresh ? { fresh: true } : {})
     }),
-  clear: (slotId: string) =>
-    quickfireClient.call<{ cleared: boolean }>("clear", { slotId }),
-  promote: (slotId: string) =>
-    quickfireClient.call<QuickfireSession | null>("promote", { slotId }),
-  list: () => quickfireClient.call<QuickfireSession[]>("list"),
+  clear: (slotId: string) => quickfireClient.call<{ cleared: boolean }>("clear", { slotId }),
+  promote: (slotId: string) => quickfireClient.call<QuickfireSession | null>("promote", { slotId }),
+  list: () => quickfireClient.call<QuickfireSession[]>("list")
 };
 
 /**
@@ -1501,6 +1358,6 @@ export function connectToChannel(
     // than `rpc.selfId`. Without one the client claims the bare transport id
     // ("shell"), which is not an identity the channel can admit.
     ...(options.clientId ? { clientId: options.clientId } : {}),
-    type: "user",
+    type: "user"
   });
 }

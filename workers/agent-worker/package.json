@@ -54,6 +54,33 @@
           "evidence": "intentional-broad"
         },
         {
+          "capability": "userland:workers/missions/missions.edit#*",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "userland:workers/missions/missions.run#*",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "bounded-dynamic"
+        },
+        {
+          "capability": "userland:workers/missions/missions.retire#*",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "critical",
+          "evidence": "bounded-dynamic"
+        },
+        {
           "capability": "context.boundary",
           "resource": {
             "kind": "prefix",
@@ -171,7 +198,7 @@
           "evidence": "bounded-dynamic"
         },
         {
-          "capability": "workspace-main-advance",
+          "capability": "git.publish",
           "resource": {
             "kind": "prefix",
             "prefix": "workspace-source-change:"

@@ -135,6 +135,14 @@ export interface SelfDevelopmentRepository {
   workingHead: VcsStateNodeRef;
 }
 
+export interface ChatTaskRuleEvidence {
+  id: string;
+  capability: string;
+  action: string;
+  resource: string;
+  decidedAt: number;
+}
+
 function fixturePublicationAuthority(
   fixture: (WorkspaceRepoCreationScope & { repoName: string | null }) | null,
 ): AgentExecutionTestPolicySpec["authority"] {
@@ -188,6 +196,14 @@ export class HeadlessRunner {
   readonly openPanelClient = openPanel;
   /** Runtime-initialized panel-tree client for harness-owned invariants. */
   readonly panelTreeClient = panelTree;
+
+  /** Read the host-owned reusable authority attached to one exact chat task. */
+  inspectChatTaskRules(input: {
+    contextId: string;
+    channelId: string;
+  }): Promise<ChatTaskRuleEvidence[]> {
+    return rpc.call("main", "authority.listTaskRules", [input]);
+  }
 
   private contextId: string;
   private readonly shared: {

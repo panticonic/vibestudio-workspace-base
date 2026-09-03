@@ -1218,9 +1218,20 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
           if (isAddresseeError(outcome)) throw addresseeToolError(ref, outcome);
           return outcome;
         });
-        const alert = isAlertRung(input.alert)
+        const requestedAlert = isAlertRung(input.alert)
           ? input.alert
           : defaultAlertRung(resolved);
+        // Addressing a person is itself an attention request. `none` means a
+        // channel-only utterance, so accepting it for an explicit person would
+        // silently discard the durable notification the addressee contract
+        // promises. A caller that wants a quiet channel message can address
+        // the channel (and optionally mention someone); human addressees have
+        // an inbox floor and `interrupt` remains explicit.
+        const alert =
+          requestedAlert === "none" &&
+          resolved.some((entry) => entry.kind === "user")
+            ? "inbox"
+            : requestedAlert;
 
         // Runs are addressed through the supervision path, not the channel
         // audience: the child lives in its own task channel, and that path

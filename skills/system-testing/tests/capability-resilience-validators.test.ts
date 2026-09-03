@@ -39,7 +39,11 @@ function invocationMessage(invocation: Invocation, index: number): ChatMessage {
   };
 }
 
-function execution(invocations: Invocation[], final = "The requested behavior was observed.") {
+function execution(
+  invocations: Invocation[],
+  final = "The requested behavior was observed.",
+  diagnostics?: Record<string, unknown>
+) {
   return {
     duration: 0,
     messages: [
@@ -60,6 +64,7 @@ function execution(invocations: Invocation[], final = "The requested behavior wa
         content: final,
       },
     ],
+    ...(diagnostics ? { diagnostics } : {})
   } as TestExecutionResult;
 }
 
@@ -248,6 +253,11 @@ describe("permission semantic validators", () => {
     duration: "Until revoked",
     revokeEffect: "Stops future reads.",
   };
+  const taskGrant = {
+    ...grant,
+    id: "grant:task-permissions-read",
+    capability: "permissions.read"
+  };
 
   it("accepts the read-only canonical permission inventory", () => {
     expect(
@@ -289,6 +299,46 @@ describe("permission semantic validators", () => {
           ),
           evalCall("return await services.permissions.list();", []),
         ])
+      ).passed
+    ).toBe(false);
+  });
+
+  it("requires two permission reads backed by one final chat-task rule", () => {
+    const validator = scenario(approvalPermissionTests, "chat-task-permission-reuse");
+    const taskRule = {
+      id: taskGrant.id,
+      capability: "permissions.read",
+      action: "view saved site permissions",
+      resource: "permissions.read",
+      decidedAt: 10
+    };
+    expect(
+      validator.validate(
+        execution([
+          evalCall(
+            'return await rpc.call("main", "permissions.listAgentProfiles", []);',
+            []
+          ),
+          evalCall("return await services.permissions.list();", [taskGrant]),
+        ], "The requested behavior was observed.", {
+          chatTaskRuleReuse: {
+            afterFirstTurn: [taskRule],
+            afterSecondTurn: [taskRule]
+          }
+        })
+      )
+    ).toEqual({ passed: true, reason: undefined });
+    expect(
+      validator.validate(
+        execution([
+          evalCall("return await services.permissions.list();", [taskGrant]),
+          evalCall("return await services.permissions.list();", [taskGrant])
+        ], "The requested behavior was observed.", {
+          chatTaskRuleReuse: {
+            afterFirstTurn: [taskRule],
+            afterSecondTurn: [taskRule, { ...taskRule, id: "grant:duplicate" }]
+          }
+        })
       ).passed
     ).toBe(false);
   });

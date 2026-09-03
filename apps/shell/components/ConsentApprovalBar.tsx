@@ -18,7 +18,7 @@ import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellA
 import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
 import {
   createApprovalStateController,
-  SHELL_APPROVAL_PENDING_CHANGED_EVENT,
+  SHELL_APPROVAL_PENDING_CHANGED_EVENT
 } from "@vibestudio/shell-core/approvalState";
 import { account, blobstore, events, panel, shellApproval, shellPresence } from "../shell/client";
 import { useShellContentOverlay, type ContentOverlayBounds } from "../shell/useShellContentOverlay";
@@ -39,7 +39,7 @@ import {
   type ApprovalTone,
   type BlobResult,
   type CallerInfo,
-  type WorkspaceHistoryTarget,
+  type WorkspaceHistoryTarget
 } from "./approvalCardModel";
 import type { OverlayThemeInfo } from "../overlay/types";
 
@@ -152,7 +152,7 @@ export function ConsentApprovalBar() {
       setMinimizedApprovalId(null);
       setKeyboardFocusRequest((previous) => ({
         approvalId,
-        sequence: (previous?.sequence ?? 0) + 1,
+        sequence: (previous?.sequence ?? 0) + 1
       }));
     }
   }, []);
@@ -176,7 +176,7 @@ export function ConsentApprovalBar() {
       onChange: (pending) => setPendingAccess(pending),
       onError: (err, phase) => {
         console.warn(`[ConsentApprovalBar] approval state ${phase} failed:`, err);
-      },
+      }
     });
     controller.start();
     const reconcileId = window.setInterval(() => {
@@ -215,7 +215,9 @@ export function ConsentApprovalBar() {
         .sort((left, right) => {
           const isPreparing = (approval: PendingApproval) =>
             approval.lifecycle?.state === "preparing" ? 1 : 0;
-          return isPreparing(left.approval) - isPreparing(right.approval) || left.index - right.index;
+          return (
+            isPreparing(left.approval) - isPreparing(right.approval) || left.index - right.index
+          );
         })
         .map(({ approval }) => approval),
     [pendingAccess]
@@ -226,8 +228,7 @@ export function ConsentApprovalBar() {
   // visible in app; `attention` only controls out-of-app notification policy.
   const minimized =
     current != null &&
-    (minimizedApprovalId === current.approvalId ||
-      current.lifecycle?.state === "preparing");
+    (minimizedApprovalId === current.approvalId || current.lifecycle?.state === "preparing");
   const queueLength = orderedPending.length;
   const canPrev = queueLength > 1 && browseIndex > 0;
   const canNext = queueLength > 1 && browseIndex < queueLength - 1;
@@ -241,9 +242,7 @@ export function ConsentApprovalBar() {
       setMinimizedApprovalId(null);
       return;
     }
-    setMinimizedApprovalId((approvalId) =>
-      approvalId === current.approvalId ? approvalId : null
-    );
+    setMinimizedApprovalId((approvalId) => (approvalId === current.approvalId ? approvalId : null));
   }, [current?.approvalId]);
 
   useEffect(() => {
@@ -276,12 +275,17 @@ export function ConsentApprovalBar() {
     void blobstore
       .getText(hash)
       .then((text) =>
-        setBlobResults((prev) => ({ ...prev, [hash]: text == null ? { missing: true } : { text } }))
+        setBlobResults((prev) => ({
+          ...prev,
+          [hash]: text == null ? { missing: true } : { text }
+        }))
       )
       .catch((err: unknown) =>
         setBlobResults((prev) => ({
           ...prev,
-          [hash]: { error: err instanceof Error ? err.message : "Blob fetch failed" },
+          [hash]: {
+            error: err instanceof Error ? err.message : "Blob fetch failed"
+          }
         }))
       )
       .finally(() => inFlightBlobsRef.current.delete(hash));
@@ -301,7 +305,7 @@ export function ConsentApprovalBar() {
         x: Math.round(rect.left),
         y: Math.round(rect.top),
         width: Math.round(rect.width),
-        height: Math.round(rect.height),
+        height: Math.round(rect.height)
       };
       setAnchorBounds((prev) =>
         prev &&
@@ -340,7 +344,7 @@ export function ConsentApprovalBar() {
       );
       setDecisionError({
         approvalId: approval.approvalId,
-        message: message || "Approval decision failed.",
+        message: message || "Approval decision failed."
       });
     });
   };
@@ -395,6 +399,23 @@ export function ConsentApprovalBar() {
       }
     );
   };
+  const resolveTaskRules = (
+    resolution: { decision: "accept"; selected: string[] } | { decision: "cancel" }
+  ) => {
+    if (current?.kind !== "capability" || current.cardType !== "task.rules") return;
+    const approval = current;
+    setPendingAccess((items) => items.filter((item) => item.approvalId !== approval.approvalId));
+    runApprovalAction(
+      approval,
+      () => shellApproval.resolveTaskRules(approval.approvalId, resolution),
+      () =>
+        setPendingAccess((items) =>
+          items.some((item) => item.approvalId === approval.approvalId)
+            ? items
+            : [approval, ...items]
+        )
+    );
+  };
   const runApprovalAction = (
     approval: PendingApproval,
     action: () => Promise<unknown>,
@@ -410,7 +431,7 @@ export function ConsentApprovalBar() {
         onError?.();
         setDecisionError({
           approvalId: approval.approvalId,
-          message: err instanceof Error ? err.message : String(err),
+          message: err instanceof Error ? err.message : String(err)
         });
       })
       .finally(() => {
@@ -435,7 +456,7 @@ export function ConsentApprovalBar() {
           const page = await panel.getTreePage({
             group: { kind: "roots", ownerUserId: profile.userId },
             ...(cursor ? { cursor } : {}),
-            limit: 100,
+            limit: 100
           });
           for (const node of page.nodes) {
             const observation = await panel.observe(node.slotId);
@@ -448,7 +469,9 @@ export function ConsentApprovalBar() {
           if (!cursor) break;
         }
         if (existingId) {
-          await panel.navigate(existingId, WORKSPACE_HISTORY_SOURCE, { stateArgs });
+          await panel.navigate(existingId, WORKSPACE_HISTORY_SOURCE, {
+            stateArgs
+          });
           navigateToId(existingId);
         } else {
           await panel.createPanel(WORKSPACE_HISTORY_SOURCE, { stateArgs });
@@ -530,6 +553,9 @@ export function ConsentApprovalBar() {
       case "resolve-install-review":
         resolveInstallReview(intent.resolution);
         return;
+      case "resolve-task-rules":
+        resolveTaskRules(intent.resolution);
+        return;
       case "fetch-blob":
         fetchBlob(intent.hash, intent.refresh);
         return;
@@ -559,7 +585,7 @@ export function ConsentApprovalBar() {
       grayColor: themeConfig.grayColor,
       radius: themeConfig.radius,
       scaling: themeConfig.scaling,
-      panelBackground: themeConfig.panelBackground,
+      panelBackground: themeConfig.panelBackground
     }),
     [
       effectiveTheme,
@@ -567,7 +593,7 @@ export function ConsentApprovalBar() {
       themeConfig.grayColor,
       themeConfig.panelBackground,
       themeConfig.radius,
-      themeConfig.scaling,
+      themeConfig.scaling
     ]
   );
 
@@ -585,7 +611,7 @@ export function ConsentApprovalBar() {
             actionPending: submittingApprovalIds.has(current.approvalId),
             diffReview,
             blobResults,
-            appearance: effectiveTheme,
+            appearance: effectiveTheme
           }
         : null,
     [
@@ -598,7 +624,7 @@ export function ConsentApprovalBar() {
       diffReview,
       effectiveTheme,
       queueLength,
-      submittingApprovalIds,
+      submittingApprovalIds
     ]
   );
 
@@ -621,7 +647,7 @@ export function ConsentApprovalBar() {
           bounds: anchorBounds,
           focusRequest,
           theme,
-          props: overlayProps,
+          props: overlayProps
         }
       : null,
     handleIntent
@@ -704,7 +730,7 @@ export function ConsentApprovalBar() {
         onExpand={() => {
           setKeyboardFocusRequest((previous) => ({
             approvalId: current.approvalId,
-            sequence: (previous?.sequence ?? 0) + 1,
+            sequence: (previous?.sequence ?? 0) + 1
           }));
           setMinimizedApprovalId(null);
         }}
@@ -719,7 +745,7 @@ function ApprovalMinimizedPill({
   tone,
   count,
   attentionSeq,
-  onExpand,
+  onExpand
 }: {
   approval: PendingApproval;
   caller: CallerInfo;
