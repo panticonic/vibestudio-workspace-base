@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   existsSync,
+  chmodSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
@@ -181,6 +182,12 @@ function makeCtx(
 let tmpRoot: string;
 beforeEach(() => {
   tmpRoot = mkdtempSync(path.join(os.tmpdir(), "claude-ext-test-"));
+  const fakeBin = path.join(tmpRoot, "bin");
+  const fakeBwrap = path.join(fakeBin, "bwrap");
+  mkdirSync(fakeBin, { recursive: true });
+  writeFileSync(fakeBwrap, "#!/bin/sh\nexit 0\n");
+  chmodSync(fakeBwrap, 0o755);
+  vi.stubEnv("PATH", `${fakeBin}${path.delimiter}${process.env["PATH"] ?? ""}`);
   vi.stubEnv("VIBESTUDIO_EXTENSION_GATEWAY_URL", "http://127.0.0.1:5000/rpc");
   vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(tmpRoot, "missing-host-claude-config"));
 });

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 import React from "react";
 import { render } from "ink";
 import { Writable } from "node:stream";
@@ -13,6 +13,21 @@ import {
   installAcceptanceFrom,
   type InstallSelection,
 } from "./ApprovalsOverlay.js";
+
+// Ink selects a non-rendering log sink when CI is present at module-load time,
+// even when the caller supplies an in-memory stream in debug mode. Keep this
+// renderer test independent of the outer process environment while continuing
+// to exercise Ink's real non-TTY output path.
+const inheritedCi = vi.hoisted(() => {
+  const value = process.env["CI"];
+  delete process.env["CI"];
+  return value;
+});
+
+afterAll(() => {
+  if (inheritedCi === undefined) delete process.env["CI"];
+  else process.env["CI"] = inheritedCi;
+});
 
 /**
  * A minimal, non-TTY Ink render harness. There is no `ink-testing-library` in
