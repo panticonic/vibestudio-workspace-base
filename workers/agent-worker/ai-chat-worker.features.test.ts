@@ -149,6 +149,29 @@ describe("AiChatWorker channel features", () => {
     expect((await instance.tools()).map((tool) => tool.name)).toEqual(["eval"]);
   });
 
+  it("presents parent-model inheritance as the default subagent contract", async () => {
+    const { instance } = await createTestDO(TestConfiguredAgent);
+    instance.configure();
+    const spawn = (await instance.tools()).find((tool) => tool.name === "spawn_subagent");
+    expect(spawn).toBeDefined();
+    const parameters = spawn?.parameters as {
+      required?: string[];
+      properties?: {
+        config?: { description?: string; properties?: { model?: { description?: string } } };
+      };
+    };
+    expect(parameters.required).toEqual(["mode", "task"]);
+    expect(parameters.properties?.config?.description).toContain(
+      "Omit `config` for ordinary delegation",
+    );
+    expect(parameters.properties?.config?.description).toContain(
+      "Do not restate or guess the parent's model",
+    );
+    expect(parameters.properties?.config?.properties?.model?.description).toContain(
+      "Normally omit this",
+    );
+  });
+
   it("falls back to ordinary chat without configured channel features", async () => {
     const { instance } = await createTestDO(TestConfiguredAgent);
     expect(instance.prompt()).toBeUndefined();

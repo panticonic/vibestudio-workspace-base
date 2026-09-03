@@ -315,9 +315,14 @@ model tools: synchronously calling the active turn back through its channel
 would wait on itself. Use `agent.describe()` for self-inspection. Use
 `chat.callMethod(...)` only for a different participant.
 
-To make a spawned/headless agent inherit your model, read it here and pass it
-into the new agent's **creation** config (its `stateArgs.agentConfig.model`),
-since model rides creation — not the subscription.
+A `spawn_subagent` Pi child inherits the parent's effective model and other
+runtime settings automatically. Omit its `config` for ordinary delegation; do
+not read and restate the model ref. Set `config.model` only for an intentional
+cross-model child, using an exact ref obtained from the current catalog.
+
+Direct creation of an independent headless agent is different: its model rides
+the entity's creation config (`stateArgs.agentConfig.model`), not a later
+subscription.
 
 > Note: `agent` is only present for **agent** eval (same gate as `chat`); the
 > EvalDO forwards each call to your own vessel, which only accepts your own eval.

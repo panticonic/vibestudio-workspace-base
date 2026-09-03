@@ -2916,7 +2916,7 @@ class SubagentSpawnProbe extends TestVessel {
     } as unknown as RpcClient;
   }
   async spawnForTest(channelId: string, invocationId: string, args: unknown) {
-    return this.runDeferredSpawn(channelId, invocationId, args);
+    return this.runDeferredSpawn(channelId, invocationId, args, this.rpc);
   }
   subagentRunForTest(runId: string) {
     return this.subagentRuns.get(runId);

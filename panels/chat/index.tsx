@@ -1190,10 +1190,6 @@ export default function ChatPanel() {
 
   const chatActions: AgenticChatActions = useMemo(
     () => ({
-      onTaskTitleChange: (title) =>
-        rpc.call("main", "authority.setTaskTitle", [
-          { contextId: resolvedContextId, channelId: channelName, title }
-        ]),
       onListTaskRules: () =>
         rpc.call("main", "authority.listTaskRules", [
           { contextId: resolvedContextId, channelId: channelName }

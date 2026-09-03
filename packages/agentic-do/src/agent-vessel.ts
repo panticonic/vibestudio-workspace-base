@@ -2110,7 +2110,12 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
             }
             // `spawn_subagent` is an agentic lifecycle operation, not workspace authorship.
             if (tool === "spawn_subagent") {
-              return await this.runDeferredSpawn(channelId, invocationId, args);
+              return await this.runDeferredSpawn(
+                channelId,
+                invocationId,
+                args,
+                execution.rpc,
+              );
             }
             const registry = await this.toolRegistry(channelId, execution);
             resolvedTool = registry.get(tool);
@@ -7744,6 +7749,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     channelId: string,
     invocationId: string,
     args: unknown,
+    invocationRpc: RpcClient,
   ): Promise<{ result: unknown; isError: boolean }> {
     try {
       const p = (args ?? {}) as {
@@ -7924,7 +7930,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
       const parentContextId = this.subscriptions.getContextId(channelId);
       const ownerEntityId = this.participantId();
-      const ownerRuntimeContextId = await this.rpc.call<string | null>(
+      const ownerRuntimeContextId = await invocationRpc.call<string | null>(
         "main",
         "runtime.resolveContext",
         [ownerEntityId],
@@ -7962,7 +7968,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       }
 
       // 1) Child context (deterministic; runtime records the lifecycle edge).
-      const { contextId } = await createSubagentContext(this.rpc, {
+      const { contextId } = await createSubagentContext(invocationRpc, {
         parentContextId,
         ownerEntityId,
         targetKey,
@@ -7983,7 +7989,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
               ]),
             ]
           : [];
-      const childHandle = await createAgentEntity(this.rpc, {
+      const childHandle = await createAgentEntity(invocationRpc, {
         source,
         className,
         key: targetKey,
@@ -8050,7 +8056,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       let childParticipantId: string;
       if (mode === "fork") {
         const childSubscription = await initAgentFromTrajectoryFork(
-          this.rpc,
+          invocationRpc,
           childHandle,
           {
             parentLogId,
@@ -8063,7 +8069,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         childParticipantId = childSubscription.participantId;
       } else {
         const childSubscription = await subscribeAgentToChannel(
-          this.rpc,
+          invocationRpc,
           childHandle,
           {
             channelId: taskChannelId,
@@ -8075,7 +8081,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         childParticipantId = childSubscription.participantId;
       }
       this.subagentRuns.setChildParticipantId(runId, childParticipantId);
-      const effectiveChildSettings = await this.rpc.call<
+      const effectiveChildSettings = await invocationRpc.call<
         Record<string, unknown>
       >(childHandle.targetId, "getAgentSettings", []);
       for (const key of ["model", "thinkingLevel"] as const) {

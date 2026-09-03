@@ -5,6 +5,7 @@ import type {
   TestOrchestrationContext
 } from "../types.js";
 import { completedScenarioEvidence, invocationReturnValue } from "./_scenario-evidence.js";
+import { getToolCalls } from "./_helpers.js";
 import { savedPermissionGrantSchema } from "@vibestudio/service-schemas/permissions";
 const PERMISSION_LIST_CALL =
   /\bservices\.permissions\.list\s*\(\s*\)|\brpc\.call\s*\(\s*["']main["']\s*,\s*["']permissions\.list["']\s*,\s*\[\s*\]\s*\)/u;
@@ -12,6 +13,8 @@ const PERMISSION_PROFILE_CALL =
   /\brpc\.call\s*\(\s*["']main["']\s*,\s*["']permissions\.listAgentProfiles["']\s*,\s*\[\s*\]\s*\)/u;
 const PERMISSION_MUTATION_CALL =
   /\bservices\.permissions\.(?:revoke|updateAgentProfile|setWorkspaceAuthorityLock)\s*\(|\brpc\.call\s*\(\s*["']main["']\s*,\s*["']permissions\.(?:revoke|updateAgentProfile|setWorkspaceAuthorityLock)["']/u;
+const SERVER_LOG_STATS_CALL =
+  /\bservices\.serverLog\.stats\s*\(\s*\)|\brpc\.call\s*\(\s*["']main["']\s*,\s*["']serverLog\.stats["']\s*,\s*\[\s*\]\s*\)/u;
 
 function validatePermissionList(result: TestExecutionResult) {
   const base = completedScenarioEvidence(result);
@@ -103,6 +106,61 @@ function validateChatTaskGrantReuse(result: TestExecutionResult) {
       };
 }
 
+function validateSubagentTaskGrantReuse(result: TestExecutionResult) {
+  const calls = successfulEvalCalls(result);
+  if (!calls) {
+    return { passed: false, reason: "The parent/subagent permission session did not complete" };
+  }
+  const spawn = getToolCalls(result).find(
+    (call) =>
+      call.name === "spawn_subagent" &&
+      call.execution?.status === "complete" &&
+      call.execution.isError !== true
+  );
+  const child = spawn
+    ? result.messages.find(
+        (message) =>
+          message.task?.id === spawn.id &&
+          message.task.execution.status === "complete" &&
+          message.task.execution.terminalOutcome === "success" &&
+          message.task.execution.isError !== true
+      )?.task
+    : undefined;
+  const inventories = calls.filter((call) => {
+    const code = String(call.arguments?.["code"] ?? "");
+    return PERMISSION_LIST_CALL.test(code);
+  });
+  const parentRead = calls.find((call) =>
+    SERVER_LOG_STATS_CALL.test(String(call.arguments?.["code"] ?? ""))
+  );
+  const returned = inventories.at(-1) ? invocationReturnValue(inventories.at(-1)!) : null;
+  const grants = returned?.present && Array.isArray(returned.value) ? returned.value : [];
+  const matchingTaskGrants = grants.filter((value) => {
+    const grant = savedPermissionGrantSchema.safeParse(value);
+    return (
+      grant.success &&
+      grant.data.kind === "capability" &&
+      grant.data.callerLabel === "This task" &&
+      grant.data.resource === "server-logs.read" &&
+      grant.data.duration === "For the current approved task"
+    );
+  });
+  const childReport = JSON.stringify(child?.execution.result ?? "");
+  return parentRead &&
+    child &&
+    spawn &&
+    !Object.prototype.hasOwnProperty.call(spawn.arguments ?? {}, "config") &&
+    /\byes\b/iu.test(childReport) &&
+    inventories.length >= 1 &&
+    matchingTaskGrants.length === 1
+    ? { passed: true, reason: undefined }
+    : {
+        passed: false,
+        reason:
+          "The ordinary child did not inherit its parent config and reuse the parent's single server-logs.read task grant",
+      };
+}
+
 function formatError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -160,6 +218,45 @@ async function orchestrateChatTaskGrantReuse(
   return execution;
 }
 
+async function orchestrateSubagentTaskGrantReuse(
+  context: TestOrchestrationContext
+): Promise<TestExecutionResult> {
+  const startedAt = Date.now();
+  const session: HeadlessSession = await context.runner.spawn(undefined);
+  let error: string | undefined;
+  try {
+    await context.sendAndWait(
+      session,
+      "Call the documented serverLog.stats() operation once and briefly report its result. Do not modify anything.",
+      "parent protected read"
+    );
+    await context.sendAndWait(
+      session,
+      "Spawn one fresh subagent. Its only task is to call the documented serverLog.stats() operation once, report exactly yes if it was readable or no plus the error if it was not, and complete. Wait for that child and summarize its result.",
+      "subagent protected read"
+    );
+    await context.sendAndWait(
+      session,
+      "Call permissions.list() once. Return only entries whose resource is exactly server-logs.read and whose callerLabel is This task. Do not change permissions.",
+      "final permission inventory"
+    );
+  } catch (cause) {
+    error = formatError(cause);
+  }
+  const execution: TestExecutionResult = {
+    messages: [...session.messages],
+    duration: Date.now() - startedAt,
+    snapshot: session.snapshot(),
+    ...(error ? { error } : {})
+  };
+  try {
+    await session.close();
+  } catch (cause) {
+    execution.cleanupErrors = [`close: ${formatError(cause)}`];
+  }
+  return execution;
+}
+
 export const approvalPermissionTests: TestCase[] = [
   {
     name: "permissions-list",
@@ -198,5 +295,32 @@ export const approvalPermissionTests: TestCase[] = [
     orchestrate: orchestrateChatTaskGrantReuse,
     validation: "agent-evidence",
     validate: validateChatTaskGrantReuse
+  },
+  {
+    name: "subagent-task-permission-reuse",
+    description: "A fresh subagent reuses its parent's chat-bound task permission",
+    category: "approvals-permissions",
+    prompt: "Harness-orchestrated parent/subagent task permission reuse check.",
+    authorityPolicy: {
+      authority: [
+        {
+          ruleId: "subagent-task-permissions-read",
+          capability: { kind: "exact", key: "server-logs.read" },
+          resource: { kind: "exact", key: "server-logs.read" },
+          tier: "gated",
+          decision: "task"
+        },
+        {
+          ruleId: "subagent-task-grant-inventory",
+          capability: { kind: "exact", key: "permissions.read" },
+          resource: { kind: "exact", key: "permissions.read" },
+          tier: "gated",
+          decision: "once"
+        }
+      ]
+    },
+    orchestrate: orchestrateSubagentTaskGrantReuse,
+    validation: "agent-evidence",
+    validate: validateSubagentTaskGrantReuse
   }
 ];

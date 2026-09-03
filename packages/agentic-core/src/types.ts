@@ -112,8 +112,6 @@ export interface NewConversationOptions {
 
 /** Inject platform-specific navigation */
 export interface AgenticChatActions {
-  /** Register the current human title used by task-scoped approval copy. */
-  onTaskTitleChange?: (title: string) => Promise<void> | void;
   /** Read the reusable authority currently attached to this conversation. */
   onListTaskRules?: () => Promise<
     Array<{

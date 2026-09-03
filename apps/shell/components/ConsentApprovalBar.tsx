@@ -774,7 +774,7 @@ function ApprovalMinimizedPill({
       >
         <span key={attentionSeq} className="approval-pill-pulse" aria-hidden="true" />
         <span className="approval-pill-icon">
-          <ApprovalKindIcon approval={approval} size={15} />
+          <ApprovalKindIcon approval={approval} caller={caller} size={15} />
         </span>
         <Flex direction="column" style={{ minWidth: 0, flex: 1 }}>
           <Text size="2" weight="bold" truncate>

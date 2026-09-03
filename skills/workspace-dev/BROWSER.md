@@ -32,8 +32,9 @@ await session.close();
 
 For ordinary eval calls, omit `authority.requests` and let the run adapt to the
 authority already admitted for the agent. If the workflow deliberately uses an
-exact per-run allowlist, `handle.cdp.page()` requires this exact request (the
-capability is `panel.inspect`, not `cdp.page`):
+exhaustive per-run allowlist, `handle.cdp.page()` requires `panel.inspect` for
+the panel selected by the handle (the capability is `panel.inspect`, not
+`cdp.page`):
 
 ```ts
 eval({
@@ -43,7 +44,7 @@ eval({
     requests: [
       {
         capability: "panel.inspect",
-        resource: { kind: "exact", key: "panel.inspect" },
+        resource: { kind: "prefix", prefix: "" },
       },
     ],
   },

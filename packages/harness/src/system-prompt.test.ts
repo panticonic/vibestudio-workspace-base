@@ -134,6 +134,8 @@ describe("composeSystemPrompt", () => {
 
   it("includes core conversation fork and subagent operating guidance", () => {
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("## Conversation Forks And Subagents");
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("Omit `config` by default");
+    expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("do not guess or restate your model");
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("do not conflate them");
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain("cache-compatible model transport");
     expect(VIBESTUDIO_BASE_SYSTEM_PROMPT).toContain(

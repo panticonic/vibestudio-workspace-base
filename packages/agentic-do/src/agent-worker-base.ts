@@ -1503,10 +1503,13 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
             config: {
               type: "object",
               description:
-                "Optional child runtime config. This object is the ONLY way to select a different " +
-                "child model or reasoning level; mentioning a model inside `task` does not configure " +
-                "the child. Omit config only when inheriting the parent's effective settings is " +
-                "intentional. For 'pi' children use model and thinkingLevel " +
+                "Optional overrides for an intentionally different child runtime. Omit `config` " +
+                "for ordinary delegation: a 'pi' child automatically inherits the parent's exact " +
+                "effective model, reasoning level, fallback, approval behavior, and prompt settings. " +
+                "Do not restate or guess the parent's model. Set `model` only when the user explicitly " +
+                "requests a different model and you have an exact currently available catalog ref; " +
+                "mentioning a model inside `task` does not configure the child. For intentional 'pi' " +
+                "overrides use model and thinkingLevel " +
                 "('minimal'|'low'|'medium'|'high'|'xhigh'|'max'), plus optional approvalLevel, " +
                 "respondPolicy, handle, and system-prompt settings. Do not use effort for Pi. " +
                 "For external kinds it maps to the launcher's CLI — claude-code supports model " +
@@ -1515,7 +1518,11 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
                 "child runs autonomously; also 'acceptEdits'|'bypassPermissions'|'manual'|'dontAsk'|'plan'), " +
                 "fallbackModel, and maxBudgetUsd (number). Unknown keys are ignored.",
               properties: {
-                model: { type: "string" },
+                model: {
+                  type: "string",
+                  description:
+                    "Intentional Pi child model override. Normally omit this (and `config`) to inherit the parent's effective model. Never guess a ref; use only an exact currently available catalog ref when a different model was explicitly requested.",
+                },
                 thinkingLevel: {
                   type: "string",
                   enum: ["minimal", "low", "medium", "high", "xhigh", "max"],

@@ -51,6 +51,8 @@ function capabilityApproval(
     authorityFacets: partial.authorityFacets,
     operationSubstance: partial.operationSubstance,
     target: partial.target,
+    requester: partial.requester,
+    callerTitle: partial.callerTitle,
     approvalId: partial.approvalId,
     lifecycle: partial.lifecycle
   };
@@ -333,6 +335,29 @@ describe("ApprovalCard", () => {
     });
   });
 
+  it("uses the requester's resolved icon for a capability card", () => {
+    renderCard(
+      capabilityApproval({
+        approvalId: "flowboard-storage",
+        title: "Use Flowboard storage",
+        requester: {
+          id: "do:flowboard",
+          kind: "do",
+          category: "durable-object",
+          title: "Flowboard",
+          icon: "🗂️",
+          repoPath: "workers/flowboard-store",
+          effectiveVersion: "ev",
+          stableIdentityKey: "workers/flowboard-store@ev",
+          ephemeralInstanceKey: "do:flowboard",
+          breadcrumbs: []
+        }
+      })
+    );
+
+    expect(document.querySelector(".approval-icon-box")?.textContent).toContain("🗂️");
+  });
+
   it("renders one decision with every independently enforced authority facet", () => {
     const inspection = authorityRow({
       capability: "panel.inspect",
@@ -465,6 +490,9 @@ describe("ApprovalCard", () => {
         ]
       })
     );
+    expect(screen.queryByText("Choose what this chat may do:")).toBeNull();
+    expect(screen.queryByRole("checkbox")).toBeNull();
+    expect(screen.getByRole("button", { name: "Allow" })).toBeTruthy();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "d" });
     expect(emit).toHaveBeenLastCalledWith({
       approvalId: "task-rules-next",

@@ -351,7 +351,7 @@ export function ApprovalCard({
           }
           disabled={taskRuleSelection.size === 0}
         >
-          Allow selected
+          {approval.authorityFacets?.length === 1 ? "Allow" : "Allow selected"}
         </Button>
         <Button
           variant="soft"
@@ -418,7 +418,7 @@ export function ApprovalCard({
       <div className="approval-card-scroll">
         <Flex align="start" gap="3" className="approval-card-body">
           <Box className="approval-icon-box" data-beacon="true">
-            <ApprovalKindIcon approval={approval} size={18} />
+            <ApprovalKindIcon approval={approval} caller={caller} size={18} />
           </Box>
 
           <Flex
@@ -474,7 +474,7 @@ export function ApprovalCard({
             </Box>
             {approval.kind === "capability" &&
             approval.authorityFacets &&
-            (approval.authorityFacets.length > 1 || approval.cardType === "task.rules") ? (
+            approval.authorityFacets.length > 1 ? (
               <Flex
                 direction="column"
                 gap="1"
@@ -874,9 +874,11 @@ function DiffReviewSection({
 
 export function ApprovalKindIcon({
   approval,
+  caller,
   size = 18
 }: {
   approval: PendingApproval;
+  caller?: CallerInfo;
   size?: number;
 }) {
   // Parts arriving, not a hazard. A warning triangle over `Welcome — here's
@@ -885,6 +887,16 @@ export function ApprovalKindIcon({
   // is also the icon for "here is your workspace".
   if (approval.kind === "unit-install-review") return <CubeIcon width={size} height={size} />;
   if (approval.kind === "device-code") return <ExternalLinkIcon width={size} height={size} />;
+  if (approval.kind === "capability" && caller?.icon) {
+    return (
+      <PanelIcon
+        icon={caller.icon}
+        source={caller.iconSourcePath}
+        size={size}
+        fallback="worker"
+      />
+    );
+  }
   if (approval.kind === "capability") return <GlobeIcon width={size} height={size} />;
   if (approval.kind === "browser-permission") return <GlobeIcon width={size} height={size} />;
   if (approval.kind === "client-config" || approval.kind === "credential-input")

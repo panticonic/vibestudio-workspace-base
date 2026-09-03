@@ -265,13 +265,6 @@ export function useAgenticChat({
     initialPrompt: actions?.onAddAgent ? undefined : initialPrompt,
     forceInitialPrompt: actions?.onAddAgent ? undefined : forceInitialPrompt
   });
-  useEffect(() => {
-    const title = core.channelTitle?.trim();
-    if (!title || !actions?.onTaskTitleChange) return;
-    void Promise.resolve(actions.onTaskTitleChange(title)).catch((error) =>
-      console.warn("[useAgenticChat] Failed to register task title:", error)
-    );
-  }, [actions, core.channelTitle]);
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const retryConnection = useCallback(() => {
     core.dismissConnectionError();
