@@ -123,6 +123,12 @@ building the UI:
    kind-specific fields such as `targetId` or `routeBasePath`.
 5. Verify the provider, then a minimal consumer call, before expanding the UI.
 
+For an existing declared service, verification proves only the context candidate.
+Before the minimal live call can use a new or changed RPC method, commit the
+provider edits and publish its repository. Wait for publication to finish, then
+resolve the service again and call the method. A green `verify` result never
+updates the active service build.
+
 Expose application operations as narrow, app-shaped RPC methods with explicit
 receiver contracts. Use channels and structured events when collaboration is
 part of the product. Keep UI projection methods out of the domain API.

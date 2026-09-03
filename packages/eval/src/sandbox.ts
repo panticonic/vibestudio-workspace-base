@@ -1885,9 +1885,14 @@ export async function executeSandbox(
     const errorMessage = err instanceof Error ? err.message : String(err);
     const errorStack = err instanceof Error ? err.stack : undefined;
     const errorData = structuredFailureData(err);
-    // Include stack in console output for debugging RPC/OAuth errors
+    // Typed application failures already carry bounded recovery data. Repeating
+    // their transport stack in the primary agent surface obscures that recovery;
+    // keep stacks for unstructured exceptions where they remain diagnostic.
     const consoleEntries = capture.getEntries();
-    const debugInfo = errorStack ? `\n[eval] Error stack: ${errorStack}` : "";
+    const debugInfo =
+      errorStack && errorData === undefined
+        ? `\n[eval] Error stack: ${errorStack}`
+        : "";
     return {
       success: false,
       consoleOutput: formatConsoleOutput(consoleEntries) + debugInfo,

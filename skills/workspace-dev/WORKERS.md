@@ -577,9 +577,13 @@ and the object's persistent SQLite database.
 
 RPC exposure belongs to the exact active provider build, not merely to the
 source currently visible in the workspace. After adding or changing an exposed
-method, publish or activate that provider build before calling it. A
-`WORKSPACE_RPC_METHOD_UNDECLARED` failure reports the active build, its declared
-methods, and safe next actions; do not bypass it with raw addressing.
+method on an existing declared service, first verify the context candidate, then
+commit the provider edits and publish that repository. Wait for publication to
+finish, resolve the service again, and only then call the changed method. A green
+`verify` result does not update protected main or the live service. A
+`WORKSPACE_RPC_METHOD_UNDECLARED` failure reports both active and recently
+verified candidate provenance when available, plus the exact publication
+recovery; do not bypass it with raw addressing.
 
 Prefer `resolveService(...)` whenever a service exists. Raw
 `resolveDurableObject(...)` may address workspace worker DO classes, but

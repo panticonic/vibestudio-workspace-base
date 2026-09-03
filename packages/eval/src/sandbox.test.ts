@@ -817,6 +817,15 @@ return fs.readFileSync("/tmp/a");`,
         published: false,
       },
     });
+    expect(result.consoleOutput).not.toContain("[eval] Error stack:");
+  });
+
+  it("retains stacks for unstructured guest exceptions", async () => {
+    const result = await executeSandbox('throw new Error("authored boom")', {
+      syntax: "typescript",
+    });
+
+    expect(result.consoleOutput).toContain("[eval] Error stack:");
   });
 
   it("honors a structured failure's declared cross-tool classification", async () => {

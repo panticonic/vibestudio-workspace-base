@@ -94,6 +94,12 @@ export type VerifyToolDetails =
       status: UnitBuildReportWire["status"];
       report: UnitBuildReportWire;
       receipt: UnitVerificationReceiptV1;
+      provenance: {
+        ref: string;
+        scope: "context-candidate";
+        publication: "unchanged";
+        liveRuntime: "unchanged";
+      };
       truncatedDiagnostics: number;
       truncatedDiagnosticText: number;
       failure?: AgentToolFailure;
@@ -162,7 +168,7 @@ export function createVerifyTool(
     name: "verify",
     label: "verify",
     description:
-      'Build or test one workspace unit against this conversation\'s exact semantic working state. Use { operation:"build", target } for compiler/bundler diagnostics and { operation:"test", target, suite?, file?, testName? } for a manifest-declared browser, workerd, or native suite. Browser and workerd code stays sandboxed; only an explicitly native suite can request native approval. This boundary materializes the exact context, returns bounded evidence, and never treats zero discovered tests as success.',
+      'Build or test one workspace unit against this conversation\'s exact semantic working state. Use { operation:"build", target } for compiler/bundler diagnostics and { operation:"test", target, suite?, file?, testName? } for a manifest-declared browser, workerd, or native suite. A successful build verifies only a context candidate: it does not publish source or update a live panel, worker, or Durable Object. Browser and workerd code stays sandboxed; only an explicitly native suite can request native approval. This boundary materializes the exact context, returns bounded evidence, and never treats zero discovered tests as success.',
     parameters: verifySchema,
     execute: async (
       _toolCallId,
@@ -241,6 +247,12 @@ export function createVerifyTool(
             status: report.status,
             report: bounded.report,
             receipt,
+            provenance: {
+              ref: `ctx:${exactContextId}`,
+              scope: "context-candidate",
+              publication: "unchanged",
+              liveRuntime: "unchanged",
+            },
             truncatedDiagnostics: bounded.truncatedDiagnostics,
             truncatedDiagnosticText: bounded.truncatedDiagnosticText,
             ...(failure ? { failure } : {}),
@@ -295,7 +307,9 @@ export function createVerifyTool(
           report.artifactKey !== artifactKey ||
           report.executionDigest !== executionDigest
         ) {
-          throw new Error("Native test adapter returned a mismatched execution identity");
+          throw new Error(
+            "Native test adapter returned a mismatched execution identity",
+          );
         }
       } else {
         if (!executeSandboxTest) {
@@ -572,6 +586,7 @@ function renderBuild(
     `Build ${report.status} for ${target} (${report.kind}; ` +
     `${report.builds.length} target${report.builds.length === 1 ? "" : "s"}; ` +
     `${diagnosticSummary}). ` +
+    "This verifies a context candidate only; protected main and every live runtime remain unchanged. " +
     "Structured diagnostics are in details.report.diagnostics; exact reusable evidence and the full-report request are in details.receipt." +
     (report.status === "failed" ? " Do not rerun this unchanged build." : "")
   );

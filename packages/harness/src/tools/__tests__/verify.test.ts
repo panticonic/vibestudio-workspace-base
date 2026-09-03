@@ -73,6 +73,18 @@ describe("context-exact verify tool", () => {
         builds: [{ target: "library:worker", buildKey: "a".repeat(64) }],
         diagnostics: { total: 0, retained: 0, truncated: 0 },
       },
+      provenance: {
+        ref: "ctx:context-7",
+        scope: "context-candidate",
+        publication: "unchanged",
+        liveRuntime: "unchanged",
+      },
+    });
+    expect(result.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining(
+        "protected main and every live runtime remain unchanged",
+      ),
     });
   });
 
