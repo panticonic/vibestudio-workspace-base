@@ -83,7 +83,7 @@ describe("ConnectionManager", () => {
     expect(config.rpc!.call).toHaveBeenCalledWith(CHANNEL_TARGET, "unsubscribe", [
       "panel:panel-1",
       expect.any(String),
-    ]);
+    ], { timeoutMs: 15_000 });
   });
 
   it("bounds an explicit replay message limit to the canonical page maximum", async () => {
@@ -141,20 +141,20 @@ describe("ConnectionManager", () => {
     );
   });
 
-  it("starts the replay deadline after channel service readiness", async () => {
+  it("bounds channel service resolution before starting replay", async () => {
     vi.useFakeTimers();
-    let releaseService!: () => void;
-    const serviceReady = new Promise<void>((resolve) => {
-      releaseService = resolve;
-    });
     const config = createConfig();
-    const originalCall = config.rpc!.call;
-    config.rpc!.call = vi.fn(async (target: string, method: string, args: unknown[]) => {
+    config.rpc!.call = vi.fn(async (target, method, _args, options) => {
       if (target === "main" && method === "workers.resolveService") {
-        await serviceReady;
+        await new Promise<void>((_resolve, reject) => {
+          setTimeout(
+            () => reject(new Error("service resolution timed out")),
+            options?.timeoutMs
+          );
+        });
       }
-      return originalCall(target, method, args);
-    }) as typeof originalCall;
+      return undefined;
+    }) as NonNullable<ConnectionConfig["rpc"]>["call"];
     const manager = new ConnectionManager({ config, metadata, callbacks: {} });
 
     const connectPromise = manager.connect({
@@ -171,13 +171,17 @@ describe("ConnectionManager", () => {
       }
     );
 
-    await vi.advanceTimersByTimeAsync(CONNECTION_READY_TIMEOUT_MS * 2);
-    expect(settled).toBe(false);
-
-    releaseService();
     await vi.advanceTimersByTimeAsync(CONNECTION_READY_TIMEOUT_MS);
-    await expect(connectPromise).rejects.toThrow(
-      "Channel chat-1 did not finish loading within 15 seconds"
+    await expect(connectPromise).rejects.toThrow("service resolution timed out");
+    expect(config.rpc!.call).toHaveBeenCalledWith(
+      "main",
+      "workers.resolveService",
+      ["vibestudio.channel.v1", "chat-1"],
+      {
+        signal: expect.any(AbortSignal),
+        timeoutMs: CONNECTION_READY_TIMEOUT_MS,
+      }
     );
+    expect(settled).toBe(true);
   });
 });

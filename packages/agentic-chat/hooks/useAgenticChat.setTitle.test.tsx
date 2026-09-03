@@ -212,6 +212,45 @@ describe("useAgenticChat set_title", () => {
     unmount();
   });
 
+  it("recovers automatically after a transient initial connection failure", async () => {
+    const failedClient = createClient();
+    failedClient.close = vi.fn(async () => undefined);
+    failedClient.ready = vi.fn(async () => {
+      throw new Error("ReadError(Reset(513))");
+    });
+    const recoveredClient = createClient();
+    pubsubMock.connectViaRpc
+      .mockReturnValueOnce(failedClient)
+      .mockReturnValueOnce(recoveredClient);
+    const latestContext: { current: ChatContextValue | null } = { current: null };
+    const config: ConnectionConfig = {
+      clientId: "panel:chat",
+      rpc: {
+        selfId: "panel:chat",
+        call: createRpcCall(),
+        stream: vi.fn(async () => new Response()),
+        on: vi.fn(() => () => undefined),
+      },
+    };
+
+    const { unmount } = render(
+      <Probe
+        config={config}
+        onContext={value => {
+          latestContext.current = value;
+        }}
+      />
+    );
+
+    await waitFor(() => expect(latestContext.current?.connected).toBe(true), {
+      timeout: 1_000,
+    });
+    expect(pubsubMock.connectViaRpc).toHaveBeenCalledTimes(2);
+    expect(latestContext.current?.connectionError).toBeNull();
+
+    unmount();
+  });
+
   it("does not advertise a panel-owned set_title method", async () => {
     const client = createClient();
     let methods: Record<string, MethodDefinition> | undefined;

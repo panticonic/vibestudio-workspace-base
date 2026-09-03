@@ -3,7 +3,11 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { connectViaRpc } from "./rpc-client.js";
+import {
+  CHANNEL_CLOSE_TIMEOUT_MS,
+  connectViaRpc,
+  resolveRpcChannelTarget,
+} from "./rpc-client.js";
 import type { PubSubClient } from "./client.js";
 import type { IncomingEvent, MethodExecutionContext } from "./protocol-types.js";
 import {
@@ -349,6 +353,7 @@ describe("connectViaRpc", () => {
   let emit: (msg: Record<string, unknown>) => void;
   let setPendingApprovals: (approvalIds: string[]) => void;
   let removeListener: ReturnType<typeof vi.fn>;
+  let streamSignals: AbortSignal[];
 
   beforeEach(() => {
     const mock = createMockRpc();
@@ -356,6 +361,7 @@ describe("connectViaRpc", () => {
     emit = mock.emit;
     setPendingApprovals = mock.setPendingApprovals;
     removeListener = mock.removeListener;
+    streamSignals = mock.streamSignals;
   });
 
   // ── 1. Subscribe + ready flow ──────────────────────────────────────────
@@ -643,6 +649,55 @@ describe("connectViaRpc", () => {
       await client.close();
     });
 
+    it("does not charge workspace review waiting against service resolution", async () => {
+      const errorData = {
+        authorityFailure: {
+          remediation: {
+            review: {
+              approvalId: "review-123",
+              title: "Welcome — here's what's in your workspace",
+            },
+          },
+        },
+      };
+      const pendingReview = Object.assign(
+        new Error("[workers.resolveService] Waiting for you to finish reviewing Welcome"),
+        { errorCode: "EREVIEWPENDING", errorData }
+      );
+      setPendingApprovals(["review-123"]);
+      let attempts = 0;
+      mockRpc.call.mockImplementation(async (target: string, method: string) => {
+        if (target === "main" && method === "workers.resolveService") {
+          attempts += 1;
+          if (attempts === 1) throw pendingReview;
+          return { kind: "durable-object", targetId: DO_TARGET };
+        }
+        return undefined;
+      });
+
+      let settled = false;
+      const resolution = resolveRpcChannelTarget({
+        rpc: mockRpc as any,
+        reviewRpc: mockRpc,
+        channel: CHANNEL,
+        resolutionTimeoutMs: 10,
+      }).finally(() => {
+        settled = true;
+      });
+      await vi.waitFor(() => expect(attempts).toBe(1));
+      await new Promise(resolve => setTimeout(resolve, 30));
+      expect(settled).toBe(false);
+
+      setPendingApprovals([]);
+      await expect(resolution).resolves.toBe(DO_TARGET);
+      expect(attempts).toBe(2);
+      for (const call of mockRpc.call.mock.calls.filter(
+        ([target, method]) => target === "main" && method === "workers.resolveService"
+      )) {
+        expect(call[3]).toEqual({ timeoutMs: 10 });
+      }
+    });
+
     it("advertises Zod methods as provider-valid JSON Schema", async () => {
       const client = connectViaRpc({
         rpc: mockRpc as any,
@@ -739,13 +794,48 @@ describe("connectViaRpc", () => {
         expect(mockRpc.call).toHaveBeenCalledWith(DO_TARGET, "unsubscribe", [
           SELF_ID,
           expect.any(String),
-        ]);
+        ], { timeoutMs: CHANNEL_CLOSE_TIMEOUT_MS });
       });
       expect(settled).toBe(false);
 
       acknowledgeLeave?.();
       await closing;
       expect(settled).toBe(true);
+    });
+
+    it("aborts the subscription when cooperative close does not answer", async () => {
+      vi.useFakeTimers();
+      mockRpc.call.mockImplementation(
+        async (
+          target: string,
+          method: string,
+          _args: unknown[],
+          options?: { timeoutMs?: number }
+        ) => {
+          if (target === "main" && method === "workers.resolveService") {
+            return { kind: "durable-object", targetId: DO_TARGET };
+          }
+          if (target === DO_TARGET && method === "unsubscribe") {
+            await new Promise<void>((_resolve, reject) => {
+              setTimeout(
+                () => reject(new Error("cooperative close timed out")),
+                options?.timeoutMs
+              );
+            });
+          }
+          return undefined;
+        }
+      );
+      const client = connectViaRpc({ rpc: mockRpc as any, channel: CHANNEL });
+      await emitReplayAndReady(emit, []);
+      await client.ready();
+
+      const closing = client.close();
+      const rejected = expect(closing).rejects.toThrow("cooperative close timed out");
+      await vi.advanceTimersByTimeAsync(CHANNEL_CLOSE_TIMEOUT_MS);
+
+      await rejected;
+      expect(streamSignals.at(-1)?.aborted).toBe(true);
     });
 
     it("does not create a parallel PubSub heartbeat loop", async () => {
@@ -850,7 +940,7 @@ describe("connectViaRpc", () => {
       expect(mockRpc.call).toHaveBeenCalledWith(DO_TARGET, "unsubscribe", [
         "user:usr_alice",
         expect.any(String),
-      ]);
+      ], { timeoutMs: CHANNEL_CLOSE_TIMEOUT_MS });
     });
 
     it("resolves ready() from the subscribe acknowledgment after applying fallback replay", async () => {
@@ -2372,7 +2462,7 @@ describe("connectViaRpc", () => {
       expect(mockRpc.call).toHaveBeenCalledWith(DO_TARGET, "unsubscribe", [
         SELF_ID,
         expect.any(String),
-      ]);
+      ], { timeoutMs: CHANNEL_CLOSE_TIMEOUT_MS });
 
       // Verify disconnect handler fired
       expect(disconnectFn).toHaveBeenCalledTimes(1);

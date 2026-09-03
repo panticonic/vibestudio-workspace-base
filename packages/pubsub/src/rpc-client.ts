@@ -198,6 +198,8 @@ interface ResolvedService {
   targetId?: string;
 }
 
+export const CHANNEL_CLOSE_TIMEOUT_MS = 15_000;
+
 export interface RpcChannelTargetOptions {
   /** Transport used for the context-bound service resolution call. */
   rpc: Pick<RpcConnectOptions["rpc"], "call">;
@@ -206,6 +208,9 @@ export interface RpcChannelTargetOptions {
   channel: string;
   protocol?: string;
   signal?: AbortSignal;
+  /** Bound for one service-resolution RPC. Explicit review waiting is not
+   * charged against this operation deadline. */
+  resolutionTimeoutMs?: number;
 }
 
 /**
@@ -220,13 +225,17 @@ export async function resolveRpcChannelTarget({
   channel,
   protocol = DEFAULT_CHANNEL_SERVICE_PROTOCOL,
   signal,
+  resolutionTimeoutMs,
 }: RpcChannelTargetOptions): Promise<string> {
   while (true) {
     try {
       const service = await rpc.call<ResolvedService>("main", "workers.resolveService", [
         protocol,
         channel,
-      ]);
+      ], {
+        ...(signal ? { signal } : {}),
+        ...(resolutionTimeoutMs !== undefined ? { timeoutMs: resolutionTimeoutMs } : {}),
+      });
       if (service.kind !== "durable-object" || !service.targetId) {
         throw new Error("Channel service must resolve to a Durable Object service");
       }
@@ -284,7 +293,12 @@ interface PresencePayload {
 
 export interface RpcConnectOptions<T extends ParticipantMetadata = ParticipantMetadata> {
   rpc: {
-    call<R = unknown>(targetId: string, method: string, args: unknown[]): Promise<R>;
+    call<R = unknown>(
+      targetId: string,
+      method: string,
+      args: unknown[],
+      options?: { signal?: AbortSignal; timeoutMs?: number }
+    ): Promise<R>;
     stream(
       targetId: string,
       method: string,
@@ -2615,7 +2629,10 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
             });
             await residentRegistration?.relationshipEnded?.();
           } else {
-            await callChannel("unsubscribe", pid, subscription.subscriptionId);
+            await rpc.call(await getDoTarget(), "unsubscribe", [
+              pid,
+              subscription.subscriptionId,
+            ], { timeoutMs: CHANNEL_CLOSE_TIMEOUT_MS });
           }
         }
       } catch (error) {

@@ -129,6 +129,7 @@ export class ConnectionManager {
           channel: channelId,
           protocol: this.config.protocol,
           signal: readyAbort.signal,
+          resolutionTimeoutMs: CONNECTION_READY_TIMEOUT_MS,
         }));
       if (this.connectAbortController !== readyAbort) {
         throw new Error("Connection attempt was superseded");
