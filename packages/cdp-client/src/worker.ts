@@ -531,8 +531,9 @@ export class CdpConnection {
 // atomic visibility/state probes, and all DOM-side actions/reads. The client
 // repeats failed state probes between evaluations so the renderer remains free
 // to process queued input and UI work while a locator is waiting. Pointer
-// actions (click/hover/...) only *probe* here for a stable hit point; the
-// actual mouse/key events are dispatched client-side via CDP Input.
+// actions (click/hover/...) only observe one candidate hit point here; the
+// client compares observations for stability and dispatches mouse/key events
+// via CDP Input.
 //
 // Kept as one literal string (no ${} interpolation) so it is the single source
 // of truth and is trivially serialisable. `__nsRun(payload)` is the entrypoint.
@@ -675,37 +676,24 @@ async function nsWaitForState(descriptor, state, timeout){
   failure.__nsLocatorFailure={__nsLocatorFailure:"state-timeout",state:state,timeout:timeout};
   throw failure;
 }
-async function nsActionable(descriptor, timeout, retainToken){
-  var deadline=Date.now()+timeout; var prev=null; var reason="not found";
-  for(;;){
-    var matches=nsLocate(descriptor), el=null, visible=null;
-    for(var mi=0;mi<matches.length;mi++){ if(nsVisible(matches[mi])){ if(!visible) visible=matches[mi]; if(nsEnabled(matches[mi])){ el=matches[mi]; break; } } }
-    if(!el) el=visible;
-    if(el && nsVisible(el) && nsEnabled(el)){
-      try{ el.scrollIntoView({block:"center",inline:"center"}); }catch(e){}
-      var b=nsBox(el);
-      if(prev && Math.abs(prev.x-b.x)<1 && Math.abs(prev.y-b.y)<1 && prev.width===b.width && prev.height===b.height){
-        var x=b.x+b.width/2, y=b.y+b.height/2;
-        var hit=document.elementFromPoint(x,y);
-        if(hit && (hit===el || el.contains(hit))){
-          if(retainToken) nsRetainedElements().set(retainToken,el);
-          return {ok:true, x:x, y:y, box:b};
-        }
-        reason="not receiving pointer events";
-      }
-      prev=b;
-    } else {
-      reason=el?(nsVisible(el)?"not enabled":"not visible"):"not found";
-      prev=null;
-    }
-    if(Date.now()>deadline) return {ok:false, reason:reason};
-    await nsSleep(30);
-  }
+function nsActionable(descriptor, retainToken){
+  var matches=nsLocate(descriptor), el=null, visible=null;
+  for(var mi=0;mi<matches.length;mi++){ if(nsVisible(matches[mi])){ if(!visible) visible=matches[mi]; if(nsEnabled(matches[mi])){ el=matches[mi]; break; } } }
+  if(!el) el=visible;
+  if(!el) return {ok:false, reason:"not found"};
+  if(!nsVisible(el)) return {ok:false, reason:"not visible"};
+  if(!nsEnabled(el)) return {ok:false, reason:"not enabled"};
+  try{ el.scrollIntoView({block:"center",inline:"center"}); }catch(e){}
+  var b=nsBox(el), x=b.x+b.width/2, y=b.y+b.height/2;
+  var hit=document.elementFromPoint(x,y);
+  if(!hit || (hit!==el && !el.contains(hit))) return {ok:false, reason:"not receiving pointer events", box:b};
+  if(retainToken) nsRetainedElements().set(retainToken,el);
+  return {ok:true, x:x, y:y, box:b};
 }
 async function __nsRun(P){
   var d=P.descriptor, a=P.arg, t=P.timeout;
   try { switch(P.op){
-    case "probe": return await nsActionable(d, t, a&&a.retainToken);
+    case "probe": return nsActionable(d, a&&a.retainToken);
     case "waitFor": { await nsWaitForState(d, P.state||"visible", t); return true; }
     case "count": return nsLocate(d).length;
     case "exists": return !!nsFirst(d);
@@ -1037,8 +1025,10 @@ class WorkerCdpPage {
       this.connection.send("Runtime.enable"),
       this.connection.send("DOM.enable"),
     ]);
-    this.currentUrl = String((await this.evaluate(() => location.href).catch(() => "")) ?? "");
-    const viewport = await this.evaluate(() => ({
+    this.currentUrl = String(
+      (await this.evaluateInternal(() => location.href).catch(() => "")) ?? ""
+    );
+    const viewport = await this.evaluateInternal(() => ({
       width: window.innerWidth,
       height: window.innerHeight,
     })).catch(() => null);
@@ -1165,7 +1155,7 @@ class WorkerCdpPage {
   }
 
   async title(): Promise<string> {
-    return String((await this.evaluate(() => document.title)) ?? "");
+    return String((await this.evaluateInternal(() => document.title)) ?? "");
   }
 
   url(): string {
@@ -1173,7 +1163,9 @@ class WorkerCdpPage {
   }
 
   async content(): Promise<string> {
-    return String((await this.evaluate(() => document.documentElement?.outerHTML ?? "")) ?? "");
+    return String(
+      (await this.evaluateInternal(() => document.documentElement?.outerHTML ?? "")) ?? ""
+    );
   }
 
   /** Set the default timeout (ms) used by auto-waiting actions/reads. Default 30000. */
@@ -1239,7 +1231,30 @@ class WorkerCdpPage {
       typeof pageFunction === "function"
         ? `(${pageFunction.toString()})(${JSON.stringify(arg)})`
         : pageFunction;
-    const operation = options.operation ?? "Runtime.evaluate";
+    return this.evaluateExpression(
+      expression,
+      options.operation ?? "Runtime.evaluate",
+      options.timeout ?? this.defaultTimeout
+    );
+  }
+
+  /** Internal browser reads retain transport-level timeout classification. */
+  private async evaluateInternal(
+    pageFunction: string | ((arg?: unknown) => unknown),
+    arg?: unknown
+  ): Promise<unknown> {
+    const expression =
+      typeof pageFunction === "function"
+        ? `(${pageFunction.toString()})(${JSON.stringify(arg)})`
+        : pageFunction;
+    return this.evaluateExpression(expression, "Runtime.evaluate");
+  }
+
+  private async evaluateExpression(
+    expression: string,
+    operation: string,
+    timeout?: number
+  ): Promise<unknown> {
     const result = (await this.connection.send(
       "Runtime.evaluate",
       {
@@ -1247,10 +1262,10 @@ class WorkerCdpPage {
         awaitPromise: true,
         returnByValue: true,
       },
-      options.timeout === undefined
+      timeout === undefined
         ? {}
         : {
-            timeoutMs: options.timeout,
+            timeoutMs: timeout,
             timeoutBehavior: "reject",
             timeoutError: (timeoutMs) =>
               new CdpError(
@@ -1468,7 +1483,9 @@ class WorkerCdpPage {
         throw new Error("Timeout " + timeout + "ms exceeded waiting for function");
       })(${JSON.stringify(source)}, ${JSON.stringify(isFunction)}, ${JSON.stringify(
         actualArg
-      )}, ${JSON.stringify(timeout)}, ${JSON.stringify(polling)})`
+      )}, ${JSON.stringify(timeout)}, ${JSON.stringify(polling)})`,
+      undefined,
+      { timeout: timeout + 1_000, operation: "waitForFunction" }
     );
   }
 
@@ -1490,7 +1507,9 @@ class WorkerCdpPage {
           await new Promise(resolve => setTimeout(resolve, 50));
         }
         throw new Error("Timeout " + timeout + "ms exceeded waiting for load state " + state);
-      })(${JSON.stringify(state)}, ${JSON.stringify(timeout)})`
+      })(${JSON.stringify(state)}, ${JSON.stringify(timeout)})`,
+      undefined,
+      { timeout: timeout + 1_000, operation: "waitForLoadState" }
     );
   }
 
@@ -1513,55 +1532,78 @@ class WorkerCdpPage {
     timeout: number = this.defaultTimeout,
     retainToken?: string
   ): Promise<{ x: number; y: number }> {
-    const probe = (await this.runLocatorOp(
-      "probe",
-      descriptor,
-      retainToken ? { retainToken } : null,
-      { timeout }
-    )) as {
+    type ActionabilityProbe = {
       ok: boolean;
       x?: number;
       y?: number;
       reason?: string;
+      box?: BoundingBox;
     };
-    if (!probe.ok || typeof probe.x !== "number" || typeof probe.y !== "number") {
-      const where = describeLocator(descriptor);
-      const candidates =
-        probe.reason === "not found"
-          ? ((await this.runLocatorOp("roleCandidates", descriptor, null, {
-              timeout: 0,
-            }).catch(() => [])) as Array<{
-              role?: string;
-              accessibleName?: string;
-            }>)
-          : [];
-      const candidateHint =
-        candidates.length > 0
-          ? candidates.every((candidate) => candidate.role === candidates[0]?.role)
-            ? ` Available ${candidates[0]?.role ?? "role"} names: ${candidates
-                .map((candidate) => JSON.stringify(candidate.accessibleName ?? ""))
-                .join(", ")}. Inspect the role locator before choosing a name.`
-            : ` Available accessible targets: ${candidates
-                .map(
-                  (candidate) =>
-                    `${candidate.role ?? "unknown role"} ${JSON.stringify(
-                      candidate.accessibleName ?? ""
-                    )}`
-                )
-                .join(", ")}. Use the rendered role and accessible name.`
-          : "";
-      throw new CdpError(
-        `not actionable (${probe.reason ?? "timeout"}) after ${timeout}ms: ${where}.${candidateHint}`,
-        {
-          locator: where,
-          code: "cdp_locator_not_actionable",
-          operation: "click",
-          recovery: "reobserve-locator",
-          timeoutMs: timeout,
-        }
-      );
+    const deadline = Date.now() + timeout;
+    let previousBox: BoundingBox | undefined;
+    let probe: ActionabilityProbe = { ok: false, reason: "not found" };
+    for (;;) {
+      probe = (await this.runLocatorOp(
+        "probe",
+        descriptor,
+        retainToken ? { retainToken } : null,
+        { timeout: 0 }
+      )) as ActionabilityProbe;
+      const box = probe.box;
+      const stable =
+        probe.ok &&
+        box !== undefined &&
+        previousBox !== undefined &&
+        Math.abs(previousBox.x - box.x) < 1 &&
+        Math.abs(previousBox.y - box.y) < 1 &&
+        Math.abs(previousBox.width - box.width) < 1 &&
+        Math.abs(previousBox.height - box.height) < 1;
+      if (stable && typeof probe.x === "number" && typeof probe.y === "number") {
+        return { x: probe.x, y: probe.y };
+      }
+      previousBox = probe.ok ? box : undefined;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) break;
+      // Keep Runtime.evaluate one-shot. Renderer input and framework work can
+      // run while the worker waits between actionability observations.
+      await new Promise((resolve) => setTimeout(resolve, Math.min(30, remaining)));
     }
-    return { x: probe.x, y: probe.y };
+
+    const where = describeLocator(descriptor);
+    const candidates =
+      probe.reason === "not found"
+        ? ((await this.runLocatorOp("roleCandidates", descriptor, null, {
+            timeout: 0,
+          }).catch(() => [])) as Array<{
+            role?: string;
+            accessibleName?: string;
+          }>)
+        : [];
+    const candidateHint =
+      candidates.length > 0
+        ? candidates.every((candidate) => candidate.role === candidates[0]?.role)
+          ? ` Available ${candidates[0]?.role ?? "role"} names: ${candidates
+              .map((candidate) => JSON.stringify(candidate.accessibleName ?? ""))
+              .join(", ")}. Inspect the role locator before choosing a name.`
+          : ` Available accessible targets: ${candidates
+              .map(
+                (candidate) =>
+                  `${candidate.role ?? "unknown role"} ${JSON.stringify(
+                    candidate.accessibleName ?? ""
+                  )}`
+              )
+              .join(", ")}. Use the rendered role and accessible name.`
+        : "";
+    throw new CdpError(
+      `not actionable (${probe.reason ?? "timeout"}) after ${timeout}ms: ${where}.${candidateHint}`,
+      {
+        locator: where,
+        code: "cdp_locator_not_actionable",
+        operation: "click",
+        recovery: "reobserve-locator",
+        timeoutMs: timeout,
+      }
+    );
   }
 
   private async dispatchClickAt(
@@ -1777,13 +1819,9 @@ class WorkerCdpPage {
     await this.afterAction();
   }
 
-  /**
-   * A completed action is observable by the next action. Yielding one browser
-   * task lets framework event batches commit without imposing arbitrary sleeps
-   * or waiting for application-specific DOM state.
-   */
+  /** Yield the worker turn after dispatch; locator postconditions observe effects. */
   private async afterAction(): Promise<void> {
-    await this.evaluate("new Promise((resolve) => setTimeout(resolve, 0))");
+    await new Promise((resolve) => setTimeout(resolve, 0));
   }
 
   // ---- Console ----------------------------------------------------------

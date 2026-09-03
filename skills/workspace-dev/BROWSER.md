@@ -312,6 +312,7 @@ await page.goForward();
 await page.title();
 page.url(); // string, synchronous like Playwright
 await page.content(); // full HTML
+// Evaluation is bounded by the page's default timeout unless overridden.
 await page.evaluate(() => document.title);
 await page.evaluate(() => new Promise(() => {}), undefined, { timeout: 5_000 });
 const bytes = await page.screenshot({ fullPage: true });

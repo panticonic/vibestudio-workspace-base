@@ -275,6 +275,7 @@ export interface CdpPage {
     action: () => unknown | Promise<unknown>,
     options?: CdpProfileOptions
   ): Promise<CdpProfileReport>;
+  /** Evaluate in the page, bounded by the page default timeout unless overridden. */
   evaluate(
     pageFunction: string | ((arg?: unknown) => unknown),
     arg?: unknown,

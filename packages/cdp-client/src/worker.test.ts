@@ -563,28 +563,24 @@ describe("worker CDP client", () => {
     expect(socket.closed).toBe(true);
   });
 
-  it("times out evaluation independently without closing the healthy transport", async () => {
+  it("bounds evaluation by the page default without closing the healthy transport", async () => {
     installFakeWebSocket();
     const browser = await BrowserImpl.connect("ws://cdp", {
       commandTimeoutMs: 1_000,
     });
     const page = browser.contexts()[0]!.pages()[0]!;
     const socket = FakeWebSocket.instances[0]!;
+    page.setDefaultTimeout(10);
     FakeWebSocket.dropMethods.add("Runtime.evaluate");
 
-    const failure = await page
-      .evaluate("new Promise(() => {})", undefined, {
-        timeout: 10,
-        operation: "agent-probe",
-      })
-      .catch((error: unknown) => error);
+    const failure = await page.evaluate("new Promise(() => {})").catch((error: unknown) => error);
 
     expect(failure).toBeInstanceOf(CdpError);
     expect(failure).toMatchObject({
       code: "cdp_evaluation_timeout",
       errorData: {
         code: "cdp_evaluation_timeout",
-        operation: "agent-probe",
+        operation: "Runtime.evaluate",
         failureKind: "user-code",
         timeoutMs: 10,
       },
@@ -790,7 +786,7 @@ describe("worker CDP client", () => {
       .map((entry) => String(entry.params?.["expression"] ?? ""))
       .find((expression) => expression.includes('"op":"probe"'));
     expect(probeEvaluation).toContain("document.elementFromPoint(x,y)");
-    expect(probeEvaluation).toContain("hit===el || el.contains(hit)");
+    expect(probeEvaluation).toContain("hit!==el && !el.contains(hit)");
     const mouse = FakeWebSocket.sent.filter((s) => s.method === "Input.dispatchMouseEvent");
     expect(mouse.map((m) => m.params?.["type"])).toEqual([
       "mouseMoved",
@@ -807,12 +803,32 @@ describe("worker CDP client", () => {
       (event) =>
         event.method === "Input.dispatchMouseEvent" && event.params?.["type"] === "mouseReleased"
     );
-    expect(FakeWebSocket.sent.slice(releaseIndex + 1)).toContainEqual({
-      method: "Runtime.evaluate",
-      params: expect.objectContaining({
-        expression: "new Promise((resolve) => setTimeout(resolve, 0))",
-      }),
-    });
+    expect(
+      FakeWebSocket.sent
+        .slice(releaseIndex + 1)
+        .some((event) => event.method === "Runtime.evaluate")
+    ).toBe(false);
+  });
+
+  it("polls actionability between one-shot page evaluations", async () => {
+    installFakeWebSocket();
+    const browser = await BrowserImpl.connect("ws://cdp");
+    const page = browser.contexts()[0]!.pages()[0]!;
+
+    await page
+      .getByRole("button", { name: "Add another column" })
+      .click({ timeout: 40 })
+      .catch(() => undefined);
+
+    const probes = FakeWebSocket.sent
+      .filter(
+        (entry) =>
+          entry.method === "Runtime.evaluate" &&
+          String(entry.params?.["expression"] ?? "").includes('"op":"probe"')
+      )
+      .map((entry) => String(entry.params?.["expression"] ?? ""));
+    expect(probes.length).toBeGreaterThan(1);
+    expect(probes.every((expression) => !expression.includes("await nsSleep(30)"))).toBe(true);
   });
 
   it("returns an observed semantic postcondition from a click", async () => {
@@ -1071,7 +1087,7 @@ describe("worker CDP client", () => {
 
     const err = await page
       .getByTestId("missing")
-      .click()
+      .click({ timeout: 40 })
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(CdpError);
     expect((err as CdpError).message).toContain('getByTestId("missing")');
@@ -1081,7 +1097,7 @@ describe("worker CDP client", () => {
       failureKind: "user-code",
       recovery: "reobserve-locator",
       locator: 'getByTestId("missing")',
-      timeoutMs: 30_000,
+      timeoutMs: 40,
     });
   });
 
@@ -1122,7 +1138,7 @@ describe("worker CDP client", () => {
 
     const err = await page
       .getByRole("button", { name: "Done" })
-      .click()
+      .click({ timeout: 40 })
       .catch((error: unknown) => error);
 
     expect((err as Error).message).toContain('Available button names: "All 5", "Open 2", "Done 3"');
@@ -1135,7 +1151,7 @@ describe("worker CDP client", () => {
 
     const err = await page
       .getByRole("button", { name: "Completed" })
-      .click()
+      .click({ timeout: 40 })
       .catch((error: unknown) => error);
 
     expect((err as Error).message).toContain(
@@ -1147,12 +1163,12 @@ describe("worker CDP client", () => {
     installFakeWebSocket();
     const browser = await BrowserImpl.connect("ws://cdp");
     const page = browser.contexts()[0]!.pages()[0]!;
-    page.setDefaultTimeout(1234);
+    page.setDefaultTimeout(40);
 
     const err = await page
       .getByTestId("missing")
       .click()
       .catch((e: unknown) => e);
-    expect((err as Error).message).toContain("1234ms");
+    expect((err as Error).message).toContain("40ms");
   });
 });
