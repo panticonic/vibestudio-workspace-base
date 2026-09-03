@@ -87,6 +87,7 @@ export class FoldCache {
     /** This agent's participant/actor id — folded into state so the fold filters out
      *  foreign-authored turn lifecycle events (see AgentState.selfId). */
     selfId: string;
+    lineageSelfIds?: string[];
   }): Promise<AgentState> {
     const remote = await this.gad.call<{
       seq: number;
@@ -105,6 +106,7 @@ export class FoldCache {
         forkSeq,
         lastSeq: forkSeq,
         selfId: input.selfId,
+        lineageSelfIds: input.lineageSelfIds,
         ...(remote?.forkHash ? { lastHash: remote.forkHash } : {}),
       });
 
@@ -119,6 +121,7 @@ export class FoldCache {
         ...cached,
         forkSeq,
         selfId: input.selfId,
+        lineageSelfIds: input.lineageSelfIds ?? [],
         config: overlayInputConfig(cached.config, input.config),
       });
     }
@@ -134,6 +137,7 @@ export class FoldCache {
           ...cached,
           forkSeq,
           ...(input.selfId ? { selfId: input.selfId } : {}),
+          lineageSelfIds: input.lineageSelfIds ?? [],
           config: overlayInputConfig(cached.config, input.config),
         };
         // a forked head's inherited prefix may begin BELOW the cached seq of a

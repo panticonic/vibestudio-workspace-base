@@ -260,6 +260,7 @@ export interface DriverDeps {
   gad: GadPort;
   executorDeps: ExecutorDeps;
   selfRefFor(channelId: string): ParticipantRef;
+  lineageSelfIdsFor?(channelId: string): string[];
   configFor(channelId: string): AgentLoopConfig;
   policiesFor(channelId: string): StepPolicy[];
   onEphemeral(emit: EphemeralEmit): void;
@@ -660,6 +661,7 @@ export class AgentLoopDriver {
       // Fold filters out other participants' turn lifecycle so this agent never adopts
       // another agent's open turn from the shared channel log.
       selfId: this.selfRef(channelId).id,
+      lineageSelfIds: this.deps.lineageSelfIdsFor?.(channelId) ?? [],
     });
     const instance: LoopInstance = {
       channelId,

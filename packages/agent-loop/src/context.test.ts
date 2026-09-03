@@ -71,6 +71,74 @@ describe("buildModelContext: multi-agent attribution", () => {
     });
   });
 
+  it("preserves pre-fork parent tool protocol as inherited model history", () => {
+    const parentId = "agent:parent";
+    const entries: SessionEntry[] = [
+      {
+        kind: "assistant",
+        seq: 4,
+        messageId: "m-parent",
+        senderRef: { kind: "agent", id: parentId },
+        blocks: [
+          {
+            type: "toolCall",
+            id: "call-read",
+            name: "read",
+            arguments: { path: "SKILL.md" },
+          },
+        ],
+      },
+      {
+        kind: "tool-result",
+        seq: 5,
+        invocationId: "call-read",
+        turnId: "turn-parent",
+        name: "read",
+        result: "skill contents",
+        isError: false,
+      },
+      {
+        kind: "assistant",
+        seq: 7,
+        messageId: "m-parent-after-cut",
+        senderRef: { kind: "agent", id: parentId },
+        blocks: [{ type: "text", content: "later parent message" }],
+      },
+    ];
+    const state: AgentState = {
+      ...initialAgentState({
+        channelId: "child",
+        config,
+        selfId: "agent:child",
+        forkSeq: 5,
+        lineageSelfIds: [parentId],
+      }),
+      entries,
+    };
+
+    expect(buildModelContext(state)).toEqual([
+      {
+        role: "assistant",
+        blocks: [
+          {
+            type: "toolCall",
+            id: "call-read",
+            name: "read",
+            arguments: { path: "SKILL.md" },
+          },
+        ],
+      },
+      {
+        role: "toolResult",
+        toolCallId: "call-read",
+        toolName: "read",
+        content: "skill contents",
+        isError: false,
+      },
+      { role: "user", content: `[${parentId}]: later parent message` },
+    ]);
+  });
+
   it("exposes structured UI interaction metadata beside readable message text", () => {
     const interaction = {
       source: "onboarding-setup-hub",

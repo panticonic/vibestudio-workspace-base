@@ -1562,6 +1562,21 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
     };
   }
 
+  /** Cognitive ancestry is narrower than channel membership: only a forked
+   * child's parent chain owns its inherited assistant/tool protocol history. */
+  private lineageSelfIds(channelId: string): string[] {
+    const subagent = this.subagentIdentity();
+    if (subagent?.mode !== "fork" || subagent.taskChannelId !== channelId) {
+      return [];
+    }
+    return [
+      ...new Set([
+        ...(subagent.lineageParticipantIds ?? []),
+        subagent.parentParticipantId,
+      ]),
+    ];
+  }
+
   protected get driver(): AgentLoopDriver {
     this._driver ??= new AgentLoopDriver({
       sql: this.sql,
@@ -1571,6 +1586,7 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
       },
       executorDeps: this.executorDeps(),
       selfRefFor: (channelId) => this.selfRef(channelId),
+      lineageSelfIdsFor: (channelId) => this.lineageSelfIds(channelId),
       configFor: (channelId) => this.loopConfig(channelId),
       policiesFor: (channelId) => this.getStepPolicies(channelId),
       onEphemeral: (emit) => this.emitEphemeral(emit),
@@ -7586,6 +7602,12 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       mode:
         s["mode"] === "fork" || s["mode"] === "fresh" ? s["mode"] : undefined,
       parentParticipantId: s["parentParticipantId"],
+      lineageParticipantIds: Array.isArray(s["lineageParticipantIds"])
+        ? s["lineageParticipantIds"].filter(
+            (value): value is string =>
+              typeof value === "string" && value.length > 0,
+          )
+        : undefined,
     };
   }
 
@@ -7948,6 +7970,19 @@ This is one admitted recurring-automation tick. If this tick establishes that th
 
       // 2) Child agent entity in that context. createEntity derives parentId from
       //    the verified caller (this vessel) → the entity→entity edge lands.
+      const parentSubagent = this.subagentIdentity();
+      const lineageParticipantIds =
+        mode === "fork"
+          ? [
+              ...new Set([
+                ...(parentSubagent?.lineageParticipantIds ?? []),
+                ...(parentSubagent?.mode === "fork"
+                  ? [parentSubagent.parentParticipantId]
+                  : []),
+                this.participantId(),
+              ]),
+            ]
+          : [];
       const childHandle = await createAgentEntity(this.rpc, {
         source,
         className,
@@ -7966,6 +8001,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
             parentContextId,
             depth: childDepth,
             parentParticipantId: this.participantId(),
+            lineageParticipantIds,
           },
         },
       });

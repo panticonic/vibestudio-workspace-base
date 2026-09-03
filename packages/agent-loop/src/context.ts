@@ -27,7 +27,7 @@ export function buildModelContext(
   const messages: ModelMessage[] = [];
   for (const entry of state.entries) {
     if (entry.seq > contextThroughSeq) break;
-    messages.push(modelMessageFromEntry(entry, state.selfId));
+    messages.push(modelMessageFromEntry(entry, state));
   }
   return messages;
 }
@@ -104,7 +104,7 @@ function interactiveUserContent(
 
 function modelMessageFromEntry(
   entry: SessionEntry,
-  selfId?: string,
+  state: Pick<AgentState, "selfId" | "forkSeq" | "lineageSelfIds">,
 ): ModelMessage {
   switch (entry.kind) {
     case "user": {
@@ -138,7 +138,11 @@ function modelMessageFromEntry(
       // as an attributed `user` message, NOT as this agent's own prior `assistant` turn —
       // otherwise the model reads other agents' messages as its own voice and continues them.
       const author = entry.senderRef;
-      if (selfId && author?.id && author.id !== selfId) {
+      const inheritedSelf =
+        entry.seq <= state.forkSeq &&
+        !!author?.id &&
+        state.lineageSelfIds.includes(author.id);
+      if (author?.id && author.id !== state.selfId && !inheritedSelf) {
         return {
           role: "user",
           content: `[${participantLabel(author)}]: ${assistantBlocksToText(entry.blocks)}`,

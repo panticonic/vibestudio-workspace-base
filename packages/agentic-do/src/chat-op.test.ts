@@ -3949,6 +3949,19 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     expect(supervisorSubscribeIndex).toBeGreaterThanOrEqual(0);
     expect(forkIndex).toBeLessThan(initIndex);
     expect(initIndex).toBeLessThan(supervisorSubscribeIndex);
+    const create = probe.rpcCalls.find(
+      (call) =>
+        call.target === "main" && call.method === "runtime.createEntity",
+    );
+    expect(create?.args[0]).toMatchObject({
+      stateArgs: {
+        subagent: {
+          mode: "fork",
+          parentParticipantId: AGENT_ID,
+          lineageParticipantIds: [AGENT_ID],
+        },
+      },
+    });
     expect(probe.activateChannelSpy).not.toHaveBeenCalledWith("task-inv-1");
     expect(probe.dropLoopSpy).toHaveBeenCalledWith("task-inv-1");
     const seed = probe.channelStub.published.find(

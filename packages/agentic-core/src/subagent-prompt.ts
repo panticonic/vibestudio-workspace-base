@@ -24,6 +24,9 @@ export interface SubagentIdentity {
    * task channel with delivery interest "addressed", so a child utterance
    * meant for the supervisor must carry this in its audience. */
   parentParticipantId: string;
+  /** Assistant identities whose pre-fork transcript is this child's cognitive
+   * lineage. This is deliberately narrower than channel membership. */
+  lineageParticipantIds?: string[];
 }
 
 export type SubagentCompletionMode = "tool" | "supervised-process";

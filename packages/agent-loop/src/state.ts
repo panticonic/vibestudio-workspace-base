@@ -502,6 +502,9 @@ export interface AgentState {
    *  (the fold filters by this), so the agent never adopts another agent's open turn
    *  from the shared channel replay. */
   selfId: string;
+  /** Actors whose assistant messages before `forkSeq` are inherited model
+   * history rather than messages from unrelated channel participants. */
+  lineageSelfIds: string[];
 
   config: AgentLoopConfig;
   entries: SessionEntry[];
@@ -518,7 +521,7 @@ export interface AgentState {
   deferredPostTurnQueue: DeferredPrompt[];
 }
 
-export const MODEL_CONTEXT_VERSION = 1;
+export const MODEL_CONTEXT_VERSION = 2;
 
 /**
  * A trajectory fork inherits semantic conversation entries, not executable
@@ -566,6 +569,7 @@ export interface InitialStateInput {
   lastHash?: string;
   /** The agent's own participant/actor id (see AgentState.selfId). */
   selfId: string;
+  lineageSelfIds?: string[];
 }
 
 export function initialAgentState(input: InitialStateInput): AgentState {
@@ -579,6 +583,7 @@ export function initialAgentState(input: InitialStateInput): AgentState {
     lastHash: input.lastHash ?? GENESIS_LAST_HASH,
     forkSeq: input.forkSeq ?? 0,
     selfId: input.selfId,
+    lineageSelfIds: input.lineageSelfIds ?? [],
     config: input.config,
     entries: [],
     openTurn: null,
