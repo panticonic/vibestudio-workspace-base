@@ -31,7 +31,12 @@ export interface ChatMessageAreaProps {
   /** Override individual invocation rendering while retaining the stock group. */
   renderInvocation?: import("./InlineGroup").InvocationRenderer;
   /** Replace, wrap, or elide the empty transcript using its complete stock renderer. */
-  renderEmptyState?: (defaultContent: ReactNode) => ReactNode;
+  renderEmptyState?: (
+    defaultContent: ReactNode,
+    state: {
+      phase: "review" | "agent" | "models" | "ready" | "connecting";
+    },
+  ) => ReactNode;
   /** Resolved browser-owned features for the stock transcript. */
   features: ResolvedAgenticChatFeatures;
   /** Envelope to scroll to and highlight once present; see AgenticChatProps. */
@@ -117,27 +122,19 @@ export function ChatMessageArea({
   // card (item 9) — gating on `connected` avoids flashing it mid-replay for an
   // existing conversation. MessageList only mounts this when there are zero
   // items, so it self-hides the moment the first message lands.
-  const defaultEmptyState = useMemo<ReactNode>(() => {
+  const emptyPhase = useMemo<
+    "review" | "agent" | "models" | "ready" | "connecting"
+  >(() => {
     const pending = pendingReviewNotice(
       connectionError?.cause ?? connectionError,
     );
-    if (pending) {
-      return <ChatStartupStatus phase="review" detail={pending.message} />;
-    }
-    if (deferredAgent?.launching) {
-      return <ChatStartupStatus phase="agent" />;
-    }
+    if (pending) return "review";
+    if (deferredAgent?.launching) return "agent";
     if (
       deferredAgent?.modelDiscoveryPending &&
       deferredAgent.queued.length > 0
-    ) {
-      return <ChatStartupStatus phase="models" />;
-    }
-    return connected ? (
-      <FirstRunCard />
-    ) : (
-      <ChatStartupStatus phase="conversation" />
-    );
+    ) return "models";
+    return connected ? "ready" : "connecting";
   }, [
     connectionError,
     deferredAgent?.launching,
@@ -145,8 +142,23 @@ export function ChatMessageArea({
     deferredAgent?.queued.length,
     connected,
   ]);
+  const defaultEmptyState = useMemo<ReactNode>(() => {
+    if (emptyPhase === "review") {
+      const pending = pendingReviewNotice(
+        connectionError?.cause ?? connectionError,
+      );
+      return <ChatStartupStatus phase="review" detail={pending?.message} />;
+    }
+    if (emptyPhase === "agent") return <ChatStartupStatus phase="agent" />;
+    if (emptyPhase === "models") return <ChatStartupStatus phase="models" />;
+    return emptyPhase === "ready" ? (
+      <FirstRunCard />
+    ) : (
+      <ChatStartupStatus phase="conversation" />
+    );
+  }, [emptyPhase, connectionError]);
   const emptyState = renderEmptyState
-    ? renderEmptyState(defaultEmptyState)
+    ? renderEmptyState(defaultEmptyState, { phase: emptyPhase })
     : defaultEmptyState;
 
   // Before the first agent exists, the message canvas hosts the inline setup

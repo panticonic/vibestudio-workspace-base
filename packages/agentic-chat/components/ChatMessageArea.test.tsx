@@ -49,6 +49,7 @@ vi.mock("./Outbox", () => ({ deriveActiveOutbox: () => [] }));
 describe("ChatMessageArea empty transcript", () => {
   beforeEach(() => {
     chatContext.messages = [];
+    chatContext.connected = true;
     recordReadReceipt.mockClear();
   });
 
@@ -65,11 +66,36 @@ describe("ChatMessageArea empty transcript", () => {
     );
 
     expect(renderEmptyState).toHaveBeenCalledOnce();
+    expect(renderEmptyState).toHaveBeenCalledWith(
+      expect.anything(),
+      { phase: "ready" },
+    );
     expect(
       screen
         .getByTestId("product-empty-state")
         .contains(screen.getByTestId("stock-empty-state"))
     ).toBe(true);
+  });
+
+  it("lets a product preserve operational startup feedback", () => {
+    chatContext.connected = false;
+    const renderEmptyState = vi.fn(
+      (defaultContent: ReactNode, state: { phase: string }) =>
+        state.phase === "ready" ? <p>Product greeting</p> : defaultContent,
+    );
+
+    render(
+      <ChatMessageArea
+        features={{ feedback: false, inlineUi: false, actionBar: false, clientEval: false }}
+        renderEmptyState={renderEmptyState}
+      />,
+    );
+
+    expect(renderEmptyState).toHaveBeenCalledWith(
+      expect.anything(),
+      { phase: "connecting" },
+    );
+    expect(screen.queryByText("Product greeting")).toBeNull();
   });
 
   it("does not infer read or inbox acknowledgement from a mounted visible transcript", () => {

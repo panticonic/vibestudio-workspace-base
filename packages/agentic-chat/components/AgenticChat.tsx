@@ -1,6 +1,7 @@
 import type { ChannelConfig } from "@workspace/pubsub";
 import { Theme } from "@radix-ui/themes";
 import { forwardRef, useEffect, useImperativeHandle } from "react";
+import type { CSSProperties } from "react";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { ChatLayout, type ChatLayoutProps } from "./ChatLayout";
 import { ChatHostCommands } from "./ChatPaletteCommands";
@@ -28,6 +29,9 @@ export interface AgenticChatHandle {
 }
 
 export interface AgenticChatProps {
+  /** Product-owned presentation class and semantic-variable overrides. */
+  className?: string;
+  style?: CSSProperties;
   /** Connection configuration (server URL, token, client ID) */
   config: ConnectionConfig;
   /** Channel name to connect to */
@@ -52,6 +56,8 @@ export interface AgenticChatProps {
   initialPrompt?: string;
   /** Send initialPrompt even if the channel already has history (idempotent). */
   forceInitialPrompt?: boolean;
+  /** Override the durable deduplication key for an explicitly triggered prompt. */
+  initialPromptIdempotencyKey?: string;
   /** Panel-supplied fork navigation + review overlay handlers (fork switcher,
    *  inline fork rows, subagent review). Omit to disable the fork UI. */
   forkNav?: ForkNavHandlers;
@@ -114,6 +120,8 @@ export interface AgenticChatProps {
  */
 export const AgenticChat = forwardRef<AgenticChatHandle, AgenticChatProps>(function AgenticChat(
   {
+    className,
+    style,
     config,
     channelName,
     channelConfig,
@@ -126,6 +134,7 @@ export const AgenticChat = forwardRef<AgenticChatHandle, AgenticChatProps>(funct
     installedAgents: installedAgentInfos,
     initialPrompt,
     forceInitialPrompt,
+    initialPromptIdempotencyKey,
     forkNav,
     importLoader,
     initialActionBarFile,
@@ -161,6 +170,7 @@ export const AgenticChat = forwardRef<AgenticChatHandle, AgenticChatProps>(funct
     installedAgentInfos,
     initialPrompt,
     forceInitialPrompt,
+    initialPromptIdempotencyKey,
     forkNav,
     importLoader,
     initialActionBarFile,
@@ -205,6 +215,8 @@ export const AgenticChat = forwardRef<AgenticChatHandle, AgenticChatProps>(funct
         <ChatProvider value={contextValue} inputValue={inputContextValue}>
           <ChatHostCommands />
           <ChatLayout
+            className={className}
+            style={style}
             features={features}
             renderMessage={renderMessage}
             renderInlineGroup={renderInlineGroup}

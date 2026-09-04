@@ -96,6 +96,8 @@ interface UseDeferredAgentParams {
    *  the agent joins, then flushed live) instead of an auto-send-on-connect. */
   initialPrompt?: string;
   forceInitialPrompt?: boolean;
+  /** Override the durable deduplication key for an explicitly triggered prompt. */
+  initialPromptIdempotencyKey?: string;
   channelName: string;
   /** Live transcript — distinguishes a brand-new chat from a fork/reopen w/ history. */
   messages: ChatMessage[];
@@ -126,6 +128,7 @@ export function useDeferredAgent(params: UseDeferredAgentParams): {
     firstAgentChannelIsNew = false,
     initialPrompt,
     forceInitialPrompt,
+    initialPromptIdempotencyKey,
     channelName,
     messages,
     replaySettled,
@@ -610,7 +613,8 @@ export function useDeferredAgent(params: UseDeferredAgentParams): {
         id: crypto.randomUUID(),
         text: initialPrompt as string,
         tier: "secondary",
-        idempotencyKey: `initial-prompt:${channelName}`,
+        idempotencyKey:
+          initialPromptIdempotencyKey ?? `initial-prompt:${channelName}`,
       },
     ]);
     // Arm a spawn only for the mount that created the channel. A forced prompt
@@ -635,6 +639,7 @@ export function useDeferredAgent(params: UseDeferredAgentParams): {
     messages,
     initialPrompt,
     forceInitialPrompt,
+    initialPromptIdempotencyKey,
     channelName,
     firstAgentModelPreflight,
     firstAgentChannelIsNew,

@@ -145,6 +145,8 @@ export interface UseChatCoreOptions {
   initialPrompt?: string;
   /** Send initialPrompt even if the channel already has history (idempotent). */
   forceInitialPrompt?: boolean;
+  /** Override the durable deduplication key for an explicitly triggered prompt. */
+  initialPromptIdempotencyKey?: string;
 }
 
 export interface ChatCoreState {
@@ -269,6 +271,7 @@ export function useChatCore({
   theme: themeProp,
   initialPrompt,
   forceInitialPrompt = false,
+  initialPromptIdempotencyKey,
 }: UseChatCoreOptions): ChatCoreState {
   const metadata = useMemo<ClientParticipantMetadata>(
     () => metadataOption ?? { name: channelName, type: "panel" },
@@ -850,7 +853,8 @@ export function useChatCore({
 
     client
       .send(prompt, {
-        idempotencyKey: `initial-prompt:${channelName}`,
+        idempotencyKey:
+          initialPromptIdempotencyKey ?? `initial-prompt:${channelName}`,
         // Injected prompt: rendered as if from the user, but system-originated —
         // supporting context, not the human's own typed input.
         tier: "secondary",
@@ -864,6 +868,7 @@ export function useChatCore({
     channelName,
     initialPrompt,
     forceInitialPrompt,
+    initialPromptIdempotencyKey,
   ]);
 
   // --- Load earlier messages (delegates to useChannelMessages pagination) ---

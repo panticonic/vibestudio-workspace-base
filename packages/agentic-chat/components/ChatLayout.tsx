@@ -18,6 +18,9 @@ export interface ChatLayoutProps extends Pick<
   ChatMessageAreaProps,
   "renderMessage" | "renderInlineGroup" | "renderInvocation" | "renderEmptyState"
 > {
+  /** Product-owned class and semantic-variable overrides for the chat root. */
+  className?: string;
+  style?: React.CSSProperties;
   /** Resolved browser-owned capabilities to mount in the stock layout. */
   features: ResolvedAgenticChatFeatures;
   /** Product-specific prompt shown when the composer is empty. */
@@ -57,6 +60,8 @@ export interface ChatLayoutProps extends Pick<
  * ```
  */
 export const ChatLayout = React.memo(function ChatLayout({
+  className,
+  style,
   renderMessage,
   renderInlineGroup,
   renderInvocation,
@@ -88,7 +93,7 @@ export const ChatLayout = React.memo(function ChatLayout({
   return (
     <>
       <Flex
-        className="agentic-chat-root"
+        className={["agentic-chat-root", className].filter(Boolean).join(" ")}
         data-part="chat-root"
         direction="column"
         style={{
@@ -100,6 +105,7 @@ export const ChatLayout = React.memo(function ChatLayout({
           gap: "var(--agentic-root-gap)",
           padding:
             "max(var(--agentic-root-padding), env(safe-area-inset-top, 0)) max(var(--agentic-root-padding), env(safe-area-inset-right, 0)) max(var(--agentic-root-padding), env(safe-area-inset-bottom, 0)) max(var(--agentic-root-padding), env(safe-area-inset-left, 0))",
+          ...style,
         }}
       >
         {renderHeader ? renderHeader(defaultHeader) : defaultHeader}

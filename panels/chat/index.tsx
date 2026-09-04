@@ -65,6 +65,13 @@ import {
   sanitizeHandle
 } from "./bootstrap.js";
 import { createAndSubscribeAgent, waitForPanelReview } from "./agentLifecycle.js";
+import {
+  ConversationHeader,
+  conversationStyle,
+  renderConversationEmptyState,
+  type ConversationPresentation
+} from "./conversationPresentation.js";
+import "./conversationPresentation.css";
 
 const AgenticChat = lazy(() =>
   import("@workspace/agentic-chat/chat").then((module) => ({
@@ -177,6 +184,8 @@ interface ChatStateArgs {
   focusMessageId?: string;
   /** Send initialPrompt even if the channel already has history (e.g. a fork). */
   forceInitialPrompt?: boolean;
+  /** Durable deduplication key for a caller-triggered initial prompt. */
+  initialPromptIdempotencyKey?: string;
   /** System prompt for the agent harness */
   systemPrompt?: string;
   /** How systemPrompt interacts with Vibestudio base, workspace prompt, and skills */
@@ -191,6 +200,10 @@ interface ChatStateArgs {
   actionBarMaxHeight?: number | null;
   /** Per-fork read cursors (channelId → last-seen head seq) for live badges. */
   forkCursors?: Record<string, number>;
+  /** Product-owned conversation framing. The canonical chat mechanics remain unchanged. */
+  presentation?: ConversationPresentation;
+  /** Stable participant recipients for unmentioned player messages. */
+  defaultRecipients?: string[];
 }
 
 /** Unsubscribe a DO from a channel via unified RPC. */
@@ -1395,6 +1408,7 @@ export default function ChatPanel() {
     [channelName]
   );
   const installedAgents = stateArgs.installedAgents ?? undefined;
+  const presentation = stateArgs.presentation;
 
   // Still bootstrapping — show a brief loading indicator
   if (!channelName) {
@@ -1425,7 +1439,7 @@ export default function ChatPanel() {
     );
   }
   return (
-    <>
+    <div style={{ height: "100dvh", minWidth: 0, overflow: "hidden" }}>
       {rehydrationStatus !== "idle" ? (
         <Theme appearance={theme} {...appTheme}>
           <Callout.Root
@@ -1466,6 +1480,8 @@ export default function ChatPanel() {
         }
       >
         <AgenticChat
+          className={presentation ? "immersive-conversation" : undefined}
+          style={conversationStyle(presentation)}
           config={config}
           channelName={channelName}
           channelConfig={stateArgs.channelConfig}
@@ -1476,6 +1492,7 @@ export default function ChatPanel() {
           installedAgents={installedAgents}
           initialPrompt={initialPromptCaptured.current}
           forceInitialPrompt={stateArgs.forceInitialPrompt}
+          initialPromptIdempotencyKey={stateArgs.initialPromptIdempotencyKey}
           forkNav={forkNav}
           features={FULL_AGENTIC_CHAT_FEATURES}
           importLoader={importLoader}
@@ -1486,8 +1503,29 @@ export default function ChatPanel() {
           connectionRetrySignal={connectionRetrySignal}
           focusMessageId={stateArgs.focusMessageId}
           onFocusMessageConsumed={handleFocusMessageConsumed}
+          renderHeader={
+            presentation
+              ? () => <ConversationHeader presentation={presentation} />
+              : undefined
+          }
+          renderEmptyState={
+            presentation
+              ? (defaultContent, state) =>
+                  renderConversationEmptyState(
+                    presentation,
+                    defaultContent,
+                    state.phase
+                  )
+              : undefined
+          }
+          composerPlaceholder={presentation?.composerPlaceholder}
+          composerDefaultMentions={stateArgs.defaultRecipients}
+          composerDisabled={
+            Boolean(stateArgs.defaultRecipients?.length) &&
+            rehydrationStatus !== "idle"
+          }
         />
       </Suspense>
-    </>
+    </div>
   );
 }

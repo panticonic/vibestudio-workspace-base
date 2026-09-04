@@ -188,6 +188,8 @@ export interface UseAgenticChatOptions {
   initialPrompt?: string;
   /** Send initialPrompt even if the channel already has history (idempotent). */
   forceInitialPrompt?: boolean;
+  /** Override the durable deduplication key for an explicitly triggered prompt. */
+  initialPromptIdempotencyKey?: string;
   /** Panel-supplied fork navigation + review overlay handlers (enables the fork
    *  switcher, inline fork rows, and subagent review). Absent ⇒ no fork UI. */
   forkNav?: ForkNavHandlers;
@@ -236,6 +238,7 @@ export function useAgenticChat({
   installedAgentInfos,
   initialPrompt,
   forceInitialPrompt,
+  initialPromptIdempotencyKey,
   forkNav,
   importLoader,
   initialActionBarFile,
@@ -263,7 +266,10 @@ export function useAgenticChat({
     metadata,
     theme,
     initialPrompt: actions?.onAddAgent ? undefined : initialPrompt,
-    forceInitialPrompt: actions?.onAddAgent ? undefined : forceInitialPrompt
+    forceInitialPrompt: actions?.onAddAgent ? undefined : forceInitialPrompt,
+    initialPromptIdempotencyKey: actions?.onAddAgent
+      ? undefined
+      : initialPromptIdempotencyKey
   });
   const [connectionAttempt, setConnectionAttempt] = useState(0);
   const retryConnection = useCallback(() => {
@@ -1527,6 +1533,7 @@ Use package imports available to inline_ui plus relative imports for local helpe
     firstAgentChannelIsNew,
     initialPrompt,
     forceInitialPrompt,
+    initialPromptIdempotencyKey,
     channelName,
     messages: core.messages,
     replaySettled: core.replaySettled
