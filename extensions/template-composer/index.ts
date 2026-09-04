@@ -55,6 +55,7 @@ import {
   createPinnedTemplateSourcePorts,
   createRegistryClient,
   createTemplateSourcePorts,
+  developmentTemplatePin,
   discoverDirectTemplatePin,
   missingTemplateCredential,
   TemplateCredentialRequired,
@@ -357,11 +358,13 @@ async function pinForLocator(
   if ("catalogId" in locator) {
     if (!env.catalog)
       throw new Error("Catalog selection requires templates.registry");
-    return catalogPin(
-      env.catalog,
-      locator.catalogId,
-      locator.registryCommit,
-      locator.registrySnapshot,
+    return developmentTemplatePin(
+      catalogPin(
+        env.catalog,
+        locator.catalogId,
+        locator.registryCommit,
+        locator.registrySnapshot,
+      ),
     );
   }
   if ("alias" in locator) {
@@ -370,22 +373,24 @@ async function pinForLocator(
     );
     if (!node)
       throw new Error(`Unknown installed template alias: ${locator.alias}`);
-    return node.pin;
+    return developmentTemplatePin(node.pin);
   }
   const url = normalizeTemplateGitUrl(locator.url);
   const installed = env.observation.state?.nodes.find(
     (candidate) => normalizeTemplateGitUrl(candidate.pin.url) === url,
   );
-  if (installed) return installed.pin;
+  if (installed) return developmentTemplatePin(installed.pin);
   const entry = env.catalog?.entries.find(
     (candidate) => normalizeTemplateGitUrl(candidate.url) === url,
   );
   return entry
-    ? WorkspaceTemplatePinSchema.parse({
-        url,
-        ...entry.promoted,
-        ...(locator.credential ? { credential: locator.credential } : {}),
-      })
+    ? developmentTemplatePin(
+        WorkspaceTemplatePinSchema.parse({
+          url,
+          ...entry.promoted,
+          ...(locator.credential ? { credential: locator.credential } : {}),
+        }),
+      )
     : discoverDirectTemplatePin(ctx, env.info.statePath, {
         url,
         ...(locator.credential ? { credential: locator.credential } : {}),
@@ -428,11 +433,13 @@ async function resolveAddSource(
       request.registrySnapshot ?? env.catalog!.coordinates.snapshot;
     return {
       env,
-      pin: catalogPin(
-        env.catalog!,
-        request.catalogId,
-        registryCommit,
-        registrySnapshot,
+      pin: developmentTemplatePin(
+        catalogPin(
+          env.catalog!,
+          request.catalogId,
+          registryCommit,
+          registrySnapshot,
+        ),
       ),
       selection: {
         catalogId: request.catalogId,

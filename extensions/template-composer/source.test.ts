@@ -4,8 +4,9 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { Buffer } from "node:buffer";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { sha256Hex } from "@vibestudio/content-addressing";
+import { canonicalSnapshotDigest, sha256Hex } from "@vibestudio/content-addressing";
 import { GitClient } from "@vibestudio/git";
+import { DEVELOPMENT_TEMPLATE_SOURCES_ENV } from "@vibestudio/workspace/developmentTemplateSources";
 import {
   acquireTemplateSnapshot,
   discoverDirectTemplatePin,
@@ -74,6 +75,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   for (const root of roots.splice(0)) {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -150,6 +152,47 @@ describe("template Git source acquisition", () => {
 
     expect(ctx.credentials.gitHttp).toHaveBeenCalledWith({ credentialId: null });
     expect(ctx.credentials.listStoredCredentials).not.toHaveBeenCalled();
+  });
+
+  it("resolves and acquires a selected development checkout without remote discovery", async () => {
+    const statePath = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "template-source-local-state-"),
+    );
+    const checkout = await fsp.mkdtemp(
+      path.join(os.tmpdir(), "template-source-local-checkout-"),
+    );
+    roots.push(statePath, checkout);
+    await fsp.mkdir(path.join(checkout, ".git"));
+    const snapshot = canonicalSnapshotDigest([
+      {
+        path: "panels/news/index.ts",
+        mode: 0o100644,
+        size: bytes.byteLength,
+        contentHash: sha256Hex(bytes),
+      },
+    ]);
+    const pin = {
+      url: "git+https://example.test/template-news.git",
+      ref: "refs/heads/main",
+      commit: COMMIT,
+      snapshot,
+    };
+    vi.stubEnv("NODE_ENV", "development");
+    vi.stubEnv(
+      DEVELOPMENT_TEMPLATE_SOURCES_ENV,
+      JSON.stringify([{ pin, checkout }]),
+    );
+    const ctx = context();
+
+    await expect(
+      discoverDirectTemplatePin(ctx as never, statePath, {
+        url: "https://example.test/template-news.git",
+      }),
+    ).resolves.toEqual(pin);
+    await expect(
+      acquireTemplateSnapshot(ctx as never, statePath, pin, "t-a1"),
+    ).resolves.toMatchObject({ commit: COMMIT, snapshot });
+    expect(GitClient.prototype.clone).not.toHaveBeenCalled();
   });
 
   it("does not delete a published exact coordinate when verification fails", async () => {

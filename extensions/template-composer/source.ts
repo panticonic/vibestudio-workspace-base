@@ -12,6 +12,8 @@ import {
   type SnapshotContentSink,
 } from "@vibestudio/git";
 import { gitCheckoutsPath } from "@vibestudio/workspace/gitCheckouts";
+import { sameWorkspaceTemplatePin } from "@vibestudio/workspace/baseTemplateRelease";
+import { readDevelopmentTemplateSources } from "@vibestudio/workspace/developmentTemplateSources";
 import type {
   WorkspaceTemplateDeclaration,
   WorkspaceTemplatePin,
@@ -161,11 +163,22 @@ function promotedForUrl(
       `Template ${url} is neither installed nor present in registry revision ${catalog.revision}`
     );
   }
-  return WorkspaceTemplatePinSchema.parse({
-    url,
-    ...entry.promoted,
-    ...(declaration.credential ? { credential: declaration.credential } : {}),
-  });
+  return developmentTemplatePin(
+    WorkspaceTemplatePinSchema.parse({
+      url,
+      ...entry.promoted,
+      ...(declaration.credential ? { credential: declaration.credential } : {}),
+    }),
+  );
+}
+
+export function developmentTemplatePin(pin: WorkspaceTemplatePin): WorkspaceTemplatePin {
+  const url = normalizeTemplateGitUrl(pin.url);
+  return (
+    readDevelopmentTemplateSources().find(
+      (source) => normalizeTemplateGitUrl(source.pin.url) === url,
+    )?.pin ?? pin
+  );
 }
 
 /**
@@ -189,7 +202,10 @@ export async function acquireTemplateSnapshot(
     `${pin.commit}-${pin.snapshot.slice("v1-sha256:".length)}`
   );
   const source = { url: pin.url, credential: pin.credential };
-  await requireTemplateCredential(ctx, source);
+  const local = readDevelopmentTemplateSources().find((candidate) =>
+    sameWorkspaceTemplatePin(candidate.pin, pin),
+  );
+  if (!local) await requireTemplateCredential(ctx, source);
   const git = gitClient(ctx, source);
   const read = (directory: string) =>
     readExactGitSnapshot({
@@ -207,6 +223,12 @@ export async function acquireTemplateSnapshot(
     label: "acquire",
     read,
     async prepare(directory) {
+      if (local) {
+        await fsp.cp(path.resolve(local.checkout), directory, {
+          recursive: true,
+        });
+        return read(directory);
+      }
       await git.clone({
         url: transportUrl(pin.url),
         dir: directory,
@@ -231,6 +253,10 @@ export async function discoverDirectTemplatePin(
   declaration: WorkspaceTemplateDeclaration
 ): Promise<WorkspaceTemplatePin> {
   const url = normalizeTemplateGitUrl(declaration.url);
+  const selected = readDevelopmentTemplateSources().find(
+    (source) => normalizeTemplateGitUrl(source.pin.url) === url,
+  );
+  if (selected) return selected.pin;
   const source = { url, credential: declaration.credential };
   await requireTemplateCredential(ctx, source);
   const snapshot = await withTemporaryGitCheckout(
