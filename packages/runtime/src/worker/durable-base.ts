@@ -502,7 +502,9 @@ export abstract class DurableObjectBase {
   private schemaDescriptorResponse(): Response {
     return Response.json(
       durableObjectSchemaDescriptor({
-        className: this.constructor.name,
+        className: String(
+          this.env["WORKER_CLASS_NAME"] ?? this.constructor.name,
+        ),
         version: (this.constructor as typeof DurableObjectBase).schemaVersion,
         storage: this.ctx.storage,
         schemaTables: this.requiredTables(),
@@ -514,7 +516,7 @@ export abstract class DurableObjectBase {
 
   private ensureSchema(): void {
     installDurableObjectSchema({
-      className: this.constructor.name,
+      className: String(this.env["WORKER_CLASS_NAME"] ?? this.constructor.name),
       version: (this.constructor as typeof DurableObjectBase).schemaVersion,
       storage: this.ctx.storage,
       schemaTables: this.requiredTables(),

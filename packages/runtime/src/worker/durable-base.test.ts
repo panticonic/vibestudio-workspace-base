@@ -381,7 +381,34 @@ class TitleProbeDO extends TestDurableObjectBase {
   }
 }
 
+class RuntimeRenamedSchemaProbeDO extends TestDurableObjectBase {
+  protected override requiredTables(): readonly string[] {
+    return ["probe_items"];
+  }
+
+  protected createTables(): void {
+    this.sql.exec("CREATE TABLE probe_items (id TEXT PRIMARY KEY)");
+  }
+}
+
 describe("DurableObjectBase request parsing", () => {
+  it("publishes the declared worker class identity when bundling changes the constructor name", async () => {
+    const { instance } = await createTestDO(RuntimeRenamedSchemaProbeDO, {
+      WORKER_CLASS_NAME: "PublishedSchemaProbeDO",
+      VIBESTUDIO_SCHEMA_PROBE: true,
+    });
+    const response = await (
+      instance as unknown as { fetch(request: Request): Promise<Response> }
+    ).fetch(new Request("http://test/probe/__vibestudio_schema_descriptor"));
+
+    expect(response.ok).toBe(true);
+    expect(await response.json()).toMatchObject({
+      className: "PublishedSchemaProbeDO",
+      version: 1,
+      freshSchemaFingerprint: expect.any(String),
+    });
+  });
+
   it("returns structured provider remediation for an undeclared direct receiver", async () => {
     const { instance } = await createTestDO(UndeclaredProbeDO, {
       WORKER_SOURCE: "workers/test",
