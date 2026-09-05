@@ -28,7 +28,7 @@
     "@workspace/pi-ai": "workspace:*",
     "@workspace/agentic-protocol": "workspace:*",
     "@workspace/pubsub": "workspace:*",
-    "diff": "^7.0.0",
+    "diff": "^8.0.4",
     "linkedom": "^0.18.13",
     "ignore": "^7.0.5",
     "unpdf": "^1.8.0",
@@ -39,7 +39,6 @@
   },
   "//": "re2 1.24.1 contains the Node >=22 compatibility fix previously carried as a host-root pnpm patch.",
   "devDependencies": {
-    "@types/diff": "^7.0.2",
     "typescript": "^7.0.2"
   }
 }
