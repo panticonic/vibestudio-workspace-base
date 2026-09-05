@@ -2,6 +2,7 @@ import type { CredentialClient } from "@vibestudio/credential-client";
 
 export interface ExtensionContextLike {
   readonly name: string;
+  storage: { readonly root: string };
   workspace: {
     getInfo(): Promise<{
       path: string;

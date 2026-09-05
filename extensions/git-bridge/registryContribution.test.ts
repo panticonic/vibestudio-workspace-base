@@ -32,6 +32,7 @@ function fixture(credential?: string) {
     }),
   };
   const engine = new RegistryContributionEngine({
+    storage: { root: path.join(root, "state") },
     workspace: {
       getInfo: vi.fn(async () => ({
         path: root,

@@ -13,21 +13,40 @@ interface TextToolResult {
 }
 
 async function makeTempRoot(): Promise<string> {
-  const root = await fs.mkdtemp(path.join(os.tmpdir(), "vibestudio-file-tools-"));
+  const root = await fs.mkdtemp(
+    path.join(os.tmpdir(), "vibestudio-file-tools-"),
+  );
   tempRoots.push(root);
   return root;
 }
 
+function nativeFs(root: string) {
+  return {
+    realpath: async (input: string) => fs.realpath(path.join(root, input)),
+    nativeRoots: async () => {
+      const source = path.join(root, ".source");
+      await fs.mkdir(source, { recursive: true });
+      return { source, scratch: root };
+    },
+  };
+}
+
 afterEach(async () => {
   await Promise.all(
-    tempRoots.splice(0).map((root) => fs.rm(root, { recursive: true, force: true }))
+    tempRoots
+      .splice(0)
+      .map((root) => fs.rm(root, { recursive: true, force: true })),
   );
 });
 
 describe("@workspace-extensions/file-tools", () => {
   it("searches a context workspace with glob and context lines", async () => {
     const workspaceRoot = await makeTempRoot();
-    const contextProjectionsPath = path.join(workspaceRoot, ".context-projections", "v5");
+    const contextProjectionsPath = path.join(
+      workspaceRoot,
+      ".context-projections",
+      "v5",
+    );
     const contextRoot = path.join(contextProjectionsPath, "ctx-test");
     await fs.mkdir(path.join(contextRoot, "src"), { recursive: true });
     await fs.writeFile(
@@ -36,18 +55,18 @@ describe("@workspace-extensions/file-tools", () => {
         "const before = true;",
         "export const entity = createEntity({ id: 'a' });",
         "const after = true;",
-      ].join("\n")
+      ].join("\n"),
     );
     await fs.writeFile(
       path.join(contextRoot, "src", "notes.md"),
-      "createEntity should not match this file\n"
+      "createEntity should not match this file\n",
     );
 
     const api = await activate({
       workspace: {
         getInfo: async () => ({ path: workspaceRoot, contextProjectionsPath }),
       },
-      fs: { realpath: async () => contextRoot },
+      fs: nativeFs(contextRoot),
       log: { info: vi.fn() },
       health: { healthy: vi.fn(), degraded: vi.fn() },
     });
@@ -60,9 +79,12 @@ describe("@workspace-extensions/file-tools", () => {
       limit: 100,
     })) as TextToolResult;
 
-    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    const text =
+      result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(text).toContain("src/entities.ts-1- const before = true;");
-    expect(text).toContain("src/entities.ts:2: export const entity = createEntity({ id: 'a' });");
+    expect(text).toContain(
+      "src/entities.ts:2: export const entity = createEntity({ id: 'a' });",
+    );
     expect(text).toContain("src/entities.ts-3- const after = true;");
     expect(text).not.toContain("notes.md");
     expect(result.details?.engine).toBe("ripgrep");
@@ -70,16 +92,23 @@ describe("@workspace-extensions/file-tools", () => {
 
   it("reports no matches without details", async () => {
     const workspaceRoot = await makeTempRoot();
-    await fs.writeFile(path.join(workspaceRoot, "file.ts"), "export const value = 1;\n");
+    await fs.writeFile(
+      path.join(workspaceRoot, "file.ts"),
+      "export const value = 1;\n",
+    );
 
     const api = await activate({
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
@@ -89,27 +118,40 @@ describe("@workspace-extensions/file-tools", () => {
       glob: "**/*.ts",
     })) as TextToolResult;
 
-    expect(result.content).toEqual([{ type: "text", text: "No matches found" }]);
+    expect(result.content).toEqual([
+      { type: "text", text: "No matches found" },
+    ]);
     expect(result.details).toBeUndefined();
   });
 
   it("defaults grep to literal matching for regex-looking snippets", async () => {
     const workspaceRoot = await makeTempRoot();
-    await fs.writeFile(path.join(workspaceRoot, "script.ts"), "eval({ path: 'tmp/demo.ts' });\n");
+    await fs.writeFile(
+      path.join(workspaceRoot, "script.ts"),
+      "eval({ path: 'tmp/demo.ts' });\n",
+    );
 
     const api = await activate({
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
-    const result = (await api.grep({ pattern: "eval({ path", path: "." })) as TextToolResult;
-    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    const result = (await api.grep({
+      pattern: "eval({ path",
+      path: ".",
+    })) as TextToolResult;
+    const text =
+      result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(text).toContain("script.ts:1:");
   });
 
@@ -117,16 +159,20 @@ describe("@workspace-extensions/file-tools", () => {
     const workspaceRoot = await makeTempRoot();
     await fs.writeFile(
       path.join(workspaceRoot, "meta.yml"),
-      "services:\n  - source: workers/notes\n    name: notes\n"
+      "services:\n  - source: workers/notes\n    name: notes\n",
     );
     const api = await activate({
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
@@ -134,7 +180,8 @@ describe("@workspace-extensions/file-tools", () => {
       pattern: "services:\n  - source: workers/notes",
       path: ".",
     })) as TextToolResult;
-    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    const text =
+      result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(text).toContain("meta.yml:1: services:");
   });
 
@@ -142,16 +189,20 @@ describe("@workspace-extensions/file-tools", () => {
     const workspaceRoot = await makeTempRoot();
     await fs.writeFile(
       path.join(workspaceRoot, "meta.yml"),
-      "services:\n  - source: workers/pubsub-channel\n"
+      "services:\n  - source: workers/pubsub-channel\n",
     );
     const api = await activate({
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
@@ -159,21 +210,29 @@ describe("@workspace-extensions/file-tools", () => {
       pattern: "- source: workers/pubsub-channel",
       path: ".",
     })) as TextToolResult;
-    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    const text =
+      result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(text).toContain("meta.yml:2:");
   });
 
   it("reports an invalid glob instead of rewriting the request", async () => {
     const workspaceRoot = await makeTempRoot();
-    await fs.writeFile(path.join(workspaceRoot, "script.ts"), "const marker = 'glob-repair';\n");
+    await fs.writeFile(
+      path.join(workspaceRoot, "script.ts"),
+      "const marker = 'glob-repair';\n",
+    );
     const api = await activate({
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
@@ -182,21 +241,30 @@ describe("@workspace-extensions/file-tools", () => {
         pattern: "glob-repair",
         path: ".",
         glob: "**/*.{ts,tsx,md",
-      })
-    ).rejects.toThrow(/invalid glob|error parsing glob|unclosed alternate group/i);
+      }),
+    ).rejects.toThrow(
+      /invalid glob|error parsing glob|unclosed alternate group/i,
+    );
   });
 
   it("accepts relative workspace as the virtual-root alias", async () => {
     const workspaceRoot = await makeTempRoot();
-    await fs.writeFile(path.join(workspaceRoot, "script.ts"), "const marker = 'root-alias';\n");
+    await fs.writeFile(
+      path.join(workspaceRoot, "script.ts"),
+      "const marker = 'root-alias';\n",
+    );
     const api = await activate({
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
@@ -211,16 +279,23 @@ describe("@workspace-extensions/file-tools", () => {
 
   it("reports invalid requested regexes instead of changing their meaning", async () => {
     const workspaceRoot = await makeTempRoot();
-    await fs.writeFile(path.join(workspaceRoot, "script.ts"), "openPanel('panels/chat');\n");
+    await fs.writeFile(
+      path.join(workspaceRoot, "script.ts"),
+      "openPanel('panels/chat');\n",
+    );
 
     const api = await activate({
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
@@ -229,7 +304,7 @@ describe("@workspace-extensions/file-tools", () => {
         pattern: "openPanel(",
         path: ".",
         literal: false,
-      })
+      }),
     ).rejects.toThrow(/invalid grep regex pattern/i);
   });
 
@@ -239,10 +314,14 @@ describe("@workspace-extensions/file-tools", () => {
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
@@ -251,23 +330,30 @@ describe("@workspace-extensions/file-tools", () => {
         pattern: "console",
         path: "packages workers panels",
         glob: "*diagnostic*",
-      })
+      }),
     ).rejects.toThrow(/path not found.*not a space-separated list/i);
   });
 
   it("finds files with ripgrep file listing", async () => {
     const workspaceRoot = await makeTempRoot();
-    const contextProjectionsPath = path.join(workspaceRoot, ".context-projections", "v5");
+    const contextProjectionsPath = path.join(
+      workspaceRoot,
+      ".context-projections",
+      "v5",
+    );
     const contextRoot = path.join(contextProjectionsPath, "ctx-test");
     await fs.mkdir(path.join(contextRoot, "src"), { recursive: true });
-    await fs.writeFile(path.join(contextRoot, "src", "a.ts"), "export const a = 1;\n");
+    await fs.writeFile(
+      path.join(contextRoot, "src", "a.ts"),
+      "export const a = 1;\n",
+    );
     await fs.writeFile(path.join(contextRoot, "src", "b.md"), "# b\n");
 
     const api = await activate({
       workspace: {
         getInfo: async () => ({ path: workspaceRoot, contextProjectionsPath }),
       },
-      fs: { realpath: async () => contextRoot },
+      fs: nativeFs(contextRoot),
       log: { info: vi.fn() },
     });
 
@@ -287,42 +373,55 @@ describe("@workspace-extensions/file-tools", () => {
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
-    await expect(api.find({ pattern: "**/*.{ts,tsx", path: "." })).rejects.toThrow(
-      /invalid find glob pattern/i
-    );
-    await expect(api.find({ pattern: "**/*.ts", path: "missing" })).rejects.toThrow(
-      /path not found/i
-    );
+    await expect(
+      api.find({ pattern: "**/*.{ts,tsx", path: "." }),
+    ).rejects.toThrow(/invalid find glob pattern/i);
+    await expect(
+      api.find({ pattern: "**/*.ts", path: "missing" }),
+    ).rejects.toThrow(/path not found/i);
   });
 
   it("streams text reads with offset and limit", async () => {
     const workspaceRoot = await makeTempRoot();
     await fs.writeFile(
       path.join(workspaceRoot, "big.txt"),
-      Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n")
+      Array.from({ length: 10 }, (_, i) => `line ${i + 1}`).join("\n"),
     );
 
     const api = await activate({
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
-    const result = (await api.read({ path: "big.txt", offset: 3, limit: 2 })) as TextToolResult;
+    const result = (await api.read({
+      path: "big.txt",
+      offset: 3,
+      limit: 2,
+    })) as TextToolResult;
 
-    const text = result.content[0]?.type === "text" ? result.content[0].text : "";
+    const text =
+      result.content[0]?.type === "text" ? result.content[0].text : "";
     expect(text).toContain("line 3\nline 4");
     expect(text).toContain("Use offset=5");
     expect(text).not.toContain("line 5\n");
@@ -337,10 +436,14 @@ describe("@workspace-extensions/file-tools", () => {
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
@@ -360,13 +463,19 @@ describe("@workspace-extensions/file-tools", () => {
       workspace: {
         getInfo: async () => ({
           path: workspaceRoot,
-          contextProjectionsPath: path.join(workspaceRoot, ".context-projections", "v5"),
+          contextProjectionsPath: path.join(
+            workspaceRoot,
+            ".context-projections",
+            "v5",
+          ),
         }),
       },
-      fs: { realpath: async () => workspaceRoot },
+      fs: nativeFs(workspaceRoot),
       log: { info: vi.fn() },
     });
 
-    await expect(api.read({ path: "outside/secret.txt" })).rejects.toThrow(/escapes search root/i);
+    await expect(api.read({ path: "outside/secret.txt" })).rejects.toThrow(
+      /escapes search root/i,
+    );
   });
 });

@@ -346,7 +346,7 @@ export class TemplatePushEngine {
     );
     return withTemporaryGitCheckout(
       fsp,
-      path.join(info.statePath, "git-checkouts", "_template-contributions"),
+      path.join(this.ctx.storage.root, "git-checkouts", "_template-contributions"),
       input.nodeId,
       async (checkout) => {
         const transportUrl = templateGitTransportUrl(input.url);

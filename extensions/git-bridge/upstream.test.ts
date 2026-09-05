@@ -182,7 +182,7 @@ function createCtx(
     credentials,
     notifications,
     rpc,
-    storage: createStorage(files),
+    storage: { root: opts.workspaceRoot ?? "/tmp/ws/state", ...createStorage(files) },
     log: { info: vi.fn(), warn: vi.fn() },
     ...(opts.health ? { health: opts.health } : {}),
   };

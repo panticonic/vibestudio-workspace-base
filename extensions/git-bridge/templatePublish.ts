@@ -213,10 +213,9 @@ export class TemplatePublishEngine {
     const git = new GitClient(fsp, {
       http: this.ctx.credentials.gitHttp({ credentialId: credentialId ?? null }),
     });
-    const info = await this.ctx.workspace.getInfo();
     return withTemporaryGitCheckout(
       fsp,
-      path.join(info.statePath, "git-checkouts", "_template-publications"),
+      path.join(this.ctx.storage.root, "git-checkouts", "_template-publications"),
       input.operationId,
       async (checkout) => {
         const defaultBranch = await git.getRemoteDefaultBranch(repository.cloneUrl);

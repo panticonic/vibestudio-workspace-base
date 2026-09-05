@@ -20,6 +20,7 @@ interface ExtensionContextLike {
   };
   fs: {
     realpath(path: string): Promise<string>;
+    nativeRoots(): Promise<{ source: string; scratch: string }>;
     /** Materialize the given workspace path(s)/repo(s) into the (sparse) context
      *  folder so disk-walking tools (ripgrep) can see them. Optional only so tests
      *  with a real on-disk fixture can omit it; the real runtime client always has it. */
@@ -118,15 +119,6 @@ interface GrepResult {
   details: GrepDetails | undefined;
 }
 
-function resolveWithin(root: string, input: string): string {
-  const resolved = path.resolve(root, input);
-  const rel = path.relative(root, resolved);
-  if (rel.startsWith("..") || path.isAbsolute(rel)) {
-    throw new Error(`Path escapes search root: ${input}`);
-  }
-  return resolved;
-}
-
 async function realpathWithin(root: string, input: string): Promise<string> {
   const realRoot = await fs.realpath(root);
   const realInput = await fs.realpath(input);
@@ -137,7 +129,10 @@ async function realpathWithin(root: string, input: string): Promise<string> {
   return realInput;
 }
 
-function resolveVirtualPath(cwd: string | undefined, input: string | undefined): string {
+function resolveVirtualPath(
+  cwd: string | undefined,
+  input: string | undefined,
+): string {
   const base = cwd && cwd.startsWith("/") ? cwd : `/${cwd ?? ""}`;
   const rawRequested = input ?? ".";
   // `workspace` and `/workspace` are conventional user/model names for the virtual
@@ -159,30 +154,36 @@ function resolveVirtualPath(cwd: string | undefined, input: string | undefined):
 
 async function resolveSearchPath(
   ctx: ExtensionContextLike,
-  req: {
-    path?: string;
-    cwd?: string;
-  }
-): Promise<{
-  root: string;
-  searchPath: string;
-  isDirectory: boolean;
-}> {
-  const root = await ctx.fs.realpath("/");
-  if (root === path.parse(root).root) {
-    throw new Error("file-tools requires a scoped extension invocation context");
-  }
+  req: { path?: string; cwd?: string },
+): Promise<{ searchPaths: string[]; isDirectory: boolean }> {
   const virtualPath = resolveVirtualPath(req.cwd, req.path);
-  // Context folders are SPARSE — only materialized repos exist on disk. file-tools
-  // reads disk directly (ripgrep subprocess / streams), so it must materialize the
-  // narrowest scope it searches BEFORE touching disk. ensureMaterialized resolves
-  // `virtualPath` to its minimal repo scope (a single repo, a section, or "all"
-  // only for a true workspace-root search).
   await ctx.fs.ensureMaterialized?.(virtualPath);
-  const searchPath = resolveWithin(root, `.${virtualPath}`);
-  let stat;
+  if (virtualPath === "/") {
+    const { source, scratch } = await ctx.fs.nativeRoots();
+    if ([source, scratch].some((root) => root === path.parse(root).root))
+      throw new Error(
+        "file-tools requires a scoped extension invocation context",
+      );
+    return { searchPaths: [source, scratch], isDirectory: true };
+  }
   try {
-    stat = await fs.stat(searchPath);
+    const resolved = await ctx.fs.realpath(virtualPath);
+    const { source, scratch } = await ctx.fs.nativeRoots();
+    const root = [source, scratch].find((candidate) => {
+      const relative = path.relative(candidate, resolved);
+      return (
+        relative === "" ||
+        (!relative.startsWith(".." + path.sep) &&
+          relative !== ".." &&
+          !path.isAbsolute(relative))
+      );
+    });
+    if (!root) throw new Error(`Path escapes search root: ${virtualPath}`);
+    const searchPath = await realpathWithin(root, resolved);
+    return {
+      searchPaths: [searchPath],
+      isDirectory: (await fs.stat(searchPath)).isDirectory(),
+    };
   } catch (error) {
     if (!isMissingSearchPathError(error)) throw error;
     const hint = /\s/.test(virtualPath.trim())
@@ -190,8 +191,20 @@ async function resolveSearchPath(
       : "";
     throw new Error(`Path not found: ${virtualPath}.${hint}`);
   }
-  const realSearchPath = await realpathWithin(root, searchPath);
-  return { root, searchPath: realSearchPath, isDirectory: stat.isDirectory() };
+}
+
+function relativeSearchPath(roots: string[], file: string): string {
+  for (const root of roots) {
+    const relative = path.relative(root, file);
+    if (
+      relative &&
+      relative !== ".." &&
+      !relative.startsWith(".." + path.sep) &&
+      !path.isAbsolute(relative)
+    )
+      return relative.replace(/\\/g, "/");
+  }
+  return path.basename(file);
 }
 
 function formatRipgrepFailure(message: string, req: GrepRequest): string {
@@ -200,7 +213,9 @@ function formatRipgrepFailure(message: string, req: GrepRequest): string {
   const regexMode = req.literal === false;
   const looksLikeRegexParseError =
     /\bregex parse error\b/i.test(base) ||
-    /\b(unclosed|unopened|unclosed group|unclosed character class)\b/i.test(base);
+    /\b(unclosed|unopened|unclosed group|unclosed character class)\b/i.test(
+      base,
+    );
   if (!regexMode || !looksLikeRegexParseError) return base;
   return [
     "Invalid grep regex pattern.",
@@ -214,13 +229,17 @@ function formatRipgrepFailure(message: string, req: GrepRequest): string {
 function isMissingSearchPathError(error: unknown): boolean {
   const code = (error as { code?: unknown } | null)?.code;
   const message = error instanceof Error ? error.message : String(error);
-  return code === "ENOENT" || /\b(?:ENOENT|path not found|no such file)\b/i.test(message);
+  return (
+    code === "ENOENT" ||
+    /\b(?:ENOENT|path not found|no such file)\b/i.test(message)
+  );
 }
 
 function formatFindFailure(message: string, req: FindRequest): string {
   const trimmed = message.trim();
   const base = trimmed || "ripgrep --files failed";
-  const looksLikeGlobParseError = /(?:error parsing glob|unclosed alternate group)/i.test(base);
+  const looksLikeGlobParseError =
+    /(?:error parsing glob|unclosed alternate group)/i.test(base);
   if (!looksLikeGlobParseError) return base;
   return [
     "Invalid find glob pattern.",
@@ -230,14 +249,23 @@ function formatFindFailure(message: string, req: FindRequest): string {
 }
 
 function truncateLine(line: string): { text: string; wasTruncated: boolean } {
-  if (line.length <= GREP_MAX_LINE_LENGTH) return { text: line, wasTruncated: false };
-  return { text: `${line.slice(0, GREP_MAX_LINE_LENGTH)}...`, wasTruncated: true };
+  if (line.length <= GREP_MAX_LINE_LENGTH)
+    return { text: line, wasTruncated: false };
+  return {
+    text: `${line.slice(0, GREP_MAX_LINE_LENGTH)}...`,
+    wasTruncated: true,
+  };
 }
 
 function truncateGrepOutput(content: string): GrepTruncationResult {
   const bytes = Buffer.byteLength(content, "utf8");
   if (bytes <= DEFAULT_MAX_BYTES) {
-    return { truncated: false, originalBytes: bytes, returnedBytes: bytes, content };
+    return {
+      truncated: false,
+      originalBytes: bytes,
+      returnedBytes: bytes,
+      content,
+    };
   }
   let returned = content;
   while (Buffer.byteLength(returned, "utf8") > DEFAULT_MAX_BYTES) {
@@ -281,22 +309,21 @@ function formatSize(bytes: number): string {
   return `${Math.round(bytes / (1024 * 1024))}MB`;
 }
 
-function toPosixPath(value: string): string {
-  return value.replace(/\\/g, "/");
-}
-
-function relativeTo(root: string, filePath: string): string {
-  return toPosixPath(path.relative(root, filePath));
-}
-
 function isLikelyImageHeader(header: Buffer): boolean {
   if (
     header.length >= 8 &&
-    header.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+    header
+      .subarray(0, 8)
+      .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
   ) {
     return true;
   }
-  if (header.length >= 3 && header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff)
+  if (
+    header.length >= 3 &&
+    header[0] === 0xff &&
+    header[1] === 0xd8 &&
+    header[2] === 0xff
+  )
     return true;
   if (
     header.length >= 6 &&
@@ -337,17 +364,14 @@ export async function activate(ctx: ExtensionContextLike) {
         throw new Error("file-tools.grep requires a pattern");
       }
 
-      const { searchPath, isDirectory } = await resolveSearchPath(ctx, raw);
+      const { searchPaths, isDirectory } = await resolveSearchPath(ctx, raw);
       const contextValue = raw.context && raw.context > 0 ? raw.context : 0;
       const effectiveLimit = Math.max(1, raw.limit ?? DEFAULT_LIMIT);
 
-      const formatPath = (filePath: string): string => {
-        if (isDirectory) {
-          const relative = path.relative(searchPath, filePath);
-          if (relative && !relative.startsWith("..")) return relative.replace(/\\/g, "/");
-        }
-        return path.basename(filePath);
-      };
+      const formatPath = (filePath: string): string =>
+        isDirectory
+          ? relativeSearchPath(searchPaths, filePath)
+          : path.basename(filePath);
 
       const fileCache = new Map<string, string[]>();
       const getFileLines = async (filePath: string): Promise<string[]> => {
@@ -355,7 +379,10 @@ export async function activate(ctx: ExtensionContextLike) {
         if (!lines) {
           try {
             const content = await fs.readFile(filePath, "utf8");
-            lines = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
+            lines = content
+              .replace(/\r\n/g, "\n")
+              .replace(/\r/g, "\n")
+              .split("\n");
           } catch {
             lines = [];
           }
@@ -377,10 +404,12 @@ export async function activate(ctx: ExtensionContextLike) {
       if (raw.glob) args.push("--glob", raw.glob);
       // End option parsing before the caller's literal pattern. Leading-dash
       // YAML/source fragments are data, not ripgrep CLI flags.
-      args.push("--", raw.pattern, searchPath);
+      args.push("--", raw.pattern, ...searchPaths);
 
       return await new Promise<GrepResult>((resolve, reject) => {
-        const child = spawn(rgPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(rgPath, args, {
+          stdio: ["ignore", "pipe", "pipe"],
+        });
         const rl = createInterface({ input: child.stdout });
         let stderr = "";
         let matchCount = 0;
@@ -435,8 +464,11 @@ export async function activate(ctx: ExtensionContextLike) {
           if (!killedDueToLimit && code !== 0 && code !== 1) {
             reject(
               new Error(
-                formatRipgrepFailure(stderr.trim() || `ripgrep exited with code ${code}`, raw)
-              )
+                formatRipgrepFailure(
+                  stderr.trim() || `ripgrep exited with code ${code}`,
+                  raw,
+                ),
+              ),
             );
             return;
           }
@@ -453,11 +485,15 @@ export async function activate(ctx: ExtensionContextLike) {
             const relativePath = formatPath(match.filePath);
             const lines = await getFileLines(match.filePath);
             if (!lines.length) {
-              outputLines.push(`${relativePath}:${match.lineNumber}: (unable to read file)`);
+              outputLines.push(
+                `${relativePath}:${match.lineNumber}: (unable to read file)`,
+              );
               continue;
             }
             const start =
-              contextValue > 0 ? Math.max(1, match.lineNumber - contextValue) : match.lineNumber;
+              contextValue > 0
+                ? Math.max(1, match.lineNumber - contextValue)
+                : match.lineNumber;
             const end =
               contextValue > 0
                 ? Math.min(lines.length, match.lineNumber + contextValue)
@@ -469,7 +505,7 @@ export async function activate(ctx: ExtensionContextLike) {
               outputLines.push(
                 current === match.lineNumber
                   ? `${relativePath}:${current}: ${text}`
-                  : `${relativePath}-${current}- ${text}`
+                  : `${relativePath}-${current}- ${text}`,
               );
             }
           }
@@ -480,7 +516,7 @@ export async function activate(ctx: ExtensionContextLike) {
           const notices: string[] = [];
           if (matchLimitReached) {
             notices.push(
-              `${effectiveLimit} matches limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`
+              `${effectiveLimit} matches limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`,
             );
             details.matchLimitReached = effectiveLimit;
           }
@@ -490,7 +526,7 @@ export async function activate(ctx: ExtensionContextLike) {
           }
           if (linesTruncated) {
             notices.push(
-              `Some lines truncated to ${GREP_MAX_LINE_LENGTH} chars. Use read tool to see full lines`
+              `Some lines truncated to ${GREP_MAX_LINE_LENGTH} chars. Use read tool to see full lines`,
             );
             details.linesTruncated = true;
           }
@@ -508,12 +544,21 @@ export async function activate(ctx: ExtensionContextLike) {
         throw new Error("file-tools.find requires a pattern");
       }
 
-      const { searchPath } = await resolveSearchPath(ctx, raw);
+      const { searchPaths } = await resolveSearchPath(ctx, raw);
       const effectiveLimit = Math.max(1, raw.limit ?? 1000);
-      const args = ["--files", "--hidden", "--color=never", "--glob", raw.pattern, searchPath];
+      const args = [
+        "--files",
+        "--hidden",
+        "--color=never",
+        "--glob",
+        raw.pattern,
+        ...searchPaths,
+      ];
 
       return await new Promise<FindResult>((resolve, reject) => {
-        const child = spawn(rgPath, args, { stdio: ["ignore", "pipe", "pipe"] });
+        const child = spawn(rgPath, args, {
+          stdio: ["ignore", "pipe", "pipe"],
+        });
         const rl = createInterface({ input: child.stdout });
         const matches: string[] = [];
         let stderr = "";
@@ -532,7 +577,9 @@ export async function activate(ctx: ExtensionContextLike) {
 
         rl.on("line", (line) => {
           if (!line.trim() || matches.length >= effectiveLimit) return;
-          matches.push(relativeTo(searchPath, line.replace(/\r$/, "")));
+          matches.push(
+            relativeSearchPath(searchPaths, line.replace(/\r$/, "")),
+          );
           if (matches.length >= effectiveLimit) stopChild();
         });
 
@@ -546,14 +593,19 @@ export async function activate(ctx: ExtensionContextLike) {
           if (!killedDueToLimit && code !== 0 && code !== 1) {
             reject(
               new Error(
-                formatFindFailure(stderr.trim() || `ripgrep --files exited with code ${code}`, raw)
-              )
+                formatFindFailure(
+                  stderr.trim() || `ripgrep --files exited with code ${code}`,
+                  raw,
+                ),
+              ),
             );
             return;
           }
           if (matches.length === 0) {
             resolve({
-              content: [{ type: "text", text: "No files found matching pattern" }],
+              content: [
+                { type: "text", text: "No files found matching pattern" },
+              ],
               details: undefined,
             });
             return;
@@ -565,7 +617,7 @@ export async function activate(ctx: ExtensionContextLike) {
           const notices: string[] = [];
           if (matches.length >= effectiveLimit) {
             notices.push(
-              `${effectiveLimit} results limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`
+              `${effectiveLimit} results limit reached. Use limit=${effectiveLimit * 2} for more, or refine pattern`,
             );
             details.resultLimitReached = effectiveLimit;
           }
@@ -587,7 +639,12 @@ export async function activate(ctx: ExtensionContextLike) {
         throw new Error("file-tools.read requires a path");
       }
 
-      const { searchPath } = await resolveSearchPath(ctx, { ...raw, path: raw.path });
+      const { searchPaths } = await resolveSearchPath(ctx, {
+        ...raw,
+        path: raw.path,
+      });
+      if (searchPaths.length !== 1) throw new Error(`Not a file: ${raw.path}`);
+      const searchPath = searchPaths[0]!;
       const stat = await fs.stat(searchPath);
       if (!stat.isFile()) throw new Error(`Not a file: ${raw.path}`);
 
@@ -601,12 +658,17 @@ export async function activate(ctx: ExtensionContextLike) {
         }
       });
       if (isLikelyImageHeader(header)) {
-        throw codedError("EIMAGE", "Image reads are handled by the image service path");
+        throw codedError(
+          "EIMAGE",
+          "Image reads are handled by the image service path",
+        );
       }
 
       const startLine = raw.offset ? Math.max(1, Math.trunc(raw.offset)) : 1;
       const requestedLimit =
-        raw.limit !== undefined ? Math.max(0, Math.trunc(raw.limit)) : undefined;
+        raw.limit !== undefined
+          ? Math.max(0, Math.trunc(raw.limit))
+          : undefined;
       if (stat.size === 0 && startLine === 1) {
         return {
           content: [{ type: "text", text: "" }],
@@ -638,7 +700,8 @@ export async function activate(ctx: ExtensionContextLike) {
             break;
           }
 
-          const lineBytes = Buffer.byteLength(line, "utf8") + (outputLines.length > 0 ? 1 : 0);
+          const lineBytes =
+            Buffer.byteLength(line, "utf8") + (outputLines.length > 0 ? 1 : 0);
           if (outputLines.length === 0 && lineBytes > DEFAULT_READ_MAX_BYTES) {
             truncatedBy = "bytes";
             firstLineExceedsLimit = true;

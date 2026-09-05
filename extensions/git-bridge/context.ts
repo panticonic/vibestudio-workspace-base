@@ -20,6 +20,7 @@ export interface ExtensionContextLike {
   };
   subscriptions?: Array<{ dispose(): void }>;
   storage: {
+    readonly root: string;
     mkdir(path: string, opts?: { recursive?: boolean }): Promise<unknown>;
     readFile(path: string, encoding?: BufferEncoding): Promise<string | Buffer>;
     writeFile(path: string, data: string | Uint8Array): Promise<void>;

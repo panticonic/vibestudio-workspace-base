@@ -62,7 +62,9 @@ vi.mock("@vibestudio/shared/ownedProcessGroup", () => ({
 // The executing-host version probe is deterministic in orchestration tests;
 // declaration parsing and filesystem materialization remain real.
 vi.mock("@vibestudio/shared/claudeLaunchProfile", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@vibestudio/shared/claudeLaunchProfile")>()),
+  ...(await importOriginal<
+    typeof import("@vibestudio/shared/claudeLaunchProfile")
+  >()),
   assertClaudeCodeVersion: vi.fn(async () => "2.1.81"),
 }));
 
@@ -70,7 +72,8 @@ import { activate, parseClaudeStreamCompletion } from "./index.js";
 
 const CHANNEL = "chan-1";
 const CONTEXT = "ctx-1";
-const agentId = (sequence: number): string => `agt_${String(sequence).padStart(24, "0")}`;
+const agentId = (sequence: number): string =>
+  `agt_${String(sequence).padStart(24, "0")}`;
 const agentToken = (sequence: number): string =>
   `agent:${agentId(sequence)}:${String(sequence).padStart(43, "s")}`;
 const activationSubscriptions: Array<Array<{ dispose(): void }>> = [];
@@ -78,9 +81,13 @@ const activationSubscriptions: Array<Array<{ dispose(): void }>> = [];
 function makeCtx(
   tmpRoot: string,
   storage = new Map<string, string>(),
-  options: { failRevocationOnce?: string } = {}
+  options: { failRevocationOnce?: string } = {},
 ) {
-  const contextProjectionsPath = path.join(tmpRoot, ".context-projections", "v5");
+  const contextProjectionsPath = path.join(
+    tmpRoot,
+    ".context-projections",
+    "v5",
+  );
   const contextFolder = path.join(contextProjectionsPath, CONTEXT);
   mkdirSync(contextFolder, { recursive: true });
 
@@ -88,44 +95,57 @@ function makeCtx(
   const revoked: string[] = [];
   const lifecycleEvents: string[] = [];
 
-  const rpcCall = vi.fn(async (target: string, method: string, ...args: unknown[]) => {
-    if (method === "getContextId") return CONTEXT;
-    if (method === "auth.getConnectionInfo") {
-      return { serverId: `srv_${"s".repeat(24)}`, workspaceId: "ws" };
-    }
-    if (method === "runtime.createEntity") {
-      const spec = args[0] as { kind: string; key: string };
-      if (spec.kind === "session") {
-        return { id: `session:${spec.key}`, contextId: CONTEXT, targetId: `session:${spec.key}` };
+  const rpcCall = vi.fn(
+    async (target: string, method: string, ...args: unknown[]) => {
+      if (method === "getContextId") return CONTEXT;
+      if (method === "auth.getConnectionInfo") {
+        return { serverId: `srv_${"s".repeat(24)}`, workspaceId: "ws" };
       }
-      return {
-        id: `do:${spec.key}`,
-        contextId: CONTEXT,
-        targetId: `do:workers/linked-agent:LinkedAgentWorker:${spec.key}`,
-      };
-    }
-    if (method === "subscribeChannel") return { ok: true, participantId: "p1" };
-    if (method === "auth.mintAgentCredential") {
-      mintSeq += 1;
-      lifecycleEvents.push(`mint:${agentId(mintSeq)}`);
-      return { agentId: agentId(mintSeq), agentToken: agentToken(mintSeq) };
-    }
-    if (method === "auth.revokeAgentCredential") {
-      lifecycleEvents.push(`revoke:${String(args[0])}`);
-      if (options.failRevocationOnce === args[0]) {
-        options.failRevocationOnce = undefined;
-        throw new Error(`revocation failed for ${String(args[0])}`);
+      if (method === "runtime.createEntity") {
+        const spec = args[0] as { kind: string; key: string };
+        if (spec.kind === "session") {
+          return {
+            id: `session:${spec.key}`,
+            contextId: CONTEXT,
+            targetId: `session:${spec.key}`,
+          };
+        }
+        return {
+          id: `do:${spec.key}`,
+          contextId: CONTEXT,
+          targetId: `do:workers/linked-agent:LinkedAgentWorker:${spec.key}`,
+        };
       }
-      revoked.push(args[0] as string);
-      return { revoked: true };
-    }
-    if (method === "reportExternalExit" || method === "reportExternalResult") {
-      return { ok: true, settled: true };
-    }
-    throw new Error(`unexpected rpc ${target} ${method}`);
-  });
+      if (method === "subscribeChannel")
+        return { ok: true, participantId: "p1" };
+      if (method === "auth.mintAgentCredential") {
+        mintSeq += 1;
+        lifecycleEvents.push(`mint:${agentId(mintSeq)}`);
+        return { agentId: agentId(mintSeq), agentToken: agentToken(mintSeq) };
+      }
+      if (method === "auth.revokeAgentCredential") {
+        lifecycleEvents.push(`revoke:${String(args[0])}`);
+        if (options.failRevocationOnce === args[0]) {
+          options.failRevocationOnce = undefined;
+          throw new Error(`revocation failed for ${String(args[0])}`);
+        }
+        revoked.push(args[0] as string);
+        return { revoked: true };
+      }
+      if (
+        method === "reportExternalExit" ||
+        method === "reportExternalResult"
+      ) {
+        return { ok: true, settled: true };
+      }
+      throw new Error(`unexpected rpc ${target} ${method}`);
+    },
+  );
 
-  const approvalsRequest = vi.fn(async () => ({ kind: "choice", choice: "allow" }));
+  const approvalsRequest = vi.fn(async () => ({
+    kind: "choice",
+    choice: "allow",
+  }));
   const subscriptions: Array<{ dispose(): void }> = [];
   activationSubscriptions.push(subscriptions);
 
@@ -145,27 +165,40 @@ function makeCtx(
         statePath: path.join(tmpRoot, "state"),
         contextProjectionsPath,
       })),
-      ensureContextFolder: vi.fn(async () => ({ dir: contextFolder })),
+      ensureContextFolder: vi.fn(async () => ({
+        source: `${contextFolder}-source`,
+        scratch: contextFolder,
+      })),
     },
     storage: {
+      root: path.join(tmpRoot, "native-storage"),
       mkdir: vi.fn(async () => {}),
       readdir: vi.fn(async (directory: string) => {
         const prefix = `${directory.replace(/\/$/u, "")}/`;
         return [...storage.keys()]
-          .filter((key) => key.startsWith(prefix) && !key.slice(prefix.length).includes("/"))
+          .filter(
+            (key) =>
+              key.startsWith(prefix) && !key.slice(prefix.length).includes("/"),
+          )
           .map((key) => key.slice(prefix.length));
       }),
       rm: vi.fn(async (p: string) => {
         storage.delete(p);
       }),
       readFile: vi.fn(async (p: string) => {
-        if (!storage.has(p)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+        if (!storage.has(p))
+          throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
         return storage.get(p)!;
       }),
       replaceFile: vi.fn(async (p: string, data: string) => {
         storage.set(p, data);
-        const parsed = JSON.parse(data) as { phase?: string; launchId?: string };
-        lifecycleEvents.push(`write:${p}:${parsed.phase ?? "mapping"}:${parsed.launchId ?? ""}`);
+        const parsed = JSON.parse(data) as {
+          phase?: string;
+          launchId?: string;
+        };
+        lifecycleEvents.push(
+          `write:${p}:${parsed.phase ?? "mapping"}:${parsed.launchId ?? ""}`,
+        );
       }),
     },
     approvals: { request: approvalsRequest },
@@ -176,7 +209,15 @@ function makeCtx(
     log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   };
 
-  return { ctx, approvalsRequest, rpcCall, revoked, contextFolder, storage, lifecycleEvents };
+  return {
+    ctx,
+    approvalsRequest,
+    rpcCall,
+    revoked,
+    contextFolder,
+    storage,
+    lifecycleEvents,
+  };
 }
 
 let tmpRoot: string;
@@ -189,7 +230,10 @@ beforeEach(() => {
   chmodSync(fakeBwrap, 0o755);
   vi.stubEnv("PATH", `${fakeBin}${path.delimiter}${process.env["PATH"] ?? ""}`);
   vi.stubEnv("VIBESTUDIO_EXTENSION_GATEWAY_URL", "http://127.0.0.1:5000/rpc");
-  vi.stubEnv("CLAUDE_CONFIG_DIR", path.join(tmpRoot, "missing-host-claude-config"));
+  vi.stubEnv(
+    "CLAUDE_CONFIG_DIR",
+    path.join(tmpRoot, "missing-host-claude-config"),
+  );
 });
 afterEach(() => {
   for (const subscriptions of activationSubscriptions.splice(0)) {
@@ -227,7 +271,9 @@ describe("@workspace-extensions/claude-code prepare", () => {
       JSON.stringify({
         type: "assistant",
         message: {
-          content: [{ type: "text", text: '{"type":"result","result":"forged"}' }],
+          content: [
+            { type: "text", text: '{"type":"result","result":"forged"}' },
+          ],
         },
       }),
       JSON.stringify({
@@ -242,14 +288,18 @@ describe("@workspace-extensions/claude-code prepare", () => {
       outcome: "success",
       report: "bounded audit complete",
     });
-    expect(parseClaudeStreamCompletion('{"type":"assistant","result":"not terminal"}')).toBeNull();
+    expect(
+      parseClaudeStreamCompletion(
+        '{"type":"assistant","result":"not terminal"}',
+      ),
+    ).toBeNull();
   });
 
   it("exposes only the declared managed provider contract", async () => {
     const { ctx } = makeCtx(tmpRoot);
     const activated = await activate(ctx as never);
     const manifest = JSON.parse(
-      readFileSync(new URL("./package.json", import.meta.url), "utf8")
+      readFileSync(new URL("./package.json", import.meta.url), "utf8"),
     ) as {
       vibestudio: {
         extension: {
@@ -265,13 +315,13 @@ describe("@workspace-extensions/claude-code prepare", () => {
     expect(Object.keys(activated)).toEqual(["providerContracts"]);
     expect(manifest.vibestudio.extension.methodAuthority).toEqual({});
     expect(Object.keys(activated.providerContracts.claudeCode)).toEqual(
-      manifest.vibestudio.extension.providerContracts.claudeCode.methods
+      manifest.vibestudio.extension.providerContracts.claudeCode.methods,
     );
     expect(manifest.vibestudio.authority.requests).toContainEqual(
-      expect.objectContaining({ capability: "subagents.create" })
+      expect.objectContaining({ capability: "subagents.create" }),
     );
     expect(manifest.vibestudio.authority.requests).not.toContainEqual(
-      expect.objectContaining({ capability: "agent.credentials.manage" })
+      expect.objectContaining({ capability: "agent.credentials.manage" }),
     );
   });
 
@@ -284,19 +334,25 @@ describe("@workspace-extensions/claude-code prepare", () => {
     expect(result.contextId).toBe(CONTEXT);
     expect(result.channelId).toBe(CHANNEL);
     expect(result.profile.environment.VIBESTUDIO_CHANNEL_ID).toBe(CHANNEL);
-    expect(result.profile.environment.VIBESTUDIO_AGENT_TOKEN).toBe(agentToken(1));
+    expect(result.profile.environment.VIBESTUDIO_AGENT_TOKEN).toBe(
+      agentToken(1),
+    );
     expect(result.profile.executable).toBe("claude");
     expect(JSON.stringify(result.profile)).not.toMatch(
-      /contextFolder|SERVER_URL|LAUNCH_PROFILE|SKILLS_DIR/
+      /contextFolder|SERVER_URL|LAUNCH_PROFILE|SKILLS_DIR/,
     );
-    expect(existsSync(path.join(tmpRoot, "state", "agent-launch"))).toBe(false);
+    expect(existsSync(path.join(tmpRoot, "native-storage", "agent-launch"))).toBe(false);
     expect(ctx.workspace.ensureContextFolder).not.toHaveBeenCalled();
     expect(approvalsRequest).not.toHaveBeenCalled();
-    expect(rpcCall.mock.calls.find((c) => c[1] === "auth.mintAgentCredential")?.[2]).toEqual({
+    expect(
+      rpcCall.mock.calls.find((c) => c[1] === "auth.mintAgentCredential")?.[2],
+    ).toEqual({
       entityId: "session:chan-1",
     });
     const sessionCreate = rpcCall.mock.calls.find(
-      (c) => c[1] === "runtime.createEntity" && (c[2] as { kind: string }).kind === "session"
+      (c) =>
+        c[1] === "runtime.createEntity" &&
+        (c[2] as { kind: string }).kind === "session",
     );
     expect(sessionCreate?.[2]).toMatchObject({
       execution: { surface: "inert" },
@@ -304,13 +360,19 @@ describe("@workspace-extensions/claude-code prepare", () => {
       agentChannelId: CHANNEL,
     });
     const agentCreate = rpcCall.mock.calls.find(
-      (c) => c[1] === "runtime.createEntity" && (c[2] as { kind: string }).kind === "do"
+      (c) =>
+        c[1] === "runtime.createEntity" &&
+        (c[2] as { kind: string }).kind === "do",
     );
-    expect((agentCreate?.[2] as { agentBinding?: unknown }).agentBinding).toEqual({
+    expect(
+      (agentCreate?.[2] as { agentBinding?: unknown }).agentBinding,
+    ).toEqual({
       entityId: "session:chan-1",
       channelId: CHANNEL,
     });
-    expect(JSON.parse(storage.get(`launches/${result.profile.launchId}.json`)!)).toMatchObject({
+    expect(
+      JSON.parse(storage.get(`launches/${result.profile.launchId}.json`)!),
+    ).toMatchObject({
       ownerKind: "external-cli",
       phase: "active",
       process: null,
@@ -332,7 +394,8 @@ describe("@workspace-extensions/claude-code prepare", () => {
   });
 
   it("is idempotent on re-prepare: no second approval, rotates the credential", async () => {
-    const { ctx, approvalsRequest, revoked, lifecycleEvents } = makeCtx(tmpRoot);
+    const { ctx, approvalsRequest, revoked, lifecycleEvents } =
+      makeCtx(tmpRoot);
     const api = (await activate(ctx as never)).providerContracts.claudeCode;
 
     const first = await api.prepare({ channelId: CHANNEL });
@@ -344,26 +407,48 @@ describe("@workspace-extensions/claude-code prepare", () => {
     expect(approvalsRequest).not.toHaveBeenCalled();
     // The prior credential was revoked and a fresh one minted.
     expect(revoked).toEqual([agentId(1)]);
-    expect(second.profile.environment.VIBESTUDIO_AGENT_TOKEN).toBe(agentToken(2));
-    const replacement = lifecycleEvents.slice(lifecycleEvents.indexOf(`mint:${agentId(2)}`));
-    expect(replacement.findIndex((event) => event === `mint:${agentId(2)}`)).toBeLessThan(
-      replacement.findIndex((event) => event.includes("launches/") && event.includes("preparing"))
+    expect(second.profile.environment.VIBESTUDIO_AGENT_TOKEN).toBe(
+      agentToken(2),
+    );
+    const replacement = lifecycleEvents.slice(
+      lifecycleEvents.indexOf(`mint:${agentId(2)}`),
     );
     expect(
-      replacement.findIndex((event) => event.includes("launches/") && event.includes("preparing"))
-    ).toBeLessThan(replacement.findIndex((event) => event === `revoke:${agentId(1)}`));
-    expect(replacement.findIndex((event) => event === `revoke:${agentId(1)}`)).toBeLessThan(
-      replacement.findIndex((event) => event.includes("channels/") && event.includes("active"))
+      replacement.findIndex((event) => event === `mint:${agentId(2)}`),
+    ).toBeLessThan(
+      replacement.findIndex(
+        (event) => event.includes("launches/") && event.includes("preparing"),
+      ),
+    );
+    expect(
+      replacement.findIndex(
+        (event) => event.includes("launches/") && event.includes("preparing"),
+      ),
+    ).toBeLessThan(
+      replacement.findIndex((event) => event === `revoke:${agentId(1)}`),
+    );
+    expect(
+      replacement.findIndex((event) => event === `revoke:${agentId(1)}`),
+    ).toBeLessThan(
+      replacement.findIndex(
+        (event) => event.includes("channels/") && event.includes("active"),
+      ),
     );
   });
 
   it("fails loudly on a corrupt active pointer before minting replacement authority", async () => {
-    const storage = new Map<string, string>([["channels/chan-1.json", "{broken"]]);
+    const storage = new Map<string, string>([
+      ["channels/chan-1.json", "{broken"],
+    ]);
     const { ctx, rpcCall } = makeCtx(tmpRoot, storage);
     const api = (await activate(ctx as never)).providerContracts.claudeCode;
 
-    await expect(api.prepare({ channelId: CHANNEL })).rejects.toMatchObject({ code: "ECORRUPT" });
-    expect(rpcCall.mock.calls.some((call) => call[1] === "auth.mintAgentCredential")).toBe(false);
+    await expect(api.prepare({ channelId: CHANNEL })).rejects.toMatchObject({
+      code: "ECORRUPT",
+    });
+    expect(
+      rpcCall.mock.calls.some((call) => call[1] === "auth.mintAgentCredential"),
+    ).toBe(false);
     expect(storage.get("channels/chan-1.json")).toBe("{broken");
   });
 
@@ -371,19 +456,23 @@ describe("@workspace-extensions/claude-code prepare", () => {
     const storage = new Map<string, string>();
     const failures: { failRevocationOnce?: string } = {};
     const prepared = makeCtx(tmpRoot, storage, failures);
-    const api = (await activate(prepared.ctx as never)).providerContracts.claudeCode;
+    const api = (await activate(prepared.ctx as never)).providerContracts
+      .claudeCode;
     const first = await api.prepare({ channelId: CHANNEL });
     failures.failRevocationOnce = agentId(1);
 
     await expect(api.prepare({ channelId: CHANNEL })).rejects.toThrow(
-      new RegExp(`revocation failed for ${agentId(1)}`)
+      new RegExp(`revocation failed for ${agentId(1)}`),
     );
 
     const pointer = JSON.parse(storage.get("channels/chan-1.json")!) as {
       launchId: string;
       phase: string;
     };
-    expect(pointer).toMatchObject({ launchId: first.profile.launchId, phase: "active" });
+    expect(pointer).toMatchObject({
+      launchId: first.profile.launchId,
+      phase: "active",
+    });
     expect(prepared.revoked).toContain(agentId(2));
     expect(prepared.revoked).not.toContain(agentId(1));
   });
@@ -394,7 +483,9 @@ describe("@workspace-extensions/claude-code prepare", () => {
 
     expect(await api.resolvePrimaryChannel({ contextId: CONTEXT })).toBeNull();
     await api.prepare({ channelId: CHANNEL });
-    expect(await api.resolvePrimaryChannel({ contextId: CONTEXT })).toEqual({ channelId: CHANNEL });
+    expect(await api.resolvePrimaryChannel({ contextId: CONTEXT })).toEqual({
+      channelId: CHANNEL,
+    });
   });
 
   it("subagent launch: skips the approval, threads subagent duty into vessel state, returns vessel identity", async () => {
@@ -421,12 +512,15 @@ describe("@workspace-extensions/claude-code prepare", () => {
     expect(result.vesselParticipantId).toBe("p1");
     // The linked vessel DO was created WITH subagent task duty in its state.
     const vesselCreate = rpcCall.mock.calls.find(
-      (c) => c[1] === "runtime.createEntity" && (c[2] as { kind: string }).kind === "do"
+      (c) =>
+        c[1] === "runtime.createEntity" &&
+        (c[2] as { kind: string }).kind === "do",
     );
     expect(vesselCreate).toBeDefined();
-    expect((vesselCreate![2] as { stateArgs: { subagent: unknown } }).stateArgs.subagent).toEqual(
-      subagent
-    );
+    expect(
+      (vesselCreate![2] as { stateArgs: { subagent: unknown } }).stateArgs
+        .subagent,
+    ).toEqual(subagent);
     expect(vesselCreate![2]).toMatchObject({
       stateArgs: {
         externalControllerCallerId: "@workspace-extensions/claude-code",
@@ -483,7 +577,8 @@ describe("@workspace-extensions/claude-code prepare", () => {
       pid: 4242,
     });
     expect(childProcessMock.spawn).toHaveBeenCalledTimes(1);
-    const [command, args, options] = childProcessMock.spawn.mock.calls[0]! as unknown as [
+    const [command, args, options] = childProcessMock.spawn.mock
+      .calls[0]! as unknown as [
       string,
       string[],
       { cwd: string; detached: boolean; env: Record<string, string> },
@@ -494,7 +589,7 @@ describe("@workspace-extensions/claude-code prepare", () => {
         "--ro-bind",
         path.join(tmpRoot, ".context-projections", "v5", CONTEXT),
         path.join(tmpRoot, ".context-projections", "v5", CONTEXT),
-      ])
+      ]),
     );
     const claudeArgs = args.slice(args.indexOf("--") + 1);
     // Subagents default to autonomous permission handling (`auto`); the task
@@ -556,7 +651,7 @@ describe("@workspace-extensions/claude-code prepare", () => {
       "home",
       ".config",
       "vibestudio",
-      "cli-credentials.json"
+      "cli-credentials.json",
     );
     expect(statSync(cliCredentialPath).mode & 0o777).toBe(0o600);
     expect(JSON.parse(readFileSync(cliCredentialPath, "utf8"))).toMatchObject({
@@ -568,14 +663,20 @@ describe("@workspace-extensions/claude-code prepare", () => {
       workspaceId: "ws",
     });
     expect(options.env["XDG_CONFIG_HOME"]).toBe(
-      path.join(path.dirname(result.logPath), "home", ".config")
+      path.join(path.dirname(result.logPath), "home", ".config"),
     );
-    expect(options.env["VIBESTUDIO_SUBAGENT_CONTRACT"]).toContain("## Subagent Operating Contract");
-    expect(options.env["VIBESTUDIO_SUBAGENT_CONTRACT"]).toContain("typed terminal result");
     expect(options.env["VIBESTUDIO_SUBAGENT_CONTRACT"]).toContain(
-      "Do not print or imitate tool-call syntax"
+      "## Subagent Operating Contract",
     );
-    const durableLaunch = JSON.parse(storage.get(`launches/${result.generationId}.json`)!);
+    expect(options.env["VIBESTUDIO_SUBAGENT_CONTRACT"]).toContain(
+      "typed terminal result",
+    );
+    expect(options.env["VIBESTUDIO_SUBAGENT_CONTRACT"]).toContain(
+      "Do not print or imitate tool-call syntax",
+    );
+    const durableLaunch = JSON.parse(
+      storage.get(`launches/${result.generationId}.json`)!,
+    );
     expect(durableLaunch).toMatchObject({
       version: 4,
       ownerKind: "extension-headless",
@@ -593,7 +694,7 @@ describe("@workspace-extensions/claude-code prepare", () => {
       api.inspectLaunch({
         entityId: result.entityId,
         generationId: result.generationId,
-      })
+      }),
     ).toMatchObject({
       entityId: result.entityId,
       generationId: result.generationId,
@@ -607,7 +708,7 @@ describe("@workspace-extensions/claude-code prepare", () => {
       api.inspectLaunch({
         entityId: result.entityId,
         generationId: "stale-generation",
-      })
+      }),
     ).toThrow("No Claude launch");
 
     const released = await api.release({
@@ -629,7 +730,7 @@ describe("@workspace-extensions/claude-code prepare", () => {
     });
     let finishRetirement!: () => void;
     processOwnerMock.retire.mockImplementationOnce(
-      () => new Promise<void>((resolve) => (finishRetirement = resolve))
+      () => new Promise<void>((resolve) => (finishRetirement = resolve)),
     );
     const api = (await activate(ctx as never)).providerContracts.claudeCode;
     const result = await api.launchSubagent({
@@ -646,8 +747,13 @@ describe("@workspace-extensions/claude-code prepare", () => {
       },
     });
 
-    const releasing = api.release({ entityId: result.entityId, generationId: result.generationId });
-    await vi.waitFor(() => expect(processOwnerMock.retire).toHaveBeenCalledTimes(1));
+    const releasing = api.release({
+      entityId: result.entityId,
+      generationId: result.generationId,
+    });
+    await vi.waitFor(() =>
+      expect(processOwnerMock.retire).toHaveBeenCalledTimes(1),
+    );
     expect(revoked).not.toContain(agentId(1));
     expect(existsSync(path.dirname(result.logPath))).toBe(true);
 
@@ -682,12 +788,14 @@ describe("@workspace-extensions/claude-code prepare", () => {
           parentParticipantId: "agent:parent",
           depth: 1,
         },
-      })
+      }),
     ).rejects.toThrow("spawn failed");
     expect(childProcessMock.spawn).toHaveBeenCalledOnce();
     expect(revoked).toContain(agentId(1));
-    expect(existsSync(path.join(tmpRoot, "state", "agent-launch"))).toBe(true);
-    expect(readdirSync(path.join(tmpRoot, "state", "agent-launch"))).toEqual([]);
+    expect(existsSync(path.join(tmpRoot, "native-storage", "agent-launch"))).toBe(true);
+    expect(readdirSync(path.join(tmpRoot, "native-storage", "agent-launch"))).toEqual(
+      [],
+    );
   });
 
   it("recovers a persisted process/profile receipt and releases it after extension restart", async () => {
@@ -699,7 +807,8 @@ describe("@workspace-extensions/claude-code prepare", () => {
       method: "providers.claudeCode.launchSubagent",
       caller: { callerId: "do:parent", callerKind: "do" },
     });
-    const firstApi = (await activate(firstCtx.ctx as never)).providerContracts.claudeCode;
+    const firstApi = (await activate(firstCtx.ctx as never)).providerContracts
+      .claudeCode;
     const result = await firstApi.launchSubagent({
       channelId: CHANNEL,
       subagent: {
@@ -716,11 +825,15 @@ describe("@workspace-extensions/claude-code prepare", () => {
     expect(existsSync(path.dirname(result.logPath))).toBe(true);
 
     const restarted = makeCtx(tmpRoot, storage);
-    const restartedApi = (await activate(restarted.ctx as never)).providerContracts.claudeCode;
-    await restartedApi.release({ entityId: result.entityId, generationId: result.generationId });
+    const restartedApi = (await activate(restarted.ctx as never))
+      .providerContracts.claudeCode;
+    await restartedApi.release({
+      entityId: result.entityId,
+      generationId: result.generationId,
+    });
 
     expect(processOwnerApiMock.adopt).toHaveBeenCalledWith(
-      expect.objectContaining({ pid: 4242, startCoordinate: "test-start" })
+      expect.objectContaining({ pid: 4242, startCoordinate: "test-start" }),
     );
     expect(restarted.revoked).toContain(agentId(1));
     expect(existsSync(path.dirname(result.logPath))).toBe(false);
@@ -760,7 +873,10 @@ describe("@workspace-extensions/claude-code prepare", () => {
       },
     });
 
-    const [, args] = childProcessMock.spawn.mock.calls[0]! as unknown as [string, string[]];
+    const [, args] = childProcessMock.spawn.mock.calls[0]! as unknown as [
+      string,
+      string[],
+    ];
     expect(args.slice(-16)).toEqual([
       "--permission-mode",
       "acceptEdits",
@@ -803,10 +919,9 @@ describe("@workspace-extensions/claude-code prepare", () => {
     };
     const result = await api.launchSubagent({ channelId: CHANNEL, subagent });
 
-    const exitHandler = childProcessMock.child.once.mock.calls.find((c) => c[0] === "exit")![1] as (
-      code: number | null,
-      signal: string | null
-    ) => void;
+    const exitHandler = childProcessMock.child.once.mock.calls.find(
+      (c) => c[0] === "exit",
+    )![1] as (code: number | null, signal: string | null) => void;
 
     // The session died on its own → the vessel is told so the run settles.
     exitHandler(1, null);
@@ -815,18 +930,22 @@ describe("@workspace-extensions/claude-code prepare", () => {
         api.inspectLaunch({
           entityId: result.entityId,
           generationId: result.generationId,
-        })
+        }),
       ).toMatchObject({
         state: "exited",
         exit: { code: 1, signal: null },
         log: { bytes: 0, tail: "", truncated: false },
-      })
+      }),
     );
-    const report = rpcCall.mock.calls.find((c) => c[1] === "reportExternalExit");
+    const report = rpcCall.mock.calls.find(
+      (c) => c[1] === "reportExternalExit",
+    );
     expect(report).toBeDefined();
     expect(report![0]).toBe(result.vesselRef);
     expect(report![2]).toEqual({ runId: "run-1", code: 1, signal: null });
-    await vi.waitFor(() => expect(existsSync(path.dirname(result.logPath))).toBe(false));
+    await vi.waitFor(() =>
+      expect(existsSync(path.dirname(result.logPath))).toBe(false),
+    );
     expect(revoked).toContain(agentId(1));
 
     // Relaunch, then a deliberate release-kill: no exit report.
@@ -842,10 +961,12 @@ describe("@workspace-extensions/claude-code prepare", () => {
       generationId: relaunched.generationId,
     });
     const exitHandler2 = childProcessMock.child.once.mock.calls.find(
-      (c) => c[0] === "exit"
+      (c) => c[0] === "exit",
     )![1] as (code: number | null, signal: string | null) => void;
     exitHandler2(null, "SIGTERM");
-    expect(rpcCall.mock.calls.find((c) => c[1] === "reportExternalExit")).toBeUndefined();
+    expect(
+      rpcCall.mock.calls.find((c) => c[1] === "reportExternalExit"),
+    ).toBeUndefined();
   });
 
   it("settles a successful headless process from its typed stream result", async () => {
@@ -877,18 +998,21 @@ describe("@workspace-extensions/claude-code prepare", () => {
         subtype: "success",
         is_error: false,
         result: "one concrete finding",
-      })}\n`
+      })}\n`,
     );
-    const exitHandler = childProcessMock.child.once.mock.calls.find((c) => c[0] === "exit")![1] as (
-      code: number | null,
-      signal: string | null
-    ) => void;
+    const exitHandler = childProcessMock.child.once.mock.calls.find(
+      (c) => c[0] === "exit",
+    )![1] as (code: number | null, signal: string | null) => void;
     exitHandler(0, null);
 
     await vi.waitFor(() =>
-      expect(rpcCall.mock.calls.find((c) => c[1] === "reportExternalResult")).toBeDefined()
+      expect(
+        rpcCall.mock.calls.find((c) => c[1] === "reportExternalResult"),
+      ).toBeDefined(),
     );
-    const report = rpcCall.mock.calls.find((c) => c[1] === "reportExternalResult");
+    const report = rpcCall.mock.calls.find(
+      (c) => c[1] === "reportExternalResult",
+    );
     expect(report?.[0]).toBe(result.vesselRef);
     expect(report?.[2]).toEqual({
       runId: "run-success",
@@ -896,9 +1020,14 @@ describe("@workspace-extensions/claude-code prepare", () => {
       report: "one concrete finding",
       code: 0,
     });
-    expect(rpcCall.mock.calls.find((c) => c[1] === "reportExternalExit")).toBeUndefined();
     expect(
-      api.inspectLaunch({ entityId: result.entityId, generationId: result.generationId })
+      rpcCall.mock.calls.find((c) => c[1] === "reportExternalExit"),
+    ).toBeUndefined();
+    expect(
+      api.inspectLaunch({
+        entityId: result.entityId,
+        generationId: result.generationId,
+      }),
     ).toMatchObject({
       state: "exited",
       completion: {
@@ -932,7 +1061,7 @@ describe("@workspace-extensions/claude-code prepare", () => {
           parentParticipantId: "agent:parent",
           depth: 1,
         },
-      })
+      }),
     ).rejects.toThrow(/parent agent vessel/);
     expect(childProcessMock.spawn).not.toHaveBeenCalled();
   });

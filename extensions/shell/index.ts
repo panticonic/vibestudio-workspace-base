@@ -8,7 +8,11 @@ import { prepareVscodeShellIntegrationLaunch } from "./shellIntegrationEnv.js";
 import { SnugServer } from "./snugServer.js";
 import { nodeSetInterval } from "./nodeTimers.js";
 import { detectAgent } from "./detectAgent.js";
-import { createContextRequestSchema, execRequestSchema, openRequestSchema } from "./types.js";
+import {
+  createContextRequestSchema,
+  execRequestSchema,
+  openRequestSchema,
+} from "./types.js";
 
 const BLOCKED_ENV = /^(LD_PRELOAD|NODE_OPTIONS|PYTHONSTARTUP|SHELL)$|^DYLD_/;
 const SCRATCH_LIMIT_BYTES = 25 * 1024 * 1024;
@@ -94,9 +98,16 @@ function scratchFilename(ext: string): string {
   return `${stamp}-${suffix}.${normalizeScratchExt(ext)}`;
 }
 
-function currentOwner(ctx: ExtensionContext): { callerId: string; callerKind: string } {
+function currentOwner(ctx: ExtensionContext): {
+  callerId: string;
+  callerKind: string;
+} {
   const caller = ctx.invocation.current()?.caller;
-  if (!caller) throw error("ENOCALLER", "shell extension requires a panel or worker caller");
+  if (!caller)
+    throw error(
+      "ENOCALLER",
+      "shell extension requires a panel or worker caller",
+    );
   return { callerId: caller.callerId, callerKind: caller.callerKind };
 }
 
@@ -116,7 +127,7 @@ declare module "@vibestudio/extension" {
 /** Build a compact semantic-state label for a context-scoped session. */
 async function contextRevisionDisplay(
   ctx: ExtensionContext,
-  contextId: string
+  contextId: string,
 ): Promise<string | undefined> {
   try {
     const status = await ctx.rpc.call<{
@@ -125,20 +136,23 @@ async function contextRevisionDisplay(
         | { kind: "application"; applicationId: string };
       workingCounts: { workUnits: number };
     }>("main", "vcs.status", { contextId });
-    const short = contextId.length > 12 ? `${contextId.slice(0, 8)}…` : contextId;
+    const short =
+      contextId.length > 12 ? `${contextId.slice(0, 8)}…` : contextId;
     const head =
       status.workingHead.kind === "event"
         ? status.workingHead.eventId
         : status.workingHead.applicationId;
     const work = status.workingCounts.workUnits;
-    return `ctx:${short} @ ${head.slice(0, 10)}${work > 0 ? ` · ${work} work` : ""}`.slice(0, 120);
+    return `ctx:${short} @ ${head.slice(0, 10)}${work > 0 ? ` · ${work} work` : ""}`.slice(
+      0,
+      120,
+    );
   } catch {
     return undefined;
   }
 }
 
 export async function activate(ctx: ExtensionContext) {
-  const workspace = await ctx.workspace.getInfo();
   const freshContextTokens = new Map<
     string,
     { contextId: string; callerId: string; expiresAt: number }
@@ -155,15 +169,16 @@ export async function activate(ctx: ExtensionContext) {
     },
     {
       detectAgent,
-      resolveContextRevision: (contextId) => contextRevisionDisplay(ctx, contextId),
-    }
+      resolveContextRevision: (contextId) =>
+        contextRevisionDisplay(ctx, contextId),
+    },
   );
   // Resolve the cwd-confinement root for a request: the context's materialized
   // working folder when contextId is set (§4.1), else the workspace root.
   const confinementRoot = async (contextId?: string): Promise<string> => {
-    if (!contextId) return workspace.path;
-    const { dir } = await ctx.workspace.ensureContextFolder(contextId);
-    return dir;
+    if (!contextId) return ctx.storage.root;
+    const { scratch } = await ctx.workspace.ensureContextFolder(contextId);
+    return scratch;
   };
   const pruneFreshContextTokens = () => {
     const now = Date.now();
@@ -171,7 +186,10 @@ export async function activate(ctx: ExtensionContext) {
       if (claim.expiresAt <= now) freshContextTokens.delete(token);
     }
   };
-  const mintFreshContextToken = (callerId: string, contextId: string): string => {
+  const mintFreshContextToken = (
+    callerId: string,
+    contextId: string,
+  ): string => {
     pruneFreshContextTokens();
     const token = randomUUID();
     freshContextTokens.set(token, {
@@ -184,12 +202,13 @@ export async function activate(ctx: ExtensionContext) {
   const consumeFreshContextToken = (
     token: string | undefined,
     callerId: string,
-    contextId: string
+    contextId: string,
   ): boolean => {
     if (!token) return false;
     pruneFreshContextTokens();
     const claim = freshContextTokens.get(token);
-    if (!claim || claim.callerId !== callerId || claim.contextId !== contextId) return false;
+    if (!claim || claim.callerId !== callerId || claim.contextId !== contextId)
+      return false;
     freshContextTokens.delete(token);
     return true;
   };
@@ -197,17 +216,24 @@ export async function activate(ctx: ExtensionContext) {
     _operation: "exec" | "open",
     contextId: string | undefined,
     contextAttachToken: string | undefined,
-    owner: { callerId: string; callerKind: string }
+    owner: { callerId: string; callerKind: string },
   ): Promise<void> => {
     if (!contextId) return;
     if (currentInvocationContextId(ctx) === contextId) return;
-    if (consumeFreshContextToken(contextAttachToken, owner.callerId, contextId)) return;
-    if (sessions.list(owner.callerId).some((session) => session.contextId === contextId)) return;
+    if (consumeFreshContextToken(contextAttachToken, owner.callerId, contextId))
+      return;
+    if (
+      sessions
+        .list(owner.callerId)
+        .some((session) => session.contextId === contextId)
+    )
+      return;
     // The context receiver independently enforces context-boundary authority.
   };
   snug = new SnugServer({
     list: (ownerCallerId) => sessions.list(ownerCallerId),
-    setMeta: (sessionId, key, value) => sessions.setMetaById(sessionId, key, value),
+    setMeta: (sessionId, key, value) =>
+      sessions.setMetaById(sessionId, key, value),
     getMeta: (sessionId, key) => sessions.getMetaById(sessionId, key),
     deleteMeta: (sessionId, key) => sessions.deleteMetaById(sessionId, key),
     setLabel: (sessionId, label) => sessions.setLabelById(sessionId, label),
@@ -216,9 +242,11 @@ export async function activate(ctx: ExtensionContext) {
     openSplit: async (sourceSessionId, direction, commandLine) => {
       const owner = sessions.ownerFor(sourceSessionId);
       if (!owner) throw error("ENOENT", "Unknown source session");
-      const cwd = sessions.cwdOf(sourceSessionId) ?? workspace.path;
+      const cwd = sessions.cwdOf(sourceSessionId) ?? ctx.storage.root;
       const contextId = sessions.contextIdOf(sourceSessionId);
-      const command = commandLine ? "/bin/sh" : (process.env["SHELL"] ?? "/bin/bash");
+      const command = commandLine
+        ? "/bin/sh"
+        : (process.env["SHELL"] ?? "/bin/bash");
       const args = commandLine ? ["-c", commandLine] : [];
       ctx.log.info?.("snug category-c request", {
         action: "split",
@@ -248,7 +276,7 @@ export async function activate(ctx: ExtensionContext) {
             label: commandLine ?? "Shell",
             ...(contextId ? { contextId } : {}),
           },
-          owner
+          owner,
         );
         snug.register(snugEnv.token, result.sessionId);
         sessions.setMetaById(result.sessionId, "snugSpawn", {
@@ -262,7 +290,8 @@ export async function activate(ctx: ExtensionContext) {
       }
     },
     openUrl: async (_sessionId, url) => {
-      if (!/^https?:\/\//.test(url)) throw error("EINVAL", "snug open only supports http(s) URLs");
+      if (!/^https?:\/\//.test(url))
+        throw error("EINVAL", "snug open only supports http(s) URLs");
       const owner = sessions.ownerFor(_sessionId);
       if (!owner) throw error("ENOENT", "Unknown source session");
       ctx.log.info?.("snug category-c request", {
@@ -279,11 +308,11 @@ export async function activate(ctx: ExtensionContext) {
     },
   });
   await snug.start();
-  const scratchDir = path.join(workspace.path, ".snug", "scratch");
+  const scratchDir = path.join(ctx.storage.root, ".snug", "scratch");
   void sweepScratch(scratchDir);
   const scratchJanitor = nodeSetInterval(
     () => void sweepScratch(scratchDir),
-    SCRATCH_JANITOR_INTERVAL_MS
+    SCRATCH_JANITOR_INTERVAL_MS,
   );
   scratchJanitor.unref?.();
   if (sessions.ptyAvailable) {
@@ -309,17 +338,24 @@ export async function activate(ctx: ExtensionContext) {
           execution: { surface: "inert" },
           source: "terminal",
           title: parsed?.title ?? "Terminal context",
-        }
+        },
       );
       const entityId = typeof handle?.id === "string" ? handle.id : undefined;
       const contextId =
         typeof handle?.contextId === "string"
           ? handle.contextId
           : entityId
-            ? await ctx.rpc.call<string | null>("main", "runtime.resolveContext", entityId)
+            ? await ctx.rpc.call<string | null>(
+                "main",
+                "runtime.resolveContext",
+                entityId,
+              )
             : null;
       if (!contextId) throw error("EIO", "Failed to resolve new context id");
-      return { contextId, contextAttachToken: mintFreshContextToken(owner.callerId, contextId) };
+      return {
+        contextId,
+        contextAttachToken: mintFreshContextToken(owner.callerId, contextId),
+      };
     },
 
     async exec(raw: unknown) {
@@ -329,7 +365,7 @@ export async function activate(ctx: ExtensionContext) {
         "exec",
         parsed.contextId,
         parsed.contextAttachToken,
-        owner
+        owner,
       );
       const root = await confinementRoot(parsed.contextId);
       const cwd = resolveWithin(root, parsed.cwd);
@@ -358,7 +394,7 @@ export async function activate(ctx: ExtensionContext) {
         "open",
         parsed.contextId,
         parsed.contextAttachToken,
-        owner
+        owner,
       );
       const root = await confinementRoot(parsed.contextId);
       const cwd = resolveWithin(root, parsed.cwd);
@@ -374,7 +410,9 @@ export async function activate(ctx: ExtensionContext) {
       } = parsed;
       let snugToken: string | undefined;
       try {
-        const { env, token } = snug.envForSession(cleanEnv(parsed.env).effective);
+        const { env, token } = snug.envForSession(
+          cleanEnv(parsed.env).effective,
+        );
         snugToken = token;
         const launch = await prepareVscodeShellIntegrationLaunch({
           command,
@@ -388,12 +426,14 @@ export async function activate(ctx: ExtensionContext) {
             args: launch.args,
             // Shell-integration rewrites are transport details. Never turn
             // their generated init-script paths into the user-facing name.
-            label: parsed.label ?? (parsed.command ? [command, ...args].join(" ") : "Shell"),
+            label:
+              parsed.label ??
+              (parsed.command ? [command, ...args].join(" ") : "Shell"),
             cwd,
             env: launch.env,
             ...(parsed.contextId ? { contextId: parsed.contextId } : {}),
           },
-          owner
+          owner,
         );
         snug.register(token, result.sessionId);
         return result;
@@ -416,7 +456,10 @@ export async function activate(ctx: ExtensionContext) {
     },
 
     async restart(sessionId: string, opts?: { cols?: number; rows?: number }) {
-      const session = sessions.requireOwner(sessionId, currentOwner(ctx).callerId);
+      const session = sessions.requireOwner(
+        sessionId,
+        currentOwner(ctx).callerId,
+      );
       const snugEnv = snug.envForSession(cleanEnv({}).effective);
       try {
         const [command, ...args] = session.command.argv;
@@ -441,24 +484,34 @@ export async function activate(ctx: ExtensionContext) {
     },
 
     async write(sessionId: string, data: string) {
-      sessions.write(sessions.requireOwner(sessionId, currentOwner(ctx).callerId), data);
+      sessions.write(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+        data,
+      );
     },
 
     async acknowledgeDataEvent(sessionId: string, charCount: number) {
       sessions.acknowledgeDataEvent(
         sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
-        charCount
+        charCount,
       );
     },
 
     async resize(sessionId: string, cols: number, rows: number) {
-      sessions.resize(sessions.requireOwner(sessionId, currentOwner(ctx).callerId), cols, rows);
+      sessions.resize(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+        cols,
+        rows,
+      );
     },
 
-    async kill(sessionId: string, signal?: "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP") {
+    async kill(
+      sessionId: string,
+      signal?: "SIGINT" | "SIGTERM" | "SIGKILL" | "SIGHUP",
+    ) {
       sessions.kill(
         sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
-        signal ?? "SIGTERM"
+        signal ?? "SIGTERM",
       );
     },
 
@@ -467,15 +520,21 @@ export async function activate(ctx: ExtensionContext) {
     },
 
     async get(sessionId: string) {
-      return sessions.info(sessions.requireOwner(sessionId, currentOwner(ctx).callerId));
+      return sessions.info(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+      );
     },
 
     async getSessionInfo(sessionId: string) {
-      return sessions.info(sessions.requireOwner(sessionId, currentOwner(ctx).callerId));
+      return sessions.info(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+      );
     },
 
     async watchSessionInfo(sessionId: string) {
-      return sessions.watchInfo(sessions.requireOwner(sessionId, currentOwner(ctx).callerId));
+      return sessions.watchInfo(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+      );
     },
 
     async watchAllSessionInfo() {
@@ -483,65 +542,95 @@ export async function activate(ctx: ExtensionContext) {
     },
 
     async attach(sessionId: string, opts?: { after?: string }) {
-      return sessions.attach(sessions.requireOwner(sessionId, currentOwner(ctx).callerId), opts);
+      return sessions.attach(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+        opts,
+      );
     },
 
     async awaitExit(sessionId: string) {
-      return sessions.awaitExit(sessions.requireOwner(sessionId, currentOwner(ctx).callerId));
+      return sessions.awaitExit(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+      );
     },
 
     async getScrollback(sessionId: string, maxBytes?: number) {
       return sessions.getScrollback(
         sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
-        maxBytes
+        maxBytes,
       );
     },
 
     async setScrollbackLimit(sessionId: string, maxBytes: number) {
       sessions.setScrollbackLimit(
         sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
-        maxBytes
+        maxBytes,
       );
     },
 
     async clearScrollback(sessionId: string) {
-      sessions.clearScrollback(sessions.requireOwner(sessionId, currentOwner(ctx).callerId));
+      sessions.clearScrollback(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+      );
     },
 
     async stashScratch(bytes: Uint8Array, ext: string) {
       currentOwner(ctx);
-      const payload = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
-      if (payload.byteLength === 0) throw error("EINVAL", "Cannot stash an empty file");
+      const payload =
+        bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+      if (payload.byteLength === 0)
+        throw error("EINVAL", "Cannot stash an empty file");
       if (payload.byteLength > SCRATCH_LIMIT_BYTES)
         throw error("E2BIG", "Scratch file exceeds 25MB limit");
       await mkdir(scratchDir, { recursive: true });
       const filename = scratchFilename(ext);
       const absolutePath = path.join(scratchDir, filename);
       await writeFile(absolutePath, payload);
-      return { absolutePath, workspaceRelative: path.relative(workspace.path, absolutePath) };
+      return {
+        absolutePath,
+        workspaceRelative: path.relative(ctx.storage.root, absolutePath),
+      };
     },
 
     async setMeta(sessionId: string, key: string, value: unknown) {
-      if (isReservedMetaKey(key)) throw error("EACCES", `Reserved shell metadata key: ${key}`);
-      sessions.setMeta(sessions.requireOwner(sessionId, currentOwner(ctx).callerId), key, value);
+      if (isReservedMetaKey(key))
+        throw error("EACCES", `Reserved shell metadata key: ${key}`);
+      sessions.setMeta(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+        key,
+        value,
+      );
     },
 
     async getMeta(sessionId: string, key?: string) {
-      return sessions.getMeta(sessions.requireOwner(sessionId, currentOwner(ctx).callerId), key);
+      return sessions.getMeta(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+        key,
+      );
     },
 
     async deleteMeta(sessionId: string, key: string) {
-      if (isReservedMetaKey(key)) throw error("EACCES", `Reserved shell metadata key: ${key}`);
-      sessions.deleteMeta(sessions.requireOwner(sessionId, currentOwner(ctx).callerId), key);
+      if (isReservedMetaKey(key))
+        throw error("EACCES", `Reserved shell metadata key: ${key}`);
+      sessions.deleteMeta(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+        key,
+      );
     },
 
     async setLabel(sessionId: string, label: string) {
-      sessions.setLabel(sessions.requireOwner(sessionId, currentOwner(ctx).callerId), label);
+      sessions.setLabel(
+        sessions.requireOwner(sessionId, currentOwner(ctx).callerId),
+        label,
+      );
     },
   };
 }
 
-export async function sweepScratch(scratchDir: string, now = Date.now()): Promise<void> {
+export async function sweepScratch(
+  scratchDir: string,
+  now = Date.now(),
+): Promise<void> {
   let entries: string[];
   try {
     entries = await readdir(scratchDir);
@@ -558,6 +647,6 @@ export async function sweepScratch(scratchDir: string, now = Date.now()): Promis
       } catch {
         // Best-effort cleanup only.
       }
-    })
+    }),
   );
 }

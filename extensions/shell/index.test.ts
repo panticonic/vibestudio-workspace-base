@@ -6,7 +6,9 @@ import type { ExtensionContext } from "@vibestudio/extension";
 import { activate } from "./index.js";
 import type { SessionInfoEvent } from "./types.js";
 
-async function makeApi(approval: "allow" | "deny" | Array<"allow" | "deny"> = "allow") {
+async function makeApi(
+  approval: "allow" | "deny" | Array<"allow" | "deny"> = "allow",
+) {
   const root = await mkdtemp(join(tmpdir(), "vibestudio-shell-test-"));
   void approval;
   const log = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
@@ -14,19 +16,24 @@ async function makeApi(approval: "allow" | "deny" | Array<"allow" | "deny"> = "a
   const ensureContextFolder = vi.fn(async (contextId: string) => {
     const dir = join(root, ".context-projections", "v5", contextId);
     await mkdir(dir, { recursive: true });
-    return { dir };
+    return { source: `${dir}-source`, scratch: dir };
   });
   const rpcCall = vi.fn(
-    async (_target: string, _method: string, ..._args: unknown[]) => [] as unknown
+    async (_target: string, _method: string, ..._args: unknown[]) =>
+      [] as unknown,
   );
-  const invoke = vi.fn(async (_name: string, _method: string, _args: unknown[]) => null as unknown);
+  const invoke = vi.fn(
+    async (_name: string, _method: string, _args: unknown[]) => null as unknown,
+  );
   const invokeProvider = vi.fn(
-    async (_provider: string, _method: string, _args: unknown[]) => null as unknown
+    async (_provider: string, _method: string, _args: unknown[]) =>
+      null as unknown,
   );
   const invocationCurrent = vi.fn(() => ({
     caller: { callerId: "panel:test", callerKind: "panel" },
   }));
   const ctx = {
+    storage: { root },
     workspace: {
       getInfo: async () => ({
         id: "ws",
@@ -46,7 +53,12 @@ async function makeApi(approval: "allow" | "deny" | Array<"allow" | "deny"> = "a
       reload: vi.fn(),
     },
     rpc: { call: rpcCall, stream: vi.fn(), on: vi.fn() },
-    health: { healthy: vi.fn(), degraded: vi.fn(), unhealthy: vi.fn(), report: vi.fn() },
+    health: {
+      healthy: vi.fn(),
+      degraded: vi.fn(),
+      unhealthy: vi.fn(),
+      report: vi.fn(),
+    },
     log,
   } as unknown as ExtensionContext;
   return {
@@ -65,7 +77,7 @@ describe("@workspace-extensions/shell", () => {
   it("rejects cwd escapes before execution", async () => {
     const { api } = await makeApi();
     await expect(
-      api.exec({ intent: { kind: "argv", executable: "pwd" }, cwd: "../../" })
+      api.exec({ intent: { kind: "argv", executable: "pwd" }, cwd: "../../" }),
     ).rejects.toMatchObject({ code: "EACCES" });
   });
 
@@ -99,21 +111,27 @@ describe("@workspace-extensions/shell", () => {
   it("rejects the removed command/args/shell exec shape", async () => {
     const { api } = await makeApi("allow");
     await expect(
-      api.exec({ command: "echo", args: ["legacy"], shell: true } as never)
+      api.exec({ command: "echo", args: ["legacy"], shell: true } as never),
     ).rejects.toThrow();
   });
 
   it("stashes scratch files inside the workspace with a hard size cap", async () => {
     const { api, root } = await makeApi("allow");
     const result = await api.stashScratch(new Uint8Array([1, 2, 3]), "png");
-    expect(result.absolutePath.startsWith(join(root, ".snug", "scratch"))).toBe(true);
+    expect(result.absolutePath.startsWith(join(root, ".snug", "scratch"))).toBe(
+      true,
+    );
     expect(result.workspaceRelative.startsWith(".snug/scratch/")).toBe(true);
-    await expect(readFile(result.absolutePath)).resolves.toEqual(Buffer.from([1, 2, 3]));
-    await expect(api.stashScratch(new Uint8Array(), "png")).rejects.toMatchObject({
+    await expect(readFile(result.absolutePath)).resolves.toEqual(
+      Buffer.from([1, 2, 3]),
+    );
+    await expect(
+      api.stashScratch(new Uint8Array(), "png"),
+    ).rejects.toMatchObject({
       code: "EINVAL",
     });
     await expect(
-      api.stashScratch(new Uint8Array(25 * 1024 * 1024 + 1), "png")
+      api.stashScratch(new Uint8Array(25 * 1024 * 1024 + 1), "png"),
     ).rejects.toMatchObject({ code: "E2BIG" });
   });
 
@@ -131,7 +149,8 @@ describe("@workspace-extensions/shell", () => {
     const reader = response.body!.getReader();
     const first = await readEvent(reader);
     expect(first.type).toBe("snapshot-batch");
-    if (first.type !== "snapshot-batch") throw new Error(`unexpected event ${first.type}`);
+    if (first.type !== "snapshot-batch")
+      throw new Error(`unexpected event ${first.type}`);
     expect(first.sessions).toEqual([]);
 
     const opened = api.open({
@@ -140,7 +159,8 @@ describe("@workspace-extensions/shell", () => {
     });
     const openedEvent = await readEvent(reader);
     expect(openedEvent.type).toBe("opened");
-    if (openedEvent.type !== "opened") throw new Error(`unexpected event ${openedEvent.type}`);
+    if (openedEvent.type !== "opened")
+      throw new Error(`unexpected event ${openedEvent.type}`);
     const { sessionId } = await opened;
     expect(openedEvent.sessionId).toBe(sessionId);
 
@@ -157,10 +177,12 @@ describe("@workspace-extensions/shell", () => {
         break;
       }
     }
-    expect(snapshot && "info" in snapshot ? snapshot.info : null).toMatchObject({
-      detectedPorts: [5173],
-      detectedUrls: ["http://localhost:5173"],
-    });
+    expect(snapshot && "info" in snapshot ? snapshot.info : null).toMatchObject(
+      {
+        detectedPorts: [5173],
+        detectedUrls: ["http://localhost:5173"],
+      },
+    );
     await reader.cancel();
   });
 
@@ -175,12 +197,16 @@ describe("@workspace-extensions/shell", () => {
     expect(beforeClear.text).toContain("one");
 
     await api.setMeta(sessionId, "badge", { text: "1" });
-    await expect(api.getMeta(sessionId, "badge")).resolves.toEqual({ text: "1" });
+    await expect(api.getMeta(sessionId, "badge")).resolves.toEqual({
+      text: "1",
+    });
     await api.deleteMeta(sessionId, "badge");
     await expect(api.getMeta(sessionId, "badge")).resolves.toBeUndefined();
 
     await api.clearScrollback(sessionId);
-    await expect(api.getScrollback(sessionId)).resolves.toMatchObject({ text: "" });
+    await expect(api.getScrollback(sessionId)).resolves.toMatchObject({
+      text: "",
+    });
     await api.setScrollbackLimit(sessionId, 1024 * 1024);
 
     const restarted = await api.restart(sessionId);
@@ -202,12 +228,16 @@ describe("@workspace-extensions/shell", () => {
         id: "spoof",
         url: "https://spoof.test",
         requestedAt: 1,
-      })
+      }),
     ).rejects.toMatchObject({ code: "EACCES" });
-    await expect(api.deleteMeta(sessionId, "snugOpenUrl")).rejects.toMatchObject({
+    await expect(
+      api.deleteMeta(sessionId, "snugOpenUrl"),
+    ).rejects.toMatchObject({
       code: "EACCES",
     });
-    await expect(api.getMeta(sessionId, "snugOpenUrl")).resolves.toBeUndefined();
+    await expect(
+      api.getMeta(sessionId, "snugOpenUrl"),
+    ).resolves.toBeUndefined();
   });
 
   it("coalesces bulk stream snapshots while keeping lifecycle events immediate", async () => {
@@ -250,7 +280,10 @@ describe("@workspace-extensions/shell", () => {
     expect(scrollback.text).toContain("1337;snug");
     expect(info.label).toBe("renamed");
     await expect(api.getMeta(sessionId, "mood")).resolves.toEqual({ ok: true });
-    await expect(api.getMeta(sessionId, "badge")).resolves.toEqual({ text: "7", color: "amber" });
+    await expect(api.getMeta(sessionId, "badge")).resolves.toEqual({
+      text: "7",
+      color: "amber",
+    });
   });
 
   it("allocates isolated snug sockets and unlinks them when sessions exit", async () => {
@@ -266,8 +299,12 @@ describe("@workspace-extensions/shell", () => {
     await api.awaitExit(first.sessionId);
     await api.awaitExit(second.sessionId);
 
-    const firstSocket = socketPathFrom((await api.getScrollback(first.sessionId)).text);
-    const secondSocket = socketPathFrom((await api.getScrollback(second.sessionId)).text);
+    const firstSocket = socketPathFrom(
+      (await api.getScrollback(first.sessionId)).text,
+    );
+    const secondSocket = socketPathFrom(
+      (await api.getScrollback(second.sessionId)).text,
+    );
 
     expect(firstSocket).toBeTruthy();
     expect(secondSocket).toBeTruthy();
@@ -281,7 +318,10 @@ describe("@workspace-extensions/shell", () => {
     const { api } = await makeApi("allow");
     const { sessionId } = await api.open({
       command: "/bin/sh",
-      args: ["-lc", 'test -n "$SNUG_SOCK" && test -z "${SNUG_TOKEN:-}" && snug version'],
+      args: [
+        "-lc",
+        'test -n "$SNUG_SOCK" && test -z "${SNUG_TOKEN:-}" && snug version',
+      ],
     });
     await api.awaitExit(sessionId);
     const scrollback = await api.getScrollback(sessionId);
@@ -294,7 +334,10 @@ describe("@workspace-extensions/shell", () => {
     const { api } = await makeApi("allow");
     const { sessionId } = await api.open({ command: "/bin/bash" });
 
-    await api.write(sessionId, "cd /tmp\nprintf 'vibestudio-shell-integration-proof\\n'\nexit\n");
+    await api.write(
+      sessionId,
+      "cd /tmp\nprintf 'vibestudio-shell-integration-proof\\n'\nexit\n",
+    );
     await api.awaitExit(sessionId);
     const scrollback = await api.getScrollback(sessionId, 1024 * 1024);
 
@@ -315,7 +358,10 @@ describe("@workspace-extensions/shell", () => {
       "c.on('data', (chunk) => data += chunk);",
       "c.on('end', () => process.stdout.write(data));",
     ].join(" ");
-    const { sessionId } = await api.open({ command: "node", args: ["-e", staleClient] });
+    const { sessionId } = await api.open({
+      command: "node",
+      args: ["-e", staleClient],
+    });
     await api.awaitExit(sessionId);
     const scrollback = await api.getScrollback(sessionId);
 
@@ -335,9 +381,13 @@ describe("@workspace-extensions/shell", () => {
     await api.awaitExit(sessionId);
     const scrollback = await api.getScrollback(sessionId);
 
-    expect(scrollback.text).toContain("reserved snug metadata key: snugOpenUrl");
+    expect(scrollback.text).toContain(
+      "reserved snug metadata key: snugOpenUrl",
+    );
     expect(scrollback.text).toContain("rejected");
-    await expect(api.getMeta(sessionId, "snugOpenUrl")).resolves.toBeUndefined();
+    await expect(
+      api.getMeta(sessionId, "snugOpenUrl"),
+    ).resolves.toBeUndefined();
   });
 
   it("lets snug clear a tab badge", async () => {
@@ -386,7 +436,9 @@ describe("@workspace-extensions/shell", () => {
     });
     await api.awaitExit(sessionId);
     const sessions = await api.list();
-    const child = sessions.find((item) => item.sessionId !== sessionId && item.meta["snugSpawn"]);
+    const child = sessions.find(
+      (item) => item.sessionId !== sessionId && item.meta["snugSpawn"],
+    );
     expect(child?.meta["snugSpawn"]).toMatchObject({
       parentSessionId: sessionId,
       direction: "row",
@@ -418,7 +470,10 @@ describe("@workspace-extensions/shell", () => {
     });
     await api.awaitExit(sessionId);
     const info = await api.get(sessionId);
-    expect(info.detectedAgent).toEqual({ kind: "claude-code", title: "Claude Code" });
+    expect(info.detectedAgent).toEqual({
+      kind: "claude-code",
+      title: "Claude Code",
+    });
   });
 
   it("does not infer an agent from labels or arbitrary arguments", async () => {
@@ -444,13 +499,16 @@ describe("@workspace-extensions/shell", () => {
     expect(ensureContextFolder).toHaveBeenCalledWith("ctx-1");
     const info = await api.get(sessionId);
     expect(info.contextId).toBe("ctx-1");
-    expect(info.command.cwd).toBe(join(root, ".context-projections", "v5", "ctx-1"));
+    expect(info.command.cwd).toBe(
+      join(root, ".context-projections", "v5", "ctx-1"),
+    );
   });
 
   it("uses shell-created context tokens for the newly created context", async () => {
     const { api, ensureContextFolder, rpcCall } = await makeApi("allow");
     rpcCall.mockImplementation(async (_target: string, method: string) => {
-      if (method === "runtime.createEntity") return { id: "entity-new", contextId: "ctx-new" };
+      if (method === "runtime.createEntity")
+        return { id: "entity-new", contextId: "ctx-new" };
       if (method === "runtime.resolveContext") return "ctx-new";
       return [];
     });
@@ -495,11 +553,14 @@ describe("@workspace-extensions/shell", () => {
   });
 });
 
-const readerBuffers = new WeakMap<ReadableStreamDefaultReader<Uint8Array>, string>();
+const readerBuffers = new WeakMap<
+  ReadableStreamDefaultReader<Uint8Array>,
+  string
+>();
 
 async function readEvent(
   reader: ReadableStreamDefaultReader<Uint8Array>,
-  timeoutMs = 5000
+  timeoutMs = 5000,
 ): Promise<SessionInfoEvent> {
   const decoder = new TextDecoder();
   let buffer = readerBuffers.get(reader) ?? "";
@@ -514,7 +575,9 @@ async function readEvent(
     const remaining = Math.max(1, deadline - Date.now());
     const next = await Promise.race([
       reader.read(),
-      new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), remaining)),
+      new Promise<undefined>((resolve) =>
+        setTimeout(() => resolve(undefined), remaining),
+      ),
     ]);
     if (!next) break;
     const { value, done } = next;

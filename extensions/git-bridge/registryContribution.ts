@@ -147,10 +147,9 @@ export class RegistryContributionEngine {
           : undefined
       ),
     });
-    const info = await this.ctx.workspace.getInfo();
     return withTemporaryGitCheckout(
       fsp,
-      path.join(info.statePath, "git-checkouts", "_template-registry-contributions"),
+      path.join(this.ctx.storage.root, "git-checkouts", "_template-registry-contributions"),
       requestFingerprint,
       async (checkout) => {
         await git.clone({

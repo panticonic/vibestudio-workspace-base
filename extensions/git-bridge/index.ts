@@ -53,7 +53,7 @@ function createBridgeHost(ctx: ExtensionContextLike): BridgeHost {
   );
 
   return {
-    checkoutRoot: async () => gitCheckoutsPath((await ctx.workspace.getInfo()).statePath),
+    checkoutRoot: async () => gitCheckoutsPath(ctx.storage.root),
     ensureContext: async (contextId) => {
       await runtime.createContext({ contextId });
     },

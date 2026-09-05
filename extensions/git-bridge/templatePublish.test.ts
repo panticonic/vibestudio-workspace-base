@@ -109,6 +109,7 @@ function publicationInput(
 
 function testContext(root: string) {
   return {
+    storage: { root: path.join(root, "state") },
     workspace: {
       getInfo: vi.fn(async () => ({
         path: root,

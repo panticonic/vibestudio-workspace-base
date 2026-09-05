@@ -144,6 +144,7 @@ function fixture() {
     }),
   };
   const ctx = {
+    storage: { root: statePath },
     workspace: { getInfo: vi.fn(async () => ({ path: root, statePath, id: "ws-1" })) },
     credentials: { gitHttp: vi.fn(() => ({})) },
     rpc: semantic,

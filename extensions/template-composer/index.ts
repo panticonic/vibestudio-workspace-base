@@ -309,7 +309,7 @@ async function environment(
     return { info, observation };
   }
   const client = await createRegistryClient(ctx, {
-    statePath: info.statePath,
+    statePath: ctx.storage.root,
     systemEpoch: options.systemEpoch ?? observation.expectedSystemEpoch,
     registry,
   });
@@ -337,11 +337,11 @@ function sourcePortsForEnvironment(
   env: Environment,
 ): TemplateSourcePorts {
   if (env.catalog) {
-    return createTemplateSourcePorts(ctx, env.info.statePath, env.catalog);
+    return createTemplateSourcePorts(ctx, ctx.storage.root, env.catalog);
   }
   return {
     acquire: (pin, nodeId) =>
-      acquireTemplateSnapshot(ctx, env.info.statePath, pin, nodeId),
+      acquireTemplateSnapshot(ctx, ctx.storage.root, pin, nodeId),
     resolvePromoted: async (declaration) => {
       throw new Error(
         `Template dependency ${declaration.url} is not locked and requires a configured templates.registry`,
@@ -391,7 +391,7 @@ async function pinForLocator(
           ...(locator.credential ? { credential: locator.credential } : {}),
         }),
       )
-    : discoverDirectTemplatePin(ctx, env.info.statePath, {
+    : discoverDirectTemplatePin(ctx, ctx.storage.root, {
         url,
         ...(locator.credential ? { credential: locator.credential } : {}),
       });
@@ -451,7 +451,7 @@ async function resolveAddSource(
   const env = await environment(ctx);
   return {
     env,
-    pin: await discoverDirectTemplatePin(ctx, env.info.statePath, request),
+    pin: await discoverDirectTemplatePin(ctx, ctx.storage.root, request),
   };
 }
 
@@ -785,7 +785,7 @@ async function applyInspection(
   const response = { ...parts.response, ...operationFields(operation.record) };
   const ports = createTemplateOperationPorts(
     ctx,
-    env.info.statePath,
+    ctx.storage.root,
     env.observation,
     operation.record,
   );
@@ -931,7 +931,7 @@ async function resumePreparedOperation(
   );
   const ports = createTemplateOperationPorts(
     ctx,
-    env.info.statePath,
+    ctx.storage.root,
     env.observation,
     record,
   );
@@ -1563,7 +1563,7 @@ export async function activate(ctx: ExtensionContextLike) {
       );
       await acquireTemplateSnapshot(
         ctx,
-        env.info.statePath,
+        ctx.storage.root,
         WorkspaceTemplatePinSchema.parse({
           url: publicationUrl,
           ref: input.publication.ref,

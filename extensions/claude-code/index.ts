@@ -434,8 +434,7 @@ export async function activate(ctx: ExtensionContext) {
   }
 
   async function profilesRoot(): Promise<string> {
-    const workspace = await ctx.workspace.getInfo();
-    return path.join(workspace.statePath, "agent-launch");
+    return path.join(ctx.storage.root, "agent-launch");
   }
 
   function finalizeRecord(
@@ -1058,12 +1057,12 @@ export async function activate(ctx: ExtensionContext) {
         `Claude launch route belongs to workspace ${connection.workspaceId}, not ${workspace.id}`,
       );
     }
-    const { dir: contextFolder } = await ctx.workspace.ensureContextFolder(
+    const { scratch: contextFolder } = await ctx.workspace.ensureContextFolder(
       prepared.contextId,
     );
     const launch = await materializeClaudeLaunch({
       profile: prepared.profile,
-      profilesRoot: path.join(workspace.statePath, "agent-launch"),
+      profilesRoot: path.join(ctx.storage.root, "agent-launch"),
       cliRoute: {
         url: currentServerUrl(),
         serverId: connection.serverId,
