@@ -11,7 +11,7 @@ import {
 import { SafeAreaView } from "react-native-safe-area-context";
 import { Button } from "./ui/primitives";
 import { radius, spacing, type } from "../design/tokens";
-import type { StackNavigationProp } from "@react-navigation/stack";
+import type { StackNavigationProp } from "@workspace/mobile-navigation";
 import { useAtomValue, useSetAtom } from "jotai";
 import type { RootStackParamList } from "../navigation/RootNavigator";
 import { resetToNativeBootstrap } from "../services/auth";

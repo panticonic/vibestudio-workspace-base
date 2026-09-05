@@ -1,4 +1,4 @@
-import { createStackNavigator } from "@react-navigation/stack";
+import { createStackNavigator } from "@workspace/mobile-navigation";
 import { LoginScreen } from "../components/LoginScreen";
 
 declare const require: (moduleName: string) => unknown;

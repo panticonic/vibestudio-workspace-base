@@ -23,8 +23,7 @@ import {
   TextInput,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useNavigation } from "@react-navigation/native";
-import { useDrawerStatus } from "@react-navigation/drawer";
+import { useNavigation, useDrawerStatus } from "@workspace/mobile-navigation";
 import { useAtomValue, useSetAtom } from "jotai";
 import { panelTreeRevisionAtom, shellClientAtom } from "../state/shellClientAtom";
 import { themeColorsAtom } from "../state/themeAtoms";

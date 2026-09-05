@@ -8,7 +8,7 @@ import {
   Alert,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import type { StackNavigationProp } from "@react-navigation/stack";
+import type { StackNavigationProp } from "@workspace/mobile-navigation";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   clearShellCredential,

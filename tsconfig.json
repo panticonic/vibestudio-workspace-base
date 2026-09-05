@@ -343,6 +343,7 @@
     "**/dist",
     "**/node_modules",
     "apps/mobile/**/*",
+    "packages/mobile-navigation/**/*",
     "apps/mobile/jest.setup.ts",
     "apps/mobile/**/*.test.ts",
     "apps/mobile/**/*.test.tsx",

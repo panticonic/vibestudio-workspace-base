@@ -7,7 +7,7 @@ import { useEffect, useRef } from "react";
 import { AppRegistry, Appearance, Linking, StatusBar } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { NavigationContainer } from "@react-navigation/native";
+import { NavigationContainer } from "@workspace/mobile-navigation";
 import { Provider as JotaiProvider, useAtomValue, useSetAtom } from "jotai";
 import { APP_CAPABILITIES_BY_NATIVE_HOST } from "@vibestudio/shared/unitManifest";
 import { RootNavigator } from "./src/navigation/RootNavigator";

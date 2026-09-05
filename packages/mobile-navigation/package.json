@@ -1,0 +1,41 @@
+{
+  "name": "@workspace/mobile-navigation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Mobile navigation with a coordinated, patched URL-query dependency chain",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "vibestudio": {
+    "dependencyResolution": {
+      "overrides": {
+        "@react-navigation/core": "7.21.13",
+        "query-string": "^9.5.1"
+      },
+      "patches": {
+        "@react-navigation/core@7.21.13": {
+          "path": "patches/@react-navigation__core@7.21.13.patch",
+          "roots": [
+            "@react-navigation/native",
+            "@react-navigation/drawer",
+            "@react-navigation/stack"
+          ]
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "@react-navigation/native": "^7.3.18",
+    "@react-navigation/drawer": "^7.13.10",
+    "@react-navigation/stack": "^7.10.24"
+  },
+  "peerDependencies": {
+    "react": "~19.0.0",
+    "react-native": "^0.79.7",
+    "react-native-gesture-handler": "^2.30.1",
+    "react-native-reanimated": "^3.19.5",
+    "react-native-safe-area-context": "^5.7.0",
+    "react-native-screens": "~4.10.0"
+  }
+}

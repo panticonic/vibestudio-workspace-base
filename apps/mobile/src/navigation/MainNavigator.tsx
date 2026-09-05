@@ -8,7 +8,7 @@
 
 import { useCallback } from "react";
 import { useWindowDimensions } from "react-native";
-import { createDrawerNavigator } from "@react-navigation/drawer";
+import { createDrawerNavigator } from "@workspace/mobile-navigation";
 import { useAtomValue, useSetAtom } from "jotai";
 import { MainScreen } from "../components/MainScreen";
 import { PanelDrawer } from "../components/PanelDrawer";

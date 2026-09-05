@@ -11,8 +11,7 @@ import {
   Pressable,
   useWindowDimensions,
 } from "react-native";
-import { useNavigation, DrawerActions } from "@react-navigation/native";
-import { useDrawerStatus } from "@react-navigation/drawer";
+import { useNavigation, DrawerActions, useDrawerStatus } from "@workspace/mobile-navigation";
 import type { TemplateInstallResolution } from "@vibestudio/shared/authority/unitInstallReview";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { ConnectionBar } from "./ConnectionBar";
