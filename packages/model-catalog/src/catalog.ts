@@ -36,15 +36,27 @@ export const LOCAL_FALLBACK_MODEL_REF = LOCAL_FALLBACK_MODEL.ref;
 export const LOCAL_MODELS_EXTENSION_ID = "@workspace-extensions/local-models";
 
 /** Service tiers advertised by the current ChatGPT Codex model catalog. */
-export function modelServiceTiers(provider: string, modelId: string): Array<"priority"> {
+export function modelServiceTiers(
+  provider: string,
+  modelId: string,
+): Array<"priority"> {
   const supportsPriority =
     provider === "openai-codex" &&
-    (modelId.startsWith("gpt-5.6-") || modelId === "gpt-5.5" || modelId === "gpt-5.4");
+    (modelId === "gpt-6-astra" ||
+      modelId.startsWith("gpt-5.6-") ||
+      modelId === "gpt-5.5" ||
+      modelId === "gpt-5.4");
   return supportsPriority ? ["priority"] : [];
 }
 
 /** Enabled effort levels the agent harness accepts (excludes pi's "off"). */
-export type AgentThinkingLevel = "minimal" | "low" | "medium" | "high" | "xhigh" | "max";
+export type AgentThinkingLevel =
+  | "minimal"
+  | "low"
+  | "medium"
+  | "high"
+  | "xhigh"
+  | "max";
 
 /**
  * Workspace-wide defaults applied to NEW agents — model plus behavior. Persisted
@@ -92,7 +104,12 @@ export interface PiModelSpec {
   baseUrl: string;
   reasoning: boolean;
   input: Array<"text" | "image">;
-  cost: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+  };
   contextWindow: number;
   maxTokens: number;
   serviceTiers?: Array<"priority">;
@@ -123,7 +140,9 @@ export function piModelToSpec(model: PiModelInput): PiModelSpec {
     ...(model.streamIdleTimeoutMs !== undefined
       ? { streamIdleTimeoutMs: model.streamIdleTimeoutMs }
       : {}),
-    ...(model.thinkingLevelMap ? { thinkingLevelMap: { ...model.thinkingLevelMap } } : {}),
+    ...(model.thinkingLevelMap
+      ? { thinkingLevelMap: { ...model.thinkingLevelMap } }
+      : {}),
     ...(model.headers ? { headers: { ...model.headers } } : {}),
     ...(model.compat ? { compat: { ...model.compat } } : {}),
   };
@@ -134,7 +153,10 @@ export function piModelToSpec(model: PiModelInput): PiModelSpec {
  *  the deterministic inference runtime used by system tests. Local: extension
  *  server state via models.changed events. */
 export type ModelAvailability =
-  | { state: "ready"; detail?: "running" | "credentialed" | "deterministic-test" }
+  | {
+      state: "ready";
+      detail?: "running" | "credentialed" | "deterministic-test";
+    }
   | { state: "startable"; detail: "will-load-on-use" }
   | {
       state: "needs-setup";
@@ -204,9 +226,12 @@ export function defaultFastModeForModel(
 
 /** Whether a model can be assigned to an agent without another setup step. */
 export function isModelUsable(
-  model: Pick<ModelCatalogEntry, "availability"> | null | undefined
+  model: Pick<ModelCatalogEntry, "availability"> | null | undefined,
 ): boolean {
-  return model?.availability.state === "ready" || model?.availability.state === "startable";
+  return (
+    model?.availability.state === "ready" ||
+    model?.availability.state === "startable"
+  );
 }
 
 /** Whether an agent can be created with this model. Remote credential setup is
@@ -216,7 +241,7 @@ export function isModelAgentLaunchable(
   model:
     | Pick<ModelCatalogEntry, "availability" | "provider" | "connectable">
     | null
-    | undefined
+    | undefined,
 ): boolean {
   return (
     isModelUsable(model) ||

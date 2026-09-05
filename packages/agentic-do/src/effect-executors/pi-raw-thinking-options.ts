@@ -1,7 +1,7 @@
 import {
   clampThinkingLevel,
   type Api,
-  type GoogleThinkingLevel,
+  type GoogleApiThinkingLevel,
   type Model,
   type ProviderStreamOptions,
   type ThinkingBudgets,
@@ -11,14 +11,23 @@ import type { ThinkingLevel as AgentThinkingLevel } from "@workspace/agent-loop"
 export type RawThinkingModel = Omit<
   Pick<
     Model<Api>,
-    "api" | "compat" | "id" | "maxTokens" | "name" | "reasoning" | "thinkingLevelMap"
+    | "api"
+    | "compat"
+    | "id"
+    | "maxTokens"
+    | "name"
+    | "reasoning"
+    | "thinkingLevelMap"
   >,
   "thinkingLevelMap"
 > & {
   thinkingLevelMap?: Partial<Record<AgentThinkingLevel, string | null>>;
 };
 
-type EnabledThinkingLevel = Exclude<ReturnType<typeof clampThinkingLevel>, "off"> | "max";
+type EnabledThinkingLevel = Exclude<
+  ReturnType<typeof clampThinkingLevel>,
+  "off"
+>;
 
 const DEFAULT_THINKING_BUDGETS: Required<ThinkingBudgets> = {
   minimal: 1024,
@@ -35,19 +44,13 @@ const DEFAULT_THINKING_BUDGETS: Required<ThinkingBudgets> = {
  */
 export function buildRawThinkingOptions(
   model: RawThinkingModel,
-  requestedLevel: AgentThinkingLevel
+  requestedLevel: AgentThinkingLevel,
 ): ProviderStreamOptions {
   if (!model.reasoning) return {};
 
-  // pi-ai 0.80's generic clamp type has not yet learned the catalog's `max`
-  // level. Clamp it through xhigh for capability validation, then preserve max
-  // for providers/models whose explicit map advertises it.
-  const clamped = clampThinkingLevel(
-    model as Model<Api>,
-    requestedLevel === "max" ? "xhigh" : requestedLevel
-  );
+  const clamped = clampThinkingLevel(model as Model<Api>, requestedLevel);
   if (clamped === "off") return {};
-  const level: EnabledThinkingLevel = requestedLevel === "max" ? "max" : clamped;
+  const level: EnabledThinkingLevel = clamped;
 
   switch (model.api) {
     case "anthropic-messages":
@@ -75,7 +78,7 @@ export function buildRawThinkingOptions(
 
 function buildAnthropicThinkingOptions(
   model: RawThinkingModel,
-  level: EnabledThinkingLevel
+  level: EnabledThinkingLevel,
 ): ProviderStreamOptions {
   if (hasForcedAdaptiveThinking(model)) {
     return {
@@ -84,7 +87,11 @@ function buildAnthropicThinkingOptions(
     };
   }
 
-  const adjusted = adjustMaxTokensForThinking(undefined, model.maxTokens, level);
+  const adjusted = adjustMaxTokensForThinking(
+    undefined,
+    model.maxTokens,
+    level,
+  );
   return {
     maxTokens: adjusted.maxTokens,
     thinkingEnabled: true,
@@ -94,13 +101,17 @@ function buildAnthropicThinkingOptions(
 
 function buildBedrockThinkingOptions(
   model: RawThinkingModel,
-  level: EnabledThinkingLevel
+  level: EnabledThinkingLevel,
 ): ProviderStreamOptions {
   if (!isAnthropicClaudeModel(model) || supportsAdaptiveThinking(model)) {
     return { reasoning: level };
   }
 
-  const adjusted = adjustMaxTokensForThinking(undefined, model.maxTokens, level);
+  const adjusted = adjustMaxTokensForThinking(
+    undefined,
+    model.maxTokens,
+    level,
+  );
   const budgetLevel = level === "xhigh" || level === "max" ? "high" : level;
   return {
     maxTokens: adjusted.maxTokens,
@@ -113,8 +124,8 @@ function buildBedrockThinkingOptions(
 
 function buildGoogleThinkingOption(
   model: RawThinkingModel,
-  level: EnabledThinkingLevel
-): { enabled: true; budgetTokens?: number; level?: GoogleThinkingLevel } {
+  level: EnabledThinkingLevel,
+): { enabled: true; budgetTokens?: number; level?: GoogleApiThinkingLevel } {
   const googleLevel = level === "xhigh" || level === "max" ? "high" : level;
   if (
     isGemini3ProModel(model) ||
@@ -135,7 +146,7 @@ function buildGoogleThinkingOption(
 
 function buildMistralThinkingOptions(
   model: RawThinkingModel,
-  level: EnabledThinkingLevel
+  level: EnabledThinkingLevel,
 ): ProviderStreamOptions {
   if (usesMistralReasoningEffort(model)) {
     return { reasoningEffort: model.thinkingLevelMap?.[level] ?? "high" };
@@ -146,7 +157,7 @@ function buildMistralThinkingOptions(
 function adjustMaxTokensForThinking(
   baseMaxTokens: number | undefined,
   modelMaxTokens: number,
-  level: EnabledThinkingLevel
+  level: EnabledThinkingLevel,
 ): { maxTokens: number; thinkingBudget: number } {
   const budgetLevel = level === "xhigh" || level === "max" ? "high" : level;
   let thinkingBudget = DEFAULT_THINKING_BUDGETS[budgetLevel];
@@ -163,7 +174,7 @@ function adjustMaxTokensForThinking(
 
 function mapAnthropicThinkingLevelToEffort(
   model: RawThinkingModel,
-  level: EnabledThinkingLevel
+  level: EnabledThinkingLevel,
 ): string {
   const mapped = model.thinkingLevelMap?.[level];
   if (typeof mapped === "string") return mapped;
@@ -187,7 +198,7 @@ function isAnthropicClaudeModel(model: RawThinkingModel): boolean {
     (candidate) =>
       candidate.includes("anthropic.claude") ||
       candidate.includes("anthropic/claude") ||
-      candidate.includes("claude")
+      candidate.includes("claude"),
   );
 }
 
@@ -199,14 +210,14 @@ function supportsAdaptiveThinking(model: RawThinkingModel): boolean {
       candidate.includes("opus-4-8") ||
       candidate.includes("sonnet-4-6") ||
       candidate.includes("sonnet-5") ||
-      candidate.includes("fable-5")
+      candidate.includes("fable-5"),
   );
 }
 
 function hasForcedAdaptiveThinking(model: RawThinkingModel): boolean {
   return (
-    (model.compat as { forceAdaptiveThinking?: boolean } | undefined)?.forceAdaptiveThinking ===
-    true
+    (model.compat as { forceAdaptiveThinking?: boolean } | undefined)
+      ?.forceAdaptiveThinking === true
   );
 }
 
@@ -231,8 +242,8 @@ function isGemini3FlashModel(model: RawThinkingModel): boolean {
 
 function getGoogleThinkingLevel(
   model: RawThinkingModel,
-  level: EnabledThinkingLevel
-): GoogleThinkingLevel {
+  level: EnabledThinkingLevel,
+): GoogleApiThinkingLevel {
   if (isGemini3ProModel(model)) {
     switch (level) {
       case "minimal":
@@ -271,7 +282,10 @@ function getGoogleThinkingLevel(
   }
 }
 
-function getGoogleBudget(model: RawThinkingModel, level: EnabledThinkingLevel): number {
+function getGoogleBudget(
+  model: RawThinkingModel,
+  level: EnabledThinkingLevel,
+): number {
   if (model.id.includes("2.5-pro")) {
     const budgets = {
       minimal: 128,

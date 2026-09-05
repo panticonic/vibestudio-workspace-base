@@ -44,7 +44,9 @@ describe("local model materialization", () => {
       reasoningCapable: true,
     };
 
-    expect(materializeModel("local", entry.slug, entry)?.spec.reasoning).toBe(true);
+    expect(materializeModel("local", entry.slug, entry)?.spec.reasoning).toBe(
+      true,
+    );
   });
 
   it("does not invent metadata for an unknown local model", () => {
@@ -53,15 +55,48 @@ describe("local model materialization", () => {
 });
 
 describe("Codex service-tier materialization", () => {
-  it("advertises priority only for models supported by Fast mode", () => {
-    expect(materializeModel("openai-codex", "gpt-5.6-sol", null)?.spec.serviceTiers).toEqual([
-      "priority",
-    ]);
+  it("materializes GPT-6 Astra for API-key and Codex providers", () => {
+    const expected = {
+      contextWindow: 272_000,
+      maxTokens: 128_000,
+      cost: {
+        input: 10,
+        output: 50,
+        cacheRead: 1,
+        cacheWrite: 12.5,
+      },
+      thinkingLevelMap: {
+        off: null,
+        minimal: null,
+        low: "low",
+        medium: "medium",
+        high: "high",
+        xhigh: "xhigh",
+        max: "max",
+      },
+    };
+
+    expect(materializeModel("openai", "gpt-6-astra", null)?.spec).toMatchObject(
+      expected,
+    );
     expect(
-      materializeModel("openai-codex", "gpt-5.3-codex-spark", null)?.spec.serviceTiers
+      materializeModel("openai-codex", "gpt-6-astra", null)?.spec,
+    ).toMatchObject({
+      ...expected,
+      serviceTiers: ["priority"],
+    });
+  });
+
+  it("advertises priority only for models supported by Fast mode", () => {
+    expect(
+      materializeModel("openai-codex", "gpt-5.6-sol", null)?.spec.serviceTiers,
+    ).toEqual(["priority"]);
+    expect(
+      materializeModel("openai-codex", "gpt-5.3-codex-spark", null)?.spec
+        .serviceTiers,
     ).toBeUndefined();
     expect(
-      materializeModel("openai-codex", "gpt-5.4-mini", null)?.spec.serviceTiers
+      materializeModel("openai-codex", "gpt-5.4-mini", null)?.spec.serviceTiers,
     ).toBeUndefined();
   });
 });

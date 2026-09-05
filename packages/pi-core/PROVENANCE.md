@@ -42,8 +42,8 @@ Intentionally excluded (replaced by `@workspace/agent-loop`):
 - Jsonl/file-backed session repos
 - the extension/hook-bus runtime, `proxy.ts`, `node.ts`
 
-`@earendil-works/pi-ai` remains an external dependency at the matching `0.82.0`
-release. `@workspace/pi-ai` owns that integration surface and its Build V2
+`@earendil-works/pi-ai` remains an external dependency, currently at `0.85.0`.
+`@workspace/pi-ai` owns that integration surface and its Build V2
 dependency-resolution patch; the host package manager has no `pi-ai` dependency
 or patch knowledge. The workerd transport-liveness changes are not mixed into
 this vendored agent-core subset.
