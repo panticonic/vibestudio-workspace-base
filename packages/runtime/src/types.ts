@@ -115,7 +115,7 @@ export interface RuntimeFs {
   mktemp(prefix?: string): Promise<string>;
   /** Create and return a unique context-local directory under `/.tmp`. */
   mkdtemp(prefix?: string): Promise<string>;
-  readFile(path: string, encoding?: BufferEncoding): Promise<string | Uint8Array>;
+  readFile(path: string, encoding?: string): Promise<string | Uint8Array>;
   writeFile(path: string, data: string | RuntimeBinaryData): Promise<void>;
   readdir(path: string): Promise<string[]>;
   readdir(path: string, options: { withFileTypes: true }): Promise<Dirent[]>;

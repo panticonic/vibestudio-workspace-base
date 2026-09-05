@@ -140,7 +140,7 @@ export function createRpcFs(rpc: Pick<RpcClient, "call">, options: RpcFsOptions 
       await call<string | undefined>("mkdir", path, { recursive: true });
       return path;
     },
-    async readFile(path: string, encoding?: BufferEncoding): Promise<string | Uint8Array> {
+    async readFile(path: string, encoding?: string): Promise<string | Uint8Array> {
       const result = await call<string | BinaryEnvelope>("readFile", path, encoding);
       if (isBinaryEnvelope(result)) {
         return decodeBinary(result);
