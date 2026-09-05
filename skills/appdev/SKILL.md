@@ -59,6 +59,11 @@ Read only references relevant to the target and change.
 
 ## Workflow
 
+For original illustrations, creative content, or other purposeful visual assets,
+follow [creative imagery and visual assets](../workspace-dev/SKILL.md#creative-imagery-and-visual-assets).
+Use this when imagery enriches the app's content or experience, including games,
+learning tools, storytelling, and visual exploration.
+
 Create `apps/<name>` with package name `@workspace-apps/<name>`, declare it
 under `apps:` in `meta/vibestudio.yml`. Use live generated docs and manifest
 schema for exact fields.

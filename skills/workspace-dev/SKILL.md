@@ -102,6 +102,32 @@ purpose, workflow, ownership, invariants, and diagnostics.
   need item-specific accessible names, not ordinal guesswork.
 - Respect the host theme and narrow mobile viewports.
 
+## Creative imagery and visual assets
+
+Proactively use `imagegen` when original imagery would improve the work's
+meaning, character, or usefulness. Consider illustrations for stories and
+learning materials, game sprites and scenery, textures, concept art, editorial
+images, and visual explanations. This applies to project content as well as
+interfaces: a request need not explicitly ask for image generation when a visual
+asset clearly serves the user's goal. Give each image a purpose in the finished
+work and preserve the user's chosen style and scope.
+
+Describe the subject, composition, visual style, and intended use in `prompt`.
+Save reusable assets with `outputPath` inside the existing target repository;
+use `.tmp/` for exploratory variants. The tool uses the connected OpenAI Codex
+subscription and records managed binary writes through semantic VCS. Its live
+schema documents size, quality, background, and output format options.
+
+Inspect the returned image or use `read` before deciding it is ready. To refine
+an image, supply its workspace path in `referencePaths` and describe what should
+change and what should remain consistent. Prefer a new output path for variants;
+intentional replacement uses `createOnly: false` with the normal observed-file
+conflict protection. Check the chosen asset in its actual layout or content,
+including cropping, scale, and theme where relevant, and share it with
+`notify` attachments. Keep exact text, data plots, and structural diagrams in
+editable code or vector form when correctness depends on their precise content;
+continue using the shared icon system for UI controls and unit identity.
+
 ## Persistence and programmable surfaces
 
 Treat an application that creates or changes user data as requiring durable
