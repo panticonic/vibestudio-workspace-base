@@ -55,3 +55,45 @@ describe("testkit panel helpers", () => {
     );
   });
 });
+
+describe("visible panel overflow", () => {
+  async function layout(clipped: boolean, scrollWidth = 390) {
+    const { PANEL_AUDIT_EXPRESSION } = await import("./panels.js");
+    const container = {
+      tagName: "SECTION",
+      className: "scene",
+      parentElement: null,
+      getBoundingClientRect: () => ({ left: 0, right: 390, width: 390 }),
+    };
+    const illustration = {
+      tagName: "svg",
+      className: "illustration",
+      parentElement: container,
+      getBoundingClientRect: () => ({ left: -115, right: 505, width: 620 }),
+    };
+    const document = {
+      querySelectorAll: () => [container, illustration],
+      documentElement: { scrollWidth, scrollHeight: 844 },
+    };
+    const evaluate = new Function(
+      "window",
+      "document",
+      "getComputedStyle",
+      `return ${PANEL_AUDIT_EXPRESSION}`,
+    );
+    return JSON.parse(
+      evaluate({ innerWidth: 390, innerHeight: 844 }, document, () => ({
+        overflowX: clipped ? "hidden" : "visible",
+      })),
+    );
+  }
+  it("accepts artwork clipped by its scene", async () => {
+    const result = await layout(true);
+    expect(result.horizontalOverflow).toBe(false);
+    expect(result.overflowElements).toEqual([]);
+  });
+  it("still catches visible elements and a genuinely scrollable document", async () => {
+    expect((await layout(false)).horizontalOverflow).toBe(true);
+    expect((await layout(true, 620)).horizontalOverflow).toBe(true);
+  });
+});

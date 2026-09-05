@@ -196,12 +196,24 @@ export interface PanelAudit {
   consoleErrors: number;
 }
 
-const AUDIT_EXPRESSION = `(() => {
+export const PANEL_AUDIT_EXPRESSION = `(() => {
   const vw = window.innerWidth;
   const overflow = [];
   for (const el of document.querySelectorAll("body *")) {
     const rect = el.getBoundingClientRect();
-    if (rect.width > 0 && (rect.right > vw + 1 || rect.left < -1)) {
+    // Audit visible geometry. A scene may intentionally extend its artwork
+    // beyond an SVG or an overflow-clipped container without overflowing the page.
+    let left = rect.left;
+    let right = rect.right;
+    for (let parent = el.parentElement; parent; parent = parent.parentElement) {
+      const style = getComputedStyle(parent);
+      if (["hidden", "clip", "auto", "scroll"].includes(style.overflowX)) {
+        const bounds = parent.getBoundingClientRect();
+        left = Math.max(left, bounds.left);
+        right = Math.min(right, bounds.right);
+      }
+    }
+    if (rect.width > 0 && right > left && (right > vw + 1 || left < -1)) {
       overflow.push({
         tag: el.tagName.toLowerCase(),
         className: typeof el.className === "string" ? el.className.slice(0, 80) : "",
@@ -224,7 +236,7 @@ export async function audit(handle: PanelHandle): Promise<PanelAudit> {
   assertNotSelf(handle);
   const layout = await withCdpSession(handle, async (session) => {
     const result = (await session.send("Runtime.evaluate", {
-      expression: AUDIT_EXPRESSION,
+      expression: PANEL_AUDIT_EXPRESSION,
       returnByValue: true,
     })) as { result?: { value?: string } };
     return JSON.parse(result.result?.value ?? "{}") as Omit<PanelAudit, "consoleErrors">;
