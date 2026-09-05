@@ -51,6 +51,7 @@ template:
     - packages/eval
     - packages/harness
     - packages/integrations
+    - packages/mobile-navigation
     - packages/model-catalog
     - packages/omnibox-core
     - packages/pi-ai

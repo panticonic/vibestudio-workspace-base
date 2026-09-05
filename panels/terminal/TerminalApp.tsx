@@ -1,3 +1,4 @@
+import { HostTerminal } from "./HostTerminal.js";
 import { Box, Button, Flex, Text, Theme } from "@radix-ui/themes";
 import { ShortcutsHelp, type ShortcutGroup } from "@workspace/ui/command";
 import { EmptyState } from "@workspace/ui/feedback";
@@ -82,6 +83,7 @@ export function TerminalApp() {
   const [state, setState] = useState<TerminalState>(() =>
     loadTerminalState(panel.stateArgs.get<TerminalState>())
   );
+  const [hostTerminalFocused, setHostTerminalFocused] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -653,10 +655,10 @@ export function TerminalApp() {
         openScratch();
       }
     },
-  });
+  }, !hostTerminalFocused);
 
   useEffect(() => {
-    if (!state.zoomedSessionId) return;
+    if (!state.zoomedSessionId || hostTerminalFocused) return;
     const onKeyDown = (event: KeyboardEvent) => {
       if (!isPlainEscapeEvent(event)) return;
       const now = Date.now();
@@ -671,7 +673,7 @@ export function TerminalApp() {
     };
     window.addEventListener("keydown", onKeyDown, { capture: true });
     return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
-  }, [state.zoomedSessionId]);
+  }, [state.zoomedSessionId, hostTerminalFocused]);
 
   useEffect(() => {
     const terminalApi = {
@@ -905,6 +907,12 @@ export function TerminalApp() {
           position: "relative",
         }}
       >
+        <HostTerminal
+          appearance={appearance}
+          fontFamily={state.fontFamily}
+          fontSize={state.fontSize}
+          onFocusChange={setHostTerminalFocused}
+        />
         {state.zoomedSessionId ? (
           <Box
             position="absolute"

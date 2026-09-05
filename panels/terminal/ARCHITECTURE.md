@@ -8,6 +8,12 @@ The panel owns one terminal split tree. It does not maintain a terminal-local si
 
 Pane headers carry the compact controls that belong to an individual terminal surface: split, zoom, settings, ports, preview, find, restart, and close. Global overlays are limited to the command launcher and notification center so the terminal output area remains the dominant surface on desktop and mobile.
 
+## Host terminals
+
+`HostTerminal.tsx` offers an explicit **Open host terminal…** action alongside the workspace split tree. The native `hostTerminal.open` receiver requires fresh critical approval for each session. The prompt names the host and workspace and explains full OS-user access to files, credentials, processes, network and other workspaces. The opened surface retains a visible **Full host access** label. It uses the same terminal frontend with bounded output reads, ordered input and resize calls.
+
+Host sessions are ephemeral and never restored from panel state. Close and unmount release the session; approval completing after unmount closes its newly created session. The receiver binds every control call to the exact authenticated connection, revokes control before cleanup, and reports process exit separately from unverified descendant cleanup. Workspace shortcuts do not consume keys while the host surface has focus.
+
 ## Boundaries
 
 - `vscode-upstream/` stores the upstream VS Code source snapshots used while porting behavior.

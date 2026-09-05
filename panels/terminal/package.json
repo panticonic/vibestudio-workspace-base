@@ -131,6 +131,15 @@
           },
           "tier": "gated",
           "evidence": "intentional-broad"
+        },
+        {
+          "capability": "host-terminal.open",
+          "resource": {
+            "kind": "prefix",
+            "prefix": "host-terminal:"
+          },
+          "tier": "critical",
+          "evidence": "bounded-dynamic"
         }
       ]
     }

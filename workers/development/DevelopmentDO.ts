@@ -652,7 +652,7 @@ export class DevelopmentDO extends DurableObjectBase {
   }
 
   @schemaRpc()
-  async writeNativeTerminal(input: { sessionId: string; writeId: string; data: string }): Promise<void> {
+  async writeNativeTerminal(input: { sessionId: string; sequence: number; data: string }): Promise<void> {
     const session = this.requireNativeSession(input.sessionId);
     await this.rpc.call("main", "developmentNative.writeTerminal", [{ ...input, sessionId: session.sessionId }]);
   }
