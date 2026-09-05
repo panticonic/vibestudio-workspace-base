@@ -29,3 +29,4 @@ export {
   createWorkspaceFileObservationStore,
 } from "./tools/index.js";
 export { createWebTools } from "./web/index.js";
+export { createImagegenTool } from "./tools/imagegen.js";

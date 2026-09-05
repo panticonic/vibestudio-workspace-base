@@ -283,6 +283,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       createWorkspaceServiceTool,
       createVerifyTool,
       createWebTools,
+      createImagegenTool,
       createToolVcs,
       createAgentFileVisibility,
       createWorkspaceFileObservationStore,
@@ -351,7 +352,53 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
       configuredModelSeparator === -1
         ? configuredModelRef
         : configuredModelRef.slice(configuredModelSeparator + 1);
+    const resolveCodexSession = async (
+      signal?: AbortSignal,
+      model = configuredProviderModel,
+    ) => {
+      const credential = await toolRpc.call<StoredCredentialSummary | null>(
+        "main",
+        "credentials.resolveCredential",
+        [{ url: "https://chatgpt.com/backend-api" }],
+        { signal },
+      );
+      if (!credential) {
+        throw new Error(
+          "OpenAI Codex subscription is not configured. Connect the openai-codex model provider first.",
+        );
+      }
+      const accountId =
+        credential.accountIdentity?.providerUserId ??
+        credential.metadata?.["accountId"];
+      if (!accountId) {
+        throw new Error(
+          "OpenAI Codex account id is missing from the connected credential. Reconnect the openai-codex model provider.",
+        );
+      }
+      const credentialClient = createCredentialClient(toolRpc);
+      return {
+        model,
+        accountId,
+        sessionId: channelId,
+        fetcher: (url: string, init?: RequestInit) =>
+          credentialClient.fetch(url, init, {
+            credentialId: credential.id,
+          }),
+      };
+    };
     const base = [
+      createImagegenTool({
+        cwd,
+        fs,
+        rpc: toolRpc,
+        vcs,
+        context: mutationContext,
+        visibility,
+        observations: fileObservations,
+        // Image dispatch needs a vision-capable Responses model independently
+        // of the conversation route (which may be Spark or another provider).
+        resolveSession: (signal) => resolveCodexSession(signal, "gpt-5.5"),
+      }),
       createReadTool(cwd, fs, {
         rpc: toolRpc,
         provenance: { vcs, context: { contextId } },
@@ -557,38 +604,7 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         },
         searchBackend:
           configuredProviderId === "openai-codex" ? "codex" : "standard",
-        resolveCodexSearchSession: async (signal) => {
-          if (configuredProviderId !== "openai-codex") return null;
-          const credential = await toolRpc.call<StoredCredentialSummary | null>(
-            "main",
-            "credentials.resolveCredential",
-            [{ url: "https://chatgpt.com/backend-api" }],
-            { signal },
-          );
-          if (!credential) {
-            throw new Error(
-              "OpenAI Codex subscription is not configured. Connect the openai-codex model provider first.",
-            );
-          }
-          const accountId =
-            credential.accountIdentity?.providerUserId ??
-            credential.metadata?.["accountId"];
-          if (!accountId) {
-            throw new Error(
-              "OpenAI Codex account id is missing from the connected credential. Reconnect the openai-codex model provider.",
-            );
-          }
-          const credentialClient = createCredentialClient(toolRpc);
-          return {
-            model: configuredProviderModel,
-            accountId,
-            sessionId: channelId,
-            fetcher: (url: string, init?: RequestInit) =>
-              credentialClient.fetch(url, init, {
-                credentialId: credential.id,
-              }),
-          };
-        },
+        resolveCodexSearchSession: resolveCodexSession,
       }),
     ] as unknown as AgentTool[];
     // The generalized `notify` tool (carries saliency:"say"; the config-level

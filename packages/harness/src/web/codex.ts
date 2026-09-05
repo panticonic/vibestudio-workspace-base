@@ -9,15 +9,12 @@
  * Protocol reference: https://github.com/Leechael/pi-codex-search (MIT)
  */
 
+import { readResponseEvents, type CodexSession } from "../codex-responses.js";
+
 export type CodexSearchContextSize = "low" | "medium" | "high";
 export type CodexSearchFreshness = "cached" | "indexed" | "live";
 
-export interface CodexSearchSession {
-  model: string;
-  accountId: string;
-  sessionId?: string;
-  fetcher: (url: string, init?: RequestInit) => Promise<Response>;
-}
+export type CodexSearchSession = CodexSession;
 
 export interface CodexCitation {
   title?: string;
@@ -93,7 +90,8 @@ export async function searchWithCodex(input: {
   signal?: AbortSignal;
   onTextDelta?: (delta: string) => void;
 }): Promise<CodexSearchResult> {
-  const { query, session, freshness, searchContextSize, signal, onTextDelta } = input;
+  const { query, session, freshness, searchContextSize, signal, onTextDelta } =
+    input;
   const headers = new Headers({
     accept: "text/event-stream",
     "content-type": "application/json",
@@ -155,7 +153,9 @@ export async function searchWithCodex(input: {
   const searchCalls = new Map<string, CodexSearchCall>();
   const citations: CodexCitation[] = [];
 
-  for await (const event of parseSse(response.body)) {
+  for await (const event of readResponseEvents<ResponseEventData>(
+    response.body,
+  )) {
     const data = event.data;
     if (!data) continue;
     switch (event.type) {
@@ -227,7 +227,10 @@ function collectOutputItem(
     return;
   }
   if (item.type !== "message" || item.role !== "assistant") return;
-  let textOffset = messageText.reduce((length, text) => length + text.length, 0);
+  let textOffset = messageText.reduce(
+    (length, text) => length + text.length,
+    0,
+  );
   for (const part of item.content ?? []) {
     if (part.type !== "output_text") continue;
     const partText = part.text ?? "";
@@ -246,58 +249,5 @@ function collectOutputItem(
       });
     }
     textOffset += partText.length;
-  }
-}
-
-async function* parseSse(
-  body: ReadableStream<Uint8Array>,
-): AsyncGenerator<{ type: string; data?: ResponseEventData }> {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  let finished = false;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        finished = true;
-        break;
-      }
-      buffer += decoder.decode(value, { stream: true });
-      let separator = /\r?\n\r?\n/u.exec(buffer);
-      while (separator?.index !== undefined) {
-        const frame = buffer.slice(0, separator.index);
-        buffer = buffer.slice(separator.index + separator[0].length);
-        const parsed = parseSseFrame(frame);
-        if (parsed) yield parsed;
-        separator = /\r?\n\r?\n/u.exec(buffer);
-      }
-    }
-  } finally {
-    if (!finished) await reader.cancel().catch(() => undefined);
-    reader.releaseLock();
-  }
-  buffer += decoder.decode();
-  const trailing = parseSseFrame(buffer);
-  if (trailing) yield trailing;
-}
-
-function parseSseFrame(
-  frame: string,
-): { type: string; data?: ResponseEventData } | undefined {
-  let type = "";
-  const dataLines: string[] = [];
-  for (const line of frame.split(/\r?\n/u)) {
-    if (line.startsWith("event:")) type = line.slice("event:".length).trim();
-    else if (line.startsWith("data:"))
-      dataLines.push(line.slice("data:".length).trimStart());
-  }
-  if (dataLines.length === 0) return undefined;
-  const raw = dataLines.join("\n");
-  if (raw === "[DONE]") return undefined;
-  try {
-    return { type, data: JSON.parse(raw) as ResponseEventData };
-  } catch {
-    return { type };
   }
 }

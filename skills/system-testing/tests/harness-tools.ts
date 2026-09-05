@@ -1,5 +1,9 @@
-import type { TestCase } from "../types.js";
-import { findLastAgentMessage, getToolCalls, noIncompleteInvocations } from "./_helpers.js";
+import { CONTENT_WORKSPACE_REPO_FIXTURE, type TestCase } from "../types.js";
+import {
+  findLastAgentMessage,
+  getToolCalls,
+  noIncompleteInvocations,
+} from "./_helpers.js";
 
 function record(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
@@ -12,7 +16,10 @@ function stateKey(value: unknown): string | null {
   if (state?.["kind"] === "event" && typeof state["eventId"] === "string") {
     return `event:${state["eventId"]}`;
   }
-  if (state?.["kind"] === "application" && typeof state["applicationId"] === "string") {
+  if (
+    state?.["kind"] === "application" &&
+    typeof state["applicationId"] === "string"
+  ) {
     return `application:${state["applicationId"]}`;
   }
   return null;
@@ -38,7 +45,8 @@ function rootKey(value: unknown): string | null {
     case "command":
       return one("commandId");
     case "trajectory":
-      return typeof root["logId"] === "string" && typeof root["head"] === "string"
+      return typeof root["logId"] === "string" &&
+        typeof root["head"] === "string"
         ? `trajectory:${root["logId"]}:${root["head"]}`
         : null;
     case "trajectory-invocation":
@@ -72,7 +80,9 @@ function rootKey(value: unknown): string | null {
   }
 }
 
-function requireProvenanceRoots(result: Parameters<typeof noIncompleteInvocations>[0]) {
+function requireProvenanceRoots(
+  result: Parameters<typeof noIncompleteInvocations>[0],
+) {
   let returnedRootCount = 0;
   let edgeCount = 0;
   for (const call of getToolCalls(result)) {
@@ -100,7 +110,8 @@ function requireProvenanceRoots(result: Parameters<typeof noIncompleteInvocation
   if (edgeCount === 0) {
     return {
       passed: false,
-      reason: "Completed provenance results contained no actual typed edge endpoints",
+      reason:
+        "Completed provenance results contained no actual typed edge endpoints",
     };
   }
   const final = findLastAgentMessage(result);
@@ -110,7 +121,8 @@ function requireProvenanceRoots(result: Parameters<typeof noIncompleteInvocation
   ) {
     return {
       passed: false,
-      reason: "Final response did not explain the observed provenance roots and relationships",
+      reason:
+        "Final response did not explain the observed provenance roots and relationships",
     };
   }
   return {
@@ -122,40 +134,81 @@ function requireProvenanceRoots(result: Parameters<typeof noIncompleteInvocation
   };
 }
 
-function requireMemoryRecall(result: Parameters<typeof noIncompleteInvocations>[0]) {
+function requireMemoryRecall(
+  result: Parameters<typeof noIncompleteInvocations>[0],
+) {
   const calls = getToolCalls(result).filter(
     (call) =>
       call.name === "memory_recall" &&
       call.execution?.status === "complete" &&
-      call.execution.isError !== true
+      call.execution.isError !== true,
   );
   if (calls.length === 0) {
     return {
       passed: false,
-      reason: "No completed workspace memory recall supplied canonical evidence",
+      reason:
+        "No completed workspace memory recall supplied canonical evidence",
     };
   }
   if (
     calls.some((call) => {
       const limit = call.arguments?.["limit"];
       return (
-        limit !== undefined && (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 50)
+        limit !== undefined &&
+        (!Number.isInteger(limit) || Number(limit) < 1 || Number(limit) > 50)
       );
     })
   ) {
     return { passed: false, reason: "Workspace memory recall was not bounded" };
   }
   const final = findLastAgentMessage(result);
-  if (!/(build|failure)/iu.test(final) || !/(found|result|nothing|no prior|memory)/iu.test(final)) {
+  if (
+    !/(build|failure)/iu.test(final) ||
+    !/(found|result|nothing|no prior|memory)/iu.test(final)
+  ) {
     return {
       passed: false,
-      reason: "Final response did not semantically report the memory-search outcome",
+      reason:
+        "Final response did not semantically report the memory-search outcome",
     };
   }
   return noIncompleteInvocations(result);
 }
 
 export const harnessToolTests: TestCase[] = [
+  {
+    name: "workspace-image-generation",
+    description: "Generate a raster illustration as a tracked workspace asset",
+    category: "harness-tools",
+    validation: "agent-evidence",
+    workspaceRepoFixture: CONTENT_WORKSPACE_REPO_FIXTURE,
+    timeoutMs: 240_000,
+    prompt:
+      "Create a small raster illustration of a blue ceramic fish on a white background for this project's assets. Save it as fish.png in the provided project repository and show me the image.",
+    validate: (result) => {
+      const calls = getToolCalls(result);
+      const generated = calls.some((call) => {
+        if (
+          call.name !== "imagegen" ||
+          call.execution?.status !== "complete" ||
+          call.execution.isError
+        )
+          return false;
+        const details = record(record(call.execution.result)?.["details"]);
+        const mutation = record(details?.["mutation"]);
+        return (
+          mutation?.["status"] === "applied" && mutation["storage"] === "vcs"
+        );
+      });
+      return generated
+        ? noIncompleteInvocations(result)
+        : {
+            passed: false,
+            reason:
+              "No generated image was saved as a semantic workspace asset",
+          };
+    },
+  },
   {
     name: "provenance-orientation",
     description: "Orient in the session using the provenance surface",
@@ -166,7 +219,8 @@ export const harnessToolTests: TestCase[] = [
   },
   {
     name: "memory-search",
-    description: "Search workspace memory with provenance before re-deriving knowledge",
+    description:
+      "Search workspace memory with provenance before re-deriving knowledge",
     category: "harness-tools",
     prompt:
       "Has this workspace dealt with build failures before? Check its memory of prior conversations and committed knowledge, and tell me what you find with provenance. Finding nothing is a valid outcome.",
