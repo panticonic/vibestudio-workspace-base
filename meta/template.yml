@@ -126,6 +126,7 @@ template:
     - workers/workspace-source
   files:
     - .ignore
+    - .gitattributes
     - package.json
     - tests/helpers/ledgerTest.ts
     - types/assets.d.ts
