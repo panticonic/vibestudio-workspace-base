@@ -1,0 +1,4 @@
+# The host compares the generated runtime manifest byte-for-byte after a
+# checkout. Keep YAML manifests canonical across Windows and Unix worktrees.
+*.yml text eol=lf
+*.yaml text eol=lf
