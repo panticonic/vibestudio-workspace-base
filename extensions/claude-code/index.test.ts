@@ -1,14 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   existsSync,
-  chmodSync,
   mkdtempSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   rmSync,
-  statSync,
-  writeFileSync,
 } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -32,40 +28,9 @@ const childProcessMock = vi.hoisted(() => {
   };
 });
 
-const processOwnerMock = vi.hoisted(() => ({
-  retire: vi.fn(async () => {}),
-  identity: {
-    version: 1 as const,
-    platform: "linux" as const,
-    pid: 4242,
-    processGroupId: 4242,
-    startCoordinate: "test-start",
-  },
-}));
-const processOwnerApiMock = vi.hoisted(() => ({
-  create: vi.fn(),
-  adopt: vi.fn(),
-}));
-
 vi.mock("node:child_process", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:child_process")>()),
   spawn: childProcessMock.spawn,
-}));
-
-vi.mock("@vibestudio/shared/ownedProcessGroup", () => ({
-  OwnedProcessGroup: {
-    create: processOwnerApiMock.create,
-    adopt: processOwnerApiMock.adopt,
-  },
-}));
-
-// The executing-host version probe is deterministic in orchestration tests;
-// declaration parsing and filesystem materialization remain real.
-vi.mock("@vibestudio/shared/claudeLaunchProfile", async (importOriginal) => ({
-  ...(await importOriginal<
-    typeof import("@vibestudio/shared/claudeLaunchProfile")
-  >()),
-  assertClaudeCodeVersion: vi.fn(async () => "2.1.81"),
 }));
 
 import { activate, parseClaudeStreamCompletion } from "./index.js";
@@ -81,7 +46,11 @@ const activationSubscriptions: Array<Array<{ dispose(): void }>> = [];
 function makeCtx(
   tmpRoot: string,
   storage = new Map<string, string>(),
-  options: { failRevocationOnce?: string } = {},
+  options: {
+    failRevocationOnce?: string;
+    failStart?: boolean;
+    failStopOnce?: boolean;
+  } = {},
 ) {
   const contextProjectionsPath = path.join(
     tmpRoot,
@@ -122,6 +91,34 @@ function makeCtx(
         mintSeq += 1;
         lifecycleEvents.push(`mint:${agentId(mintSeq)}`);
         return { agentId: agentId(mintSeq), agentToken: agentToken(mintSeq) };
+      }
+      if (method === "linkedClaude.start") {
+        if (options.failStart)
+          throw new Error("installed provider unavailable");
+        const input = args[0] as {
+          profile: {
+            launchId: string;
+            environment: { VIBESTUDIO_ENTITY_ID: string };
+          };
+        };
+        return {
+          generationId: input.profile.launchId,
+          entityId: input.profile.environment.VIBESTUDIO_ENTITY_ID,
+          state: "running",
+          pid: 4242,
+          exit: null,
+          log: { bytes: 0, tail: "", truncated: false },
+        };
+      }
+      if (method === "linkedClaude.stop") {
+        if (options.failStopOnce) {
+          options.failStopOnce = false;
+          throw new Error("host retirement unconfirmed");
+        }
+        lifecycleEvents.push(
+          `stop:${(args[0] as { generationId: string }).generationId}`,
+        );
+        return { stopped: true };
       }
       if (method === "auth.revokeAgentCredential") {
         lifecycleEvents.push(`revoke:${String(args[0])}`);
@@ -223,12 +220,6 @@ function makeCtx(
 let tmpRoot: string;
 beforeEach(() => {
   tmpRoot = mkdtempSync(path.join(os.tmpdir(), "claude-ext-test-"));
-  const fakeBin = path.join(tmpRoot, "bin");
-  const fakeBwrap = path.join(fakeBin, "bwrap");
-  mkdirSync(fakeBin, { recursive: true });
-  writeFileSync(fakeBwrap, "#!/bin/sh\nexit 0\n");
-  chmodSync(fakeBwrap, 0o755);
-  vi.stubEnv("PATH", `${fakeBin}${path.delimiter}${process.env["PATH"] ?? ""}`);
   vi.stubEnv("VIBESTUDIO_EXTENSION_GATEWAY_URL", "http://127.0.0.1:5000/rpc");
   vi.stubEnv(
     "CLAUDE_CONFIG_DIR",
@@ -244,11 +235,6 @@ afterEach(() => {
   childProcessMock.child.on.mockClear();
   childProcessMock.child.once.mockClear();
   childProcessMock.child.kill.mockClear();
-  processOwnerMock.retire.mockClear();
-  processOwnerApiMock.create.mockReset();
-  processOwnerApiMock.create.mockReturnValue(processOwnerMock);
-  processOwnerApiMock.adopt.mockReset();
-  processOwnerApiMock.adopt.mockReturnValue(processOwnerMock);
   vi.unstubAllEnvs();
   vi.clearAllMocks();
 });
@@ -259,7 +245,7 @@ describe("@workspace-extensions/claude-code prepare", () => {
     const initialExitListeners = process.listenerCount("exit");
 
     await activate(ctx as never);
-    expect(process.listenerCount("exit")).toBe(initialExitListeners + 1);
+    expect(process.listenerCount("exit")).toBe(initialExitListeners);
 
     ctx.subscriptions.pop()!.dispose();
     expect(process.listenerCount("exit")).toBe(initialExitListeners);
@@ -341,7 +327,9 @@ describe("@workspace-extensions/claude-code prepare", () => {
     expect(JSON.stringify(result.profile)).not.toMatch(
       /contextFolder|SERVER_URL|LAUNCH_PROFILE|SKILLS_DIR/,
     );
-    expect(existsSync(path.join(tmpRoot, "native-storage", "agent-launch"))).toBe(false);
+    expect(
+      existsSync(path.join(tmpRoot, "native-storage", "agent-launch")),
+    ).toBe(false);
     expect(ctx.workspace.ensureContextFolder).not.toHaveBeenCalled();
     expect(approvalsRequest).not.toHaveBeenCalled();
     expect(
@@ -375,8 +363,6 @@ describe("@workspace-extensions/claude-code prepare", () => {
     ).toMatchObject({
       ownerKind: "external-cli",
       phase: "active",
-      process: null,
-      materialization: null,
     });
   });
 
@@ -532,456 +518,19 @@ describe("@workspace-extensions/claude-code prepare", () => {
     expect(vesselCreate![2]).not.toHaveProperty("agentChannelId");
   });
 
-  it("launchSubagent prepares, spawns headless Claude privately, and release kills it", async () => {
-    vi.stubEnv("ANTHROPIC_API_KEY", "ambient-provider-secret");
-    vi.stubEnv("CLAUDE_CODE_OAUTH_TOKEN", "ambient-provider-session");
-    vi.stubEnv("AWS_SECRET_ACCESS_KEY", "ambient-cloud-secret");
-    vi.stubEnv("SSH_AUTH_SOCK", "/run/user/1000/ambient-ssh-agent");
-    vi.stubEnv("NODE_OPTIONS", "--require=/tmp/ambient-injection.cjs");
-    vi.stubEnv("UNRELATED_SECRET", "ambient-secret");
-    const { ctx, approvalsRequest, storage } = makeCtx(tmpRoot);
+  it("delegates headless execution with semantic inputs and stops before credential revocation", async () => {
+    const { ctx, rpcCall, lifecycleEvents } = makeCtx(tmpRoot);
     ctx.invocation.current.mockReturnValue({
       requestId: "req-1",
       extensionName: "@workspace-extensions/claude-code",
       method: "providers.claudeCode.launchSubagent",
       caller: { callerId: "do:parent", callerKind: "do" },
     });
-    const api = (await activate(ctx as never)).providerContracts.claudeCode;
-
-    const subagent = {
-      runId: "run-1",
-      task: "audit the repo",
-      parentRef: "do:parent",
-      parentChannelId: "home-chan",
-      taskChannelId: "task-chan",
-      parentContextId: "ctx-parent",
-      parentParticipantId: "agent:parent",
-      depth: 1,
-      mode: "fresh" as const,
-    };
-    const result = await api.launchSubagent({
-      channelId: CHANNEL,
-      title: "Audit",
-      subagent,
-    });
-
-    expect(approvalsRequest).not.toHaveBeenCalled();
-    expect(result).toMatchObject({
-      entityId: "session:chan-1",
-      contextId: CONTEXT,
-      channelId: CHANNEL,
-      vesselEntityId: "do:linked:session:chan-1",
-      vesselParticipantId: "p1",
-      launchId: "claude-code:run-1",
-      generationId: expect.any(String),
-      pid: 4242,
-    });
-    expect(childProcessMock.spawn).toHaveBeenCalledTimes(1);
-    const [command, args, options] = childProcessMock.spawn.mock
-      .calls[0]! as unknown as [
-      string,
-      string[],
-      { cwd: string; detached: boolean; env: Record<string, string> },
-    ];
-    expect(command).toMatch(/\/bwrap$/);
-    expect(args).toEqual(
-      expect.arrayContaining([
-        "--ro-bind",
-        path.join(tmpRoot, ".context-projections", "v5", CONTEXT),
-        path.join(tmpRoot, ".context-projections", "v5", CONTEXT),
-      ]),
-    );
-    const claudeArgs = args.slice(args.indexOf("--") + 1);
-    // Subagents default to autonomous permission handling (`auto`); the task
-    // rides as the terminal -p prompt.
-    expect(claudeArgs.slice(0, 3)).toEqual([
-      "claude",
-      "--dangerously-load-development-channels",
-      "server:vibestudio",
-    ]);
-    expect(claudeArgs.slice(-10)).toEqual([
-      "--permission-mode",
-      "auto",
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--allowedTools",
-      "mcp__vibestudio__say,mcp__vibestudio__complete",
-      "--strict-mcp-config",
-      "-p",
-      "audit the repo",
-    ]);
-    expect(claudeArgs).toContain("--mcp-config");
-    expect(claudeArgs).toContain("--strict-mcp-config");
-    expect(claudeArgs).toContain("--settings");
-    expect(options).toMatchObject({
-      cwd: path.join(tmpRoot, ".context-projections", "v5", CONTEXT),
-      detached: true,
-    });
-    expect(options.env).toMatchObject({
-      PATH: process.env["PATH"],
-      VIBESTUDIO_CONTEXT_ID: CONTEXT,
-      VIBESTUDIO_CHANNEL_ID: CHANNEL,
-      VIBESTUDIO_ENTITY_ID: result.entityId,
-      VIBESTUDIO_VESSEL_REF: result.vesselRef,
-      // Subagent duty rides the session env so the bridge can state it in the
-      // MCP instructions instead of hedging.
-      VIBESTUDIO_SUBAGENT_RUN_ID: "run-1",
-      VIBESTUDIO_SUBAGENT_PARENT_CHANNEL_ID: "home-chan",
-      VIBESTUDIO_LINKED_SCRATCH: expect.stringContaining("/scratch"),
-      CLAUDE_CONFIG_DIR: expect.stringContaining("/claude-config"),
-      TMPDIR: "/tmp",
-    });
-    for (const secret of [
-      "VIBESTUDIO_AGENT_TOKEN",
-      "VIBESTUDIO_SERVER_URL",
-      "VIBESTUDIO_EXTENSION_RPC_TOKEN",
-      "VIBESTUDIO_EXTENSION_GATEWAY_URL",
-      "ANTHROPIC_API_KEY",
-      "CLAUDE_CODE_OAUTH_TOKEN",
-      "AWS_SECRET_ACCESS_KEY",
-      "SSH_AUTH_SOCK",
-      "NODE_OPTIONS",
-      "UNRELATED_SECRET",
-    ]) {
-      expect(options.env).not.toHaveProperty(secret);
-    }
-    const cliCredentialPath = path.join(
-      path.dirname(result.logPath),
-      "home",
-      ".config",
-      "vibestudio",
-      "cli-credentials.json",
-    );
-    expect(statSync(cliCredentialPath).mode & 0o777).toBe(0o600);
-    expect(JSON.parse(readFileSync(cliCredentialPath, "utf8"))).toMatchObject({
-      kind: "agent",
-      entityId: result.entityId,
-      contextId: CONTEXT,
-      agentId: agentId(1),
-      agentToken: agentToken(1),
-      workspaceId: "ws",
-    });
-    expect(options.env["XDG_CONFIG_HOME"]).toBe(
-      path.join(path.dirname(result.logPath), "home", ".config"),
-    );
-    expect(options.env["VIBESTUDIO_SUBAGENT_CONTRACT"]).toContain(
-      "## Subagent Operating Contract",
-    );
-    expect(options.env["VIBESTUDIO_SUBAGENT_CONTRACT"]).toContain(
-      "typed terminal result",
-    );
-    expect(options.env["VIBESTUDIO_SUBAGENT_CONTRACT"]).toContain(
-      "Do not print or imitate tool-call syntax",
-    );
-    const durableLaunch = JSON.parse(
-      storage.get(`launches/${result.generationId}.json`)!,
-    );
-    expect(durableLaunch).toMatchObject({
-      version: 4,
-      ownerKind: "extension-headless",
-      phase: "active",
-      process: { pid: 4242, startCoordinate: "test-start" },
-      materialization: {
-        profileDir: path.dirname(result.logPath),
-        logPath: result.logPath,
-      },
-    });
-    expect(JSON.stringify(durableLaunch)).not.toContain(agentToken(1));
-    expect(durableLaunch).not.toHaveProperty("vesselRef");
-
-    expect(
-      api.inspectLaunch({
-        entityId: result.entityId,
-        generationId: result.generationId,
-      }),
-    ).toMatchObject({
-      entityId: result.entityId,
-      generationId: result.generationId,
-      launchId: "claude-code:run-1",
-      runId: "run-1",
-      state: "running",
-      pid: 4242,
-      log: { bytes: 0, tail: "", truncated: false },
-    });
-    expect(() =>
-      api.inspectLaunch({
-        entityId: result.entityId,
-        generationId: "stale-generation",
-      }),
-    ).toThrow("No Claude launch");
-
-    const released = await api.release({
-      entityId: result.entityId,
-      generationId: result.generationId,
-    });
-    expect(released).toEqual({ released: true });
-    expect(processOwnerMock.retire).toHaveBeenCalledTimes(1);
-    expect(existsSync(path.dirname(result.logPath))).toBe(false);
-  });
-
-  it("does not revoke or delete a headless generation until its process group is absent", async () => {
-    const { ctx, revoked } = makeCtx(tmpRoot);
-    ctx.invocation.current.mockReturnValue({
-      requestId: "req-1",
-      extensionName: "@workspace-extensions/claude-code",
-      method: "providers.claudeCode.launchSubagent",
-      caller: { callerId: "do:parent", callerKind: "do" },
-    });
-    let finishRetirement!: () => void;
-    processOwnerMock.retire.mockImplementationOnce(
-      () => new Promise<void>((resolve) => (finishRetirement = resolve)),
-    );
     const api = (await activate(ctx as never)).providerContracts.claudeCode;
     const result = await api.launchSubagent({
       channelId: CHANNEL,
-      subagent: {
-        runId: "run-order",
-        task: "audit",
-        parentRef: "do:parent",
-        parentChannelId: "home-chan",
-        taskChannelId: "task-chan",
-        parentContextId: "ctx-parent",
-        parentParticipantId: "agent:parent",
-        depth: 1,
-      },
-    });
-
-    const releasing = api.release({
-      entityId: result.entityId,
-      generationId: result.generationId,
-    });
-    await vi.waitFor(() =>
-      expect(processOwnerMock.retire).toHaveBeenCalledTimes(1),
-    );
-    expect(revoked).not.toContain(agentId(1));
-    expect(existsSync(path.dirname(result.logPath))).toBe(true);
-
-    finishRetirement();
-    await releasing;
-    expect(revoked).toContain(agentId(1));
-    expect(existsSync(path.dirname(result.logPath))).toBe(false);
-  });
-
-  it("retires the staged generation when spawn fails", async () => {
-    const { ctx, revoked } = makeCtx(tmpRoot);
-    ctx.invocation.current.mockReturnValue({
-      requestId: "req-spawn-failure",
-      extensionName: "@workspace-extensions/claude-code",
-      method: "providers.claudeCode.launchSubagent",
-      caller: { callerId: "do:parent", callerKind: "do" },
-    });
-    childProcessMock.spawn.mockImplementationOnce(() => {
-      throw new Error("spawn failed");
-    });
-    const api = (await activate(ctx as never)).providerContracts.claudeCode;
-    await expect(
-      api.launchSubagent({
-        channelId: CHANNEL,
-        subagent: {
-          runId: "run-spawn-failure",
-          task: "audit",
-          parentRef: "do:parent",
-          parentChannelId: "home-chan",
-          taskChannelId: "task-chan",
-          parentContextId: "ctx-parent",
-          parentParticipantId: "agent:parent",
-          depth: 1,
-        },
-      }),
-    ).rejects.toThrow("spawn failed");
-    expect(childProcessMock.spawn).toHaveBeenCalledOnce();
-    expect(revoked).toContain(agentId(1));
-    expect(existsSync(path.join(tmpRoot, "native-storage", "agent-launch"))).toBe(true);
-    expect(readdirSync(path.join(tmpRoot, "native-storage", "agent-launch"))).toEqual(
-      [],
-    );
-  });
-
-  it("recovers a persisted process/profile receipt and releases it after extension restart", async () => {
-    const storage = new Map<string, string>();
-    const firstCtx = makeCtx(tmpRoot, storage);
-    firstCtx.ctx.invocation.current.mockReturnValue({
-      requestId: "req-1",
-      extensionName: "@workspace-extensions/claude-code",
-      method: "providers.claudeCode.launchSubagent",
-      caller: { callerId: "do:parent", callerKind: "do" },
-    });
-    const firstApi = (await activate(firstCtx.ctx as never)).providerContracts
-      .claudeCode;
-    const result = await firstApi.launchSubagent({
-      channelId: CHANNEL,
-      subagent: {
-        runId: "run-restart",
-        task: "audit",
-        parentRef: "do:parent",
-        parentChannelId: "home-chan",
-        taskChannelId: "task-chan",
-        parentContextId: "ctx-parent",
-        parentParticipantId: "agent:parent",
-        depth: 1,
-      },
-    });
-    expect(existsSync(path.dirname(result.logPath))).toBe(true);
-
-    const restarted = makeCtx(tmpRoot, storage);
-    const restartedApi = (await activate(restarted.ctx as never))
-      .providerContracts.claudeCode;
-    await restartedApi.release({
-      entityId: result.entityId,
-      generationId: result.generationId,
-    });
-
-    expect(processOwnerApiMock.adopt).toHaveBeenCalledWith(
-      expect.objectContaining({ pid: 4242, startCoordinate: "test-start" }),
-    );
-    expect(restarted.revoked).toContain(agentId(1));
-    expect(existsSync(path.dirname(result.logPath))).toBe(false);
-  });
-
-  it("maps whitelisted CLI options onto the argv and drops unsafe values", async () => {
-    const { ctx } = makeCtx(tmpRoot);
-    ctx.invocation.current.mockReturnValue({
-      requestId: "req-1",
-      extensionName: "@workspace-extensions/claude-code",
-      method: "providers.claudeCode.launchSubagent",
-      caller: { callerId: "do:parent", callerKind: "do" },
-    });
-    const api = (await activate(ctx as never)).providerContracts.claudeCode;
-
-    await api.launchSubagent({
-      channelId: CHANNEL,
-      options: {
-        model: "opus",
-        effort: "high",
-        permissionMode: "acceptEdits",
-        fallbackModel: "--inject-me", // flag-shaped value: dropped
-        maxBudgetUsd: 5,
-        notAFlag: "ignored", // unknown key: dropped
-        maxTurns: 3, // unsupported by the CLI: dropped
-      },
       subagent: {
         runId: "run-1",
-        task: "audit the repo",
-        parentRef: "do:parent",
-        parentChannelId: "home-chan",
-        taskChannelId: "task-chan",
-        parentContextId: "ctx-parent",
-        parentParticipantId: "agent:parent",
-        depth: 1,
-        mode: "fresh",
-      },
-    });
-
-    const [, args] = childProcessMock.spawn.mock.calls[0]! as unknown as [
-      string,
-      string[],
-    ];
-    expect(args.slice(-16)).toEqual([
-      "--permission-mode",
-      "acceptEdits",
-      "--model",
-      "opus",
-      "--effort",
-      "high",
-      "--max-budget-usd",
-      "5",
-      "--output-format",
-      "stream-json",
-      "--verbose",
-      "--allowedTools",
-      "mcp__vibestudio__say,mcp__vibestudio__complete",
-      "--strict-mcp-config",
-      "-p",
-      "audit the repo",
-    ]);
-  });
-
-  it("reports an unexpected process exit to the vessel; a deliberate kill stays silent", async () => {
-    const { ctx, rpcCall, revoked } = makeCtx(tmpRoot);
-    ctx.invocation.current.mockReturnValue({
-      requestId: "req-1",
-      extensionName: "@workspace-extensions/claude-code",
-      method: "providers.claudeCode.launchSubagent",
-      caller: { callerId: "do:parent", callerKind: "do" },
-    });
-    const api = (await activate(ctx as never)).providerContracts.claudeCode;
-    const subagent = {
-      runId: "run-1",
-      task: "audit",
-      parentRef: "do:parent",
-      parentChannelId: "home-chan",
-      taskChannelId: "task-chan",
-      parentContextId: "ctx-parent",
-      parentParticipantId: "agent:parent",
-      depth: 1,
-      mode: "fresh" as const,
-    };
-    const result = await api.launchSubagent({ channelId: CHANNEL, subagent });
-
-    const exitHandler = childProcessMock.child.once.mock.calls.find(
-      (c) => c[0] === "exit",
-    )![1] as (code: number | null, signal: string | null) => void;
-
-    // The session died on its own → the vessel is told so the run settles.
-    exitHandler(1, null);
-    await vi.waitFor(() =>
-      expect(
-        api.inspectLaunch({
-          entityId: result.entityId,
-          generationId: result.generationId,
-        }),
-      ).toMatchObject({
-        state: "exited",
-        exit: { code: 1, signal: null },
-        log: { bytes: 0, tail: "", truncated: false },
-      }),
-    );
-    const report = rpcCall.mock.calls.find(
-      (c) => c[1] === "reportExternalExit",
-    );
-    expect(report).toBeDefined();
-    expect(report![0]).toBe(result.vesselRef);
-    expect(report![2]).toEqual({ runId: "run-1", code: 1, signal: null });
-    await vi.waitFor(() =>
-      expect(existsSync(path.dirname(result.logPath))).toBe(false),
-    );
-    expect(revoked).toContain(agentId(1));
-
-    // Relaunch, then a deliberate release-kill: no exit report.
-    rpcCall.mockClear();
-    childProcessMock.child.on.mockClear();
-    childProcessMock.child.once.mockClear();
-    const relaunched = await api.launchSubagent({
-      channelId: CHANNEL,
-      subagent,
-    });
-    await api.release({
-      entityId: relaunched.entityId,
-      generationId: relaunched.generationId,
-    });
-    const exitHandler2 = childProcessMock.child.once.mock.calls.find(
-      (c) => c[0] === "exit",
-    )![1] as (code: number | null, signal: string | null) => void;
-    exitHandler2(null, "SIGTERM");
-    expect(
-      rpcCall.mock.calls.find((c) => c[1] === "reportExternalExit"),
-    ).toBeUndefined();
-  });
-
-  it("settles a successful headless process from its typed stream result", async () => {
-    const { ctx, rpcCall } = makeCtx(tmpRoot);
-    ctx.invocation.current.mockReturnValue({
-      requestId: "req-1",
-      extensionName: "@workspace-extensions/claude-code",
-      method: "providers.claudeCode.launchSubagent",
-      caller: { callerId: "do:parent", callerKind: "do" },
-    });
-    const api = (await activate(ctx as never)).providerContracts.claudeCode;
-    const result = await api.launchSubagent({
-      channelId: CHANNEL,
-      subagent: {
-        runId: "run-success",
         task: "audit",
         parentRef: "do:parent",
         parentChannelId: "home-chan",
@@ -991,52 +540,80 @@ describe("@workspace-extensions/claude-code prepare", () => {
         depth: 1,
       },
     });
-    writeFileSync(
-      result.logPath,
-      `${JSON.stringify({
-        type: "result",
-        subtype: "success",
-        is_error: false,
-        result: "one concrete finding",
-      })}\n`,
-    );
-    const exitHandler = childProcessMock.child.once.mock.calls.find(
-      (c) => c[0] === "exit",
-    )![1] as (code: number | null, signal: string | null) => void;
-    exitHandler(0, null);
-
-    await vi.waitFor(() =>
-      expect(
-        rpcCall.mock.calls.find((c) => c[1] === "reportExternalResult"),
-      ).toBeDefined(),
-    );
-    const report = rpcCall.mock.calls.find(
-      (c) => c[1] === "reportExternalResult",
-    );
-    expect(report?.[0]).toBe(result.vesselRef);
-    expect(report?.[2]).toEqual({
-      runId: "run-success",
-      outcome: "success",
-      report: "one concrete finding",
-      code: 0,
+    const start = rpcCall.mock.calls.find(
+      (call) => call[1] === "linkedClaude.start",
+    )!;
+    expect(Object.keys(start[2] as object).sort()).toEqual([
+      "options",
+      "profile",
+      "prompt",
+    ]);
+    expect(start[2]).not.toHaveProperty("launcher");
+    expect(start[2]).not.toHaveProperty("readPaths");
+    expect(ctx.workspace.ensureContextFolder).not.toHaveBeenCalled();
+    expect(childProcessMock.spawn).not.toHaveBeenCalled();
+    expect(result).not.toHaveProperty("logPath");
+    await api.release({
+      entityId: result.entityId,
+      generationId: result.generationId,
     });
-    expect(
-      rpcCall.mock.calls.find((c) => c[1] === "reportExternalExit"),
-    ).toBeUndefined();
-    expect(
-      api.inspectLaunch({
-        entityId: result.entityId,
-        generationId: result.generationId,
-      }),
-    ).toMatchObject({
-      state: "exited",
-      completion: {
-        source: "stream-result",
-        outcome: "success",
-        report: "one concrete finding",
-      },
-    });
+    expect(lifecycleEvents.indexOf(`stop:${result.generationId}`)).toBeLessThan(
+      lifecycleEvents.indexOf(`revoke:${agentId(1)}`),
+    );
   });
+
+  it.each(["start", "stop"])(
+    "preserves authority ownership through a failed host %s",
+    async (failure) => {
+      const { ctx, revoked, storage } = makeCtx(tmpRoot, new Map(), {
+        failStart: failure === "start",
+        failStopOnce: failure === "stop",
+      });
+      ctx.invocation.current.mockReturnValue({
+        requestId: "req",
+        extensionName: "@workspace-extensions/claude-code",
+        method: "providers.claudeCode.launchSubagent",
+        caller: { callerId: "do:parent", callerKind: "do" },
+      });
+      const api = (await activate(ctx as never)).providerContracts.claudeCode;
+      const launching = api.launchSubagent({
+        channelId: CHANNEL,
+        subagent: {
+          runId: "run",
+          task: "audit",
+          parentRef: "do:parent",
+          parentChannelId: "home",
+          taskChannelId: "task",
+          parentContextId: "parent",
+          parentParticipantId: "participant",
+          depth: 1,
+        },
+      });
+      if (failure === "start") {
+        await expect(launching).rejects.toThrow(
+          "installed provider unavailable",
+        );
+        expect(revoked).toEqual([agentId(1)]);
+      } else {
+        const result = await launching;
+        await expect(
+          api.release({
+            entityId: result.entityId,
+            generationId: result.generationId,
+          }),
+        ).rejects.toThrow("host retirement unconfirmed");
+        expect(revoked).toEqual([]);
+        expect(
+          JSON.parse(storage.get(`launches/${result.generationId}.json`)!),
+        ).toMatchObject({ phase: "retiring", agentId: agentId(1) });
+        await api.release({
+          entityId: result.entityId,
+          generationId: result.generationId,
+        });
+        expect(revoked).toEqual([agentId(1)]);
+      }
+    },
+  );
 
   it("launchSubagent rejects non-agent-vessel callers", async () => {
     const { ctx } = makeCtx(tmpRoot);
