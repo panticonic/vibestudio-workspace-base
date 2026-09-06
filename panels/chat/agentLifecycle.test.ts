@@ -12,6 +12,8 @@ import {
 
 const mocks = vi.hoisted(() => ({
   waitForApprovalResolution: vi.fn(async () => undefined),
+  getStateArgs: vi.fn(),
+  setStateArgs: vi.fn(),
   call: vi.fn(async (_target: string, method: string, args: unknown[]) => {
     if (method === "runtime.createEntity") {
       const spec = args[0] as { key: string; contextId?: string };
@@ -22,12 +24,15 @@ const mocks = vi.hoisted(() => ({
   }),
 }));
 
-vi.mock("@workspace/runtime", () => ({ rpc: { call: mocks.call } }));
+vi.mock("@workspace/runtime", () => ({
+  rpc: { call: mocks.call },
+  panel: { stateArgs: { get: mocks.getStateArgs, set: mocks.setStateArgs } },
+}));
 vi.mock("@workspace/pubsub", () => ({
   waitForApprovalResolution: mocks.waitForApprovalResolution,
 }));
 
-import { createAndSubscribeAgent } from "./agentLifecycle.js";
+import { createAndSubscribeAgent, persistInstalledAgent } from "./agentLifecycle.js";
 
 function callsFor(method: string): unknown[][] {
   return mocks.call.mock.calls.filter((c) => c[1] === method).map((c) => c[2] as unknown[]);
@@ -317,5 +322,74 @@ describe("ProvisionalAgentLifecycle", () => {
       "runtime.createEntity",
       "runtime.retireEntity",
     ]);
+  });
+});
+
+describe("claimed agent persistence", () => {
+  beforeEach(() => {
+    mocks.waitForApprovalResolution.mockReset().mockResolvedValue(undefined);
+    mocks.getStateArgs.mockReset().mockReturnValue({ installedAgents: [] });
+    mocks.setStateArgs.mockReset();
+  });
+  it("waits for review then persists the same agent without repeating its launch or losing concurrent records", async () => {
+    const agent = {
+      agentId: "AiChatWorker",
+      source: "workers/agent-worker",
+      className: "AiChatWorker",
+      handle: "first",
+      key: "claimed-key",
+    };
+    const concurrent = { ...agent, handle: "second", key: "concurrent-key" };
+    let resolveReview!: () => void;
+    mocks.waitForApprovalResolution.mockImplementationOnce(
+      () =>
+        new Promise<undefined>((resolve) => {
+          resolveReview = () => resolve(undefined);
+        }),
+    );
+    mocks.getStateArgs.mockReturnValue({ installedAgents: [] });
+    mocks.setStateArgs
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Waiting for review"), {
+          code: "EREVIEWPENDING",
+          errorData: {
+            authorityFailure: {
+              remediation: {
+                review: { approvalId: "review-welcome", title: "Welcome" },
+              },
+            },
+          },
+        }),
+      )
+      .mockResolvedValue(undefined);
+    mocks.call.mockClear();
+    const pending = persistInstalledAgent(agent);
+    await vi.waitFor(() =>
+      expect(mocks.waitForApprovalResolution).toHaveBeenCalledExactlyOnceWith(
+        expect.anything(),
+        "review-welcome",
+      ),
+    );
+    expect(mocks.setStateArgs).toHaveBeenCalledTimes(1);
+    mocks.getStateArgs.mockReturnValue({ installedAgents: [concurrent] });
+    resolveReview();
+    await pending;
+    expect(mocks.setStateArgs).toHaveBeenLastCalledWith({
+      installedAgents: [concurrent, agent],
+    });
+    expect(mocks.call).not.toHaveBeenCalled();
+  });
+  it("propagates ordinary persistence errors without waiting on approval", async () => {
+    mocks.setStateArgs.mockRejectedValue(new Error("storage unavailable"));
+    await expect(
+      persistInstalledAgent({
+        agentId: "AiChatWorker",
+        source: "workers/agent-worker",
+        className: "AiChatWorker",
+        handle: "first",
+        key: "claimed-key",
+      }),
+    ).rejects.toThrow("storage unavailable");
+    expect(mocks.waitForApprovalResolution).not.toHaveBeenCalled();
   });
 });

@@ -59,12 +59,11 @@ import { isReviewPending } from "@vibestudio/shared/authority/reviewPending";
 import type { LocalModelsCapabilities, ServerKind } from "@workspace/model-catalog/localModels";
 import type { DurableObjectServiceClient } from "@workspace/runtime";
 import {
-  appendInstalledAgent,
   buildAgentSubscriptionConfig,
   requireChatContextId,
   sanitizeHandle
 } from "./bootstrap.js";
-import { createAndSubscribeAgent, waitForPanelReview } from "./agentLifecycle.js";
+import { createAndSubscribeAgent, persistInstalledAgent, waitForPanelReview } from "./agentLifecycle.js";
 import {
   ConversationHeader,
   conversationStyle,
@@ -1043,8 +1042,7 @@ export default function ChatPanel() {
       // Persist into stateArgs.installedAgents so the agent rehydrates on reload.
       // Read the latest snapshot (rather than the captured `stateArgs`) to avoid
       // clobbering concurrent additions.
-      const currentArgs = panel.stateArgs.get<ChatStateArgs>();
-      const nextInstalled = appendInstalledAgent(currentArgs.installedAgents, {
+      await persistInstalledAgent({
         agentId: className,
         handle,
         key: agentKey,
@@ -1052,7 +1050,6 @@ export default function ChatPanel() {
         className,
         ...(Object.keys(perAgent).length > 0 ? { config: perAgent } : {})
       });
-      await panel.stateArgs.set({ installedAgents: nextInstalled });
       return { agentId: source, handle };
     },
     [getProvisionalAgentLifecycle, resolveProvisionalAgentIntent]

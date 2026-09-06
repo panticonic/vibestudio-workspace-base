@@ -1,5 +1,6 @@
 /** Panel adapter for the runtime-neutral agent launch/lifecycle primitives. */
-import { rpc } from "@workspace/runtime";
+import { rpc, panel } from "@workspace/runtime";
+import { appendInstalledAgent, type InstalledAgentRecord } from "./bootstrap.js";
 import { waitForApprovalResolution } from "@workspace/pubsub";
 import { launchAgentIntoChannel } from "@workspace/agentic-core/agent-launch";
 import {
@@ -37,4 +38,17 @@ export async function createAndSubscribeAgent(args: {
     waitForPanelReview
   );
   return subscription;
+}
+
+/** Retain the claimed agent identity while review blocks its durable panel record.
+ * Retry only the idempotent persistence, never the already-completed launch. */
+export async function persistInstalledAgent(agent: InstalledAgentRecord): Promise<void> {
+  await withWorkspaceReviewRetry(async () => {
+    const current = panel.stateArgs.get<{
+      installedAgents?: InstalledAgentRecord[];
+    }>();
+    await panel.stateArgs.set({
+      installedAgents: appendInstalledAgent(current.installedAgents, agent),
+    });
+  }, waitForPanelReview);
 }
