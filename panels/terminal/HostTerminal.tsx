@@ -15,6 +15,7 @@ type Output = { text: string; cursor: number; alive: boolean };
 
 /** Explicit host authority is never restored or opened by a mount effect. */
 export function HostTerminal(props: {
+  executionPlatform: string | null;
   appearance: TerminalAppearance;
   fontFamily: string;
   fontSize: number;
@@ -185,6 +186,22 @@ export function HostTerminal(props: {
   useEffect(() => {
     frontend.current?.setTheme(resolveTerminalTheme(props.appearance, container.current));
   }, [props.appearance]);
+
+  if (props.executionPlatform === "win32") {
+    return (
+      <Text size="1" color="amber">
+        Windows workspace terminals and extensions run with your account's host
+        permissions. They can access host files, credentials, processes and
+        network. There is no separate protected terminal mode.
+      </Text>
+    );
+  }
+  if (!props.executionPlatform)
+    return (
+      <Text size="1" color="gray">
+        Checking the workspace host's terminal permissions…
+      </Text>
+    );
 
   return (
     <Flex

@@ -84,6 +84,24 @@ export function TerminalApp() {
     loadTerminalState(panel.stateArgs.get<TerminalState>())
   );
   const [hostTerminalFocused, setHostTerminalFocused] = useState(false);
+  const [executionPlatform, setExecutionPlatform] = useState<string | null>(null);
+  useEffect(() => {
+    let active = true;
+    void callMain<{ platform: string }>("developmentNative.describeHost").then(
+      (host) => {
+        if (active) setExecutionPlatform(host.platform);
+      },
+      (error) =>
+        console.error(
+          "Cannot determine workspace host terminal permissions",
+          error
+        )
+    );
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -908,6 +926,7 @@ export function TerminalApp() {
         }}
       >
         <HostTerminal
+          executionPlatform={executionPlatform}
           appearance={appearance}
           fontFamily={state.fontFamily}
           fontSize={state.fontSize}

@@ -60,6 +60,7 @@ beforeEach(async () => {
   await act(async () =>
     root.render(
       <HostTerminal
+        executionPlatform="linux"
         appearance="dark"
         fontFamily="monospace"
         fontSize={14}
@@ -148,4 +149,23 @@ it("labels full host access, renders output and retires its session on close", a
   });
   expect(dispose).toHaveBeenCalledOnce();
   expect(container.textContent).toContain("Open host terminal…");
+});
+
+it("discloses Windows host permissions without offering a separate host mode", async () => {
+  await act(async () =>
+    root.render(
+      <HostTerminal
+        executionPlatform="win32"
+        appearance="dark"
+        fontFamily="monospace"
+        fontSize={14}
+        onFocusChange={() => {}}
+      />,
+    ),
+  );
+  expect(container.textContent).toContain(
+    "Windows workspace terminals and extensions run with your account's host permissions",
+  );
+  expect(container.querySelector("button")).toBeNull();
+  expect(mocks.call).not.toHaveBeenCalled();
 });
