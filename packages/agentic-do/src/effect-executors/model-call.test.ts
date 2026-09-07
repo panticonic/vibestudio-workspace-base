@@ -6,6 +6,7 @@ import {
   type InitialStateInput,
   type ModelCallEffect,
 } from "@workspace/agent-loop";
+import { encodeChannelPayloadStoredValues } from "@workspace/agentic-protocol";
 import { transformMessages } from "@workspace/pi-ai/api/transform-messages";
 import {
   CredentialApprovalDeferredError,
@@ -1330,7 +1331,11 @@ describe("modelCallExecutor", () => {
         },
       ];
       const continued = await modelCallExecutor.execute({
-        descriptor: { ...inputDescriptor, messageId: "msg-continued" },
+        descriptor: {
+          ...inputDescriptor,
+          messageId: "msg-continued",
+          request: { ...inputDescriptor.request, contextThroughSeq: 2 },
+        },
         state: continuedState,
         signal: new AbortController().signal,
         deps: inputDeps,
@@ -1370,10 +1375,18 @@ describe("modelCallExecutor", () => {
     async (readPath, uiPath, uiId) => {
       const inputDeps = deps();
       inputDeps.env = { VIBESTUDIO_TEST_MODE: "1" };
+      const stored = new Map<string, string>();
+      const writer = {
+        putText: async (text: string) => {
+          const digest = `stored-${stored.size}`;
+          stored.set(digest, text);
+          return { digest, size: new TextEncoder().encode(text).length };
+        },
+      };
       inputDeps.blobstore.getText = async (digest) =>
         digest === "sys"
           ? `## Opening turn\nRead \`${readPath}\`, then render \`${uiPath}\` with \`inline_ui\` using the stable ID \`${uiId}\`.`
-          : "";
+          : stored.get(digest) ?? "";
       const inputDescriptor = descriptor();
       inputDescriptor.request.activeToolNames = ["read", "inline_ui"];
       const state = initialAgentState({ channelId: "channel-1", config });
@@ -1418,7 +1431,12 @@ describe("modelCallExecutor", () => {
           kind: "assistant",
           seq: state.entries.length + 1,
           messageId: `assistant-${state.entries.length}`,
-          blocks: outcome.blocks,
+          // Use the same storage classes as durable assistant events. Even
+          // small tool arguments are references when the next inference runs.
+          blocks: (await encodeChannelPayloadStoredValues(
+            { payload: { blocks: outcome.blocks } },
+            writer
+          ) as { payload: { blocks: unknown[] } }).payload.blocks,
         });
         state.entries.push({
           kind: "tool-result",

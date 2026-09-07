@@ -682,6 +682,7 @@ function deterministicTestModeModelOutcome(
   descriptor: ModelCallEffect,
   state: AgentState,
   systemPrompt: string,
+  messages: ModelMessage[],
   env?: Record<string, unknown>
 ): EffectOutcome | null {
   const testMode = env?.["VIBESTUDIO_TEST_MODE"];
@@ -707,11 +708,10 @@ function deterministicTestModeModelOutcome(
         result.seq >= turnOpenedAt &&
         result.name === name &&
         !result.isError &&
-        state.entries.some(
+        messages.some(
           (entry) =>
-            entry.kind === "assistant" &&
-            entry.seq >= turnOpenedAt &&
-            entry.blocks.some(
+            entry.role === "assistant" &&
+            entry.blocks?.some(
               (block) =>
                 isRecord(block) &&
                 block["type"] === "toolCall" &&
@@ -768,12 +768,7 @@ function deterministicTestModeModelOutcome(
     }
   }
 
-  const userEntry = [...state.entries]
-    .reverse()
-    .find(
-      (entry): entry is Extract<(typeof state.entries)[number], { kind: "user" }> =>
-        entry.kind === "user" && entry.seq <= descriptor.request.contextThroughSeq
-    );
+  const userEntry = [...messages].reverse().find((entry) => entry.role === "user");
   const userRequest = userEntry
     ? extractUserContent(userEntry.content)
         .map((block) => block.text)
@@ -1036,6 +1031,16 @@ async function executeModelCall(
   systemPromptPromise.catch(() => {});
   toolsJsonPromise.catch(() => {});
 
+  // Both real and deterministic inference consume the same storage boundary:
+  // folded tool arguments, results and user content can be blob refs. Models see
+  // the actual bytes, never `vibestudio.blob-ref.v1` pointers (a model that
+  // reads pointer JSON emits garbage tool args and pointer-shaped paths).
+  const hydratedMessages = (await hydrateStoredValueRefs(
+    modelContextForPolicy(state, request.contextThroughSeq, request.turnMetadata?.contextPolicy),
+    { getText: (digest) => deps.blobstore.getText(digest) }
+  )) as ModelMessage[];
+  throwIfAborted();
+
   const testModeEnabled =
     deps.env?.["VIBESTUDIO_TEST_MODE"] === "1" ||
     (globalThis as { process?: { env?: Record<string, string | undefined> } }).process?.env?.[
@@ -1046,6 +1051,7 @@ async function executeModelCall(
         descriptor,
         state,
         (await systemPromptPromise) ?? "",
+        hydratedMessages,
         deps.env
       )
     : null;
@@ -1159,14 +1165,6 @@ async function executeModelCall(
   );
   const tools = toolsJson ? (JSON.parse(toolsJson) as Context["tools"]) : undefined;
 
-  // Storage boundary, model-input side: fold entries keep spilled fields
-  // (tool results, large user content) as blob refs — the model must see
-  // the actual bytes, never `vibestudio.blob-ref.v1` pointers (a model that
-  // reads pointer JSON emits garbage tool args and pointer-shaped paths).
-  const hydratedMessages = (await hydrateStoredValueRefs(
-    modelContextForPolicy(state, request.contextThroughSeq, request.turnMetadata?.contextPolicy),
-    { getText: (digest) => deps.blobstore.getText(digest) }
-  )) as ModelMessage[];
   const modelFacingMessages = hydratedMessages.map((message) =>
     message.role === "toolResult"
       ? { ...message, content: modelFacingToolResultContent(message.content) }
