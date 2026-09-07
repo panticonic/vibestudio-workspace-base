@@ -5,7 +5,13 @@ import { templateTests } from "./templates.js";
 function execution(
   returnValue: unknown,
   final: string,
-  options: { code?: string; console?: string } = {},
+  options: {
+    code?: string;
+    console?: string;
+    observed?: unknown;
+    observationCompleted?: boolean;
+    invocationFailed?: boolean;
+  } = {},
 ): TestExecutionResult {
   return {
     duration: 0,
@@ -26,8 +32,8 @@ function execution(
               'return extensions.invoke("@workspace-extensions/templates", "catalog", []);',
           },
           execution: {
-            status: "complete",
-            isError: false,
+            status: options.invocationFailed ? "error" : "complete",
+            isError: options.invocationFailed ?? false,
             result: { details: { returnValue, console: options.console } },
           },
         },
@@ -40,6 +46,19 @@ function execution(
         content: final,
       },
     ],
+    diagnostics:
+      options.observationCompleted === false
+        ? { templateCatalogObservation: { completed: false, error: "unavailable" } }
+        : Object.prototype.hasOwnProperty.call(options, "observed") || returnValue !== undefined
+          ? {
+              templateCatalogObservation: {
+                completed: true,
+                value: Object.prototype.hasOwnProperty.call(options, "observed")
+                  ? options.observed
+                  : returnValue,
+              },
+            }
+          : undefined,
   } as TestExecutionResult;
 }
 
@@ -50,6 +69,13 @@ describe("template agentic validator", () => {
   it("accepts an observed cache miss without inventing installed relationships", () => {
     expect(
       catalog.validate(execution(null, "No catalog is cached.")),
+    ).toMatchObject({ passed: true });
+  });
+  it("accepts the captured result wrapper when the harness independently observes the same miss", () => {
+    expect(
+      catalog.validate(
+        execution({ result: null }, "No catalog is cached.", { observed: null }),
+      ),
     ).toMatchObject({ passed: true });
   });
   it("joins the reported count to the observed catalog", () => {
@@ -69,6 +95,41 @@ describe("template agentic validator", () => {
   it("rejects a claimed cache miss without an observed result", () => {
     expect(
       catalog.validate(execution(undefined, "No catalog is cached.")),
+    ).toMatchObject({ passed: false });
+  });
+  it("rejects a failed catalog invocation despite a completed harness observation", () => {
+    expect(
+      catalog.validate(
+        execution(undefined, "No catalog is cached.", {
+          observed: null,
+          invocationFailed: true,
+        }),
+      ),
+    ).toMatchObject({ passed: false });
+  });
+  it("rejects agent-shaped cache-miss aliases without a harness observation", () => {
+    for (const value of [
+      { catalog: null },
+      { result: null },
+      { catalogUnavailable: true },
+    ]) {
+      expect(
+        catalog.validate(
+          execution(value, "No catalog is cached.", {
+            observed: undefined,
+            observationCompleted: false,
+          }),
+        ),
+      ).toMatchObject({ passed: false });
+    }
+  });
+  it("uses the independent observation instead of an agent-selected result key", () => {
+    expect(
+      catalog.validate(
+        execution({ result: null }, "There is 1 cached template.", {
+          observed: { entries: [], coordinates: { commit: "exact" } },
+        }),
+      ),
     ).toMatchObject({ passed: false });
   });
   it("rejects refreshing during a cache-only request", () => {

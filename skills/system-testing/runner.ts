@@ -6,6 +6,7 @@ import {
 import type { ConnectionConfig } from "@workspace/agentic-core";
 import {
   blobstore,
+  extensions,
   gad,
   openPanel,
   panelTree,
@@ -203,6 +204,8 @@ function fixtureContextAuthority(
 
 export class HeadlessRunner {
   readonly validationEvidenceReader: BlobReader = blobstore;
+  /** Public workspace extension client for harness-owned behavioral observations. */
+  readonly extensionsClient = extensions;
   /** Runtime-initialized panel opener for harness-owned scenario fixtures. */
   readonly openPanelClient = openPanel;
   /** Runtime-initialized panel-tree client for harness-owned invariants. */

@@ -29,7 +29,7 @@ Use the extension's complete installed unit name when invoking it:
 ```ts
 import { extensions } from "@workspace/runtime";
 
-const cached = await extensions.invoke("@workspace-extensions/templates", "catalog", []);
+return await extensions.invoke("@workspace-extensions/templates", "catalog", []);
 ```
 
 Call `inspect` with an already reviewed exact `{ pin }`, a direct

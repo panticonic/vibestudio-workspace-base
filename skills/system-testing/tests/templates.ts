@@ -1,4 +1,8 @@
-import type { TestCase, TestExecutionResult } from "../types.js";
+import type {
+  TestCase,
+  TestExecutionResult,
+  TestOrchestrationContext,
+} from "../types.js";
 import {
   completedScenarioEvidence,
   invocationConsoleOutput,
@@ -10,6 +14,9 @@ import { findLastAgentMessage } from "./_helpers.js";
 function exactCount(message: string, value: number): boolean {
   return new RegExp(`(?:^|\\D)${value}(?:\\D|$)`, "u").test(message);
 }
+
+const CACHED_CATALOG_PROMPT =
+  "How many workspace templates are in the catalog already cached here? Do not fetch, refresh or change anything. If no catalog is cached, tell me that.";
 
 function invokedTemplateOperation(code: string, operation: string): boolean {
   if (!code.includes("@workspace-extensions/templates")) return false;
@@ -63,21 +70,25 @@ function templateCatalogChecked(result: TestExecutionResult) {
       passed: false,
       reason: "Cache-only request unexpectedly refreshed the catalog",
     };
-  const records = walkRecords([
-    ...base.evidence.evalValues,
-    ...consoleStructuredValues(base.evidence.calls),
-  ]);
+  const observation = result.diagnostics?.["templateCatalogObservation"];
+  if (
+    typeof observation !== "object" ||
+    observation === null ||
+    (observation as Record<string, unknown>)["completed"] !== true ||
+    !Object.prototype.hasOwnProperty.call(observation, "value")
+  )
+    return {
+      passed: false,
+      reason: "The harness did not complete an independent cached catalog observation",
+    };
+  const observedValue = (observation as Record<string, unknown>)["value"];
+  const records = walkRecords([observedValue]);
   const catalog = records.find(
     (record) =>
       Array.isArray(record["entries"]) &&
       typeof record["coordinates"] === "object",
   );
-  const absent =
-    base.evidence.evalValues.some((value) => value === null) ||
-    records.some(
-      (record) =>
-        record["catalogUnavailable"] === true || record["catalog"] === null,
-    );
+  const absent = observedValue === null;
   const final = findLastAgentMessage(result);
   if (!catalog && !absent)
     return {
@@ -99,6 +110,48 @@ function templateCatalogChecked(result: TestExecutionResult) {
         passed: false,
         reason: "Agent did not report the observed catalog size",
       };
+}
+
+async function orchestrateCachedCatalog(
+  context: TestOrchestrationContext,
+): Promise<TestExecutionResult> {
+  const startedAt = Date.now();
+  const session = await context.runner.spawn(undefined);
+  let observation: { completed: true; value: unknown } | { completed: false; error: string };
+  let error: string | undefined;
+  let cleanupError: string | undefined;
+  try {
+    await context.sendAndWait(
+      session,
+      CACHED_CATALOG_PROMPT,
+      "cached template catalog",
+    );
+    observation = {
+      completed: true,
+      value: await context.runner.extensionsClient.invoke(
+        "@workspace-extensions/templates",
+        "catalog",
+        [],
+      ),
+    };
+  } catch (cause) {
+    error = cause instanceof Error ? cause.message : String(cause);
+    observation = { completed: false, error };
+  } finally {
+    try {
+      await session.close();
+    } catch (cause) {
+      cleanupError = `close: ${cause instanceof Error ? cause.message : String(cause)}`;
+    }
+  }
+  return {
+    messages: [...session.messages],
+    duration: Date.now() - startedAt,
+    snapshot: session.snapshot(),
+    diagnostics: { templateCatalogObservation: observation },
+    ...(error ? { error } : {}),
+    ...(cleanupError ? { cleanupErrors: [cleanupError] } : {}),
+  };
 }
 
 function templateAuthoringPrepared(result: TestExecutionResult) {
@@ -195,8 +248,8 @@ export const templateTests: TestCase[] = [
       "Observe the existing verified template catalog without fetching source",
     category: "templates",
     validation: "agent-evidence",
-    prompt:
-      "How many workspace templates are in the catalog already cached here? Do not fetch, refresh or change anything. If no catalog is cached, tell me that.",
+    prompt: CACHED_CATALOG_PROMPT,
+    orchestrate: orchestrateCachedCatalog,
     validate: templateCatalogChecked,
   },
   {
