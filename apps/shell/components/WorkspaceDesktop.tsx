@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createStore,
   Provider as StoreProvider,
+  useAtomValue,
   useSetAtom,
   useStore,
 } from "jotai";
@@ -30,6 +31,7 @@ import {
   settingsDialogAtom,
   workspaceChooserDialogOpenAtom,
 } from "../state/appModeAtoms";
+import { themeConfigAtom, themeModeAtom } from "../state/themeAtoms";
 import { workspaceLabel } from "../shell/workspaceLabel";
 import { WorkspaceStack, type WorkspaceSection } from "./WorkspaceStack";
 import { PanelApp } from "./PanelApp";
@@ -76,6 +78,24 @@ export function WorkspaceDesktop() {
   );
   const setSettings = useSetAtom(settingsDialogAtom);
   const setChooser = useSetAtom(workspaceChooserDialogOpenAtom);
+  // Appearance and theme identity are one app-wide choice, but each retained
+  // workspace renders in its own Jotai store, and the control that sets them
+  // (ThemeSettings, in this chrome) writes only to the window's store. Without
+  // this mirror the chrome re-themes while every workspace keeps whatever it
+  // read from localStorage at mount — and since it is the workspace's
+  // PanelStack that broadcasts appearance to the panel views, the panels stop
+  // following the setting altogether.
+  const themeMode = useAtomValue(themeModeAtom);
+  const themeConfig = useAtomValue(themeConfigAtom);
+  useEffect(() => {
+    for (const owner of opened) {
+      // The plain atoms, not their setters: this mirrors a choice that is
+      // already persisted, and re-persisting it per workspace would be a write
+      // amplification with no reader.
+      owner.store.set(themeModeAtom, themeMode);
+      owner.store.set(themeConfigAtom, themeConfig);
+    }
+  }, [opened, themeMode, themeConfig]);
   useEffect(() => {
     approvalPresentation.setHost(notificationHost);
     approvalPresentation.setAnchorId(

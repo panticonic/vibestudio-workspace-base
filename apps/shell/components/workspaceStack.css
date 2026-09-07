@@ -1,9 +1,14 @@
 .workspace-stack {
+  --workspace-stack-gutter: 4px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--workspace-stack-gutter);
   min-width: 0;
-  padding: 8px;
+  /* One gutter, used everywhere: the inset around the section frames, the
+     gap between them, and the frames' own inner padding are all this value,
+     so a panel row sits as far from the frame's edge as the frame sits from
+     the navigation's. */
+  padding: var(--workspace-stack-gutter);
   color: var(--gray-12);
 }
 .workspace-stack button {
@@ -25,7 +30,10 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 2px 4px 2px 10px;
+  /* Aligned with a section heading: the frame's inset, its padding, and the
+     heading's own — so this label and the workspace names share a left edge,
+     and the add button lines up with each section's new-panel button. */
+  padding: 2px calc(var(--workspace-stack-gutter) * 3);
   color: var(--gray-10);
   font-size: 11px;
   font-weight: 600;
@@ -36,6 +44,11 @@
 .workspace-section-toggle {
   display: grid;
   place-items: center;
+  /* The user-agent's button padding survives a `border: 0` reset. These are
+     fixed-size grids, so its 6px of inline padding shrank the centring area
+     below the glyph's own width and every chevron and plus sat right of its
+     own button. */
+  padding: 0;
   width: 28px;
   height: 32px;
   flex-shrink: 0;
@@ -51,22 +64,25 @@
   min-width: 0;
   border-radius: 12px;
   border: 1px solid transparent;
-  padding: 3px;
+  padding: var(--workspace-stack-gutter);
 }
 .workspace-section-focused {
   background: var(--accent-2);
   border-color: var(--accent-5);
 }
 .workspace-section-system {
-  margin-top: 6px;
+  margin-top: var(--workspace-stack-gutter);
   border-top-color: var(--gray-5);
   border-radius: 0 0 12px 12px;
-  padding-top: 6px;
 }
 .workspace-section-heading {
   display: flex;
   align-items: center;
   min-width: 0;
+  /* The heading names the workspace the frame stands for, so it is inset one
+     gutter further than the tree it introduces — the caret and the new-panel
+     button would otherwise sit right against the frame's edge. */
+  padding-inline: var(--workspace-stack-gutter);
 }
 .workspace-section-toggle {
   width: 20px;
@@ -84,7 +100,7 @@
   gap: 9px;
   flex: 1;
   min-width: 0;
-  padding: 6px 2px;
+  padding: 2px;
   text-align: left;
   border-radius: 7px;
 }
@@ -127,7 +143,6 @@
 }
 .workspace-section-tree {
   min-width: 0;
-  padding: 2px 0 5px;
 }
 .workspace-section-state {
   display: grid;
@@ -148,9 +163,13 @@
   display: flex;
   align-items: center;
   gap: 7px;
-  width: calc(100% - 24px);
-  margin: 2px 0 6px 24px;
-  padding: 6px 9px;
+  /* The same box as the filter field below it: the section frame owns the
+     gutter, so this spans the tree's full width instead of being indented on
+     one side only. The extra inline-start padding drops the dot into the
+     column the filter's search icon and the rows' carets share. */
+  width: 100%;
+  margin: 0 0 var(--workspace-stack-gutter);
+  padding: 6px 6px 6px 10px;
   text-align: left;
   border-radius: 7px;
   background: var(--amber-3) !important;

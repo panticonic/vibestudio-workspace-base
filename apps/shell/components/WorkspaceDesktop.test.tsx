@@ -4,7 +4,7 @@ import {
   useApprovalPresentationController,
 } from "./ApprovalPresentationContext";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
-import { atom, useAtom } from "jotai";
+import { atom, getDefaultStore, useAtom, useAtomValue } from "jotai";
 import {
   act,
   fireEvent,
@@ -18,6 +18,7 @@ import {
   useWorkspaceNavigationHost,
   useWorkspaceVisible,
 } from "../shell/workspaceContext";
+import { effectiveThemeAtom, themeModeAtom } from "../state/themeAtoms";
 const api = vi.hoisted(() => {
   const catalog = [
     {
@@ -103,10 +104,12 @@ vi.mock("./PanelApp", () => ({
     const owner = useWorkspaceNavigationHost();
     const visible = useWorkspaceVisible();
     const [value, setValue] = useAtom(draft);
+    const appearance = useAtomValue(effectiveThemeAtom);
     return (
       <input
         aria-label={`${owner?.workspaceId} draft`}
         data-visible={String(visible)}
+        data-appearance={appearance}
         value={value}
         onChange={(event) => setValue(event.target.value)}
       />
@@ -279,6 +282,35 @@ describe("desktop workspace ownership", () => {
       finishOpening();
       result.unmount();
       api.catalog.push(garden);
+    }
+  });
+
+  it("follows the window's appearance choice into every retained workspace", async () => {
+    // The chrome's theme control writes the window store; each workspace
+    // renders in its own. Without the mirror the panels keep the appearance
+    // they read at mount and stop following the setting.
+    const window = getDefaultStore();
+    window.set(themeModeAtom, "dark");
+    const result = render(<Desktop />);
+    try {
+      const personal = await screen.findByLabelText("personal draft");
+      fireEvent.click(screen.getByRole("button", { name: "Open System" }));
+      const system = await screen.findByLabelText("system draft");
+      await waitFor(() =>
+        expect(personal.getAttribute("data-appearance")).toBe("dark"),
+      );
+      expect(system.getAttribute("data-appearance")).toBe("dark");
+
+      await act(async () => {
+        window.set(themeModeAtom, "light");
+      });
+      await waitFor(() =>
+        expect(personal.getAttribute("data-appearance")).toBe("light"),
+      );
+      expect(system.getAttribute("data-appearance")).toBe("light");
+    } finally {
+      window.set(themeModeAtom, "system");
+      result.unmount();
     }
   });
 });

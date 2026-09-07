@@ -75,6 +75,9 @@ const OWNER_BAND_HEIGHT = 18;
 const ROW_PADDING_LEFT = 6;
 /** Fixed-width gutter that holds the expand caret so titles align by depth. */
 const CARET_SLOT = 14;
+
+/** Height the end-of-tree drop target claims while a drag is in flight. */
+const END_DROP_ZONE_DRAG_HEIGHT = 36;
 /** Optical artwork size; leaves breathing room inside the dense 22px row. */
 const PANEL_ICON_SIZE = 13;
 const ACTION_BUTTON_SIZE = 18;
@@ -713,8 +716,9 @@ function EndDropZone({ isOver, projectedDepth, isDragging }: EndDropZoneProps) {
       {...listeners}
       style={{
         position: "relative",
-        minHeight: isDragging ? 32 : 16,
-        marginTop: 4,
+        // No footprint at rest: the tree should end with its last row.
+        minHeight: isDragging ? END_DROP_ZONE_DRAG_HEIGHT - 4 : 0,
+        marginTop: isDragging ? 4 : 0,
         borderTop: isDragging && !showIndicator ? "1px dashed var(--surface-border)" : undefined,
         transition: "min-height var(--motion-base) var(--ease-standard)",
       }}
@@ -1214,14 +1218,26 @@ export function LazyPanelTreeSidebar({
   }, [listElement, scrollElement, measureListOffset]);
 
   // Virtual list — only mount items in/near the viewport.
-  // +1 for the EndDropZone at the bottom.
+  // +1 for the EndDropZone at the bottom. It is a landing area for a drag, so
+  // it claims height only while one is in flight; at rest it must measure zero
+  // or every workspace section ends in a row of empty space.
+  const dragging = activeId !== null;
   const virtualizer = useVirtualizer({
     count: rows.length + 1,
     getScrollElement: () => scrollElement,
     scrollMargin: scrollMargin ?? 0,
-    estimateSize: (index) => (rows[index]?.kind === "owner-band" ? OWNER_BAND_HEIGHT : ROW_HEIGHT),
+    estimateSize: (index) =>
+      index === rows.length
+        ? dragging
+          ? END_DROP_ZONE_DRAG_HEIGHT
+          : 0
+        : rows[index]?.kind === "owner-band"
+          ? OWNER_BAND_HEIGHT
+          : ROW_HEIGHT,
     overscan: 10,
   });
+  // The estimate above changes with the drag, and the virtualizer caches it.
+  useLayoutEffect(() => virtualizer.measure(), [dragging, virtualizer]);
 
   // Only a new selection in the focused workspace may move the common
   // sidebar. Background row loads and section resizing preserve its position.
@@ -1242,7 +1258,7 @@ export function LazyPanelTreeSidebar({
 
   const diagnostics =
     treeLoadError || selfIdentityError ? (
-      <Flex direction="column" gap="1" mx="1" mb="1">
+      <Flex direction="column" gap="1" mb="1">
         {treeLoadError ? (
           <Flex
             role="alert"
@@ -1321,14 +1337,12 @@ export function LazyPanelTreeSidebar({
       <Flex
         align="center"
         gap="1"
-        mx="1"
-        mt="1"
         mb="1"
         style={{
-          // The outer margin is the sidebar gutter (4px, matching the tree
-          // scroller's reserved lane and the footer); the inner padding is the
-          // row gutter, so the search icon lands on the same x as a row's
-          // expander and nothing steps in twice.
+          // The workspace section frame owns the whole gutter around the tree,
+          // so the field adds no outer margin of its own and runs edge to edge
+          // with the rows below it. The inner padding is the row gutter, so the
+          // search icon lands on the same x as a row's expander.
           paddingInline: ROW_PADDING_LEFT,
           minHeight: 24,
           borderRadius: 5,
@@ -1365,7 +1379,8 @@ export function LazyPanelTreeSidebar({
           </IconButton>
         ) : null}
       </Flex>
-      <div ref={setListElement} className="panel-tree-scroll">
+      {/* The workspace section frame owns the gutter; this list adds none. */}
+      <div ref={setListElement}>
         <Box
           style={{
             position: "relative",
@@ -1387,9 +1402,9 @@ export function LazyPanelTreeSidebar({
                   }}
                 >
                   <EndDropZone
-                    isOver={overId === END_DROP_ZONE_ID && activeId !== null}
+                    isOver={overId === END_DROP_ZONE_ID && dragging}
                     projectedDepth={overId === END_DROP_ZONE_ID ? projectedDepth : null}
-                    isDragging={activeId !== null}
+                    isDragging={dragging}
                   />
                 </Box>
               );
@@ -1499,7 +1514,7 @@ export function LazyPanelTreeSidebar({
                   isVisible={item.id !== selectedId && (visibleIds?.has(item.id) ?? false)}
                   showIndicator={item.id === indicatorItemId}
                   projectedDepth={item.id === indicatorItemId ? projectedDepth : null}
-                  isDraggingAny={activeId !== null}
+                  isDraggingAny={dragging}
                   showIndicatorBelow={showIndicatorBelow}
                   isTouch={isTouch}
                   isSortable={!trimmedQuery}
