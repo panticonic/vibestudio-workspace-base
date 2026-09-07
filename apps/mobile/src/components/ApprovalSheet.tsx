@@ -978,15 +978,17 @@ function CallerRow({
   const colors = useAtomValue(themeColorsAtom);
   const shellClient = useAtomValue(shellClientAtom);
   const iconKind: MobileUnitIconKind =
-    caller.kind === "panel"
-      ? "panel"
-      : caller.kind === "app"
-        ? "app"
-        : caller.kind === "extension"
-          ? "extension"
-          : caller.kind === "system"
-            ? "system"
-            : "worker";
+    caller.kind === "browser"
+      ? "browser"
+      : caller.kind === "panel"
+        ? "panel"
+        : caller.kind === "app"
+          ? "app"
+          : caller.kind === "extension"
+            ? "extension"
+            : caller.kind === "system"
+              ? "system"
+              : "worker";
   const chip = (
     <View
       style={[

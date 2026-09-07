@@ -985,15 +985,17 @@ function CallerChip({ caller, onShow }: { caller: CallerInfo; onShow: () => void
             source={caller.iconSourcePath}
             size={APPROVAL_CALLER_ICON_SIZE}
             fallback={
-              caller.kind === "panel"
-                ? "panel"
-                : caller.kind === "app"
-                  ? "app"
-                  : caller.kind === "extension"
-                    ? "extension"
-                    : caller.kind === "system"
-                      ? "system"
-                      : "worker"
+              caller.kind === "browser"
+                ? "browser"
+                : caller.kind === "panel"
+                  ? "panel"
+                  : caller.kind === "app"
+                    ? "app"
+                    : caller.kind === "extension"
+                      ? "extension"
+                      : caller.kind === "system"
+                        ? "system"
+                        : "worker"
             }
           />
         </span>
