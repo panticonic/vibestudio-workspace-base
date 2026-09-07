@@ -5,6 +5,16 @@ description: Create, develop, verify, and diagnose workspace panels, workers, Du
 
 # Workspace development
 
+All panels, workers, agents, and contexts in one workspace use that workspace's
+materialized source and state. A context is a branch inside the workspace, not
+a cross-workspace source loader. Quickfire stays with the workspace of its
+target panel. Personal and System are private per-user workspaces; native
+client code comes from the user's System workspace, while `about/new` and
+other workspace-local pages load locally. Do not add cross-workspace source
+loading or application RPC forwarding. The transport can carry qualified
+identities, but forwarding remains closed pending the receiver-trust versus
+per-invocation-isolation decision.
+
 Use [app development](../appdev/SKILL.md) for trusted apps and [extension
 development](../extensiondev/SKILL.md) for trusted Node services.
 
@@ -58,6 +68,9 @@ purpose, workflow, ownership, invariants, and diagnostics.
   data — build real empty states, real data-entry flows, and real persistence.
 - Use workspace-root-relative paths. Never put host checkout paths in workspace
   source or tool arguments.
+- Treat an ordinary workspace's `admin`/`member` membership role as separate
+  from the authenticated account's `accountRole`. Personal and System remain
+  private regardless of ordinary workspace membership APIs.
 - Declare every package you import, and declare it in the right place: a unit
   loaded on its own (panel, about page, app, worker, extension) owns React and
   its UI kit in `dependencies`; a unit loaded into someone else's realm (skill,
@@ -210,7 +223,9 @@ receipt. An existing destination is not part of the attempt; choose a distinct
 name or stop.
 
 Use context-local project files when the user wants private scratch content
-rather than a published executable unit.
+rather than a published executable unit. For source adoption, use explicit
+copy, compare, and merge operations that preserve provenance; source ancestry
+does not grant access or install a live upstream.
 
 ## Open and verify panels
 

@@ -122,8 +122,11 @@ When capabilities or dependency identity change, test:
 - approved update becomes active
 - source change approval works for app repos
 - capability denial surfaces clearly
-- newly created template workspaces activate their initial trusted app and
-  extension set without a headless approval dead end
+- the user's designated System workspace admits its native client app through
+  the normal launch review
+- new ordinary workspaces surface their extension and panel/worker reviews;
+  retained native app source never creates orphan app launch reviews or runtime
+  principals in those workspaces
 
 ## Regression Areas
 

@@ -171,7 +171,8 @@ import * as fs from "node:fs/promises";
 import { spawn } from "node:child_process";
 
 export async function activate() {
-  // No prompt. The install approval already granted native trust.
+  // Raw Node writes follow the workspace's native resource admission.
+  // They do not create per-call capability prompts or semantic VCS edits.
   await fs.writeFile("/tmp/extension-cache", "...");
   return {
     /* api */
@@ -179,7 +180,12 @@ export async function activate() {
 }
 ```
 
-Raw Node calls are silent and ambient — the user authorized them once at install. Use `ctx.fs` instead when you want the call to show up in the audit log under the extension's identity, or when you want to ask the original caller for permission per call.
+Raw Node effects follow the existing native execution contract: Unix MXC exposes
+the workspace's selected filesystem resources with ordinary networking; Windows
+runs with the application's OS-user permissions. Source admission is not a
+per-invocation resource sandbox, and contexts do not isolate native commands from
+other exposed resources in the same workspace. Use `ctx.fs` for managed semantic
+source operations and their normal caller attribution and authority checks.
 
 ### Exact context folders — provision before reading raw disk
 

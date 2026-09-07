@@ -6,8 +6,7 @@
   "exports": {
     "./types": "./types.ts",
     "./ui": "./ui.tsx",
-    "./templates": "./templates.ts",
-    "./template-review": "./templateReview.tsx"
+    "./templates": "./templates.ts"
   },
   "dependencies": {
     "@radix-ui/themes": "^3.3.0",

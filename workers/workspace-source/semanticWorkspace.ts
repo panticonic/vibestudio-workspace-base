@@ -1276,6 +1276,11 @@ export class SemanticWorkspace {
         return this.push(parsed as VcsPushInput, request);
       case "status":
         return { kind: "complete", result: this.status(parsed as VcsStatusInput) };
+      case "mainState": {
+        const eventId = this.deps.store.mainEventId();
+        if (!eventId) throw new SemanticVcsError("InvalidReference", "Workspace main is not initialized");
+        return { kind: "complete", result: { kind: "event", eventId } };
+      }
       case "compare":
         return this.compare(parsed as VcsCompareInput, request);
       case "inspect":
@@ -1815,6 +1820,7 @@ export class SemanticWorkspace {
       finalizeExternalDelta: true,
       push: true,
       status: true,
+      mainState: true,
       compare: true,
       inspect: true,
       neighbors: true,

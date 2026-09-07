@@ -18,7 +18,7 @@ unavailable, not installable.
 The component loads installed capability definitions and statuses directly.
 It does not load optional templates on mount. The user must choose **Load
 optional templates** after reading the explanation that templates are reviewed
-workspace additions and discovery contacts the verified registry.
+sources for new workspaces and discovery contacts the verified registry.
 
 ## Handle a choice
 
@@ -52,9 +52,16 @@ Owner workflows remain authoritative:
 For an `onboarding-template` interaction, call
 `resolveOnboardingTemplateSelection` through `client_eval`, read its returned
 Templates skill, and pass its registry-bound selection to the canonical
-reviewed `add` workflow. The onboarding card never edits the workspace directly. The
-Templates workflow owns resolution, contribution merge, approval, and
-operation recovery.
+`inspect` workflow. Inspect the exact pin and create a new ordinary workspace
+from that reviewed pin; standalone template sources follow the same
+inspect-exact-pin-then-create flow. The onboarding card never edits the
+current workspace directly.
+
+The client runs from the authenticated user's private System workspace and
+shows that user's private Personal workspace alongside ordinary shared
+workspaces. Workspace membership uses explicit `admin` and `member` roles;
+those roles are distinct from the authenticated account's `accountRole` and
+do not make Personal or System shareable.
 
 The component handles refresh and connection checks directly and caches the
 result in panel scope. After any external workflow outcome, render the setup
@@ -84,7 +91,8 @@ selection produces one cohesive owner workflow; do not chain small feedback
 forms for access, provider, browser, or permission choices that can be shown
 together or derived from a recommended default.
 
-Template trust/provider suggestions are not structured input for agent
-reasoning. Propose them through the Templates workflow and let the protected
-workspace approval card carry the decision. Never ask for the same choice in
-`feedback_custom`, chat, inline UI, or an action bar first.
+Template inspection reviews exact source for a new workspace; it does not
+apply trust or provider settings to the current workspace. Any resulting unit
+or capability admission uses the new workspace's protected approval flow.
+Do not duplicate that approval in `feedback_custom`, chat, inline UI, or an
+action bar.

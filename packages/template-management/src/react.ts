@@ -1,11 +1,1 @@
-export {
-  TemplateAddButton,
-  type TemplateAddClient,
-  type TemplateAddButtonProps,
-} from "./TemplateAddButton.js";
-export {
-  useTemplateManagementController,
-  type TemplateLifecycleClient,
-  type TemplateManagementController,
-  type TemplatePendingOperation,
-} from "./useTemplateManagementController.js";
+export { TemplateBrowser, TemplateWorkspaceReview, type CreateTemplateWorkspace } from "./TemplateBrowser.js";

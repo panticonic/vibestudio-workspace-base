@@ -15,7 +15,7 @@ import {
   createBrowserDataClient,
   type ImportJobSnapshot,
 } from "@vibestudio/browser-data";
-import { activate } from "./index.js";
+import { activate } from "../../extensions/browser-data/index.js";
 import { onboardingCatalog } from "../../skills/onboarding/catalog.js";
 import { composeOnboardingSnapshot } from "../../skills/onboarding/snapshot.js";
 import {
@@ -53,11 +53,13 @@ describe("onboarding browser-data component chain", () => {
         stream: vi.fn(async () => new Response()),
       },
       workers: {
-        resolveService: vi.fn(async (_protocol: string, objectKey?: string) => ({
-          kind: "durable-object" as const,
-          targetId: "do:workers/browser-data:BrowserDataDO:browser:user-1",
-          objectKey,
-        })),
+        resolveService: vi.fn(
+          async (_protocol: string, objectKey?: string) => ({
+            kind: "durable-object" as const,
+            targetId: "do:workers/browser-data:BrowserDataDO:browser:user-1",
+            objectKey,
+          }),
+        ),
       },
       invocation: {
         current: () => ({

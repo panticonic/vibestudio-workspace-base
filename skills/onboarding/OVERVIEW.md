@@ -4,7 +4,11 @@
 > trust boundary, storage model, permission system — read the
 > [architecture skill](../architecture/SKILL.md).
 
-Vibestudio is a desktop application (Electron) that gives you a personal, AI-powered workspace organized as horizontally stacked panels. Each panel is its own TypeScript app running in an isolated webview, and an AI agent (the chat panel) can create, edit, and launch new panels on the fly.
+Vibestudio is a desktop application (Electron) that gives each account a
+private Personal workspace and a private System workspace, alongside any
+ordinary shared workspaces. Panels are horizontally stacked TypeScript apps
+running in isolated webviews, and an AI agent (the chat panel) can create,
+edit, and launch new panels on the fly.
 
 ## Key Concepts
 
@@ -14,7 +18,7 @@ Panels are the building blocks of your workspace. Each panel is a self-contained
 
 - Access a sandboxed filesystem, AI models, and DO-backed app databases
 - Open browser panels to view and automate websites
-- Communicate with other panels via RPC
+- Communicate with other panels in the same workspace via RPC
 - Launch child panels
 
 The **chat panel** is the default root panel — it's where you interact with the AI agent.
@@ -32,20 +36,28 @@ A workspace is a named collection of panels, packages, workers, and configuratio
 
 - Create multiple workspaces (e.g. "personal", "work", "experiment")
 - Fork a workspace to branch off a snapshot
-- Switch between workspaces (triggers app relaunch)
+- Focus another workspace while retaining each workspace's panel tree and drafts
 - Configure which panels open on first launch (`initPanels`)
 
 Workspace config lives in `meta/vibestudio.yml`. Each workspace gets one
 semantic provenance/VCS graph with a committed event and exact working head.
+Contexts, source, and runtime state stay inside their workspace. The native
+client runs from the user's System workspace; `about/new` opens locally in the
+current workspace. Workspace creation and selection belong to the native
+client's authenticated hub controls. Public application RPC forwarding between
+workspaces remains closed pending a receiver-trust decision; a workspace-qualified
+transport target does not enable it.
 
 ### Contexts
 
-A context is an isolated execution environment for a panel. Each context gets:
+A context is a workspace-local source and state branch for a panel, not a native security boundary. Each context gets:
 
 - Its own **context folder** — a materialized view of the workspace state
 - A unique **context ID** used in URLs and storage
 
 Panels in the same context share a filesystem. The chat panel's agent and its child panels typically share a context so they can see each other's files.
+Contexts are workspace-local branches and cannot load source from another
+workspace. Quickfire follows the workspace of its target panel.
 
 ### The Agent (Chat Panel)
 
@@ -65,7 +77,7 @@ The chat panel hosts an AI agent that can:
 - **Build and launch panels** on demand
 - **Connect API provider integrations** — Gmail, GitHub, Slack, and other OAuth/credential-backed services
 - **Tune its own model defaults** — the host chat agent's provider, effort, approval, and chattiness are configurable
-- **Import browser data** — cookies, passwords, bookmarks, history
+- **Import browser data in Personal** — cookies, passwords, bookmarks, history
 - **Automate browsers** via Playwright-style CDP automation (`handle.cdp.page()`)
 - **Schedule recurring work** — run an installed worker method, exact inline eval,
   or agent prompt on an interval or timezone-aware cron calendar, optionally
@@ -116,7 +128,7 @@ All panels and sandbox code can import from `@workspace/runtime`:
 | `fs`        | Filesystem scoped to the context folder              |
 | `ai`        | Text generation and streaming (multiple model roles) |
 | `workers`   | Resolve worker/DO services, including app databases  |
-| `workspace` | List, create, configure, switch workspaces           |
+| `workspace` | Inspect and configure the owning workspace           |
 | `rpc`       | Call services on the main process or other panels    |
 
 Additional surfaces: `browserData` from `@workspace/runtime` (browser data import/export), and `@workspace/cdp-client` (the workerd-native CDP client used by `handle.cdp.page()` — the single Playwright-style browser-automation surface; reach it through the handle, and use its exported `CdpConnection` only for protocol-level work).

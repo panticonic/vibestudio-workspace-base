@@ -75,10 +75,15 @@ structured terminal invocations; human approval waits have no timeout.
 
 ## Credentials
 
-Credentials are URL-bound and host-mediated. Userland composes requests and receives
-responses but never receives secret bytes. OAuth refresh, audience matching, and
+The mediated credential APIs are URL-bound. Callers submit requests and receive
+responses without receiving secret bytes. OAuth refresh, audience matching, and
 credential injection remain host-owned. External Git uses the same mediated egress
 model (`credentials.gitHttp()`), never raw tokens in workspace code.
+
+Credential capture and browser imports belong to the acting user's private
+Personal workspace. Personal and System cannot be shared. These ownership rules
+protect authenticated interfaces; they do not establish universal secrecy from
+native code running as the host OS user.
 
 ## Content integrity
 
@@ -107,11 +112,18 @@ The host resolves persisted file/message classes; callers never supply trusted
 Standing authority approved before newly ingested outside content cannot be exercised
 until the new lineage is reviewed.
 
-## Why agents are safe by construction
+## Agent runtime boundaries
 
-An agent has a context-scoped filesystem, no credential material, no unapproved path
-to protected main, mediated egress, an exact code/session identity, and receiver-side
-checks on every sensitive effect. Content lineage covers what influenced the session
-and what the session writes for others. Route actions through the typed runtime APIs
+The workerd agent/eval interface provides a context-scoped filesystem, mediated
+credential use and egress, protected-main publication checks, and exact
+code/session identity. Native extensions and commands have a different execution
+contract: Unix uses MXC resource admission; Windows native processes run with the
+host OS user's permissions and can read host-user-accessible sibling state.
+Native networking is not universally mediated. A resource supplied to a shared
+workspace's native command is not made private from sibling commands by per-user
+RPC attribution.
+
+Content lineage covers what influenced the session and what the session writes
+for others. Route actions through the typed runtime APIs
 and repair the contract when denied; never add a retry, alternate caller, broad
 wildcard, generated-manifest edit, or compatibility path to route around the gate.

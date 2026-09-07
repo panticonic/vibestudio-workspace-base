@@ -25,6 +25,16 @@ workerd isolates; extensions run as approved Node services; apps are approved
 clients. Agents are ordinary workspace participants using the same services and
 gates as other callers.
 
+The workspace is the locality boundary for source, state, and contexts.
+Contexts branch inside one workspace; they do not make another workspace's
+source available. Quickfire follows the workspace of its target panel.
+Personal and System are private per-user workspaces, and native client code is
+owned by that user's System workspace. `about/new` and other workspace-local
+pages load from the local workspace. Cross-workspace application RPC
+forwarding is closed pending a decision on exported receiver trust versus
+per-invocation isolation; the transport's ability to carry a qualified target
+does not make forwarding available.
+
 Durable conversations and tool activity live in canonical trajectory/channel
 logs. Managed source, applications, integration decisions, and publication live
 in the semantic workspace graph. Materialized files, indexes, Git checkouts, and

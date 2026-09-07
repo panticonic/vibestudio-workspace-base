@@ -110,7 +110,10 @@ Manifest:
 ```
 
 The terminal target builds a Node ESM entry artifact and can be launched by the
-server as a supervised app process. The server emits `apps:available` with
+System workspace server as a supervised app process. All three native app
+targets require the protected System designation for hosting; declaring an app
+in another workspace preserves authoring source without offering a native launch.
+The server emits `apps:available` with
 `launchMode: "terminal-process"`. Disabled or stopped terminal apps report
 `available`; launched terminal apps report `running`.
 
@@ -151,10 +154,11 @@ implications than panels.
 
 Host target selection is intentionally local operational state, not workspace
 configuration. A workspace may contain multiple apps for the same target under
-`apps/*`; the user chooses which app the current host should run through the
-workspace/host target picker. The selection is stored under the workspace state
-directory and can differ per workspace and per client install. Do not write
-these bindings into `meta/vibestudio.yml`.
+`apps/*`. Desktop and mobile choose their client implementation from the acting
+user's designated System workspace and apply the ordinary approved host-target
+selection there. Focusing another workspace does not select its app as native
+chrome or reload the client. Host-target selection is stored under workspace
+state; do not write these bindings into `meta/vibestudio.yml`.
 
 Selection modes:
 

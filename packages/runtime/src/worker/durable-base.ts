@@ -385,6 +385,7 @@ export abstract class DurableObjectBase {
         tier: tier.tier,
         sensitivity,
         ...(tier.session === "codeOnly" ? { codeOnly: true } : {}),
+        ...(wireMethod.crossWorkspace === true ? { crossWorkspace: true } : {}),
       };
     }
     const codeSource = this.rpcSchemaCodeSource(method, wireMethod);
@@ -395,6 +396,7 @@ export abstract class DurableObjectBase {
         tier: tier.tier,
         sensitivity,
         ...(tier.session === "codeOnly" ? { codeOnly: true } : {}),
+        ...(wireMethod.crossWorkspace === true ? { crossWorkspace: true } : {}),
       };
     }
     const unconstrained = authority.principals.filter(
@@ -420,6 +422,7 @@ export abstract class DurableObjectBase {
       tier: tier.tier,
       sensitivity,
       ...(tier.session === "codeOnly" ? { codeOnly: true } : {}),
+      ...(wireMethod.crossWorkspace === true ? { crossWorkspace: true } : {}),
     };
   }
 

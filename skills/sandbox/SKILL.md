@@ -66,6 +66,14 @@ identity answer different questions. Use the specific API in
 [RUNTIME_API.md](RUNTIME_API.md); never infer a verified user from an agent or
 runtime entity.
 
+Every eval call runs in the current workspace and context. Contexts are
+workspace-local branches, not a way to load source from another workspace.
+Quickfire remains attached to the workspace of its target panel. The transport
+layer can represent a workspace-qualified RPC target, but cross-workspace
+application forwarding is deliberately closed pending a product decision about
+exported receiver trust versus per-invocation isolation. Do not document or
+invent a forwarding API.
+
 ## Component essentials
 
 Inline, action-bar, and feedback source files must default-export a component.

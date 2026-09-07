@@ -12,15 +12,9 @@ import {
   type SnapshotContentSink,
 } from "@vibestudio/git";
 import { gitCheckoutsPath } from "@vibestudio/workspace/gitCheckouts";
-import { sameWorkspaceTemplatePin } from "@vibestudio/workspace/baseTemplateRelease";
-import { readDevelopmentTemplateSources } from "@vibestudio/workspace/developmentTemplateSources";
-import type {
-  WorkspaceTemplateDeclaration,
-  WorkspaceTemplatePin,
-} from "@vibestudio/workspace-contracts/types";
+import type { WorkspaceTemplateDeclaration, WorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
 import { WorkspaceTemplatePinSchema } from "@vibestudio/workspace-contracts/workspaceConfigSchema";
 import { normalizeTemplateGitUrl } from "@vibestudio/workspace/templateCoordinates";
-import type { TemplateSourcePorts } from "@workspace/template-composer";
 import {
   ExactGitRegistryAcquirer,
   FileTemplateRegistryCache,
@@ -152,35 +146,6 @@ export async function createRegistryClient(
   return new TemplateRegistryClient(options);
 }
 
-function promotedForUrl(
-  catalog: TemplateCatalogSnapshot,
-  declaration: WorkspaceTemplateDeclaration
-): WorkspaceTemplatePin {
-  const url = normalizeTemplateGitUrl(declaration.url);
-  const entry = catalog.entries.find((candidate) => normalizeTemplateGitUrl(candidate.url) === url);
-  if (!entry) {
-    throw new Error(
-      `Template ${url} is neither installed nor present in registry revision ${catalog.revision}`
-    );
-  }
-  return developmentTemplatePin(
-    WorkspaceTemplatePinSchema.parse({
-      url,
-      ...entry.promoted,
-      ...(declaration.credential ? { credential: declaration.credential } : {}),
-    }),
-  );
-}
-
-export function developmentTemplatePin(pin: WorkspaceTemplatePin): WorkspaceTemplatePin {
-  const url = normalizeTemplateGitUrl(pin.url);
-  return (
-    readDevelopmentTemplateSources().find(
-      (source) => normalizeTemplateGitUrl(source.pin.url) === url,
-    )?.pin ?? pin
-  );
-}
-
 /**
  * Exact immutable acquisition. The ref is used only to fetch the repository;
  * a moving branch is allowed to have advanced after the state was written.
@@ -202,10 +167,7 @@ export async function acquireTemplateSnapshot(
     `${pin.commit}-${pin.snapshot.slice("v1-sha256:".length)}`
   );
   const source = { url: pin.url, credential: pin.credential };
-  const local = readDevelopmentTemplateSources().find((candidate) =>
-    sameWorkspaceTemplatePin(candidate.pin, pin),
-  );
-  if (!local) await requireTemplateCredential(ctx, source);
+  await requireTemplateCredential(ctx, source);
   const git = gitClient(ctx, source);
   const read = (directory: string) =>
     readExactGitSnapshot({
@@ -223,12 +185,6 @@ export async function acquireTemplateSnapshot(
     label: "acquire",
     read,
     async prepare(directory) {
-      if (local) {
-        await fsp.cp(path.resolve(local.checkout), directory, {
-          recursive: true,
-        });
-        return read(directory);
-      }
       await git.clone({
         url: transportUrl(pin.url),
         dir: directory,
@@ -253,10 +209,6 @@ export async function discoverDirectTemplatePin(
   declaration: WorkspaceTemplateDeclaration
 ): Promise<WorkspaceTemplatePin> {
   const url = normalizeTemplateGitUrl(declaration.url);
-  const selected = readDevelopmentTemplateSources().find(
-    (source) => normalizeTemplateGitUrl(source.pin.url) === url,
-  );
-  if (selected) return selected.pin;
   const source = { url, credential: declaration.credential };
   await requireTemplateCredential(ctx, source);
   const snapshot = await withTemporaryGitCheckout(
@@ -280,29 +232,6 @@ export async function discoverDirectTemplatePin(
     commit: snapshot.commit,
     snapshot: snapshot.snapshot,
   });
-}
-
-export function createTemplateSourcePorts(
-  ctx: ExtensionContextLike,
-  statePath: string,
-  catalog: TemplateCatalogSnapshot
-): TemplateSourcePorts {
-  return {
-    resolvePromoted: async (declaration) => promotedForUrl(catalog, declaration),
-    acquire: async (pin, nodeId) => acquireTemplateSnapshot(ctx, statePath, pin, nodeId),
-  };
-}
-
-export function createPinnedTemplateSourcePorts(
-  base: TemplateSourcePorts,
-  pins: readonly WorkspaceTemplatePin[]
-): TemplateSourcePorts {
-  const exact = new Map(pins.map((pin) => [normalizeTemplateGitUrl(pin.url), pin]));
-  return {
-    acquire: base.acquire,
-    resolvePromoted: async (declaration) =>
-      exact.get(normalizeTemplateGitUrl(declaration.url)) ?? base.resolvePromoted(declaration),
-  };
 }
 
 export function catalogPin(

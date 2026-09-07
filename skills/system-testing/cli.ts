@@ -496,14 +496,12 @@ export async function systemTestDoctor(
     "declared workspace extensions are approved and build-ready"
   );
   await capture(
-    "template-registry",
-    () =>
-      rpc.call("main", "extensions.invoke", [
-        "@workspace-extensions/template-composer",
-        "catalog",
-        [{ refresh: true }],
-      ]),
-    "verified template registry is reachable and compatible with the workspace epoch"
+    "workspace-configuration",
+    async () => {
+      const source = await rpc.call("main", "fs.readFile", ["meta/vibestudio.yml", "utf8"]);
+      return rpc.call("main", "workspace.validateConfig", [source]);
+    },
+    "the workspace has a valid standalone runtime configuration"
   );
   await capture(
     "claude-code-extension",

@@ -2,8 +2,9 @@
 
 ## The two-tier trust model
 
-Vibestudio splits into a small **trusted host** and a large **sandboxed
-userland**, with the boundary drawn as narrowly as possible.
+Vibestudio separates the **trusted host** from **workspace-authored code**.
+Browser panels, workerd workers and native processes have different execution
+boundaries; a workspace label alone does not establish native containment.
 
 **The host** is the Electron shell (or headless server + paired native
 clients) plus the workspace server process. It owns, exclusively:
@@ -19,32 +20,39 @@ clients) plus the workspace server process. It owns, exclusively:
 
 **Userland** is everything under the workspace root — the tree that is *your*
 file root as an agent. All of it is agent-writable source, versioned in the
-workspace VCS, built on demand, and sandboxed at runtime. The host never
+workspace VCS and built on demand. The host never
 executes workspace code in its own process.
 
-The consequence: an agent (or any userland code) can build arbitrary software,
-but cannot exfiltrate credentials, silently advance `main`, escape its
-filesystem scope, or reach the network unmediated. Safety comes from the
-boundary, not from constraining what agents may write.
+Protected application APIs authenticate callers, preserve workspace identity and
+gate effects such as publishing `main` or using credentials. Native commands,
+builds and extensions share one workspace runtime: Unix uses stock MXC with
+selected filesystem resources and open networking; Windows runs directly with
+the application's OS-user permissions. Windows native code has no filesystem or
+network confinement. Contexts are branches, not native security domains, and
+credentials deliberately exposed to a shared workspace are available to its
+commands. RPC approvals do not confine raw native effects.
 
 ## Unit kinds
 
-Trust is attached to **declared package identity**, not filesystem position.
-`@workspace-apps/foo` at `apps/foo` is trusted because its unit was approved,
-not because it lives under `apps/`.
+Admission identifies the exact declared package, source and requested authority;
+neither a package name nor its filesystem position grants trust. Native client
+hosting additionally checks the user's designated System workspace. An ordinary
+workspace or website cannot gain client authority by declaring an `apps/` path.
 
 | Kind | Runs in | Trust | Use for |
 |---|---|---|---|
 | **Panel** (`panels/*`) | Isolated webview, talks to server over WebSocket RPC | Sandboxed | User-facing UI surfaces |
 | **Worker / DO** (`workers/*`) | workerd V8 isolate | Sandboxed | Server-side userland logic; DOs are the app-database primitive (`this.sql`) |
-| **Extension** (`extensions/*`) | Forked Node process, full Node access | **Trusted** (elevated install/update approval) | Wrapping native deps, long-lived Node services, replacing in-host services |
+| **Extension** (`extensions/*`) | Native Node process in its workspace runtime | Exact source admission plus the platform's native execution contract | Wrapping native deps and long-lived Node services |
 | **App** (`apps/*`) | Trusted client runtime: `electron` shell view, `react-native` signed bundle, or `terminal` artifact | **Trusted** client unit | Client software with its own runtime target |
 | **Package** (`packages/*`) | Wherever imported | As importer | Shared libraries |
 | **Project** (`projects/*`), `meta/` | Content only | n/a | Plain content repos; ungated push |
 
-Panels/workers are sandboxed by construction; extensions and apps cross the
-trust line, which is why their install/update/push flows carry richer,
-elevated approvals.
+Panels/workers retain browser/workerd isolation. Native extensions follow the
+platform contract above; client apps require their separate exact-code admission.
+Source approval does not turn a workspace into a host process or lend it another
+workspace's grants. New workspaces own their source and runtime state; adopting
+Base source does not create a live dependency on a Base workspace.
 
 ## RPC vs workspace services
 
@@ -122,3 +130,8 @@ A context is an isolated execution environment with its own materialized
 sharing a context share a filesystem; the chat agent and the panels it spawns
 typically share one. Reads stay on that exact event/application state as
 `main` advances elsewhere (see STORAGE.md for the VCS semantics).
+
+Contexts are branches inside one workspace. They do not load source, state, or
+authority from another workspace. Quickfire remains in the workspace of its
+target panel; the native client is sourced from the user's private System
+workspace, while workspace-local pages such as `about/new` load locally.

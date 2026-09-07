@@ -142,6 +142,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "vitest": "^3.2.7"
+    "vitest": "^3.2.7",
+    "@workspace/agentic-protocol": "workspace:*"
   }
 }

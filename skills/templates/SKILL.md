@@ -1,144 +1,106 @@
 ---
 name: templates
-description: Inspect, add, adopt, update, remove, author, publish, or suggest changes to workspace templates through the template-composer extension.
+description: Discover, inspect, create, and publish exact upstream workspace snapshots.
 ---
 
 # Workspace templates
 
-`@workspace-extensions/template-composer` owns template resolution, verified
-content acquisition, relationship changes, retained repair contexts, and host
-review. Invoke it through `extensions.invoke(...)`.
+`@workspace-extensions/templates` owns catalog discovery, exact acquisition,
+manifest inspection, and snapshot publication. A template is a self-contained
+upstream workspace source. It is not an installed layer and confers no grants.
 
-Use the machine-readable [public contract](public-contract.json) for exact
-methods and result discriminants. Read [template
-authoring](references/template-authoring.md) for release creation and [errors
-and remedies](references/errors-and-remedies.md) for failure recovery.
+Base is an ordinary source-only upstream. A workspace records its adopted
+upstream identity and exact source baseline, but runs from its own materialized
+source and does not load Base or another workspace at runtime. Copy, compare,
+and merge are explicit source operations that preserve provenance and do not
+grant authority.
 
-## User-facing language
+Use [public-contract.json](public-contract.json) for exact method shapes and
+[template authoring](references/template-authoring.md) when publishing.
 
-Describe named templates, the parts they add or change, exact versions, incoming
-changes, and suggestions to maintainers. Keep graph, pin, fragment, ref, and
-object-ID details in an optional technical view.
+## Discover and create
 
-## Invariants
+Read `catalog` without arguments for cached rendering. Refresh only after an
+explicit user action with `[{ refresh: true }]`. Catalog selections remain
+bound to the returned `coordinates.commit` and `coordinates.snapshot`.
 
-- Invoke one composer operation per intent. Composer owns dependency resolution,
-  VCS deltas, retained state, and the single protected review.
-- Templates contribute changes; they don't own repositories. Overlapping
-  contributions and local edits resolve through semantic VCS.
-- Never edit managed template relationship files directly — use composer or the
-  reviewed workspace-settings flow.
-- A mutation isn't complete until its typed result confirms application or
-  returns the requested contribution. A decline is a valid terminal outcome.
-- Logical credential names may be stored; concrete credential IDs and secrets
-  may not.
+Call `inspect` with an already reviewed exact `{ pin }`, a direct
+`{ url, credential? }`, or a catalog-bound
+`{ catalogId, registryCommit, registrySnapshot }`. The result contains the
+exact immutable `pin`, self-asserted presentation, and validated repository and
+file inventory. To open an application, pass that exact pin to the ordinary
+workspace creation flow as `rootTemplate`, creating a new standalone
+workspace. Standalone template sources follow the same inspect-exact-pin-then-
+create flow. Never merge it into the current workspace as an installed
+template.
 
-## Observe and resume
+To incorporate selected source into an existing workspace, use ordinary VCS
+compare and merge operations and record their normal source baseline. Template
+metadata does not choose merge precedence or apply provider, trust, credential,
+or authority settings.
 
-Start with `status` and `operations`. Run `check` only when the user asks or
-opens a template status view — update discovery is not a background schedule.
+## Copy selected source between workspaces
 
-For a retained operation, follow its state:
+Native System clients use `prepareSelectedTransfer` from
+`@workspace/workspace-transfer`. It is a shared client implementation over the
+existing authenticated `vcs` and `blobstore` services, not an application RPC
+bridge. Public application calls between workspaces remain closed.
 
-- `reviewing`: merge each returned source delta into the operation's exact
-  review context through the ordinary [VCS
-  workflow](../vibestudio-vcs/SKILL.md), then `resume`.
-- `repairing`: edit the exact repair context from its structured failures, run
-  focused checks, then `resume`.
-- other resumable states: call `resume` and follow the next discriminant.
+Read `vcs.mainState()` to capture protected main directly without creating an
+observation context. Capture the source workspace, exact VCS state and explicitly selected
+repository/file paths. Capture the destination workspace, repository path,
+review context ID and expected working head. Supply source/destination labels
+and the audience from the current hub/account selection. Pass a client factory
+bound to that authenticated hub/account. Its VCS client needs `listFiles`,
+`status`, `importSnapshot`, `registerExternalDelta`, `compare` and `merge`; its
+blobstore client needs `getBase64` and `putBase64`.
 
-Cancel only when the user abandons a user-initiated operation. Product-owned
-release operations must be repaired or resumed. A retained operation is not an
-approval card; publication still crosses its normal review boundary.
+`prepareSelectedTransfer(input, getWorkspaceClient)` returns an immutable
+`preview` and an `execute()` method. The preview shows exact source/destination
+filenames, digest, mode, byte count and audience. Preparation sends nothing to
+the destination. Review the preview and recheck destination membership before
+calling `execute()`. Native UI confirms the workspace audience: only the owner
+for private workspaces, or all current and future authorized members for ordinary
+workspaces. Reconfirm if that audience policy changed, or if a review explicitly
+promised an exact roster and that roster changed.
+Selection is bounded to 200 regular/executable files and 4 MiB of content;
+oversized files are rejected from metadata before their bytes are fetched.
 
-After an applied result, honor `contextIntegration`: continue immediately after
-`integrated`, merge the exact `publicationEventId` into the returned context
-after `needs-merge`, and avoid claiming the current conversation observes it
-after `unavailable`. That final publication merge takes only the context, source
-event, and intent. Do not pass `coordinates`: coordinate decisions belong only
-to unresolved `review.items[].sourceDeltaId` merges, and an applied publication
-event has already concluded them.
+For a fresh review branch, reserve an ID locally and call
+`runtime.createContext({ contextId })` only after Copy is confirmed. Capture the
+destination main event as `expectedWorkingHead`: execution checks the new
+context's actual head before disclosing source content. If main advanced, it
+requires a fresh review. Execution also revalidates source and destination
+access and verifies every copied content digest. It transfers selected bytes
+and a fresh import boundary, never source history, runtime data, membership,
+credentials or grants.
 
-## Add, adopt, update, and remove
+With no destination `repositoryId`, execution imports the complete selected
+manifest as a new repository in that review context. With an existing
+`repositoryId`, it registers an external delta covering only the selected
+destination paths, then returns ordinary compare/merge results. Unselected
+destination files remain unchanged. The baseline is the selected destination
+content: this operation is an explicit copy, not an ancestry-preserving source
+merge. A true authored-baseline merge requires an available, authorized baseline
+and the existing external-delta workflow.
 
-For `add`, pass either the exact catalog selection or a direct URL with a fresh
-command ID. Refresh the catalog only on explicit request. Never preflight the
-same release unless the user asked for a read-only comparison.
-
-For a named catalog entry, the cache-only `catalog` call is selection—not a
-release preflight. Match the returned display name to its opaque `id`, then run
-the single mutation:
-
-```js
-const composer = "@workspace-extensions/template-composer";
-const catalog = await extensions.invoke(composer, "catalog", []);
-const selected = catalog.entries.find((entry) => entry.name === requestedName);
-if (!selected) throw new Error(`No verified template named ${requestedName}`);
-return extensions.invoke(composer, "add", [
-  {
-    commandId: `template-add-${crypto.randomUUID()}`,
-    source: { catalogId: selected.id },
-  },
-]);
-```
-
-Do not inspect composer source code to discover this call shape. The public
-contract above and this workflow are the operative interface.
-
-If `add` returns `pending`, leave eval and merge each returned
-`review.items[].sourceDeltaId` in `review.contextId` with the ordinary `vcs`
-tool, then call
-`extensions.invoke(composer, "resume", [{ operationId: result.operationId }])`.
-Repeat only for a newly returned typed review or repair state; stop at `applied`
-and honor `contextIntegration`.
-
-Use `adopt` only when the user asserts the workspace already descends from the
-inspected exact release. Adoption records lineage without importing that
-release's repository state — it is not a shortcut around an add conflict.
-
-For updates, run `check` for the selected alias, then `pull` only after the user
-chooses to update. Resolve each returned delta through ordinary semantic merge
-and resume when every decision is accounted for.
-
-For a major-version workspace update, call `pull` for the installed Base alias
-with `targetSystemEpoch`. Composer refreshes that generation's verified
-registry, resolves the complete installed template set to exact promoted pins,
-performs ordinary retained userland composition, rewrites the workspace
-generation, and marks its final reviewed publication as the epoch transition.
-An explicitly selected exact `pin` may replace the target Base registry entry.
-Do not edit `systemEpoch` directly or ask the host to plan the source changes.
-
-Only directly configured templates can be removed. If a template arrives as a
-dependency, identify the direct parent instead. Removal preserves other
-templates' contributions and local edits per the semantic merge.
-
-`suggest` publishes a contribution for template maintainers without changing the
-workspace. Report only the returned branch or URL.
+An existing-repository result may contain conflicts or unfinished merge pages.
+Continue with ordinary VCS review and explicit conflict resolution, then commit
+and finalize the delta. New-repository import is committed locally by the normal
+import operation. Neither path pushes to main; publication remains the ordinary
+separate review and approval flow. Keep the operation ID for canonical command
+reconciliation if a connection fails during execution.
 
 ## Author and publish
 
-Use `authoringParts` to discover publishable protected-main parts, then
-`inspectAuthoring` for one user outcome and its required dependencies. Review
-the returned requested, required, dependency, and overlap parts. Include
-contract notes when a release changes a userland contract.
+Use `authoringParts`, then `inspectAuthoring` with `{ name, description,
+parts }`. Review `requiredParts`: workspace package dependencies and runtime
+companions are included so the published snapshot is self-contained.
 
-Publish only the exact inspected fingerprint through `publishAuthoring` with an
-explicit destination, version, and fresh command ID. Contract-breaking changes
-publish as one new current epoch; they never carry migration notes or readers.
-The returned web URL, ref,
-commit, snapshot, and template URL are the completion evidence. A publication
-creates an installable release; registry recommendation is a separate reviewed
-contribution through `suggestRegistryEntry`.
+Publish the unchanged receipt through `publishAuthoring` with its fingerprint,
+version, explicit destination, and fresh command ID. The resulting URL, ref,
+commit, and snapshot are the exact release coordinates. Registry recommendation
+is a separate `suggestRegistryEntry` contribution.
 
-Keep the authoring workflow inside composer — never copy workspace files with a
-shell command or create an auxiliary repository.
-
-## Catalog ownership
-
-Composer is the sole catalog and mutation owner. Onboarding may hand a selected
-registry identity to this workflow but doesn't install templates itself.
-
-Use cache-only `catalog` reads for ordinary rendering. Refresh only on explicit
-user action. Preserve a stale verified snapshot as stale, distinguish an
-uncached `null` from an empty catalog, and surface a failed explicit refresh
-without hiding template status.
+Logical credential names may be recorded. Concrete credential IDs are used only
+for the explicit publication call and never written into the snapshot.

@@ -16,12 +16,18 @@ by an authenticated human account.
 
 ## Desktop Remote Shell
 
-Remote startup is a two-step Iroh flow:
+Remote startup retains a hub session and separate workspace sessions:
 
 1. Redeem a user-bound or root-bootstrap invite and store the global device
    credential.
-2. Select a workspace through `hubControl.routeWorkspace`, which returns that
-   child's current Iroh reach information without minting another identity.
+2. Call `hubControl.ensureUserWorkspaces` on the authenticated hub session to
+   obtain the user's private Personal/System pair. Load native client source
+   from System.
+3. Use `hubControl.routeWorkspace` for each workspace the user opens. It returns
+   that child's current Iroh reach without minting another account identity.
+   Keep the hub session for the catalog and account operations; bind each child
+   session to its exact workspace. Changing focus must not retarget an in-flight
+   operation or replace the System client implementation.
 
 `vibestudio remote pair "https://vibestudio.app/p#<compact-payload>"`
 or the equivalent `vibestudio://connect/<compact-payload>` link exchanges a pairing invite
@@ -66,13 +72,18 @@ The native host persists the selected source alongside the activated bundle so
 future reconnects refresh grants for the same app. No implicit app-source
 fallback should be added to clients.
 
+The selected source belongs to the authenticated user's designated System
+workspace. A panel, website, or app in another workspace cannot select itself
+as the native client by declaring the same source name or capabilities.
+
 The workspace app should use that principal grant for RPC. It should not store
 or handle the refresh token directly in JS.
 
 ## Terminal Client
 
 The terminal target produces a Node ESM entry and the workspace server can
-launch it as a supervised app process. A terminal app should:
+launch it as a supervised app process only in a designated System workspace.
+Ordinary workspaces may retain its source for authoring. A terminal app should:
 
 - connect over `/rpc` with the runner-provided principal grant
 - use app identity and manifest capabilities for privileged calls
@@ -85,17 +96,19 @@ the template so it is available for debugging, but it stays dormant until the sh
 `runtime.supervision.activate({ kind: "app", releaseId:
 "@workspace-apps/remote-cli" })` starts it.
 
-Fresh workspaces created from the product template trust their initial declared
-app/extension set during startup. Later meta-state updates, capability changes, source
-changes, dependency changes, and target changes still go through the normal unit
-approval path.
+Initial source comes from the selected distribution's explicit inventory:
+Personal and System have different source sets. Importing or copying source
+does not copy approvals or grants. Unit admission, capability changes, source
+changes, dependency changes, and target changes use the normal approval path.
 
 ## Pairing Invite Creation
 
 Pairing invite creation belongs to the stable hub session held by desktop,
 mobile, and external CLI shells. A workspace app has only its exact child
 session and cannot deputy a hub-control request. `pairDevice` binds an invite to
-the authenticated shell's account; `inviteUser` is root/admin-gated.
+the authenticated shell's account. `inviteUser` requires an account admin and
+explicit workspace-admin authority for every target workspace. Personal and
+System are exclusively owned and cannot receive additional members.
 
 ## URL And Transport Rules
 

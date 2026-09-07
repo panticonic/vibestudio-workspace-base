@@ -147,22 +147,25 @@ For branch-aware declarations, import approvals, startup auto-import, and
 credentialed private repo retries, see
 [EXTERNAL_GIT_PROJECTS.md](EXTERNAL_GIT_PROJECTS.md).
 
-## Base template vs live workspace
+## Source distributions and live workspaces
 
-A live workspace is created from the promoted base template's exact Git pin;
-the Vibestudio host does not contain a fallback copy of workspace source.
+Base, Personal and System are separate self-contained source distributions.
+Base supplies common agentic functionality; Personal supplies normal personal
+work and browser-data services; System supplies the native client and system
+workflows. Each user has their own non-shareable Personal and System workspace.
+Other workspaces can have explicit members. No running Base workspace is needed.
 
-1. The host acquires and verifies the configured base URL, ref, commit, and
-   snapshot.
+1. The host acquires and verifies the selected distribution's exact URL, ref,
+   commit and snapshot. The host contains no fallback workspace source.
 2. It imports those repositories through exact `vcs.importSnapshot` work units
    with explicit repository and file identities.
-3. It builds and activates the base manifest, including the manifest-declared
+3. It builds and activates that distribution's manifest, including its declared
    `gad.workspace` source provider.
-4. The template composer adopts the base lineage on first run and publishes
-   descriptive relationship state. Optional templates then use the same
-   inspect, build, approval, and protected-publication path.
+4. It keeps upstream identity and source baselines for explicit source comparison
+   and merge. Optional templates use exact inspection and create their own
+   workspace; they do not become installed layers in another workspace.
 
-A fresh development or system-test instance performs this same base acquisition
-and bootstrap. Editing a live workspace changes that workspace's semantic
+A fresh development or system-test instance uses those same distribution and
+bootstrap contracts. Editing a live workspace changes that workspace's semantic
 source; publishing or suggesting those changes is explicit and never mirrors
 them into a host checkout.

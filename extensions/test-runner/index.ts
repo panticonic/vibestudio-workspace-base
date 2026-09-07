@@ -141,22 +141,6 @@ function nodeModulesRoot(file: string): string {
   throw new Error(`Could not locate dependency root for ${file}`);
 }
 
-function workspaceRootProbePaths(root: string): string[] {
-  const probes: string[] = [];
-  let cursor = path.resolve(root);
-  while (true) {
-    probes.push(
-      path.join(cursor, "package.json"),
-      path.join(cursor, "tsconfig.json"),
-      path.join(cursor, "pnpm-workspace.yaml"),
-      path.join(cursor, "lerna.json"),
-    );
-    const parent = path.dirname(cursor);
-    if (parent === cursor) return probes;
-    cursor = parent;
-  }
-}
-
 function nativeRunnerSource(input: {
   vitestNodeUrl: string;
   root: string;
@@ -301,21 +285,13 @@ export async function activate(ctx: ExtensionContextLike) {
           }),
         );
         const dependencyRoot = nodeModulesRoot(vitestNode);
+        // The extension and its child execute in the same workspace native
+        // domain: MXC resource admission on Unix, normal host-user execution
+        // on Windows. Tests are not a separate filesystem security domain.
+        // Dependency resolution follows the installed closure, including
+        // package-manager links; it does not define another permission list.
         const outcome = await runChild(
-          [
-            "--permission",
-            "--allow-addons",
-            "--allow-child-process",
-            "--allow-worker",
-            `--allow-fs-read=${root}`,
-            `--allow-fs-read=${dependencyRoot}`,
-            `--allow-fs-read=${scratch}`,
-            ...workspaceRootProbePaths(root).map(
-              (probe) => `--allow-fs-read=${probe}`,
-            ),
-            `--allow-fs-write=${scratch}`,
-            runnerPath,
-          ],
+          [runnerPath],
           root,
           {
             NODE_ENV: "test",

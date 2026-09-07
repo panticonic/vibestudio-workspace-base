@@ -5,6 +5,10 @@ description: Exercise workspace services and runtime APIs against explicit expec
 
 # Explorer — sandbox self-exploration
 
+Explorer is a Personal-specific diagnostic worker. Use the generic
+`workers/agent-worker` / `AiChatWorker` guidance for application agents in an
+ordinary workspace.
+
 When the focus includes semantic VCS, first read the canonical
 [Vibestudio VCS skill](../../skills/vibestudio-vcs/SKILL.md). Exercise its exact
 event, application, change, and identity contracts; do not invent a fallback

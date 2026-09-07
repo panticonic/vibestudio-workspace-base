@@ -43,7 +43,10 @@ The canary migrations all follow the same shape:
    await svc.<method>(...);
    ```
 
-4. **Declare the extension** in the template repository's `meta/template.yml` under `extensions:` so it is composed on installation. It is not pre-approved — the startup reconcile raises a joint approval the user (or, headlessly, the shell via `shellApproval.resolve`) must grant before it runs.
+4. **Declare the extension** in the owning workspace's `meta/vibestudio.yml`
+   under `extensions:`. Include it explicitly when publishing a workspace
+   snapshot; selected source copying does not install configuration or grants.
+   The runtime's ordinary unit review must approve it before execution.
 
 5. **Add an integration test** at `tests/extension-<name>.integration.test.ts` that boots a real server, approves the joint unit approval, calls a representative method, and asserts the response matches the old service's contract.
 
@@ -60,7 +63,11 @@ The canary migrations all follow the same shape:
 ## What changes for the extension author
 
 - **Dependencies** ship inside the extension repo. The host no longer brings them. This is usually a win (independent upgrade cadence) but means the host's `node_modules` shrinks.
-- **State** lives in `ctx.storage` (per-extension scratch) instead of `{userData}` paths the in-host service used. Migration code that needs to read the old location can call `ctx.fs.readFile(...)` and copy on first activation.
+- **State** lives in `ctx.storage` (per-extension scratch) instead of arbitrary
+  host `{userData}` paths. `ctx.fs` exposes the admitted workspace filesystem,
+  not a general host migration interface. Moving old host-owned data requires
+  an explicit bounded host migration or user-selected import; do not widen the
+  native resource admission to recover an old path.
 - **Logs and health** are now structured: `ctx.log.info(..., { fields })` rather than `console.log`, `ctx.health.report(...)` for operational state.
 
 ## Concrete examples

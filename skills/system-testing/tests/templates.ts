@@ -2,7 +2,6 @@ import type { TestCase, TestExecutionResult } from "../types.js";
 import {
   completedScenarioEvidence,
   invocationConsoleOutput,
-  walkArrays,
   walkRecords,
   type ScenarioEvidence,
 } from "./_scenario-evidence.js";
@@ -12,27 +11,17 @@ function exactCount(message: string, value: number): boolean {
   return new RegExp(`(?:^|\\D)${value}(?:\\D|$)`, "u").test(message);
 }
 
-function nonNegativeInteger(
-  record: Record<string, unknown>,
-  keys: readonly string[]
-): number | undefined {
-  for (const key of keys) {
-    const value = record[key];
-    if (Number.isInteger(value) && (value as number) >= 0) return value as number;
-  }
-  return undefined;
-}
-
-function invokedComposerOperation(code: string, operation: string): boolean {
-  if (!code.includes("@workspace-extensions/template-composer")) return false;
+function invokedTemplateOperation(code: string, operation: string): boolean {
+  if (!code.includes("@workspace-extensions/templates")) return false;
   const quoted = `(["'])${operation}\\1`;
   const convenienceCall = new RegExp(
     `(?:\\bextensions|\\([^)]*\\bextensions\\b[^)]*\\))\\.invoke\\s*\\([^,]+,\\s*${quoted}`,
-    "u"
+    "u",
   ).test(code);
   const portableCall =
-    /rpc\.call\s*\(\s*(["'])main\1\s*,\s*(["'])extensions\.invoke\2\s*,/u.test(code) &&
-    new RegExp(quoted, "u").test(code);
+    /rpc\.call\s*\(\s*(["'])main\1\s*,\s*(["'])extensions\.invoke\2\s*,/u.test(
+      code,
+    ) && new RegExp(quoted, "u").test(code);
   const indirectCall =
     /extensions\.invoke\s*\([^,]+,\s*[A-Za-z_$][\w$]*/u.test(code) &&
     new RegExp(`\\b[A-Za-z_$][\\w$]*\\s*\\(\\s*${quoted}`, "u").test(code);
@@ -61,108 +50,54 @@ function consoleStructuredValues(calls: ScenarioEvidence["calls"]): unknown[] {
   return values;
 }
 
-function consoleStatusCount(output: string): number | undefined {
-  const match = /(?:^|\n)status(?:\s+ok)?\s+(\[[^\n]*\])/iu.exec(output);
-  if (!match?.[1]) return undefined;
-  try {
-    const value: unknown = JSON.parse(match[1]);
-    return Array.isArray(value) ? value.length : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function templateOverviewChecked(result: TestExecutionResult) {
+function templateCatalogChecked(result: TestExecutionResult) {
   const base = completedScenarioEvidence(result);
   if (!base.passed) return base;
-  if (
-    !invokedComposerOperation(base.evidence.evalCode, "status") ||
-    !invokedComposerOperation(base.evidence.evalCode, "catalog")
-  ) {
+  if (!invokedTemplateOperation(base.evidence.evalCode, "catalog"))
     return {
       passed: false,
-      reason: "Completed eval did not invoke template composer status and catalog",
+      reason: "No completed template catalog observation",
     };
-  }
-
+  if (/refresh\s*:\s*true/u.test(base.evidence.evalCode))
+    return {
+      passed: false,
+      reason: "Cache-only request unexpectedly refreshed the catalog",
+    };
   const records = walkRecords([
     ...base.evidence.evalValues,
     ...consoleStructuredValues(base.evidence.calls),
   ]);
-  const overview = records.find(
+  const catalog = records.find(
     (record) =>
-      nonNegativeInteger(record, ["statusCount", "connectedTemplatesCount"]) !== undefined &&
-      (nonNegativeInteger(record, ["catalogCount", "catalogEntriesCount"]) !== undefined ||
-        record["catalogUnavailable"] === true)
+      Array.isArray(record["entries"]) &&
+      typeof record["coordinates"] === "object",
   );
-  const arrays = walkArrays(base.evidence.evalValues);
-  const status = arrays.find((items) =>
-    items.every(
-      (item) =>
-        typeof item === "object" &&
-        item !== null &&
-        !Array.isArray(item) &&
-        typeof (item as Record<string, unknown>)["alias"] === "string" &&
-        typeof (item as Record<string, unknown>)["state"] === "string"
-    )
-  );
-  const catalog = arrays.find((items) =>
-    items.every(
-      (item) =>
-        typeof item === "object" &&
-        item !== null &&
-        !Array.isArray(item) &&
-        typeof (item as Record<string, unknown>)["id"] === "string" &&
-        typeof (item as Record<string, unknown>)["name"] === "string"
-    )
-  );
-  const statusCount = overview
-    ? nonNegativeInteger(overview, ["statusCount", "connectedTemplatesCount"])
-    : undefined;
-  const catalogCount = overview
-    ? nonNegativeInteger(overview, ["catalogCount", "catalogEntriesCount"])
-    : undefined;
-  const catalogUnavailable = overview?.["catalogUnavailable"] === true;
-  const hasStatusRow = records.some(
-    (record) => typeof record["alias"] === "string" && typeof record["state"] === "string"
-  );
-  const hasCatalogRow = records.some(
-    (record) => typeof record["id"] === "string" && typeof record["name"] === "string"
-  );
-  const consoleOutput = base.evidence.calls
-    .map(invocationConsoleOutput)
-    .filter((output): output is string => output !== null)
-    .join("\n");
-  const observedConsoleStatusCount = consoleStatusCount(consoleOutput);
-  const consoleCatalogUnavailable = /no verified template registry is cached/iu.test(consoleOutput);
-  const countsAreSupported =
-    statusCount !== undefined &&
-    (catalogCount !== undefined || catalogUnavailable) &&
-    (statusCount === 0 || hasStatusRow) &&
-    (catalogUnavailable || catalogCount === 0 || hasCatalogRow);
-  const consoleEvidenceIsSupported =
-    observedConsoleStatusCount !== undefined && consoleCatalogUnavailable;
-  if ((!status || !catalog) && !countsAreSupported && !consoleEvidenceIsSupported) {
+  const absent =
+    base.evidence.evalValues.some((value) => value === null) ||
+    records.some(
+      (record) =>
+        record["catalogUnavailable"] === true || record["catalog"] === null,
+    );
+  const final = findLastAgentMessage(result);
+  if (!catalog && !absent)
     return {
       passed: false,
-      reason: "Template status and catalog calls did not both return canonical row sets",
+      reason:
+        "Catalog read did not return a snapshot or an observed cache miss",
     };
-  }
-  const observedStatusCount = statusCount ?? status?.length ?? observedConsoleStatusCount!;
-  const observedCatalogCount = catalogCount ?? catalog?.length;
-  const observedCatalogUnavailable = catalogUnavailable || consoleCatalogUnavailable;
-  const final = findLastAgentMessage(result);
-  const catalogReported =
-    !observedCatalogUnavailable && observedCatalogCount !== undefined
-      ? exactCount(final, observedCatalogCount)
-      : /\b(?:cache\w*|catalog|registry)\b[\s\S]*?\b(?:absent|empty|missing|unavailable|not cached)\b/iu.test(
-          final
-        );
-  return exactCount(final, observedStatusCount) && catalogReported
-    ? { passed: true, reason: undefined }
+  if (absent && !catalog)
+    return /cache|unavailable|not available|not cached|no catalog/iu.test(final)
+      ? { passed: true }
+      : {
+          passed: false,
+          reason: "Agent did not report the observed unavailable catalog",
+        };
+  const count = (catalog!["entries"] as unknown[]).length;
+  return exactCount(final, count)
+    ? { passed: true }
     : {
         passed: false,
-        reason: "Final response did not report the observed template and catalog counts",
+        reason: "Agent did not report the observed catalog size",
       };
 }
 
@@ -170,16 +105,20 @@ function templateAuthoringPrepared(result: TestExecutionResult) {
   const base = completedScenarioEvidence(result);
   if (!base.passed) return base;
   if (
-    !invokedComposerOperation(base.evidence.evalCode, "authoringParts") ||
-    !invokedComposerOperation(base.evidence.evalCode, "inspectAuthoring")
+    !invokedTemplateOperation(base.evidence.evalCode, "authoringParts") ||
+    !invokedTemplateOperation(base.evidence.evalCode, "inspectAuthoring")
   ) {
     return {
       passed: false,
-      reason: "Completed eval did not discover parts and inspect an authoring plan",
+      reason:
+        "Completed eval did not discover parts and inspect an authoring plan",
     };
   }
-  if (invokedComposerOperation(base.evidence.evalCode, "publishAuthoring")) {
-    return { passed: false, reason: "Preparation-only scenario unexpectedly published a template" };
+  if (invokedTemplateOperation(base.evidence.evalCode, "publishAuthoring")) {
+    return {
+      passed: false,
+      reason: "Preparation-only scenario unexpectedly published a template",
+    };
   }
   const records = walkRecords([
     ...base.evidence.evalValues,
@@ -191,14 +130,20 @@ function templateAuthoringPrepared(result: TestExecutionResult) {
   >();
   for (const record of records) {
     const fingerprint = record["fingerprint"];
-    if (typeof fingerprint !== "string" || !/^v1-sha256:[0-9a-f]{64}$/u.test(fingerprint)) {
+    if (
+      typeof fingerprint !== "string" ||
+      !/^v1-sha256:[0-9a-f]{64}$/u.test(fingerprint)
+    ) {
       continue;
     }
-    const receipt = receipts.get(fingerprint) ?? { requestedParts: new Set<string>() };
+    const receipt = receipts.get(fingerprint) ?? {
+      requestedParts: new Set<string>(),
+    };
     if (typeof record["mainEventId"] === "string") {
       receipt.mainEventId = record["mainEventId"];
     }
-    if (typeof record["manifest"] === "string") receipt.manifest = record["manifest"];
+    if (typeof record["manifest"] === "string")
+      receipt.manifest = record["manifest"];
     const requested = Array.isArray(record["requestedParts"])
       ? record["requestedParts"]
       : Array.isArray(record["requested"])
@@ -212,7 +157,8 @@ function templateAuthoringPrepared(result: TestExecutionResult) {
     receipts.set(fingerprint, receipt);
   }
   const exactReceipts = [...receipts].filter(
-    ([, receipt]) => receipt.manifest !== undefined && receipt.requestedParts.size > 0
+    ([, receipt]) =>
+      receipt.manifest !== undefined && receipt.requestedParts.size > 0,
   );
   if (!exactReceipts.length) {
     return {
@@ -220,80 +166,47 @@ function templateAuthoringPrepared(result: TestExecutionResult) {
       reason: "Authoring inspection did not return an exact non-empty plan",
     };
   }
-  const composerReceipts = exactReceipts.filter(([, receipt]) =>
-    receipt.requestedParts.has("packages/template-composer")
+  const selectedReceipts = exactReceipts.filter(([, receipt]) =>
+    receipt.requestedParts.has("packages/template-registry"),
   );
-  if (!composerReceipts.length) {
+  if (!selectedReceipts.length) {
     return {
       passed: false,
-      reason: "Authoring plan did not select the requested template composer package",
+      reason:
+        "Authoring plan did not select the requested template registry library",
     };
   }
   const final = findLastAgentMessage(result);
-  const reportedExactPlan = composerReceipts.some(([fingerprint]) => final.includes(fingerprint));
-  return reportedExactPlan &&
-    /not publish|not published|nothing (?:was )?published|without publishing|prepared/iu.test(final)
-    ? { passed: true, reason: undefined }
-    : {
-        passed: false,
-        reason: "Final response did not report the exact fingerprint and preparation-only state",
-      };
-}
-
-function templateInstalledThroughSingleTransaction(result: TestExecutionResult) {
-  const base = completedScenarioEvidence(result);
-  if (!base.passed) return base;
-  if (!invokedComposerOperation(base.evidence.evalCode, "add")) {
-    return { passed: false, reason: "Agent did not invoke the canonical template add operation" };
-  }
-  if (invokedComposerOperation(base.evidence.evalCode, "prepareAdd")) {
-    return { passed: false, reason: "Agent used the removed preparation ceremony before add" };
-  }
-  const records = walkRecords(base.evidence.evalValues);
-  const applied = records.some(
-    (record) =>
-      record["state"] === "applied" &&
-      typeof record["operationId"] === "string" &&
-      Array.isArray(record["affectedParts"])
+  const reportedExactPlan = selectedReceipts.some(([fingerprint]) =>
+    final.includes(fingerprint),
   );
-  const final = findLastAgentMessage(result);
-  const reportedCompletion =
-    /examples?/iu.test(final) &&
-    /(?:added|installed|connected|completed|finished|successful|state\s*:\s*["'`]?applied)/iu.test(
-      final
-    );
-  return applied && reportedCompletion
+  return reportedExactPlan
     ? { passed: true, reason: undefined }
     : {
         passed: false,
-        reason: "Template add did not return an applied operation and a truthful completion",
+        reason: "Final response did not identify the observed exact plan",
       };
 }
 
 export const templateTests: TestCase[] = [
   {
-    name: "templates-install-examples",
-    description: "Install one official template through the single reviewed transaction",
+    name: "templates-cached-catalog",
+    description:
+      "Observe the existing verified template catalog without fetching source",
     category: "templates",
     validation: "agent-evidence",
     prompt:
-      "Use the shipped Templates skill to add the Examples template from the verified catalog. Complete the canonical install transaction and report the outcome. Do not perform a separate read-only inspection unless the install reports an actionable conflict or validation failure.",
-    validate: templateInstalledThroughSingleTransaction,
-  },
-  {
-    name: "templates-status-catalog",
-    description: "Inspect exact template relationships and the verified registry cache",
-    category: "templates",
-    prompt:
-      "Use the workspace templates skill and userland template composer to inspect connected templates and the cached verified registry. Do not refresh, fetch, or change anything. Keep the status observation even when the cache-only catalog read reports that no verified registry is cached. Report the exact number of connected templates and, when cached, catalog entries; otherwise report that the catalog cache is unavailable. Include one concrete status or catalog name when available.",
-    validate: templateOverviewChecked,
+      "How many workspace templates are in the catalog already cached here? Do not fetch, refresh or change anything. If no catalog is cached, tell me that.",
+    validate: templateCatalogChecked,
   },
   {
     name: "templates-authoring-prepare",
-    description: "Discover authorable parts and prepare an exact template publication plan",
+    description:
+      "Prepare a self-contained upstream snapshot from the local template registry library",
     category: "templates",
+    validation: "agent-evidence",
     prompt:
-      "Use the workspace templates skill to prepare, but do not publish, a reusable template containing the workspace library package whose discovered packageName is @workspace/template-composer (not the extension package). Discover the available authoring parts through the composer and select the matching inventory row instead of guessing its repository path. Give it a concise name and description, inspect the exact plan, and report the selected part, any automatically required or inherited parts, and the complete plan fingerprint. Explicitly say that nothing was published.",
+      "Prepare a reusable workspace snapshot containing the template registry library. Show me what source and required dependencies it would include, with an exact plan I can review. Do not publish anything.",
     validate: templateAuthoringPrepared,
   },
 ];

@@ -1912,6 +1912,11 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }
 
   @schemaRpc()
+  vcsMainState(request: SemanticDispatchRequest): Promise<unknown> {
+    return this.vcsSemantic("mainState", request);
+  }
+
+  @schemaRpc()
   vcsCompare(request: SemanticDispatchRequest): Promise<unknown> {
     return this.vcsSemantic("compare", request);
   }

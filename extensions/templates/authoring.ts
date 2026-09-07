@@ -15,11 +15,7 @@ import type {
   TemplateAuthoringIntent,
 } from "@vibestudio/service-schemas/templates";
 import { normalizeWorkspaceRepoPath } from "@vibestudio/workspace/remotes";
-import { normalizeTemplateGitUrl } from "@vibestudio/workspace/templateCoordinates";
-import {
-  WorkspaceConfigTopLayerSchema,
-  WorkspaceTemplateDeclarationSchema,
-} from "@vibestudio/workspace-contracts/workspaceConfigSchema";
+import { WorkspaceConfigTopLayerSchema } from "@vibestudio/workspace-contracts/workspaceConfigSchema";
 import { WORKSPACE_PACKAGE_SCOPES } from "@vibestudio/workspace-contracts/sourceDirs";
 import type { WorkspaceConfig } from "@vibestudio/workspace-contracts/types";
 import type { ExtensionContextLike } from "./context.js";
@@ -88,7 +84,7 @@ function selectedGitMap<T>(
 function projectManifest(
   config: WorkspaceConfig,
   selected: ReadonlySet<string>,
-  dependencies: NonNullable<TemplateAuthoringIntent["dependencies"]>,
+  presentation: { name: string; description: string },
   includeWorkspaceDefaults: boolean
 ): string {
   const upstreams = selectedGitMap(config.git?.upstreams, selected);
@@ -136,12 +132,8 @@ function projectManifest(
         )
       )
     : undefined;
-  return canonicalYaml(
-    WorkspaceConfigTopLayerSchema.parse({
+  const runtime = WorkspaceConfigTopLayerSchema.parse({
       systemEpoch: config.systemEpoch,
-      templates: {
-        use: dependencies,
-      },
       ...(config.defaultRepo && selected.has(config.defaultRepo)
         ? { defaultRepo: config.defaultRepo }
         : {}),
@@ -182,8 +174,15 @@ function projectManifest(
       ...(providers && Object.keys(providers).length ? { providers } : {}),
       ...(trust && Object.keys(trust).length ? { trust } : {}),
       ...(hostTargets && Object.keys(hostTargets).length ? { hostTargets } : {}),
-    })
-  );
+    });
+  return canonicalYaml({
+    ...runtime,
+    template: {
+      ...presentation,
+      repositories: [...selected].sort(compareUtf16CodeUnits),
+      files: [],
+    },
+  });
 }
 
 async function repository(
@@ -249,51 +248,6 @@ function parsePackageMetadata(
   };
 }
 
-interface ResolvedAuthoringDependencies {
-  dependencies: NonNullable<TemplateAuthoringIntent["dependencies"]>;
-  dependencyParts: string[];
-}
-
-function resolveAuthoringDependencies(
-  request: TemplateAuthoringIntent,
-  observation: SemanticWorkspaceObservation
-): ResolvedAuthoringDependencies {
-  const dependencies = (request.dependencies ?? []).map((dependency) =>
-    WorkspaceTemplateDeclarationSchema.parse({
-      ...dependency,
-      url: normalizeTemplateGitUrl(dependency.url),
-    })
-  );
-  if (!dependencies.length) return { dependencies: [], dependencyParts: [] };
-  if (!observation.state) return { dependencies, dependencyParts: [] };
-
-  const nodesById = new Map(observation.state.nodes.map((node) => [node.nodeId, node]));
-  const nodesByUrl = new Map(
-    observation.state.nodes.map((node) => [normalizeTemplateGitUrl(node.pin.url), node])
-  );
-  const inheritedNodeIds = new Set<string>();
-  const include = (nodeId: string) => {
-    if (inheritedNodeIds.has(nodeId)) return;
-    const node = nodesById.get(nodeId);
-    if (!node) throw new Error(`Installed template closure is missing node ${nodeId}`);
-    inheritedNodeIds.add(nodeId);
-    node.parents.forEach(include);
-  };
-  for (const dependency of dependencies) {
-    const node = nodesByUrl.get(dependency.url);
-    if (node) include(node.nodeId);
-  }
-  return {
-    dependencies,
-    dependencyParts: Object.entries(observation.state.repositories)
-      .filter(([, repository]) =>
-        repository.contributions.some(({ nodeId }) => inheritedNodeIds.has(nodeId))
-      )
-      .map(([repoPath]) => normalizeWorkspaceRepoPath(repoPath))
-      .sort(compareUtf16CodeUnits),
-  };
-}
-
 function runtimeReferences(config: WorkspaceConfig): Array<[owner: string, target: string]> {
   const refs: Array<[string, string]> = [];
   const add = (owner: string | null, target: string | null) => {
@@ -346,12 +300,10 @@ export async function inspectTemplateAuthoring(
   const description = rawRequest.description.trim();
   if (!name) throw new Error("Template name is required");
   if (!description) throw new Error("Template description is required");
-  const resolvedDependencies = resolveAuthoringDependencies(rawRequest, observation);
-  const inherited = new Set(resolvedDependencies.dependencyParts);
+  const inherited = new Set<string>();
   const selectableParts = [
     ...new Set([
       ...observation.localRepoPaths,
-      ...Object.keys(observation.state?.repositories ?? {}),
     ]),
   ]
     .filter((repoPath) => repoPath !== META_REPOSITORY)
@@ -391,7 +343,7 @@ export async function inspectTemplateAuthoring(
         if (!owner) {
           throw new Error(`${repoPath} depends on missing workspace package ${dependency}`);
         }
-        if (!inherited.has(owner) && !included.has(owner)) {
+        if (!included.has(owner)) {
           included.add(owner);
           required.add(owner);
           changed = true;
@@ -411,11 +363,10 @@ export async function inspectTemplateAuthoring(
   }
 
   const includedParts = [...included].sort(compareUtf16CodeUnits);
-  const overlapParts = requestedParts.filter((repoPath) => inherited.has(repoPath));
   const manifest = projectManifest(
     observation.runtimeTop as WorkspaceConfig,
     new Set(includedParts),
-    resolvedDependencies.dependencies,
+    { name, description },
     selectableParts.every((repoPath) => included.has(repoPath) || inherited.has(repoPath))
   );
   const manifestDigest = `v1-sha256:${sha256HexSyncText(manifest)}` as const;
@@ -423,17 +374,12 @@ export async function inspectTemplateAuthoring(
     name,
     description,
     parts: requestedParts,
-    ...(resolvedDependencies.dependencies.length
-      ? { dependencies: resolvedDependencies.dependencies }
-      : {}),
   };
   const body = {
     protocol: "vibestudio-template-authoring-plan-v1",
     request,
     mainEventId: observation.mainEventId,
     includedParts,
-    dependencyParts: resolvedDependencies.dependencyParts,
-    overlapParts,
     manifestDigest,
   };
   return {
@@ -443,8 +389,6 @@ export async function inspectTemplateAuthoring(
     requestedParts,
     includedParts,
     requiredParts: [...required].sort(compareUtf16CodeUnits),
-    dependencyParts: resolvedDependencies.dependencyParts,
-    overlapParts,
     manifest,
     manifestDigest,
     fingerprint: `v1-sha256:${sha256HexSyncText(canonicalJson(body))}`,
@@ -458,31 +402,17 @@ export async function listTemplateAuthoringParts(
   const repoPaths = [
     ...new Set([
       ...observation.localRepoPaths,
-      ...Object.keys(observation.state?.repositories ?? {}),
     ]),
   ]
     .filter((repoPath) => repoPath !== META_REPOSITORY)
     .map(normalizeWorkspaceRepoPath)
     .sort(compareUtf16CodeUnits);
-  const aliases = new Map(
-    (observation.state?.nodes ?? []).map((node) => [node.nodeId, node.alias])
-  );
-  const urls = new Map((observation.state?.nodes ?? []).map((node) => [node.nodeId, node.pin.url]));
   return Promise.all(
     repoPaths.map(async (repoPath) => {
       const metadata = await packageMetadata(ctx, observation, repoPath);
-      const contributions = observation.state?.repositories?.[repoPath]?.contributions ?? [];
-      const templateAliases = contributions
-        .map(({ nodeId }) => aliases.get(nodeId))
-        .filter((alias): alias is string => alias !== undefined);
-      const templateUrls = contributions
-        .map(({ nodeId }) => urls.get(nodeId))
-        .filter((url): url is string => url !== undefined);
       return {
         repoPath,
         ...(metadata.name ? { packageName: metadata.name } : {}),
-        ...(templateAliases.length ? { templateAliases } : {}),
-        ...(templateUrls.length ? { templateUrls } : {}),
       };
     })
   );

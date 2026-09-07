@@ -4,15 +4,31 @@ import { AGENTIC_EVENT_PAYLOAD_KIND } from "@workspace/agentic-protocol";
 
 import { TestAgentWorker } from "./test-agent-worker.js";
 
+const STANDARD_METHODS = [
+  "pause",
+  "resume",
+  "connectModelCredential",
+  "setModel",
+  "setThinkingLevel",
+  "setApprovalLevel",
+  "setRespondPolicy",
+  "getAgentSettings",
+  "getModelExecutionEvidence",
+  "getDebugState",
+];
+
 class CapturingTestAgentWorker extends TestAgentWorker {
-  published: Array<{ event: { kind?: string; turnId?: string }; opts?: unknown }> = [];
+  published: Array<{
+    event: { kind?: string; turnId?: string };
+    opts?: unknown;
+  }> = [];
 
   protected override createChannelClient() {
     return {
       publishAgenticEvent: async (
         _participantId: string,
         event: { kind?: string; turnId?: string },
-        opts?: unknown
+        opts?: unknown,
       ) => {
         this.published.push({ event, opts });
         return { id: this.published.length };
@@ -20,7 +36,10 @@ class CapturingTestAgentWorker extends TestAgentWorker {
     } as never;
   }
 
-  seedDeterministicSubscription(channelId = "ch-1", participantId = "agent-test") {
+  seedDeterministicSubscription(
+    channelId = "ch-1",
+    participantId = "agent-test",
+  ) {
     this.sql.exec(
       `INSERT OR REPLACE INTO subscriptions
          (channel_id, context_id, revision, subscribed_at, config, relationship_json, participant_id)
@@ -31,12 +50,27 @@ class CapturingTestAgentWorker extends TestAgentWorker {
       Date.now(),
       JSON.stringify({ deterministicResponse: true }),
       "{}",
-      participantId
+      participantId,
     );
   }
 }
 
+class ContractTestAgentWorker extends TestAgentWorker {
+  participant() {
+    return this.getParticipantInfo("ch-1");
+  }
+}
+
 describe("TestAgentWorker", () => {
+  it("exposes the standard agent control methods", async () => {
+    const { instance } = await createTestDO(ContractTestAgentWorker);
+    const methodNames = instance
+      .participant()
+      .methods?.map((method) => method.name);
+
+    expect(methodNames).toEqual(expect.arrayContaining(STANDARD_METHODS));
+  });
+
   it("publishes deterministic replies inside an explicit open and closed turn", async () => {
     const { instance } = await createTestDO(CapturingTestAgentWorker);
     const worker = instance as CapturingTestAgentWorker;
@@ -55,7 +89,9 @@ describe("TestAgentWorker", () => {
         payload: {
           protocol: "agentic.trajectory.v1",
           role: "user",
-          blocks: [{ blockId: "user-msg-1:block:0", type: "text", content: "hello" }],
+          blocks: [
+            { blockId: "user-msg-1:block:0", type: "text", content: "hello" },
+          ],
           outcome: "completed",
         },
         createdAt: "2026-05-28T00:00:00.000Z",
@@ -72,7 +108,7 @@ describe("TestAgentWorker", () => {
       "turn.closed",
     ]);
     expect(new Set(worker.published.map(({ event }) => event.turnId))).toEqual(
-      new Set(["deterministic-turn-msg-1"])
+      new Set(["deterministic-turn-msg-1"]),
     );
   });
 });

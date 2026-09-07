@@ -68,8 +68,8 @@ Clean install:
    ID through its ordered relay set and presents the one-time `code`.
 6. Native stores its Endpoint secret, the returned device credential, and the
    durable hub-control reach.
-7. JS routes the selected workspace and fetches `/auth/mobile-app-bootstrap`
-   over Iroh.
+7. JS calls `hubControl.ensureUserWorkspaces`, routes the authenticated user's
+   System workspace, and fetches `/auth/mobile-app-bootstrap` there over Iroh.
 8. JS streams the chosen platform artifact to native chunk-by-chunk.
 9. Native verifies the decompressed bundle integrity, writes it to disk, and
    reloads into the workspace app.
@@ -77,10 +77,13 @@ Clean install:
 Already paired:
 
 1. Bootstrap reads the stored Iroh identity and credential from `@vibestudio/mobile-iroh`.
-2. Bootstrap reconnects to the hub Endpoint and refreshes the selected workspace reach.
+2. Bootstrap reconnects to the hub Endpoint, ensures the user's Personal/System
+   pair, and refreshes System's reach for client-source admission.
 3. Bootstrap gates approvals, streams any required bundle update, and reloads.
-4. The workspace app uses the active Iroh transport; native no longer issues
-   HTTP grants or lists/selects workspaces.
+4. The System app retains hub control and separate authenticated child sessions
+   for opened workspaces. Workspace focus changes presentation and resource
+   selection without changing the client bundle. Native retains device secrets;
+   ordinary panels and websites do not receive the client control interface.
 
 ## Bootstrap Payload
 

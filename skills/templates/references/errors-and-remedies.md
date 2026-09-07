@@ -1,18 +1,21 @@
 # Template errors and remedies
 
-Use the service’s structured error state. Do not replace it with guessed
-instructions or retry a failed integrity check.
+Use the error returned by catalog discovery, exact inspection, or publication.
+There is no installed-template composition operation to resume, no managed
+settings to repair, and no template update removal flow.
 
-| State                             | Explain to the user                                                                   | Next action                                                                                    |
-| --------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
-| waiting for credential            | “The {name} template is private. Connect {provider} to finish.”                       | Open the standard connection flow.                                                             |
-| overlapping changes               | “{a} and {b} both change {part}.”                                                     | Open each returned VCS delta, merge semantically, and resume the operation.                    |
-| setting conflict                  | “Both {a} and {b} set up {thing}.”                                                    | Let the user choose one; the service records the workspace setting.                            |
-| content mismatch                  | “This template’s content doesn’t match its published version. Nothing was installed.” | Stop. Offer Details; do not retry.                                                             |
-| managed settings edited           | “You’ve edited settings that the {name} template manages.”                            | Offer to move the intended change into workspace settings, then retry.                         |
-| remote unavailable                | For an explicit check: “Couldn’t reach {host}.”                                       | Offer another check later. On a passive view, show no update badge.                            |
-| build or type failure             | “The merged template changes need repair before they can be published.”               | Edit the returned repair context using the structured failures, then resume to rebuild it.     |
-| contribution removed by an update | “{name} no longer contributes its changes to {part}.”                                 | Review the removal delta through ordinary VCS; other contributions and workspace edits remain. |
+| Failure | Next action |
+| --- | --- |
+| Private source needs credentials | Open the standard connection flow, then retry the explicit acquisition with the selected credential. Never store concrete credentials in the snapshot. |
+| No verified catalog is cached | Offer an explicit catalog refresh. |
+| Catalog changed or entry retired | Refresh and review the new registry-bound selection before inspection. |
+| Snapshot integrity or manifest validation failed | Stop and show the returned details. Do not substitute another source or retry an integrity failure. |
+| Remote unavailable | Show which explicit acquisition failed and offer another attempt later. |
+| Authoring source changed after inspection | Run `inspectAuthoring` again and review the new fingerprint and required source closure before publishing. |
+| Authoring dependency or runtime companion missing | Repair the reported source dependency, then inspect the complete selection again. |
+| Publication failed | Inspect the recorded command outcome before retrying. Preserve its command ID for reconciliation; do not assume the remote destination was unchanged. |
 
-Any failure that made no change must say: “Nothing was changed.” When a remedy
-needs another product surface, name it and provide that navigation action.
+Inspection does not integrate source or grant authority. Say that no workspace
+source changed only when the operation's outcome establishes it. Workspace
+creation, unit admission, selected-file copying, and ordinary VCS merges have
+their own outcomes and review flows; do not describe them as template installation.

@@ -9,18 +9,20 @@ This skill operates existing agent implementations. To author or change the
 chat panel, agent worker/runtime, channel, or protocol, read
 [agentic development](../agentic-development/SKILL.md).
 
-An agent is a workspace worker DO (e.g. `workers/explorer-agent` /
-`ExplorerAgentWorker`). Use the general helper to create an instance and
+An agent is a worker DO inside the current workspace. The generic chat-agent
+example is `workers/agent-worker` / `AiChatWorker`; `workers/explorer-agent` is
+a Personal-specific diagnostic worker and is not a general application agent.
+Use the general helper to create an instance and
 subscribe it:
 
 ```ts
 import { addAgentToChannel } from "@workspace-skills/agents";
 
 const result = await addAgentToChannel({
-  source: "workers/explorer-agent",
-  className: "ExplorerAgentWorker",
-  handle: "explorer",
-  name: "Explorer",
+  source: "workers/agent-worker",
+  className: "AiChatWorker",
+  handle: "assistant",
+  name: "Assistant",
   channelId: chat.channelId, // defaults contextId to the current runtime context
   replay: true, // only when eligible existing history should be admitted
   config: {
@@ -31,6 +33,13 @@ const result = await addAgentToChannel({
 ```
 
 Remove with `removeAgentFromChannel({ source, className, handle, channelId })`.
+
+The worker, channel, prompt resources, and agent state are resolved in the
+workspace that owns the target panel. Contexts are branches inside that same
+workspace; they do not load source from another workspace. Quickfire follows
+the target panel's workspace as well. Personal and System are private
+per-user workspaces, and native client code runs from that user's System
+workspace.
 
 ## Per-channel identity
 

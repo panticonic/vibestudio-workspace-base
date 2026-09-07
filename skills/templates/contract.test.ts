@@ -2,35 +2,39 @@ import * as fs from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("templates skill public contract", () => {
-  it("documents separate exact trust/provider suggestion decisions", () => {
+  it("documents the current exact-pin and authoring contract", () => {
     const root = new URL(".", import.meta.url);
     const contract = JSON.parse(fs.readFileSync(new URL("public-contract.json", root), "utf8")) as {
       methods: Record<string, { arguments: string[] }>;
-      types: Record<string, string>;
       invariants: string[];
     };
     const skill = fs.readFileSync(new URL("SKILL.md", root), "utf8");
     const prose = skill.replace(/\s+/g, " ");
     const invariants = contract.invariants.join(" ");
-    expect(contract.methods["decideSuggestion"]?.arguments.join(" ")).toContain("accept|decline");
-    expect(contract.methods["resume"]?.arguments.join(" ")).toContain("operationId");
-    expect(contract.methods["resume"]?.arguments.join(" ")).not.toContain("commandId");
-    expect(contract.methods["cancel"]?.arguments.join(" ")).toContain("operationId");
-    expect(contract.methods["adopt"]?.arguments.join(" ")).toContain("pin");
-    expect(contract.methods["inspectAuthoring"]?.arguments.join(" ")).toContain("parts");
-    expect(contract.methods["publishAuthoring"]?.arguments.join(" ")).toContain(
+
+    expect(Object.keys(contract.methods).sort()).toEqual([
+      "authoringParts",
+      "catalog",
+      "inspect",
+      "inspectAuthoring",
+      "publishAuthoring",
+      "suggestRegistryEntry",
+    ]);
+    expect(contract.methods["catalog"]!.arguments).toEqual(["optional { refresh: true }"]);
+    expect(contract.methods["inspect"]!.arguments.join(" ")).toContain("{ pin }");
+    expect(contract.methods["inspect"]!.arguments.join(" ")).toContain("registrySnapshot");
+    expect(contract.methods["inspectAuthoring"]!.arguments.join(" ")).toContain("parts");
+    expect(contract.methods["publishAuthoring"]!.arguments.join(" ")).toContain(
       "expectedFingerprint"
     );
-    expect(contract.methods["publishAuthoring"]?.arguments.join(" ")).not.toContain("plan");
-    expect(contract.types["TemplateInspection"]).toContain("section, value");
-    expect(contract.types["TemplateStatusRow"]).not.toContain("contribution");
-    expect(contract.methods["add"]?.arguments.join(" ")).toContain("source:");
-    expect(contract.methods["add"]?.arguments.join(" ")).not.toContain("pin");
-    expect(prose).toContain("[public contract](public-contract.json)");
-    expect(prose).toContain("single protected review");
-    expect(invariants).toContain("excluded trust/provider values are optional hints");
-    expect(invariants).toContain("separate protected settings action");
-    expect(invariants).toContain("staging an isolated context is not separately gated");
-    expect(invariants).toContain("without merging historical template content");
+    expect(contract.methods["suggestRegistryEntry"]!.arguments.join(" ")).toContain("publication");
+
+    expect(prose).toContain("exact immutable `pin`");
+    expect(prose).toContain("creating a new standalone workspace");
+    expect(prose).toContain("ordinary VCS compare and merge operations");
+    expect(invariants).toContain("inspect resolves once to an exact pin");
+    expect(invariants).toContain("workspace creation consumes the exact inspected pin");
+    expect(invariants).toContain("source integration into an existing workspace uses ordinary VCS comparison and merge");
+    expect(invariants).toContain("publication does not create installed layers, runtime authority, or registry promotion");
   });
 });

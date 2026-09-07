@@ -8,6 +8,17 @@ description: Create or modify trusted workspace apps for Electron, React Native,
 Apps under `apps/` are approved client runtimes. Panels are UI surfaces, workers
 and DOs are sandboxed services, extensions are trusted Node services.
 
+Desktop and mobile load their approved client implementation from the acting
+user's private System workspace. Focusing Personal or a shared workspace changes
+the resource session, not the client source. System is ordinary workspace source;
+its location alone grants neither host authority nor access to another workspace.
+Native app units, including supervised terminal apps, are hosted only in a
+designated System workspace. Other workspaces may contain and build their source
+for authoring, but do not stage native app launch reviews or runtime principals.
+Native code follows the platform execution contract: Unix uses MXC resource
+admission; Windows native processes run with the host OS user's permissions.
+Workspace RPC checks do not imply universal native filesystem or network isolation.
+
 ## Read by task
 
 | Task                                                    | Reference                                                           |

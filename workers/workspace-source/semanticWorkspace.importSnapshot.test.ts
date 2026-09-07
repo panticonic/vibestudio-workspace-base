@@ -255,6 +255,17 @@ async function inspectAuthoredChanges(
 }
 
 describe("SemanticWorkspace snapshot import", () => {
+  it("reads protected main directly without any context creation or semantic write", async () => {
+    const { semantic, sql, initial } = await authorityFixture();
+    const before = sql.exec("SELECT total_changes() AS writes").toArray();
+    const result = await semantic.dispatch("mainState", {
+      input: undefined,
+      ingress: { causalParent: null, contextIntegrity: { class: "internal", externalKeys: [] } },
+    });
+    expect(result).toEqual({ kind: "complete", result: initial.committed.ref });
+    expect(sql.exec("SELECT total_changes() AS writes").toArray()).toEqual(before);
+  });
+
   it("attaches a runtime context without requesting a filesystem projection", async () => {
     const { semantic, store } = await authorityFixture();
 

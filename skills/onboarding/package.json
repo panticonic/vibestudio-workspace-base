@@ -36,5 +36,8 @@
   "peerDependencies": {
     "react": "^19.0.0",
     "@radix-ui/themes": "^3.3.0"
+  },
+  "devDependencies": {
+    "@workspace/agentic-chat": "workspace:*"
   }
 }

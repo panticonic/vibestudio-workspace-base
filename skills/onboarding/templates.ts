@@ -1,4 +1,3 @@
-import type { TemplateStatusRow } from "@vibestudio/service-schemas/templates";
 import type { TemplateCatalogSnapshot } from "@workspace/template-registry";
 
 export interface OnboardingTemplateSelection {
@@ -11,32 +10,24 @@ export interface OptionalTemplateSnapshot {
   id: string;
   title: string;
   description: string;
-  state: "available" | "installed" | "unknown";
+  state: "available";
   summary: string;
   observedAt: string;
   selection: OnboardingTemplateSelection;
 }
 
 export interface OptionalTemplateSnapshotDependencies {
-  status?: () => Promise<TemplateStatusRow[]>;
   catalog?: (options?: { refresh?: boolean }) => Promise<TemplateCatalogSnapshot | null>;
   refreshCatalog?: boolean;
   now?: () => Date;
 }
 
-async function composerStatus(): Promise<TemplateStatusRow[]> {
-  const { extensions } = await import("@workspace/runtime");
-  return extensions.invoke("@workspace-extensions/template-composer", "status", []) as Promise<
-    TemplateStatusRow[]
-  >;
-}
-
-async function composerCatalog(
+async function templateCatalog(
   options: { refresh?: boolean } = {}
 ): Promise<TemplateCatalogSnapshot | null> {
   const { extensions } = await import("@workspace/runtime");
   return extensions.invoke(
-    "@workspace-extensions/template-composer",
+    "@workspace-extensions/templates",
     "catalog",
     options.refresh ? [{ refresh: true }] : []
   ) as Promise<TemplateCatalogSnapshot | null>;
@@ -57,37 +48,19 @@ export async function loadOptionalTemplateSnapshot(
   dependencies: OptionalTemplateSnapshotDependencies = {}
 ): Promise<OptionalTemplateSnapshot[]> {
   const observedAt = (dependencies.now?.() ?? new Date()).toISOString();
-  const catalog = await (dependencies.catalog ?? composerCatalog)({
+  const catalog = await (dependencies.catalog ?? templateCatalog)({
     refresh: dependencies.refreshCatalog ?? true,
   });
   if (!catalog) return [];
-  let installedUrls: ReadonlySet<string> | undefined;
-  try {
-    installedUrls = new Set(
-      (await (dependencies.status ?? composerStatus)()).map((entry) => entry.url)
-    );
-  } catch {
-    installedUrls = undefined;
-  }
   return catalog.entries
     .filter((entry) => entry.recommended)
     .map((entry) => {
-      const state = installedUrls
-        ? installedUrls.has(entry.url)
-          ? "installed"
-          : "available"
-        : "unknown";
       return {
         id: `template.${entry.id}`,
         title: entry.name,
         description: entry.description,
-        state,
-        summary:
-          state === "installed"
-            ? "Installed in this workspace."
-            : state === "available"
-              ? "Available to review and add."
-              : "Installation status could not be read right now.",
+        state: "available",
+        summary: "Available to inspect and open as a new workspace.",
         observedAt,
         selection: {
           catalogId: entry.id,

@@ -251,21 +251,15 @@ describe("system-testing CLI-neutral API", () => {
     });
   });
 
-  it("fails doctor before agentic execution when the verified template registry is incompatible", async () => {
+  it("fails doctor before agentic execution when standalone workspace configuration is invalid", async () => {
     configureHealthyDoctorModels([
       { ref: SYSTEM_TEST_AGENT_MODEL, availability: { state: "ready" } },
       { ref: SYSTEM_TEST_USAGE_LIMIT_FALLBACK_MODEL, availability: { state: "ready" } },
     ]);
     const priorImplementation = mocks.rpcCall.getMockImplementation();
     mocks.rpcCall.mockImplementation(async (...args: unknown[]) => {
-      if (
-        args[1] === "extensions.invoke" &&
-        Array.isArray(args[2]) &&
-        args[2][1] === "catalog"
-      ) {
-        throw new Error(
-          "Template registry system epoch 59 does not match workspace system epoch 60"
-        );
+      if (args[1] === "workspace.validateConfig") {
+        throw new Error("Workspace runtime configuration references an undeclared unit");
       }
       return priorImplementation?.(...args);
     });
@@ -273,9 +267,9 @@ describe("system-testing CLI-neutral API", () => {
     const result = await systemTestDoctor();
 
     expect(result.ok).toBe(false);
-    expect(result.checks.find((check) => check.name === "template-registry")).toMatchObject({
+    expect(result.checks.find((check) => check.name === "workspace-configuration")).toMatchObject({
       ok: false,
-      detail: expect.stringContaining("system epoch 59"),
+      detail: expect.stringContaining("undeclared unit"),
     });
   });
 

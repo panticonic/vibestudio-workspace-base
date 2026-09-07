@@ -5,8 +5,12 @@ description: Create or modify trusted Vibestudio extensions — supervised Node 
 
 # Extension development
 
-Extensions under `extensions/` run as approved Node processes with full Node
-APIs, native modules, sockets, and host filesystem access. Prefer a worker when
+Extensions under `extensions/` run as approved Node processes with Node APIs,
+native modules and ordinary networking. Unix execution uses the workspace's
+MXC runtime with selected filesystem resources; Windows executes directly with
+the application's OS-user permissions and has no native filesystem confinement.
+Extensions share their workspace's exposed resources, not a per-call sandbox.
+Prefer a worker when
 a workerd isolate suffices. To call an installed extension, use live generated
 docs and the `extensions` runtime API; this skill is for authoring one.
 
@@ -27,8 +31,9 @@ docs and the `extensions` runtime API; this skill is for authoring one.
   guide](../workspace-dev/references/icons.md).
 - Return a plain object from `activate(ctx)` — its own enumerable function
   properties are the RPC surface.
-- Node and `ctx.fs` access is trusted authority, not a sandbox. Declare
-  protected resources in `authority.provides` and bind methods through
+- Raw Node access follows the workspace's native resource admission; `ctx.fs`
+  uses protected semantic operations. Neither creates a per-call native sandbox.
+  Declare protected resources in `authority.provides` and bind methods through
   `vibestudio.extension.methodAuthority` — no advisory prompts inside methods.
 - Use `ctx.log` for structured runtime logs. Select the exact live extension
   identity before reading supervision health or logs.

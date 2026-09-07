@@ -1,6 +1,6 @@
 ---
 name: onboarding
-description: Open the state-aware setup overview, route selections to owner workflows, refresh state, or hand off template installations.
+description: Open the state-aware setup overview, route selections to owner workflows, refresh state, or inspect templates for new workspaces.
 ---
 
 # Onboarding
@@ -67,9 +67,10 @@ cancelled, or changes externally, render the same component ID with no snapshot
 props. Report the operation but don't claim a row's refreshed state before the
 component reads it.
 
-For template operations, honor the composer's `contextIntegration` result:
-refresh after `integrated`, merge normally after `needs-merge`, don't claim this
-conversation observes it after `unavailable`.
+Creating from a template opens a separate workspace. Keep this conversation in
+its owning workspace; creation does not integrate source into its context.
+For explicit source copies or merges, inspect the destination's ordinary VCS
+result before claiming that the changes are available there.
 
 ## Product rules
 
@@ -82,8 +83,9 @@ conversation observes it after `unavailable`.
   feedback questions or a custom approval UI.
 - Treat recurring work as an immediately usable agent capability, not setup.
   Automations owns its schedule, execution, history, and supervision.
-- Onboarding may suggest verified template outcomes, but Templates remains the
-  sole install/update path.
+- Onboarding may suggest catalog entries; Templates owns inspection and exact
+  source selection for workspace creation. There is no installed-layer or
+  automatic update workflow.
 
 Read [GETTING_STARTED.md](GETTING_STARTED.md) for the execution recipe,
 [OVERVIEW.md](OVERVIEW.md) for product concepts, and

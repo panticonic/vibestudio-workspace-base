@@ -1,0 +1,20 @@
+{
+  "name": "@workspace/workspace-transfer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Selected source copying through authenticated workspace clients",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@vibestudio/content-addressing": "workspace:*",
+    "@vibestudio/rpc": "workspace:*",
+    "@vibestudio/service-schemas": "workspace:*",
+    "@vibestudio/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "vitest": "^3.2.7",
+    "@vibestudio/durable": "workspace:*"
+  }
+}

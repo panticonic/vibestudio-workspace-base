@@ -5,7 +5,7 @@ import { templateTests } from "./templates.js";
 function execution(
   returnValue: unknown,
   final: string,
-  options: { code?: string; console?: string } = {}
+  options: { code?: string; console?: string } = {},
 ): TestExecutionResult {
   return {
     duration: 0,
@@ -23,12 +23,7 @@ function execution(
           arguments: {
             code:
               options.code ??
-              [
-                'const status = await extensions.invoke("@workspace-extensions/template-composer", "status", []);',
-                'const catalog = await extensions.invoke("@workspace-extensions/template-composer", "catalog", []);',
-                "if (catalog === null) return { statusCount: status.length, catalogUnavailable: true };",
-                "return { statusCount: status.length, catalogCount: catalog.entries.length, firstCatalog: catalog.entries[0] };",
-              ].join("\n"),
+              'return extensions.invoke("@workspace-extensions/templates", "catalog", []);',
           },
           execution: {
             status: "complete",
@@ -49,275 +44,153 @@ function execution(
 }
 
 describe("template agentic validator", () => {
-  it("requires exact applied evidence for the Examples installation", () => {
-    const test = templateTests.find(({ name }) => name === "templates-install-examples")!;
-    expect(test.validation).toBe("agent-evidence");
+  const catalog = templateTests.find(
+    ({ name }) => name === "templates-cached-catalog",
+  )!;
+  it("accepts an observed cache miss without inventing installed relationships", () => {
     expect(
-      test.validate(
-        execution(
-          {
-            operationId: "template-add-success",
-            state: "applied",
-            affectedParts: ["panels/hello-svelte"],
-          },
-          "The Examples template was installed successfully.",
-          {
-            code:
-              'return await extensions.invoke("@workspace-extensions/template-composer", "add", [{ commandId: "template-add-success", source: { catalogId: "examples" } }]);',
-          }
-        )
-      )
-    ).toEqual({ passed: true, reason: undefined });
+      catalog.validate(execution(null, "No catalog is cached.")),
+    ).toMatchObject({ passed: true });
   });
-
-  it("rejects a completed turn when the Examples installation returned an error", () => {
-    const test = templateTests.find(({ name }) => name === "templates-install-examples")!;
+  it("joins the reported count to the observed catalog", () => {
+    const snapshot = {
+      entries: [{ id: "garden", name: "Garden" }],
+      coordinates: { commit: "exact" },
+    };
     expect(
-      test.validate(
-        execution(
-          {
-            operationId: "template-add-failed",
-            state: "error",
-            affectedParts: ["panels/hello-svelte"],
-            blocker: { code: "TemplateBuildFailed" },
-          },
-          "The Examples template install did not complete.",
-          {
-            code:
-              'return await extensions.invoke("@workspace-extensions/template-composer", "add", [{ commandId: "template-add-failed", source: { catalogId: "examples" } }]);',
-          }
-        )
-      )
+      catalog.validate(
+        execution(snapshot, "There is 1 cached template: Garden."),
+      ),
+    ).toMatchObject({ passed: true });
+    expect(
+      catalog.validate(execution(snapshot, "There are 2 cached templates.")),
     ).toMatchObject({ passed: false });
   });
-
-  it("accepts a truthful completed-install report", () => {
-    const test = templateTests.find(({ name }) => name === "templates-install-examples")!;
+  it("rejects a claimed cache miss without an observed result", () => {
     expect(
-      test.validate(
-        execution(
-          {
-            operationId: "template-add-success",
-            state: "applied",
-            affectedParts: ["panels/hello-svelte"],
-          },
-          "Completed the canonical install for Examples successfully.",
-          {
-            code:
-              'return await extensions.invoke("@workspace-extensions/template-composer", "add", [{ commandId: "template-add-success", source: { catalogId: "examples" } }]);',
-          }
-        )
-      )
-    ).toEqual({ passed: true, reason: undefined });
+      catalog.validate(execution(undefined, "No catalog is cached.")),
+    ).toMatchObject({ passed: false });
   });
-
-  it("accepts an exact applied-state report", () => {
-    const test = templateTests.find(({ name }) => name === "templates-install-examples")!;
+  it("rejects refreshing during a cache-only request", () => {
     expect(
-      test.validate(
-        execution(
-          {
-            operationId: "template-add-success",
-            state: "applied",
-            affectedParts: ["panels/hello-svelte"],
-          },
-          'Implemented successfully: Examples returned state: "applied".',
-          {
-            code:
-              'return await extensions.invoke("@workspace-extensions/template-composer", "add", [{ commandId: "template-add-success", source: { catalogId: "examples" } }]);',
-          }
-        )
-      )
-    ).toEqual({ passed: true, reason: undefined });
+      catalog.validate(
+        execution(null, "No catalog is cached.", {
+          code: 'return extensions.invoke("@workspace-extensions/templates", "catalog", [{ refresh: true }]);',
+        }),
+      ),
+    ).toMatchObject({ passed: false });
   });
-
-  it("accepts a fresh workspace with no connected or featured templates", () => {
-    const test = templateTests.find(({ name }) => name === "templates-status-catalog")!;
-    expect(
-      test.validate(
-        execution(
-          {
-            statusCount: 0,
-            catalogCount: 0,
-          },
-          "There are 0 connected templates and 0 catalog entries."
-        )
-      )
-    ).toEqual({ passed: true, reason: undefined });
-  });
-
-  it("accepts an honest absent-cache result without losing template status", () => {
-    const test = templateTests.find(({ name }) => name === "templates-status-catalog")!;
-    expect(
-      test.validate(
-        execution(
-          {
-            connectedTemplatesCount: 0,
-            catalogUnavailable: true,
-          },
-          "There are 0 connected templates. The verified catalog cache is unavailable."
-        )
-      )
-    ).toEqual({ passed: true, reason: undefined });
-  });
-
-  it("accepts cached-registry unavailable wording", () => {
-    const test = templateTests.find(({ name }) => name === "templates-status-catalog")!;
-    expect(
-      test.validate(
-        execution(
-          { connectedTemplatesCount: 0, catalogUnavailable: true },
-          "Connected templates: 0. Cached verified registry: unavailable.",
-          {
-            code: [
-              "const call = (method, args = []) => extensions.invoke('@workspace-extensions/template-composer', method, args);",
-              "const status = await call('status', []);",
-              "await call('catalog', []);",
-              "return { connectedTemplatesCount: status.length, catalogUnavailable: true };",
-            ].join("\n"),
-          }
-        )
-      )
-    ).toEqual({ passed: true, reason: undefined });
-  });
-
-  it("accepts captured console evidence from a successful cache-only observation", () => {
-    const test = templateTests.find(({ name }) => name === "templates-status-catalog")!;
-    expect(
-      test.validate(
-        execution(undefined, "0 connected templates. Catalog cache unavailable.", {
-          code: [
-            "const status = await extensions.invoke('@workspace-extensions/template-composer', 'status', []);",
-            "console.log('status ok', JSON.stringify(status));",
-            "try {",
-            "  await extensions.invoke('@workspace-extensions/template-composer', 'catalog', []);",
-            "} catch (error) { console.log(String(error)); }",
-          ].join("\n"),
-          console: "status ok []\nNo verified template registry is cached; refresh first",
-        })
-      )
-    ).toEqual({ passed: true, reason: undefined });
-  });
-
-  it("accepts the typed runtime proxy after an agent uses a local type assertion", () => {
-    const test = templateTests.find(({ name }) => name === "templates-status-catalog")!;
-    expect(
-      test.validate(
-        execution(
-          {
-            connectedTemplatesCount: 0,
-            catalogUnavailable: true,
-          },
-          "There are 0 connected templates. The verified catalog cache is unavailable.",
-          {
-            code: [
-              'const status = await (extensions as any).invoke("@workspace-extensions/template-composer", "status", []);',
-              'await (extensions as any).invoke("@workspace-extensions/template-composer", "catalog", []);',
-            ].join("\n"),
-          }
-        )
-      )
-    ).toEqual({ passed: true, reason: undefined });
+  it("does not retain an installed-layer test for the retired product flow", () => {
+    expect(templateTests.map((test) => test.name)).toEqual([
+      "templates-cached-catalog",
+      "templates-authoring-prepare",
+    ]);
   });
 
   it("accepts an exact preparation-only authoring plan", () => {
-    const test = templateTests.find(({ name }) => name === "templates-authoring-prepare")!;
+    const test = templateTests.find(
+      ({ name }) => name === "templates-authoring-prepare",
+    )!;
     const fingerprint = `v1-sha256:${"a".repeat(64)}`;
     expect(
       test.validate(
         execution(
           {
-            available: [{ repoPath: "packages/template-composer" }],
+            available: [{ repoPath: "packages/template-registry" }],
             plan: {
               mainEventId: "event:main",
               fingerprint,
-              requestedParts: ["packages/template-composer"],
-              includedParts: ["packages/template-composer", "packages/shared"],
+              requestedParts: ["packages/template-registry"],
+              includedParts: ["packages/template-registry", "packages/shared"],
               requiredParts: ["packages/shared"],
-              dependencyParts: [],
-              overlapParts: [],
-              manifest: "systemEpoch: 57\n",
+              manifest: "systemEpoch: 0\n",
             },
           },
           `Prepared the template plan with fingerprint ${fingerprint}. Nothing was published.`,
           {
             code: [
-              "const available = await extensions.invoke('@workspace-extensions/template-composer', 'authoringParts', []);",
-              "const plan = await extensions.invoke('@workspace-extensions/template-composer', 'inspectAuthoring', [{ name: 'Composer', description: 'Template composer', parts: ['packages/template-composer'] }]);",
+              "const available = await extensions.invoke('@workspace-extensions/templates', 'authoringParts', []);",
+              "const plan = await extensions.invoke('@workspace-extensions/templates', 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['packages/template-registry'] }]);",
               "return { available, plan };",
             ].join("\n"),
-          }
-        )
-      )
+          },
+        ),
+      ),
     ).toEqual({ passed: true, reason: undefined });
   });
 
-  it("accepts a structured console receipt when the composer is held in a variable", () => {
-    const test = templateTests.find(({ name }) => name === "templates-authoring-prepare")!;
+  it("accepts a structured console receipt when the templates is held in a variable", () => {
+    const test = templateTests.find(
+      ({ name }) => name === "templates-authoring-prepare",
+    )!;
     const fingerprint = `v1-sha256:${"b".repeat(64)}`;
     const plan = {
       fingerprint,
-      selectedParts: ["packages/template-composer"],
-      includedParts: ["packages/template-composer"],
+      selectedParts: ["packages/template-registry"],
+      includedParts: ["packages/template-registry"],
       requiredParts: [],
-      dependencyParts: [],
-      overlapParts: [],
-      manifest: "systemEpoch: 57\n",
+      manifest: "systemEpoch: 0\n",
     };
     expect(
       test.validate(
-        execution(undefined, `The exact fingerprint is ${fingerprint}. Nothing was published.`, {
-          code: [
-            "const composer = '@workspace-extensions/template-composer';",
-            "const available = await rpc.call('main', 'extensions.invoke', [composer, 'authoringParts', []]);",
-            "const plan = await rpc.call('main', 'extensions.invoke', [composer, 'inspectAuthoring', [{ name: 'Composer', description: 'Template composer', parts: ['packages/template-composer'] }]]);",
-            "console.log(JSON.stringify(plan));",
-          ].join("\n"),
-          console: JSON.stringify(plan),
-        })
-      )
+        execution(
+          undefined,
+          `The exact fingerprint is ${fingerprint}. Nothing was published.`,
+          {
+            code: [
+              "const templates = '@workspace-extensions/templates';",
+              "const available = await rpc.call('main', 'extensions.invoke', [templates, 'authoringParts', []]);",
+              "const plan = await rpc.call('main', 'extensions.invoke', [templates, 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['packages/template-registry'] }]]);",
+              "console.log(JSON.stringify(plan));",
+            ].join("\n"),
+            console: JSON.stringify(plan),
+          },
+        ),
+      ),
     ).toEqual({ passed: true, reason: undefined });
   });
 
   it("rejects an authoring trajectory that published in the preparation-only scenario", () => {
-    const test = templateTests.find(({ name }) => name === "templates-authoring-prepare")!;
+    const test = templateTests.find(
+      ({ name }) => name === "templates-authoring-prepare",
+    )!;
     expect(
       test.validate(
         execution(
           {
             mainEventId: "event:main",
             fingerprint: `v1-sha256:${"a".repeat(64)}`,
-            requestedParts: ["packages/template-composer"],
-            includedParts: ["packages/template-composer"],
-            manifest: "systemEpoch: 57\n",
+            requestedParts: ["packages/template-registry"],
+            includedParts: ["packages/template-registry"],
+            manifest: "systemEpoch: 0\n",
           },
           "Published.",
           {
             code: [
-              "await extensions.invoke('@workspace-extensions/template-composer', 'authoringParts', []);",
-              "const plan = await extensions.invoke('@workspace-extensions/template-composer', 'inspectAuthoring', [{ name: 'Composer', description: 'Template composer', parts: ['packages/template-composer'] }]);",
-              "await extensions.invoke('@workspace-extensions/template-composer', 'publishAuthoring', [{ plan }]);",
+              "await extensions.invoke('@workspace-extensions/templates', 'authoringParts', []);",
+              "const plan = await extensions.invoke('@workspace-extensions/templates', 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['packages/template-registry'] }]);",
+              "await extensions.invoke('@workspace-extensions/templates', 'publishAuthoring', [{ plan }]);",
               "return plan;",
             ].join("\n"),
-          }
-        )
-      )
+          },
+        ),
+      ),
     ).toMatchObject({ passed: false });
   });
 
   it("accepts the reported exact receipt after an earlier draft inspection", () => {
-    const test = templateTests.find(({ name }) => name === "templates-authoring-prepare")!;
+    const test = templateTests.find(
+      ({ name }) => name === "templates-authoring-prepare",
+    )!;
     const firstFingerprint = `v1-sha256:${"c".repeat(64)}`;
     const finalFingerprint = `v1-sha256:${"d".repeat(64)}`;
     const exactPlan = (fingerprint: string) => ({
       mainEventId: "event:main",
       fingerprint,
-      requestedParts: ["packages/template-composer"],
-      includedParts: ["packages/template-composer"],
+      requestedParts: ["packages/template-registry"],
+      includedParts: ["packages/template-registry"],
       requiredParts: [],
-      dependencyParts: [],
-      overlapParts: [],
-      manifest: "systemEpoch: 57\n",
+      manifest: "systemEpoch: 0\n",
     });
     expect(
       test.validate(
@@ -328,19 +201,21 @@ describe("template agentic validator", () => {
           `Prepared the final template plan with fingerprint ${finalFingerprint}. Nothing was published.`,
           {
             code: [
-              "const composer = '@workspace-extensions/template-composer';",
-              "await extensions.invoke(composer, 'authoringParts', []);",
-              "await extensions.invoke(composer, 'inspectAuthoring', [{ name: 'Draft', description: 'First draft', parts: ['packages/template-composer'] }]);",
-              "return await extensions.invoke(composer, 'inspectAuthoring', [{ name: 'Final', description: 'Final draft', parts: ['packages/template-composer'] }]);",
+              "const templates = '@workspace-extensions/templates';",
+              "await extensions.invoke(templates, 'authoringParts', []);",
+              "await extensions.invoke(templates, 'inspectAuthoring', [{ name: 'Draft', description: 'First draft', parts: ['packages/template-registry'] }]);",
+              "return await extensions.invoke(templates, 'inspectAuthoring', [{ name: 'Final', description: 'Final draft', parts: ['packages/template-registry'] }]);",
             ].join("\n"),
-          }
-        )
-      )
+          },
+        ),
+      ),
     ).toEqual({ passed: true, reason: undefined });
   });
 
   it("reconstructs one receipt when shared plan values are serialized separately", () => {
-    const test = templateTests.find(({ name }) => name === "templates-authoring-prepare")!;
+    const test = templateTests.find(
+      ({ name }) => name === "templates-authoring-prepare",
+    )!;
     const fingerprint = `v1-sha256:${"e".repeat(64)}`;
     expect(
       test.validate(
@@ -348,27 +223,27 @@ describe("template agentic validator", () => {
           {
             summary: {
               fingerprint,
-              requestedParts: ["packages/template-composer"],
-              includedParts: ["packages/template-composer"],
+              requestedParts: ["packages/template-registry"],
+              includedParts: ["packages/template-registry"],
             },
             plan: {
               fingerprint,
               mainEventId: "event:main",
               requestedParts: "[Circular]",
               includedParts: "[Circular]",
-              manifest: "systemEpoch: 57\n",
+              manifest: "systemEpoch: 0\n",
             },
           },
           `Prepared the template plan with fingerprint ${fingerprint}. Nothing was published.`,
           {
             code: [
-              "const composer = '@workspace-extensions/template-composer';",
-              "await extensions.invoke(composer, 'authoringParts', []);",
-              "return await extensions.invoke(composer, 'inspectAuthoring', [{ name: 'Composer', description: 'Template composer', parts: ['packages/template-composer'] }]);",
+              "const templates = '@workspace-extensions/templates';",
+              "await extensions.invoke(templates, 'authoringParts', []);",
+              "return await extensions.invoke(templates, 'inspectAuthoring', [{ name: 'Registry', description: 'Template registry', parts: ['packages/template-registry'] }]);",
             ].join("\n"),
-          }
-        )
-      )
+          },
+        ),
+      ),
     ).toEqual({ passed: true, reason: undefined });
   });
 });

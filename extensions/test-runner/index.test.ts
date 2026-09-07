@@ -77,11 +77,15 @@ describe("native test adapter boundary", () => {
     ).rejects.toThrow("Unknown declared test suite");
   });
 
-  it("executes selected modules only in a permission-constrained child", async () => {
+  it("executes selected modules in a child using the installed test-engine dependencies", async () => {
     const { ctx, target } = fixture();
     fs.writeFileSync(
       path.join(target, "simple.test.ts"),
       'import { expect, it } from "vitest"; it("passes", () => expect(2 + 2).toBe(4));\n',
+    );
+    fs.writeFileSync(
+      path.join(target, "unselected.test.ts"),
+      'throw new Error("Unselected module must not execute");\n',
     );
     const api = await activate(ctx);
     const result = await api.runNative({

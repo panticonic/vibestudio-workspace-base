@@ -92,7 +92,8 @@
     "@workspace/ui": "workspace:*",
     "@radix-ui/themes": "^3.3.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "@workspace/react": "workspace:*"
   },
   "type": "module"
 }

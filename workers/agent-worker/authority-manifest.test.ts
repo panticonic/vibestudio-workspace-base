@@ -9,7 +9,7 @@ interface AuthorityRequest {
 }
 
 describe("agent-worker authority manifest", () => {
-  it("depends on the workspace-owned phone provisioning protocol", () => {
+  it("keeps the generic agent independent of System phone provisioning", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("./package.json", import.meta.url), "utf8"),
     ) as {
@@ -20,7 +20,7 @@ describe("agent-worker authority manifest", () => {
         };
       };
     };
-    expect(manifest.vibestudio.authority.serviceRequests).toContainEqual({
+    expect(manifest.vibestudio.authority.serviceRequests).not.toContainEqual({
       protocol: "vibestudio.phone-provisioning.v1",
       availability: "required",
     });

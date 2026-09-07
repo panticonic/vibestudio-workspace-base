@@ -11,7 +11,14 @@ import {
   MagnifyingGlassIcon,
   PlusIcon,
 } from "@radix-ui/react-icons";
-import { browserData, buildPanelLink, panel, panelTree, workspace } from "@workspace/runtime";
+import {
+  browserData,
+  buildPanelLink,
+  panel,
+  panelTree,
+  workers,
+  workspace,
+} from "@workspace/runtime";
 import type { PanelHandle } from "@workspace/runtime";
 import {
   canonicalizeUrlForAddress,
@@ -70,7 +77,12 @@ const BACKGROUND_REFRESH_DEADLINE_MS = 500;
 const INSTANCE_EXPAND_DWELL_MS = 400;
 
 /** With nothing typed there is no relevance signal, so lead with the workspace. */
-const IDLE_GROUP_ORDER: LauncherSuggestion["kind"][] = ["panel", "history", "url", "chat"];
+const IDLE_GROUP_ORDER: LauncherSuggestion["kind"][] = [
+  "panel",
+  "history",
+  "url",
+  "chat",
+];
 
 /**
  * The unified prefix grammar (spec §1.2).
@@ -81,7 +93,11 @@ const IDLE_GROUP_ORDER: LauncherSuggestion["kind"][] = ["panel", "history", "url
  * everything. A typed `>` is still parsed as `@` for one release, with the
  * deprecation notice below saying so, rather than silently searching nothing.
  */
-const MODES: Array<{ prefix: Exclude<ModePrefix, "">; mode: LauncherMode; label: string }> = [
+const MODES: Array<{
+  prefix: Exclude<ModePrefix, "">;
+  mode: LauncherMode;
+  label: string;
+}> = [
   { prefix: "@", mode: "goto", label: "Go to" },
   { prefix: "/", mode: "chat", label: "Chat" },
 ];
@@ -93,7 +109,9 @@ const REPLACEMENT_PREFIX = "@";
 /** Let the launcher paint and accept input before optional ranking data starts crossing RPC. */
 function scheduleBackgroundRefresh(callback: () => void): () => void {
   if (typeof window.requestIdleCallback === "function") {
-    const id = window.requestIdleCallback(callback, { timeout: BACKGROUND_REFRESH_DEADLINE_MS });
+    const id = window.requestIdleCallback(callback, {
+      timeout: BACKGROUND_REFRESH_DEADLINE_MS,
+    });
     return () => window.cancelIdleCallback(id);
   }
   const id = window.setTimeout(callback, 0);
@@ -102,7 +120,9 @@ function scheduleBackgroundRefresh(callback: () => void): () => void {
 
 function readCachedPanelGroups(): LaunchablePanelGroups | null {
   try {
-    return parseCachedLaunchablePanelGroups(localStorage.getItem(LAUNCHABLE_PANEL_CACHE_KEY));
+    return parseCachedLaunchablePanelGroups(
+      localStorage.getItem(LAUNCHABLE_PANEL_CACHE_KEY),
+    );
   } catch {
     return null;
   }
@@ -110,7 +130,10 @@ function readCachedPanelGroups(): LaunchablePanelGroups | null {
 
 function cachePanelGroups(groups: LaunchablePanelGroups): void {
   try {
-    localStorage.setItem(LAUNCHABLE_PANEL_CACHE_KEY, serializeLaunchablePanelGroups(groups));
+    localStorage.setItem(
+      LAUNCHABLE_PANEL_CACHE_KEY,
+      serializeLaunchablePanelGroups(groups),
+    );
   } catch {
     // Catalog caching is optional; sourceTree remains authoritative.
   }
@@ -118,22 +141,31 @@ function cachePanelGroups(groups: LaunchablePanelGroups): void {
 
 function readCachedPanelUsage(): PanelUsage {
   try {
-    const cached = JSON.parse(localStorage.getItem(PANEL_USAGE_CACHE_KEY) ?? "null") as {
+    const cached = JSON.parse(
+      localStorage.getItem(PANEL_USAGE_CACHE_KEY) ?? "null",
+    ) as {
       version?: unknown;
       usage?: unknown;
     } | null;
-    if (cached?.version !== 1 || !cached.usage || typeof cached.usage !== "object") return {};
+    if (
+      cached?.version !== 1 ||
+      !cached.usage ||
+      typeof cached.usage !== "object"
+    )
+      return {};
     return Object.fromEntries(
-      Object.entries(cached.usage).filter((entry): entry is [string, PanelUsage[string]] => {
-        const value = entry[1] as Partial<PanelUsage[string]> | null;
-        return (
-          !!value &&
-          typeof value.count === "number" &&
-          Number.isFinite(value.count) &&
-          typeof value.lastUsed === "number" &&
-          Number.isFinite(value.lastUsed)
-        );
-      })
+      Object.entries(cached.usage).filter(
+        (entry): entry is [string, PanelUsage[string]] => {
+          const value = entry[1] as Partial<PanelUsage[string]> | null;
+          return (
+            !!value &&
+            typeof value.count === "number" &&
+            Number.isFinite(value.count) &&
+            typeof value.lastUsed === "number" &&
+            Number.isFinite(value.lastUsed)
+          );
+        },
+      ),
     );
   } catch {
     return {};
@@ -142,7 +174,10 @@ function readCachedPanelUsage(): PanelUsage {
 
 function cachePanelUsage(usage: PanelUsage): void {
   try {
-    localStorage.setItem(PANEL_USAGE_CACHE_KEY, JSON.stringify({ version: 1, usage }));
+    localStorage.setItem(
+      PANEL_USAGE_CACHE_KEY,
+      JSON.stringify({ version: 1, usage }),
+    );
   } catch {
     // This is only a warm-start projection of durable workspace state.
   }
@@ -150,13 +185,16 @@ function cachePanelUsage(usage: PanelUsage): void {
 
 function usageRecord(rows: PanelSourceUsage[]): PanelUsage {
   return Object.fromEntries(
-    rows.map((row) => [row.source, { count: row.accessCount, lastUsed: row.lastAccessedAt }])
+    rows.map((row) => [
+      row.source,
+      { count: row.accessCount, lastUsed: row.lastAccessedAt },
+    ]),
   );
 }
 
 async function readOpenPanels(
   onBatch?: (panels: OpenPanel[]) => void,
-  knownRevision?: number | null
+  knownRevision?: number | null,
 ): Promise<{ panels: OpenPanel[]; revision: number; unchanged: boolean }> {
   const found: OpenPanel[] = [];
   const pendingParents: string[] = [];
@@ -199,28 +237,33 @@ async function readOpenPanels(
   };
   await readGroup();
   if (unchanged) return { panels: [], revision, unchanged: true };
-  while (pendingParents.length && found.length < 2_000) await readGroup(pendingParents.shift()!);
+  while (pendingParents.length && found.length < 2_000)
+    await readGroup(pendingParents.shift()!);
   return { panels: found, revision, unchanged: false };
 }
 
 function destinationSource(suggestion: LauncherSuggestion): string | null {
   if (suggestion.kind === "panel") return suggestion.panel.path;
-  if (suggestion.kind === "history") return canonicalizeUrlForAddress(suggestion.browser.url);
-  if (suggestion.kind === "url") return canonicalizeUrlForAddress(suggestion.url);
+  if (suggestion.kind === "history")
+    return canonicalizeUrlForAddress(suggestion.browser.url);
+  if (suggestion.kind === "url")
+    return canonicalizeUrlForAddress(suggestion.url);
   return null;
 }
 
 /** The row's primary line: what the destination is, never how to reach it. */
 function suggestionLabel(suggestion: LauncherSuggestion): string {
   if (suggestion.kind === "panel") return suggestion.panel.title;
-  if (suggestion.kind === "history") return suggestion.browser.title || suggestion.browser.url;
+  if (suggestion.kind === "history")
+    return suggestion.browser.title || suggestion.browser.url;
   if (suggestion.kind === "url") return suggestion.url;
   return "Start a new Agentic Chat";
 }
 
 /** The row's secondary line: where it leads or what activating it will do. */
 function suggestionMeta(suggestion: DisplaySuggestion): string {
-  if (suggestion.kind === "panel") return suggestion.panel.description ?? suggestion.panel.path;
+  if (suggestion.kind === "panel")
+    return suggestion.panel.description ?? suggestion.panel.path;
   if (suggestion.kind === "history") return suggestion.browser.url;
   if (suggestion.kind === "url") return "Open in a new browser panel";
   return `Send “${suggestion.prompt}” as the opening message`;
@@ -228,7 +271,8 @@ function suggestionMeta(suggestion: DisplaySuggestion): string {
 
 function activationLabel(suggestion: DisplaySuggestion | undefined): string {
   if (!suggestion) return "Open";
-  if (suggestion.kind === "panel" && suggestion.openPanels?.length) return "Open new";
+  if (suggestion.kind === "panel" && suggestion.openPanels?.length)
+    return "Open new";
   if (suggestion.openPanel) return "Focus";
   return suggestion.kind === "chat" ? "Send" : "Open";
 }
@@ -240,7 +284,8 @@ function SuggestionIcon({
   suggestion: LauncherSuggestion;
   favicon?: string;
 }) {
-  const panelIcon = suggestion.kind === "panel" ? suggestion.panel.icon : undefined;
+  const panelIcon =
+    suggestion.kind === "panel" ? suggestion.panel.icon : undefined;
   const [imageFailed, setImageFailed] = useState(false);
   useEffect(() => setImageFailed(false), [panelIcon]);
   if (suggestion.kind === "panel") {
@@ -251,7 +296,7 @@ function SuggestionIcon({
           src={`${buildPanelLink(suggestion.panel.path)}../../${unitIconTarget(
             suggestion.panel.path,
             panelIcon,
-            suggestion.panel.iconVersion
+            suggestion.panel.iconVersion,
           )}`}
           alt=""
           aria-hidden="true"
@@ -285,7 +330,13 @@ function SuggestionIcon({
   );
 }
 
-function LauncherNotice({ color, children }: { color: "orange" | "red"; children: ReactNode }) {
+function LauncherNotice({
+  color,
+  children,
+}: {
+  color: "orange" | "red";
+  children: ReactNode;
+}) {
   return (
     <Callout.Root color={color} size="1" variant="surface">
       <Callout.Icon>
@@ -322,7 +373,8 @@ function SuggestionRow({
   onToggleExisting: () => void;
 }) {
   const pending = pendingId === suggestion.id;
-  const openPanels = suggestion.kind === "panel" ? (suggestion.openPanels ?? []) : [];
+  const openPanels =
+    suggestion.kind === "panel" ? (suggestion.openPanels ?? []) : [];
   const body = (
     <>
       <SuggestionIcon suggestion={suggestion} favicon={favicon} />
@@ -337,7 +389,9 @@ function SuggestionRow({
         {pending ? (
           <Spinner size="1" />
         ) : selected ? (
-          <span className="launcher-enter">↵ {activationLabel(suggestion)}</span>
+          <span className="launcher-enter">
+            ↵ {activationLabel(suggestion)}
+          </span>
         ) : null}
       </span>
     </>
@@ -355,19 +409,23 @@ function SuggestionRow({
   // A panel destination is a real link, so the usual browser gestures — middle
   // click, modifier click, copy address — keep working. Everything else is a
   // command with no addressable target.
-  const href = suggestion.kind === "panel" ? buildPanelLink(suggestion.panel.path) : undefined;
+  const href =
+    suggestion.kind === "panel"
+      ? buildPanelLink(suggestion.panel.path)
+      : undefined;
   const primary = href ? (
-      <a
-        {...shared}
-        href={href}
-        onClick={(event) => {
-          if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-          event.preventDefault();
-          if (!disabled) onActivate();
-        }}
-      >
-        {body}
-      </a>
+    <a
+      {...shared}
+      href={href}
+      onClick={(event) => {
+        if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey)
+          return;
+        event.preventDefault();
+        if (!disabled) onActivate();
+      }}
+    >
+      {body}
+    </a>
   ) : (
     <button {...shared} type="button" disabled={disabled} onClick={onActivate}>
       {body}
@@ -383,14 +441,17 @@ function SuggestionRow({
             type="button"
             className="launcher-open-disclosure"
             aria-label={`${expanded ? "Hide" : "Show"} ${openPanels.length} open ${suggestionLabel(
-              suggestion
+              suggestion,
             )} ${openPanels.length === 1 ? "panel" : "panels"}`}
             aria-expanded={expanded}
             disabled={disabled}
             onClick={onToggleExisting}
           >
             <span>{openPanels.length} open</span>
-            <span className="launcher-open-disclosure-chevron" aria-hidden="true">
+            <span
+              className="launcher-open-disclosure-chevron"
+              aria-hidden="true"
+            >
               {expanded ? "⌃" : "⌄"}
             </span>
           </button>
@@ -421,7 +482,10 @@ function SuggestionRow({
                   }`}
                   onClick={() => onFocusExisting(openPanel)}
                 >
-                  <span className="launcher-open-instance-index" aria-hidden="true">
+                  <span
+                    className="launcher-open-instance-index"
+                    aria-hidden="true"
+                  >
                     {index + 1}
                   </span>
                   <span className="launcher-open-instance-text">
@@ -448,14 +512,18 @@ function SuggestionRow({
 function NewPanelPage() {
   const isMobile = useIsMobile();
   const [panelGroups, setPanelGroups] = useState<LaunchablePanelGroups | null>(
-    readCachedPanelGroups
+    readCachedPanelGroups,
   );
   const [loading, setLoading] = useState(panelGroups === null);
   const [catalogError, setCatalogError] = useState<string | null>(null);
   const [value, setValue] = useState("");
-  const [panelUsage, setPanelUsage] = useState<PanelUsage>(readCachedPanelUsage);
+  const [panelUsage, setPanelUsage] =
+    useState<PanelUsage>(readCachedPanelUsage);
   const [openPanels, setOpenPanels] = useState<OpenPanel[]>([]);
-  const [browserSuggestions, setBrowserSuggestions] = useState<BrowserAddressSuggestion[]>([]);
+  const [browserSuggestions, setBrowserSuggestions] = useState<
+    BrowserAddressSuggestion[]
+  >([]);
+  const [hasBrowserData, setHasBrowserData] = useState(false);
   const [historyError, setHistoryError] = useState(false);
   const [historyReviewPending, setHistoryReviewPending] = useState(false);
   const [historyRefreshEpoch, setHistoryRefreshEpoch] = useState(0);
@@ -471,7 +539,10 @@ function NewPanelPage() {
   const selectionTouchedRef = useRef(false);
   const navigationStartedRef = useRef(false);
   const lastNavigationRef = useRef<NavigationTarget | null>(null);
-  const lastExistingRef = useRef<{ openPanel: OpenPanel; suggestionId: string } | null>(null);
+  const lastExistingRef = useRef<{
+    openPanel: OpenPanel;
+    suggestionId: string;
+  } | null>(null);
   const catalogFetchRef = useRef<Promise<void> | null>(null);
   const lastCatalogFetchRef = useRef(0);
   const liveRefreshRef = useRef(0);
@@ -481,19 +552,30 @@ function NewPanelPage() {
 
   const parsedInput = useMemo(() => parseLauncherInput(value), [value]);
   const browserUrl = useMemo(
-    () => (parsedInput.mode === "all" ? browserUrlFromEntry(parsedInput.query) : null),
-    [parsedInput]
+    () =>
+      parsedInput.mode === "all"
+        ? browserUrlFromEntry(parsedInput.query)
+        : null,
+    [parsedInput],
   );
 
   const refreshCatalog = useCallback((force = false): Promise<void> => {
     if (catalogFetchRef.current) return catalogFetchRef.current;
-    if (!force && Date.now() - lastCatalogFetchRef.current < CATALOG_REVALIDATE_INTERVAL_MS) {
+    if (
+      !force &&
+      Date.now() - lastCatalogFetchRef.current < CATALOG_REVALIDATE_INTERVAL_MS
+    ) {
       return Promise.resolve();
     }
     lastCatalogFetchRef.current = Date.now();
-    const request = workspace
-      .sourceTree()
-      .then((tree) => {
+    const request = Promise.all([
+      workspace.sourceTree(),
+      workers.listServices(),
+    ])
+      .then(([tree, services]) => {
+        setHasBrowserData(
+          services.some((service) => service.name === "browser.data"),
+        );
         const groups = collectLaunchablePanelGroups(tree.children);
         setPanelGroups(groups);
         cachePanelGroups(groups);
@@ -543,10 +625,13 @@ function NewPanelPage() {
       .catch(() => {
         // Awareness is progressive enhancement; launching remains available.
       });
-    const refresh = Promise.allSettled([usageRequest, topologyRequest]).then(() => undefined);
+    const refresh = Promise.allSettled([usageRequest, topologyRequest]).then(
+      () => undefined,
+    );
     liveRefreshInFlightRef.current = refresh;
     void refresh.finally(() => {
-      if (liveRefreshInFlightRef.current === refresh) liveRefreshInFlightRef.current = null;
+      if (liveRefreshInFlightRef.current === refresh)
+        liveRefreshInFlightRef.current = null;
     });
   }, []);
 
@@ -582,7 +667,7 @@ function NewPanelPage() {
 
   useEffect(() => {
     const requestId = ++historyRequestRef.current;
-    if (parsedInput.mode === "chat") {
+    if (!hasBrowserData || parsedInput.mode === "chat") {
       setBrowserSuggestions([]);
       setHistoryError(false);
       setHistoryReviewPending(false);
@@ -608,18 +693,24 @@ function NewPanelPage() {
             setHistoryReviewPending(reviewPending);
             setHistoryError(!reviewPending);
             if (!reviewPending) {
-              console.warn("[new-panel] Canonical browser history query failed", error);
+              console.warn(
+                "[new-panel] Canonical browser history query failed",
+                error,
+              );
             }
           });
       },
-      parsedInput.query ? 100 : 0
+      parsedInput.query ? 100 : 0,
     );
     return () => clearTimeout(timer);
-  }, [historyRefreshEpoch, parsedInput]);
+  }, [hasBrowserData, historyRefreshEpoch, parsedInput]);
 
   useEffect(() => {
     if (!historyReviewPending) return;
-    const timer = window.setTimeout(() => setHistoryRefreshEpoch((epoch) => epoch + 1), 2_000);
+    const timer = window.setTimeout(
+      () => setHistoryRefreshEpoch((epoch) => epoch + 1),
+      2_000,
+    );
     return () => clearTimeout(timer);
   }, [historyReviewPending, historyRefreshEpoch]);
 
@@ -642,7 +733,14 @@ function NewPanelPage() {
       browserSuggestions,
       browserUrl,
     });
-  }, [browserSuggestions, browserUrl, panelGroups, panelUsage, parsedInput.query, value]);
+  }, [
+    browserSuggestions,
+    browserUrl,
+    panelGroups,
+    panelUsage,
+    parsedInput.query,
+    value,
+  ]);
 
   const groups = useMemo(
     () =>
@@ -651,24 +749,31 @@ function NewPanelPage() {
           const source = destinationSource(suggestion);
           if (!source) return suggestion;
           const matches = openPanels.filter(
-            (entry) => entry.source === source || entry.canonicalSource === source
+            (entry) =>
+              entry.source === source || entry.canonicalSource === source,
           );
           if (!matches.length) return suggestion;
           return suggestion.kind === "panel"
             ? { ...suggestion, openPanels: matches }
             : { ...suggestion, openPanel: matches[0] };
         }),
-        parsedInput.query.trim() ? undefined : IDLE_GROUP_ORDER
+        parsedInput.query.trim() ? undefined : IDLE_GROUP_ORDER,
       ),
-    [baseSuggestions, openPanels, parsedInput]
+    [baseSuggestions, openPanels, parsedInput],
   );
 
   // The keyboard walks exactly what the eye walks: grouped display order.
-  const suggestions = useMemo(() => groups.flatMap((group) => group.items), [groups]);
+  const suggestions = useMemo(
+    () => groups.flatMap((group) => group.items),
+    [groups],
+  );
 
   useEffect(() => {
     setSelectedId((current) => {
-      if (selectionTouchedRef.current && suggestions.some((item) => item.id === current))
+      if (
+        selectionTouchedRef.current &&
+        suggestions.some((item) => item.id === current)
+      )
         return current;
       return suggestions[0]?.id ?? null;
     });
@@ -676,9 +781,10 @@ function NewPanelPage() {
 
   const selectedIndex = Math.max(
     0,
-    suggestions.findIndex((item) => item.id === selectedId)
+    suggestions.findIndex((item) => item.id === selectedId),
   );
-  const selected = suggestions.find((item) => item.id === selectedId) ?? suggestions[0];
+  const selected =
+    suggestions.find((item) => item.id === selectedId) ?? suggestions[0];
   const completion = autocompleteForSuggestion(value, selected);
 
   // Let a deliberate pause reveal live instances without making fast arrow-key
@@ -687,21 +793,32 @@ function NewPanelPage() {
   useEffect(() => {
     setExpandedId(null);
     if (!selected?.openPanels?.length) return;
-    const timer = window.setTimeout(() => setExpandedId(selected.id), INSTANCE_EXPAND_DWELL_MS);
+    const timer = window.setTimeout(
+      () => setExpandedId(selected.id),
+      INSTANCE_EXPAND_DWELL_MS,
+    );
     return () => window.clearTimeout(timer);
   }, [selected?.id, selected?.openPanels?.length]);
 
   useEffect(() => {
     if (!selected?.id) return;
     const option = document.getElementById(`launcher-${selected.id}`);
-    if (typeof option?.scrollIntoView === "function") option.scrollIntoView({ block: "nearest" });
+    if (typeof option?.scrollIntoView === "function")
+      option.scrollIntoView({ block: "nearest" });
   }, [selected?.id]);
 
   useEffect(() => {
+    if (!hasBrowserData) return;
     const urls = suggestions.flatMap((item) =>
-      item.kind === "history" ? [item.browser.url] : item.kind === "url" ? [item.url] : []
+      item.kind === "history"
+        ? [item.browser.url]
+        : item.kind === "url"
+          ? [item.url]
+          : [],
     );
-    const missing = [...new Set(urls)].filter((url) => !(url in favicons)).slice(0, 12);
+    const missing = [...new Set(urls)]
+      .filter((url) => !(url in favicons))
+      .slice(0, 12);
     if (!missing.length) return;
     const requestId = ++faviconRequestRef.current;
     const timer = window.setTimeout(() => {
@@ -709,18 +826,24 @@ function NewPanelPage() {
         missing.map(async (url) => {
           try {
             const icon = await browserData.getPageFavicon(url);
-            return [url, icon ? `data:${icon.mime_type};base64,${icon.image_data}` : null] as const;
+            return [
+              url,
+              icon ? `data:${icon.mime_type};base64,${icon.image_data}` : null,
+            ] as const;
           } catch {
             return [url, null] as const;
           }
-        })
+        }),
       ).then((entries) => {
         if (requestId === faviconRequestRef.current)
-          setFavicons((current) => ({ ...current, ...Object.fromEntries(entries) }));
+          setFavicons((current) => ({
+            ...current,
+            ...Object.fromEntries(entries),
+          }));
       });
     }, 120);
     return () => clearTimeout(timer);
-  }, [favicons, suggestions]);
+  }, [hasBrowserData, favicons, suggestions]);
 
   const maxInputHeight = isMobile ? 144 : 190;
   const resizeInput = useCallback(() => {
@@ -736,23 +859,28 @@ function NewPanelPage() {
   useEffect(() => resizeInput(), [resizeInput, value]);
   useEffect(() => () => cancelAnimationFrame(resizeRafRef.current), []);
 
-  const beginNavigation = useCallback((target: NavigationTarget, id: string) => {
-    if (navigationStartedRef.current) return;
-    navigationStartedRef.current = true;
-    lastNavigationRef.current = target;
-    lastExistingRef.current = null;
-    setPendingId(id);
-    setNavigationError(null);
-    if (target.href) {
-      requestAnimationFrame(() => location.assign(target.href!));
-      return;
-    }
-    void panel.reopen({ source: target.source }).catch((cause: unknown) => {
-      navigationStartedRef.current = false;
-      setPendingId(null);
-      setNavigationError(cause instanceof Error ? cause.message : String(cause));
-    });
-  }, []);
+  const beginNavigation = useCallback(
+    (target: NavigationTarget, id: string) => {
+      if (navigationStartedRef.current) return;
+      navigationStartedRef.current = true;
+      lastNavigationRef.current = target;
+      lastExistingRef.current = null;
+      setPendingId(id);
+      setNavigationError(null);
+      if (target.href) {
+        requestAnimationFrame(() => location.assign(target.href!));
+        return;
+      }
+      void panel.reopen({ source: target.source }).catch((cause: unknown) => {
+        navigationStartedRef.current = false;
+        setPendingId(null);
+        setNavigationError(
+          cause instanceof Error ? cause.message : String(cause),
+        );
+      });
+    },
+    [],
+  );
 
   const focusExisting = useCallback(
     (openPanel: OpenPanel, suggestionId: string) => {
@@ -768,10 +896,12 @@ function NewPanelPage() {
         await panelTree.self().archive();
       })().catch((cause: unknown) => {
         setPendingId(null);
-        setNavigationError(cause instanceof Error ? cause.message : String(cause));
+        setNavigationError(
+          cause instanceof Error ? cause.message : String(cause),
+        );
       });
     },
-    [pendingId]
+    [pendingId],
   );
 
   const activate = useCallback(
@@ -781,14 +911,19 @@ function NewPanelPage() {
         setPendingId(suggestion.id);
         void suggestion.openPanel.handle.focus().catch((cause: unknown) => {
           setPendingId(null);
-          setNavigationError(cause instanceof Error ? cause.message : String(cause));
+          setNavigationError(
+            cause instanceof Error ? cause.message : String(cause),
+          );
         });
         return;
       }
       if (suggestion.kind === "panel") {
         beginNavigation(
-          { source: suggestion.panel.path, href: buildPanelLink(suggestion.panel.path) },
-          suggestion.id
+          {
+            source: suggestion.panel.path,
+            href: buildPanelLink(suggestion.panel.path),
+          },
+          suggestion.id,
         );
       } else if (suggestion.kind === "history") {
         beginNavigation({ source: suggestion.browser.url }, suggestion.id);
@@ -802,17 +937,18 @@ function NewPanelPage() {
               stateArgs: { initialPrompt: suggestion.prompt },
             }),
           },
-          suggestion.id
+          suggestion.id,
         );
       }
     },
-    [beginNavigation, pendingId]
+    [beginNavigation, pendingId],
   );
 
   const chooseOffset = (offset: number) => {
     if (!suggestions.length) return;
     selectionTouchedRef.current = true;
-    const next = (selectedIndex + offset + suggestions.length) % suggestions.length;
+    const next =
+      (selectedIndex + offset + suggestions.length) % suggestions.length;
     setSelectedId(suggestions[next]!.id);
   };
 
@@ -828,7 +964,9 @@ function NewPanelPage() {
 
   const toggleMode = (prefix: Exclude<ModePrefix, "">) =>
     replaceInput(
-      parsedInput.prefix === prefix ? parsedInput.query : `${prefix}${parsedInput.query}`
+      parsedInput.prefix === prefix
+        ? parsedInput.query
+        : `${prefix}${parsedInput.query}`,
     );
 
   const actionLabel = activationLabel(selected);
@@ -844,12 +982,18 @@ function NewPanelPage() {
       <Box className="launcher-search">
         <div className="launcher-field">
           <div className="launcher-entry">
-            <MagnifyingGlassIcon className="launcher-entry-icon" width={18} height={18} />
+            <MagnifyingGlassIcon
+              className="launcher-entry-icon"
+              width={18}
+              height={18}
+            />
             <div className="launcher-input-wrap">
               {showGhost ? (
                 <div className="launcher-ghost" aria-hidden="true">
                   <span className="launcher-ghost-typed">{value}</span>
-                  <span className="launcher-ghost-suffix">{completion.suffix}</span>
+                  <span className="launcher-ghost-suffix">
+                    {completion.suffix}
+                  </span>
                 </div>
               ) : null}
               <textarea
@@ -862,7 +1006,9 @@ function NewPanelPage() {
                 aria-autocomplete="both"
                 aria-expanded={suggestions.length > 0}
                 aria-controls="launcher-suggestions"
-                aria-activedescendant={selected ? `launcher-${selected.id}` : undefined}
+                aria-activedescendant={
+                  selected ? `launcher-${selected.id}` : undefined
+                }
                 enterKeyHint={selected?.kind === "chat" ? "send" : "go"}
                 style={{ maxHeight: maxInputHeight }}
                 placeholder="Panel, address, or ask an agent…"
@@ -879,18 +1025,34 @@ function NewPanelPage() {
                   } else if (event.key === "ArrowUp") {
                     event.preventDefault();
                     chooseOffset(-1);
-                  } else if ((event.key === "Tab" || event.key === "ArrowRight") && completion) {
-                    if (event.key === "Tab" || inputRef.current?.selectionStart === value.length) {
+                  } else if (
+                    (event.key === "Tab" || event.key === "ArrowRight") &&
+                    completion
+                  ) {
+                    if (
+                      event.key === "Tab" ||
+                      inputRef.current?.selectionStart === value.length
+                    ) {
                       event.preventDefault();
                       replaceInput(completion.value);
                     }
-                  } else if (event.key === "ArrowRight" && selected?.openPanels?.length) {
+                  } else if (
+                    event.key === "ArrowRight" &&
+                    selected?.openPanels?.length
+                  ) {
                     event.preventDefault();
                     setExpandedId(selected.id);
-                  } else if (event.key === "ArrowLeft" && expandedId === selected?.id) {
+                  } else if (
+                    event.key === "ArrowLeft" &&
+                    expandedId === selected?.id
+                  ) {
                     event.preventDefault();
                     setExpandedId(null);
-                  } else if (event.key === "Enter" && !event.shiftKey && selected) {
+                  } else if (
+                    event.key === "Enter" &&
+                    !event.shiftKey &&
+                    selected
+                  ) {
                     event.preventDefault();
                     activate(selected);
                   } else if (event.key === "Escape" && value) {
@@ -953,7 +1115,11 @@ function NewPanelPage() {
               ? "Panel suggestions may be out of date."
               : "The panel catalog could not be loaded."}
           </Text>
-          <Button size="1" variant="soft" onClick={() => void refreshCatalog(true)}>
+          <Button
+            size="1"
+            variant="soft"
+            onClick={() => void refreshCatalog(true)}
+          >
             Retry
           </Button>
         </LauncherNotice>
@@ -961,13 +1127,15 @@ function NewPanelPage() {
       {parsedInput.prefix === DEPRECATED_PREFIX ? (
         <LauncherNotice color="orange">
           <Text size="2">
-            <code>&gt;</code> is now <code>@</code> — one &ldquo;go to&rdquo; scope for panels and
-            recent pages. Searching there instead.
+            <code>&gt;</code> is now <code>@</code> — one &ldquo;go to&rdquo;
+            scope for panels and recent pages. Searching there instead.
           </Text>
           <Button
             size="1"
             variant="soft"
-            onClick={() => replaceInput(`${REPLACEMENT_PREFIX}${parsedInput.query}`)}
+            onClick={() =>
+              replaceInput(`${REPLACEMENT_PREFIX}${parsedInput.query}`)
+            }
           >
             Use @
           </Button>
@@ -987,7 +1155,9 @@ function NewPanelPage() {
       ) : null}
       {navigationError ? (
         <LauncherNotice color="red">
-          <Text size="2">Couldn&apos;t open that destination: {navigationError}</Text>
+          <Text size="2">
+            Couldn&apos;t open that destination: {navigationError}
+          </Text>
           <Button
             size="1"
             variant="soft"
@@ -1008,7 +1178,12 @@ function NewPanelPage() {
       ) : null}
 
       {loading && !panelGroups && !suggestions.length ? (
-        <Flex direction="column" gap="2" aria-busy="true" aria-label="Loading destinations">
+        <Flex
+          direction="column"
+          gap="2"
+          aria-busy="true"
+          aria-label="Loading destinations"
+        >
           {[0, 1, 2, 3].map((row) => (
             <div key={row} className="launcher-skeleton" />
           ))}
@@ -1021,8 +1196,15 @@ function NewPanelPage() {
           aria-label="Destinations"
         >
           {groups.map((group) => (
-            <section key={group.kind} role="group" aria-labelledby={`launcher-group-${group.kind}`}>
-              <h2 className="launcher-group-label" id={`launcher-group-${group.kind}`}>
+            <section
+              key={group.kind}
+              role="group"
+              aria-labelledby={`launcher-group-${group.kind}`}
+            >
+              <h2
+                className="launcher-group-label"
+                id={`launcher-group-${group.kind}`}
+              >
                 {group.label}
               </h2>
               <div className="launcher-group-items">
@@ -1047,9 +1229,13 @@ function NewPanelPage() {
                       setSelectedId(suggestion.id);
                     }}
                     onActivate={() => activate(suggestion)}
-                    onFocusExisting={(openPanel) => focusExisting(openPanel, suggestion.id)}
+                    onFocusExisting={(openPanel) =>
+                      focusExisting(openPanel, suggestion.id)
+                    }
                     onToggleExisting={() =>
-                      setExpandedId((current) => (current === suggestion.id ? null : suggestion.id))
+                      setExpandedId((current) =>
+                        current === suggestion.id ? null : suggestion.id,
+                      )
                     }
                   />
                 ))}
@@ -1063,15 +1249,18 @@ function NewPanelPage() {
             {parsedInput.prefix
               ? `Nothing in ${
                   MODES.find(
-                    (mode) =>
-                      mode.mode === parsedInput.mode
+                    (mode) => mode.mode === parsedInput.mode,
                   )?.label.toLowerCase() ?? "this scope"
                 } matches “${parsedInput.query}”.`
               : `Nothing matches “${parsedInput.query}”.`}
           </Text>
           <Flex gap="2" justify="center" wrap="wrap" mt="3">
             {parsedInput.prefix ? (
-              <Button size="2" variant="soft" onClick={() => replaceInput(parsedInput.query)}>
+              <Button
+                size="2"
+                variant="soft"
+                onClick={() => replaceInput(parsedInput.query)}
+              >
                 Search everything
               </Button>
             ) : null}
