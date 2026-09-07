@@ -1868,9 +1868,10 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
    * failure stays exceptional so uncertainty can never authorize a duplicate. */
   private async completedMutationEvidence(
     commandId: string,
+    rpc: RpcClient,
   ): Promise<{ commandId: string; command: unknown } | null> {
     try {
-      const inspected = await createSubagentVcsClient(this.rpc).inspect({
+      const inspected = await createSubagentVcsClient(rpc).inspect({
         node: { kind: "command", commandId },
         edgeLimit: 1,
       });
@@ -2158,6 +2159,7 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
             ) {
               const evidence = await this.completedMutationEvidence(
                 execution.commandId,
+                execution.rpc,
               );
               if (evidence) {
                 return {
@@ -2198,12 +2200,17 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
           }
         },
         alreadyApplied: async (state, invocationId) => {
-          const commandId = commandIdForTrajectoryInvocation({
+          const parent = {
+            kind: "trajectory-invocation" as const,
             logId: state.logId,
             head: state.head,
             invocationId,
-          });
-          return this.completedMutationEvidence(commandId);
+          };
+          const commandId = commandIdForTrajectoryInvocation(parent);
+          return this.completedMutationEvidence(
+            commandId,
+            withCausalParent(this.rpc, parent),
+          );
         },
       },
       http: {

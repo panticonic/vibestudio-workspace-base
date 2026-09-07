@@ -173,8 +173,17 @@ export const interactionSurfaceTests: TestCase[] = [
     prompt: "I just opened this workspace for the first time. Show me the setup overview.",
     orchestrate: runOnboardingOpening,
     validate: (result) => {
-      const tools = requireCompletedTools(result, ["inline_ui"]);
+      const tools = requireCompletedTools(result, ["read", "inline_ui"]);
       if (!tools.passed) return tools;
+      const skillRead = completedNamedToolCalls(result, "read").find(
+        (call) => call.arguments?.["path"] === "skills/onboarding/SKILL.md"
+      );
+      if (!skillRead) {
+        return {
+          passed: false,
+          reason: "Opening onboarding did not successfully read skills/onboarding/SKILL.md",
+        };
+      }
       if (
         completedNamedToolCalls(result, "eval").length > 0 ||
         completedNamedToolCalls(result, "client_eval").length > 0

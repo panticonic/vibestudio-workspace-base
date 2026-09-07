@@ -658,6 +658,37 @@ describe("semantic system-test validators", () => {
     ).toEqual({ passed: true, reason: undefined });
   });
 
+  it("rejects an onboarding card assembled after its required skill read failed", () => {
+    const test = interactionSurfaceTests.find(
+      (candidate) => candidate.name === "onboarding-opening-overview"
+    )!;
+    const inline = {
+      name: "inline_ui",
+      arguments: {
+        path: "skills/onboarding/SetupHub.tsx",
+        id: "onboarding-setup-overview",
+      },
+      execution: { status: "complete", isError: false, result: { ok: true } },
+    };
+    const failedRead = {
+      name: "read",
+      arguments: { path: "skills/onboarding/SKILL.md" },
+      execution: { status: "error", isError: true, result: "VCS reference unavailable" },
+    };
+    const completedRead = {
+      ...failedRead,
+      execution: { status: "complete", isError: false, result: "# Onboarding" },
+    };
+
+    expect(test.validate(execution("ONBOARDING_OPENING_OK", [failedRead, inline])).passed).toBe(
+      false
+    );
+    expect(test.validate(execution("ONBOARDING_OPENING_OK", [completedRead, inline]))).toEqual({
+      passed: true,
+      reason: undefined,
+    });
+  });
+
   it("treats hyphenated prose tokens and spaced prose as equivalent", () => {
     expect(
       finalMessageHasAll(execution("Diagnosis used bounded diagnostics."), ["bounded-diagnostics"])
