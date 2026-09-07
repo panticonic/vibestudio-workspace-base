@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient, useWorkspaceVisible } from "../shell/workspaceContext";
 import {
   useCallback,
   useEffect,
@@ -7,10 +8,7 @@ import {
 } from "react";
 import { Box } from "@radix-ui/themes";
 
-import {
-  view,
-  type NativePanelSlotBounds,
-} from "../shell/client";
+import { type NativePanelSlotBounds } from "../shell/client";
 
 interface PanelSurfaceProps {
   nativeSlotId: string;
@@ -59,12 +57,16 @@ export function PanelSurface({
   onPointerDown,
   children,
 }: PanelSurfaceProps) {
+  const { view } = useShellWorkspaceClient();
+  const visible = useWorkspaceVisible();
+
   const elementRef = useRef<HTMLDivElement | null>(null);
   const [bindingId] = useState(
     () =>
       globalThis.crypto?.randomUUID?.() ??
       `panel-slot-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
   );
+  const visibleRef = useRef(visible); visibleRef.current = visible;
   const focusedRef = useRef(focused);
   focusedRef.current = focused;
   const declaredRef = useRef(false);
@@ -73,6 +75,7 @@ export function PanelSurface({
   const rafRef = useRef<number | null>(null);
 
   const sync = useCallback(() => {
+    if (!visibleRef.current) return;
     const bounds = readBounds(elementRef.current);
     if (!bounds) return;
     const request = {
@@ -98,7 +101,7 @@ export function PanelSurface({
     void view.updateNativePanelSlot(request).catch((error: unknown) => {
       console.warn("[PanelSurface] geometry update failed:", error);
     });
-  }, [bindingId, nativeSlotId, panelId]);
+  }, [bindingId, nativeSlotId, panelId, visible, view]);
 
   const scheduleSync = useCallback(() => {
     if (rafRef.current !== null) return;
@@ -109,6 +112,7 @@ export function PanelSurface({
   }, [sync]);
 
   useLayoutEffect(() => {
+    if (!visible) return;
     mountedRef.current = true;
     sync();
     const element = elementRef.current;
@@ -124,6 +128,7 @@ export function PanelSurface({
       window.removeEventListener("resize", scheduleSync);
       if (rafRef.current !== null)
         window.cancelAnimationFrame?.(rafRef.current);
+      rafRef.current = null;
       if (!declaredRef.current) return;
       declaredRef.current = false;
       void view
@@ -135,7 +140,7 @@ export function PanelSurface({
           console.warn("[PanelSurface] declaration cleanup failed:", error)
         );
     };
-  }, [bindingId, nativeSlotId, scheduleSync, sync]);
+  }, [bindingId, nativeSlotId, scheduleSync, sync, visible, view]);
 
   useEffect(() => {
     if (!declaredRef.current) {

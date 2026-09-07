@@ -1,15 +1,30 @@
+import {
+  useShellWorkspaceClient,
+  useWorkspaceVisible,
+  useWorkspaceNavigationHost,
+} from "./workspaceContext";
 import { useEffect, useRef } from "react";
 import {
-  nativeShellOverlay,
-  view,
   type NativeShellOverlayEvent,
   type NativeShellOverlayOptions,
 } from "./client";
 
 export function useNativeShellOverlay(
   options: (NativeShellOverlayOptions & { open: boolean }) | null,
-  onOverlayEvent?: (event: NativeShellOverlayEvent) => void
+  onOverlayEvent?: (event: NativeShellOverlayEvent) => void,
 ): void {
+  const { nativeShellOverlay, view } = useShellWorkspaceClient();
+  const visible = useWorkspaceVisible();
+  const workspace = useWorkspaceNavigationHost()?.workspaceId ?? "system";
+  const localId = options?.id;
+  options = options
+    ? {
+        ...options,
+        id: JSON.stringify([workspace, options.id]),
+        open: visible && options.open,
+      }
+    : null;
+
   const visibleIdRef = useRef<string | null>(null);
   const lastOptionsKeyRef = useRef<string | null>(null);
 
@@ -52,11 +67,11 @@ export function useNativeShellOverlay(
   useEffect(() => {
     if (!onOverlayEvent) return;
     return nativeShellOverlay.on((event) => {
-      if (!options?.id || event.overlayId === options.id) {
-        onOverlayEvent(event);
+      if (visible && options?.id && event.overlayId === options.id) {
+        onOverlayEvent({ ...event, overlayId: localId ?? event.overlayId });
       }
     });
-  }, [onOverlayEvent, options?.id]);
+  }, [onOverlayEvent, options?.id, visible, localId]);
 }
 
 function getOverlayOptionsKey(options: NativeShellOverlayOptions): string {

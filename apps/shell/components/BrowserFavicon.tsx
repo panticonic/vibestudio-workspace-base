@@ -1,6 +1,7 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useEffect, useState } from "react";
 import { GlobeIcon } from "@radix-ui/react-icons";
-import { browserData } from "../shell/client";
+
 
 export type BrowserFaviconHandle = { pageUrl: string; updatedAt: number };
 
@@ -13,6 +14,8 @@ export function BrowserFavicon({
   handle: BrowserFaviconHandle;
   size?: number;
 }) {
+  const { browserData } = useShellWorkspaceClient();
+
   const key = `${handle.pageUrl}\0${handle.updatedAt}`;
   const [src, setSrc] = useState(() => faviconCache.get(key));
 

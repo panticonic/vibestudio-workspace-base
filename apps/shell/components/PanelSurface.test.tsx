@@ -3,6 +3,7 @@
 import React from "react";
 import { act, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { WorkspaceVisibilityContext } from "../shell/workspaceContext";
 import { PanelSurface } from "./PanelSurface";
 
 const shellClient = vi.hoisted(() => ({
@@ -69,6 +70,19 @@ describe("PanelSurface", () => {
     HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
+  });
+
+  it("releases hidden workspace surfaces and restores the same retained panel on focus", () => {
+    const renderSurface = (visible: boolean) => <WorkspaceVisibilityContext.Provider value={visible}><PanelSurface nativeSlotId="pane" panelId="panel" focused /></WorkspaceVisibilityContext.Provider>;
+    const { rerender } = render(renderSurface(true));
+    const binding = shellClient.bindNativePanelSlot.mock.calls[0]?.[0];
+    rerender(renderSurface(false));
+    expect(shellClient.clearNativePanelSlot).toHaveBeenCalledTimes(1);
+    flushAnimationFrames();
+    expect(shellClient.bindNativePanelSlot).toHaveBeenCalledTimes(1);
+    rerender(renderSurface(true));
+    expect(shellClient.bindNativePanelSlot).toHaveBeenCalledTimes(2);
+    expect(shellClient.bindNativePanelSlot.mock.calls[1]?.[0]).toEqual(binding);
   });
 
   it("claims its initial slot without waiting for an animation frame", () => {

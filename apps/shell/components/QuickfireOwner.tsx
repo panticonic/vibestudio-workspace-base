@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 /**
  * QuickfireOwner — the chrome side of the quickfire overlay (spec §2.3).
  *
@@ -46,14 +47,7 @@ import type {
   BrowserAddressSuggestion,
   PanelChromeState,
 } from "@vibestudio/shared/panelChrome";
-import {
-  app,
-  hostCommands,
-  panel,
-  quickfire,
-  userNotifications,
-  workspace,
-} from "../shell/client";
+
 import { useShellEvent } from "../shell/useShellEvent";
 import {
   useShellContentOverlay,
@@ -160,6 +154,9 @@ const CLOSED: OverlayState = {
 };
 
 export function QuickfireOwner() {
+  const workspaceId = useWorkspaceNavigationHost()?.workspaceId ?? "system";
+  const { app, hostCommands, panel, quickfire, userNotifications, workspace } = useShellWorkspaceClient();
+
   const [state, setState] = useState<OverlayState>(CLOSED);
   const [chromeState, setChromeState] = useState<PanelChromeState | null>(null);
   const [pinnedPanelIds, setPinnedPanelIds] = useState<string[]>([]);
@@ -560,7 +557,7 @@ export function QuickfireOwner() {
   useEffect(() => {
     if (!state.open) return;
     let live = true;
-    void collectOpenPanels()
+    void collectOpenPanels(panel)
       .then((entries) => {
         if (live) setOpenPanels(entries);
       })
@@ -730,7 +727,7 @@ export function QuickfireOwner() {
   // --- Anchor measurement ---------------------------------------------------
   useEffect(() => {
     const measure = () => {
-      const host = document.getElementById(QUICKFIRE_OVERLAY_HOST_ID);
+      const host = document.getElementById(`${QUICKFIRE_OVERLAY_HOST_ID}:${workspaceId}`);
       const rect = host?.getBoundingClientRect();
       if (!rect || rect.width <= 0 || rect.height <= 0) {
         setAnchorBounds(null);
@@ -767,7 +764,7 @@ export function QuickfireOwner() {
       );
     };
     measure();
-    const host = document.getElementById(QUICKFIRE_OVERLAY_HOST_ID);
+    const host = document.getElementById(`${QUICKFIRE_OVERLAY_HOST_ID}:${workspaceId}`);
     const observer =
       host && typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(measure)
@@ -1532,7 +1529,7 @@ function mergePanelEntries(
 }
 
 /** Bounded walk of the open panel forest — the "already open" index (§4.1). */
-async function collectOpenPanels(): Promise<OpenPanelEntry[]> {
+async function collectOpenPanels(panel: import("../shell/workspaceClient").ShellWorkspaceClient["panel"]): Promise<OpenPanelEntry[]> {
   const entries: OpenPanelEntry[] = [];
   const titles = new Map<string, string>();
   const pending: Array<

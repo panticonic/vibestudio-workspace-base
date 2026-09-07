@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 /**
  * NotificationBar — centralized notification display in the shell chrome area.
  *
@@ -22,14 +23,7 @@ import {
 } from "@radix-ui/react-icons";
 import { useShellEvent } from "../shell/useShellEvent";
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
-import {
-  app,
-  browserEnvironment,
-  extensions,
-  notification,
-  panel,
-  supervisedUnits,
-} from "../shell/client";
+
 import type { NotificationPayload } from "@vibestudio/shared/events";
 import { assertPresent } from "../utils/assertPresent";
 
@@ -99,6 +93,8 @@ function panelOpenInstruction(value: unknown): {
 }
 
 export function NotificationBar() {
+  const { app, browserEnvironment, extensions, notification, panel, supervisedUnits } = useShellWorkspaceClient();
+
   const [notifications, setNotifications] = useState<Map<string, NotificationPayload>>(new Map());
   const [expandedIds, setExpandedIds] = useState<Set<string>>(new Set());
   const timerCleanups = useRef<Map<string, () => void>>(new Map());

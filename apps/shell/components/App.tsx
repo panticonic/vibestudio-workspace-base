@@ -1,10 +1,11 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useEffect, useCallback } from "react";
 import { useSetAtom } from "jotai";
 import { Theme } from "@radix-ui/themes";
 
 import {
   workspaceChooserDialogOpenAtom,
-  activeWorkspaceNameAtom,
+  workspaceChooserTemplateAtom,
 } from "../state/appModeAtoms";
 import {
   effectiveThemeAtom,
@@ -15,16 +16,7 @@ import {
 } from "../state/themeAtoms";
 import { useAtomValue } from "jotai";
 import { useShellEvent } from "../shell/useShellEvent";
-import {
-  app,
-  hostCommands,
-  incomingShellSurface,
-  notification,
-  panel,
-  workspace,
-  shellNetwork,
-  connectNativePanelAdapter,
-} from "../shell/client";
+
 import { ChunkErrorBoundary } from "./ChunkErrorBoundary";
 import MainMode from "./MainMode";
 
@@ -32,13 +24,15 @@ import MainMode from "./MainMode";
  * Root App component that renders the main panel app.
  */
 export function App() {
+  const { app, incomingShellSurface, notification, shellNetwork, connectNativePanelAdapter } = useShellWorkspaceClient();
+
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
   const themeMode = useAtomValue(themeModeAtom);
   const themeConfig = useAtomValue(themeConfigAtom);
   const loadThemePreference = useSetAtom(loadThemePreferenceAtom);
   const loadThemeConfig = useSetAtom(loadThemeConfigAtom);
   const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
-  const setActiveWorkspaceName = useSetAtom(activeWorkspaceNameAtom);
+  const setWorkspaceChooserTemplate = useSetAtom(workspaceChooserTemplateAtom);
   // Hand the window to the hosted shell immediately. MainMode belongs to the
   // normal startup surface and is bundled with it; optional heavyweight
   // features inside that surface retain their own lazy boundaries.
@@ -72,26 +66,6 @@ export function App() {
     return () => window.removeEventListener("online", handleOnline);
   }, []);
 
-  // Broadcast the theme identity to every panel whenever it changes, so a
-  // user-picked accent/radius propagates live over the runtime bridge.
-  useEffect(() => {
-    void panel.updateThemeConfig(themeConfig).catch((error) => {
-      console.error("Failed to broadcast theme identity", error);
-    });
-  }, [themeConfig]);
-
-  // Eagerly load active workspace name on mount (independent of chooser dialog)
-  useEffect(() => {
-    workspace
-      .getActive()
-      .then((name) => {
-        setActiveWorkspaceName(name);
-      })
-      .catch((err) =>
-        console.error("[App] Failed to get active workspace:", err),
-      );
-  }, [setActiveWorkspaceName]);
-
   // Listen for system theme changes via shell event
   const handleThemeChanged = useCallback(() => {
     loadThemePreference();
@@ -99,39 +73,11 @@ export function App() {
   useShellEvent("system-theme-changed", handleThemeChanged);
 
   // Listen for workspace switcher menu event via shell event
-  const handleOpenWorkspaceSwitcher = useCallback(() => {
+  const handleOpenWorkspaceSwitcher = useCallback((input: import("@vibestudio/shared/events").EventPayloads["open-workspace-switcher"]) => {
+    setWorkspaceChooserTemplate(input?.template ?? null);
     setWorkspaceChooserOpen(true);
-  }, [setWorkspaceChooserOpen]);
+  }, [setWorkspaceChooserOpen, setWorkspaceChooserTemplate]);
   useShellEvent("open-workspace-switcher", handleOpenWorkspaceSwitcher);
-
-  // Listen for navigate-about menu event via shell event
-  const handleNavigateAbout = useCallback(async (payload: { page: string }) => {
-    try {
-      await panel.createAboutPanel(payload.page);
-    } catch (error) {
-      console.error(
-        `[App] Failed to create shell panel for ${payload.page}:`,
-        error,
-      );
-      void notification.show({
-        type: "error",
-        title: "Couldn't open page",
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }, []);
-  useShellEvent("navigate-about", handleNavigateAbout);
-
-  // A panel's contributed host command, invoked from outside the palette
-  // (`app.openShellSurface({ kind: "panel-command" })` or its deep link). Same
-  // routing as a palette selection; the panel decides what the id means.
-  const handleRunPanelCommand = useCallback(
-    (payload: { panelId: string; commandId: string }) => {
-      void hostCommands.run(payload.panelId, payload.commandId);
-    },
-    [],
-  );
-  useShellEvent("run-panel-command", handleRunPanelCommand);
 
   // A surface deep link that reached the host before this shell was listening:
   // drain it once and send it back through the host's dispatcher.

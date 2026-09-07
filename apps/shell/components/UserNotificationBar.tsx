@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
 import { Badge, Button, Flex, IconButton, Spinner, Text } from "@radix-ui/themes";
@@ -9,14 +10,10 @@ import {
   InfoCircledIcon,
   ReloadIcon,
 } from "@radix-ui/react-icons";
-import {
-  userNotifications,
-  type ShellChannelInvite,
-  type ShellUserNotification,
-} from "../shell/client";
+import { type ShellChannelInvite, type ShellUserNotification } from "../shell/client";
 import type { AgentMessageNotificationData } from "@vibestudio/shared/userNotifications";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
-import { events, notification as shellToast } from "../shell/client";
+
 import { openConversationSurfaceAtom } from "../state/commandAgentAtoms";
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
 import { useShellEvent } from "../shell/useShellEvent";
@@ -62,6 +59,8 @@ export function groupNotifications(
  * account events, and reconciled after host reconnect. There is no timer poll.
  */
 export function UserNotificationBar() {
+  const { userNotifications, events, notification: shellToast } = useShellWorkspaceClient();
+
   const [notifications, setNotifications] = useState<ShellUserNotification[]>([]);
   const [loading, setLoading] = useState(true);
   const [busyNotificationId, setBusyNotificationId] = useState<string | null>(null);

@@ -1,4 +1,9 @@
 import {
+  useShellWorkspaceClient,
+  useWorkspaceNavigationHost,
+  useWorkspaceVisible,
+} from "../shell/workspaceContext";
+import {
   Cross2Icon,
   DotsHorizontalIcon,
   HamburgerMenuIcon,
@@ -65,9 +70,6 @@ import {
   isPanelClosePointerButton,
 } from "@vibestudio/shared/panelCommands";
 import {
-  menu,
-  notification,
-  panel,
   type NativeShellOverlayEvent,
   type NativeShellOverlayOptions,
   type ShellOverlayRow,
@@ -111,6 +113,9 @@ export function TitleBar({
   paneChromeState,
   onPaneChromeCommand,
 }: TitleBarProps) {
+  const { menu, notification, panel } = useShellWorkspaceClient();
+  const navigationHost = useWorkspaceNavigationHost();
+
   const {
     mode: navigationMode,
     setMode,
@@ -122,10 +127,18 @@ export function TitleBar({
   const isMobile = useIsMobile();
 
   const handleNavigationToggle = () => {
+    if (navigationHost) {
+      navigationHost.toggleSidebar();
+      return;
+    }
     const nextMode: NavigationMode =
       navigationMode === "stack" ? "tree" : "stack";
     setMode(nextMode);
   };
+
+  const treeVisible = navigationHost
+    ? navigationHost.sidebarVisible
+    : navigationMode === "tree";
 
   const handleMobileAddressToggleKeyDown = (
     event: KeyboardEvent<HTMLDivElement>,
@@ -215,11 +228,7 @@ export function TitleBar({
             />
 
             <Tooltip
-              content={
-                navigationMode === "tree"
-                  ? "Close panel tree"
-                  : "Open panel tree"
-              }
+              content={treeVisible ? "Close panel tree" : "Open panel tree"}
             >
               <IconButton
                 variant="ghost"
@@ -227,12 +236,10 @@ export function TitleBar({
                 className="app-touch-target"
                 onClick={handleNavigationToggle}
                 aria-label={
-                  navigationMode === "tree"
-                    ? "Close panel tree"
-                    : "Open panel tree"
+                  treeVisible ? "Close panel tree" : "Open panel tree"
                 }
               >
-                {navigationMode === "tree" ? <BoxIcon /> : <ViewVerticalIcon />}
+                {treeVisible ? <BoxIcon /> : <ViewVerticalIcon />}
               </IconButton>
             </Tooltip>
           </Flex>
@@ -354,7 +361,7 @@ export function TitleBar({
           }
         >
           {/* macOS: reserve the native traffic-light cluster and hover target. */}
-          {isMac && (
+          {isMac && (!navigationHost || !navigationHost.sidebarVisible) && (
             <Box
               style={{
                 width: MACOS_TITLEBAR_CONTROL_RESERVE_PX,
@@ -374,23 +381,37 @@ export function TitleBar({
           </IconButton>
 
           <Tooltip
-            content={
-              navigationMode === "tree" ? "Breadcrumb mode" : "Tree mode"
-            }
+            content={treeVisible ? "Hide workspaces" : "Show workspaces"}
           >
             <IconButton
               variant="ghost"
               size="1"
               onClick={handleNavigationToggle}
-              aria-label={
-                navigationMode === "tree"
-                  ? "Switch to breadcrumb navigation"
-                  : "Switch to tree view"
-              }
+              aria-label={treeVisible ? "Hide workspaces" : "Show workspaces"}
             >
-              {navigationMode === "tree" ? <BoxIcon /> : <ViewVerticalIcon />}
+              {treeVisible ? <BoxIcon /> : <ViewVerticalIcon />}
             </IconButton>
           </Tooltip>
+
+          {navigationHost && (
+            <span
+              title={navigationHost.workspaceLabel}
+              style={{
+                maxWidth: 140,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+                fontSize: 11,
+                fontWeight: 600,
+                color: "var(--accent-11)",
+                padding: "3px 7px",
+                borderRadius: 5,
+                background: "var(--accent-3)",
+              }}
+            >
+              {navigationHost.workspaceLabel}
+            </span>
+          )}
 
           <Tooltip content="New panel (⌘/Ctrl+T)">
             <IconButton
@@ -533,6 +554,9 @@ function BrowserAddressBar({
   chromeState?: PanelChromeState | null;
   onChromeCommand?: (command: ChromeCommand) => void;
 }) {
+  const { notification, panel } = useShellWorkspaceClient();
+
+  const workspaceVisible = useWorkspaceVisible();
   const isMobile = useIsMobile();
   const [value, setValue] = useState(chromeState?.editableAddress ?? "");
   const [addressOptions, setAddressOptions] =
@@ -608,6 +632,7 @@ function BrowserAddressBar({
   }, [focused, value]);
 
   useEffect(() => {
+    if (!workspaceVisible) return;
     const focusAddress = () => {
       inputRef.current?.focus();
       inputRef.current?.select();
@@ -615,7 +640,7 @@ function BrowserAddressBar({
     window.addEventListener("shell-focus-address", focusAddress);
     return () =>
       window.removeEventListener("shell-focus-address", focusAddress);
-  }, []);
+  }, [workspaceVisible]);
 
   const autocompleteItems = useMemo(
     () =>
@@ -962,8 +987,8 @@ function BrowserAddressBar({
                     .clearBrowserSiteData(chromeState.panelId)
                     .then(() =>
                       setSiteState((current) =>
-                        current ? { ...current, cookieCount: 0 } : current
-                      )
+                        current ? { ...current, cookieCount: 0 } : current,
+                      ),
                     )
                     .catch((error) =>
                       reportSiteActionError("Couldn't clear site data", error),
@@ -997,6 +1022,9 @@ function PanelAddressBar({
   chromeState: PanelChromeState;
   onChromeCommand?: (command: ChromeCommand) => void;
 }) {
+  const { panel } = useShellWorkspaceClient();
+
+  const workspaceVisible = useWorkspaceVisible();
   const isMobile = useIsMobile();
   const pathInputRef = useRef<HTMLInputElement | null>(null);
   const [pathValue, setPathValue] = useState(chromeState.source);
@@ -1032,6 +1060,7 @@ function PanelAddressBar({
   }, [pathValue]);
 
   useEffect(() => {
+    if (!workspaceVisible) return;
     const focusAddress = () => {
       pathInputRef.current?.focus();
       pathInputRef.current?.select();
@@ -1039,7 +1068,7 @@ function PanelAddressBar({
     window.addEventListener("shell-focus-address", focusAddress);
     return () =>
       window.removeEventListener("shell-focus-address", focusAddress);
-  }, []);
+  }, [workspaceVisible]);
 
   const submit = (event?: KeyboardEvent<HTMLInputElement>) => {
     const value = pathValue.trim();
@@ -1331,6 +1360,8 @@ function HoverableBreadcrumbItem({
   onEditAddress,
   onClosePane,
 }: HoverableBreadcrumbItemProps) {
+  const { panel } = useShellWorkspaceClient();
+
   const [isHovered, setIsHovered] = useState(false);
   const isTouch = useTouchDevice();
 
@@ -1348,9 +1379,7 @@ function HoverableBreadcrumbItem({
   const archivePanel = () => {
     if (
       hasChildren &&
-      !window.confirm(
-        `Close “${title}”? Child panels will also be archived.`,
-      )
+      !window.confirm(`Close “${title}”? Child panels will also be archived.`)
     )
       return;
     void panel.archive(panelId).catch((error) => {
@@ -1596,6 +1625,8 @@ function BreadcrumbBar({
   closablePanePanelId,
   onClosePane,
 }: BreadcrumbBarProps) {
+  const { menu } = useShellWorkspaceClient();
+
   const ancestors = navigationData?.ancestors ?? [];
   const currentSiblings = navigationData?.currentSiblings ?? [];
   const descendantGroups = statusNavigation?.descendantGroups ?? [];

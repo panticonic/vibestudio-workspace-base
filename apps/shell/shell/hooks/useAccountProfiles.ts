@@ -1,5 +1,6 @@
+import { useShellWorkspaceClient } from "../workspaceContext";
 import { useEffect, useMemo, useState } from "react";
-import { ACCOUNT_PROFILE_CHANGED_EVENT, account, type ShellAccountProfile } from "../client.js";
+import { type ShellAccountProfile } from "../client.js";
 
 const PROFILE_REFRESH_INTERVAL_MS = 30_000;
 
@@ -15,6 +16,8 @@ function errorMessage(error: unknown): string {
 
 /** Resolve the shell's verified account before selecting an owner-primary tree. */
 export function useCurrentAccountProfile(): CurrentAccountProfileState {
+  const { ACCOUNT_PROFILE_CHANGED_EVENT, account } = useShellWorkspaceClient();
+
   const [state, setState] = useState<CurrentAccountProfileState>({
     profile: null,
     settled: false,
@@ -59,6 +62,8 @@ export function useCurrentAccountProfile(): CurrentAccountProfileState {
 export function useAccountProfiles(
   userIds: readonly string[]
 ): ReadonlyMap<string, ShellAccountProfile> {
+  const { ACCOUNT_PROFILE_CHANGED_EVENT, account } = useShellWorkspaceClient();
+
   const userIdsKey = useMemo(
     () => [...new Set(userIds.filter(Boolean))].sort().join("\n"),
     [userIds]

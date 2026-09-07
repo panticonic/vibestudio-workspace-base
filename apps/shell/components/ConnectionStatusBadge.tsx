@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 /**
  * ConnectionStatusBadge — chrome indicator for server connection state.
  *
@@ -8,7 +9,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Badge, IconButton, Tooltip } from "@radix-ui/themes";
 import { CrossCircledIcon, GlobeIcon, UpdateIcon } from "@radix-ui/react-icons";
-import { app } from "../shell/client";
+
 import { useShellEvent } from "../shell/useShellEvent";
 
 type ConnectionStatus = "connected" | "connecting" | "disconnected";
@@ -32,6 +33,8 @@ export function ConnectionStatusBadge({
 }: {
   onOpenSettings: () => void;
 }) {
+  const { app } = useShellWorkspaceClient();
+
   const [snap, setSnap] = useState<ConnectionSnapshot | null>(null);
   const [hasConnected, setHasConnected] = useState(false);
 

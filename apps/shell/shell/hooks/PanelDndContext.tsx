@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient } from "../workspaceContext";
 /**
  * PanelDndContext - Drag-and-drop context for the panel tree.
  *
@@ -41,7 +42,7 @@ import {
   verticalListSortingStrategy,
   sortableKeyboardCoordinates,
 } from "@dnd-kit/sortable";
-import { panel as panelService } from "../client.js";
+
 import {
   usePanelTree,
   flattenTree,
@@ -150,6 +151,8 @@ interface PanelDndProviderProps {
 }
 
 export function PanelDndProvider({ children }: PanelDndProviderProps) {
+  const { panel: panelService } = useShellWorkspaceClient();
+
   const { allRootPanels, panelMap, loadChildren } = usePanelTree();
   const {
     beginDrag: beginLayoutDrag,

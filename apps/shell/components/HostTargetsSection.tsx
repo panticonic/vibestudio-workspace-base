@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Callout, Code, Flex, Table, Text, TextField } from "@radix-ui/themes";
 import { ExclamationTriangleIcon } from "@radix-ui/react-icons";
@@ -9,7 +10,7 @@ import type {
 import type { PendingUnitInstallReviewApproval } from "@vibestudio/shared/approvals";
 import { launchGateView, targetLabel } from "@vibestudio/shared/bootstrapLaunchGate";
 import { OriginText } from "./OriginText";
-import { buildUnits, hostLaunch, supervisedUnits, workspace } from "../shell/client";
+
 
 const HOST_TARGETS: HostTarget[] = ["electron", "react-native", "terminal"];
 
@@ -135,6 +136,8 @@ export function LaunchGateFacts({
 }
 
 export function HostTargetsSection({ showHeading = true }: { showHeading?: boolean } = {}) {
+  const { buildUnits, hostLaunch, supervisedUnits, workspace } = useShellWorkspaceClient();
+
   const [candidates, setCandidates] = useState<Record<HostTarget, HostTargetCandidate[]>>({
     electron: [],
     "react-native": [],

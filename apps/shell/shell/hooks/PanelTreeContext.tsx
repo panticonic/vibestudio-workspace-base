@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient } from "../workspaceContext";
 import {
   createContext,
   useCallback,
@@ -27,7 +28,7 @@ import type {
   PanelSnapshot,
   PanelSummary,
 } from "@vibestudio/shared/types";
-import { panel } from "../client.js";
+
 import { useShellEvent } from "../useShellEvent.js";
 import { useDirectShellEvent } from "../useDirectShellEvent.js";
 import {
@@ -301,6 +302,8 @@ function hasSameTreePresentation(
 }
 
 export function PanelTreeProvider({ children }: { children: ReactNode }) {
+  const { panel } = useShellWorkspaceClient();
+
   const currentAccount = useCurrentAccountProfile();
   const selfUserId = currentAccount.profile?.userId ?? null;
   const [cacheVersion, rerender] = useState(0);
@@ -740,6 +743,8 @@ export function useFullPanel(panelId: string | null): {
   panel: FullPanel | null;
   loading: boolean;
 } {
+  const { panel } = useShellWorkspaceClient();
+
   const [value, setValue] = useState<FullPanel | null>(null);
   const [loading, setLoading] = useState(Boolean(panelId));
   const nextRequestRef = useRef(0);
@@ -898,6 +903,8 @@ export function useAncestors(panelId: string | null): {
   ancestors: PanelAncestor[];
   loading: boolean;
 } {
+  const { panel } = useShellWorkspaceClient();
+
   const { presentations: livePresentations } = usePanelTreeContext();
   const [ancestors, setAncestors] = useState<PanelAncestor[]>([]);
   const [loading, setLoading] = useState(Boolean(panelId));

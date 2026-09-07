@@ -1,19 +1,19 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AppDialog } from "@workspace/ui/overlay";
 
 import {
-  settingsDialogSectionAtom,
+  settingsDialogAtom,
   workspaceChooserDialogOpenAtom,
   shellOverlayActiveAtom,
 } from "../state/appModeAtoms";
-import { view } from "../shell/client";
+
 import { useShellEvent } from "../shell/useShellEvent";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { ConnectionSettingsDialog } from "./ConnectionSettingsDialog";
-import { PanelApp } from "./PanelApp";
+import { WorkspaceDesktop } from "./WorkspaceDesktop";
 import { WorkspaceChooser } from "./WorkspaceChooser";
-import { WorkspaceWizard } from "./WorkspaceWizard";
 import { WorkspaceConnectionOverlay } from "./WorkspaceConnectionOverlay";
 
 /**
@@ -22,10 +22,12 @@ import { WorkspaceConnectionOverlay } from "./WorkspaceConnectionOverlay";
  * lazy, but the panel chrome itself is required for first useful paint.
  */
 export default function MainMode() {
+  const { view } = useShellWorkspaceClient();
+
   const workspaceChooserOpen = useAtomValue(workspaceChooserDialogOpenAtom);
   const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
-  const settingsSection = useAtomValue(settingsDialogSectionAtom);
-  const setSettingsSection = useSetAtom(settingsDialogSectionAtom);
+  const settingsTarget = useAtomValue(settingsDialogAtom);
+  const setSettingsTarget = useSetAtom(settingsDialogAtom);
   const shellOverlayActive = useAtomValue(shellOverlayActiveAtom);
 
   // Mounted here, not next to the badge that opens it: the badge lives in the
@@ -33,8 +35,8 @@ export default function MainMode() {
   useShellEvent(
     "open-settings",
     useCallback(
-      ({ section }) => setSettingsSection(section),
-      [setSettingsSection],
+      (target) => setSettingsTarget(target),
+      [setSettingsTarget],
     ),
   );
 
@@ -77,8 +79,7 @@ export default function MainMode() {
 
   return (
     <>
-      <PanelApp />
-      <WorkspaceWizard />
+      <WorkspaceDesktop />
 
       {/* Workspace Chooser Dialog (for switching workspaces in main mode) */}
       <AppDialog
@@ -90,11 +91,12 @@ export default function MainMode() {
       </AppDialog>
 
       <WorkspaceConnectionOverlay
-        onOpenSettings={() => setSettingsSection("connection")}
+        onOpenSettings={() => setSettingsTarget({ section: "connection" })}
       />
       <ConnectionSettingsDialog
-        section={settingsSection}
-        onSectionChange={setSettingsSection}
+        section={settingsTarget?.section ?? null}
+        workspaceId={settingsTarget?.workspaceId}
+        onSectionChange={(section) => setSettingsTarget(section ? { ...settingsTarget, section } : null)}
       />
     </>
   );

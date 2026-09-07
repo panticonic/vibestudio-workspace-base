@@ -291,7 +291,7 @@ function mountBar() {
   // jsdom doesn't lay out, so stub the anchor host's rect to a real size — the
   // coordinator only opens the overlay once it has a non-empty anchor.
   const host = document.createElement("div");
-  host.id = "app-approval-host";
+  host.id = "app-approval-host:system";
   host.getBoundingClientRect = () =>
     ({
       x: 0,
@@ -329,7 +329,7 @@ describe("ConsentApprovalBar coordinator", () => {
   });
 
   afterEach(() => {
-    document.getElementById("app-approval-host")?.remove();
+    document.getElementById("app-approval-host:system")?.remove();
   });
 
   it("sends a heartbeat and lists pending while mounted", async () => {

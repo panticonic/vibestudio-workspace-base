@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useEffect, useMemo, useState } from "react";
 import {
   Badge,
@@ -11,17 +12,10 @@ import {
   Text,
 } from "@radix-ui/themes";
 import { ExclamationTriangleIcon } from "@radix-ui/react-icons";
-import { panel } from "../shell/client";
+
 import QRCode from "qrcode-terminal/vendor/QRCode/index.js";
 import QRErrorCorrectLevel from "qrcode-terminal/vendor/QRCode/QRErrorCorrectLevel.js";
-import {
-  account,
-  hubControl,
-  remoteCred,
-  type DeviceRecord,
-  type PairingInvite,
-  type ShellAccountProfile,
-} from "../shell/client";
+import { type DeviceRecord, type PairingInvite, type ShellAccountProfile } from "../shell/client";
 
 export function PairedDevicesSection({
   currentDeviceId,
@@ -34,6 +28,8 @@ export function PairedDevicesSection({
   onStartPhoneSetup?: () => void;
   showHeading?: boolean;
 }) {
+  const { panel, account, hubControl, remoteCred } = useShellWorkspaceClient();
+
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [owners, setOwners] = useState<Record<string, ShellAccountProfile>>({});
   const [busyId, setBusyId] = useState<string | null>(null);

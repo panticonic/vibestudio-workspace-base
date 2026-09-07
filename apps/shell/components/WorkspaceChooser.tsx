@@ -1,340 +1,219 @@
-import { useState, useEffect } from "react";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useEffect, useRef, useState } from "react";
+import { useAtom, useSetAtom } from "jotai";
 import {
-  AlertDialog,
+  Badge,
   Box,
   Button,
   Callout,
-  Card,
   Flex,
-  IconButton,
+  Heading,
   Spinner,
   Text,
+  TextField,
 } from "@radix-ui/themes";
+import { TemplateBrowser } from "@workspace/template-management/react";
+import type { HubWorkspaceEntry } from "@vibestudio/service-schemas/hubControl";
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import { workspaceLabel } from "../shell/workspaceLabel";
 import {
-  ExclamationTriangleIcon,
-  PlusIcon,
-  TrashIcon,
-} from "@radix-ui/react-icons";
-import { VibestudioLogo } from "@workspace/ui/brand";
-import { Surface } from "@workspace/ui/layout";
-
-import {
-  recentWorkspacesAtom,
-  workspacesLoadingAtom,
-  activeWorkspaceNameAtom,
-  loadRecentWorkspacesAtom,
-  removeRecentWorkspaceAtom,
-  chooseWorkspaceAtom,
   workspaceChooserDialogOpenAtom,
-  wizardDialogOpenAtom,
-  wizardFormDataAtom,
-  workspaceErrorAtom,
-  remoteWorkspaceModeAtom,
+  workspaceChooserTemplateAtom,
 } from "../state/appModeAtoms";
-import type { WorkspaceEntry } from "@vibestudio/shared/types";
-
-function formatRelativeTime(timestamp: number): string {
-  const seconds = Math.floor((Date.now() - timestamp) / 1000);
-  if (seconds < 60) return "just now";
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(timestamp).toLocaleDateString();
-}
 
 export function WorkspaceChooser() {
-  const recentWorkspaces = useAtomValue(recentWorkspacesAtom);
-  const isLoading = useAtomValue(workspacesLoadingAtom);
-  const activeWorkspaceName = useAtomValue(activeWorkspaceNameAtom);
-  const loadRecentWorkspaces = useSetAtom(loadRecentWorkspacesAtom);
-  const removeRecentWorkspace = useSetAtom(removeRecentWorkspaceAtom);
-  const chooseWorkspace = useSetAtom(chooseWorkspaceAtom);
-  const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
-  const setWizardDialogOpen = useSetAtom(wizardDialogOpenAtom);
-  const setWizardFormData = useSetAtom(wizardFormDataAtom);
-  const workspaceError = useAtomValue(workspaceErrorAtom);
-  const remoteWorkspaceMode = useAtomValue(remoteWorkspaceModeAtom);
-  const setWorkspaceError = useSetAtom(workspaceErrorAtom);
-
-  const [pendingDelete, setPendingDelete] = useState<string | null>(null);
-
-  // Load workspaces on mount. The atom owns clearing or replacing stale errors.
+  const { hubControl, templates } = useShellWorkspaceClient();
+  const close = useSetAtom(workspaceChooserDialogOpenAtom);
+  const [template, setTemplate] = useAtom(workspaceChooserTemplateAtom);
+  const [workspaces, setWorkspaces] = useState<HubWorkspaceEntry[]>([]);
+  const [mode, setMode] = useState<"list" | "blank" | "source">(
+    template ? "source" : "list",
+  );
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [name, setName] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [created, setCreated] = useState<HubWorkspaceEntry | null>(null);
+  const pending = useRef(false);
   useEffect(() => {
-    void loadRecentWorkspaces();
-  }, [loadRecentWorkspaces]);
-
-  const handleChooseWorkspace = async (ws: WorkspaceEntry) => {
-    if (ws.name === activeWorkspaceName) {
-      setWorkspaceChooserOpen(false);
-      return;
-    }
+    let live = true;
+    hubControl
+      .listWorkspaces()
+      .then((entries) => {
+        if (live) setWorkspaces(entries);
+      })
+      .catch((error) => {
+        if (live) setError(String(error));
+      })
+      .finally(() => {
+        if (live) setLoading(false);
+      });
+    return () => {
+      live = false;
+    };
+  }, [hubControl]);
+  useEffect(() => {
+    if (template) setMode("source");
+  }, [template]);
+  const open = async (workspaceId: string) => {
+    setBusy(true);
+    setError(null);
     try {
-      await chooseWorkspace(ws.name);
+      await hubControl.routeWorkspace({ workspaceId });
+      setTemplate(null);
+      close(false);
     } catch (error) {
-      console.error("Failed to choose workspace:", error);
-      setWorkspaceError(error instanceof Error ? error.message : String(error));
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
     }
   };
-
-  const handleRemoveWorkspace = (e: React.MouseEvent, name: string) => {
-    e.stopPropagation();
-    setPendingDelete(name);
+  const create = async (
+    workspace: string,
+    rootTemplate?: import("@vibestudio/service-schemas/templates").TemplateExactPin,
+  ) => {
+    if (pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      const entry = await hubControl.createWorkspace({
+        workspace,
+        ...(rootTemplate ? { rootTemplate } : {}),
+      });
+      setCreated(entry);
+      await open(entry.workspaceId);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error));
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
   };
-
-  const handleConfirmDelete = async () => {
-    if (!pendingDelete) return;
-    const name = pendingDelete;
-    setPendingDelete(null);
-    await removeRecentWorkspace(name);
-  };
-
-  const handleCreateNew = () => {
-    setWizardFormData({
-      workspaceName: "",
-      forkFrom: "",
-    });
-    setWizardDialogOpen(true);
-  };
-
   return (
     <Box
-      style={{
-        height: "100%",
-        display: "flex",
-        flexDirection: "column",
-        padding: "24px",
-        paddingTop: "40px", // Account for title bar
-      }}
+      p={{ initial: "3", sm: "5" }}
+      style={{ maxHeight: "80vh", overflow: "auto" }}
     >
-      {/* Header */}
-      <Flex direction="column" align="center" gap="2" mb="5">
-        <VibestudioLogo size={156} variant="logo" />
-        <Text size="2" color="gray">
-          Select a workspace to get started
-        </Text>
-      </Flex>
-
-      {/* Workspaces */}
-      <Surface
-        level="panel"
-        bordered
-        padding="4"
-        flex={1}
-        style={{ overflow: "hidden", minHeight: 0 }}
-      >
-        <Flex direction="column" style={{ height: "100%" }}>
-          <Flex justify="between" align="center" mb="3">
-            <Text size="2" weight="medium" color="gray">
+      <Flex direction="column" gap="4">
+        <Flex align="center" justify="between" gap="3">
+          {mode === "source" && !created ? (
+            <Text size="2" color="gray">
               Workspaces
             </Text>
-            {isLoading && (
-              <Text size="1" color="gray">
-                Loading...
-              </Text>
-            )}
-          </Flex>
-
-          {/* Error display */}
-          {workspaceError && (
-            <Callout.Root
-              color="red"
-              mb="2"
-              style={{ cursor: "pointer" }}
-              onClick={() => setWorkspaceError(null)}
-            >
-              <Callout.Icon>
-                <ExclamationTriangleIcon />
-              </Callout.Icon>
-              <Callout.Text>{workspaceError}</Callout.Text>
-            </Callout.Root>
+          ) : (
+            <Heading size="5">
+              {created
+                ? `${created.name} is ready`
+                : mode === "list"
+                  ? "Your workspaces"
+                  : "Room for a new idea"}
+            </Heading>
           )}
-
-          <Box
-            style={{
-              flex: 1,
-              overflow: "auto",
-              marginRight: "-8px",
-              paddingRight: "8px",
-            }}
-          >
-            {recentWorkspaces.length === 0 ? (
-              <Flex
-                direction="column"
-                align="center"
-                justify="center"
-                gap="2"
-                style={{
-                  height: "100%",
-                  minHeight: "160px",
-                  textAlign: "center",
-                }}
-              >
-                {isLoading ? (
-                  <>
-                    <VibestudioLogo size={44} variant="symbol" />
-                    <Spinner size="2" />
-                    <Text size="2" color="gray">
-                      Loading workspaces...
-                    </Text>
-                  </>
-                ) : (
-                  <>
-                    <VibestudioLogo size={44} variant="symbol" />
-                    <Text size="2" color="gray">
-                      {workspaceError
-                        ? "Could not load workspaces"
-                        : "No workspaces available"}
-                    </Text>
-                    {workspaceError ? (
-                      <Button
-                        size="1"
-                        variant="soft"
-                        onClick={() => void loadRecentWorkspaces()}
-                      >
-                        Retry
-                      </Button>
-                    ) : null}
-                  </>
-                )}
-              </Flex>
-            ) : (
-              <Flex direction="column" gap="2">
-                {recentWorkspaces.map((ws) => (
-                  <WorkspaceItem
-                    key={ws.name}
-                    workspace={ws}
-                    isActive={ws.name === activeWorkspaceName}
-                    onSelect={() => handleChooseWorkspace(ws)}
-                    onRemove={(e) => handleRemoveWorkspace(e, ws.name)}
-                    canDelete={!remoteWorkspaceMode}
-                    canSelect
-                  />
-                ))}
-              </Flex>
-            )}
-          </Box>
+          {mode !== "list" && !created ? (
+            <Button
+              variant="ghost"
+              color="gray"
+              size="3"
+              disabled={busy}
+              onClick={() => {
+                setMode("list");
+                setTemplate(null);
+                setError(null);
+              }}
+            >
+              All workspaces
+            </Button>
+          ) : null}
         </Flex>
-      </Surface>
-
-      {/* Action Buttons */}
-      {remoteWorkspaceMode ? (
-        <Callout.Root color="blue" mt="4">
-          <Callout.Text>
-            Choose another workspace to reconnect this device without pairing
-            again. Create and delete workspaces from the server host.
-          </Callout.Text>
-        </Callout.Root>
-      ) : (
-        <Flex gap="3" mt="4" justify="center">
+        {error ? (
+          <Callout.Root color="red" role="alert">
+            <Callout.Text>{error}</Callout.Text>
+          </Callout.Root>
+        ) : null}
+        {created ? (
           <Button
-            variant="soft"
             size="3"
-            color="green"
-            className="app-touch-target"
-            onClick={handleCreateNew}
+            disabled={busy}
+            onClick={() => void open(created.workspaceId)}
           >
-            <PlusIcon />
-            Create New Workspace
+            Open workspace
           </Button>
-        </Flex>
-      )}
-
-      {/* Delete confirmation dialog */}
-      <AlertDialog.Root
-        open={!!pendingDelete}
-        onOpenChange={(open) => !open && setPendingDelete(null)}
-      >
-        <AlertDialog.Content maxWidth="400px">
-          <AlertDialog.Title>Delete workspace</AlertDialog.Title>
-          <AlertDialog.Description>
-            Permanently delete &ldquo;{pendingDelete}&rdquo;? All panels,
-            packages, agents, and data will be removed. This cannot be undone.
-          </AlertDialog.Description>
-          <Flex gap="3" mt="4" justify="end">
-            <AlertDialog.Cancel>
-              <Button variant="soft" color="gray">
-                Cancel
-              </Button>
-            </AlertDialog.Cancel>
-            <AlertDialog.Action>
-              <Button color="red" onClick={handleConfirmDelete}>
-                Delete
-              </Button>
-            </AlertDialog.Action>
-          </Flex>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
-    </Box>
-  );
-}
-
-interface WorkspaceItemProps {
-  workspace: WorkspaceEntry;
-  isActive: boolean;
-  onSelect: () => void;
-  onRemove: (e: React.MouseEvent) => void;
-  canDelete: boolean;
-  canSelect: boolean;
-}
-
-function WorkspaceItem({
-  workspace,
-  isActive,
-  onSelect,
-  onRemove,
-  canDelete,
-  canSelect,
-}: WorkspaceItemProps) {
-  return (
-    <Card style={{ position: "relative" }} className="workspace-item">
-      <Flex justify="between" align="center" p="3" gap="2">
-        <button
-          type="button"
-          onClick={onSelect}
-          disabled={!canSelect}
-          style={{
-            flex: 1,
-            minWidth: 0,
-            textAlign: "left",
-            background: "transparent",
-            border: "none",
-            padding: 0,
-            cursor: canSelect ? "pointer" : "default",
-            opacity: canSelect ? 1 : 0.65,
-          }}
-        >
-          <Flex direction="column" gap="1" style={{ minWidth: 0 }}>
-            <Text size="2" weight="medium" truncate>
-              {workspace.name}
-              {isActive && (
-                <Text size="1" color="gray" ml="2">
-                  (current)
-                </Text>
-              )}
+        ) : mode === "source" ? (
+          <TemplateBrowser
+            client={templates}
+            initialPin={template ?? undefined}
+            onCreate={create}
+          />
+        ) : mode === "blank" ? (
+          <Flex direction="column" gap="3">
+            <Text size="2" color="gray">
+              Start with the shared basics and make it your own.
             </Text>
+            <label>
+              <Text as="div" size="2" weight="medium" mb="2">
+                Workspace name
+              </Text>
+              <TextField.Root
+                size="3"
+                aria-label="Workspace name"
+                placeholder="my-project"
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                disabled={busy}
+              />
+            </label>
             <Text size="1" color="gray">
-              {formatRelativeTime(workspace.lastOpened)}
+              Use letters, numbers, hyphens or underscores.
             </Text>
+            <Button
+              size="3"
+              loading={busy}
+              disabled={busy || !/^[A-Za-z0-9_-]+$/.test(name.trim())}
+              onClick={() => void create(name.trim())}
+            >
+              Create workspace
+            </Button>
           </Flex>
-        </button>
-        {!isActive && canDelete && (
-          <IconButton
-            variant="ghost"
-            size="1"
-            color="gray"
-            onClick={onRemove}
-            aria-label={`Delete workspace ${workspace.name}`}
-            title={`Delete workspace ${workspace.name}`}
-            style={{ flexShrink: 0 }}
-          >
-            <TrashIcon />
-          </IconButton>
+        ) : (
+          <>
+            <Text size="2" color="gray">
+              Each workspace keeps its own panels, files and conversations.
+            </Text>
+            {loading ? (
+              <Flex gap="2" role="status">
+                <Spinner />
+                <Text size="2">Loading workspaces…</Text>
+              </Flex>
+            ) : null}
+            <Flex direction="column" gap="2">
+              {workspaces.map((workspace) => (
+                <Button
+                  key={workspace.workspaceId}
+                  size="3"
+                  variant="surface"
+                  color="gray"
+                  disabled={busy}
+                  onClick={() => void open(workspace.workspaceId)}
+                  style={{ justifyContent: "space-between", minHeight: 56 }}
+                >
+                  <Text weight="medium">{workspaceLabel(workspace)}</Text>
+                  <Badge color="gray">
+                    {workspace.privateRole ? "Only you" : "Workspace"}
+                  </Badge>
+                </Button>
+              ))}
+            </Flex>
+            <Flex gap="3" wrap="wrap" mt="2">
+              <Button size="3" onClick={() => setMode("blank")}>
+                New workspace
+              </Button>
+              <Button size="3" variant="soft" onClick={() => setMode("source")}>
+                Explore apps & sources
+              </Button>
+            </Flex>
+          </>
         )}
       </Flex>
-    </Card>
+    </Box>
   );
 }

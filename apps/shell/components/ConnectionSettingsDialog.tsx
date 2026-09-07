@@ -1,6 +1,8 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useState } from "react";
 import {
   Button,
+  IconButton,
   Dialog,
   Flex,
   Text,
@@ -9,7 +11,7 @@ import {
   Box,
   Tabs,
 } from "@radix-ui/themes";
-import { ExclamationTriangleIcon } from "@radix-ui/react-icons";
+import { Cross2Icon, ExclamationTriangleIcon } from "@radix-ui/react-icons";
 import { AppDialog } from "@workspace/ui/overlay";
 import type { SettingsSection } from "@vibestudio/shared/shellSurface";
 import {
@@ -17,12 +19,7 @@ import {
   parseConnectLink,
   type ConnectPairing,
 } from "@vibestudio/shared/connect";
-import {
-  app,
-  incomingPairLink,
-  remoteCred,
-  type RemoteCredCurrent,
-} from "../shell/client";
+import { type RemoteCredCurrent } from "../shell/client";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
 import { PairedDevicesSection } from "./PairedDevicesSection";
@@ -31,6 +28,9 @@ import { AccountProfileSection } from "./AccountProfileSection";
 import { ThemeSettingsControls } from "./ThemeSettings";
 import { HostTargetsSection } from "./HostTargetsSection";
 import { TemplatesSection } from "./TemplatesSection";
+import { WorkspaceConnectionsSection } from "./WorkspaceConnectionsSection";
+
+import "./connectionSettingsDialog.css";
 
 type LiveConnection = {
   status: "connected" | "connecting" | "disconnected";
@@ -40,13 +40,37 @@ type LiveConnection = {
 
 interface Props {
   section: SettingsSection | null;
+  workspaceId?: string;
   onSectionChange: (section: SettingsSection | null) => void;
 }
 
-export function ConnectionSettingsDialog({ section, onSectionChange }: Props) {
+export function ConnectionSettingsDialog({
+  section,
+  workspaceId,
+  onSectionChange,
+}: Props) {
+  const { app, incomingPairLink, remoteCred } = useShellWorkspaceClient();
+
   const open = section !== null;
   const view = section ?? "connection";
   useShellOverlay(open);
+  // The dialog portal mounts after the parent effect; reveal the selected tab
+  // when its list mounts, and again whenever the selected section changes.
+  const navigationRef = useCallback(
+    (navigation: HTMLDivElement | null) => {
+      const selected = navigation?.querySelector<HTMLElement>(
+        '[role="tab"][data-state="active"]',
+      );
+      if (!navigation || !selected) return;
+      const bounds = navigation.getBoundingClientRect();
+      const tab = selected.getBoundingClientRect();
+      if (tab.left < bounds.left)
+        navigation.scrollLeft += tab.left - bounds.left;
+      else if (tab.right > bounds.right)
+        navigation.scrollLeft += tab.right - bounds.right;
+    },
+    [view],
+  );
   const [current, setCurrent] = useState<RemoteCredCurrent | null>(null);
   const [pairLink, setPairLink] = useState("");
   const [busy, setBusy] = useState(false);
@@ -167,16 +191,39 @@ export function ConnectionSettingsDialog({ section, onSectionChange }: Props) {
         if (!nextOpen) onSectionChange(null);
       }}
       maxWidth="820px"
-      title="Settings"
+      className="connection-settings-dialog"
+      title={
+        <Flex align="center" justify="between" gap="3">
+          <span>Settings</span>
+          <Dialog.Close>
+            <IconButton
+              variant="ghost"
+              color="gray"
+              aria-label="Close settings"
+            >
+              <Cross2Icon width="18" height="18" />
+            </IconButton>
+          </Dialog.Close>
+        </Flex>
+      }
       description="Manage your account, this device, and services in the current workspace."
     >
       <Tabs.Root
+        className="connection-settings-tabs"
         value={view}
         onValueChange={(next) => onSectionChange(next as SettingsSection)}
       >
-        <Tabs.List aria-label="Settings view" mt="3">
+        <Tabs.List
+          ref={navigationRef}
+          aria-label="Settings view"
+          mt="3"
+          style={{ overflowX: "auto" }}
+        >
           <Tabs.Trigger value="connection" aria-label="Connection">
             Connection
+          </Tabs.Trigger>
+          <Tabs.Trigger value="workspaces" aria-label="Workspace connections">
+            Connections
           </Tabs.Trigger>
           <Tabs.Trigger value="devices" aria-label="Devices">
             Devices
@@ -198,6 +245,12 @@ export function ConnectionSettingsDialog({ section, onSectionChange }: Props) {
           </Tabs.Trigger>
         </Tabs.List>
 
+        <Tabs.Content value="workspaces">
+          <WorkspaceConnectionsSection
+            key={workspaceId ?? "choose-workspace"}
+            initialWorkspaceId={workspaceId}
+          />
+        </Tabs.Content>
         <Tabs.Content value="connection">
           <Box pt="4">
             <Text as="div" size="3" weight="medium">
@@ -453,19 +506,12 @@ export function ConnectionSettingsDialog({ section, onSectionChange }: Props) {
 
         <Tabs.Content value="templates">
           <Box pt="4">
-            <TemplatesSection showHeading={false} />
+            <TemplatesSection
+              showHeading={false}
+              initialWorkspaceId={workspaceId}
+            />
           </Box>
         </Tabs.Content>
-
-        {view !== "connection" ? (
-          <Flex justify="end" mt="5">
-            <Dialog.Close>
-              <Button variant="soft" color="gray">
-                Close
-              </Button>
-            </Dialog.Close>
-          </Flex>
-        ) : null}
       </Tabs.Root>
     </AppDialog>
   );

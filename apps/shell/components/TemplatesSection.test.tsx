@@ -1,104 +1,98 @@
 // @vitest-environment jsdom
-
-import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TemplatesSection } from "./TemplatesSection";
-
+import { Provider, createStore } from "jotai";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const clients = vi.hoisted(() => ({
-  templates: {
-    status: vi.fn(),
-    operations: vi.fn(),
-    catalog: vi.fn(),
-    check: vi.fn(),
-    pull: vi.fn(),
-    remove: vi.fn(),
-    resume: vi.fn(),
-    cancel: vi.fn(),
-    decideSuggestion: vi.fn(),
+  templates: { catalog: vi.fn(), inspect: vi.fn() },
+  hubControl: {
+    listWorkspaces: vi.fn(),
+    createWorkspace: vi.fn(),
+    routeWorkspace: vi.fn(),
   },
-  credentials: { requestCredentialInput: vi.fn() },
-  panel: { createPanel: vi.fn() },
-  vcs: { compareDelta: vi.fn(), integrateDelta: vi.fn() },
 }));
-
-vi.mock("../shell/client", () => clients);
-
-const row = {
-  nodeId: "node-github",
-  alias: "github",
-  url: "git+https://example.test/github.git",
-  ref: "refs/tags/v1",
-  commit: "1".repeat(40),
-  direct: true,
-  state: "current" as const,
-  contributedParts: 2,
-  pendingReviews: 0,
-  suggestions: [],
+vi.mock("./SourceCopySection", () => ({ SourceCopySection: () => null }));
+vi.mock("../shell/workspaceContext", () => ({
+  useShellWorkspaceClient: () => clients,
+}));
+const pin = {
+  url: "git+https://example.test/garden.git",
+  ref: "refs/heads/main",
+  commit: "a".repeat(40),
+  snapshot: `v1-sha256:${"b".repeat(64)}` as const,
 };
+const inspection = {
+  pin,
+  presentation: { name: "Garden", description: "A place for growing ideas." },
+  repositories: ["panels/garden"],
+  files: [],
+};
+const catalog = {
+  version: 1,
+  systemEpoch: 1,
+  coordinates: { ...pin, url: "git+https://example.test/catalog.git" },
+  stale: false,
+  entries: [],
+};
+afterEach(cleanup);
+beforeEach(() => {
+  vi.resetAllMocks();
+  clients.templates.catalog.mockResolvedValue(catalog);
+  clients.templates.inspect.mockResolvedValue(inspection);
+  clients.hubControl.listWorkspaces.mockResolvedValue([
+    {
+      workspaceId: "shared-id",
+      name: "Shared garden",
+      running: true,
+      lastOpened: 1,
+    },
+  ]);
+  clients.hubControl.createWorkspace.mockResolvedValue({
+    workspaceId: "new-id",
+    name: "garden",
+    running: true,
+    lastOpened: 0,
+  });
+  clients.hubControl.routeWorkspace.mockResolvedValue(undefined);
+});
 
-function draw() {
-  return render(
-    <Theme>
-      <TemplatesSection />
-    </Theme>
+import { TemplatesSection } from "./TemplatesSection";
+import { settingsDialogAtom } from "../state/appModeAtoms";
+it("reviews a source, creates its exact snapshot and retries opening without duplicating it", async () => {
+  const store = createStore();
+  clients.hubControl.routeWorkspace.mockRejectedValueOnce(
+    new Error("Connection interrupted"),
   );
-}
-
-describe("TemplatesSection mutation refresh", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    clients.templates.status.mockResolvedValue([row]);
-    clients.templates.operations.mockResolvedValue([]);
-    clients.templates.catalog.mockResolvedValue({
-      version: 1,
-      revision: "registry-v1",
-      systemEpoch: 1,
-      entries: [],
-      coordinates: {
-        url: "git+https://example.test/registry.git",
-        ref: "refs/heads/main",
-        commit: "2".repeat(40),
-        snapshot: `v1-sha256:${"2".repeat(64)}`,
-      },
-      stale: false,
-    });
-    clients.templates.check.mockResolvedValue([]);
-    clients.panel.createPanel.mockResolvedValue({ id: "upgrade-chat" });
+  render(
+    <Provider store={store}>
+      <Theme>
+        <TemplatesSection />
+      </Theme>
+    </Provider>,
+  );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Workspace source address" }),
+    { target: { value: "https://example.test/garden.git" } },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Review workspace" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Create workspace" }),
+  );
+  await screen.findByText("Connection interrupted");
+  expect(clients.hubControl.createWorkspace).toHaveBeenCalledWith({
+    workspace: "garden",
+    rootTemplate: pin,
   });
-
-  afterEach(cleanup);
-
-  it("refreshes status and pending operations after an update request", async () => {
-    clients.templates.pull.mockResolvedValue({
-      operationId: "pull-github",
-      state: "pending",
-      affectedParts: [],
-    });
-    const view = draw();
-    fireEvent.click(await view.findByRole("button", { name: "Check for updates" }));
-
-    await waitFor(() => expect(clients.templates.pull).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(clients.templates.operations).toHaveBeenCalledTimes(2));
-    expect(clients.templates.status).toHaveBeenCalledTimes(4);
-  });
-
-  it("refreshes away a relationship after removal", async () => {
-    let removed = false;
-    clients.templates.status.mockImplementation(async () => (removed ? [] : [row]));
-    clients.templates.remove.mockImplementation(async () => {
-      removed = true;
-      return {
-        operationId: "remove-github",
-        state: "applied",
-        affectedParts: ["extensions/github"],
-      };
-    });
-    const view = draw();
-    fireEvent.click(await view.findByRole("button", { name: "Remove" }));
-
-    expect(await view.findByText("No committed template relationships yet.")).toBeTruthy();
-    expect(clients.templates.operations).toHaveBeenCalledTimes(2);
-  });
-
+  fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
+  await waitFor(() =>
+    expect(clients.hubControl.routeWorkspace).toHaveBeenCalledTimes(2),
+  );
+  expect(clients.hubControl.createWorkspace).toHaveBeenCalledTimes(1);
+  expect(store.get(settingsDialogAtom)).toBeNull();
 });

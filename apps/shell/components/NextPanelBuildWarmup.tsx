@@ -1,7 +1,8 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useRef } from "react";
 import type { PanelPresentationSnapshot } from "@vibestudio/shared/panel/presentation";
 
-import { buildUnits, panel } from "../shell/client";
+
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
 import { usePanelTree } from "../shell/hooks/PanelTreeContext";
 import { useShellEvent } from "../shell/useShellEvent";
@@ -24,6 +25,8 @@ type IdleWindow = Window & {
  * creation still uses the same build request and joins its single-flight work.
  */
 export function NextPanelBuildWarmup() {
+  const { buildUnits, panel } = useShellWorkspaceClient();
+
   const { initialized } = usePanelTree();
   const scheduled = useRef(false);
   const cancelIdle = useRef<(() => void) | null>(null);

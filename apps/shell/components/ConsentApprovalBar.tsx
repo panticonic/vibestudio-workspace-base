@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient, useWorkspaceVisible, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 /**
  * ConsentApprovalBar — the approval coordinator. It owns the approval state
  * (subscription, queue, minimized) and the RPC handlers, and renders the
@@ -20,7 +21,7 @@ import {
   createApprovalStateController,
   SHELL_APPROVAL_PENDING_CHANGED_EVENT
 } from "@vibestudio/shell-core/approvalState";
-import { account, blobstore, events, panel, shellApproval, shellPresence } from "../shell/client";
+
 import { useShellContentOverlay, type ContentOverlayBounds } from "../shell/useShellContentOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
 import { effectiveThemeAtom, themeConfigAtom } from "../state/themeAtoms";
@@ -62,6 +63,11 @@ const APPROVAL_RECONCILE_INTERVAL_MS = 5_000;
 const WORKSPACE_HISTORY_SOURCE = "about/workspace-history";
 
 export function ConsentApprovalBar() {
+  const workspaceVisible = useWorkspaceVisible();
+  const workspaceNavigation = useWorkspaceNavigationHost();
+  const workspaceId = workspaceNavigation?.workspaceId ?? "system";
+  const { account, blobstore, events, panel, shellApproval, shellPresence } = useShellWorkspaceClient();
+
   const [pendingAccess, setPendingAccess] = useState<PendingApproval[]>([]);
   const [decisionError, setDecisionError] = useState<{
     approvalId: string;
@@ -157,13 +163,17 @@ export function ConsentApprovalBar() {
     }
   }, []);
   useShellEvent("focus-approval-card", focusCurrentApproval);
+  useEffect(() => {
+    if (workspaceVisible && workspaceNavigation?.reviewRequest) focusCurrentApproval();
+  }, [workspaceVisible, workspaceNavigation?.reviewRequest, focusCurrentApproval]);
   // The same request from inside this document: `focus-approval-card` is a
   // main→renderer shell event, so the quickfire slate's
   // `authority.focus-approval` command cannot emit it and asks here instead.
   useEffect(() => {
+    if (!workspaceVisible) return;
     window.addEventListener(FOCUS_APPROVAL_REQUEST_EVENT, focusCurrentApproval);
     return () => window.removeEventListener(FOCUS_APPROVAL_REQUEST_EVENT, focusCurrentApproval);
-  }, [focusCurrentApproval]);
+  }, [focusCurrentApproval, workspaceVisible]);
 
   useEffect(() => {
     const controller = createApprovalStateController({
@@ -233,6 +243,12 @@ export function ConsentApprovalBar() {
   const canPrev = queueLength > 1 && browseIndex > 0;
   const canNext = queueLength > 1 && browseIndex < queueLength - 1;
   const currentCaller = current ? resolveCallerInfo(current) : null;
+  const sourceWorkspaceId = current?.kind === "capability" ? current.snapshot?.sourceWorkspaceId : undefined;
+  const destinationWorkspaceId = current?.kind === "capability" ? current.snapshot?.workspaceId ?? workspaceId : workspaceId;
+  const approvalWorkspaceLabel = sourceWorkspaceId && sourceWorkspaceId !== destinationWorkspaceId
+    ? `${workspaceNavigation?.workspaceNames[sourceWorkspaceId] ?? sourceWorkspaceId} → ${workspaceNavigation?.workspaceNames[destinationWorkspaceId] ?? workspaceNavigation?.workspaceLabel ?? destinationWorkspaceId}`
+    : workspaceNavigation?.workspaceLabel;
+
   const diffReview = current ? getDiffReviewPayload(current) : null;
   const diffHashes = diffReview ? diffReviewPayloadHashes(diffReview) : new Set<string>();
   const payloadHashes = diffHashes;
@@ -295,7 +311,7 @@ export function ConsentApprovalBar() {
   const [anchorBounds, setAnchorBounds] = useState<ContentOverlayBounds | null>(null);
   useEffect(() => {
     const measure = () => {
-      const host = document.getElementById(APPROVAL_OVERLAY_HOST_ID);
+      const host = document.getElementById(`${APPROVAL_OVERLAY_HOST_ID}:${workspaceId}`);
       const rect = host?.getBoundingClientRect();
       if (!rect || rect.width <= 0 || rect.height <= 0) {
         setAnchorBounds(null);
@@ -318,7 +334,7 @@ export function ConsentApprovalBar() {
       );
     };
     measure();
-    const host = document.getElementById(APPROVAL_OVERLAY_HOST_ID);
+    const host = document.getElementById(`${APPROVAL_OVERLAY_HOST_ID}:${workspaceId}`);
     const observer =
       host && typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
     observer?.observe(host as Element);
@@ -601,6 +617,7 @@ export function ConsentApprovalBar() {
     () =>
       current
         ? {
+            workspaceLabel: approvalWorkspaceLabel,
             approval: current,
             queue:
               queueLength > 1 ? { index: browseIndex, total: queueLength, canPrev, canNext } : null,
@@ -624,7 +641,8 @@ export function ConsentApprovalBar() {
       diffReview,
       effectiveTheme,
       queueLength,
-      submittingApprovalIds
+      submittingApprovalIds,
+      approvalWorkspaceLabel
     ]
   );
 
@@ -689,11 +707,12 @@ export function ConsentApprovalBar() {
   // so it can be a real dialog with the shell's focus behaviour. Closing it
   // without deciding is the same act as minimizing the card — the review stays
   // pending in the queue and the pill offers it back.
-  if (!minimized && fullSurface) {
+  if (workspaceVisible && !minimized && fullSurface) {
     return (
       <>
         {resultNotice}
         <ApprovalFullSurface
+          workspaceLabel={approvalWorkspaceLabel}
           approval={current}
           caller={currentCaller}
           queue={

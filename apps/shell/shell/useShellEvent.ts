@@ -10,15 +10,22 @@
  */
 
 import { useEffect, useLayoutEffect, useRef } from "react";
-import { events, type EventName, type EventPayloads } from "./client.js";
+import type { EventName, EventPayloads, ShellWorkspaceClient } from "./workspaceClient";
+import { useShellWorkspaceClient } from "./workspaceContext";
 
 // Re-export for consumers
 export type { EventPayloads } from "./client.js";
 
 /** Refcount per event name. Shared across all hook instances. */
-const subscriptionRefcounts = new Map<EventName, number>();
+const references = new WeakMap<ShellWorkspaceClient["events"], Map<EventName, number>>();
+function subscriptionsFor(events: ShellWorkspaceClient["events"]) {
+  let refs = references.get(events);
+  if (!refs) { refs = new Map(); references.set(events, refs); }
+  return refs;
+}
 
-function addSubscription(event: EventName): void {
+function addSubscription(events: ShellWorkspaceClient["events"], event: EventName): void {
+  const subscriptionRefcounts = subscriptionsFor(events);
   const prev = subscriptionRefcounts.get(event) ?? 0;
   subscriptionRefcounts.set(event, prev + 1);
   if (prev === 0) {
@@ -28,7 +35,8 @@ function addSubscription(event: EventName): void {
   }
 }
 
-function removeSubscription(event: EventName): void {
+function removeSubscription(events: ShellWorkspaceClient["events"], event: EventName): void {
+  const subscriptionRefcounts = subscriptionsFor(events);
   const prev = subscriptionRefcounts.get(event) ?? 0;
   if (prev <= 0) return;
   if (prev === 1) {
@@ -58,6 +66,7 @@ export function useShellEvent<E extends EventName>(
   event: E,
   callback: (data: EventPayloads[E]) => void
 ): void {
+  const { events } = useShellWorkspaceClient();
   // Use ref to store the latest callback without triggering effect re-runs
   const callbackRef = useRef(callback);
 
@@ -69,11 +78,11 @@ export function useShellEvent<E extends EventName>(
 
   useEffect(() => {
     const cleanup = events.on(event, (payload) => callbackRef.current(payload));
-    addSubscription(event);
+    addSubscription(events, event);
 
     return () => {
       cleanup();
-      removeSubscription(event);
+      removeSubscription(events, event);
     };
-  }, [event]); // Only depend on event, not callback
+  }, [events, event]); // Only depend on event, not callback
 }

@@ -1,7 +1,8 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Badge, Button, Callout, Code, Flex, Table, Text } from "@radix-ui/themes";
 import { ExclamationTriangleIcon } from "@radix-ui/react-icons";
-import { app, notification, supervisedUnits } from "../shell/client";
+import { type app, type supervisedUnits } from "../shell/client";
 import { useShellEvent } from "../shell/useShellEvent";
 
 type PendingUpdate = Awaited<ReturnType<typeof app.listPendingUpdates>>[number];
@@ -11,6 +12,8 @@ type AppUnit = SupervisedUnit & { versions: ReleaseVersions };
 type UnitHealth = Awaited<ReturnType<typeof supervisedUnits.health>>;
 
 export function AppUpdatesSection({ showHeading = true }: { showHeading?: boolean } = {}) {
+  const { app, notification, supervisedUnits } = useShellWorkspaceClient();
+
   const [pending, setPending] = useState<PendingUpdate[]>([]);
   const [apps, setApps] = useState<AppUnit[]>([]);
   const [busy, setBusy] = useState<string | null>(null);

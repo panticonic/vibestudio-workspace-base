@@ -41,6 +41,7 @@ const PREFERRED_HEIGHT = 720;
 const WINDOW_MARGIN = 32;
 
 export interface ApprovalFullSurfaceProps {
+  workspaceLabel?: string;
   approval: PendingApproval;
   caller: CallerInfo;
   queue: ApprovalQueueInfo | null;
@@ -83,6 +84,7 @@ export function useReturnFocus(): void {
 }
 
 export function ApprovalFullSurface({
+  workspaceLabel,
   approval,
   caller,
   queue,
@@ -129,7 +131,8 @@ export function ApprovalFullSurface({
         <Dialog.Title className="approval-full-surface-name">{copy.title}</Dialog.Title>
         <ApprovalCard
           key={approval.approvalId}
-          approval={approval}
+          workspaceLabel={workspaceLabel}
+      approval={approval}
           caller={caller}
           queue={queue}
           decisionError={decisionError}

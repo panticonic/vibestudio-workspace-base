@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 /**
  * LazyPanelTreeSidebar - Sortable panel tree sidebar with drag-and-drop.
  *
@@ -16,12 +17,10 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef, memo, type CSSProperties } from "react";
 import { useTouchDevice } from "@workspace/react/responsive";
-import { useAtomValue, useSetAtom } from "jotai";
+import { useAtomValue } from "jotai";
 import {
   CaretRightIcon,
-  CaretSortIcon,
   Cross2Icon,
-  CubeIcon,
   DrawingPinFilledIcon,
   MagnifyingGlassIcon,
   PlusIcon,
@@ -46,19 +45,13 @@ import {
   type WorkspacePresenceEntry,
 } from "../shell/hooks/index.js";
 import { isPanelClosePointerButton } from "@vibestudio/shared/panelCommands";
-import { notification, panel } from "../shell/client.js";
+
 import {
-  activeWorkspaceNameAtom,
-  settingsDialogSectionAtom,
   pinnedPanelIdsAtom,
-  workspaceChooserDialogOpenAtom,
 } from "../state/appModeAtoms.js";
-import { openCommandAgentAtom } from "../state/commandAgentAtoms.js";
 import { assertPresent } from "../utils/assertPresent";
 import { PanelIcon } from "./PanelIcon";
-import { ConnectionStatusBadge } from "./ConnectionStatusBadge";
 import { buildGuides } from "./panelTreeGuides.js";
-import { ThemeSettings } from "./ThemeSettings";
 
 // ============================================================================
 // Style Constants
@@ -714,103 +707,6 @@ function EndDropZone({ isOver, projectedDepth, isDragging }: EndDropZoneProps) {
 // Sidebar Footer (new panel CTA + workspace switcher)
 // ============================================================================
 
-interface SidebarFooterProps {
-  activeWorkspaceName: string | null;
-  onSwitchWorkspace: () => void;
-  onNewPanel: () => void;
-}
-
-function SidebarFooter({ activeWorkspaceName, onSwitchWorkspace, onNewPanel }: SidebarFooterProps) {
-  const setSettingsSection = useSetAtom(settingsDialogSectionAtom);
-  const openCommandAgent = useSetAtom(openCommandAgentAtom);
-  const handleWorkspaceKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Enter" || e.key === " ") {
-        e.preventDefault();
-        onSwitchWorkspace();
-      }
-    },
-    [onSwitchWorkspace]
-  );
-
-  return (
-    <Box px="1" py="1">
-      {/* The icon-only primary actions fill the footer evenly. The explicit flex
-          items keep them full-width even though each has a tooltip trigger. */}
-      <Flex gap="1" style={{ width: "100%" }}>
-        <Box style={{ flex: "1 1 0", minWidth: 0 }}>
-          <Tooltip content="Command (⌘/Ctrl+K)">
-            <IconButton
-              variant="soft"
-              color="violet"
-              size="2"
-              className="app-touch-target app-panel-tree-command"
-              onClick={() => openCommandAgent()}
-              aria-label="Command"
-              style={{ width: "100%" }}
-            >
-              <span aria-hidden="true">✦</span>
-            </IconButton>
-          </Tooltip>
-        </Box>
-        <Box style={{ flex: "1 1 0", minWidth: 0 }}>
-          <Tooltip content="New panel">
-            <IconButton
-              variant="soft"
-              color="cyan"
-              size="2"
-              className="app-touch-target app-panel-tree-new"
-              onClick={onNewPanel}
-              aria-label="New panel"
-              style={{ width: "100%" }}
-            >
-              <PlusIcon />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      </Flex>
-
-      {/* One session row: which workspace you're in, plus the two controls that
-          belong to the whole app rather than any panel. The switcher is its own
-          button so the icon buttons beside it stay separately clickable — a row
-          that is itself a button can't contain other buttons. */}
-      <Flex align="center" gap="1" mt="1">
-        {activeWorkspaceName ? (
-          <Flex
-            className="app-tree-workspace app-touch-target"
-            role="button"
-            tabIndex={0}
-            align="center"
-            gap="2"
-            px="2"
-            py="1"
-            onClick={onSwitchWorkspace}
-            onKeyDown={handleWorkspaceKeyDown}
-            aria-label={`Workspace: ${activeWorkspaceName}. Activate to switch workspace.`}
-            title="Switch workspace"
-            style={{
-              flex: 1,
-              minWidth: 0,
-              borderRadius: "var(--radius-2)",
-              cursor: "pointer",
-            }}
-          >
-            <CubeIcon style={{ flexShrink: 0, color: "var(--gray-9)" }} />
-            <Text size="2" truncate style={{ flex: 1, minWidth: 0, color: "var(--gray-12)" }}>
-              {activeWorkspaceName}
-            </Text>
-            <CaretSortIcon style={{ flexShrink: 0, color: "var(--gray-9)" }} />
-          </Flex>
-        ) : (
-          <Box style={{ flex: 1 }} />
-        )}
-        <ConnectionStatusBadge onOpenSettings={() => setSettingsSection("connection")} />
-        <ThemeSettings />
-      </Flex>
-    </Box>
-  );
-}
-
 // ============================================================================
 // Owner Bands (WP3 forest)
 // ============================================================================
@@ -1040,8 +936,8 @@ export function LazyPanelTreeSidebar({
   onPanelContextMenu,
   onArchive,
 }: LazyPanelTreeSidebarProps) {
-  const activeWorkspaceName = useAtomValue(activeWorkspaceNameAtom);
-  const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
+  const { notification, panel } = useShellWorkspaceClient();
+
   const isTouch = useTouchDevice();
 
   const {
@@ -1190,9 +1086,6 @@ export function LazyPanelTreeSidebar({
     }
   }, []);
 
-  const handleSwitchWorkspace = useCallback(() => {
-    setWorkspaceChooserOpen(true);
-  }, [setWorkspaceChooserOpen]);
 
   const handleAddChild = useCallback(
     async (parentId: string) => {
@@ -1354,11 +1247,6 @@ export function LazyPanelTreeSidebar({
             New panel
           </Button>
         </Flex>
-        <SidebarFooter
-          activeWorkspaceName={activeWorkspaceName}
-          onSwitchWorkspace={handleSwitchWorkspace}
-          onNewPanel={handleNewPanel}
-        />
       </Flex>
     );
   }
@@ -1570,11 +1458,6 @@ export function LazyPanelTreeSidebar({
           })}
         </Box>
       </div>
-      <SidebarFooter
-        activeWorkspaceName={activeWorkspaceName}
-        onSwitchWorkspace={handleSwitchWorkspace}
-        onNewPanel={handleNewPanel}
-      />
     </Flex>
   );
 }

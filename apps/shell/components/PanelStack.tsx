@@ -1,11 +1,29 @@
+import { createPortal } from "react-dom";
+import {
+  useWorkspaceNavigationHost,
+  useWorkspaceVisible,
+} from "../shell/workspaceContext";
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { memo, useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useSetAtom } from "jotai";
 import { Cross2Icon } from "@radix-ui/react-icons";
-import { Box, Button, Card, Flex, IconButton, Spinner, Text, TextField } from "@radix-ui/themes";
+import {
+  Box,
+  Button,
+  Card,
+  Flex,
+  IconButton,
+  Spinner,
+  Text,
+  TextField,
+} from "@radix-ui/themes";
 import { VibestudioLogo } from "@workspace/ui/brand";
 import { useIsMobile } from "@workspace/react/responsive";
 
-import type { LazyTitleNavigationData, LazyStatusNavigationData } from "./navigationTypes";
+import type {
+  LazyTitleNavigationData,
+  LazyStatusNavigationData,
+} from "./navigationTypes";
 import type { PanelContextMenuAction } from "@vibestudio/shared/types";
 import {
   DEFAULT_SEARCH_TEMPLATE,
@@ -30,15 +48,7 @@ import {
   useSiblings,
   useDescendantSiblingGroups,
 } from "../shell/hooks/PanelTreeContext";
-import {
-  app,
-  incomingPanelLocation,
-  menu,
-  notification,
-  panel as panelService,
-  view,
-  workspace,
-} from "../shell/client";
+
 import {
   pinMutationSeqAtom,
   pinnedPanelIdsAtom,
@@ -60,7 +70,10 @@ import {
   paneForPanel,
   refineDropTarget,
 } from "../layout/placementEngine";
-import { openInNewColumnAction, panelCreatedLayoutAction } from "../layout/panelPresentation";
+import {
+  openInNewColumnAction,
+  panelCreatedLayoutAction,
+} from "../layout/panelPresentation";
 import {
   PANE_VERTICAL_CHROME_HEIGHT,
   type LayoutDropTarget,
@@ -75,32 +88,30 @@ interface PanelStackProps {
   onRegisterDevToolsHandler?: (handler: () => void) => void;
   onRegisterNavigateToId?: (navigate: NavigateToPanelId) => void;
   onRegisterPanelContextMenu?: (
-    handler: (panelId: string, position: { x: number; y: number }) => Promise<void>
+    handler: (
+      panelId: string,
+      position: { x: number; y: number },
+    ) => Promise<void>,
   ) => void;
   onRegisterChromeCommand?: (handler: (command: ChromeCommand) => void) => void;
   onPaneChromeStateChange?: (state: FocusedPaneChromeState | null) => void;
-  onRegisterPaneChromeCommand?: (handler: (command: PaneChromeCommand) => void) => void;
+  onRegisterPaneChromeCommand?: (
+    handler: (command: PaneChromeCommand) => void,
+  ) => void;
 }
 
-const DEFAULT_DESKTOP_SIDEBAR_WIDTH = 232;
-const MIN_DESKTOP_SIDEBAR_WIDTH = 200;
-const SIDEBAR_WIDTH_STORAGE_KEY = "panel-tree-sidebar-width";
-
-function readPersistedSidebarWidth(): number {
-  if (typeof window === "undefined") return DEFAULT_DESKTOP_SIDEBAR_WIDTH;
-  try {
-    const stored = Number.parseFloat(localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY) ?? "");
-    if (!Number.isFinite(stored)) return DEFAULT_DESKTOP_SIDEBAR_WIDTH;
-    const maxWidth = Math.max(MIN_DESKTOP_SIDEBAR_WIDTH, window.innerWidth - 200);
-    return Math.round(Math.min(maxWidth, Math.max(MIN_DESKTOP_SIDEBAR_WIDTH, stored)));
-  } catch {
-    return DEFAULT_DESKTOP_SIDEBAR_WIDTH;
-  }
-}
-
-function reportPanelCommandError(action: string, error: unknown): void {
+function reportPanelCommandError(
+  notification: import("../shell/workspaceClient").ShellWorkspaceClient["notification"],
+  action: string,
+  error: unknown,
+): void {
   const message = error instanceof Error ? error.message : String(error);
-  void notification.show({ type: "error", title: `${action} failed`, message, ttl: 8_000 });
+  void notification.show({
+    type: "error",
+    title: `${action} failed`,
+    message,
+    ttl: 8_000,
+  });
 }
 
 export type ChromeCommand =
@@ -152,6 +163,18 @@ export const PanelStack = memo(function PanelStack({
   onPaneChromeStateChange,
   onRegisterPaneChromeCommand,
 }: PanelStackProps) {
+  const {
+    app,
+    incomingPanelLocation,
+    menu,
+    notification,
+    panel: panelService,
+    view,
+    workspace,
+  } = useShellWorkspaceClient();
+
+  const navigationHost = useWorkspaceNavigationHost();
+  const workspaceVisible = useWorkspaceVisible();
   const { mode: navigationMode } = useNavigationLayout();
   const {
     setMode,
@@ -179,16 +202,23 @@ export const PanelStack = memo(function PanelStack({
       const rect = el.getBoundingClientRect();
       if (rect.width > 0 && rect.height > 0) {
         setContentSize((current) =>
-          current.width === Math.round(rect.width) && current.height === Math.round(rect.height)
+          current.width === Math.round(rect.width) &&
+          current.height === Math.round(rect.height)
             ? current
-            : { width: Math.round(rect.width), height: Math.round(rect.height) }
+            : {
+                width: Math.round(rect.width),
+                height: Math.round(rect.height),
+              },
         );
       }
     });
     observer.observe(el);
     const rect = el.getBoundingClientRect();
     if (rect.width > 0 && rect.height > 0) {
-      setContentSize({ width: Math.round(rect.width), height: Math.round(rect.height) });
+      setContentSize({
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      });
     }
     return () => observer.disconnect();
   }, [contentEl]);
@@ -218,27 +248,17 @@ export const PanelStack = memo(function PanelStack({
     setAddressBarVisible(false);
   }, [focusedPanelId, setAddressBarVisible]);
   const [hostThemeCss, setHostThemeCss] = useState<string | null>(null);
-  const [unresponsivePanels, setUnresponsivePanels] = useState<Set<string>>(() => new Set());
+  const [unresponsivePanels, setUnresponsivePanels] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [findOpen, setFindOpen] = useState(false);
   const [findText, setFindText] = useState("");
-  const [findResult, setFindResult] = useState({ activeMatchOrdinal: 0, matches: 0 });
-  const [sidebarWidth, setSidebarWidth] = useState<number>(readPersistedSidebarWidth);
-  const [isResizingSidebar, setIsResizingSidebar] = useState(false);
-  const [isResizeHover, setIsResizeHover] = useState(false);
-  const [viewportWidth, setViewportWidth] = useState(() =>
-    typeof window === "undefined" ? 1024 : window.innerWidth
-  );
+  const [findResult, setFindResult] = useState({
+    activeMatchOrdinal: 0,
+    matches: 0,
+  });
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const resizePointerIdRef = useRef<number | null>(null);
   const isMobile = useIsMobile();
-
-  useEffect(() => {
-    try {
-      localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth));
-    } catch {
-      // A storage failure should not disable resizing for the current session.
-    }
-  }, [sidebarWidth]);
 
   // Lazy data hooks — chrome, breadcrumbs, and commands follow the focused pane.
   const { panels: rootPanels, loading: rootLoading } = useRootPanels();
@@ -246,11 +266,12 @@ export const PanelStack = memo(function PanelStack({
   const { panelMap } = usePanelTree();
   const { ancestors } = useAncestors(focusedPanelId);
   const { siblings } = useSiblings(focusedPanelId);
-  const { groups: descendantGroups } = useDescendantSiblingGroups(focusedPanelId);
+  const { groups: descendantGroups } =
+    useDescendantSiblingGroups(focusedPanelId);
 
   useShellEvent(
     "toggle-find-in-page",
-    useCallback(() => setFindOpen((open) => !open), [])
+    useCallback(() => setFindOpen((open) => !open), []),
   );
   useEffect(() => {
     if (!findOpen || !focusedPanelId || !findText) {
@@ -259,9 +280,12 @@ export const PanelStack = memo(function PanelStack({
     }
     const timer = window.setTimeout(() => {
       void panelService
-        .findInPage(focusedPanelId, findText, { forward: true, findNext: false })
+        .findInPage(focusedPanelId, findText, {
+          forward: true,
+          findNext: false,
+        })
         .then(setFindResult)
-        .catch((error) => reportPanelCommandError("Find", error));
+        .catch((error) => reportPanelCommandError(notification, "Find", error));
     }, 100);
     return () => window.clearTimeout(timer);
   }, [findOpen, findText, focusedPanelId]);
@@ -276,9 +300,9 @@ export const PanelStack = memo(function PanelStack({
       void panelService
         .findInPage(focusedPanelId, findText, { forward, findNext: true })
         .then(setFindResult)
-        .catch((error) => reportPanelCommandError("Find", error));
+        .catch((error) => reportPanelCommandError(notification, "Find", error));
     },
-    [findText, focusedPanelId]
+    [findText, focusedPanelId],
   );
 
   useShellEvent(
@@ -290,7 +314,7 @@ export const PanelStack = memo(function PanelStack({
         else next.add(panelId);
         return next;
       });
-    }, [])
+    }, []),
   );
 
   // Ancestor IDs for tree auto-expansion
@@ -310,31 +334,33 @@ export const PanelStack = memo(function PanelStack({
   // usePanelLayout (§7, §4.5); the engine is the single writer of layout state.
 
   // Build lazy title navigation data
-  const lazyTitleNavigationData = useMemo<LazyTitleNavigationData | null>(() => {
-    if (!visiblePanel) {
-      return null;
-    }
+  const lazyTitleNavigationData =
+    useMemo<LazyTitleNavigationData | null>(() => {
+      if (!visiblePanel) {
+        return null;
+      }
 
-    return {
-      ancestors,
-      currentSiblings: siblings,
-      currentId: visiblePanel.id,
-      currentTitle: visiblePanel.title,
-      currentChildCount: panelMap.get(visiblePanel.id)?.childCount ?? 0,
-    };
-  }, [ancestors, panelMap, siblings, visiblePanel]);
+      return {
+        ancestors,
+        currentSiblings: siblings,
+        currentId: visiblePanel.id,
+        currentTitle: visiblePanel.title,
+        currentChildCount: panelMap.get(visiblePanel.id)?.childCount ?? 0,
+      };
+    }, [ancestors, panelMap, siblings, visiblePanel]);
 
   // Build lazy status navigation data
-  const lazyStatusNavigationData = useMemo<LazyStatusNavigationData | null>(() => {
-    if (!focusedPanelId) {
-      return null;
-    }
+  const lazyStatusNavigationData =
+    useMemo<LazyStatusNavigationData | null>(() => {
+      if (!focusedPanelId) {
+        return null;
+      }
 
-    return {
-      descendantGroups,
-      visiblePanelId: focusedPanelId,
-    };
-  }, [descendantGroups, focusedPanelId]);
+      return {
+        descendantGroups,
+        visiblePanelId: focusedPanelId,
+      };
+    }, [descendantGroups, focusedPanelId]);
 
   // Update navigation context with lazy data
   useEffect(() => {
@@ -353,10 +379,13 @@ export const PanelStack = memo(function PanelStack({
       dispatch({
         type: "show-panel",
         panelId,
-        origin: options?.target === "focused-pane" ? "navigation-click" : "navigate-event",
+        origin:
+          options?.target === "focused-pane"
+            ? "navigation-click"
+            : "navigate-event",
       });
     },
-    [dispatch]
+    [dispatch],
   );
 
   // Register navigate function with context
@@ -382,8 +411,8 @@ export const PanelStack = memo(function PanelStack({
         const action = panelCreatedLayoutAction(payload);
         if (action) dispatchIntent(`create:${payload.panelId}`, action);
       },
-      [dispatchIntent]
-    )
+      [dispatchIntent],
+    ),
   );
 
   // Existing-panel presentation is deliberately separate from creation.
@@ -411,8 +440,8 @@ export const PanelStack = memo(function PanelStack({
           origin: "navigate-event",
         });
       },
-      [dispatchIntent]
-    )
+      [dispatchIntent],
+    ),
   );
 
   // Native focus feedback (§5.2): when a native view gains focus by a route the
@@ -426,19 +455,21 @@ export const PanelStack = memo(function PanelStack({
           dispatch({ type: "focus-pane", paneId: location.pane.id });
         }
       },
-      [layout, dispatch]
-    )
+      [layout, dispatch],
+    ),
   );
 
   const navigatePanelHistory = useCallback(
     async (panelId: string, delta: -1 | 1): Promise<unknown> => {
       const chrome = await panelService.getChromeState(panelId);
       if (chrome.kind === "browser") {
-        return delta === -1 ? view.browserGoBack(panelId) : view.browserGoForward(panelId);
+        return delta === -1
+          ? view.browserGoBack(panelId)
+          : view.browserGoForward(panelId);
       }
       return panelService.navigateHistory(panelId, delta);
     },
-    []
+    [],
   );
 
   const createChildForPanel = useCallback(
@@ -452,7 +483,7 @@ export const PanelStack = memo(function PanelStack({
         placement: { disposition },
       });
     },
-    []
+    [],
   );
 
   // Execute the canonical panel context-menu command set.
@@ -467,14 +498,14 @@ export const PanelStack = memo(function PanelStack({
         case "back":
           await panelService.markBrowserNavigationIntent(
             panelId,
-            assertPresent(getBrowserNavigationIntentForCommand("back"))
+            assertPresent(getBrowserNavigationIntentForCommand("back")),
           );
           await navigatePanelHistory(panelId, -1);
           break;
         case "forward":
           await panelService.markBrowserNavigationIntent(
             panelId,
-            assertPresent(getBrowserNavigationIntentForCommand("forward"))
+            assertPresent(getBrowserNavigationIntentForCommand("forward")),
           );
           await navigatePanelHistory(panelId, 1);
           break;
@@ -482,14 +513,14 @@ export const PanelStack = memo(function PanelStack({
         case "reload-panel":
           await panelService.markBrowserNavigationIntent(
             panelId,
-            assertPresent(getBrowserNavigationIntentForCommand("reload-panel"))
+            assertPresent(getBrowserNavigationIntentForCommand("reload-panel")),
           );
           await panelService.reload(panelId);
           break;
         case "reload-view":
           await panelService.markBrowserNavigationIntent(
             panelId,
-            assertPresent(getBrowserNavigationIntentForCommand("reload-view"))
+            assertPresent(getBrowserNavigationIntentForCommand("reload-view")),
           );
           await panelService.reloadView(panelId);
           break;
@@ -497,7 +528,9 @@ export const PanelStack = memo(function PanelStack({
         case "force-reload-view":
           await panelService.markBrowserNavigationIntent(
             panelId,
-            assertPresent(getBrowserNavigationIntentForCommand("force-reload-view"))
+            assertPresent(
+              getBrowserNavigationIntentForCommand("force-reload-view"),
+            ),
           );
           await panelService.forceReloadView(panelId);
           break;
@@ -519,7 +552,7 @@ export const PanelStack = memo(function PanelStack({
           const targetPanel = panelMap.get(panelId);
           const child =
             targetPanel?.children.find(
-              (candidate) => candidate.id === targetPanel.selectedChildId
+              (candidate) => candidate.id === targetPanel.selectedChildId,
             ) ?? targetPanel?.children[0];
           if (child) dispatch(openInNewColumnAction(layout, child.id, panelId));
           break;
@@ -532,7 +565,8 @@ export const PanelStack = memo(function PanelStack({
           break;
         case "close-pane": {
           const location = paneForPanel(layout, panelId);
-          if (location) dispatch({ type: "close-pane", paneId: location.pane.id });
+          if (location)
+            dispatch({ type: "close-pane", paneId: location.pane.id });
           break;
         }
         case "open-in-new-column": {
@@ -550,7 +584,9 @@ export const PanelStack = memo(function PanelStack({
           const state = await panelService.getChromeState(panelId);
           if (state.kind === "browser") {
             if (state.resolvedUrl) {
-              await panelService.createBrowser(state.resolvedUrl, { focus: true });
+              await panelService.createBrowser(state.resolvedUrl, {
+                focus: true,
+              });
             }
           } else {
             await panelService.createPanel(state.source, { isRoot: true });
@@ -590,7 +626,7 @@ export const PanelStack = memo(function PanelStack({
       bumpPinMutationSeq,
       layout,
       dispatch,
-    ]
+    ],
   );
 
   const showPanelContextMenu = useCallback(
@@ -598,22 +634,29 @@ export const PanelStack = memo(function PanelStack({
       const location = paneForPanel(layout, panelId);
       const presentation = location
         ? {
-            kind: location.column.panes.length > 1 ? ("stacked" as const) : ("solo" as const),
+            kind:
+              location.column.panes.length > 1
+                ? ("stacked" as const)
+                : ("solo" as const),
             canSplitBelow: canSplitColumnVertically(
               location.column,
               contentSize.height,
-              PANE_VERTICAL_CHROME_HEIGHT
+              PANE_VERTICAL_CHROME_HEIGHT,
             ),
           }
         : undefined;
       try {
-        const action = await menu.showPanelContext(panelId, position, presentation);
+        const action = await menu.showPanelContext(
+          panelId,
+          position,
+          presentation,
+        );
         if (action) await handlePanelAction(panelId, action);
       } catch (error) {
-        reportPanelCommandError("Panel action", error);
+        reportPanelCommandError(notification, "Panel action", error);
       }
     },
-    [contentSize.height, handlePanelAction, layout]
+    [contentSize.height, handlePanelAction, layout],
   );
 
   useEffect(() => {
@@ -625,77 +668,18 @@ export const PanelStack = memo(function PanelStack({
     try {
       await panelService.archive(panelId);
     } catch (error) {
-      reportPanelCommandError("Close panel", error);
+      reportPanelCommandError(notification, "Close panel", error);
     }
   }, []);
-
-  useEffect(() => {
-    if (!isMobile) {
-      return;
-    }
-
-    const updateViewportWidth = () => setViewportWidth(window.innerWidth);
-    updateViewportWidth();
-    window.addEventListener("resize", updateViewportWidth);
-    return () => window.removeEventListener("resize", updateViewportWidth);
-  }, [isMobile]);
-
-  const startSidebarResize = (event: React.PointerEvent) => {
-    event.preventDefault();
-    resizePointerIdRef.current = event.pointerId;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    setIsResizingSidebar(true);
-  };
-
-  useEffect(() => {
-    if (!isResizingSidebar) {
-      return;
-    }
-
-    const handlePointerMove = (event: PointerEvent) => {
-      if (resizePointerIdRef.current !== null && event.pointerId !== resizePointerIdRef.current) {
-        return;
-      }
-      if (!containerRef.current) return;
-      const rect = containerRef.current.getBoundingClientRect();
-      const nextWidth = event.clientX - rect.left;
-      const maxWidth = Math.max(MIN_DESKTOP_SIDEBAR_WIDTH, rect.width - 200);
-      const clamped = Math.min(maxWidth, Math.max(MIN_DESKTOP_SIDEBAR_WIDTH, nextWidth));
-      setSidebarWidth(clamped);
-    };
-
-    const stopResize = (event: PointerEvent) => {
-      if (resizePointerIdRef.current !== null && event.pointerId !== resizePointerIdRef.current) {
-        return;
-      }
-      resizePointerIdRef.current = null;
-      setIsResizingSidebar(false);
-    };
-
-    window.addEventListener("pointermove", handlePointerMove);
-    window.addEventListener("pointerup", stopResize, { capture: true });
-    window.addEventListener("pointercancel", stopResize, { capture: true });
-
-    return () => {
-      window.removeEventListener("pointermove", handlePointerMove);
-      window.removeEventListener("pointerup", stopResize, {
-        capture: true,
-      } as EventListenerOptions);
-      window.removeEventListener("pointercancel", stopResize, {
-        capture: true,
-      } as EventListenerOptions);
-    };
-  }, [isResizingSidebar]);
-
-  const mobileSidebarWidth = Math.max(0, Math.min(360, viewportWidth - 48));
-  const effectiveSidebarWidth = isMobile ? mobileSidebarWidth : sidebarWidth;
 
   // Send theme CSS to main process for injection into views
   useEffect(() => {
     if (hostThemeCss) {
       void view
         .setThemeCss(hostThemeCss)
-        .catch((err: unknown) => console.warn("[PanelStack] Theme CSS injection failed:", err));
+        .catch((err: unknown) =>
+          console.warn("[PanelStack] Theme CSS injection failed:", err),
+        );
     }
   }, [hostThemeCss]);
 
@@ -719,48 +703,56 @@ export const PanelStack = memo(function PanelStack({
         case "back":
           void panelService.markBrowserNavigationIntent(
             panelId,
-            assertPresent(getBrowserNavigationIntentForCommand(command.type))
+            assertPresent(getBrowserNavigationIntentForCommand(command.type)),
           );
           void navigatePanelHistory(panelId, -1);
           return;
         case "forward":
           void panelService.markBrowserNavigationIntent(
             panelId,
-            assertPresent(getBrowserNavigationIntentForCommand(command.type))
+            assertPresent(getBrowserNavigationIntentForCommand(command.type)),
           );
           void navigatePanelHistory(panelId, 1);
           return;
         case "reload-panel":
           void panelService.markBrowserNavigationIntent(
             panelId,
-            assertPresent(getBrowserNavigationIntentForCommand(command.type))
+            assertPresent(getBrowserNavigationIntentForCommand(command.type)),
           );
           void panelService
             .reload(panelId)
-            .catch((error) => reportPanelCommandError("Reload", error));
+            .catch((error) =>
+              reportPanelCommandError(notification, "Reload", error),
+            );
           return;
         case "reload-view":
           void panelService.markBrowserNavigationIntent(
             panelId,
-            assertPresent(getBrowserNavigationIntentForCommand(command.type))
+            assertPresent(getBrowserNavigationIntentForCommand(command.type)),
           );
           void panelService
             .reloadView(panelId)
-            .catch((error) => reportPanelCommandError("Reload", error));
+            .catch((error) =>
+              reportPanelCommandError(notification, "Reload", error),
+            );
           return;
         case "force-reload-view":
           void panelService.markBrowserNavigationIntent(
             panelId,
-            assertPresent(getBrowserNavigationIntentForCommand(command.type))
+            assertPresent(getBrowserNavigationIntentForCommand(command.type)),
           );
           void panelService
             .forceReloadView(panelId)
-            .catch((error) => reportPanelCommandError("Force reload", error));
+            .catch((error) =>
+              reportPanelCommandError(notification, "Force reload", error),
+            );
           return;
         case "rebuild-panel":
           void panelService
             .rebuildPanel(panelId)
-            .catch((error) => reportPanelCommandError("Rebuild", error));
+            .catch((error) =>
+              reportPanelCommandError(notification, "Rebuild", error),
+            );
           return;
         case "stop":
           void view.browserStop(panelId);
@@ -768,7 +760,9 @@ export const PanelStack = memo(function PanelStack({
         case "copy-address":
           void panelService
             .getChromeState(panelId)
-            .then((state) => navigator.clipboard.writeText(state.editableAddress));
+            .then((state) =>
+              navigator.clipboard.writeText(state.editableAddress),
+            );
           return;
         case "open-external":
           void panelService.getChromeState(panelId).then((state) => {
@@ -785,14 +779,22 @@ export const PanelStack = memo(function PanelStack({
             if (url)
               void panelService
                 .createBrowser(url, { focus: true })
-                .catch((error) => reportPanelCommandError("Duplicate panel", error));
+                .catch((error) =>
+                  reportPanelCommandError(
+                    notification,
+                    "Duplicate panel",
+                    error,
+                  ),
+                );
           } else {
             void panelService
               .createPanel(snapshot.source, {
                 isRoot: true,
                 ref: snapshot.options.ref,
               })
-              .catch((error) => reportPanelCommandError("Duplicate panel", error));
+              .catch((error) =>
+                reportPanelCommandError(notification, "Duplicate panel", error),
+              );
           }
           return;
         }
@@ -810,27 +812,36 @@ export const PanelStack = memo(function PanelStack({
         case "unload":
           void panelService
             .unload(panelId)
-            .catch((error) => reportPanelCommandError("Unload", error));
+            .catch((error) =>
+              reportPanelCommandError(notification, "Unload", error),
+            );
           return;
         case "archive":
           if (
             visiblePanel &&
             (panelMap.get(panelId)?.children.length ?? 0) > 0 &&
             !window.confirm(
-              `Close “${visiblePanel.title}” and its child panels? All descendants will be archived.`
+              `Close “${visiblePanel.title}” and its child panels? All descendants will be archived.`,
             )
           )
             return;
           void panelService
             .archive(panelId)
-            .catch((error) => reportPanelCommandError("Close panel", error));
+            .catch((error) =>
+              reportPanelCommandError(notification, "Close panel", error),
+            );
           return;
         case "focus-address":
           window.dispatchEvent(new Event("shell-focus-address"));
           return;
         case "navigate": {
           if (command.action) {
-            executeAddressAction(panelId, command.action, command.mode ?? "current", command.ref);
+            executeAddressAction(
+              panelId,
+              command.action,
+              command.mode ?? "current",
+              command.ref,
+            );
             return;
           }
           const parsed = parseAddressInput(command.value);
@@ -843,14 +854,11 @@ export const PanelStack = memo(function PanelStack({
               return;
             }
             void (async () => {
-              if (location.workspace && location.workspace !== (await workspace.getActive())) {
-                await incomingPanelLocation.prepareWorkspaceRelaunch(location);
-                try {
-                  await workspace.select(location.workspace);
-                } catch (error) {
-                  await incomingPanelLocation.prepareWorkspaceRelaunch(null);
-                  throw error;
-                }
+              if (
+                location.workspace &&
+                location.workspace !== (await workspace.getActive())
+              ) {
+                await incomingPanelLocation.openLocation(location);
                 return;
               }
               const common = {
@@ -892,17 +900,26 @@ export const PanelStack = memo(function PanelStack({
               recordAsTyped: true,
             };
             const intent = getBrowserNavigationIntentForAddressAction(action);
-            if (intent) void panelService.markBrowserNavigationIntent(panelId, intent);
+            if (intent)
+              void panelService.markBrowserNavigationIntent(panelId, intent);
             if (mode === "external") {
               void app.openExternal(parsed.url);
             } else if (mode === "child") {
               void panelService
                 .createBrowserChild(panelId, parsed.url, { focus: true })
-                .catch((error) => reportPanelCommandError("Open child panel", error));
+                .catch((error) =>
+                  reportPanelCommandError(
+                    notification,
+                    "Open child panel",
+                    error,
+                  ),
+                );
             } else if (mode === "root") {
               void panelService
                 .createBrowser(parsed.url, { focus: true })
-                .catch((error) => reportPanelCommandError("Open panel", error));
+                .catch((error) =>
+                  reportPanelCommandError(notification, "Open panel", error),
+                );
             } else if (
               visiblePanel &&
               isBrowserPanelSource(getCurrentSnapshot(visiblePanel).source)
@@ -911,7 +928,9 @@ export const PanelStack = memo(function PanelStack({
             } else {
               void panelService
                 .createBrowser(parsed.url, { focus: true })
-                .catch((error) => reportPanelCommandError("Open panel", error));
+                .catch((error) =>
+                  reportPanelCommandError(notification, "Open panel", error),
+                );
             }
             return;
           }
@@ -921,9 +940,17 @@ export const PanelStack = memo(function PanelStack({
               mode === "current"
                 ? panelService.navigate(panelId, parsed.source, { ref })
                 : mode === "child"
-                  ? panelService.createChild(panelId, parsed.source, { focus: true, ref })
-                  : panelService.createPanel(parsed.source, { isRoot: true, ref });
-            void creator.catch((error) => reportPanelCommandError("Open panel", error));
+                  ? panelService.createChild(panelId, parsed.source, {
+                      focus: true,
+                      ref,
+                    })
+                  : panelService.createPanel(parsed.source, {
+                      isRoot: true,
+                      ref,
+                    });
+            void creator.catch((error) =>
+              reportPanelCommandError(notification, "Open panel", error),
+            );
             return;
           }
           if (parsed.type === "search") {
@@ -935,17 +962,26 @@ export const PanelStack = memo(function PanelStack({
               recordAsTyped: true,
             };
             const intent = getBrowserNavigationIntentForAddressAction(action);
-            if (intent) void panelService.markBrowserNavigationIntent(panelId, intent);
+            if (intent)
+              void panelService.markBrowserNavigationIntent(panelId, intent);
             if (mode === "external") {
               void app.openExternal(url);
             } else if (mode === "child") {
               void panelService
                 .createBrowserChild(panelId, url, { focus: true })
-                .catch((error) => reportPanelCommandError("Open child panel", error));
+                .catch((error) =>
+                  reportPanelCommandError(
+                    notification,
+                    "Open child panel",
+                    error,
+                  ),
+                );
             } else if (mode === "root") {
               void panelService
                 .createBrowser(url, { focus: true })
-                .catch((error) => reportPanelCommandError("Open panel", error));
+                .catch((error) =>
+                  reportPanelCommandError(notification, "Open panel", error),
+                );
             } else if (
               visiblePanel &&
               isBrowserPanelSource(getCurrentSnapshot(visiblePanel).source)
@@ -954,7 +990,9 @@ export const PanelStack = memo(function PanelStack({
             } else {
               void panelService
                 .createBrowser(url, { focus: true })
-                .catch((error) => reportPanelCommandError("Open panel", error));
+                .catch((error) =>
+                  reportPanelCommandError(notification, "Open panel", error),
+                );
             }
             return;
           }
@@ -965,24 +1003,22 @@ export const PanelStack = memo(function PanelStack({
         targetPanelId: string,
         action: AddressAction,
         mode: AddressNavigationMode,
-        ref?: string
+        ref?: string,
       ) {
         if (action.type === "panel-location") {
           const location = action.location;
-          const targetMode = mode === "current" ? (location.disposition ?? mode) : mode;
+          const targetMode =
+            mode === "current" ? (location.disposition ?? mode) : mode;
           if (targetMode === "external") {
             if (action.raw) void app.openExternal(action.raw);
             return;
           }
           void (async () => {
-            if (location.workspace && location.workspace !== (await workspace.getActive())) {
-              await incomingPanelLocation.prepareWorkspaceRelaunch(location);
-              try {
-                await workspace.select(location.workspace);
-              } catch (error) {
-                await incomingPanelLocation.prepareWorkspaceRelaunch(null);
-                throw error;
-              }
+            if (
+              location.workspace &&
+              location.workspace !== (await workspace.getActive())
+            ) {
+              await incomingPanelLocation.openLocation(location);
               return;
             }
             const common = {
@@ -1018,17 +1054,29 @@ export const PanelStack = memo(function PanelStack({
         }
         if (action.type === "navigate-url") {
           const intent = getBrowserNavigationIntentForAddressAction(action);
-          if (intent) void panelService.markBrowserNavigationIntent(targetPanelId, intent);
+          if (intent)
+            void panelService.markBrowserNavigationIntent(
+              targetPanelId,
+              intent,
+            );
           if (mode === "external") {
             void app.openExternal(action.url);
           } else if (mode === "child") {
             void panelService
               .createBrowserChild(targetPanelId, action.url, { focus: true })
-              .catch((error) => reportPanelCommandError("Open child panel", error));
+              .catch((error) =>
+                reportPanelCommandError(
+                  notification,
+                  "Open child panel",
+                  error,
+                ),
+              );
           } else if (mode === "root") {
             void panelService
               .createBrowser(action.url, { focus: true })
-              .catch((error) => reportPanelCommandError("Open panel", error));
+              .catch((error) =>
+                reportPanelCommandError(notification, "Open panel", error),
+              );
           } else if (
             visiblePanel &&
             isBrowserPanelSource(getCurrentSnapshot(visiblePanel).source)
@@ -1037,24 +1085,38 @@ export const PanelStack = memo(function PanelStack({
           } else {
             void panelService
               .createBrowser(action.url, { focus: true })
-              .catch((error) => reportPanelCommandError("Open panel", error));
+              .catch((error) =>
+                reportPanelCommandError(notification, "Open panel", error),
+              );
           }
           return;
         }
         if (action.type === "search" || action.type === "keyword-search") {
           const url = applySearchTemplate(action.query, action.template);
           const intent = getBrowserNavigationIntentForAddressAction(action);
-          if (intent) void panelService.markBrowserNavigationIntent(targetPanelId, intent);
+          if (intent)
+            void panelService.markBrowserNavigationIntent(
+              targetPanelId,
+              intent,
+            );
           if (mode === "external") {
             void app.openExternal(url);
           } else if (mode === "child") {
             void panelService
               .createBrowserChild(targetPanelId, url, { focus: true })
-              .catch((error) => reportPanelCommandError("Open child panel", error));
+              .catch((error) =>
+                reportPanelCommandError(
+                  notification,
+                  "Open child panel",
+                  error,
+                ),
+              );
           } else if (mode === "root") {
             void panelService
               .createBrowser(url, { focus: true })
-              .catch((error) => reportPanelCommandError("Open panel", error));
+              .catch((error) =>
+                reportPanelCommandError(notification, "Open panel", error),
+              );
           } else if (
             visiblePanel &&
             isBrowserPanelSource(getCurrentSnapshot(visiblePanel).source)
@@ -1063,7 +1125,9 @@ export const PanelStack = memo(function PanelStack({
           } else {
             void panelService
               .createBrowser(url, { focus: true })
-              .catch((error) => reportPanelCommandError("Open panel", error));
+              .catch((error) =>
+                reportPanelCommandError(notification, "Open panel", error),
+              );
           }
           return;
         }
@@ -1071,18 +1135,31 @@ export const PanelStack = memo(function PanelStack({
           const actionRef = action.ref ?? ref;
           const creator =
             mode === "current"
-              ? panelService.navigate(targetPanelId, action.source, { ref: actionRef })
+              ? panelService.navigate(targetPanelId, action.source, {
+                  ref: actionRef,
+                })
               : mode === "child"
                 ? panelService.createChild(targetPanelId, action.source, {
                     focus: true,
                     ref: actionRef,
                   })
-                : panelService.createPanel(action.source, { isRoot: true, ref: actionRef });
-          void creator.catch((error) => reportPanelCommandError("Open panel", error));
+                : panelService.createPanel(action.source, {
+                    isRoot: true,
+                    ref: actionRef,
+                  });
+          void creator.catch((error) =>
+            reportPanelCommandError(notification, "Open panel", error),
+          );
         }
       }
     },
-    [navigatePanelHistory, setPinnedPanelIds, bumpPinMutationSeq, visiblePanel, panelMap]
+    [
+      navigatePanelHistory,
+      setPinnedPanelIds,
+      bumpPinMutationSeq,
+      visiblePanel,
+      panelMap,
+    ],
   );
 
   useEffect(() => {
@@ -1133,8 +1210,6 @@ export const PanelStack = memo(function PanelStack({
     };
   }, [onChromeStateChange, visiblePanel]);
 
-  const isTreeNavigation = navigationMode === "tree";
-
   // Navigation mode changes the native panel slot's available width without
   // changing the panel layout model itself. Force a presentation commit so
   // the native WebContents view follows the sidebar opening/closing in the
@@ -1153,40 +1228,46 @@ export const PanelStack = memo(function PanelStack({
   const navigateFromTree = useCallback(
     (panelId: string, options?: { openBeside?: boolean }) => {
       if (options?.openBeside && layout.focusedPaneId) {
-        dispatch({ type: "open-beside", panelId, anchorPaneId: layout.focusedPaneId });
+        dispatch({
+          type: "open-beside",
+          panelId,
+          anchorPaneId: layout.focusedPaneId,
+        });
       } else {
         dispatch({ type: "show-panel", panelId, origin: "tree-click" });
       }
       closeMobileTree();
     },
-    [closeMobileTree, dispatch, layout.focusedPaneId]
+    [closeMobileTree, dispatch, layout.focusedPaneId],
   );
 
   const focusPane = useCallback(
     (paneId: string) => dispatch({ type: "focus-pane", paneId }),
-    [dispatch]
+    [dispatch],
   );
   const focusColumn = useCallback(
     (columnId: string) => {
-      const column = layout.columns.find((candidate) => candidate.id === columnId);
+      const column = layout.columns.find(
+        (candidate) => candidate.id === columnId,
+      );
       const pane = column?.panes[0];
       if (pane) dispatch({ type: "focus-pane", paneId: pane.id });
     },
-    [layout, dispatch]
+    [layout, dispatch],
   );
   const closePane = useCallback(
     (paneId: string) => dispatch({ type: "close-pane", paneId }),
-    [dispatch]
+    [dispatch],
   );
   const createChildInPane = useCallback(
     (paneId: string) => {
       const panelId = findPane(layout, paneId)?.pane.panelId;
       if (!panelId) return;
       void createChildForPanel(panelId, "side").catch((error) =>
-        reportPanelCommandError("Create child panel", error)
+        reportPanelCommandError(notification, "Create child panel", error),
       );
     },
-    [createChildForPanel, layout]
+    [createChildForPanel, layout],
   );
   const runPaneChromeCommand = useCallback(
     (command: PaneChromeCommand) => {
@@ -1204,11 +1285,12 @@ export const PanelStack = memo(function PanelStack({
           break;
       }
     },
-    [closePane, createChildInPane, dispatch, layout.focusedPaneId]
+    [closePane, createChildInPane, dispatch, layout.focusedPaneId],
   );
   const layoutPaneCount = useMemo(
-    () => layout.columns.reduce((total, column) => total + column.panes.length, 0),
-    [layout.columns]
+    () =>
+      layout.columns.reduce((total, column) => total + column.panes.length, 0),
+    [layout.columns],
   );
   const paneChromeState = useMemo<FocusedPaneChromeState | null>(() => {
     const paneId = layout.focusedPaneId;
@@ -1244,15 +1326,19 @@ export const PanelStack = memo(function PanelStack({
   // Keyboard pane-focus movement: Cmd/Ctrl+Alt+arrows; +Shift+←/→ brings the
   // nearest parked column into the viewport (§5.2/§6).
   useEffect(() => {
+    if (!workspaceVisible) return;
     const handler = (event: KeyboardEvent) => {
       if (!(event.ctrlKey || event.metaKey) || !event.altKey) return;
-      const focused = layout.focusedPaneId ? findPane(layout, layout.focusedPaneId) : null;
+      const focused = layout.focusedPaneId
+        ? findPane(layout, layout.focusedPaneId)
+        : null;
       if (!focused) return;
       if (event.shiftKey) {
         if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
         event.preventDefault();
         const parked = event.key === "ArrowLeft" ? parkedLeft : parkedRight;
-        const target = event.key === "ArrowLeft" ? parked[parked.length - 1] : parked[0];
+        const target =
+          event.key === "ArrowLeft" ? parked[parked.length - 1] : parked[0];
         if (target) focusColumn(target);
         return;
       }
@@ -1261,8 +1347,9 @@ export const PanelStack = memo(function PanelStack({
         const delta = event.key === "ArrowLeft" ? -1 : 1;
         const neighbor = layout.columns[focused.columnIndex + delta];
         target =
-          neighbor?.panes[Math.min(focused.paneIndex, (neighbor?.panes.length ?? 1) - 1)]?.id ??
-          null;
+          neighbor?.panes[
+            Math.min(focused.paneIndex, (neighbor?.panes.length ?? 1) - 1)
+          ]?.id ?? null;
       } else if (event.key === "ArrowUp" || event.key === "ArrowDown") {
         const delta = event.key === "ArrowUp" ? -1 : 1;
         target = focused.column.panes[focused.paneIndex + delta]?.id ?? null;
@@ -1274,23 +1361,34 @@ export const PanelStack = memo(function PanelStack({
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [layout, parkedLeft, parkedRight, focusPane, focusColumn]);
+  }, [
+    workspaceVisible,
+    layout,
+    parkedLeft,
+    parkedRight,
+    focusPane,
+    focusColumn,
+  ]);
 
-  const visibleIdSet = useMemo(() => new Set(visiblePanelIds), [visiblePanelIds]);
+  const visibleIdSet = useMemo(
+    () => new Set(visiblePanelIds),
+    [visiblePanelIds],
+  );
 
   const resizeColumns = useCallback(
     (columnFrs: number[]) => dispatch({ type: "resize-columns", columnFrs }),
-    [dispatch]
+    [dispatch],
   );
   const resizePanes = useCallback(
-    (columnId: string, paneFrs: number[]) => dispatch({ type: "resize-panes", columnId, paneFrs }),
-    [dispatch]
+    (columnId: string, paneFrs: number[]) =>
+      dispatch({ type: "resize-panes", columnId, paneFrs }),
+    [dispatch],
   );
   // A drop is one engine action; the drag layer never edits the layout itself.
   const placePanel = useCallback(
     (panelId: string, target: LayoutDropTarget) =>
       dispatch({ type: "place-panel", panelId, target }),
-    [dispatch]
+    [dispatch],
   );
   /**
    * Keyboard equivalent of a placement drag, driven from the pane's own grip so
@@ -1302,7 +1400,10 @@ export const PanelStack = memo(function PanelStack({
       if (!location) return;
       const panelId = location.pane.panelId;
       if (direction === "up" || direction === "down") {
-        const neighbor = location.column.panes[location.paneIndex + (direction === "up" ? -1 : 1)];
+        const neighbor =
+          location.column.panes[
+            location.paneIndex + (direction === "up" ? -1 : 1)
+          ];
         if (!neighbor) return;
         dispatch({
           type: "place-panel",
@@ -1319,7 +1420,9 @@ export const PanelStack = memo(function PanelStack({
       // column to move at all; one that shares a column just leaves it.
       const alone = location.column.panes.length === 1;
       if (direction === "right") {
-        const anchor = alone ? layout.columns[location.columnIndex + 1] : location.column;
+        const anchor = alone
+          ? layout.columns[location.columnIndex + 1]
+          : location.column;
         if (!anchor) return;
         dispatch({
           type: "place-panel",
@@ -1338,7 +1441,7 @@ export const PanelStack = memo(function PanelStack({
         target: { kind: "new-column", afterColumnId: anchorId },
       });
     },
-    [layout, dispatch]
+    [layout, dispatch],
   );
   const refineTarget = useCallback(
     (target: LayoutDropTarget, panelId: string) =>
@@ -1346,7 +1449,7 @@ export const PanelStack = memo(function PanelStack({
         viewportHeight: contentSize.height,
         paneChromeHeight: PANE_VERTICAL_CHROME_HEIGHT,
       }),
-    [layout, contentSize.height]
+    [layout, contentSize.height],
   );
 
   // Show loading state while initializing
@@ -1375,7 +1478,9 @@ export const PanelStack = memo(function PanelStack({
       data-shell-layout-columns={layout.columns.length}
       data-shell-layout-restored={restored ? "true" : "false"}
       data-shell-layout-visible-panels={visiblePanelIds.join(",")}
-      data-shell-layout-root-panels={rootPanels.map((panel) => panel.id).join(",")}
+      data-shell-layout-root-panels={rootPanels
+        .map((panel) => panel.id)
+        .join(",")}
       data-shell-layout-resident-columns={residentColumnIds.join(",")}
       style={{ flex: "1 1 0", minHeight: 0, minWidth: 0 }}
       ref={containerRef}
@@ -1389,98 +1494,28 @@ export const PanelStack = memo(function PanelStack({
           alignItems: "stretch",
         }}
       >
-        {isTreeNavigation && (
-          <Card
-            data-shell-panel-sidebar="true"
-            className="app-shell-panel-card"
-            size="2"
-            style={{
-              width: `${effectiveSidebarWidth}px`,
-              minWidth: isMobile ? `${effectiveSidebarWidth}px` : "200px",
-              flexShrink: 0,
-              alignSelf: "stretch",
-              overflow: "hidden",
-              display: "flex",
-              flexDirection: "column",
-              borderRadius: isMobile ? 0 : undefined,
-              borderTop: isMobile ? 0 : undefined,
-              borderBottom: isMobile ? 0 : undefined,
-            }}
-          >
-            <Flex direction="column" gap="1" style={{ flex: 1, minHeight: 0 }}>
-              {isMobile && (
-                <Flex align="center" justify="end" px="1" pt="1">
-                  <IconButton
-                    size="1"
-                    variant="ghost"
-                    aria-label="Close panel tree"
-                    onClick={closeMobileTree}
-                  >
-                    <Cross2Icon />
-                  </IconButton>
-                </Flex>
-              )}
-              <LazyPanelTreeSidebar
-                selectedId={focusedPanelId}
-                visibleIds={visibleIdSet}
-                ancestorIds={ancestorIds}
-                onSelect={navigateFromTree}
-                onPanelContextMenu={showPanelContextMenu}
-                onArchive={handleArchive}
-              />
-            </Flex>
-          </Card>
-        )}
-
-        {isTreeNavigation && !isMobile && (
-          <Box
-            onPointerDown={startSidebarResize}
-            onPointerEnter={() => setIsResizeHover(true)}
-            onPointerLeave={() => setIsResizeHover(false)}
-            style={{
-              // The divider takes only its hairline in the layout: a wider
-              // element here would read as extra padding on the sidebar's
-              // right edge alone, breaking the even gutter the tree keeps on
-              // its other three sides. The roomy grab area and the hover
-              // thickening are both absolutely positioned below, so neither
-              // costs a pixel of flow.
-              cursor: "col-resize",
-              flexShrink: 0,
-              width: 1,
-              alignSelf: "stretch",
-              touchAction: "none",
-              position: "relative",
-              background: "transparent",
-            }}
-          >
-            <Box
-              aria-hidden
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                left: -3,
-                right: -3,
-                cursor: "col-resize",
+        {navigationHost?.element &&
+          createPortal(
+            <LazyPanelTreeSidebar
+              selectedId={focusedPanelId}
+              visibleIds={visibleIdSet}
+              ancestorIds={ancestorIds}
+              onSelect={(id, options) => {
+                navigationHost.focus();
+                navigateFromTree(id, options);
               }}
-            />
-            <Box
-              style={{
-                position: "absolute",
-                top: 0,
-                bottom: 0,
-                left: 0,
-                width: isResizingSidebar || isResizeHover ? 2 : 1,
-                backgroundColor:
-                  isResizingSidebar || isResizeHover ? "var(--accent-8)" : "var(--gray-a6)",
-                transition: "background-color 120ms ease-out, width 120ms ease-out",
-              }}
-            />
-          </Box>
-        )}
+              onPanelContextMenu={showPanelContextMenu}
+              onArchive={handleArchive}
+            />,
+            navigationHost.element,
+          )}
 
         {/* Layout viewport: a row of resizable columns of panes */}
-        <Flex direction="column" gap="0" style={{ flex: "1 1 0", minHeight: 0, minWidth: 0 }}>
+        <Flex
+          direction="column"
+          gap="0"
+          style={{ flex: "1 1 0", minHeight: 0, minWidth: 0 }}
+        >
           <SavePasswordBar visiblePanelId={focusedPanelId} />
           {findOpen && (
             <Flex
@@ -1512,7 +1547,12 @@ export const PanelStack = memo(function PanelStack({
               <Button size="1" variant="ghost" onClick={() => nextFind(true)}>
                 Next
               </Button>
-              <IconButton size="1" variant="ghost" aria-label="Close find" onClick={closeFind}>
+              <IconButton
+                size="1"
+                variant="ghost"
+                aria-label="Close find"
+                onClick={closeFind}
+              >
                 <Cross2Icon />
               </IconButton>
             </Flex>
@@ -1560,12 +1600,21 @@ export const PanelStack = memo(function PanelStack({
                       onClick={() => {
                         void panelService
                           .createAboutPanel("new")
-                          .catch((error) => reportPanelCommandError("Create panel", error));
+                          .catch((error) =>
+                            reportPanelCommandError(
+                              notification,
+                              "Create panel",
+                              error,
+                            ),
+                          );
                       }}
                     >
                       New panel
                     </Button>
-                    <Button variant="soft" onClick={() => openWorkspaceChooser(true)}>
+                    <Button
+                      variant="soft"
+                      onClick={() => openWorkspaceChooser(true)}
+                    >
                       Switch workspace
                     </Button>
                   </Flex>

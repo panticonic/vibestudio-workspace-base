@@ -22,6 +22,7 @@ import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type { OverlaySurfaceComponentProps } from "./types";
 
 export interface ApprovalCardSurfaceProps {
+  workspaceLabel?: string;
   approval: PendingApproval;
   queue: ApprovalQueueInfo | null;
   decisionError: string | null;
@@ -51,6 +52,7 @@ export function ApprovalCardSurface({ props, emitIntent }: OverlaySurfaceCompone
 type Waiter = { resolve: (value: string) => void; reject: (reason: Error) => void };
 
 function ApprovalCardSurfaceInner({
+  workspaceLabel,
   approval,
   queue,
   decisionError,
@@ -106,6 +108,7 @@ function ApprovalCardSurfaceInner({
   return (
     <ApprovalCard
       key={approvalId}
+      workspaceLabel={workspaceLabel}
       approval={approval}
       caller={caller}
       queue={queue}

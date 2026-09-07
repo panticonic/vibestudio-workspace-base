@@ -1,5 +1,9 @@
-import { useEffect, useId } from "react";
-import { useSetAtom } from "jotai";
+import {
+  ShellPresentationStoreContext,
+  useWorkspaceVisible,
+} from "./workspaceContext";
+import { useContext, useEffect, useId } from "react";
+import { useSetAtom, useStore } from "jotai";
 import { shellOverlayOwnersAtom } from "../state/appModeAtoms";
 
 /**
@@ -14,10 +18,16 @@ import { shellOverlayOwnersAtom } from "../state/appModeAtoms";
  */
 export function useShellOverlay(isOpen: boolean): void {
   const ownerId = useId();
-  const setOwners = useSetAtom(shellOverlayOwnersAtom);
+  const localStore = useStore();
+  const presentationStore =
+    useContext(ShellPresentationStoreContext) ?? localStore;
+  const visible = useWorkspaceVisible();
+  const setOwners = useSetAtom(shellOverlayOwnersAtom, {
+    store: presentationStore,
+  });
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !visible) return;
     setOwners((current) => {
       if (current.has(ownerId)) return current;
       const next = new Set(current);
@@ -32,5 +42,5 @@ export function useShellOverlay(isOpen: boolean): void {
         return next;
       });
     };
-  }, [isOpen, ownerId, setOwners]);
+  }, [isOpen, ownerId, setOwners, visible]);
 }

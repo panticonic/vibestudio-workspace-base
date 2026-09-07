@@ -118,5 +118,7 @@ describe("ConnectionSettingsDialog", () => {
     expect(screen.getByText("Host app settings")).toBeTruthy();
     rerender(renderDialog("templates"));
     expect(screen.getByText("Template settings")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    expect(onSectionChange).toHaveBeenCalledWith(null);
   });
 });

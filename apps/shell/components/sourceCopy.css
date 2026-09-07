@@ -1,0 +1,182 @@
+.source-copy {
+  padding-top: var(--space-4);
+  min-width: 0;
+  container-type: inline-size;
+}
+.source-copy-heading {
+  padding-bottom: var(--space-2);
+}
+.source-copy-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  height: 44px;
+  border-radius: var(--radius-4);
+  background: var(--accent-a3);
+  color: var(--accent-11);
+}
+.source-copy-section {
+  min-width: 0;
+  border-top: 1px solid var(--gray-a5);
+  padding-top: var(--space-4);
+}
+.source-copy-section-heading {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+}
+.source-copy-section-heading > .rt-Badge {
+  margin-left: auto;
+}
+.source-copy-step {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  border: 1px solid var(--gray-a6);
+  border-radius: 50%;
+  color: var(--gray-11);
+  font-size: var(--font-size-1);
+  font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+}
+.source-copy-source-fields,
+.source-copy-target-fields {
+  display: grid;
+  gap: var(--space-3);
+}
+.source-copy-source-fields > *,
+.source-copy-target-fields > * {
+  min-width: 0;
+}
+.source-copy-target-fields {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+}
+.source-copy-browse > .rt-TextFieldRoot {
+  flex: 1;
+  min-width: 0;
+}
+.source-copy-hint {
+  margin: 0 0 var(--space-3);
+}
+.source-copy-route {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--accent-a5);
+  border-radius: var(--radius-4);
+  background: var(--accent-a2);
+  overflow-wrap: anywhere;
+}
+.source-copy-route > svg {
+  color: var(--accent-10);
+}
+.source-copy-eyebrow {
+  margin-bottom: var(--space-1);
+}
+.source-copy-audience {
+  padding: var(--space-3) var(--space-4);
+  border-left: 3px solid var(--gray-a7);
+  border-radius: 0 var(--radius-3) var(--radius-3) 0;
+  background: var(--gray-a2);
+}
+.source-copy-audience[data-shared] {
+  border-left-color: var(--amber-8);
+  background: var(--amber-a2);
+}
+.source-copy-files {
+  max-height: 270px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--gray-a5);
+  border-radius: var(--radius-3);
+  padding: var(--space-1);
+  background: var(--color-panel-solid);
+}
+.source-copy-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  min-width: 0;
+  min-height: 40px;
+  box-sizing: border-box;
+  border-radius: var(--radius-2);
+}
+label.source-copy-file {
+  cursor: pointer;
+}
+label.source-copy-file:hover {
+  background: var(--gray-a2);
+}
+label.source-copy-file[data-selected] {
+  background: var(--accent-a3);
+}
+.source-copy-file + .source-copy-file {
+  margin-top: 2px;
+}
+.source-copy-file > .source-copy-path {
+  flex: 1;
+}
+.source-copy-file > .rt-CheckboxRoot,
+.source-copy-size {
+  flex-shrink: 0;
+}
+.source-copy-size {
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.source-copy-path,
+.source-copy-destination-note {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0;
+}
+.source-copy-files > .rt-Button {
+  margin: var(--space-2) var(--space-3);
+}
+.source-copy-primary {
+  align-self: flex-end;
+}
+.source-copy-actions {
+  border-top: 1px solid var(--gray-a5);
+  padding-top: var(--space-4);
+}
+.source-copy-next {
+  margin-top: var(--space-1);
+}
+.source-copy-branch {
+  color: var(--gray-11);
+  font-size: var(--font-size-1);
+}
+.source-copy-branch > summary {
+  cursor: pointer;
+  padding: var(--space-2) 0;
+}
+@container (max-width: 420px) {
+  .source-copy-target-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .source-copy-browse {
+    flex-wrap: wrap;
+  }
+  .source-copy-browse > .rt-TextFieldRoot {
+    flex-basis: 100%;
+  }
+  .source-copy-browse > .rt-Button,
+  .source-copy-primary {
+    width: 100%;
+  }
+  .source-copy-actions {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .source-copy-file {
+    min-height: 44px;
+  }
+}

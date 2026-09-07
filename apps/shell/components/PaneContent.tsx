@@ -1,9 +1,10 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useState } from "react";
 import { Box, Button, Flex, Spinner, Text } from "@radix-ui/themes";
 import { VibestudioLogo } from "@workspace/ui/brand";
 import type { PanelPresentationSnapshot } from "@vibestudio/shared/panel/presentation";
 
-import { panel as panelService, view } from "../shell/client";
+
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
 import { PanelSurface } from "./PanelSurface";
 import { nativeSlotIdForPane } from "../layout/types";
@@ -54,6 +55,8 @@ export function PaneContent({
   onDismissUnresponsive,
   onFocusPane,
 }: PaneContentProps) {
+  const { panel: panelService, view } = useShellWorkspaceClient();
+
   const [snapshot, setSnapshot] = useState<PanelPresentationSnapshot | null>(null);
   const [takeoverBusy, setTakeoverBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);

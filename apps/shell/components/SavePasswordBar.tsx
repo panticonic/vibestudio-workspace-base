@@ -1,7 +1,8 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { Flex, Text, Button, Callout } from "@radix-ui/themes";
 import { useShellEvent } from "../shell/useShellEvent";
-import { autofill } from "../shell/client";
+
 
 interface PasswordSavePrompt {
   kind: "password";
@@ -25,6 +26,8 @@ interface SavePasswordBarProps {
 }
 
 export function SavePasswordBar({ visiblePanelId }: SavePasswordBarProps) {
+  const { autofill } = useShellWorkspaceClient();
+
   // Map of panelId -> prompt data; supports background panels queueing prompts
   const [prompts, setPrompts] = useState<Map<string, SavePromptData>>(new Map());
   const [confirmation, setConfirmation] = useState<string | null>(null);

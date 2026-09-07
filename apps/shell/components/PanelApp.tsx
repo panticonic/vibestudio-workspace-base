@@ -1,13 +1,13 @@
+import { useShellWorkspaceClient, useWorkspaceVisible, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Box, Flex } from "@radix-ui/themes";
 
-import { effectiveThemeAtom, loadThemePreferenceAtom } from "../state/themeAtoms";
+import { effectiveThemeAtom, loadThemePreferenceAtom, themeConfigAtom } from "../state/themeAtoms";
 import { NavigationProvider, useNavigationActions, useNavigationLayout } from "./NavigationContext";
 import { PanelTreeProvider, PanelDndProvider, LayoutDragProvider } from "../shell/hooks/index.js";
 import { useShellEvent } from "../shell/useShellEvent";
-import { app, incomingPanelLocation, notification, panel, workspace } from "../shell/client";
-import type { PanelLocation } from "@vibestudio/shared/panelLocation";
+
 import { PanelStack } from "./PanelStack";
 import type { ChromeCommand } from "./PanelStack";
 import { TitleBar } from "./TitleBar";
@@ -34,10 +34,54 @@ export function PanelApp() {
 }
 
 function PanelAppContent() {
+  const { notification, panel, hostCommands } = useShellWorkspaceClient();
+  const visible = useWorkspaceVisible();
+  const workspaceId = useWorkspaceNavigationHost()?.workspaceId ?? "system";
+
   const effectiveTheme = useThemeSynchronizer();
+  const themeConfig = useAtomValue(themeConfigAtom);
+  // Broadcast the theme identity to every panel whenever it changes, so a
+  // user-picked accent/radius propagates live over the runtime bridge.
+  useEffect(() => {
+    void panel.updateThemeConfig(themeConfig).catch((error) => {
+      console.error("Failed to broadcast theme identity", error);
+    });
+  }, [themeConfig]);
+
+
   const [currentTitle, setCurrentTitle] = useState("Vibestudio");
   const [chromeState, setChromeState] = useState<PanelChromeState | null>(null);
   const [paneChromeState, setPaneChromeState] = useState<FocusedPaneChromeState | null>(null);
+
+  // Listen for navigate-about menu event via shell event
+  const handleNavigateAbout = useCallback(async (payload: { page: string }) => {
+    try {
+      await panel.createAboutPanel(payload.page);
+    } catch (error) {
+      console.error(
+        `[App] Failed to create shell panel for ${payload.page}:`,
+        error,
+      );
+      void notification.show({
+        type: "error",
+        title: "Couldn't open page",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, []);
+  useShellEvent("navigate-about", handleNavigateAbout);
+
+  // A panel's contributed host command, invoked from outside the palette
+  // (`app.openShellSurface({ kind: "panel-command" })` or its deep link). Same
+  // routing as a palette selection; the panel decides what the id means.
+  const handleRunPanelCommand = useCallback(
+    (payload: { panelId: string; commandId: string }) => {
+      void hostCommands.run(payload.panelId, payload.commandId);
+    },
+    [],
+  );
+  useShellEvent("run-panel-command", handleRunPanelCommand);
+
 
   // Convert panel initialization errors into notifications
   useShellEvent(
@@ -101,8 +145,9 @@ function PanelAppContent() {
     handlePaneChromeCommandRef.current = handler;
   }, []);
 
-  // Keyboard shortcut for panel devtools
+  // Keyboard shortcut for the focused workspace only.
   useEffect(() => {
+    if (!visible) return;
     const handler = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === "i") {
         event.preventDefault();
@@ -131,7 +176,7 @@ function PanelAppContent() {
 
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [handleChromeCommand, openPanelDevTools, setAddressBarVisible]);
+  }, [handleChromeCommand, openPanelDevTools, setAddressBarVisible, visible]);
 
   useShellEvent(
     "toggle-address-bar",
@@ -166,74 +211,7 @@ function PanelAppContent() {
   }, [openPanelDevTools]);
   useShellEvent("toggle-panel-devtools", handleTogglePanelDevTools);
 
-  useEffect(() => {
-    let active = true;
-    const openLocation = async (location: PanelLocation) => {
-      if (!active) return;
-      const activeWorkspace = await workspace.getActive();
-      if (location.workspace && location.workspace !== activeWorkspace) {
-        await incomingPanelLocation.prepareWorkspaceRelaunch(location);
-        try {
-          await workspace.select(location.workspace);
-        } catch (error) {
-          await incomingPanelLocation.prepareWorkspaceRelaunch(null);
-          throw error;
-        }
-        return;
-      }
-      const focusedPanelId = await panel.getFocusedPanelId();
-      const common = {
-        ref: location.ref,
-        contextId: location.contextId,
-        stateArgs: location.stateArgs,
-        placement: location.placement,
-      };
-      const disposition = location.disposition ?? "root";
-      const result =
-        disposition === "current" && focusedPanelId
-          ? await panel.navigate(focusedPanelId, location.source, common)
-          : disposition === "child" && focusedPanelId
-            ? await panel.createChild(focusedPanelId, location.source, {
-                ...common,
-                title: location.title,
-                slug: location.slug,
-                focus: location.focus ?? true,
-              })
-            : await panel.createPanel(location.source, {
-                ...common,
-                title: location.title,
-                slug: location.slug,
-                isRoot: true,
-                focus: location.focus ?? true,
-              });
-      if (
-        active &&
-        result &&
-        location.focus !== false &&
-        disposition === "current" &&
-        focusedPanelId
-      ) {
-        navigateToId(result.id);
-      }
-    };
-    const handle = (location: PanelLocation) => {
-      void openLocation(location).catch((error: unknown) => {
-        void notification.show({
-          type: "error",
-          title: "Panel link could not be opened",
-          message: error instanceof Error ? error.message : String(error),
-        });
-      });
-    };
-    void incomingPanelLocation.getPending().then((location) => {
-      if (location) handle(location);
-    });
-    const off = incomingPanelLocation.onLocation(handle);
-    return () => {
-      active = false;
-      off();
-    };
-  }, [navigateToId]);
+
 
   return (
     <Flex direction="column" height="100dvh" style={{ overflow: "hidden" }}>
@@ -254,7 +232,7 @@ function PanelAppContent() {
       {/* Panel region — also the positioning host the approval card portals
           into, so it floats over the panels rather than the chrome. */}
       <Box
-        id={APPROVAL_OVERLAY_HOST_ID}
+        id={`${APPROVAL_OVERLAY_HOST_ID}:${workspaceId}`}
         style={{
           position: "relative",
           flex: "1 1 0",
@@ -268,7 +246,7 @@ function PanelAppContent() {
             hit target, so the owner can measure the region without changing
             how the approval card's host box lays out. */}
         <div
-          id={QUICKFIRE_OVERLAY_HOST_ID}
+          id={`${QUICKFIRE_OVERLAY_HOST_ID}:${workspaceId}`}
           aria-hidden="true"
           style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
         />
@@ -299,6 +277,8 @@ function PanelAppContent() {
  * Exported for testing purposes.
  */
 export function useThemeSynchronizer(): "light" | "dark" {
+  const { app } = useShellWorkspaceClient();
+
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
   const loadThemePreference = useSetAtom(loadThemePreferenceAtom);
 

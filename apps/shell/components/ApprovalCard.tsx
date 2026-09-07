@@ -90,6 +90,7 @@ import {
 } from "./approvalCardModel";
 
 export interface ApprovalCardProps {
+  workspaceLabel?: string;
   approval: PendingApproval;
   caller: CallerInfo;
   /** Queue position for the navigator; null when a single approval is pending. */
@@ -118,6 +119,7 @@ export interface ApprovalCardProps {
 export type ApprovalCardLayout = "card" | "dialog";
 
 export function ApprovalCard({
+  workspaceLabel,
   approval,
   caller,
   queue,
@@ -415,6 +417,7 @@ export function ApprovalCard({
       aria-busy={actionPending}
     >
       <span key={approval.approvalId} className="approval-attention-pulse" aria-hidden="true" />
+      {workspaceLabel && <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--gray-5)", fontSize: 12, color: "var(--gray-11)" }}>Workspace · <strong>{workspaceLabel}</strong></div>}
       <div className="approval-card-scroll">
         <Flex align="start" gap="3" className="approval-card-body">
           <Box className="approval-icon-box" data-beacon="true">

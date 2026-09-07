@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { Box, Button, Callout, Flex, Spinner, Text, TextField } from "@radix-ui/themes";
 import { CheckCircledIcon, ExclamationTriangleIcon } from "@radix-ui/react-icons";
@@ -14,7 +15,7 @@ import {
   ACCOUNT_AVATAR_DATA_URI_PATTERN,
   MAX_AVATAR_DATA_URI_BYTES,
 } from "@vibestudio/service-schemas/account";
-import { account, type ShellAccountProfile } from "../shell/client";
+import { type ShellAccountProfile } from "../shell/client";
 
 interface AccountProfileSectionProps {
   active: boolean;
@@ -75,6 +76,8 @@ async function avatarDataUriFromFile(file: File): Promise<string> {
 }
 
 export function AccountProfileSection({ active }: AccountProfileSectionProps) {
+  const { account } = useShellWorkspaceClient();
+
   const [profile, setProfile] = useState<ShellAccountProfile | null>(null);
   const [draft, setDraft] = useState<AccountProfileDraft>(EMPTY_ACCOUNT_PROFILE_DRAFT);
   const [avatarDraft, setAvatarDraft] = useState<string | null | undefined>(undefined);

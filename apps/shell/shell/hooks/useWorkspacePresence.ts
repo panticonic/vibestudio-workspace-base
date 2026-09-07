@@ -1,3 +1,4 @@
+import { useShellWorkspaceClient } from "../workspaceContext";
 /**
  * useWorkspacePresence — WP8 §4 workspace-USER presence, for the panel-forest UI.
  *
@@ -13,7 +14,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { workspacePresence, type WorkspacePresenceEntry } from "../client.js";
+import { type WorkspacePresenceEntry } from "../client.js";
 import { useShellEvent } from "../useShellEvent.js";
 
 export type { WorkspacePresenceEntry } from "../client.js";
@@ -36,6 +37,8 @@ function indexByUser(entries: WorkspacePresenceEntry[]): Map<string, WorkspacePr
  * in place as members connect/drop.
  */
 export function useWorkspacePresence(): WorkspacePresenceByUser {
+  const { workspacePresence } = useShellWorkspaceClient();
+
   const [byUser, setByUser] = useState<Map<string, WorkspacePresenceEntry>>(new Map());
   const eventVersionRef = useRef(0);
 

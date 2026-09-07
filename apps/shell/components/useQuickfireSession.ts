@@ -17,18 +17,13 @@ import {
   type QuickfireSessionView,
   type QuickfireTransport,
 } from "@workspace/quickfire-core/session";
-import { connectToChannel, quickfire } from "../shell/client";
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { hasOpenTurn, projectTranscript, TRANSCRIPT_LIMIT } from "./quickfireTranscript";
 
 export { hasOpenTurn, projectTranscript, TRANSCRIPT_LIMIT };
 export type { QuickfireSessionSource, QuickfireSessionView };
 
-const transport: QuickfireTransport = {
-  sessionFor: (slotId, options) => quickfire.sessionFor(slotId, options),
-  clear: (slotId) => quickfire.clear(slotId),
-  promote: (slotId) => quickfire.promote(slotId),
-  connectToChannel,
-};
+
 
 /**
  * Resolve and drive the conversation bound to `source` — a panel slot (the
@@ -42,7 +37,13 @@ const transport: QuickfireTransport = {
 export function useQuickfireSession(
   source: QuickfireSessionSource | null
 ): QuickfireSessionController {
-  const bound = useMemo(() => transport, []);
+  const { connectToChannel, quickfire } = useShellWorkspaceClient();
+  const bound = useMemo<QuickfireTransport>(() => ({
+    sessionFor: (slotId, options) => quickfire.sessionFor(slotId, options),
+    clear: (slotId) => quickfire.clear(slotId),
+    promote: (slotId) => quickfire.promote(slotId),
+    connectToChannel,
+  }), [quickfire, connectToChannel]);
   // The overlay's only input sits at the TOP of the card — it is the palette's
   // input, reused. So the newest message belongs directly beneath it and older
   // ones recede downward; a bottom-anchored chat would put the reply furthest

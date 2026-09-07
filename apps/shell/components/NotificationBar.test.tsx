@@ -27,6 +27,8 @@ const shellClient = vi.hoisted(() => ({
 }));
 
 vi.mock("../shell/client", () => ({
+  browserEnvironment: { openDownload: vi.fn(), revealDownload: vi.fn() },
+  extensions: { invoke: vi.fn() },
   app: {
     applyUpdate: shellClient.applyUpdate,
   },
