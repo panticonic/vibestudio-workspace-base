@@ -116,9 +116,13 @@ function AboutPage() {
             <DataList.Item>
               <DataList.Label>Runtime</DataList.Label>
               <DataList.Value>
-                <Link href="https://electronjs.org" target="_blank">
-                  Electron
-                </Link>
+                {isMobile ? (
+                  "Mobile WebView"
+                ) : (
+                  <Link href="https://electronjs.org" target="_blank">
+                    Electron
+                  </Link>
+                )}
               </DataList.Value>
             </DataList.Item>
             <DataList.Item>

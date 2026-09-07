@@ -26,6 +26,7 @@ import {
 } from "@vibestudio/rpc";
 import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
 import type { MobileRpcClient } from "./mobileTransport";
+import mobilePackage from "../../package.json";
 
 export interface BridgeAdapterCallbacks {
   openShellSurface(target: MobileShellSurface): void;
@@ -207,7 +208,8 @@ export function createBridgeAdapter(deps: {
       envelope.target !== "main" ||
       request.type !== "request" ||
       (request.method !== "app.openShellSurface" &&
-        request.method !== "app.describeShellSurfaces")
+        request.method !== "app.describeShellSurfaces" &&
+        request.method !== "app.getInfo")
     )
       return false;
     const lease = requirePanelLease(panelId);
@@ -247,7 +249,15 @@ export function createBridgeAdapter(deps: {
         );
       }
       let result: unknown;
-      if (request.method === "app.openShellSurface") {
+      if (request.method === "app.getInfo") {
+        appMethods.getInfo.args.parse(request.args);
+        result = appMethods.getInfo.returns.parse({
+          version: mobilePackage.version,
+          connectionMode: "remote",
+          connectionStatus: deps.transport.status,
+          remoteTransport: null,
+        });
+      } else if (request.method === "app.openShellSurface") {
         if ("readOnly" in request && request.readOnly === true) {
           throw new RpcBoundaryError(
             "Read-only requests cannot open native surfaces",

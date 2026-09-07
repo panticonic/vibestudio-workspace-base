@@ -656,7 +656,11 @@ describe("bridgeAdapter native app navigation", () => {
     const openShellSurface = jest.fn();
     const deliverToPanel = jest.fn();
     const adapter = createAdapter({
-      transport: { selfId: "shell:device", openPanelSession } as never,
+      transport: {
+        selfId: "shell:device",
+        status: "connected",
+        openPanelSession,
+      } as never,
       getPanelLease: () => lease,
       callbacks: {
         navigateToPanel: jest.fn(),
@@ -774,6 +778,29 @@ describe("bridgeAdapter native app navigation", () => {
       }),
     );
     expect(f.openShellSurface).not.toHaveBeenCalled();
+  });
+
+  it("returns the mobile host's truthful app and connection information", async () => {
+    const f = fixture();
+    await f.adapter.handle("panel:tree/a", "postEnvelope", [
+      f.request("app.getInfo"),
+    ]);
+    expect(f.deliverToPanel).toHaveBeenCalledWith(
+      "panel:tree/a",
+      expect.objectContaining({
+        message: {
+          type: "response",
+          requestId: "native-request",
+          result: {
+            version: "0.1.0",
+            connectionMode: "remote",
+            connectionStatus: "connected",
+            remoteTransport: null,
+          },
+        },
+      }),
+    );
+    expect(f.session.send).not.toHaveBeenCalled();
   });
 
   it.each([
