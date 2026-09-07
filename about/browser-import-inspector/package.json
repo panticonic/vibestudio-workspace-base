@@ -6,7 +6,7 @@
   "vibestudio": {
     "title": "Browser Migration & State",
     "icon": "./assets/icon.svg",
-    "description": "Migrate browser data through public and sealed host paths, inspect history, and debug import sources",
+    "description": "Import bookmarks, history, passwords, and other browser data",
     "hiddenInLauncher": false,
     "authority": {
       "provides": [],
