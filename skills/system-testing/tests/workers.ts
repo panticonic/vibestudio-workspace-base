@@ -429,6 +429,7 @@ export const workerTests: TestCase[] = [
     name: "create-worker",
     description: "Create a worker instance",
     category: "workers",
+    workspaceRepoFixture: BUILDABLE_REGULAR_WORKER_WORKSPACE_REPO_FIXTURE,
     prompt: "Temporarily start a worker, confirm that it exists, and leave no instance behind.",
     validate: (result) => {
       const base = lifecycleEvidence(result, [
@@ -460,6 +461,7 @@ export const workerTests: TestCase[] = [
     name: "create-destroy",
     description: "Create a worker and then destroy it",
     category: "workers",
+    workspaceRepoFixture: BUILDABLE_REGULAR_WORKER_WORKSPACE_REPO_FIXTURE,
     prompt: "Check that a harmless temporary worker can be started successfully.",
     validate: (result) => {
       const base = lifecycleEvidence(result, [

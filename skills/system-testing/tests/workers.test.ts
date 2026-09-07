@@ -73,6 +73,14 @@ describe("worker test validators", () => {
   });
 
   it("keeps authored worker probes in an isolated buildable fixture", () => {
+    expect(test("create-worker").workspaceRepoFixture).toEqual({
+      kind: "buildable-regular-worker",
+      section: "workers",
+    });
+    expect(test("create-destroy").workspaceRepoFixture).toEqual({
+      kind: "buildable-regular-worker",
+      section: "workers",
+    });
     expect(test("worker-do-sql-persistence").workspaceRepoFixture).toEqual({
       kind: "buildable-worker",
       section: "workers",
