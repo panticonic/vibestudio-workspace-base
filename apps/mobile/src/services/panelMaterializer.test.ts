@@ -62,30 +62,24 @@ function makeDeps(overrides?: {
       async () => overrides?.panelInit ?? { entityId: "panel:nav-1" },
     ),
     acquireLease: jest.fn(
-      async (
-        _panelId: string,
-        runtimeEntityId: string,
-        opts: { connectionId: string },
-      ) =>
+      async (_panelId: string, runtimeEntityId: string) =>
         overrides?.acquireResult ?? {
           acquired: true,
+          version: { epoch: "test", counter: 1 },
           lease: makeLease({
             runtimeEntityId: asPanelEntityId(runtimeEntityId),
-            connectionId: opts.connectionId,
+            connectionId: "retained-connection",
           }),
         },
     ),
     takeOverLease: jest.fn(
-      async (
-        _panelId: string,
-        runtimeEntityId: string,
-        opts: { connectionId: string },
-      ) =>
+      async (_panelId: string, runtimeEntityId: string) =>
         overrides?.acquireResult ?? {
           acquired: true,
+          version: { epoch: "test", counter: 1 },
           lease: makeLease({
             runtimeEntityId: asPanelEntityId(runtimeEntityId),
-            connectionId: opts.connectionId,
+            connectionId: "retained-connection",
           }),
         },
     ),
@@ -223,14 +217,13 @@ describe("materializeMobilePanel", () => {
     ).resolves.toEqual({
       panelId: "panel-1",
       runtimeEntityId: "panel:nav-1",
+      connectionId: "retained-connection",
       url: "about:blank",
       managed: true,
       panelInit: null,
     });
     expect(deps.getPanelInit).not.toHaveBeenCalled();
-    expect(deps.acquireLease).toHaveBeenCalledWith("panel-1", "panel:nav-1", {
-      connectionId: expect.stringMatching(/^mobile-panel-1-/),
-    });
+    expect(deps.acquireLease).toHaveBeenCalledWith("panel-1", "panel:nav-1");
   });
 
   it("acquires a mobile runtime lease for browser panels before returning the browser URL", async () => {
@@ -247,14 +240,13 @@ describe("materializeMobilePanel", () => {
     expect(result).toEqual({
       panelId: "panel-1",
       runtimeEntityId: "panel:nav-1",
+      connectionId: "retained-connection",
       url: "https://example.com/docs",
       managed: false,
       panelInit: null,
     });
     expect(deps.getPanelInit).toHaveBeenCalledWith("panel-1");
-    expect(deps.acquireLease).toHaveBeenCalledWith("panel-1", "panel:nav-1", {
-      connectionId: expect.stringMatching(/^mobile-panel-1-/),
-    });
+    expect(deps.acquireLease).toHaveBeenCalledWith("panel-1", "panel:nav-1");
     expect(deps.takeOverLease).not.toHaveBeenCalled();
   });
 
@@ -269,9 +261,7 @@ describe("materializeMobilePanel", () => {
       leaseMode: "takeOver",
     });
 
-    expect(deps.takeOverLease).toHaveBeenCalledWith("panel-1", "panel:nav-1", {
-      connectionId: expect.stringMatching(/^mobile-panel-1-/),
-    });
+    expect(deps.takeOverLease).toHaveBeenCalledWith("panel-1", "panel:nav-1");
     expect(deps.acquireLease).not.toHaveBeenCalled();
   });
 
@@ -279,6 +269,7 @@ describe("materializeMobilePanel", () => {
     const deps = makeDeps({
       acquireResult: {
         acquired: false,
+        version: { epoch: "test", counter: 1 },
         lease: makeLease({ holderLabel: "Desktop" }),
       },
     });
@@ -299,6 +290,7 @@ describe("materializeMobilePanel", () => {
       panelInit: { entityId: "panel:nav-1", slotId: "panel-1" },
       acquireResult: {
         acquired: true,
+        version: { epoch: "test", counter: 1 },
         lease: makeLease({ connectionId: "recovered-connection" }),
       },
     });
@@ -367,9 +359,7 @@ describe("materializeMobilePanel", () => {
       panelInit: { entityId: "panel:nav-2" },
     });
     expect(deps.acquireLease).toHaveBeenCalledTimes(1);
-    expect(deps.acquireLease).toHaveBeenCalledWith("panel-1", "panel:nav-2", {
-      connectionId: expect.stringMatching(/^mobile-panel-1-/),
-    });
+    expect(deps.acquireLease).toHaveBeenCalledWith("panel-1", "panel:nav-2");
   });
 });
 

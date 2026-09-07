@@ -1,3 +1,4 @@
+import { asPanelEntityId } from "@vibestudio/shared/panel/ids";
 import { parseShellSurfaceLink } from "@vibestudio/shared/shellSurface";
 import type { ShellClient } from "../services/shellClient";
 import type { RootStackParamList } from "../navigation/RootNavigator";
@@ -293,8 +294,10 @@ export function MainScreen() {
   useAppLifecycle(shellClient);
   const [webViewStack, setWebViewStack] = useState<WebViewEntry[]>([]);
   const webViewStackRef = useRef<WebViewEntry[]>([]);
+  const retentionLifetime = useRef(new AbortController());
   const updateWebViewStack = useCallback(
     (update: (current: WebViewEntry[]) => WebViewEntry[]) => {
+      if (retentionLifetime.current.signal.aborted) return;
       const next = update(webViewStackRef.current);
       webViewStackRef.current = next;
       setWebViewStack(next);
@@ -640,27 +643,15 @@ export function MainScreen() {
       return next;
     });
   }, [shellClient, setPanelTreeRevision, setPinnedPanelIds, persistPins]);
-  const activatePanel = useCallback(
+  const retainPanelPresentation = useCallback(
     (panelId: string) => {
-      if (!shellClient || !hostConfig) return;
+      if (!shellClient || retentionLifetime.current.signal.aborted) return;
       const panel = shellClient.panels.registry.getPanel(panelId);
-      if (!panel) return;
-      setActivePanelId(panelId);
-      updateWebViewStack((prev) =>
-        prev.map((entry) =>
-          entry.panelId === panelId
-            ? { ...entry, lastActive: Date.now() }
-            : entry,
-        ),
-      );
-      if (webViewStackRef.current.some((entry) => entry.panelId === panelId))
+      if (
+        !panel ||
+        webViewStackRef.current.some((entry) => entry.panelId === panelId)
+      )
         return;
-      const lease = shellClient.panels.registry.getRuntimeLease(panelId);
-      if (lease && lease.clientSessionId !== shellClient.credentials.deviceId) {
-        smokePhase("workspace-panel-leased-elsewhere", { panelId });
-        return;
-      }
-
       // Activation creates only the presentation slot. One shared convergence
       // path below owns every asynchronous runtime read, lease, and URL update,
       // so initial activation cannot race navigation differently from a
@@ -694,13 +685,72 @@ export function MainScreen() {
         ),
       );
     },
+    [shellClient, panelMaterializationRetryQueue, updateWebViewStack],
+  );
+  const activatePanel = useCallback(
+    (panelId: string) => {
+      if (!shellClient || !hostConfig) return;
+      const panel = shellClient.panels.registry.getPanel(panelId);
+      if (!panel) return;
+      setActivePanelId(panelId);
+      updateWebViewStack((prev) =>
+        prev.map((entry) =>
+          entry.panelId === panelId
+            ? { ...entry, lastActive: Date.now() }
+            : entry,
+        ),
+      );
+      if (webViewStackRef.current.some((entry) => entry.panelId === panelId))
+        return;
+      const lease = shellClient.panels.registry.getRuntimeLease(panelId);
+      if (lease && lease.clientSessionId !== shellClient.credentials.deviceId) {
+        smokePhase("workspace-panel-leased-elsewhere", { panelId });
+        return;
+      }
+
+      retainPanelPresentation(panelId);
+    },
     [
       hostConfig,
       panelMaterializationRetryQueue,
       shellClient,
       setActivePanelId,
       updateWebViewStack,
+      retainPanelPresentation,
     ],
+  );
+  const syncRetainedRuntimeOwners = useCallback(() => {
+    if (!shellClient || retentionLifetime.current.signal.aborted) return;
+    shellClient.panels.syncRetainedRuntimeOwners(
+      webViewStackRef.current.flatMap((entry) => {
+        const panel = shellClient.panels.registry.getPanel(entry.panelId);
+        return panel?.runtimeEntityId
+          ? [
+              {
+                panelId: entry.panelId,
+                runtimeEntityId: asPanelEntityId(panel.runtimeEntityId),
+              },
+            ]
+          : [];
+      }),
+    );
+  }, [shellClient]);
+  useEffect(() => {
+    retentionLifetime.current = new AbortController();
+    return () => {
+      retentionLifetime.current.abort();
+      webViewStackRef.current = [];
+      shellClient?.panels.syncRetainedRuntimeOwners([]);
+    };
+  }, [shellClient]);
+  const getRetainedPanel = useCallback(
+    (panelId: string) => {
+      syncRetainedRuntimeOwners();
+      return webViewStackRef.current.some((entry) => entry.panelId === panelId)
+        ? (shellClient?.panels.registry.getPanel(panelId) ?? null)
+        : null;
+    },
+    [shellClient, syncRetainedRuntimeOwners],
   );
   // WebViews are retained presentation slots, not runtime identities. Converge
   // every retained slot when its immutable runtime entity changes—whether the
@@ -711,6 +761,7 @@ export function MainScreen() {
       webViewStack.map((entry) => entry.panelId),
     );
     panelMaterializationRetryQueue.retainOnly(retainedPanelIds);
+    syncRetainedRuntimeOwners();
     for (const entry of webViewStack) {
       const panel = shellClient.panels.registry.getPanel(entry.panelId);
       if (!panel) {
@@ -757,13 +808,12 @@ export function MainScreen() {
           panelId: entry.panelId,
           signal: cancellation.signal,
           hostConfig,
-          getPanel: () =>
-            shellClient.panels.registry.getPanel(entry.panelId) ?? null,
+          getPanel: () => getRetainedPanel(entry.panelId),
           getPanelInit: (id) => shellClient.panels.getPanelInit(id),
-          acquireLease: (id, entityId, opts) =>
-            shellClient.panels.acquireLease(id, entityId, opts),
-          takeOverLease: (id, entityId, opts) =>
-            shellClient.panels.takeOverLease(id, entityId, opts),
+          acquireLease: (id, entityId) =>
+            shellClient.panels.acquireLease(id, entityId),
+          takeOverLease: (id, entityId) =>
+            shellClient.panels.takeOverLease(id, entityId),
           leaseMode: "acquire",
         }),
         PANEL_MATERIALIZE_TIMEOUT_MS,
@@ -771,18 +821,23 @@ export function MainScreen() {
         () => cancellation.abort(),
       )
         .then((materialized) => {
+          syncRetainedRuntimeOwners();
           const currentEntry = webViewStackRef.current.find(
             (candidate) => candidate.panelId === entry.panelId,
           );
           const currentPanel = shellClient.panels.registry.getPanel(
             entry.panelId,
           );
+          if (!currentEntry || !currentPanel) return;
           if (
-            !currentEntry ||
-            !currentPanel ||
-            materialized.runtimeEntityId !== currentPanel.runtimeEntityId
+            materialized.runtimeEntityId !== currentPanel.runtimeEntityId ||
+            !shellClient.panels.isCurrentRuntimeLease(
+              entry.panelId,
+              materialized.runtimeEntityId,
+              materialized.connectionId,
+            )
           ) {
-            return;
+            throw new Error("Panel runtime changed before presentation");
           }
           if (hostConfig.protocol === "http") {
             console.log(`[MainScreen] Materialized panel ${entry.panelId}`, {
@@ -828,6 +883,17 @@ export function MainScreen() {
           );
         })
         .catch((error: unknown) => {
+          const retained = webViewStackRef.current.find(
+            (candidate) => candidate.panelId === entry.panelId,
+          );
+          const currentPanel = getRetainedPanel(entry.panelId);
+          if (
+            !retained ||
+            !currentPanel ||
+            mobilePanelMaterializationState(currentPanel, retained) ===
+              "current"
+          )
+            return;
           const message =
             error instanceof Error
               ? error.message
@@ -857,24 +923,35 @@ export function MainScreen() {
     shellClient,
     updateWebViewStack,
     webViewStack,
+    getRetainedPanel,
+    syncRetainedRuntimeOwners,
   ]);
   const takeOverActivePanel = useCallback(() => {
     if (!activePanelId || !activePanel || !hostConfig || !shellClient) return;
+    retainPanelPresentation(activePanelId);
     pendingPanelLoads.current.add(activePanelId);
     setLoadingPanelId(activePanelId);
     void materializeLatestMobilePanel({
       panelId: activePanelId,
       hostConfig,
-      getPanel: () =>
-        shellClient.panels.registry.getPanel(activePanelId) ?? null,
+      getPanel: () => getRetainedPanel(activePanelId),
       getPanelInit: (id) => shellClient.panels.getPanelInit(id),
-      acquireLease: (id, entityId, opts) =>
-        shellClient.panels.acquireLease(id, entityId, opts),
-      takeOverLease: (id, entityId, opts) =>
-        shellClient.panels.takeOverLease(id, entityId, opts),
+      acquireLease: (id, entityId) =>
+        shellClient.panels.acquireLease(id, entityId),
+      takeOverLease: (id, entityId) =>
+        shellClient.panels.takeOverLease(id, entityId),
       leaseMode: "takeOver",
     })
       .then((materialized) => {
+        syncRetainedRuntimeOwners();
+        if (
+          !shellClient.panels.isCurrentRuntimeLease(
+            activePanelId,
+            materialized.runtimeEntityId,
+            materialized.connectionId,
+          )
+        )
+          return;
         updateWebViewStack((prev) =>
           addWebViewEntry(
             prev,
@@ -911,7 +988,16 @@ export function MainScreen() {
           current === activePanelId ? null : current,
         );
       });
-  }, [activePanel, activePanelId, hostConfig, pushToast, shellClient]);
+  }, [
+    activePanel,
+    activePanelId,
+    hostConfig,
+    pushToast,
+    shellClient,
+    getRetainedPanel,
+    syncRetainedRuntimeOwners,
+    retainPanelPresentation,
+  ]);
   useEffect(() => {
     if (!shellClient) return;
     refreshTree();
@@ -1330,7 +1416,13 @@ export function MainScreen() {
           togglePanelPin(panelId);
           return;
         case "unload":
-          void shellClient.panels.unload(panelId);
+          void shellClient.panels.unload(panelId).catch((error: unknown) =>
+            pushToast({
+              title: "Could not unload panel",
+              message: error instanceof Error ? error.message : "Try again.",
+              tone: "danger",
+            }),
+          );
           updateWebViewStack((prev) =>
             prev.filter((entry) => entry.panelId !== panelId),
           );

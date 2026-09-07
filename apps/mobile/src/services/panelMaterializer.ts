@@ -13,6 +13,7 @@ import { buildPanelUrl, type HostConfig } from "./panelUrls";
 export interface MobileMaterializedPanel {
   panelId: string;
   runtimeEntityId: PanelEntityId;
+  connectionId: string;
   url: string;
   managed: boolean;
   panelInit: unknown;
@@ -26,12 +27,10 @@ export interface MobilePanelMaterializationDeps {
   acquireLease(
     panelId: string,
     runtimeEntityId: PanelEntityId,
-    opts: { connectionId: string },
   ): Promise<PanelRuntimeAcquireResult>;
   takeOverLease(
     panelId: string,
     runtimeEntityId: PanelEntityId,
-    opts: { connectionId: string },
   ): Promise<PanelRuntimeAcquireResult>;
   leaseMode: "acquire" | "takeOver";
 }
@@ -88,11 +87,10 @@ export async function materializeMobilePanel(
   checkActive();
   const snapshot = getCurrentSnapshot(opts.panel);
   const managed = !snapshot.source.startsWith("browser:");
-  const connectionId = `mobile-${opts.panelId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
   const acquireLease = (runtimeEntityId: PanelEntityId) =>
     opts.leaseMode === "takeOver"
-      ? opts.takeOverLease(opts.panelId, runtimeEntityId, { connectionId })
-      : opts.acquireLease(opts.panelId, runtimeEntityId, { connectionId });
+      ? opts.takeOverLease(opts.panelId, runtimeEntityId)
+      : opts.acquireLease(opts.panelId, runtimeEntityId);
   if (managed && !/^[0-9a-f]{64}$/.test(opts.panel.buildKey ?? "")) {
     if (!opts.panel.runtimeEntityId) {
       throw new Error(
@@ -110,6 +108,7 @@ export async function materializeMobilePanel(
     return {
       panelId: opts.panelId,
       runtimeEntityId,
+      connectionId: lease.lease.connectionId,
       url: "about:blank",
       managed: true,
       panelInit: null,
@@ -126,7 +125,7 @@ export async function materializeMobilePanel(
   // Validate the SHAPE here (throws loudly on a slot id "panel:tree/…" where an
   // entity id "panel:nav-…" is required) so the slot/entity mix-up cannot reach
   // the lease + grant as a laundered raw string — the brand then enforces it
-  // through acquireLease → runtimeConnectionBySlot → openPanelSession at compile
+  // through acquireLease → retained runtime owner → openPanelSession at compile
   // time.
   const runtimeEntityId: PanelEntityId = asPanelEntityId(rawEntityId);
   if (runtimeEntityId !== opts.panel.runtimeEntityId) {
@@ -145,6 +144,7 @@ export async function materializeMobilePanel(
     return {
       panelId: opts.panelId,
       runtimeEntityId,
+      connectionId: lease.lease.connectionId,
       url: snapshot.source.slice("browser:".length),
       managed: false,
       panelInit: null,
@@ -161,6 +161,7 @@ export async function materializeMobilePanel(
   return {
     panelId: opts.panelId,
     runtimeEntityId,
+    connectionId: lease.lease.connectionId,
     url: buildPanelUrl(
       snapshot.source,
       snapshot.contextId,

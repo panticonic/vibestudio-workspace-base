@@ -1,3 +1,7 @@
+import {
+  RetainedRuntimeLeases,
+  type RetainedRuntimeOwner,
+} from "./retainedRuntimeLeases";
 import { browserPermissionsMethods } from "@vibestudio/service-schemas/browserPermissions";
 import type { BrowserPermissionRequester } from "./workspaceBrowserPermission";
 import type { PanelRegistry } from "@vibestudio/shared/panelRegistry";
@@ -24,15 +28,11 @@ import type {
   PanelHost,
   PanelHostRegistration,
   PanelRuntimeAcquireResult,
-  PanelRuntimeLease,
   PanelRuntimeLeaseChangedEvent,
   RuntimeLeaseSnapshot,
 } from "@vibestudio/shared/panel/panelLease";
 import type { PanelPageObservation } from "@vibestudio/shared/panel/observation";
-import {
-  reconcileTrackedRuntimeLeases,
-  trackedRuntimeLeaseWasLost,
-} from "./runtimeLeaseRepair";
+import { reconcileTrackedRuntimeLeases } from "./runtimeLeaseRepair";
 import type { PanelTreeInvalidation } from "@vibestudio/shared/panel/treeIndex";
 import {
   createPanelHostRegistration,
@@ -40,7 +40,6 @@ import {
 } from "@vibestudio/shared/panel/panelLease";
 import {
   asPanelSlotId,
-  asPanelEntityId,
   type PanelEntityId,
 } from "@vibestudio/shared/panel/ids";
 import {
@@ -305,10 +304,7 @@ class MobilePanels implements PanelHost {
   private readonly browserData: BrowserDataClient;
   private readonly workspaceRpc: WorkspaceRpcClient;
   private readonly presentation: WorkspacePresentationClient;
-  private readonly runtimeConnectionBySlot = new Map<
-    string,
-    { runtimeEntityId: PanelEntityId; connectionId: string }
-  >();
+  private readonly runtimeLeases: RetainedRuntimeLeases;
   private registered = false;
   readonly registration: PanelHostRegistration;
   constructor(
@@ -332,6 +328,25 @@ class MobilePanels implements PanelHost {
       loadOnLeaseAssignment: false,
     });
     this.panelRuntime = createPanelRuntimeClient(this.deps.transport);
+    this.runtimeLeases = new RetainedRuntimeLeases({
+      createConnectionId: () =>
+        `mobile-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`,
+      acquire: (panelId, runtimeEntityId, connectionId, mode) =>
+        this.panelRuntime[mode](
+          runtimeEntityId,
+          createPanelRuntimeLeaseRequest({
+            slotId: panelId,
+            clientSessionId: this.deps.clientSessionId,
+            connectionId,
+          }),
+        ),
+      release: (runtimeEntityId, connectionId) =>
+        this.panelRuntime.release(runtimeEntityId, connectionId),
+      changed: (panelId) =>
+        this.bridgeAdapterInstance?.closePanelSession(panelId),
+      failed: (error) =>
+        console.warn("[MobilePanels] Failed to retire panel lease", error),
+    });
     this.workspaceRpc = createWorkspaceRpcClient(this.deps.transport);
     this.presentation = createWorkspacePresentationClient(this.deps.transport);
     this.browserData = createBrowserDataClient({
@@ -379,7 +394,7 @@ class MobilePanels implements PanelHost {
         },
         deliverToPanel: (panelId, envelope) =>
           this.deliverToPanel(panelId, envelope),
-        getPanelLease: (panelId) => this.runtimeConnectionBySlot.get(panelId),
+        getPanelLease: (panelId) => this.runtimeLeases.get(panelId),
       });
     }
     const initialTheme =
@@ -909,24 +924,30 @@ class MobilePanels implements PanelHost {
   resetBridgeSessionForReload(panelId: string): void {
     this.bridgeAdapterInstance?.closePanelSession(panelId);
   }
-  async unload(panelId: string): Promise<void> {
-    // Tear down the panel's dedicated relay session (closed regardless of whether
-    // it held a runtime lease).
-    this.bridgeAdapterInstance?.closePanelSession(panelId);
-    const lease = this.runtimeConnectionBySlot.get(panelId);
-    this.runtimeConnectionBySlot.delete(panelId);
-    if (!lease) return;
-    try {
-      await this.panelRuntime.release(
-        lease.runtimeEntityId,
-        lease.connectionId,
-      );
-    } catch (error) {
-      console.warn("[MobilePanels] Failed to release panel lease", {
-        panelId,
-        error: error instanceof Error ? error.message : String(error),
-      });
+  syncRetainedRuntimeOwners(
+    entries: readonly { panelId: string; runtimeEntityId: PanelEntityId }[],
+  ): void {
+    const retained = new Set(entries.map((entry) => entry.panelId));
+    for (const panelId of this.runtimeLeases.keys()) {
+      if (!retained.has(panelId)) void this.runtimeLeases.retire(panelId);
     }
+    for (const entry of entries)
+      this.runtimeLeases.retain(entry.panelId, entry.runtimeEntityId);
+  }
+  isCurrentRuntimeLease(
+    panelId: string,
+    runtimeEntityId: PanelEntityId,
+    connectionId: string,
+  ): boolean {
+    const owner = this.runtimeLeases.get(panelId);
+    return (
+      owner?.runtimeEntityId === runtimeEntityId &&
+      owner.connectionId === connectionId
+    );
+  }
+  async unload(panelId: string): Promise<void> {
+    this.bridgeAdapterInstance?.closePanelSession(panelId);
+    await this.runtimeLeases.retire(panelId);
   }
   async reportView(
     runtimeEntityId: PanelEntityId,
@@ -944,7 +965,7 @@ class MobilePanels implements PanelHost {
     smokePhase("workspace-panel-init-start", { panelId });
     const panelInit = await this.requireManager().getPanelInit(slotId);
     smokePhase("workspace-panel-init-complete", { panelId });
-    const lease = this.runtimeConnectionBySlot.get(String(slotId));
+    const lease = this.runtimeLeases.get(String(slotId));
     if (!lease || !panelInit || typeof panelInit !== "object") return panelInit;
     return {
       ...(panelInit as Record<string, unknown>),
@@ -955,62 +976,52 @@ class MobilePanels implements PanelHost {
   async acquireLease(
     panelId: string,
     runtimeEntityId: PanelEntityId,
-    opts: { connectionId: string },
   ): Promise<PanelRuntimeAcquireResult> {
     smokePhase("workspace-panel-lease-start", { panelId, runtimeEntityId });
-    const result = await this.panelRuntime.acquire(
+    const result = await this.runtimeLeases.acquire(
+      panelId,
       runtimeEntityId,
-      createPanelRuntimeLeaseRequest({
-        slotId: panelId,
-        clientSessionId: this.deps.clientSessionId,
-        connectionId: opts.connectionId,
-      }),
+      "acquire",
     );
     smokePhase("workspace-panel-lease-complete", {
       panelId,
       acquired: result.acquired,
     });
-    if (result.acquired) {
-      this.trackRuntimeLease(result.lease);
-    }
     return result;
   }
   async takeOverLease(
     panelId: string,
     runtimeEntityId: PanelEntityId,
-    opts: { connectionId: string },
   ): Promise<PanelRuntimeAcquireResult> {
-    const result = await this.panelRuntime.takeOver(
-      runtimeEntityId,
-      createPanelRuntimeLeaseRequest({
-        slotId: panelId,
-        clientSessionId: this.deps.clientSessionId,
-        connectionId: opts.connectionId,
-      }),
-    );
-    if (result.acquired) {
-      this.trackRuntimeLease(result.lease);
-    }
-    return result;
+    return this.runtimeLeases.acquire(panelId, runtimeEntityId, "takeOver");
   }
   handleRuntimeLeaseChanged(event: PanelRuntimeLeaseChangedEvent): void {
+    const currentVersion = this.registry.getRuntimeLeaseVersion();
+    if (
+      currentVersion?.epoch === event.version.epoch &&
+      event.version.counter <= currentVersion.counter
+    )
+      return;
     this.registry.applyRuntimeLeaseChanged(event);
-    if (event.next?.clientSessionId === this.deps.clientSessionId) {
-      this.trackRuntimeLease(event.next);
-    } else if (
-      trackedRuntimeLeaseWasLost({
-        tracked: this.runtimeConnectionBySlot.get(String(event.slotId)),
-        event,
-        clientSessionId: this.deps.clientSessionId,
-      })
-    ) {
-      this.clearTrackedRuntimeLease(String(event.slotId));
-    }
+    this.runtimeLeases.handleEvent(event, this.deps.clientSessionId);
   }
+
   async syncRuntimeLeases(): Promise<void> {
+    const owners = new Map(
+      Array.from(this.runtimeLeases.keys(), (panelId) => [
+        panelId,
+        this.runtimeLeases.retained(panelId)!,
+      ]),
+    );
     const snapshot = await this.panelRuntime.getSnapshot();
+    const currentVersion = this.registry.getRuntimeLeaseVersion();
+    if (
+      currentVersion?.epoch === snapshot.version.epoch &&
+      snapshot.version.counter < currentVersion.counter
+    )
+      return;
     this.registry.applyRuntimeLeaseSnapshot(snapshot);
-    await this.syncTrackedRuntimeLeases(snapshot);
+    await this.syncTrackedRuntimeLeases(snapshot, owners);
   }
   async handleBridgeCall(
     panelId: string,
@@ -1071,44 +1082,36 @@ class MobilePanels implements PanelHost {
     if (!this.panelManager) throw new Error("Panels not initialized");
     return this.panelManager;
   }
-  private trackRuntimeLease(lease: PanelRuntimeLease): void {
-    this.setTrackedRuntimeLease(
-      String(lease.slotId),
-      asPanelEntityId(String(lease.runtimeEntityId)),
-      lease.connectionId,
-    );
-  }
-  private setTrackedRuntimeLease(
-    panelId: string,
-    runtimeEntityId: PanelEntityId,
-    connectionId: string,
-  ): void {
-    const existing = this.runtimeConnectionBySlot.get(panelId);
-    const changed =
-      !existing ||
-      existing.runtimeEntityId !== runtimeEntityId ||
-      existing.connectionId !== connectionId;
-    this.runtimeConnectionBySlot.set(panelId, {
-      runtimeEntityId,
-      connectionId,
-    });
-    if (changed) this.bridgeAdapterInstance?.closePanelSession(panelId);
-  }
-  private clearTrackedRuntimeLease(panelId: string): void {
-    const tracked = this.runtimeConnectionBySlot.delete(panelId);
-    if (tracked) this.bridgeAdapterInstance?.closePanelSession(panelId);
-  }
   private async syncTrackedRuntimeLeases(
     snapshot: RuntimeLeaseSnapshot,
+    captured: ReadonlyMap<string, RetainedRuntimeOwner>,
   ): Promise<void> {
+    const current = new Map(
+      [...captured].filter(([panelId, owner]) =>
+        this.runtimeLeases.acceptVersion(panelId, owner, snapshot.version),
+      ),
+    );
     const { ours, lost, orphaned } = reconcileTrackedRuntimeLeases({
-      snapshot,
-      trackedSlotIds: Array.from(this.runtimeConnectionBySlot.keys()),
+      snapshot: {
+        ...snapshot,
+        leases: snapshot.leases.filter(
+          (lease) =>
+            current.get(String(lease.slotId))?.runtimeEntityId ===
+            lease.runtimeEntityId,
+        ),
+      },
+      trackedSlotIds: [...current]
+        .filter(([, owner]) => owner.acquired)
+        .map(([panelId]) => panelId),
       clientSessionId: this.deps.clientSessionId,
     });
-    for (const lease of ours) this.trackRuntimeLease(lease);
-    for (const slotId of lost) this.clearTrackedRuntimeLease(slotId);
-    await this.repairRuntimeLeases(orphaned);
+    for (const lease of ours)
+      this.runtimeLeases.observe(lease, snapshot.version);
+    for (const slotId of lost)
+      this.runtimeLeases.clear(slotId, current.get(slotId), snapshot.version);
+    await this.repairRuntimeLeases(
+      orphaned.map((panelId) => [panelId, current.get(panelId)!]),
+    );
   }
   /**
    * Re-acquire the routes this device is still presenting.
@@ -1121,23 +1124,17 @@ class MobilePanels implements PanelHost {
    * dropping the tracked route is correct.
    */
   private async repairRuntimeLeases(
-    panelIds: readonly string[],
+    owners: readonly (readonly [string, RetainedRuntimeOwner])[],
   ): Promise<void> {
-    for (const panelId of panelIds) {
-      const tracked = this.runtimeConnectionBySlot.get(panelId);
-      if (!tracked) continue;
+    for (const [panelId, tracked] of owners) {
+      if (this.runtimeLeases.get(panelId) !== tracked) continue;
       try {
-        const result = await this.panelRuntime.acquire(
+        await this.runtimeLeases.acquire(
+          panelId,
           tracked.runtimeEntityId,
-          createPanelRuntimeLeaseRequest({
-            slotId: panelId,
-            clientSessionId: this.deps.clientSessionId,
-            connectionId: tracked.connectionId,
-          }),
+          "acquire",
         );
-        if (!result.acquired) this.clearTrackedRuntimeLease(panelId);
       } catch (error) {
-        this.clearTrackedRuntimeLease(panelId);
         console.warn("[MobilePanels] Failed to repair panel runtime lease", {
           panelId,
           error: error instanceof Error ? error.message : String(error),
