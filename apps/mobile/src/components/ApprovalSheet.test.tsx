@@ -85,7 +85,11 @@ const credential: PendingApproval = {
   credentialId: "cred-google",
   credentialLabel: "Google Calendar",
   audience: [{ match: "origin", url: "https://calendar.google.com/" }],
-  injection: { type: "header", name: "Authorization", valueTemplate: "Bearer {{token}}" },
+  injection: {
+    type: "header",
+    name: "Authorization",
+    valueTemplate: "Bearer {{token}}",
+  },
   accountIdentity: { email: "me@example.com", providerUserId: "user-1" },
   scopes: ["calendar.readonly"],
   oauthAuthorizeOrigin: "https://accounts.google.com",
@@ -123,7 +127,12 @@ const clientConfig: PendingApproval = {
   title: "Google Calendar",
   fields: [
     { name: "clientId", label: "Client ID", type: "text", required: true },
-    { name: "clientSecret", label: "Client Secret", type: "secret", required: true },
+    {
+      name: "clientSecret",
+      label: "Client Secret",
+      type: "secret",
+      required: true,
+    },
   ],
 };
 
@@ -132,11 +141,15 @@ const credentialInput: PendingApproval = {
   kind: "credential-input",
   title: "Add API key",
   credentialLabel: "Acme API",
-  audience: [{ match: "path-prefix", url: "https://api.acme.test/v1/projects" }],
+  audience: [
+    { match: "path-prefix", url: "https://api.acme.test/v1/projects" },
+  ],
   injection: { type: "query-param", name: "api_key" },
   accountIdentity: { providerUserId: "acme-user" },
   scopes: ["projects.read"],
-  fields: [{ name: "apiKey", label: "API Key", type: "secret", required: true }],
+  fields: [
+    { name: "apiKey", label: "API Key", type: "secret", required: true },
+  ],
 };
 
 const secretInput: PendingApproval = {
@@ -146,7 +159,14 @@ const secretInput: PendingApproval = {
   description: "Authenticate sudo for: sudo id",
   warning: "This password is used once and is not stored.",
   details: [{ label: "Command", value: "sudo id" }],
-  fields: [{ name: "password", label: "Sudo password", type: "secret", required: true }],
+  fields: [
+    {
+      name: "password",
+      label: "Sudo password",
+      type: "secret",
+      required: true,
+    },
+  ],
 };
 
 const genericApproval: PendingApproval = {
@@ -165,7 +185,8 @@ const deviceCode: PendingApproval = {
   credentialLabel: "GitHub",
   userCode: "ABCD-1234",
   verificationUri: "https://github.com/login/device",
-  verificationUriComplete: "https://github.com/login/device?user_code=ABCD-1234",
+  verificationUriComplete:
+    "https://github.com/login/device?user_code=ABCD-1234",
   expiresAt: Date.now() + 600_000,
   oauthTokenOrigin: "https://github.com/login/oauth/access_token",
 };
@@ -265,7 +286,10 @@ const installReview: PendingApproval = {
  * in one part for split/collapse tests without inventing unregistered
  * capabilities.
  */
-function headlineRow(id: string, timing: InstallReviewRow["timing"] = "on-add"): InstallReviewRow {
+function headlineRow(
+  id: string,
+  timing: InstallReviewRow["timing"] = "on-add",
+): InstallReviewRow {
   return {
     kind: "permission",
     key: `push.send#${id}`,
@@ -285,7 +309,8 @@ function headlineRow(id: string, timing: InstallReviewRow["timing"] = "on-add"):
 }
 
 function reviewPart(
-  overrides: Partial<InstallReviewPart> & Pick<InstallReviewPart, "identityKey" | "title">
+  overrides: Partial<InstallReviewPart> &
+    Pick<InstallReviewPart, "identityKey" | "title">,
 ): InstallReviewPart {
   return {
     kind: "worker",
@@ -331,7 +356,7 @@ const browserPermission: PendingApproval = {
 
 function renderSheet(
   approval: PendingApproval | PendingApproval[],
-  overrides: Partial<React.ComponentProps<typeof ApprovalSheet>> = {}
+  overrides: Partial<React.ComponentProps<typeof ApprovalSheet>> = {},
 ) {
   const props = {
     approvals: Array.isArray(approval) ? approval : [approval],
@@ -347,6 +372,28 @@ function renderSheet(
 }
 
 describe("ApprovalSheet", () => {
+  it("keeps a cross-workspace approval direction visible outside request details", () => {
+    const foreign: PendingApproval = {
+      ...consequentialCapability,
+      snapshot: {
+        ...consequentialCapability.snapshot!,
+        sourceWorkspaceId: "project",
+        workspaceId: "personal",
+      },
+    };
+    const { getByText, getByTestId } = renderSheet(foreign, {
+      workspaceName: "Personal",
+      workspaceNames: { project: "Project", personal: "Personal" },
+    });
+    expect(getByTestId("approval-workspace-direction")).toBeTruthy();
+    expect(getByText("Project → Personal")).toBeTruthy();
+    expect(
+      getByText(
+        "Responses return to Project and may be visible to its members.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("presents one accessible modal summary that remains usable with long localized copy", () => {
     const localized = {
       ...genericApproval,
@@ -404,11 +451,17 @@ describe("ApprovalSheet", () => {
       ],
     };
     const content = new Map([
-      ["old-hash", "one\ntwo\nthree\nfour\nfive\nold value\nseven\neight\nnine\nten"],
-      ["new-hash", "one\ntwo\nthree\nfour\nfive\nnew value\nseven\neight\nnine\nten"],
+      [
+        "old-hash",
+        "one\ntwo\nthree\nfour\nfive\nold value\nseven\neight\nnine\nten",
+      ],
+      [
+        "new-hash",
+        "one\ntwo\nthree\nfour\nfive\nnew value\nseven\neight\nnine\nten",
+      ],
     ]);
     const onFetchDiffContent = jest.fn(
-      async (_approvalId: string, hash: string) => content.get(hash) ?? null
+      async (_approvalId: string, hash: string) => content.get(hash) ?? null,
     );
     const onOpenDiffFile = jest.fn(async () => undefined);
     const { getByTestId, getByText } = renderSheet(diffApproval, {
@@ -426,7 +479,7 @@ describe("ApprovalSheet", () => {
       expect.arrayContaining([
         ["approval-1", "old-hash"],
         ["approval-1", "new-hash"],
-      ])
+      ]),
     );
     await waitFor(() => expect(getByText("old value")).toBeTruthy());
     expect(getByText("new value")).toBeTruthy();
@@ -436,8 +489,8 @@ describe("ApprovalSheet", () => {
     await waitFor(() =>
       expect(onOpenDiffFile).toHaveBeenCalledWith(
         diffApproval.diffReview![0]!.changedFiles[0],
-        diffApproval.diffReview![0]
-      )
+        diffApproval.diffReview![0],
+      ),
     );
   });
 
@@ -448,7 +501,8 @@ describe("ApprovalSheet", () => {
   });
 
   it("puts what is worth knowing above the everyday fold", () => {
-    const { getAllByText, getByText, getByTestId, queryByText } = renderSheet(installReview);
+    const { getAllByText, getByText, getByTestId, queryByText } =
+      renderSheet(installReview);
 
     // The list line states what is notable, or an honest ordinary footprint.
     expect(getByText(/Publishing & sending|send a notification/)).toBeTruthy();
@@ -464,8 +518,8 @@ describe("ApprovalSheet", () => {
     fireEvent.press(getByText("Plus 1 everyday permission"));
     expect(
       getByText(
-        "These are the ordinary things parts do here. Ordinary doesn't mean harmless — open any one to see what it does."
-      )
+        "These are the ordinary things parts do here. Ordinary doesn't mean harmless — open any one to see what it does.",
+      ),
     ).toBeTruthy();
     expect(getByText("view an account profile")).toBeTruthy();
   });
@@ -506,16 +560,24 @@ describe("ApprovalSheet", () => {
         }),
       ],
     };
-    const { getAllByText, getByTestId, getByText, queryByTestId } = renderSheet(groupedReview);
+    const { getAllByText, getByTestId, getByText, queryByTestId } =
+      renderSheet(groupedReview);
 
     expect(
-      getAllByText(/^(App panels|Agents and background tasks|System panels|Services)$/u).map(
-        (node) => node.props.children
-      )
-    ).toEqual(["App panels", "Agents and background tasks", "System panels", "Services"]);
+      getAllByText(
+        /^(App panels|Agents and background tasks|System panels|Services)$/u,
+      ).map((node) => node.props.children),
+    ).toEqual([
+      "App panels",
+      "Agents and background tasks",
+      "System panels",
+      "Services",
+    ]);
 
     const appPanels = getByTestId("install-review-group-app-panels");
-    const agents = getByTestId("install-review-group-agents-and-background-tasks");
+    const agents = getByTestId(
+      "install-review-group-agents-and-background-tasks",
+    );
     const systemPanels = getByTestId("install-review-group-system-panels");
     const services = getByTestId("install-review-group-services");
     expect(appPanels.props.accessibilityState.expanded).toBe(true);
@@ -553,11 +615,13 @@ describe("ApprovalSheet", () => {
     };
     const { getByTestId } = renderSheet(routineReview);
 
-    expect(getByTestId("install-review-group-app-panels").props.accessibilityState.expanded).toBe(
-      true
-    );
     expect(
-      getByTestId("install-review-group-system-panels").props.accessibilityState.expanded
+      getByTestId("install-review-group-app-panels").props.accessibilityState
+        .expanded,
+    ).toBe(true);
+    expect(
+      getByTestId("install-review-group-system-panels").props.accessibilityState
+        .expanded,
     ).toBe(true);
   });
 
@@ -570,26 +634,28 @@ describe("ApprovalSheet", () => {
         label: index === 0 ? "Panel" : "Agent",
         repoPath: index === 0 ? "panels/chat" : `workers/worker-${index}`,
         notableRows: index === 0 ? [headlineRow("chat")] : [],
-      })
+      }),
     );
     const onResolveInstallReview = jest.fn(
-      async (_approvalId: string, _resolution: TemplateInstallResolution) => undefined
+      async (_approvalId: string, _resolution: TemplateInstallResolution) =>
+        undefined,
     );
     const { getByTestId, getByText, queryByTestId } = renderSheet(
       { ...installReview, parts },
-      { onResolveInstallReview }
+      { onResolveInstallReview },
     );
 
     // The quiet worker category begins folded, but a search result is never
     // trapped behind it. While filtering, the category says it cannot fold.
     expect(
-      getByTestId("install-review-group-agents-and-background-tasks").props.accessibilityState
-        .expanded
+      getByTestId("install-review-group-agents-and-background-tasks").props
+        .accessibilityState.expanded,
     ).toBe(false);
     fireEvent.changeText(getByTestId("install-review-search"), "Worker 4");
     expect(getByTestId("install-review-part-unit-4")).toBeTruthy();
     expect(
-      getByTestId("install-review-group-agents-and-background-tasks").props.accessibilityState
+      getByTestId("install-review-group-agents-and-background-tasks").props
+        .accessibilityState,
     ).toEqual(expect.objectContaining({ disabled: true, expanded: true }));
     expect(getByText(/12 parts hidden by your search/u)).toBeTruthy();
 
@@ -597,14 +663,19 @@ describe("ApprovalSheet", () => {
     fireEvent.press(getByTestId("install-review-kind-Panel"));
     expect(getByTestId("install-review-part-unit-0")).toBeTruthy();
     expect(queryByTestId("install-review-part-unit-4")).toBeNull();
-    expect(getByTestId("install-review-kind-Panel").props.accessibilityState.selected).toBe(true);
+    expect(
+      getByTestId("install-review-kind-Panel").props.accessibilityState
+        .selected,
+    ).toBe(true);
 
     // Filtering changes visibility only; accepting still names every part.
     fireEvent.press(getByTestId("approval-action-accept-install-review"));
     await waitFor(() => {
       const resolution = onResolveInstallReview.mock.calls[0]?.[1];
       expect(resolution).toMatchObject({ decision: "adopt-root" });
-      expect(resolution?.decision === "cancel" ? [] : resolution?.allowNow).toHaveLength(13);
+      expect(
+        resolution?.decision === "cancel" ? [] : resolution?.allowNow,
+      ).toHaveLength(13);
     });
   });
 
@@ -615,11 +686,14 @@ describe("ApprovalSheet", () => {
         reviewPart({
           identityKey: "template/six@ev-six",
           title: "Six Notable",
-          notableRows: ["a", "b", "c", "d", "e", "f"].map((id) => headlineRow(id)),
+          notableRows: ["a", "b", "c", "d", "e", "f"].map((id) =>
+            headlineRow(id),
+          ),
         }),
       ],
     };
-    const { getAllByText, getByText, queryByText, getByTestId } = renderSheet(manyNotable);
+    const { getAllByText, getByText, queryByText, getByTestId } =
+      renderSheet(manyNotable);
     fireEvent.press(getByTestId("install-review-part-template/six@ev-six"));
 
     // Five shown, the sixth folded behind an honest count — nothing dropped.
@@ -645,8 +719,11 @@ describe("ApprovalSheet", () => {
         }),
       ],
     };
-    const { getAllByText, queryByText, getByTestId } = renderSheet(criticalAmongMany);
-    fireEvent.press(getByTestId("install-review-part-template/critical@ev-critical"));
+    const { getAllByText, queryByText, getByTestId } =
+      renderSheet(criticalAmongMany);
+    fireEvent.press(
+      getByTestId("install-review-part-template/critical@ev-critical"),
+    );
 
     // The one row a person must not miss forces the whole list open by default.
     expect(queryByText("Show all 6 notable")).toBeNull();
@@ -673,7 +750,9 @@ describe("ApprovalSheet", () => {
     // Always shown, unconditionally — a repair touches a part the template
     // does not own, so it is never folded into or hidden behind the
     // template's own list.
-    expect(getByText("Also changes 1 part already in your workspace")).toBeTruthy();
+    expect(
+      getByText("Also changes 1 part already in your workspace"),
+    ).toBeTruthy();
     expect(getByText("Chat · Agent")).toBeTruthy();
     fireEvent.press(getByTestId("install-review-part-workspace/chat@ev-chat"));
     // The repair's own row, identified by its distinguishing resource phrase.
@@ -741,15 +820,24 @@ describe("ApprovalSheet", () => {
         }),
       ],
     };
-    const { getByText, getAllByText, getByTestId, queryByText } = renderSheet(lookalike);
-    fireEvent.press(getByTestId("install-review-part-template/studio@ev-studio"));
+    const { getByText, getAllByText, getByTestId, queryByText } =
+      renderSheet(lookalike);
+    fireEvent.press(
+      getByTestId("install-review-part-template/studio@ev-studio"),
+    );
 
     // Whole, never shortened to the domain.
-    expect(getByText("https://github.com.attacker.net/acme/studio")).toBeTruthy();
+    expect(
+      getByText("https://github.com.attacker.net/acme/studio"),
+    ).toBeTruthy();
     // Emphasized in place: weight and an underline, never colour alone.
     const emphasis = getAllByText("attacker.net").find((node) => {
-      const style = Array.isArray(node.props.style) ? node.props.style[0] : node.props.style;
-      return style?.fontWeight === "800" && style?.textDecorationLine === "underline";
+      const style = Array.isArray(node.props.style)
+        ? node.props.style[0]
+        : node.props.style;
+      return (
+        style?.fontWeight === "800" && style?.textDecorationLine === "underline"
+      );
     });
     expect(emphasis).toBeTruthy();
     // And said out loud, in the same words every other surface uses.
@@ -765,13 +853,18 @@ describe("ApprovalSheet", () => {
 
       fireEvent.press(getByTestId(`approval-action-${decision}`));
 
-      await waitFor(() => expect(onResolve).toHaveBeenCalledWith("approval-1", decision));
-    }
+      await waitFor(() =>
+        expect(onResolve).toHaveBeenCalledWith("approval-1", decision),
+      );
+    },
   );
 
   it("shows the exact prepared effect and eligible agent scope on mobile", async () => {
     const onResolve = jest.fn(async () => undefined);
-    const { getAllByText, getByText, getByTestId } = renderSheet(consequentialCapability, { onResolve });
+    const { getAllByText, getByText, getByTestId } = renderSheet(
+      consequentialCapability,
+      { onResolve },
+    );
     expect(getByText("Publishing & sending")).toBeTruthy();
     expect(getByText("What exactly")).toBeTruthy();
     expect(getByText("Send 1 briefing to Briefings")).toBeTruthy();
@@ -784,7 +877,9 @@ describe("ApprovalSheet", () => {
     expect(getAllByText("push.send")).toHaveLength(2);
     expect(getByText("channel:briefings")).toBeTruthy();
     fireEvent.press(getByTestId("approval-action-agent"));
-    await waitFor(() => expect(onResolve).toHaveBeenCalledWith("approval-1", "agent"));
+    await waitFor(() =>
+      expect(onResolve).toHaveBeenCalledWith("approval-1", "agent"),
+    );
   });
 
   it("does not repeat a plain approval heading in an exact-effect card", () => {
@@ -818,15 +913,19 @@ describe("ApprovalSheet", () => {
     "resolves browser permission decision %s",
     async (decision) => {
       const onResolve = jest.fn(async () => undefined);
-      const { getByTestId, getByText } = renderSheet(browserPermission, { onResolve });
+      const { getByTestId, getByText } = renderSheet(browserPermission, {
+        onResolve,
+      });
 
       fireEvent.press(getByText("Request details"));
       expect(getByText("camera, microphone")).toBeTruthy();
       expect(getByText("This device")).toBeTruthy();
       fireEvent.press(getByTestId(`approval-action-${decision}`));
 
-      await waitFor(() => expect(onResolve).toHaveBeenCalledWith("approval-1", decision));
-    }
+      await waitFor(() =>
+        expect(onResolve).toHaveBeenCalledWith("approval-1", decision),
+      );
+    },
   );
 
   it("submits client config only after required fields are filled", async () => {
@@ -844,13 +943,15 @@ describe("ApprovalSheet", () => {
       expect(onSubmitClientConfig).toHaveBeenCalledWith("approval-1", {
         clientId: "client-id",
         clientSecret: "secret",
-      })
+      }),
     );
   });
 
   it("submits credential input only after required fields are filled", async () => {
     const onSubmitCredentialInput = jest.fn(async () => undefined);
-    const { getByTestId } = renderSheet(credentialInput, { onSubmitCredentialInput });
+    const { getByTestId } = renderSheet(credentialInput, {
+      onSubmitCredentialInput,
+    });
 
     fireEvent.press(getByTestId("approval-submit"));
     expect(onSubmitCredentialInput).not.toHaveBeenCalled();
@@ -861,13 +962,15 @@ describe("ApprovalSheet", () => {
     await waitFor(() =>
       expect(onSubmitCredentialInput).toHaveBeenCalledWith("approval-1", {
         apiKey: "github_pat_1",
-      })
+      }),
     );
   });
 
   it("submits one-shot secret input only after required fields are filled", async () => {
     const onSubmitSecretInput = jest.fn(async () => undefined);
-    const { getByTestId, getByText } = renderSheet(secretInput, { onSubmitSecretInput });
+    const { getByTestId, getByText } = renderSheet(secretInput, {
+      onSubmitSecretInput,
+    });
 
     expect(getByText("Continue")).toBeTruthy();
     fireEvent.press(getByTestId("approval-submit"));
@@ -879,7 +982,7 @@ describe("ApprovalSheet", () => {
     await waitFor(() =>
       expect(onSubmitSecretInput).toHaveBeenCalledWith("approval-1", {
         password: "hunter2",
-      })
+      }),
     );
   });
 
@@ -887,8 +990,8 @@ describe("ApprovalSheet", () => {
     const { getByText, queryByText, rerender } = renderSheet(credential);
     expect(
       getByText(
-        "The sign-in site is different from the service's site. Make sure you recognize both."
-      )
+        "The sign-in site is different from the service's site. Make sure you recognize both.",
+      ),
     ).toBeTruthy();
 
     rerender(
@@ -901,7 +1004,9 @@ describe("ApprovalSheet", () => {
         onSubmitSecretInput={jest.fn()}
       />,
     );
-    expect(queryByText("The sign-in domain differs from the service domain.")).toBeNull();
+    expect(
+      queryByText("The sign-in domain differs from the service domain."),
+    ).toBeNull();
   });
 
   it("renders the caller chip with the kind icon and label", () => {
@@ -943,7 +1048,11 @@ describe("ApprovalSheet", () => {
       kind: "capability",
       capability: "context.boundary",
       title: "Open another workspace branch",
-      resource: { type: "context", label: "Workspace branch", value: "Agent X" },
+      resource: {
+        type: "context",
+        label: "Workspace branch",
+        value: "Agent X",
+      },
     };
     const onNavigateToPanel = jest.fn();
     const { getByTestId } = renderSheet(titledPanel, { onNavigateToPanel });
@@ -958,10 +1067,22 @@ describe("ApprovalSheet", () => {
       kind: "capability",
       capability: "context.boundary",
       title: "First request",
-      resource: { type: "context", label: "Workspace branch", value: "Agent X" },
+      resource: {
+        type: "context",
+        label: "Workspace branch",
+        value: "Agent X",
+      },
     };
-    const b: PendingApproval = { ...a, approvalId: "a2", title: "Second request" };
-    const c: PendingApproval = { ...a, approvalId: "a3", title: "Third request" };
+    const b: PendingApproval = {
+      ...a,
+      approvalId: "a2",
+      title: "Second request",
+    };
+    const c: PendingApproval = {
+      ...a,
+      approvalId: "a3",
+      title: "Third request",
+    };
     const { getByText, getByTestId } = renderSheet([a, b, c]);
     expect(getByText("First request")).toBeTruthy();
     expect(getByText("1 / 3")).toBeTruthy();
@@ -981,16 +1102,22 @@ describe("ApprovalSheet", () => {
 
     fireEvent.press(getByTestId("approval-action-device-cancel"));
 
-    await waitFor(() => expect(onResolve).toHaveBeenCalledWith("approval-1", "dismiss"));
+    await waitFor(() =>
+      expect(onResolve).toHaveBeenCalledWith("approval-1", "dismiss"),
+    );
   });
 
   it("shows every part in plain language, with a checkbox only for what it can grant", async () => {
     const onResolveInstallReview = jest.fn(
-      async (_approvalId: string, _resolution: TemplateInstallResolution) => undefined
+      async (_approvalId: string, _resolution: TemplateInstallResolution) =>
+        undefined,
     );
-    const { getByText, getByTestId, queryByLabelText } = renderSheet(installReview, {
-      onResolveInstallReview,
-    });
+    const { getByText, getByTestId, queryByLabelText } = renderSheet(
+      installReview,
+      {
+        onResolveInstallReview,
+      },
+    );
 
     expect(getByText("Mobile · Client App")).toBeTruthy();
     fireEvent.press(getByTestId("install-review-group-extensions"));
@@ -1008,10 +1135,13 @@ describe("ApprovalSheet", () => {
       expect(onResolveInstallReview).toHaveBeenCalledWith("approval-1", {
         decision: "adopt-root",
         allowNow: [
-          { identityKey: "apps/mobile@ev-mobile", permissions: ["account.profile.read\u0000{}"] },
+          {
+            identityKey: "apps/mobile@ev-mobile",
+            permissions: ["account.profile.read\u0000{}"],
+          },
           { identityKey: "extensions/git-tools@ev-extension", permissions: [] },
         ],
-      })
+      }),
     );
   });
 
@@ -1029,38 +1159,42 @@ describe("ApprovalSheet", () => {
 
     expect(getByText("Act on Shell's context")).toBeTruthy();
     expect(
-      getByText("This can affect files and running work in a different part of your project.")
+      getByText(
+        "This can affect files and running work in a different part of your project.",
+      ),
     ).toBeTruthy();
     expect(getByTestId("approval-accent-stripe").props.style).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           backgroundColor: "#ff7b72",
         }),
-      ])
+      ]),
     );
     expect(getByTestId("approval-category-icon").props.style).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           backgroundColor: "#ff7b72",
         }),
-      ])
+      ]),
     );
-    expect(getByTestId("approval-action-version").props.accessibilityLabel).toContain(
-      "Remember for this version"
-    );
+    expect(
+      getByTestId("approval-action-version").props.accessibilityLabel,
+    ).toContain("Remember for this version");
     expect(getByTestId("approval-action-version").props.style).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           backgroundColor: "#ff7b72",
           borderColor: "#ff7b72",
         }),
-      ])
+      ]),
     );
   });
 
   it("minimizes from backdrop without denying the pending request", async () => {
     const onResolve = jest.fn(async () => undefined);
-    const { getByTestId, getByText } = renderSheet(genericApproval, { onResolve });
+    const { getByTestId, getByText } = renderSheet(genericApproval, {
+      onResolve,
+    });
 
     fireEvent.press(getByTestId("approval-backdrop"));
 

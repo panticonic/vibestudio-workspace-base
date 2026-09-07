@@ -1,3 +1,5 @@
+import { browserPermissionsMethods } from "@vibestudio/service-schemas/browserPermissions";
+import type { BrowserPermissionRequester } from "./workspaceBrowserPermission";
 import type { PanelRegistry } from "@vibestudio/shared/panelRegistry";
 import type { RpcEnvelope } from "@vibestudio/rpc";
 import { decodePanelStateArgs } from "@vibestudio/shared/panelStateArgs";
@@ -60,13 +62,13 @@ import {
   isTransientMobileTransportFailure,
   MobileRpcClient,
   type ConnectionStatus,
+  type MobileRpcClientConfig,
 } from "./mobileTransport";
 import { createMobileShellCore } from "../shellCore/createMobileShellCore";
 import {
   startPanelAssetFacade,
   type PanelAssetFacade,
 } from "./panelAssetFacade";
-import { drainWorkspaceMutationQueue } from "./backgroundActionQueue";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
 import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval";
 import { blobstoreMethods } from "@vibestudio/service-schemas/blobstore";
@@ -150,6 +152,11 @@ function delayUnlessAborted(ms: number, signal: AbortSignal): Promise<boolean> {
 export interface ShellClientConfig {
   credentials: Credentials;
   serverEndpointId: string;
+  workspaceId?: string;
+  workspaceName?: string;
+  connectWorkspace?: MobileRpcClientConfig["connectWorkspace"];
+  /** App source remains in System while panel services use this workspace. */
+  appSourceClient?: ShellClient;
   onTreeInvalidated?: (event: PanelTreeInvalidation) => void;
   onPanelsChanged?: () => void;
   onStatusChange?: (status: ConnectionStatus) => void;
@@ -314,6 +321,7 @@ class MobilePanels implements PanelHost {
       navigateToPanel: (panelId: string) => void;
       deliverToShell: (panelId: string, envelope: RpcEnvelope) => void;
       clientSessionId: string;
+      localStorageScope: string;
     },
   ) {
     this.registration = createPanelHostRegistration({
@@ -353,6 +361,7 @@ class MobilePanels implements PanelHost {
   ): void {
     if (!this.panelManager) {
       const core = createMobileShellCore({
+        localStorageScope: this.deps.localStorageScope,
         workspaceId,
         serverUrl: this.deps.serverUrl,
         transport: this.deps.transport,
@@ -692,6 +701,7 @@ class MobilePanels implements PanelHost {
     id: string;
     title: string;
   }> {
+    smokePhase("workspace-panel-create-requested", { page });
     const result = await this.requireManager().create(`about/${page}`, {
       isRoot: true,
       addAsRoot: true,
@@ -931,7 +941,9 @@ class MobilePanels implements PanelHost {
   }
   async getPanelInit(panelId: string): Promise<unknown> {
     const slotId = asPanelSlotId(panelId);
+    smokePhase("workspace-panel-init-start", { panelId });
     const panelInit = await this.requireManager().getPanelInit(slotId);
+    smokePhase("workspace-panel-init-complete", { panelId });
     const lease = this.runtimeConnectionBySlot.get(String(slotId));
     if (!lease || !panelInit || typeof panelInit !== "object") return panelInit;
     return {
@@ -945,6 +957,7 @@ class MobilePanels implements PanelHost {
     runtimeEntityId: PanelEntityId,
     opts: { connectionId: string },
   ): Promise<PanelRuntimeAcquireResult> {
+    smokePhase("workspace-panel-lease-start", { panelId, runtimeEntityId });
     const result = await this.panelRuntime.acquire(
       runtimeEntityId,
       createPanelRuntimeLeaseRequest({
@@ -953,6 +966,10 @@ class MobilePanels implements PanelHost {
         connectionId: opts.connectionId,
       }),
     );
+    smokePhase("workspace-panel-lease-complete", {
+      panelId,
+      acquired: result.acquired,
+    });
     if (result.acquired) {
       this.trackRuntimeLease(result.lease);
     }
@@ -1175,6 +1192,28 @@ export class ShellClient {
     ): Promise<{ contextId: string; title: string | null }>;
   };
   readonly credentials: Credentials;
+  readonly workspaceName: string;
+  private readonly browserSessionEpoch = crypto.randomUUID();
+  readonly requestBrowserPermission: BrowserPermissionRequester = (
+    panelId,
+    request,
+    signal,
+  ) =>
+    createTypedServiceClient(
+      "browserPermissions",
+      browserPermissionsMethods,
+      (service, method, args) =>
+        this.transport.call("main", `${service}.${method}`, args, { signal }),
+    ).request({
+      panelId,
+      sessionEpoch: this.browserSessionEpoch,
+      origin: request.origin,
+      topLevelUrl: request.topLevelUrl,
+      capabilities: request.capabilities,
+      deviceLabel: "Vibestudio Mobile",
+    });
+  readonly localStorageScope: string;
+  private readonly expectedWorkspaceId: string | undefined;
   private readonly serverEndpointId: string;
   // Mutable: starts as the loopback placeholder, then becomes
   // `http://127.0.0.1:<facadePort>` once the panel-asset façade binds (init).
@@ -1208,7 +1247,8 @@ export class ShellClient {
   private navigationListeners = new Set<(panelId: string) => void>();
   private readonly browserPrivacyPresentation =
     new BrowserPrivacyPresentationState();
-  private readonly browserImportProvider: MobileBrowserImportProvider;
+  private readonly browserImportProvider: MobileBrowserImportProvider | null;
+  private closing: Promise<void> | null = null;
 
   /**
    * Join a channel as this device. The quickfire sheet needs live delivery (not
@@ -1256,19 +1296,30 @@ export class ShellClient {
   private readonly onReadinessChange?: ShellClientConfig["onReadinessChange"];
   constructor(config: ShellClientConfig) {
     this.credentials = config.credentials;
+    this.localStorageScope = `${config.serverEndpointId.toLowerCase()}:${config.credentials.deviceId}`;
+    this.expectedWorkspaceId = config.workspaceId;
+    this.workspaceName =
+      config.workspaceName ?? config.workspaceId ?? "Workspace";
     this.serverEndpointId = config.serverEndpointId.toLowerCase();
     this.onReadinessChange = config.onReadinessChange;
     this.serverUrl = MOBILE_SERVER_LOOPBACK_ORIGIN;
     // Remote RPC uses the stored Iroh endpoint identity and device credential.
-    this.transport = new MobileRpcClient({});
-    this.browserImportProvider = new MobileBrowserImportProvider(
-      this.transport,
-      config.credentials.deviceId,
-    );
-    this.browserImportProvider.expose();
-    this.transport.expose("mobileBrowserPrivacyPresentation.open", ({ args }) =>
-      this.browserPrivacyPresentation.accept(args[0]),
-    );
+    this.transport = new MobileRpcClient({
+      connectWorkspace: config.connectWorkspace,
+    });
+    this.browserImportProvider = config.appSourceClient
+      ? null
+      : new MobileBrowserImportProvider(
+          this.transport,
+          config.credentials.deviceId,
+        );
+    this.browserImportProvider?.expose();
+    if (!config.appSourceClient) {
+      this.transport.expose(
+        "mobileBrowserPrivacyPresentation.open",
+        ({ args }) => this.browserPrivacyPresentation.accept(args[0]),
+      );
+    }
     this.hostCommands = {
       get: (panelId) => this.hostCommandRegistry.get(panelId),
       clear: (panelId) => this.hostCommandRegistry.clear(panelId),
@@ -1295,6 +1346,7 @@ export class ShellClient {
       onPanelsChanged: config.onPanelsChanged,
       getSelfUserId: () => this.currentUserId,
       clientSessionId: config.credentials.deviceId,
+      localStorageScope: this.localStorageScope,
       navigateToPanel: (panelId) => {
         for (const listener of this.navigationListeners) listener(panelId);
       },
@@ -1388,9 +1440,11 @@ export class ShellClient {
       promote: (slotId) => quickfireClient.promote({ slotId }),
       list: () => quickfireClient.list(),
     };
-    this.hostLaunch = new HostLaunchClient((service, method, args) =>
-      this.transport.call("main", `${service}.${method}`, args),
-    );
+    this.hostLaunch =
+      config.appSourceClient?.hostLaunch ??
+      new HostLaunchClient((service, method, args) =>
+        this.transport.call("main", `${service}.${method}`, args),
+      );
     this.browserPrivacy = createShellBrowserPrivacyClient(this.transport);
     this.events.on("panel:runtimeLeaseChanged", (event) => {
       this.panels.handleRuntimeLeaseChanged(
@@ -1419,6 +1473,7 @@ export class ShellClient {
         let restored = await loadMobileShellStartupSnapshot(
           this.serverEndpointId,
           info.config.id,
+          this.credentials.deviceId,
         );
         try {
           this.panels.prepare(
@@ -1432,6 +1487,7 @@ export class ShellClient {
           await clearMobileShellStartupSnapshot(
             this.serverEndpointId,
             info.config.id,
+            this.credentials.deviceId,
           );
           restored = null;
           this.panels.prepare(info.config.id);
@@ -1479,10 +1535,14 @@ export class ShellClient {
     workspaceIdentity: string,
   ): Promise<void> {
     if (this.facade) return;
-    this.facade = await startPanelAssetFacade(this.transport, {
-      serverEndpointId: this.serverEndpointId,
-      workspaceIdentity,
-    });
+    this.facade = await startPanelAssetFacade(
+      this.transport,
+      {
+        serverEndpointId: this.serverEndpointId,
+        workspaceIdentity,
+      },
+      this.localStorageScope,
+    );
     this.serverUrl = `http://127.0.0.1:${this.facade.port}`;
     smokePhase("workspace-panel-facade-ready", { port: this.facade.port });
   }
@@ -1505,6 +1565,17 @@ export class ShellClient {
   }
 
   /** Authenticated account id, available after the workspace handshake. */
+  get pushScope():
+    | import("@vibestudio/shared/workspacePushScope").WorkspacePushScope
+    | null {
+    const serverId = this.transport.serverId;
+    const userId = this.currentUserId;
+    const workspaceId = this.workspaceId;
+    return serverId && userId && workspaceId
+      ? { serverId, userId, workspaceId }
+      : null;
+  }
+
   get currentUserId(): string | null {
     return this.accountProfileClient.current?.userId ?? null;
   }
@@ -1577,6 +1648,14 @@ export class ShellClient {
     await this.transport.connectAndWait(null);
     smokePhase("workspace-ws-authenticated");
     const info = await this.workspaces.getInfo();
+    if (
+      this.expectedWorkspaceId &&
+      info.config.id !== this.expectedWorkspaceId
+    ) {
+      throw new Error(
+        "The workspace connection returned a different workspace identity",
+      );
+    }
     smokePhase("workspace-info-loaded", { workspaceId: info.config.id });
     this.workspaceInfo = info;
     return info;
@@ -1613,7 +1692,6 @@ export class ShellClient {
           await deferredResults;
           return;
         }
-        await drainWorkspaceMutationQueue(this);
         if (this.disposed || signal.aborted) {
           await deferredResults;
           return;
@@ -1693,7 +1771,8 @@ export class ShellClient {
     const snapshot = this.panels.startupSnapshot();
     if (!snapshot) return;
     const record: MobileShellStartupSnapshot = {
-      schemaVersion: 2,
+      schemaVersion: 3,
+      deviceId: this.credentials.deviceId,
       serverEndpointId: this.serverEndpointId,
       workspaceIdentity,
       capturedAt: Date.now(),
@@ -1785,7 +1864,6 @@ export class ShellClient {
         "mobile-panel-tree",
         async () => {
           await this.panels.recoverRegistration();
-          await drainWorkspaceMutationQueue(this);
           await this.panels.refresh();
         },
       ),
@@ -1793,7 +1871,6 @@ export class ShellClient {
         "mobile-panel-tree",
         async () => {
           await this.panels.recoverRegistration();
-          await drainWorkspaceMutationQueue(this);
           await this.panels.recoverSnapshot();
         },
       ),
@@ -1803,24 +1880,36 @@ export class ShellClient {
     for (const listener of this.recoveryCompleteListeners) listener(kind);
   }
   dispose(): void {
+    void this.close().catch((error: unknown) =>
+      console.warn("[ShellClient] Workspace cleanup failed", error),
+    );
+  }
+  close(): Promise<void> {
+    if (this.closing) return this.closing;
     this.disposed = true;
     this.reconciliationAbort?.abort();
     for (const unsubscribe of this.panelRecoveryUnsubs ?? []) unsubscribe();
     this.panelRecoveryUnsubs = null;
     this.recoveryCompleteListeners.clear();
     this.browserPrivacyPresentation.clear();
-    void (async () => {
-      await this.panelRuntime
-        .unregisterClient(this.credentials.deviceId)
-        .catch(() => {});
+    this.closing = (async () => {
+      await this.events.unsubscribeAll().catch(() => {});
+      if (this.workspaceInfo)
+        await this.panelRuntime
+          .unregisterClient(this.credentials.deviceId)
+          .catch(() => {});
       await this.facade?.close().catch(() => {});
       this.facade = null;
-      await this.browserImportProvider.dispose();
-      this.transport.disconnect();
+      try {
+        await this.browserImportProvider?.dispose();
+      } finally {
+        await this.transport.close();
+      }
     })();
     this.statusUnsub?.();
     this.statusUnsub = null;
     this.hostCommandRegistry.clear();
+    return this.closing;
   }
 
   private deliverToLocalShell(panelId: string, envelope: RpcEnvelope): void {

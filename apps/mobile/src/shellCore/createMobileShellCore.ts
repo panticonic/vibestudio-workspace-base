@@ -7,6 +7,7 @@ import { createWorkspacePresentationClient } from "@workspace/runtime/workspace-
 
 export function createMobileShellCore(deps: {
   workspaceId: string;
+  localStorageScope: string;
   serverUrl: string;
   transport: MobileRpcClient;
   onPresentationUpdated?: (update: {
@@ -15,6 +16,7 @@ export function createMobileShellCore(deps: {
   }) => void;
 }) {
   const registry = new PanelRegistry({
+    workspaceId: deps.workspaceId,
     onPresentationUpdated: deps.onPresentationUpdated,
   });
   const host = parseHostConfig(deps.serverUrl);
@@ -27,7 +29,10 @@ export function createMobileShellCore(deps: {
     call: (service, method, args) =>
       deps.transport.call("main", `${service}.${method}`, args),
     workspaceState: presentation.workspaceState,
-    viewState: createMobileLocalViewStateStore(deps.workspaceId),
+    viewState: createMobileLocalViewStateStore(
+      deps.localStorageScope,
+      deps.workspaceId,
+    ),
     workspacePath: "",
     allowMissingManifests: true,
     serverInfo: {

@@ -28,6 +28,8 @@ export const pushToastAtom = atom(null, (_get, set, toast: ToastInput) => {
     tone: toast.tone ?? "info",
     createdAt: toast.createdAt ?? Date.now(),
     durationMs: toast.durationMs,
+    actionLabel: toast.actionLabel,
+    onAction: toast.onAction,
   };
   set(toastQueueAtom, (queue) => [...queue, entry]);
 });

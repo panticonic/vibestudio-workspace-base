@@ -1,3 +1,8 @@
+import {
+  readWorkspacePushScope,
+  workspaceNotificationKey,
+} from "@vibestudio/shared/workspacePushScope";
+import { readApprovalTarget } from "./backgroundActionQueueCore";
 import type { PushApprovalDataPayload } from "@vibestudio/shared/approvalContract";
 import { isPushUserInboxDataPayload } from "@vibestudio/shared/userNotifications";
 import { displayInboxNotification } from "./inboxNotifications";
@@ -49,7 +54,9 @@ interface NotifeeEvent {
 
 interface MessagingModule {
   (): {
-    setBackgroundMessageHandler(handler: (message: RemoteMessage) => Promise<void>): void;
+    setBackgroundMessageHandler(
+      handler: (message: RemoteMessage) => Promise<void>,
+    ): void;
   };
 }
 
@@ -63,13 +70,16 @@ function getMessaging(): MessagingModule | null {
     return mod.default ?? mod;
   } catch {
     console.warn(
-      "[PushBackground] Firebase messaging unavailable. Background FCM handler disabled."
+      "[PushBackground] Firebase messaging unavailable. Background FCM handler disabled.",
     );
     return null;
   }
 }
 
-function getNotifee(): { notifee: NotifeeModule; EventType: Record<string, number> } | null {
+function getNotifee(): {
+  notifee: NotifeeModule;
+  EventType: Record<string, number>;
+} | null {
   try {
     const mod = require("@notifee/react-native") as {
       default?: NotifeeModule;
@@ -80,17 +90,24 @@ function getNotifee(): { notifee: NotifeeModule; EventType: Record<string, numbe
       EventType: mod.EventType ?? {},
     };
   } catch {
-    console.warn("[PushBackground] Notifee unavailable. Background notification handler disabled.");
+    console.warn(
+      "[PushBackground] Notifee unavailable. Background notification handler disabled.",
+    );
     return null;
   }
 }
 
 export function registerBackgroundHandlers(): void {
-  requireApprovedAppCapability("notifications", "background notification handlers");
+  requireApprovedAppCapability(
+    "notifications",
+    "background notification handlers",
+  );
   if (registered) return;
   registered = true;
   if (!isNativeFirebaseConfigured()) {
-    console.info("[PushBackground] Firebase is not configured. Background FCM handler disabled.");
+    console.info(
+      "[PushBackground] Firebase is not configured. Background FCM handler disabled.",
+    );
     return;
   }
 
@@ -104,44 +121,63 @@ export function registerBackgroundHandlers(): void {
       });
     }
   } catch (error) {
-    console.warn("[PushBackground] Failed to register Firebase background handler:", error);
+    console.warn(
+      "[PushBackground] Failed to register Firebase background handler:",
+      error,
+    );
   }
 
   try {
     if (loadedNotifee) {
       loadedNotifee.notifee.onBackgroundEvent(async (event) => {
-        await handleBackgroundNotifeeEvent(event, loadedNotifee.notifee, loadedNotifee.EventType);
+        await handleBackgroundNotifeeEvent(
+          event,
+          loadedNotifee.notifee,
+          loadedNotifee.EventType,
+        );
       });
     }
   } catch (error) {
-    console.warn("[PushBackground] Failed to register Notifee background handler:", error);
+    console.warn(
+      "[PushBackground] Failed to register Notifee background handler:",
+      error,
+    );
   }
 }
 
 export async function handleBackgroundMessage(
   message: RemoteMessage,
-  notifee: Pick<NotifeeModule, "displayNotification" | "cancelNotification">
+  notifee: Pick<NotifeeModule, "displayNotification" | "cancelNotification">,
 ): Promise<void> {
-  requireApprovedAppCapability("notifications", "background notification message");
+  requireApprovedAppCapability(
+    "notifications",
+    "background notification message",
+  );
   if (isPushUserInboxDataPayload(message.data)) {
     await displayInboxNotification(message.data, message, notifee);
     return;
   }
-  const data = (message.data ?? {}) as PushApprovalDataPayload;
+  const data: Partial<PushApprovalDataPayload> = message.data ?? {};
   if (data.kind === "approval-cancel") {
     const cancelKey = data.cancelKey ?? data.approvalId;
-    if (cancelKey) await notifee.cancelNotification(cancelKey);
+    const scope = readWorkspacePushScope(data);
+    if (cancelKey && scope)
+      await notifee.cancelNotification(
+        workspaceNotificationKey(scope, cancelKey),
+      );
     return;
   }
 
-  if (data.kind !== "approval-prompt" || !data.approvalId) return;
+  const target = readApprovalTarget(data);
+  if (data.kind !== "approval-prompt" || !target) return;
 
   const category = data.category ?? APPROVAL_CATEGORY_DECIDE;
-  const title = data.title ?? message.notification?.title ?? "Approval requested";
+  const title =
+    data.title ?? message.notification?.title ?? "Approval requested";
   const body = data.body ?? message.notification?.body ?? "";
 
   await notifee.displayNotification({
-    id: data.cancelKey ?? data.approvalId,
+    id: workspaceNotificationKey(target, data.cancelKey ?? target.approvalId),
     title,
     body,
     data: {
@@ -163,19 +199,27 @@ export async function handleBackgroundMessage(
 export async function handleBackgroundNotifeeEvent(
   event: NotifeeEvent,
   notifee: Pick<NotifeeModule, "displayNotification" | "cancelNotification"> & {
-    displayNotification?: (notification: Record<string, unknown>) => Promise<void>;
+    displayNotification?: (
+      notification: Record<string, unknown>,
+    ) => Promise<void>;
   },
-  EventType: Record<string, number>
+  EventType: Record<string, number>,
 ): Promise<void> {
-  requireApprovedAppCapability("notifications", "background notification action");
+  requireApprovedAppCapability(
+    "notifications",
+    "background notification action",
+  );
   const notification = event.detail.notification;
-  const approvalId = readApprovalId(notification);
-  if (!approvalId) return;
+  const target = readApprovalTarget(notification?.data);
+  if (!target) return;
 
   const actionId = event.detail.pressAction?.id;
-  if (event.type === EventType["ACTION_PRESS"] && isBackgroundDecision(actionId)) {
-    await queueBackgroundAction(approvalId, actionId);
-    await updateActionNotification(notifee, approvalId, notification);
+  if (
+    event.type === EventType["ACTION_PRESS"] &&
+    isBackgroundDecision(actionId)
+  ) {
+    await queueBackgroundAction(target, actionId);
+    await updateActionNotification(notifee, target, notification);
     return;
   }
 
@@ -183,12 +227,6 @@ export async function handleBackgroundNotifeeEvent(
     (event.type === EventType["ACTION_PRESS"] && actionId === "open") ||
     event.type === EventType["PRESS"]
   ) {
-    await enqueueDeepLink(approvalId);
+    await enqueueDeepLink(target);
   }
-}
-
-function readApprovalId(notification: NotifeeEvent["detail"]["notification"]): string | null {
-  const dataApprovalId = notification?.data?.["approvalId"];
-  if (typeof dataApprovalId === "string" && dataApprovalId.length > 0) return dataApprovalId;
-  return notification?.id ?? null;
 }

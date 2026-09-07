@@ -57,7 +57,7 @@ export async function activate() {
           const bundleArtifactId = randomUUID();
           artifactFiles.set(bundleArtifactId, { filePath: bundlePath, tempDir });
           artifacts.push({
-            path: `index.${platform}.bundle`,
+            path: `${platform}/index.bundle`,
             role: "primary",
             contentType: "application/javascript; charset=utf-8",
             encoding: "utf8",
@@ -68,7 +68,7 @@ export async function activate() {
             const assetArtifactId = randomUUID();
             artifactFiles.set(assetArtifactId, { filePath: assetPath, tempDir });
             artifacts.push({
-              path: `assets/${platform}/${path.relative(assetsDir, assetPath).replace(/\\/g, "/")}`,
+              path: `${platform}/${path.relative(assetsDir, assetPath).replace(/\\/g, "/")}`,
               role: "asset",
               contentType: contentTypeForPath(assetPath),
               encoding: "base64",

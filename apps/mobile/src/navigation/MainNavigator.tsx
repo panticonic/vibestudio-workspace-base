@@ -1,81 +1,269 @@
-/**
- * MainNavigator -- Drawer navigator wrapping the main panel screen.
- *
- * Uses @react-navigation/drawer with PanelDrawer as custom drawer content.
- * The drawer is swipeable from the left edge. The main content area shows
- * the AppBar + panel content (WebViews will be wired by Agent F).
- */
-
-import { useCallback } from "react";
-import { useWindowDimensions } from "react-native";
-import { createDrawerNavigator } from "@workspace/mobile-navigation";
+import { workspaceName as displayWorkspaceName } from "../services/workspaceName";
+import { WorkspaceCreateSheet } from "../components/WorkspaceCreateSheet";
+import { WorkspaceApprovalSurface } from "../components/WorkspaceApprovalSurface";
+import { pushToastAtom } from "../state/toastAtoms";
+import { useSyncExternalStore } from "react";
+import {
+  View,
+  Text,
+  Modal,
+  ActivityIndicator,
+  useWindowDimensions,
+} from "react-native";
+import {
+  createDrawerNavigator,
+  useNavigation,
+  DrawerActions,
+} from "@workspace/mobile-navigation";
 import { useAtomValue, useSetAtom } from "jotai";
 import { MainScreen } from "../components/MainScreen";
-import { PanelDrawer } from "../components/PanelDrawer";
-import { activePanelIdAtom } from "../state/navigationAtoms";
-import { shellClientAtom } from "../state/shellClientAtom";
+import { WorkspaceDrawer } from "../components/WorkspaceDrawer";
+import { workspaceDirectoryAtom } from "../state/workspaceDirectoryAtom";
+import {
+  WorkspaceDirectoryContext,
+  WorkspaceScope,
+} from "../state/workspaceScope";
+import { colorSchemeAtom, themeColorsAtom } from "../state/themeAtoms";
 import { mobileNavigationLayout } from "../shellCore/mobileLayout";
+import { ActionSheetHost } from "../components/ui/ActionSheetHost";
+import { Button } from "../components/ui/primitives";
+import { spacing, type } from "../design/tokens";
+import type { MobileWorkspaceDirectory } from "../services/workspaceDirectory";
 
-export type DrawerParamList = {
-  PanelContent: undefined;
-};
-
+export type DrawerParamList = { PanelContent: undefined };
 const Drawer = createDrawerNavigator<DrawerParamList>();
 
 export function MainNavigator() {
+  const directory = useAtomValue(workspaceDirectoryAtom);
   const { width, height } = useWindowDimensions();
   const layout = mobileNavigationLayout(width, height);
   const persistent = layout.kind === "tablet";
-
+  if (!directory) return null;
   return (
-    <Drawer.Navigator
-      defaultStatus={persistent ? "open" : "closed"}
-      screenOptions={{
-        headerShown: false,
-        drawerType: persistent ? "permanent" : "front",
-        drawerStyle: { width: layout.drawerWidth },
-        swipeEnabled: !persistent,
-        swipeEdgeWidth: 50,
-      }}
-      drawerContent={(props: { navigation: { closeDrawer: () => void } }) => (
-        <DrawerContentWrapper navigation={props.navigation} persistent={persistent} />
-      )}
-    >
-      <Drawer.Screen name="PanelContent" component={MainScreen} />
-    </Drawer.Navigator>
+    <WorkspaceDirectoryContext.Provider value={directory}>
+      <Drawer.Navigator
+        defaultStatus={persistent ? "open" : "closed"}
+        screenOptions={{
+          headerShown: false,
+          drawerType: persistent ? "permanent" : "front",
+          drawerStyle: { width: layout.drawerWidth },
+          swipeEnabled: !persistent,
+          swipeEdgeWidth: 50,
+        }}
+        drawerContent={(props: {
+          navigation: {
+            closeDrawer: () => void;
+            navigate: (
+              screen: string,
+              params?: { workspaceId?: string },
+            ) => void;
+          };
+        }) => (
+          <WorkspaceDrawer
+            directory={directory}
+            onSettings={(workspaceId) => {
+              props.navigation.closeDrawer();
+              props.navigation.navigate("Settings", {
+                workspaceId: workspaceId ?? undefined,
+              });
+            }}
+            onSelect={() => {
+              if (!persistent) props.navigation.closeDrawer();
+            }}
+          />
+        )}
+      >
+        <Drawer.Screen name="PanelContent" component={WorkspaceScreens} />
+      </Drawer.Navigator>
+    </WorkspaceDirectoryContext.Provider>
   );
 }
 
-/**
- * Wrapper that provides PanelDrawer with the onSelectPanel callback.
- * Hydrates and focuses the selected durable panel, then closes the drawer.
- */
-function DrawerContentWrapper({
-  navigation,
-  persistent,
+function WorkspaceScreens() {
+  const directory = useAtomValue(workspaceDirectoryAtom)!;
+  return <RetainedWorkspaceScreens directory={directory} />;
+}
+
+function RetainedWorkspaceScreens({
+  directory,
 }: {
-  navigation: { closeDrawer: () => void };
-  persistent: boolean;
+  directory: MobileWorkspaceDirectory;
 }) {
-  const shellClient = useAtomValue(shellClientAtom);
-  const setActivePanelId = useSetAtom(activePanelIdAtom);
-
-  const handleSelectPanel = useCallback(
-    (panelId: string) => {
-      if (!persistent) navigation.closeDrawer();
-      if (!shellClient) {
-        setActivePanelId(panelId);
-        return;
-      }
-      void shellClient.panels.focus(panelId).catch((error: unknown) => {
-        console.warn("[MainNavigator] Failed to focus panel", {
-          panelId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
-    },
-    [navigation, persistent, setActivePanelId, shellClient]
+  useSyncExternalStore(directory.subscribe, directory.getSnapshot);
+  const scheme = useAtomValue(colorSchemeAtom);
+  const colors = useAtomValue(themeColorsAtom);
+  const navigation = useNavigation();
+  const notify = useSetAtom(pushToastAtom);
+  const approvalSession = directory.approvalWorkspaceId
+    ? directory.sessions.get(directory.approvalWorkspaceId)
+    : undefined;
+  const selected = directory.activeWorkspaceId;
+  const selectedSession = selected
+    ? directory.sessions.get(selected)
+    : undefined;
+  const selectedEntry = directory.entries.find(
+    (entry) => entry.workspaceId === selected,
   );
-
-  return <PanelDrawer onSelectPanel={handleSelectPanel} />;
+  const ready = selectedSession?.state === "ready";
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {[...directory.sessions.values()]
+        .filter(
+          (session) =>
+            session.state === "ready" &&
+            directory.presented.has(session.workspaceId),
+        )
+        .map((session) => {
+          const visible = session.workspaceId === selected;
+          return (
+            <View
+              key={session.workspaceId}
+              style={{ flex: 1, display: visible ? "flex" : "none" }}
+              pointerEvents={visible ? "auto" : "none"}
+              accessibilityElementsHidden={!visible}
+              importantForAccessibility={
+                visible ? "auto" : "no-hide-descendants"
+              }
+            >
+              <WorkspaceScope
+                session={session}
+                visible={visible}
+                scheme={scheme}
+              >
+                <MainScreen />
+                {visible && <ActionSheetHost />}
+              </WorkspaceScope>
+            </View>
+          );
+        })}
+      {directory.workspaceCreation && (
+        <WorkspaceCreateSheet
+          directory={directory}
+          template={directory.workspaceCreation.template}
+          onClose={() => directory.closeWorkspaceCreation()}
+          onCreated={() => directory.closeWorkspaceCreation()}
+        />
+      )}
+      {approvalSession?.state === "ready" &&
+        approvalSession.approvals !== null && (
+          <WorkspaceScope session={approvalSession} visible scheme={scheme}>
+            <WorkspaceApprovalSurface
+              directory={directory}
+              session={approvalSession}
+              notify={notify}
+            />
+          </WorkspaceScope>
+        )}
+      {directory.approvalWorkspaceId &&
+        (!approvalSession ||
+          approvalSession.state !== "ready" ||
+          approvalSession.approvals === null) && (
+          <Modal
+            transparent
+            visible
+            animationType="fade"
+            onRequestClose={() => directory.closeApprovals()}
+          >
+            <View
+              style={{
+                flex: 1,
+                justifyContent: "center",
+                padding: spacing.xl,
+                backgroundColor: "rgba(0,0,0,0.45)",
+              }}
+            >
+              <View
+                accessibilityViewIsModal
+                style={{
+                  padding: spacing.xl,
+                  gap: spacing.md,
+                  borderRadius: 20,
+                  backgroundColor: colors.surfaceRaised,
+                }}
+              >
+                <Text
+                  accessibilityRole="header"
+                  style={[type.heading, { color: colors.text }]}
+                >
+                  {displayWorkspaceName(
+                    directory.entries.find(
+                      (entry) =>
+                        entry.workspaceId === directory.approvalWorkspaceId,
+                    )!,
+                  )}{" "}
+                  · Approvals
+                </Text>
+                {approvalSession?.state === "failed" ||
+                approvalSession?.approvalError ? (
+                  <>
+                    <Text style={{ color: colors.textSecondary }}>
+                      {approvalSession.error ?? approvalSession.approvalError}
+                    </Text>
+                    <Button
+                      label="Try again"
+                      onPress={() =>
+                        directory.openApprovals(directory.approvalWorkspaceId!)
+                      }
+                    />
+                  </>
+                ) : (
+                  <>
+                    <ActivityIndicator color={colors.textSecondary} />
+                    <Text style={{ color: colors.textSecondary }}>
+                      Connecting to this workspace’s approval queue…
+                    </Text>
+                  </>
+                )}
+                <Button
+                  label="Close"
+                  onPress={() => directory.closeApprovals()}
+                />
+              </View>
+            </View>
+          </Modal>
+        )}
+      {!ready && (
+        <View
+          style={{
+            flex: 1,
+            justifyContent: "center",
+            padding: spacing.xl,
+            gap: spacing.md,
+          }}
+        >
+          <Text
+            accessibilityRole="header"
+            style={[type.heading, { color: colors.text }]}
+          >
+            {selectedEntry
+              ? displayWorkspaceName(selectedEntry)
+              : "Workspace unavailable"}
+          </Text>
+          <Text
+            accessibilityRole={
+              selectedSession?.state === "failed" ? "alert" : "text"
+            }
+            style={[type.body, { color: colors.textSecondary }]}
+          >
+            {selectedSession?.state === "opening"
+              ? "Opening your workspace…"
+              : (selectedSession?.error ??
+                "This workspace is no longer available to your account. Choose another workspace to continue.")}
+          </Text>
+          {selectedSession?.state === "failed" && selected && (
+            <Button
+              label="Try again"
+              onPress={() => {
+                void directory.open(selected).catch(() => undefined);
+              }}
+            />
+          )}
+          <Button
+            label="Your workspaces"
+            onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
+          />
+        </View>
+      )}
+    </View>
+  );
 }

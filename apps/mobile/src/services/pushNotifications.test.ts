@@ -1,3 +1,10 @@
+import { workspaceNotificationKey } from "@vibestudio/shared/workspacePushScope";
+const scope = {
+  serverId: "srv_aaaaaaaaaaaaaaaaaaaaaaaa",
+  userId: "alice",
+  workspaceId: "project",
+};
+const notificationKey = (id: string) => workspaceNotificationKey(scope, id);
 import { AppState, NativeModules } from "react-native";
 import { waitFor } from "@testing-library/react-native";
 import {
@@ -5,7 +12,10 @@ import {
   registerForPushNotifications,
   reconcilePushNotifications,
 } from "./pushNotifications";
-import { handleBackgroundMessage, handleBackgroundNotifeeEvent } from "./backgroundHandlers";
+import {
+  handleBackgroundMessage,
+  handleBackgroundNotifeeEvent,
+} from "./backgroundHandlers";
 import {
   backgroundActionQueueStorageKeys,
   SYNCING_NOTIFICATION_BODY,
@@ -15,6 +25,7 @@ import { setApprovedAppCapabilities } from "./appCapabilities";
 type RecoveryKind = "resubscribe" | "cold-recover";
 
 type MockShellClient = {
+  pushScope: typeof scope;
   transport: {
     status: "connected" | "connecting" | "disconnected";
     call: jest.Mock;
@@ -68,7 +79,9 @@ const mockNotifee = {
   requestPermission: jest.fn(async () => ({ authorizationStatus: 1 })),
 };
 
-jest.mock("@react-native-firebase/messaging", () => mockMessagingFactory, { virtual: true });
+jest.mock("@react-native-firebase/messaging", () => mockMessagingFactory, {
+  virtual: true,
+});
 jest.mock(
   "@notifee/react-native",
   () => ({
@@ -76,7 +89,7 @@ jest.mock(
     default: mockNotifee,
     EventType: { ACTION_PRESS: 1, PRESS: 2 },
   }),
-  { virtual: true }
+  { virtual: true },
 );
 jest.mock(
   "@react-native-async-storage/async-storage",
@@ -89,10 +102,12 @@ jest.mock(
       mockStorage.delete(key);
     }),
   }),
-  { virtual: true }
+  { virtual: true },
 );
 jest.mock("react-native-keychain", () => ({
-  ACCESSIBLE: { WHEN_UNLOCKED_THIS_DEVICE_ONLY: "WHEN_UNLOCKED_THIS_DEVICE_ONLY" },
+  ACCESSIBLE: {
+    WHEN_UNLOCKED_THIS_DEVICE_ONLY: "WHEN_UNLOCKED_THIS_DEVICE_ONLY",
+  },
   getGenericPassword: jest.fn(async () => false),
   setGenericPassword: jest.fn(async () => true),
 }));
@@ -105,33 +120,40 @@ const appStateSpy = jest
   });
 
 function createShellClient(
-  status: MockShellClient["transport"]["status"] = "connected"
+  status: MockShellClient["transport"]["status"] = "connected",
 ): MockShellClient {
   const transport = {
     status,
-    call: jest.fn(async (_target: string, method: string, _args: unknown[] = []) => {
-      if (method === "shellApproval.listPending") {
-        return [{ approvalId: "approval-1" }];
-      }
-      return undefined;
-    }),
+    call: jest.fn(
+      async (_target: string, method: string, _args: unknown[] = []) => {
+        if (method === "shellApproval.listPending") {
+          return [{ approvalId: "approval-1" }];
+        }
+        return undefined;
+      },
+    ),
     onRecovery: jest.fn((kind: RecoveryKind, callback: () => void) => {
       mockListeners.recovery.set(kind, callback);
       return jest.fn();
     }),
   };
   return {
+    pushScope: scope,
     transport,
     shellApproval: {
-      listPending: jest.fn(() => transport.call("main", "shellApproval.listPending", [])),
+      listPending: jest.fn(() =>
+        transport.call("main", "shellApproval.listPending", []),
+      ),
       resolve: jest.fn((approvalId: string, decision: string) =>
-        transport.call("main", "shellApproval.resolve", [approvalId, decision])
+        transport.call("main", "shellApproval.resolve", [approvalId, decision]),
       ),
     },
     push: {
-      register: jest.fn((request: unknown) => transport.call("main", "push.register", [request])),
+      register: jest.fn((request: unknown) =>
+        transport.call("main", "push.register", [request]),
+      ),
       unregister: jest.fn((clientId: string) =>
-        transport.call("main", "push.unregister", [clientId])
+        transport.call("main", "push.unregister", [clientId]),
       ),
     },
   };
@@ -139,8 +161,9 @@ function createShellClient(
 
 beforeEach(() => {
   setApprovedAppCapabilities(["notifications", "keychain"]);
-  (NativeModules["VibestudioMobileHost"] as { firebaseConfigured?: boolean }).firebaseConfigured =
-    true;
+  (
+    NativeModules["VibestudioMobileHost"] as { firebaseConfigured?: boolean }
+  ).firebaseConfigured = true;
   jest.clearAllMocks();
   mockStorage.clear();
   mockListeners.tokenRefresh = undefined;
@@ -160,8 +183,9 @@ afterAll(() => {
 
 describe("pushNotifications", () => {
   it("skips Firebase messaging setup when the native app has no Firebase config", async () => {
-    (NativeModules["VibestudioMobileHost"] as { firebaseConfigured?: boolean }).firebaseConfigured =
-      false;
+    (
+      NativeModules["VibestudioMobileHost"] as { firebaseConfigured?: boolean }
+    ).firebaseConfigured = false;
     const shellClient = createShellClient();
 
     const cleanup = await registerForPushNotifications(shellClient as never);
@@ -171,7 +195,7 @@ describe("pushNotifications", () => {
     expect(shellClient.transport.call).not.toHaveBeenCalledWith(
       "main",
       "push.register",
-      expect.any(Array)
+      expect.any(Array),
     );
   });
 
@@ -182,18 +206,26 @@ describe("pushNotifications", () => {
     mockListeners.tokenRefresh?.("token-2");
     await Promise.resolve();
 
-    expect(shellClient.transport.call).toHaveBeenCalledWith("main", "push.register", [
-      expect.objectContaining({
-        token: "token-1",
-        platform: expect.stringMatching(/^(android|ios)$/),
-      }),
-    ]);
-    expect(shellClient.transport.call).toHaveBeenCalledWith("main", "push.register", [
-      expect.objectContaining({
-        token: "token-2",
-        platform: expect.stringMatching(/^(android|ios)$/),
-      }),
-    ]);
+    expect(shellClient.transport.call).toHaveBeenCalledWith(
+      "main",
+      "push.register",
+      [
+        expect.objectContaining({
+          token: "token-1",
+          platform: expect.stringMatching(/^(android|ios)$/),
+        }),
+      ],
+    );
+    expect(shellClient.transport.call).toHaveBeenCalledWith(
+      "main",
+      "push.register",
+      [
+        expect.objectContaining({
+          token: "token-2",
+          platform: expect.stringMatching(/^(android|ios)$/),
+        }),
+      ],
+    );
   });
 
   it("resolves foreground deny actions immediately and cancels notification", async () => {
@@ -203,16 +235,22 @@ describe("pushNotifications", () => {
     await mockListeners.foreground?.({
       type: 1,
       detail: {
-        notification: { id: "approval-1", data: { approvalId: "approval-1" } },
+        notification: {
+          id: "approval-1",
+          data: { ...scope, approvalId: "approval-1" },
+        },
         pressAction: { id: "deny" },
       },
     });
 
-    expect(shellClient.transport.call).toHaveBeenCalledWith("main", "shellApproval.resolve", [
-      "approval-1",
-      "deny",
-    ]);
-    expect(mockNotifee.cancelNotification).toHaveBeenCalledWith("approval-1");
+    expect(shellClient.transport.call).toHaveBeenCalledWith(
+      "main",
+      "shellApproval.resolve",
+      ["approval-1", "deny"],
+    );
+    expect(mockNotifee.cancelNotification).toHaveBeenCalledWith(
+      notificationKey("approval-1"),
+    );
   });
 
   it("queues background-equivalent foreground actions when disconnected without cancelling", async () => {
@@ -222,21 +260,27 @@ describe("pushNotifications", () => {
     await mockListeners.foreground?.({
       type: 1,
       detail: {
-        notification: { id: "approval-1", title: "Approval", data: { approvalId: "approval-1" } },
+        notification: {
+          id: "approval-1",
+          title: "Approval",
+          data: { ...scope, approvalId: "approval-1" },
+        },
         pressAction: { id: "deny" },
       },
     });
 
-    expect(mockNotifee.cancelNotification).not.toHaveBeenCalledWith("approval-1");
+    expect(mockNotifee.cancelNotification).not.toHaveBeenCalledWith(
+      notificationKey("approval-1"),
+    );
     expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "approval-1",
+        id: notificationKey("approval-1"),
         body: SYNCING_NOTIFICATION_BODY,
-      })
+      }),
     );
-    expect(mockStorage.get(backgroundActionQueueStorageKeys.ACTION_QUEUE_KEY)).toContain(
-      "approval-1"
-    );
+    expect(
+      mockStorage.get(backgroundActionQueueStorageKeys.ACTION_QUEUE_KEY),
+    ).toContain("approval-1");
   });
 
   it("queues background deny actions without cancelling the notification", async () => {
@@ -252,25 +296,25 @@ describe("pushNotifications", () => {
           notification: {
             id: "approval-bg",
             title: "Approval",
-            data: { approvalId: "approval-bg" },
+            data: { ...scope, approvalId: "approval-bg" },
           },
           pressAction: { id: "deny" },
         },
       },
       backgroundNotifee,
-      { ACTION_PRESS: 1, PRESS: 2 }
+      { ACTION_PRESS: 1, PRESS: 2 },
     );
 
     expect(backgroundNotifee.cancelNotification).not.toHaveBeenCalled();
     expect(backgroundNotifee.displayNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "approval-bg",
+        id: notificationKey("approval-bg"),
         body: SYNCING_NOTIFICATION_BODY,
-      })
+      }),
     );
-    expect(mockStorage.get(backgroundActionQueueStorageKeys.ACTION_QUEUE_KEY)).toContain(
-      "approval-bg"
-    );
+    expect(
+      mockStorage.get(backgroundActionQueueStorageKeys.ACTION_QUEUE_KEY),
+    ).toContain("approval-bg");
   });
 
   it("rejects direct background notification handlers without the notifications capability", async () => {
@@ -282,26 +326,31 @@ describe("pushNotifications", () => {
 
     await expect(
       handleBackgroundMessage(
-        { data: { kind: "approval-cancel", cancelKey: "approval-bg" } },
-        backgroundNotifee
-      )
+        {
+          data: { ...scope, kind: "approval-cancel", cancelKey: "approval-bg" },
+        },
+        backgroundNotifee,
+      ),
     ).rejects.toThrow(
-      "background notification message requires approved app capability 'notifications'"
+      "background notification message requires approved app capability 'notifications'",
     );
     await expect(
       handleBackgroundNotifeeEvent(
         {
           type: 1,
           detail: {
-            notification: { id: "approval-bg", data: { approvalId: "approval-bg" } },
+            notification: {
+              id: "approval-bg",
+              data: { ...scope, approvalId: "approval-bg" },
+            },
             pressAction: { id: "deny" },
           },
         },
         backgroundNotifee,
-        { ACTION_PRESS: 1, PRESS: 2 }
-      )
+        { ACTION_PRESS: 1, PRESS: 2 },
+      ),
     ).rejects.toThrow(
-      "background notification action requires approved app capability 'notifications'"
+      "background notification action requires approved app capability 'notifications'",
     );
 
     expect(backgroundNotifee.cancelNotification).not.toHaveBeenCalled();
@@ -313,11 +362,13 @@ describe("pushNotifications", () => {
 
     await expect(
       displayApprovalNotification(
-        { data: { kind: "approval-prompt", approvalId: "approval-1" } },
-        mockNotifee
-      )
+        {
+          data: { ...scope, kind: "approval-prompt", approvalId: "approval-1" },
+        },
+        mockNotifee,
+      ),
     ).rejects.toThrow(
-      "approval notification display requires approved app capability 'notifications'"
+      "approval notification display requires approved app capability 'notifications'",
     );
     expect(mockNotifee.displayNotification).not.toHaveBeenCalled();
   });
@@ -327,6 +378,7 @@ describe("pushNotifications", () => {
       {
         notification: { title: "ignored", body: "ignored" },
         data: {
+          ...scope,
           kind: "user-inbox",
           notificationId: "agent.message:say:call-1:usr_bob",
           inboxKind: "agent.message",
@@ -339,20 +391,24 @@ describe("pushNotifications", () => {
           senderHandle: "news",
         },
       },
-      mockNotifee
+      mockNotifee,
     );
 
     expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
       expect.objectContaining({
-        id: "agent.message:say:call-1:usr_bob",
+        id: notificationKey("agent.message:say:call-1:usr_bob"),
         title: "Briefing ready",
         body: "3 stories",
-        data: expect.objectContaining({ kind: "user-inbox", channelId: "ch-news", messageId: "say:call-1" }),
+        data: expect.objectContaining({
+          kind: "user-inbox",
+          channelId: "ch-news",
+          messageId: "say:call-1",
+        }),
         android: expect.objectContaining({
           channelId: "messages",
           pressAction: { id: "open", launchActivity: "default" },
         }),
-      })
+      }),
     );
   });
 
@@ -360,6 +416,7 @@ describe("pushNotifications", () => {
     await displayApprovalNotification(
       {
         data: {
+          ...scope,
           kind: "approval-prompt",
           approvalId: "approval-1",
           actionsJson: JSON.stringify([
@@ -368,7 +425,7 @@ describe("pushNotifications", () => {
           ]),
         },
       },
-      mockNotifee
+      mockNotifee,
     );
 
     expect(mockNotifee.displayNotification).toHaveBeenCalledWith(
@@ -379,7 +436,7 @@ describe("pushNotifications", () => {
             { title: "Don't upload", pressAction: { id: "deny" } },
           ],
         }),
-      })
+      }),
     );
   });
 
@@ -390,8 +447,15 @@ describe("pushNotifications", () => {
         backgroundActionQueueStorageKeys.ACTION_QUEUE_KEY,
         JSON.stringify({
           version: 1,
-          actions: [{ approvalId: "approval-1", decision: "session", queuedAt: Date.now() }],
-        })
+          actions: [
+            {
+              ...scope,
+              approvalId: "approval-1",
+              decision: "session",
+              queuedAt: Date.now(),
+            },
+          ],
+        }),
       );
       const shellClient = createShellClient();
       await registerForPushNotifications(shellClient as never);
@@ -402,14 +466,19 @@ describe("pushNotifications", () => {
       mockListeners.recovery.get(kind)?.();
 
       await waitFor(() =>
-        expect(shellClient.transport.call).toHaveBeenCalledWith("main", "shellApproval.resolve", [
-          "approval-1",
-          "session",
-        ])
+        expect(shellClient.transport.call).toHaveBeenCalledWith(
+          "main",
+          "shellApproval.resolve",
+          ["approval-1", "session"],
+        ),
       );
-      expect(mockNotifee.cancelNotification).toHaveBeenCalledWith("approval-1");
-      expect(mockStorage.has(backgroundActionQueueStorageKeys.ACTION_QUEUE_KEY)).toBe(false);
-    }
+      expect(mockNotifee.cancelNotification).toHaveBeenCalledWith(
+        notificationKey("approval-1"),
+      );
+      expect(
+        mockStorage.has(backgroundActionQueueStorageKeys.ACTION_QUEUE_KEY),
+      ).toBe(false);
+    },
   );
 
   it("handles silent cancel data messages", async () => {
@@ -417,27 +486,40 @@ describe("pushNotifications", () => {
     await registerForPushNotifications(shellClient as never);
 
     mockListeners.message?.({
-      data: {
-        kind: "approval-cancel",
-        cancelKey: "approval-1",
-      },
+      data: { ...scope, kind: "approval-cancel", cancelKey: "approval-1" },
     });
     await Promise.resolve();
 
-    expect(mockNotifee.cancelNotification).toHaveBeenCalledWith("approval-1");
+    expect(mockNotifee.cancelNotification).toHaveBeenCalledWith(
+      notificationKey("approval-1"),
+    );
   });
 
   it("reconciles stale displayed notifications", async () => {
     const shellClient = createShellClient();
     mockNotifee.getDisplayedNotifications.mockResolvedValue([
-      { notification: { id: "approval-1" } },
-      { notification: { id: "stale-approval" } },
+      {
+        notification: {
+          id: "approval-1",
+          data: { ...scope, approvalId: "approval-1" },
+        },
+      },
+      {
+        notification: {
+          id: "stale-approval",
+          data: { ...scope, approvalId: "stale-approval" },
+        },
+      },
     ] as never);
 
     await reconcilePushNotifications(shellClient as never, mockNotifee);
 
-    expect(mockNotifee.cancelNotification).toHaveBeenCalledWith("stale-approval");
-    expect(mockNotifee.cancelNotification).not.toHaveBeenCalledWith("approval-1");
+    expect(mockNotifee.cancelNotification).toHaveBeenCalledWith(
+      "stale-approval",
+    );
+    expect(mockNotifee.cancelNotification).not.toHaveBeenCalledWith(
+      notificationKey("approval-1"),
+    );
   });
 
   it("keeps a still-pending notification displayed under a distinct cancelKey", async () => {
@@ -445,14 +527,26 @@ describe("pushNotifications", () => {
     // Displayed under cancelKey, but the pending approvalId lives in data.
     // Reconcile must match on the carried approvalId, not the display id.
     mockNotifee.getDisplayedNotifications.mockResolvedValue([
-      { notification: { id: "cancel-key-1", data: { approvalId: "approval-1" } } },
-      { notification: { id: "cancel-key-2", data: { approvalId: "stale-approval" } } },
+      {
+        notification: {
+          id: "cancel-key-1",
+          data: { ...scope, approvalId: "approval-1" },
+        },
+      },
+      {
+        notification: {
+          id: "cancel-key-2",
+          data: { ...scope, approvalId: "stale-approval" },
+        },
+      },
     ] as never);
 
     await reconcilePushNotifications(shellClient as never, mockNotifee);
 
     // approval-1 is pending -> its notification (display id cancel-key-1) stays.
-    expect(mockNotifee.cancelNotification).not.toHaveBeenCalledWith("cancel-key-1");
+    expect(mockNotifee.cancelNotification).not.toHaveBeenCalledWith(
+      "cancel-key-1",
+    );
     // stale-approval is not pending -> cancelled by its actual display id.
     expect(mockNotifee.cancelNotification).toHaveBeenCalledWith("cancel-key-2");
   });
@@ -527,19 +621,39 @@ describe("pushNotifications", () => {
             section: "template",
           },
         ],
-        summary: { panels: 0, agents: 0, services: 0, clientApps: 1, extensions: 1 },
+        summary: {
+          panels: 0,
+          agents: 0,
+          services: 0,
+          clientApps: 1,
+          extensions: 1,
+        },
         unchangedPartCount: 0,
       },
       { approvalId: "runtime-approval" },
     ]);
     mockNotifee.getDisplayedNotifications.mockResolvedValue([
-      { notification: { id: "startup-display", data: { approvalId: "startup-units" } } },
-      { notification: { id: "runtime-display", data: { approvalId: "runtime-approval" } } },
+      {
+        notification: {
+          id: "startup-display",
+          data: { ...scope, approvalId: "startup-units" },
+        },
+      },
+      {
+        notification: {
+          id: "runtime-display",
+          data: { ...scope, approvalId: "runtime-approval" },
+        },
+      },
     ] as never);
 
     await reconcilePushNotifications(shellClient as never, mockNotifee);
 
-    expect(mockNotifee.cancelNotification).toHaveBeenCalledWith("startup-display");
-    expect(mockNotifee.cancelNotification).not.toHaveBeenCalledWith("runtime-display");
+    expect(mockNotifee.cancelNotification).toHaveBeenCalledWith(
+      "startup-display",
+    );
+    expect(mockNotifee.cancelNotification).not.toHaveBeenCalledWith(
+      "runtime-display",
+    );
   });
 });

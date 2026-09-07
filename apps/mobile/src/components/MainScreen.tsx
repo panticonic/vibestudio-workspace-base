@@ -1,4 +1,18 @@
-import { useEffect, useCallback, useMemo, useRef, useState } from "react";
+import { parseShellSurfaceLink } from "@vibestudio/shared/shellSurface";
+import type { ShellClient } from "../services/shellClient";
+import type { RootStackParamList } from "../navigation/RootNavigator";
+import {
+  useWorkspaceVisible,
+  useWorkspaceDirectory,
+} from "../state/workspaceScope";
+import {
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   View,
   Text,
@@ -11,17 +25,20 @@ import {
   Pressable,
   useWindowDimensions,
 } from "react-native";
-import { useNavigation, DrawerActions, useDrawerStatus } from "@workspace/mobile-navigation";
-import type { TemplateInstallResolution } from "@vibestudio/shared/authority/unitInstallReview";
+import {
+  useNavigation,
+  DrawerActions,
+  useDrawerStatus,
+  type StackNavigationProp,
+} from "@workspace/mobile-navigation";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { ConnectionBar } from "./ConnectionBar";
 import { AppBar } from "./AppBar";
+import { workspaceBrowserProfile } from "../services/workspaceBrowserProfile";
 import { LoadedPanelWebView } from "./LoadedPanelWebView";
 import { syncManagedWebViewThemes } from "./webViewThemes";
-import { ApprovalSheet } from "./ApprovalSheet";
 import { CommandSheet } from "./CommandSheet";
 import { QuickfireSheet } from "./QuickfireSheet";
-import { BrowserPrivacyManager } from "./BrowserPrivacyManager";
 import { Toast } from "./Toast";
 import { VibestudioLogo } from "./VibestudioLogo";
 import { useAppLifecycle } from "../hooks/useAppLifecycle";
@@ -29,9 +46,15 @@ import type { PanelWebViewHandle, PanelNavigationEvent } from "./PanelWebView";
 import type { WebViewNavigation } from "react-native-webview/lib/WebViewTypes";
 import type { PanelPageObservation } from "@vibestudio/shared/panel/observation";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
-import { panelTreeRevisionAtom, shellClientAtom } from "../state/shellClientAtom";
-import { colorSchemeAtom, themeColorsAtom, themePreferenceAtom } from "../state/themeAtoms";
-import { approvalDeepLinkAtom } from "../state/approvalDeepLinkAtom";
+import {
+  panelTreeRevisionAtom,
+  shellClientAtom,
+} from "../state/shellClientAtom";
+import {
+  colorSchemeAtom,
+  themeColorsAtom,
+  themePreferenceAtom,
+} from "../state/themeAtoms";
 import { inboxDeepLinkAtom } from "../state/inboxDeepLinkAtom";
 import { pushToastAtom } from "../state/toastAtoms";
 import {
@@ -48,7 +71,10 @@ import {
   webViewUnmountNeedsUnload,
   type WebViewEntry,
 } from "./webViewStack";
-import { loadPinnedPanelIds, savePinnedPanelIds } from "../shellCore/pinnedPanels";
+import {
+  loadPinnedPanelIds,
+  savePinnedPanelIds,
+} from "../shellCore/pinnedPanels";
 import { resolveMobileBackAction } from "../shellCore/mobileBackNavigation";
 import { mobileNavigationLayout } from "../shellCore/mobileLayout";
 import {
@@ -63,12 +89,19 @@ import {
   mobilePanelMaterializationState,
   PanelMaterializationRetryQueue,
 } from "../services/panelMaterializer";
-import { handleExternalOpen, type ExternalOpenPayload } from "../services/oauthLoopback";
+import {
+  handleExternalOpen,
+  type ExternalOpenPayload,
+} from "../services/oauthLoopback";
 import {
   handleMobileAppLifecycleEvent,
   type AppLifecyclePayload,
 } from "../services/appUpdatePrompt";
-import { copyToClipboard, openExternalUrl, shareText } from "../services/nativeCapabilities";
+import {
+  copyToClipboard,
+  openExternalUrl,
+  shareText,
+} from "../services/nativeCapabilities";
 import { resetToNativeBootstrap } from "../services/auth";
 import { clearShellCredential } from "../services/mobileCredentials";
 import {
@@ -92,20 +125,9 @@ import {
   type PanelCommandId,
 } from "@vibestudio/shared/panelCommands";
 import { getCurrentSnapshot } from "@vibestudio/shared/panel/accessors";
-import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
-import {
-  createApprovalStateController,
-  SHELL_APPROVAL_PENDING_CHANGED_EVENT,
-  type ApprovalStateController,
-} from "@vibestudio/shell-core/approvalState";
+
 import type { HostConfig } from "../services/panelUrls";
-import type {
-  ApprovalDecision,
-  DiffReviewEntry,
-  DiffReviewFile,
-  PendingApproval,
-} from "@vibestudio/shared/approvals";
-import type { MobileBrowserPrivacySection } from "../services/shellClient";
+
 import {
   channelInviteFromNotification,
   type UserNotification,
@@ -142,7 +164,9 @@ import {
 import { Button, EmptyState } from "./ui/primitives";
 
 /** Native icon choices for renderer-neutral shared panel commands. */
-const PANEL_COMMAND_PRESENTATION: Partial<Record<PanelCommandId, { icon?: IconComponent }>> = {
+const PANEL_COMMAND_PRESENTATION: Partial<
+  Record<PanelCommandId, { icon?: IconComponent }>
+> = {
   back: { icon: ArrowLeftIcon },
   forward: { icon: ArrowRightIcon },
   "reload-panel": { icon: RefreshCwIcon },
@@ -162,10 +186,18 @@ const PANEL_COMMAND_PRESENTATION: Partial<Record<PanelCommandId, { icon?: IconCo
 
 const PANEL_MATERIALIZE_TIMEOUT_MS = 45_000;
 
-function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  message: string,
+  cancel: () => void,
+): Promise<T> {
   let timeout: ReturnType<typeof setTimeout> | null = null;
   const timeoutPromise = new Promise<never>((_, reject) => {
-    timeout = setTimeout(() => reject(new Error(message)), timeoutMs);
+    timeout = setTimeout(() => {
+      cancel();
+      reject(new Error(message));
+    }, timeoutMs);
   });
   return Promise.race([promise, timeoutPromise]).finally(() => {
     if (timeout) clearTimeout(timeout);
@@ -176,30 +208,44 @@ function smokePhase(phase: string, extra?: Record<string, unknown>): void {
   console.log(`[VibestudioMobileSmoke] phase=${phase}`, extra ?? "");
 }
 
+const noDirectorySubscription = () => () => {};
+const noDirectoryRevision = () => 0;
+
 export function MainScreen() {
+  const workspaceVisible = useWorkspaceVisible();
+  const workspaceDirectory = useWorkspaceDirectory();
+  useSyncExternalStore(
+    workspaceDirectory?.subscribe ?? noDirectorySubscription,
+    workspaceDirectory?.getSnapshot ?? noDirectoryRevision,
+  );
   const navigation = useNavigation();
   const drawerStatus = useDrawerStatus();
-  const { width: viewportWidth, height: viewportHeight } = useWindowDimensions();
+  const { width: viewportWidth, height: viewportHeight } =
+    useWindowDimensions();
   const persistentNavigation =
     mobileNavigationLayout(viewportWidth, viewportHeight).kind === "tablet";
   useEffect(() => {
+    if (!workspaceVisible) return;
     navigation.dispatch(
-      persistentNavigation ? DrawerActions.openDrawer() : DrawerActions.closeDrawer()
+      persistentNavigation
+        ? DrawerActions.openDrawer()
+        : DrawerActions.closeDrawer(),
     );
-  }, [navigation, persistentNavigation]);
+  }, [navigation, persistentNavigation, workspaceVisible]);
   const shellClient = useAtomValue(shellClientAtom);
   const panelTreeRevision = useAtomValue(panelTreeRevisionAtom);
   const setPanelTreeRevision = useSetAtom(panelTreeRevisionAtom);
   const setActivePanelMetadata = useSetAtom(activePanelMetadataAtom);
   const setActivePanelId = useSetAtom(activePanelIdAtom);
   const colorScheme = useAtomValue(colorSchemeAtom);
-  const currentThemeModeRef = useRef<"light" | "dark">(colorScheme === "light" ? "light" : "dark");
+  const currentThemeModeRef = useRef<"light" | "dark">(
+    colorScheme === "light" ? "light" : "dark",
+  );
   currentThemeModeRef.current = colorScheme === "light" ? "light" : "dark";
   const activePanelId = useAtomValue(activePanelIdAtom);
   const activePanelTitle = useAtomValue(activePanelTitleAtom);
   const activePanelParentId = useAtomValue(activePanelParentIdAtom);
   const colors = useAtomValue(themeColorsAtom);
-  const [approvalDeepLinkId, setApprovalDeepLinkId] = useAtom(approvalDeepLinkAtom);
   const pushToast = useSetAtom(pushToastAtom);
   const showActionSheet = useSetAtom(showActionSheetAtom);
   const pinnedPanelIds = useAtomValue(pinnedPanelIdsAtom);
@@ -247,54 +293,73 @@ export function MainScreen() {
   useAppLifecycle(shellClient);
   const [webViewStack, setWebViewStack] = useState<WebViewEntry[]>([]);
   const webViewStackRef = useRef<WebViewEntry[]>([]);
-  const updateWebViewStack = useCallback((update: (current: WebViewEntry[]) => WebViewEntry[]) => {
-    const next = update(webViewStackRef.current);
-    webViewStackRef.current = next;
-    setWebViewStack(next);
-  }, []);
+  const updateWebViewStack = useCallback(
+    (update: (current: WebViewEntry[]) => WebViewEntry[]) => {
+      const next = update(webViewStackRef.current);
+      webViewStackRef.current = next;
+      setWebViewStack(next);
+    },
+    [],
+  );
   const [loadingPanelId, setLoadingPanelId] = useState<string | null>(null);
-  const [panelLoadErrors, setPanelLoadErrors] = useState<Record<string, string>>({});
-  const [pendingApprovals, setPendingApprovals] = useState<PendingApproval[]>([]);
-  const [userNotifications, setUserNotifications] = useState<UserNotification[]>([]);
-  const [browserPrivacySection, setBrowserPrivacySection] =
-    useState<MobileBrowserPrivacySection | null>(null);
+  const [panelLoadErrors, setPanelLoadErrors] = useState<
+    Record<string, string>
+  >({});
+  const [userNotifications, setUserNotifications] = useState<
+    UserNotification[]
+  >([]);
   const userNotificationRefreshSeq = useRef(0);
 
-  useEffect(() => {
-    setBrowserPrivacySection(null);
-    if (!shellClient) return;
-    return shellClient.onOpenBrowserPrivacy(setBrowserPrivacySection);
-  }, [shellClient]);
-  const pendingApprovalsRefreshSeq = useRef(0);
-  const pendingApprovalsSignatureRef = useRef("");
-  const approvalStateControllerRef = useRef<ApprovalStateController | null>(null);
   const [addressBarVisible, setAddressBarVisible] = useState(false);
   const [addressQuery, setAddressQuery] = useState("");
-  const [addressSuggestions, setAddressSuggestions] = useState<AddressAutocompleteItem[]>([]);
+  const [addressSuggestions, setAddressSuggestions] = useState<
+    AddressAutocompleteItem[]
+  >([]);
   const [selectedMobileApp, setSelectedMobileApp] = useState<{
     source: string | null;
     appId: string | null;
   }>({ source: null, appId: null });
-  const [webViewNavigation, setWebViewNavigation] = useState<Record<string, WebViewNavigation>>({});
+  const [webViewNavigation, setWebViewNavigation] = useState<
+    Record<string, WebViewNavigation>
+  >({});
   const webViewNavigationRef = useRef<Record<string, WebViewNavigation>>({});
-  const webViewRefsMap = useRef<Map<string, PanelWebViewHandle | null>>(new Map());
+  const browserProfile = shellClient?.workspaceId
+    ? workspaceBrowserProfile(
+        shellClient.localStorageScope,
+        shellClient.workspaceId,
+      )
+    : null;
+  const webViewRefsMap = useRef<Map<string, PanelWebViewHandle | null>>(
+    new Map(),
+  );
   const webViewThemeSignaturesRef = useRef<Map<string, string>>(new Map());
   const pendingPanelLoads = useRef<Set<string>>(new Set());
-  const [panelMaterializationRetryEpoch, setPanelMaterializationRetryEpoch] = useState(0);
-  const panelMaterializationRetryQueueRef = useRef<PanelMaterializationRetryQueue | null>(null);
+  const [panelMaterializationRetryEpoch, setPanelMaterializationRetryEpoch] =
+    useState(0);
+  const panelMaterializationRetryQueueRef =
+    useRef<PanelMaterializationRetryQueue | null>(null);
   if (!panelMaterializationRetryQueueRef.current) {
-    panelMaterializationRetryQueueRef.current = new PanelMaterializationRetryQueue(() =>
-      setPanelMaterializationRetryEpoch((epoch) => epoch + 1)
-    );
+    panelMaterializationRetryQueueRef.current =
+      new PanelMaterializationRetryQueue(() =>
+        setPanelMaterializationRetryEpoch((epoch) => epoch + 1),
+      );
   }
-  const panelMaterializationRetryQueue = panelMaterializationRetryQueueRef.current;
-  const pendingHistoryIntentByUrl = useRef<Map<string, BrowserNavigationIntent>>(new Map());
-  const pendingHistoryIntentByPanel = useRef<Map<string, BrowserNavigationIntent>>(new Map());
+  const panelMaterializationRetryQueue =
+    panelMaterializationRetryQueueRef.current;
+  const pendingHistoryIntentByUrl = useRef<
+    Map<string, BrowserNavigationIntent>
+  >(new Map());
+  const pendingHistoryIntentByPanel = useRef<
+    Map<string, BrowserNavigationIntent>
+  >(new Map());
   const recentHistoryRecords = useRef<Map<string, number>>(new Map());
   useEffect(() => {
     webViewNavigationRef.current = webViewNavigation;
   }, [webViewNavigation]);
-  useEffect(() => () => panelMaterializationRetryQueue.stop(), [panelMaterializationRetryQueue]);
+  useEffect(
+    () => () => panelMaterializationRetryQueue.stop(),
+    [panelMaterializationRetryQueue],
+  );
   useEffect(() => {
     userNotificationRefreshSeq.current += 1;
     if (!shellClient) {
@@ -310,23 +375,29 @@ export function MainScreen() {
       }
     };
     void refresh().catch((error: unknown) => {
-      if (!disposed) console.warn("[MainScreen] Failed to load user notifications:", error);
+      if (!disposed)
+        console.warn("[MainScreen] Failed to load user notifications:", error);
     });
     const unsubscribeEvent = shellClient.onDirectEvent(
       "user-notifications-changed",
       () =>
         void refresh().catch((error: unknown) =>
-          console.warn("[MainScreen] Failed to refresh user notifications:", error)
-        )
+          console.warn(
+            "[MainScreen] Failed to refresh user notifications:",
+            error,
+          ),
+        ),
     );
-    const unsubscribeResubscribe = shellClient.recovery.registerResubscribeHandler(
-      "mobile-user-notifications",
-      refresh
-    );
-    const unsubscribeColdRecover = shellClient.recovery.registerColdRecoverHandler(
-      "mobile-user-notifications",
-      refresh
-    );
+    const unsubscribeResubscribe =
+      shellClient.recovery.registerResubscribeHandler(
+        "mobile-user-notifications",
+        refresh,
+      );
+    const unsubscribeColdRecover =
+      shellClient.recovery.registerColdRecoverHandler(
+        "mobile-user-notifications",
+        refresh,
+      );
     return () => {
       disposed = true;
       userNotificationRefreshSeq.current += 1;
@@ -380,7 +451,10 @@ export function MainScreen() {
       for (const entry of webViewStackRef.current) {
         if (!entry.managed) continue;
         const panel = shellClient.panels.registry.getPanel(entry.panelId);
-        if (panel && mobilePanelMaterializationState(panel, entry) === "current") {
+        if (
+          panel &&
+          mobilePanelMaterializationState(panel, entry) === "current"
+        ) {
           shellClient.panels.resetBridgeSessionForReload(entry.panelId);
           webViewRefsMap.current.get(entry.panelId)?.reload();
         }
@@ -392,17 +466,20 @@ export function MainScreen() {
       webViewRefsMap.current.delete(panelId);
       webViewThemeSignaturesRef.current.delete(panelId);
       shellClient?.hostCommands.clear(panelId);
-      if (shellClient && webViewUnmountNeedsUnload(webViewStackRef.current, panelId)) {
+      if (
+        shellClient &&
+        webViewUnmountNeedsUnload(webViewStackRef.current, panelId)
+      ) {
         void shellClient.panels.unload(panelId).catch((error: unknown) =>
           pushToast({
             title: "Could not unload panel",
             message: error instanceof Error ? error.message : "Try again.",
             tone: "danger",
-          })
+          }),
         );
       }
     },
-    [pushToast, shellClient]
+    [pushToast, shellClient],
   );
   const handleWebViewRef = useCallback(
     (panelId: string, handle: PanelWebViewHandle | null) => {
@@ -413,17 +490,19 @@ export function MainScreen() {
       }
       webViewRefsMap.current.set(panelId, handle);
       shellClient?.panels.flushPanelDeliveries(panelId);
-      const existingEntry = webViewStackRef.current.find((entry) => entry.panelId === panelId);
+      const existingEntry = webViewStackRef.current.find(
+        (entry) => entry.panelId === panelId,
+      );
       if (existingEntry) {
         syncManagedWebViewThemes(
           [existingEntry],
           webViewRefsMap.current,
           webViewThemeSignaturesRef.current,
-          currentThemeModeRef.current
+          currentThemeModeRef.current,
         );
       }
     },
-    [shellClient]
+    [shellClient],
   );
   const hostConfig: HostConfig | null = useMemo(() => {
     if (!shellClient) return null;
@@ -433,15 +512,6 @@ export function MainScreen() {
       return null;
     }
   }, [shellClient]);
-  const visibleApprovals = useMemo(() => {
-    if (!approvalDeepLinkId) return pendingApprovals;
-    const linked = pendingApprovals.find((approval) => approval.approvalId === approvalDeepLinkId);
-    if (!linked) return pendingApprovals;
-    return [
-      linked,
-      ...pendingApprovals.filter((approval) => approval.approvalId !== approvalDeepLinkId),
-    ];
-  }, [approvalDeepLinkId, pendingApprovals]);
   const activePanel = useMemo(() => {
     if (!activePanelId || !shellClient) return null;
     return shellClient.panels.registry.getPanel(activePanelId) ?? null;
@@ -450,9 +520,12 @@ export function MainScreen() {
     if (!activePanelId || !shellClient) return null;
     return shellClient.panels.registry.getRuntimeLease(activePanelId);
   }, [activePanelId, panelTreeRevision, shellClient]);
-  const activePanelLoadError = activePanelId ? panelLoadErrors[activePanelId] : null;
+  const activePanelLoadError = activePanelId
+    ? panelLoadErrors[activePanelId]
+    : null;
   const activePanelLeasedElsewhere = Boolean(
-    activeRuntimeLease && activeRuntimeLease.clientSessionId !== shellClient?.credentials.deviceId
+    activeRuntimeLease &&
+    activeRuntimeLease.clientSessionId !== shellClient?.credentials.deviceId,
   );
   const activeChromeState = useMemo(() => {
     if (!activePanel) return null;
@@ -488,7 +561,7 @@ export function MainScreen() {
                 input: query,
                 browserSuggestions: options.suggestions,
                 limit: 8,
-              })
+              }),
             )
           : shellClient.panels.getAddressOptions(query).then((options) => {
               return buildAddressAutocompleteItems({
@@ -511,28 +584,26 @@ export function MainScreen() {
       clearTimeout(timer);
     };
   }, [activeChromeState, addressBarVisible, addressQuery, shellClient]);
-  useEffect(() => {
-    if (!shellClient) {
-      setPendingApprovals([]);
-    }
-  }, [shellClient]);
   // Persist the pin set to AsyncStorage (workspace-scoped). Best-effort.
   const persistPins = useCallback(
     (ids: Set<string>) => {
       const workspaceId = shellClient?.workspaceId;
       if (!workspaceId) return;
-      void savePinnedPanelIds(workspaceId, [...ids]);
+      void savePinnedPanelIds(shellClient.localStorageScope, workspaceId, [
+        ...ids,
+      ]);
     },
-    [shellClient]
+    [shellClient],
   );
   // Predicates shared by the cap insert and the idle sweep. Reads the pin ref
   // (latest value inside interval/callback closures) and the live lease.
   const buildStackPredicates = useCallback(
     () => ({
       isPinned: (id: string) => pinnedPanelIdsRef.current.has(id),
-      isKeepLoaded: (id: string) => !!shellClient?.panels.registry.getRuntimeLease(id)?.keepLoaded,
+      isKeepLoaded: (id: string) =>
+        !!shellClient?.panels.registry.getRuntimeLease(id)?.keepLoaded,
     }),
-    [shellClient]
+    [shellClient],
   );
   const togglePanelPin = useCallback(
     (panelId: string) => {
@@ -544,20 +615,24 @@ export function MainScreen() {
         return next;
       });
     },
-    [persistPins, setPinnedPanelIds]
+    [persistPins, setPinnedPanelIds],
   );
   const refreshTree = useCallback(() => {
     if (!shellClient) return;
     setPanelTreeRevision(shellClient.panels.treeCache.getRevision());
     updateWebViewStack((prev) =>
-      prev.filter((entry) => shellClient.panels.registry.getPanel(entry.panelId) !== undefined)
+      prev.filter(
+        (entry) =>
+          shellClient.panels.registry.getPanel(entry.panelId) !== undefined,
+      ),
     );
     // Prune pins for panels no longer in the tree; persist if anything dropped.
     setPinnedPanelIds((prev) => {
       let changed = false;
       const next = new Set<string>();
       for (const id of prev) {
-        if (shellClient.panels.registry.getPanel(id) !== undefined) next.add(id);
+        if (shellClient.panels.registry.getPanel(id) !== undefined)
+          next.add(id);
         else changed = true;
       }
       if (!changed) return prev;
@@ -565,129 +640,6 @@ export function MainScreen() {
       return next;
     });
   }, [shellClient, setPanelTreeRevision, setPinnedPanelIds, persistPins]);
-  const applyPendingApprovals = useCallback((pending: PendingApproval[]) => {
-    setPendingApprovals(pending);
-    const signature = pending
-      .map((approval) => `${approval.kind}:${approval.approvalId}`)
-      .join("|");
-    if (signature !== pendingApprovalsSignatureRef.current) {
-      pendingApprovalsSignatureRef.current = signature;
-      if (pending.length > 0) {
-        smokePhase("workspace-approval-pending", {
-          count: pending.length,
-          kinds: pending.map((approval) => approval.kind),
-        });
-      }
-    }
-  }, []);
-  const refreshPendingApprovals = useCallback(async () => {
-    if (approvalStateControllerRef.current) {
-      return approvalStateControllerRef.current.refresh("manual");
-    }
-    if (!shellClient) {
-      pendingApprovalsRefreshSeq.current++;
-      setPendingApprovals([]);
-      return [];
-    }
-    const seq = ++pendingApprovalsRefreshSeq.current;
-    const pending = filterRuntimeApprovals(await shellClient.shellApproval.listPending());
-    if (seq === pendingApprovalsRefreshSeq.current) {
-      applyPendingApprovals(pending);
-    }
-    return pending;
-  }, [applyPendingApprovals, shellClient]);
-  const removeResolvedApproval = useCallback(
-    (approvalId: string) => {
-      setPendingApprovals((current) =>
-        current.filter((approval) => approval.approvalId !== approvalId)
-      );
-      if (approvalId === approvalDeepLinkId) setApprovalDeepLinkId(null);
-    },
-    [approvalDeepLinkId, setApprovalDeepLinkId]
-  );
-  const resolveApproval = useCallback(
-    async (approvalId: string, decision: ApprovalDecision) => {
-      if (!shellClient) throw new Error("Shell client not available");
-      await shellClient.shellApproval.resolve(approvalId, decision);
-      removeResolvedApproval(approvalId);
-      void refreshPendingApprovals().catch((error: unknown) =>
-        pushToast({
-          title: "Could not refresh approvals",
-          message: error instanceof Error ? error.message : "Try again.",
-          tone: "danger",
-        })
-      );
-    },
-    [pushToast, refreshPendingApprovals, removeResolvedApproval, shellClient]
-  );
-  const fetchApprovalDiffContent = useCallback(
-    async (approvalId: string, hash: string): Promise<string | null> => {
-      if (!shellClient) throw new Error("Shell client not available");
-      const approval = pendingApprovals.find((item) => item.approvalId === approvalId);
-      const belongsToReview = approval?.diffReview?.some((entry) =>
-        entry.changedFiles.some((file) => file.oldHash === hash || file.newHash === hash)
-      );
-      if (!belongsToReview) {
-        throw new Error("This file is not part of the pending reviewed change.");
-      }
-      return shellClient.blobstore.getText(hash);
-    },
-    [pendingApprovals, shellClient]
-  );
-  const openApprovalDiffFile = useCallback(
-    async (file: DiffReviewFile, entry: DiffReviewEntry) => {
-      if (!shellClient) return;
-      try {
-        await shellClient.panels.createRootPanel("about/workspace-history", {
-          focus: true,
-          stateArgs: {
-            diffTarget: {
-              repoPath: entry.repoPath,
-              path: file.path,
-              oldHash: file.oldHash,
-              newHash: file.newHash,
-              oldState: entry.oldState,
-              newState: entry.newState,
-              binary: file.binary,
-              tooLarge: file.tooLarge,
-              files: entry.changedFiles,
-            },
-          },
-        });
-      } catch (error) {
-        pushToast({
-          title: "Could not open the file inspector",
-          message: error instanceof Error ? error.message : "Try again.",
-          tone: "danger",
-        });
-      }
-    },
-    [pushToast, shellClient]
-  );
-  const submitClientConfig = useCallback(
-    async (approvalId: string, values: Record<string, string>) => {
-      if (!shellClient) throw new Error("Shell client not available");
-      await shellClient.shellApproval.submitClientConfig(approvalId, values);
-      removeResolvedApproval(approvalId);
-    },
-    [removeResolvedApproval, shellClient]
-  );
-  const submitCredentialInput = useCallback(
-    async (approvalId: string, values: Record<string, string>) => {
-      if (!shellClient) throw new Error("Shell client not available");
-      await shellClient.shellApproval.submitCredentialInput(approvalId, values);
-      removeResolvedApproval(approvalId);
-    },
-    [removeResolvedApproval, shellClient]
-  );
-  const submitSecretInput = useCallback(
-    async (approvalId: string, values: Record<string, string>) => {
-      if (!shellClient) throw new Error("Shell client not available");
-      await shellClient.shellApproval.submitSecretInput(approvalId, values);
-      removeResolvedApproval(approvalId);
-    },
-    [removeResolvedApproval, shellClient]
-  );
   const activatePanel = useCallback(
     (panelId: string) => {
       if (!shellClient || !hostConfig) return;
@@ -696,10 +648,13 @@ export function MainScreen() {
       setActivePanelId(panelId);
       updateWebViewStack((prev) =>
         prev.map((entry) =>
-          entry.panelId === panelId ? { ...entry, lastActive: Date.now() } : entry
-        )
+          entry.panelId === panelId
+            ? { ...entry, lastActive: Date.now() }
+            : entry,
+        ),
       );
-      if (webViewStackRef.current.some((entry) => entry.panelId === panelId)) return;
+      if (webViewStackRef.current.some((entry) => entry.panelId === panelId))
+        return;
       const lease = shellClient.panels.registry.getRuntimeLease(panelId);
       if (lease && lease.clientSessionId !== shellClient.credentials.deviceId) {
         smokePhase("workspace-panel-leased-elsewhere", { panelId });
@@ -733,76 +688,51 @@ export function MainScreen() {
           {
             activePanelId: activePanelIdRef.current,
             isPinned: (id) => pinnedPanelIdsRef.current.has(id),
-            isKeepLoaded: (id) => !!shellClient.panels.registry.getRuntimeLease(id)?.keepLoaded,
-          }
-        )
+            isKeepLoaded: (id) =>
+              !!shellClient.panels.registry.getRuntimeLease(id)?.keepLoaded,
+          },
+        ),
       );
     },
-    [hostConfig, panelMaterializationRetryQueue, shellClient, setActivePanelId, updateWebViewStack]
-  );
-  const resolveInstallReview = useCallback(
-    async (approvalId: string, resolution: TemplateInstallResolution) => {
-      if (!shellClient) throw new Error("Shell client not available");
-      const outcome = await shellClient.shellApproval.resolveInstallReview(approvalId, resolution);
-      removeResolvedApproval(approvalId);
-
-      const failed = outcome.landing?.failed ?? [];
-      const failure = failed.length > 0;
-      const entryPoint =
-        !failure && outcome.entryPoint?.kind === "panel" ? outcome.entryPoint : undefined;
-      const supportingCopy = failure
-        ? failed.map((part) => `${part.title}: ${part.reason}`).join(" · ")
-        : (outcome.detail ?? outcome.subject ?? "Your workspace is ready.");
-      pushToast({
-        id: `install-review:${outcome.approvalId}`,
-        title: outcome.heading,
-        message: supportingCopy,
-        tone: failure ? "danger" : outcome.decision === "accepted" ? "success" : "info",
-        durationMs: failure ? 0 : 8_000,
-        ...(entryPoint
-          ? {
-              actionLabel: `Open ${entryPoint.title}`,
-              onAction: async () => {
-                try {
-                  const created = await shellClient.panels.createRootPanel(entryPoint.repoPath, {
-                    title: entryPoint.title,
-                    focus: true,
-                  });
-                  refreshTree();
-                  activatePanel(created.id);
-                } catch (error) {
-                  pushToast({
-                    title: `Could not open ${entryPoint.title}`,
-                    message: error instanceof Error ? error.message : "Try again.",
-                    tone: "danger",
-                    durationMs: 0,
-                  });
-                }
-              },
-            }
-          : {}),
-      });
-    },
-    [activatePanel, pushToast, refreshTree, removeResolvedApproval, shellClient]
+    [
+      hostConfig,
+      panelMaterializationRetryQueue,
+      shellClient,
+      setActivePanelId,
+      updateWebViewStack,
+    ],
   );
   // WebViews are retained presentation slots, not runtime identities. Converge
   // every retained slot when its immutable runtime entity changes—whether the
   // change came from build completion or navigation, and whether it is visible.
   useEffect(() => {
     if (!hostConfig || !shellClient) return;
-    const retainedPanelIds = new Set(webViewStack.map((entry) => entry.panelId));
+    const retainedPanelIds = new Set(
+      webViewStack.map((entry) => entry.panelId),
+    );
     panelMaterializationRetryQueue.retainOnly(retainedPanelIds);
     for (const entry of webViewStack) {
       const panel = shellClient.panels.registry.getPanel(entry.panelId);
       if (!panel) {
-        panelMaterializationRetryQueue.cancel(entry.panelId, { resetAttempts: true });
-        setLoadingPanelId((current) => (current === entry.panelId ? null : current));
+        panelMaterializationRetryQueue.cancel(entry.panelId, {
+          resetAttempts: true,
+        });
+        setLoadingPanelId((current) =>
+          current === entry.panelId ? null : current,
+        );
         continue;
       }
-      const materializationState = mobilePanelMaterializationState(panel, entry);
+      const materializationState = mobilePanelMaterializationState(
+        panel,
+        entry,
+      );
       if (materializationState === "current") {
-        panelMaterializationRetryQueue.cancel(entry.panelId, { resetAttempts: true });
-        setLoadingPanelId((current) => (current === entry.panelId ? null : current));
+        panelMaterializationRetryQueue.cancel(entry.panelId, {
+          resetAttempts: true,
+        });
+        setLoadingPanelId((current) =>
+          current === entry.panelId ? null : current,
+        );
         continue;
       }
       if (materializationState === "pending") {
@@ -817,27 +747,36 @@ export function MainScreen() {
       }
       // A real tree/stack change supersedes the delayed fallback poll. Preserve
       // its attempt count so a persistent failure still backs off.
-      panelMaterializationRetryQueue.cancel(entry.panelId, { resetAttempts: false });
+      panelMaterializationRetryQueue.cancel(entry.panelId, {
+        resetAttempts: false,
+      });
       pendingPanelLoads.current.add(entry.panelId);
+      const cancellation = new AbortController();
       void withTimeout(
         materializeLatestMobilePanel({
           panelId: entry.panelId,
+          signal: cancellation.signal,
           hostConfig,
-          getPanel: () => shellClient.panels.registry.getPanel(entry.panelId) ?? null,
+          getPanel: () =>
+            shellClient.panels.registry.getPanel(entry.panelId) ?? null,
           getPanelInit: (id) => shellClient.panels.getPanelInit(id),
-          acquireLease: (id, entityId, opts) => shellClient.panels.acquireLease(id, entityId, opts),
+          acquireLease: (id, entityId, opts) =>
+            shellClient.panels.acquireLease(id, entityId, opts),
           takeOverLease: (id, entityId, opts) =>
             shellClient.panels.takeOverLease(id, entityId, opts),
           leaseMode: "acquire",
         }),
         PANEL_MATERIALIZE_TIMEOUT_MS,
-        `Timed out preparing panel ${entry.panelId} for mobile.`
+        `Timed out preparing panel ${entry.panelId} for mobile.`,
+        () => cancellation.abort(),
       )
         .then((materialized) => {
           const currentEntry = webViewStackRef.current.find(
-            (candidate) => candidate.panelId === entry.panelId
+            (candidate) => candidate.panelId === entry.panelId,
           );
-          const currentPanel = shellClient.panels.registry.getPanel(entry.panelId);
+          const currentPanel = shellClient.panels.registry.getPanel(
+            entry.panelId,
+          );
           if (
             !currentEntry ||
             !currentPanel ||
@@ -873,23 +812,38 @@ export function MainScreen() {
                     managed: materialized.managed,
                     panelInit: materialized.panelInit,
                   }
-                : currentEntry
-            )
+                : currentEntry,
+            ),
           );
-          panelMaterializationRetryQueue.cancel(entry.panelId, { resetAttempts: true });
+          panelMaterializationRetryQueue.cancel(entry.panelId, {
+            resetAttempts: true,
+          });
           setPanelLoadErrors((current) => {
             if (!current[entry.panelId]) return current;
             const { [entry.panelId]: _removed, ...rest } = current;
             return rest;
           });
-          setLoadingPanelId((current) => (current === entry.panelId ? null : current));
+          setLoadingPanelId((current) =>
+            current === entry.panelId ? null : current,
+          );
         })
         .catch((error: unknown) => {
-          const message = error instanceof Error ? error.message : "Could not load this panel.";
-          setPanelLoadErrors((current) => ({ ...current, [entry.panelId]: message }));
-          setLoadingPanelId((current) => (current === entry.panelId ? null : current));
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Could not load this panel.";
+          setPanelLoadErrors((current) => ({
+            ...current,
+            [entry.panelId]: message,
+          }));
+          setLoadingPanelId((current) =>
+            current === entry.panelId ? null : current,
+          );
           panelMaterializationRetryQueue.schedule(entry.panelId);
-          smokePhase("workspace-panel-activate-failed", { panelId: entry.panelId, message });
+          smokePhase("workspace-panel-activate-failed", {
+            panelId: entry.panelId,
+            message,
+          });
         })
         .finally(() => {
           pendingPanelLoads.current.delete(entry.panelId);
@@ -911,10 +865,13 @@ export function MainScreen() {
     void materializeLatestMobilePanel({
       panelId: activePanelId,
       hostConfig,
-      getPanel: () => shellClient.panels.registry.getPanel(activePanelId) ?? null,
+      getPanel: () =>
+        shellClient.panels.registry.getPanel(activePanelId) ?? null,
       getPanelInit: (id) => shellClient.panels.getPanelInit(id),
-      acquireLease: (id, entityId, opts) => shellClient.panels.acquireLease(id, entityId, opts),
-      takeOverLease: (id, entityId, opts) => shellClient.panels.takeOverLease(id, entityId, opts),
+      acquireLease: (id, entityId, opts) =>
+        shellClient.panels.acquireLease(id, entityId, opts),
+      takeOverLease: (id, entityId, opts) =>
+        shellClient.panels.takeOverLease(id, entityId, opts),
       leaseMode: "takeOver",
     })
       .then((materialized) => {
@@ -932,21 +889,27 @@ export function MainScreen() {
             {
               activePanelId: activePanelIdRef.current,
               isPinned: (id) => pinnedPanelIdsRef.current.has(id),
-              isKeepLoaded: (id) => !!shellClient.panels.registry.getRuntimeLease(id)?.keepLoaded,
-            }
-          )
+              isKeepLoaded: (id) =>
+                !!shellClient.panels.registry.getRuntimeLease(id)?.keepLoaded,
+            },
+          ),
         );
       })
       .catch((error: unknown) => {
         pushToast({
           title: "Take over failed",
-          message: error instanceof Error ? error.message : "Could not take over panel.",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Could not take over panel.",
           tone: "danger",
         });
       })
       .finally(() => {
         pendingPanelLoads.current.delete(activePanelId);
-        setLoadingPanelId((current) => (current === activePanelId ? null : current));
+        setLoadingPanelId((current) =>
+          current === activePanelId ? null : current,
+        );
       });
   }, [activePanel, activePanelId, hostConfig, pushToast, shellClient]);
   useEffect(() => {
@@ -958,7 +921,6 @@ export function MainScreen() {
       "apps:lifecycle",
       "workspace:revision-bumped",
     ] as const;
-    let disposed = false;
     const subscribeAll = async () => {
       await Promise.all(
         eventNames.map(async (name) => {
@@ -967,63 +929,43 @@ export function MainScreen() {
           } catch (error) {
             console.warn(`[MainScreen] Failed to subscribe to ${name}:`, error);
           }
-        })
+        }),
       );
     };
-    const approvalStateController = createApprovalStateController({
-      listPending: () => shellClient.shellApproval.listPending(),
-      subscribePendingChanged: () =>
-        shellClient.events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
-      unsubscribePendingChanged: () =>
-        shellClient.events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
-      onPendingChanged: (listener) =>
-        shellClient.events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, listener),
-      filter: filterRuntimeApprovals,
-      onChange: (pending) => {
-        pendingApprovalsRefreshSeq.current++;
-        applyPendingApprovals(pending);
-      },
-      onError: (error, phase) => {
-        console.warn(`[MainScreen] Approval state ${phase} failed:`, error);
-      },
-    });
-    approvalStateControllerRef.current = approvalStateController;
-    approvalStateController.start();
-    void subscribeAll()
-      .then(() => {})
-      .catch((error: unknown) => {
-        console.warn("[MainScreen] Failed to subscribe to approval events:", error);
-        if (!disposed) {
-          void approvalStateController
-            .refresh("manual")
-            .catch((refreshError: unknown) =>
-              console.warn(
-                "[MainScreen] Failed to refresh approvals after subscribe failure:",
-                refreshError
-              )
-            );
-        }
-      });
+    void subscribeAll().catch((error: unknown) =>
+      console.warn("[MainScreen] Event subscription failed", error),
+    );
     const unsubReconnect = shellClient.transport.onReconnect(() => {
-      void subscribeAll()
-        .then(() => approvalStateController.refresh("manual"))
-        .catch(() => approvalStateController.refresh("manual"));
+      void subscribeAll().catch((error: unknown) =>
+        console.warn("[MainScreen] Event resubscription failed", error),
+      );
     });
     const unsubNavigate = shellClient.onNavigateToPanel((panelId) => {
       refreshTree();
       activatePanel(panelId);
     });
-    const unsubCreated = shellClient.onDirectEvent("panel-created", ({ panelId, focus }) => {
-      refreshTree();
-      if (focus) activatePanel(panelId);
-    });
-    const unsubNav = shellClient.onDirectEvent("navigate-to-panel", ({ panelId }) => {
-      if (panelId) activatePanel(panelId);
-    });
-    const unsubExternal = shellClient.events.on("external-open:open", (payload) => {
-      void handleExternalOpen(shellClient, payload as ExternalOpenPayload).catch(
-        (error: unknown) => {
-          const message = error instanceof Error ? error.message : String(error);
+    const unsubCreated = shellClient.onDirectEvent(
+      "panel-created",
+      ({ panelId, focus }) => {
+        refreshTree();
+        if (focus) activatePanel(panelId);
+      },
+    );
+    const unsubNav = shellClient.onDirectEvent(
+      "navigate-to-panel",
+      ({ panelId }) => {
+        if (panelId) activatePanel(panelId);
+      },
+    );
+    const unsubExternal = shellClient.events.on(
+      "external-open:open",
+      (payload) => {
+        void handleExternalOpen(
+          shellClient,
+          payload as ExternalOpenPayload,
+        ).catch((error: unknown) => {
+          const message =
+            error instanceof Error ? error.message : String(error);
           console.warn("[MainScreen] Failed to open external URL:", error);
           pushToast({
             title: "Could not open OAuth flow",
@@ -1031,9 +973,9 @@ export function MainScreen() {
             tone: "danger",
             durationMs: 10000,
           });
-        }
-      );
-    });
+        });
+      },
+    );
     const handleNotification = (payload: unknown) => {
       const notif = payload as {
         id?: string;
@@ -1063,34 +1005,48 @@ export function MainScreen() {
         });
       }
     };
-    const unsubNotification = shellClient.events.on("notification:show", handleNotification);
+    const unsubNotification = shellClient.events.on(
+      "notification:show",
+      handleNotification,
+    );
     const unsubDirectNotification = shellClient.onDirectEvent(
       "notification:show",
-      handleNotification
+      handleNotification,
     );
-    const unsubAppLifecycle = shellClient.events.on("apps:lifecycle", (payload) => {
-      handleMobileAppLifecycleEvent(payload as AppLifecyclePayload, {
-        shellClient,
-        pushToast,
-        prompted: promptedAppUpdatesRef.current,
-        selectedSource: selectedMobileApp.source,
-        selectedAppId: selectedMobileApp.appId,
-      });
-    });
-    const unsubWorkspaceRevision = shellClient.events.on("workspace:revision-bumped", () => {
-      void shellClient.panels
-        .refresh()
-        .then(refreshTree)
-        .catch((error: unknown) => {
-          console.warn("[MainScreen] Panel refresh after workspace revision failed:", error);
-          return refreshTree();
-        })
-        .catch((error: unknown) =>
-          console.warn("[MainScreen] Panel tree fallback refresh failed:", error)
-        );
-    });
+    const unsubAppLifecycle = shellClient.events.on(
+      "apps:lifecycle",
+      (payload) => {
+        handleMobileAppLifecycleEvent(payload as AppLifecyclePayload, {
+          shellClient,
+          pushToast,
+          prompted: promptedAppUpdatesRef.current,
+          selectedSource: selectedMobileApp.source,
+          selectedAppId: selectedMobileApp.appId,
+        });
+      },
+    );
+    const unsubWorkspaceRevision = shellClient.events.on(
+      "workspace:revision-bumped",
+      () => {
+        void shellClient.panels
+          .refresh()
+          .then(refreshTree)
+          .catch((error: unknown) => {
+            console.warn(
+              "[MainScreen] Panel refresh after workspace revision failed:",
+              error,
+            );
+            return refreshTree();
+          })
+          .catch((error: unknown) =>
+            console.warn(
+              "[MainScreen] Panel tree fallback refresh failed:",
+              error,
+            ),
+          );
+      },
+    );
     return () => {
-      disposed = true;
       unsubReconnect();
       unsubNavigate();
       unsubCreated();
@@ -1099,28 +1055,18 @@ export function MainScreen() {
       unsubNotification();
       unsubDirectNotification();
       unsubAppLifecycle();
-      approvalStateController.stop();
-      if (approvalStateControllerRef.current === approvalStateController) {
-        approvalStateControllerRef.current = null;
-      }
       unsubWorkspaceRevision();
       for (const name of eventNames) {
         void shellClient.events.unsubscribe(name).catch(() => {});
       }
     };
-  }, [
-    activatePanel,
-    applyPendingApprovals,
-    pushToast,
-    refreshPendingApprovals,
-    refreshTree,
-    selectedMobileApp,
-    shellClient,
-  ]);
+  }, [activatePanel, pushToast, refreshTree, selectedMobileApp, shellClient]);
   useEffect(() => {
     if (!activePanelId || !shellClient) return;
     void shellClient.panels.notifyFocused(activePanelId);
-    webViewRefsMap.current.get(activePanelId)?.dispatchHostEvent("runtime:focus", null);
+    webViewRefsMap.current
+      .get(activePanelId)
+      ?.dispatchHostEvent("runtime:focus", null);
   }, [activePanelId, shellClient]);
   // Activity on blur: when the active panel changes, bump the OUTGOING panel's
   // lastActive so "idle" means "since you last viewed it". The incoming panel
@@ -1132,8 +1078,10 @@ export function MainScreen() {
     if (previous && previous !== activePanelId) {
       updateWebViewStack((stack) =>
         stack.map((entry) =>
-          entry.panelId === previous ? { ...entry, lastActive: Date.now() } : entry
-        )
+          entry.panelId === previous
+            ? { ...entry, lastActive: Date.now() }
+            : entry,
+        ),
       );
     }
   }, [activePanelId]);
@@ -1144,7 +1092,7 @@ export function MainScreen() {
     const workspaceId = shellClient?.workspaceId;
     if (!workspaceId) return;
     let cancelled = false;
-    void loadPinnedPanelIds(workspaceId)
+    void loadPinnedPanelIds(shellClient.localStorageScope, workspaceId)
       .then((ids) => {
         if (cancelled) return;
         setPinnedPanelIds(new Set(ids));
@@ -1188,11 +1136,11 @@ export function MainScreen() {
                 title: "Could not unload panel",
                 message: error instanceof Error ? error.message : "Try again.",
                 tone: "danger",
-              })
+              }),
             );
           },
           ...predicates,
-        })
+        }),
       );
     }, PANEL_UI_IDLE_SWEEP_MS);
     return () => clearInterval(sweepTimer);
@@ -1203,7 +1151,7 @@ export function MainScreen() {
       webViewStack,
       webViewRefsMap.current,
       webViewThemeSignaturesRef.current,
-      mode
+      mode,
     );
   }, [colorScheme, webViewStack]);
   useEffect(() => {
@@ -1220,14 +1168,19 @@ export function MainScreen() {
     if (!shellClient) return;
     updateWebViewStack((prev) =>
       prev.filter((entry) => {
-        const lease = shellClient.panels.registry.getRuntimeLease(entry.panelId);
-        return !lease || lease.clientSessionId === shellClient.credentials.deviceId;
-      })
+        const lease = shellClient.panels.registry.getRuntimeLease(
+          entry.panelId,
+        );
+        return (
+          !lease || lease.clientSessionId === shellClient.credentials.deviceId
+        );
+      }),
     );
   }, [panelTreeRevision, shellClient]);
   useEffect(() => {
     if (!shellClient) return;
-    if (activePanelId && shellClient.panels.registry.getPanel(activePanelId)) return;
+    if (activePanelId && shellClient.panels.registry.getPanel(activePanelId))
+      return;
     const firstRootId = shellClient.panels.getPreferredRootId();
     setActivePanelId(firstRootId);
   }, [activePanelId, panelTreeRevision, setActivePanelId, shellClient]);
@@ -1238,18 +1191,21 @@ export function MainScreen() {
     (panelId: string) => {
       activatePanel(panelId);
     },
-    [activatePanel]
+    [activatePanel],
   );
   const handleActiveBack = useCallback(() => {
     if (!activePanelId) return;
-    pendingHistoryIntentByPanel.current.set(activePanelId, requireBrowserNavigationIntent("back"));
+    pendingHistoryIntentByPanel.current.set(
+      activePanelId,
+      requireBrowserNavigationIntent("back"),
+    );
     webViewRefsMap.current.get(activePanelId)?.goBack();
   }, [activePanelId]);
   const handleActiveForward = useCallback(() => {
     if (!activePanelId) return;
     pendingHistoryIntentByPanel.current.set(
       activePanelId,
-      requireBrowserNavigationIntent("forward")
+      requireBrowserNavigationIntent("forward"),
     );
     webViewRefsMap.current.get(activePanelId)?.goForward();
   }, [activePanelId]);
@@ -1259,7 +1215,7 @@ export function MainScreen() {
     if (currentUrl)
       pendingHistoryIntentByUrl.current.set(
         canonicalHistoryKey(currentUrl),
-        requireBrowserNavigationIntent("reload-panel")
+        requireBrowserNavigationIntent("reload-panel"),
       );
     webViewRefsMap.current.get(activePanelId)?.reload();
   }, [activePanelId, webViewNavigation]);
@@ -1273,13 +1229,16 @@ export function MainScreen() {
       const panel = shellClient.panels.registry.getPanel(panelId);
       switch (command) {
         case "back":
-          pendingHistoryIntentByPanel.current.set(panelId, requireBrowserNavigationIntent("back"));
+          pendingHistoryIntentByPanel.current.set(
+            panelId,
+            requireBrowserNavigationIntent("back"),
+          );
           webViewRefsMap.current.get(panelId)?.goBack();
           return;
         case "forward":
           pendingHistoryIntentByPanel.current.set(
             panelId,
-            requireBrowserNavigationIntent("forward")
+            requireBrowserNavigationIntent("forward"),
           );
           webViewRefsMap.current.get(panelId)?.goForward();
           return;
@@ -1292,7 +1251,7 @@ export function MainScreen() {
             if (currentUrl)
               pendingHistoryIntentByUrl.current.set(
                 canonicalHistoryKey(currentUrl),
-                requireBrowserNavigationIntent("reload-panel")
+                requireBrowserNavigationIntent("reload-panel"),
               );
           }
           webViewRefsMap.current.get(panelId)?.reload();
@@ -1309,7 +1268,11 @@ export function MainScreen() {
                 : undefined;
           if (address) {
             copyToClipboard(address);
-            pushToast({ title: "Address copied", message: address, tone: "success" });
+            pushToast({
+              title: "Address copied",
+              message: address,
+              tone: "success",
+            });
           }
           return;
         }
@@ -1321,13 +1284,15 @@ export function MainScreen() {
                 ? getCurrentSnapshot(panel).source
                 : undefined;
           if (address) {
-            void shareText(address, panel?.title ?? activePanelTitle ?? "Panel").catch(
-              (error: unknown) =>
-                pushToast({
-                  title: "Could not share panel",
-                  message: error instanceof Error ? error.message : "Try again.",
-                  tone: "danger",
-                })
+            void shareText(
+              address,
+              panel?.title ?? activePanelTitle ?? "Panel",
+            ).catch((error: unknown) =>
+              pushToast({
+                title: "Could not share panel",
+                message: error instanceof Error ? error.message : "Try again.",
+                tone: "danger",
+              }),
             );
           }
           return;
@@ -1366,7 +1331,9 @@ export function MainScreen() {
           return;
         case "unload":
           void shellClient.panels.unload(panelId);
-          updateWebViewStack((prev) => prev.filter((entry) => entry.panelId !== panelId));
+          updateWebViewStack((prev) =>
+            prev.filter((entry) => entry.panelId !== panelId),
+          );
           return;
         case "archive":
           void shellClient.panels.archive(panelId).then(refreshTree);
@@ -1386,7 +1353,7 @@ export function MainScreen() {
       shellClient,
       togglePanelPin,
       webViewNavigation,
-    ]
+    ],
   );
   const showPanelActions = useCallback(
     (panelId = activePanelId) => {
@@ -1415,9 +1382,11 @@ export function MainScreen() {
           "toggle-pin",
           "unload",
           "archive",
-        ]
+        ],
       );
-      const contributedCommands = presentMobileHostCommands(shellClient.hostCommands.get(panelId));
+      const contributedCommands = presentMobileHostCommands(
+        shellClient.hostCommands.get(panelId),
+      );
       const isPinned = pinnedPanelIds.has(panelId);
       showActionSheet({
         title: panel?.title ?? "Panel",
@@ -1433,8 +1402,14 @@ export function MainScreen() {
               id: command.id,
               label: command.label,
               description: command.description,
-              icon: command.id === "toggle-pin" && isPinned ? PinOffIcon : presentation?.icon,
-              tone: command.id === "archive" ? ("danger" as const) : ("default" as const),
+              icon:
+                command.id === "toggle-pin" && isPinned
+                  ? PinOffIcon
+                  : presentation?.icon,
+              tone:
+                command.id === "archive"
+                  ? ("danger" as const)
+                  : ("default" as const),
             };
           }),
         ],
@@ -1466,7 +1441,7 @@ export function MainScreen() {
       pushToast,
       shellClient,
       showActionSheet,
-    ]
+    ],
   );
   // ---- Command sheet + quickfire sheet (quickfire-overlay-spec §7) ---------
   const openCommandSheet = useSetAtom(openCommandSheetAtom);
@@ -1521,7 +1496,7 @@ export function MainScreen() {
       webView.dispatchHostEvent(HOST_COMMAND_RUN_EVENT, { commandId });
       return true;
     },
-    []
+    [],
   );
 
   /**
@@ -1537,9 +1512,10 @@ export function MainScreen() {
     void (async () => {
       try {
         if (link.channelId) {
-          const conversation = await shellClient.userNotifications.describeConversation(
-            link.channelId
-          );
+          const conversation =
+            await shellClient.userNotifications.describeConversation(
+              link.channelId,
+            );
           openQuickfireSheet({
             conversation: {
               channelId: link.channelId,
@@ -1549,7 +1525,9 @@ export function MainScreen() {
                 ? {
                     replyTo: {
                       participantId: link.senderParticipantId,
-                      ...(link.senderHandle ? { handle: link.senderHandle } : {}),
+                      ...(link.senderHandle
+                        ? { handle: link.senderHandle }
+                        : {}),
                     },
                   }
                 : {}),
@@ -1566,7 +1544,13 @@ export function MainScreen() {
         });
       }
     })();
-  }, [inboxDeepLink, openQuickfireSheet, pushToast, setInboxDeepLink, shellClient]);
+  }, [
+    inboxDeepLink,
+    openQuickfireSheet,
+    pushToast,
+    setInboxDeepLink,
+    shellClient,
+  ]);
 
   const showQuickfireConversations = useCallback(
     (rows: Parameters<MobileSlateDeps["showQuickfireConversations"]>[0]) => {
@@ -1575,9 +1559,12 @@ export function MainScreen() {
         items: rows.map((row) => ({
           id: row.slotId,
           label:
-            shellClient?.panels.registry.getPanel(row.slotId)?.title ?? row.slotId,
+            shellClient?.panels.registry.getPanel(row.slotId)?.title ??
+            row.slotId,
           description:
-            row.promotedAt === null ? "conversation" : "continued in a chat panel",
+            row.promotedAt === null
+              ? "conversation"
+              : "continued in a chat panel",
         })),
         onSelect: (slotId) => {
           activatePanel(slotId);
@@ -1585,7 +1572,7 @@ export function MainScreen() {
         },
       });
     },
-    [activatePanel, openQuickfireSheet, shellClient, showActionSheet]
+    [activatePanel, openQuickfireSheet, shellClient, showActionSheet],
   );
 
   /**
@@ -1602,7 +1589,7 @@ export function MainScreen() {
       activatePanel(opened.id);
       refreshTree();
     },
-    [activatePanel, refreshTree, shellClient]
+    [activatePanel, refreshTree, shellClient],
   );
 
   const slateDeps = useMemo<MobileSlateDeps | null>(() => {
@@ -1615,7 +1602,12 @@ export function MainScreen() {
       navigateToPanel: activatePanel,
       setThemePreference,
       copyText: copyToClipboard,
-      openWorkspaceSettings: () => navigation.getParent()?.navigate("Settings" as never),
+      openWorkspaceSettings: () =>
+        navigation
+          .getParent<StackNavigationProp<RootStackParamList>>()
+          ?.navigate("Settings", {
+            workspaceId: shellClient.workspaceId ?? undefined,
+          }),
       showQuickfireConversations,
       openChatPanelForChannel,
     };
@@ -1637,7 +1629,8 @@ export function MainScreen() {
   const quickfireTransport = useMemo<QuickfireTransport | null>(() => {
     if (!shellClient) return null;
     return {
-      sessionFor: (slotId, options) => shellClient.quickfire.sessionFor(slotId, options),
+      sessionFor: (slotId, options) =>
+        shellClient.quickfire.sessionFor(slotId, options),
       clear: (slotId) => shellClient.quickfire.clear(slotId),
       promote: (slotId) => shellClient.quickfire.promote(slotId),
       connectToChannel: (channelId, contextId, options) =>
@@ -1645,23 +1638,53 @@ export function MainScreen() {
     };
   }, [shellClient]);
 
+  const openWorkspacePanelLink = useCallback(
+    (
+      workspaceId: string,
+      source: string,
+      options: Parameters<ShellClient["panels"]["createRootPanel"]>[1],
+    ) => {
+      if (!workspaceDirectory) return;
+      void workspaceDirectory
+        .openPanelSource(workspaceId, source, options)
+        .catch((error: unknown) => {
+          pushToast({
+            title: "Could not open panel link",
+            message:
+              error instanceof Error
+                ? error.message
+                : "The workspace is unavailable.",
+            tone: "danger",
+          });
+        });
+    },
+    [workspaceDirectory, pushToast],
+  );
+
   const executeAddressAction = useCallback(
     (action: AddressAction, mode: AddressNavigationMode = "current") => {
       if (!shellClient) return;
       const targetMode = mode;
       if (action.type === "panel-location") {
         const location = action.location;
-        if (location.workspace && location.workspace !== shellClient.workspaceId) {
-          pushToast({
-            title: "Panel link targets another workspace",
-            message: `Switch to ${location.workspace} before opening this link.`,
-            tone: "warning",
-          });
-          return;
-        }
-        const locationMode = mode === "current" ? (location.disposition ?? mode) : mode;
+        const locationMode =
+          mode === "current" ? (location.disposition ?? mode) : mode;
         if (locationMode === "external") {
           if (action.raw) void openExternalUrl(action.raw);
+          return;
+        }
+        if (
+          location.workspace &&
+          location.workspace !== shellClient.workspaceId
+        ) {
+          openWorkspacePanelLink(location.workspace, location.source, {
+            ref: location.ref,
+            contextId: location.contextId,
+            stateArgs: location.stateArgs,
+            title: location.title,
+            slug: location.slug,
+            focus: true,
+          });
           return;
         }
         const common = {
@@ -1671,14 +1694,22 @@ export function MainScreen() {
         };
         const operation =
           locationMode === "current" && activePanelId
-            ? shellClient.panels.navigatePanel(activePanelId, location.source, common)
+            ? shellClient.panels.navigatePanel(
+                activePanelId,
+                location.source,
+                common,
+              )
             : locationMode === "child" && activePanelId
-              ? shellClient.panels.createChildPanel(activePanelId, location.source, {
-                  ...common,
-                  title: location.title,
-                  slug: location.slug,
-                  focus: location.focus ?? true,
-                })
+              ? shellClient.panels.createChildPanel(
+                  activePanelId,
+                  location.source,
+                  {
+                    ...common,
+                    title: location.title,
+                    slug: location.slug,
+                    focus: location.focus ?? true,
+                  },
+                )
               : shellClient.panels.createRootPanel(location.source, {
                   ...common,
                   title: location.title,
@@ -1693,15 +1724,22 @@ export function MainScreen() {
           .catch((error: unknown) =>
             pushToast({
               title: "Navigation failed",
-              message: error instanceof Error ? error.message : "Could not open panel link.",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Could not open panel link.",
               tone: "danger",
-            })
+            }),
           );
         return;
       }
       if (action.type === "navigate-url") {
         const intent = getBrowserNavigationIntentForAddressAction(action);
-        if (intent) pendingHistoryIntentByUrl.current.set(canonicalHistoryKey(action.url), intent);
+        if (intent)
+          pendingHistoryIntentByUrl.current.set(
+            canonicalHistoryKey(action.url),
+            intent,
+          );
         if (targetMode === "external") {
           void openExternalUrl(action.url);
         } else if (targetMode === "child" && activePanelId) {
@@ -1710,9 +1748,12 @@ export function MainScreen() {
             .catch((error: unknown) =>
               pushToast({
                 title: "Navigation failed",
-                message: error instanceof Error ? error.message : "Could not open browser panel.",
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : "Could not open browser panel.",
                 tone: "danger",
-              })
+              }),
             );
         } else if (targetMode === "root") {
           void shellClient.panels
@@ -1721,18 +1762,26 @@ export function MainScreen() {
             .catch((error: unknown) =>
               pushToast({
                 title: "Navigation failed",
-                message: error instanceof Error ? error.message : "Could not open browser panel.",
+                message:
+                  error instanceof Error
+                    ? error.message
+                    : "Could not open browser panel.",
                 tone: "danger",
-              })
+              }),
             );
         } else {
           if (!activePanelId) return;
           const active = shellClient.panels.registry.getPanel(activePanelId);
-          if (active && isBrowserPanelSource(getCurrentSnapshot(active).source)) {
+          if (
+            active &&
+            isBrowserPanelSource(getCurrentSnapshot(active).source)
+          ) {
             updateWebViewStack((prev) =>
               prev.map((entry) =>
-                entry.panelId === activePanelId ? { ...entry, url: action.url } : entry
-              )
+                entry.panelId === activePanelId
+                  ? { ...entry, url: action.url }
+                  : entry,
+              ),
             );
             setWebViewNavigation((prev) => ({
               ...prev,
@@ -1747,9 +1796,12 @@ export function MainScreen() {
               .catch((error: unknown) =>
                 pushToast({
                   title: "Navigation failed",
-                  message: error instanceof Error ? error.message : "Could not open browser panel.",
+                  message:
+                    error instanceof Error
+                      ? error.message
+                      : "Could not open browser panel.",
                   tone: "danger",
-                })
+                }),
               );
           }
         }
@@ -1758,16 +1810,25 @@ export function MainScreen() {
       if (action.type === "search" || action.type === "keyword-search") {
         const url = applySearchTemplate(action.query, action.template);
         const intent = getBrowserNavigationIntentForAddressAction(action);
-        if (intent) pendingHistoryIntentByUrl.current.set(canonicalHistoryKey(url), intent);
+        if (intent)
+          pendingHistoryIntentByUrl.current.set(
+            canonicalHistoryKey(url),
+            intent,
+          );
         if (targetMode === "external") {
           void openExternalUrl(url);
           return;
         }
         if (targetMode === "current" && activePanelId) {
           const active = shellClient.panels.registry.getPanel(activePanelId);
-          if (active && isBrowserPanelSource(getCurrentSnapshot(active).source)) {
+          if (
+            active &&
+            isBrowserPanelSource(getCurrentSnapshot(active).source)
+          ) {
             updateWebViewStack((prev) =>
-              prev.map((entry) => (entry.panelId === activePanelId ? { ...entry, url } : entry))
+              prev.map((entry) =>
+                entry.panelId === activePanelId ? { ...entry, url } : entry,
+              ),
             );
             setWebViewNavigation((prev) => ({
               ...prev,
@@ -1780,16 +1841,21 @@ export function MainScreen() {
           }
         }
         void shellClient.panels
-          .createBrowserUrlPanel(targetMode === "child" ? activePanelId : null, url, {
-            focus: true,
-          })
+          .createBrowserUrlPanel(
+            targetMode === "child" ? activePanelId : null,
+            url,
+            {
+              focus: true,
+            },
+          )
           .then((result) => activatePanel(result.id))
           .catch((error: unknown) =>
             pushToast({
               title: "Navigation failed",
-              message: error instanceof Error ? error.message : "Could not search.",
+              message:
+                error instanceof Error ? error.message : "Could not search.",
               tone: "danger",
-            })
+            }),
           );
         return;
       }
@@ -1797,44 +1863,89 @@ export function MainScreen() {
         const ref = action.ref ?? undefined;
         const created =
           targetMode === "current" && activePanelId
-            ? shellClient.panels.navigatePanel(activePanelId, action.source, { ref })
+            ? shellClient.panels.navigatePanel(activePanelId, action.source, {
+                ref,
+              })
             : targetMode === "child" && activePanelId
-              ? shellClient.panels.createChildPanel(activePanelId, action.source, {
-                  focus: true,
-                  ref,
-                })
+              ? shellClient.panels.createChildPanel(
+                  activePanelId,
+                  action.source,
+                  {
+                    focus: true,
+                    ref,
+                  },
+                )
               : shellClient.panels.createRootPanel(action.source, { ref });
         void created
           .then((result) => activatePanel(result.id))
           .catch((error: unknown) =>
             pushToast({
               title: "Navigation failed",
-              message: error instanceof Error ? error.message : "Could not open panel.",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Could not open panel.",
               tone: "danger",
-            })
+            }),
           );
       }
     },
-    [activatePanel, activePanelId, pushToast, refreshTree, shellClient, webViewNavigation]
+    [
+      activatePanel,
+      activePanelId,
+      openWorkspacePanelLink,
+      pushToast,
+      refreshTree,
+      shellClient,
+      webViewNavigation,
+    ],
+  );
+  const handleShellSurfaceLink = useCallback(
+    (url: string): boolean => {
+      const parsed = parseShellSurfaceLink(url);
+      if (parsed.kind === "unrelated") return false;
+      if (parsed.kind === "error") {
+        pushToast({
+          title: "Could not open link",
+          message: parsed.reason,
+          tone: "danger",
+        });
+        return true;
+      }
+      if (parsed.target.kind !== "workspace-chooser") return false;
+      if (parsed.target.template)
+        workspaceDirectory?.requestWorkspaceCreation(parsed.target.template);
+      else navigation.dispatch(DrawerActions.openDrawer());
+      return true;
+    },
+    [navigation, pushToast, workspaceDirectory],
   );
   const handleNavigateAddress = useCallback(
     (value: string, mode: AddressNavigationMode = "current") => {
       if (!shellClient) return;
+      if (mode !== "external" && handleShellSurfaceLink(value)) return;
       const parsed = parseAddressInput(value);
       if (!parsed) return;
       if (parsed.type === "panel-location") {
         const location = parsed.location;
-        if (location.workspace && location.workspace !== shellClient.workspaceId) {
-          pushToast({
-            title: "Panel link targets another workspace",
-            message: `Switch to ${location.workspace} before opening this link.`,
-            tone: "warning",
-          });
-          return;
-        }
-        const targetMode = mode === "current" ? (location.disposition ?? mode) : mode;
+        const targetMode =
+          mode === "current" ? (location.disposition ?? mode) : mode;
         if (targetMode === "external") {
           void openExternalUrl(value);
+          return;
+        }
+        if (
+          location.workspace &&
+          location.workspace !== shellClient.workspaceId
+        ) {
+          openWorkspacePanelLink(location.workspace, location.source, {
+            ref: location.ref,
+            contextId: location.contextId,
+            stateArgs: location.stateArgs,
+            title: location.title,
+            slug: location.slug,
+            focus: true,
+          });
           return;
         }
         const common = {
@@ -1844,14 +1955,22 @@ export function MainScreen() {
         };
         const created =
           targetMode === "current" && activePanelId
-            ? shellClient.panels.navigatePanel(activePanelId, location.source, common)
+            ? shellClient.panels.navigatePanel(
+                activePanelId,
+                location.source,
+                common,
+              )
             : targetMode === "child" && activePanelId
-              ? shellClient.panels.createChildPanel(activePanelId, location.source, {
-                  ...common,
-                  title: location.title,
-                  slug: location.slug,
-                  focus: location.focus ?? true,
-                })
+              ? shellClient.panels.createChildPanel(
+                  activePanelId,
+                  location.source,
+                  {
+                    ...common,
+                    title: location.title,
+                    slug: location.slug,
+                    focus: location.focus ?? true,
+                  },
+                )
               : shellClient.panels.createRootPanel(location.source, {
                   ...common,
                   title: location.title,
@@ -1866,18 +1985,27 @@ export function MainScreen() {
           .catch((error: unknown) =>
             pushToast({
               title: "Navigation failed",
-              message: error instanceof Error ? error.message : "Could not open panel link.",
+              message:
+                error instanceof Error
+                  ? error.message
+                  : "Could not open panel link.",
               tone: "danger",
-            })
+            }),
           );
         return;
       }
       if (parsed.type === "browser-url") {
-        executeAddressAction({ type: "navigate-url", url: parsed.url, recordAsTyped: true }, mode);
+        executeAddressAction(
+          { type: "navigate-url", url: parsed.url, recordAsTyped: true },
+          mode,
+        );
         return;
       }
       if (parsed.type === "panel-source") {
-        executeAddressAction({ type: "panel-source", source: parsed.source }, mode);
+        executeAddressAction(
+          { type: "panel-source", source: parsed.source },
+          mode,
+        );
         return;
       }
       if (parsed.type === "search") {
@@ -1888,20 +2016,30 @@ export function MainScreen() {
             template: "https://www.google.com/search?q=%s",
             recordAsTyped: true,
           },
-          mode
+          mode,
         );
       }
     },
-    [activePanelId, executeAddressAction, shellClient]
+    [
+      activePanelId,
+      executeAddressAction,
+      handleShellSurfaceLink,
+      openWorkspacePanelLink,
+      shellClient,
+    ],
   );
   const handlePanelNavigate = useCallback(
     (event: PanelNavigationEvent) => {
       if (!shellClient) return;
       if (event.workspace && event.workspace !== shellClient.workspaceId) {
-        pushToast({
-          title: "Panel link targets another workspace",
-          message: `Switch to ${event.workspace} before opening this link.`,
-          tone: "warning",
+        openWorkspacePanelLink(event.workspace, event.source, {
+          ref: event.ref ?? event.options.ref,
+          contextId: event.contextId ?? event.options.contextId,
+          stateArgs: event.stateArgs,
+          title: event.options.title,
+          slug: event.options.slug,
+          name: event.options.name,
+          focus: true,
         });
         return;
       }
@@ -1927,7 +2065,11 @@ export function MainScreen() {
                 name: event.options.name,
                 focus: event.options.focus ?? true,
               })
-            : shellClient.panels.navigatePanel(event.panelId, event.source, common);
+            : shellClient.panels.navigatePanel(
+                event.panelId,
+                event.source,
+                common,
+              );
       void operation
         .then((result) => {
           refreshTree();
@@ -1938,40 +2080,57 @@ export function MainScreen() {
         .catch((error: unknown) => {
           pushToast({
             title: "Panel navigation failed",
-            message: error instanceof Error ? error.message : "Could not open panel.",
+            message:
+              error instanceof Error ? error.message : "Could not open panel.",
             tone: "danger",
           });
         });
     },
-    [activatePanel, pushToast, refreshTree, shellClient]
+    [
+      activatePanel,
+      openWorkspacePanelLink,
+      pushToast,
+      refreshTree,
+      shellClient,
+    ],
   );
   const handlePanelTitleChange = useCallback(
     (panelId: string, title: string) => {
       if (!shellClient) return;
       const navUrl = webViewNavigationRef.current[panelId]?.url;
       const panel = shellClient.panels.registry.getPanel(panelId);
-      if (navUrl && panel && isBrowserPanelSource(getCurrentSnapshot(panel).source)) {
+      if (
+        navUrl &&
+        panel &&
+        isBrowserPanelSource(getCurrentSnapshot(panel).source)
+      ) {
         void shellClient.panels
           .updateHistoryTitle({ url: navUrl, title })
           .catch((error: unknown) =>
-            console.warn(`[MainScreen] Failed to update history title for ${panelId}:`, error)
+            console.warn(
+              `[MainScreen] Failed to update history title for ${panelId}:`,
+              error,
+            ),
           );
       }
       void shellClient.panels
         .updateTitle(panelId, title)
         .then(refreshTree)
         .catch((error: unknown) => {
-          console.warn(`[MainScreen] Failed to update title for panel ${panelId}:`, error);
+          console.warn(
+            `[MainScreen] Failed to update title for panel ${panelId}:`,
+            error,
+          );
         });
     },
-    [refreshTree, shellClient]
+    [refreshTree, shellClient],
   );
   const handlePanelBootObservation = useCallback(
     (
       panelId: string,
       runtimeEntityId: PanelEntityId,
       connectionId: string,
-      observation: PanelPageObservation
+      observation: PanelPageObservation,
     ) => {
       if (!shellClient) return;
       const phase =
@@ -1997,17 +2156,23 @@ export function MainScreen() {
           }
         })
         .catch((error: unknown) => {
-          console.warn(`[MainScreen] Failed to report panel boot for ${panelId}:`, error);
+          console.warn(
+            `[MainScreen] Failed to report panel boot for ${panelId}:`,
+            error,
+          );
         });
     },
-    [hostConfig?.protocol, shellClient]
+    [hostConfig?.protocol, shellClient],
   );
   const recordMobileBrowserNavigation = useCallback(
     (panelId: string, navState: WebViewNavigation) => {
       if (!shellClient || !/^https?:\/\//i.test(navState.url)) return;
       const key = canonicalHistoryKey(navState.url);
       const intent = pendingHistoryIntentByUrl.current.get(key) ??
-        pendingHistoryIntentByPanel.current.get(panelId) ?? { transition: "link", typed: false };
+        pendingHistoryIntentByPanel.current.get(panelId) ?? {
+          transition: "link",
+          typed: false,
+        };
       pendingHistoryIntentByUrl.current.delete(key);
       pendingHistoryIntentByPanel.current.delete(panelId);
       const duplicateKey = `${panelId}:${key}:${intent.transition ?? "link"}`;
@@ -2024,10 +2189,10 @@ export function MainScreen() {
           visitTime: now,
         })
         .catch((error: unknown) =>
-          console.warn("[MainScreen] Failed to record browser history:", error)
+          console.warn("[MainScreen] Failed to record browser history:", error),
         );
     },
-    [shellClient]
+    [shellClient],
   );
   const handleWebViewNavigationStateChange = useCallback(
     (panelId: string, managed: boolean, navState: WebViewNavigation) => {
@@ -2039,29 +2204,35 @@ export function MainScreen() {
         void shellClient?.panels
           .updateBrowserUrl(panelId, navState.url)
           .catch((error: unknown) =>
-            console.warn("[MainScreen] Failed to update browser URL:", error)
+            console.warn("[MainScreen] Failed to update browser URL:", error),
           );
         recordMobileBrowserNavigation(panelId, navState);
       }
     },
-    [recordMobileBrowserNavigation, shellClient]
+    [recordMobileBrowserNavigation, shellClient],
   );
   const handleBridgeCall = useCallback(
     async (panelId: string, method: string, args: unknown[]) => {
       if (!shellClient) throw new Error("Shell client not available");
-      const result = await shellClient.handlePanelBridgeCall(panelId, method, args);
+      const result = await shellClient.handlePanelBridgeCall(
+        panelId,
+        method,
+        args,
+      );
       refreshTree();
       return result;
     },
-    [refreshTree, shellClient]
+    [refreshTree, shellClient],
   );
   useEffect(() => {
-    if (Platform.OS !== "android") return;
+    if (Platform.OS !== "android" || !workspaceVisible) return;
     const onBackPress = () => {
       const action = resolveMobileBackAction({
         drawerOpen: !persistentNavigation && drawerStatus === "open",
         addressBarVisible,
-        browserCanGoBack: Boolean(activePanelId && webViewNavigation[activePanelId]?.canGoBack),
+        browserCanGoBack: Boolean(
+          activePanelId && webViewNavigation[activePanelId]?.canGoBack,
+        ),
         parentPanelId: activePanelParentId,
       });
       switch (action) {
@@ -2072,7 +2243,7 @@ export function MainScreen() {
           if (!activePanelId) return false;
           pendingHistoryIntentByPanel.current.set(
             activePanelId,
-            requireBrowserNavigationIntent("back")
+            requireBrowserNavigationIntent("back"),
           );
           webViewRefsMap.current.get(activePanelId)?.goBack();
           return true;
@@ -2084,9 +2255,13 @@ export function MainScreen() {
           return false;
       }
     };
-    const subscription = BackHandler.addEventListener("hardwareBackPress", onBackPress);
+    const subscription = BackHandler.addEventListener(
+      "hardwareBackPress",
+      onBackPress,
+    );
     return () => subscription.remove();
   }, [
+    workspaceVisible,
     activePanelId,
     activePanelParentId,
     activatePanel,
@@ -2110,11 +2285,13 @@ export function MainScreen() {
               .catch((error) =>
                 Alert.alert(
                   "Re-pair failed",
-                  error instanceof Error ? error.message : "Could not return to the pairing screen."
-                )
+                  error instanceof Error
+                    ? error.message
+                    : "Could not return to the pairing screen.",
+                ),
               ),
         },
-      ]
+      ],
     );
   }, []);
   const currentUserNotification = userNotifications[0] ?? null;
@@ -2124,9 +2301,13 @@ export function MainScreen() {
   const dismissUserNotification = useCallback(async () => {
     if (!shellClient || !currentUserNotification) return;
     try {
-      await shellClient.userNotifications.acknowledge(currentUserNotification.id);
+      await shellClient.userNotifications.acknowledge(
+        currentUserNotification.id,
+      );
       setUserNotifications((current) =>
-        current.filter((notification) => notification.id !== currentUserNotification.id)
+        current.filter(
+          (notification) => notification.id !== currentUserNotification.id,
+        ),
       );
     } catch (error) {
       pushToast({
@@ -2137,12 +2318,19 @@ export function MainScreen() {
     }
   }, [currentUserNotification, pushToast, shellClient]);
   const joinInvitedChannel = useCallback(async () => {
-    if (!shellClient || !currentUserNotification || !currentChannelInvite) return;
+    if (!shellClient || !currentUserNotification || !currentChannelInvite)
+      return;
     try {
-      await shellClient.userNotifications.openChannel(currentChannelInvite.channelId);
-      await shellClient.userNotifications.acknowledge(currentUserNotification.id);
+      await shellClient.userNotifications.openChannel(
+        currentChannelInvite.channelId,
+      );
+      await shellClient.userNotifications.acknowledge(
+        currentUserNotification.id,
+      );
       setUserNotifications((current) =>
-        current.filter((notification) => notification.id !== currentUserNotification.id)
+        current.filter(
+          (notification) => notification.id !== currentUserNotification.id,
+        ),
       );
     } catch (error) {
       pushToast({
@@ -2183,17 +2371,24 @@ export function MainScreen() {
           try {
             if (id === "__dismiss_all__") {
               for (const notification of userNotifications) {
-                await shellClient.userNotifications.acknowledge(notification.id);
+                await shellClient.userNotifications.acknowledge(
+                  notification.id,
+                );
               }
               setUserNotifications([]);
               return;
             }
-            const notification = userNotifications.find((entry) => entry.id === id);
+            const notification = userNotifications.find(
+              (entry) => entry.id === id,
+            );
             if (!notification) return;
             const invite = channelInviteFromNotification(notification);
-            if (invite) await shellClient.userNotifications.openChannel(invite.channelId);
+            if (invite)
+              await shellClient.userNotifications.openChannel(invite.channelId);
             await shellClient.userNotifications.acknowledge(notification.id);
-            setUserNotifications((current) => current.filter((entry) => entry.id !== id));
+            setUserNotifications((current) =>
+              current.filter((entry) => entry.id !== id),
+            );
           } catch (error) {
             pushToast({
               title: "Notification action failed",
@@ -2210,6 +2405,8 @@ export function MainScreen() {
       <ConnectionBar onRepair={handleRepair} />
       <AppBar
         title={activePanelTitle}
+        approvalCount={workspaceDirectory?.approvalCount ?? 0}
+        onApprovalsPress={() => workspaceDirectory?.openApprovals()}
         onMenuPress={handleMenuPress}
         showMenuButton={!persistentNavigation}
         onPanelCreated={handlePanelCreated}
@@ -2248,11 +2445,17 @@ export function MainScreen() {
         >
           <BellIcon size={17} color={colors.primary} />
           <View style={styles.userNotificationCopy}>
-            <Text style={[styles.userNotificationTitle, { color: colors.text }]} numberOfLines={1}>
+            <Text
+              style={[styles.userNotificationTitle, { color: colors.text }]}
+              numberOfLines={1}
+            >
               {currentUserNotification.title}
             </Text>
             <Text
-              style={[styles.userNotificationMessage, { color: colors.textSecondary }]}
+              style={[
+                styles.userNotificationMessage,
+                { color: colors.textSecondary },
+              ]}
               numberOfLines={1}
             >
               {currentUserNotification.message ?? currentUserNotification.kind}
@@ -2260,7 +2463,10 @@ export function MainScreen() {
           </View>
           {userNotifications.length > 1 ? (
             <View
-              style={[styles.userNotificationCountPill, { backgroundColor: colors.accentSoft }]}
+              style={[
+                styles.userNotificationCountPill,
+                { backgroundColor: colors.accentSoft },
+              ]}
             >
               <Text style={[typeScale.micro, { color: colors.primary }]}>
                 +{userNotifications.length - 1}
@@ -2271,9 +2477,17 @@ export function MainScreen() {
             <Pressable
               accessibilityRole="button"
               onPress={() => void joinInvitedChannel()}
-              style={[styles.userNotificationButton, { borderColor: colors.primary }]}
+              style={[
+                styles.userNotificationButton,
+                { borderColor: colors.primary },
+              ]}
             >
-              <Text style={[styles.userNotificationButtonText, { color: colors.primary }]}>
+              <Text
+                style={[
+                  styles.userNotificationButtonText,
+                  { color: colors.primary },
+                ]}
+              >
                 Join
               </Text>
             </Pressable>
@@ -2282,9 +2496,17 @@ export function MainScreen() {
             accessibilityRole="button"
             accessibilityLabel={`Dismiss ${currentUserNotification.title}`}
             onPress={() => void dismissUserNotification()}
-            style={[styles.userNotificationButton, { borderColor: colors.border }]}
+            style={[
+              styles.userNotificationButton,
+              { borderColor: colors.border },
+            ]}
           >
-            <Text style={[styles.userNotificationButtonText, { color: colors.textSecondary }]}>
+            <Text
+              style={[
+                styles.userNotificationButtonText,
+                { color: colors.textSecondary },
+              ]}
+            >
               Dismiss
             </Text>
           </Pressable>
@@ -2305,9 +2527,15 @@ export function MainScreen() {
           !activePanelLoadError &&
           !webViewStack.some((entry) => entry.panelId === loadingPanelId) && (
             <View style={styles.loadingContainer}>
-              <VibestudioLogo size={64} variant="symbol" style={styles.placeholderLogo} />
+              <VibestudioLogo
+                size={64}
+                variant="symbol"
+                style={styles.placeholderLogo}
+              />
               <ActivityIndicator size="large" color={colors.primary} />
-              <Text style={[styles.loadingText, { color: colors.textSecondary }]}>
+              <Text
+                style={[styles.loadingText, { color: colors.textSecondary }]}
+              >
                 Loading panel…
               </Text>
             </View>
@@ -2337,21 +2565,33 @@ export function MainScreen() {
             art={<VibestudioLogo size={72} variant="symbol" />}
             title={`Running on ${activeRuntimeLease?.holderLabel ?? "another client"}`}
             message="This panel is live on another device. Taking over moves it here."
-            action={<Button label="Take over" variant="filled" onPress={takeOverActivePanel} />}
+            action={
+              <Button
+                label="Take over"
+                variant="filled"
+                onPress={takeOverActivePanel}
+              />
+            }
           />
         )}
 
         {!activePanelLeasedElsewhere &&
+          browserProfile &&
           webViewStack.map((entry) => (
             <LoadedPanelWebView
               key={entry.panelId}
               entry={entry}
+              browserProfile={browserProfile}
+              onBrowserPermission={shellClient?.requestBrowserPermission}
               visible={entry.panelId === activePanelId}
               colors={colors}
               managedBasePath={hostConfig?.basePath ?? ""}
-              diagnosticsEnabled={entry.managed && hostConfig?.protocol === "http"}
+              diagnosticsEnabled={
+                entry.managed && hostConfig?.protocol === "http"
+              }
               onHandleChange={handleWebViewRef}
               onPanelNavigate={handlePanelNavigate}
+              onShellSurfaceLink={handleShellSurfaceLink}
               onNavigationStateChange={handleWebViewNavigationStateChange}
               onTitleChange={handlePanelTitleChange}
               onBootObservation={handlePanelBootObservation}
@@ -2360,21 +2600,12 @@ export function MainScreen() {
             />
           ))}
       </View>
-      <ApprovalSheet
-        approvals={visibleApprovals}
-        onResolve={resolveApproval}
-        onSubmitClientConfig={submitClientConfig}
-        onSubmitCredentialInput={submitCredentialInput}
-        onSubmitSecretInput={submitSecretInput}
-        onResolveInstallReview={resolveInstallReview}
-        onNavigateToPanel={activatePanel}
-        onFetchDiffContent={fetchApprovalDiffContent}
-        onOpenDiffFile={openApprovalDiffFile}
-      />
       {slateDeps ? (
         <CommandSheet
           slateDeps={slateDeps}
-          {...(focusedPanelDescriptor ? { focusedPanel: focusedPanelDescriptor } : {})}
+          {...(focusedPanelDescriptor
+            ? { focusedPanel: focusedPanelDescriptor }
+            : {})}
           openPanels={openPanelEntries}
           contributedCommands={contributedCommandContributions}
           runContributedCommand={dispatchContributedCommand}
@@ -2392,13 +2623,6 @@ export function MainScreen() {
           openLink={(href) => handleNavigateAddress(href, "child")}
         />
       ) : null}
-      {shellClient && browserPrivacySection !== null ? (
-        <BrowserPrivacyManager
-          initialSection={browserPrivacySection}
-          client={shellClient.browserPrivacy}
-          onClose={() => setBrowserPrivacySection(null)}
-        />
-      ) : null}
       <Toast />
     </View>
   );
@@ -2407,10 +2631,14 @@ function canonicalHistoryKey(url: string): string {
   return canonicalizeBrowserHistoryUrl(url) ?? url;
 }
 
-function requireBrowserNavigationIntent(command: PanelCommandId): BrowserNavigationIntent {
+function requireBrowserNavigationIntent(
+  command: PanelCommandId,
+): BrowserNavigationIntent {
   const intent = getBrowserNavigationIntentForCommand(command);
   if (!intent) {
-    throw new Error(`Panel command ${command} does not have a browser navigation intent`);
+    throw new Error(
+      `Panel command ${command} does not have a browser navigation intent`,
+    );
   }
   return intent;
 }

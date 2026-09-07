@@ -65,6 +65,10 @@ export function isTransientMobileTransportFailure(error: unknown): boolean {
 }
 
 export interface MobileRpcClientConfig {
+  /** Immutable workspace session factory supplied by the retained account. */
+  connectWorkspace?: (
+    onRecovery: (kind: RecoveryKind) => void | Promise<void>,
+  ) => Promise<IrohConnection>;
   initialConnectionRetry?: {
     maxMs?: number;
     delayMs?: number;
@@ -82,7 +86,7 @@ export class MobileRpcClient implements Pick<
   RpcClient,
   "selfId" | "expose" | "call" | "emit" | "on" | "stream" | "streamReadable"
 > {
-  private config: MobileRpcClientConfig;
+  private readonly config: MobileRpcClientConfig;
   private connection: IrohConnection | null = null;
   private rpc: RpcClient | null = null;
   private controlRpc: RpcClient | null = null;
@@ -90,7 +94,7 @@ export class MobileRpcClient implements Pick<
   // so a stray call() racing connectAndWait() must not open a second pipe.
   private connecting: Promise<RpcClient> | null = null;
   // Identity token for the in-flight `establishConnection()`. `teardown()` clears
-  // it, so a handshake that resolves AFTER a disconnect/updateConfig closes the
+  // it, so a handshake that resolves AFTER a disconnect closes the
   // pipe it produced instead of adopting it. Without this, a disconnect mid-connect
   // captured `this.connection` (still null) and closed nothing, then the pending
   // handshake assigned `this.connection` + status "connected" — leaking a live
@@ -98,6 +102,7 @@ export class MobileRpcClient implements Pick<
   // mid-connect.
   private activeConnectToken: object | null = null;
   private currentCallerId: string | null = null;
+  private authenticatedServerId: string | null = null;
   private statusState: ConnectionStatus = "disconnected";
   private readonly statusListeners = new Set<
     (status: ConnectionStatus) => void
@@ -125,6 +130,10 @@ export class MobileRpcClient implements Pick<
 
   get selfId(): string {
     return this.currentCallerId ?? "shell:pending";
+  }
+
+  get serverId(): string | null {
+    return this.authenticatedServerId;
   }
 
   get status(): ConnectionStatus {
@@ -225,15 +234,6 @@ export class MobileRpcClient implements Pick<
     return () => {
       this.statusListeners.delete(callback);
     };
-  }
-
-  updateConfig(config: MobileRpcClientConfig): void {
-    this.config = config;
-    void this.teardown()
-      .then(() => this.setStatus("disconnected"))
-      .catch((error) =>
-        this.reportTransportFailure("Configuration teardown failed", error),
-      );
   }
 
   async call<T = unknown>(
@@ -388,32 +388,30 @@ export class MobileRpcClient implements Pick<
   private async establishConnection(): Promise<RpcClient> {
     const token = {};
     this.activeConnectToken = token;
-    const stored = await loadShellCredential();
-    if (!stored) {
-      throw new Error("No stored Iroh shell credential — re-pair this device");
-    }
-    smokePhase("workspace-iroh-connect-start", {
-      phase: stored.phase,
-      endpointId:
-        stored.phase === "routed"
-          ? stored.workspacePairing.endpointId.slice(0, 12)
-          : stored.controlPairing.endpointId.slice(0, 12),
-    });
-    const connection = await reconnectMobileSession(
-      stored,
-      Platform.OS === "ios" ? "app-scheme" : "client-loopback",
-      (kind) => this.emitRecovery(kind),
-    );
+    const connection = this.config.connectWorkspace
+      ? await this.config.connectWorkspace((kind) => this.emitRecovery(kind))
+      : await this.restoreBootstrapSession();
     if (this.activeConnectToken !== token) {
-      // A disconnect()/updateConfig()/reconnect() ran while this handshake was in
-      // flight. Close the pipe we just produced (and its keepalive) rather than
-      // adopting it, so a teardown-during-connect genuinely tears down.
       return closeThenThrow(
         connection,
         new ConnectSupersededError(),
         "Superseded mobile connection",
       );
     }
+    if (
+      connection.serverId &&
+      this.authenticatedServerId &&
+      connection.serverId !== this.authenticatedServerId
+    ) {
+      return closeThenThrow(
+        connection,
+        new Error(
+          "The workspace route changed the authenticated account server",
+        ),
+        "Workspace server identity changed",
+      );
+    }
+    this.authenticatedServerId ??= connection.serverId ?? null;
     this.activeConnectToken = null;
     this.connection = connection;
     this.currentCallerId = connection.callerId;
@@ -426,24 +424,36 @@ export class MobileRpcClient implements Pick<
         "Invalid mobile session",
       );
     }
-    for (const [method, handler] of this.exposedHandlers) {
+    for (const [method, handler] of this.exposedHandlers)
       this.rpc.expose(method, handler);
-    }
-    // Surface authenticated session state so UI and recovery react to drops.
     connection.session.onStatusChange?.((status) => this.setStatus(status));
-    // Reconnect progress is an additive transport capability. Production
-    // Iroh transports expose it; older injected/test transports can omit it
-    // without turning a successful connection into a retry loop.
-    if (typeof connection.transport.onReconnectProgress === "function") {
-      connection.transport.onReconnectProgress((progress) =>
-        this.emitReconnectProgress(progress),
-      );
-    }
+    connection.transport.onReconnectProgress?.((progress) =>
+      this.emitReconnectProgress(progress),
+    );
     for (const event of this.eventSubscriptions.keys())
       this.attachEventSubscription(event);
     this.setStatus(connection.session.status?.() ?? "connected");
     smokePhase("workspace-iroh-connected", { callerId: connection.callerId });
     return this.rpc;
+  }
+
+  private async restoreBootstrapSession(): Promise<IrohConnection> {
+    const stored = await loadShellCredential();
+    if (!stored) {
+      throw new Error("No stored Iroh shell credential — re-pair this device");
+    }
+    smokePhase("workspace-iroh-connect-start", {
+      phase: stored.phase,
+      endpointId:
+        stored.phase === "routed"
+          ? stored.workspacePairing.endpointId.slice(0, 12)
+          : stored.controlPairing.endpointId.slice(0, 12),
+    });
+    return reconnectMobileSession(
+      stored,
+      Platform.OS === "ios" ? "app-scheme" : "client-loopback",
+      (kind) => this.emitRecovery(kind),
+    );
   }
 
   private async connectAndWaitWithRetry(
@@ -484,7 +494,7 @@ export class MobileRpcClient implements Pick<
         }
         return;
       } catch (error) {
-        // An intentional teardown (disconnect/dispose/updateConfig) landed
+        // An intentional teardown (disconnect/dispose) landed
         // mid-connect. Do NOT retry — that would resurrect a pipe the caller
         // just asked to drop. Propagate so the awaiting init() unwinds.
         if (error instanceof ConnectSupersededError) throw error;

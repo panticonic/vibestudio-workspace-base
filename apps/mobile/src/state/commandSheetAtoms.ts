@@ -7,6 +7,7 @@
  * through `MainScreen`.
  */
 import { atom } from "jotai";
+import { shellClientAtom } from "./shellClientAtom";
 import type { QuickfireMode } from "@workspace/quickfire-core";
 
 export interface CommandSheetRequest {
@@ -25,7 +26,7 @@ export const openCommandSheetAtom = atom(
       mode: request?.mode ?? "all",
       ...(request?.query ? { query: request.query } : {}),
     });
-  }
+  },
 );
 
 export const dismissCommandSheetAtom = atom(null, (_get, set) => {
@@ -35,6 +36,8 @@ export const dismissCommandSheetAtom = atom(null, (_get, set) => {
 export interface QuickfireSheetRequest {
   /** The panel slot the conversation binds to (§1.4). Absent for a `conversation` request. */
   slotId?: string;
+  /** Captured with the target, so later focus changes cannot relabel this conversation. */
+  panelTitle?: string;
   /**
    * An existing channel to talk in — the conversation surface an agent's
    * notification opens (messaging plan §4.8). Nothing is minted: the person
@@ -66,9 +69,15 @@ export const quickfireSheetAtom = atom<QuickfireSheetRequest | null>(null);
  */
 export const openQuickfireSheetAtom = atom(
   null,
-  (_get, set, request: QuickfireSheetRequest) => {
-    set(quickfireSheetAtom, request);
-  }
+  (get, set, request: QuickfireSheetRequest) => {
+    const panelTitle =
+      request.panelTitle ??
+      (request.slotId
+        ? (get(shellClientAtom)?.panels.registry.getPanel(request.slotId)
+            ?.title ?? request.slotId)
+        : undefined);
+    set(quickfireSheetAtom, { ...request, panelTitle });
+  },
 );
 
 export const dismissQuickfireSheetAtom = atom(null, (_get, set) => {

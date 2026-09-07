@@ -1,173 +1,107 @@
 import type { ApprovalDecisionId } from "@vibestudio/shared/approvalContract";
+import {
+  readWorkspacePushScope,
+  sameWorkspacePushScope,
+  type WorkspaceApprovalTarget,
+} from "@vibestudio/shared/workspacePushScope";
 
 export const BACKGROUND_ACTION_QUEUE_TTL_MS = 24 * 60 * 60 * 1000;
-
-// Background notification actions only queue built-in inline decisions.
-// Userland choices open the app so the foreground approval sheet can render arbitrary options.
 export type BackgroundApprovalDecision = Exclude<ApprovalDecisionId, "dismiss">;
-
-export interface QueuedBackgroundAction {
-  approvalId: string;
+export interface QueuedBackgroundAction extends WorkspaceApprovalTarget {
   decision: BackgroundApprovalDecision;
   queuedAt: number;
 }
 
-export interface QueuedWorkspaceMutation {
-  id: string;
-  service: string;
-  method: string;
-  args: unknown[];
-  queuedAt: number;
+export function readApprovalTarget(
+  value: unknown,
+): WorkspaceApprovalTarget | null {
+  const scope = readWorkspacePushScope(value);
+  if (!scope) return null;
+  const approvalId = (value as Record<string, unknown>)["approvalId"];
+  return typeof approvalId === "string" && approvalId.trim()
+    ? { ...scope, approvalId }
+    : null;
 }
-
-interface QueueEnvelope {
-  version: 1;
-  actions: QueuedBackgroundAction[];
+export function sameApprovalTarget(
+  left: WorkspaceApprovalTarget,
+  right: WorkspaceApprovalTarget,
+): boolean {
+  return (
+    sameWorkspacePushScope(left, right) && left.approvalId === right.approvalId
+  );
 }
-
-interface WorkspaceMutationEnvelope {
-  version: 1;
-  mutations: QueuedWorkspaceMutation[];
-}
-
 export function loadPendingActions(
   raw: string | null | undefined,
-  now = Date.now()
+  now = Date.now(),
 ): QueuedBackgroundAction[] {
   if (!raw) return [];
-
   try {
-    const parsed = JSON.parse(raw) as Partial<QueueEnvelope> | QueuedBackgroundAction[];
-    const actions = Array.isArray(parsed) ? parsed : parsed.actions;
-    if (!Array.isArray(actions)) return [];
-    return pruneStaleActions(actions.filter(isQueuedBackgroundAction), now);
+    const parsed = JSON.parse(raw) as { actions?: unknown };
+    if (!Array.isArray(parsed.actions)) return [];
+    return pruneStaleActions(
+      parsed.actions.filter(
+        (value): value is QueuedBackgroundAction =>
+          readApprovalTarget(value) !== null &&
+          isBackgroundDecision(value.decision) &&
+          Number.isFinite(value.queuedAt),
+      ),
+      now,
+    );
   } catch {
     return [];
   }
 }
-
-export function serializePendingActions(actions: QueuedBackgroundAction[]): string {
-  const envelope: QueueEnvelope = {
-    version: 1,
-    actions,
-  };
-  return JSON.stringify(envelope);
+export function serializePendingActions(
+  actions: QueuedBackgroundAction[],
+): string {
+  return JSON.stringify({ version: 2, actions });
 }
-
 export function enqueueAction(
   actions: QueuedBackgroundAction[],
   action: QueuedBackgroundAction,
-  now = Date.now()
+  now = Date.now(),
 ): QueuedBackgroundAction[] {
-  const pending = pruneStaleActions(actions, now).filter(
-    (entry) => entry.approvalId !== action.approvalId
-  );
-  return [...pending, action];
+  return [
+    ...pruneStaleActions(actions, now).filter(
+      (entry) => !sameApprovalTarget(entry, action),
+    ),
+    action,
+  ];
 }
-
 export function clearAction(
   actions: QueuedBackgroundAction[],
-  approvalId: string
+  target: WorkspaceApprovalTarget,
 ): QueuedBackgroundAction[] {
-  return actions.filter((entry) => entry.approvalId !== approvalId);
+  return actions.filter((entry) => !sameApprovalTarget(entry, target));
 }
-
 export function pruneStaleActions(
   actions: QueuedBackgroundAction[],
-  now = Date.now()
+  now = Date.now(),
 ): QueuedBackgroundAction[] {
-  return actions.filter((entry) => now - entry.queuedAt <= BACKGROUND_ACTION_QUEUE_TTL_MS);
-}
-
-export function loadWorkspaceMutations(
-  raw: string | null | undefined,
-  now = Date.now()
-): QueuedWorkspaceMutation[] {
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as
-      | Partial<WorkspaceMutationEnvelope>
-      | QueuedWorkspaceMutation[];
-    const mutations = Array.isArray(parsed) ? parsed : parsed.mutations;
-    if (!Array.isArray(mutations)) return [];
-    return pruneStaleWorkspaceMutations(mutations.filter(isQueuedWorkspaceMutation), now);
-  } catch {
-    return [];
-  }
-}
-
-export function serializeWorkspaceMutations(mutations: QueuedWorkspaceMutation[]): string {
-  return JSON.stringify({ version: 1, mutations } satisfies WorkspaceMutationEnvelope);
-}
-
-export function enqueueWorkspaceMutation(
-  mutations: QueuedWorkspaceMutation[],
-  mutation: QueuedWorkspaceMutation,
-  now = Date.now()
-): QueuedWorkspaceMutation[] {
-  const pending = pruneStaleWorkspaceMutations(mutations, now).filter(
-    (entry) => entry.id !== mutation.id
+  return actions.filter(
+    (entry) => now - entry.queuedAt <= BACKGROUND_ACTION_QUEUE_TTL_MS,
   );
-  return [...pending, mutation];
 }
-
-export function clearWorkspaceMutation(
-  mutations: QueuedWorkspaceMutation[],
-  id: string
-): QueuedWorkspaceMutation[] {
-  return mutations.filter((entry) => entry.id !== id);
-}
-
-export function pruneStaleWorkspaceMutations(
-  mutations: QueuedWorkspaceMutation[],
-  now = Date.now()
-): QueuedWorkspaceMutation[] {
-  return mutations.filter((entry) => now - entry.queuedAt <= BACKGROUND_ACTION_QUEUE_TTL_MS);
-}
-
-export function enqueueDeepLink(_currentApprovalId: string | null, approvalId: string): string {
-  return approvalId;
-}
-
-export function loadDeepLink(raw: string | null | undefined): string | null {
+export function loadDeepLink(
+  raw: string | null | undefined,
+): WorkspaceApprovalTarget | null {
   if (!raw) return null;
-
   try {
-    const parsed = JSON.parse(raw) as { approvalId?: unknown };
-    return typeof parsed.approvalId === "string" && parsed.approvalId.length > 0
-      ? parsed.approvalId
-      : null;
+    return readApprovalTarget(JSON.parse(raw));
   } catch {
     return null;
   }
 }
-
-export function serializeDeepLink(approvalId: string): string {
-  return JSON.stringify({ approvalId });
+export function serializeDeepLink(target: WorkspaceApprovalTarget): string {
+  return JSON.stringify(target);
 }
-
-function isQueuedBackgroundAction(value: unknown): value is QueuedBackgroundAction {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<QueuedBackgroundAction>;
+export function isBackgroundDecision(
+  value: unknown,
+): value is BackgroundApprovalDecision {
   return (
-    typeof candidate.approvalId === "string" &&
-    isBackgroundDecision(candidate.decision) &&
-    typeof candidate.queuedAt === "number"
+    value === "once" ||
+    value === "session" ||
+    value === "version" ||
+    value === "deny"
   );
-}
-
-function isQueuedWorkspaceMutation(value: unknown): value is QueuedWorkspaceMutation {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Partial<QueuedWorkspaceMutation>;
-  return (
-    typeof candidate.id === "string" &&
-    typeof candidate.service === "string" &&
-    typeof candidate.method === "string" &&
-    Array.isArray(candidate.args) &&
-    typeof candidate.queuedAt === "number"
-  );
-}
-
-export function isBackgroundDecision(value: unknown): value is BackgroundApprovalDecision {
-  return value === "once" || value === "session" || value === "version" || value === "deny";
 }

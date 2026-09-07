@@ -183,6 +183,29 @@ describe("needsMobilePanelMaterialization", () => {
 });
 
 describe("materializeMobilePanel", () => {
+  it("does not acquire a lease when a timed-out init eventually completes", async () => {
+    const deps = makeDeps();
+    let finish!: (value: { entityId: string }) => void;
+    deps.getPanelInit.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const controller = new AbortController();
+    const pending = materializeMobilePanel({
+      panelId: "panel-1",
+      panel: makePanel("panels/editor"),
+      hostConfig,
+      ...deps,
+      leaseMode: "acquire",
+      signal: controller.signal,
+    });
+    controller.abort();
+    finish({ entityId: "panel:nav-1" });
+    await expect(pending).rejects.toThrow("canceled");
+    expect(deps.acquireLease).not.toHaveBeenCalled();
+  });
   it("leases a reserved panel and returns an immediate blank WebView without requesting a grant", async () => {
     const deps = makeDeps();
     const panel = makePanel("panels/editor");

@@ -173,7 +173,7 @@ describe("QuickfireSheet", () => {
     const openChatPanel = jest.fn(async () => {});
     const { store, getByLabelText } = renderSheet(transport, openChatPanel);
     act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
-    await waitFor(() => getByLabelText("Move this conversation into a chat panel, keeping its history"));
+    await waitFor(() => expect(getByLabelText("Move this conversation into a chat panel, keeping its history")).toBeEnabled());
     await act(async () => {
       fireEvent.press(getByLabelText("Move this conversation into a chat panel, keeping its history"));
     });

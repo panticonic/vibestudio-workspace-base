@@ -1,10 +1,22 @@
 import { useEffect } from "react";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useAtomValue, useSetAtom } from "jotai";
-import { dismissToastAtom, toastQueueAtom, type ToastTone } from "../state/toastAtoms";
+import {
+  dismissToastAtom,
+  toastQueueAtom,
+  type ToastTone,
+} from "../state/toastAtoms";
 import { themeColorsAtom } from "../state/themeAtoms";
-import { AlertTriangle, CheckCircle2, Info, XCircle, type IconComponent } from "../design/icons";
-import { radius, shadow, spacing, type } from "../design/tokens";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Info,
+  XCircle,
+  X,
+  type IconComponent,
+} from "../design/icons";
+import { radius, shadow, spacing, touchTarget, type } from "../design/tokens";
 
 const DEFAULT_DURATION_MS = 4500;
 
@@ -12,6 +24,7 @@ export function Toast() {
   const toasts = useAtomValue(toastQueueAtom);
   const dismissToast = useSetAtom(dismissToastAtom);
   const colors = useAtomValue(themeColorsAtom);
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     const timers = toasts.map((toast) => {
@@ -29,20 +42,18 @@ export function Toast() {
   if (toasts.length === 0) return null;
 
   return (
-    <View pointerEvents="box-none" style={styles.viewport}>
+    <View
+      pointerEvents="box-none"
+      style={[styles.viewport, { top: insets.top + spacing.md }]}
+    >
       {toasts.slice(-3).map((toast) => {
         const tone = toast.tone ?? "info";
         const Icon = toneIcon(tone);
         const toneColor = toneToColor(colors, tone);
         return (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`${toast.actionLabel ?? "Dismiss notification"}: ${toast.title ? `${toast.title}. ` : ""}${toast.message}`}
+          <View
+            accessibilityLiveRegion="polite"
             key={toast.id}
-            onPress={() => {
-              dismissToast(toast.id);
-              if (toast.onAction) void toast.onAction();
-            }}
             style={[
               styles.toast,
               {
@@ -56,16 +67,38 @@ export function Toast() {
             <Icon size={18} color={toneColor} />
             <View style={styles.copy}>
               {toast.title ? (
-                <Text style={[type.bodyStrong, { color: colors.text }]}>{toast.title}</Text>
+                <Text style={[type.bodyStrong, { color: colors.text }]}>
+                  {toast.title}
+                </Text>
               ) : null}
-              <Text style={[type.caption, { color: colors.textSecondary }]}>{toast.message}</Text>
+              <Text style={[type.caption, { color: colors.textSecondary }]}>
+                {toast.message}
+              </Text>
             </View>
             {toast.actionLabel ? (
-              <Text style={[type.bodyStrong, styles.action, { color: colors.accent }]}>
-                {toast.actionLabel}
-              </Text>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={toast.actionLabel}
+                onPress={() => {
+                  dismissToast(toast.id);
+                  if (toast.onAction) void toast.onAction();
+                }}
+                style={styles.action}
+              >
+                <Text style={[type.bodyStrong, { color: colors.accent }]}>
+                  {toast.actionLabel}
+                </Text>
+              </Pressable>
             ) : null}
-          </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`Dismiss notification: ${toast.title ?? toast.message}`}
+              onPress={() => dismissToast(toast.id)}
+              style={styles.dismiss}
+            >
+              <X size={18} color={colors.textSecondary} />
+            </Pressable>
+          </View>
         );
       })}
     </View>
@@ -81,7 +114,7 @@ function toneIcon(tone: ToastTone): IconComponent {
 
 function toneToColor(
   colors: { accent: string; success: string; warning: string; danger: string },
-  tone: ToastTone
+  tone: ToastTone,
 ) {
   if (tone === "success") return colors.success;
   if (tone === "warning") return colors.warning;
@@ -94,7 +127,6 @@ const styles = StyleSheet.create({
     left: spacing.md,
     position: "absolute",
     right: spacing.md,
-    top: spacing.md,
     zIndex: 50,
   },
   toast: {
@@ -121,5 +153,15 @@ const styles = StyleSheet.create({
   },
   action: {
     alignSelf: "center",
+    minHeight: touchTarget,
+    justifyContent: "center",
+    maxWidth: "35%",
+  },
+  dismiss: {
+    alignSelf: "center",
+    minWidth: touchTarget,
+    minHeight: touchTarget,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });

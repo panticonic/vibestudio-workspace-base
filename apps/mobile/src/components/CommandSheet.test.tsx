@@ -133,6 +133,7 @@ describe("CommandSheet", () => {
       expect(store.get(quickfireSheetAtom)).toEqual({
         slotId: "panel:tree/root/0",
         draft: "why is this slow",
+        panelTitle: "panel:tree/root/0",
       })
     );
     await waitFor(() => expect(store.get(commandSheetAtom)).toBeNull());

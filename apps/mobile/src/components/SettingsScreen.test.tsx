@@ -1,3 +1,4 @@
+import { workspaceDirectoryAtom } from "../state/workspaceDirectoryAtom";
 import { Alert, NativeModules } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
@@ -29,6 +30,10 @@ jest.mock("@vibestudio/mobile-iroh", () => ({
   persistStoredMobileConnection: jest.fn(async () => undefined),
 }));
 
+jest.mock("./WorkspaceConnectionsSection", () => ({
+  WorkspaceConnectionsSection: () => null,
+}));
+
 jest.mock("./ConnectionBar", () => ({
   ConnectionBar: () => null,
 }));
@@ -58,8 +63,20 @@ const nativeHost = NativeModules["VibestudioMobileHost"] as {
 };
 
 const workspaces = [
-  { workspaceId: "ws-a", name: "alpha", lastOpened: 10, running: true },
-  { workspaceId: "ws-b", name: "beta", lastOpened: 5, running: false },
+  {
+    workspaceId: "ws-a",
+    name: "alpha",
+    lastOpened: 10,
+    pendingApprovalCount: 0,
+    running: true,
+  },
+  {
+    workspaceId: "ws-b",
+    name: "beta",
+    lastOpened: 5,
+    pendingApprovalCount: 0,
+    running: false,
+  },
 ];
 
 const profile = {
@@ -98,6 +115,12 @@ function renderSettings() {
     })),
   };
   store.set(shellClientAtom, shellClient as never);
+  store.set(workspaceDirectoryAtom, {
+    activeWorkspaceId: "ws-a",
+    entries: workspaces,
+    clearBrowserCookies: jest.fn(async () => undefined),
+    dispose: jest.fn(async () => undefined),
+  } as never);
   const navigation = { goBack: jest.fn(), replace: jest.fn() };
   return {
     ...render(
@@ -239,7 +262,7 @@ describe("SettingsScreen workspace selector", () => {
     });
   });
 
-  it("routes a non-current workspace and exposes the pending reload state", async () => {
+  it("routes a non-current workspace and exposes the opening state", async () => {
     selectMock.mockImplementationOnce(() => new Promise(() => undefined));
     const view = renderSettings();
     await waitFor(() =>
@@ -250,7 +273,9 @@ describe("SettingsScreen workspace selector", () => {
 
     expect(selectMock).toHaveBeenCalledWith(
       "ws-b",
-      expect.objectContaining({ control: view.shellClient.hubControl }),
+      expect.objectContaining({
+        control: expect.objectContaining({ activeWorkspaceId: "ws-a" }),
+      }),
     );
     expect(view.getByText("Switching…")).toBeTruthy();
     expect(

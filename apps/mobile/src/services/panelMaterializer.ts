@@ -20,6 +20,7 @@ export interface MobileMaterializedPanel {
 
 export interface MobilePanelMaterializationDeps {
   panelId: string;
+  signal?: AbortSignal;
   hostConfig: HostConfig;
   getPanelInit(panelId: string): Promise<unknown>;
   acquireLease(
@@ -81,6 +82,10 @@ export function needsMobilePanelMaterialization(
 export async function materializeMobilePanel(
   opts: MobilePanelMaterializationDeps & { panel: Panel },
 ): Promise<MobileMaterializedPanel> {
+  const checkActive = () => {
+    if (opts.signal?.aborted) throw new Error("Panel materialization canceled");
+  };
+  checkActive();
   const snapshot = getCurrentSnapshot(opts.panel);
   const managed = !snapshot.source.startsWith("browser:");
   const connectionId = `mobile-${opts.panelId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
@@ -96,6 +101,7 @@ export async function materializeMobilePanel(
     }
     const runtimeEntityId = asPanelEntityId(opts.panel.runtimeEntityId);
     const lease = await acquireLease(runtimeEntityId);
+    checkActive();
     if (!lease.acquired) {
       throw new Error(
         formatPanelRuntimeLeaseDeniedMessage(opts.panelId, lease.lease),
@@ -110,6 +116,7 @@ export async function materializeMobilePanel(
     };
   }
   const panelInit = await opts.getPanelInit(opts.panelId);
+  checkActive();
   const rawEntityId = panelInitEntityId(panelInit);
   if (!rawEntityId) {
     throw new Error(
@@ -128,6 +135,7 @@ export async function materializeMobilePanel(
     );
   }
   const lease = await acquireLease(runtimeEntityId);
+  checkActive();
   if (!lease.acquired) {
     throw new Error(
       formatPanelRuntimeLeaseDeniedMessage(opts.panelId, lease.lease),
@@ -193,6 +201,7 @@ export async function materializeLatestMobilePanel(
   opts: MobilePanelMaterializationDeps & { getPanel(): Panel | null },
 ): Promise<MobileMaterializedPanel> {
   while (true) {
+    if (opts.signal?.aborted) throw new Error("Panel materialization canceled");
     const panel = opts.getPanel();
     if (!panel) throw new Error(`Panel ${opts.panelId} no longer exists`);
     const expectedCoordinate = materializationCoordinate(panel);
@@ -201,6 +210,7 @@ export async function materializeLatestMobilePanel(
     try {
       materialized = await materializeMobilePanel({ ...opts, panel });
     } catch (error) {
+      if (opts.signal?.aborted) throw error;
       const current = opts.getPanel();
       if (current && materializationCoordinate(current) !== expectedCoordinate)
         continue;

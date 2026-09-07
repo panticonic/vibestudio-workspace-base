@@ -48,6 +48,7 @@ const colors = {
 
 function props(overrides: Partial<LoadedPanelWebViewProps> = {}): LoadedPanelWebViewProps {
   return {
+    browserProfile: "test-account/workspace",
     entry: {
       panelId: "panel-1",
       runtimeEntityId: "panel:nav-panel-1" as WebViewEntry["runtimeEntityId"],

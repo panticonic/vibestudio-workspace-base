@@ -5,6 +5,7 @@ describe("createMobileShellCore", () => {
     jest.useFakeTimers();
     const onPresentationUpdated = jest.fn();
     const core = createMobileShellCore({
+      localStorageScope: "account-a",
       workspaceId: "workspace-test",
       serverUrl: "http://127.0.0.1:3000/_workspace/workspace-test",
       transport: { call: jest.fn() } as never,

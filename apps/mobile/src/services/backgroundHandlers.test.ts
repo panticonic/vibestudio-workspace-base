@@ -1,8 +1,17 @@
+import { workspaceNotificationKey } from "@vibestudio/shared/workspacePushScope";
+const scope = {
+  serverId: "srv_aaaaaaaaaaaaaaaaaaaaaaaa",
+  userId: "alice",
+  workspaceId: "project",
+};
 jest.mock("react-native", () => ({
   Platform: { OS: "android" },
 }));
 
-import { handleBackgroundMessage, handleBackgroundNotifeeEvent } from "./backgroundHandlers";
+import {
+  handleBackgroundMessage,
+  handleBackgroundNotifeeEvent,
+} from "./backgroundHandlers";
 import { setApprovedAppCapabilities } from "./appCapabilities";
 
 describe("backgroundHandlers", () => {
@@ -18,11 +27,13 @@ describe("backgroundHandlers", () => {
 
     await expect(
       handleBackgroundMessage(
-        { data: { kind: "approval-cancel", cancelKey: "approval-bg" } },
-        notifee
-      )
+        {
+          data: { ...scope, kind: "approval-cancel", cancelKey: "approval-bg" },
+        },
+        notifee,
+      ),
     ).rejects.toThrow(
-      "background notification message requires approved app capability 'notifications'"
+      "background notification message requires approved app capability 'notifications'",
     );
 
     await expect(
@@ -30,15 +41,18 @@ describe("backgroundHandlers", () => {
         {
           type: 1,
           detail: {
-            notification: { id: "approval-bg", data: { approvalId: "approval-bg" } },
+            notification: {
+              id: "approval-bg",
+              data: { ...scope, approvalId: "approval-bg" },
+            },
             pressAction: { id: "deny" },
           },
         },
         notifee,
-        { ACTION_PRESS: 1, PRESS: 2 }
-      )
+        { ACTION_PRESS: 1, PRESS: 2 },
+      ),
     ).rejects.toThrow(
-      "background notification action requires approved app capability 'notifications'"
+      "background notification action requires approved app capability 'notifications'",
     );
 
     expect(notifee.cancelNotification).not.toHaveBeenCalled();
@@ -53,11 +67,13 @@ describe("backgroundHandlers", () => {
     };
 
     await handleBackgroundMessage(
-      { data: { kind: "approval-cancel", cancelKey: "approval-bg" } },
-      notifee
+      { data: { ...scope, kind: "approval-cancel", cancelKey: "approval-bg" } },
+      notifee,
     );
 
-    expect(notifee.cancelNotification).toHaveBeenCalledWith("approval-bg");
+    expect(notifee.cancelNotification).toHaveBeenCalledWith(
+      workspaceNotificationKey(scope, "approval-bg"),
+    );
     expect(notifee.displayNotification).not.toHaveBeenCalled();
   });
 });

@@ -87,10 +87,10 @@ export interface PanelAssetFacade {
 // HTTP cache warm across app launches).
 // --------------------------------------------------------------------------
 
-async function readPersistedPort(): Promise<number | null> {
+async function readPersistedPort(key: string): Promise<number | null> {
   const storage = getNativeAppStorage();
   try {
-    const raw = await storage.getItem(PERSISTED_PORT_KEY);
+    const raw = await storage.getItem(key);
     const port = raw ? Number.parseInt(raw, 10) : NaN;
     return Number.isInteger(port) && port > 0 && port < 65536 ? port : null;
   } catch (error) {
@@ -99,10 +99,10 @@ async function readPersistedPort(): Promise<number | null> {
   }
 }
 
-async function writePersistedPort(port: number): Promise<void> {
+async function writePersistedPort(key: string, port: number): Promise<void> {
   const storage = getNativeAppStorage();
   try {
-    await storage.setItem(PERSISTED_PORT_KEY, String(port));
+    await storage.setItem(key, String(port));
   } catch (error) {
     console.warn(`[panel-facade] Failed to persist port ${port}:`, error);
   }
@@ -125,9 +125,11 @@ export interface MobileFetchedResponse {
 export async function startPanelAssetFacade(
   transport: MobileRpcClient,
   namespace: MobileAssetStoreNamespace,
+  accountScope: string,
 ): Promise<PanelAssetFacade> {
   const store = new MobileAssetStore(namespace);
-  const preferredPort = await readPersistedPort();
+  const portKey = `${PERSISTED_PORT_KEY}:${JSON.stringify([accountScope, namespace.workspaceIdentity])}`;
+  const preferredPort = await readPersistedPort(portKey);
   const activeSockets = new Set<TcpSocketConn>();
   const activeRequests = new Set<Promise<void>>();
   let closing = false;
@@ -173,7 +175,7 @@ export async function startPanelAssetFacade(
     preferredPort !== null
       ? await bind(preferredPort).catch(() => bind(0))
       : await bind(0);
-  if (port !== preferredPort) void writePersistedPort(port);
+  if (port !== preferredPort) void writePersistedPort(portKey, port);
 
   console.log(
     `[VibestudioMobileSmoke] phase=workspace-panel-facade-listening ${JSON.stringify({ port })}`,

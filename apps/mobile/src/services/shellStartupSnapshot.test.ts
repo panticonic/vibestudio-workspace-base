@@ -33,7 +33,8 @@ const tree: PanelTreeCacheSnapshot = {
 
 function snapshot(): MobileShellStartupSnapshot {
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
+    deviceId: "device-a",
     serverEndpointId: "a".repeat(64),
     workspaceIdentity: "workspace-one",
     capturedAt: 123,
@@ -50,10 +51,28 @@ describe("mobile shell startup snapshot", () => {
       true,
     );
     await expect(
-      loadMobileShellStartupSnapshot("a".repeat(64), "workspace-one", storage),
+      loadMobileShellStartupSnapshot(
+        "a".repeat(64),
+        "workspace-one",
+        "device-a",
+        storage,
+      ),
     ).resolves.toEqual(snapshot());
     await expect(
-      loadMobileShellStartupSnapshot("b".repeat(64), "workspace-one", storage),
+      loadMobileShellStartupSnapshot(
+        "b".repeat(64),
+        "workspace-one",
+        "device-a",
+        storage,
+      ),
+    ).resolves.toBeNull();
+    await expect(
+      loadMobileShellStartupSnapshot(
+        "a".repeat(64),
+        "workspace-one",
+        "device-b",
+        storage,
+      ),
     ).resolves.toBeNull();
   });
 
@@ -67,7 +86,12 @@ describe("mobile shell startup snapshot", () => {
     );
 
     await expect(
-      loadMobileShellStartupSnapshot("a".repeat(64), "workspace-one", storage),
+      loadMobileShellStartupSnapshot(
+        "a".repeat(64),
+        "workspace-one",
+        "device-a",
+        storage,
+      ),
     ).resolves.toBeNull();
     expect(storage.removeItem).toHaveBeenCalledWith(storageKey);
   });

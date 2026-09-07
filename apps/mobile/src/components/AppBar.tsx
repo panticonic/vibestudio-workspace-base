@@ -10,13 +10,29 @@
  * edit row (back/forward/input/reload) plus autocomplete suggestions.
  */
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import type { StyleProp, TextStyle } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAtomValue, useSetAtom } from "jotai";
 import { themeColorsAtom } from "../state/themeAtoms";
-import { panelTreeRevisionAtom, shellClientAtom } from "../state/shellClientAtom";
+import {
+  panelTreeRevisionAtom,
+  shellClientAtom,
+} from "../state/shellClientAtom";
 import { activePanelIdAtom } from "../state/navigationAtoms";
 import { pushToastAtom } from "../state/toastAtoms";
 import {
@@ -28,6 +44,7 @@ import type { AddressAutocompleteItem } from "@workspace/omnibox-core";
 import { getCurrentSnapshot } from "@vibestudio/shared/panel/accessors";
 import { hairline, radius, spacing, touchTarget, type } from "../design/tokens";
 import {
+  Bell,
   ArrowLeft,
   ArrowRight,
   Bookmark,
@@ -49,6 +66,8 @@ import { IconButton } from "./ui/primitives";
 import { MobilePanelIcon } from "./MobilePanelIcon";
 
 interface AppBarProps {
+  approvalCount?: number;
+  onApprovalsPress?: () => void;
   /** Title to display in the address pill */
   title: string;
   /** Called when the hamburger menu button is pressed */
@@ -84,6 +103,8 @@ interface AppBarProps {
 
 export function AppBar({
   title,
+  approvalCount = 0,
+  onApprovalsPress,
   onMenuPress,
   showMenuButton = true,
   onPanelCreated,
@@ -113,6 +134,8 @@ export function AppBar({
   const pushToast = useSetAtom(pushToastAtom);
   const [addressValue, setAddressValue] = useState(address);
   const [addressFocused, setAddressFocused] = useState(false);
+  const [creatingPanel, setCreatingPanel] = useState(false);
+  const panelCreationPending = useRef(false);
   const inputRef = useRef<TextInput | null>(null);
   const activePanelIdentity = useMemo(() => {
     if (!shellClient || !activePanelId) return null;
@@ -122,16 +145,19 @@ export function AppBar({
     return {
       icon: panel.icon,
       source,
-      kind: isBrowserPanelSource(source) ? ("browser" as const) : ("workspace" as const),
+      kind: isBrowserPanelSource(source)
+        ? ("browser" as const)
+        : ("workspace" as const),
     };
   }, [activePanelId, panelTreeRevision, shellClient]);
   const resolveBrowserFavicon = useCallback(
-    (url: string) => shellClient?.panels.getPageFaviconDataUrl(url) ?? Promise.resolve(null),
-    [shellClient]
+    (url: string) =>
+      shellClient?.panels.getPageFaviconDataUrl(url) ?? Promise.resolve(null),
+    [shellClient],
   );
   const visibleSuggestions = useMemo(
     () => (addressFocused ? addressSuggestions.slice(0, 8) : []),
-    [addressFocused, addressSuggestions]
+    [addressFocused, addressSuggestions],
   );
 
   useEffect(() => {
@@ -153,16 +179,22 @@ export function AppBar({
   }, [addressBarVisible]);
 
   const handleCreatePanel = useCallback(async () => {
-    if (!shellClient) return;
+    if (!shellClient || panelCreationPending.current) return;
+    panelCreationPending.current = true;
+    setCreatingPanel(true);
     try {
       const result = await shellClient.panels.createAboutPanel("new");
       onPanelCreated?.(result.id);
     } catch (error) {
       pushToast({
         title: "Panel creation failed",
-        message: error instanceof Error ? error.message : "Could not create panel.",
+        message:
+          error instanceof Error ? error.message : "Could not create panel.",
         tone: "danger",
       });
+    } finally {
+      panelCreationPending.current = false;
+      setCreatingPanel(false);
     }
   }, [onPanelCreated, pushToast, shellClient]);
 
@@ -179,6 +211,20 @@ export function AppBar({
         },
       ]}
     >
+      <Text
+        numberOfLines={1}
+        style={[
+          type.micro,
+          {
+            color: colors.textSecondary,
+            paddingHorizontal: spacing.lg,
+            paddingTop: spacing.xs,
+          },
+        ]}
+        accessibilityLabel={`Workspace: ${shellClient?.workspaceName ?? "Workspace"}`}
+      >
+        {shellClient?.workspaceName ?? "Workspace"}
+      </Text>
       {!addressBarVisible ? (
         <View
           style={[
@@ -190,7 +236,11 @@ export function AppBar({
           ]}
         >
           {showMenuButton ? (
-            <IconButton icon={Menu} onPress={onMenuPress} label="Open panel drawer" />
+            <IconButton
+              icon={Menu}
+              onPress={onMenuPress}
+              label="Open panel drawer"
+            />
           ) : null}
           <Pressable
             onPress={onToggleAddressBar}
@@ -204,7 +254,9 @@ export function AppBar({
             style={({ pressed }) => [
               styles.pill,
               {
-                backgroundColor: pressed ? colors.surfaceRaised : colors.surfaceSunken,
+                backgroundColor: pressed
+                  ? colors.surfaceRaised
+                  : colors.surfaceSunken,
                 borderColor: colors.borderSubtle,
               },
             ]}
@@ -223,7 +275,11 @@ export function AppBar({
             ) : null}
             <View style={styles.pillCopy}>
               <Text
-                style={[type.bodyStrong, styles.pillTitle, { color: colors.text }]}
+                style={[
+                  type.bodyStrong,
+                  styles.pillTitle,
+                  { color: colors.text },
+                ]}
                 numberOfLines={1}
                 ellipsizeMode="tail"
               >
@@ -239,7 +295,7 @@ export function AppBar({
                 </Text>
               ) : null}
             </View>
-            {isLoading ? (
+            {isLoading || creatingPanel ? (
               <ActivityIndicator
                 size="small"
                 color={colors.textSecondary}
@@ -247,6 +303,14 @@ export function AppBar({
               />
             ) : null}
           </Pressable>
+          {approvalCount > 0 && (
+            <IconButton
+              icon={Bell}
+              label={`Approvals, ${approvalCount} waiting`}
+              onPress={onApprovalsPress}
+              color={colors.primary}
+            />
+          )}
           {onShowActions ? (
             <IconButton
               icon={MoreHorizontal}
@@ -266,9 +330,9 @@ export function AppBar({
           <IconButton
             icon={Plus}
             onPress={handleCreatePanel}
-            label="Create new panel"
+            label={creatingPanel ? "Creating panel" : "Create new panel"}
             size={23}
-            disabled={!shellClient}
+            disabled={!shellClient || creatingPanel}
           />
         </View>
       ) : (
@@ -298,7 +362,10 @@ export function AppBar({
           <View
             style={[
               styles.inputWrap,
-              { backgroundColor: colors.surfaceSunken, borderColor: colors.primary },
+              {
+                backgroundColor: colors.surfaceSunken,
+                borderColor: colors.primary,
+              },
             ]}
           >
             <TextInput
@@ -346,7 +413,9 @@ export function AppBar({
         </View>
       )}
       {addressBarVisible && visibleSuggestions.length > 0 && (
-        <View style={[styles.suggestions, { borderTopColor: colors.borderSubtle }]}>
+        <View
+          style={[styles.suggestions, { borderTopColor: colors.borderSubtle }]}
+        >
           {visibleSuggestions.map((item, index) => (
             <Pressable
               key={`${item.kind}:${item.value}`}
@@ -377,13 +446,22 @@ export function AppBar({
                     text={item.label}
                     ranges={item.matchRanges?.label}
                     style={[styles.suggestionLabel, { color: colors.text }]}
-                    highlightStyle={[styles.suggestionMatch, { color: colors.primary }]}
+                    highlightStyle={[
+                      styles.suggestionMatch,
+                      { color: colors.primary },
+                    ]}
                   />
                   <HighlightedText
                     text={item.meta}
                     ranges={item.matchRanges?.meta}
-                    style={[styles.suggestionMeta, { color: colors.textSecondary }]}
-                    highlightStyle={[styles.suggestionMatch, { color: colors.primary }]}
+                    style={[
+                      styles.suggestionMeta,
+                      { color: colors.textSecondary },
+                    ]}
+                    highlightStyle={[
+                      styles.suggestionMatch,
+                      { color: colors.primary },
+                    ]}
                   />
                 </View>
               </View>
@@ -395,7 +473,9 @@ export function AppBar({
   );
 }
 
-function iconForSuggestion(kind: AddressAutocompleteItem["iconKind"]): IconComponent {
+function iconForSuggestion(
+  kind: AddressAutocompleteItem["iconKind"],
+): IconComponent {
   return (
     (
       {
@@ -424,7 +504,10 @@ function HighlightedText({
   return (
     <Text style={style} numberOfLines={1}>
       {splitTextByMatchRanges(text, ranges).map((part, index) => (
-        <Text key={`${index}:${part.text}`} style={part.highlighted ? highlightStyle : undefined}>
+        <Text
+          key={`${index}:${part.text}`}
+          style={part.highlighted ? highlightStyle : undefined}
+        >
           {part.text}
         </Text>
       ))}

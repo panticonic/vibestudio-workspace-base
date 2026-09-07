@@ -25,18 +25,34 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useNavigation, useDrawerStatus } from "@workspace/mobile-navigation";
 import { useAtomValue, useSetAtom } from "jotai";
-import { panelTreeRevisionAtom, shellClientAtom } from "../state/shellClientAtom";
+import {
+  panelTreeRevisionAtom,
+  shellClientAtom,
+} from "../state/shellClientAtom";
 import { themeColorsAtom } from "../state/themeAtoms";
 import { connectionStatusAtom } from "../state/connectionAtoms";
-import { activePanelIdAtom, pinnedPanelIdsAtom } from "../state/navigationAtoms";
+import {
+  activePanelIdAtom,
+  pinnedPanelIdsAtom,
+} from "../state/navigationAtoms";
 import { pushToastAtom } from "../state/toastAtoms";
-import { showActionSheetAtom, type ActionSheetItem } from "../state/actionSheetAtoms";
+import {
+  showActionSheetAtom,
+  type ActionSheetItem,
+} from "../state/actionSheetAtoms";
 import { savePinnedPanelIds } from "../shellCore/pinnedPanels";
 import { PanelTreeItem } from "./PanelTreeItem";
 import { VibestudioLogo } from "./VibestudioLogo";
 import { isBrowserPanelSource } from "@vibestudio/shared/panelChrome";
-import { getPanelCommandDefinitions, type PanelCommandId } from "@vibestudio/shared/panelCommands";
-import { copyToClipboard, openExternalUrl, shareText } from "../services/nativeCapabilities";
+import {
+  getPanelCommandDefinitions,
+  type PanelCommandId,
+} from "@vibestudio/shared/panelCommands";
+import {
+  copyToClipboard,
+  openExternalUrl,
+  shareText,
+} from "../services/nativeCapabilities";
 import {
   buildMobilePanelForestRows,
   mobilePanelTreeTitle,
@@ -64,10 +80,13 @@ import {
 interface PanelDrawerProps {
   /** Called when a panel is selected; parent should close the drawer */
   onSelectPanel: (panelId: string) => void;
+  embedded?: boolean;
 }
 
 /** Native icon choices for renderer-neutral shared panel commands. */
-const COMMAND_PRESENTATION: Partial<Record<PanelCommandId, { icon: IconComponent }>> = {
+const COMMAND_PRESENTATION: Partial<
+  Record<PanelCommandId, { icon: IconComponent }>
+> = {
   "copy-address": { icon: Copy },
   "share-address": { icon: Share2 },
   "open-external": { icon: ExternalLink },
@@ -76,7 +95,10 @@ const COMMAND_PRESENTATION: Partial<Record<PanelCommandId, { icon: IconComponent
   archive: { icon: Archive },
 };
 
-function findPanelById(panels: MobilePanelTreeNode[], panelId: string): MobilePanelTreeNode | null {
+function findPanelById(
+  panels: MobilePanelTreeNode[],
+  panelId: string,
+): MobilePanelTreeNode | null {
   for (const panel of panels) {
     if (panel.id === panelId) return panel;
     const child = findPanelById(panel.children, panelId);
@@ -85,7 +107,10 @@ function findPanelById(panels: MobilePanelTreeNode[], panelId: string): MobilePa
   return null;
 }
 
-export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
+export function PanelDrawer({
+  onSelectPanel,
+  embedded = false,
+}: PanelDrawerProps) {
   const pushToast = useSetAtom(pushToastAtom);
   const showActionSheet = useSetAtom(showActionSheetAtom);
   const shellClient = useAtomValue(shellClientAtom);
@@ -107,17 +132,25 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
   const [loadingGroupKey, setLoadingGroupKey] = useState<string | null>(null);
   const [cacheVersion, setCacheVersion] = useState(0);
   useEffect(
-    () => shellClient?.panels.treeCache.subscribe(() => setCacheVersion((value) => value + 1)),
-    [shellClient]
+    () =>
+      shellClient?.panels.treeCache.subscribe(() =>
+        setCacheVersion((value) => value + 1),
+      ),
+    [shellClient],
   );
   const groups = useMemo<MobilePanelTreeGroup[]>(() => {
     if (!shellClient) return [];
     const cache = shellClient.panels.treeCache;
     const branch = (
-      node: import("@vibestudio/shared/panel/treeIndex").PanelTreeNode
+      node: import("@vibestudio/shared/panel/treeIndex").PanelTreeNode,
     ): MobilePanelTreeNode => {
-      const children = cache.getGroup({ kind: "children", parentSlotId: node.slotId })?.nodes ?? [];
-      const childGroup = cache.getGroup({ kind: "children", parentSlotId: node.slotId });
+      const children =
+        cache.getGroup({ kind: "children", parentSlotId: node.slotId })
+          ?.nodes ?? [];
+      const childGroup = cache.getGroup({
+        kind: "children",
+        parentSlotId: node.slotId,
+      });
       const presentation = shellClient.panels.registry.getPanel(node.slotId);
       return {
         id: node.slotId,
@@ -129,7 +162,8 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         kind: node.kind,
         childCount: node.childCount,
         childrenLoadedCount: childGroup?.loadedCount ?? 0,
-        childrenHaveMore: childGroup?.nextCursor !== null && childGroup !== null,
+        childrenHaveMore:
+          childGroup?.nextCursor !== null && childGroup !== null,
         children: children.map(branch),
       };
     };
@@ -137,23 +171,26 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
       owner: group.ownerUserId ?? "",
       rootCount: group.rootCount,
       rootLoadedCount:
-        cache.getGroup({ kind: "roots", ownerUserId: group.ownerUserId })?.loadedCount ?? 0,
+        cache.getGroup({ kind: "roots", ownerUserId: group.ownerUserId })
+          ?.loadedCount ?? 0,
       rootsHaveMore:
-        cache.getGroup({ kind: "roots", ownerUserId: group.ownerUserId })?.nextCursor !== null &&
-        cache.getGroup({ kind: "roots", ownerUserId: group.ownerUserId }) !== null,
+        cache.getGroup({ kind: "roots", ownerUserId: group.ownerUserId })
+          ?.nextCursor !== null &&
+        cache.getGroup({ kind: "roots", ownerUserId: group.ownerUserId }) !==
+          null,
       rootPanels: (
-        cache.getGroup({ kind: "roots", ownerUserId: group.ownerUserId })?.nodes ?? []
+        cache.getGroup({ kind: "roots", ownerUserId: group.ownerUserId })
+          ?.nodes ?? []
       ).map(branch),
     }));
   }, [cacheVersion, panelTreeRevision, shellClient]);
   useEffect(() => {
     if (!shellClient) return;
-    const retained: import("@vibestudio/shared/panel/treeIndex").PanelTreeGroup[] = groups.map(
-      (group) => ({
+    const retained: import("@vibestudio/shared/panel/treeIndex").PanelTreeGroup[] =
+      groups.map((group) => ({
         kind: "roots",
         ownerUserId: group.owner || null,
-      })
-    );
+      }));
     const visit = (node: MobilePanelTreeNode) => {
       if (node.childCount > 0 && node.children.length > 0) {
         retained.push({ kind: "children", parentSlotId: node.id });
@@ -163,9 +200,19 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
     groups.forEach((group) => group.rootPanels.forEach(visit));
     shellClient.panels.treeCache.retainGroups(retained);
   }, [groups, shellClient]);
-  const panelRoots = useMemo(() => groups.flatMap((group) => group.rootPanels), [groups]);
-  const ownerIds = useMemo(() => groups.map((group) => group.owner).filter(Boolean), [groups]);
-  const ownerProfiles = useVisibleAccountProfiles(shellClient, ownerIds, drawerVisible);
+  const panelRoots = useMemo(
+    () => groups.flatMap((group) => group.rootPanels),
+    [groups],
+  );
+  const ownerIds = useMemo(
+    () => groups.map((group) => group.owner).filter(Boolean),
+    [groups],
+  );
+  const ownerProfiles = useVisibleAccountProfiles(
+    shellClient,
+    ownerIds,
+    drawerVisible,
+  );
 
   // Build the collapsed set from the shell client's registry
   const collapsedIds = useMemo(() => {
@@ -179,9 +226,9 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         groups,
         collapsedIds,
         shellClient?.currentUserId ?? null,
-        ownerProfiles
+        ownerProfiles,
       ),
-    [collapsedIds, groups, ownerProfiles, shellClient]
+    [collapsedIds, groups, ownerProfiles, shellClient],
   );
 
   const trimmedQuery = query.trim().toLowerCase();
@@ -215,7 +262,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
                 kind: node.kind,
                 childCount: node.childCount,
                 children: [],
-              }))
+              })),
             );
             setSearchCursor(results.nextCursor);
           }
@@ -263,13 +310,22 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         const next = [...searchResults, ...additions];
         setSearchResults(next);
         setSearchCursor(next.length >= 500 ? null : results.nextCursor);
-      } else if (!trimmedQuery && shellClient.panels.treeCache.getRootGroups().nextCursor) {
+      } else if (
+        !trimmedQuery &&
+        shellClient.panels.treeCache.getRootGroups().nextCursor
+      ) {
         await shellClient.panels.treeCache.loadRootGroups(false);
       }
     } finally {
       setLoadingIndexPage(false);
     }
-  }, [loadingIndexPage, searchCursor, searchResults, shellClient, trimmedQuery]);
+  }, [
+    loadingIndexPage,
+    searchCursor,
+    searchResults,
+    shellClient,
+    trimmedQuery,
+  ]);
 
   // Search collapses the hierarchy into a flat match list; otherwise prepend a
   // "Pinned" band above the owner-grouped forest.
@@ -284,11 +340,16 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
     }
     if (pinnedPanelIds.size === 0) return forestRows;
     const pinnedRows = forestRows.filter(
-      (row) => row.kind === "panel" && pinnedPanelIds.has(row.panel.id)
+      (row) => row.kind === "panel" && pinnedPanelIds.has(row.panel.id),
     );
     if (pinnedRows.length === 0) return forestRows;
     return [
-      { kind: "owner", owner: "__pinned__", label: "Pinned", color: colors.primary },
+      {
+        kind: "owner",
+        owner: "__pinned__",
+        label: "Pinned",
+        color: colors.primary,
+      },
       ...pinnedRows.map((row) => ({ ...row, depth: 0, isCollapsed: true })),
       ...forestRows,
     ] as MobilePanelForestRow[];
@@ -302,7 +363,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         await shellClient.panels.treeCache.loadMore(
           row.parentSlotId === null
             ? { kind: "roots", ownerUserId: row.ownerUserId ?? null }
-            : { kind: "children", parentSlotId: row.parentSlotId as never }
+            : { kind: "children", parentSlotId: row.parentSlotId as never },
         );
       } catch (error) {
         pushToast({
@@ -314,7 +375,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         setLoadingGroupKey(null);
       }
     },
-    [loadingGroupKey, pushToast, shellClient]
+    [loadingGroupKey, pushToast, shellClient],
   );
 
   const handleRefresh = useCallback(async () => {
@@ -339,7 +400,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
     (panelId: string) => {
       onSelectPanel(panelId);
     },
-    [onSelectPanel]
+    [onSelectPanel],
   );
 
   const handleToggleCollapse = useCallback(
@@ -353,7 +414,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         });
       }
     },
-    [shellClient]
+    [shellClient],
   );
 
   const handleArchive = useCallback(
@@ -371,7 +432,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         throw error;
       }
     },
-    [pushToast, shellClient]
+    [pushToast, shellClient],
   );
 
   const togglePanelPin = useCallback(
@@ -381,11 +442,14 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         if (next.has(panelId)) next.delete(panelId);
         else next.add(panelId);
         const workspaceId = shellClient?.workspaceId;
-        if (workspaceId) void savePinnedPanelIds(workspaceId, [...next]);
+        if (workspaceId)
+          void savePinnedPanelIds(shellClient.localStorageScope, workspaceId, [
+            ...next,
+          ]);
         return next;
       });
     },
-    [setPinnedPanelIds, shellClient]
+    [setPinnedPanelIds, shellClient],
   );
 
   const performPanelCommand = useCallback(
@@ -409,13 +473,15 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         case "share-address":
           void shellClient.panels
             .observe(panelId)
-            .then((observation) => shareText(observation.source, observation.title || "Panel"))
+            .then((observation) =>
+              shareText(observation.source, observation.title || "Panel"),
+            )
             .catch((error: unknown) =>
               pushToast({
                 title: "Could not share panel",
                 message: error instanceof Error ? error.message : "Try again.",
                 tone: "danger",
-              })
+              }),
             );
           return;
         case "open-external":
@@ -431,7 +497,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
               ? shellClient.panels.createBrowserUrlPanel(
                   null,
                   observation.source.slice("browser:".length),
-                  { focus: true }
+                  { focus: true },
                 )
               : shellClient.panels.createRootPanel(observation.source);
             return create.then((result) => onSelectPanel(result.id));
@@ -446,14 +512,14 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
                 title: "Could not archive panel",
                 message: error instanceof Error ? error.message : "Try again.",
                 tone: "danger",
-              })
+              }),
             );
           return;
         default:
           onSelectPanel(panelId);
       }
     },
-    [onSelectPanel, pushToast, shellClient, togglePanelPin]
+    [onSelectPanel, pushToast, shellClient, togglePanelPin],
   );
 
   const handlePanelLongPress = useCallback(
@@ -464,7 +530,9 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
       const commandIds: PanelCommandId[] = [
         "copy-address",
         "share-address",
-        ...(isBrowserPanelSource(panel.source ?? "") ? (["open-external"] as const) : []),
+        ...(isBrowserPanelSource(panel.source ?? "")
+          ? (["open-external"] as const)
+          : []),
         "duplicate",
         "toggle-pin",
         "archive",
@@ -472,7 +540,8 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
       const definitions = getPanelCommandDefinitions({ isPinned });
       const commands = commandIds.map((id) => {
         const definition = definitions.find((candidate) => candidate.id === id);
-        if (!definition) throw new Error(`Missing panel command definition: ${id}`);
+        if (!definition)
+          throw new Error(`Missing panel command definition: ${id}`);
         return definition;
       });
       const items: ActionSheetItem[] = commands.map((command) => {
@@ -481,7 +550,10 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
           id: command.id,
           label: command.label,
           description: command.description,
-          icon: command.id === "toggle-pin" && isPinned ? PinOff : presentation?.icon,
+          icon:
+            command.id === "toggle-pin" && isPinned
+              ? PinOff
+              : presentation?.icon,
           tone: command.id === "archive" ? "danger" : "default",
         };
       });
@@ -491,7 +563,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         onSelect: (id) => performPanelCommand(id as PanelCommandId, panelId),
       });
     },
-    [panelRoots, performPanelCommand, pinnedPanelIds, showActionSheet]
+    [panelRoots, performPanelCommand, pinnedPanelIds, showActionSheet],
   );
 
   const handleSettingsPress = useCallback(() => {
@@ -499,8 +571,9 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
   }, [navigation]);
 
   const resolveBrowserFavicon = useCallback(
-    (url: string) => shellClient?.panels.getPageFaviconDataUrl(url) ?? Promise.resolve(null),
-    [shellClient]
+    (url: string) =>
+      shellClient?.panels.getPageFaviconDataUrl(url) ?? Promise.resolve(null),
+    [shellClient],
   );
 
   const renderItem = useCallback(
@@ -509,9 +582,18 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         return (
           <View style={styles.ownerHeader} accessibilityRole="header">
             <View
-              style={[styles.ownerDot, { backgroundColor: item.color ?? colors.textTertiary }]}
+              style={[
+                styles.ownerDot,
+                { backgroundColor: item.color ?? colors.textTertiary },
+              ]}
             />
-            <Text style={[type.section, styles.ownerLabel, { color: colors.textTertiary }]}>
+            <Text
+              style={[
+                type.section,
+                styles.ownerLabel,
+                { color: colors.textTertiary },
+              ]}
+            >
               {item.label}
             </Text>
           </View>
@@ -524,7 +606,10 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
             disabled={loadingGroupKey !== null}
             accessibilityRole="button"
             accessibilityLabel={`Load older panels (${item.remaining} remaining)`}
-            style={[styles.loadMore, { paddingLeft: spacing.lg + item.depth * 18 }]}
+            style={[
+              styles.loadMore,
+              { paddingLeft: spacing.lg + item.depth * 18 },
+            ]}
           >
             <Text style={[type.caption, { color: colors.primary }]}>
               {loadingGroupKey === item.groupKey
@@ -562,7 +647,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
       loadingGroupKey,
       resolveBrowserFavicon,
       trimmedQuery,
-    ]
+    ],
   );
 
   const keyExtractor = useCallback(
@@ -572,7 +657,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         : item.kind === "load-more"
           ? `more:${item.groupKey}`
           : `panel:${item.panel.id}:${index}`,
-    []
+    [],
   );
 
   const statusColor =
@@ -588,27 +673,66 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         ? "Connecting…"
         : "Disconnected";
 
+  const loadMoreFooter = (
+    trimmedQuery
+      ? searchCursor !== null
+      : Boolean(shellClient?.panels.treeCache.getRootGroups().nextCursor)
+  ) ? (
+    <Pressable
+      onPress={() => void handleLoadMoreIndex()}
+      disabled={loadingIndexPage}
+      style={styles.loadMore}
+      accessibilityRole="button"
+    >
+      <Text style={[type.caption, { color: colors.primary }]}>
+        {loadingIndexPage
+          ? "Loading…"
+          : trimmedQuery
+            ? "Load more matches"
+            : "Load more panel owners"}
+      </Text>
+    </Pressable>
+  ) : null;
+
   return (
     <View
-      style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top }]}
+      style={[
+        styles.container,
+        {
+          backgroundColor: colors.background,
+          paddingTop: embedded ? 0 : insets.top,
+        },
+      ]}
     >
-      <View style={styles.header}>
-        <VibestudioLogo size={26} variant="symbol" />
-        <View style={styles.headerCopy}>
-          <Text style={[type.heading, { color: colors.text }]} numberOfLines={1}>
-            {shellClient?.workspaceId ?? "Vibestudio"}
-          </Text>
-          <View style={styles.statusRow}>
-            <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-            <Text style={[type.micro, { color: colors.textTertiary }]}>{statusLabel}</Text>
+      {!embedded && (
+        <View style={styles.header}>
+          <VibestudioLogo size={26} variant="symbol" />
+          <View style={styles.headerCopy}>
+            <Text
+              style={[type.heading, { color: colors.text }]}
+              numberOfLines={1}
+            >
+              {shellClient?.workspaceId ?? "Vibestudio"}
+            </Text>
+            <View style={styles.statusRow}>
+              <View
+                style={[styles.statusDot, { backgroundColor: statusColor }]}
+              />
+              <Text style={[type.micro, { color: colors.textTertiary }]}>
+                {statusLabel}
+              </Text>
+            </View>
           </View>
         </View>
-      </View>
+      )}
 
       <View
         style={[
           styles.searchWrap,
-          { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
+          {
+            backgroundColor: colors.surfaceSunken,
+            borderColor: colors.borderSubtle,
+          },
         ]}
       >
         <Search size={15} color={colors.textTertiary} />
@@ -635,16 +759,39 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
       </View>
 
       {flatItems.length === 0 ? (
-        <View style={styles.emptyContainer}>
-          <VibestudioLogo size={64} variant="symbol" style={styles.emptyLogo} />
-          <Text style={[type.bodyStrong, styles.emptyTitle, { color: colors.text }]}>
+        <View
+          style={[styles.emptyContainer, embedded && { padding: spacing.md }]}
+        >
+          {!embedded && (
+            <VibestudioLogo
+              size={64}
+              variant="symbol"
+              style={styles.emptyLogo}
+            />
+          )}
+          <Text
+            style={[type.bodyStrong, styles.emptyTitle, { color: colors.text }]}
+          >
             {trimmedQuery ? "No matching panels" : "No panels open yet"}
           </Text>
-          <Text style={[type.caption, styles.emptyText, { color: colors.textSecondary }]}>
+          <Text
+            style={[
+              type.caption,
+              styles.emptyText,
+              { color: colors.textSecondary },
+            ]}
+          >
             {trimmedQuery
               ? "Try a different search, or clear it to see the full tree."
               : "Tap + to open New Panel, or tap the address pill and enter a website or panel source."}
           </Text>
+        </View>
+      ) : embedded ? (
+        <View>
+          {flatItems.map((item, index) => (
+            <View key={keyExtractor(item, index)}>{renderItem({ item })}</View>
+          ))}
+          {loadMoreFooter}
         </View>
       ) : (
         <FlatList
@@ -654,28 +801,7 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
           contentContainerStyle={styles.listContent}
           style={styles.list}
           keyboardShouldPersistTaps="handled"
-          ListFooterComponent={
-            (
-              trimmedQuery
-                ? searchCursor !== null
-                : Boolean(shellClient?.panels.treeCache.getRootGroups().nextCursor)
-            ) ? (
-              <Pressable
-                onPress={() => void handleLoadMoreIndex()}
-                disabled={loadingIndexPage}
-                style={styles.loadMore}
-                accessibilityRole="button"
-              >
-                <Text style={[type.caption, { color: colors.primary }]}>
-                  {loadingIndexPage
-                    ? "Loading…"
-                    : trimmedQuery
-                      ? "Load more matches"
-                      : "Load more panel owners"}
-                </Text>
-              </Pressable>
-            ) : null
-          }
+          ListFooterComponent={loadMoreFooter}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -686,28 +812,32 @@ export function PanelDrawer({ onSelectPanel }: PanelDrawerProps) {
         />
       )}
 
-      <View
-        style={[
-          styles.footer,
-          {
-            borderTopColor: colors.borderSubtle,
-            paddingBottom: Math.max(insets.bottom, spacing.md),
-          },
-        ]}
-      >
-        <Pressable
-          onPress={handleSettingsPress}
-          style={({ pressed }) => [
-            styles.footerButton,
-            pressed && { backgroundColor: colors.surfaceSunken },
+      {!embedded && (
+        <View
+          style={[
+            styles.footer,
+            {
+              borderTopColor: colors.borderSubtle,
+              paddingBottom: Math.max(insets.bottom, spacing.md),
+            },
           ]}
-          accessibilityRole="button"
-          accessibilityLabel="Open settings"
         >
-          <Settings size={18} color={colors.textSecondary} />
-          <Text style={[type.bodyStrong, { color: colors.textSecondary }]}>Settings</Text>
-        </Pressable>
-      </View>
+          <Pressable
+            onPress={handleSettingsPress}
+            style={({ pressed }) => [
+              styles.footerButton,
+              pressed && { backgroundColor: colors.surfaceSunken },
+            ]}
+            accessibilityRole="button"
+            accessibilityLabel="Open settings"
+          >
+            <Settings size={18} color={colors.textSecondary} />
+            <Text style={[type.bodyStrong, { color: colors.textSecondary }]}>
+              Settings
+            </Text>
+          </Pressable>
+        </View>
+      )}
     </View>
   );
 }

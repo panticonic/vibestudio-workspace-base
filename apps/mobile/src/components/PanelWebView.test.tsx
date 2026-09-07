@@ -11,6 +11,8 @@ jest.mock("react-native-webview", () => {
   };
 });
 
+jest.mock("../services/workspaceBrowserProfile", () => ({ workspaceWebViewConfig: (scope: string) => ({ props: { workspaceProfile: scope } }) }));
+
 jest.mock("../services/nativeCapabilities", () => ({
   openExternalUrl: jest.fn(async () => undefined),
 }));
@@ -21,6 +23,7 @@ describe("PanelWebView lifecycle", () => {
     const latest = jest.fn();
     const view = render(
       <PanelWebView
+        browserProfile="test-account/workspace"
         panelId="panel:tree/panels~chat/one"
         url="about:blank"
         visible
@@ -31,6 +34,7 @@ describe("PanelWebView lifecycle", () => {
 
     view.rerender(
       <PanelWebView
+        browserProfile="test-account/workspace"
         panelId="panel:tree/panels~chat/one"
         url="about:blank"
         visible

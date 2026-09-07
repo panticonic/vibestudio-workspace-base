@@ -4,6 +4,7 @@ import React, {
   useCallback,
   useMemo,
   useEffect,
+  useLayoutEffect,
   useImperativeHandle,
   forwardRef,
 } from "react";
@@ -16,6 +17,11 @@ import {
   Platform,
 } from "react-native";
 import { WebView } from "react-native-webview";
+import {
+  createBrowserPermissionHandler,
+  type BrowserPermissionRequester,
+} from "../services/workspaceBrowserPermission";
+import { workspaceWebViewConfig } from "../services/workspaceBrowserProfile";
 import type {
   WebViewNavigation,
   ShouldStartLoadRequest,
@@ -78,6 +84,9 @@ export interface PanelWebViewHandle {
 }
 
 export interface PanelWebViewProps {
+  browserProfile: string;
+  onBrowserPermission?: BrowserPermissionRequester;
+  onShellSurfaceLink?: (url: string) => boolean;
   panelId: string;
   url: string;
   visible: boolean;
@@ -533,6 +542,8 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
   function PanelWebView(
     {
       panelId,
+      browserProfile,
+      onBrowserPermission,
       url,
       visible,
       managed,
@@ -540,6 +551,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       managedBasePath = "",
       onNavigationStateChange,
       onPanelNavigate,
+      onShellSurfaceLink,
       onTitleChange,
       onBootObservation,
       onBridgeCall,
@@ -549,6 +561,34 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
     },
     ref,
   ) {
+    const browserPermission = useRef<ReturnType<
+      typeof createBrowserPermissionHandler
+    > | null>(null);
+    useLayoutEffect(() => {
+      const handler = createBrowserPermissionHandler(
+        panelId,
+        onBrowserPermission,
+      );
+      browserPermission.current = handler;
+      return () => {
+        browserPermission.current = null;
+        handler.close();
+      };
+    }, [panelId, onBrowserPermission]);
+    const onNativeBrowserPermission = useCallback(
+      async (
+        event: Parameters<
+          ReturnType<typeof createBrowserPermissionHandler>["onEvent"]
+        >[0],
+      ) => {
+        await browserPermission.current?.onEvent(event);
+      },
+      [],
+    );
+    const nativeConfig = useMemo(
+      () => workspaceWebViewConfig(browserProfile, onNativeBrowserPermission),
+      [browserProfile, onNativeBrowserPermission],
+    );
     const webViewRef = useRef<WebView>(null);
     const [hasError, setHasError] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -771,7 +811,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
         // bar (which knows the live pipe state) instead.
         setErrorMessage(
           `The panel didn't finish loading after ${seconds}s.\n\n` +
-            `Check the connection status bar at the top for your workspace connection, then retry.`,
+            `Check your connection, then retry.`,
         );
       }, MANAGED_PANEL_TIMEOUT_CHECK_MS);
 
@@ -843,6 +883,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
           openExternalPdf(requestUrl);
           return false;
         }
+        if (onShellSurfaceLink?.(requestUrl)) return false;
         if (requestUrl === url) return true;
 
         if (emitPanelNavigation(requestUrl)) {
@@ -861,6 +902,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       },
       [
         emitPanelNavigation,
+        onShellSurfaceLink,
         managed,
         onBridgeCall,
         openExternalPdf,
@@ -1325,6 +1367,8 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
         )}
         <WebView
           ref={webViewRef}
+          nativeConfig={nativeConfig}
+          geolocationEnabled
           key={panelId}
           source={{ uri: url }}
           style={styles.webView}

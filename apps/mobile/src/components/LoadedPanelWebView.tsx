@@ -1,14 +1,22 @@
+import type { BrowserPermissionRequester } from "../services/workspaceBrowserPermission";
 import { memo, useCallback } from "react";
 import { StyleSheet, View } from "react-native";
 import type { WebViewNavigation } from "react-native-webview/lib/WebViewTypes";
 import type { ThemeColors } from "../state/themeAtoms";
 import type { WebViewEntry } from "./webViewStack";
-import { PanelWebView, type PanelNavigationEvent, type PanelWebViewHandle } from "./PanelWebView";
+import {
+  PanelWebView,
+  type PanelNavigationEvent,
+  type PanelWebViewHandle,
+} from "./PanelWebView";
 import { WebViewErrorBoundary } from "./WebViewErrorBoundary";
 import type { PanelPageObservation } from "@vibestudio/shared/panel/observation";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 
 export interface LoadedPanelWebViewProps {
+  browserProfile: string;
+  onBrowserPermission?: BrowserPermissionRequester;
+  onShellSurfaceLink?: (url: string) => boolean;
   entry: WebViewEntry;
   visible: boolean;
   colors: ThemeColors;
@@ -16,15 +24,23 @@ export interface LoadedPanelWebViewProps {
   diagnosticsEnabled: boolean;
   onHandleChange: (panelId: string, handle: PanelWebViewHandle | null) => void;
   onPanelNavigate: (event: PanelNavigationEvent) => void;
-  onNavigationStateChange: (panelId: string, managed: boolean, navState: WebViewNavigation) => void;
+  onNavigationStateChange: (
+    panelId: string,
+    managed: boolean,
+    navState: WebViewNavigation,
+  ) => void;
   onTitleChange: (panelId: string, title: string) => void;
   onBootObservation: (
     panelId: string,
     runtimeEntityId: PanelEntityId,
     connectionId: string,
-    observation: PanelPageObservation
+    observation: PanelPageObservation,
   ) => void;
-  onBridgeCall: (panelId: string, method: string, args: unknown[]) => Promise<unknown>;
+  onBridgeCall: (
+    panelId: string,
+    method: string,
+    args: unknown[],
+  ) => Promise<unknown>;
   onUnmount: (panelId: string) => void;
 }
 
@@ -37,6 +53,9 @@ export interface LoadedPanelWebViewProps {
  */
 function LoadedPanelWebViewImpl({
   entry,
+  browserProfile,
+  onBrowserPermission,
+  onShellSurfaceLink,
   visible,
   colors,
   managedBasePath,
@@ -50,13 +69,14 @@ function LoadedPanelWebViewImpl({
   onUnmount,
 }: LoadedPanelWebViewProps) {
   const handleRef = useCallback(
-    (handle: PanelWebViewHandle | null) => onHandleChange(entry.panelId, handle),
-    [entry.panelId, onHandleChange]
+    (handle: PanelWebViewHandle | null) =>
+      onHandleChange(entry.panelId, handle),
+    [entry.panelId, onHandleChange],
   );
   const handleNavigationStateChange = useCallback(
     (navState: WebViewNavigation) =>
       onNavigationStateChange(entry.panelId, entry.managed, navState),
-    [entry.managed, entry.panelId, onNavigationStateChange]
+    [entry.managed, entry.panelId, onNavigationStateChange],
   );
 
   return (
@@ -77,6 +97,9 @@ function LoadedPanelWebViewImpl({
       >
         <PanelWebView
           ref={handleRef}
+          browserProfile={browserProfile}
+          onBrowserPermission={onBrowserPermission}
+          onShellSurfaceLink={onShellSurfaceLink}
           panelId={entry.panelId}
           url={entry.url}
           visible={visible}

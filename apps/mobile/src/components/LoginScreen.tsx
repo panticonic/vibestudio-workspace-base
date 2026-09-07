@@ -24,7 +24,6 @@ import { parseConnectLink } from "@vibestudio/shared/connect";
 import {
   MobileHostTargetApprovalRequiredError,
   ShellClient,
-  type Credentials,
 } from "../services/shellClient";
 import {
   serverUrlAtom,
@@ -41,6 +40,11 @@ import {
   panelTreeRevisionAtom,
   shellClientAtom,
 } from "../state/shellClientAtom";
+import {
+  createMobileWorkspaceDirectory,
+  type MobileWorkspaceDirectory,
+} from "../services/workspaceDirectory";
+import { workspaceDirectoryAtom } from "../state/workspaceDirectoryAtom";
 import { themeColorsAtom } from "../state/themeAtoms";
 import { VibestudioLogo } from "./VibestudioLogo";
 
@@ -70,6 +74,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
   const setWorkspaceReadiness = useSetAtom(workspaceReadinessAtom);
   const setPairingIdentity = useSetAtom(pairingIdentityAtom);
   const setShellClient = useSetAtom(shellClientAtom);
+  const setWorkspaceDirectory = useSetAtom(workspaceDirectoryAtom);
   const setPanelTreeRevision = useSetAtom(panelTreeRevisionAtom);
   const authLoading = useAtomValue(authLoadingAtom);
   const authError = useAtomValue(authErrorAtom);
@@ -149,7 +154,8 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
 
   React.useEffect(() => {
     let cancelled = false;
-    let pendingClient: ShellClient | null = null;
+    let pendingDirectory: MobileWorkspaceDirectory | null = null;
+    const abort = new AbortController();
 
     const finishConnectedClient = (client: ShellClient) => {
       smokePhase("workspace-connected");
@@ -188,65 +194,38 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
             "The saved mobile connection has not completed its required migration.",
           );
         }
-        const credentials: Credentials = {
-          deviceId: stored.credential.deviceId,
-        };
         setPairingIdentity({
           server: "Paired workspace server",
           deviceId: stored.credential.deviceId,
         });
-        setConnectionPhase("Contacting your workspace server…");
-
-        const client = new ShellClient({
-          credentials,
-          serverEndpointId: stored.controlPairing.endpointId,
-          onReadinessChange: setWorkspaceReadiness,
-          onStatusChange: (status) => {
-            setConnectionStatus(status);
-            if (status === "connected") {
-              setConnectionAttempt(0);
-              setConnectionPhase("Preparing the mobile workspace…");
-            }
-          },
-          onTreeInvalidated: (event) => {
-            setPanelTreeRevision(event.revision);
-          },
-          onPanelsChanged: () => {
-            setPanelTreeRevision((revision) => revision + 1);
-          },
-        });
-        pendingClient = client;
-        const offProgress = client.transport.onReconnectProgress((progress) => {
-          if (cancelled) return;
-          setConnectionAttempt(progress.attempt);
-          setConnectionPhase(
-            progress.phase === "scheduled"
-              ? "Waiting to retry the server…"
-              : "Connecting securely to your workspace…",
-          );
-        });
+        setConnectionPhase("Opening your workspaces…");
         cancelConnectionRef.current = () => {
           cancelled = true;
-          offProgress?.();
-          client.dispose();
+          abort.abort();
           setAuthLoading(false);
           setAuthError(
             "Connection cancelled. Your saved pairing is unchanged.",
           );
         };
-
-        await client.init();
+        const directory = await createMobileWorkspaceDirectory(
+          stored,
+          abort.signal,
+        );
+        pendingDirectory = directory;
         if (cancelled) {
-          client.dispose();
+          await directory.dispose();
           return;
         }
-        finishConnectedClient(client);
-        offProgress?.();
+        const system = directory.sessions.get(directory.systemWorkspaceId)!;
+        setWorkspaceDirectory(directory);
+        pendingDirectory = null;
+        setConnectionStatus(system.client.transport.status);
+        setWorkspaceReadiness("shell-ready");
+        finishConnectedClient(system.client);
         cancelConnectionRef.current = null;
-        pendingClient = null;
       } catch (error) {
-        pendingClient?.dispose();
-        pendingClient = null;
+        await pendingDirectory?.dispose();
+        pendingDirectory = null;
         if (cancelled) return;
         setAuthLoading(false);
         const message =
@@ -276,7 +255,8 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
 
     return () => {
       cancelled = true;
-      pendingClient?.dispose();
+      if (pendingDirectory) void pendingDirectory.dispose();
+      if (cancelConnectionRef.current) abort.abort();
       cancelConnectionRef.current = null;
     };
   }, [
@@ -289,6 +269,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
     setPanelTreeRevision,
     setServerUrlAtom,
     setShellClient,
+    setWorkspaceDirectory,
     setPairingIdentity,
   ]);
 
@@ -303,7 +284,7 @@ export function LoginScreen({ navigation }: LoginScreenProps) {
       >
         <VibestudioLogo size={156} variant="logo" style={styles.brandMark} />
         <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
-          Opening the selected workspace
+          Your workspaces, together
         </Text>
 
         {authLoading ? (

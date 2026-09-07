@@ -1,3 +1,4 @@
+import { useWorkspaceVisible } from "../state/workspaceScope";
 /**
  * CommandSheet — the mobile command palette (quickfire-overlay-spec §7.1).
  *
@@ -32,7 +33,10 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from "react-native-safe-area-context";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
   commandSpecFromWire,
@@ -113,6 +117,7 @@ export function CommandSheet({
   contributedCommands,
   runContributedCommand,
 }: CommandSheetProps) {
+  const workspaceVisible = useWorkspaceVisible();
   const request = useAtomValue(commandSheetAtom);
   const dismiss = useSetAtom(dismissCommandSheetAtom);
   const openQuickfire = useSetAtom(openQuickfireSheetAtom);
@@ -123,7 +128,9 @@ export function CommandSheet({
   const [mode, setMode] = useState<QuickfireMode>("all");
   const [value, setValue] = useState("");
   const [argSession, setArgSession] = useState<ArgSession | null>(null);
-  const [conversations, setConversations] = useState<QuickfireSessionSummary[] | null>(null);
+  const [conversations, setConversations] = useState<
+    QuickfireSessionSummary[] | null
+  >(null);
   const [history, setHistory] = useState<BrowserAddressSuggestion[]>([]);
   const inputRef = useRef<TextInput | null>(null);
   const translateY = useRef(new Animated.Value(SLIDE_DISTANCE)).current;
@@ -197,7 +204,7 @@ export function CommandSheet({
           }
         },
       }),
-    [close, translateY]
+    [close, translateY],
   );
 
   const slate = useMemo(() => buildMobileSlate(), []);
@@ -205,13 +212,19 @@ export function CommandSheet({
     () =>
       contributedCommands.flatMap((contribution) =>
         contribution.commands.map((command) =>
-          commandSpecFromWire(command, { panelId: contribution.panelId })
-        )
+          commandSpecFromWire(command, { panelId: contribution.panelId }),
+        ),
       ),
-    [contributedCommands]
+    [contributedCommands],
   );
-  const commands = useMemo<CommandSpec[]>(() => [...slate, ...contributed], [contributed, slate]);
-  const slateById = useMemo(() => new Map(slate.map((command) => [command.id, command])), [slate]);
+  const commands = useMemo<CommandSpec[]>(
+    () => [...slate, ...contributed],
+    [contributed, slate],
+  );
+  const slateById = useMemo(
+    () => new Map(slate.map((command) => [command.id, command])),
+    [slate],
+  );
 
   const ctx = useMemo<SurfaceContext>(
     () => ({
@@ -219,16 +232,19 @@ export function CommandSheet({
       openPanels: { entries: openPanels },
       ...(focusedPanel ? { focusedPanel } : {}),
     }),
-    [focusedPanel, openPanels]
+    [focusedPanel, openPanels],
   );
 
-  const searchQuery = argSession ? argSession.query : stripModePrefix(value, mode);
+  const searchQuery = argSession
+    ? argSession.query
+    : stripModePrefix(value, mode);
 
   // Browser history for the `@` scope and mixed mode, through the same client
   // call the address field in `AppBar` makes — one ranking path, one answer.
   // Search engines are dropped (an address-bar affordance, not a destination)
   // and favicons are not fetched, matching the desktop overlay's rows.
-  const historyQuery = mode === "goto" ? parseGotoScope(searchQuery).query : searchQuery;
+  const historyQuery =
+    mode === "goto" ? parseGotoScope(searchQuery).query : searchQuery;
   const wantsHistory = !argSession && (mode === "all" || mode === "goto");
   useEffect(() => {
     if (!request || !wantsHistory) {
@@ -241,7 +257,11 @@ export function CommandSheet({
         .getBrowserAddressOptions(historyQuery)
         .then((options) => {
           if (live) {
-            setHistory(options.suggestions.filter((item) => item.source !== "search-engine"));
+            setHistory(
+              options.suggestions.filter(
+                (item) => item.source !== "search-engine",
+              ),
+            );
           }
         })
         .catch(() => {
@@ -261,7 +281,8 @@ export function CommandSheet({
       if (!slotId) {
         pushToast({
           title: "No panel is open",
-          message: "The Quickfire agent is bound to the panel you are looking at.",
+          message:
+            "The Quickfire agent is bound to the panel you are looking at.",
           tone: "warning",
         });
         return;
@@ -273,7 +294,7 @@ export function CommandSheet({
         ...(options?.send && draft.trim() ? { send: true } : {}),
       });
     },
-    [close, openQuickfire, pushToast, slateDeps.activePanelId]
+    [close, openQuickfire, pushToast, slateDeps.activePanelId],
   );
 
   const groups = useMemo<QuickfireGroup[]>(() => {
@@ -287,24 +308,50 @@ export function CommandSheet({
           label: "Quickfire agent conversations",
           rows: conversations.map((row) => ({
             id: `quickfire-slot:${row.slotId}`,
-            title: openPanels.find((entry) => entry.id === row.slotId)?.title ?? row.slotId,
-            meta: row.promotedAt === null ? "conversation" : "continued in a chat panel",
+            title:
+              openPanels.find((entry) => entry.id === row.slotId)?.title ??
+              row.slotId,
+            meta:
+              row.promotedAt === null
+                ? "conversation"
+                : "continued in a chat panel",
             icon: "✦",
           })),
         },
       ];
     }
-    return buildPaletteRows({ mode, argSession, query: searchQuery, ctx, commands, history });
-  }, [argSession, commands, conversations, ctx, history, mode, openPanels, searchQuery]);
+    return buildPaletteRows({
+      mode,
+      argSession,
+      query: searchQuery,
+      ctx,
+      commands,
+      history,
+    });
+  }, [
+    argSession,
+    commands,
+    conversations,
+    ctx,
+    history,
+    mode,
+    openPanels,
+    searchQuery,
+  ]);
 
   const sections = useMemo<RowSection[]>(
-    () => groups.map((group) => ({ key: group.key, title: group.label, data: group.rows })),
-    [groups]
+    () =>
+      groups.map((group) => ({
+        key: group.key,
+        title: group.label,
+        data: group.rows,
+      })),
+    [groups],
   );
 
   const rowTargets = useMemo(
     () => buildRowTargets(groups, commands, { argSession }),
-    [argSession, commands, groups]
+    [argSession, commands, groups],
   );
 
   const applyOutcome = useCallback(
@@ -323,7 +370,9 @@ export function CommandSheet({
         setArgSession(null);
         setConversations(null);
         setMode(outcome.scope.mode);
-        setValue(inputForMode(outcome.scope.query ?? "", "all", outcome.scope.mode));
+        setValue(
+          inputForMode(outcome.scope.query ?? "", "all", outcome.scope.mode),
+        );
         return;
       }
       if (outcome.close) {
@@ -334,7 +383,7 @@ export function CommandSheet({
       // argument breadcrumb is spent.
       setArgSession(null);
     },
-    [close, handOffToQuickfire, pushToast]
+    [close, handOffToQuickfire, pushToast],
   );
 
   const execute = useCallback(
@@ -356,7 +405,7 @@ export function CommandSheet({
       if (!command.panelId) return;
       const delivered = runContributedCommand(
         command.panelId,
-        command.id.slice(command.panelId.length + 1)
+        command.id.slice(command.panelId.length + 1),
       );
       if (!delivered) {
         pushToast({
@@ -368,7 +417,14 @@ export function CommandSheet({
       }
       close();
     },
-    [applyOutcome, close, pushToast, runContributedCommand, slateById, slateDeps]
+    [
+      applyOutcome,
+      close,
+      pushToast,
+      runContributedCommand,
+      slateById,
+      slateDeps,
+    ],
   );
 
   const applySessionOutcome = useCallback(
@@ -385,14 +441,20 @@ export function CommandSheet({
       }
       setArgSession(outcome.session);
     },
-    [execute]
+    [execute],
   );
 
   const activateCommand = useCallback(
     (command: CommandSpec) => {
-      const inline = parseInlineCommand(stripModePrefix(value, mode), [command], ctx);
+      const inline = parseInlineCommand(
+        stripModePrefix(value, mode),
+        [command],
+        ctx,
+      );
       const outcome = startArgSession(command, {
-        ...(inline ? { prefilled: inline.filled, seedQuery: inline.residual } : {}),
+        ...(inline
+          ? { prefilled: inline.filled, seedQuery: inline.residual }
+          : {}),
         restoreQuery: value,
       });
       if (outcome.kind === "execute") {
@@ -401,7 +463,7 @@ export function CommandSheet({
       }
       if (outcome.kind === "session") setArgSession(outcome.session);
     },
-    [ctx, execute, mode, value]
+    [ctx, execute, mode, value],
   );
 
   const activateRow = useCallback(
@@ -415,7 +477,12 @@ export function CommandSheet({
           return;
         case "option": {
           if (!argSession) return;
-          applySessionOutcome(reduceArgSession(argSession, { type: "enter", value: target.value }));
+          applySessionOutcome(
+            reduceArgSession(argSession, {
+              type: "enter",
+              value: target.value,
+            }),
+          );
           return;
         }
         case "panel":
@@ -438,7 +505,7 @@ export function CommandSheet({
                 title: "Could not open that address",
                 message: error instanceof Error ? error.message : String(error),
                 tone: "danger",
-              })
+              }),
             );
           close();
           return;
@@ -458,7 +525,7 @@ export function CommandSheet({
                 title: "Could not start a chat",
                 message: error instanceof Error ? error.message : String(error),
                 tone: "danger",
-              })
+              }),
             );
           close();
           return;
@@ -474,7 +541,7 @@ export function CommandSheet({
       pushToast,
       rowTargets,
       slateDeps,
-    ]
+    ],
   );
 
   const handleChangeText = useCallback(
@@ -483,7 +550,9 @@ export function CommandSheet({
       if (argSession) {
         // The shared reducer owns what typing means inside a session (it is
         // also what clears a validation error), so route through it.
-        applySessionOutcome(reduceArgSession(argSession, { type: "input", value: next }));
+        applySessionOutcome(
+          reduceArgSession(argSession, { type: "input", value: next }),
+        );
         return;
       }
       const nextMode = modeForInput(next, mode);
@@ -494,7 +563,7 @@ export function CommandSheet({
       setMode(nextMode);
       setValue(next);
     },
-    [applySessionOutcome, argSession, handOffToQuickfire, mode]
+    [applySessionOutcome, argSession, handOffToQuickfire, mode],
   );
 
   const handleSelectMode = useCallback(
@@ -507,7 +576,7 @@ export function CommandSheet({
       setValue(inputForMode(value, mode, next));
       setMode(next);
     },
-    [handOffToQuickfire, mode, value]
+    [handOffToQuickfire, mode, value],
   );
 
   const handleSubmit = useCallback(() => {
@@ -515,7 +584,9 @@ export function CommandSheet({
       applySessionOutcome(reduceArgSession(argSession, { type: "enter" }));
       return;
     }
-    const first = groups.flatMap((group) => group.rows).find((row) => !row.disabled);
+    const first = groups
+      .flatMap((group) => group.rows)
+      .find((row) => !row.disabled);
     if (first) activateRow(first);
   }, [activateRow, applySessionOutcome, argSession, groups]);
 
@@ -525,12 +596,14 @@ export function CommandSheet({
       if (event.nativeEvent.key !== "Backspace") return;
       if (argSession) {
         if (argSession.query.length > 0) return;
-        applySessionOutcome(reduceArgSession(argSession, { type: "backspace" }));
+        applySessionOutcome(
+          reduceArgSession(argSession, { type: "backspace" }),
+        );
         return;
       }
       if (value.length === 0 && mode !== "all") handleSelectMode("all");
     },
-    [applySessionOutcome, argSession, handleSelectMode, mode, value.length]
+    [applySessionOutcome, argSession, handleSelectMode, mode, value.length],
   );
 
   const chips = argSession ? filledArgChips(argSession) : [];
@@ -544,7 +617,7 @@ export function CommandSheet({
   return (
     <Modal
       transparent
-      visible
+      visible={workspaceVisible}
       statusBarTranslucent
       animationType="none"
       presentationStyle="overFullScreen"
@@ -552,7 +625,10 @@ export function CommandSheet({
     >
       <View style={styles.root}>
         <Animated.View
-          style={[styles.backdrop, { backgroundColor: colors.overlay, opacity: backdropOpacity }]}
+          style={[
+            styles.backdrop,
+            { backgroundColor: colors.overlay, opacity: backdropOpacity },
+          ]}
         >
           <Pressable
             style={StyleSheet.absoluteFill}
@@ -566,7 +642,11 @@ export function CommandSheet({
           style={styles.avoider}
           pointerEvents="box-none"
         >
-          <SafeAreaView edges={["bottom"]} style={styles.safeArea} pointerEvents="box-none">
+          <SafeAreaView
+            edges={["bottom"]}
+            style={styles.safeArea}
+            pointerEvents="box-none"
+          >
             <Animated.View
               testID="command-sheet"
               accessibilityViewIsModal
@@ -583,13 +663,23 @@ export function CommandSheet({
               ]}
             >
               <View {...panResponder.panHandlers} style={styles.grabArea}>
-                <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+                <View
+                  style={[styles.grabber, { backgroundColor: colors.border }]}
+                />
               </View>
 
               {argSession ? (
                 <View style={styles.chipRow}>
-                  <View style={[styles.chip, { backgroundColor: colors.accentSoft }]}>
-                    <Text style={[type.caption, { color: colors.primary }]} numberOfLines={1}>
+                  <View
+                    style={[
+                      styles.chip,
+                      { backgroundColor: colors.accentSoft },
+                    ]}
+                  >
+                    <Text
+                      style={[type.caption, { color: colors.primary }]}
+                      numberOfLines={1}
+                    >
                       {argSession.spec.title}
                     </Text>
                   </View>
@@ -599,11 +689,18 @@ export function CommandSheet({
                       accessibilityRole="button"
                       accessibilityLabel={`Change ${chip.arg.label}: ${chip.value}`}
                       onPress={() =>
-                        applySessionOutcome(reduceArgSession(argSession, { type: "backspace" }))
+                        applySessionOutcome(
+                          reduceArgSession(argSession, { type: "backspace" }),
+                        )
                       }
-                      style={[styles.chip, { backgroundColor: colors.surfaceSunken }]}
+                      style={[
+                        styles.chip,
+                        { backgroundColor: colors.surfaceSunken },
+                      ]}
                     >
-                      <Text style={[type.caption, { color: colors.textSecondary }]}>
+                      <Text
+                        style={[type.caption, { color: colors.textSecondary }]}
+                      >
                         {chip.arg.label}: {chip.value}
                       </Text>
                     </Pressable>
@@ -614,7 +711,10 @@ export function CommandSheet({
               <View
                 style={[
                   styles.searchRow,
-                  { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
+                  {
+                    backgroundColor: colors.surfaceSunken,
+                    borderColor: colors.borderSubtle,
+                  },
                 ]}
               >
                 <Search size={17} color={colors.textTertiary} />
@@ -630,7 +730,9 @@ export function CommandSheet({
                   autoCorrect={false}
                   returnKeyType="go"
                   style={[styles.searchInput, { color: colors.text }]}
-                  placeholder={activeArg?.label ?? QUICKFIRE_MODE_PLACEHOLDER[mode]}
+                  placeholder={
+                    activeArg?.label ?? QUICKFIRE_MODE_PLACEHOLDER[mode]
+                  }
                   placeholderTextColor={colors.textTertiary}
                 />
                 <Pressable
@@ -644,7 +746,9 @@ export function CommandSheet({
               </View>
 
               {argSession?.error ? (
-                <Text style={[type.caption, styles.error, { color: colors.danger }]}>
+                <Text
+                  style={[type.caption, styles.error, { color: colors.danger }]}
+                >
                   {argSession.error}
                 </Text>
               ) : null}
@@ -663,18 +767,28 @@ export function CommandSheet({
                         style={[
                           styles.modeChip,
                           {
-                            backgroundColor: selected ? colors.accentSoft : colors.surfaceSunken,
-                            borderColor: selected ? colors.primary : colors.borderSubtle,
+                            backgroundColor: selected
+                              ? colors.accentSoft
+                              : colors.surfaceSunken,
+                            borderColor: selected
+                              ? colors.primary
+                              : colors.borderSubtle,
                           },
                         ]}
                       >
                         <Text
                           style={[
                             type.caption,
-                            { color: selected ? colors.primary : colors.textSecondary },
+                            {
+                              color: selected
+                                ? colors.primary
+                                : colors.textSecondary,
+                            },
                           ]}
                         >
-                          {chip.mode === "quickfire" ? `✦ ${chip.label}` : chip.label}
+                          {chip.mode === "quickfire"
+                            ? `✦ ${chip.label}`
+                            : chip.label}
                         </Text>
                       </Pressable>
                     );
@@ -683,7 +797,13 @@ export function CommandSheet({
               )}
 
               {emptyMessage ? (
-                <Text style={[type.caption, styles.empty, { color: colors.textTertiary }]}>
+                <Text
+                  style={[
+                    type.caption,
+                    styles.empty,
+                    { color: colors.textTertiary },
+                  ]}
+                >
                   {emptyMessage}
                 </Text>
               ) : (
@@ -698,7 +818,10 @@ export function CommandSheet({
                       style={[
                         type.micro,
                         styles.sectionHeader,
-                        { color: colors.textTertiary, backgroundColor: colors.surfaceRaised },
+                        {
+                          color: colors.textTertiary,
+                          backgroundColor: colors.surfaceRaised,
+                        },
                       ]}
                     >
                       {section.title.toUpperCase()}
@@ -718,33 +841,48 @@ export function CommandSheet({
                         item.disabled ? styles.disabled : null,
                       ]}
                     >
-                      <Text style={[styles.rowIcon, { color: colors.textSecondary }]}>
+                      <Text
+                        style={[
+                          styles.rowIcon,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
                         {item.icon ?? "›"}
                       </Text>
                       <View style={styles.rowCopy}>
                         <Text
                           style={[
                             type.bodyStrong,
-                            { color: item.danger ? colors.danger : colors.text },
+                            {
+                              color: item.danger ? colors.danger : colors.text,
+                            },
                           ]}
                           numberOfLines={1}
                         >
                           {/* Why this row is here — the same ranges the desktop
                               palette and the address bar highlight. */}
-                          {splitTextByMatchRanges(item.title, item.titleRanges).map(
-                            (part, index) =>
-                              part.highlighted ? (
-                                <Text key={index} style={{ color: colors.primary }}>
-                                  {part.text}
-                                </Text>
-                              ) : (
-                                part.text
-                              )
+                          {splitTextByMatchRanges(
+                            item.title,
+                            item.titleRanges,
+                          ).map((part, index) =>
+                            part.highlighted ? (
+                              <Text
+                                key={index}
+                                style={{ color: colors.primary }}
+                              >
+                                {part.text}
+                              </Text>
+                            ) : (
+                              part.text
+                            ),
                           )}
                         </Text>
                         {item.meta ? (
                           <Text
-                            style={[type.caption, { color: colors.textTertiary }]}
+                            style={[
+                              type.caption,
+                              { color: colors.textTertiary },
+                            ]}
                             numberOfLines={1}
                             ellipsizeMode="middle"
                           >
@@ -753,7 +891,9 @@ export function CommandSheet({
                         ) : null}
                       </View>
                       {item.badge ? (
-                        <Text style={[type.micro, { color: colors.textTertiary }]}>
+                        <Text
+                          style={[type.micro, { color: colors.textTertiary }]}
+                        >
                           {item.badge}
                         </Text>
                       ) : null}

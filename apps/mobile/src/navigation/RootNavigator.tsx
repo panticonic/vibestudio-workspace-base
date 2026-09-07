@@ -6,7 +6,7 @@ declare const require: (moduleName: string) => unknown;
 export type RootStackParamList = {
   Login: undefined;
   Main: undefined;
-  Settings: undefined;
+  Settings: { workspaceId?: string } | undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();
@@ -29,7 +29,10 @@ const getSettingsScreen = () =>
 
 export function RootNavigator() {
   return (
-    <Stack.Navigator initialRouteName="Login" screenOptions={{ headerShown: false }}>
+    <Stack.Navigator
+      initialRouteName="Login"
+      screenOptions={{ headerShown: false }}
+    >
       <Stack.Screen name="Login" component={LoginScreen} />
       <Stack.Screen name="Main" getComponent={getMainNavigator} />
       <Stack.Screen name="Settings" getComponent={getSettingsScreen} />

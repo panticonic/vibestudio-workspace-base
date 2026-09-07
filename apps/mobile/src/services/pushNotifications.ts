@@ -1,3 +1,11 @@
+import {
+  readWorkspacePushScope,
+  sameWorkspacePushScope,
+  workspaceNotificationKey,
+  type WorkspaceApprovalTarget,
+  type WorkspacePushScope,
+} from "@vibestudio/shared/workspacePushScope";
+import { readApprovalTarget } from "./backgroundActionQueueCore";
 /**
  * Push notification service -- FCM/APNs token registration and approval actions.
  *
@@ -32,7 +40,8 @@ import { isBackgroundDecision } from "./backgroundActionQueueCore";
 import { isNativeFirebaseConfigured } from "./nativeFirebase";
 import { getNativeAppStorage } from "./nativeAppStorage";
 declare const require: (moduleName: string) => unknown;
-const PERMISSION_DENIED_TOAST_KEY = "vibestudio:push:permission-denied-toast-at";
+const PERMISSION_DENIED_TOAST_KEY =
+  "vibestudio:push:permission-denied-toast-at";
 const PERMISSION_DENIED_TOAST_INTERVAL_MS = 7 * 24 * 60 * 60 * 1000;
 interface FirebaseMessagingModule {
   (): FirebaseMessagingInstance;
@@ -48,7 +57,9 @@ interface FirebaseMessagingInstance {
   deleteToken(): Promise<void>;
   onTokenRefresh(callback: (token: string) => void): () => void;
   onMessage(callback: (message: RemoteMessage) => void): () => void;
-  onNotificationOpenedApp(callback: (message: RemoteMessage) => void): () => void;
+  onNotificationOpenedApp(
+    callback: (message: RemoteMessage) => void,
+  ): () => void;
   getInitialNotification(): Promise<RemoteMessage | null>;
 }
 interface NotifeeModule {
@@ -63,7 +74,9 @@ interface NotifeeModule {
       };
     }>
   >;
-  onForegroundEvent(callback: (event: NotifeeEvent) => void | Promise<void>): () => void;
+  onForegroundEvent(
+    callback: (event: NotifeeEvent) => void | Promise<void>,
+  ): () => void;
   requestPermission?(): Promise<
     | {
         authorizationStatus?: number;
@@ -96,7 +109,8 @@ export interface RemoteMessage {
   data?: Record<string, string | undefined>;
 }
 export interface PushRuntimeCallbacks {
-  onApprovalDeepLink?: (approvalId: string) => void;
+  onApprovalDeepLink?: (target: WorkspaceApprovalTarget) => void;
+  resolveWorkspace?: (scope: WorkspacePushScope) => Promise<ShellClient>;
   /**
    * A tapped inbox push (messaging plan §4.5 step 5 / §4.10.9): land the person
    * on the escalated envelope — the conversation sheet on the phone — and
@@ -140,10 +154,12 @@ async function getDeviceClientId(): Promise<string> {
         options: {
           service: string;
           accessible?: string;
-        }
+        },
       ): Promise<unknown>;
     };
-    const existing = await Keychain.getGenericPassword({ service: "vibestudio-push-device-id" });
+    const existing = await Keychain.getGenericPassword({
+      service: "vibestudio-push-device-id",
+    });
     if (existing && existing.password) {
       cachedDeviceId = existing.password;
       return existing.password;
@@ -163,7 +179,7 @@ async function getDeviceClientId(): Promise<string> {
         options: {
           service: string;
           accessible?: string;
-        }
+        },
       ): Promise<unknown>;
     };
     await Keychain.setGenericPassword("push-device-id", cachedDeviceId, {
@@ -183,7 +199,7 @@ function getFirebaseMessaging(): FirebaseMessagingModule | null {
     return mod.default ?? mod;
   } catch {
     console.warn(
-      "[PushNotifications] @react-native-firebase/messaging not available. Push disabled."
+      "[PushNotifications] @react-native-firebase/messaging not available. Push disabled.",
     );
     return null;
   }
@@ -203,12 +219,15 @@ function getNotifee(): {
     };
   } catch {
     console.warn(
-      "[PushNotifications] @notifee/react-native not available. Local notifications disabled."
+      "[PushNotifications] @notifee/react-native not available. Local notifications disabled.",
     );
     return null;
   }
 }
-async function registerToken(shellClient: ShellClient, token: string): Promise<void> {
+async function registerToken(
+  shellClient: ShellClient,
+  token: string,
+): Promise<void> {
   const platform = Platform.OS === "ios" ? "ios" : "android";
   const clientId = await getDeviceClientId();
   await shellClient.push.register({ token, platform, clientId });
@@ -219,19 +238,26 @@ function isAuthorizedStatus(
     | {
         authorizationStatus?: number;
       }
-    | undefined
+    | undefined,
 ): boolean {
-  const value = typeof status === "number" ? status : status?.authorizationStatus;
+  const value =
+    typeof status === "number" ? status : status?.authorizationStatus;
   return value === 1 || value === 2;
 }
-async function maybeShowDeniedToast(callbacks: PushRuntimeCallbacks): Promise<void> {
+async function maybeShowDeniedToast(
+  callbacks: PushRuntimeCallbacks,
+): Promise<void> {
   const storage = getNativeAppStorage();
   const now = Date.now();
-  const lastShown = Number((await storage.getItem(PERMISSION_DENIED_TOAST_KEY)) ?? 0);
-  if (lastShown && now - lastShown < PERMISSION_DENIED_TOAST_INTERVAL_MS) return;
+  const lastShown = Number(
+    (await storage.getItem(PERMISSION_DENIED_TOAST_KEY)) ?? 0,
+  );
+  if (lastShown && now - lastShown < PERMISSION_DENIED_TOAST_INTERVAL_MS)
+    return;
   callbacks.onToast?.({
     title: "Notifications are off",
-    message: "Enable notifications in system settings to approve requests from the lock screen.",
+    message:
+      "Enable notifications in system settings to approve requests from the lock screen.",
     tone: "warning",
     durationMs: 8000,
   });
@@ -239,23 +265,31 @@ async function maybeShowDeniedToast(callbacks: PushRuntimeCallbacks): Promise<vo
 }
 export async function displayApprovalNotification(
   message: RemoteMessage,
-  notifee: Pick<NotifeeModule, "displayNotification" | "cancelNotification">
+  notifee: Pick<NotifeeModule, "displayNotification" | "cancelNotification">,
 ): Promise<void> {
-  requireApprovedAppCapability("notifications", "approval notification display");
+  requireApprovedAppCapability(
+    "notifications",
+    "approval notification display",
+  );
   if (isPushUserInboxDataPayload(message.data)) {
     await displayInboxNotification(message.data, message, notifee);
     return;
   }
-  const data = (message.data ?? {}) as PushApprovalDataPayload;
+  const data: Partial<PushApprovalDataPayload> = message.data ?? {};
   if (data.kind === "approval-cancel") {
     const cancelKey = data.cancelKey ?? data.approvalId;
-    if (cancelKey) await notifee.cancelNotification(cancelKey);
+    const scope = readWorkspacePushScope(data);
+    if (cancelKey && scope)
+      await notifee.cancelNotification(
+        workspaceNotificationKey(scope, cancelKey),
+      );
     return;
   }
-  if (data.kind !== "approval-prompt" || !data.approvalId) return;
+  const target = readApprovalTarget(data);
+  if (data.kind !== "approval-prompt" || !target) return;
   const category = data.category ?? APPROVAL_CATEGORY_DECIDE;
   await notifee.displayNotification({
-    id: data.cancelKey ?? data.approvalId,
+    id: workspaceNotificationKey(target, data.cancelKey ?? target.approvalId),
     title: data.title ?? message.notification?.title ?? "Approval requested",
     body: data.body ?? message.notification?.body ?? "",
     data: {
@@ -275,11 +309,13 @@ export async function displayApprovalNotification(
 }
 export async function reconcilePushNotifications(
   shellClient: ShellClient,
-  notifee?: NotifeeModule | null
+  notifee?: NotifeeModule | null,
 ): Promise<void> {
   if (!notifee) return;
   try {
-    const pending = filterRuntimeApprovals(await shellClient.shellApproval.listPending());
+    const pending = filterRuntimeApprovals(
+      await shellClient.shellApproval.listPending(),
+    );
     const pendingIds = new Set(pending.map((approval) => approval.approvalId));
     const displayed = (await notifee.getDisplayedNotifications?.()) ?? [];
     for (const entry of displayed) {
@@ -289,51 +325,90 @@ export async function reconcilePushNotifications(
       // approval's notification to be cancelled. Cancel by the actual
       // display id.
       const displayId = entry.notification?.id ?? entry.id;
-      const approvalId = readApprovalId(entry.notification);
-      if (displayId && approvalId && !pendingIds.has(approvalId)) {
+      const target = readApprovalTarget(entry.notification?.data);
+      if (
+        displayId &&
+        target &&
+        shellClient.pushScope &&
+        sameWorkspacePushScope(target, shellClient.pushScope) &&
+        !pendingIds.has(target.approvalId)
+      ) {
         await notifee.cancelNotification(displayId);
       }
     }
   } catch (error) {
-    console.warn("[PushNotifications] Failed to reconcile displayed notifications:", error);
+    console.warn(
+      "[PushNotifications] Failed to reconcile displayed notifications:",
+      error,
+    );
   }
   await drainBackgroundActionQueue(shellClient, notifee);
 }
-async function handleDeepLink(approvalId: string, callbacks: PushRuntimeCallbacks): Promise<void> {
-  await enqueueDeepLink(approvalId);
-  callbacks.onApprovalDeepLink?.(approvalId);
+async function handleDeepLink(
+  target: WorkspaceApprovalTarget,
+  callbacks: PushRuntimeCallbacks,
+): Promise<void> {
+  await enqueueDeepLink(target);
+  callbacks.onApprovalDeepLink?.(target);
 }
-async function consumeStoredDeepLink(callbacks: PushRuntimeCallbacks): Promise<void> {
-  const approvalId = await takePendingDeepLink();
-  if (approvalId) callbacks.onApprovalDeepLink?.(approvalId);
+async function consumeStoredDeepLink(
+  shellClient: ShellClient,
+  callbacks: PushRuntimeCallbacks,
+): Promise<void> {
+  const scope = shellClient.pushScope;
+  if (!scope) return;
+  const target = await takePendingDeepLink(scope);
+  if (target) callbacks.onApprovalDeepLink?.(target);
 }
 async function handleForegroundEvent(
   event: NotifeeEvent,
   EventType: Record<string, number>,
   shellClient: ShellClient,
   notifee: NotifeeModule,
-  callbacks: PushRuntimeCallbacks
+  callbacks: PushRuntimeCallbacks,
 ): Promise<void> {
   const notification = event.detail.notification;
   if (isPushUserInboxDataPayload(notification?.data)) {
     if (
       event.type === EventType["PRESS"] ||
-      (event.type === EventType["ACTION_PRESS"] && event.detail.pressAction?.id === "open")
+      (event.type === EventType["ACTION_PRESS"] &&
+        event.detail.pressAction?.id === "open")
     ) {
-      callbacks.onInboxDeepLink?.(notification.data as PushUserInboxDataPayload);
+      callbacks.onInboxDeepLink?.(
+        notification.data as PushUserInboxDataPayload,
+      );
     }
     return;
   }
-  const approvalId = readApprovalId(notification);
-  if (!approvalId) return;
+  const target = readApprovalTarget(notification?.data);
+  if (
+    !target ||
+    !shellClient.pushScope ||
+    target.serverId !== shellClient.pushScope.serverId ||
+    target.userId !== shellClient.pushScope.userId
+  )
+    return;
   const actionId = event.detail.pressAction?.id;
-  if (event.type === EventType["ACTION_PRESS"] && isBackgroundDecision(actionId)) {
-    if (shellClient.transport.status === "connected") {
-      await shellClient.shellApproval.resolve(approvalId, actionId);
-      await notifee.cancelNotification(approvalId);
-    } else {
-      await queueBackgroundAction(approvalId, actionId);
-      await updateActionNotification(notifee, approvalId, notification);
+  if (
+    event.type === EventType["ACTION_PRESS"] &&
+    isBackgroundDecision(actionId)
+  ) {
+    await queueBackgroundAction(target, actionId);
+    try {
+      const client = sameWorkspacePushScope(target, shellClient.pushScope)
+        ? shellClient
+        : await callbacks.resolveWorkspace?.(target);
+      if (
+        client?.pushScope &&
+        sameWorkspacePushScope(target, client.pushScope) &&
+        client.transport.status === "connected"
+      ) {
+        await drainBackgroundActionQueue(client, notifee);
+      } else {
+        await updateActionNotification(notifee, target, notification);
+      }
+    } catch {
+      await updateActionNotification(notifee, target, notification);
     }
     return;
   }
@@ -341,13 +416,8 @@ async function handleForegroundEvent(
     (event.type === EventType["ACTION_PRESS"] && actionId === "open") ||
     event.type === EventType["PRESS"]
   ) {
-    await handleDeepLink(approvalId, callbacks);
+    await handleDeepLink(target, callbacks);
   }
-}
-function readApprovalId(notification: NotifeeEvent["detail"]["notification"]): string | null {
-  const dataApprovalId = notification?.data?.["approvalId"];
-  if (typeof dataApprovalId === "string" && dataApprovalId.length > 0) return dataApprovalId;
-  return notification?.id ?? null;
 }
 /**
  * Register for push notifications and wire foreground lifecycle handling.
@@ -356,16 +426,18 @@ function readApprovalId(notification: NotifeeEvent["detail"]["notification"]): s
  */
 export async function registerForPushNotifications(
   shellClient: ShellClient,
-  callbacksOrTap?: PushRuntimeCallbacks | NotificationTapHandler
+  callbacksOrTap?: PushRuntimeCallbacks | NotificationTapHandler,
 ): Promise<() => void> {
   requireApprovedAppCapability("notifications", "push notifications");
   const callbacks: PushRuntimeCallbacks =
     typeof callbacksOrTap === "function"
-      ? { onApprovalDeepLink: (approvalId) => callbacksOrTap({ approvalId }) }
+      ? { onApprovalDeepLink: (target) => callbacksOrTap({ ...target }) }
       : (callbacksOrTap ?? {});
   cleanupPushNotificationSubscriptions();
   if (!isNativeFirebaseConfigured()) {
-    console.info("[PushNotifications] Firebase is not configured. Push disabled.");
+    console.info(
+      "[PushNotifications] Firebase is not configured. Push disabled.",
+    );
     return cleanupPushNotificationSubscriptions;
   }
   const messagingModule = getFirebaseMessaging();
@@ -378,7 +450,10 @@ export async function registerForPushNotifications(
     try {
       await notifee.requestPermission();
     } catch (error) {
-      console.warn("[PushNotifications] Local notification permission request failed:", error);
+      console.warn(
+        "[PushNotifications] Local notification permission request failed:",
+        error,
+      );
     }
   }
   if (!isAuthorizedStatus(authStatus)) {
@@ -388,7 +463,7 @@ export async function registerForPushNotifications(
   try {
     await registerToken(shellClient, await messaging.getToken());
     console.log(
-      `[PushNotifications] Token registered (${Platform.OS === "ios" ? "ios" : "android"})`
+      `[PushNotifications] Token registered (${Platform.OS === "ios" ? "ios" : "android"})`,
     );
   } catch (error) {
     console.error("[PushNotifications] Failed to register token:", error);
@@ -403,17 +478,23 @@ export async function registerForPushNotifications(
   cleanupFunctions.push(
     messaging.onTokenRefresh((token) => {
       void registerToken(shellClient, token).catch((error) => {
-        console.error("[PushNotifications] Failed to register refreshed token:", error);
+        console.error(
+          "[PushNotifications] Failed to register refreshed token:",
+          error,
+        );
       });
-    })
+    }),
   );
   if (notifee) {
     cleanupFunctions.push(
       messaging.onMessage((message) => {
         void displayApprovalNotification(message, notifee).catch((error) => {
-          console.error("[PushNotifications] Failed to display foreground notification:", error);
+          console.error(
+            "[PushNotifications] Failed to display foreground notification:",
+            error,
+          );
         });
-      })
+      }),
     );
     cleanupFunctions.push(
       notifee.onForegroundEvent((event) => {
@@ -422,11 +503,14 @@ export async function registerForPushNotifications(
           loadedNotifee?.EventType ?? {},
           shellClient,
           notifee,
-          callbacks
+          callbacks,
         ).catch((error) => {
-          console.error("[PushNotifications] Failed to handle foreground action:", error);
+          console.error(
+            "[PushNotifications] Failed to handle foreground action:",
+            error,
+          );
         });
-      })
+      }),
     );
   }
   cleanupFunctions.push(
@@ -435,28 +519,43 @@ export async function registerForPushNotifications(
         callbacks.onInboxDeepLink?.(message.data);
         return;
       }
-      const approvalId = message.data?.["approvalId"];
-      if (approvalId) void handleDeepLink(approvalId, callbacks);
-    })
+      const target = readApprovalTarget(message.data);
+      if (target) void handleDeepLink(target, callbacks);
+    }),
   );
-  let initialNotification: Awaited<ReturnType<typeof messaging.getInitialNotification>> = null;
+  let initialNotification: Awaited<
+    ReturnType<typeof messaging.getInitialNotification>
+  > = null;
   try {
     initialNotification = await messaging.getInitialNotification();
   } catch (error) {
-    console.warn("[PushNotifications] Failed to read the launch notification:", error);
+    console.warn(
+      "[PushNotifications] Failed to read the launch notification:",
+      error,
+    );
   }
-  if (initialNotification && isPushUserInboxDataPayload(initialNotification.data)) {
+  if (
+    initialNotification &&
+    isPushUserInboxDataPayload(initialNotification.data)
+  ) {
     callbacks.onInboxDeepLink?.(initialNotification.data);
-  } else if (initialNotification?.data?.["approvalId"]) {
-    await handleDeepLink(initialNotification.data["approvalId"], callbacks);
+  } else {
+    const target = readApprovalTarget(initialNotification?.data);
+    if (target) await handleDeepLink(target, callbacks);
   }
-  const appStateSub = AppState.addEventListener("change", (nextState: AppStateStatus) => {
-    if (nextState !== "active") return;
-    void consumeStoredDeepLink(callbacks);
-    void reconcilePushNotifications(shellClient, notifee).catch((error) => {
-      console.error("[PushNotifications] Failed to reconcile after app activation:", error);
-    });
-  });
+  const appStateSub = AppState.addEventListener(
+    "change",
+    (nextState: AppStateStatus) => {
+      if (nextState !== "active") return;
+      void consumeStoredDeepLink(shellClient, callbacks);
+      void reconcilePushNotifications(shellClient, notifee).catch((error) => {
+        console.error(
+          "[PushNotifications] Failed to reconcile after app activation:",
+          error,
+        );
+      });
+    },
+  );
   cleanupFunctions.push(() => appStateSub.remove());
   // Drain queued offline decisions / reconcile on ANY recovery. onReconnect
   // only fires for "resubscribe"; a server reboot or dirty session recovers
@@ -467,21 +566,32 @@ export async function registerForPushNotifications(
       .getToken()
       .then((token) => registerToken(shellClient, token))
       .catch((error) => {
-        console.error("[PushNotifications] Failed to re-register token after recovery:", error);
+        console.error(
+          "[PushNotifications] Failed to re-register token after recovery:",
+          error,
+        );
         callbacks.onToast?.({
           title: "Approval notifications still unavailable",
-          message: "Keep Vibestudio open to see approval requests, or reconnect and try again.",
+          message:
+            "Keep Vibestudio open to see approval requests, or reconnect and try again.",
           tone: "warning",
           durationMs: 8000,
         });
       });
     void reconcilePushNotifications(shellClient, notifee).catch((error) => {
-      console.error("[PushNotifications] Failed to reconcile after recovery:", error);
+      console.error(
+        "[PushNotifications] Failed to reconcile after recovery:",
+        error,
+      );
     });
   };
-  cleanupFunctions.push(shellClient.transport.onRecovery("resubscribe", reconcileOnRecovery));
-  cleanupFunctions.push(shellClient.transport.onRecovery("cold-recover", reconcileOnRecovery));
-  await consumeStoredDeepLink(callbacks);
+  cleanupFunctions.push(
+    shellClient.transport.onRecovery("resubscribe", reconcileOnRecovery),
+  );
+  cleanupFunctions.push(
+    shellClient.transport.onRecovery("cold-recover", reconcileOnRecovery),
+  );
+  await consumeStoredDeepLink(shellClient, callbacks);
   await reconcilePushNotifications(shellClient, notifee);
   return cleanupPushNotificationSubscriptions;
 }
@@ -491,7 +601,9 @@ export async function registerForPushNotifications(
  * Deletes the device token from Firebase and notifies the server
  * to stop sending push notifications to this device.
  */
-export async function unregisterPushNotifications(shellClient: ShellClient): Promise<void> {
+export async function unregisterPushNotifications(
+  shellClient: ShellClient,
+): Promise<void> {
   requireApprovedAppCapability("notifications", "push notifications");
   cleanupPushNotificationSubscriptions();
   const messagingModule = getFirebaseMessaging();
@@ -500,7 +612,10 @@ export async function unregisterPushNotifications(shellClient: ShellClient): Pro
   try {
     await shellClient.push.unregister(await getDeviceClientId());
   } catch (error) {
-    console.error("[PushNotifications] Failed to unregister token from server:", error);
+    console.error(
+      "[PushNotifications] Failed to unregister token from server:",
+      error,
+    );
   }
   try {
     await messaging.deleteToken();

@@ -1,3 +1,4 @@
+import { useWorkspaceVisible } from "../state/workspaceScope";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   AccessibilityInfo,
@@ -125,7 +126,7 @@ function resolveCallerInfo(approval: PendingApproval): CallerInfo {
 }
 
 function defaultInstallSelection(
-  parts: PendingUnitInstallReviewApproval["parts"]
+  parts: PendingUnitInstallReviewApproval["parts"],
 ): Map<string, Set<string>> {
   return new Map(
     parts
@@ -135,16 +136,16 @@ function defaultInstallSelection(
         new Set(
           clearableRows(part)
             .filter((row) => row.selectedByDefault)
-            .map((row) => row.key)
+            .map((row) => row.key),
         ),
-      ])
+      ]),
   );
 }
 
 /** Keep user choices that remain valid when the server refreshes one approval. */
 function syncInstallSelection(
   parts: PendingUnitInstallReviewApproval["parts"],
-  previous: ReadonlyMap<string, ReadonlySet<string>>
+  previous: ReadonlyMap<string, ReadonlySet<string>>,
 ): Map<string, Set<string>> {
   return new Map(
     parts
@@ -157,7 +158,7 @@ function syncInstallSelection(
           ? [...prior].filter((key) => offerable.has(key))
           : rows.filter((row) => row.selectedByDefault).map((row) => row.key);
         return [part.identityKey, new Set(selected)] as const;
-      })
+      }),
   );
 }
 
@@ -168,24 +169,31 @@ function installOfferSignature(approval: PendingApproval | null): string {
       part.identityKey,
       part.change,
       clearableRows(part).map((row) => [row.key, row.selectedByDefault]),
-    ])
+    ]),
   );
 }
 
 export interface ApprovalSheetProps {
+  visible?: boolean;
+  workspaceName?: string;
+  workspaceNames?: Readonly<Record<string, string>>;
+  onClose?: () => void;
   approvals: PendingApproval[];
-  onResolve: (approvalId: string, decision: ApprovalDecision) => Promise<void> | void;
+  onResolve: (
+    approvalId: string,
+    decision: ApprovalDecision,
+  ) => Promise<void> | void;
   onSubmitClientConfig: (
     approvalId: string,
-    values: Record<string, string>
+    values: Record<string, string>,
   ) => Promise<void> | void;
   onSubmitCredentialInput: (
     approvalId: string,
-    values: Record<string, string>
+    values: Record<string, string>,
   ) => Promise<void> | void;
   onSubmitSecretInput: (
     approvalId: string,
-    values: Record<string, string>
+    values: Record<string, string>,
   ) => Promise<void> | void;
   /**
    * Accept a review with exactly what the user allowed now, or cancel it. Every
@@ -193,7 +201,7 @@ export interface ApprovalSheetProps {
    */
   onResolveInstallReview: (
     approvalId: string,
-    resolution: TemplateInstallResolution
+    resolution: TemplateInstallResolution,
   ) => Promise<void> | void;
   /**
    * Optional. When supplied and the current approval comes from a panel,
@@ -202,9 +210,15 @@ export interface ApprovalSheetProps {
    */
   onNavigateToPanel?: (panelId: string) => void;
   /** Lazy trusted blob read. The sheet further restricts this to hashes in the approval payload. */
-  onFetchDiffContent?: (approvalId: string, hash: string) => Promise<string | null>;
+  onFetchDiffContent?: (
+    approvalId: string,
+    hash: string,
+  ) => Promise<string | null>;
   /** Open the full workspace file inspector for more context or degraded files. */
-  onOpenDiffFile?: (file: DiffReviewFile, entry: DiffReviewEntry) => Promise<void> | void;
+  onOpenDiffFile?: (
+    file: DiffReviewFile,
+    entry: DiffReviewEntry,
+  ) => Promise<void> | void;
 }
 
 type PendingAction =
@@ -213,9 +227,18 @@ type PendingAction =
   | "submit-credential-input"
   | "submit-secret-input";
 
-type ButtonVariant = "primary" | "surface" | "danger" | "dangerPrimary" | "outline";
+type ButtonVariant =
+  | "primary"
+  | "surface"
+  | "danger"
+  | "dangerPrimary"
+  | "outline";
 
 export function ApprovalSheet({
+  visible,
+  workspaceName,
+  workspaceNames,
+  onClose,
   approvals,
   onResolve,
   onSubmitClientConfig,
@@ -226,6 +249,7 @@ export function ApprovalSheet({
   onFetchDiffContent,
   onOpenDiffFile,
 }: ApprovalSheetProps) {
+  const workspaceVisible = useWorkspaceVisible();
   const colors = useAtomValue(themeColorsAtom);
   const { height: viewportHeight } = useWindowDimensions();
   const [browseIndex, setBrowseIndex] = useState(0);
@@ -238,6 +262,24 @@ export function ApprovalSheet({
   }, [approvals.length]);
 
   const current = approvals[browseIndex] ?? approvals[0] ?? null;
+  const sourceWorkspaceId =
+    current?.kind === "capability"
+      ? current.snapshot?.sourceWorkspaceId
+      : undefined;
+  const targetWorkspaceId =
+    current?.kind === "capability" ? current.snapshot?.workspaceId : undefined;
+  const crossesWorkspace =
+    sourceWorkspaceId &&
+    targetWorkspaceId &&
+    sourceWorkspaceId !== targetWorkspaceId;
+  const sourceWorkspaceName = sourceWorkspaceId
+    ? (workspaceNames?.[sourceWorkspaceId] ?? sourceWorkspaceId)
+    : "";
+  const targetWorkspaceName = targetWorkspaceId
+    ? (workspaceNames?.[targetWorkspaceId] ??
+      workspaceName ??
+      targetWorkspaceId)
+    : "";
   const queueLength = approvals.length;
   const canPrev = queueLength > 1 && browseIndex > 0;
   const canNext = queueLength > 1 && browseIndex < queueLength - 1;
@@ -247,7 +289,9 @@ export function ApprovalSheet({
    * defaults, so one tap accepts the complete slate with everything allowed and
    * unchecking is the dial for anyone who would rather be asked (U5).
    */
-  const [installSelection, setInstallSelection] = useState<Map<string, Set<string>>>(new Map());
+  const [installSelection, setInstallSelection] = useState<
+    Map<string, Set<string>>
+  >(new Map());
   // Recomputed on every render so the footer status line and the acceptance
   // payload always agree with exactly what is checked on screen right now.
   const installAllowNow: TemplateAcceptance["allowNow"] = useMemo(
@@ -256,10 +300,12 @@ export function ApprovalSheet({
         identityKey,
         permissions: [...permissions],
       })),
-    [installSelection]
+    [installSelection],
   );
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null);
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [minimized, setMinimized] = useState(false);
   const translateY = useRef(new Animated.Value(viewportHeight)).current;
@@ -294,7 +340,7 @@ export function ApprovalSheet({
         ? approvalChanged
           ? defaultInstallSelection(current.parts)
           : syncInstallSelection(current.parts, previous)
-        : new Map()
+        : new Map(),
     );
     if (!approvalChanged) return;
     setValues({});
@@ -303,7 +349,8 @@ export function ApprovalSheet({
     setMinimized(false);
     setDetailsOpen(
       shouldOpenApprovalDetails(current) ||
-        (current.kind === "credential" && !!current.oauthAudienceDomainMismatch)
+        (current.kind === "credential" &&
+          !!current.oauthAudienceDomainMismatch),
     );
     ReactNativeHapticFeedback.trigger("impactLight");
     Animated.parallel([
@@ -321,13 +368,20 @@ export function ApprovalSheet({
         useNativeDriver: true,
       }),
     ]).start();
-    if (copy) {
+    if (copy && (visible ?? workspaceVisible)) {
       const requester = callerInfo
         ? `Requested by ${callerInfo.label}, ${callerInfo.kindLabel.toLowerCase()}. `
         : "";
-      AccessibilityInfo.announceForAccessibility(`${copy.title}. ${requester}${copy.summary}`);
+      AccessibilityInfo.announceForAccessibility(
+        `${copy.title}. ${requester}${copy.summary}`,
+      );
     }
-  }, [currentApprovalId, currentInstallOfferSignature]);
+  }, [
+    currentApprovalId,
+    currentInstallOfferSignature,
+    visible,
+    workspaceVisible,
+  ]);
 
   const runAction = useCallback(
     async (action: PendingAction, task: () => Promise<void> | void) => {
@@ -342,30 +396,37 @@ export function ApprovalSheet({
       try {
         await task();
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Couldn't resolve. Try again.";
+        const message =
+          err instanceof Error ? err.message : "Couldn't resolve. Try again.";
         setError(message || "Couldn't resolve. Try again.");
         AccessibilityInfo.announceForAccessibility(
-          `Approval action failed. ${message || "Couldn't resolve. Try again."}`
+          `Approval action failed. ${message || "Couldn't resolve. Try again."}`,
         );
       } finally {
         setPendingAction(null);
       }
     },
-    [isBusy]
+    [isBusy],
   );
 
   const dismiss = useCallback(() => {
+    if (onClose) {
+      onClose();
+      return;
+    }
     if (!current || isBusy) return;
     // Backdrop taps and swipe-down mean “not now”, not denial. Keep the queue
     // entry pending and leave a visible pill to reopen it.
     setMinimized(true);
-  }, [current, isBusy]);
+  }, [current, isBusy, onClose]);
 
   const panResponder = useMemo(
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_event, gesture) =>
-          !isBusy && gesture.dy > 8 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+          !isBusy &&
+          gesture.dy > 8 &&
+          Math.abs(gesture.dy) > Math.abs(gesture.dx),
         onPanResponderMove: (_event, gesture) => {
           const next = Math.max(0, gesture.dy);
           dragOffset.current = next;
@@ -386,7 +447,7 @@ export function ApprovalSheet({
           }).start();
         },
       }),
-    [dismiss, isBusy, translateY]
+    [dismiss, isBusy, translateY],
   );
 
   const showRequestingPanel = useCallback(() => {
@@ -419,10 +480,19 @@ export function ApprovalSheet({
   }
 
   return (
-    <Modal visible transparent animationType="none" presentationStyle="overFullScreen">
+    <Modal
+      visible={visible ?? workspaceVisible}
+      onRequestClose={onClose}
+      transparent
+      animationType="none"
+      presentationStyle="overFullScreen"
+    >
       <View style={styles.modalRoot}>
         <Animated.View
-          style={[styles.backdrop, { backgroundColor: colors.overlay, opacity: backdropOpacity }]}
+          style={[
+            styles.backdrop,
+            { backgroundColor: colors.overlay, opacity: backdropOpacity },
+          ]}
         >
           <Pressable
             accessibilityLabel="Dismiss approval"
@@ -473,13 +543,41 @@ export function ApprovalSheet({
                 <X size={20} color={colors.textSecondary} />
               </Pressable>
               <View style={styles.handleWrap} {...panResponder.panHandlers}>
-                <View style={[styles.handle, { backgroundColor: colors.border }]} />
+                <View
+                  style={[styles.handle, { backgroundColor: colors.border }]}
+                />
               </View>
 
               <ScrollView
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.scrollContent}
               >
+                {workspaceName && (
+                  <Text
+                    style={[typeRamp.caption, { color: colors.textSecondary }]}
+                  >
+                    {workspaceName} · Approval
+                  </Text>
+                )}
+                {crossesWorkspace && (
+                  <View
+                    style={{ paddingVertical: 12 }}
+                    testID="approval-workspace-direction"
+                  >
+                    <Text style={[typeRamp.bodyStrong, { color: colors.text }]}>
+                      {sourceWorkspaceName} → {targetWorkspaceName}
+                    </Text>
+                    <Text
+                      style={[
+                        typeRamp.caption,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      Responses return to {sourceWorkspaceName} and may be
+                      visible to its members.
+                    </Text>
+                  </View>
+                )}
                 <ApprovalHeader
                   approval={current}
                   accentColor={accentColor}
@@ -488,16 +586,26 @@ export function ApprovalSheet({
                   canPrev={canPrev}
                   canNext={canNext}
                   onPrev={() => setBrowseIndex((idx) => Math.max(0, idx - 1))}
-                  onNext={() => setBrowseIndex((idx) => Math.min(queueLength - 1, idx + 1))}
+                  onNext={() =>
+                    setBrowseIndex((idx) => Math.min(queueLength - 1, idx + 1))
+                  }
                 />
                 {current.kind === "capability" && current.authorityRow ? (
                   <View
                     style={[
                       styles.domainChip,
-                      { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
+                      {
+                        backgroundColor: colors.surfaceSunken,
+                        borderColor: colors.borderSubtle,
+                      },
                     ]}
                   >
-                    <Text style={[styles.domainChipText, { color: colors.textSecondary }]}>
+                    <Text
+                      style={[
+                        styles.domainChipText,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
                       {AUTHORITY_DOMAINS[current.authorityRow.domain].label}
                       {current.authorityRow.provenance.surface
                         ? ` · ${current.authorityRow.provenance.surface}`
@@ -505,16 +613,22 @@ export function ApprovalSheet({
                     </Text>
                   </View>
                 ) : null}
-                <Text style={[styles.title, { color: colors.text }]}>{copy.title}</Text>
+                <Text style={[styles.title, { color: colors.text }]}>
+                  {copy.title}
+                </Text>
                 <CallerRow
                   caller={callerInfo}
                   attribution={attribution ?? {}}
                   canNavigate={!!onNavigateToPanel && !!callerInfo.panelId}
                   onPress={showRequestingPanel}
                 />
-                {copy.summary ? <ApprovalMarkdown source={copy.summary} tone="muted" /> : null}
+                {copy.summary ? (
+                  <ApprovalMarkdown source={copy.summary} tone="muted" />
+                ) : null}
                 {copy.warning ? <WarningBand message={copy.warning} /> : null}
-                {current.kind === "device-code" ? <DeviceCodePanel approval={current} /> : null}
+                {current.kind === "device-code" ? (
+                  <DeviceCodePanel approval={current} />
+                ) : null}
                 {/* The review IS the body: parts, rows, and selection. It is
                     not a disclosure under a request summary. */}
                 {current.kind === "unit-install-review" ? (
@@ -530,9 +644,9 @@ export function ApprovalSheet({
                             ? new Set(
                                 clearableRows(part)
                                   .filter((row) => row.selectedByDefault)
-                                  .map((row) => row.key)
+                                  .map((row) => row.key),
                               )
-                            : new Set()
+                            : new Set(),
                         );
                         return next;
                       })
@@ -549,25 +663,49 @@ export function ApprovalSheet({
                     }
                   />
                 ) : null}
-                {current.kind === "capability" && shouldShowOperationSubstance(current) ? (
+                {current.kind === "capability" &&
+                shouldShowOperationSubstance(current) ? (
                   <View style={styles.detailCard}>
-                    <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+                    <Text
+                      style={[
+                        styles.detailLabel,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
                       What exactly
                     </Text>
                     <Text style={[styles.detailValue, { color: colors.text }]}>
                       {current.operationSubstance.summary}
                     </Text>
                     {current.operationSubstance.detail ? (
-                      <Text style={[styles.detailValue, { color: colors.textSecondary }]}>
+                      <Text
+                        style={[
+                          styles.detailValue,
+                          { color: colors.textSecondary },
+                        ]}
+                      >
                         {current.operationSubstance.detail}
                       </Text>
                     ) : null}
                     {current.operationSubstance.facts?.map((fact) => (
-                      <View key={`${fact.label}:${fact.value}`} style={styles.substanceFact}>
-                        <Text style={[styles.substanceFactLabel, { color: colors.textSecondary }]}>
+                      <View
+                        key={`${fact.label}:${fact.value}`}
+                        style={styles.substanceFact}
+                      >
+                        <Text
+                          style={[
+                            styles.substanceFactLabel,
+                            { color: colors.textSecondary },
+                          ]}
+                        >
                           {fact.label}
                         </Text>
-                        <Text style={[styles.substanceFactValue, { color: colors.text }]}>
+                        <Text
+                          style={[
+                            styles.substanceFactValue,
+                            { color: colors.text },
+                          ]}
+                        >
                           {fact.value}
                         </Text>
                       </View>
@@ -612,7 +750,10 @@ export function ApprovalSheet({
               <View
                 style={[
                   styles.actionBar,
-                  { borderTopColor: colors.borderSubtle, backgroundColor: colors.surfaceRaised },
+                  {
+                    borderTopColor: colors.borderSubtle,
+                    backgroundColor: colors.surfaceRaised,
+                  },
                 ]}
               >
                 {current.kind === "client-config" ? (
@@ -623,10 +764,14 @@ export function ApprovalSheet({
                     pendingAction={pendingAction}
                     onSubmit={() =>
                       runAction("submit-client-config", () =>
-                        onSubmitClientConfig(current.approvalId, values)
+                        onSubmitClientConfig(current.approvalId, values),
                       )
                     }
-                    onDeny={() => runAction("deny", () => onResolve(current.approvalId, "deny"))}
+                    onDeny={() =>
+                      runAction("deny", () =>
+                        onResolve(current.approvalId, "deny"),
+                      )
+                    }
                   />
                 ) : current.kind === "credential-input" ? (
                   <CredentialInputActions
@@ -636,10 +781,14 @@ export function ApprovalSheet({
                     pendingAction={pendingAction}
                     onSubmit={() =>
                       runAction("submit-credential-input", () =>
-                        onSubmitCredentialInput(current.approvalId, values)
+                        onSubmitCredentialInput(current.approvalId, values),
                       )
                     }
-                    onDeny={() => runAction("deny", () => onResolve(current.approvalId, "deny"))}
+                    onDeny={() =>
+                      runAction("deny", () =>
+                        onResolve(current.approvalId, "deny"),
+                      )
+                    }
                   />
                 ) : current.kind === "secret-input" ? (
                   <SecretInputActions
@@ -649,17 +798,23 @@ export function ApprovalSheet({
                     pendingAction={pendingAction}
                     onSubmit={() =>
                       runAction("submit-secret-input", () =>
-                        onSubmitSecretInput(current.approvalId, values)
+                        onSubmitSecretInput(current.approvalId, values),
                       )
                     }
-                    onDeny={() => runAction("deny", () => onResolve(current.approvalId, "deny"))}
+                    onDeny={() =>
+                      runAction("deny", () =>
+                        onResolve(current.approvalId, "deny"),
+                      )
+                    }
                   />
                 ) : current.kind === "device-code" ? (
                   <DeviceCodeActions
                     busy={isBusy}
                     pendingAction={pendingAction}
                     onCancel={() =>
-                      runAction("dismiss", () => onResolve(current.approvalId, "dismiss"))
+                      runAction("dismiss", () =>
+                        onResolve(current.approvalId, "dismiss"),
+                      )
                     }
                   />
                 ) : current.kind === "unit-install-review" ? (
@@ -678,12 +833,14 @@ export function ApprovalSheet({
                                 ? "adopt-root"
                                 : "install",
                           allowNow: installAllowNow,
-                        })
+                        }),
                       )
                     }
                     onCancel={() =>
                       runAction("dismiss", () =>
-                        onResolveInstallReview(current.approvalId, { decision: "cancel" })
+                        onResolveInstallReview(current.approvalId, {
+                          decision: "cancel",
+                        }),
                       )
                     }
                   />
@@ -692,7 +849,9 @@ export function ApprovalSheet({
                     busy={isBusy}
                     pendingAction={pendingAction}
                     onChoose={(decision) =>
-                      runAction(decision, () => onResolve(current.approvalId, decision))
+                      runAction(decision, () =>
+                        onResolve(current.approvalId, decision),
+                      )
                     }
                   />
                 ) : (
@@ -701,7 +860,9 @@ export function ApprovalSheet({
                     busy={isBusy}
                     pendingAction={pendingAction}
                     onChoose={(decision) =>
-                      runAction(decision, () => onResolve(current.approvalId, decision))
+                      runAction(decision, () =>
+                        onResolve(current.approvalId, decision),
+                      )
                     }
                   />
                 )}
@@ -830,7 +991,10 @@ function CallerRow({
     <View
       style={[
         styles.callerChip,
-        { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
+        {
+          backgroundColor: colors.surfaceSunken,
+          borderColor: colors.borderSubtle,
+        },
       ]}
     >
       <MobileUnitIcon
@@ -841,7 +1005,10 @@ function CallerRow({
         size={18}
         color={colors.textSecondary}
       />
-      <Text numberOfLines={1} style={[styles.callerChipLabel, { color: colors.text }]}>
+      <Text
+        numberOfLines={1}
+        style={[styles.callerChipLabel, { color: colors.text }]}
+      >
         {caller.label}
       </Text>
       {canNavigate ? <ArrowRight size={12} color={colors.accent} /> : null}
@@ -867,16 +1034,24 @@ function CallerRow({
       </Text>
       {attribution.target ? (
         <>
-          <Text style={[styles.callerRowLabel, { color: colors.textSecondary }]}>
+          <Text
+            style={[styles.callerRowLabel, { color: colors.textSecondary }]}
+          >
             {attribution.relation ?? "for"}
           </Text>
           <View
             style={[
               styles.callerChip,
-              { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
+              {
+                backgroundColor: colors.surfaceSunken,
+                borderColor: colors.borderSubtle,
+              },
             ]}
           >
-            <Text numberOfLines={1} style={[styles.callerChipLabel, { color: colors.text }]}>
+            <Text
+              numberOfLines={1}
+              style={[styles.callerChipLabel, { color: colors.text }]}
+            >
               {attribution.target}
             </Text>
           </View>
@@ -926,9 +1101,18 @@ function ApprovalMarkdown({
   const blocks = parseApprovalMarkdown(source);
   if (blocks.length === 0) return null;
   const color =
-    tone === "danger" ? colors.danger : tone === "muted" ? colors.textSecondary : colors.text;
+    tone === "danger"
+      ? colors.danger
+      : tone === "muted"
+        ? colors.textSecondary
+        : colors.text;
   return (
-    <View style={[styles.markdownBlock, compact ? styles.markdownBlockCompact : null]}>
+    <View
+      style={[
+        styles.markdownBlock,
+        compact ? styles.markdownBlockCompact : null,
+      ]}
+    >
       {blocks.map((block, index) => {
         if (block.kind === "code-block") {
           return (
@@ -997,14 +1181,20 @@ function ApprovalMarkdownInlineNodes({
         if (node.kind === "strong") {
           return (
             <Text key={index} style={styles.markdownStrong}>
-              <ApprovalMarkdownInlineNodes nodes={node.children} color={color} />
+              <ApprovalMarkdownInlineNodes
+                nodes={node.children}
+                color={color}
+              />
             </Text>
           );
         }
         if (node.kind === "emphasis") {
           return (
             <Text key={index} style={styles.markdownEmphasis}>
-              <ApprovalMarkdownInlineNodes nodes={node.children} color={color} />
+              <ApprovalMarkdownInlineNodes
+                nodes={node.children}
+                color={color}
+              />
             </Text>
           );
         }
@@ -1023,7 +1213,9 @@ function InlineError({ message }: { message: string }) {
   return (
     <View style={[styles.warningBand, { backgroundColor: colors.dangerSoft }]}>
       <AlertTriangle size={14} color={colors.danger} />
-      <Text style={[styles.warningText, { color: colors.danger }]}>{message}</Text>
+      <Text style={[styles.warningText, { color: colors.danger }]}>
+        {message}
+      </Text>
     </View>
   );
 }
@@ -1051,11 +1243,18 @@ function SecretConfigFields({
       {approval.fields.map((field) => (
         <View key={field.name} style={styles.fieldBlock}>
           <View style={styles.fieldLabelRow}>
-            <Text style={[styles.fieldLabel, { color: colors.text }]}>{field.label}</Text>
+            <Text style={[styles.fieldLabel, { color: colors.text }]}>
+              {field.label}
+            </Text>
             {field.required ? (
-              <Badge label={HOST_APPROVAL_COPY.chrome.required} tone="warning" />
+              <Badge
+                label={HOST_APPROVAL_COPY.chrome.required}
+                tone="warning"
+              />
             ) : null}
-            {field.type === "secret" ? <Badge label={HOST_APPROVAL_COPY.chrome.secret} /> : null}
+            {field.type === "secret" ? (
+              <Badge label={HOST_APPROVAL_COPY.chrome.secret} />
+            ) : null}
           </View>
           <TextInput
             accessibilityLabel={field.label}
@@ -1140,7 +1339,9 @@ function ApprovalDetails({
           // Native RN can't rotate icons declaratively without animated value;
           // we keep it static and rely on accessibilityState for assistive tech.
         />
-        <Text style={[styles.detailsSummaryText, { color: colors.textSecondary }]}>
+        <Text
+          style={[styles.detailsSummaryText, { color: colors.textSecondary }]}
+        >
           Request details
         </Text>
       </Pressable>
@@ -1154,10 +1355,20 @@ function ApprovalDetails({
             secondarySelectable
           />
           {breadcrumbSummary ? (
-            <DetailRow icon={Workflow} label="Chain" value={breadcrumbSummary} code />
+            <DetailRow
+              icon={Workflow}
+              label="Chain"
+              value={breadcrumbSummary}
+              code
+            />
           ) : null}
           {requesterEvalSummary ? (
-            <DetailRow icon={Settings2} label="Eval" value={requesterEvalSummary} code />
+            <DetailRow
+              icon={Settings2}
+              label="Eval"
+              value={requesterEvalSummary}
+              code
+            />
           ) : null}
           {approval.requester ? (
             <DetailRow
@@ -1172,7 +1383,9 @@ function ApprovalDetails({
               icon={Settings2}
               label="Operation"
               value={`${getApprovalOperationKindLabel(approval.operation.kind)} · ${approval.operation.verb}${
-                approval.operation.object ? ` · ${approval.operation.object.value}` : ""
+                approval.operation.object
+                  ? ` · ${approval.operation.object.value}`
+                  : ""
               }`}
               code
             />
@@ -1185,17 +1398,34 @@ function ApprovalDetails({
                 value={`${approval.snapshot.service}.${approval.snapshot.method}`}
                 code
               />
-              <DetailRow icon={Lock} label="Authority" value={approval.capability} code />
+              <DetailRow
+                icon={Lock}
+                label="Authority"
+                value={approval.capability}
+                code
+              />
               <DetailRow
                 icon={Lock}
                 label="Authority target"
-                value={approval.grantResourceKey ?? approval.snapshot.resourceKey}
+                value={
+                  approval.grantResourceKey ?? approval.snapshot.resourceKey
+                }
                 code
               />
             </>
           ) : null}
-          <DetailRow icon={Globe} label="Requester repo" value={approval.repoPath} code />
-          <DetailRow icon={Lock} label="Requester version" value={approval.effectiveVersion} code />
+          <DetailRow
+            icon={Globe}
+            label="Requester repo"
+            value={approval.repoPath}
+            code
+          />
+          <DetailRow
+            icon={Lock}
+            label="Requester version"
+            value={approval.effectiveVersion}
+            code
+          />
           {approval.kind === "credential" ? (
             <CredentialDetails approval={approval} />
           ) : approval.kind === "client-config" ? (
@@ -1218,7 +1448,11 @@ function ApprovalDetails({
   );
 }
 
-function CredentialDetails({ approval }: { approval: PendingCredentialApproval }) {
+function CredentialDetails({
+  approval,
+}: {
+  approval: PendingCredentialApproval;
+}) {
   const oauthOrigins = [
     approval.oauthAuthorizeOrigin,
     approval.oauthTokenOrigin,
@@ -1226,10 +1460,25 @@ function CredentialDetails({ approval }: { approval: PendingCredentialApproval }
   ].filter((origin): origin is string => !!origin);
   return (
     <>
-      <DetailRow icon={Lock} label="Account" value={formatAccount(approval)} code />
-      <DetailRow icon={Lock} label="Injects as" value={formatInjection(approval)} code />
+      <DetailRow
+        icon={Lock}
+        label="Account"
+        value={formatAccount(approval)}
+        code
+      />
+      <DetailRow
+        icon={Lock}
+        label="Injects as"
+        value={formatInjection(approval)}
+        code
+      />
       {approval.bindingLabel ? (
-        <DetailRow icon={Lock} label="Binding" value={approval.bindingLabel} code />
+        <DetailRow
+          icon={Lock}
+          label="Binding"
+          value={approval.bindingLabel}
+          code
+        />
       ) : null}
       {approval.grantResource ? (
         <DetailRow
@@ -1241,14 +1490,26 @@ function CredentialDetails({ approval }: { approval: PendingCredentialApproval }
       ) : null}
       {approval.gitOperation ? (
         <>
-          <DetailRow icon={Lock} label="Operation" value={approval.gitOperation.label} code />
-          <DetailRow icon={Globe} label="Remote" value={approval.gitOperation.remote} code />
+          <DetailRow
+            icon={Lock}
+            label="Operation"
+            value={approval.gitOperation.label}
+            code
+          />
+          <DetailRow
+            icon={Globe}
+            label="Remote"
+            value={approval.gitOperation.remote}
+            code
+          />
         </>
       ) : null}
       <DetailRow
         icon={Globe}
         label="Audience"
-        value={approval.audience.map((audience) => `${audience.match}: ${audience.url}`).join("\n")}
+        value={approval.audience
+          .map((audience) => `${audience.match}: ${audience.url}`)
+          .join("\n")}
         code
       />
       {oauthOrigins.length > 0 ? (
@@ -1269,20 +1530,39 @@ function CredentialDetails({ approval }: { approval: PendingCredentialApproval }
         />
       ) : null}
       {approval.scopes.length > 0 ? (
-        <DetailRow icon={Lock} label="Scopes" value={approval.scopes.join(", ")} code />
+        <DetailRow
+          icon={Lock}
+          label="Scopes"
+          value={approval.scopes.join(", ")}
+          code
+        />
       ) : null}
     </>
   );
 }
 
-function ClientConfigDetails({ approval }: { approval: PendingClientConfigApproval }) {
+function ClientConfigDetails({
+  approval,
+}: {
+  approval: PendingClientConfigApproval;
+}) {
   const tokenOrigin = originForUrl(approval.tokenUrl);
   const authorizeOrigin = originForUrl(approval.authorizeUrl);
   return (
     <>
       <DetailRow icon={Lock} label="Client" value={approval.configId} code />
-      <DetailRow icon={Globe} label="Authorize" value={approval.authorizeUrl} code />
-      <DetailRow icon={Globe} label="Token URL" value={approval.tokenUrl} code />
+      <DetailRow
+        icon={Globe}
+        label="Authorize"
+        value={approval.authorizeUrl}
+        code
+      />
+      <DetailRow
+        icon={Globe}
+        label="Token URL"
+        value={approval.tokenUrl}
+        code
+      />
       <DetailRow
         icon={Lock}
         label="Binding"
@@ -1292,7 +1572,10 @@ function ClientConfigDetails({ approval }: { approval: PendingClientConfigApprov
         icon={Lock}
         label="Fields"
         value={approval.fields
-          .map((field) => `${field.name}${field.type === "secret" ? " (secret)" : ""}`)
+          .map(
+            (field) =>
+              `${field.name}${field.type === "secret" ? " (secret)" : ""}`,
+          )
           .join(", ")}
         code
       />
@@ -1300,11 +1583,25 @@ function ClientConfigDetails({ approval }: { approval: PendingClientConfigApprov
   );
 }
 
-function CredentialInputDetails({ approval }: { approval: PendingCredentialInputApproval }) {
+function CredentialInputDetails({
+  approval,
+}: {
+  approval: PendingCredentialInputApproval;
+}) {
   return (
     <>
-      <DetailRow icon={Lock} label="Service" value={approval.credentialLabel} code />
-      <DetailRow icon={Lock} label="Injects as" value={formatInjection(approval)} code />
+      <DetailRow
+        icon={Lock}
+        label="Service"
+        value={approval.credentialLabel}
+        code
+      />
+      <DetailRow
+        icon={Lock}
+        label="Injects as"
+        value={formatInjection(approval)}
+        code
+      />
       <DetailRow
         icon={Globe}
         label="Audience"
@@ -1315,18 +1612,30 @@ function CredentialInputDetails({ approval }: { approval: PendingCredentialInput
         icon={Lock}
         label="Fields"
         value={approval.fields
-          .map((field) => `${field.name}${field.type === "secret" ? " (secret)" : ""}`)
+          .map(
+            (field) =>
+              `${field.name}${field.type === "secret" ? " (secret)" : ""}`,
+          )
           .join(", ")}
         code
       />
       {approval.scopes.length > 0 ? (
-        <DetailRow icon={Lock} label="Scopes" value={approval.scopes.join(", ")} code />
+        <DetailRow
+          icon={Lock}
+          label="Scopes"
+          value={approval.scopes.join(", ")}
+          code
+        />
       ) : null}
     </>
   );
 }
 
-function SecretInputDetails({ approval }: { approval: PendingSecretInputApproval }) {
+function SecretInputDetails({
+  approval,
+}: {
+  approval: PendingSecretInputApproval;
+}) {
   return (
     <>
       {(approval.details ?? []).map((detail) => (
@@ -1343,7 +1652,10 @@ function SecretInputDetails({ approval }: { approval: PendingSecretInputApproval
         icon={Lock}
         label="Fields"
         value={approval.fields
-          .map((field) => `${field.name}${field.type === "secret" ? " (secret)" : ""}`)
+          .map(
+            (field) =>
+              `${field.name}${field.type === "secret" ? " (secret)" : ""}`,
+          )
           .join(", ")}
         code
       />
@@ -1351,7 +1663,11 @@ function SecretInputDetails({ approval }: { approval: PendingSecretInputApproval
   );
 }
 
-function CapabilityDetails({ approval }: { approval: PendingCapabilityApproval }) {
+function CapabilityDetails({
+  approval,
+}: {
+  approval: PendingCapabilityApproval;
+}) {
   return (
     <>
       {approval.resource ? (
@@ -1376,21 +1692,49 @@ function CapabilityDetails({ approval }: { approval: PendingCapabilityApproval }
   );
 }
 
-function BrowserPermissionDetails({ approval }: { approval: PendingBrowserPermissionApproval }) {
+function BrowserPermissionDetails({
+  approval,
+}: {
+  approval: PendingBrowserPermissionApproval;
+}) {
   return (
     <>
       <DetailRow icon={Globe} label="Site" value={approval.origin} code />
-      <DetailRow icon={Lock} label="Permissions" value={approval.capabilities.join(", ")} code />
-      <DetailRow icon={Settings2} label="Device" value={approval.deviceLabel} code />
+      <DetailRow
+        icon={Lock}
+        label="Permissions"
+        value={approval.capabilities.join(", ")}
+        code
+      />
+      <DetailRow
+        icon={Settings2}
+        label="Device"
+        value={approval.deviceLabel}
+        code
+      />
     </>
   );
 }
 
-function DeviceCodeDetails({ approval }: { approval: PendingDeviceCodeApproval }) {
+function DeviceCodeDetails({
+  approval,
+}: {
+  approval: PendingDeviceCodeApproval;
+}) {
   return (
     <>
-      <DetailRow icon={Lock} label="Service" value={approval.credentialLabel} code />
-      <DetailRow icon={Globe} label="Verify at" value={approval.verificationUri} code />
+      <DetailRow
+        icon={Lock}
+        label="Service"
+        value={approval.credentialLabel}
+        code
+      />
+      <DetailRow
+        icon={Globe}
+        label="Verify at"
+        value={approval.verificationUri}
+        code
+      />
       <DetailRow
         icon={Lock}
         label="Provider"
@@ -1420,7 +1764,8 @@ function installOriginLabel(origin: InstallReviewOrigin): string {
   }
   if (origin.originStatus === "unresolved") return "";
   if (origin.url) return origin.url;
-  if (origin.isHostBuild) return origin.version ? `Vibestudio ${origin.version}` : "Vibestudio";
+  if (origin.isHostBuild)
+    return origin.version ? `Vibestudio ${origin.version}` : "Vibestudio";
   return origin.originKey;
 }
 
@@ -1433,17 +1778,24 @@ function installOriginLabel(origin: InstallReviewOrigin): string {
  * of what the surrounding operation is called.
  */
 function installReviewSummaryLine(part: InstallReviewPart): string {
-  const changed = [...part.notableRows, ...part.everydayRows].filter((row) => row.change);
+  const changed = [...part.notableRows, ...part.everydayRows].filter(
+    (row) => row.change,
+  );
   if (changed.length === 0) return partNotableLine(part);
   return changed
     .slice(0, 3)
-    .map((row) => `${row.change === "removed" ? "− " : "+ "}${installRowHeadline(row)}`)
+    .map(
+      (row) =>
+        `${row.change === "removed" ? "− " : "+ "}${installRowHeadline(row)}`,
+    )
     .join(" · ");
 }
 
 function installReviewSummaryFragment(part: InstallReviewPart): string {
   const summary = installReviewSummaryLine(part);
-  return summary.length === 0 ? summary : `${summary[0]?.toLowerCase() ?? ""}${summary.slice(1)}`;
+  return summary.length === 0
+    ? summary
+    : `${summary[0]?.toLowerCase() ?? ""}${summary.slice(1)}`;
 }
 
 /**
@@ -1463,13 +1815,19 @@ function InstallReviewDetails({
   approval: PendingUnitInstallReviewApproval;
   selection: ReadonlyMap<string, ReadonlySet<string>>;
   onTogglePart: (part: InstallReviewPart, checked: boolean) => void;
-  onToggleRow: (part: InstallReviewPart, rowKey: string, checked: boolean) => void;
+  onToggleRow: (
+    part: InstallReviewPart,
+    rowKey: string,
+    checked: boolean,
+  ) => void;
 }) {
   const colors = useAtomValue(themeColorsAtom);
   const copy = HOST_APPROVAL_COPY.installReview;
   const [query, setQuery] = useState("");
   const [kindFilter, setKindFilter] = useState("");
-  const [groupExpansion, setGroupExpansion] = useState<Map<string, boolean>>(() => new Map());
+  const [groupExpansion, setGroupExpansion] = useState<Map<string, boolean>>(
+    () => new Map(),
+  );
 
   // One comparator, shared with the desktop list (§7.8): a differential review
   // leads with what changed, a first encounter leads with what is worth
@@ -1479,18 +1837,22 @@ function InstallReviewDetails({
   // where a notable part goes to be missed.
   const sortedParts = useMemo(
     () =>
-      [...approval.parts].sort((left, right) => compareInstallParts(approval.mode, left, right)),
-    [approval.parts, approval.mode]
+      [...approval.parts].sort((left, right) =>
+        compareInstallParts(approval.mode, left, right),
+      ),
+    [approval.parts, approval.mode],
   );
   // A repair touches units the template does not own (§5.3): it is never mixed
   // into the template's own list and never folded away.
-  const templateParts = sortedParts.filter((part) => part.section === "template");
+  const templateParts = sortedParts.filter(
+    (part) => part.section === "template",
+  );
   const repairParts = sortedParts.filter((part) => part.section === "repair");
   const needle = query.trim().toLowerCase();
   const filtersShown = templateParts.length > SEARCH_THRESHOLD;
   const kinds = useMemo(
     () => [...new Set(templateParts.map((part) => part.label))].sort(),
-    [templateParts]
+    [templateParts],
   );
   const visibleParts = filtersShown
     ? templateParts.filter(
@@ -1498,11 +1860,13 @@ function InstallReviewDetails({
           (kindFilter === "" || part.label === kindFilter) &&
           (needle === "" ||
             part.title.toLowerCase().includes(needle) ||
-            part.purpose.toLowerCase().includes(needle))
+            part.purpose.toLowerCase().includes(needle)),
       )
     : templateParts;
   const groups = groupInstallParts(visibleParts);
-  const anythingNotable = templateParts.some((part) => part.notableRows.length > 0);
+  const anythingNotable = templateParts.some(
+    (part) => part.notableRows.length > 0,
+  );
   const filtering = filtersShown && (needle !== "" || kindFilter !== "");
   const groupIsOpen = (group: InstallPartGroup): boolean => {
     if (filtering) return true;
@@ -1512,12 +1876,15 @@ function InstallReviewDetails({
   };
   const hiddenByFilter = templateParts.length - visibleParts.length;
   const hiddenAllowed = templateParts.filter(
-    (part) => !visibleParts.includes(part) && (selection.get(part.identityKey)?.size ?? 0) > 0
+    (part) =>
+      !visibleParts.includes(part) &&
+      (selection.get(part.identityKey)?.size ?? 0) > 0,
   ).length;
 
   // An upgrade that changes nothing about what any part can do is one line —
   // and the sheet header already carries it.
-  if (approval.parts.length === 0 && approval.unchangedPartCount > 0) return null;
+  if (approval.parts.length === 0 && approval.unchangedPartCount > 0)
+    return null;
 
   return (
     <>
@@ -1563,7 +1930,9 @@ function InstallReviewDetails({
                   style={({ pressed }) => [
                     styles.installReviewKindFilter,
                     {
-                      backgroundColor: selected ? colors.accentSoft : colors.surfaceSunken,
+                      backgroundColor: selected
+                        ? colors.accentSoft
+                        : colors.surfaceSunken,
                       borderColor: selected ? colors.primary : colors.border,
                       opacity: pressed ? pressedOpacity : 1,
                     },
@@ -1573,7 +1942,9 @@ function InstallReviewDetails({
                   <Text
                     style={[
                       styles.installReviewKindFilterText,
-                      { color: selected ? colors.primary : colors.textSecondary },
+                      {
+                        color: selected ? colors.primary : colors.textSecondary,
+                      },
                     ]}
                   >
                     {label}
@@ -1590,13 +1961,19 @@ function InstallReviewDetails({
           return (
             <View
               key={group.key}
-              style={[styles.installReviewGroup, { borderColor: colors.borderSubtle }]}
+              style={[
+                styles.installReviewGroup,
+                { borderColor: colors.borderSubtle },
+              ]}
             >
               <Pressable
                 accessibilityRole="button"
                 accessibilityState={{ disabled: filtering, expanded: open }}
                 accessibilityLabel={`${group.title}. ${installPartGroupCount(group)} parts. ${group.parts
-                  .map((part) => `${part.title}: ${installReviewSummaryFragment(part)}`)
+                  .map(
+                    (part) =>
+                      `${part.title}: ${installReviewSummaryFragment(part)}`,
+                  )
                   .join(". ")}`}
                 disabled={filtering}
                 onPress={() =>
@@ -1616,7 +1993,12 @@ function InstallReviewDetails({
                 testID={`install-review-group-${group.key}`}
               >
                 <View style={styles.installReviewGroupTitleRow}>
-                  <Text style={[styles.installReviewGroupTitle, { color: colors.text }]}>
+                  <Text
+                    style={[
+                      styles.installReviewGroupTitle,
+                      { color: colors.text },
+                    ]}
+                  >
                     {group.title}
                   </Text>
                   <View
@@ -1626,7 +2008,10 @@ function InstallReviewDetails({
                     ]}
                   >
                     <Text
-                      style={[styles.installReviewGroupBadgeText, { color: colors.textSecondary }]}
+                      style={[
+                        styles.installReviewGroupBadgeText,
+                        { color: colors.textSecondary },
+                      ]}
                     >
                       {installPartGroupCount(group)}
                     </Text>
@@ -1647,7 +2032,9 @@ function InstallReviewDetails({
                       mode={approval.mode}
                       selected={selection.get(part.identityKey) ?? new Set()}
                       onTogglePart={(checked) => onTogglePart(part, checked)}
-                      onToggleRow={(rowKey, checked) => onToggleRow(part, rowKey, checked)}
+                      onToggleRow={(rowKey, checked) =>
+                        onToggleRow(part, rowKey, checked)
+                      }
                     />
                   ))}
                 </View>
@@ -1680,7 +2067,9 @@ function InstallReviewDetails({
               mode={approval.mode}
               selected={selection.get(part.identityKey) ?? new Set()}
               onTogglePart={(checked) => onTogglePart(part, checked)}
-              onToggleRow={(rowKey, checked) => onToggleRow(part, rowKey, checked)}
+              onToggleRow={(rowKey, checked) =>
+                onToggleRow(part, rowKey, checked)
+              }
             />
           ))}
         </View>
@@ -1706,7 +2095,8 @@ function InstallReviewPartRow({
   const shellClient = useAtomValue(shellClientAtom);
   const [open, setOpen] = useState(false);
   const clearable = clearableRows(part);
-  const allSelected = clearable.length > 0 && clearable.every((row) => selected.has(row.key));
+  const allSelected =
+    clearable.length > 0 && clearable.every((row) => selected.has(row.key));
   const noneSelected = clearable.every((row) => !selected.has(row.key));
   const copy = HOST_APPROVAL_COPY.installReview;
 
@@ -1746,11 +2136,15 @@ function InstallReviewPartRow({
             {part.title} · {part.label}
           </Text>
           {part.purpose ? (
-            <Text style={[styles.unitReviewChange, { color: colors.textSecondary }]}>
+            <Text
+              style={[styles.unitReviewChange, { color: colors.textSecondary }]}
+            >
               {part.purpose}
             </Text>
           ) : null}
-          <Text style={[styles.unitReviewChange, { color: colors.textSecondary }]}>
+          <Text
+            style={[styles.unitReviewChange, { color: colors.textSecondary }]}
+          >
             {mode === "update" && part.change === "added" ? "New · " : ""}
             {installReviewSummaryLine(part)}
           </Text>
@@ -1764,7 +2158,9 @@ function InstallReviewPartRow({
           onPress={() => onTogglePart(!allSelected)}
           style={styles.detailsSummary}
         >
-          <Text style={[styles.unitReviewChange, { color: colors.textSecondary }]}>
+          <Text
+            style={[styles.unitReviewChange, { color: colors.textSecondary }]}
+          >
             {allSelected
               ? "Allowed now"
               : noneSelected
@@ -1774,7 +2170,11 @@ function InstallReviewPartRow({
         </Pressable>
       ) : null}
       {open ? (
-        <InstallReviewPartDetail part={part} selected={selected} onToggleRow={onToggleRow} />
+        <InstallReviewPartDetail
+          part={part}
+          selected={selected}
+          onToggleRow={onToggleRow}
+        />
       ) : null}
     </View>
   );
@@ -1804,8 +2204,13 @@ function InstallReviewPartDetail({
 
   const notable = part.notableRows;
   const hasCritical = notable.some((row) => row.timing === "asks-every-time");
-  const collapsed = notable.length > NOTABLE_COLLAPSE_THRESHOLD && !showAllNotable && !hasCritical;
-  const shownNotable = collapsed ? notable.slice(0, NOTABLE_COLLAPSE_THRESHOLD) : notable;
+  const collapsed =
+    notable.length > NOTABLE_COLLAPSE_THRESHOLD &&
+    !showAllNotable &&
+    !hasCritical;
+  const shownNotable = collapsed
+    ? notable.slice(0, NOTABLE_COLLAPSE_THRESHOLD)
+    : notable;
 
   return (
     <View style={styles.detailRows}>
@@ -1828,7 +2233,9 @@ function InstallReviewPartDetail({
               onPress={() => setShowAllNotable(true)}
               style={styles.disclosureButton}
             >
-              <Text style={[styles.disclosureButtonText, { color: colors.primary }]}>
+              <Text
+                style={[styles.disclosureButtonText, { color: colors.primary }]}
+              >
                 {copy.sections.showAllNotable(notable.length)}
               </Text>
             </Pressable>
@@ -1840,18 +2247,27 @@ function InstallReviewPartDetail({
           <Pressable
             accessibilityRole="button"
             accessibilityState={{ expanded: showEveryday }}
-            accessibilityLabel={copy.sections.everyday(part.everydayRows.length)}
+            accessibilityLabel={copy.sections.everyday(
+              part.everydayRows.length,
+            )}
             onPress={() => setShowEveryday((open) => !open)}
             style={styles.disclosureButton}
           >
             <ChevronDown size={12} color={colors.primary} />
-            <Text style={[styles.disclosureButtonText, { color: colors.primary }]}>
+            <Text
+              style={[styles.disclosureButtonText, { color: colors.primary }]}
+            >
               {copy.sections.everyday(part.everydayRows.length)}
             </Text>
           </Pressable>
           {showEveryday ? (
             <View style={styles.detailRows}>
-              <Text style={[styles.unitReviewChange, { color: colors.textSecondary }]}>
+              <Text
+                style={[
+                  styles.unitReviewChange,
+                  { color: colors.textSecondary },
+                ]}
+              >
                 {copy.sections.everydayFraming}
               </Text>
               {/* Grouped by domain (§7.2), same as the desktop detail. Nine
@@ -1895,7 +2311,11 @@ function InstallReviewPartDetail({
           words — this row's accessibility label is exactly `originDomainFact`,
           the string the terminal form prints. */}
       {part.origin.registrableDomain && !part.origin.isHostBuild ? (
-        <DetailRow icon={Globe} label="Domain" value={part.origin.registrableDomain} />
+        <DetailRow
+          icon={Globe}
+          label="Domain"
+          value={part.origin.registrableDomain}
+        />
       ) : null}
       {part.originallyInstalledFrom ? (
         <DetailRow
@@ -1920,7 +2340,9 @@ function InstallReviewRowLine({
   const colors = useAtomValue(themeColorsAtom);
   const headline = installRowHeadline(row);
   const detail =
-    row.kind === "behavior" ? INSTALL_BEHAVIOR_COPY[row.fact].detail : row.row.resource;
+    row.kind === "behavior"
+      ? INSTALL_BEHAVIOR_COPY[row.fact].detail
+      : row.row.resource;
   const timing = INSTALL_ROW_TIMING_COPY[row.timing];
 
   // Contextual and critical rows carry no checkbox — this decision cannot grant
@@ -1931,9 +2353,15 @@ function InstallReviewRowLine({
         {row.change === "added" ? "+ " : row.change === "removed" ? "− " : ""}
         {headline}
       </Text>
-      <Text style={[styles.unitReviewChange, { color: colors.textSecondary }]}>{detail}</Text>
+      <Text style={[styles.unitReviewChange, { color: colors.textSecondary }]}>
+        {detail}
+      </Text>
       {timing ? (
-        <Text style={[styles.unitReviewChange, { color: colors.textSecondary }]}>{timing}</Text>
+        <Text
+          style={[styles.unitReviewChange, { color: colors.textSecondary }]}
+        >
+          {timing}
+        </Text>
       ) : null}
     </View>
   );
@@ -1947,7 +2375,9 @@ function InstallReviewRowLine({
       onPress={() => onToggle(!checked)}
       style={styles.detailsSummary}
     >
-      <Text style={[styles.detailsSummaryText, { color: colors.text }]}>{checked ? "☑" : "☐"}</Text>
+      <Text style={[styles.detailsSummaryText, { color: colors.text }]}>
+        {checked ? "☑" : "☐"}
+      </Text>
       {body}
     </Pressable>
   );
@@ -1957,10 +2387,14 @@ const MOBILE_DIFF_CONTEXT_LINES = 3;
 const MOBILE_DIFF_MAX_CHANGED_ROWS = 400;
 const MOBILE_DIFF_MAX_COMPARISON_CELLS = 750_000;
 const MOBILE_DIFF_MAX_DISPLAY_ROWS = 1_600;
-type MobileDiffDisplayRow = DiffRow | { type: "omitted"; count: number; key: string };
+type MobileDiffDisplayRow =
+  | DiffRow
+  | { type: "omitted"; count: number; key: string };
 
 /** Preserve every changed line while folding long unchanged runs. */
-function compactMobileDiffRows(rows: readonly DiffRow[]): MobileDiffDisplayRow[] {
+function compactMobileDiffRows(
+  rows: readonly DiffRow[],
+): MobileDiffDisplayRow[] {
   const keep = new Set<number>();
   rows.forEach((row, index) => {
     if (row.type === "context") return;
@@ -1985,7 +2419,11 @@ function compactMobileDiffRows(rows: readonly DiffRow[]): MobileDiffDisplayRow[]
     }
     const start = index;
     while (index < rows.length && !keep.has(index)) index += 1;
-    result.push({ type: "omitted", count: index - start, key: `${start}:${index}` });
+    result.push({
+      type: "omitted",
+      count: index - start,
+      key: `${start}:${index}`,
+    });
   }
   return result;
 }
@@ -2028,9 +2466,11 @@ function MobileDiffReview({
       if (cached !== undefined) return cached;
       const pending = inFlight.current.get(hash);
       if (pending) return pending;
-      if (!fetchContent) throw new Error("File contents are unavailable on this client.");
+      if (!fetchContent)
+        throw new Error("File contents are unavailable on this client.");
       const request = fetchContent(approvalId, hash).then((text) => {
-        if (text == null) throw new Error("This reviewed file is no longer available.");
+        if (text == null)
+          throw new Error("This reviewed file is no longer available.");
         cache.current.set(hash, text);
         return text;
       });
@@ -2041,7 +2481,7 @@ function MobileDiffReview({
         inFlight.current.delete(hash);
       }
     },
-    [allowedHashes, approvalId, fetchContent]
+    [allowedHashes, approvalId, fetchContent],
   );
   const totals = entries.reduce(
     (sum, entry) => ({
@@ -2049,9 +2489,11 @@ function MobileDiffReview({
       insertions: sum.insertions + (entry.diffStat.insertions ?? 0),
       deletions: sum.deletions + (entry.diffStat.deletions ?? 0),
     }),
-    { files: 0, insertions: 0, deletions: 0 }
+    { files: 0, insertions: 0, deletions: 0 },
   );
-  const hasLineTotals = entries.every((entry) => entry.diffStat.insertions != null);
+  const hasLineTotals = entries.every(
+    (entry) => entry.diffStat.insertions != null,
+  );
   return (
     <View
       style={[styles.mobileDiffReview, { borderColor: colors.border }]}
@@ -2059,9 +2501,14 @@ function MobileDiffReview({
     >
       <View style={styles.mobileDiffReviewHeading}>
         <View style={styles.mobileDiffReviewHeadingCopy}>
-          <Text style={[styles.mobileDiffReviewTitle, { color: colors.text }]}>Review changes</Text>
-          <Text style={[styles.mobileDiffMeta, { color: colors.textSecondary }]}>
-            {totals.files} {totals.files === 1 ? "file" : "files"} · {entries.length}{" "}
+          <Text style={[styles.mobileDiffReviewTitle, { color: colors.text }]}>
+            Review changes
+          </Text>
+          <Text
+            style={[styles.mobileDiffMeta, { color: colors.textSecondary }]}
+          >
+            {totals.files} {totals.files === 1 ? "file" : "files"} ·{" "}
+            {entries.length}{" "}
             {entries.length === 1 ? "repository" : "repositories"}
           </Text>
         </View>
@@ -2074,7 +2521,8 @@ function MobileDiffReview({
         ) : null}
       </View>
       <Text style={[styles.mobileDiffHelp, { color: colors.textSecondary }]}>
-        Open a repository, then a file, to inspect the exact reviewed change before deciding.
+        Open a repository, then a file, to inspect the exact reviewed change
+        before deciding.
       </Text>
       <View style={styles.mobileDiffRepositories}>
         {entries.map((entry, index) => (
@@ -2109,14 +2557,22 @@ function MobileDiffRepository({
       ? ""
       : ` · +${entry.diffStat.insertions} −${entry.diffStat.deletions ?? 0}`;
   return (
-    <View style={[styles.mobileDiffRepository, { borderColor: colors.borderSubtle }]}>
+    <View
+      style={[
+        styles.mobileDiffRepository,
+        { borderColor: colors.borderSubtle },
+      ]}
+    >
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen((value) => !value)}
         style={({ pressed }) => [
           styles.mobileDiffRepositoryHeader,
-          { backgroundColor: colors.surfaceSunken, opacity: pressed ? pressedOpacity : 1 },
+          {
+            backgroundColor: colors.surfaceSunken,
+            opacity: pressed ? pressedOpacity : 1,
+          },
         ]}
         testID={`approval-diff-repo-${entry.repoPath}`}
       >
@@ -2132,8 +2588,11 @@ function MobileDiffRepository({
           >
             {entry.repoPath}
           </Text>
-          <Text style={[styles.mobileDiffMeta, { color: colors.textSecondary }]}>
-            {entry.diffStat.filesChanged} {entry.diffStat.filesChanged === 1 ? "file" : "files"}
+          <Text
+            style={[styles.mobileDiffMeta, { color: colors.textSecondary }]}
+          >
+            {entry.diffStat.filesChanged}{" "}
+            {entry.diffStat.filesChanged === 1 ? "file" : "files"}
             {counts}
             {entry.truncated ? " · list truncated" : ""}
           </Text>
@@ -2151,14 +2610,16 @@ function MobileDiffRepository({
             />
           ))}
           {entry.changedFiles.length === 0 ? (
-            <Text style={[styles.mobileDiffHelp, { color: colors.textSecondary }]}>
+            <Text
+              style={[styles.mobileDiffHelp, { color: colors.textSecondary }]}
+            >
               No file details were included.
             </Text>
           ) : null}
           {entry.truncated ? (
             <Text style={[styles.mobileDiffWarning, { color: colors.warning }]}>
-              More files changed than this inline list can show. Use the full inspector for
-              repository context.
+              More files changed than this inline list can show. Use the full
+              inspector for repository context.
             </Text>
           ) : null}
         </View>
@@ -2194,7 +2655,8 @@ function MobileDiffFile({
     void (async () => {
       try {
         const load = (hash: string | undefined, side: string) => {
-          if (!hash) throw new Error(`The reviewed ${side} content hash is missing.`);
+          if (!hash)
+            throw new Error(`The reviewed ${side} content hash is missing.`);
           return fetchContent(hash);
         };
         let result: LineDiffResult;
@@ -2210,19 +2672,24 @@ function MobileDiffFile({
           const oldLineCount = oldText === "" ? 0 : countLines(oldText);
           const newLineCount = newText === "" ? 0 : countLines(newText);
           if (oldLineCount * newLineCount > MOBILE_DIFF_MAX_COMPARISON_CELLS) {
-            throw new DiffTooLargeError("This file is too large to compare smoothly on a phone.");
+            throw new DiffTooLargeError(
+              "This file is too large to compare smoothly on a phone.",
+            );
           }
           result = diffLines(oldText, newText);
         }
-        if (result.insertions + result.deletions > MOBILE_DIFF_MAX_CHANGED_ROWS) {
+        if (
+          result.insertions + result.deletions >
+          MOBILE_DIFF_MAX_CHANGED_ROWS
+        ) {
           throw new DiffTooLargeError(
-            `This file changes ${result.insertions + result.deletions} lines, which is too much for a useful phone-sized inline diff.`
+            `This file changes ${result.insertions + result.deletions} lines, which is too much for a useful phone-sized inline diff.`,
           );
         }
         const rows = compactMobileDiffRows(result.rows);
         if (rows.length > MOBILE_DIFF_MAX_DISPLAY_ROWS) {
           throw new DiffTooLargeError(
-            "This change is too spread out for a useful phone-sized inline diff."
+            "This change is too spread out for a useful phone-sized inline diff.",
           );
         }
         if (!cancelled) setState({ status: "ready", result, rows });
@@ -2230,7 +2697,10 @@ function MobileDiffFile({
         if (!cancelled)
           setState({
             status: "error",
-            message: error instanceof Error ? error.message : "Could not load this file diff.",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Could not load this file diff.",
           });
       }
     })();
@@ -2253,7 +2723,10 @@ function MobileDiffFile({
     <View style={[styles.mobileDiffFile, { borderColor: colors.borderSubtle }]}>
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ disabled: degraded, expanded: degraded ? undefined : open }}
+        accessibilityState={{
+          disabled: degraded,
+          expanded: degraded ? undefined : open,
+        }}
         disabled={degraded}
         onPress={() => {
           if (open) {
@@ -2271,10 +2744,18 @@ function MobileDiffFile({
         ) : (
           <ChevronRight size={15} color={colors.textSecondary} />
         )}
-        <Text style={[styles.mobileDiffKind, { color: tone[0], backgroundColor: tone[1] }]}>
+        <Text
+          style={[
+            styles.mobileDiffKind,
+            { color: tone[0], backgroundColor: tone[1] },
+          ]}
+        >
           {file.kind}
         </Text>
-        <Text numberOfLines={2} style={[styles.mobileDiffFilePath, { color: colors.text }]}>
+        <Text
+          numberOfLines={2}
+          style={[styles.mobileDiffFilePath, { color: colors.text }]}
+        >
           {file.path}
         </Text>
       </Pressable>
@@ -2291,21 +2772,33 @@ function MobileDiffFile({
           {state.status === "idle" || state.status === "loading" ? (
             <View style={styles.mobileDiffLoading}>
               <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={[styles.mobileDiffHelp, { color: colors.textSecondary }]}>
+              <Text
+                style={[styles.mobileDiffHelp, { color: colors.textSecondary }]}
+              >
                 Loading reviewed content…
               </Text>
             </View>
           ) : state.status === "ready" ? (
             <>
-              <Text style={[styles.mobileDiffMeta, { color: colors.textSecondary }]}>
-                <Text style={{ color: colors.success }}>+{state.result.insertions}</Text>
+              <Text
+                style={[styles.mobileDiffMeta, { color: colors.textSecondary }]}
+              >
+                <Text style={{ color: colors.success }}>
+                  +{state.result.insertions}
+                </Text>
                 {" · "}
-                <Text style={{ color: colors.danger }}>−{state.result.deletions}</Text>
+                <Text style={{ color: colors.danger }}>
+                  −{state.result.deletions}
+                </Text>
                 {" · unchanged context is folded"}
               </Text>
               <MobileDiffRows rows={state.rows} />
               {onOpenFile ? (
-                <MobileOpenDiffFileButton file={file} entry={entry} onOpenFile={onOpenFile} />
+                <MobileOpenDiffFileButton
+                  file={file}
+                  entry={entry}
+                  onOpenFile={onOpenFile}
+                />
               ) : null}
             </>
           ) : state.status === "error" ? (
@@ -2325,11 +2818,23 @@ function MobileDiffFile({
 function MobileDiffRows({ rows }: { rows: readonly MobileDiffDisplayRow[] }) {
   const colors = useAtomValue(themeColorsAtom);
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator style={styles.mobileDiffCodeScroll}>
-      <View style={[styles.mobileDiffCode, { backgroundColor: colors.codeBackground }]}>
+    <ScrollView
+      horizontal
+      showsHorizontalScrollIndicator
+      style={styles.mobileDiffCodeScroll}
+    >
+      <View
+        style={[
+          styles.mobileDiffCode,
+          { backgroundColor: colors.codeBackground },
+        ]}
+      >
         {rows.map((row, index) =>
           row.type === "omitted" ? (
-            <Text key={row.key} style={[styles.mobileDiffOmitted, { color: colors.textTertiary }]}>
+            <Text
+              key={row.key}
+              style={[styles.mobileDiffOmitted, { color: colors.textTertiary }]}
+            >
               ··· {row.count} unchanged {row.count === 1 ? "line" : "lines"} ···
             </Text>
           ) : (
@@ -2347,7 +2852,12 @@ function MobileDiffRows({ rows }: { rows: readonly MobileDiffDisplayRow[] }) {
                 },
               ]}
             >
-              <Text style={[styles.mobileDiffLineNumber, { color: colors.textTertiary }]}>
+              <Text
+                style={[
+                  styles.mobileDiffLineNumber,
+                  { color: colors.textTertiary },
+                ]}
+              >
                 {(row.type === "removed" ? row.oldLineNo : row.newLineNo) ?? ""}
               </Text>
               <Text
@@ -2363,13 +2873,20 @@ function MobileDiffRows({ rows }: { rows: readonly MobileDiffDisplayRow[] }) {
                   },
                 ]}
               >
-                {row.type === "added" ? "+" : row.type === "removed" ? "−" : " "}
+                {row.type === "added"
+                  ? "+"
+                  : row.type === "removed"
+                    ? "−"
+                    : " "}
               </Text>
-              <Text selectable style={[styles.mobileDiffCodeText, { color: colors.text }]}>
+              <Text
+                selectable
+                style={[styles.mobileDiffCodeText, { color: colors.text }]}
+              >
                 {row.text || " "}
               </Text>
             </View>
-          )
+          ),
         )}
       </View>
     </ScrollView>
@@ -2389,10 +2906,21 @@ function MobileDiffFallback({
 }) {
   const colors = useAtomValue(themeColorsAtom);
   return (
-    <View style={[styles.mobileDiffFallback, { backgroundColor: colors.warningSoft }]}>
-      <Text style={[styles.mobileDiffWarning, { color: colors.warning }]}>{message}</Text>
+    <View
+      style={[
+        styles.mobileDiffFallback,
+        { backgroundColor: colors.warningSoft },
+      ]}
+    >
+      <Text style={[styles.mobileDiffWarning, { color: colors.warning }]}>
+        {message}
+      </Text>
       {onOpenFile ? (
-        <MobileOpenDiffFileButton file={file} entry={entry} onOpenFile={onOpenFile} />
+        <MobileOpenDiffFileButton
+          file={file}
+          entry={entry}
+          onOpenFile={onOpenFile}
+        />
       ) : null}
     </View>
   );
@@ -2427,13 +2955,20 @@ function MobileOpenDiffFileButton({
   );
 }
 
-function DeviceCodePanel({ approval }: { approval: PendingDeviceCodeApproval }) {
+function DeviceCodePanel({
+  approval,
+}: {
+  approval: PendingDeviceCodeApproval;
+}) {
   const colors = useAtomValue(themeColorsAtom);
   return (
     <View
       style={[
         styles.issuerPanel,
-        { backgroundColor: colors.surfaceSunken, borderColor: colors.borderSubtle },
+        {
+          backgroundColor: colors.surfaceSunken,
+          borderColor: colors.borderSubtle,
+        },
       ]}
     >
       <Text style={[styles.helperText, { color: colors.textSecondary }]}>
@@ -2442,7 +2977,10 @@ function DeviceCodePanel({ approval }: { approval: PendingDeviceCodeApproval }) 
       <Text
         accessibilityLabel={`Device code ${approval.userCode}`}
         selectable
-        style={[styles.deviceCode, { color: colors.text, backgroundColor: colors.codeBackground }]}
+        style={[
+          styles.deviceCode,
+          { color: colors.text, backgroundColor: colors.codeBackground },
+        ]}
       >
         {approval.userCode}
       </Text>
@@ -2517,7 +3055,11 @@ function DetailRow({
   const colors = useAtomValue(themeColorsAtom);
   const content =
     format === "markdown" ? (
-      <ApprovalMarkdown source={value} tone={danger ? "danger" : "default"} compact />
+      <ApprovalMarkdown
+        source={value}
+        tone={danger ? "danger" : "default"}
+        compact
+      />
     ) : format === "tree" ? (
       <CollapsibleTree value={value} colors={colors} />
     ) : (
@@ -2528,7 +3070,8 @@ function DetailRow({
           code || format === "code" ? styles.codeText : null,
           {
             color: danger ? colors.danger : colors.text,
-            backgroundColor: code || format === "code" ? colors.codeBackground : "transparent",
+            backgroundColor:
+              code || format === "code" ? colors.codeBackground : "transparent",
           },
         ]}
       >
@@ -2550,8 +3093,13 @@ function DetailRow({
     );
   return (
     <View accessibilityLabel={`${label}: ${value}`} style={styles.detailRow}>
-      <RowIcon size={14} color={danger ? colors.danger : colors.textSecondary} />
-      <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>{label}</Text>
+      <RowIcon
+        size={14}
+        color={danger ? colors.danger : colors.textSecondary}
+      />
+      <Text style={[styles.detailLabel, { color: colors.textSecondary }]}>
+        {label}
+      </Text>
       <View style={styles.detailValueColumn}>
         {content}
         {secondary ? (
@@ -2560,7 +3108,10 @@ function DetailRow({
             style={[
               styles.detailValueSecondary,
               styles.codeText,
-              { color: colors.textSecondary, backgroundColor: colors.codeBackground },
+              {
+                color: colors.textSecondary,
+                backgroundColor: colors.codeBackground,
+              },
             ]}
           >
             {secondary}
@@ -2583,15 +3134,29 @@ function CollapsibleTree({
   const summary = lines[0] ?? "";
   const hasBody = lines.length > 1;
   if (!hasBody) {
-    return <Text style={[styles.detailValue, { color: colors.text }]}>{summary}</Text>;
+    return (
+      <Text style={[styles.detailValue, { color: colors.text }]}>
+        {summary}
+      </Text>
+    );
   }
   return (
     <View>
-      <Pressable onPress={() => setOpen((prev) => !prev)} style={{ flexDirection: "row", gap: 4 }}>
-        <Text style={[styles.detailValue, { color: colors.textSecondary, flexShrink: 0 }]}>
+      <Pressable
+        onPress={() => setOpen((prev) => !prev)}
+        style={{ flexDirection: "row", gap: 4 }}
+      >
+        <Text
+          style={[
+            styles.detailValue,
+            { color: colors.textSecondary, flexShrink: 0 },
+          ]}
+        >
           {open ? "▾" : "▸"}
         </Text>
-        <Text style={[styles.detailValue, { color: colors.text }]}>{summary}</Text>
+        <Text style={[styles.detailValue, { color: colors.text }]}>
+          {summary}
+        </Text>
       </Pressable>
       {open ? (
         <Text
@@ -2626,7 +3191,8 @@ function StandardActions({
   onChoose: (decision: ApprovalDecision) => void;
 }) {
   const recommendedDecision = getRecommendedStandardDecision(approval);
-  const isSevereCapability = approval.kind === "capability" && approval.severity === "severe";
+  const isSevereCapability =
+    approval.kind === "capability" && approval.severity === "severe";
   const actions = getStandardApprovalDecisionActions(approval);
   // Task scope is the recommended answer for ordinary gated work. Keep it in
   // the primary row with the narrow one-shot and decline choices; standing
@@ -2635,8 +3201,12 @@ function StandardActions({
     recommendedDecision === "task"
       ? new Set(["once", "task", "deny"])
       : new Set(["once", "version", "deny"]);
-  const primaryActions = actions.filter((action) => primaryDecisionSet.has(action.decision));
-  const secondaryActions = actions.filter((action) => !primaryDecisionSet.has(action.decision));
+  const primaryActions = actions.filter((action) =>
+    primaryDecisionSet.has(action.decision),
+  );
+  const secondaryActions = actions.filter(
+    (action) => !primaryDecisionSet.has(action.decision),
+  );
   return (
     <View style={styles.actionGroups}>
       <View style={styles.actionRow}>
@@ -2702,7 +3272,7 @@ function BrowserPermissionActions({
 }) {
   const copy = HOST_APPROVAL_COPY.actions.browserPermission;
   const actions: Array<{
-    decision: "once" | "session" | "always" | "block";
+    decision: "once" | "session" | "always";
     label: string;
     description: string;
     variant: ButtonVariant;
@@ -2722,28 +3292,36 @@ function BrowserPermissionActions({
       ...copy.always,
       variant: "outline",
     },
-    {
-      decision: "block",
-      ...copy.block,
-      variant: "danger",
-    },
   ];
   return (
     <View style={styles.actionGroups}>
+      {[actions.slice(0, 1), actions.slice(1, 3)].map((row, index) => (
+        <View key={index} style={styles.actionRow}>
+          {row.map((action) => (
+            <DecisionButton
+              key={action.decision}
+              label={action.label}
+              description={action.description}
+              variant={action.variant}
+              disabled={busy}
+              loading={pendingAction === action.decision}
+              onPress={() => onChoose(action.decision)}
+              testID={`approval-action-${action.decision}`}
+            />
+          ))}
+        </View>
+      ))}
       <View style={styles.actionRow}>
-        {actions.map((action) => (
-          <DecisionButton
-            key={action.decision}
-            label={action.label}
-            description={action.description}
-            variant={action.variant}
-            disabled={busy}
-            loading={pendingAction === action.decision}
-            icon={action.decision === "block" ? XCircle : undefined}
-            onPress={() => onChoose(action.decision)}
-            testID={`approval-action-${action.decision}`}
-          />
-        ))}
+        <DecisionButton
+          label={copy.block.label}
+          description={copy.block.description}
+          variant="danger"
+          disabled={busy}
+          loading={pendingAction === "block"}
+          icon={XCircle}
+          onPress={() => onChoose("block")}
+          testID="approval-action-block"
+        />
         <DecisionButton
           label={copy.dismiss.label}
           description={copy.dismiss.description}
@@ -2829,7 +3407,9 @@ function ClientConfigActions(props: {
   onSubmit: () => void;
   onDeny: () => void;
 }) {
-  return <InputApprovalActions {...props} submitAction="submit-client-config" />;
+  return (
+    <InputApprovalActions {...props} submitAction="submit-client-config" />
+  );
 }
 
 function CredentialInputActions(props: {
@@ -2840,7 +3420,9 @@ function CredentialInputActions(props: {
   onSubmit: () => void;
   onDeny: () => void;
 }) {
-  return <InputApprovalActions {...props} submitAction="submit-credential-input" />;
+  return (
+    <InputApprovalActions {...props} submitAction="submit-credential-input" />
+  );
 }
 
 function SecretInputActions(props: {
@@ -2889,7 +3471,7 @@ function InputApprovalActions({
   denyDescription?: string;
 }) {
   const missingRequired = approval.fields.some(
-    (field) => field.required && !values[field.name]?.trim()
+    (field) => field.required && !values[field.name]?.trim(),
   );
   return (
     <View style={styles.actionRow}>
@@ -2957,7 +3539,11 @@ function DecisionButton({
       ) : (
         <ButtonIcon size={16} color={style.text.color} />
       )}
-      <Text numberOfLines={2} adjustsFontSizeToFit style={[styles.decisionText, style.text]}>
+      <Text
+        numberOfLines={2}
+        adjustsFontSizeToFit
+        style={[styles.decisionText, style.text]}
+      >
         {label}
       </Text>
     </Pressable>
@@ -2972,7 +3558,7 @@ function buttonStyle(
     primary: string;
     text: string;
   },
-  variant: ButtonVariant
+  variant: ButtonVariant,
 ) {
   if (variant === "primary") {
     return {
@@ -3210,14 +3796,22 @@ const styles = StyleSheet.create({
   },
   markdownInlineCode: {
     borderRadius: radius.sm / 2,
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
     fontSize: 12,
     paddingHorizontal: spacing.xs,
     paddingVertical: 1,
   },
   markdownCodeBlock: {
     borderRadius: radius.sm,
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
     fontSize: 12,
     lineHeight: 17,
     paddingHorizontal: spacing.sm,
@@ -3337,7 +3931,11 @@ const styles = StyleSheet.create({
   mobileDiffMeta: { ...typeRamp.micro, fontWeight: "500" },
   mobileDiffHelp: { ...typeRamp.caption },
   mobileDiffRepositories: { gap: spacing.sm },
-  mobileDiffRepository: { borderRadius: radius.sm, borderWidth: hairline, overflow: "hidden" },
+  mobileDiffRepository: {
+    borderRadius: radius.sm,
+    borderWidth: hairline,
+    overflow: "hidden",
+  },
   mobileDiffRepositoryHeader: {
     alignItems: "center",
     flexDirection: "row",
@@ -3348,7 +3946,11 @@ const styles = StyleSheet.create({
   mobileDiffRepositoryCopy: { flex: 1, gap: 2 },
   mobileDiffRepositoryTitle: { ...typeRamp.caption, fontWeight: "600" },
   mobileDiffFiles: { gap: spacing.sm, padding: spacing.sm },
-  mobileDiffFile: { borderRadius: radius.sm, borderWidth: hairline, overflow: "hidden" },
+  mobileDiffFile: {
+    borderRadius: radius.sm,
+    borderWidth: hairline,
+    overflow: "hidden",
+  },
   mobileDiffFileHeader: {
     alignItems: "center",
     flexDirection: "row",
@@ -3366,26 +3968,42 @@ const styles = StyleSheet.create({
   },
   mobileDiffFilePath: { ...typeRamp.caption, flex: 1, fontWeight: "600" },
   mobileDiffFileBody: { gap: spacing.sm, padding: spacing.sm, paddingTop: 0 },
-  mobileDiffLoading: { alignItems: "center", flexDirection: "row", gap: spacing.sm },
+  mobileDiffLoading: {
+    alignItems: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
   mobileDiffCodeScroll: { borderRadius: radius.sm, maxHeight: 420 },
   mobileDiffCode: { minWidth: 640, paddingVertical: spacing.xs },
   mobileDiffCodeRow: { flexDirection: "row", minHeight: 20 },
   mobileDiffLineNumber: {
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
     fontSize: 11,
     paddingRight: spacing.xs,
     textAlign: "right",
     width: 42,
   },
   mobileDiffMarker: {
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
     fontSize: 12,
     fontWeight: "700",
     textAlign: "center",
     width: 20,
   },
   mobileDiffCodeText: {
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
     fontSize: 11,
     lineHeight: 20,
     paddingRight: spacing.md,
@@ -3490,12 +4108,20 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.xs,
   },
   codeText: {
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
     paddingHorizontal: spacing.xs + 2,
     paddingVertical: 2,
   },
   deviceCode: {
-    fontFamily: Platform.select({ ios: "Menlo", android: "monospace", default: "monospace" }),
+    fontFamily: Platform.select({
+      ios: "Menlo",
+      android: "monospace",
+      default: "monospace",
+    }),
     fontSize: 28,
     fontWeight: "700",
     letterSpacing: 4,

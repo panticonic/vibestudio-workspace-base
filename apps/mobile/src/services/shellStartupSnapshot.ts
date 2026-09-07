@@ -2,13 +2,14 @@ import type { PanelTreeCacheSnapshot } from "@vibestudio/shell-core/panelTreeCac
 import type { Panel } from "@vibestudio/shared/types";
 import { getNativeAppStorage, type NativeAppStorage } from "./nativeAppStorage";
 
-const SNAPSHOT_SCHEMA_VERSION = 2;
+const SNAPSHOT_SCHEMA_VERSION = 3;
 const MAX_SNAPSHOT_BYTES = 2 * 1024 * 1024;
-const KEY_PREFIX = "@vibestudio/mobile-shell-startup/v2";
+const KEY_PREFIX = "@vibestudio/mobile-shell-startup/v3";
 
 export interface MobileShellStartupSnapshot {
   schemaVersion: typeof SNAPSHOT_SCHEMA_VERSION;
   serverEndpointId: string;
+  deviceId: string;
   workspaceIdentity: string;
   capturedAt: number;
   preferredPanelId: string | null;
@@ -16,16 +17,21 @@ export interface MobileShellStartupSnapshot {
   rootPanels: Panel[];
 }
 
-function key(serverEndpointId: string, workspaceIdentity: string): string {
-  return `${KEY_PREFIX}/${serverEndpointId.toLowerCase()}/${encodeURIComponent(workspaceIdentity)}`;
+function key(
+  serverEndpointId: string,
+  workspaceIdentity: string,
+  deviceId: string,
+): string {
+  return `${KEY_PREFIX}/${serverEndpointId.toLowerCase()}/${encodeURIComponent(deviceId)}/${encodeURIComponent(workspaceIdentity)}`;
 }
 
 export async function loadMobileShellStartupSnapshot(
   serverEndpointId: string,
   workspaceIdentity: string,
+  deviceId: string,
   storage: NativeAppStorage = getNativeAppStorage(),
 ): Promise<MobileShellStartupSnapshot | null> {
-  const storageKey = key(serverEndpointId, workspaceIdentity);
+  const storageKey = key(serverEndpointId, workspaceIdentity, deviceId);
   const raw = await storage.getItem(storageKey);
   if (!raw) return null;
   if (raw.length > MAX_SNAPSHOT_BYTES) {
@@ -39,6 +45,7 @@ export async function loadMobileShellStartupSnapshot(
       parsed.serverEndpointId?.toLowerCase() !==
         serverEndpointId.toLowerCase() ||
       parsed.workspaceIdentity !== workspaceIdentity ||
+      parsed.deviceId !== deviceId ||
       !Number.isSafeInteger(parsed.capturedAt) ||
       !parsed.tree ||
       !Array.isArray(parsed.rootPanels) ||
@@ -61,7 +68,11 @@ export async function saveMobileShellStartupSnapshot(
   const raw = JSON.stringify(snapshot);
   if (raw.length > MAX_SNAPSHOT_BYTES) return false;
   await storage.setItem(
-    key(snapshot.serverEndpointId, snapshot.workspaceIdentity),
+    key(
+      snapshot.serverEndpointId,
+      snapshot.workspaceIdentity,
+      snapshot.deviceId,
+    ),
     raw,
   );
   return true;
@@ -70,7 +81,8 @@ export async function saveMobileShellStartupSnapshot(
 export async function clearMobileShellStartupSnapshot(
   serverEndpointId: string,
   workspaceIdentity: string,
+  deviceId: string,
   storage: NativeAppStorage = getNativeAppStorage(),
 ): Promise<void> {
-  await storage.removeItem(key(serverEndpointId, workspaceIdentity));
+  await storage.removeItem(key(serverEndpointId, workspaceIdentity, deviceId));
 }

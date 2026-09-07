@@ -2,8 +2,11 @@ import { createLocalPanelViewStateStore } from "@vibestudio/shell-core/localView
 import type { LocalPanelViewStateStore } from "@vibestudio/shell-core/panelManager";
 import { getNativeAppStorage } from "../services/nativeAppStorage";
 
-export function createMobileLocalViewStateStore(workspaceId: string): LocalPanelViewStateStore {
-  const key = `vibestudio:workspace:${workspaceId}:local-view-state`;
+export function createMobileLocalViewStateStore(
+  accountScope: string,
+  workspaceId: string,
+): LocalPanelViewStateStore {
+  const key = `vibestudio:account:${accountScope}:workspace:${workspaceId}:local-view-state`;
   return createLocalPanelViewStateStore({
     async read() {
       return getNativeAppStorage().getItem(key);

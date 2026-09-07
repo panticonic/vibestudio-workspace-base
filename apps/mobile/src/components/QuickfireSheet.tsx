@@ -1,3 +1,4 @@
+import { useWorkspaceVisible } from "../state/workspaceScope";
 /**
  * QuickfireSheet — the panel-scoped agent conversation on mobile
  * (quickfire-overlay-spec §7.2, structure mirroring §4.3).
@@ -99,6 +100,7 @@ export function QuickfireSheet({
   openChatPanel,
   openLink,
 }: QuickfireSheetProps) {
+  const workspaceVisible = useWorkspaceVisible();
   const request = useAtomValue(quickfireSheetAtom);
   const dismiss = useSetAtom(dismissQuickfireSheetAtom);
   const returnToCommands = useSetAtom(returnToCommandSheetAtom);
@@ -133,7 +135,7 @@ export function QuickfireSheet({
       (request.conversation.replyTo?.handle
         ? `@${request.conversation.replyTo.handle}`
         : request.conversation.channelId))
-    : panelTitle;
+    : (request?.panelTitle ?? panelTitle);
 
   const [draft, setDraft] = useState("");
   const scrollRef = useRef<ScrollView | null>(null);
@@ -332,7 +334,7 @@ export function QuickfireSheet({
         ? {}
         : {
             suggestions: suggestedOpeners({
-              title: panelTitle,
+              title: headerTitle,
               kind: "workspace",
             }),
           }),
@@ -391,7 +393,7 @@ export function QuickfireSheet({
   return (
     <Modal
       transparent
-      visible
+      visible={workspaceVisible}
       statusBarTranslucent
       animationType="none"
       presentationStyle="overFullScreen"

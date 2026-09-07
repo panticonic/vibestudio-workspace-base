@@ -21,7 +21,10 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAtomValue, useSetAtom } from "jotai";
-import { actionSheetAtom, dismissActionSheetAtom } from "../../state/actionSheetAtoms";
+import {
+  actionSheetAtom,
+  dismissActionSheetAtom,
+} from "../../state/actionSheetAtoms";
 import { themeColorsAtom } from "../../state/themeAtoms";
 import { radius, shadow, spacing, type } from "../../design/tokens";
 import { Check } from "../../design/icons";
@@ -68,9 +71,11 @@ export function ActionSheetHost() {
           duration: 180,
           useNativeDriver: true,
         }),
-      ]).start(() => onDone());
+      ]).start(({ finished }) => {
+        if (finished) onDone();
+      });
     },
-    [backdropOpacity, translateY]
+    [backdropOpacity, translateY],
   );
 
   useEffect(() => {
@@ -89,7 +94,7 @@ export function ActionSheetHost() {
         onSelect?.(id);
       });
     },
-    [animateOut, config, dismiss]
+    [animateOut, config, dismiss],
   );
 
   const panResponder = useRef(
@@ -110,18 +115,31 @@ export function ActionSheetHost() {
           }).start();
         }
       },
-    })
+    }),
   ).current;
 
   if (!config) return null;
 
   return (
-    <Modal transparent visible statusBarTranslucent animationType="none" onRequestClose={close}>
+    <Modal
+      transparent
+      visible
+      statusBarTranslucent
+      animationType="none"
+      onRequestClose={close}
+    >
       <View style={styles.root}>
         <Animated.View
-          style={[styles.backdrop, { backgroundColor: colors.overlay, opacity: backdropOpacity }]}
+          style={[
+            styles.backdrop,
+            { backgroundColor: colors.overlay, opacity: backdropOpacity },
+          ]}
         >
-          <Pressable style={StyleSheet.absoluteFill} onPress={close} accessibilityLabel="Dismiss" />
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={close}
+            accessibilityLabel="Dismiss"
+          />
         </Animated.View>
         <Animated.View
           style={[
@@ -136,15 +154,24 @@ export function ActionSheetHost() {
           ]}
         >
           <View {...panResponder.panHandlers} style={styles.grabArea}>
-            <View style={[styles.grabber, { backgroundColor: colors.border }]} />
+            <View
+              style={[styles.grabber, { backgroundColor: colors.border }]}
+            />
             {config.title ? (
-              <Text style={[type.heading, styles.title, { color: colors.text }]} numberOfLines={1}>
+              <Text
+                style={[type.heading, styles.title, { color: colors.text }]}
+                numberOfLines={1}
+              >
                 {config.title}
               </Text>
             ) : null}
             {config.subtitle ? (
               <Text
-                style={[type.caption, styles.subtitle, { color: colors.textSecondary }]}
+                style={[
+                  type.caption,
+                  styles.subtitle,
+                  { color: colors.textSecondary },
+                ]}
                 numberOfLines={1}
                 ellipsizeMode="middle"
               >
@@ -179,12 +206,17 @@ export function ActionSheetHost() {
                     <View style={styles.rowIcon}>
                       <Icon
                         size={19}
-                        color={tone === "default" ? colors.textSecondary : labelColor}
+                        color={
+                          tone === "default" ? colors.textSecondary : labelColor
+                        }
                       />
                     </View>
                   ) : null}
                   <View style={styles.rowCopy}>
-                    <Text style={[type.bodyStrong, { color: labelColor }]} numberOfLines={1}>
+                    <Text
+                      style={[type.bodyStrong, { color: labelColor }]}
+                      numberOfLines={1}
+                    >
                       {item.label}
                     </Text>
                     {item.description ? (
@@ -196,7 +228,9 @@ export function ActionSheetHost() {
                       </Text>
                     ) : null}
                   </View>
-                  {item.selected ? <Check size={18} color={colors.primary} /> : null}
+                  {item.selected ? (
+                    <Check size={18} color={colors.primary} />
+                  ) : null}
                 </Pressable>
               );
             })}
@@ -213,7 +247,9 @@ export function ActionSheetHost() {
               },
             ]}
           >
-            <Text style={[type.bodyStrong, { color: colors.textSecondary }]}>Cancel</Text>
+            <Text style={[type.bodyStrong, { color: colors.textSecondary }]}>
+              Cancel
+            </Text>
           </Pressable>
         </Animated.View>
       </View>

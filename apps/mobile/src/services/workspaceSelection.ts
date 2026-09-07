@@ -1,109 +1,35 @@
-import {
-  selectMobileConnectionWorkspace,
-  createRoutedMobileConnection,
-  loadShellCredential,
-  persistStoredMobileConnection,
-  type MobileHubWorkspace,
-  type MobileHubWorkspaceRoute,
-  type StoredMobileConnection,
-} from "@vibestudio/mobile-iroh";
-import { resetToNativeBootstrap } from "./auth";
+import type { MobileHubWorkspace } from "@vibestudio/mobile-iroh";
+import type { MobileWorkspaceDirectory } from "./workspaceDirectory";
 
 export interface MobileWorkspaceSelectionDependencies {
-  control: {
-    listWorkspaces(): Promise<MobileHubWorkspace[]>;
-    routeWorkspace(input: {
-      workspaceId: string;
-    }): Promise<MobileHubWorkspaceRoute>;
-  };
-  loadCredential(): ReturnType<typeof loadShellCredential>;
-  persistCredential(stored: StoredMobileConnection): Promise<void>;
-  reloadBootstrap(): Promise<{ reloading: boolean }>;
+  listWorkspaces(): Promise<MobileHubWorkspace[]>;
+  activateWorkspace(workspaceId: string): Promise<void>;
 }
 
 export function mobileWorkspaceSelectionDependencies(
-  control: MobileWorkspaceSelectionDependencies["control"],
+  directory: MobileWorkspaceDirectory,
 ): MobileWorkspaceSelectionDependencies {
   return {
-    control,
-    loadCredential: loadShellCredential,
-    persistCredential: persistStoredMobileConnection,
-    reloadBootstrap: resetToNativeBootstrap,
+    listWorkspaces: async () => {
+      await directory.refresh();
+      return directory.entries;
+    },
+    activateWorkspace: (workspaceId) => directory.activate(workspaceId),
   };
 }
 
-function missingCredentialError(): Error {
-  return new Error(
-    "No current mobile device credential is stored. Pair this device again.",
-  );
-}
-
-/** List account-visible workspaces through the already-retained hub session. */
 export async function listMobileWorkspaces(
   dependencies: MobileWorkspaceSelectionDependencies,
 ): Promise<MobileHubWorkspace[]> {
-  return dependencies.control.listWorkspaces();
+  return dependencies.listWorkspaces();
 }
 
-/**
- * Select a workspace without touching the live workspace session until the
- * handoff is committed. The new exact reach is in Keychain before native bundle
- * reset/reload starts. If reset fails, the prior workspace reach is restored and
- * the existing ShellClient remains active.
- */
+/** Switching changes visible content; the account and existing sessions stay put. */
 export async function selectMobileWorkspace(
   workspaceId: string,
   dependencies: MobileWorkspaceSelectionDependencies,
-): Promise<MobileHubWorkspaceRoute> {
-  if (!workspaceId.trim() || workspaceId !== workspaceId.trim()) {
+): Promise<void> {
+  if (!workspaceId.trim() || workspaceId !== workspaceId.trim())
     throw new Error("Choose a valid workspace.");
-  }
-  const initialStored = await dependencies.loadCredential();
-  if (!initialStored) throw missingCredentialError();
-  if (initialStored.phase !== "routed") {
-    throw new Error(
-      "Finish preparing the selected workspace before switching workspaces.",
-    );
-  }
-
-  const baseline = initialStored;
-  let selectionWriteAttempted = false;
-  try {
-    // Switching keeps this device's existing pairing; only the target
-    // workspace changes, so nobody has to rescan a pairing code.
-    const paired = selectMobileConnectionWorkspace(baseline, workspaceId);
-    selectionWriteAttempted = true;
-    await dependencies.persistCredential(paired);
-    const route = await dependencies.control.routeWorkspace({ workspaceId });
-    if (route.workspaceId !== workspaceId) {
-      throw new Error(
-        "The server routed a different workspace than the one selected.",
-      );
-    }
-    const selected = createRoutedMobileConnection(paired, route.workspaceReach);
-    await dependencies.persistCredential(selected);
-
-    const reset = await dependencies.reloadBootstrap();
-    if (reset.reloading !== true) {
-      throw new Error("The native host did not start the workspace reload.");
-    }
-    return route;
-  } catch (error) {
-    if (selectionWriteAttempted) {
-      try {
-        await dependencies.persistCredential(baseline);
-      } catch (rollbackError) {
-        const selectionMessage =
-          error instanceof Error ? error.message : String(error);
-        const rollbackMessage =
-          rollbackError instanceof Error
-            ? rollbackError.message
-            : String(rollbackError);
-        throw new Error(
-          `Workspace selection failed (${selectionMessage}) and the previous secure credential could not be restored (${rollbackMessage}).`,
-        );
-      }
-    }
-    throw error;
-  }
+  await dependencies.activateWorkspace(workspaceId);
 }

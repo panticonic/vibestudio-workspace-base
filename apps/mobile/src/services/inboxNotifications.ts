@@ -1,3 +1,4 @@
+import { workspaceNotificationKey } from "@vibestudio/shared/workspacePushScope";
 /**
  * Pushed inbox entries on the phone (messaging plan §4.5 step 5, §4.10.9).
  *
@@ -9,7 +10,9 @@ import type { PushUserInboxDataPayload } from "@vibestudio/shared/userNotificati
 import { INBOX_NOTIFICATION_CHANNEL_ID } from "./notificationCategories";
 
 interface InboxNotifee {
-  displayNotification: (notification: Record<string, unknown>) => Promise<unknown>;
+  displayNotification: (
+    notification: Record<string, unknown>,
+  ) => Promise<unknown>;
 }
 
 interface InboxRemoteMessage {
@@ -24,10 +27,10 @@ interface InboxRemoteMessage {
 export async function displayInboxNotification(
   data: PushUserInboxDataPayload,
   message: InboxRemoteMessage,
-  notifee: InboxNotifee
+  notifee: InboxNotifee,
 ): Promise<void> {
   await notifee.displayNotification({
-    id: data.notificationId,
+    id: workspaceNotificationKey(data, data.notificationId),
     title: data.title || message.notification?.title || "New message",
     body: data.body ?? message.notification?.body ?? "",
     data: { ...data },
@@ -39,4 +42,3 @@ export async function displayInboxNotification(
     ios: {},
   });
 }
-

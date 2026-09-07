@@ -1,3 +1,7 @@
+import { WorkspaceTransferSheet } from "./WorkspaceTransferSheet";
+import { WorkspaceCookiesCard } from "./WorkspaceCookiesCard";
+import { workspaceName as displayWorkspaceName } from "../services/workspaceName";
+import { workspaceDirectoryAtom } from "../state/workspaceDirectoryAtom";
 import React from "react";
 import {
   View,
@@ -61,6 +65,7 @@ import {
   IconButton,
 } from "./ui/primitives";
 import { ConnectionBar } from "./ConnectionBar";
+import { WorkspaceConnectionsSection } from "./WorkspaceConnectionsSection";
 import { MobileAccountProfileSection } from "./MobileAccountProfileSection";
 
 type SettingsScreenNavigationProp = StackNavigationProp<
@@ -70,6 +75,7 @@ type SettingsScreenNavigationProp = StackNavigationProp<
 
 interface SettingsScreenProps {
   navigation: SettingsScreenNavigationProp;
+  route?: { params?: { workspaceId?: string; panelId?: string } };
 }
 
 const APPEARANCE_OPTIONS: {
@@ -82,7 +88,12 @@ const APPEARANCE_OPTIONS: {
   { value: "dark", label: "Dark", icon: Moon },
 ];
 
-export function SettingsScreen({ navigation }: SettingsScreenProps) {
+export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
+  const directory = useAtomValue(workspaceDirectoryAtom);
+  const [showFileCopy, setShowFileCopy] = React.useState(false);
+  const [managedWorkspaceId] = React.useState(
+    route?.params?.workspaceId ?? directory?.activeWorkspaceId ?? undefined,
+  );
   const shellClient = useAtomValue(shellClientAtom);
   const setShellClient = useSetAtom(shellClientAtom);
   const connectionStatus = useAtomValue(connectionStatusAtom);
@@ -110,11 +121,8 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
   const [now, setNow] = React.useState(Date.now());
   const mountedRef = React.useRef(true);
   const workspaceSelection = React.useMemo(
-    () =>
-      shellClient
-        ? mobileWorkspaceSelectionDependencies(shellClient.hubControl)
-        : null,
-    [shellClient],
+    () => (directory ? mobileWorkspaceSelectionDependencies(directory) : null),
+    [directory],
   );
 
   React.useEffect(() => {
@@ -158,7 +166,7 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
   const handleWorkspaceSelection = React.useCallback(
     async (workspace: MobileHubWorkspace) => {
       if (
-        workspace.workspaceId === shellClient?.workspaceId ||
+        workspace.workspaceId === directory?.activeWorkspaceId ||
         switchingWorkspace
       )
         return;
@@ -168,8 +176,8 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
         if (!workspaceSelection)
           throw new Error("The mobile session is not connected.");
         await selectMobileWorkspace(workspace.workspaceId, workspaceSelection);
-        // Success schedules a native reload. Keep the pending state visible until
-        // React Native tears this workspace tree down.
+        setSwitchingWorkspace(null);
+        navigation.goBack();
       } catch (error) {
         if (mountedRef.current) {
           setWorkspaceError(
@@ -181,7 +189,12 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
         }
       }
     },
-    [shellClient?.workspaceId, switchingWorkspace, workspaceSelection],
+    [
+      directory?.activeWorkspaceId,
+      switchingWorkspace,
+      workspaceSelection,
+      navigation,
+    ],
   );
 
   const performDisconnect = async () => {
@@ -229,6 +242,7 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
 
     // Keychain is clear and native reload is committed; now release the old
     // workspace resources. Failure paths above intentionally leave them live.
+    await directory?.dispose();
     shellClient?.dispose();
     setShellClient(null);
     setPanelTreeRevision(0);
@@ -347,6 +361,12 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
         </View>
 
         <MobileAccountProfileSection client={shellClient} />
+        {directory && (
+          <WorkspaceConnectionsSection
+            directory={directory}
+            initialWorkspaceId={managedWorkspaceId}
+          />
+        )}
 
         <SectionHeader label="Connection" />
         <Card>
@@ -466,6 +486,44 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
           )}
         </Card>
 
+        {directory &&
+          managedWorkspaceId &&
+          directory.entries.some(
+            (entry) => entry.workspaceId === managedWorkspaceId,
+          ) && (
+            <WorkspaceCookiesCard
+              workspaceName={displayWorkspaceName(
+                directory.entries.find(
+                  (entry) => entry.workspaceId === managedWorkspaceId,
+                )!,
+              )}
+              onClear={() => directory.clearBrowserCookies(managedWorkspaceId)}
+            />
+          )}
+
+        {directory && managedWorkspaceId && (
+          <Card>
+            <Text style={[type.heading, { color: colors.text }]}>
+              Copy between workspaces
+            </Text>
+            <Text style={[type.caption, { color: colors.textSecondary }]}>
+              Choose exact files, review who can see them, then copy into a
+              separate review branch.
+            </Text>
+            <Button
+              label="Copy selected files"
+              onPress={() => setShowFileCopy(true)}
+            />
+          </Card>
+        )}
+        {directory && managedWorkspaceId && showFileCopy && (
+          <WorkspaceTransferSheet
+            directory={directory}
+            initialWorkspaceId={managedWorkspaceId}
+            onClose={() => setShowFileCopy(false)}
+          />
+        )}
+
         <SectionHeader label="Appearance" />
         <Card>
           <Text
@@ -552,8 +610,8 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
               { color: colors.textSecondary },
             ]}
           >
-            Choose where this device opens. Switching reloads the approved
-            mobile app for that workspace.
+            Each workspace keeps its own panels and conversations. Switching
+            brings you back to where you left off.
           </Text>
 
           {workspacesLoading ? (
@@ -584,7 +642,8 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
           ) : null}
 
           {workspaces.map((workspace) => {
-            const current = workspace.workspaceId === shellClient?.workspaceId;
+            const current =
+              workspace.workspaceId === directory?.activeWorkspaceId;
             const switching = switchingWorkspace === workspace.name;
             const disabled =
               current || switchingWorkspace !== null || workspacesLoading;
@@ -593,7 +652,7 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
                 key={workspace.workspaceId}
                 testID={`workspace-option-${workspace.workspaceId}`}
                 accessibilityRole="button"
-                accessibilityLabel={`${workspace.name}${current ? ", current workspace" : ""}`}
+                accessibilityLabel={`${displayWorkspaceName(workspace)}${current ? ", current workspace" : ""}`}
                 accessibilityState={{
                   disabled,
                   selected: current,
@@ -617,7 +676,7 @@ export function SettingsScreen({ navigation }: SettingsScreenProps) {
               >
                 <View style={styles.workspaceCopy}>
                   <Text style={[type.bodyStrong, { color: colors.text }]}>
-                    {workspace.name}
+                    {displayWorkspaceName(workspace)}
                   </Text>
                   <Text
                     style={[

@@ -2,63 +2,71 @@ import {
   BACKGROUND_ACTION_QUEUE_TTL_MS,
   clearAction,
   enqueueAction,
-  enqueueDeepLink,
   loadDeepLink,
   loadPendingActions,
   serializeDeepLink,
   serializePendingActions,
 } from "./backgroundActionQueueCore";
+const scope = {
+  serverId: "srv_aaaaaaaaaaaaaaaaaaaaaaaa",
+  workspaceId: "project",
+  userId: "alice",
+};
+const target = { ...scope, approvalId: "approval-1" };
 
-describe("backgroundActionQueueCore", () => {
-  it("enqueues, loads, and clears pending actions", () => {
-    const now = 1_000;
-    const queued = enqueueAction(
-      [],
-      {
-        approvalId: "approval-1",
-        decision: "deny",
-        queuedAt: now,
-      },
-      now
-    );
-
-    expect(loadPendingActions(serializePendingActions(queued), now)).toEqual([
-      { approvalId: "approval-1", decision: "deny", queuedAt: now },
+describe("workspace-scoped background approval actions", () => {
+  it("persists the captured workspace and account and clears only that target", () => {
+    const action = { ...target, decision: "deny" as const, queuedAt: 1000 };
+    const queued = enqueueAction([], action, 1000);
+    expect(loadPendingActions(serializePendingActions(queued), 1000)).toEqual([
+      action,
     ]);
-    expect(clearAction(queued, "approval-1")).toEqual([]);
+    expect(clearAction(queued, { ...target, workspaceId: "other" })).toEqual([
+      action,
+    ]);
+    expect(clearAction(queued, target)).toEqual([]);
   });
-
-  it("replaces duplicate approval actions with the latest decision", () => {
+  it("keeps colliding approval ids in different workspaces and accounts independent", () => {
+    const original = { ...target, decision: "once" as const, queuedAt: 1 };
+    const other = {
+      ...original,
+      workspaceId: "other",
+      decision: "deny" as const,
+    };
     const queued = enqueueAction(
-      [{ approvalId: "approval-1", decision: "once", queuedAt: 1 }],
-      {
-        approvalId: "approval-1",
-        decision: "version",
-        queuedAt: 2,
-      },
-      2
+      enqueueAction([original], other, 2),
+      { ...original, decision: "version", queuedAt: 3 },
+      3,
     );
-
-    expect(queued).toEqual([{ approvalId: "approval-1", decision: "version", queuedAt: 2 }]);
+    expect(queued).toEqual([
+      other,
+      { ...original, decision: "version", queuedAt: 3 },
+    ]);
   });
-
-  it("drops stale actions older than 24 hours", () => {
+  it("does not guess the destination of legacy unscoped actions or links", () => {
+    expect(
+      loadPendingActions(
+        JSON.stringify({
+          version: 1,
+          actions: [
+            { approvalId: "approval-1", decision: "deny", queuedAt: 1 },
+          ],
+        }),
+        2,
+      ),
+    ).toEqual([]);
+    expect(
+      loadDeepLink(JSON.stringify({ approvalId: "approval-1" })),
+    ).toBeNull();
+  });
+  it("drops expired decisions and keeps the explicit deep-link target", () => {
     const now = BACKGROUND_ACTION_QUEUE_TTL_MS + 10;
-    const loaded = loadPendingActions(
-      serializePendingActions([
-        { approvalId: "stale", decision: "deny", queuedAt: 0 },
-        { approvalId: "fresh", decision: "session", queuedAt: now },
-      ]),
-      now
-    );
-
-    expect(loaded).toEqual([{ approvalId: "fresh", decision: "session", queuedAt: now }]);
-  });
-
-  it("keeps only the latest deep link approval id", () => {
-    const first = enqueueDeepLink(null, "approval-1");
-    const second = enqueueDeepLink(first, "approval-2");
-
-    expect(loadDeepLink(serializeDeepLink(second))).toBe("approval-2");
+    expect(
+      loadPendingActions(
+        serializePendingActions([{ ...target, decision: "deny", queuedAt: 0 }]),
+        now,
+      ),
+    ).toEqual([]);
+    expect(loadDeepLink(serializeDeepLink(target))).toEqual(target);
   });
 });
