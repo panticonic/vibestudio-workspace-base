@@ -346,19 +346,19 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
     >
       <ConnectionBar onRepair={handleDisconnect} />
 
+      <View style={styles.headerRow}>
+        <IconButton icon={ArrowLeft} label="Back" onPress={handleBack} />
+        <Text style={[type.title, styles.title, { color: colors.text }]}>
+          Settings
+        </Text>
+        <View style={styles.headerSpacer} />
+      </View>
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.content}
         automaticallyAdjustKeyboardInsets
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.headerRow}>
-          <IconButton icon={ArrowLeft} label="Back" onPress={handleBack} />
-          <Text style={[type.title, styles.title, { color: colors.text }]}>
-            Settings
-          </Text>
-          <View style={styles.headerSpacer} />
-        </View>
 
         <MobileAccountProfileSection client={shellClient} />
         {directory && (
@@ -751,7 +751,9 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: spacing.lg,
+    paddingHorizontal: spacing.xl,
+    paddingTop: spacing.xl,
+    paddingBottom: spacing.sm,
   },
   headerSpacer: {
     width: touchTarget - 4,
