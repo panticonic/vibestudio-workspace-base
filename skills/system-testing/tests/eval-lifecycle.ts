@@ -1,4 +1,5 @@
 import type { TestCase, TestExecutionResult, TestOrchestrationContext } from "../types.js";
+import { systemTestFailure, type SystemTestFailure } from "../structured-error.js";
 import { getToolCalls } from "./_helpers.js";
 import {
   completedScenarioEvidence,
@@ -66,6 +67,7 @@ async function orchestrateDbPersistence(
   const startedAt = Date.now();
   const session = await context.runner.spawn();
   let error: string | undefined;
+  let failure: SystemTestFailure | undefined;
   try {
     await context.sendAndWait(
       session,
@@ -78,18 +80,21 @@ async function orchestrateDbPersistence(
       "read eval database row"
     );
   } catch (cause) {
-    error = formatError(cause);
+    failure = systemTestFailure("eval-db-persistence", cause);
+    error = failure.error.message;
   }
   const execution: TestExecutionResult = {
     messages: [...session.messages],
     duration: Date.now() - startedAt,
     snapshot: session.snapshot(),
     ...(error ? { error } : {}),
+    ...(failure ? { failure } : {}),
   };
   try {
     await session.close();
   } catch (cause) {
     execution.cleanupErrors = [`close: ${formatError(cause)}`];
+    execution.cleanupFailures = [systemTestFailure("eval-db-persistence-close", cause)];
   }
   return execution;
 }
@@ -403,7 +408,13 @@ async function orchestrateEventPages(
       diagnostics: { evalEventPages: probe },
     };
   } catch (cause) {
-    return { messages: [], duration: Date.now() - startedAt, error: formatError(cause) };
+    const failure = systemTestFailure("eval-event-pages", cause);
+    return {
+      messages: [],
+      duration: Date.now() - startedAt,
+      error: failure.error.message,
+      failure,
+    };
   }
 }
 
@@ -419,10 +430,12 @@ async function orchestrateCancellation(
       diagnostics: { evalCancellation: probe },
     };
   } catch (cause) {
+    const failure = systemTestFailure("eval-cancellation", cause);
     return {
       messages: [],
       duration: Date.now() - startedAt,
-      error: formatError(cause),
+      error: failure.error.message,
+      failure,
     };
   }
 }
@@ -433,6 +446,7 @@ async function orchestrateAgentReplay(
   const startedAt = Date.now();
   const session = await context.runner.spawn();
   let error: string | undefined;
+  let failure: SystemTestFailure | undefined;
   let replayEvidence: Record<string, unknown> | undefined;
   try {
     const targetId = session.agentTargetId;
@@ -487,7 +501,8 @@ async function orchestrateAgentReplay(
     const settled = await turn;
     if (settled.error) throw settled.error;
   } catch (cause) {
-    error = formatError(cause);
+    failure = systemTestFailure("eval-agent-replay", cause);
+    error = failure.error.message;
   }
 
   const execution: TestExecutionResult = {
@@ -498,11 +513,13 @@ async function orchestrateAgentReplay(
       ...(replayEvidence ? { evalAgentReplay: replayEvidence } : {}),
     },
     ...(error ? { error } : {}),
+    ...(failure ? { failure } : {}),
   };
   try {
     await session.close();
   } catch (cause) {
     execution.cleanupErrors = [`close: ${formatError(cause)}`];
+    execution.cleanupFailures = [systemTestFailure("eval-agent-replay-close", cause)];
   }
   return execution;
 }
@@ -513,6 +530,7 @@ async function orchestrateLiveKernelContinuity(
   const startedAt = Date.now();
   const session = await context.runner.spawn();
   let error: string | undefined;
+  let failure: SystemTestFailure | undefined;
   try {
     await context.sendAndWait(
       session,
@@ -526,7 +544,8 @@ async function orchestrateLiveKernelContinuity(
       "invoke live notebook object after idle"
     );
   } catch (cause) {
-    error = formatError(cause);
+    failure = systemTestFailure("eval-live-kernel-continuity", cause);
+    error = failure.error.message;
   }
 
   const execution: TestExecutionResult = {
@@ -534,11 +553,13 @@ async function orchestrateLiveKernelContinuity(
     duration: Date.now() - startedAt,
     snapshot: session.snapshot(),
     ...(error ? { error } : {}),
+    ...(failure ? { failure } : {}),
   };
   try {
     await session.close();
   } catch (cause) {
     execution.cleanupErrors = [`close: ${formatError(cause)}`];
+    execution.cleanupFailures = [systemTestFailure("eval-live-kernel-continuity-close", cause)];
   }
   const cleanupErrors = session
     .snapshot()

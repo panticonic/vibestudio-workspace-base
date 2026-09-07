@@ -1,4 +1,5 @@
 import type { TestCase, TestExecutionResult, TestOrchestrationContext } from "../types.js";
+import { systemTestFailure, type SystemTestFailure } from "../structured-error.js";
 import { walkRecords } from "./_scenario-evidence.js";
 
 const SHA256 = /^[a-f0-9]{64}$/u;
@@ -374,10 +375,6 @@ function validateOwnedCleanup(result: TestExecutionResult) {
       };
 }
 
-function formatError(error: unknown): string {
-  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
-}
-
 function operation(
   receipt: SelfDevelopmentReceipt,
   service: HarnessOperation["service"],
@@ -405,16 +402,19 @@ async function orchestrate(
     prerequisite: { available: true, reason: null }
   };
   let error: string | undefined;
+  let failure: SystemTestFailure | undefined;
   try {
     await run(receipt);
   } catch (cause) {
-    error = formatError(cause);
+    failure = systemTestFailure(`self-development:${scenario}`, cause);
+    error = failure.error.message;
   }
   return {
     messages: [],
     duration: Date.now() - startedAt,
     diagnostics: { selfDevelopment: receipt },
-    ...(error ? { error } : {})
+    ...(error ? { error } : {}),
+    ...(failure ? { failure } : {})
   };
 }
 

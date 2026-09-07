@@ -1091,6 +1091,46 @@ describe("extension semantic validators", () => {
 });
 
 describe("scenario prompts", () => {
+  it("retains structured RPC diagnostics from harness-orchestrated eval probes", async () => {
+    const test = scenario(evalLifecycleTests, "eval-events");
+    const error = Object.assign(new Error("Event page probe failed"), {
+      name: "RemoteRpcError",
+      code: "EventPageUnavailable",
+      errorData: {
+        code: "EventPageUnavailable",
+        diagnosticHandle: "diag:eval-events",
+        sessionToken: "must-not-leak",
+      },
+    });
+
+    const result = await test.orchestrate!({
+      runner: {
+        probeEvalEventPages: async () => {
+          throw error;
+        },
+      } as never,
+      remainingTimeMs: () => 10_000,
+      sendAndWait: async () => {
+        throw new Error("Agent turn must not be used");
+      },
+    });
+
+    expect(result.failure).toEqual({
+      phase: "eval-event-pages",
+      error: {
+        name: "RemoteRpcError",
+        message: "Event page probe failed",
+        code: "EventPageUnavailable",
+        errorData: {
+          code: "EventPageUnavailable",
+          diagnosticHandle: "diag:eval-events",
+          sessionToken: "[redacted]",
+        },
+        diagnosticHandles: ["diag:eval-events"],
+      },
+    });
+  });
+
   it("use vague user goals without marker protocols or answer templates", () => {
     const tests = [
       ...buildTests,

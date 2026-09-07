@@ -3,6 +3,7 @@ import type {
   TestExecutionResult,
   TestOrchestrationContext,
 } from "../types.js";
+import { systemTestFailure, type SystemTestFailure } from "../structured-error.js";
 import {
   completedScenarioEvidence,
   invocationConsoleOutput,
@@ -119,7 +120,9 @@ async function orchestrateCachedCatalog(
   const session = await context.runner.spawn(undefined);
   let observation: { completed: true; value: unknown } | { completed: false; error: string };
   let error: string | undefined;
+  let failure: SystemTestFailure | undefined;
   let cleanupError: string | undefined;
+  let cleanupFailure: SystemTestFailure | undefined;
   try {
     await context.sendAndWait(
       session,
@@ -135,13 +138,15 @@ async function orchestrateCachedCatalog(
       ),
     };
   } catch (cause) {
-    error = cause instanceof Error ? cause.message : String(cause);
+    failure = systemTestFailure("cached-template-catalog", cause);
+    error = failure.error.message;
     observation = { completed: false, error };
   } finally {
     try {
       await session.close();
     } catch (cause) {
-      cleanupError = `close: ${cause instanceof Error ? cause.message : String(cause)}`;
+      cleanupFailure = systemTestFailure("cached-template-catalog-close", cause);
+      cleanupError = `close: ${cleanupFailure.error.message}`;
     }
   }
   return {
@@ -150,7 +155,9 @@ async function orchestrateCachedCatalog(
     snapshot: session.snapshot(),
     diagnostics: { templateCatalogObservation: observation },
     ...(error ? { error } : {}),
+    ...(failure ? { failure } : {}),
     ...(cleanupError ? { cleanupErrors: [cleanupError] } : {}),
+    ...(cleanupFailure ? { cleanupFailures: [cleanupFailure] } : {}),
   };
 }
 
