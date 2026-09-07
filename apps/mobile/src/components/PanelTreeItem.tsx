@@ -123,7 +123,12 @@ export function PanelTreeItem({
   }));
 
   const archiveBackgroundStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(translateX.value, [-ARCHIVE_THRESHOLD, 0], [1, 0], Extrapolation.CLAMP),
+    opacity: interpolate(
+      translateX.value,
+      [-ARCHIVE_THRESHOLD, 0],
+      [1, 0],
+      Extrapolation.CLAMP,
+    ),
   }));
 
   const containerAnimatedStyle = useAnimatedStyle(() => ({
@@ -174,7 +179,9 @@ export function PanelTreeItem({
               style={styles.chevronButton}
               hitSlop={10}
               accessibilityRole="button"
-              accessibilityLabel={item.isCollapsed ? "Expand children" : "Collapse children"}
+              accessibilityLabel={
+                item.isCollapsed ? "Expand children" : "Collapse children"
+              }
             >
               {item.isCollapsed ? (
                 <ChevronRight size={15} color={mutedColor} />
@@ -196,6 +203,8 @@ export function PanelTreeItem({
           >
             <MobilePanelIcon
               icon={item.icon}
+              iconVersion={item.iconVersion}
+              iconState={item.iconState}
               source={item.source}
               kind={item.kind}
               serverUrl={serverUrl}
@@ -204,7 +213,12 @@ export function PanelTreeItem({
               resolveBrowserFavicon={resolveBrowserFavicon}
             />
             <Text
-              style={[type.body, isActive && type.bodyStrong, styles.title, { color: titleColor }]}
+              style={[
+                type.body,
+                isActive && type.bodyStrong,
+                styles.title,
+                { color: titleColor },
+              ]}
               numberOfLines={1}
               ellipsizeMode="tail"
             >
@@ -221,7 +235,9 @@ export function PanelTreeItem({
 
           {/* Child count badge */}
           {item.childCount > 0 && (
-            <Text style={[type.micro, styles.childCount, { color: mutedColor }]}>
+            <Text
+              style={[type.micro, styles.childCount, { color: mutedColor }]}
+            >
               {item.childCount}
             </Text>
           )}

@@ -4,6 +4,8 @@ export interface MobilePanelTreeNode {
   parentId: string | null;
   owner: string | null;
   icon?: string;
+  iconVersion?: string;
+  iconState?: string;
   source?: string;
   kind?: "workspace" | "browser";
   childCount: number;
@@ -26,7 +28,7 @@ export interface MobilePanelTreeGroup {
  */
 export function mobilePanelTreeTitle(
   snapshotTitle: string,
-  presentation: { title: string } | null | undefined
+  presentation: { title: string } | null | undefined,
 ): string {
   return presentation?.title ?? snapshotTitle;
 }
@@ -71,13 +73,15 @@ export interface MobilePanelRowPresentation {
   childCount: number;
   isCollapsed: boolean;
   icon?: string;
+  iconVersion?: string;
+  iconState?: string;
   source?: string;
   kind?: "workspace" | "browser";
 }
 
 export function presentMobilePanelRow(
   row: Extract<MobilePanelForestRow, { kind: "panel" }>,
-  searching: boolean
+  searching: boolean,
 ): MobilePanelRowPresentation {
   return {
     id: row.panel.id,
@@ -86,6 +90,8 @@ export function presentMobilePanelRow(
     childCount: searching ? 0 : row.panel.childCount,
     isCollapsed: searching ? true : row.isCollapsed,
     icon: row.panel.icon,
+    iconVersion: row.panel.iconVersion,
+    iconState: row.panel.iconState,
     source: row.panel.source,
     kind: row.panel.kind,
   };
@@ -93,7 +99,7 @@ export function presentMobilePanelRow(
 
 export function orderMobilePanelForest(
   groups: readonly MobilePanelTreeGroup[],
-  selfUserId: string | null
+  selfUserId: string | null,
 ): MobilePanelTreeGroup[] {
   if (!selfUserId) return [...groups];
   return [
@@ -105,7 +111,7 @@ export function orderMobilePanelForest(
 function ownerLabel(
   owner: string,
   selfUserId: string | null,
-  profile: MobileOwnerProfile | undefined
+  profile: MobileOwnerProfile | undefined,
 ): string {
   if (!owner) return "Workspace panels";
   if (owner === selfUserId) return "Your panels";
@@ -126,7 +132,7 @@ function appendNodes(
   rows: MobilePanelForestRow[],
   groupKey: string,
   parentSlotId: string | null,
-  ownerUserId?: string | null
+  ownerUserId?: string | null,
 ): void {
   for (const panel of nodes) {
     const isCollapsed = collapsedIds.has(panel.id);
@@ -141,7 +147,7 @@ function appendNodes(
         depth + 1,
         rows,
         `children:${panel.id}`,
-        panel.id
+        panel.id,
       );
     }
   }
@@ -161,7 +167,7 @@ export function buildMobilePanelForestRows(
   groups: readonly MobilePanelTreeGroup[],
   collapsedIds: ReadonlySet<string>,
   selfUserId: string | null,
-  profiles: ReadonlyMap<string, MobileOwnerProfile>
+  profiles: ReadonlyMap<string, MobileOwnerProfile>,
 ): MobilePanelForestRow[] {
   const rows: MobilePanelForestRow[] = [];
   for (const group of orderMobilePanelForest(groups, selfUserId)) {
@@ -183,7 +189,7 @@ export function buildMobilePanelForestRows(
       rows,
       `roots:${group.owner}`,
       null,
-      group.owner || null
+      group.owner || null,
     );
   }
   return rows;

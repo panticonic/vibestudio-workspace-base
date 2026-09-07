@@ -1,16 +1,22 @@
-import { fireEvent, render, waitFor } from "@testing-library/react-native";
+import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import { SvgUri } from "react-native-svg";
 import { AppBar } from "./AppBar";
 import type { AddressAutocompleteItem } from "@workspace/omnibox-core";
-import { shellClientAtom, panelTreeRevisionAtom } from "../state/shellClientAtom";
+import {
+  shellClientAtom,
+  panelTreeRevisionAtom,
+} from "../state/shellClientAtom";
 import { activePanelIdAtom } from "../state/navigationAtoms";
 
 jest.mock("@vibestudio/shared/panelChrome", () => ({
   isBrowserPanelSource: (source: string) => source.startsWith("browser:"),
   browserUrlFromPanelSource: (source: string) =>
     source.startsWith("browser:") ? source.slice("browser:".length) : null,
-  splitTextByMatchRanges: (text: string, ranges?: Array<{ start: number; end: number }>) => {
+  splitTextByMatchRanges: (
+    text: string,
+    ranges?: Array<{ start: number; end: number }>,
+  ) => {
     const range = ranges?.[0];
     if (!range) return [{ text, highlighted: false }];
     return [
@@ -36,13 +42,20 @@ const suggestion: AddressAutocompleteItem = {
     label: [{ start: 8, end: 12 }],
   },
   action: { type: "navigate-url", url: "https://example.test/docs" },
-  browser: { url: "https://example.test/docs", title: "Example Docs", source: "history" },
+  browser: {
+    url: "https://example.test/docs",
+    title: "Example Docs",
+    source: "history",
+  },
 };
 
 describe("AppBar address UX", () => {
   it("opens the New Panel launcher directly from the create button", async () => {
     const store = createStore();
-    const createAboutPanel = jest.fn(async () => ({ id: "panel-new", title: "New Panel" }));
+    const createAboutPanel = jest.fn(async () => ({
+      id: "panel-new",
+      title: "New Panel",
+    }));
     const onPanelCreated = jest.fn();
     store.set(shellClientAtom, {
       panels: {
@@ -52,8 +65,12 @@ describe("AppBar address UX", () => {
 
     const { getByLabelText } = render(
       <Provider store={store}>
-        <AppBar title="Agentic Chat" onMenuPress={jest.fn()} onPanelCreated={onPanelCreated} />
-      </Provider>
+        <AppBar
+          title="Agentic Chat"
+          onMenuPress={jest.fn()}
+          onPanelCreated={onPanelCreated}
+        />
+      </Provider>,
     );
 
     fireEvent.press(getByLabelText("Create new panel"));
@@ -68,15 +85,18 @@ describe("AppBar address UX", () => {
     const store = createStore();
     store.set(activePanelIdAtom, "panel-1");
     store.set(panelTreeRevisionAtom, 1);
+    const panel = {
+      id: "panel-1",
+      icon: "./assets/icon.svg",
+      iconVersion: undefined as string | undefined,
+      iconState: undefined as string | undefined,
+      snapshot: { source: "panels/chat" },
+    };
     store.set(shellClientAtom, {
       serverUrl: "http://127.0.0.1:43100",
       panels: {
         registry: {
-          getPanel: () => ({
-            id: "panel-1",
-            icon: "./assets/icon.svg",
-            snapshot: { source: "panels/chat" },
-          }),
+          getPanel: () => panel,
         },
         getPageFaviconDataUrl: jest.fn(async () => null),
       },
@@ -85,20 +105,42 @@ describe("AppBar address UX", () => {
     const { getByTestId } = render(
       <Provider store={store}>
         <AppBar title="Agentic Chat" onMenuPress={jest.fn()} />
-      </Provider>
+      </Provider>,
     );
 
-    const image = getByTestId("active-panel-icon", { includeHiddenElements: true }).findByType(
-      SvgUri
-    );
+    const image = getByTestId("active-panel-icon", {
+      includeHiddenElements: true,
+    }).findByType(SvgUri);
     expect(image.props.uri).toBe(
-      "http://127.0.0.1:43100/__vibestudio/unit-icon?source=panels%2Fchat&path=assets%2Ficon.svg"
+      "http://127.0.0.1:43100/__vibestudio/unit-icon?source=panels%2Fchat&path=assets%2Ficon.svg",
+    );
+    fireEvent(
+      getByTestId("active-panel-icon-svg", { includeHiddenElements: true }),
+      "error",
+    );
+    expect(() =>
+      getByTestId("active-panel-icon-svg", { includeHiddenElements: true }),
+    ).toThrow();
+    act(() => {
+      panel.iconVersion = "a".repeat(64);
+      panel.iconState = "b".repeat(64);
+      store.set(panelTreeRevisionAtom, 2);
+    });
+    expect(
+      getByTestId("active-panel-icon-svg", { includeHiddenElements: true })
+        .props.uri,
+    ).toBe(
+      `http://127.0.0.1:43100/__vibestudio/unit-icon?source=panels%2Fchat&path=assets%2Ficon.svg&v=${panel.iconVersion}&s=${panel.iconState}`,
     );
   });
 
   it("removes the redundant drawer button beside persistent tablet navigation", () => {
     const { queryByLabelText } = render(
-      <AppBar title="Agentic Chat" onMenuPress={jest.fn()} showMenuButton={false} />
+      <AppBar
+        title="Agentic Chat"
+        onMenuPress={jest.fn()}
+        showMenuButton={false}
+      />,
     );
 
     expect(queryByLabelText("Open panel drawer")).toBeNull();
@@ -107,7 +149,11 @@ describe("AppBar address UX", () => {
   it("uses one generic panel menu entry point for native and contributed actions", () => {
     const onShowActions = jest.fn();
     const { getByLabelText, queryByLabelText } = render(
-      <AppBar title="Agentic Chat" onMenuPress={jest.fn()} onShowActions={onShowActions} />
+      <AppBar
+        title="Agentic Chat"
+        onMenuPress={jest.fn()}
+        onShowActions={onShowActions}
+      />,
     );
 
     fireEvent.press(getByLabelText("Panel menu"));
@@ -127,7 +173,7 @@ describe("AppBar address UX", () => {
         addressSuggestions={[suggestion]}
         onAddressQueryChange={onAddressQueryChange}
         onSelectAddressSuggestion={onSelectAddressSuggestion}
-      />
+      />,
     );
 
     fireEvent(getByTestId("address-input"), "focus");

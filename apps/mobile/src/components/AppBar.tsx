@@ -144,6 +144,8 @@ export function AppBar({
     const source = getCurrentSnapshot(panel).source;
     return {
       icon: panel.icon,
+      iconVersion: panel.iconVersion,
+      iconState: panel.iconState,
       source,
       kind: isBrowserPanelSource(source)
         ? ("browser" as const)

@@ -4,6 +4,8 @@ import { MobileUnitIcon } from "./MobileUnitIcon";
 
 export function MobilePanelIcon(props: {
   icon?: string;
+  iconVersion?: string;
+  iconState?: string;
   source?: string;
   kind?: "workspace" | "browser";
   serverUrl: string;
@@ -13,7 +15,9 @@ export function MobilePanelIcon(props: {
   resolveBrowserFavicon: (url: string) => Promise<string | null>;
 }) {
   const browserUrl =
-    props.kind === "browser" && props.source ? browserUrlFromPanelSource(props.source) : null;
+    props.kind === "browser" && props.source
+      ? browserUrlFromPanelSource(props.source)
+      : null;
   const [favicon, setFavicon] = useState<string | null>(null);
 
   useEffect(() => {
@@ -37,6 +41,8 @@ export function MobilePanelIcon(props: {
   return (
     <MobileUnitIcon
       icon={props.icon}
+      iconVersion={props.iconVersion}
+      iconState={props.iconState}
       source={props.source}
       imageOverride={favicon}
       kind={props.kind === "browser" ? "browser" : "panel"}

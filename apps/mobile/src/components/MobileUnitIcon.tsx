@@ -12,7 +12,13 @@ import {
   type IconComponent,
 } from "../design/icons";
 
-export type MobileUnitIconKind = "panel" | "browser" | "worker" | "app" | "extension" | "system";
+export type MobileUnitIconKind =
+  | "panel"
+  | "browser"
+  | "worker"
+  | "app"
+  | "extension"
+  | "system";
 
 const FALLBACKS: Record<MobileUnitIconKind, IconComponent> = {
   panel: LayoutGrid,
@@ -24,13 +30,17 @@ const FALLBACKS: Record<MobileUnitIconKind, IconComponent> = {
 };
 
 function isSvgImage(uri: string): boolean {
-  return /^data:image\/svg\+xml(?:[;,]|$)/i.test(uri) || /\.svg(?:$|[?&#])/i.test(uri);
+  return (
+    /^data:image\/svg\+xml(?:[;,]|$)/i.test(uri) ||
+    /\.svg(?:$|[?&#])/i.test(uri)
+  );
 }
 
 export function MobileUnitIcon(props: {
   icon?: string;
   /** Names the icon's content so the fetched glyph can be stored forever. */
   iconVersion?: string;
+  iconState?: string;
   source?: string;
   imageOverride?: string | null;
   kind: MobileUnitIconKind;
@@ -42,9 +52,16 @@ export function MobileUnitIcon(props: {
   const size = props.size ?? 18;
   const manifestImage = useMemo(() => {
     if (props.icon?.startsWith("data:image/")) return props.icon;
-    if (!props.icon?.startsWith("./") || !props.source || !props.serverUrl) return null;
-    return `${props.serverUrl}/${unitIconTarget(props.source, props.icon, props.iconVersion)}`;
-  }, [props.icon, props.iconVersion, props.serverUrl, props.source]);
+    if (!props.icon?.startsWith("./") || !props.source || !props.serverUrl)
+      return null;
+    return `${props.serverUrl}/${unitIconTarget(props.source, props.icon, props.iconVersion, props.iconState)}`;
+  }, [
+    props.icon,
+    props.iconVersion,
+    props.iconState,
+    props.serverUrl,
+    props.source,
+  ]);
   const image = props.imageOverride ?? manifestImage;
   const [imageFailed, setImageFailed] = useState(false);
   const handleImageError = useCallback(() => setImageFailed(true), []);
@@ -65,16 +82,27 @@ export function MobileUnitIcon(props: {
       <Image
         accessibilityIgnoresInvertColors
         source={{ uri: image }}
-        style={{ width: size, height: size, borderRadius: Math.max(2, Math.round(size / 6)) }}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: Math.max(2, Math.round(size / 6)),
+        }}
         resizeMode="contain"
         onError={handleImageError}
       />
     );
-  } else if (props.icon && !props.icon.startsWith("./") && !props.icon.startsWith("data:image/")) {
+  } else if (
+    props.icon &&
+    !props.icon.startsWith("./") &&
+    !props.icon.startsWith("data:image/")
+  ) {
     content = (
       <Text
         accessibilityElementsHidden
-        style={[styles.emoji, { width: size, fontSize: size - 1, lineHeight: size + 1 }]}
+        style={[
+          styles.emoji,
+          { width: size, fontSize: size - 1, lineHeight: size + 1 },
+        ]}
       >
         {props.icon}
       </Text>
