@@ -52,6 +52,11 @@ export type WorkspaceRepoCreationScope =
   | { kind: "buildable-panel"; section: "panels" }
   | { kind: "optimizable-panel"; section: "panels" }
   | { kind: "created-repository"; section: WorkspaceRepoSection }
+  | {
+      kind: "created-repositories";
+      section: WorkspaceRepoSection;
+      expectedSections: readonly WorkspaceRepoSection[];
+    }
   | { kind: "buildable-panel-with-derived"; section: "panels" };
 
 export interface WorkspaceRepoFixturePort {
@@ -80,7 +85,10 @@ type WorkspaceRepoFixtureStateBase = {
 };
 
 export type WorkspaceRepoFixtureState =
-  | (Extract<WorkspaceRepoCreationScope, { kind: "created-repository" }> &
+  | (Extract<
+      WorkspaceRepoCreationScope,
+      { kind: "created-repository" | "created-repositories" }
+    > &
       WorkspaceRepoFixtureStateBase & {
         repoName: null;
         repositoryId: null;
@@ -167,7 +175,10 @@ export class WorkspaceRepoFixtureLifecycle {
       if (status.committed.kind !== "event") {
         throw new Error("Fresh fixture context did not start at a committed event");
       }
-      if (this.fixture.kind === "created-repository") {
+      if (
+        this.fixture.kind === "created-repository" ||
+        this.fixture.kind === "created-repositories"
+      ) {
         return {
           ...this.fixture,
           testName: this.testName,
@@ -433,7 +444,9 @@ export class WorkspaceRepoFixtureLifecycle {
       onPhase?.("task-first-parent-events");
       const taskEvents = await this.taskFirstParentEvents(state, taskStatus.committed.eventId);
       const needsCreationScope =
-        state.kind === "created-repository" || state.kind === "buildable-panel-with-derived";
+        state.kind === "created-repository" ||
+        state.kind === "created-repositories" ||
+        state.kind === "buildable-panel-with-derived";
       const scopedTaskChanges = needsCreationScope
         ? await this.inspectTaskChanges(await this.taskWorkNewestFirst(taskEvents))
         : null;
@@ -515,6 +528,9 @@ export class WorkspaceRepoFixtureLifecycle {
           cleanupContextId,
           cleanupStatus,
           publishedChanges.createdRepositories,
+          state.kind === "created-repositories"
+            ? publishedWork.flatMap(({ changeIds }) => changeIds)
+            : [],
           onPhase
         );
       }
@@ -569,6 +585,7 @@ export class WorkspaceRepoFixtureLifecycle {
     cleanupContextId: string,
     status: Awaited<ReturnType<FixtureVcs["status"]>>,
     createdRepositories: TaskCreatedRepository[],
+    ownedTaskChangeIds: string[],
     onPhase?: (phase: string) => void
   ): Promise<string[]> {
     let workingHead = status.workingHead;
@@ -601,6 +618,21 @@ export class WorkspaceRepoFixtureLifecycle {
       counteractedChangeIds.push(...changeIds);
       for (const changeId of changeIds) counteractedOriginalIds.add(changeId);
       for (const changeId of reverted.changeIds) cleanupChangeIds.add(changeId);
+    }
+    const remainingTaskChangeIds = [...new Set(ownedTaskChangeIds)]
+      .filter((changeId) => !counteractedOriginalIds.has(changeId))
+      .sort();
+    if (remainingTaskChangeIds.length > 0) {
+      onPhase?.("counteract-revert");
+      const reverted = await this.port.vcs.revert({
+        contextId: cleanupContextId,
+        commandId: this.command("revert-task-work"),
+        expectedWorkingHead: workingHead,
+        changeIds: remainingTaskChangeIds,
+        intentSummary: `Remove published system-test work from ${this.scopeLabel(state)}`,
+      });
+      workingHead = reverted.workingHead;
+      counteractedChangeIds.push(...remainingTaskChangeIds);
     }
     if (counteractedChangeIds.length === 0) return [];
     onPhase?.("counteract-commit");
@@ -948,7 +980,11 @@ export class WorkspaceRepoFixtureLifecycle {
     primaryRepositoryId: string | null;
     error: Error | null;
   } {
-    if (state.kind !== "created-repository" && state.kind !== "buildable-panel-with-derived") {
+    if (
+      state.kind !== "created-repository" &&
+      state.kind !== "created-repositories" &&
+      state.kind !== "buildable-panel-with-derived"
+    ) {
       if (!state.repositoryId) {
         return {
           ownedRepositoryIds: new Set(),
@@ -968,6 +1004,33 @@ export class WorkspaceRepoFixtureLifecycle {
     const candidates = createdRepositories.filter(
       ({ repositoryId }) => repositoryId !== seedRepositoryId
     );
+    if (state.kind === "created-repositories") {
+      const actualSections = candidates
+        .map(({ repoPath }) => repoPath.split("/", 1)[0] ?? "")
+        .sort();
+      const expectedSections = [...state.expectedSections].sort();
+      if (
+        candidates.length !== expectedSections.length ||
+        actualSections.some((section, index) => section !== expectedSections[index])
+      ) {
+        return {
+          ownedRepositoryIds: new Set(),
+          primaryRepositoryId: null,
+          error: new Error(
+            `Workspace repository creation scope expected sections ${expectedSections.join(", ")}, found: ${
+              candidates.map(({ repoPath }) => repoPath).join(", ") || "none"
+            }`
+          ),
+        };
+      }
+      return {
+        ownedRepositoryIds: new Set(candidates.map(({ repositoryId }) => repositoryId)),
+        primaryRepositoryId: candidates.find(({ repoPath }) =>
+          repoPath.startsWith(`${state.section}/`)
+        )!.repositoryId,
+        error: null,
+      };
+    }
     const expected = `exactly one task-created repository in ${state.section}/`;
     if (candidates.length !== 1) {
       return {
@@ -1012,7 +1075,7 @@ function repositorySeedFiles(
   repoName: string,
   fixture: WorkspaceRepoCreationScope
 ): Array<{ path: string; content: string }> {
-  if (fixture.kind === "created-repository") return [];
+  if (fixture.kind === "created-repository" || fixture.kind === "created-repositories") return [];
   if (fixture.kind === "content") {
     return [
       {

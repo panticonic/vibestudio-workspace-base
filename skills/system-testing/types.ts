@@ -63,6 +63,12 @@ export const CREATED_PANEL_WORKSPACE_REPO_FIXTURE = {
   section: "panels",
 } as const satisfies WorkspaceRepoCreationScope;
 
+export const CREATED_PANEL_STORE_WORKSPACE_REPO_FIXTURE = {
+  kind: "created-repositories",
+  section: "panels",
+  expectedSections: ["panels", "workers"],
+} as const satisfies WorkspaceRepoCreationScope;
+
 export const CREATED_PACKAGE_WORKSPACE_REPO_FIXTURE = {
   kind: "created-repository",
   section: "packages",

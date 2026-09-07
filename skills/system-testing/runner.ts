@@ -34,6 +34,7 @@ import type { AttachedHostApprovalAuditEvent } from "@vibestudio/service-schemas
 import type { TestAuthorityPolicy } from "./types.js";
 import type { BlobReader } from "@workspace/agentic-protocol";
 import { createRecoveryCoordinator } from "@vibestudio/shell-core/recoveryCoordinator";
+import { evalInPanel } from "@workspace/testkit";
 
 // This runner is eval'd server-side (in the orchestrating agent's EvalDO), so it
 // uses the portable client surface — NOT panel-only `getStateArgs`/`slotId`.
@@ -196,6 +197,26 @@ export class HeadlessRunner {
   readonly openPanelClient = openPanel;
   /** Runtime-initialized panel-tree client for harness-owned invariants. */
   readonly panelTreeClient = panelTree;
+
+  /** Evaluate against a separate hosted panel through the canonical testkit driver. */
+  readonly evalInPanelClient = evalInPanel;
+
+  /** Read the canonical user-facing permission inventory for harness assertions. */
+  async listPermissions(): Promise<unknown[]> {
+    const permissions = await rpc.call("main", "permissions.list", []);
+    if (!Array.isArray(permissions)) throw new Error("permissions.list returned no inventory");
+    return permissions;
+  }
+
+  /** Read the installed unit/config projection used to bind permission evidence. */
+  async inspectInstalledWorkspace(): Promise<{ units: unknown[]; config: unknown }> {
+    const [units, config] = await Promise.all([
+      rpc.call("main", "build.listUnits", []),
+      rpc.call("main", "workspace.getConfig", []),
+    ]);
+    if (!Array.isArray(units)) throw new Error("build.listUnits returned no unit inventory");
+    return { units, config };
+  }
 
   /** Read the host-owned reusable authority attached to one exact chat task. */
   inspectChatTaskRules(input: {

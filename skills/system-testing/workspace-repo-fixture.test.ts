@@ -15,6 +15,11 @@ const BUILDABLE_REGULAR_WORKER = {
   section: "workers",
 } as const;
 const CREATED_PANEL = { kind: "created-repository", section: "panels" } as const;
+const CREATED_PANEL_STORE = {
+  kind: "created-repositories",
+  section: "panels",
+  expectedSections: ["panels", "workers"],
+} as const;
 const PANEL_WITH_DERIVED = {
   kind: "buildable-panel-with-derived",
   section: "panels",
@@ -36,6 +41,7 @@ function createPort() {
   let publishedFileIsCreation = false;
   let reportedSnapshotRevision: string | null = null;
   let taskCreatedRepositories: Array<{ repositoryId: string; repoPath: string }> = [];
+  let taskAdditionalChangeIds: string[] = [];
   const counteractedRepositories = new Set<string>();
   const counteractedFileChanges = new Set<string>();
   const destroyContext = vi.fn(async (_contextId: string) => undefined);
@@ -105,7 +111,10 @@ function createPort() {
   const changesForWork = (workUnitId: string): string[] =>
     workUnitId === "work:escaped"
       ? taskCreatedRepositories.length > 0
-        ? taskCreatedRepositories.map((_, index) => `change:task-created:${index}`)
+        ? [
+            ...taskCreatedRepositories.map((_, index) => `change:task-created:${index}`),
+            ...taskAdditionalChangeIds,
+          ]
         : ["change:escaped"]
       : workUnitId === "work:file"
         ? ["change:file"]
@@ -520,11 +529,12 @@ function createPort() {
       escaped = true;
       taskTail = "escaped";
     },
-    createTaskRepositories: (repoPaths: string[]) => {
+    createTaskRepositories: (repoPaths: string[], additionalChangeIds: string[] = []) => {
       taskCreatedRepositories = repoPaths.map((repoPath, index) => ({
         repositoryId: `repository:task-created:${index}`,
         repoPath,
       }));
+      taskAdditionalChangeIds = additionalChangeIds;
       taskTail = "escaped";
     },
     externalEscape: () => {
@@ -622,6 +632,61 @@ describe("WorkspaceRepoFixtureLifecycle", () => {
     );
     expect(fake.revert).not.toHaveBeenCalled();
     expect(fake.destroyContext).toHaveBeenCalledWith("context:1");
+  });
+
+  it("owns one atomically published panel and worker store", async () => {
+    const fake = createPort();
+    const fixture = new WorkspaceRepoFixtureLifecycle(
+      fake.port,
+      "panel-store-test",
+      null,
+      CREATED_PANEL_STORE
+    );
+    const state = await fixture.prepare();
+    fake.createTaskRepositories(
+      ["panels/notes", "workers/notes-store"],
+      ["change:workspace-meta"]
+    );
+
+    await expect(fixture.cleanup(state)).resolves.toMatchObject({
+      publishedFixtureRemoved: {
+        repositoryId: "repository:task-created:0",
+        repoPath: "panels/notes",
+      },
+      unexpectedPublishedRepositoriesRemoved: [],
+      counteractedChangeIds: expect.arrayContaining([
+        "change:task-created:0",
+        "change:task-created:1",
+        "change:workspace-meta",
+      ]),
+    });
+    expect(fake.revert).toHaveBeenCalledWith(
+      expect.objectContaining({ changeIds: ["change:workspace-meta"] })
+    );
+  });
+
+  it("rejects a panel-store publication missing either repository kind", async () => {
+    const fake = createPort();
+    const fixture = new WorkspaceRepoFixtureLifecycle(
+      fake.port,
+      "panel-store-incomplete-test",
+      null,
+      CREATED_PANEL_STORE
+    );
+    const state = await fixture.prepare();
+    fake.createTaskRepositories(["panels/notes", "panels/not-a-store"]);
+
+    await expect(fixture.cleanup(state)).rejects.toThrow(
+      "expected sections panels, workers"
+    );
+    expect(fake.revert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        changeIds: expect.arrayContaining([
+          "change:task-created:0",
+          "change:task-created:1",
+        ]),
+      })
+    );
   });
 
   it("counteracts and fails a task-created scope with multiple repositories", async () => {

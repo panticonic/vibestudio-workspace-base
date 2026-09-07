@@ -108,6 +108,141 @@ describe("project lifecycle prompts", () => {
       kind: "created-repository",
       section: "panels",
     });
+    expect(fixtureFor("atomic-panel-store-install-clearance")).toEqual({
+      kind: "created-repositories",
+      section: "panels",
+      expectedSections: ["panels", "workers"],
+    });
+  });
+
+  it("requires an install grant before the generated panel-store UI round trip", () => {
+    const test = projectLifecycleTests.find(
+      ({ name }) => name === "atomic-panel-store-install-clearance"
+    )!;
+    const panelPath = "panels/atomic-notes";
+    const result = todoExecution([
+      invocation("publication", "eval", { code: "createProjects(); publish();" }, {
+        returnValue: [
+          { created: panelPath },
+          { created: "workers/atomic-notes-store" },
+        ],
+      }),
+    ]);
+    result.diagnostics = {
+      atomicPanelStore: {
+        source: "system-test-harness",
+        panelPath,
+        storePath: "workers/atomic-notes-store",
+        installedBeforeOpen: {
+          units: [
+            {
+              source: panelPath,
+              kind: "panel",
+              effectiveVersion: "exact-version",
+              authorityRows: [
+                {
+                  capability: "workspace-service:atomic-notes-store",
+                  resourceScope: {
+                    kind: "exact",
+                    key: "do:workers/atomic-notes-store:NotesStore:workspace",
+                  },
+                  statement: "allowed",
+                },
+              ],
+            },
+            {
+              source: "workers/atomic-notes-store",
+              kind: "worker",
+              effectiveVersion: "store-version",
+            },
+          ],
+          config: {
+            services: [
+              {
+                source: "workers/atomic-notes-store",
+                name: "atomic-notes-store",
+                authority: { binding: { declaredFor: [panelPath] } },
+              },
+            ],
+            singletonObjects: [
+              {
+                source: "workers/atomic-notes-store",
+                className: "NotesStore",
+                key: "workspace",
+              },
+            ],
+          },
+        },
+        permissionsBeforeOpen: [
+          {
+            kind: "capability",
+            repoPath: panelPath,
+            effectiveVersion: "exact-version",
+            authority: {
+              effect: "allow",
+              provenance: "install",
+              scope: "version",
+              decisionSurface: "publication",
+              subject: `code:${panelPath}@exact-version`,
+              capability: "workspace-service:atomic-notes-store",
+              resource: {
+                kind: "exact",
+                key: "do:workers/atomic-notes-store:NotesStore:workspace",
+              },
+            },
+          },
+        ],
+        written: "unique-note",
+        afterReload: "unique-note",
+        before: { panelId: "panel:atomic", source: panelPath, phase: "ready" },
+        after: { panelId: "panel:atomic", source: panelPath, phase: "ready" },
+      },
+    };
+
+    expect(test.validate(result)).toEqual({ passed: true, reason: undefined });
+    const withoutGrant = structuredClone(result);
+    const diagnostic = withoutGrant.diagnostics?.["atomicPanelStore"] as Record<string, unknown>;
+    diagnostic["permissionsBeforeOpen"] = [];
+    expect(test.validate(withoutGrant)).toMatchObject({ passed: false });
+    for (const mutation of [
+      { effectiveVersion: "wrong-version" },
+      { authority: { effect: "deny" } },
+      { authority: { provenance: "acquisition", scope: "session" } },
+      {
+        authority: {
+          resource: {
+            kind: "exact",
+            key: "do:workers/atomic-notes-store-similar:NotesStore:workspace",
+          },
+        },
+      },
+    ]) {
+      const invalid = structuredClone(result);
+      const row = (
+        invalid.diagnostics?.["atomicPanelStore"] as {
+          permissionsBeforeOpen: Array<Record<string, unknown>>;
+        }
+      ).permissionsBeforeOpen[0]!;
+      const originalAuthority = row["authority"] as Record<string, unknown>;
+      const { authority: authorityMutation, ...rowMutation } = mutation;
+      Object.assign(row, rowMutation);
+      if (authorityMutation) {
+        row["authority"] = {
+          ...originalAuthority,
+          ...authorityMutation,
+        };
+      }
+      expect(test.validate(invalid)).toMatchObject({ passed: false });
+    }
+    expect(typeof test.authorityPolicy).not.toBe("function");
+    const authority = typeof test.authorityPolicy === "function" ? [] : test.authorityPolicy?.authority;
+    expect(authority).not.toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          capability: { kind: "exact", key: "workspace-service:atomic-notes-store" },
+        }),
+      ])
+    );
   });
 
   it("keeps the task-management app request natural while independently validating the result", () => {

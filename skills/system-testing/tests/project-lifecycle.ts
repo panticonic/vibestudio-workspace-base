@@ -1,10 +1,12 @@
 import {
   BUILDABLE_PANEL_WITH_DERIVED_WORKSPACE_REPO_FIXTURE,
   CREATED_PACKAGE_WORKSPACE_REPO_FIXTURE,
+  CREATED_PANEL_STORE_WORKSPACE_REPO_FIXTURE,
   CREATED_PANEL_WORKSPACE_REPO_FIXTURE,
   CREATED_WORKER_WORKSPACE_REPO_FIXTURE,
   type TestCase,
   type TestExecutionResult,
+  type TestOrchestrationContext,
 } from "../types.js";
 import { panelControlAuthorityPolicy, PANEL_AUTOMATION_RESOURCE } from "../panel-authority.js";
 import { findLastAgentMessage, getToolCalls, type InvocationCardPayloadLike } from "./_helpers.js";
@@ -738,6 +740,247 @@ function validateTaskManagementApp(result: TestExecutionResult) {
   return { passed: true, reason: undefined };
 }
 
+function validateAtomicPanelStore(result: TestExecutionResult) {
+  const base = completedScenarioEvidence(result);
+  if (!base.passed) return base;
+  const captured = result.diagnostics?.["atomicPanelStore"];
+  if (!isRecord(captured) || captured["source"] !== "system-test-harness") {
+    return {
+      passed: false,
+      reason: "Harness did not capture the atomic panel-store acceptance",
+    };
+  }
+  const panelPath = captured["panelPath"];
+  const storePath = captured["storePath"];
+  if (
+    typeof panelPath !== "string" ||
+    !panelPath.startsWith("panels/") ||
+    typeof storePath !== "string" ||
+    !storePath.startsWith("workers/")
+  ) {
+    return {
+      passed: false,
+      reason: "Harness did not capture exact panel and worker-store paths",
+    };
+  }
+  const permissions = Array.isArray(captured["permissionsBeforeOpen"])
+    ? captured["permissionsBeforeOpen"]
+    : [];
+  const installed = isRecord(captured["installedBeforeOpen"])
+    ? captured["installedBeforeOpen"]
+    : null;
+  const units = Array.isArray(installed?.["units"])
+    ? installed!["units"].filter(isRecord)
+    : [];
+  const configValue = installed?.["config"];
+  const config = isRecord(configValue) ? configValue : null;
+  const panelUnit = units.find((unit) => unit["source"] === panelPath);
+  const storeUnit = units.find((unit) => unit["source"] === storePath);
+  const services = config && Array.isArray(config["services"])
+    ? config["services"].filter(isRecord)
+    : [];
+  const service = services.find((candidate) => candidate["source"] === storePath);
+  const serviceAuthorityValue = service?.["authority"];
+  const serviceAuthority = isRecord(serviceAuthorityValue) ? serviceAuthorityValue : null;
+  const binding = serviceAuthority?.["binding"];
+  const singletonObjects = config && Array.isArray(config["singletonObjects"])
+    ? config["singletonObjects"].filter(isRecord)
+    : [];
+  const singleton = singletonObjects.find(
+    (candidate) => candidate["source"] === storePath
+  );
+  const serviceName = service?.["name"];
+  const expectedCapability =
+    typeof serviceName === "string" ? `workspace-service:${serviceName}` : null;
+  const expectedResource =
+    typeof singleton?.["className"] === "string" && typeof singleton["key"] === "string"
+      ? `do:${storePath}:${singleton["className"]}:${singleton["key"]}`
+      : null;
+  const panelEffectiveVersion = panelUnit?.["effectiveVersion"];
+  const authorityRows = Array.isArray(panelUnit?.["authorityRows"])
+    ? panelUnit!["authorityRows"].filter(isRecord)
+    : [];
+  const declaredRow = authorityRows.find((row) => {
+    const resourceScopeValue = row["resourceScope"];
+    const resourceScope = isRecord(resourceScopeValue) ? resourceScopeValue : null;
+    return (
+      row["capability"] === expectedCapability &&
+      resourceScope?.["kind"] === "exact" &&
+      resourceScope["key"] === expectedResource &&
+      row["statement"] === "allowed"
+    );
+  });
+  const grant = permissions.filter(isRecord).find(
+    (record) => {
+      const authorityValue = record["authority"];
+      const authority = isRecord(authorityValue) ? authorityValue : null;
+      const resourceValue = authority?.["resource"];
+      const resource = isRecord(resourceValue) ? resourceValue : null;
+      return (
+        record["kind"] === "capability" &&
+        record["repoPath"] === panelPath &&
+        record["effectiveVersion"] === panelEffectiveVersion &&
+        authority?.["effect"] === "allow" &&
+        authority["provenance"] === "install" &&
+        authority["scope"] === "version" &&
+        authority["decisionSurface"] === "publication" &&
+        authority["subject"] === `code:${panelPath}@${String(panelEffectiveVersion)}` &&
+        authority["capability"] === expectedCapability &&
+        resource?.["kind"] === "exact" &&
+        resource["key"] === expectedResource
+      );
+    }
+  );
+  if (!grant) {
+    return {
+      passed: false,
+      reason:
+        "No exact version-scoped install permission was independently observed before panel open",
+    };
+  }
+  const declaredFor = isRecord(binding) ? binding["declaredFor"] : null;
+  const declaredBinding =
+    binding === "declared" || (Array.isArray(declaredFor) && declaredFor.includes(panelPath));
+  if (
+    !panelUnit ||
+    panelUnit["kind"] !== "panel" ||
+    typeof panelEffectiveVersion !== "string" ||
+    !storeUnit ||
+    storeUnit["kind"] !== "worker" ||
+    typeof storeUnit["effectiveVersion"] !== "string" ||
+    !service ||
+    !expectedCapability ||
+    !expectedResource ||
+    !declaredBinding ||
+    !declaredRow
+  ) {
+    return {
+      passed: false,
+      reason:
+        "Installed units and workspace config do not bind the exact panel version to the exact store service",
+    };
+  }
+  const written = captured["written"];
+  const afterReload = captured["afterReload"];
+  const before = captured["before"];
+  const after = captured["after"];
+  if (
+    typeof written !== "string" ||
+    written.length < 8 ||
+    written !== afterReload ||
+    !isRecord(before) ||
+    !isRecord(after) ||
+    before["panelId"] !== after["panelId"] ||
+    before["source"] !== panelPath ||
+    after["source"] !== panelPath
+  ) {
+    return {
+      passed: false,
+      reason:
+        "The harness did not write, reload, and read the same exact panel through its rendered UI",
+    };
+  }
+  return { passed: true, reason: undefined };
+}
+
+async function orchestrateAtomicPanelStore(
+  context: TestOrchestrationContext
+): Promise<TestExecutionResult> {
+  const startedAt = Date.now();
+  const session = await context.runner.spawn();
+  let handle: Awaited<ReturnType<typeof context.runner.openPanelClient>> | null = null;
+  let error: string | undefined;
+  let captured: Record<string, unknown> = { source: "system-test-harness" };
+  try {
+    await context.sendAndWait(
+      session,
+      "Create a small notes panel and a Durable Object store as exactly two new workspace repositories. Declare the store as a named workspace service in workspace meta and declare the panel's exact gated request for it. The panel must expose a text input with `data-testid=note-input`, a save button with `data-testid=save-note`, and the loaded value with `data-testid=stored-note`. Publish the panel, store, and meta update together in one atomic task publication. Do not open the panel or call the store after publication; the harness will verify the installed result.",
+      "atomic panel-store publication"
+    );
+    const executionSoFar = { messages: [...session.messages], duration: 0 } as TestExecutionResult;
+    const created = completedScenarioEvidence(executionSoFar);
+    if (!created.passed) throw new Error(created.reason);
+    if (
+      created.evidence.calls.some((call) =>
+        String(call.arguments?.["code"] ?? "").includes("openPanel")
+      )
+    ) {
+      throw new Error("Publication agent opened the panel before the harness permission check");
+    }
+    const paths = created.evidence.calls
+      .flatMap(returnedRecords)
+      .flatMap((record) => (typeof record["created"] === "string" ? [record["created"]] : []));
+    const panelPath = paths.find((path) => path.startsWith("panels/"));
+    const storePath = paths.find((path) => path.startsWith("workers/"));
+    if (!panelPath || !storePath) throw new Error("Publication returned no panel/store paths");
+
+    const installedBeforeOpen = await context.runner.inspectInstalledWorkspace();
+    const permissionsBeforeOpen = await context.runner.listPermissions();
+    handle = await context.runner.openPanelClient(panelPath, {
+      parentId: null,
+      focus: false,
+      contextId: session.agentContextId ?? undefined,
+    });
+    const beforeObservation = await handle.observe();
+    const written = `atomic-note-${crypto.randomUUID()}`;
+    await context.runner.evalInPanelClient(
+      handle,
+      `(() => { const input = document.querySelector('[data-testid="note-input"]'); const save = document.querySelector('[data-testid="save-note"]'); if (!(input instanceof HTMLInputElement) || !(save instanceof HTMLElement)) throw new Error('notes controls missing'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ${JSON.stringify(written)}); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); save.click(); return true; })()`
+    );
+    const readStored = () =>
+      context.runner.evalInPanelClient<string>(
+        handle!,
+        `document.querySelector('[data-testid="stored-note"]')?.textContent?.trim() ?? ''`
+      );
+    const waitForStored = async () => {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const value = await readStored();
+        if (value === written) return value;
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      }
+      throw new Error("Stored note did not become visible before the deadline");
+    };
+    await waitForStored();
+    await handle.reload();
+    const afterObservation = await handle.observe();
+    const afterReload = await waitForStored();
+    captured = {
+      source: "system-test-harness",
+      panelPath,
+      storePath,
+      installedBeforeOpen,
+      permissionsBeforeOpen,
+      written,
+      afterReload,
+      before: beforeObservation,
+      after: afterObservation,
+    };
+  } catch (cause) {
+    error = cause instanceof Error ? cause.message : String(cause);
+  }
+  const execution: TestExecutionResult = {
+    messages: [...session.messages],
+    duration: Date.now() - startedAt,
+    diagnostics: { atomicPanelStore: captured },
+    ...(error ? { error } : {}),
+  };
+  try {
+    await handle?.archive();
+  } catch (cause) {
+    execution.cleanupErrors = [`archive: ${cause instanceof Error ? cause.message : String(cause)}`];
+  }
+  try {
+    await session.close();
+  } catch (cause) {
+    execution.cleanupErrors = [
+      ...(execution.cleanupErrors ?? []),
+      `close: ${cause instanceof Error ? cause.message : String(cause)}`,
+    ];
+  }
+  return execution;
+}
+
 function validateTodoDebugLoop(result: TestExecutionResult) {
   const base = completedScenarioEvidence(result);
   if (!base.passed) return base;
@@ -972,6 +1215,28 @@ export const projectLifecycleTests: TestCase[] = [
     prompt: "Build me a full-featured task management app, then launch and debug it.",
     validation: "agent-evidence",
     validate: validateTaskManagementApp,
+  },
+  {
+    name: "atomic-panel-store-install-clearance",
+    description:
+      "Publish a panel and its declared workspace store atomically, then prove install clearance and UI persistence",
+    category: "project-lifecycle",
+    timeoutMs: 45 * 60_000,
+    workspaceRepoFixture: CREATED_PANEL_STORE_WORKSPACE_REPO_FIXTURE,
+    authorityPolicy: panelControlAuthorityPolicy("inspect-atomic-panel-store", [
+      {
+        ruleId: "inspect-atomic-panel-store-install-permission",
+        capability: { kind: "exact", key: "permissions.read" },
+        resource: { kind: "exact", key: "permissions.read" },
+        tier: "gated",
+        decision: "once",
+      },
+    ]),
+    resources: [PANEL_AUTOMATION_RESOURCE],
+    prompt: "Harness-orchestrated atomic panel/store publication and live UI persistence check.",
+    orchestrate: orchestrateAtomicPanelStore,
+    validation: "agent-evidence",
+    validate: validateAtomicPanelStore,
   },
   {
     name: "panel-todo-debug-polish",
