@@ -10,6 +10,10 @@ const BUILDABLE_EXTENSION = { kind: "buildable-extension", section: "extensions"
 const BUILDABLE_APP = { kind: "buildable-app", section: "apps" } as const;
 const OPTIMIZABLE_PANEL = { kind: "optimizable-panel", section: "panels" } as const;
 const BUILDABLE_WORKER = { kind: "buildable-worker", section: "workers" } as const;
+const BUILDABLE_REGULAR_WORKER = {
+  kind: "buildable-regular-worker",
+  section: "workers",
+} as const;
 const CREATED_PANEL = { kind: "created-repository", section: "panels" } as const;
 const PANEL_WITH_DERIVED = {
   kind: "buildable-panel-with-derived",
@@ -937,6 +941,24 @@ describe("WorkspaceRepoFixtureLifecycle", () => {
 
     await fixture.cleanup(state);
     expect(fake.destroyContext).toHaveBeenCalledWith("context:1");
+  });
+
+  it("seeds a regular worker whose named export is valid in workerd", async () => {
+    const fake = createPort();
+    const fixture = new WorkspaceRepoFixtureLifecycle(
+      fake.port,
+      "regular-worker-test",
+      "system-test-regular-worker",
+      BUILDABLE_REGULAR_WORKER
+    );
+
+    const state = await fixture.prepare();
+    const seededText = fake.putText.mock.calls.map(([text]) => text).join("\n");
+
+    expect(seededText).toContain('export function fixtureValue() { return "baseline"; }');
+    expect(seededText).not.toContain('export const fixtureValue = "baseline"');
+
+    await fixture.cleanup(state);
   });
 
   it("does not enumerate ambient repositories during setup or cleanup", async () => {

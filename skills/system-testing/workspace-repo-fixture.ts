@@ -1120,7 +1120,7 @@ function repositorySeedFiles(
         content: [
           'import { createWorkerRuntime, handleWorkerRpc, type ExecutionContext, type WorkerEnv } from "@workspace/runtime/worker";',
           "",
-          'export const fixtureValue = "baseline";',
+          'export function fixtureValue() { return "baseline"; }',
           "",
           "let exposedFor: string | null = null;",
           "",
