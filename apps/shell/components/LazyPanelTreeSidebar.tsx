@@ -1345,7 +1345,9 @@ export function LazyPanelTreeSidebar({
           // search icon lands on the same x as a row's expander.
           paddingInline: ROW_PADDING_LEFT,
           minHeight: 24,
-          borderRadius: 5,
+          // The same radius as a row: both are the section frame's direct
+          // children, and the frame's own radius is derived from theirs.
+          borderRadius: "var(--radius-2)",
           background: "var(--gray-a3)",
           border: "1px solid var(--gray-a5)",
         }}
