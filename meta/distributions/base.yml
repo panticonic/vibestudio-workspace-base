@@ -2,6 +2,7 @@ template:
   name: Base
   description: A self-contained foundation for an agentic workspace.
   repositories:
+    - about/help
     - about/new
     - about/testbench
     - extensions/claude-code

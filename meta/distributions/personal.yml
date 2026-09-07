@@ -9,6 +9,7 @@ template:
     - about/downloads
     - about/history
     - about/local-models
+    - about/help
     - about/new
     - about/permissions
     - about/testbench
