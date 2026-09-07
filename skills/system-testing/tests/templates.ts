@@ -76,13 +76,8 @@ function templateCatalogChecked(result: TestExecutionResult) {
     base.evidence.evalValues.some((value) => value === null) ||
     records.some(
       (record) =>
-        record["catalogUnavailable"] === true ||
-        record["catalog"] === null,
-    ) ||
-    (records.some((record) => record["cached"] === false) &&
-      /if\s*\(\s*[A-Za-z_$][\w$]*\s*===\s*null\s*\)\s*return\s*\{[^}]*\bcached\s*:\s*false\b/iu.test(
-        base.evidence.evalCode,
-      ));
+        record["catalogUnavailable"] === true || record["catalog"] === null,
+    );
   const final = findLastAgentMessage(result);
   if (!catalog && !absent)
     return {

@@ -51,18 +51,6 @@ describe("template agentic validator", () => {
     expect(
       catalog.validate(execution(null, "No catalog is cached.")),
     ).toMatchObject({ passed: true });
-    expect(
-      catalog.validate(
-        execution({ cached: false, count: 0 }, "No catalog is cached.", {
-          code: 'const result = await extensions.invoke("@workspace-extensions/templates", "catalog", []); if (result === null) return { cached: false, count: 0 }; return result;',
-        }),
-      ),
-    ).toMatchObject({ passed: true });
-    expect(
-      catalog.validate(
-        execution({ cached: false, count: 0 }, "No catalog is cached."),
-      ),
-    ).toMatchObject({ passed: false });
   });
   it("joins the reported count to the observed catalog", () => {
     const snapshot = {
