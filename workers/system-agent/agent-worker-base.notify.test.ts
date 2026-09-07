@@ -13,7 +13,7 @@ import type {
   ParticipantRef,
   ResolveAddresseeContext,
 } from "@workspace/agentic-protocol";
-import { SystemAgentWorker } from "../../../workers/system-agent/system-agent-worker.js";
+import { SystemAgentWorker } from "./system-agent-worker.js";
 
 interface RecordedSend {
   participantId: string;
