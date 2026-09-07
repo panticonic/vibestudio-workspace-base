@@ -2,6 +2,7 @@ import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
 import { AppDialog } from "@workspace/ui/overlay";
+import { isRpcConnectionLost } from "@vibestudio/rpc";
 
 import {
   settingsDialogAtom,
@@ -46,14 +47,25 @@ export default function MainMode() {
   // Register shell overlays — hides panel views so dialogs aren't obscured
   useShellOverlay(workspaceChooserOpen);
 
-  // Sync overlay state to main process
-  useEffect(() => {
-    void view
-      .setShellOverlay(shellOverlayActive)
-      .catch((error: unknown) =>
-        console.warn("[MainMode] Shell overlay sync failed:", error),
-      );
-  }, [shellOverlayActive]);
+  // Reassert the current desired state after reconnection, including a dialog
+  // closed while its workspace connection was unavailable.
+  const syncOverlay = useCallback(() => {
+    void view.setShellOverlay(shellOverlayActive).catch((error: unknown) => {
+      if (!isRpcConnectionLost(error)) {
+        console.warn("[MainMode] Shell overlay sync failed:", error);
+      }
+    });
+  }, [view, shellOverlayActive]);
+  useEffect(syncOverlay, [syncOverlay]);
+  useShellEvent(
+    "server-connection-changed",
+    useCallback(
+      ({ status }) => {
+        if (status === "connected") syncOverlay();
+      },
+      [syncOverlay],
+    ),
+  );
 
   useEffect(() => {
     const bridge = (
