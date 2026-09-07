@@ -110,6 +110,18 @@
           },
           "tier": "gated",
           "evidence": "intentional-broad"
+        },
+        {
+          "capability": "workspace-service:channel",
+          "resource": {
+            "kind": "prefix",
+            "prefix": "do:workers/pubsub-channel:PubSubChannel:"
+          },
+          "tier": "gated",
+          "evidence": "bounded-dynamic",
+          "packages": [
+            "@workspace/collection-orchestration"
+          ]
         }
       ]
     }
