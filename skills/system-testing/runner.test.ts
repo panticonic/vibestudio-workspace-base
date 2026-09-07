@@ -64,6 +64,7 @@ import { HeadlessRunner, SYSTEM_TEST_AGENT_PROMPT } from "./runner.js";
 import {
   CONTENT_WORKSPACE_REPO_FIXTURE,
   CREATED_PANEL_WORKSPACE_REPO_FIXTURE,
+  CREATED_PANEL_STORE_WORKSPACE_REPO_FIXTURE,
 } from "./types.js";
 
 describe("HeadlessRunner", () => {
@@ -856,6 +857,37 @@ describe("HeadlessRunner", () => {
       "runtime.destroyContext",
       [{ contextId: "ctx-created", recursive: true }],
     );
+  });
+
+  it("does not present a multi-repository creation scope as an existing fixture", async () => {
+    const runner = new HeadlessRunner("ctx-test").forTest("panel-store-create", {
+      workspaceRepoFixture: CREATED_PANEL_STORE_WORKSPACE_REPO_FIXTURE,
+    });
+    mocks.rpc.call.mockResolvedValueOnce({ contextId: "ctx-created" });
+    mocks.vcs.status.mockResolvedValueOnce({
+      contextId: "ctx-created",
+      committed: { kind: "event", eventId: "event:main" },
+      workingHead: { kind: "event", eventId: "event:main" },
+      clean: true,
+      mainEventId: "event:main",
+      mainRelation: "at",
+      workingCounts: { applications: 0, workUnits: 0, changes: 0 },
+      integrating: [],
+    });
+
+    await runner.prepareWorkspaceRepoFixture();
+    await runner.spawn();
+
+    expect(runner.workspaceRepoName).toBeNull();
+    expect(runner.withTaskResources("create both")).toBe("create both");
+    const config = mocks.createWithAgent.mock.calls[0]![0] as {
+      extraConfig: Record<string, unknown>;
+    };
+    expect(config.extraConfig["systemPrompt"]).toContain(
+      'owns exactly 2 repositories that it creates, one under each of "panels/", "workers/"',
+    );
+    expect(config.extraConfig["systemPrompt"]).not.toContain("is already present");
+    expect(config.extraConfig["systemPrompt"]).not.toContain("system-test-panel-store-create-");
   });
 
   it("preserves structured runner diagnostic failures without serializing stacks", async () => {

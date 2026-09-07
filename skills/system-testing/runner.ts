@@ -335,7 +335,12 @@ export class HeadlessRunner {
    */
   withTaskResources(prompt: string): string {
     const fixture = this.workspaceRepoFixture;
-    if (!fixture || fixture.kind === "created-repository") return prompt;
+    if (
+      !fixture ||
+      fixture.kind === "created-repository" ||
+      fixture.kind === "created-repositories"
+    )
+      return prompt;
     const repoPath = `${fixture.section}/${fixture.repoName}`;
     return (
       "Prepared task input:\n" +
@@ -369,7 +374,8 @@ export class HeadlessRunner {
     const workspaceRepoFixture = opts?.workspaceRepoFixture
       ? {
           repoName:
-            opts.workspaceRepoFixture.kind === "created-repository"
+            opts.workspaceRepoFixture.kind === "created-repository" ||
+            opts.workspaceRepoFixture.kind === "created-repositories"
               ? null
               : `${repoNameStem}${crypto.randomUUID().slice(0, 8)}`,
           ...opts.workspaceRepoFixture,
@@ -583,6 +589,8 @@ export class HeadlessRunner {
         ? `\n\nHarness-owned test scope: this task owns exactly one repository that it creates under ${JSON.stringify(
             `${this.workspaceRepoFixture.section}/`,
           )}. All pre-existing repositories and every other newly created repository are outside the test scope.`
+        : this.workspaceRepoFixture.kind === "created-repositories"
+          ? `\n\nHarness-owned test scope: this task owns exactly ${this.workspaceRepoFixture.expectedSections.length} repositories that it creates, one under each of ${this.workspaceRepoFixture.expectedSections.map((section) => JSON.stringify(`${section}/`)).join(", ")}. All pre-existing repositories and every other newly created repository are outside the test scope.`
         : this.workspaceRepoFixture.kind === "buildable-panel-with-derived"
           ? `\n\nHarness-owned test scope: the disposable source repository ${JSON.stringify(
               `${this.workspaceRepoFixture.section}/${this.workspaceRepoFixture.repoName}`,
