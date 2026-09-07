@@ -100,9 +100,8 @@ function RetainedWorkspaceScreens({
   const colors = useAtomValue(themeColorsAtom);
   const navigation = useNavigation();
   const notify = useSetAtom(pushToastAtom);
-  const approvalSession = directory.approvalWorkspaceId
-    ? directory.sessions.get(directory.approvalWorkspaceId)
-    : undefined;
+  const approvalOwner = directory.selectedApprovalOwner;
+  const approvalSession = approvalOwner?.session;
   const selected = directory.activeWorkspaceId;
   const selectedSession = selected
     ? directory.sessions.get(selected)
@@ -161,16 +160,60 @@ function RetainedWorkspaceScreens({
           onCreated={() => directory.closeWorkspaceCreation()}
         />
       )}
-      {approvalSession?.state === "ready" &&
-        approvalSession.approvals !== null && (
+      {approvalOwner &&
+        approvalOwner.approvals !== null &&
+        (!approvalSession || approvalSession.state === "ready") &&
+        (approvalSession ? (
           <WorkspaceScope session={approvalSession} visible scheme={scheme}>
             <WorkspaceApprovalSurface
               directory={directory}
-              session={approvalSession}
+              owner={approvalOwner}
               notify={notify}
             />
           </WorkspaceScope>
-        )}
+        ) : (
+          <WorkspaceApprovalSurface
+            directory={directory}
+            owner={approvalOwner}
+            notify={notify}
+          />
+        ))}
+      {directory.approvalOwnerErrors.length > 0 && !approvalOwner && (
+        <Modal transparent visible animationType="fade">
+          <View
+            style={{
+              flex: 1,
+              justifyContent: "center",
+              padding: spacing.xl,
+              backgroundColor: "rgba(0,0,0,0.45)",
+            }}
+          >
+            <View
+              accessibilityViewIsModal
+              style={{
+                padding: spacing.xl,
+                gap: spacing.md,
+                borderRadius: 20,
+                backgroundColor: colors.surfaceRaised,
+              }}
+            >
+              <Text
+                accessibilityRole="header"
+                style={[type.heading, { color: colors.text }]}
+              >
+                Approvals unavailable
+              </Text>
+              <Text style={{ color: colors.textSecondary }}>
+                {directory.approvalOwnerErrors.join(" ")}
+              </Text>
+              <Button
+                label="Try again"
+                onPress={() => void directory.retryFailedApprovalOwners()}
+              />
+            </View>
+          </View>
+        </Modal>
+      )}
       {directory.approvalWorkspaceId &&
         (!approvalSession ||
           approvalSession.state !== "ready" ||

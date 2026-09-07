@@ -1,6 +1,8 @@
 /** Stable startup client and exports used by shell entry points. */
 import {
   createRpcClient,
+  rpcDestinationMatchesCaller,
+  type RpcDestination,
   bridgeStreamSurfaceOf,
   openBridgeStream,
   openBridgeUploadStream,
@@ -14,7 +16,11 @@ import {
   type NativeWorkspaceConnectionBridge,
 } from "./nativeConnectionState";
 import { createNativePanelPresentation } from "./nativePanelPresentation";
-import { createShellWorkspaceClient } from "./workspaceClient";
+import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
+import {
+  createShellApprovalClient,
+  createShellWorkspaceClient,
+} from "./workspaceClient";
 export * from "./workspaceClient";
 const g = globalThis as unknown as {
   __vibestudioWorkspaceConnection?: NativeWorkspaceConnectionBridge;
@@ -50,21 +56,18 @@ if (streamSurface) {
     );
   };
 }
-const rpc: RpcClient = createRpcClient({
-  selfId: g.__vibestudioTransport.identity.runtimeId,
-  callerKind: "app",
+const systemOwner = createOwnerRpc({
+  kind: "workspace",
   workspaceId: g.__vibestudioTransport.identity.workspaceId,
-  authorityAcquisition: "wait",
-  transport: {
-    ...transport,
-    onMessage: (handler) =>
-      transport.onMessage((envelope) => {
-        const source = envelope.delivery.caller.workspaceId;
-        if (!source || source === g.__vibestudioTransport?.identity.workspaceId)
-          handler(envelope);
-      }),
-  },
 });
+const rpc: RpcClient = systemOwner.rpc;
+const hubOwner = createOwnerRpc({ kind: "hub" });
+export const hubRpc = hubOwner.rpc;
+export const hubApprovalSource = {
+  owner: { kind: "hub" as const },
+  shellApproval: createShellApprovalClient(hubRpc),
+  events: new EventsClient(hubRpc),
+};
 export const systemWorkspaceId = Promise.resolve(
   g.__vibestudioTransport.identity.workspaceId,
 );
@@ -72,6 +75,7 @@ export const nativePanelPresentation = createNativePanelPresentation(rpc);
 export const startupWorkspaceClient = createShellWorkspaceClient(rpc, {
   workspaceId: systemWorkspaceId,
   nativePresentation: nativePanelPresentation,
+  hubRpc,
 });
 /** The startup workspace client; never rebound when focus changes. */
 export const {
@@ -116,9 +120,8 @@ export const {
   connectToChannel,
 } = startupWorkspaceClient;
 
-/** A captured target client. Desktop UI admission is enforced at the native IPC boundary. */
-export async function createWorkspaceShellClient(workspaceId: string) {
-  const sourceWorkspaceId = await systemWorkspaceId;
+/** One captured RPC owner; focus changes cannot retarget it. */
+function createOwnerRpc(destination: RpcDestination) {
   let closed = false;
   const releases = new Set<() => void>();
   const statuses = new Set<
@@ -127,7 +130,7 @@ export async function createWorkspaceShellClient(workspaceId: string) {
   const scopedRpc = createRpcClient({
     selfId: assertPresent(g.__vibestudioTransport).identity.runtimeId,
     callerKind: "app",
-    workspaceId: sourceWorkspaceId,
+    workspaceId: assertPresent(g.__vibestudioTransport).identity.workspaceId,
     authorityAcquisition: "wait",
     transport: {
       ...(transport.stream
@@ -138,7 +141,7 @@ export async function createWorkspaceShellClient(workspaceId: string) {
               return transport.stream!(
                 {
                   ...envelope,
-                  destination: { kind: "workspace", workspaceId },
+                  destination,
                 },
                 signal,
                 body,
@@ -154,7 +157,7 @@ export async function createWorkspaceShellClient(workspaceId: string) {
               return transport.streamBody!(
                 {
                   ...envelope,
-                  destination: { kind: "workspace", workspaceId },
+                  destination,
                 },
                 signal,
                 body,
@@ -166,12 +169,14 @@ export async function createWorkspaceShellClient(workspaceId: string) {
         if (closed) return Promise.reject(new Error("Workspace UI is closed"));
         return transport.send({
           ...envelope,
-          destination: { kind: "workspace", workspaceId },
+          destination,
         });
       },
       onMessage: (handler) => {
         const release = transport.onMessage((envelope) => {
-          if (envelope.delivery.caller.workspaceId === workspaceId)
+          if (
+            rpcDestinationMatchesCaller(destination, envelope.delivery.caller)
+          )
             handler(envelope);
         });
         releases.add(release);
@@ -199,9 +204,26 @@ export async function createWorkspaceShellClient(workspaceId: string) {
       },
     },
   });
+  return {
+    rpc: scopedRpc,
+    close() {
+      if (closed) return;
+      closed = true;
+      for (const listener of statuses) listener("disconnected");
+      statuses.clear();
+      for (const release of releases) release();
+      releases.clear();
+    },
+  };
+}
+/** A captured target client. Desktop UI admission is enforced at the native IPC boundary. */
+export async function createWorkspaceShellClient(workspaceId: string) {
+  const owner = createOwnerRpc({ kind: "workspace", workspaceId });
+  const scopedRpc = owner.rpc;
   const scoped = createShellWorkspaceClient(scopedRpc, {
     workspaceId,
     nativePresentation: nativePanelPresentation,
+    hubRpc,
   });
   const client = {
     ...scoped,
@@ -226,13 +248,8 @@ export async function createWorkspaceShellClient(workspaceId: string) {
   return {
     client,
     close() {
-      if (closed) return;
-      closed = true;
       scoped.unitIcons.close();
-      for (const listener of statuses) listener("disconnected");
-      statuses.clear();
-      for (const release of releases) release();
-      releases.clear();
+      owner.close();
     },
   };
 }

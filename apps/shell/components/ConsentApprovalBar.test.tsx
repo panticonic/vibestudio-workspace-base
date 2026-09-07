@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import React, { useEffect } from "react";
+import React, { useEffect, useMemo } from "react";
 import {
   ApprovalPresentationContext,
   useApprovalPresentationController,
@@ -317,9 +317,16 @@ function installReviewApproval(
   };
 }
 
-function PresentedBar() {
+type SourceFactory = (
+  client: ReturnType<typeof useShellWorkspaceClient>,
+) => import("./ConsentApprovalBar").ApprovalSource;
+function PresentedBar({ source }: { source?: SourceFactory }) {
   const presentation = useApprovalPresentationController(
     useShellWorkspaceClient(),
+  );
+  const approvalSource = useMemo(
+    () => source?.(presentation.client),
+    [source, presentation.client],
   );
   useEffect(() => {
     presentation.setHost(document.body);
@@ -327,12 +334,12 @@ function PresentedBar() {
   }, [presentation.setHost, presentation.setAnchorId]);
   return (
     <ApprovalPresentationContext.Provider value={presentation}>
-      <ConsentApprovalBar />
+      <ConsentApprovalBar source={approvalSource} />
     </ApprovalPresentationContext.Provider>
   );
 }
 
-function mountBar() {
+function mountBar(source?: SourceFactory) {
   // jsdom doesn't lay out, so stub the anchor host's rect to a real size — the
   // coordinator only opens the overlay once it has a non-empty anchor.
   const host = document.createElement("div");
@@ -352,12 +359,55 @@ function mountBar() {
   document.body.appendChild(host);
   return render(
     <Theme>
-      <PresentedBar />
+      <PresentedBar source={source} />
     </Theme>,
   );
 }
 
 describe("ConsentApprovalBar coordinator", () => {
+  it("decides a server-owned request through its captured queue without a workspace heartbeat", async () => {
+    const resolve = vi.fn(async () => {});
+    const listPending = vi.fn(async () => [
+      capabilityApproval({
+        approvalId: "server-approval",
+        title: "Server access",
+      }),
+    ]);
+    const view = mountBar((client) => ({
+      owner: { kind: "hub" },
+      shellApproval: { ...client.shellApproval, listPending, resolve },
+      events: client.events,
+    }));
+    await waitFor(() =>
+      expect(overlay.options?.props?.approval?.approvalId).toBe(
+        "server-approval",
+      ),
+    );
+    emit({ type: "show-panel", approvalId: "server-approval" });
+    expect(shellClient.navigateToId).not.toHaveBeenCalled();
+    emit({ type: "decide", approvalId: "server-approval", decision: "once" });
+    await waitFor(() =>
+      expect(resolve).toHaveBeenCalledWith("server-approval", "once"),
+    );
+    expect(shellClient.resolve).not.toHaveBeenCalled();
+    expect(shellClient.listPending).not.toHaveBeenCalled();
+    expect(shellClient.heartbeat).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it("shows a failed queue read and clears the error after Retry succeeds", async () => {
+    shellClient.listPending.mockRejectedValueOnce(
+      new Error("Queue disconnected"),
+    );
+    const view = mountBar();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "approvals couldn’t be loaded",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    view.unmount();
+  });
+
   it("renders a background owner in the shared surface and rejects another workspace's identical-ID intent", async () => {
     const request = installReviewApproval("same");
     const personalResolve = vi.fn(async () => ({

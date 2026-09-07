@@ -1,4 +1,8 @@
-import { isRpcConnectionLost } from "@vibestudio/rpc";
+import {
+  isRpcConnectionLost,
+  rpcDestinationKey,
+  type RpcDestination,
+} from "@vibestudio/rpc";
 import { createPortal } from "react-dom";
 import { approvalPresentationKey } from "@vibestudio/shared/approvalPresentation";
 import { useApprovalPresentation } from "./ApprovalPresentationContext";
@@ -7,7 +11,7 @@ import {
   useWorkspaceVisible,
   useWorkspaceNavigationHost,
   ShellWorkspaceClientContext,
-  WorkspaceVisibilityContext
+  WorkspaceVisibilityContext,
 } from "../shell/workspaceContext";
 /**
  * ConsentApprovalBar — the approval coordinator. It owns the approval state
@@ -18,11 +22,22 @@ import {
  * approval as props and runs the matching `shellApproval.*` call when the card
  * emits an intent. The presentational card lives in `./ApprovalCard`.
  */
-import { useCallback, useEffect, useMemo, useId, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useAtomValue } from "jotai";
-import { Badge, Flex, Text } from "@radix-ui/themes";
+import { Badge, Button, Flex, Text } from "@radix-ui/themes";
 import { ChevronRightIcon } from "@radix-ui/react-icons";
-import type { ApprovalDecision, PendingApproval } from "@vibestudio/shared/approvals";
+import type {
+  ApprovalDecision,
+  PendingApproval,
+} from "@vibestudio/shared/approvals";
 import { getApprovalCopy } from "@vibestudio/shared/approvalCopy";
 import type { TemplateInstallResolution } from "@vibestudio/shared/authority/unitInstallReview";
 import type { InstallReviewResolution } from "@vibestudio/service-schemas/shellApproval";
@@ -30,10 +45,13 @@ import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
 import {
   createApprovalStateController,
   type ApprovalStateController,
-  SHELL_APPROVAL_PENDING_CHANGED_EVENT
+  SHELL_APPROVAL_PENDING_CHANGED_EVENT,
 } from "@vibestudio/shell-core/approvalState";
 
-import { useShellContentOverlay, type ContentOverlayBounds } from "../shell/useShellContentOverlay";
+import {
+  useShellContentOverlay,
+  type ContentOverlayBounds,
+} from "../shell/useShellContentOverlay";
 import { useShellEvent } from "../shell/useShellEvent";
 import { effectiveThemeAtom, themeConfigAtom } from "../state/themeAtoms";
 import { FOCUS_APPROVAL_REQUEST_EVENT } from "../commands/slate";
@@ -51,7 +69,7 @@ import {
   type ApprovalTone,
   type BlobResult,
   type CallerInfo,
-  type WorkspaceHistoryTarget
+  type WorkspaceHistoryTarget,
 } from "./approvalCardModel";
 import type { OverlayThemeInfo } from "../overlay/types";
 
@@ -73,16 +91,35 @@ const APPROVAL_RECONCILE_INTERVAL_MS = 5_000;
  *  the diff-review escape hatch deep-links into). */
 const WORKSPACE_HISTORY_SOURCE = "about/workspace-history";
 
-export function ConsentApprovalBar() {
+export type ApprovalSource = {
+  owner: RpcDestination;
+  shellApproval: import("../shell/workspaceClient").ShellWorkspaceClient["shellApproval"];
+  events: Pick<
+    import("../shell/workspaceClient").ShellWorkspaceClient["events"],
+    "subscribe" | "unsubscribe" | "on"
+  >;
+};
+
+export function ConsentApprovalBar({
+  source,
+}: { source?: ApprovalSource } = {}) {
   const workspaceVisible = useWorkspaceVisible();
   const presentation = useApprovalPresentation();
   const publicationOwner = useRef(Symbol("workspace-approvals")).current;
   const presentationOwner = useId();
   const workspaceNavigation = useWorkspaceNavigationHost();
   const workspaceId = workspaceNavigation?.workspaceId ?? "system";
-  const { unitIcons, account, blobstore, events, panel, shellApproval, shellPresence } =
-    useShellWorkspaceClient();
+  const workspaceClient = useShellWorkspaceClient();
+  const { unitIcons, account, blobstore, panel, shellPresence } =
+    workspaceClient;
+  const { events, shellApproval } = source ?? workspaceClient;
+  const owner = useMemo<RpcDestination>(
+    () => source?.owner ?? { kind: "workspace", workspaceId },
+    [source, workspaceId],
+  );
+  const ownerKey = rpcDestinationKey(owner);
 
+  const [queueError, setQueueError] = useState<string | null>(null);
   const [pendingAccess, setPendingAccess] = useState<PendingApproval[]>([]);
   const approvalController = useRef<ApprovalStateController | null>(null);
   const authoritativePending = useRef<PendingApproval[]>([]);
@@ -102,9 +139,9 @@ export function ConsentApprovalBar() {
    * remain answerable.
    */
   const submittingApprovalIdsRef = useRef<Set<string>>(new Set());
-  const [submittingApprovalIds, setSubmittingApprovalIds] = useState<ReadonlySet<string>>(
-    () => new Set()
-  );
+  const [submittingApprovalIds, setSubmittingApprovalIds] = useState<
+    ReadonlySet<string>
+  >(() => new Set());
   /**
    * What came of the last install review (§7.2, "Result").
    *
@@ -114,13 +151,15 @@ export function ConsentApprovalBar() {
    * `News added` / `Open News →` exist at all, and it is deliberately outside
    * the queue — it never delays, hides, or replaces the next approval.
    */
-  const [installResult, setInstallResult] = useState<InstallReviewResolution | null>(null);
+  const [installResult, setInstallResult] =
+    useState<InstallReviewResolution | null>(null);
   const transientWorkspaceReady =
     installResult?.mode === "adopt-root" &&
     installResult.decision === "accepted" &&
     installResult.landing !== undefined &&
     installResult.landing.failed.length === 0;
-  const installResultHasFailure = (installResult?.landing?.failed.length ?? 0) > 0;
+  const installResultHasFailure =
+    (installResult?.landing?.failed.length ?? 0) > 0;
   const installResultAutoDismissMs = installResultHasFailure
     ? null
     : transientWorkspaceReady
@@ -135,7 +174,9 @@ export function ConsentApprovalBar() {
   } | null>(null);
   // Diff-review (P3.5): host-served blob cache, keyed by content hash, fetched
   // lazily on the overlay surface's behalf (the surface has no RPC).
-  const [blobResults, setBlobResults] = useState<Record<string, BlobResult>>({});
+  const [blobResults, setBlobResults] = useState<Record<string, BlobResult>>(
+    {},
+  );
   const blobResultsRef = useRef(blobResults);
   blobResultsRef.current = blobResults;
   const inFlightBlobsRef = useRef<Set<string>>(new Set());
@@ -149,15 +190,19 @@ export function ConsentApprovalBar() {
   useEffect(() => {
     if (!installResult || installResultAutoDismissMs === null) return;
     const timer = window.setTimeout(() => {
-      setInstallResult((current) => (current === installResult ? null : current));
+      setInstallResult((current) =>
+        current === installResult ? null : current,
+      );
     }, installResultAutoDismissMs);
     return () => window.clearTimeout(timer);
   }, [installResult, installResultAutoDismissMs]);
 
   useEffect(() => {
+    if (owner.kind !== "workspace") return;
     const heartbeat = () => {
       void shellPresence.heartbeat().catch((err: unknown) => {
-        if (!isRpcConnectionLost(err)) console.warn("[ConsentApprovalBar] heartbeat failed:", err);
+        if (!isRpcConnectionLost(err))
+          console.warn("[ConsentApprovalBar] heartbeat failed:", err);
       });
     };
     heartbeat();
@@ -171,7 +216,7 @@ export function ConsentApprovalBar() {
       presentation.expand();
       setKeyboardFocusRequest((previous) => ({
         approvalId,
-        sequence: (previous?.sequence ?? 0) + 1
+        sequence: (previous?.sequence ?? 0) + 1,
       }));
     }
   }, [presentation.expand]);
@@ -182,25 +227,38 @@ export function ConsentApprovalBar() {
   useEffect(() => {
     if (!workspaceVisible) return;
     window.addEventListener(FOCUS_APPROVAL_REQUEST_EVENT, focusCurrentApproval);
-    return () => window.removeEventListener(FOCUS_APPROVAL_REQUEST_EVENT, focusCurrentApproval);
+    return () =>
+      window.removeEventListener(
+        FOCUS_APPROVAL_REQUEST_EVENT,
+        focusCurrentApproval,
+      );
   }, [focusCurrentApproval, workspaceVisible]);
 
   useEffect(() => {
     const controller = createApprovalStateController({
       listPending: () => shellApproval.listPending(),
-      subscribePendingChanged: () => events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
-      unsubscribePendingChanged: () => events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
+      subscribePendingChanged: () =>
+        events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
+      unsubscribePendingChanged: () =>
+        events.unsubscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT),
       onPendingChanged: (listener) =>
-        events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, (payload) => listener(payload)),
+        events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, (payload) =>
+          listener(payload),
+        ),
       filter: filterRuntimeApprovals,
       onChange: (pending) => {
+        setQueueError(null);
         authoritativePending.current = pending;
         setPendingAccess(pending);
       },
       onError: (err, phase) => {
+        setQueueError(err instanceof Error ? err.message : String(err));
         if (!isRpcConnectionLost(err))
-          console.warn(`[ConsentApprovalBar] approval state ${phase} failed:`, err);
-      }
+          console.warn(
+            `[ConsentApprovalBar] approval state ${phase} failed:`,
+            err,
+          );
+      },
     });
     approvalController.current = controller;
     controller.start();
@@ -218,7 +276,7 @@ export function ConsentApprovalBar() {
   useEffect(() => {
     const ids = new Set(pendingAccess.map((approval) => approval.approvalId));
     const hasNew = pendingAccess.some(
-      (approval) => !seenApprovalIdsRef.current.has(approval.approvalId)
+      (approval) => !seenApprovalIdsRef.current.has(approval.approvalId),
     );
     seenApprovalIdsRef.current = ids;
     if (hasNew) setAttentionSeq((seq) => seq + 1);
@@ -226,11 +284,11 @@ export function ConsentApprovalBar() {
 
   const { publish, remove } = presentation;
   useEffect(() => {
-    publish(workspaceId, publicationOwner, pendingAccess);
-  }, [publish, workspaceId, publicationOwner, pendingAccess]);
+    publish(owner, publicationOwner, pendingAccess);
+  }, [publish, owner, publicationOwner, pendingAccess]);
   useEffect(
-    () => () => remove(workspaceId, publicationOwner),
-    [remove, workspaceId, publicationOwner]
+    () => () => remove(owner, publicationOwner),
+    [remove, owner, publicationOwner],
   );
 
   const orderedPending = useMemo(
@@ -241,33 +299,40 @@ export function ConsentApprovalBar() {
           const isPreparing = (approval: PendingApproval) =>
             approval.lifecycle?.state === "preparing" ? 1 : 0;
           return (
-            isPreparing(left.approval) - isPreparing(right.approval) || left.index - right.index
+            isPreparing(left.approval) - isPreparing(right.approval) ||
+            left.index - right.index
           );
         })
         .map(({ approval }) => approval),
-    [pendingAccess]
+    [pendingAccess],
   );
   const browseIndex = presentation.entries.findIndex(
-    (entry) => approvalPresentationKey(entry) === presentation.state.selectedKey
+    (entry) =>
+      approvalPresentationKey(entry) === presentation.state.selectedKey,
   );
   const current =
     orderedPending.find(
       (approval) =>
-        approvalPresentationKey({ workspaceId, approvalId: approval.approvalId }) ===
-        presentation.state.selectedKey
+        approvalPresentationKey({ owner, approvalId: approval.approvalId }) ===
+        presentation.state.selectedKey,
     ) ?? null;
   const presentationKey = current
-    ? JSON.stringify([workspaceId, current.approvalId, presentationOwner])
+    ? JSON.stringify([ownerKey, current.approvalId, presentationOwner])
     : null;
   currentApprovalIdRef.current = current?.approvalId ?? null;
   // Preparation is progress, not a decision yet. Every actionable approval is
   // visible in app; `attention` only controls out-of-app notification policy.
   const minimized =
-    current != null && (!presentation.state.open || current.lifecycle?.state === "preparing");
+    current != null &&
+    (!presentation.state.open || current.lifecycle?.state === "preparing");
   const queueLength = presentation.entries.length;
   const canPrev = queueLength > 1 && browseIndex > 0;
   const canNext = queueLength > 1 && browseIndex < queueLength - 1;
-  const currentCaller = current ? resolveCallerInfo(current) : null;
+  const resolvedCaller = current ? resolveCallerInfo(current) : null;
+  const currentCaller =
+    resolvedCaller && owner.kind === "hub"
+      ? { ...resolvedCaller, panelId: undefined }
+      : resolvedCaller;
   const [callerIcon, setCallerIcon] = useState<{
     approvalId: string;
     owner: typeof unitIcons;
@@ -277,7 +342,13 @@ export function ConsentApprovalBar() {
   const callerIconSource = currentCaller?.iconSourcePath;
   const callerIconPath = currentCaller?.icon;
   useEffect(() => {
-    if (!current || !callerIconSource || !callerIconPath?.startsWith("./")) return;
+    if (
+      owner.kind !== "workspace" ||
+      !current ||
+      !callerIconSource ||
+      !callerIconPath?.startsWith("./")
+    )
+      return;
     let active = true;
     const approvalId = current.approvalId;
     const key = JSON.stringify([callerIconSource, callerIconPath, null, null]);
@@ -290,22 +361,38 @@ export function ConsentApprovalBar() {
     return () => {
       active = false;
     };
-  }, [current?.approvalId, callerIconSource, callerIconPath, unitIcons]);
+  }, [
+    ownerKey,
+    current?.approvalId,
+    callerIconSource,
+    callerIconPath,
+    unitIcons,
+  ]);
   const sourceWorkspaceId =
-    current?.kind === "capability" ? current.snapshot?.sourceWorkspaceId : undefined;
+    current?.kind === "capability"
+      ? current.snapshot?.sourceWorkspaceId
+      : undefined;
   const destinationWorkspaceId =
-    current?.kind === "capability" ? (current.snapshot?.workspaceId ?? workspaceId) : workspaceId;
+    current?.kind === "capability"
+      ? (current.snapshot?.workspaceId ?? workspaceId)
+      : workspaceId;
   const approvalWorkspaceLabel =
-    sourceWorkspaceId && sourceWorkspaceId !== destinationWorkspaceId
-      ? `${workspaceNavigation?.workspaceNames[sourceWorkspaceId] ?? sourceWorkspaceId} → ${workspaceNavigation?.workspaceNames[destinationWorkspaceId] ?? workspaceNavigation?.workspaceLabel ?? destinationWorkspaceId}`
-      : workspaceNavigation?.workspaceLabel;
+    owner.kind === "hub"
+      ? "Server"
+      : sourceWorkspaceId && sourceWorkspaceId !== destinationWorkspaceId
+        ? `${workspaceNavigation?.workspaceNames[sourceWorkspaceId] ?? sourceWorkspaceId} → ${workspaceNavigation?.workspaceNames[destinationWorkspaceId] ?? workspaceNavigation?.workspaceLabel ?? destinationWorkspaceId}`
+        : workspaceNavigation?.workspaceLabel;
 
   const diffReview = current ? getDiffReviewPayload(current) : null;
-  const diffHashes = diffReview ? diffReviewPayloadHashes(diffReview) : new Set<string>();
+  const diffHashes = diffReview
+    ? diffReviewPayloadHashes(diffReview)
+    : new Set<string>();
   const payloadHashes = diffHashes;
 
   useEffect(() => {
-    setDecisionError((error) => (error && error.approvalId !== current?.approvalId ? null : error));
+    setDecisionError((error) =>
+      error && error.approvalId !== current?.approvalId ? null : error,
+    );
     // A new approval starts with an empty blob cache — payload hashes are
     // per-approval, and nothing should carry over between them.
     setBlobResults({});
@@ -316,10 +403,20 @@ export function ConsentApprovalBar() {
   // current approval's payload are fetchable; any other hash is ignored.
   const fetchBlob = (hash: string, refresh = false) => {
     if (!current || !payloadHashes.has(hash)) return;
+    if (owner.kind !== "workspace") {
+      setBlobResults((previous) => ({
+        ...previous,
+        [hash]: { error: "This server request has no workspace file source." },
+      }));
+      return;
+    }
     const existing = blobResultsRef.current[hash];
     // Immutable successful content remains cached. A refresh is meaningful
     // only for a prior missing/error result and never duplicates in-flight IO.
-    if ((existing && (!refresh || "text" in existing)) || inFlightBlobsRef.current.has(hash)) {
+    if (
+      (existing && (!refresh || "text" in existing)) ||
+      inFlightBlobsRef.current.has(hash)
+    ) {
       return;
     }
     if (refresh) {
@@ -336,25 +433,29 @@ export function ConsentApprovalBar() {
       .then((text) =>
         setBlobResults((prev) => ({
           ...prev,
-          [hash]: text == null ? { missing: true } : { text }
-        }))
+          [hash]: text == null ? { missing: true } : { text },
+        })),
       )
       .catch((err: unknown) =>
         setBlobResults((prev) => ({
           ...prev,
           [hash]: {
-            error: err instanceof Error ? err.message : "Blob fetch failed"
-          }
-        }))
+            error: err instanceof Error ? err.message : "Blob fetch failed",
+          },
+        })),
       )
       .finally(() => inFlightBlobsRef.current.delete(hash));
   };
 
   // Measure the panel-region rect (the overlay anchor). Re-measure on resize.
-  const [anchorBounds, setAnchorBounds] = useState<ContentOverlayBounds | null>(null);
+  const [anchorBounds, setAnchorBounds] = useState<ContentOverlayBounds | null>(
+    null,
+  );
   useEffect(() => {
     const measure = () => {
-      const host = presentation.anchorId ? document.getElementById(presentation.anchorId) : null;
+      const host = presentation.anchorId
+        ? document.getElementById(presentation.anchorId)
+        : null;
       const rect = host?.getBoundingClientRect();
       if (!rect || rect.width <= 0 || rect.height <= 0) {
         setAnchorBounds(null);
@@ -364,7 +465,7 @@ export function ConsentApprovalBar() {
         x: Math.round(rect.left),
         y: Math.round(rect.top),
         width: Math.round(rect.width),
-        height: Math.round(rect.height)
+        height: Math.round(rect.height),
       };
       setAnchorBounds((prev) =>
         prev &&
@@ -373,13 +474,17 @@ export function ConsentApprovalBar() {
         prev.width === next.width &&
         prev.height === next.height
           ? prev
-          : next
+          : next,
       );
     };
     measure();
-    const host = presentation.anchorId ? document.getElementById(presentation.anchorId) : null;
+    const host = presentation.anchorId
+      ? document.getElementById(presentation.anchorId)
+      : null;
     const observer =
-      host && typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+      host && typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(measure)
+        : null;
     observer?.observe(host as Element);
     window.addEventListener("resize", measure);
     return () => {
@@ -394,24 +499,30 @@ export function ConsentApprovalBar() {
     const approval = current;
     if (!approval) return;
     setDecisionError(null);
-    setPendingAccess((items) => items.filter((item) => item.approvalId !== approval.approvalId));
+    setPendingAccess((items) =>
+      items.filter((item) => item.approvalId !== approval.approvalId),
+    );
     void shellApproval
       .resolve(approval.approvalId, decision)
       .catch((error: unknown) => reconcileFailedDecision(approval, error));
   };
   const submitClientConfig = (values: Record<string, string>) => {
     if (current?.kind !== "client-config") return;
-    runApprovalAction(current, () => shellApproval.submitClientConfig(current.approvalId, values));
+    runApprovalAction(current, () =>
+      shellApproval.submitClientConfig(current.approvalId, values),
+    );
   };
   const submitCredentialInput = (values: Record<string, string>) => {
     if (current?.kind !== "credential-input") return;
     runApprovalAction(current, () =>
-      shellApproval.submitCredentialInput(current.approvalId, values)
+      shellApproval.submitCredentialInput(current.approvalId, values),
     );
   };
   const submitSecretInput = (values: Record<string, string>) => {
     if (current?.kind !== "secret-input") return;
-    runApprovalAction(current, () => shellApproval.submitSecretInput(current.approvalId, values));
+    runApprovalAction(current, () =>
+      shellApproval.submitSecretInput(current.approvalId, values),
+    );
   };
   /**
    * Answer a review and keep what the server says came of it.
@@ -434,23 +545,36 @@ export function ConsentApprovalBar() {
     // look like a very slow save. Retire it immediately, exactly as the standard
     // approval path does, and restore the same snapshot only if the decision
     // itself fails.
-    setPendingAccess((items) => items.filter((item) => item.approvalId !== approval.approvalId));
+    setPendingAccess((items) =>
+      items.filter((item) => item.approvalId !== approval.approvalId),
+    );
     runApprovalAction(approval, async () => {
-      const outcome = await shellApproval.resolveInstallReview(approval.approvalId, resolution);
+      const outcome = await shellApproval.resolveInstallReview(
+        approval.approvalId,
+        resolution,
+      );
       setInstallResult(outcome);
     });
   };
   const resolveTaskRules = (
-    resolution: { decision: "accept"; selected: string[] } | { decision: "cancel" }
+    resolution:
+      | { decision: "accept"; selected: string[] }
+      | { decision: "cancel" },
   ) => {
-    if (current?.kind !== "capability" || current.cardType !== "task.rules") return;
+    if (current?.kind !== "capability" || current.cardType !== "task.rules")
+      return;
     const approval = current;
-    setPendingAccess((items) => items.filter((item) => item.approvalId !== approval.approvalId));
+    setPendingAccess((items) =>
+      items.filter((item) => item.approvalId !== approval.approvalId),
+    );
     runApprovalAction(approval, () =>
-      shellApproval.resolveTaskRules(approval.approvalId, resolution)
+      shellApproval.resolveTaskRules(approval.approvalId, resolution),
     );
   };
-  const runApprovalAction = (approval: PendingApproval, action: () => Promise<unknown>) => {
+  const runApprovalAction = (
+    approval: PendingApproval,
+    action: () => Promise<unknown>,
+  ) => {
     if (submittingApprovalIdsRef.current.has(approval.approvalId)) return;
     submittingApprovalIdsRef.current.add(approval.approvalId);
     setDecisionError(null);
@@ -462,7 +586,10 @@ export function ConsentApprovalBar() {
         setSubmittingApprovalIds(new Set(submittingApprovalIdsRef.current));
       });
   };
-  const reconcileFailedDecision = async (approval: PendingApproval, error: unknown) => {
+  const reconcileFailedDecision = async (
+    approval: PendingApproval,
+    error: unknown,
+  ) => {
     console.error("[ConsentApprovalBar] approval action failed:", error);
     const controller = approvalController.current;
     if (!controller) return;
@@ -470,10 +597,14 @@ export function ConsentApprovalBar() {
     if (approvalController.current !== controller) return;
     // A denied decision can also mean the request was withdrawn or membership
     // changed. Only the current authoritative queue can put a request back.
-    if (authoritativePending.current.some((item) => item.approvalId === approval.approvalId)) {
+    if (
+      authoritativePending.current.some(
+        (item) => item.approvalId === approval.approvalId,
+      )
+    ) {
       setDecisionError({
         approvalId: approval.approvalId,
-        message: error instanceof Error ? error.message : String(error)
+        message: error instanceof Error ? error.message : String(error),
       });
     }
   };
@@ -481,6 +612,14 @@ export function ConsentApprovalBar() {
   // (navigate it to the new target + focus), otherwise create one. The target
   // rides along as launch state-args the panel consumes on mount/param-change.
   const openInWorkspaceHistory = (target: WorkspaceHistoryTarget) => {
+    if (owner.kind !== "workspace") {
+      if (current)
+        setDecisionError({
+          approvalId: current.approvalId,
+          message: "This server request has no workspace history.",
+        });
+      return;
+    }
     const stateArgs = { diffTarget: target };
     void (async () => {
       try {
@@ -494,7 +633,7 @@ export function ConsentApprovalBar() {
           const page = await panel.getTreePage({
             group: { kind: "roots", ownerUserId: profile.userId },
             ...(cursor ? { cursor } : {}),
-            limit: 100
+            limit: 100,
           });
           for (const node of page.nodes) {
             const observation = await panel.observe(node.slotId);
@@ -508,14 +647,17 @@ export function ConsentApprovalBar() {
         }
         if (existingId) {
           await panel.navigate(existingId, WORKSPACE_HISTORY_SOURCE, {
-            stateArgs
+            stateArgs,
           });
           navigateToId(existingId);
         } else {
           await panel.createPanel(WORKSPACE_HISTORY_SOURCE, { stateArgs });
         }
       } catch (err: unknown) {
-        console.error("[ConsentApprovalBar] open-in-workspace-history failed:", err);
+        console.error(
+          "[ConsentApprovalBar] open-in-workspace-history failed:",
+          err,
+        );
       }
     })();
   };
@@ -542,7 +684,9 @@ export function ConsentApprovalBar() {
    * notice stays, because dismissing it would take the only remaining link with
    * it.
    */
-  const openEntryPoint = (entryPoint: NonNullable<InstallReviewResolution["entryPoint"]>) => {
+  const openEntryPoint = (
+    entryPoint: NonNullable<InstallReviewResolution["entryPoint"]>,
+  ) => {
     void panel
       .createPanel(entryPoint.repoPath, { title: entryPoint.title })
       .then(() => setInstallResult(null))
@@ -558,7 +702,11 @@ export function ConsentApprovalBar() {
   const handleIntent = (payload: unknown) => {
     if (typeof payload !== "object" || payload === null) return;
     const candidate = payload as { type?: unknown; approvalId?: unknown };
-    if (typeof candidate.type !== "string" || typeof candidate.approvalId !== "string") return;
+    if (
+      typeof candidate.type !== "string" ||
+      typeof candidate.approvalId !== "string"
+    )
+      return;
     const intent = payload as ApprovalCardIntent;
     if (
       !current ||
@@ -575,7 +723,8 @@ export function ConsentApprovalBar() {
         presentation.step(intent.dir === "prev" ? -1 : 1);
         return;
       case "show-panel":
-        if (currentCaller?.panelId) navigateToId(currentCaller.panelId);
+        if (owner.kind === "workspace" && currentCaller?.panelId)
+          navigateToId(currentCaller.panelId);
         return;
       case "decide":
         decide(intent.decision);
@@ -627,7 +776,7 @@ export function ConsentApprovalBar() {
       grayColor: themeConfig.grayColor,
       radius: themeConfig.radius,
       scaling: themeConfig.scaling,
-      panelBackground: themeConfig.panelBackground
+      panelBackground: themeConfig.panelBackground,
     }),
     [
       effectiveTheme,
@@ -635,8 +784,8 @@ export function ConsentApprovalBar() {
       themeConfig.grayColor,
       themeConfig.panelBackground,
       themeConfig.radius,
-      themeConfig.scaling
-    ]
+      themeConfig.scaling,
+    ],
   );
 
   const overlayProps = useMemo(
@@ -646,12 +795,15 @@ export function ConsentApprovalBar() {
             workspaceLabel: approvalWorkspaceLabel,
             presentationKey,
             iconUrls:
-              callerIcon?.approvalId === current.approvalId && callerIcon.owner === unitIcons
+              callerIcon?.approvalId === current.approvalId &&
+              callerIcon.owner === unitIcons
                 ? { [callerIcon.key]: callerIcon.url }
                 : {},
             approval: current,
             queue:
-              queueLength > 1 ? { index: browseIndex, total: queueLength, canPrev, canNext } : null,
+              queueLength > 1
+                ? { index: browseIndex, total: queueLength, canPrev, canNext }
+                : null,
             decisionError:
               decisionError && decisionError.approvalId === current.approvalId
                 ? decisionError.message
@@ -659,7 +811,7 @@ export function ConsentApprovalBar() {
             actionPending: submittingApprovalIds.has(current.approvalId),
             diffReview,
             blobResults,
-            appearance: effectiveTheme
+            appearance: effectiveTheme,
           }
         : null,
     [
@@ -676,8 +828,8 @@ export function ConsentApprovalBar() {
       queueLength,
       submittingApprovalIds,
       approvalWorkspaceLabel,
-      presentationKey
-    ]
+      presentationKey,
+    ],
   );
 
   /**
@@ -690,7 +842,8 @@ export function ConsentApprovalBar() {
    * decision over the first.
    */
   const fullSurface = current != null && approvalOpensFullSurface(current);
-  const overlayOpen = current != null && !minimized && !fullSurface && anchorBounds != null;
+  const overlayOpen =
+    current != null && !minimized && !fullSurface && anchorBounds != null;
   const overlayOptions: Parameters<typeof useShellContentOverlay>[0] =
     overlayOpen && current && anchorBounds
       ? {
@@ -699,7 +852,7 @@ export function ConsentApprovalBar() {
           bounds: anchorBounds,
           focusRequest,
           theme,
-          props: overlayProps
+          props: overlayProps,
         }
       : null;
 
@@ -721,11 +874,16 @@ export function ConsentApprovalBar() {
    * dismissed.
    */
   const resultNotice = installResult ? (
-    <div data-shell-top-chrome="install-review-result" className="install-review-result">
+    <div
+      data-shell-top-chrome="install-review-result"
+      className="install-review-result"
+    >
       <InstallReviewOutcomeNotice
         outcome={{ source: "resolved", resolution: installResult }}
         compact
-        {...(!transientWorkspaceReady && installResult.entryPoint?.kind === "panel"
+        {...(!transientWorkspaceReady &&
+        owner.kind === "workspace" &&
+        installResult.entryPoint?.kind === "panel"
           ? { onOpenEntryPoint: openEntryPoint }
           : {})}
         onDismiss={() => setInstallResult(null)}
@@ -738,13 +896,53 @@ export function ConsentApprovalBar() {
       ? createPortal(
           <ShellWorkspaceClientContext.Provider value={presentation.client}>
             <WorkspaceVisibilityContext.Provider value={true}>
-              <ApprovalNativePresentation options={overlayOptions} onIntent={handleIntent}>
+              {queueError && (
+                <Flex
+                  role="alert"
+                  align="center"
+                  gap="3"
+                  p="3"
+                  style={{
+                    border: "1px solid var(--amber-7)",
+                    borderRadius: "var(--radius-3)",
+                    background: "var(--amber-2)",
+                    pointerEvents: "auto",
+                  }}
+                >
+                  <Flex
+                    direction="column"
+                    gap="1"
+                    style={{ flex: 1, minWidth: 0 }}
+                  >
+                    <Text size="2" weight="medium">
+                      {approvalWorkspaceLabel ?? workspaceId}: approvals
+                      couldn’t be loaded
+                    </Text>
+                    <Text size="1" color="gray">
+                      {queueError}
+                    </Text>
+                  </Flex>
+                  <Button
+                    size="1"
+                    variant="soft"
+                    onClick={() =>
+                      void approvalController.current?.refresh("manual")
+                    }
+                  >
+                    Retry
+                  </Button>
+                </Flex>
+              )}
+              <ApprovalNativePresentation
+                options={overlayOptions}
+                onIntent={handleIntent}
+              >
                 {body}
               </ApprovalNativePresentation>
             </WorkspaceVisibilityContext.Provider>
           </ShellWorkspaceClientContext.Provider>,
           presentation.host,
-          workspaceId
+          ownerKey,
         )
       : null;
 
@@ -764,7 +962,9 @@ export function ConsentApprovalBar() {
           approval={current}
           caller={currentCaller}
           queue={
-            queueLength > 1 ? { index: browseIndex, total: queueLength, canPrev, canNext } : null
+            queueLength > 1
+              ? { index: browseIndex, total: queueLength, canPrev, canNext }
+              : null
           }
           decisionError={
             decisionError && decisionError.approvalId === current.approvalId
@@ -776,7 +976,7 @@ export function ConsentApprovalBar() {
           emit={handleIntent}
           onClose={minimizeReview}
         />
-      </>
+      </>,
     );
   }
 
@@ -791,26 +991,28 @@ export function ConsentApprovalBar() {
       <ApprovalMinimizedPill
         approval={current}
         caller={currentCaller}
-        tone={highestPendingTone(presentation.entries.map((entry) => entry.approval))}
+        tone={highestPendingTone(
+          presentation.entries.map((entry) => entry.approval),
+        )}
         count={presentation.entries.filter((entry) => entry.actionable).length}
         workspaceLabel={approvalWorkspaceLabel}
         attentionSeq={attentionSeq}
         onExpand={() => {
           setKeyboardFocusRequest((previous) => ({
             approvalId: current.approvalId,
-            sequence: (previous?.sequence ?? 0) + 1
+            sequence: (previous?.sequence ?? 0) + 1,
           }));
           presentation.expand();
         }}
       />
-    </>
+    </>,
   );
 }
 
 function ApprovalNativePresentation({
   options,
   onIntent,
-  children
+  children,
 }: {
   options: Parameters<typeof useShellContentOverlay>[0];
   onIntent(payload: unknown): void;
@@ -827,7 +1029,7 @@ function ApprovalMinimizedPill({
   count,
   workspaceLabel,
   attentionSeq,
-  onExpand
+  onExpand,
 }: {
   approval: PendingApproval;
   caller: CallerInfo;
@@ -852,10 +1054,16 @@ function ApprovalMinimizedPill({
         data-approval-pill=""
         onClick={onExpand}
         aria-label={
-          multiple ? `Review ${count} pending approvals` : `Review approval: ${copy.title}`
+          multiple
+            ? `Review ${count} pending approvals`
+            : `Review approval: ${copy.title}`
         }
       >
-        <span key={attentionSeq} className="approval-pill-pulse" aria-hidden="true" />
+        <span
+          key={attentionSeq}
+          className="approval-pill-pulse"
+          aria-hidden="true"
+        />
         <span className="approval-pill-icon">
           <ApprovalKindIcon approval={approval} caller={caller} size={15} />
         </span>

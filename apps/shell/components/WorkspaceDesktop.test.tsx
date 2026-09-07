@@ -19,6 +19,10 @@ import {
   useWorkspaceVisible,
 } from "../shell/workspaceContext";
 import { effectiveThemeAtom, themeModeAtom } from "../state/themeAtoms";
+const nativeSync = vi.hoisted(() => ({
+  snapshot: { error: null as string | null },
+  listeners: new Set<() => void>(),
+}));
 const api = vi.hoisted(() => {
   const catalog = [
     {
@@ -80,6 +84,14 @@ const api = vi.hoisted(() => {
   };
 });
 vi.mock("../shell/client", () => ({
+  nativePanelPresentation: {
+    setFocusedWorkspace: vi.fn(async () => {}),
+    subscribe: (listener: () => void) => {
+      nativeSync.listeners.add(listener);
+      return () => nativeSync.listeners.delete(listener);
+    },
+    getSnapshot: () => nativeSync.snapshot,
+  },
   app: { getInfo: async () => ({ initialFocusedWorkspaceId: "personal" }) },
   createWorkspaceShellClient: api.open,
   systemWorkspaceId: Promise.resolve("system"),
@@ -131,6 +143,29 @@ function Desktop() {
   );
 }
 describe("desktop workspace ownership", () => {
+  it("clears the native presentation error when the compositor recovers without a workspace switch", async () => {
+    const result = render(<Desktop />);
+    try {
+      await screen.findByLabelText("personal draft");
+      act(() => {
+        nativeSync.snapshot = { error: "Native presentation disconnected" };
+        for (const listener of nativeSync.listeners) listener();
+      });
+      expect(screen.getByText("Native presentation disconnected")).toBeTruthy();
+      act(() => {
+        nativeSync.snapshot = { error: null };
+        for (const listener of nativeSync.listeners) listener();
+      });
+      expect(screen.queryByText("Native presentation disconnected")).toBeNull();
+      expect(
+        screen.getByLabelText("personal draft").getAttribute("data-visible"),
+      ).toBe("true");
+    } finally {
+      result.unmount();
+      nativeSync.snapshot = { error: null };
+    }
+  });
+
   it("keeps a delayed startup link in its captured workspace after focus changes", async () => {
     let finish!: (target: unknown) => void;
     api.incomingSurface.mockImplementationOnce(

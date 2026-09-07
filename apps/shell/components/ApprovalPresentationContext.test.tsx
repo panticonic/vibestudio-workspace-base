@@ -15,30 +15,51 @@ const approval = (approvalId: string): PendingCapabilityApproval => ({
   effectiveVersion: "ev",
   requestedAt: 1,
   capability: "context.boundary",
-  title: "Review access"
+  title: "Review access",
 });
-const mount = () => renderHook(() => useApprovalPresentationController(useShellWorkspaceClient()));
+const mount = () =>
+  renderHook(() =>
+    useApprovalPresentationController(useShellWorkspaceClient()),
+  );
 
 describe("window approval presentation", () => {
   it("keeps a minimized selection stable across owner refreshes and separates identical IDs", () => {
     const { result } = mount();
     const personal = Symbol();
     const team = Symbol();
-    act(() => result.current.publish("personal", personal, [approval("same")]));
-    act(() => result.current.publish("team", team, [approval("same")]));
+    act(() =>
+      result.current.publish(
+        { kind: "workspace", workspaceId: "personal" },
+        personal,
+        [approval("same")],
+      ),
+    );
+    act(() =>
+      result.current.publish({ kind: "workspace", workspaceId: "team" }, team, [
+        approval("same"),
+      ]),
+    );
     expect(result.current.entries).toHaveLength(2);
     expect(result.current.state.selectedKey).toBe(
-      approvalPresentationKey({ workspaceId: "personal", approvalId: "same" })
+      approvalPresentationKey({
+        owner: { kind: "workspace", workspaceId: "personal" },
+        approvalId: "same",
+      }),
     );
     act(() => result.current.minimize());
     act(() =>
-      result.current.publish("team", team, [{ ...approval("same"), title: "Updated description" }])
+      result.current.publish({ kind: "workspace", workspaceId: "team" }, team, [
+        { ...approval("same"), title: "Updated description" },
+      ]),
     );
     expect(result.current.state.open).toBe(false);
     act(() => result.current.request("team", "same"));
     expect(result.current.state.open).toBe(true);
     expect(result.current.state.selectedKey).toBe(
-      approvalPresentationKey({ workspaceId: "team", approvalId: "same" })
+      approvalPresentationKey({
+        owner: { kind: "workspace", workspaceId: "team" },
+        approvalId: "same",
+      }),
     );
   });
 
@@ -47,14 +68,37 @@ describe("window approval presentation", () => {
     const old = Symbol();
     const replacement = Symbol();
     act(() => result.current.request("team", "wanted"));
-    act(() => result.current.publish("team", old, [approval("first"), approval("wanted")]));
-    expect(result.current.state.selectedKey).toBe(
-      approvalPresentationKey({ workspaceId: "team", approvalId: "wanted" })
+    act(() =>
+      result.current.publish({ kind: "workspace", workspaceId: "team" }, old, [
+        approval("first"),
+        approval("wanted"),
+      ]),
     );
-    act(() => result.current.publish("team", replacement, [approval("replacement")]));
-    act(() => result.current.remove("team", old));
-    expect(result.current.entries.map((entry) => entry.approvalId)).toEqual(["replacement"]);
-    act(() => result.current.remove("team", replacement));
+    expect(result.current.state.selectedKey).toBe(
+      approvalPresentationKey({
+        owner: { kind: "workspace", workspaceId: "team" },
+        approvalId: "wanted",
+      }),
+    );
+    act(() =>
+      result.current.publish(
+        { kind: "workspace", workspaceId: "team" },
+        replacement,
+        [approval("replacement")],
+      ),
+    );
+    act(() =>
+      result.current.remove({ kind: "workspace", workspaceId: "team" }, old),
+    );
+    expect(result.current.entries.map((entry) => entry.approvalId)).toEqual([
+      "replacement",
+    ]);
+    act(() =>
+      result.current.remove(
+        { kind: "workspace", workspaceId: "team" },
+        replacement,
+      ),
+    );
     expect(result.current.entries).toEqual([]);
     expect(result.current.state.selectedKey).toBeNull();
   });

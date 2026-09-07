@@ -6,6 +6,7 @@ import {
 } from "@vibestudio/rpc";
 const state = vi.hoisted(() => ({ clients: [] as RpcClient[] }));
 vi.mock("./workspaceClient", () => ({
+  createShellApprovalClient: () => ({}),
   createShellWorkspaceClient: (rpc: RpcClient) => {
     state.clients.push(rpc);
     return {
@@ -184,4 +185,71 @@ it("holds a nested workspace acquisition for its owning shell and retries after 
     args: [{ acquisitionId: "acq:browser-import" }],
   });
   project.close();
+});
+
+it("routes server calls and replies independently of a workspace named hub", async () => {
+  const handlers = new Set<(envelope: RpcEnvelope) => void>();
+  const sent: RpcEnvelope[] = [];
+  vi.stubGlobal("__vibestudioTransport", {
+    identity: { workspaceId: "system", runtimeId: "@workspace-apps/shell" },
+    send: async (envelope: RpcEnvelope) => {
+      sent.push(envelope);
+      if (envelope.message.type !== "request") return;
+      const requestId = envelope.message.requestId;
+      const isHub = envelope.destination?.kind === "hub";
+      const workspaceId =
+        envelope.destination?.kind === "workspace"
+          ? envelope.destination.workspaceId
+          : undefined;
+      const caller = {
+        callerId: isHub ? "hub" : "main",
+        callerKind: "server" as const,
+        ...(workspaceId ? { workspaceId } : {}),
+      };
+      queueMicrotask(() =>
+        handlers.forEach((handler) =>
+          handler(
+            envelopeFromMessage({
+              selfId: caller.callerId,
+              from: caller.callerId,
+              target: envelope.from,
+              destination: { kind: "workspace", workspaceId: "system" },
+              caller,
+              message: {
+                type: "response",
+                requestId,
+                result: isHub ? "server" : "workspace",
+              },
+            }),
+          ),
+        ),
+      );
+    },
+    onMessage: (handler: (envelope: RpcEnvelope) => void) => {
+      handlers.add(handler);
+      return () => handlers.delete(handler);
+    },
+  });
+  vi.stubGlobal("__vibestudioWorkspaceConnection", {
+    getCurrent: async () => ({
+      version: 1,
+      phase: "online",
+      mode: "remote",
+      since: 1,
+    }),
+    onChange: () => () => {},
+  });
+  const module = await import("./client");
+  const workspace = await module.createWorkspaceShellClient("hub");
+  await expect(
+    module.hubRpc.call("main", "shellApproval.listPending", []),
+  ).resolves.toBe("server");
+  await expect(
+    state.clients[1]!.call("main", "shellApproval.listPending", []),
+  ).resolves.toBe("workspace");
+  expect(sent.map((envelope) => envelope.destination)).toEqual([
+    { kind: "hub" },
+    { kind: "workspace", workspaceId: "hub" },
+  ]);
+  workspace.close();
 });

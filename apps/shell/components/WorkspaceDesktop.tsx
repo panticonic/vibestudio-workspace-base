@@ -1,7 +1,13 @@
 import { useApprovalPresentation } from "./ApprovalPresentationContext";
 import { APPROVAL_OVERLAY_HOST_ID } from "./ConsentApprovalBar";
 import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   createStore,
   Provider as StoreProvider,
@@ -16,6 +22,7 @@ import {
   app,
   createWorkspaceShellClient,
   hubControl,
+  nativePanelPresentation,
   systemWorkspaceId,
   incomingPanelLocation,
   incomingShellSurface,
@@ -62,11 +69,23 @@ export function WorkspaceDesktop() {
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const focusedRef = useRef(focusedId);
   focusedRef.current = focusedId;
+  const nativeSync = useSyncExternalStore(
+    nativePanelPresentation.subscribe,
+    nativePanelPresentation.getSnapshot,
+  );
+  useEffect(() => {
+    // The compositor owns error/recovery state for every desired-state sync,
+    // including automatic reconnect recovery after this promise has settled.
+    void nativePanelPresentation
+      .setFocusedWorkspace(focusedId)
+      .catch(() => undefined);
+  }, [focusedId]);
   const catalogRef = useRef(catalog);
   catalogRef.current = catalog;
   const [expanded, setExpanded] = useState(new Set<string>());
   const [busy, setBusy] = useState(new Set<string>());
   const [error, setError] = useState<string | null>(null);
+  const visibleError = error ?? nativeSync.error;
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const [titleBarHost, setTitleBarHost] = useState<HTMLElement | null>(null);
   const [notificationHost, setNotificationHost] = useState<HTMLElement | null>(
@@ -457,15 +476,24 @@ export function WorkspaceDesktop() {
             </Flex>
           </aside>
           <main className="workspace-desktop-content">
-            {error && (
+            {visibleError && (
               <Callout.Root color="red">
-                <Callout.Text>{error}</Callout.Text>
-                <Button variant="soft" onClick={() => void refresh()}>
+                <Callout.Text>{visibleError}</Callout.Text>
+                <Button
+                  variant="soft"
+                  onClick={() => {
+                    if (error) void refresh();
+                    else
+                      void nativePanelPresentation
+                        .setFocusedWorkspace(focusedId)
+                        .catch(() => undefined);
+                  }}
+                >
                   <ReloadIcon /> Try again
                 </Button>
               </Callout.Root>
             )}
-            {!focusedId && !error && (
+            {!focusedId && !visibleError && (
               <Text className="workspace-desktop-starting" color="gray">
                 Opening your workspaces…
               </Text>

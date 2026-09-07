@@ -1,4 +1,11 @@
-import { createContext, useCallback, useContext, useMemo, useState } from "react";
+import { rpcDestinationKey, type RpcDestination } from "@vibestudio/rpc";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useState,
+} from "react";
 import { actionableRuntimeApprovals } from "@vibestudio/shared/approvalVisibility";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type { ShellWorkspaceClient } from "../shell/workspaceClient";
@@ -8,21 +15,30 @@ import {
   reconcileApprovalPresentation,
   selectApprovalPresentation,
   stepApprovalPresentation,
-  type ApprovalPresentationState
+  type ApprovalPresentationState,
 } from "@vibestudio/shared/approvalPresentation";
 
-type Owner = { token: symbol; pending: readonly PendingApproval[] };
+type Owner = {
+  owner: RpcDestination;
+  token: symbol;
+  pending: readonly PendingApproval[];
+};
 export type PresentedApproval = {
-  workspaceId: string;
+  owner: RpcDestination;
+  workspaceId?: string;
   approval: PendingApproval;
   approvalId: string;
   actionable: boolean;
 };
 
 /** A window presentation index. Requests and decision authority stay with their workspace controllers. */
-export function useApprovalPresentationController(client: ShellWorkspaceClient) {
+export function useApprovalPresentationController(
+  client: ShellWorkspaceClient,
+) {
   const [owners, setOwners] = useState(new Map<string, Owner>());
-  const [state, setState] = useState<ApprovalPresentationState>(createApprovalPresentationState);
+  const [state, setState] = useState<ApprovalPresentationState>(
+    createApprovalPresentationState,
+  );
   const [requestedWorkspace, setRequestedWorkspace] = useState<{
     workspaceId: string;
     approvalId?: string;
@@ -31,18 +47,24 @@ export function useApprovalPresentationController(client: ShellWorkspaceClient) 
   const [anchorId, setAnchorId] = useState<string | null>(null);
   const entries = useMemo<PresentedApproval[]>(
     () =>
-      [...owners].flatMap(([workspaceId, owner]) => {
+      [...owners.values()].flatMap((owner) => {
         const actionable = new Set(
-          actionableRuntimeApprovals([...owner.pending]).map((approval) => approval.approvalId)
+          actionableRuntimeApprovals([...owner.pending]).map(
+            (approval) => approval.approvalId,
+          ),
         );
         return owner.pending.map((approval) => ({
-          workspaceId,
+          owner: owner.owner,
+          workspaceId:
+            owner.owner.kind === "workspace"
+              ? owner.owner.workspaceId
+              : undefined,
           approval,
           approvalId: approval.approvalId,
-          actionable: actionable.has(approval.approvalId)
+          actionable: actionable.has(approval.approvalId),
         }));
       }),
-    [owners]
+    [owners],
   );
   let next = reconcileApprovalPresentation(state, entries);
   if (requestedWorkspace) {
@@ -50,51 +72,70 @@ export function useApprovalPresentationController(client: ShellWorkspaceClient) 
       entries.find(
         (entry) =>
           entry.workspaceId === requestedWorkspace.workspaceId &&
-          (!requestedWorkspace.approvalId || entry.approvalId === requestedWorkspace.approvalId) &&
-          entry.actionable
+          (!requestedWorkspace.approvalId ||
+            entry.approvalId === requestedWorkspace.approvalId) &&
+          entry.actionable,
       ) ??
       entries.find(
         (entry) =>
           entry.workspaceId === requestedWorkspace.workspaceId &&
-          (!requestedWorkspace.approvalId || entry.approvalId === requestedWorkspace.approvalId)
+          (!requestedWorkspace.approvalId ||
+            entry.approvalId === requestedWorkspace.approvalId),
       );
     if (requested) {
-      next = selectApprovalPresentation(next, entries, approvalPresentationKey(requested));
+      next = selectApprovalPresentation(
+        next,
+        entries,
+        approvalPresentationKey(requested),
+      );
       setRequestedWorkspace(null);
     }
   }
   if (next !== state) setState(next);
   const publish = useCallback(
-    (workspaceId: string, token: symbol, pending: readonly PendingApproval[]) => {
+    (
+      owner: RpcDestination,
+      token: symbol,
+      pending: readonly PendingApproval[],
+    ) => {
+      const ownerKey = rpcDestinationKey(owner);
       setOwners((current) => {
         if (
-          current.get(workspaceId)?.token === token &&
-          current.get(workspaceId)?.pending === pending
+          current.get(ownerKey)?.token === token &&
+          current.get(ownerKey)?.pending === pending
         )
           return current;
-        return new Map(current).set(workspaceId, { token, pending });
+        return new Map(current).set(ownerKey, { owner, token, pending });
       });
     },
-    []
+    [],
   );
-  const remove = useCallback((workspaceId: string, token: symbol) => {
+  const remove = useCallback((owner: RpcDestination, token: symbol) => {
+    const ownerKey = rpcDestinationKey(owner);
     setOwners((current) => {
-      if (current.get(workspaceId)?.token !== token) return current;
+      if (current.get(ownerKey)?.token !== token) return current;
       const copy = new Map(current);
-      copy.delete(workspaceId);
+      copy.delete(ownerKey);
       return copy;
     });
   }, []);
   const request = useCallback(
     (workspaceId: string, approvalId?: string) =>
       setRequestedWorkspace({ workspaceId, approvalId }),
-    []
+    [],
   );
-  const minimize = useCallback(() => setState((current) => ({ ...current, open: false })), []);
-  const expand = useCallback(() => setState((current) => ({ ...current, open: true })), []);
+  const minimize = useCallback(
+    () => setState((current) => ({ ...current, open: false })),
+    [],
+  );
+  const expand = useCallback(
+    () => setState((current) => ({ ...current, open: true })),
+    [],
+  );
   const step = useCallback(
-    (delta: number) => setState((current) => stepApprovalPresentation(current, entries, delta)),
-    [entries]
+    (delta: number) =>
+      setState((current) => stepApprovalPresentation(current, entries, delta)),
+    [entries],
   );
   return {
     client,
@@ -109,14 +150,18 @@ export function useApprovalPresentationController(client: ShellWorkspaceClient) 
     request,
     minimize,
     expand,
-    step
+    step,
   };
 }
 
-export type ApprovalPresentation = ReturnType<typeof useApprovalPresentationController>;
-export const ApprovalPresentationContext = createContext<ApprovalPresentation | null>(null);
+export type ApprovalPresentation = ReturnType<
+  typeof useApprovalPresentationController
+>;
+export const ApprovalPresentationContext =
+  createContext<ApprovalPresentation | null>(null);
 export function useApprovalPresentation() {
   const presentation = useContext(ApprovalPresentationContext);
-  if (!presentation) throw new Error("Approval presentation requires the desktop window owner");
+  if (!presentation)
+    throw new Error("Approval presentation requires the desktop window owner");
   return presentation;
 }

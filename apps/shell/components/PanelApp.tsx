@@ -1,3 +1,4 @@
+import { hubApprovalSource } from "../shell/client";
 import { useShellWorkspaceClient, useWorkspaceVisible, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 import { useEffect, useState, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
@@ -237,6 +238,7 @@ function PanelAppContent() {
       <NotificationBar />
       <UserNotificationBar />
       <ConsentApprovalBar />
+      {navigationHost?.privateRole === "system" && <ConsentApprovalBar source={hubApprovalSource} />}
       <QuickfireOwner />
       {/* Panel region — also the positioning host the approval card portals
           into, so it floats over the panels rather than the chrome. */}

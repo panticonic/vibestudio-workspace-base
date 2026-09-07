@@ -15,7 +15,7 @@ function nativeSession(workspaceId: string) {
         return {
           accepted: true,
           handshake: {
-            protocolVersion: 1,
+            protocolVersion: 2,
             hostGeneration: workspaceId,
             shellGeneration: "shell",
             sealedLaunchIdentity: "@workspace-apps/shell",
@@ -26,11 +26,12 @@ function nativeSession(workspaceId: string) {
         return {
           accepted: true,
           observation: {
-            protocolVersion: 1,
+            protocolVersion: 2,
             hostGeneration: workspaceId,
             shellGeneration: "shell",
             desiredRevision: desired.revision,
             observationRevision: desired.revision,
+            focusedWorkspaceId: desired.focusedWorkspaceId,
             surfaces: desired.surfaces.map((surface) => ({
               ...surface,
               nativeSurfaceId: workspaceId + ":" + surface.surfaceId,
@@ -50,6 +51,7 @@ function nativeSession(workspaceId: string) {
   return {
     rpc,
     client: createShellWorkspaceClient(rpc, {
+      hubRpc: rpc,
       workspaceId,
       nativePresentation: createNativePanelPresentation(rpc),
     }),
@@ -165,7 +167,7 @@ describe("native desired-state recovery", () => {
           return {
             accepted: true,
             handshake: {
-              protocolVersion: 1,
+              protocolVersion: 2,
               hostGeneration: "host",
               shellGeneration: "shell",
               sealedLaunchIdentity: "@workspace-apps/shell",
@@ -176,11 +178,12 @@ describe("native desired-state recovery", () => {
         return {
           accepted: true,
           observation: {
-            protocolVersion: 1,
+            protocolVersion: 2,
             hostGeneration: "host",
             shellGeneration: "shell",
             desiredRevision: desired.revision,
             observationRevision: desired.revision,
+            focusedWorkspaceId: desired.focusedWorkspaceId,
             surfaces: desired.surfaces.map((surface) => ({
               ...surface,
               nativeSurfaceId: surface.surfaceId,
@@ -201,6 +204,7 @@ describe("native desired-state recovery", () => {
     const system = native.forWorkspace("system");
     await personal.bindNativePanelSlot(slot);
     await system.bindNativePanelSlot(slot);
+    await native.setFocusedWorkspace("system");
     offline = true;
     changed("connecting");
     await expect(
@@ -212,10 +216,14 @@ describe("native desired-state recovery", () => {
     await expect(system.clearNativePanelSlot(slot)).rejects.toMatchObject({
       code: "CONNECTION_LOST",
     });
+    await expect(
+      native.setFocusedWorkspace("empty-workspace"),
+    ).rejects.toMatchObject({ code: "CONNECTION_LOST" });
     const before = applied.length;
     offline = false;
     changed("connected");
     await vi.waitFor(() => expect(applied).toHaveLength(before + 1));
+    expect(applied.at(-1)?.focusedWorkspaceId).toBe("empty-workspace");
     expect(applied.at(-1)?.surfaces).toHaveLength(1);
     expect(applied.at(-1)?.surfaces[0]).toMatchObject({
       materialization: { workspaceId: "personal" },
@@ -225,5 +233,122 @@ describe("native desired-state recovery", () => {
     changed("connected");
     expect(stop).toHaveBeenCalledOnce();
     expect(applied).toHaveLength(before + 1);
+  });
+
+  it("reports only the latest desired sync failure and clears it after focus-only recovery", async () => {
+    let changed!: (status: RpcConnectionStatus) => void;
+    let offline = false;
+    const applied: NativePanelDesiredSnapshot[] = [];
+    const call = vi.fn(
+      async (_target: string, method: string, args: unknown[]) => {
+        if (method === "view.connectNativePanelAdapter")
+          return {
+            accepted: true,
+            handshake: {
+              protocolVersion: 2,
+              hostGeneration: "host",
+              shellGeneration: "shell",
+              sealedLaunchIdentity: "@workspace-apps/shell",
+            },
+          };
+        if (offline)
+          throw new RpcBoundaryError("offline", "transport", "CONNECTION_LOST");
+        const desired = args[0] as NativePanelDesiredSnapshot;
+        applied.push(desired);
+        return {
+          accepted: true,
+          observation: {
+            protocolVersion: 2,
+            hostGeneration: "host",
+            shellGeneration: "shell",
+            desiredRevision: desired.revision,
+            observationRevision: desired.revision,
+            focusedWorkspaceId: desired.focusedWorkspaceId,
+            surfaces: [],
+          },
+        };
+      },
+    );
+    const native = createNativePanelPresentation({
+      call,
+      onStatusChange: (listener: (status: RpcConnectionStatus) => void) => {
+        changed = listener;
+        return () => undefined;
+      },
+    } as unknown as RpcClient);
+    const snapshots: Array<{ error: string | null }> = [];
+    native.subscribe(() => snapshots.push(native.getSnapshot()));
+
+    offline = true;
+    changed("connecting");
+    await expect(native.setFocusedWorkspace("personal")).rejects.toMatchObject({
+      code: "CONNECTION_LOST",
+    });
+    expect(native.getSnapshot()).toEqual({ error: "offline" });
+
+    offline = false;
+    changed("connected");
+    await vi.waitFor(() =>
+      expect(native.getSnapshot()).toEqual({ error: null }),
+    );
+    expect(applied.at(-1)?.focusedWorkspaceId).toBe("personal");
+    expect(applied.at(-1)?.surfaces).toEqual([]);
+    expect(snapshots).toEqual([{ error: "offline" }, { error: null }]);
+  });
+
+  it("does not publish an older failed focus after a newer focus is queued", async () => {
+    let rejectFirst!: (error: Error) => void;
+    let applyCount = 0;
+    const call = vi.fn(
+      async (_target: string, method: string, args: unknown[]) => {
+        if (method === "view.connectNativePanelAdapter")
+          return {
+            accepted: true,
+            handshake: {
+              protocolVersion: 2,
+              hostGeneration: "host",
+              shellGeneration: "shell",
+              sealedLaunchIdentity: "@workspace-apps/shell",
+            },
+          };
+        const desired = args[0] as NativePanelDesiredSnapshot;
+        applyCount += 1;
+        if (applyCount === 1)
+          await new Promise<never>((_resolve, reject) => {
+            rejectFirst = reject;
+          });
+        return {
+          accepted: true,
+          observation: {
+            protocolVersion: 2,
+            hostGeneration: "host",
+            shellGeneration: "shell",
+            desiredRevision: desired.revision,
+            observationRevision: desired.revision,
+            focusedWorkspaceId: desired.focusedWorkspaceId,
+            surfaces: [],
+          },
+        };
+      },
+    );
+    const native = createNativePanelPresentation({
+      call,
+      onStatusChange: () => () => undefined,
+    } as unknown as RpcClient);
+    const listener = vi.fn();
+    native.subscribe(listener);
+    const oldFocus = native.setFocusedWorkspace("personal");
+    await vi.waitFor(() => expect(applyCount).toBe(1));
+    const latestFocus = native.setFocusedWorkspace("system");
+    const oldFocusRejected =
+      expect(oldFocus).rejects.toThrow("old focus failed");
+    rejectFirst(new Error("old focus failed"));
+
+    await oldFocusRejected;
+    await expect(latestFocus).resolves.toMatchObject({
+      focusedWorkspaceId: "system",
+    });
+    expect(native.getSnapshot()).toEqual({ error: null });
+    expect(listener).not.toHaveBeenCalled();
   });
 });

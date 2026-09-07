@@ -1,25 +1,25 @@
 import { workspaceName as displayWorkspaceName } from "../services/workspaceName";
 import { approvalPresentationKey } from "@vibestudio/shared/approvalPresentation";
 import type {
+  MobileApprovalOwner,
   MobileWorkspaceDirectory,
-  MobileWorkspaceSession,
 } from "../services/workspaceDirectory";
 import type { ToastInput } from "../state/toastAtoms";
-import { ApprovalSheet } from "./ApprovalSheet";
+import { ApprovalSheet, type ApprovalSheetProps } from "./ApprovalSheet";
 
-/** Approvals have a captured workspace; opening one does not mount its panels. */
+/** Approvals retain their exact hub/workspace owner while the shared queue is open. */
 export function WorkspaceApprovalSurface({
   directory,
-  session,
+  owner,
   notify,
 }: {
   directory: MobileWorkspaceDirectory;
-  session: MobileWorkspaceSession;
+  owner: MobileApprovalOwner;
   notify: (toast: ToastInput) => void;
 }) {
   const items = directory.approvalItems;
   const selected = directory.selectedApproval;
-  if (!selected || selected.workspaceId !== session.workspaceId) return null;
+  if (!selected || directory.selectedApprovalOwner !== owner) return null;
   const selectedKey = approvalPresentationKey(selected);
   const remaining = directory.unloadedApprovalWorkspaces;
   const loading = remaining
@@ -28,28 +28,33 @@ export function WorkspaceApprovalSurface({
   const unavailable = remaining
     .filter(({ state }) => state !== "loading")
     .map(({ entry }) => displayWorkspaceName(entry));
-  const queueStatus = remaining.length
-    ? {
-        message: [
-          loading.length ? `Loading reviews from ${loading.join(", ")}…` : null,
-          unavailable.length
-            ? `More reviews in ${unavailable.join(", ")}.`
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" "),
-        ...(unavailable.length
-          ? {
-              actionLabel: "Load remaining reviews",
-              onAction: () => directory.openApprovals(),
-            }
-          : {}),
-      }
-    : undefined;
+  const ownerErrors = directory.approvalOwnerErrors;
+  const queueStatus =
+    remaining.length || ownerErrors.length
+      ? {
+          message: [
+            loading.length
+              ? `Loading reviews from ${loading.join(", ")}…`
+              : null,
+            unavailable.length
+              ? `More reviews in ${unavailable.join(", ")}.`
+              : null,
+            ...ownerErrors,
+          ]
+            .filter(Boolean)
+            .join(" "),
+          ...(unavailable.length
+            ? {
+                actionLabel: "Load remaining reviews",
+                onAction: () => directory.openApprovals(),
+              }
+            : {}),
+        }
+      : undefined;
   const assertCurrent = (approvalId = selected.approvalId) => {
     if (
       !directory.approvalPresentation.open ||
-      directory.sessions.get(session.workspaceId) !== session ||
+      directory.selectedApprovalOwner !== owner ||
       directory.approvalPresentation.selectedKey !== selectedKey ||
       approvalId !== selected.approvalId ||
       !directory.approvalItems.some(
@@ -61,15 +66,81 @@ export function WorkspaceApprovalSurface({
       );
     }
   };
-  const client = session.client;
+  const client = owner.session?.client;
   const refresh = async () => {
-    await session.approvalState?.refresh("manual");
+    await owner.approvalState?.refresh("manual");
   };
+  const workspaceActions = client
+    ? {
+        onFetchDiffContent: async (approvalId: string, hash: string) => {
+          assertCurrent(approvalId);
+          const approval = owner.approvals?.find(
+            (item) => item.approvalId === approvalId,
+          );
+          if (
+            !approval?.diffReview?.some((entry) =>
+              entry.changedFiles.some(
+                (file) => file.oldHash === hash || file.newHash === hash,
+              ),
+            )
+          ) {
+            throw new Error(
+              "This file is not part of the pending reviewed change.",
+            );
+          }
+          return client.blobstore.getText(hash);
+        },
+        onNavigateToPanel: (panelId: string) => {
+          assertCurrent();
+          directory.closeApprovals();
+          void directory
+            .activate(owner.session!.workspaceId, panelId)
+            .catch((error: unknown) =>
+              notify({
+                title: "Could not open the requesting panel",
+                message: String(error),
+                tone: "danger",
+              }),
+            );
+        },
+        onOpenDiffFile: async (
+          file: Parameters<
+            NonNullable<ApprovalSheetProps["onOpenDiffFile"]>
+          >[0],
+          entry: Parameters<
+            NonNullable<ApprovalSheetProps["onOpenDiffFile"]>
+          >[1],
+        ) => {
+          assertCurrent();
+          const panel = await client.panels.createRootPanel(
+            "about/workspace-history",
+            {
+              focus: true,
+              stateArgs: {
+                diffTarget: {
+                  repoPath: entry.repoPath,
+                  path: file.path,
+                  oldHash: file.oldHash,
+                  newHash: file.newHash,
+                  oldState: entry.oldState,
+                  newState: entry.newState,
+                  binary: file.binary,
+                  tooLarge: file.tooLarge,
+                  files: entry.changedFiles,
+                },
+              },
+            },
+          );
+          directory.closeApprovals();
+          await directory.activate(owner.session!.workspaceId, panel.id);
+        },
+      }
+    : {};
   return (
     <ApprovalSheet
       key={selectedKey}
       visible
-      workspaceName={client.workspaceName}
+      workspaceName={owner.label}
       workspaceNames={Object.fromEntries(
         directory.entries.map((entry) => [
           entry.workspaceId,
@@ -86,85 +157,31 @@ export function WorkspaceApprovalSurface({
         onPrevious: () => directory.stepApproval(-1),
         onNext: () => directory.stepApproval(1),
       }}
+      {...workspaceActions}
       onClose={() => directory.closeApprovals()}
       onResolve={async (approvalId, decision) => {
         assertCurrent(approvalId);
-        await client.shellApproval.resolve(approvalId, decision);
+        await owner.shellApproval.resolve(approvalId, decision);
         await refresh();
       }}
       onSubmitClientConfig={async (approvalId, values) => {
         assertCurrent(approvalId);
-        await client.shellApproval.submitClientConfig(approvalId, values);
+        await owner.shellApproval.submitClientConfig(approvalId, values);
         await refresh();
       }}
       onSubmitCredentialInput={async (approvalId, values) => {
         assertCurrent(approvalId);
-        await client.shellApproval.submitCredentialInput(approvalId, values);
+        await owner.shellApproval.submitCredentialInput(approvalId, values);
         await refresh();
       }}
       onSubmitSecretInput={async (approvalId, values) => {
         assertCurrent(approvalId);
-        await client.shellApproval.submitSecretInput(approvalId, values);
+        await owner.shellApproval.submitSecretInput(approvalId, values);
         await refresh();
-      }}
-      onFetchDiffContent={async (approvalId, hash) => {
-        assertCurrent(approvalId);
-        const approval = session.approvals?.find(
-          (item) => item.approvalId === approvalId,
-        );
-        if (
-          !approval?.diffReview?.some((entry) =>
-            entry.changedFiles.some(
-              (file) => file.oldHash === hash || file.newHash === hash,
-            ),
-          )
-        ) {
-          throw new Error(
-            "This file is not part of the pending reviewed change.",
-          );
-        }
-        return client.blobstore.getText(hash);
-      }}
-      onNavigateToPanel={(panelId) => {
-        assertCurrent();
-        directory.closeApprovals();
-        void directory
-          .activate(session.workspaceId, panelId)
-          .catch((error: unknown) =>
-            notify({
-              title: "Could not open the requesting panel",
-              message: String(error),
-              tone: "danger",
-            }),
-          );
-      }}
-      onOpenDiffFile={async (file, entry) => {
-        assertCurrent();
-        const panel = await client.panels.createRootPanel(
-          "about/workspace-history",
-          {
-            focus: true,
-            stateArgs: {
-              diffTarget: {
-                repoPath: entry.repoPath,
-                path: file.path,
-                oldHash: file.oldHash,
-                newHash: file.newHash,
-                oldState: entry.oldState,
-                newState: entry.newState,
-                binary: file.binary,
-                tooLarge: file.tooLarge,
-                files: entry.changedFiles,
-              },
-            },
-          },
-        );
-        directory.closeApprovals();
-        await directory.activate(session.workspaceId, panel.id);
       }}
       onResolveInstallReview={async (approvalId, resolution) => {
         assertCurrent(approvalId);
-        const outcome = await client.shellApproval.resolveInstallReview(
+        const outcome = await owner.shellApproval.resolveInstallReview(
           approvalId,
           resolution,
         );
@@ -184,7 +201,7 @@ export function WorkspaceApprovalSurface({
             ? failures
                 .map((part) => `${part.title}: ${part.reason}`)
                 .join(" · ")
-            : [client.workspaceName, distinctDetail ? detail : null]
+            : [owner.label, distinctDetail ? detail : null]
                 .filter(Boolean)
                 .join(" · "),
           tone: failures.length
@@ -192,15 +209,18 @@ export function WorkspaceApprovalSurface({
             : outcome.decision === "accepted"
               ? "success"
               : "info",
-          ...(entryPoint
+          ...(entryPoint && owner.session
             ? {
                 actionLabel: `Open ${entryPoint.title}`,
                 onAction: async () => {
-                  const panel = await client.panels.createRootPanel(
+                  const panel = await client!.panels.createRootPanel(
                     entryPoint.repoPath,
                     { title: entryPoint.title, focus: true },
                   );
-                  await directory.activate(session.workspaceId, panel.id);
+                  await directory.activate(
+                    owner.session!.workspaceId,
+                    panel.id,
+                  );
                 },
               }
             : {}),

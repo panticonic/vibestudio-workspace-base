@@ -50,6 +50,13 @@ jest.mock("@vibestudio/mobile-iroh", () => ({
   connectMobileAccount: jest.fn(),
   MobileConnectionAggregateError: AggregateError,
 }));
+jest.mock("@vibestudio/service-schemas/clients/eventsClient", () => ({
+  EventsClient: jest.fn().mockImplementation(() => ({
+    subscribe: jest.fn(async () => undefined),
+    unsubscribe: jest.fn(async () => undefined),
+    on: jest.fn(() => () => {}),
+  })),
+}));
 
 const entries = [
   {
@@ -80,11 +87,12 @@ function fixture() {
   const account = {
     control: {
       rpc: {
-        call: jest.fn(async (_target, method) =>
-          method === "hubControl.ensureUserWorkspaces"
-            ? { personal: entries[1], system: entries[0] }
-            : entries,
-        ),
+        call: jest.fn(async (_target, method) => {
+          if (method === "hubControl.ensureUserWorkspaces")
+            return { personal: entries[1], system: entries[0] };
+          if (method === "shellApproval.listPending") return [];
+          return entries;
+        }),
       },
     },
     openWorkspace: jest.fn(
@@ -109,6 +117,70 @@ beforeEach(() => {
 });
 
 describe("mobile workspace directory", () => {
+  it("merges hub approvals without creating a fake workspace session", async () => {
+    const { directory, account } = fixture();
+    await directory.init();
+    const request = {
+      approvalId: "hub-review",
+      callerId: "hub-control",
+      callerKind: "worker" as const,
+      repoPath: "workers/account-task",
+      effectiveVersion: "v1",
+      requestedByUserId: "alice",
+      requestedAt: 1,
+      kind: "capability" as const,
+      capability: "account.manage",
+      title: "Manage account",
+    };
+    (account.control.rpc.call as jest.Mock).mockImplementation(
+      async (_target, method) => {
+        if (method === "hubControl.ensureUserWorkspaces")
+          return { personal: entries[1], system: entries[0] };
+        if (method === "shellApproval.listPending") return [request];
+        return entries;
+      },
+    );
+
+    await directory.hubApproval.approvalState!.refresh("manual");
+
+    expect(directory.approvalItems).toEqual([
+      expect.objectContaining({
+        owner: { kind: "hub" },
+        approvalId: "hub-review",
+      }),
+    ]);
+    expect(directory.selectedApprovalOwner).toBe(directory.hubApproval);
+    expect(directory.approvalCount).toBe(1);
+    expect(directory.sessions.has("hub")).toBe(false);
+    await directory.dispose();
+  });
+
+  it("retains a visible account queue error until a successful refresh", async () => {
+    const { directory, account } = fixture();
+    const warn = jest
+      .spyOn(console, "warn")
+      .mockImplementation(() => undefined);
+    await directory.init();
+    jest
+      .mocked(account.control.rpc.call)
+      .mockRejectedValueOnce(new Error("account queue unavailable"));
+    await directory.hubApproval.approvalState!.refresh("manual");
+    expect(directory.approvalOwnerErrors).toEqual([
+      "Account: account queue unavailable",
+    ]);
+    expect(directory.failedApprovalOwners).toEqual([directory.hubApproval]);
+    jest.mocked(account.control.rpc.call).mockResolvedValueOnce([]);
+    await directory.retryFailedApprovalOwners();
+    expect(directory.approvalOwnerErrors).toEqual([]);
+    expect(directory.failedApprovalOwners).toEqual([]);
+    expect(warn).toHaveBeenCalledWith(
+      "[WorkspaceDirectory] Account approval refresh:manual failed",
+      expect.any(Error),
+    );
+    warn.mockRestore();
+    await directory.dispose();
+  });
+
   it("keeps the System app source separate from lazily opened workspace clients", async () => {
     const { directory, account } = fixture();
     await directory.init();
@@ -393,9 +465,11 @@ it("loads unopened pending owners into the global queue without presenting or fo
   finish();
   await directory.open("project");
   await project.approvalState!.refresh("manual");
-  expect(directory.approvalItems.map(({ workspaceId }) => workspaceId)).toEqual(
-    ["personal", "project"],
-  );
+  expect(
+    directory.approvalItems.map(({ owner }) =>
+      owner.kind === "workspace" ? owner.workspaceId : "hub",
+    ),
+  ).toEqual(["personal", "project"]);
   expect(directory.approvalWorkspaceId).toBe("personal");
   directory.stepApproval(1);
   expect(directory.approvalWorkspaceId).toBe("project");

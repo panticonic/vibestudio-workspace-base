@@ -1,10 +1,7 @@
 import { render } from "@testing-library/react-native";
 import { approvalPresentationKey } from "@vibestudio/shared/approvalPresentation";
 import type { ApprovalSheetProps } from "./ApprovalSheet";
-import type {
-  MobileWorkspaceDirectory,
-  MobileWorkspaceSession,
-} from "../services/workspaceDirectory";
+import type { MobileWorkspaceDirectory } from "../services/workspaceDirectory";
 import { WorkspaceApprovalSurface } from "./WorkspaceApprovalSurface";
 
 let mockSheet: ApprovalSheetProps;
@@ -40,12 +37,13 @@ function fixture() {
     },
   };
   const item = (workspaceId: string) => ({
+    owner: { kind: "workspace" as const, workspaceId },
     workspaceId,
     approvalId: approval.approvalId,
     actionable: true,
     approval,
   });
-  const directory = {
+  const directory: any = {
     entries: [
       { workspaceId: "system", name: "System" },
       { workspaceId: "personal", name: "Personal" },
@@ -54,9 +52,12 @@ function fixture() {
       ["system", system],
       ["personal", personal],
     ]),
+    workspaceApprovalOwners: new Map(),
     approvalItems: [item("system"), item("personal")],
     unloadedApprovalWorkspaces: [],
     selectedApproval: item("system"),
+    selectedApprovalOwner: null,
+    approvalOwnerErrors: [],
     approvalPresentation: {
       selectedKey: approvalPresentationKey(item("system")),
       open: true,
@@ -65,14 +66,26 @@ function fixture() {
     closeApprovals: jest.fn(),
     activate: jest.fn(),
   };
-  render(
+  const owner = {
+    owner: { kind: "workspace" as const, workspaceId: "system" },
+    label: "System",
+    shellApproval: system.client.shellApproval,
+    events: {},
+    session: system,
+    approvals: system.approvals,
+    approvalState: system.approvalState,
+    approvalError: null,
+  };
+  directory.workspaceApprovalOwners.set("system", owner);
+  directory.selectedApprovalOwner = owner;
+  const rendered = render(
     <WorkspaceApprovalSurface
       directory={directory as unknown as MobileWorkspaceDirectory}
-      session={system as unknown as MobileWorkspaceSession}
+      owner={owner as never}
       notify={jest.fn()}
     />,
   );
-  return { directory, system, personal };
+  return { directory, system, personal, rendered, approval };
 }
 
 it("keeps a submitted decision and its refresh on the captured workspace", async () => {
@@ -86,7 +99,7 @@ it("keeps a submitted decision and its refresh on the captured workspace", async
   );
   const pending = mockSheet.onResolve("same-id", "once");
   directory.approvalPresentation.selectedKey = approvalPresentationKey({
-    workspaceId: "personal",
+    owner: { kind: "workspace", workspaceId: "personal" },
     approvalId: "same-id",
   });
   finish();
@@ -103,7 +116,7 @@ it("keeps a submitted decision and its refresh on the captured workspace", async
 it("rejects a stale callback after selecting a colliding request from another workspace", async () => {
   const { directory, system, personal } = fixture();
   directory.approvalPresentation.selectedKey = approvalPresentationKey({
-    workspaceId: "personal",
+    owner: { kind: "workspace", workspaceId: "personal" },
     approvalId: "same-id",
   });
   await expect(mockSheet.onResolve("same-id", "once")).rejects.toThrow(
@@ -116,8 +129,56 @@ it("rejects a stale callback after selecting a colliding request from another wo
 it("rejects an old owner's callback after access removal or session replacement", async () => {
   const { directory, system } = fixture();
   directory.sessions.delete("system");
+  directory.selectedApprovalOwner = null;
   await expect(mockSheet.onResolve("same-id", "once")).rejects.toThrow(
     "no longer selected",
   );
   expect(system.client.shellApproval.resolve).not.toHaveBeenCalled();
+});
+
+it("resolves an account approval through its captured hub owner", async () => {
+  const { directory, system, rendered, approval } = fixture();
+  const hubApproval = { ...approval, approvalId: "hub-review" };
+  const hubItem = {
+    owner: { kind: "hub" as const },
+    approvalId: hubApproval.approvalId,
+    actionable: true,
+    approval: hubApproval,
+  };
+  const hubOwner = {
+    owner: hubItem.owner,
+    label: "Account",
+    shellApproval: { resolve: jest.fn(async () => undefined) },
+    events: {},
+    approvals: [hubApproval],
+    approvalState: { refresh: jest.fn(async () => undefined) },
+    approvalError: null,
+  };
+  directory.approvalItems = [hubItem];
+  directory.selectedApproval = hubItem;
+  directory.selectedApprovalOwner = hubOwner;
+  directory.approvalOwnerErrors = ["Account: account queue unavailable"];
+  directory.approvalPresentation.selectedKey = approvalPresentationKey(hubItem);
+  rendered.rerender(
+    <WorkspaceApprovalSurface
+      directory={directory as MobileWorkspaceDirectory}
+      owner={hubOwner as never}
+      notify={jest.fn()}
+    />,
+  );
+
+  await mockSheet.onResolve("hub-review", "once");
+
+  expect(hubOwner.shellApproval.resolve).toHaveBeenCalledWith(
+    "hub-review",
+    "once",
+  );
+  expect(hubOwner.approvalState.refresh).toHaveBeenCalledWith("manual");
+  expect(system.client.shellApproval.resolve).not.toHaveBeenCalled();
+  expect(mockSheet.onNavigateToPanel).toBeUndefined();
+  expect(mockSheet.onFetchDiffContent).toBeUndefined();
+  expect(mockSheet.onOpenDiffFile).toBeUndefined();
+  expect(mockSheet.queue.status?.message).toContain(
+    "Account: account queue unavailable",
+  );
 });

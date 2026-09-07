@@ -261,7 +261,10 @@ function createHubControlClient(transport: MobileRpcClient) {
     "hubControl",
     hubControlMethods,
     (service, method, args) =>
-      transport.call("main", `${service}.${method}`, args),
+      transport.call("main", `${service}.${method}`, args, {
+        destination: { kind: "hub" },
+        authorityAcquisition: "wait",
+      }),
   );
 }
 

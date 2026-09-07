@@ -234,7 +234,7 @@ describe("MobileRpcClient Iroh transport", () => {
     );
   });
 
-  it("routes only hubControl calls over the retained stable hub pipe", async () => {
+  it("routes only typed hub destinations over the retained stable hub pipe", async () => {
     const workspaceCall = jest.fn(async () => ({ workspace: true }));
     const hubCall = jest.fn(async () => ({ hub: true }));
     mockReconnectMobileSession.mockResolvedValue(
@@ -253,10 +253,15 @@ describe("MobileRpcClient Iroh transport", () => {
       },
     );
     await expect(
-      client.call("main", "hubControl.listWorkspaces", []),
+      client.call("main", "shellApproval.listPending", [], {
+        destination: { kind: "hub" },
+      }),
     ).resolves.toEqual({
       hub: true,
     });
+    await expect(
+      client.call("main", "hubControl.lookalikeWorkspaceMethod", []),
+    ).resolves.toEqual({ workspace: true });
     expect(workspaceCall).toHaveBeenCalledWith(
       "main",
       "workspace.getInfo",
@@ -265,7 +270,7 @@ describe("MobileRpcClient Iroh transport", () => {
     );
     expect(hubCall).toHaveBeenCalledWith(
       "main",
-      "hubControl.listWorkspaces",
+      "shellApproval.listPending",
       [],
       undefined,
     );

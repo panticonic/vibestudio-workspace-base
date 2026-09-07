@@ -244,15 +244,11 @@ export function createShellWorkspaceClient(
   ownership: {
     workspaceId: string | Promise<string>;
     nativePresentation: NativePanelPresentation;
+    hubRpc: RpcClient;
   },
 ) {
   const hostLaunch = new HostLaunchClient((service, method, args) =>
     rpc.call("main", `${service}.${method}`, args),
-  );
-  const shellApprovalClient = createTypedServiceClient(
-    "shellApproval",
-    shellApprovalMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
   );
   const shellPresenceClient = createTypedServiceClient(
     "shellPresence",
@@ -371,7 +367,8 @@ export function createShellWorkspaceClient(
   const hubControlClient = createTypedServiceClient(
     "hubControl",
     hubControlMethods,
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
+    (service, method, args) =>
+      ownership.hubRpc.call("main", `${service}.${method}`, args),
   );
   const blobstoreClient = createTypedServiceClient(
     "blobstore",
@@ -1309,33 +1306,7 @@ export function createShellWorkspaceClient(
     warmPanel: (source: string, ref?: string) =>
       buildClient.getPanelMetadata(source, ref),
   };
-  const shellApproval = {
-    resolve: (approvalId: string, decision: ApprovalDecision) =>
-      shellApprovalClient.resolve(approvalId, decision),
-    resolveBootstrap: (
-      approvalId: string,
-      decision: Extract<ApprovalDecision, "once" | "deny">,
-    ) => shellApprovalClient.resolveBootstrap([approvalId], decision),
-    resolveInstallReview: (
-      approvalId: string,
-      resolution: import("@vibestudio/shared/authority/unitInstallReview").TemplateInstallResolution,
-    ) => shellApprovalClient.resolveInstallReview(approvalId, resolution),
-    resolveTaskRules: (
-      approvalId: string,
-      resolution:
-        | { decision: "accept"; selected: string[] }
-        | { decision: "cancel" },
-    ) => shellApprovalClient.resolveTaskRules(approvalId, resolution),
-    submitClientConfig: (approvalId: string, values: Record<string, string>) =>
-      shellApprovalClient.submitClientConfig(approvalId, values),
-    submitCredentialInput: (
-      approvalId: string,
-      values: Record<string, string>,
-    ) => shellApprovalClient.submitCredentialInput(approvalId, values),
-    submitSecretInput: (approvalId: string, values: Record<string, string>) =>
-      shellApprovalClient.submitSecretInput(approvalId, values),
-    listPending: () => shellApprovalClient.listPending(),
-  };
+  const shellApproval = createShellApprovalClient(rpc);
   // =============================================================================
   // Shell Presence Service
   // =============================================================================
@@ -1450,3 +1421,39 @@ export function createShellWorkspaceClient(
 export type ShellWorkspaceClient = ReturnType<
   typeof createShellWorkspaceClient
 >;
+
+/** Approval decisions stay bound to the RPC owner supplied by the caller. */
+export function createShellApprovalClient(rpc: RpcClient) {
+  const shellApprovalClient = createTypedServiceClient(
+    "shellApproval",
+    shellApprovalMethods,
+    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
+  );
+  return {
+    resolve: (approvalId: string, decision: ApprovalDecision) =>
+      shellApprovalClient.resolve(approvalId, decision),
+    resolveBootstrap: (
+      approvalId: string,
+      decision: Extract<ApprovalDecision, "once" | "deny">,
+    ) => shellApprovalClient.resolveBootstrap([approvalId], decision),
+    resolveInstallReview: (
+      approvalId: string,
+      resolution: import("@vibestudio/shared/authority/unitInstallReview").TemplateInstallResolution,
+    ) => shellApprovalClient.resolveInstallReview(approvalId, resolution),
+    resolveTaskRules: (
+      approvalId: string,
+      resolution:
+        | { decision: "accept"; selected: string[] }
+        | { decision: "cancel" },
+    ) => shellApprovalClient.resolveTaskRules(approvalId, resolution),
+    submitClientConfig: (approvalId: string, values: Record<string, string>) =>
+      shellApprovalClient.submitClientConfig(approvalId, values),
+    submitCredentialInput: (
+      approvalId: string,
+      values: Record<string, string>,
+    ) => shellApprovalClient.submitCredentialInput(approvalId, values),
+    submitSecretInput: (approvalId: string, values: Record<string, string>) =>
+      shellApprovalClient.submitSecretInput(approvalId, values),
+    listPending: () => shellApprovalClient.listPending(),
+  };
+}

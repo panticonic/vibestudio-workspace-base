@@ -40,6 +40,15 @@ function smokePhase(phase: string, details?: Record<string, unknown>): void {
   console.log(`[VibestudioMobileSmoke] phase=${phase}${suffix}`);
 }
 
+function optionsForSelectedPipe<T extends RpcCallOptions | RpcStreamOptions>(
+  options: T | undefined,
+  hub: boolean,
+): T | undefined {
+  if (!hub || !options) return options;
+  const { destination: _destination, ...rest } = options;
+  return (Object.keys(rest).length ? rest : undefined) as T | undefined;
+}
+
 export type ConnectionStatus = RpcConnectionStatus;
 
 /** Whether an idempotent shell operation should be retried on the same pipe. */
@@ -230,12 +239,12 @@ export class MobileRpcClient implements Pick<
     options?: RpcCallOptions,
   ): Promise<T> {
     const workspaceRpc = await this.ensureRpc();
-    const selected = method.startsWith("hubControl.")
-      ? this.controlRpc
-      : workspaceRpc;
+    const hub = options?.destination?.kind === "hub";
+    const selected = hub ? this.controlRpc : workspaceRpc;
     if (!selected)
       throw new Error("Stable hub control connection not established");
-    return selected.call<T>(targetId, method, args, options);
+    const selectedOptions = optionsForSelectedPipe(options, hub);
+    return selected.call<T>(targetId, method, args, selectedOptions);
   }
 
   expose<TArgs extends unknown[], TReturn>(
@@ -255,7 +264,17 @@ export class MobileRpcClient implements Pick<
     args: unknown[],
     options?: RpcStreamOptions,
   ): Promise<Response> {
-    return (await this.ensureRpc()).stream(targetId, method, args, options);
+    const workspaceRpc = await this.ensureRpc();
+    const hub = options?.destination?.kind === "hub";
+    const selected = hub ? this.controlRpc : workspaceRpc;
+    if (!selected)
+      throw new Error("Stable hub control connection not established");
+    return selected.stream(
+      targetId,
+      method,
+      args,
+      optionsForSelectedPipe(options, hub),
+    );
   }
 
   /**
@@ -270,11 +289,16 @@ export class MobileRpcClient implements Pick<
     args: unknown[],
     options?: RpcStreamOptions,
   ): ReturnType<RpcClient["streamReadable"]> {
-    return (await this.ensureRpc()).streamReadable(
+    const workspaceRpc = await this.ensureRpc();
+    const hub = options?.destination?.kind === "hub";
+    const selected = hub ? this.controlRpc : workspaceRpc;
+    if (!selected)
+      throw new Error("Stable hub control connection not established");
+    return selected.streamReadable(
       targetId,
       method,
       args,
-      options,
+      optionsForSelectedPipe(options, hub),
     );
   }
 
