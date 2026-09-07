@@ -24,6 +24,14 @@ Read `catalog` without arguments for cached rendering. Refresh only after an
 explicit user action with `[{ refresh: true }]`. Catalog selections remain
 bound to the returned `coordinates.commit` and `coordinates.snapshot`.
 
+Use the extension's complete installed unit name when invoking it:
+
+```ts
+import { extensions } from "@workspace/runtime";
+
+const cached = await extensions.invoke("@workspace-extensions/templates", "catalog", []);
+```
+
 Call `inspect` with an already reviewed exact `{ pin }`, a direct
 `{ url, credential? }`, or a catalog-bound
 `{ catalogId, registryCommit, registrySnapshot }`. The result contains the
