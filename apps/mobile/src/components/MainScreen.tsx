@@ -91,6 +91,7 @@ import {
   mobilePanelMaterializationState,
   PanelMaterializationRetryQueue,
 } from "../services/panelMaterializer";
+import { recoverCurrentPanels } from "./panelRecovery";
 import {
   copyToClipboard,
   openExternalUrl,
@@ -416,22 +417,24 @@ export function MainScreen({
   useEffect(() => {
     if (!shellClient) return;
     return shellClient.onRecoveryComplete((kind) => {
-      if (kind !== "cold-recover") return;
-      // A cold recovery replaced the server process and therefore every
-      // panel-side bridge session. Reload only retained WebViews whose runtime
-      // identity is still authoritative; changed identities are rematerialized
-      // by the convergence effect below instead of loading stale URLs.
-      for (const entry of webViewStackRef.current) {
-        if (!entry.managed) continue;
-        const panel = shellClient.panels.registry.getPanel(entry.panelId);
-        if (
-          panel &&
-          mobilePanelMaterializationState(panel, entry) === "current"
-        ) {
-          shellClient.panels.resetBridgeSessionForReload(entry.panelId);
-          webViewRefsMap.current.get(entry.panelId)?.reload();
-        }
-      }
+      recoverCurrentPanels(
+        kind,
+        webViewStackRef.current,
+        webViewRefsMap.current,
+        (entry) => {
+          const panel = shellClient.panels.registry.getPanel(entry.panelId);
+          return !!(
+            panel &&
+            mobilePanelMaterializationState(panel, entry) === "current"
+          );
+        },
+        (panelId, handle) => {
+          // A cold recovery replaced the server process and therefore this
+          // authoritative document's panel-side bridge session.
+          shellClient.panels.resetBridgeSessionForReload(panelId);
+          handle.reload();
+        },
+      );
     });
   }, [shellClient]);
   const handleWebViewUnmount = useCallback(

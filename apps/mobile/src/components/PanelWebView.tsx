@@ -76,6 +76,8 @@ export interface PanelWebViewHandle {
    * this panel off the pipe.)
    */
   deliverEnvelope: (envelope: unknown) => void;
+  /** Notify this document that its panel session completed recovery. */
+  deliverRecovery: (kind: "resubscribe" | "cold-recover") => void;
   navigate: (url: string) => void;
   goBack: () => void;
   goForward: () => void;
@@ -166,7 +168,7 @@ function serializeForInjection(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-function buildBridgeBootstrapScript(
+export function buildBridgeBootstrapScript(
   panelInit: unknown,
   enableDebug: boolean,
 ): string {
@@ -177,6 +179,10 @@ function buildBridgeBootstrapScript(
       const pending = new Map();
       const listeners = new Map();
       const envelopeListeners = new Set();
+      const recoveryListeners = {
+        "resubscribe": new Set(),
+        "cold-recover": new Set(),
+      };
       const streamListeners = new Set();
       // Buffer host→panel messages that arrive before the panel's RPC client has
       // registered onEnvelope/onStreamMessage, then flush to the first handler —
@@ -350,6 +356,20 @@ function buildBridgeBootstrapScript(
         }
       }
 
+      function deliverRecovery(kind) {
+        const handlers = recoveryListeners[kind];
+        if (!handlers) return;
+        for (const handler of handlers) {
+          try {
+            Promise.resolve(handler()).catch(function (error) {
+              console.error("[VibestudioBridge] Panel recovery failed", kind, error);
+            });
+          } catch (error) {
+            console.error("[VibestudioBridge] Panel recovery failed", kind, error);
+          }
+        }
+      }
+
       function callHost(method, args) {
         return new Promise(function(resolve, reject) {
           const id = "bridge-" + Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 10);
@@ -393,6 +413,12 @@ function buildBridgeBootstrapScript(
             }
           }
           return () => envelopeListeners.delete(handler);
+        },
+        onRecovery: (kind, handler) => {
+          const handlers = recoveryListeners[kind];
+          if (!handlers || typeof handler !== "function") return () => {};
+          handlers.add(handler);
+          return () => handlers.delete(handler);
         },
         // §1.6 upload hop (see @vibestudio/rpc bridgeStream.ts): the postMessage
         // bridge is string-only, so body chunks cross as base64 (~256 KiB).
@@ -445,6 +471,7 @@ function buildBridgeBootstrapScript(
         resolvePending,
         dispatchEventToListeners,
         deliverEnvelope,
+        deliverRecovery,
       };
       globalThis.__vibestudioShell = shell;
       function reportPanelBoot(boot) {
@@ -706,6 +733,16 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       [injectEnvelope, managed, panelId],
     );
 
+    const deliverRecovery = useCallback(
+      (kind: "resubscribe" | "cold-recover") => {
+        if (!managed || !bridgeReadyRef.current) return;
+        webViewRef.current?.injectJavaScript(
+          `window.__vibestudioMobileHost&&window.__vibestudioMobileHost.deliverRecovery(${JSON.stringify(kind)}); true;`,
+        );
+      },
+      [managed],
+    );
+
     const flushPendingEnvelopes = useCallback(() => {
       bridgeReadyRef.current = true;
       const queue = pendingEnvelopesRef.current;
@@ -734,6 +771,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
         },
         dispatchHostEvent,
         deliverEnvelope,
+        deliverRecovery,
         navigate: (nextUrl: string) => {
           webViewRef.current?.injectJavaScript(
             `location.assign(${JSON.stringify(nextUrl)}); true;`,
@@ -744,7 +782,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
         reload: reloadPanel,
         stop: () => webViewRef.current?.stopLoading(),
       }),
-      [dispatchHostEvent, deliverEnvelope, reloadPanel],
+      [dispatchHostEvent, deliverEnvelope, deliverRecovery, reloadPanel],
     );
 
     const onUnmountRef = useRef(onUnmount);
