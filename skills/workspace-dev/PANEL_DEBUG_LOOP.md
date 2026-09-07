@@ -76,6 +76,14 @@ return the panel handle's native screenshot result directly. Omit an exact `auth
 ordinary eval; if intentionally attenuating, `cdp.page()` requires the exact
 `panel.inspect` request documented in `BROWSER.md`.
 
+Run CDP session/page acquisition in a read-write eval even when the subsequent
+locator calls only read text. The acquired connection can also execute scripts
+and mutate the page; a read-only eval cannot acquire that authority. For visual
+inspection without a CDP connection, use a read-only eval returning
+`await scope.panel.cdp.screenshot({ format: "png" })`; console inspection can use
+`await scope.panel.cdp.consoleHistory()`. Do not acquire `cdp.page()` first for
+either bounded read.
+
 ```ts
 scope.panelSession = await scope.panel.cdp.session();
 const page = scope.panelSession.page;
