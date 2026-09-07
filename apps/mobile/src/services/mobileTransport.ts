@@ -6,13 +6,14 @@
  * device credential, and every RPC owns an independent QUIC stream.
  */
 
-import type {
-  RpcCallOptions,
-  RpcClient,
-  RpcContextHandler,
-  RpcConnectionStatus,
-  RpcEventContext,
-  RpcStreamOptions,
+import {
+  isRpcConnectionLost,
+  type RpcCallOptions,
+  type RpcClient,
+  type RpcContextHandler,
+  type RpcConnectionStatus,
+  type RpcEventContext,
+  type RpcStreamOptions,
 } from "@vibestudio/rpc";
 import type { RecoveryKind } from "@vibestudio/rpc/protocol/recoveryCoordinator";
 import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
@@ -41,21 +42,25 @@ function smokePhase(phase: string, details?: Record<string, unknown>): void {
 
 export type ConnectionStatus = RpcConnectionStatus;
 
-const TRANSIENT_TRANSPORT_ERROR_CODES = new Set([
-  "CONNECTION_LOST",
-  "IROH_RESPONSE_HEAD_TIMEOUT",
-]);
-
 /** Whether an idempotent shell operation should be retried on the same pipe. */
 export function isTransientMobileTransportFailure(error: unknown): boolean {
   let current = error;
   const seen = new Set<unknown>();
   while (current && typeof current === "object" && !seen.has(current)) {
     seen.add(current);
-    const candidate = current as { code?: unknown; cause?: unknown };
+    const candidate = current as {
+      code?: unknown;
+      cause?: unknown;
+      errorKind?: unknown;
+    };
     if (
-      typeof candidate.code === "string" &&
-      TRANSIENT_TRANSPORT_ERROR_CODES.has(candidate.code)
+      candidate.errorKind !== undefined &&
+      candidate.errorKind !== "transport"
+    )
+      return false;
+    if (
+      isRpcConnectionLost(current) ||
+      candidate.code === "IROH_RESPONSE_HEAD_TIMEOUT"
     ) {
       return true;
     }
@@ -93,14 +98,12 @@ export class MobileRpcClient implements Pick<
   // Dedupes concurrent connect attempts: the Iroh handshake is eager + async,
   // so a stray call() racing connectAndWait() must not open a second pipe.
   private connecting: Promise<RpcClient> | null = null;
-  // Identity token for the in-flight `establishConnection()`. `teardown()` clears
-  // it, so a handshake that resolves AFTER a disconnect closes the
-  // pipe it produced instead of adopting it. Without this, a disconnect mid-connect
-  // captured `this.connection` (still null) and closed nothing, then the pending
-  // handshake assigned `this.connection` + status "connected" — leaking a live
-  // pipe + keepalive when the app backgrounds or ShellClient.dispose() unmounts
-  // mid-connect.
-  private activeConnectToken: object | null = null;
+  private retirement: Promise<void> | null = null;
+  // One lifetime covers connection establishment and the adopted session.
+  // Teardown retires it before async close, so late callbacks cannot affect a
+  // replacement session and a late handshake closes its own unused connection.
+  private connectionToken: object | null = null;
+  private connectionSubscriptions: Array<() => void> = [];
   private currentCallerId: string | null = null;
   private authenticatedServerId: string | null = null;
   private statusState: ConnectionStatus = "disconnected";
@@ -137,45 +140,30 @@ export class MobileRpcClient implements Pick<
   }
 
   get status(): ConnectionStatus {
-    return this.connection?.session.status?.() ?? this.statusState;
+    return this.connection?.session.status() ?? this.statusState;
   }
 
   connect(): void {
-    this.setStatus("connecting");
-    void this.ensureRpc().catch((error) => {
-      // A superseded connect means a newer teardown/connect already owns the
-      // status — don't clobber it or log a scary failure.
-      if (error instanceof ConnectSupersededError) return;
-      console.warn("[MobileRpcClient] Failed to connect Iroh pipe:", error);
-      this.setStatus("disconnected");
-    });
+    // The shared connection job reports its terminal failure once.
+    void this.ensureRpc().catch(() => undefined);
   }
 
   async connectAndWait(timeoutMs?: number | null): Promise<void> {
-    this.setStatus("connecting");
+    const token = this.ensureConnectionLifetime();
     try {
-      await this.connectAndWaitWithRetry(timeoutMs);
+      await this.ensureRpc(timeoutMs);
+      this.assertConnectionLifetime(token);
     } catch (error) {
-      if (error instanceof ConnectSupersededError) {
-        // Torn down mid-connect (disconnect/dispose); let the caller reject
-        // without a spurious "disconnected" flash — a new connect owns status.
-        throw error;
-      }
-      console.warn(
-        "[MobileRpcClient] Failed to connect mobile RPC transport:",
-        error,
-      );
-      this.setStatus("disconnected");
+      this.assertConnectionLifetime(token);
+      if (error instanceof ConnectSupersededError) throw error;
       throw error;
     }
   }
 
   reconnect(): void {
-    void this.teardown()
-      .then(() => this.connect())
-      .catch((error) =>
-        this.reportTransportFailure("Reconnect teardown failed", error),
-      );
+    const closing = this.teardown();
+    const token = this.ensureConnectionLifetime();
+    this.startConnectionJob(token, undefined, closing);
   }
 
   onReconnectProgress(
@@ -214,7 +202,7 @@ export class MobileRpcClient implements Pick<
   }
 
   disconnect(): void {
-    if (!this.connection && !this.connecting) {
+    if (!this.connectionToken && !this.connection && !this.connecting) {
       this.setStatus("disconnected");
       return;
     }
@@ -226,7 +214,6 @@ export class MobileRpcClient implements Pick<
   /** Deterministic ownership handoff used before the native RN runtime reloads. */
   async close(): Promise<void> {
     await this.teardown();
-    this.setStatus("disconnected");
   }
 
   onStatusChange(callback: (status: ConnectionStatus) => void): () => void {
@@ -374,71 +361,121 @@ export class MobileRpcClient implements Pick<
     };
   }
 
-  private async ensureRpc(): Promise<RpcClient> {
-    if (this.rpc) return this.rpc;
-    if (this.connecting) return this.connecting;
-    this.connecting = this.establishConnection();
-    try {
-      return await this.connecting;
-    } finally {
-      this.connecting = null;
-    }
+  private ensureConnectionLifetime(): object {
+    return (this.connectionToken ??= {});
   }
 
-  private async establishConnection(): Promise<RpcClient> {
-    const token = {};
-    this.activeConnectToken = token;
-    const connection = this.config.connectWorkspace
-      ? await this.config.connectWorkspace((kind) => this.emitRecovery(kind))
-      : await this.restoreBootstrapSession();
-    if (this.activeConnectToken !== token) {
-      return closeThenThrow(
+  private assertConnectionLifetime(token: object): void {
+    if (this.connectionToken !== token) throw new ConnectSupersededError();
+  }
+
+  private async ensureRpc(timeoutMs?: number | null): Promise<RpcClient> {
+    if (this.rpc) return this.rpc;
+    if (this.connecting) return this.connecting;
+    return this.startConnectionJob(this.ensureConnectionLifetime(), timeoutMs);
+  }
+
+  private startConnectionJob(
+    token: object,
+    timeoutMs?: number | null,
+    retirement = this.retirement,
+  ): Promise<RpcClient> {
+    // This one promise includes preceding retirement and every initial attempt.
+    // A failed job remains terminal until an explicit new connection intent.
+    const connecting = (async () => {
+      await retirement;
+      this.assertConnectionLifetime(token);
+      this.setStatus("connecting");
+      return this.establishConnectionWithRetry(token, timeoutMs);
+    })();
+    this.connecting = connecting;
+    void connecting.catch((error) => {
+      if (this.connectionToken !== token) return;
+      this.reportTransportFailure("Connection failed", error, token);
+    });
+    return connecting;
+  }
+
+  private async establishConnection(token: object): Promise<RpcClient> {
+    let connection: IrohConnection | undefined;
+    const current = () =>
+      this.connectionToken === token &&
+      connection !== undefined &&
+      this.connection === connection;
+    const recover = (kind: RecoveryKind) => {
+      if (current()) this.emitRecovery(kind);
+    };
+    try {
+      connection = this.config.connectWorkspace
+        ? await this.config.connectWorkspace(recover)
+        : await this.restoreBootstrapSession(recover, token);
+    } catch (error) {
+      this.assertConnectionLifetime(token);
+      throw error;
+    }
+    if (this.connectionToken !== token) {
+      return this.retireAttemptAndThrow(
         connection,
         new ConnectSupersededError(),
-        "Superseded mobile connection",
       );
     }
-    if (
-      connection.serverId &&
-      this.authenticatedServerId &&
-      connection.serverId !== this.authenticatedServerId
-    ) {
-      return closeThenThrow(
-        connection,
-        new Error(
+    const subscriptions: Array<() => void> = [];
+    const events = new Map<string, () => void>();
+    try {
+      if (
+        connection.serverId &&
+        this.authenticatedServerId &&
+        connection.serverId !== this.authenticatedServerId
+      ) {
+        throw new Error(
           "The workspace route changed the authenticated account server",
-        ),
-        "Workspace server identity changed",
+        );
+      }
+      if (!connection.hubControlRpc)
+        throw new Error(
+          "Mobile session did not retain its stable hub control pipe",
+        );
+      const rpc = connection.rpc;
+      for (const [method, handler] of this.exposedHandlers)
+        rpc.expose(method, handler);
+      subscriptions.push(
+        connection.session.onStatusChange((status) => {
+          if (current()) this.setStatus(status);
+        }),
       );
+      const stopProgress = connection.transport.onReconnectProgress?.(
+        (progress) => {
+          if (current()) this.emitReconnectProgress(progress);
+        },
+      );
+      if (stopProgress) subscriptions.push(stopProgress);
+      for (const event of this.eventSubscriptions.keys())
+        events.set(event, this.subscribeToRpcEvent(rpc, event));
+      this.assertConnectionLifetime(token);
+    } catch (error) {
+      return this.retireAttemptAndThrow(connection, error, [
+        ...subscriptions,
+        ...events.values(),
+      ]);
     }
     this.authenticatedServerId ??= connection.serverId ?? null;
-    this.activeConnectToken = null;
     this.connection = connection;
     this.currentCallerId = connection.callerId;
     this.rpc = connection.rpc;
-    this.controlRpc = connection.hubControlRpc ?? null;
-    if (!this.controlRpc) {
-      return closeThenThrow(
-        connection,
-        new Error("Mobile session did not retain its stable hub control pipe"),
-        "Invalid mobile session",
-      );
-    }
-    for (const [method, handler] of this.exposedHandlers)
-      this.rpc.expose(method, handler);
-    connection.session.onStatusChange?.((status) => this.setStatus(status));
-    connection.transport.onReconnectProgress?.((progress) =>
-      this.emitReconnectProgress(progress),
-    );
-    for (const event of this.eventSubscriptions.keys())
-      this.attachEventSubscription(event);
-    this.setStatus(connection.session.status?.() ?? "connected");
+    this.controlRpc = connection.hubControlRpc;
+    this.connectionSubscriptions = subscriptions;
+    for (const [event, stop] of events) this.activeEventUnsubs.set(event, stop);
+    this.setStatus(connection.session.status());
     smokePhase("workspace-iroh-connected", { callerId: connection.callerId });
     return this.rpc;
   }
 
-  private async restoreBootstrapSession(): Promise<IrohConnection> {
+  private async restoreBootstrapSession(
+    onRecovery: (kind: RecoveryKind) => void,
+    token: object,
+  ): Promise<IrohConnection> {
     const stored = await loadShellCredential();
+    this.assertConnectionLifetime(token);
     if (!stored) {
       throw new Error("No stored Iroh shell credential — re-pair this device");
     }
@@ -452,13 +489,14 @@ export class MobileRpcClient implements Pick<
     return reconnectMobileSession(
       stored,
       Platform.OS === "ios" ? "app-scheme" : "client-loopback",
-      (kind) => this.emitRecovery(kind),
+      onRecovery,
     );
   }
 
-  private async connectAndWaitWithRetry(
+  private async establishConnectionWithRetry(
+    token: object,
     timeoutMs?: number | null,
-  ): Promise<void> {
+  ): Promise<RpcClient> {
     const retry = this.config.initialConnectionRetry ?? {};
     const startedAt = Date.now();
     const maxMs =
@@ -480,20 +518,22 @@ export class MobileRpcClient implements Pick<
     let lastError: unknown = null;
 
     while (Date.now() < deadline) {
+      this.assertConnectionLifetime(token);
       attempt += 1;
-      this.setStatus("connecting");
       this.emitReconnectProgress({
         attempt,
         phase: "connecting",
         reason: attempt === 1 ? "initial connection" : "retry",
       });
       try {
-        await this.ensureRpc();
+        const rpc = await this.establishConnection(token);
+        this.assertConnectionLifetime(token);
         if (attempt > 1) {
           smokePhase("workspace-iroh-retry-connected", { attempt });
         }
-        return;
+        return rpc;
       } catch (error) {
+        this.assertConnectionLifetime(token);
         // An intentional teardown (disconnect/dispose) landed
         // mid-connect. Do NOT retry — that would resurrect a pipe the caller
         // just asked to drop. Propagate so the awaiting init() unwinds.
@@ -504,14 +544,10 @@ export class MobileRpcClient implements Pick<
           phase: "failed",
           reason: error instanceof Error ? error.message : String(error),
         });
-        try {
-          await this.teardown();
-        } catch (cleanupError) {
-          throw new MobileConnectionAggregateError(
-            [error, cleanupError],
-            "Mobile connection failed and its resources could not all be closed",
-          );
-        }
+        // Setup owns and closes rejected attempts before they reach this loop.
+        // Failed cleanup is terminal: do not build another connection over it.
+        if (error instanceof MobileConnectionAggregateError) throw error;
+        this.assertConnectionLifetime(token);
         const remainingMs = deadline - Date.now();
         if (remainingMs <= 0) break;
         const delayMs = Math.min(
@@ -538,6 +574,7 @@ export class MobileRpcClient implements Pick<
       }
     }
 
+    this.assertConnectionLifetime(token);
     throw lastError instanceof Error
       ? lastError
       : new Error(
@@ -546,33 +583,101 @@ export class MobileRpcClient implements Pick<
   }
 
   private async teardown(): Promise<void> {
-    // Invalidate any in-flight establishConnection() so it closes (rather than
-    // adopts) the pipe it is about to produce, and let a fresh connect start.
-    this.activeConnectToken = null;
+    this.connectionToken = null;
     this.connecting = null;
+    const closing = this.closeConnectionResources();
+    this.setStatus("disconnected");
+    await closing;
+  }
+
+  /** Detach the exact adopted connection before asynchronous native cleanup. */
+  private async closeConnectionResources(): Promise<void> {
     const connection = this.connection;
     this.connection = null;
     this.rpc = null;
     this.controlRpc = null;
     this.currentCallerId = null;
+    const subscriptions = [
+      ...this.connectionSubscriptions.splice(0),
+      ...this.activeEventUnsubs.values(),
+    ];
     this.activeEventUnsubs.clear();
-    await connection?.close();
+    await this.retireResources(connection, subscriptions);
   }
 
-  private reportTransportFailure(context: string, error: unknown): void {
+  private retireResources(
+    connection: IrohConnection | null,
+    subscriptions: Array<() => void>,
+  ): Promise<void> {
+    if (!connection && subscriptions.length === 0)
+      return this.retirement ?? Promise.resolve();
+    const cleanup = closeConnectionResources(connection, subscriptions);
+    const previous = this.retirement;
+    const retirement = previous
+      ? Promise.allSettled([previous, cleanup]).then((results) => {
+          const failures = results.flatMap((result) =>
+            result.status === "rejected" ? [result.reason] : [],
+          );
+          if (failures.length)
+            throw new MobileConnectionAggregateError(
+              failures,
+              "Mobile connection resources could not all be closed",
+            );
+        })
+      : cleanup;
+    this.retirement = retirement;
+    void retirement.then(
+      () => {
+        if (this.retirement === retirement) this.retirement = null;
+      },
+      () => undefined,
+    );
+    return retirement;
+  }
+
+  private async retireAttemptAndThrow(
+    connection: IrohConnection,
+    error: unknown,
+    subscriptions: Array<() => void> = [],
+  ): Promise<never> {
+    try {
+      await this.retireResources(connection, subscriptions);
+    } catch (cleanupError) {
+      throw new MobileConnectionAggregateError(
+        [error, cleanupError],
+        "Mobile connection setup failed and its resources could not all be closed",
+      );
+    }
+    throw error;
+  }
+
+  private reportTransportFailure(
+    context: string,
+    error: unknown,
+    token: object | null = null,
+  ): void {
     const reason = `${context}: ${errorMessage(error)}`;
     console.error(`[MobileRpcClient] ${reason}`, error);
-    this.emitReconnectProgress({ attempt: 0, phase: "failed", reason });
-    this.setStatus("disconnected");
+    if (this.connectionToken === token) {
+      this.emitReconnectProgress({ attempt: 0, phase: "failed", reason });
+      this.setStatus("disconnected");
+    }
   }
 
   private attachEventSubscription(event: string): void {
     if (!this.rpc || this.activeEventUnsubs.has(event)) return;
-    const unsubscribe = this.rpc.on(event, (ev) => {
+    this.activeEventUnsubs.set(
+      event,
+      this.subscribeToRpcEvent(this.rpc, event),
+    );
+  }
+
+  private subscribeToRpcEvent(rpc: RpcClient, event: string): () => void {
+    return rpc.on(event, (ev) => {
+      if (this.rpc !== rpc) return;
       for (const listener of this.eventSubscriptions.get(event) ?? [])
         listener(ev);
     });
-    this.activeEventUnsubs.set(event, unsubscribe);
   }
 
   private setStatus(status: ConnectionStatus): void {
@@ -609,18 +714,26 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-async function closeThenThrow(
-  connection: IrohConnection,
-  failure: Error,
-  context: string,
-): Promise<never> {
-  try {
-    await connection.close();
-  } catch (cleanupError) {
-    throw new MobileConnectionAggregateError(
-      [failure, cleanupError],
-      `${context} failed and its resources could not all be closed`,
-    );
+async function closeConnectionResources(
+  connection: IrohConnection | null,
+  subscriptions: Array<() => void>,
+): Promise<void> {
+  const failures: unknown[] = [];
+  for (const stop of subscriptions) {
+    try {
+      stop();
+    } catch (error) {
+      failures.push(error);
+    }
   }
-  throw failure;
+  try {
+    await connection?.close();
+  } catch (error) {
+    failures.push(error);
+  }
+  if (failures.length)
+    throw new MobileConnectionAggregateError(
+      failures,
+      "Mobile connection resources could not all be closed",
+    );
 }

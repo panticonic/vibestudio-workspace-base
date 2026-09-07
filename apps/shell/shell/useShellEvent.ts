@@ -1,3 +1,4 @@
+import { isRpcConnectionLost } from "@vibestudio/rpc";
 /**
  * useShellEvent - React hook for subscribing to shell events.
  *
@@ -20,7 +21,10 @@ export type { EventPayloads } from "./client.js";
 const references = new WeakMap<ShellWorkspaceClient["events"], Map<EventName, number>>();
 function subscriptionsFor(events: ShellWorkspaceClient["events"]) {
   let refs = references.get(events);
-  if (!refs) { refs = new Map(); references.set(events, refs); }
+  if (!refs) {
+    refs = new Map();
+    references.set(events, refs);
+  }
   return refs;
 }
 
@@ -29,9 +33,9 @@ function addSubscription(events: ShellWorkspaceClient["events"], event: EventNam
   const prev = subscriptionRefcounts.get(event) ?? 0;
   subscriptionRefcounts.set(event, prev + 1);
   if (prev === 0) {
-    void events
-      .subscribe(event)
-      .catch((err: unknown) => console.warn(`[useShellEvent] watch ${event} failed:`, err));
+    void events.subscribe(event).catch((err: unknown) => {
+      if (!isRpcConnectionLost(err)) console.warn(`[useShellEvent] watch ${event} failed:`, err);
+    });
   }
 }
 
@@ -41,9 +45,10 @@ function removeSubscription(events: ShellWorkspaceClient["events"], event: Event
   if (prev <= 0) return;
   if (prev === 1) {
     subscriptionRefcounts.delete(event);
-    void events
-      .unsubscribe(event)
-      .catch((err: unknown) => console.warn(`[useShellEvent] unsubscribe ${event} failed:`, err));
+    void events.unsubscribe(event).catch((err: unknown) => {
+      if (!isRpcConnectionLost(err))
+        console.warn(`[useShellEvent] unsubscribe ${event} failed:`, err);
+    });
   } else {
     subscriptionRefcounts.set(event, prev - 1);
   }

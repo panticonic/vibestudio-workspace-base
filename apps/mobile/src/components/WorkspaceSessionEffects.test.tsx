@@ -91,7 +91,7 @@ it("presents an unvisited workspace's events through the account host and stops 
   f.emit("notification:show", { title: "Stale" });
   expect(f.notify).toHaveBeenCalledTimes(1);
   view.unmount();
-  expect(f.stop).toHaveBeenCalledTimes(5);
+  expect(f.stop).toHaveBeenCalledTimes(4);
   f.emit("notification:show", { title: "Stopped" });
   expect(f.notify).toHaveBeenCalledTimes(1);
 });

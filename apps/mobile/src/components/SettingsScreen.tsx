@@ -1,3 +1,4 @@
+import type { SettingsSection } from "@vibestudio/shared/shellSurface";
 import { WorkspaceTransferSheet } from "./WorkspaceTransferSheet";
 import { WorkspaceCookiesCard } from "./WorkspaceCookiesCard";
 import { workspaceName as displayWorkspaceName } from "../services/workspaceName";
@@ -75,7 +76,13 @@ type SettingsScreenNavigationProp = StackNavigationProp<
 
 interface SettingsScreenProps {
   navigation: SettingsScreenNavigationProp;
-  route?: { params?: { workspaceId?: string; panelId?: string } };
+  route?: {
+    params?: {
+      workspaceId?: string;
+      panelId?: string;
+      section?: SettingsSection;
+    };
+  };
 }
 
 const APPEARANCE_OPTIONS: {
@@ -89,6 +96,24 @@ const APPEARANCE_OPTIONS: {
 ];
 
 export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
+  const scrollView = React.useRef<ScrollView>(null);
+  const initialSection = React.useRef(route?.params?.section);
+  const sectionFrame = React.useRef<number | null>(null);
+  React.useEffect(
+    () => () => {
+      if (sectionFrame.current !== null)
+        cancelAnimationFrame(sectionFrame.current);
+    },
+    [],
+  );
+  const scrollToSection = (section: SettingsSection, y: number) => {
+    if (initialSection.current !== section) return;
+    initialSection.current = undefined;
+    sectionFrame.current = requestAnimationFrame(() => {
+      sectionFrame.current = null;
+      scrollView.current?.scrollTo({ y, animated: false });
+    });
+  };
   const directory = useAtomValue(workspaceDirectoryAtom);
   const [showFileCopy, setShowFileCopy] = React.useState(false);
   const [managedWorkspaceId] = React.useState(
@@ -354,13 +379,20 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
         <View style={styles.headerSpacer} />
       </View>
       <ScrollView
+        ref={scrollView}
         style={styles.scrollView}
         contentContainerStyle={styles.content}
         automaticallyAdjustKeyboardInsets
         keyboardShouldPersistTaps="handled"
       >
-
-        <MobileAccountProfileSection client={shellClient} />
+        <View
+          testID="settings-section-profile"
+          onLayout={(event) =>
+            scrollToSection("profile", event.nativeEvent.layout.y)
+          }
+        >
+          <MobileAccountProfileSection client={shellClient} />
+        </View>
         {directory && (
           <WorkspaceConnectionsSection
             directory={directory}
@@ -368,7 +400,14 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
           />
         )}
 
-        <SectionHeader label="Connection" />
+        <View
+          testID="settings-section-connection"
+          onLayout={(event) =>
+            scrollToSection("connection", event.nativeEvent.layout.y)
+          }
+        >
+          <SectionHeader label="Connection" />
+        </View>
         <Card>
           <View style={styles.connectionRow}>
             <Text style={[type.body, { color: colors.textSecondary }]}>
@@ -403,7 +442,14 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
           </View>
         </Card>
 
-        <SectionHeader label="Devices" />
+        <View
+          testID="settings-section-devices"
+          onLayout={(event) =>
+            scrollToSection("devices", event.nativeEvent.layout.y)
+          }
+        >
+          <SectionHeader label="Devices" />
+        </View>
         <Card>
           <Text
             style={[
@@ -524,7 +570,14 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
           />
         )}
 
-        <SectionHeader label="Appearance" />
+        <View
+          testID="settings-section-appearance"
+          onLayout={(event) =>
+            scrollToSection("appearance", event.nativeEvent.layout.y)
+          }
+        >
+          <SectionHeader label="Appearance" />
+        </View>
         <Card>
           <Text
             style={[
@@ -580,28 +633,35 @@ export function SettingsScreen({ navigation, route }: SettingsScreenProps) {
           </View>
         </Card>
 
-        <SectionHeader
-          label="Workspace"
-          trailing={
-            !workspacesLoading && workspaceError ? (
-              <Pressable
-                accessibilityRole="button"
-                onPress={() => void loadWorkspaces()}
-                style={styles.retryButton}
-              >
-                <Text
-                  style={[
-                    type.caption,
-                    styles.retryText,
-                    { color: colors.primary },
-                  ]}
-                >
-                  Retry
-                </Text>
-              </Pressable>
-            ) : undefined
+        <View
+          testID="settings-section-workspaces"
+          onLayout={(event) =>
+            scrollToSection("workspaces", event.nativeEvent.layout.y)
           }
-        />
+        >
+          <SectionHeader
+            label="Workspace"
+            trailing={
+              !workspacesLoading && workspaceError ? (
+                <Pressable
+                  accessibilityRole="button"
+                  onPress={() => void loadWorkspaces()}
+                  style={styles.retryButton}
+                >
+                  <Text
+                    style={[
+                      type.caption,
+                      styles.retryText,
+                      { color: colors.primary },
+                    ]}
+                  >
+                    Retry
+                  </Text>
+                </Pressable>
+              ) : undefined
+            }
+          />
+        </View>
         <Card>
           <Text
             style={[

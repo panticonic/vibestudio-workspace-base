@@ -1,4 +1,4 @@
-import type { RpcClient } from "@vibestudio/rpc";
+import { isRpcConnectionLost, type RpcClient } from "@vibestudio/rpc";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
 import { viewMethods } from "@vibestudio/service-schemas/view";
 import type { NativePanelSlotBounds } from "./workspaceClient";
@@ -25,6 +25,8 @@ export function createNativePanelPresentation(rpc: RpcClient) {
     shellGeneration: string;
   };
   let nativePanelAdapterConnection: Promise<void> | null = null;
+  let needsSync = false;
+  let closed = false;
   const connectNativePanelAdapter = () => {
     nativePanelAdapterConnection ??= viewClient
       .connectNativePanelAdapter({
@@ -36,12 +38,18 @@ export function createNativePanelPresentation(rpc: RpcClient) {
           throw new Error(`Panel host rejected shell: ${result.reason}`);
         nativePanelAdapterHandshake = result.handshake;
         desiredNativePanelSlotRevision = 0;
+      })
+      .catch((error) => {
+        nativePanelAdapterConnection = null;
+        throw error;
       });
     return nativePanelAdapterConnection;
   };
   const syncDesiredNativePanelSlots = () => {
     const apply = async () => {
+      if (closed) throw new Error("Native panel presentation is closed");
       await connectNativePanelAdapter();
+      if (closed) throw new Error("Native panel presentation is closed");
       const revision = ++desiredNativePanelSlotRevision;
       const result = await viewClient.applyNativePanelSurfaces({
         protocolVersion: 1,
@@ -66,7 +74,17 @@ export function createNativePanelPresentation(rpc: RpcClient) {
         );
       return result.observation;
     };
-    const current = nativePanelSyncTail.then(apply, apply);
+    needsSync = true;
+    const current = nativePanelSyncTail.then(apply, apply).then(
+      (observation) => {
+        needsSync = false;
+        return observation;
+      },
+      (error) => {
+        needsSync = true;
+        throw error;
+      },
+    );
     nativePanelSyncTail = current.then(
       () => undefined,
       () => undefined,
@@ -74,8 +92,28 @@ export function createNativePanelPresentation(rpc: RpcClient) {
     return current;
   };
 
+  const stopStatus = rpc.onStatusChange((status) => {
+    if (closed) return;
+    if (status !== "connected") {
+      needsSync = true;
+      return;
+    }
+    if (!needsSync) return;
+    // Reassert the latest complete desired compositor state, including clears
+    // made while disconnected. User actions and server mutations are not replayed.
+    void syncDesiredNativePanelSlots().catch((error) => {
+      if (!closed && !isRpcConnectionLost(error))
+        console.warn("Native panel state recovery failed:", error);
+    });
+  });
   return {
     connectNativePanelAdapter,
+    close() {
+      if (closed) return;
+      closed = true;
+      stopStatus();
+      desiredNativePanelSlots.clear();
+    },
     forWorkspace(workspaceId: string | Promise<string>) {
       return {
         bindNativePanelSlot: async (request: {

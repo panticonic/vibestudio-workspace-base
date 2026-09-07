@@ -1,5 +1,5 @@
 import { workspaceDirectoryAtom } from "../state/workspaceDirectoryAtom";
-import { Alert, NativeModules } from "react-native";
+import { Alert, NativeModules, ScrollView } from "react-native";
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import Clipboard from "@react-native-clipboard/clipboard";
@@ -88,7 +88,7 @@ const profile = {
   avatar: "data:image/png;base64,YXZhdGFy",
 };
 
-function renderSettings() {
+function renderSettings(section?: "devices" | "connection") {
   const store = createStore();
   store.set(connectionStatusAtom, "connected");
   const shellClient = {
@@ -125,7 +125,10 @@ function renderSettings() {
   return {
     ...render(
       <Provider store={store}>
-        <SettingsScreen navigation={navigation as never} />
+        <SettingsScreen
+          navigation={navigation as never}
+          route={{ params: { workspaceId: "ws-a", section } }}
+        />
       </Provider>,
     ),
     navigation,
@@ -173,6 +176,23 @@ describe("SettingsScreen workspace selector", () => {
   afterEach(() => {
     setApprovedAppCapabilities([]);
   });
+
+  it.each(["devices", "connection"] as const)(
+    "opens the requested %s section once layout is available",
+    async (section) => {
+      const scroll = jest.spyOn(ScrollView.prototype, "scrollTo");
+      const view = renderSettings(section);
+      fireEvent(view.getByTestId(`settings-section-${section}`), "layout", {
+        nativeEvent: { layout: { x: 0, y: 420, width: 300, height: 30 } },
+      });
+      await waitFor(() =>
+        expect(scroll).toHaveBeenCalledWith({ y: 420, animated: false }),
+      );
+      fireEvent.press(view.getByLabelText("Back"));
+      expect(view.navigation.goBack).toHaveBeenCalledTimes(1);
+      scroll.mockRestore();
+    },
+  );
 
   it("saves the current account profile and clears its avatar", async () => {
     const view = renderSettings();

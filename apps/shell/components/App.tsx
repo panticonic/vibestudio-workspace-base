@@ -25,14 +25,8 @@ import MainMode from "./MainMode";
  * Root App component that renders the main panel app.
  */
 export function App() {
-  const {
-    unitIcons,
-    app,
-    incomingShellSurface,
-    notification,
-    shellNetwork,
-    connectNativePanelAdapter,
-  } = useShellWorkspaceClient();
+  const { unitIcons, app, shellNetwork, connectNativePanelAdapter } =
+    useShellWorkspaceClient();
 
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
   const themeMode = useAtomValue(themeModeAtom);
@@ -81,26 +75,16 @@ export function App() {
   useShellEvent("system-theme-changed", handleThemeChanged);
 
   // Listen for workspace switcher menu event via shell event
-  const handleOpenWorkspaceSwitcher = useCallback((input: import("@vibestudio/shared/events").EventPayloads["open-workspace-switcher"]) => {
-    setWorkspaceChooserTemplate(input?.template ?? null);
-    setWorkspaceChooserOpen(true);
-  }, [setWorkspaceChooserOpen, setWorkspaceChooserTemplate]);
+  const handleOpenWorkspaceSwitcher = useCallback(
+    (
+      input: import("@vibestudio/shared/events").EventPayloads["open-workspace-switcher"],
+    ) => {
+      setWorkspaceChooserTemplate(input?.template ?? null);
+      setWorkspaceChooserOpen(true);
+    },
+    [setWorkspaceChooserOpen, setWorkspaceChooserTemplate],
+  );
   useShellEvent("open-workspace-switcher", handleOpenWorkspaceSwitcher);
-
-  // A surface deep link that reached the host before this shell was listening:
-  // drain it once and send it back through the host's dispatcher.
-  useEffect(() => {
-    void incomingShellSurface.getPending().then((target) => {
-      if (!target) return;
-      app.openShellSurface(target).catch((error: unknown) => {
-        void notification.show({
-          type: "error",
-          title: "Couldn't open that link",
-          message: error instanceof Error ? error.message : String(error),
-        });
-      });
-    });
-  }, []);
 
   return (
     <Theme

@@ -1,5 +1,9 @@
 import { createBridgeAdapter } from "./bridgeAdapter";
-import type { RpcConnectionStatus, RpcEnvelope } from "@vibestudio/rpc";
+import {
+  createRpcClient,
+  type RpcConnectionStatus,
+  type RpcEnvelope,
+} from "@vibestudio/rpc";
 import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
 import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 import { HOST_COMMAND_CONTRIBUTION_EVENT } from "@vibestudio/shared/hostCommands";
@@ -8,9 +12,14 @@ function createAdapter(
   overrides?: Partial<Parameters<typeof createBridgeAdapter>[0]>,
 ) {
   return createBridgeAdapter({
+    workspaceId: "workspace-a",
     panelManager: {} as never,
     transport: {} as never,
-    callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
+    callbacks: {
+      navigateToPanel: jest.fn(),
+      deliverToShell: jest.fn(),
+      openShellSurface: jest.fn(),
+    },
     deliverToPanel: jest.fn(),
     getPanelLease: jest.fn(),
     ...overrides,
@@ -89,7 +98,11 @@ describe("bridgeAdapter panel init", () => {
     const adapter = createAdapter({
       panelManager: panelManager as never,
       transport: {} as never,
-      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
       getPanelInit,
     });
 
@@ -110,7 +123,11 @@ describe("bridgeAdapter panel init", () => {
     const adapter = createAdapter({
       panelManager: panelManager as never,
       transport: {} as never,
-      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
     });
 
     await expect(
@@ -150,7 +167,11 @@ describe("bridgeAdapter panel session relay", () => {
     );
     const adapter = createAdapter({
       transport: { openPanelSession } as never,
-      callbacks: { navigateToPanel: jest.fn(), deliverToShell },
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell,
+        openShellSurface: jest.fn(),
+      },
     });
 
     await expect(
@@ -184,7 +205,11 @@ describe("bridgeAdapter panel session relay", () => {
     const adapter = createAdapter({
       panelManager: {} as never,
       transport: { openPanelSession } as never,
-      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
       deliverToPanel: jest.fn(),
       getPanelLease: jest.fn(() => ({
         runtimeEntityId: "panel:runtime-a" as PanelEntityId,
@@ -229,7 +254,11 @@ describe("bridgeAdapter panel session relay", () => {
     const adapter = createAdapter({
       panelManager: {} as never,
       transport: { openPanelSession } as never,
-      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
       deliverToPanel: jest.fn(),
       getPanelLease: jest.fn(() => ({
         runtimeEntityId: "panel:runtime-a" as PanelEntityId,
@@ -291,7 +320,11 @@ describe("bridgeAdapter panel session relay", () => {
     const adapter = createAdapter({
       panelManager: {} as never,
       transport: { openPanelSession } as never,
-      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
       deliverToPanel: jest.fn(),
       getPanelLease: jest.fn(() => lease),
     });
@@ -340,7 +373,11 @@ describe("bridgeAdapter panel session relay", () => {
     const adapter = createAdapter({
       panelManager: {} as never,
       transport: { openPanelSession: jest.fn(async () => session) } as never,
-      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
       deliverToPanel: jest.fn(),
       getPanelLease: jest.fn(() =>
         hasLease
@@ -462,7 +499,11 @@ describe("bridgeAdapter upload streams", () => {
     const adapter = createAdapter({
       panelManager: {} as never,
       transport: { openPanelSession: jest.fn(async () => session) } as never,
-      callbacks: { navigateToPanel: jest.fn(), deliverToShell: jest.fn() },
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface: jest.fn(),
+      },
       deliverToPanel,
       getPanelLease: jest.fn(() => ({
         runtimeEntityId: "panel:runtime-a" as PanelEntityId,
@@ -603,3 +644,197 @@ async function waitFor(assertion: () => void): Promise<void> {
   }
   throw lastError;
 }
+
+describe("bridgeAdapter native app navigation", () => {
+  function fixture() {
+    let lease = {
+      runtimeEntityId: "panel:runtime-a" as PanelEntityId,
+      connectionId: "connection-a",
+    };
+    const session = makePanelSession();
+    const openPanelSession = jest.fn(async () => session);
+    const openShellSurface = jest.fn();
+    const deliverToPanel = jest.fn();
+    const adapter = createAdapter({
+      transport: { selfId: "shell:device", openPanelSession } as never,
+      getPanelLease: () => lease,
+      callbacks: {
+        navigateToPanel: jest.fn(),
+        deliverToShell: jest.fn(),
+        openShellSurface,
+      },
+      deliverToPanel,
+    });
+    const request = (method: string, args: unknown[] = []) => {
+      const envelope = panelRequestEnvelope("native-request");
+      if (envelope.message.type !== "request")
+        throw new Error("Expected request");
+      envelope.message.method = method;
+      envelope.message.args = args;
+      return envelope;
+    };
+    return {
+      adapter,
+      session,
+      openPanelSession,
+      openShellSurface,
+      deliverToPanel,
+      request,
+      replaceLease: () => {
+        lease = { ...lease, connectionId: "connection-b" };
+      },
+    };
+  }
+
+  it("authenticates the managed lease and replies with captured identity without relaying native navigation", async () => {
+    const f = fixture();
+    const target = { kind: "settings", section: "devices" };
+    await f.adapter.handle("panel:tree/a", "postEnvelope", [
+      f.request("app.openShellSurface", [target]),
+    ]);
+    expect(f.openPanelSession).toHaveBeenCalledWith(
+      "panel:runtime-a",
+      "connection-a",
+    );
+    expect(f.openShellSurface).toHaveBeenCalledWith(target);
+    expect(f.session.send).not.toHaveBeenCalled();
+    expect(f.deliverToPanel).toHaveBeenCalledWith(
+      "panel:tree/a",
+      expect.objectContaining({
+        from: "main",
+        target: "panel:runtime-a",
+        delivery: {
+          caller: {
+            callerId: "shell:device",
+            callerKind: "shell",
+            workspaceId: "workspace-a",
+          },
+        },
+        message: {
+          type: "response",
+          requestId: "native-request",
+          result: undefined,
+        },
+      }),
+    );
+  });
+
+  it("settles the real panel RPC client through the native response carrier", async () => {
+    const f = fixture();
+    let receive!: (envelope: RpcEnvelope) => void;
+    f.deliverToPanel.mockImplementation(
+      (_panelId: string, envelope: RpcEnvelope) => receive(envelope),
+    );
+    const rpc = createRpcClient({
+      selfId: "panel:runtime-a",
+      callerKind: "panel",
+      transport: {
+        send: async (envelope) => {
+          await f.adapter.handle("panel:tree/a", "postEnvelope", [envelope]);
+        },
+        onMessage: (handler) => {
+          receive = handler;
+          return () => {};
+        },
+      },
+    });
+    await expect(
+      rpc.call("main", "app.describeShellSurfaces", []),
+    ).resolves.toEqual({ surfaces: ["settings", "workspace-chooser"] });
+    await expect(
+      rpc.call("main", "app.openShellSurface", [
+        { kind: "settings", section: "connection" },
+      ]),
+    ).resolves.toBeUndefined();
+    expect(f.openShellSurface).toHaveBeenCalledWith({
+      kind: "settings",
+      section: "connection",
+    });
+    await expect(
+      rpc.call("main", "app.openShellSurface", [
+        { kind: "settings", section: "apps" },
+      ]),
+    ).rejects.toThrow("Mobile settings do not include");
+    expect(f.session.send).not.toHaveBeenCalled();
+  });
+
+  it("describes only supported mobile native surfaces", async () => {
+    const f = fixture();
+    await f.adapter.handle("panel:tree/a", "postEnvelope", [
+      f.request("app.describeShellSurfaces"),
+    ]);
+    expect(f.deliverToPanel).toHaveBeenCalledWith(
+      "panel:tree/a",
+      expect.objectContaining({
+        message: {
+          type: "response",
+          requestId: "native-request",
+          result: { surfaces: ["settings", "workspace-chooser"] },
+        },
+      }),
+    );
+    expect(f.openShellSurface).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { kind: "about", page: "new" },
+    { kind: "settings", section: "apps" },
+    { kind: "settings", section: 42 },
+  ])(
+    "returns an error for an unsupported or malformed surface %j",
+    async (target) => {
+      const f = fixture();
+      await f.adapter.handle("panel:tree/a", "postEnvelope", [
+        f.request("app.openShellSurface", [target]),
+      ]);
+      expect(f.openShellSurface).not.toHaveBeenCalled();
+      expect(f.session.send).not.toHaveBeenCalled();
+      expect(f.deliverToPanel).toHaveBeenCalledWith(
+        "panel:tree/a",
+        expect.objectContaining({
+          message: expect.objectContaining({
+            type: "response",
+            requestId: "native-request",
+            error: expect.any(String),
+          }),
+        }),
+      );
+    },
+  );
+
+  it("rejects cross-workspace addressing without executing native navigation", async () => {
+    const f = fixture();
+    const envelope = f.request("app.openShellSurface", [{ kind: "settings" }]);
+    envelope.targetWorkspaceId = "workspace-b";
+    await f.adapter.handle("panel:tree/a", "postEnvelope", [envelope]);
+    expect(f.openShellSurface).not.toHaveBeenCalled();
+    expect(f.deliverToPanel).toHaveBeenCalledWith(
+      "panel:tree/a",
+      expect.objectContaining({
+        message: expect.objectContaining({
+          errorCode: "EACCES",
+          errorKind: "access",
+        }),
+      }),
+    );
+  });
+
+  it("does not navigate or reply into a replacement after session validation awaits", async () => {
+    const f = fixture();
+    let resolve!: (session: IrohClientSession) => void;
+    f.openPanelSession.mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = done;
+        }),
+    );
+    const pending = f.adapter.handle("panel:tree/a", "postEnvelope", [
+      f.request("app.openShellSurface", [{ kind: "settings" }]),
+    ]);
+    f.replaceLease();
+    resolve(f.session);
+    await expect(pending).rejects.toThrow("no longer hosted here");
+    expect(f.openShellSurface).not.toHaveBeenCalled();
+    expect(f.deliverToPanel).not.toHaveBeenCalled();
+  });
+});

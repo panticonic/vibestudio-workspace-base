@@ -127,9 +127,6 @@ export function WorkspaceSessionEffects({
     );
     const stopEvent = client.events.on("notification:show", present);
     const stopDirect = client.onDirectEvent("notification:show", present);
-    const stopReconnect = client.transport.onReconnect(() => {
-      void subscribe();
-    });
     void subscribe();
     return () => {
       active = false;
@@ -138,7 +135,6 @@ export function WorkspaceSessionEffects({
       stopExternalDirect();
       stopEvent();
       stopDirect();
-      stopReconnect();
       void client.events.unsubscribeMany(topics).catch((error: unknown) => {
         console.warn("[WorkspaceNotifications] Unsubscribe failed", error);
       });

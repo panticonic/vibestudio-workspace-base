@@ -1,3 +1,4 @@
+import { isRpcConnectionLost } from "@vibestudio/rpc";
 import { useShellWorkspaceClient, useWorkspaceVisible } from "../shell/workspaceContext";
 import {
   useCallback,
@@ -92,14 +93,14 @@ export function PanelSurface({
         .catch((error: unknown) => {
           if (!mountedRef.current) return;
           declaredRef.current = false;
-          console.warn("[PanelSurface] declaration failed:", error);
+          if (!isRpcConnectionLost(error)) console.warn("[PanelSurface] declaration failed:", error);
         });
       return;
     }
     if (sameBounds(lastBoundsRef.current, bounds)) return;
     lastBoundsRef.current = bounds;
     void view.updateNativePanelSlot(request).catch((error: unknown) => {
-      console.warn("[PanelSurface] geometry update failed:", error);
+      if (!isRpcConnectionLost(error)) console.warn("[PanelSurface] geometry update failed:", error);
     });
   }, [bindingId, nativeSlotId, panelId, visible, view]);
 
@@ -136,9 +137,9 @@ export function PanelSurface({
           nativeSlotId,
           bindingId,
         })
-        .catch((error: unknown) =>
-          console.warn("[PanelSurface] declaration cleanup failed:", error)
-        );
+        .catch((error: unknown) => {
+          if (!isRpcConnectionLost(error)) console.warn("[PanelSurface] declaration cleanup failed:", error);
+        });
     };
   }, [bindingId, nativeSlotId, scheduleSync, sync, visible, view]);
 
@@ -153,9 +154,9 @@ export function PanelSurface({
         bindingId,
         focused,
       })
-      .catch((error: unknown) =>
-        console.warn("[PanelSurface] focus update failed:", error)
-      );
+      .catch((error: unknown) => {
+        if (!isRpcConnectionLost(error)) console.warn("[PanelSurface] focus update failed:", error);
+      });
   }, [bindingId, focused, nativeSlotId, scheduleSync]);
 
   useEffect(scheduleSync, [layoutEpoch, scheduleSync]);

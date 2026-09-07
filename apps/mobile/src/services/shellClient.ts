@@ -1,4 +1,8 @@
 import {
+  mobileShellSurface,
+  type MobileShellSurface,
+} from "./mobileShellSurfaces";
+import {
   RetainedRuntimeLeases,
   type RetainedRuntimeOwner,
 } from "./retainedRuntimeLeases";
@@ -315,6 +319,7 @@ class MobilePanels implements PanelHost {
       getSelfUserId: () => string | null;
       navigateToPanel: (panelId: string) => void;
       deliverToShell: (panelId: string, envelope: RpcEnvelope) => void;
+      openShellSurface: (target: MobileShellSurface) => void;
       clientSessionId: string;
       localStorageScope: string;
     },
@@ -384,12 +389,14 @@ class MobilePanels implements PanelHost {
       this.panelManager = core.panelManager;
       this.registryInstance = core.registry;
       this.bridgeAdapterInstance = createBridgeAdapter({
+        workspaceId: core.registry.workspaceId,
         panelManager: core.panelManager,
         transport: this.deps.transport,
         getPanelInit: (panelId) => this.getPanelInit(panelId),
         callbacks: {
           navigateToPanel: this.deps.navigateToPanel,
           deliverToShell: this.deps.deliverToShell,
+          openShellSurface: this.deps.openShellSurface,
         },
         deliverToPanel: (panelId, envelope) =>
           this.deliverToPanel(panelId, envelope),
@@ -1247,6 +1254,9 @@ export class ShellClient {
     );
   }
   private panelRecoveryUnsubs: Array<() => void> | null = null;
+  private shellSurfaceListeners = new Set<
+    (target: MobileShellSurface) => void
+  >();
   private recoveryCompleteListeners = new Set<(kind: RecoveryKind) => void>();
   private workspaceInfo: WorkspaceInfo | null = null;
   private readonly accountProfileClient: MobileAccountProfileClient;
@@ -1312,6 +1322,7 @@ export class ShellClient {
       },
       deliverToShell: (panelId, envelope) =>
         this.deliverToLocalShell(panelId, envelope),
+      openShellSurface: (target) => this.openShellSurface(target),
     });
     const userNotificationStore = createGadServiceClient(this.transport);
     const channelClients = new Map<
@@ -1795,6 +1806,20 @@ export class ShellClient {
       this.navigationListeners.delete(listener);
     };
   }
+  openShellSurface(target: unknown): void {
+    const descriptor = mobileShellSurface(target);
+    if (this.disposed || this.shellSurfaceListeners.size === 0)
+      throw new Error("Mobile shell navigation is unavailable");
+    for (const listener of this.shellSurfaceListeners) listener(descriptor);
+  }
+  onOpenShellSurface(
+    listener: (target: MobileShellSurface) => void,
+  ): () => void {
+    this.shellSurfaceListeners.add(listener);
+    return () => {
+      this.shellSurfaceListeners.delete(listener);
+    };
+  }
   onOpenBrowserPrivacy(
     listener: (section: MobileBrowserPrivacySection) => void,
   ): () => void {
@@ -1847,6 +1872,7 @@ export class ShellClient {
     for (const unsubscribe of this.panelRecoveryUnsubs ?? []) unsubscribe();
     this.panelRecoveryUnsubs = null;
     this.recoveryCompleteListeners.clear();
+    this.shellSurfaceListeners.clear();
     this.browserPrivacyPresentation.clear();
     this.closing = (async () => {
       await this.events.unsubscribeAll().catch(() => {});

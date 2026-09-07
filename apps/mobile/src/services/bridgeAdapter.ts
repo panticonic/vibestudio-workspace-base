@@ -1,3 +1,9 @@
+import { appMethods } from "@vibestudio/service-schemas/app";
+import {
+  mobileShellSurface,
+  MOBILE_SHELL_SURFACES,
+  type MobileShellSurface,
+} from "./mobileShellSurfaces";
 import type { PanelManager } from "@vibestudio/shell-core/panelManager";
 import {
   asPanelSlotId,
@@ -7,6 +13,10 @@ import type { OpenExternalOptions } from "@vibestudio/shared/externalOpen";
 import { externalOpenMethods } from "@vibestudio/service-schemas/externalOpen";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
 import {
+  responseEnvelopeFor,
+  rpcErrorKindOf,
+  rpcErrorDataOf,
+  RpcBoundaryError,
   createBridgeStreamRelay,
   stampEnvelopeCaller,
   type BridgeBodyChunk,
@@ -18,6 +28,7 @@ import type { IrohClientSession } from "@vibestudio/rpc/transports/irohClient";
 import type { MobileRpcClient } from "./mobileTransport";
 
 export interface BridgeAdapterCallbacks {
+  openShellSurface(target: MobileShellSurface): void;
   navigateToPanel(panelId: string): void;
   /** Deliver an envelope to this panel's local owning shell. */
   deliverToShell(panelId: string, envelope: RpcEnvelope): void;
@@ -31,6 +42,7 @@ type PanelSessionEntry = {
 };
 
 export function createBridgeAdapter(deps: {
+  workspaceId: string;
   panelManager: PanelManager;
   transport: MobileRpcClient;
   callbacks: BridgeAdapterCallbacks;
@@ -186,6 +198,114 @@ export function createBridgeAdapter(deps: {
     );
   }
 
+  async function handleNativeAppRequest(
+    panelId: string,
+    envelope: RpcEnvelope,
+  ): Promise<boolean> {
+    const request = envelope.message;
+    if (
+      envelope.target !== "main" ||
+      request.type !== "request" ||
+      (request.method !== "app.openShellSurface" &&
+        request.method !== "app.describeShellSurfaces")
+    )
+      return false;
+    const lease = requirePanelLease(panelId);
+    const captured = panelLeaseKey(lease);
+    const assertCurrent = () => {
+      if (panelLeaseKey(requirePanelLease(panelId)) !== captured) {
+        throw new RpcBoundaryError(
+          "The initiating panel is no longer hosted here",
+          "access",
+          "EACCES",
+        );
+      }
+    };
+    const session = await ensurePanelSession(panelId);
+    assertCurrent();
+    if (!isPanelSessionLive(session))
+      throw new RpcBoundaryError(
+        "The initiating panel session is closed",
+        "transport",
+        "CONNECTION_LOST",
+      );
+    const authenticated = stampEnvelopeCaller(envelope, {
+      callerId: lease.runtimeEntityId,
+      callerKind: "panel",
+      workspaceId: deps.workspaceId,
+    });
+    let response: RpcEnvelope;
+    try {
+      if (
+        envelope.targetWorkspaceId &&
+        envelope.targetWorkspaceId !== deps.workspaceId
+      ) {
+        throw new RpcBoundaryError(
+          "Native shell navigation belongs to the initiating workspace",
+          "access",
+          "EACCES",
+        );
+      }
+      let result: unknown;
+      if (request.method === "app.openShellSurface") {
+        if ("readOnly" in request && request.readOnly === true) {
+          throw new RpcBoundaryError(
+            "Read-only requests cannot open native surfaces",
+            "access",
+            "EACCES",
+          );
+        }
+        const [target] = appMethods.openShellSurface.args.parse(request.args);
+        const descriptor = mobileShellSurface(target);
+        assertCurrent();
+        deps.callbacks.openShellSurface(descriptor);
+        result = appMethods.openShellSurface.returns.parse(undefined);
+      } else {
+        appMethods.describeShellSurfaces.args.parse(request.args);
+        result = appMethods.describeShellSurfaces.returns.parse({
+          surfaces: [...MOBILE_SHELL_SURFACES],
+        });
+      }
+      response = responseEnvelopeFor(
+        authenticated,
+        {
+          callerId: deps.transport.selfId,
+          callerKind: "shell",
+          workspaceId: deps.workspaceId,
+        },
+        {
+          type: "response",
+          requestId: request.requestId,
+          result,
+        },
+      );
+    } catch (error) {
+      response = responseEnvelopeFor(
+        authenticated,
+        {
+          callerId: deps.transport.selfId,
+          callerKind: "shell",
+          workspaceId: deps.workspaceId,
+        },
+        {
+          type: "response",
+          requestId: request.requestId,
+          error: error instanceof Error ? error.message : String(error),
+          errorKind: rpcErrorKindOf(error),
+          ...(error instanceof RpcBoundaryError && error.code
+            ? { errorCode: error.code }
+            : {}),
+          ...(rpcErrorDataOf(error) !== undefined
+            ? { errorData: rpcErrorDataOf(error) }
+            : {}),
+        },
+      );
+    }
+    assertCurrent();
+    deps.deliverToPanel(panelId, response);
+    return true;
+  }
+
   return {
     closePanelSession,
     async handle(
@@ -261,6 +381,7 @@ export function createBridgeAdapter(deps: {
             deps.callbacks.deliverToShell(panelId, envelope);
             return;
           }
+          if (await handleNativeAppRequest(panelId, envelope)) return;
           // Send over the panel's dedicated "panel" session; replies + events
           // arrive via the session's onMessage → deliverToPanel. The bridge
           // acknowledgement is delivery backpressure: do not tell the WebView

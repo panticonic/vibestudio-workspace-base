@@ -1,3 +1,4 @@
+import type { MobileShellSurface } from "../services/mobileShellSurfaces";
 import { asPanelEntityId } from "@vibestudio/shared/panel/ids";
 import { parseShellSurfaceLink } from "@vibestudio/shared/shellSurface";
 import type { ShellClient } from "../services/shellClient";
@@ -985,11 +986,6 @@ export function MainScreen({
     void subscribeAll().catch((error: unknown) =>
       console.warn("[MainScreen] Event subscription failed", error),
     );
-    const unsubReconnect = shellClient.transport.onReconnect(() => {
-      void subscribeAll().catch((error: unknown) =>
-        console.warn("[MainScreen] Event resubscription failed", error),
-      );
-    });
     const unsubNavigate = shellClient.onNavigateToPanel((panelId) => {
       refreshTree();
       activatePanel(panelId);
@@ -1029,7 +1025,6 @@ export function MainScreen({
       },
     );
     return () => {
-      unsubReconnect();
       unsubNavigate();
       unsubCreated();
       unsubNav();
@@ -1883,25 +1878,55 @@ export function MainScreen({
       webViewNavigation,
     ],
   );
+  const openShellSurface = useCallback(
+    (target: MobileShellSurface) => {
+      if (!shellClient || !workspaceDirectory)
+        throw new Error("The workspace is unavailable");
+      if (target.kind === "workspace-chooser") {
+        if (target.template)
+          workspaceDirectory.requestWorkspaceCreation(target.template);
+        else navigation.dispatch(DrawerActions.openDrawer());
+        return;
+      }
+      const workspaceId = target.workspaceId ?? shellClient.workspaceId;
+      if (
+        !workspaceId ||
+        !workspaceDirectory.entries.some(
+          (entry) => entry.workspaceId === workspaceId,
+        )
+      ) {
+        throw new Error("You no longer have access to the selected workspace");
+      }
+      const parent =
+        navigation.getParent<StackNavigationProp<RootStackParamList>>();
+      if (!parent) throw new Error("Mobile settings navigation is unavailable");
+      parent.push("Settings", { workspaceId, section: target.section });
+    },
+    [navigation, shellClient, workspaceDirectory],
+  );
+  useEffect(
+    () => shellClient?.onOpenShellSurface(openShellSurface),
+    [shellClient, openShellSurface],
+  );
+
   const handleShellSurfaceLink = useCallback(
     (url: string): boolean => {
       const parsed = parseShellSurfaceLink(url);
       if (parsed.kind === "unrelated") return false;
-      if (parsed.kind === "error") {
+      try {
+        if (parsed.kind === "error") throw new Error(parsed.reason);
+        if (!shellClient) throw new Error("The workspace is unavailable");
+        shellClient.openShellSurface(parsed.target);
+      } catch (error) {
         pushToast({
           title: "Could not open link",
-          message: parsed.reason,
+          message: error instanceof Error ? error.message : String(error),
           tone: "danger",
         });
-        return true;
       }
-      if (parsed.target.kind !== "workspace-chooser") return false;
-      if (parsed.target.template)
-        workspaceDirectory?.requestWorkspaceCreation(parsed.target.template);
-      else navigation.dispatch(DrawerActions.openDrawer());
       return true;
     },
-    [navigation, pushToast, workspaceDirectory],
+    [pushToast, shellClient],
   );
   const handleNavigateAddress = useCallback(
     (value: string, mode: AddressNavigationMode = "current") => {

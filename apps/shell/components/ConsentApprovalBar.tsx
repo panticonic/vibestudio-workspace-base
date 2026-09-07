@@ -1,3 +1,4 @@
+import { isRpcConnectionLost } from "@vibestudio/rpc";
 import { createPortal } from "react-dom";
 import { approvalPresentationKey } from "@vibestudio/shared/approvalPresentation";
 import { useApprovalPresentation } from "./ApprovalPresentationContext";
@@ -155,9 +156,9 @@ export function ConsentApprovalBar() {
 
   useEffect(() => {
     const heartbeat = () => {
-      void shellPresence
-        .heartbeat()
-        .catch((err: unknown) => console.warn("[ConsentApprovalBar] heartbeat failed:", err));
+      void shellPresence.heartbeat().catch((err: unknown) => {
+        if (!isRpcConnectionLost(err)) console.warn("[ConsentApprovalBar] heartbeat failed:", err);
+      });
     };
     heartbeat();
     const intervalId = window.setInterval(heartbeat, 5_000);
@@ -197,7 +198,8 @@ export function ConsentApprovalBar() {
         setPendingAccess(pending);
       },
       onError: (err, phase) => {
-        console.warn(`[ConsentApprovalBar] approval state ${phase} failed:`, err);
+        if (!isRpcConnectionLost(err))
+          console.warn(`[ConsentApprovalBar] approval state ${phase} failed:`, err);
       }
     });
     approvalController.current = controller;

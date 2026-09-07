@@ -17,6 +17,7 @@ import {
   hubControl,
   systemWorkspaceId,
   incomingPanelLocation,
+  incomingShellSurface,
 } from "../shell/client";
 import {
   ShellWorkspaceClientContext,
@@ -86,6 +87,25 @@ export function WorkspaceDesktop() {
     approvalPresentation.setAnchorId,
   ]);
   const [disconnected, setDisconnected] = useState(new Set<string>());
+  const incomingSurfaceDrained = useRef(false);
+  useEffect(() => {
+    const owner = focusedId ? owners.current.get(focusedId) : undefined;
+    if (!owner || incomingSurfaceDrained.current) return;
+    incomingSurfaceDrained.current = true;
+    // Capture the destination when startup presents its first workspace. A
+    // delayed native read must not retarget the link after the user switches.
+    void incomingShellSurface
+      .getPending()
+      .then(async (target) => {
+        if (!target) return;
+        if (owners.current.get(owner.workspace.workspaceId) !== owner)
+          throw new Error("The workspace for that link is no longer available");
+        await owner.client.app.openShellSurface(target);
+      })
+      .catch((error: unknown) => {
+        setError(error instanceof Error ? error.message : String(error));
+      });
+  }, [focusedId]);
 
   const open = useCallback(
     (workspace: HubWorkspaceEntry): Promise<OpenWorkspace> => {

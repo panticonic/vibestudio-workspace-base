@@ -9,10 +9,15 @@ import {
   type RpcEnvelope,
 } from "@vibestudio/rpc";
 import { assertPresent } from "../utils/assertPresent";
+import {
+  createNativeConnectionState,
+  type NativeWorkspaceConnectionBridge,
+} from "./nativeConnectionState";
 import { createNativePanelPresentation } from "./nativePanelPresentation";
 import { createShellWorkspaceClient } from "./workspaceClient";
 export * from "./workspaceClient";
 const g = globalThis as unknown as {
+  __vibestudioWorkspaceConnection?: NativeWorkspaceConnectionBridge;
   __vibestudioTransport?: {
     identity: { workspaceId: string; runtimeId: string };
     send: (envelope: RpcEnvelope) => Promise<void>;
@@ -20,13 +25,16 @@ const g = globalThis as unknown as {
   };
 };
 if (!g.__vibestudioTransport) throw new Error("Shell transport not available");
+const connection = createNativeConnectionState(
+  assertPresent(g.__vibestudioWorkspaceConnection),
+);
 const transport: EnvelopeRpcTransport = {
   send: (envelope) => assertPresent(g.__vibestudioTransport).send(envelope),
   onMessage: (handler) =>
     assertPresent(g.__vibestudioTransport).onMessage(handler),
-  status: () => "connected",
-  ready: () => Promise.resolve(),
-  onStatusChange: () => () => {},
+  status: connection.status,
+  ready: connection.ready,
+  onStatusChange: connection.onStatusChange,
 };
 const streamSurface = bridgeStreamSurfaceOf(g.__vibestudioTransport);
 if (streamSurface) {
@@ -112,7 +120,9 @@ export async function createWorkspaceShellClient(workspaceId: string) {
   const sourceWorkspaceId = await systemWorkspaceId;
   let closed = false;
   const releases = new Set<() => void>();
-  const statuses = new Set<(status: "connected" | "disconnected") => void>();
+  const statuses = new Set<
+    (status: import("@vibestudio/rpc").RpcConnectionStatus) => void
+  >();
   const scopedRpc = createRpcClient({
     selfId: assertPresent(g.__vibestudioTransport).identity.runtimeId,
     callerKind: "app",
@@ -159,14 +169,21 @@ export async function createWorkspaceShellClient(workspaceId: string) {
           release();
         };
       },
-      status: () => (closed ? "disconnected" : "connected"),
+      status: () => (closed ? "disconnected" : connection.status()),
       ready: async () => {
         if (closed) throw new Error("Workspace UI is closed");
+        await connection.ready();
       },
       onStatusChange: (handler) => {
         statuses.add(handler);
+        const release = connection.onStatusChange((status) => {
+          if (!closed) handler(status);
+        });
+        releases.add(release);
         return () => {
           statuses.delete(handler);
+          releases.delete(release);
+          release();
         };
       },
     },
@@ -177,9 +194,8 @@ export async function createWorkspaceShellClient(workspaceId: string) {
   });
   const client = {
     ...scoped,
-    // Account/device UI has one System presentation owner. Workspace code and
-    // panel/Quickfire services above keep their captured target connection.
-    app,
+    // Account/device management has one System presentation owner. Native
+    // workspace navigation, panels and Quickfire keep their scoped clients.
     hostLaunch,
     hubControl,
     account,

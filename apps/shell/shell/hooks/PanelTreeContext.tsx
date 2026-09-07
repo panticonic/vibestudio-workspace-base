@@ -1,3 +1,4 @@
+import { isRpcConnectionLost } from "@vibestudio/rpc";
 import { useShellWorkspaceClient } from "../workspaceContext";
 import {
   createContext,
@@ -424,12 +425,14 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         // initial shell behind build metadata and asset reads.
         void hydratePresentations(loaded.flatMap((group) => group.nodes)).catch(
           (error: unknown) =>
+            !isRpcConnectionLost(error) &&
             console.warn("[PanelTree] Failed to hydrate presentations:", error),
         );
         if (options.reconcilePinState) await reconcilePins();
         setTreeLoadError(null);
         setInitialized(true);
       } catch (error) {
+        if (isRpcConnectionLost(error)) return;
         setTreeLoadError(
           error instanceof Error ? error.message : String(error),
         );
@@ -457,6 +460,16 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     void refreshTree();
   }, [refreshTree]);
+
+  useShellEvent(
+    "server-connection-changed",
+    useCallback(
+      (event) => {
+        if (event.status === "connected") void refreshTree();
+      },
+      [refreshTree],
+    ),
+  );
 
   useShellEvent(
     "panel-tree-invalidated",
@@ -512,11 +525,13 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
             ),
           );
         })
-        .catch((error: unknown) =>
-          console.warn(
-            "[PanelTree] Failed to refresh changed presentations:",
-            error,
-          ),
+        .catch(
+          (error: unknown) =>
+            !isRpcConnectionLost(error) &&
+            console.warn(
+              "[PanelTree] Failed to refresh changed presentations:",
+              error,
+            ),
         );
     },
     [mergePresentations],
@@ -546,8 +561,13 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
         kind: "children",
         parentSlotId: panelId as PanelSlotId,
       });
-      void hydratePresentations(loaded.nodes).catch((error: unknown) =>
-        console.warn("[PanelTree] Failed to hydrate child presentations:", error),
+      void hydratePresentations(loaded.nodes).catch(
+        (error: unknown) =>
+          !isRpcConnectionLost(error) &&
+          console.warn(
+            "[PanelTree] Failed to hydrate child presentations:",
+            error,
+          ),
       );
     },
     [cache, hydratePresentations],
@@ -589,8 +609,13 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
   const loadMore = useCallback(
     async (group: PanelTreeGroup) => {
       const loaded = await cache.loadMore(group);
-      void hydratePresentations(loaded.nodes).catch((error: unknown) =>
-        console.warn("[PanelTree] Failed to hydrate additional presentations:", error),
+      void hydratePresentations(loaded.nodes).catch(
+        (error: unknown) =>
+          !isRpcConnectionLost(error) &&
+          console.warn(
+            "[PanelTree] Failed to hydrate additional presentations:",
+            error,
+          ),
       );
     },
     [cache, hydratePresentations],
@@ -608,7 +633,11 @@ export function PanelTreeProvider({ children }: { children: ReactNode }) {
     );
     void hydratePresentations(loaded.flatMap((group) => group.nodes)).catch(
       (error: unknown) =>
-        console.warn("[PanelTree] Failed to hydrate root presentations:", error),
+        !isRpcConnectionLost(error) &&
+        console.warn(
+          "[PanelTree] Failed to hydrate root presentations:",
+          error,
+        ),
     );
   }, [cache, hydratePresentations]);
   const search = useCallback(
@@ -806,13 +835,24 @@ export function useFullPanel(panelId: string | null): {
     void panel
       .getPresentation(panelId)
       .then((presentation) => applyPresentation(presentation, request))
-      .catch((error: unknown) =>
-        console.warn(
-          `[PanelTree] Failed to refresh presentation ${panelId}:`,
-          error,
-        ),
+      .catch(
+        (error: unknown) =>
+          !isRpcConnectionLost(error) &&
+          console.warn(
+            `[PanelTree] Failed to refresh presentation ${panelId}:`,
+            error,
+          ),
       );
   }, [applyPresentation, panelId]);
+  useShellEvent(
+    "server-connection-changed",
+    useCallback(
+      (event) => {
+        if (event.status === "connected") refreshPresentation();
+      },
+      [refreshPresentation],
+    ),
+  );
   useDirectShellEvent(
     "panel-presentation-changed",
     useCallback(
@@ -862,10 +902,11 @@ export function useFullPanel(panelId: string | null): {
         if (!cancelled) applyPresentation(presentation, request);
       })
       .catch((error: unknown) => {
-        console.warn(
-          `[PanelTree] Failed to load presentation ${panelId}:`,
-          error,
-        );
+        !isRpcConnectionLost(error) &&
+          console.warn(
+            `[PanelTree] Failed to load presentation ${panelId}:`,
+            error,
+          );
         if (!cancelled) setLoading(false);
       });
     return () => {
@@ -993,11 +1034,13 @@ export function useDescendantSiblingGroups(
   })();
   useEffect(() => {
     if (panelId) {
-      void loadSelectionPath(panelId, maxDepth).catch((error: unknown) =>
-        console.warn(
-          `[PanelTree] Failed to load selection path ${panelId}:`,
-          error,
-        ),
+      void loadSelectionPath(panelId, maxDepth).catch(
+        (error: unknown) =>
+          !isRpcConnectionLost(error) &&
+          console.warn(
+            `[PanelTree] Failed to load selection path ${panelId}:`,
+            error,
+          ),
       );
     }
   }, [loadSelectionPath, maxDepth, panelId, selectionPathKey]);

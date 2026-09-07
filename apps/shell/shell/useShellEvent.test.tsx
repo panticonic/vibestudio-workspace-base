@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { RpcBoundaryError } from "@vibestudio/rpc";
 import { render, waitFor } from "@testing-library/react";
 import { useLayoutEffect } from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -13,8 +14,8 @@ vi.mock("./client.js", () => ({
   events: {
     subscribe: (...args: unknown[]) => subscribe(...args),
     unsubscribe: (...args: unknown[]) => unsubscribe(...args),
-    on: (...args: unknown[]) => onEvent(...args),
-  },
+    on: (...args: unknown[]) => onEvent(...args)
+  }
 }));
 
 import { useShellEvent } from "./useShellEvent";
@@ -26,7 +27,7 @@ function Probe({ onUpdate }: { onUpdate: (payload: unknown) => void }) {
 
 function CommitProbe({
   onUpdate,
-  payload,
+  payload
 }: {
   onUpdate: (payload: unknown) => void;
   payload?: unknown;
@@ -89,3 +90,34 @@ describe("useShellEvent", () => {
     expect(second).toHaveBeenCalledWith({ revision: 2 });
   });
 });
+
+it.each(["transport", "access", "internal"] as const)(
+  "keeps the watch desired during loss and preserves %s diagnostics",
+  async (kind) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const failure = new RpcBoundaryError("unavailable", kind, "CONNECTION_LOST");
+      subscribe.mockReset().mockRejectedValue(failure);
+      unsubscribe.mockReset().mockRejectedValue(failure);
+      onEvent
+        .mockReset()
+        .mockImplementation((event: string, listener: (payload: unknown) => void) => {
+          listeners.set(event, listener);
+          return () => listeners.delete(event);
+        });
+      const received = vi.fn();
+      const mounted = render(<Probe onUpdate={received} />);
+      await waitFor(() => expect(subscribe).toHaveBeenCalledOnce());
+      // A failed opening attempt must not discard the desired local listener;
+      // the canonical EventsClient can deliver its recovered snapshot to it.
+      listeners.get("panel-tree-invalidated")?.({ revision: 9 });
+      expect(received).toHaveBeenCalledWith({ revision: 9 });
+      mounted.unmount();
+      await waitFor(() => expect(unsubscribe).toHaveBeenCalledOnce());
+      await Promise.resolve();
+      expect(warn).toHaveBeenCalledTimes(kind === "transport" ? 0 : 2);
+    } finally {
+      warn.mockRestore();
+    }
+  }
+);

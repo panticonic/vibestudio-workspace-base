@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import type { RpcClient } from "@vibestudio/rpc";
+import {
+  RpcBoundaryError,
+  type RpcClient,
+  type RpcConnectionStatus,
+} from "@vibestudio/rpc";
 import type { NativePanelDesiredSnapshot } from "@vibestudio/service-schemas/view";
 import { createNativePanelPresentation } from "./nativePanelPresentation";
 import { createShellWorkspaceClient } from "./workspaceClient";
@@ -40,9 +44,17 @@ function nativeSession(workspaceId: string) {
   const rpc = {
     call,
     on: vi.fn(() => () => {}),
+    onStatusChange: vi.fn(() => () => {}),
     selfId: workspaceId,
   } as unknown as RpcClient;
-  return { rpc, client: createShellWorkspaceClient(rpc, { workspaceId, nativePresentation: createNativePanelPresentation(rpc) }), call };
+  return {
+    rpc,
+    client: createShellWorkspaceClient(rpc, {
+      workspaceId,
+      nativePresentation: createNativePanelPresentation(rpc),
+    }),
+    call,
+  };
 }
 const slot = {
   nativeSlotId: "pane-1",
@@ -108,14 +120,110 @@ describe("workspace-owned shell clients", () => {
     const project = native.forWorkspace("project");
     await personal.bindNativePanelSlot(slot);
     await project.bindNativePanelSlot(slot);
-    let snapshots = host.call.mock.calls.filter(([, method]) => method === "view.applyNativePanelSurfaces");
+    let snapshots = host.call.mock.calls.filter(
+      ([, method]) => method === "view.applyNativePanelSurfaces",
+    );
     const second = snapshots.at(-1)?.[2][0] as NativePanelDesiredSnapshot;
     expect(second.surfaces).toHaveLength(2);
-    expect(new Set(second.surfaces.map((surface) => surface.surfaceId)).size).toBe(2);
-    expect(second.surfaces.map((surface) => surface.materialization.workspaceId)).toEqual(["personal", "project"]);
-    await personal.clearNativePanelSlot({ nativeSlotId: slot.nativeSlotId, bindingId: slot.bindingId });
-    snapshots = host.call.mock.calls.filter(([, method]) => method === "view.applyNativePanelSurfaces");
-    expect(snapshots.at(-1)?.[2][0]).toMatchObject({ revision: 3, surfaces: [{ materialization: { workspaceId: "project", runtimeEntityId: "panel-1" } }] });
+    expect(
+      new Set(second.surfaces.map((surface) => surface.surfaceId)).size,
+    ).toBe(2);
+    expect(
+      second.surfaces.map((surface) => surface.materialization.workspaceId),
+    ).toEqual(["personal", "project"]);
+    await personal.clearNativePanelSlot({
+      nativeSlotId: slot.nativeSlotId,
+      bindingId: slot.bindingId,
+    });
+    snapshots = host.call.mock.calls.filter(
+      ([, method]) => method === "view.applyNativePanelSurfaces",
+    );
+    expect(snapshots.at(-1)?.[2][0]).toMatchObject({
+      revision: 3,
+      surfaces: [
+        {
+          materialization: {
+            workspaceId: "project",
+            runtimeEntityId: "panel-1",
+          },
+        },
+      ],
+    });
   });
+});
 
+describe("native desired-state recovery", () => {
+  it("reasserts the latest placements and clears after a connection loss", async () => {
+    let changed!: (status: RpcConnectionStatus) => void;
+    let offline = false;
+    const applied: NativePanelDesiredSnapshot[] = [];
+    const call = vi.fn(
+      async (_target: string, method: string, args: unknown[]) => {
+        if (offline)
+          throw new RpcBoundaryError("offline", "transport", "CONNECTION_LOST");
+        if (method === "view.connectNativePanelAdapter")
+          return {
+            accepted: true,
+            handshake: {
+              protocolVersion: 1,
+              hostGeneration: "host",
+              shellGeneration: "shell",
+              sealedLaunchIdentity: "@workspace-apps/shell",
+            },
+          };
+        const desired = args[0] as NativePanelDesiredSnapshot;
+        applied.push(desired);
+        return {
+          accepted: true,
+          observation: {
+            protocolVersion: 1,
+            hostGeneration: "host",
+            shellGeneration: "shell",
+            desiredRevision: desired.revision,
+            observationRevision: desired.revision,
+            surfaces: desired.surfaces.map((surface) => ({
+              ...surface,
+              nativeSurfaceId: surface.surfaceId,
+            })),
+          },
+        };
+      },
+    );
+    const stop = vi.fn();
+    const native = createNativePanelPresentation({
+      call,
+      onStatusChange: (listener: (status: RpcConnectionStatus) => void) => {
+        changed = listener;
+        return stop;
+      },
+    } as unknown as RpcClient);
+    const personal = native.forWorkspace("personal");
+    const system = native.forWorkspace("system");
+    await personal.bindNativePanelSlot(slot);
+    await system.bindNativePanelSlot(slot);
+    offline = true;
+    changed("connecting");
+    await expect(
+      personal.updateNativePanelSlot({
+        ...slot,
+        bounds: { ...slot.bounds, width: 620 },
+      }),
+    ).rejects.toMatchObject({ code: "CONNECTION_LOST" });
+    await expect(system.clearNativePanelSlot(slot)).rejects.toMatchObject({
+      code: "CONNECTION_LOST",
+    });
+    const before = applied.length;
+    offline = false;
+    changed("connected");
+    await vi.waitFor(() => expect(applied).toHaveLength(before + 1));
+    expect(applied.at(-1)?.surfaces).toHaveLength(1);
+    expect(applied.at(-1)?.surfaces[0]).toMatchObject({
+      materialization: { workspaceId: "personal" },
+      bounds: { width: 620 },
+    });
+    native.close();
+    changed("connected");
+    expect(stop).toHaveBeenCalledOnce();
+    expect(applied).toHaveLength(before + 1);
+  });
 });

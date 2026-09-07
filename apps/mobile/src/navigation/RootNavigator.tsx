@@ -1,3 +1,4 @@
+import type { SettingsSection } from "@vibestudio/shared/shellSurface";
 import { createStackNavigator } from "@workspace/mobile-navigation";
 import { LoginScreen } from "../components/LoginScreen";
 
@@ -6,7 +7,7 @@ declare const require: (moduleName: string) => unknown;
 export type RootStackParamList = {
   Login: undefined;
   Main: undefined;
-  Settings: { workspaceId?: string } | undefined;
+  Settings: { workspaceId?: string; section?: SettingsSection } | undefined;
 };
 
 const Stack = createStackNavigator<RootStackParamList>();

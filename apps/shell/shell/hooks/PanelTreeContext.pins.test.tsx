@@ -3,6 +3,7 @@
 import { render, screen, waitFor, act, fireEvent } from "@testing-library/react";
 import { Provider, createStore, useAtomValue } from "jotai";
 import { useEffect, useRef } from "react";
+import { RpcBoundaryError } from "@vibestudio/rpc";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // The shell client facade is mocked so we control the tree + pin sources.
@@ -39,12 +40,14 @@ vi.mock("../client.js", () => ({
 }));
 
 // Capture the `panel-tree-invalidated` handler so a test can push a fresh snapshot.
+let connectionHandler: ((data: unknown) => void) | null = null;
 let treeUpdateHandler: ((data: unknown) => void) | null = null;
 let presentationChangeHandler: ((data: { revision: number; panelIds: string[] }) => void) | null =
   null;
 vi.mock("../useShellEvent.js", () => ({
   useShellEvent: (event: string, handler: (data: unknown) => void) => {
     if (event === "panel-tree-invalidated") treeUpdateHandler = handler;
+    if (event === "server-connection-changed") connectionHandler = handler;
   },
 }));
 vi.mock("../useDirectShellEvent.js", () => ({
@@ -193,6 +196,7 @@ function emitInvalidation(revision: number) {
 
 beforeEach(() => {
   treeUpdateHandler = null;
+  connectionHandler = null;
   presentationChangeHandler = null;
   currentGroups = [];
   childSlotIds = new Map();
@@ -920,4 +924,21 @@ describe("PanelTreeProvider local descendant selection", () => {
       "panel:b-new",
     ]);
   });
+});
+
+it("refreshes the retained tree after an interrupted read when its owner becomes ready", async () => {
+  currentGroups = [{ ownerUserId: "alice", slotIds: ["before"] }];
+  listPinnedPanelIds.mockResolvedValue([]);
+  getPresentation.mockImplementation(async (id: string) => fullPresentation(id, id));
+  renderProvider();
+  await waitFor(() => expect(getRootGroups).toHaveBeenCalledOnce());
+  getRootGroups.mockRejectedValueOnce(
+    new RpcBoundaryError("offline", "transport", "CONNECTION_LOST")
+  );
+  emitInvalidation(2);
+  await waitFor(() => expect(getRootGroups).toHaveBeenCalledTimes(2));
+  currentGroups = [{ ownerUserId: "alice", slotIds: ["after"] }];
+  act(() => connectionHandler?.({ status: "connected", isRemote: true }));
+  await waitFor(() => expect(getRootGroups).toHaveBeenCalledTimes(3));
+  await waitFor(() => expect(screen.getByTestId("roots").textContent).toContain("after"));
 });

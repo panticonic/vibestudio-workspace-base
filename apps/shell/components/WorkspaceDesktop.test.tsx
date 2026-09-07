@@ -46,20 +46,27 @@ const api = vi.hoisted(() => {
   ];
   const calls = new Map<
     string,
-    { create: ReturnType<typeof vi.fn>; close: ReturnType<typeof vi.fn> }
+    {
+      create: ReturnType<typeof vi.fn>;
+      close: ReturnType<typeof vi.fn>;
+      surface: ReturnType<typeof vi.fn>;
+    }
   >();
   return {
     catalog,
     calls,
     route: vi.fn(async () => {}),
+    incomingSurface: vi.fn(async (): Promise<unknown> => null),
     open: vi.fn(async (id: string) => {
       const create = vi.fn(async () => ({ id: "panel" }));
       const close = vi.fn();
-      calls.set(id, { create, close });
+      const surface = vi.fn(async () => {});
+      calls.set(id, { create, close, surface });
       return {
         close,
         client: {
           panel: { createAboutPanel: create },
+          app: { openShellSurface: surface },
           shellApproval: { listPending: async () => [] },
           events: {
             on: () => () => {},
@@ -84,6 +91,7 @@ vi.mock("../shell/client", () => ({
     routeWorkspace: api.route,
   },
   directEvents: { on: () => () => {} },
+  incomingShellSurface: { getPending: api.incomingSurface },
   incomingPanelLocation: {
     onLocation: () => () => {},
     getPending: async () => null,
@@ -120,6 +128,36 @@ function Desktop() {
   );
 }
 describe("desktop workspace ownership", () => {
+  it("keeps a delayed startup link in its captured workspace after focus changes", async () => {
+    let finish!: (target: unknown) => void;
+    api.incomingSurface.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const result = render(<Desktop />);
+    try {
+      await screen.findByLabelText("personal draft");
+      await waitFor(() => expect(finish).toBeDefined());
+      fireEvent.click(screen.getByRole("button", { name: "Open System" }));
+      await waitFor(() =>
+        expect(
+          screen.getByLabelText("system draft").getAttribute("data-visible"),
+        ).toBe("true"),
+      );
+      await act(async () => {
+        finish({ kind: "about", page: "permissions" });
+      });
+      expect(
+        api.calls.get("personal")?.surface,
+      ).toHaveBeenCalledExactlyOnceWith({ kind: "about", page: "permissions" });
+      expect(api.calls.get("system")?.surface).not.toHaveBeenCalled();
+    } finally {
+      result.unmount();
+    }
+  });
+
   it("preserves explicit System focus when slower initial Personal loading finishes", async () => {
     const createOwner = api.open.getMockImplementation()!;
     let finishPersonal!: () => void;

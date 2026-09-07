@@ -6,6 +6,7 @@ vi.mock("./workspaceClient", () => ({
     state.clients.push(rpc);
     return {
       unitIcons: { close: vi.fn() },
+      app: { openShellSurface: vi.fn() },
       workspace: {
         getActive: async () => "workspace",
         getConfig: async () => ({}),
@@ -29,10 +30,21 @@ it("binds System RPC identity before its first request and isolates destination 
       return () => handlers.delete(handler);
     },
   });
+  vi.stubGlobal("__vibestudioWorkspaceConnection", {
+    getCurrent: async () => ({
+      version: 1,
+      phase: "online",
+      mode: "remote",
+      since: 1,
+    }),
+    onChange: () => () => {},
+  });
   const module = await import("./client");
   expect(await module.systemWorkspaceId).toBe("system");
   expect(send).not.toHaveBeenCalled();
   const project = await module.createWorkspaceShellClient("project");
+  expect(project.client.app).toBeDefined();
+  expect(project.client.app).not.toBe(module.app);
   const systemEvent = vi.fn();
   const projectEvent = vi.fn();
   state.clients[0]!.on("changed", systemEvent);
