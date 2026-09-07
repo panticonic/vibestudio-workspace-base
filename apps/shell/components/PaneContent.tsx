@@ -189,11 +189,6 @@ export function PaneContent({
         {presentation.state === "idle" ? <VibestudioLogo size={56} variant="symbol" /> : null}
         <Spinner size="3" />
         <Text>{presentation.state === "loading" ? "Preparing panel..." : "Loading panel..."}</Text>
-        {presentation.state === "loading" ? (
-          <Text size="2" color="gray">
-            {presentation.stage}
-          </Text>
-        ) : null}
         {slow ? (
           <Flex direction="column" align="center" gap="2">
             <Text size="2" color="amber">
