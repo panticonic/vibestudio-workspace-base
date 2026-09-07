@@ -66,6 +66,7 @@ export function WorkspaceDesktop() {
   const [busy, setBusy] = useState(new Set<string>());
   const [error, setError] = useState<string | null>(null);
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
+  const [titleBarHost, setTitleBarHost] = useState<HTMLElement | null>(null);
   const [notificationHost, setNotificationHost] = useState<HTMLElement | null>(
     null,
   );
@@ -387,120 +388,125 @@ export function WorkspaceDesktop() {
   return (
     <ShellPresentationStoreContext.Provider value={presentationStore}>
       <div className="workspace-desktop">
-        <aside
-          className="workspace-desktop-navigation"
-          hidden={!sidebarVisible}
-        >
-          <WorkspaceStack
-            scrollRef={setScrollElement}
-            sections={sections}
-            onToggleExpanded={(id) => {
-              if (!owners.current.has(id)) {
+        <header className="workspace-desktop-titlebar" ref={setTitleBarHost} />
+        <div className="workspace-desktop-body">
+          <aside
+            className="workspace-desktop-navigation"
+            hidden={!sidebarVisible}
+          >
+            <WorkspaceStack
+              scrollRef={setScrollElement}
+              sections={sections}
+              onToggleExpanded={(id) => {
+                if (!owners.current.has(id)) {
+                  void select(id);
+                  return;
+                }
+                setExpanded((ids) => {
+                  const next = new Set(ids);
+                  if (!next.delete(id)) next.add(id);
+                  return next;
+                });
+              }}
+              onOpenWorkspace={(id) => {
                 void select(id);
-                return;
-              }
-              setExpanded((ids) => {
-                const next = new Set(ids);
-                if (!next.delete(id)) next.add(id);
-                return next;
-              });
-            }}
-            onOpenWorkspace={(id) => {
-              void select(id);
-            }}
-            onCreatePanel={(id) => {
-              void createPanel(id);
-            }}
-            onReviewApprovals={reviewApprovals}
-            onAddWorkspace={() => setChooser(true)}
-          />
-          <Flex className="workspace-desktop-controls" gap="2" align="center">
-            <Button
-              variant="ghost"
-              color="gray"
-              onClick={() =>
-                setSettings({
-                  section: "workspaces",
-                  ...(focusedId ? { workspaceId: focusedId } : {}),
-                })
-              }
-            >
-              <GearIcon /> Settings
-            </Button>
-            <ConnectionStatusBadge
-              onOpenSettings={() => setSettings({ section: "connection" })}
+              }}
+              onCreatePanel={(id) => {
+                void createPanel(id);
+              }}
+              onReviewApprovals={reviewApprovals}
+              onAddWorkspace={() => setChooser(true)}
             />
-            <ThemeSettings />
-          </Flex>
-        </aside>
-        <main className="workspace-desktop-content">
-          {error && (
-            <Callout.Root color="red">
-              <Callout.Text>{error}</Callout.Text>
-              <Button variant="soft" onClick={() => void refresh()}>
-                <ReloadIcon /> Try again
+            <Flex className="workspace-desktop-controls" gap="2" align="center">
+              <Button
+                variant="ghost"
+                color="gray"
+                onClick={() =>
+                  setSettings({
+                    section: "workspaces",
+                    ...(focusedId ? { workspaceId: focusedId } : {}),
+                  })
+                }
+              >
+                <GearIcon /> Settings
               </Button>
-            </Callout.Root>
-          )}
-          {!focusedId && !error && (
-            <Text className="workspace-desktop-starting" color="gray">
-              Opening your workspaces…
-            </Text>
-          )}
-          {opened.map((owner) => (
-            <StoreProvider
-              key={owner.workspace.workspaceId}
-              store={owner.store}
-            >
-              <WorkspaceIconsContext.Provider value={owner.client.unitIcons}>
-                <ShellWorkspaceClientContext.Provider value={owner.client}>
-                  <WorkspaceVisibilityContext.Provider
-                    value={owner.workspace.workspaceId === focusedId}
-                  >
-                    <WorkspaceNavigationHostContext.Provider
-                      value={{
-                        scrollElement,
-                        notificationHost,
-                        setNotificationHost,
-                        element:
-                          treeHosts.get(owner.workspace.workspaceId) ?? null,
-                        workspaceId: owner.workspace.workspaceId,
-                        workspaceLabel: workspaceLabel(owner.workspace),
-                        workspaceNames: Object.fromEntries(
-                          catalog.map((entry) => [
-                            entry.workspaceId,
-                            workspaceLabel(entry),
-                          ]),
-                        ),
-                        sidebarVisible,
-                        toggleSidebar: () =>
-                          setSidebarVisible((visible) => !visible),
-                        focus: () => {
-                          void select(owner.workspace.workspaceId);
-                        },
-                      }}
+              <ConnectionStatusBadge
+                onOpenSettings={() => setSettings({ section: "connection" })}
+              />
+              <ThemeSettings />
+            </Flex>
+          </aside>
+          <main className="workspace-desktop-content">
+            {error && (
+              <Callout.Root color="red">
+                <Callout.Text>{error}</Callout.Text>
+                <Button variant="soft" onClick={() => void refresh()}>
+                  <ReloadIcon /> Try again
+                </Button>
+              </Callout.Root>
+            )}
+            {!focusedId && !error && (
+              <Text className="workspace-desktop-starting" color="gray">
+                Opening your workspaces…
+              </Text>
+            )}
+            {opened.map((owner) => (
+              <StoreProvider
+                key={owner.workspace.workspaceId}
+                store={owner.store}
+              >
+                <WorkspaceIconsContext.Provider value={owner.client.unitIcons}>
+                  <ShellWorkspaceClientContext.Provider value={owner.client}>
+                    <WorkspaceVisibilityContext.Provider
+                      value={owner.workspace.workspaceId === focusedId}
                     >
-                      <WorkspacePanelOwner
-                        owner={owner}
-                        visible={owner.workspace.workspaceId === focusedId}
-                        onConnection={(connected) =>
-                          setDisconnected((current) => {
-                            const id = owner.workspace.workspaceId;
-                            if (current.has(id) === !connected) return current;
-                            const next = new Set(current);
-                            if (connected) next.delete(id);
-                            else next.add(id);
-                            return next;
-                          })
-                        }
-                      />
-                    </WorkspaceNavigationHostContext.Provider>
-                  </WorkspaceVisibilityContext.Provider>
-                </ShellWorkspaceClientContext.Provider>
-              </WorkspaceIconsContext.Provider>
-            </StoreProvider>
-          ))}
-        </main>
+                      <WorkspaceNavigationHostContext.Provider
+                        value={{
+                          scrollElement,
+                          titleBarHost,
+                          notificationHost,
+                          setNotificationHost,
+                          element:
+                            treeHosts.get(owner.workspace.workspaceId) ?? null,
+                          workspaceId: owner.workspace.workspaceId,
+                          workspaceLabel: workspaceLabel(owner.workspace),
+                          workspaceNames: Object.fromEntries(
+                            catalog.map((entry) => [
+                              entry.workspaceId,
+                              workspaceLabel(entry),
+                            ]),
+                          ),
+                          sidebarVisible,
+                          toggleSidebar: () =>
+                            setSidebarVisible((visible) => !visible),
+                          focus: () => {
+                            void select(owner.workspace.workspaceId);
+                          },
+                        }}
+                      >
+                        <WorkspacePanelOwner
+                          owner={owner}
+                          visible={owner.workspace.workspaceId === focusedId}
+                          onConnection={(connected) =>
+                            setDisconnected((current) => {
+                              const id = owner.workspace.workspaceId;
+                              if (current.has(id) === !connected)
+                                return current;
+                              const next = new Set(current);
+                              if (connected) next.delete(id);
+                              else next.add(id);
+                              return next;
+                            })
+                          }
+                        />
+                      </WorkspaceNavigationHostContext.Provider>
+                    </WorkspaceVisibilityContext.Provider>
+                  </ShellWorkspaceClientContext.Provider>
+                </WorkspaceIconsContext.Provider>
+              </StoreProvider>
+            ))}
+          </main>
+        </div>
       </div>
     </ShellPresentationStoreContext.Provider>
   );

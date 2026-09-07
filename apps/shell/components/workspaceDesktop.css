@@ -1,5 +1,7 @@
-.workspace-desktop { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; background: var(--gray-2); height: 100dvh; overflow: hidden; }
-.workspace-desktop-navigation { display: flex; flex-direction: column; width: 272px; min-width: 220px; max-width: 32vw; min-height: 0; flex-shrink: 0; border-right: 1px solid var(--gray-a5); background: var(--color-panel-solid); padding-top: 28px; }
+.workspace-desktop-titlebar { flex: none; min-width: 0; }
+.workspace-desktop-body { display: flex; flex: 1 1 0; min-height: 0; min-width: 0; }
+.workspace-desktop { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; min-width: 0; background: var(--gray-2); height: 100dvh; overflow: hidden; }
+.workspace-desktop-navigation { display: flex; flex-direction: column; width: 272px; min-width: 220px; max-width: 32vw; min-height: 0; flex-shrink: 0; border-right: 1px solid var(--gray-a5); background: var(--color-panel-solid); }
 .workspace-desktop-navigation > .workspace-stack { flex: 1; min-height: 0; overflow-y: auto; }
 .workspace-tree-host { display: flex; flex-direction: column; min-height: 0; flex: none; }
 .workspace-desktop-controls { flex-shrink: 0; padding: 14px 12px; border-top: 1px solid var(--gray-a4); }

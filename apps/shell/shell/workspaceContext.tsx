@@ -14,6 +14,7 @@ export const useWorkspaceVisible = () => useContext(WorkspaceVisibilityContext);
 export const WorkspaceNavigationHostContext = createContext<{
   element: HTMLElement | null;
   scrollElement: HTMLElement | null;
+  titleBarHost: HTMLElement | null;
   notificationHost: HTMLElement | null;
   setNotificationHost(element: HTMLElement | null): void;
   workspaceId: string;

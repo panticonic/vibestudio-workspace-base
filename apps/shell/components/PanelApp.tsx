@@ -1,5 +1,6 @@
 import { useShellWorkspaceClient, useWorkspaceVisible, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 import { useEffect, useState, useRef, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Box, Flex } from "@radix-ui/themes";
 
@@ -217,15 +218,18 @@ function PanelAppContent() {
   return (
     <Flex direction="column" height="100%" style={{ flex: "1 1 0", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
       <NextPanelBuildWarmup />
-      <TitleBar
-        title={currentTitle}
-        chromeState={chromeState}
-        onChromeCommand={handleChromeCommand}
-        onNavigateToId={navigateToFocusedPane}
-        onPanelContextMenu={showPanelContextMenu}
-        paneChromeState={paneChromeState}
-        onPaneChromeCommand={handlePaneChromeCommand}
-      />
+      {visible && navigationHost?.titleBarHost && createPortal(
+        <TitleBar
+          title={currentTitle}
+          chromeState={chromeState}
+          onChromeCommand={handleChromeCommand}
+          onNavigateToId={navigateToFocusedPane}
+          onPanelContextMenu={showPanelContextMenu}
+          paneChromeState={paneChromeState}
+          onPaneChromeCommand={handlePaneChromeCommand}
+        />,
+        navigationHost.titleBarHost,
+      )}
       <div
         className="workspace-desktop-notifications"
         ref={visible ? navigationHost?.setNotificationHost : undefined}

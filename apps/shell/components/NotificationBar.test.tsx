@@ -120,6 +120,7 @@ describe("NotificationBar", () => {
         value={{
           element: null,
           scrollElement: null,
+          titleBarHost: null,
           notificationHost: host,
           setNotificationHost: vi.fn(),
           workspaceId: "personal",
