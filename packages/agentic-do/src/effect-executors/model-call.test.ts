@@ -189,6 +189,10 @@ function descriptor(
   };
 }
 
+function toolSchemas(names: string[]): string {
+  return JSON.stringify(names.map((name) => ({ name, parameters: { type: "object", properties: {} } })));
+}
+
 function deps(): ExecutorDeps {
   return {
     selfRef: { kind: "agent", id: "agent:self", participantId: "agent:self" },
@@ -1274,8 +1278,8 @@ describe("modelCallExecutor", () => {
         digest === "sys"
           ? "BASE SYSTEM\n\nRead `packages/agentic-do/SKILL.md` when working on the runtime." +
             "\n\n## Opening turn\n\nRead `skills/onboarding/SKILL.md`, then continue."
-          : "";
-      const inputDescriptor = descriptor();
+          : digest === "tools" ? toolSchemas(["read"]) : "";
+      const inputDescriptor = descriptor({ toolSchemasHash: "tools" });
       inputDescriptor.request.provider = "openai-codex";
       inputDescriptor.request.model = "gpt-5.3-codex-spark";
       inputDescriptor.request.activeToolNames = ["read"];
@@ -1375,6 +1379,7 @@ describe("modelCallExecutor", () => {
     async (readPath, uiPath, uiId) => {
       const inputDeps = deps();
       inputDeps.env = { VIBESTUDIO_TEST_MODE: "1" };
+      let exposedTools = ["read", "inline_ui"];
       const stored = new Map<string, string>();
       const writer = {
         putText: async (text: string) => {
@@ -1386,9 +1391,9 @@ describe("modelCallExecutor", () => {
       inputDeps.blobstore.getText = async (digest) =>
         digest === "sys"
           ? `## Opening turn\nRead \`${readPath}\`, then render \`${uiPath}\` with \`inline_ui\` using the stable ID \`${uiId}\`.`
-          : stored.get(digest) ?? "";
-      const inputDescriptor = descriptor();
-      inputDescriptor.request.activeToolNames = ["read", "inline_ui"];
+          : digest === "tools" ? toolSchemas(exposedTools) : stored.get(digest) ?? "";
+      const inputDescriptor = descriptor({ toolSchemasHash: "tools" });
+      inputDescriptor.request.activeToolNames = ["read"];
       const state = initialAgentState({ channelId: "channel-1", config });
       const execute = () =>
         modelCallExecutor.execute({
@@ -1476,12 +1481,12 @@ describe("modelCallExecutor", () => {
       ];
       await completeTool("read", { path: readPath });
       // Inference may request only tools actually exposed to the current turn.
-      inputDescriptor.request.activeToolNames = ["read"];
+      exposedTools = ["read"];
       expect(await execute()).toMatchObject({
         kind: "model",
         blocks: [{ type: "text" }],
       });
-      inputDescriptor.request.activeToolNames = ["read", "inline_ui"];
+      exposedTools = ["read", "inline_ui"];
       await completeTool("inline_ui", { path: uiPath, id: uiId, props: {} });
       expect(await execute()).toMatchObject({
         kind: "model",
@@ -1494,8 +1499,9 @@ describe("modelCallExecutor", () => {
   it("turns a natural web request into a real web_fetch invocation in deterministic test mode", async () => {
     const inputDeps = deps();
     inputDeps.env = { VIBESTUDIO_TEST_MODE: "1" };
-    inputDeps.blobstore.getText = async () => "";
+    inputDeps.blobstore.getText = async (digest) => digest === "tools" ? toolSchemas(["web_fetch"]) : "";
     const inputDescriptor = descriptor({
+      toolSchemasHash: "tools",
       activeToolNames: ["web_fetch"],
       contextThroughSeq: 2,
     });
@@ -1593,8 +1599,9 @@ describe("modelCallExecutor", () => {
   it("uses the real eval sandbox for a natural sandbox web request in deterministic test mode", async () => {
     const inputDeps = deps();
     inputDeps.env = { VIBESTUDIO_TEST_MODE: "1" };
-    inputDeps.blobstore.getText = async () => "";
+    inputDeps.blobstore.getText = async (digest) => digest === "tools" ? toolSchemas(["eval", "web_fetch"]) : "";
     const inputDescriptor = descriptor({
+      toolSchemasHash: "tools",
       activeToolNames: ["eval", "web_fetch"],
       contextThroughSeq: 2,
     });

@@ -683,6 +683,7 @@ function deterministicTestModeModelOutcome(
   state: AgentState,
   systemPrompt: string,
   messages: ModelMessage[],
+  tools: Context["tools"],
   env?: Record<string, unknown>
 ): EffectOutcome | null {
   const testMode = env?.["VIBESTUDIO_TEST_MODE"];
@@ -695,6 +696,7 @@ function deterministicTestModeModelOutcome(
   // turn is the prompt's executable startup contract; honor its explicit
   // Markdown-path read and inline UI render so E2E still exercises the real
   // invocation, file transport, renderer, and continuation loop.
+  const availableToolNames = new Set((tools ?? []).map((tool) => tool.name));
   const openingTurn = systemPrompt.match(/##\s+Opening turn\b([\s\S]*?)(?=\n##\s|$)/i)?.[1];
   const requestedRead = openingTurn?.match(/\bread\s+`([^`]+)`/i)?.[1];
   const requestedInlineUi = openingTurn?.match(
@@ -724,7 +726,7 @@ function deterministicTestModeModelOutcome(
             )
         )
     );
-  if (requestedRead && descriptor.request.activeToolNames.includes("read")) {
+  if (requestedRead && availableToolNames.has("read")) {
     const readCompleted = completedToolCall("read", { path: requestedRead });
     if (!readCompleted) {
       return {
@@ -746,7 +748,7 @@ function deterministicTestModeModelOutcome(
 
   if (
     requestedInlineUi &&
-    descriptor.request.activeToolNames.includes("inline_ui") &&
+    availableToolNames.has("inline_ui") &&
     (!requestedRead || completedToolCall("read", { path: requestedRead }))
   ) {
     const [, path, id] = requestedInlineUi;
@@ -783,7 +785,7 @@ function deterministicTestModeModelOutcome(
   if (
     requestedWebUrl &&
     requestsSandboxExecution &&
-    descriptor.request.activeToolNames.includes("eval")
+    availableToolNames.has("eval")
   ) {
     const evalCompleted = state.entries.some(
       (entry) => entry.kind === "tool-result" && entry.seq >= turnOpenedAt && entry.name === "eval"
@@ -811,7 +813,7 @@ function deterministicTestModeModelOutcome(
         usage: { inputTokens: 1, outputTokens: 1 },
       };
     }
-  } else if (requestedWebUrl && descriptor.request.activeToolNames.includes("web_fetch")) {
+  } else if (requestedWebUrl && availableToolNames.has("web_fetch")) {
     const webFetchCompleted = state.entries.some(
       (entry) =>
         entry.kind === "tool-result" && entry.seq >= turnOpenedAt && entry.name === "web_fetch"
@@ -1025,11 +1027,17 @@ async function executeModelCall(
   const toolsJsonPromise = request.toolSchemasHash
     ? deps.blobstore.getText(request.toolSchemasHash)
     : Promise.resolve(null);
-  // The credential lookup below can return (suspend) or throw before these
-  // are awaited; detached no-op handlers prevent an unhandled rejection in
-  // that window. The awaited Promise.all still observes any real rejection.
-  systemPromptPromise.catch(() => {});
-  toolsJsonPromise.catch(() => {});
+  const [systemPromptRaw, toolsJson] = await Promise.all([systemPromptPromise, toolsJsonPromise]);
+  throwIfAborted();
+  trace("context.blobs.loaded", {
+    hasSystemPrompt: systemPromptRaw !== null,
+    hasTools: toolsJson !== null,
+  });
+  const systemPrompt = systemPromptForPolicy(
+    systemPromptRaw ?? undefined,
+    request.turnMetadata?.contextPolicy
+  );
+  const tools = toolsJson ? (JSON.parse(toolsJson) as Context["tools"]) : undefined;
 
   // Both real and deterministic inference consume the same storage boundary:
   // folded tool arguments, results and user content can be blob refs. Models see
@@ -1050,8 +1058,9 @@ async function executeModelCall(
     ? deterministicTestModeModelOutcome(
         descriptor,
         state,
-        (await systemPromptPromise) ?? "",
+        systemPrompt ?? "",
         hydratedMessages,
+        tools,
         deps.env
       )
     : null;
@@ -1152,18 +1161,6 @@ async function executeModelCall(
       throw err;
     }
   }
-
-  const [systemPromptRaw, toolsJson] = await Promise.all([systemPromptPromise, toolsJsonPromise]);
-  throwIfAborted();
-  trace("context.blobs.loaded", {
-    hasSystemPrompt: systemPromptRaw !== null,
-    hasTools: toolsJson !== null,
-  });
-  const systemPrompt = systemPromptForPolicy(
-    systemPromptRaw ?? undefined,
-    request.turnMetadata?.contextPolicy
-  );
-  const tools = toolsJson ? (JSON.parse(toolsJson) as Context["tools"]) : undefined;
 
   const modelFacingMessages = hydratedMessages.map((message) =>
     message.role === "toolResult"
