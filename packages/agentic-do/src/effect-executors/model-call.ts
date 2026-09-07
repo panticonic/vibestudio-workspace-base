@@ -7,6 +7,7 @@
  */
 
 import { stream } from "@workspace/pi-ai/compat";
+import { isTerminalAuthorityFailure } from "@vibestudio/rpc";
 import {
   closeOpenAICodexWebSocketSessions,
   releaseOpenAICodexWebSocketSession,
@@ -229,6 +230,18 @@ function normalizePercent(value: number): number {
 
 function isUnattendedModelRequest(request: ModelCallEffect["request"]): boolean {
   return request.turnMetadata?.origin === "scheduled";
+}
+
+function terminalCredentialAuthorityOutcome(error: unknown): EffectOutcome {
+  const reason = error instanceof Error ? error.message : "Credential authorization failed";
+  return {
+    kind: "model",
+    blocks: [],
+    stopReason: "error",
+    errorReason: reason,
+    recoverable: false,
+    failure: { code: "auth_or_credentials", reason, recoverable: false },
+  };
 }
 
 function modelFailureOutcome(
@@ -1157,6 +1170,9 @@ async function executeModelCall(
             ? { modelBaseUrl: err.modelBaseUrl ?? modelBaseUrl }
             : {}),
         } satisfies EffectOutcome;
+      }
+      if (isTerminalAuthorityFailure(err)) {
+        return terminalCredentialAuthorityOutcome(err);
       }
       throw err;
     }

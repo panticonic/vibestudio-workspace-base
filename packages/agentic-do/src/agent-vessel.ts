@@ -21,6 +21,7 @@ import {
 import { PanelDurableObjectBase } from "@workspace/runtime/worker/panel-durable-base";
 import { assertExactSqlTableSchema } from "@workspace/runtime/worker/sql-table-schema";
 import {
+  isTerminalAuthorityFailure,
   RemoteRpcError,
   rpc,
   withCausalParent,
@@ -218,16 +219,6 @@ function authorityAcquisitionRequired(error: unknown): boolean {
     candidate.code === "EACQUIRE" &&
     typeof candidate.errorData?.acquisition?.ownerRuntimeId === "string"
   );
-}
-
-function authorityDecisionDenied(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-  const failure = (
-    error as {
-      errorData?: { authorityFailure?: { reasonCode?: unknown } };
-    }
-  ).errorData?.authorityFailure;
-  return failure?.reasonCode === "user-denied";
 }
 
 const DELTA_BATCH_MS = 100;
@@ -2036,7 +2027,7 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
                 modelBaseUrl,
               );
             }
-            if (authorityDecisionDenied(err)) throw err;
+            if (isTerminalAuthorityFailure(err)) throw err;
             if (!(err instanceof CredentialPendingError)) {
               console.warn(
                 `[AgentVessel] resolveCredential(${modelBaseUrl ?? providerId}) failed:`,

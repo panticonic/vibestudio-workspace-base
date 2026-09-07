@@ -469,6 +469,49 @@ describe("modelCallExecutor", () => {
     expect(mocks.stream).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["user-denied", "Credential approval denied"],
+    ["receiver-rejected", "Approval requester is not a member of this workspace"],
+  ])("settles terminal credential authority failure %s without retrying", async (reasonCode, reason) => {
+    const inputDeps = deps();
+    inputDeps.credentials.getApiKey = vi.fn(async () => {
+      throw Object.assign(new Error(reason), {
+        code: "EACCES",
+        errorKind: "access",
+        errorData: {
+          authorityFailure: {
+            reasonCode,
+            reason,
+            capability: "credentials.use",
+            resourceKey: "credentials.use",
+            remediation: { kind: "none", message: "The user denied this request." },
+          },
+        },
+      });
+    });
+
+    await expect(
+      modelCallExecutor.execute({
+        descriptor: descriptor(),
+        state: initialAgentState({ channelId: "channel-1", config }),
+        signal: new AbortController().signal,
+        deps: inputDeps,
+        onEphemeral: () => {},
+      }),
+    ).resolves.toMatchObject({
+      kind: "model",
+      stopReason: "error",
+      recoverable: false,
+      errorReason: reason,
+      failure: {
+        code: "auth_or_credentials",
+        reason,
+        recoverable: false,
+      },
+    });
+    expect(mocks.stream).not.toHaveBeenCalled();
+  });
+
   it("fails a loopback request with a model error when the local-models port is absent", async () => {
     const getApiKey = vi.fn(async () => ({ apiKey: "cloud-key" }));
     const inputDeps = deps();
