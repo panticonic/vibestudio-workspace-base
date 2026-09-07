@@ -673,27 +673,32 @@ export function ApprovalCard({
               </Flex>
             ) : null}
 
-            <Flex align="center" gap="1" wrap="wrap" style={{ minWidth: 0 }}>
-              <CallerChip
-                caller={caller}
-                onShow={() => emitForApproval({ type: "show-panel" })}
-              />
-              <Text size="1" color="gray" style={{ flexShrink: 0 }}>
-                {caller.kindLabel.toLowerCase()}
-              </Text>
-              {attribution.target ? (
-                <>
-                  <Text size="1" color="gray" style={{ flexShrink: 0 }}>
-                    {attribution.relation ?? "for"}
-                  </Text>
-                  <span className="approval-caller-chip" data-clickable="false">
-                    <span className="approval-caller-chip-title">
-                      {attribution.target}
+            {caller.kind !== "system" || attribution.target ? (
+              <Flex align="center" gap="1" wrap="wrap" style={{ minWidth: 0 }}>
+                <CallerChip
+                  caller={caller}
+                  onShow={() => emitForApproval({ type: "show-panel" })}
+                />
+                <Text size="1" color="gray" style={{ flexShrink: 0 }}>
+                  {caller.kindLabel.toLowerCase()}
+                </Text>
+                {attribution.target ? (
+                  <>
+                    <Text size="1" color="gray" style={{ flexShrink: 0 }}>
+                      {attribution.relation ?? "for"}
+                    </Text>
+                    <span
+                      className="approval-caller-chip"
+                      data-clickable="false"
+                    >
+                      <span className="approval-caller-chip-title">
+                        {attribution.target}
+                      </span>
                     </span>
-                  </span>
-                </>
-              ) : null}
-            </Flex>
+                  </>
+                ) : null}
+              </Flex>
+            ) : null}
 
             {/* The warning states its fact at the card's own volume. Native
                 code running outside our protections is worth saying every time

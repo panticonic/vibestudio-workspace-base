@@ -252,6 +252,28 @@ function renderCard(
 }
 
 describe("ApprovalCard", () => {
+  it("retains an explicit target for a system request", () => {
+    renderCard(
+      capabilityApproval({
+        approvalId: "system-target",
+        title: "Inspect dashboard",
+        callerKind: "system",
+        target: {
+          id: "panel:dashboard",
+          kind: "panel",
+          title: "Example dashboard",
+        },
+      }),
+    );
+    expect(screen.getByText("Example dashboard")).toBeTruthy();
+    expect(document.querySelector(".approval-caller-chip")).not.toBeNull();
+  });
+
+  it("omits redundant workspace requester chrome for workspace setup", () => {
+    renderCard(installReviewApproval({ approvalId: "workspace-review" }));
+    expect(document.querySelector(".approval-caller-chip")).toBeNull();
+  });
+
   it("renders preparation as background progress without offering consent decisions", () => {
     const { emit } = renderCard(
       capabilityApproval({

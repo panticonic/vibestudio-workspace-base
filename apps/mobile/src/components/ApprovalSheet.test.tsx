@@ -401,6 +401,25 @@ function renderSheet(
 }
 
 describe("ApprovalSheet", () => {
+  it("retains an explicit target for a system request", () => {
+    const { getByTestId, getByText } = renderSheet({
+      ...consequentialCapability,
+      callerKind: "system",
+      target: {
+        id: "panel:dashboard",
+        kind: "panel",
+        title: "Example dashboard",
+      },
+    });
+    expect(getByTestId("approval-caller-chip")).toBeTruthy();
+    expect(getByText("Example dashboard")).toBeTruthy();
+  });
+
+  it("omits redundant workspace requester chrome for workspace setup", () => {
+    const { queryByTestId } = renderSheet(installReview);
+    expect(queryByTestId("approval-caller-chip")).toBeNull();
+  });
+
   it("keeps a cross-workspace approval direction visible outside request details", () => {
     const foreign: PendingApproval = {
       ...consequentialCapability,

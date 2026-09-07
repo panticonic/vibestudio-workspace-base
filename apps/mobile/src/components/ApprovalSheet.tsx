@@ -640,12 +640,14 @@ export function ApprovalSheet({
                 <Text style={[styles.title, { color: colors.text }]}>
                   {copy.title}
                 </Text>
-                <CallerRow
-                  caller={callerInfo}
-                  attribution={attribution ?? {}}
-                  canNavigate={!!onNavigateToPanel && !!callerInfo.panelId}
-                  onPress={showRequestingPanel}
-                />
+                {callerInfo.kind !== "system" || attribution?.target ? (
+                  <CallerRow
+                    caller={callerInfo}
+                    attribution={attribution ?? {}}
+                    canNavigate={!!onNavigateToPanel && !!callerInfo.panelId}
+                    onPress={showRequestingPanel}
+                  />
+                ) : null}
                 {copy.summary ? (
                   <ApprovalMarkdown source={copy.summary} tone="muted" />
                 ) : null}
