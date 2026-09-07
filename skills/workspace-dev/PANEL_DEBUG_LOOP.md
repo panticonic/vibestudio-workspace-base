@@ -134,7 +134,11 @@ actions. Repeated controls must have item-specific names such as
 `Complete Buy milk` and `Delete Buy milk`; repair the panel if they do not.
 
 Run add, complete, filter, and delete in one bounded cell against the fresh
-page. Actions auto-wait, so do not add sleeps. Finish by reading console events,
+page. Actions auto-wait, so do not add sleeps. For newly authored or restyled UI,
+also follow [theme verification](WORKFLOW.md#theme-and-layout): inspect light and
+dark appearances, switch the host choice with the same panel open, and restore
+the prior setting. Check custom surfaces and open overlays, not just the theme
+class. Finish by reading console events,
 capturing the final screenshot, closing the page client, and returning compact
 evidence.
 

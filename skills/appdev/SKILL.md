@@ -63,8 +63,12 @@ Read only references relevant to the target and change.
   Use version-controlled project files when content benefits from history and
   collaboration; client component state and process memory are presentation
   state, not persistence.
-- Make sure you always make the page respect user's light / dark mode choices.
-  Use `usePanelTheme()` and responsive layouts for your design.
+- Respect the user's live light/dark choice and use responsive layouts. For
+  panel UI, follow [the theme contract](../workspace-dev/WORKFLOW.md#theme-and-layout):
+  automatic React mounting supplies the theme wrapper, custom CSS must consume
+  theme-aware colors, and `usePanelTheme()` is for code that needs appearance.
+  For native client UI, use the target's existing appearance state. Verify both
+  appearances and live switching when creating or restyling UI.
 - Panel commands are generic and host-local: panels own command meaning; apps
   own presentation and routing.
 

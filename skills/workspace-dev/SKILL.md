@@ -113,7 +113,11 @@ purpose, workflow, ownership, invariants, and diagnostics.
   guide](references/icons.md). Use `@workspace/ui/icons` for controls.
 - Inspect accessible roles and names before automation — repeated item controls
   need item-specific accessible names, not ordinal guesswork.
-- Respect the host theme and narrow mobile viewports.
+- Respect the host's live light/dark choice. Automatically mounted React panels
+  already have a Radix theme wrapper; use its theme-aware colors for custom CSS
+  instead of hardcoding a light or dark palette. Read [theme and layout](WORKFLOW.md#theme-and-layout)
+  when authoring UI, and verify both appearances plus live switching. Keep
+  layouts usable at narrow mobile viewports.
 
 ## Creative imagery and visual assets
 
