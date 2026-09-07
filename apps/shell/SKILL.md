@@ -7,6 +7,20 @@ description: Develop and diagnose the trusted Electron shell in apps/shell, incl
 
 `apps/shell` hosts desktop panel chrome and device-management UI.
 
+## Workspace ownership
+
+- Workspace UI reads and actions use the client captured by
+  `useShellWorkspaceClient()`. Command implementations receive that same client;
+  they must not import startup `panel`, `quickfire`, or notification services.
+- Keep the captured client through asynchronous work, including error reporting.
+  A focus change must never redirect an in-flight action into another workspace.
+- The startup System client owns app and account presentation. Personal, System,
+  and shared panel trees use the same workspace runtime and projection events.
+  Workspace role determines available services, not an alternate panel path.
+- Direct user notifications already travel through admitted workspace UI
+  sessions. Do not copy them onto a workspace broadcast or add another startup
+  forwarding path.
+
 ## Devices Surface
 
 - "Connect a device" calls `hubControl.pairDevice` on the currently connected

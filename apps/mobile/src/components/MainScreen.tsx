@@ -54,7 +54,7 @@ import {
 import {
   colorSchemeAtom,
   themeColorsAtom,
-  themePreferenceAtom,
+  type ThemePreference,
 } from "../state/themeAtoms";
 import { inboxDeepLinkAtom } from "../state/inboxDeepLinkAtom";
 import { pushToastAtom } from "../state/toastAtoms";
@@ -90,14 +90,6 @@ import {
   mobilePanelMaterializationState,
   PanelMaterializationRetryQueue,
 } from "../services/panelMaterializer";
-import {
-  handleExternalOpen,
-  type ExternalOpenPayload,
-} from "../services/oauthLoopback";
-import {
-  handleMobileAppLifecycleEvent,
-  type AppLifecyclePayload,
-} from "../services/appUpdatePrompt";
 import {
   copyToClipboard,
   openExternalUrl,
@@ -212,7 +204,11 @@ function smokePhase(phase: string, extra?: Record<string, unknown>): void {
 const noDirectorySubscription = () => () => {};
 const noDirectoryRevision = () => 0;
 
-export function MainScreen() {
+export function MainScreen({
+  setThemePreference,
+}: {
+  setThemePreference: (preference: ThemePreference) => void;
+}) {
   const workspaceVisible = useWorkspaceVisible();
   const workspaceDirectory = useWorkspaceDirectory();
   useSyncExternalStore(
@@ -253,7 +249,6 @@ export function MainScreen() {
   const setPinnedPanelIds = useSetAtom(pinnedPanelIdsAtom);
   const pinsHydrated = useAtomValue(pinsHydratedAtom);
   const setPinsHydrated = useSetAtom(pinsHydratedAtom);
-  const promptedAppUpdatesRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     let cancelled = false;
     if (!shellClient || !activePanelId) {
@@ -318,10 +313,6 @@ export function MainScreen() {
   const [addressSuggestions, setAddressSuggestions] = useState<
     AddressAutocompleteItem[]
   >([]);
-  const [selectedMobileApp, setSelectedMobileApp] = useState<{
-    source: string | null;
-    appId: string | null;
-  }>({ source: null, appId: null });
   const [webViewNavigation, setWebViewNavigation] = useState<
     Record<string, WebViewNavigation>
   >({});
@@ -407,28 +398,6 @@ export function MainScreen() {
       unsubscribeEvent();
       unsubscribeResubscribe();
       unsubscribeColdRecover();
-    };
-  }, [shellClient]);
-  useEffect(() => {
-    let cancelled = false;
-    if (!shellClient) {
-      setSelectedMobileApp({ source: null, appId: null });
-      return;
-    }
-    void shellClient.hostLaunch
-      .configuredCandidate("react-native")
-      .then((candidate) => {
-        if (cancelled) return;
-        setSelectedMobileApp({
-          source: candidate?.source ?? null,
-          appId: candidate?.name ?? null,
-        });
-      })
-      .catch(() => {
-        if (!cancelled) setSelectedMobileApp({ source: null, appId: null });
-      });
-    return () => {
-      cancelled = true;
     };
   }, [shellClient]);
   // Route host→panel RPC envelopes (relay replies + events) into the target
@@ -1001,11 +970,7 @@ export function MainScreen() {
   useEffect(() => {
     if (!shellClient) return;
     refreshTree();
-    const eventNames = [
-      "external-open:open",
-      "apps:lifecycle",
-      "workspace:revision-bumped",
-    ] as const;
+    const eventNames = ["workspace:revision-bumped"] as const;
     const subscribeAll = async () => {
       await Promise.all(
         eventNames.map(async (name) => {
@@ -1042,37 +1007,6 @@ export function MainScreen() {
         if (panelId) activatePanel(panelId);
       },
     );
-    const unsubExternal = shellClient.events.on(
-      "external-open:open",
-      (payload) => {
-        void handleExternalOpen(
-          shellClient,
-          payload as ExternalOpenPayload,
-        ).catch((error: unknown) => {
-          const message =
-            error instanceof Error ? error.message : String(error);
-          console.warn("[MainScreen] Failed to open external URL:", error);
-          pushToast({
-            title: "Could not open OAuth flow",
-            message,
-            tone: "danger",
-            durationMs: 10000,
-          });
-        });
-      },
-    );
-    const unsubAppLifecycle = shellClient.events.on(
-      "apps:lifecycle",
-      (payload) => {
-        handleMobileAppLifecycleEvent(payload as AppLifecyclePayload, {
-          shellClient,
-          pushToast,
-          prompted: promptedAppUpdatesRef.current,
-          selectedSource: selectedMobileApp.source,
-          selectedAppId: selectedMobileApp.appId,
-        });
-      },
-    );
     const unsubWorkspaceRevision = shellClient.events.on(
       "workspace:revision-bumped",
       () => {
@@ -1099,14 +1033,12 @@ export function MainScreen() {
       unsubNavigate();
       unsubCreated();
       unsubNav();
-      unsubExternal();
-      unsubAppLifecycle();
       unsubWorkspaceRevision();
       for (const name of eventNames) {
         void shellClient.events.unsubscribe(name).catch(() => {});
       }
     };
-  }, [activatePanel, pushToast, refreshTree, selectedMobileApp, shellClient]);
+  }, [activatePanel, refreshTree, shellClient]);
   useEffect(() => {
     if (!activePanelId || !shellClient) return;
     void shellClient.panels.notifyFocused(activePanelId);
@@ -1498,7 +1430,6 @@ export function MainScreen() {
   // ---- Command sheet + quickfire sheet (quickfire-overlay-spec §7) ---------
   const openCommandSheet = useSetAtom(openCommandSheetAtom);
   const openQuickfireSheet = useSetAtom(openQuickfireSheetAtom);
-  const setThemePreference = useSetAtom(themePreferenceAtom);
 
   /**
    * The "already open" index, read from the cache the drawer already renders so

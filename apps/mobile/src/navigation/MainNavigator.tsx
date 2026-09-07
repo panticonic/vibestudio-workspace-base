@@ -3,7 +3,7 @@ import { WorkspaceCreateSheet } from "../components/WorkspaceCreateSheet";
 import { WorkspaceApprovalSurface } from "../components/WorkspaceApprovalSurface";
 import { pushToastAtom } from "../state/toastAtoms";
 import { useSyncExternalStore } from "react";
-import { WorkspaceNotificationSubscriber } from "../components/WorkspaceNotificationSubscriber";
+import { WorkspaceSessionEffects } from "../components/WorkspaceSessionEffects";
 import {
   View,
   Text,
@@ -24,7 +24,11 @@ import {
   WorkspaceDirectoryContext,
   WorkspaceScope,
 } from "../state/workspaceScope";
-import { colorSchemeAtom, themeColorsAtom } from "../state/themeAtoms";
+import {
+  colorSchemeAtom,
+  themeColorsAtom,
+  themePreferenceAtom,
+} from "../state/themeAtoms";
 import { mobileNavigationLayout } from "../shellCore/mobileLayout";
 import { ActionSheetHost } from "../components/ui/ActionSheetHost";
 import { Button } from "../components/ui/primitives";
@@ -92,6 +96,7 @@ function RetainedWorkspaceScreens({
 }) {
   useSyncExternalStore(directory.subscribe, directory.getSnapshot);
   const scheme = useAtomValue(colorSchemeAtom);
+  const setThemePreference = useSetAtom(themePreferenceAtom);
   const colors = useAtomValue(themeColorsAtom);
   const navigation = useNavigation();
   const notify = useSetAtom(pushToastAtom);
@@ -111,11 +116,12 @@ function RetainedWorkspaceScreens({
       {[...directory.sessions.values()]
         .filter((session) => session.state === "ready")
         .map((session) => (
-          <WorkspaceNotificationSubscriber
+          <WorkspaceSessionEffects
             key={session.workspaceId}
             directory={directory}
             session={session}
             notify={notify}
+            theme={scheme === "light" ? "light" : "dark"}
           />
         ))}
       {[...directory.sessions.values()]
@@ -141,7 +147,7 @@ function RetainedWorkspaceScreens({
                 visible={visible}
                 scheme={scheme}
               >
-                <MainScreen />
+                <MainScreen setThemePreference={setThemePreference} />
                 {visible && <ActionSheetHost />}
               </WorkspaceScope>
             </View>

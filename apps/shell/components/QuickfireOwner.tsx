@@ -1,4 +1,7 @@
-import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/workspaceContext";
+import {
+  useShellWorkspaceClient,
+  useWorkspaceNavigationHost,
+} from "../shell/workspaceContext";
 /**
  * QuickfireOwner — the chrome side of the quickfire overlay (spec §2.3).
  *
@@ -68,7 +71,7 @@ import {
 import { useNavigationActions } from "./NavigationContext";
 import {
   buildSlate,
-  reportCommandFailure,
+  reportCommandFailure as reportWorkspaceCommandFailure,
   runContributedCommand,
   type CommandOutcome,
   type SlateCommand,
@@ -155,7 +158,13 @@ const CLOSED: OverlayState = {
 
 export function QuickfireOwner() {
   const workspaceId = useWorkspaceNavigationHost()?.workspaceId ?? "system";
-  const { app, hostCommands, panel, quickfire, userNotifications, workspace } = useShellWorkspaceClient();
+  const client = useShellWorkspaceClient();
+  const { app, hostCommands, panel, quickfire, userNotifications, workspace } =
+    client;
+  const reportCommandFailure = useCallback(
+    (error: unknown) => reportWorkspaceCommandFailure(client, error),
+    [client],
+  );
 
   const [state, setState] = useState<OverlayState>(CLOSED);
   const [chromeState, setChromeState] = useState<PanelChromeState | null>(null);
@@ -208,6 +217,7 @@ export function QuickfireOwner() {
 
   const deps = useMemo<SlateDeps>(
     () => ({
+      client,
       setThemeMode,
       setThemeConfig,
       openWorkspaceChooser: () => setWorkspaceChooserOpen(true),
@@ -217,6 +227,7 @@ export function QuickfireOwner() {
       showQuickfireConversations: setQuickfireConversations,
     }),
     [
+      client,
       navigateToId,
       setAddressBarVisible,
       setThemeConfig,
@@ -727,7 +738,9 @@ export function QuickfireOwner() {
   // --- Anchor measurement ---------------------------------------------------
   useEffect(() => {
     const measure = () => {
-      const host = document.getElementById(`${QUICKFIRE_OVERLAY_HOST_ID}:${workspaceId}`);
+      const host = document.getElementById(
+        `${QUICKFIRE_OVERLAY_HOST_ID}:${workspaceId}`,
+      );
       const rect = host?.getBoundingClientRect();
       if (!rect || rect.width <= 0 || rect.height <= 0) {
         setAnchorBounds(null);
@@ -764,7 +777,9 @@ export function QuickfireOwner() {
       );
     };
     measure();
-    const host = document.getElementById(`${QUICKFIRE_OVERLAY_HOST_ID}:${workspaceId}`);
+    const host = document.getElementById(
+      `${QUICKFIRE_OVERLAY_HOST_ID}:${workspaceId}`,
+    );
     const observer =
       host && typeof ResizeObserver !== "undefined"
         ? new ResizeObserver(measure)
@@ -820,6 +835,7 @@ export function QuickfireOwner() {
         ? Promise.resolve(runner.run(args, deps))
         : command.panelId
           ? runContributedCommand(
+              client,
               command.panelId,
               command.id.slice(command.panelId.length + 1),
             )
@@ -832,7 +848,7 @@ export function QuickfireOwner() {
           close();
         });
     },
-    [applyOutcome, close, deps, slateById],
+    [applyOutcome, client, close, deps, reportCommandFailure, slateById],
   );
 
   /** Enter a command: run it, or open its argument session. */
@@ -992,10 +1008,13 @@ export function QuickfireOwner() {
       close,
       navigateToId,
       open,
+      panel,
+      reportCommandFailure,
       quickfireSession,
       rowTargets,
       rows,
       state.argSession,
+      state.retargeting,
     ],
   );
 
@@ -1352,6 +1371,7 @@ export function QuickfireOwner() {
       ghostSuffix,
       openLink,
       promoteToChatPanel,
+      reportCommandFailure,
       quickfireSession,
       quickfireSlotId,
       rows,
@@ -1529,7 +1549,9 @@ function mergePanelEntries(
 }
 
 /** Bounded walk of the open panel forest — the "already open" index (§4.1). */
-async function collectOpenPanels(panel: import("../shell/workspaceClient").ShellWorkspaceClient["panel"]): Promise<OpenPanelEntry[]> {
+async function collectOpenPanels(
+  panel: import("../shell/workspaceClient").ShellWorkspaceClient["panel"],
+): Promise<OpenPanelEntry[]> {
   const entries: OpenPanelEntry[] = [];
   const titles = new Map<string, string>();
   const pending: Array<

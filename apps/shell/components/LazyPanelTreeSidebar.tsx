@@ -664,6 +664,8 @@ const SortableTreeItem = memo(
       prev.item.parentId === next.item.parentId &&
       prev.item.panel.title === next.item.panel.title &&
       prev.item.panel.icon === next.item.panel.icon &&
+      prev.item.panel.iconVersion === next.item.panel.iconVersion &&
+      prev.item.panel.iconState === next.item.panel.iconState &&
       prev.item.panel.source === next.item.panel.source &&
       prev.item.panel.childCount === next.item.panel.childCount &&
       prev.item.panel.buildState === next.item.panel.buildState &&

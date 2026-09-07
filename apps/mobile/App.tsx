@@ -22,7 +22,6 @@ import { setupOAuthHandler } from "./src/services/oauthHandler";
 import { setupNotificationCategories } from "./src/services/notificationCategories";
 import { registerForPushNotifications } from "./src/services/pushNotifications";
 import {
-  colorSchemeAtom,
   hydrateThemePreferenceAtom,
   isDarkModeAtom,
   systemColorSchemeAtom,
@@ -51,7 +50,6 @@ function AppContent() {
   }, [shellClient]);
   const isDark = useAtomValue(isDarkModeAtom);
   const colors = useAtomValue(themeColorsAtom);
-  const effectiveScheme = useAtomValue(colorSchemeAtom);
   const setSystemColorScheme = useSetAtom(systemColorSchemeAtom);
   const hydrateThemePreference = useSetAtom(hydrateThemePreferenceAtom);
   const inboxDeepLinkSequence = useRef(0);
@@ -73,17 +71,6 @@ function AppContent() {
     );
     return () => subscription.remove();
   }, [setSystemColorScheme]);
-
-  // Mirror the effective theme (system scheme + user override) into managed
-  // panels whenever it changes.
-  useEffect(() => {
-    if (!shellClient) return;
-    void shellClient.panels
-      .updateTheme(effectiveScheme === "light" ? "light" : "dark")
-      .catch((error) =>
-        console.warn("[mobile] Failed to sync panel theme:", error),
-      );
-  }, [effectiveScheme, shellClient]);
 
   // Set up OAuth deep link handler when the shell client is available
   useEffect(() => {
@@ -169,15 +156,13 @@ function AppContent() {
             return (await directory.resolveNotificationWorkspace(scope)).client;
           },
           onApprovalDeepLink: (target) => {
-            void directory
-              ?.openApproval(target)
-              .catch((error: unknown) =>
-                pushToast({
-                  title: "Could not open approval",
-                  message: String(error),
-                  tone: "danger",
-                }),
-              );
+            void directory?.openApproval(target).catch((error: unknown) =>
+              pushToast({
+                title: "Could not open approval",
+                message: String(error),
+                tone: "danger",
+              }),
+            );
           },
           onInboxDeepLink: (payload) => {
             if (!directory) return;

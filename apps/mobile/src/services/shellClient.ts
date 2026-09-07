@@ -1652,10 +1652,6 @@ export class ShellClient {
           await deferredResults;
           return;
         }
-        if (this.disposed || signal.aborted) {
-          await deferredResults;
-          return;
-        }
         this.registerPanelRecoveryHandlers();
         const [profile, host] = await deferredResults;
         if (this.disposed || signal.aborted) return;
