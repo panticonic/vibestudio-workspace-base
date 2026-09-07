@@ -18,6 +18,7 @@ export const WorkspaceNavigationHostContext = createContext<{
   notificationHost: HTMLElement | null;
   setNotificationHost(element: HTMLElement | null): void;
   workspaceId: string;
+  privateRole?: "personal" | "system";
   workspaceLabel: string;
   workspaceNames: Readonly<Record<string, string>>;
   sidebarVisible: boolean;

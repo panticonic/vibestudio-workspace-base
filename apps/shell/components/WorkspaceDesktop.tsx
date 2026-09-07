@@ -469,6 +469,7 @@ export function WorkspaceDesktop() {
                           element:
                             treeHosts.get(owner.workspace.workspaceId) ?? null,
                           workspaceId: owner.workspace.workspaceId,
+                          privateRole: owner.workspace.privateRole,
                           workspaceLabel: workspaceLabel(owner.workspace),
                           workspaceNames: Object.fromEntries(
                             catalog.map((entry) => [

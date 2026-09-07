@@ -229,6 +229,7 @@ export function WorkspaceDrawer({
                   scheme={scheme}
                 >
                   <PanelDrawer
+                    privateRole={entry.privateRole}
                     embedded
                     onSelectPanel={(panelId) => {
                       perform(directory.activate(entry.workspaceId, panelId));

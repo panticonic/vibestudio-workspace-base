@@ -81,6 +81,7 @@ interface PanelDrawerProps {
   /** Called when a panel is selected; parent should close the drawer */
   onSelectPanel: (panelId: string) => void;
   embedded?: boolean;
+  privateRole?: "personal" | "system";
 }
 
 /** Native icon choices for renderer-neutral shared panel commands. */
@@ -108,6 +109,7 @@ function findPanelById(
 }
 
 export function PanelDrawer({
+  privateRole,
   onSelectPanel,
   embedded = false,
 }: PanelDrawerProps) {
@@ -229,8 +231,9 @@ export function PanelDrawer({
         collapsedIds,
         shellClient?.currentUserId ?? null,
         ownerProfiles,
+        privateRole,
       ),
-    [collapsedIds, groups, ownerProfiles, shellClient],
+    [collapsedIds, groups, ownerProfiles, shellClient, privateRole],
   );
 
   const trimmedQuery = query.trim().toLowerCase();

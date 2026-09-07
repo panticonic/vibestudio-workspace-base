@@ -1,4 +1,4 @@
-import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 /**
  * LazyPanelTreeSidebar - Sortable panel tree sidebar with drag-and-drop.
  *
@@ -862,9 +862,8 @@ type SidebarRow =
 
 /**
  * Interleave owner band headers into the flattened item list at forest group
- * boundaries. Every populated owner group gets a band, including a single
- * group: dropping the header would silently restore the old single-user
- * interpretation and make ownership change meaning as groups appear/disappear.
+ * boundaries. Shared workspaces show explicit owner bands; private Personal
+ * and System workspaces present one tree while retaining pagination ownership.
  */
 function buildSidebarRows(
   flattenedItems: FlattenedPanel[],
@@ -874,7 +873,8 @@ function buildSidebarRows(
     rootLoadedCount?: number;
     rootsHaveMore?: boolean;
     rootPanels: PanelTreeViewNode[];
-  }>
+  }>,
+  privateRole?: "personal" | "system",
 ): SidebarRow[] {
   const populated = forest.filter((group) => group.rootPanels.length > 0);
   const itemById = new Map(flattenedItems.map((item) => [item.id, item]));
@@ -920,7 +920,7 @@ function buildSidebarRows(
   };
 
   for (const group of populated) {
-    rows.push({ kind: "owner-band", owner: group.owner });
+    if (!privateRole) rows.push({ kind: "owner-band", owner: group.owner });
     appendGroup(
       group.rootPanels,
       group.rootCount,
@@ -963,6 +963,7 @@ export function LazyPanelTreeSidebar({
   onArchive,
 }: LazyPanelTreeSidebarProps) {
   const { notification, panel } = useShellWorkspaceClient();
+  const privateRole = useWorkspaceNavigationHost()?.privateRole;
 
   const isTouch = useTouchDevice();
 
@@ -1001,8 +1002,8 @@ export function LazyPanelTreeSidebar({
   // Owner bands (WP3): one labelled section per owner group, own group first
   // (ordering happens in PanelTreeContext), others visible & inspectable below.
   const treeRows = useMemo(
-    () => buildSidebarRows(flattenedItems, ownerGroups),
-    [flattenedItems, ownerGroups]
+    () => buildSidebarRows(flattenedItems, ownerGroups, privateRole),
+    [flattenedItems, ownerGroups, privateRole]
   );
   const trimmedQuery = query.trim();
   useEffect(() => {

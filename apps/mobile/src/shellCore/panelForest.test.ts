@@ -7,7 +7,10 @@ import {
   type MobilePanelTreeNode,
 } from "./panelForest";
 
-function panel(id: string, children: MobilePanelTreeNode[] = []): MobilePanelTreeNode {
+function panel(
+  id: string,
+  children: MobilePanelTreeNode[] = [],
+): MobilePanelTreeNode {
   return {
     id,
     title: id,
@@ -28,18 +31,46 @@ describe("mobile panel forest", () => {
     },
   ];
 
+  it.each(["personal", "system"] as const)(
+    "presents one tree in a private %s workspace without losing pagination ownership",
+    (privateRole) => {
+      const rows = buildMobilePanelForestRows(
+        [
+          { owner: "", rootCount: 1, rootPanels: [panel("onboarding")] },
+          {
+            owner: "alice",
+            rootCount: 2,
+            rootPanels: [panel("task-board")],
+            rootsHaveMore: true,
+          },
+        ],
+        new Set(),
+        "alice",
+        new Map(),
+        privateRole,
+      );
+      expect(rows.filter((row) => row.kind === "owner")).toEqual([]);
+      expect(
+        rows.filter((row) => row.kind === "panel").map((row) => row.panel.id),
+      ).toEqual(["task-board", "onboarding"]);
+      expect(rows.find((row) => row.kind === "load-more")).toMatchObject({
+        ownerUserId: "alice",
+        remaining: 1,
+      });
+    },
+  );
+
   it("uses a refreshed resident title over the durable tree snapshot", () => {
-    expect(mobilePanelTreeTitle("Agentic Chat", { title: "Workspace onboarding" })).toBe(
-      "Workspace onboarding"
-    );
+    expect(
+      mobilePanelTreeTitle("Agentic Chat", { title: "Workspace onboarding" }),
+    ).toBe("Workspace onboarding");
     expect(mobilePanelTreeTitle("Agentic Chat", null)).toBe("Agentic Chat");
   });
 
   it("orders the verified account's roots first", () => {
-    expect(orderMobilePanelForest(forest, "alice").map((group) => group.owner)).toEqual([
-      "alice",
-      "bob",
-    ]);
+    expect(
+      orderMobilePanelForest(forest, "alice").map((group) => group.owner),
+    ).toEqual(["alice", "bob"]);
   });
 
   it("keeps explicit owner rows even when there is one populated group", () => {
@@ -47,12 +78,18 @@ describe("mobile panel forest", () => {
       [forest[1]!],
       new Set(),
       "alice",
-      new Map([["alice", { userId: "alice", handle: "alice", displayName: "Alice" }]])
+      new Map([
+        ["alice", { userId: "alice", handle: "alice", displayName: "Alice" }],
+      ]),
     );
     expect(
       rows.map((row) =>
-        row.kind === "owner" ? row.label : row.kind === "panel" ? row.panel.id : "more"
-      )
+        row.kind === "owner"
+          ? row.label
+          : row.kind === "panel"
+            ? row.panel.id
+            : "more",
+      ),
     ).toEqual(["Your panels", "alice-root", "alice-child"]);
   });
 
@@ -61,22 +98,28 @@ describe("mobile panel forest", () => {
       forest,
       new Set(["alice-root"]),
       "alice",
-      new Map([["bob", { userId: "bob", handle: "bob", displayName: "Bob" }]])
+      new Map([["bob", { userId: "bob", handle: "bob", displayName: "Bob" }]]),
     );
     expect(
       rows.map((row) =>
-        row.kind === "owner" ? row.label : row.kind === "panel" ? row.panel.id : "more"
-      )
+        row.kind === "owner"
+          ? row.label
+          : row.kind === "panel"
+            ? row.panel.id
+            : "more",
+      ),
     ).toEqual(["Your panels", "alice-root", "Bob", "bob-root"]);
   });
 
   it("bounds each sibling group and exposes an explicit older-panels row", () => {
-    const roots = Array.from({ length: 50 }, (_, index) => panel(`root-${index}`));
+    const roots = Array.from({ length: 50 }, (_, index) =>
+      panel(`root-${index}`),
+    );
     const rows = buildMobilePanelForestRows(
       [{ owner: "alice", rootCount: 55, rootPanels: roots }],
       new Set(),
       "alice",
-      new Map()
+      new Map(),
     );
     expect(rows.filter((row) => row.kind === "panel")).toHaveLength(50);
     expect(rows.at(-1)).toMatchObject({
@@ -87,7 +130,9 @@ describe("mobile panel forest", () => {
   });
 
   it("uses traversal progress rather than the sliding window size for older-history rows", () => {
-    const roots = Array.from({ length: 50 }, (_, index) => panel(`older-${index}`));
+    const roots = Array.from({ length: 50 }, (_, index) =>
+      panel(`older-${index}`),
+    );
     const rows = buildMobilePanelForestRows(
       [
         {
@@ -100,7 +145,7 @@ describe("mobile panel forest", () => {
       ],
       new Set(),
       "alice",
-      new Map()
+      new Map(),
     );
     expect(rows.at(-1)).toMatchObject({ kind: "load-more", remaining: 400 });
 
@@ -116,7 +161,7 @@ describe("mobile panel forest", () => {
       ],
       new Set(),
       "alice",
-      new Map()
+      new Map(),
     );
     expect(complete.some((row) => row.kind === "load-more")).toBe(false);
   });
@@ -132,14 +177,14 @@ describe("mobile panel forest", () => {
       [{ owner: "alice", rootCount: 1, rootPanels: [unloadedParent] }],
       new Set(["parent"]),
       "alice",
-      new Map()
+      new Map(),
     ).find(
       (
-        candidate
+        candidate,
       ): candidate is Extract<
         ReturnType<typeof buildMobilePanelForestRows>[number],
         { kind: "panel" }
-      > => candidate.kind === "panel"
+      > => candidate.kind === "panel",
     );
 
     expect(row).toBeDefined();

@@ -168,17 +168,19 @@ export function buildMobilePanelForestRows(
   collapsedIds: ReadonlySet<string>,
   selfUserId: string | null,
   profiles: ReadonlyMap<string, MobileOwnerProfile>,
+  privateRole?: "personal" | "system",
 ): MobilePanelForestRow[] {
   const rows: MobilePanelForestRow[] = [];
   for (const group of orderMobilePanelForest(groups, selfUserId)) {
     if (group.rootCount === 0) continue;
     const profile = profiles.get(group.owner);
-    rows.push({
-      kind: "owner",
-      owner: group.owner,
-      label: ownerLabel(group.owner, selfUserId, profile),
-      ...(profile?.color ? { color: profile.color } : {}),
-    });
+    if (!privateRole)
+      rows.push({
+        kind: "owner",
+        owner: group.owner,
+        label: ownerLabel(group.owner, selfUserId, profile),
+        ...(profile?.color ? { color: profile.color } : {}),
+      });
     appendNodes(
       group.rootPanels,
       group.rootCount,
