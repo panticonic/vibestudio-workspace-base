@@ -923,6 +923,27 @@ async function orchestrateAtomicPanelStore(
     });
     const beforeObservation = await handle.observe();
     const written = `atomic-note-${crypto.randomUUID()}`;
+    const controlsDeadline = Date.now() + 10_000;
+    let controlsReady = false;
+    while (Date.now() < controlsDeadline) {
+      controlsReady = await context.runner.evalInPanelClient<boolean>(
+        handle,
+        `document.querySelector('[data-testid="note-input"]') instanceof HTMLInputElement && document.querySelector('[data-testid="save-note"]') instanceof HTMLElement`
+      );
+      if (controlsReady) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (!controlsReady) {
+      captured = {
+        ...captured,
+        panelPath,
+        storePath,
+        before: beforeObservation,
+        failureObservation: await handle.observe(),
+        failureDiagnosis: await handle.diagnose(),
+      };
+      throw new Error("Notes controls did not render before the deadline");
+    }
     await context.runner.evalInPanelClient(
       handle,
       `(() => { const input = document.querySelector('[data-testid="note-input"]'); const save = document.querySelector('[data-testid="save-note"]'); if (!(input instanceof HTMLInputElement) || !(save instanceof HTMLElement)) throw new Error('notes controls missing'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ${JSON.stringify(written)}); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); save.click(); return true; })()`
