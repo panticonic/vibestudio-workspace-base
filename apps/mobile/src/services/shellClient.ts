@@ -1161,6 +1161,10 @@ export class ShellClient {
   readonly credentials: Credentials;
   readonly workspaceName: string;
   private readonly browserSessionEpoch = crypto.randomUUID();
+  private readonly browserNotificationGrants = new Map<
+    string,
+    "granted" | "denied"
+  >();
   readonly requestBrowserPermission: BrowserPermissionRequester = (
     panelId,
     request,
@@ -1179,6 +1183,68 @@ export class ShellClient {
       capabilities: request.capabilities,
       deviceLabel: "Vibestudio Mobile",
     });
+  readonly browserNotificationPermission = (
+    origin: string,
+  ): "default" | "denied" | "granted" =>
+    this.browserNotificationGrants.get(origin) ?? "default";
+  readonly refreshBrowserNotificationPermissions = async (): Promise<void> => {
+    const snapshot = await createTypedServiceClient(
+      "browserPermissions",
+      browserPermissionsMethods,
+      (service, method, args) =>
+        this.transport.call("main", `${service}.${method}`, args),
+    ).snapshot({ sessionEpoch: this.browserSessionEpoch });
+    this.replaceBrowserNotificationGrants(snapshot.grants);
+  };
+  readonly requestBrowserNotificationPermission = async (
+    panelId: string,
+    origin: string,
+    topLevelUrl: string,
+    signal: AbortSignal,
+  ): Promise<"default" | "denied" | "granted"> => {
+    const result = await createTypedServiceClient(
+      "browserPermissions",
+      browserPermissionsMethods,
+      (service, method, args) =>
+        this.transport.call("main", `${service}.${method}`, args, { signal }),
+    ).request({
+      panelId,
+      sessionEpoch: this.browserSessionEpoch,
+      origin,
+      topLevelUrl,
+      capabilities: ["notifications"],
+      deviceLabel: "Vibestudio Mobile",
+    });
+    this.replaceBrowserNotificationGrants(result.grants);
+    return result.granted
+      ? "granted"
+      : result.decision === "block"
+        ? "denied"
+        : "default";
+  };
+  private replaceBrowserNotificationGrants(
+    grants: Array<{
+      origin: string;
+      capability: string;
+      decision: "allow" | "block";
+    }>,
+  ): void {
+    this.browserNotificationGrants.clear();
+    for (const grant of grants) {
+      if (grant.capability === "notifications")
+        this.browserNotificationGrants.set(
+          grant.origin,
+          grant.decision === "allow" ? "granted" : "denied",
+        );
+    }
+  }
+  readonly updateBrowserNotificationPermissions = (
+    grants: Array<{
+      origin: string;
+      capability: string;
+      decision: "allow" | "block";
+    }>,
+  ): void => this.replaceBrowserNotificationGrants(grants);
   readonly localStorageScope: string;
   private readonly expectedWorkspaceId: string | undefined;
   private readonly serverEndpointId: string;
@@ -1440,6 +1506,7 @@ export class ShellClient {
     for (;;) {
       try {
         const info = await this.connectWorkspace();
+        await this.refreshBrowserNotificationPermissions();
         await this.startPanelAssetFacade(info.config.id);
         let restored = await loadMobileShellStartupSnapshot(
           this.serverEndpointId,

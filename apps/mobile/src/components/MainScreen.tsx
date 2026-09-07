@@ -58,7 +58,9 @@ import {
   type ThemePreference,
 } from "../state/themeAtoms";
 import { inboxDeepLinkAtom } from "../state/inboxDeepLinkAtom";
-import { pushToastAtom } from "../state/toastAtoms";
+import { dismissToastAtom, pushToastAtom } from "../state/toastAtoms";
+import { presentWorkspaceNotification } from "../services/workspaceNotifications";
+import { WorkspaceWebsiteNotificationCoordinator } from "../services/workspaceWebsiteNotifications";
 import {
   activePanelIdAtom,
   activePanelTitleAtom,
@@ -246,6 +248,60 @@ export function MainScreen({
   const activePanelParentId = useAtomValue(activePanelParentIdAtom);
   const colors = useAtomValue(themeColorsAtom);
   const pushToast = useSetAtom(pushToastAtom);
+  const dismissToast = useSetAtom(dismissToastAtom);
+  const websiteNotifications = useMemo(() => {
+    if (!workspaceDirectory) return null;
+    return new WorkspaceWebsiteNotificationCoordinator(
+      (workspaceId, toast) =>
+        presentWorkspaceNotification(
+          workspaceDirectory,
+          pushToast,
+          workspaceId,
+          toast,
+        ),
+      dismissToast,
+    );
+  }, [dismissToast, pushToast, workspaceDirectory]);
+  const websiteNotificationHost = useMemo(() => {
+    if (!shellClient || !websiteNotifications || !shellClient.workspaceId)
+      return undefined;
+    const workspaceId = shellClient.workspaceId;
+    return {
+      permission: (_panelId: string, origin: string) =>
+        shellClient.browserNotificationPermission(origin),
+      requestPermission: (
+        panelId: string,
+        origin: string,
+        topLevelUrl: string,
+        signal: AbortSignal,
+      ) =>
+        shellClient.requestBrowserNotificationPermission(
+          panelId,
+          origin,
+          topLevelUrl,
+          signal,
+        ),
+      show: async (
+        _panelId: string,
+        origin: string,
+        target: number,
+        input: { title: string; options: unknown },
+      ) => {
+        await shellClient.refreshBrowserNotificationPermissions();
+        if (shellClient.browserNotificationPermission(origin) !== "granted") {
+          throw new Error("Notification permission has not been granted");
+        }
+        return websiteNotifications.show(
+          workspaceId,
+          origin,
+          target,
+          input.title,
+          input.options,
+        );
+      },
+      close: (id: string) => websiteNotifications.close(id),
+    };
+  }, [shellClient, websiteNotifications]);
   const showActionSheet = useSetAtom(showActionSheetAtom);
   const pinnedPanelIds = useAtomValue(pinnedPanelIdsAtom);
   const setPinnedPanelIds = useSetAtom(pinnedPanelIdsAtom);
@@ -328,6 +384,20 @@ export function MainScreen({
   const webViewRefsMap = useRef<Map<string, PanelWebViewHandle | null>>(
     new Map(),
   );
+  useEffect(() => {
+    if (!shellClient) return;
+    return shellClient.events.on(
+      "browser-permissions:changed",
+      ({ grants }) => {
+        shellClient.updateBrowserNotificationPermissions(grants);
+        const notifications = grants
+          .filter((grant) => grant.capability === "notifications")
+          .map((grant) => ({ origin: grant.origin, decision: grant.decision }));
+        for (const handle of webViewRefsMap.current.values())
+          handle?.updateWebsiteNotificationPermissions(notifications);
+      },
+    );
+  }, [shellClient]);
   const webViewThemeSignaturesRef = useRef<Map<string, string>>(new Map());
   const pendingPanelLoads = useRef<Set<string>>(new Set());
   const [panelMaterializationRetryEpoch, setPanelMaterializationRetryEpoch] =
@@ -424,8 +494,7 @@ export function MainScreen({
         (entry) => {
           const panel = shellClient.panels.registry.getPanel(entry.panelId);
           return !!(
-            panel &&
-            mobilePanelMaterializationState(panel, entry) === "current"
+            panel && mobilePanelMaterializationState(panel, entry) === "current"
           );
         },
         (panelId, handle) => {
@@ -2597,6 +2666,7 @@ export function MainScreen({
               entry={entry}
               browserProfile={browserProfile}
               onBrowserPermission={shellClient?.requestBrowserPermission}
+              onWebsiteNotification={websiteNotificationHost}
               visible={entry.panelId === activePanelId}
               colors={colors}
               managedBasePath={hostConfig?.basePath ?? ""}

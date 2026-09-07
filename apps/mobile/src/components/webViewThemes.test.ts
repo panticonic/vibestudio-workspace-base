@@ -20,6 +20,7 @@ function handle(): PanelWebViewHandle {
     dispatchHostEvent: jest.fn(),
     deliverEnvelope: jest.fn(),
     deliverRecovery: jest.fn(),
+    updateWebsiteNotificationPermissions: jest.fn(),
     navigate: jest.fn(),
     goBack: jest.fn(),
     goForward: jest.fn(),
@@ -35,7 +36,12 @@ describe("syncManagedWebViewThemes", () => {
     const signatures = new Map<string, string>();
 
     syncManagedWebViewThemes([entry()], handles, signatures, "dark");
-    syncManagedWebViewThemes([entry({ lastActive: 2 })], handles, signatures, "dark");
+    syncManagedWebViewThemes(
+      [entry({ lastActive: 2 })],
+      handles,
+      signatures,
+      "dark",
+    );
 
     expect(panelHandle.injectTheme).toHaveBeenCalledTimes(1);
   });
@@ -51,7 +57,7 @@ describe("syncManagedWebViewThemes", () => {
       [entry({ url: "http://127.0.0.1/next" })],
       handles,
       signatures,
-      "light"
+      "light",
     );
 
     expect(panelHandle.injectTheme).toHaveBeenCalledTimes(3);

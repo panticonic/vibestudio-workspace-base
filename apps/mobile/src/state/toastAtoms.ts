@@ -11,6 +11,7 @@ export interface ToastEntry {
   durationMs?: number;
   actionLabel?: string;
   onAction?: () => void | Promise<void>;
+  onClose?: () => void | Promise<void>;
 }
 
 export type ToastInput = Omit<ToastEntry, "id" | "createdAt"> & {
@@ -30,6 +31,7 @@ export const pushToastAtom = atom(null, (_get, set, toast: ToastInput) => {
     durationMs: toast.durationMs,
     actionLabel: toast.actionLabel,
     onAction: toast.onAction,
+    onClose: toast.onClose,
   };
   set(toastQueueAtom, (queue) => [...queue, entry]);
 });

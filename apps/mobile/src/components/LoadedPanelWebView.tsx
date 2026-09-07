@@ -1,4 +1,5 @@
 import type { BrowserPermissionRequester } from "../services/workspaceBrowserPermission";
+import type { WebsiteNotificationHost } from "../services/workspaceWebsiteNotifications";
 import { memo, useCallback } from "react";
 import { StyleSheet, View } from "react-native";
 import type { WebViewNavigation } from "react-native-webview/lib/WebViewTypes";
@@ -16,6 +17,7 @@ import type { PanelEntityId } from "@vibestudio/shared/panel/ids";
 export interface LoadedPanelWebViewProps {
   browserProfile: string;
   onBrowserPermission?: BrowserPermissionRequester;
+  onWebsiteNotification?: WebsiteNotificationHost;
   onShellSurfaceLink?: (url: string) => boolean;
   entry: WebViewEntry;
   visible: boolean;
@@ -55,6 +57,7 @@ function LoadedPanelWebViewImpl({
   entry,
   browserProfile,
   onBrowserPermission,
+  onWebsiteNotification,
   onShellSurfaceLink,
   visible,
   colors,
@@ -99,6 +102,7 @@ function LoadedPanelWebViewImpl({
           ref={handleRef}
           browserProfile={browserProfile}
           onBrowserPermission={onBrowserPermission}
+          onWebsiteNotification={onWebsiteNotification}
           onShellSurfaceLink={onShellSurfaceLink}
           panelId={entry.panelId}
           url={entry.url}

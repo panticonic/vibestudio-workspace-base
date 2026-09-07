@@ -5,7 +5,7 @@ export interface NativeBrowserPermissionRequest {
   target: number;
   origin: string;
   topLevelUrl: string;
-  capabilities: ("camera" | "microphone" | "geolocation")[];
+  capabilities: ("camera" | "microphone" | "geolocation" | "notifications")[];
 }
 export type BrowserPermissionRequester = (
   panelId: string,

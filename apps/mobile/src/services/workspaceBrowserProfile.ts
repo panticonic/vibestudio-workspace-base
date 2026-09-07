@@ -9,6 +9,7 @@ import type { NativeProps } from "react-native-webview/lib/RNCWebViewNativeCompo
 import type { HostComponent } from "react-native";
 
 import type { NativeBrowserPermissionRequest } from "./workspaceBrowserPermission";
+import type { NativeWebsiteNotificationRequest } from "./workspaceWebsiteNotifications";
 
 const COMPONENT = "VibestudioWorkspaceWebView";
 let nativeComponent: HostComponent<NativeProps> | null = null;
@@ -29,6 +30,9 @@ export function workspaceWebViewConfig(
   onWorkspacePermission?: (event: {
     nativeEvent: NativeBrowserPermissionRequest & { cancelled?: boolean };
   }) => void,
+  onWorkspaceWebsiteNotification?: (event: {
+    nativeEvent: NativeWebsiteNotificationRequest;
+  }) => void,
 ): NonNullable<WebViewProps["nativeConfig"]> {
   const native = UIManager.getViewManagerConfig(COMPONENT) as {
     Constants?: { profilesSupported?: boolean };
@@ -47,6 +51,9 @@ export function workspaceWebViewConfig(
     props: {
       workspaceProfile: scope,
       ...(onWorkspacePermission ? { onWorkspacePermission } : {}),
+      ...(onWorkspaceWebsiteNotification
+        ? { onWorkspaceWebsiteNotification }
+        : {}),
     },
   };
 }

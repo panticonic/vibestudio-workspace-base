@@ -7,6 +7,7 @@ function handle(): PanelWebViewHandle {
     dispatchHostEvent: jest.fn(),
     deliverEnvelope: jest.fn(),
     deliverRecovery: jest.fn(),
+    updateWebsiteNotificationPermissions: jest.fn(),
     navigate: jest.fn(),
     goBack: jest.fn(),
     goForward: jest.fn(),

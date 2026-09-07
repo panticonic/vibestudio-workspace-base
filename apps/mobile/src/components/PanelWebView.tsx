@@ -22,6 +22,11 @@ import {
   type BrowserPermissionRequester,
 } from "../services/workspaceBrowserPermission";
 import { workspaceWebViewConfig } from "../services/workspaceBrowserProfile";
+import {
+  createWebsiteNotificationHandler,
+  buildWorkspaceWebsiteNotificationScript,
+  type WebsiteNotificationHost,
+} from "../services/workspaceWebsiteNotifications";
 import type {
   WebViewNavigation,
   ShouldStartLoadRequest,
@@ -78,6 +83,9 @@ export interface PanelWebViewHandle {
   deliverEnvelope: (envelope: unknown) => void;
   /** Notify this document that its panel session completed recovery. */
   deliverRecovery: (kind: "resubscribe" | "cold-recover") => void;
+  updateWebsiteNotificationPermissions: (
+    grants: Array<{ origin: string; decision: "allow" | "block" }>,
+  ) => void;
   navigate: (url: string) => void;
   goBack: () => void;
   goForward: () => void;
@@ -88,6 +96,7 @@ export interface PanelWebViewHandle {
 export interface PanelWebViewProps {
   browserProfile: string;
   onBrowserPermission?: BrowserPermissionRequester;
+  onWebsiteNotification?: WebsiteNotificationHost;
   onShellSurfaceLink?: (url: string) => boolean;
   panelId: string;
   url: string;
@@ -571,6 +580,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       panelId,
       browserProfile,
       onBrowserPermission,
+      onWebsiteNotification,
       url,
       visible,
       managed,
@@ -612,10 +622,49 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       },
       [],
     );
-    const nativeConfig = useMemo(
-      () => workspaceWebViewConfig(browserProfile, onNativeBrowserPermission),
-      [browserProfile, onNativeBrowserPermission],
+    const websiteNotification = useRef<ReturnType<
+      typeof createWebsiteNotificationHandler
+    > | null>(null);
+    useLayoutEffect(() => {
+      const handler = createWebsiteNotificationHandler(
+        panelId,
+        onWebsiteNotification,
+      );
+      websiteNotification.current = handler;
+      return () => {
+        websiteNotification.current = null;
+        handler.close();
+      };
+    }, [onWebsiteNotification, panelId]);
+    const onNativeWebsiteNotification = useCallback(
+      async (
+        event: Parameters<
+          ReturnType<typeof createWebsiteNotificationHandler>["onEvent"]
+        >[0],
+      ) => {
+        await websiteNotification.current?.onEvent(event);
+      },
+      [],
     );
+    const nativeConfig = useMemo(
+      () =>
+        workspaceWebViewConfig(
+          browserProfile,
+          onNativeBrowserPermission,
+          onNativeWebsiteNotification,
+        ),
+      [browserProfile, onNativeBrowserPermission, onNativeWebsiteNotification],
+    );
+    const initialWebsiteNotificationPermission = useMemo(() => {
+      try {
+        return (
+          onWebsiteNotification?.permission(panelId, new URL(url).origin) ??
+          "default"
+        );
+      } catch {
+        return "default";
+      }
+    }, [onWebsiteNotification, panelId, url]);
     const webViewRef = useRef<WebView>(null);
     const [hasError, setHasError] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -772,6 +821,24 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
         dispatchHostEvent,
         deliverEnvelope,
         deliverRecovery,
+        updateWebsiteNotificationPermissions: (grants) => {
+          let currentOrigin: string | null = null;
+          try {
+            currentOrigin = new URL(currentUrlRef.current).origin;
+          } catch {}
+          if (!currentOrigin) return;
+          const grant = grants.find((item) => item.origin === currentOrigin);
+          const permission =
+            grant?.decision === "allow"
+              ? "granted"
+              : grant?.decision === "block"
+                ? "denied"
+                : "default";
+          const payload = JSON.stringify(JSON.stringify({ permission }));
+          webViewRef.current?.injectJavaScript(
+            `globalThis.__vibestudioWebsiteNotificationsNative?.onmessage?.({data:${payload}});true;`,
+          );
+        },
         navigate: (nextUrl: string) => {
           webViewRef.current?.injectJavaScript(
             `location.assign(${JSON.stringify(nextUrl)}); true;`,
@@ -1425,14 +1492,14 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
           onFileDownload={
             Platform.OS === "ios" ? handleFileDownload : undefined
           }
-          injectedJavaScriptBeforeContentLoaded={
+          injectedJavaScriptBeforeContentLoaded={`${buildWorkspaceWebsiteNotificationScript(initialWebsiteNotificationPermission)}\n${
             managed
               ? buildBridgeBootstrapScript(
                   panelInit,
                   diagnosticsEnabled || __DEV__,
                 )
-              : undefined
-          }
+              : ""
+          }`}
           injectedJavaScript={REFERRER_POLICY_SCRIPT}
           scalesPageToFit={false}
           textZoom={100}

@@ -28,7 +28,10 @@ export function Toast() {
     const timers = toasts.map((toast) => {
       const duration = toast.durationMs ?? DEFAULT_DURATION_MS;
       if (duration <= 0) return null;
-      return setTimeout(() => dismissToast(toast.id), duration);
+      return setTimeout(() => {
+        dismissToast(toast.id);
+        void toast.onClose?.();
+      }, duration);
     });
     return () => {
       for (const timer of timers) {
@@ -94,7 +97,10 @@ export function Toast() {
             <Pressable
               accessibilityRole="button"
               accessibilityLabel={`Dismiss notification: ${toast.title ?? toast.message}`}
-              onPress={() => dismissToast(toast.id)}
+              onPress={() => {
+                dismissToast(toast.id);
+                void toast.onClose?.();
+              }}
               style={styles.dismiss}
             >
               <X size={18} color={colors.textSecondary} />
