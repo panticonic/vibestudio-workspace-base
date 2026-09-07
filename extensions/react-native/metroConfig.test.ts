@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { createRequire } from "node:module";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { BuildProviderInput } from "@vibestudio/shared/buildProvider";
 import { writeProjectedMetroConfig } from "./metroConfig.js";
@@ -215,7 +216,10 @@ describe("React Native provider Metro projection", () => {
   });
 
   it("keeps the mobile Iroh boundary aligned with the account session owner", () => {
-    const sourcePath = path.resolve("apps/mobile");
+    const sourcePath = path.resolve(
+      path.dirname(fileURLToPath(import.meta.url)),
+      "../../apps/mobile",
+    );
     const outputPath = fs.mkdtempSync(
       path.join(os.tmpdir(), "metro-native-policy-"),
     );
