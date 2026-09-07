@@ -692,19 +692,40 @@ function deterministicTestModeModelOutcome(
   // This deterministic endpoint substitutes only for model inference,
   // independently of whichever provider a fresh profile resolves. The opening
   // turn is the prompt's executable startup contract; honor its explicit
-  // Markdown-path read so E2E still exercises the real invocation, file
-  // transport, and continuation loop.
+  // Markdown-path read and inline UI render so E2E still exercises the real
+  // invocation, file transport, renderer, and continuation loop.
   const openingTurn = systemPrompt.match(/##\s+Opening turn\b([\s\S]*?)(?=\n##\s|$)/i)?.[1];
   const requestedRead = openingTurn?.match(/\bread\s+`([^`]+)`/i)?.[1];
-  if (requestedRead && descriptor.request.activeToolNames.includes("read")) {
-    const turnOpenedAt = state.openTurn?.openedAtSeq ?? 0;
-    const readCompleted = state.entries.some(
-      (entry) =>
-        entry.kind === "tool-result" &&
-        entry.seq >= turnOpenedAt &&
-        entry.name === "read" &&
-        !entry.isError
+  const requestedInlineUi = openingTurn?.match(
+    /\brender\s+`([^`]+)`\s+with\s+`inline_ui`\s+using\s+(?:the\s+)?stable\s+ID\s+`([^`]+)`/i
+  );
+  const turnOpenedAt = state.openTurn?.openedAtSeq ?? 0;
+  const completedToolCall = (name: string, args: Record<string, string>): boolean =>
+    state.entries.some(
+      (result) =>
+        result.kind === "tool-result" &&
+        result.seq >= turnOpenedAt &&
+        result.name === name &&
+        !result.isError &&
+        state.entries.some(
+          (entry) =>
+            entry.kind === "assistant" &&
+            entry.seq >= turnOpenedAt &&
+            entry.blocks.some(
+              (block) =>
+                isRecord(block) &&
+                block["type"] === "toolCall" &&
+                block["id"] === result.invocationId &&
+                block["name"] === name &&
+                isRecord(block["arguments"]) &&
+                Object.entries(args).every(
+                  ([key, value]) => (block["arguments"] as Record<string, unknown>)[key] === value
+                )
+            )
+        )
     );
+  if (requestedRead && descriptor.request.activeToolNames.includes("read")) {
+    const readCompleted = completedToolCall("read", { path: requestedRead });
     if (!readCompleted) {
       return {
         kind: "model",
@@ -723,7 +744,30 @@ function deterministicTestModeModelOutcome(
     }
   }
 
-  const turnOpenedAt = state.openTurn?.openedAtSeq ?? 0;
+  if (
+    requestedInlineUi &&
+    descriptor.request.activeToolNames.includes("inline_ui") &&
+    (!requestedRead || completedToolCall("read", { path: requestedRead }))
+  ) {
+    const [, path, id] = requestedInlineUi;
+    if (path && id && !completedToolCall("inline_ui", { path, id })) {
+      return {
+        kind: "model",
+        blocks: [
+          {
+            type: "toolCall",
+            id: `${descriptor.messageId}:test-inline-ui`,
+            name: "inline_ui",
+            arguments: { path, id, props: {} },
+          },
+        ],
+        stopReason: "completed",
+        outcome: "tool_calls_only",
+        usage: { inputTokens: 1, outputTokens: 1 },
+      };
+    }
+  }
+
   const userEntry = [...state.entries]
     .reverse()
     .find(

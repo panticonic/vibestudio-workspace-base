@@ -1354,6 +1354,125 @@ describe("modelCallExecutor", () => {
     }
   });
 
+  it.each([
+    [
+      "skills/onboarding/SKILL.md",
+      "skills/onboarding/SetupHub.tsx",
+      "onboarding-setup-overview",
+    ],
+    [
+      "skills/example/SKILL.md",
+      "skills/example/Overview.tsx",
+      "example-overview",
+    ],
+  ])(
+    "executes the opening read before inline_ui for %s",
+    async (readPath, uiPath, uiId) => {
+      const inputDeps = deps();
+      inputDeps.env = { VIBESTUDIO_TEST_MODE: "1" };
+      inputDeps.blobstore.getText = async (digest) =>
+        digest === "sys"
+          ? `## Opening turn\nRead \`${readPath}\`, then render \`${uiPath}\` with \`inline_ui\` using the stable ID \`${uiId}\`.`
+          : "";
+      const inputDescriptor = descriptor();
+      inputDescriptor.request.activeToolNames = ["read", "inline_ui"];
+      const state = initialAgentState({ channelId: "channel-1", config });
+      const execute = () =>
+        modelCallExecutor.execute({
+          descriptor: {
+            ...inputDescriptor,
+            messageId: `msg-${state.entries.length}`,
+            request: {
+              ...inputDescriptor.request,
+              contextThroughSeq: state.entries.length,
+            },
+          },
+          state,
+          signal: new AbortController().signal,
+          deps: inputDeps,
+          onEphemeral: () => {},
+        });
+      const completeTool = async (
+        name: string,
+        args: Record<string, unknown>,
+      ) => {
+        const outcome = await execute();
+        expect(outcome).toMatchObject({
+          kind: "model",
+          blocks: [{ type: "toolCall", name, arguments: args }],
+          outcome: "tool_calls_only",
+        });
+        if (!("kind" in outcome) || outcome.kind !== "model")
+          throw new Error("Expected model inference");
+        const call = outcome.blocks[0];
+        if (
+          !call ||
+          typeof call !== "object" ||
+          !("type" in call) ||
+          call.type !== "toolCall" ||
+          !("id" in call) ||
+          typeof call.id !== "string"
+        )
+          throw new Error("Expected a real tool invocation");
+        state.entries.push({
+          kind: "assistant",
+          seq: state.entries.length + 1,
+          messageId: `assistant-${state.entries.length}`,
+          blocks: outcome.blocks,
+        });
+        state.entries.push({
+          kind: "tool-result",
+          seq: state.entries.length + 1,
+          invocationId: call.id,
+          turnId: "turn-context",
+          name,
+          result: "Tool execution completed",
+          isError: false,
+        });
+      };
+
+      // A successful unrelated read cannot satisfy the opening skill read.
+      state.entries = [
+        {
+          kind: "assistant",
+          seq: 1,
+          messageId: "unrelated",
+          blocks: [
+            {
+              type: "toolCall",
+              id: "unrelated-read",
+              name: "read",
+              arguments: { path: "README.md" },
+            },
+          ],
+        },
+        {
+          kind: "tool-result",
+          seq: 2,
+          invocationId: "unrelated-read",
+          turnId: "turn-context",
+          name: "read",
+          result: "Unrelated file",
+          isError: false,
+        },
+      ];
+      await completeTool("read", { path: readPath });
+      // Inference may request only tools actually exposed to the current turn.
+      inputDescriptor.request.activeToolNames = ["read"];
+      expect(await execute()).toMatchObject({
+        kind: "model",
+        blocks: [{ type: "text" }],
+      });
+      inputDescriptor.request.activeToolNames = ["read", "inline_ui"];
+      await completeTool("inline_ui", { path: uiPath, id: uiId, props: {} });
+      expect(await execute()).toMatchObject({
+        kind: "model",
+        blocks: [{ type: "text" }],
+      });
+      expect(mocks.stream).not.toHaveBeenCalled();
+    },
+  );
+
   it("turns a natural web request into a real web_fetch invocation in deterministic test mode", async () => {
     const inputDeps = deps();
     inputDeps.env = { VIBESTUDIO_TEST_MODE: "1" };
