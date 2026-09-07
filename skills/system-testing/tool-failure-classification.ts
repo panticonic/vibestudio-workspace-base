@@ -87,22 +87,22 @@ export function isSafeEvalDomainRejection(
 }
 
 /**
- * The eval runtime distinguishes a guest program failure from its own
- * infrastructure failing. Agentic development is expected to execute,
- * diagnose, edit, and rerun imperfect user code, so every eval failure
+ * Eval and source verification distinguish guest program failures from their
+ * own infrastructure failing. Agentic development is expected to execute,
+ * diagnose, edit, and rerun imperfect user code, so every such failure
  * explicitly typed as `user-code` remains visible in diagnostics but is not a
  * failed platform effect. The failure code is evidence for diagnosis, not a
  * second allowlist that can drift as new guest-code errors are added. Untyped
  * eval errors and every infrastructure/cancellation failure remain
  * unexpected.
  */
-export function isEvalGuestCodeFailure(
+export function isGuestCodeFailure(
   toolName: string,
   terminalReasonCode: string | undefined,
   failureKind: string | undefined
 ): boolean {
   return (
-    toolName === "eval" &&
+    (toolName === "eval" || toolName === "verify") &&
     failureKind === "user-code" &&
     terminalReasonCode !== "module_not_available"
   );
@@ -185,7 +185,7 @@ export function classifyBuiltInToolFailure(input: {
     return "domain-rejection";
   }
   if (
-    isEvalGuestCodeFailure(
+    isGuestCodeFailure(
       input.name,
       input.terminalReasonCode ?? input.failureCode,
       input.failureKind

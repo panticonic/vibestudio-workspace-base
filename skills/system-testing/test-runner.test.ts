@@ -587,6 +587,24 @@ describe("TestRunner", () => {
               isError: true,
             },
           },
+          {
+            id: "call-4",
+            name: "verify",
+            status: "error",
+            terminalReasonCode: "build_verification_failed",
+            execution: {
+              status: "error",
+              terminalOutcome: "tool_error",
+              terminalReasonCode: "build_verification_failed",
+              result: {
+                details: {
+                  failureKind: "user-code",
+                  failure: { code: "build_verification_failed" },
+                },
+              },
+              isError: true,
+            },
+          },
         ],
         debugEvents: [],
         cleanupErrors: [],
@@ -643,8 +661,27 @@ describe("TestRunner", () => {
           terminalReasonCode: "guest_execution_failed",
           failureKind: "user-code",
         }),
+        expect.objectContaining({
+          name: "verify",
+          diagnosticOnly: true,
+          classification: "guest-code-failure",
+          terminalReasonCode: "build_verification_failed",
+          failureKind: "user-code",
+        }),
       ]),
     );
+
+    const unrecoveredSuite = await tester.runSuite([
+      {
+        name: "unrecovered-source-failure",
+        category: "test",
+        description: "unrecovered source failure",
+        prompt: "trigger source failure",
+        validation: "harness" as const,
+        validate: () => ({ passed: false, reason: "Source remained broken" }),
+      },
+    ]);
+    expect(unrecoveredSuite).toMatchObject({ passed: 0, failed: 1 });
 
     const expectedSuite = await tester.runSuite([
       {

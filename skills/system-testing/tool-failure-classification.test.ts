@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  isEvalGuestCodeFailure,
+  isGuestCodeFailure,
   isPreExecutionArgumentRejection,
   isReadOnlyInputRejection,
   isSafeEvalDomainRejection,
@@ -72,12 +72,14 @@ describe("tool failure classification", () => {
     expect(isSafeEvalDomainRejection("read", "module_not_available")).toBe(false);
   });
 
-  it("separates typed guest program exceptions from eval infrastructure failures", () => {
-    expect(isEvalGuestCodeFailure("eval", "guest_execution_failed", "user-code")).toBe(true);
-    expect(isEvalGuestCodeFailure("eval", "package_export_not_found", "user-code")).toBe(true);
-    expect(isEvalGuestCodeFailure("eval", "guest_execution_failed", "infrastructure")).toBe(false);
-    expect(isEvalGuestCodeFailure("eval", "module_not_available", "user-code")).toBe(false);
-    expect(isEvalGuestCodeFailure("read", "guest_execution_failed", "user-code")).toBe(false);
+  it("separates typed guest program and build failures from infrastructure failures", () => {
+    expect(isGuestCodeFailure("eval", "guest_execution_failed", "user-code")).toBe(true);
+    expect(isGuestCodeFailure("eval", "package_export_not_found", "user-code")).toBe(true);
+    expect(isGuestCodeFailure("verify", "build_verification_failed", "user-code")).toBe(true);
+    expect(isGuestCodeFailure("verify", "build_verification_failed", "infrastructure")).toBe(false);
+    expect(isGuestCodeFailure("eval", "guest_execution_failed", "infrastructure")).toBe(false);
+    expect(isGuestCodeFailure("eval", "module_not_available", "user-code")).toBe(false);
+    expect(isGuestCodeFailure("read", "guest_execution_failed", "user-code")).toBe(false);
   });
 
   it("keeps typed ambiguous subagent inspection diagnostic-only", () => {
