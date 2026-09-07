@@ -749,6 +749,16 @@ describe("HeadlessRunner", () => {
                 decision: "once",
               },
               {
+                ruleId: "fixture-git-publication",
+                capability: { kind: "exact", key: "git.publish" },
+                resource: {
+                  kind: "prefix",
+                  prefix: "workspace-source-change:publication:",
+                },
+                tier: "gated",
+                decision: "once",
+              },
+              {
                 ruleId: "fixture-publication",
                 capability: { kind: "exact", key: "workspace-main-advance" },
                 resource: {
@@ -888,6 +898,29 @@ describe("HeadlessRunner", () => {
     );
     expect(config.extraConfig["systemPrompt"]).not.toContain("is already present");
     expect(config.extraConfig["systemPrompt"]).not.toContain("system-test-panel-store-create-");
+    expect(mocks.rpc.call).toHaveBeenNthCalledWith(
+      1,
+      "main",
+      "runtime.createContext",
+      [
+        {
+          testPolicy: expect.objectContaining({
+            authority: expect.arrayContaining([
+              {
+                ruleId: "fixture-git-publication",
+                capability: { kind: "exact", key: "git.publish" },
+                resource: {
+                  kind: "prefix",
+                  prefix: "workspace-source-change:publication:",
+                },
+                tier: "gated",
+                decision: "once",
+              },
+            ]),
+          }),
+        },
+      ],
+    );
   });
 
   it("preserves structured runner diagnostic failures without serializing stacks", async () => {

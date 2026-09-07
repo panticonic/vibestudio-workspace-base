@@ -150,6 +150,16 @@ function fixturePublicationAuthority(
   if (!fixture) return [];
   return [
     {
+      ruleId: "fixture-git-publication",
+      capability: { kind: "exact", key: "git.publish" },
+      resource: {
+        kind: "prefix" as const,
+        prefix: "workspace-source-change:publication:",
+      },
+      tier: "gated",
+      decision: "once",
+    },
+    {
       ruleId: "fixture-publication",
       capability: { kind: "exact", key: "workspace-main-advance" },
       // Main advancement authorizes one immutable, atomic publication rather
