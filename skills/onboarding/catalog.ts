@@ -93,11 +93,13 @@ export interface OnboardingSkillEntry {
   onboarding?: unknown;
 }
 
-const connectionManagement = {
-  inspect: { via: "about-page", page: "credentials" },
-  revoke: { via: "about-page", page: "credentials" },
-  grants: { via: "about-page", page: "permissions" },
-} as const satisfies Partial<Record<SetupAction, SetupActionTarget>>;
+function connectionManagement(): Partial<Record<SetupAction, SetupActionTarget>> {
+  return {
+    inspect: { via: "about-page", page: "credentials" },
+    revoke: { via: "about-page", page: "credentials" },
+    grants: { via: "about-page", page: "permissions" },
+  };
+}
 
 export const onboardingCatalog: readonly OnboardingCapabilityDefinition[] = [
   {
@@ -113,7 +115,7 @@ export const onboardingCatalog: readonly OnboardingCapabilityDefinition[] = [
       setup: { via: "model-settings" },
       repair: { via: "model-settings" },
       change: { via: "model-settings" },
-      ...connectionManagement,
+      ...connectionManagement(),
     },
     visibility: "primary",
     setup: {
@@ -136,7 +138,7 @@ export const onboardingCatalog: readonly OnboardingCapabilityDefinition[] = [
       repair: { via: "owner-skill" },
       reconnect: { via: "owner-skill" },
       check: { via: "owner-skill" },
-      ...connectionManagement,
+      ...connectionManagement(),
     },
     visibility: "primary",
     setup: {

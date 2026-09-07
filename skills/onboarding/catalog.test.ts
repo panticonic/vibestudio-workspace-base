@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { serializeScope } from "@workspace/eval";
 import {
   composeOnboardingCatalog,
   onboardingCatalog,
@@ -7,6 +8,21 @@ import {
 } from "./catalog.js";
 
 describe("onboarding catalog", () => {
+  it("is exactly recoverable when cached in the durable panel UI scope", () => {
+    const serialized = serializeScope(
+      new Map([
+        [
+          "onboardingSetupOverview",
+          { catalog: onboardingCatalog, snapshot: [] },
+        ],
+      ]),
+    );
+
+    expect(serialized.volatileKeys).toEqual([]);
+    expect(serialized.droppedPaths).toEqual([]);
+    expect(serialized.serializedKeys).toEqual(["onboardingSetupOverview"]);
+  });
+
   it("has unique stable ids and satisfies setup/action ownership invariants", () => {
     expect(validateOnboardingCatalog()).toEqual([]);
     expect(new Set(onboardingCatalog.map((entry) => entry.id)).size).toBe(onboardingCatalog.length);
