@@ -2437,6 +2437,9 @@ export function MainScreen({
         onOpenGoTo={() => openCommandSheet({ mode: "goto" })}
       />
 
+      {/* Transient results reserve space below navigation; their actions must
+          never cover the workspace/approval controls above. */}
+      <Toast />
       {currentUserNotification ? (
         <Pressable
           accessibilityLiveRegion="polite"
@@ -2631,7 +2634,6 @@ export function MainScreen({
           openLink={(href) => handleNavigateAddress(href, "child")}
         />
       ) : null}
-      <Toast />
     </View>
   );
 }

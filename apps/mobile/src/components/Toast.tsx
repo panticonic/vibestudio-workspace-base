@@ -1,5 +1,4 @@
 import { useEffect } from "react";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useAtomValue, useSetAtom } from "jotai";
 import {
@@ -24,7 +23,6 @@ export function Toast() {
   const toasts = useAtomValue(toastQueueAtom);
   const dismissToast = useSetAtom(dismissToastAtom);
   const colors = useAtomValue(themeColorsAtom);
-  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     const timers = toasts.map((toast) => {
@@ -42,10 +40,7 @@ export function Toast() {
   if (toasts.length === 0) return null;
 
   return (
-    <View
-      pointerEvents="box-none"
-      style={[styles.viewport, { top: insets.top + spacing.md }]}
-    >
+    <View style={styles.viewport}>
       {toasts.slice(-3).map((toast) => {
         const tone = toast.tone ?? "info";
         const Icon = toneIcon(tone);
@@ -67,11 +62,17 @@ export function Toast() {
             <Icon size={18} color={toneColor} />
             <View style={styles.copy}>
               {toast.title ? (
-                <Text style={[type.bodyStrong, { color: colors.text }]}>
+                <Text
+                  style={[type.bodyStrong, { color: colors.text }]}
+                  numberOfLines={1}
+                >
                   {toast.title}
                 </Text>
               ) : null}
-              <Text style={[type.caption, { color: colors.textSecondary }]}>
+              <Text
+                style={[type.caption, { color: colors.textSecondary }]}
+                numberOfLines={2}
+              >
                 {toast.message}
               </Text>
             </View>
@@ -124,10 +125,9 @@ function toneToColor(
 
 const styles = StyleSheet.create({
   viewport: {
-    left: spacing.md,
-    position: "absolute",
-    right: spacing.md,
-    zIndex: 50,
+    flexShrink: 0,
+    marginHorizontal: spacing.md,
+    marginTop: spacing.sm,
   },
   toast: {
     alignItems: "flex-start",
