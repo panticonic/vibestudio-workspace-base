@@ -574,6 +574,20 @@ function hostAuthorityOf(url: string): string | null {
   return match?.[1]?.toLowerCase() ?? null;
 }
 
+function panelDocumentIncarnationKey(panelId: string, panelInit: unknown): string {
+  if (!panelInit || typeof panelInit !== "object" || Array.isArray(panelInit))
+    return panelId;
+  const init = panelInit as Record<string, unknown>;
+  const entityId = init["entityId"];
+  const connectionId = init["connectionId"];
+  return typeof entityId === "string" &&
+    entityId.length > 0 &&
+    typeof connectionId === "string" &&
+    connectionId.length > 0
+    ? `${panelId}\u0000${entityId}\u0000${connectionId}`
+    : panelId;
+}
+
 const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
   function PanelWebView(
     {
@@ -692,6 +706,26 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
     // Bounded: an overflow trims the oldest with a warning rather than growing.
     const bridgeReadyRef = useRef(false);
     const pendingEnvelopesRef = useRef<unknown[]>([]);
+    const documentIncarnationKey = panelDocumentIncarnationKey(
+      panelId,
+      panelInit,
+    );
+    const documentOwner = useMemo(
+      () => ({ incarnation: documentIncarnationKey, url }),
+      [documentIncarnationKey, url],
+    );
+    const currentDocumentOwnerRef = useRef<typeof documentOwner | null>(null);
+    useLayoutEffect(() => {
+      currentDocumentOwnerRef.current = documentOwner;
+      return () => {
+        if (currentDocumentOwnerRef.current === documentOwner)
+          currentDocumentOwnerRef.current = null;
+      };
+    }, [documentOwner]);
+    const ownsCurrentDocument = useCallback(
+      () => currentDocumentOwnerRef.current === documentOwner,
+      [documentOwner],
+    );
     const loadStartedAtRef = useRef<number>(Date.now());
     const lastLoadProgressAtRef = useRef<number>(Date.now());
     const lastLoadProgressRef = useRef(0);
@@ -869,7 +903,11 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       };
     }, [panelId]);
 
-    useEffect(() => {
+    useLayoutEffect(() => {
+      pendingEnvelopesRef.current = [];
+    }, [documentIncarnationKey]);
+
+    useLayoutEffect(() => {
       currentUrlRef.current = url;
       loadStartedAtRef.current = Date.now();
       lastLoadProgressAtRef.current = Date.now();
@@ -879,7 +917,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
       setHasError(false);
       setIsLoading(true);
       setErrorMessage("");
-    }, [url]);
+    }, [documentIncarnationKey, url]);
 
     useEffect(() => {
       if (!managed || !visible || !isLoading || hasError) return;
@@ -1161,10 +1199,12 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
               message.method,
               message.args ?? [],
             );
+            if (!ownsCurrentDocument()) return;
             webViewRef.current?.injectJavaScript(
               `window.__vibestudioMobileHost&&window.__vibestudioMobileHost.resolvePending(${JSON.stringify(message.id)}, true, ${serializeForInjection(result)}); true;`,
             );
           } catch (error) {
+            if (!ownsCurrentDocument()) return;
             const errorMessage =
               error instanceof Error ? error.message : String(error);
             webViewRef.current?.injectJavaScript(
@@ -1183,6 +1223,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
         onBootObservation,
         onBridgeCall,
         onTitleChange,
+        ownsCurrentDocument,
         panelId,
       ],
     );
@@ -1481,23 +1522,45 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
           ref={webViewRef}
           nativeConfig={nativeConfig}
           geolocationEnabled
-          key={panelId}
+          key={documentIncarnationKey}
           source={{ uri: url }}
           style={styles.webView}
           userAgent={VIBESTUDIO_USER_AGENT}
           cacheEnabled
           cacheMode="LOAD_DEFAULT"
-          onShouldStartLoadWithRequest={handleShouldStartLoad}
-          onNavigationStateChange={handleNavigationStateChange}
-          onMessage={handleMessage}
-          onLoadStart={handleLoadStart}
-          onLoadProgress={handleLoadProgress}
-          onError={handleError}
-          onHttpError={handleHttpError}
-          onLoadEnd={handleLoadEnd}
-          onRenderProcessGone={handleRenderProcessGone}
+          onShouldStartLoadWithRequest={(event) =>
+            ownsCurrentDocument() && handleShouldStartLoad(event)
+          }
+          onNavigationStateChange={(event) => {
+            if (ownsCurrentDocument()) handleNavigationStateChange(event);
+          }}
+          onMessage={(event) => {
+            if (ownsCurrentDocument()) void handleMessage(event);
+          }}
+          onLoadStart={(event) => {
+            if (ownsCurrentDocument()) handleLoadStart(event);
+          }}
+          onLoadProgress={(event) => {
+            if (ownsCurrentDocument()) handleLoadProgress(event);
+          }}
+          onError={(event) => {
+            if (ownsCurrentDocument()) handleError(event);
+          }}
+          onHttpError={(event) => {
+            if (ownsCurrentDocument()) handleHttpError(event);
+          }}
+          onLoadEnd={() => {
+            if (ownsCurrentDocument()) handleLoadEnd();
+          }}
+          onRenderProcessGone={(event) => {
+            if (ownsCurrentDocument()) handleRenderProcessGone(event);
+          }}
           onFileDownload={
-            Platform.OS === "ios" ? handleFileDownload : undefined
+            Platform.OS === "ios"
+              ? (event) => {
+                  if (ownsCurrentDocument()) handleFileDownload(event);
+                }
+              : undefined
           }
           injectedJavaScriptBeforeContentLoaded={`${buildWorkspaceWebsiteNotificationScript(initialWebsiteNotificationOrigin, initialWebsiteNotificationPermission)}\n${
             managed
