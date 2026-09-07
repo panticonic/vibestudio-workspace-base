@@ -1,5 +1,6 @@
 import { useShellWorkspaceClient } from "../workspaceContext";
 import { useEffect, useMemo, useState } from "react";
+import { isRpcConnectionLost } from "@vibestudio/rpc";
 import { type ShellAccountProfile } from "../client.js";
 
 const PROFILE_REFRESH_INTERVAL_MS = 30_000;
@@ -84,7 +85,8 @@ export function useAccountProfiles(
       } catch (error) {
         // Preserve the last successful identity projection during transient
         // reconnects; owner labels should not flap back to opaque ids.
-        console.warn("[useAccountProfiles] profile refresh failed:", error);
+        if (!isRpcConnectionLost(error))
+          console.warn("[useAccountProfiles] profile refresh failed:", error);
       }
     };
     void refresh();

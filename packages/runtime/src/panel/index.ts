@@ -8,6 +8,7 @@ import { createHostedRuntime, type RuntimeHost } from "../shared/hostedRuntime.j
 // --- Portable authoring helpers (z, defineContract, Rpc, path/context helpers,
 // buildPanelLink, createGatewayFetch) — identical on panel · worker · eval. ---
 export * from "../shared/portable.js";
+export { isRpcConnectionLost } from "@vibestudio/rpc";
 export { FORM_FILL_TYPES } from "@vibestudio/browser-data/form-fill-types";
 export type { FormFillType } from "@vibestudio/browser-data/form-fill-types";
 
