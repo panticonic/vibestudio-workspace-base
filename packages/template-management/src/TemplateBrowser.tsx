@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  pendingReviewNotice,
-  isReviewPending,
+  pendingAuthorityNotice,
+  isAuthorityPending,
 } from "@vibestudio/shared/authority/reviewPending";
 import {
   Badge,
@@ -197,8 +197,8 @@ export function TemplateBrowser({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
-  const review = pendingReviewNotice(error);
-  const awaitingReview = isReviewPending(error);
+  const review = pendingAuthorityNotice(error);
+  const awaitingReview = isAuthorityPending(error);
   const [query, setQuery] = useState("");
   const [url, setUrl] = useState("");
   const [credential, setCredential] = useState("");
@@ -293,7 +293,7 @@ export function TemplateBrowser({
             <Flex direction="column" gap="2">
               {review && onReviewPending ? (
                 <Button onClick={() => onReviewPending(review.approvalId)}>
-                  Open review
+                  {review.kind === "acquisition" ? "Open approval" : "Open review"}
                 </Button>
               ) : (
                 <Text size="2">

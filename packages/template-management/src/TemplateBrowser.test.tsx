@@ -177,3 +177,41 @@ it("presents the exact pending review and retries only when requested", async ()
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   await waitFor(() => expect(client.catalog).toHaveBeenCalledTimes(2));
 });
+
+it("presents a queued runtime acquisition instead of its wrapped error", async () => {
+  const failure = Object.assign(new Error("Extension templates.catalog invocation failed"), {
+    code: "EACQUIRE",
+    errorKind: "access",
+    errorData: {
+      acquisition: {
+        acquisitionId: "acq-templates-network",
+        ownerRuntimeId: "panel-system",
+        snapshotDigest: "snapshot",
+        capability: "network.response.read",
+        resourceKey: "https://github.com",
+        tier: "gated",
+        cardType: "permission.gated",
+        renderedAction: "read responses from github.com",
+        pending: true,
+      },
+      authorityFailure: { reasonCode: "approval-required" },
+    },
+  });
+  const client = {
+    catalog: vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(null),
+    inspect: vi.fn(),
+  };
+  const onReviewPending = vi.fn();
+  render(
+    <Theme>
+      <TemplateBrowser client={client} onReviewPending={onReviewPending} />
+    </Theme>,
+  );
+  await screen.findByText("Your approval is needed to read responses from github.com.");
+  expect(screen.queryByText("Extension templates.catalog invocation failed")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open approval" }));
+  expect(onReviewPending).toHaveBeenCalledWith("acq-templates-network");
+  expect(client.catalog).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  await waitFor(() => expect(client.catalog).toHaveBeenCalledTimes(2));
+});

@@ -17,9 +17,14 @@ const clients = vi.hoisted(() => ({
     routeWorkspace: vi.fn(),
   },
 }));
+const approvalPresentation = vi.hoisted(() => ({ request: vi.fn() }));
 vi.mock("./SourceCopySection", () => ({ SourceCopySection: () => null }));
 vi.mock("../shell/workspaceContext", () => ({
   useShellWorkspaceClient: () => clients,
+}));
+vi.mock("../shell/client", () => ({ systemWorkspaceId: Promise.resolve("system-id") }));
+vi.mock("./ApprovalPresentationContext", () => ({
+  useApprovalPresentation: () => approvalPresentation,
 }));
 const pin = {
   url: "git+https://example.test/garden.git",
@@ -95,4 +100,33 @@ it("reviews a source, creates its exact snapshot and retries opening without dup
   );
   expect(clients.hubControl.createWorkspace).toHaveBeenCalledTimes(1);
   expect(store.get(settingsDialogAtom)).toBeNull();
+});
+
+it("opens the shared approval presenter for a catalog acquisition", async () => {
+  clients.templates.catalog.mockRejectedValueOnce(
+    Object.assign(new Error("wrapped extension failure"), {
+      code: "EACQUIRE",
+      errorData: {
+        acquisition: {
+          acquisitionId: "acq-catalog-network",
+          renderedAction: "read responses from github.com",
+          pending: true,
+        },
+      },
+    }),
+  );
+  render(
+    <Provider store={createStore()}>
+      <Theme>
+        <TemplatesSection />
+      </Theme>
+    </Provider>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Open approval" }));
+  await waitFor(() =>
+    expect(approvalPresentation.request).toHaveBeenCalledWith(
+      "system-id",
+      "acq-catalog-network",
+    ),
+  );
 });

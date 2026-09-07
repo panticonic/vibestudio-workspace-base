@@ -5,6 +5,8 @@ import { TemplateBrowser } from "@workspace/template-management/react";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { settingsDialogAtom } from "../state/appModeAtoms";
 import { SourceCopySection } from "./SourceCopySection";
+import { systemWorkspaceId } from "../shell/client";
+import { useApprovalPresentation } from "./ApprovalPresentationContext";
 
 export function TemplatesSection(
   props: { showHeading?: boolean; initialWorkspaceId?: string } = {},
@@ -27,6 +29,7 @@ export function TemplatesSection(
 
 function TemplateCreationSection() {
   const { templates, hubControl } = useShellWorkspaceClient();
+  const approvalPresentation = useApprovalPresentation();
   const closeSettings = useSetAtom(settingsDialogAtom);
   const [created, setCreated] = useState<{
     workspaceId: string;
@@ -60,6 +63,11 @@ function TemplateCreationSection() {
   return (
     <TemplateBrowser
       client={templates}
+      onReviewPending={(approvalId) => {
+        void systemWorkspaceId.then((ownerId) => {
+          approvalPresentation.request(ownerId, approvalId);
+        });
+      }}
       onCreate={async (name, pin) => {
         const entry = await hubControl.createWorkspace({
           workspace: name,
