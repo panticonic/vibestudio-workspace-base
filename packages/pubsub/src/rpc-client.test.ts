@@ -19,6 +19,7 @@ import {
   invocationCompletedPayload,
   invocationFailedPayload,
 } from "@workspace/agentic-protocol";
+import { RpcBoundaryError } from "@vibestudio/rpc";
 import { createRecoveryCoordinator } from "@vibestudio/shell-core/recoveryCoordinator";
 import { encodeEventWatchRecord } from "@vibestudio/shared/events";
 import { ledgerTest } from "../../../tests/helpers/ledgerTest.js";
@@ -287,6 +288,12 @@ function createMockRpc() {
     controller?.close();
   }
 
+  function failSubscription(error: unknown): void {
+    const controller = streamController;
+    streamController = null;
+    controller?.error(error);
+  }
+
   return {
     rpc,
     emit,
@@ -295,6 +302,7 @@ function createMockRpc() {
     streamSignals,
     priorSignalStatesAtOpen,
     closeSubscription,
+    failSubscription,
   };
 }
 
@@ -2315,6 +2323,35 @@ describe("connectViaRpc", () => {
 
       await vi.waitFor(() => expect(mock.rpc.stream).toHaveBeenCalledTimes(2));
       expect(mock.priorSignalStatesAtOpen[1]).toEqual([false]);
+      await client.close();
+    });
+
+    it("waits for host recovery after typed transport loss, then replaces once", async () => {
+      const coordinator = createRecoveryCoordinator();
+      const mock = createMockRpc();
+      const client = connectViaRpc({
+        rpc: mock.rpc as any,
+        channel: CHANNEL,
+        recoveryCoordinator: coordinator,
+      });
+
+      await emitReplayAndReady(mock.emit, []);
+      await client.ready();
+      mock.failSubscription(
+        new RpcBoundaryError(
+          "Workspace server is temporarily unavailable",
+          "transport",
+          "CONNECTION_LOST",
+        ),
+      );
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mock.rpc.stream).toHaveBeenCalledTimes(1);
+
+      await coordinator.run("resubscribe");
+      expect(mock.rpc.stream).toHaveBeenCalledTimes(2);
+      await Promise.resolve();
+      expect(mock.rpc.stream).toHaveBeenCalledTimes(2);
       await client.close();
     });
 
