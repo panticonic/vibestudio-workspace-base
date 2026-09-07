@@ -213,4 +213,75 @@ describe("React Native provider Metro projection", () => {
       "android",
     );
   });
+
+  it("keeps the mobile Iroh boundary aligned with the account session owner", () => {
+    const sourcePath = path.resolve("apps/mobile");
+    const outputPath = fs.mkdtempSync(
+      path.join(os.tmpdir(), "metro-native-policy-"),
+    );
+    temporaryRoots.push(outputPath);
+    const configPath = writeProjectedMetroConfig(
+      {
+        target: "react-native",
+        unitName: "@workspace-apps/mobile",
+        sourcePath,
+        dependencyProjection: {
+          nodeModulesPath: path.resolve("node_modules"),
+          modules: {
+            "@workspace-apps/mobile": sourcePath,
+            "@vibestudio/mobile-iroh": path.resolve("packages/mobile-iroh"),
+          },
+        },
+        effectiveVersion: "ev-test",
+        manifest: {
+          app: {
+            target: "react-native",
+            renderer: "App.tsx",
+            nativeModulePolicy: "native-module-policy.json",
+          },
+        },
+      },
+      outputPath,
+    );
+    const config = require(configPath) as {
+      resolver: {
+        resolveRequest(
+          context: {
+            originModulePath: string;
+            resolveRequest: (...args: unknown[]) => unknown;
+          },
+          moduleName: string,
+          platform: string,
+        ): unknown;
+      };
+    };
+    const resolveRequest = vi.fn((_context, target) => target);
+
+    expect(
+      config.resolver.resolveRequest(
+        {
+          originModulePath: path.join(
+            sourcePath,
+            "src/services/workspaceDirectory.ts",
+          ),
+          resolveRequest,
+        },
+        "@vibestudio/mobile-iroh",
+        "android",
+      ),
+    ).toBe("@vibestudio/mobile-iroh");
+    expect(() =>
+      config.resolver.resolveRequest(
+        {
+          originModulePath: path.join(
+            sourcePath,
+            "src/services/workspaceSelection.ts",
+          ),
+          resolveRequest,
+        },
+        "@vibestudio/mobile-iroh",
+        "android",
+      ),
+    ).toThrow('Direct import of native module "@vibestudio/mobile-iroh"');
+  });
 });

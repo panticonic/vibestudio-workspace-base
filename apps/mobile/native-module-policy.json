@@ -17,7 +17,7 @@
     "@vibestudio/mobile-iroh": [
       "src/services/mobileTransport.ts",
       "src/services/mobileCredentials.ts",
-      "src/services/workspaceSelection.ts",
+      "src/services/workspaceDirectory.ts",
       "src/services/appBootstrap.ts"
     ]
   }
