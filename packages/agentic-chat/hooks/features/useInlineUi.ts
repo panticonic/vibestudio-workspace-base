@@ -158,7 +158,7 @@ export function useInlineUi({
             cacheKey: result.cacheKey!,
             runtime: result.runtime,
           });
-        } else {
+        } else if (!isRpcConnectionLost(result)) {
           compiledSourcesRef.current.delete(data.id);
           console.error(
             `[InlineUiMessage] Component "${data.id}" compilation failed` +
