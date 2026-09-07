@@ -1,3 +1,4 @@
+import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createStore,
@@ -136,6 +137,7 @@ export function WorkspaceDesktop() {
   const refresh = useCallback(
     async (focusWorkspaceId?: string) => {
       const generation = epoch.current;
+      const focusAtStart = focusGeneration.current;
       try {
         const pair = await hubControl.ensureUserWorkspaces();
         const sourceId = await systemWorkspaceId;
@@ -166,7 +168,13 @@ export function WorkspaceDesktop() {
           );
           if (target) await open(target);
         }
-        if (generation !== epoch.current) return;
+        // Initial loading must not replace a workspace explicitly selected while
+        // its private owners were opening.
+        if (
+          generation !== epoch.current ||
+          focusAtStart !== focusGeneration.current
+        )
+          return;
         if (!owners.current.has(focusedRef.current ?? ""))
           await hubControl.routeWorkspace({
             workspaceId:
@@ -174,6 +182,11 @@ export function WorkspaceDesktop() {
                 ? focusWorkspaceId
                 : pair.personal.workspaceId,
           });
+        if (
+          generation !== epoch.current ||
+          focusAtStart !== focusGeneration.current
+        )
+          return;
         setFocusedId((current) =>
           focusWorkspaceId && visible.has(focusWorkspaceId)
             ? focusWorkspaceId
@@ -397,59 +410,63 @@ export function WorkspaceDesktop() {
               key={owner.workspace.workspaceId}
               store={owner.store}
             >
-              <ShellWorkspaceClientContext.Provider value={owner.client}>
-                <WorkspaceVisibilityContext.Provider
-                  value={owner.workspace.workspaceId === focusedId}
-                >
-                  <WorkspaceNavigationHostContext.Provider
-                    value={{
-                      element:
-                        treeHosts.get(owner.workspace.workspaceId) ?? null,
-                      workspaceId: owner.workspace.workspaceId,
-                      workspaceLabel: workspaceLabel(owner.workspace),
-                      workspaceNames: Object.fromEntries(
-                        catalog.map((entry) => [
-                          entry.workspaceId,
-                          workspaceLabel(entry),
-                        ]),
-                      ),
-                      reviewRequest:
-                        reviewRequests.get(owner.workspace.workspaceId) ?? 0,
-                      sidebarVisible,
-                      toggleSidebar: () =>
-                        setSidebarVisible((visible) => !visible),
-                      focus: () => {
-                        void select(owner.workspace.workspaceId);
-                      },
-                    }}
+              <WorkspaceIconsContext.Provider value={owner.client.unitIcons}>
+                <ShellWorkspaceClientContext.Provider value={owner.client}>
+                  <WorkspaceVisibilityContext.Provider
+                    value={owner.workspace.workspaceId === focusedId}
                   >
-                    <WorkspacePanelOwner
-                      owner={owner}
-                      visible={owner.workspace.workspaceId === focusedId}
-                      onConnection={(connected) =>
-                        setDisconnected((current) => {
-                          const id = owner.workspace.workspaceId;
-                          if (current.has(id) === !connected) return current;
-                          const next = new Set(current);
-                          if (connected) next.delete(id);
-                          else next.add(id);
-                          return next;
-                        })
-                      }
-                      onApprovals={(count) =>
-                        setApprovals((values) => {
-                          if (values.get(owner.workspace.workspaceId) === count)
-                            return values;
-                          return new Map(values).set(
-                            owner.workspace.workspaceId,
-                            count,
-                          );
-                        })
-                      }
-                    />
-                  </WorkspaceNavigationHostContext.Provider>
-                </WorkspaceVisibilityContext.Provider>
-              </ShellWorkspaceClientContext.Provider>
+                    <WorkspaceNavigationHostContext.Provider
+                      value={{
+                        element:
+                          treeHosts.get(owner.workspace.workspaceId) ?? null,
+                        workspaceId: owner.workspace.workspaceId,
+                        workspaceLabel: workspaceLabel(owner.workspace),
+                        workspaceNames: Object.fromEntries(
+                          catalog.map((entry) => [
+                            entry.workspaceId,
+                            workspaceLabel(entry),
+                          ]),
+                        ),
+                        reviewRequest:
+                          reviewRequests.get(owner.workspace.workspaceId) ?? 0,
+                        sidebarVisible,
+                        toggleSidebar: () =>
+                          setSidebarVisible((visible) => !visible),
+                        focus: () => {
+                          void select(owner.workspace.workspaceId);
+                        },
+                      }}
+                    >
+                      <WorkspacePanelOwner
+                        owner={owner}
+                        visible={owner.workspace.workspaceId === focusedId}
+                        onConnection={(connected) =>
+                          setDisconnected((current) => {
+                            const id = owner.workspace.workspaceId;
+                            if (current.has(id) === !connected) return current;
+                            const next = new Set(current);
+                            if (connected) next.delete(id);
+                            else next.add(id);
+                            return next;
+                          })
+                        }
+                        onApprovals={(count) =>
+                          setApprovals((values) => {
+                            if (
+                              values.get(owner.workspace.workspaceId) === count
+                            )
+                              return values;
+                            return new Map(values).set(
+                              owner.workspace.workspaceId,
+                              count,
+                            );
+                          })
+                        }
+                      />
+                    </WorkspaceNavigationHostContext.Provider>
+                  </WorkspaceVisibilityContext.Provider>
+                </ShellWorkspaceClientContext.Provider>
+              </WorkspaceIconsContext.Provider>
             </StoreProvider>
           ))}
         </main>

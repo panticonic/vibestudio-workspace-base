@@ -1,3 +1,4 @@
+import { createWorkspaceIcons } from "./workspaceIcons";
 import type { NativePanelPresentation } from "./nativePanelPresentation";
 /**
  * Shell Client - Typed wrappers for shell service calls via RPC.
@@ -1400,6 +1401,7 @@ export function createShellWorkspaceClient(
     });
   }
   return {
+    unitIcons: createWorkspaceIcons(rpc),
     hostLaunch,
     app,
     panel,

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, within, waitFor } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type {
@@ -18,6 +18,14 @@ import { installRowHeadline } from "@vibestudio/shared/authority/unitInstallRevi
 import { ApprovalCard } from "./ApprovalCard";
 import { resolveCallerInfo, type ApprovalCardIntent } from "./approvalCardModel";
 import { ApprovalCardSurface } from "../overlay/ApprovalCardSurface";
+
+const icons = vi.hoisted(() => ({
+  load: async (source: string) => `blob:workspace-icon/${source}`
+}));
+vi.mock("../shell/workspaceIconsContext", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../shell/workspaceIconsContext")>()),
+  useWorkspaceIcons: () => icons
+}));
 
 function capabilityApproval(
   partial: Partial<PendingCapabilityApproval> & {
@@ -657,7 +665,7 @@ describe("ApprovalCard", () => {
     });
   });
 
-  it("describes extension credential access without unknown-requester sentence fragments", () => {
+  it("describes extension credential access without unknown-requester sentence fragments", async () => {
     const credential: PendingCredentialApproval = {
       ...capabilityApproval({
         approvalId: "github-user",
@@ -702,8 +710,10 @@ describe("ApprovalCard", () => {
 
     renderCard(credential);
 
-    expect(document.querySelector(".approval-caller-chip img")?.getAttribute("src")).toBe(
-      "../../__vibestudio/unit-icon?source=extensions%2Fgit-bridge&path=assets%2Ficon.svg"
+    await waitFor(() =>
+      expect(document.querySelector(".approval-caller-chip img")?.getAttribute("src")).toBe(
+        "blob:workspace-icon/extensions/git-bridge"
+      )
     );
     expect(screen.getByText("extension")).toBeTruthy();
     expect(screen.getByText("as")).toBeTruthy();
@@ -793,7 +803,7 @@ describe("ApprovalCard", () => {
     ["install", "app", "apps/desktop"],
     ["install", "extension", "extensions/browser"],
     ["part-changed", "worker", "workers/agent"]
-  ] as const)("keeps a custom icon in %s reviews for %s units", (mode, kind, repoPath) => {
+  ] as const)("keeps a custom icon in %s reviews for %s units", async (mode, kind, repoPath) => {
     renderCard(
       installReviewApproval({
         approvalId: `${mode}-${kind}-icon`,
@@ -817,8 +827,10 @@ describe("ApprovalCard", () => {
       })
     );
 
-    expect(document.querySelector(".install-review-part-icon img")?.getAttribute("src")).toBe(
-      `../../__vibestudio/unit-icon?source=${encodeURIComponent(repoPath)}&path=assets%2Ficon.svg`
+    await waitFor(() =>
+      expect(document.querySelector(".install-review-part-icon img")?.getAttribute("src")).toBe(
+        `blob:workspace-icon/${repoPath}`
+      )
     );
   });
 

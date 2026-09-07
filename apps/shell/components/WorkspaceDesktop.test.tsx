@@ -67,7 +67,7 @@ const api = vi.hoisted(() => {
   };
 });
 vi.mock("../shell/client", () => ({
-  app: { getInfo: async () => ({}) },
+  app: { getInfo: async () => ({ initialFocusedWorkspaceId: "personal" }) },
   createWorkspaceShellClient: api.open,
   systemWorkspaceId: Promise.resolve("system"),
   hubControl: {
@@ -105,6 +105,38 @@ vi.mock("./ConnectionStatusBadge", () => ({
   ConnectionStatusBadge: () => null,
 }));
 describe("desktop workspace ownership", () => {
+  it("preserves explicit System focus when slower initial Personal loading finishes", async () => {
+    const createOwner = api.open.getMockImplementation()!;
+    let finishPersonal!: () => void;
+    const personalOpening = new Promise<void>((resolve) => {
+      finishPersonal = resolve;
+    });
+    api.open.mockImplementation(async (id) => {
+      const owner = await createOwner(id);
+      if (id === "personal") await personalOpening;
+      return owner;
+    });
+    api.route.mockClear();
+    const result = render(<WorkspaceDesktop />);
+    try {
+      const system = await screen.findByLabelText("system draft");
+      fireEvent.click(screen.getByRole("button", { name: "Open System" }));
+      await waitFor(() =>
+        expect(system.getAttribute("data-visible")).toBe("true"),
+      );
+      await act(async () => {
+        finishPersonal();
+      });
+      await screen.findByLabelText("personal draft");
+      expect(system.getAttribute("data-visible")).toBe("true");
+      expect(api.route.mock.calls).toEqual([[{ workspaceId: "system" }]]);
+    } finally {
+      finishPersonal();
+      result.unmount();
+      api.open.mockImplementation(createOwner);
+    }
+  });
+
   it("keeps independent retained drafts and captures New in the chosen workspace", async () => {
     const result = render(<WorkspaceDesktop />);
     const personal = await screen.findByLabelText("personal draft");

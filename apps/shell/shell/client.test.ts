@@ -5,6 +5,7 @@ vi.mock("./workspaceClient", () => ({
   createShellWorkspaceClient: (rpc: RpcClient) => {
     state.clients.push(rpc);
     return {
+      unitIcons: { close: vi.fn() },
       workspace: {
         getActive: async () => "workspace",
         getConfig: async () => ({}),

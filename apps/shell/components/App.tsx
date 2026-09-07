@@ -1,3 +1,4 @@
+import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useEffect, useCallback } from "react";
 import { useSetAtom } from "jotai";
@@ -24,7 +25,14 @@ import MainMode from "./MainMode";
  * Root App component that renders the main panel app.
  */
 export function App() {
-  const { app, incomingShellSurface, notification, shellNetwork, connectNativePanelAdapter } = useShellWorkspaceClient();
+  const {
+    unitIcons,
+    app,
+    incomingShellSurface,
+    notification,
+    shellNetwork,
+    connectNativePanelAdapter,
+  } = useShellWorkspaceClient();
 
   const effectiveTheme = useAtomValue(effectiveThemeAtom);
   const themeMode = useAtomValue(themeModeAtom);
@@ -100,9 +108,11 @@ export function App() {
       {...themeConfig}
       className="app-shell-theme"
     >
-      <ChunkErrorBoundary>
-        <MainMode />
-      </ChunkErrorBoundary>
+      <WorkspaceIconsContext.Provider value={unitIcons}>
+        <ChunkErrorBoundary>
+          <MainMode />
+        </ChunkErrorBoundary>
+      </WorkspaceIconsContext.Provider>
     </Theme>
   );
 }

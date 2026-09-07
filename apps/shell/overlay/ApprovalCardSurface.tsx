@@ -10,19 +10,22 @@
  * pushes the result back down in `blobResults`. This is the `DiffContentFetcher`
  * the shared `DiffViewer` consumes.
  */
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
+import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
 import type { DiffContentFetcher, DiffReviewEntry } from "@workspace/ui/diff";
 import { ApprovalCard } from "../components/ApprovalCard";
 import {
   resolveCallerInfo,
   type ApprovalQueueInfo,
-  type BlobResult,
+  type BlobResult
 } from "../components/approvalCardModel";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import type { OverlaySurfaceComponentProps } from "./types";
 
 export interface ApprovalCardSurfaceProps {
   workspaceLabel?: string;
+  /** Exact caller icon resources already fetched by the owning chrome client. */
+  iconUrls?: Record<string, string>;
   approval: PendingApproval;
   queue: ApprovalQueueInfo | null;
   decisionError: string | null;
@@ -49,10 +52,14 @@ export function ApprovalCardSurface({ props, emitIntent }: OverlaySurfaceCompone
   return <ApprovalCardSurfaceInner {...props} emitIntent={emitIntent} />;
 }
 
-type Waiter = { resolve: (value: string) => void; reject: (reason: Error) => void };
+type Waiter = {
+  resolve: (value: string) => void;
+  reject: (reason: Error) => void;
+};
 
 function ApprovalCardSurfaceInner({
   workspaceLabel,
+  iconUrls,
   approval,
   queue,
   decisionError,
@@ -60,8 +67,18 @@ function ApprovalCardSurfaceInner({
   diffReview,
   blobResults,
   appearance,
-  emitIntent,
+  emitIntent
 }: ApprovalCardSurfaceProps & { emitIntent: (payload: unknown) => void }) {
+  const icons = useMemo(
+    () => ({
+      load: async (source: string, icon: string, version?: string, state?: string) => {
+        const value = iconUrls?.[JSON.stringify([source, icon, version, state])];
+        if (!value) throw new Error("Approval icon is unavailable");
+        return value;
+      }
+    }),
+    [iconUrls]
+  );
   const caller = resolveCallerInfo(approval);
   const approvalId = approval.approvalId;
 
@@ -99,26 +116,28 @@ function ApprovalCardSurfaceInner({
           type: "fetch-blob",
           hash,
           approvalId,
-          ...(existing ? { refresh: true } : {}),
+          ...(existing ? { refresh: true } : {})
         });
       }),
     [approvalId]
   );
 
   return (
-    <ApprovalCard
-      key={approvalId}
-      workspaceLabel={workspaceLabel}
-      approval={approval}
-      caller={caller}
-      queue={queue}
-      decisionError={decisionError}
-      actionPending={actionPending ?? false}
-      diffReview={diffReview ?? null}
-      fetchContent={fetchContent}
-      appearance={appearance ?? "light"}
-      emit={(intent) => emitIntent(intent)}
-    />
+    <WorkspaceIconsContext.Provider value={icons}>
+      <ApprovalCard
+        key={approvalId}
+        workspaceLabel={workspaceLabel}
+        approval={approval}
+        caller={caller}
+        queue={queue}
+        decisionError={decisionError}
+        actionPending={actionPending ?? false}
+        diffReview={diffReview ?? null}
+        fetchContent={fetchContent}
+        appearance={appearance ?? "light"}
+        emit={(intent) => emitIntent(intent)}
+      />
+    </WorkspaceIconsContext.Provider>
   );
 }
 

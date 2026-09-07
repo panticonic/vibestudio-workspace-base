@@ -4,11 +4,11 @@ import {
   DashboardIcon,
   DesktopIcon,
   GearIcon,
-  GlobeIcon,
+  GlobeIcon
 } from "@radix-ui/react-icons";
 import { lazy, Suspense, useEffect, useState } from "react";
 import type { PanelNavigationState } from "@vibestudio/shared/types";
-import { unitIconTarget } from "@vibestudio/shared/panel/assetPathPolicy";
+import { useWorkspaceIcons } from "../shell/workspaceIconsContext";
 
 const BrowserFavicon = lazy(async () => {
   const module = await import("./BrowserFavicon");
@@ -22,7 +22,7 @@ export function PanelIcon({
   source,
   favicon,
   size = 16,
-  fallback = false,
+  fallback = false
 }: {
   icon?: string;
   /** Names the icon's content so the fetched glyph can be stored forever. */
@@ -34,14 +34,34 @@ export function PanelIcon({
   size?: number;
   fallback?: "panel" | "browser" | "worker" | "app" | "extension" | "system" | false;
 }) {
-  const imageSource =
-    icon?.startsWith("./") && source
-      ? `../../${unitIconTarget(source, icon, iconVersion, iconState)}`
-      : icon?.startsWith("data:image/")
-        ? icon
-        : null;
-  const [imageFailed, setImageFailed] = useState(false);
-  useEffect(() => setImageFailed(false), [imageSource]);
+  const unitIcons = useWorkspaceIcons();
+  const key = JSON.stringify([source, icon, iconVersion, iconState]);
+  const [image, setImage] = useState<{
+    owner: typeof unitIcons;
+    key: string;
+    url: string;
+  } | null>(null);
+  const imageSource = icon?.startsWith("data:image/")
+    ? icon
+    : image?.owner === unitIcons && image.key === key
+      ? image.url
+      : null;
+  const [failedSource, setFailedSource] = useState<string | null>(null);
+  useEffect(() => {
+    if (!unitIcons || !icon?.startsWith("./") || !source) return;
+    let active = true;
+    void unitIcons
+      .load(source, icon, iconVersion, iconState)
+      .then((url) => {
+        if (active) setImage({ owner: unitIcons, key, url });
+      })
+      .catch(() => {
+        /* The declared fallback is the icon's error state. */
+      });
+    return () => {
+      active = false;
+    };
+  }, [unitIcons, source, icon, iconVersion, iconState, key]);
   if (favicon) {
     return (
       <Suspense fallback={<GlobeIcon width={size} height={size} />}>
@@ -49,7 +69,7 @@ export function PanelIcon({
       </Suspense>
     );
   }
-  if (imageSource && !imageFailed) {
+  if (imageSource && failedSource !== imageSource) {
     return (
       <img
         src={imageSource}
@@ -65,9 +85,9 @@ export function PanelIcon({
           flexShrink: 0,
           display: "block",
           objectFit: "contain",
-          borderRadius: Math.max(2, Math.round(size * 0.2)),
+          borderRadius: Math.max(2, Math.round(size * 0.2))
         }}
-        onError={() => setImageFailed(true)}
+        onError={() => setFailedSource(imageSource)}
       />
     );
   }
@@ -84,7 +104,7 @@ export function PanelIcon({
           justifyContent: "center",
           fontSize: size,
           lineHeight: 1,
-          fontFamily: "Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif",
+          fontFamily: "Apple Color Emoji, Segoe UI Emoji, Noto Color Emoji, sans-serif"
         }}
       >
         {icon}

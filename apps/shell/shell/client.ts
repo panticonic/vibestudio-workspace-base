@@ -66,6 +66,7 @@ export const startupWorkspaceClient = createShellWorkspaceClient(rpc, {
 });
 /** The startup workspace client; never rebound when focus changes. */
 export const {
+  unitIcons,
   hostLaunch,
   app,
   panel,
@@ -200,6 +201,7 @@ export async function createWorkspaceShellClient(workspaceId: string) {
     close() {
       if (closed) return;
       closed = true;
+      scoped.unitIcons.close();
       for (const listener of statuses) listener("disconnected");
       statuses.clear();
       for (const release of releases) release();

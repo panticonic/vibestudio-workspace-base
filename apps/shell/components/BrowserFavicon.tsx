@@ -2,27 +2,35 @@ import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useEffect, useState } from "react";
 import { GlobeIcon } from "@radix-ui/react-icons";
 
-
 export type BrowserFaviconHandle = { pageUrl: string; updatedAt: number };
 
-const faviconCache = new Map<string, string>();
+const faviconCaches = new WeakMap<object, Map<string, string>>();
 
 export function BrowserFavicon({
   handle,
-  size = 16,
+  size = 16
 }: {
   handle: BrowserFaviconHandle;
   size?: number;
 }) {
   const { browserData } = useShellWorkspaceClient();
 
+  const faviconCache = faviconCaches.get(browserData) ?? new Map<string, string>();
+  faviconCaches.set(browserData, faviconCache);
   const key = `${handle.pageUrl}\0${handle.updatedAt}`;
-  const [src, setSrc] = useState(() => faviconCache.get(key));
+  const [image, setImage] = useState<{
+    owner: typeof browserData;
+    key: string;
+    src: string;
+  } | null>(null);
+  const src =
+    faviconCache.get(key) ??
+    (image?.owner === browserData && image.key === key ? image.src : undefined);
 
   useEffect(() => {
     const cached = faviconCache.get(key);
     if (cached) {
-      setSrc(cached);
+      setImage({ owner: browserData, key, src: cached });
       return;
     }
     let cancelled = false;
@@ -39,7 +47,7 @@ export function BrowserFavicon({
           if (!oldest) break;
           faviconCache.delete(oldest[0]);
         }
-        setSrc(value);
+        setImage({ owner: browserData, key, src: value });
       })
       .catch(() => {
         // The globe fallback is the complete error state for favicon retrieval.
@@ -47,7 +55,7 @@ export function BrowserFavicon({
     return () => {
       cancelled = true;
     };
-  }, [handle.pageUrl, key]);
+  }, [browserData, faviconCache, handle.pageUrl, key]);
 
   return src ? (
     <img src={src} width={size} height={size} alt="" style={{ flexShrink: 0 }} />

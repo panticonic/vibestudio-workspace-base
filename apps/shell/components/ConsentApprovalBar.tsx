@@ -1,4 +1,8 @@
-import { useShellWorkspaceClient, useWorkspaceVisible, useWorkspaceNavigationHost } from "../shell/workspaceContext";
+import {
+  useShellWorkspaceClient,
+  useWorkspaceVisible,
+  useWorkspaceNavigationHost
+} from "../shell/workspaceContext";
 /**
  * ConsentApprovalBar — the approval coordinator. It owns the approval state
  * (subscription, queue, minimized) and the RPC handlers, and renders the
@@ -66,7 +70,8 @@ export function ConsentApprovalBar() {
   const workspaceVisible = useWorkspaceVisible();
   const workspaceNavigation = useWorkspaceNavigationHost();
   const workspaceId = workspaceNavigation?.workspaceId ?? "system";
-  const { account, blobstore, events, panel, shellApproval, shellPresence } = useShellWorkspaceClient();
+  const { unitIcons, account, blobstore, events, panel, shellApproval, shellPresence } =
+    useShellWorkspaceClient();
 
   const [pendingAccess, setPendingAccess] = useState<PendingApproval[]>([]);
   const [decisionError, setDecisionError] = useState<{
@@ -243,11 +248,37 @@ export function ConsentApprovalBar() {
   const canPrev = queueLength > 1 && browseIndex > 0;
   const canNext = queueLength > 1 && browseIndex < queueLength - 1;
   const currentCaller = current ? resolveCallerInfo(current) : null;
-  const sourceWorkspaceId = current?.kind === "capability" ? current.snapshot?.sourceWorkspaceId : undefined;
-  const destinationWorkspaceId = current?.kind === "capability" ? current.snapshot?.workspaceId ?? workspaceId : workspaceId;
-  const approvalWorkspaceLabel = sourceWorkspaceId && sourceWorkspaceId !== destinationWorkspaceId
-    ? `${workspaceNavigation?.workspaceNames[sourceWorkspaceId] ?? sourceWorkspaceId} → ${workspaceNavigation?.workspaceNames[destinationWorkspaceId] ?? workspaceNavigation?.workspaceLabel ?? destinationWorkspaceId}`
-    : workspaceNavigation?.workspaceLabel;
+  const [callerIcon, setCallerIcon] = useState<{
+    approvalId: string;
+    owner: typeof unitIcons;
+    key: string;
+    url: string;
+  } | null>(null);
+  const callerIconSource = currentCaller?.iconSourcePath;
+  const callerIconPath = currentCaller?.icon;
+  useEffect(() => {
+    if (!current || !callerIconSource || !callerIconPath?.startsWith("./")) return;
+    let active = true;
+    const approvalId = current.approvalId;
+    const key = JSON.stringify([callerIconSource, callerIconPath, null, null]);
+    void unitIcons
+      .load(callerIconSource, callerIconPath)
+      .then((url) => {
+        if (active) setCallerIcon({ approvalId, owner: unitIcons, key, url });
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [current?.approvalId, callerIconSource, callerIconPath, unitIcons]);
+  const sourceWorkspaceId =
+    current?.kind === "capability" ? current.snapshot?.sourceWorkspaceId : undefined;
+  const destinationWorkspaceId =
+    current?.kind === "capability" ? (current.snapshot?.workspaceId ?? workspaceId) : workspaceId;
+  const approvalWorkspaceLabel =
+    sourceWorkspaceId && sourceWorkspaceId !== destinationWorkspaceId
+      ? `${workspaceNavigation?.workspaceNames[sourceWorkspaceId] ?? sourceWorkspaceId} → ${workspaceNavigation?.workspaceNames[destinationWorkspaceId] ?? workspaceNavigation?.workspaceLabel ?? destinationWorkspaceId}`
+      : workspaceNavigation?.workspaceLabel;
 
   const diffReview = current ? getDiffReviewPayload(current) : null;
   const diffHashes = diffReview ? diffReviewPayloadHashes(diffReview) : new Set<string>();
@@ -618,6 +649,10 @@ export function ConsentApprovalBar() {
       current
         ? {
             workspaceLabel: approvalWorkspaceLabel,
+            iconUrls:
+              callerIcon?.approvalId === current.approvalId && callerIcon.owner === unitIcons
+                ? { [callerIcon.key]: callerIcon.url }
+                : {},
             approval: current,
             queue:
               queueLength > 1 ? { index: browseIndex, total: queueLength, canPrev, canNext } : null,
@@ -633,6 +668,8 @@ export function ConsentApprovalBar() {
         : null,
     [
       blobResults,
+      callerIcon,
+      unitIcons,
       browseIndex,
       canNext,
       canPrev,

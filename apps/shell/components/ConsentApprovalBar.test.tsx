@@ -23,6 +23,7 @@ type GetTreePageFn = () => Promise<{
   nextCursor: string | null;
 }>;
 const shellClient = vi.hoisted(() => ({
+  loadIcon: vi.fn(async () => "blob:owning-workspace-icon"),
   heartbeat: vi.fn(() => Promise.resolve()),
   listPending: vi.fn<ListPendingFn>(() => Promise.resolve([])),
   resolve: vi.fn(() => Promise.resolve()),
@@ -68,12 +69,14 @@ const overlay = vi.hoisted(() => ({
       approval?: { approvalId?: string };
       queue?: unknown;
       decisionError?: unknown;
+      iconUrls?: Record<string, string>;
     };
   } | null,
   onIntent: null as ((payload: unknown) => void) | null,
 }));
 
 vi.mock("../shell/client", () => ({
+  unitIcons: { load: shellClient.loadIcon },
   shellApproval: {
     listPending: shellClient.listPending,
     resolve: shellClient.resolve,
@@ -332,6 +335,39 @@ describe("ConsentApprovalBar coordinator", () => {
     document.getElementById("app-approval-host:system")?.remove();
   });
 
+  it("forwards only the owning client's exact caller image to the RPC-less overlay", async () => {
+    const url = "data:image/svg+xml;base64,PHN2Zy8+";
+    shellClient.loadIcon.mockResolvedValueOnce(url);
+    shellClient.listPending.mockResolvedValueOnce([
+      {
+        ...capabilityApproval({ approvalId: "mail-icon", title: "Read mail" }),
+        requester: {
+          id: "worker:mail",
+          kind: "worker",
+          category: "worker",
+          title: "Mail",
+          icon: "./icon.svg",
+          iconSourcePath: "workers/mail",
+          repoPath: "workers/mail",
+          effectiveVersion: "v1",
+          stableIdentityKey: "workers/mail@v1",
+          ephemeralInstanceKey: "worker:mail",
+          breadcrumbs: [],
+        },
+      },
+    ]);
+    mountBar();
+    await waitFor(() =>
+      expect(overlay.options?.props?.iconUrls).toEqual({
+        [JSON.stringify(["workers/mail", "./icon.svg", null, null])]: url,
+      }),
+    );
+    expect(shellClient.loadIcon).toHaveBeenCalledWith(
+      "workers/mail",
+      "./icon.svg",
+    );
+  });
+
   it("sends a heartbeat and lists pending while mounted", async () => {
     let heartbeatTick: (() => void) | undefined;
     const realSetInterval = window.setInterval.bind(window);
@@ -431,7 +467,9 @@ describe("ConsentApprovalBar coordinator", () => {
       expect(overlay.options?.props?.approval?.approvalId).toBe("queued"),
     );
     expect(
-      screen.queryByRole("button", { name: "Review approval: Queued approval" }),
+      screen.queryByRole("button", {
+        name: "Review approval: Queued approval",
+      }),
     ).toBeNull();
   });
 
@@ -1052,7 +1090,9 @@ describe("ConsentApprovalBar coordinator", () => {
     await waitFor(() =>
       expect(fullSurface.props?.approval?.approvalId).toBe("unrelated"),
     );
-    expect(screen.queryByRole("button", { name: /Review approval/u })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /Review approval/u }),
+    ).toBeNull();
   });
 
   /**
