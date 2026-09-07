@@ -1859,7 +1859,7 @@ export async function executeSandbox(
       throwIfAborted(signal);
       return {
         safeReturnValue: safeSerialize(
-          returnValue ?? result.exports["default"],
+          returnValue === undefined ? result.exports["default"] : returnValue,
         ),
         exports: result.exports,
       };
