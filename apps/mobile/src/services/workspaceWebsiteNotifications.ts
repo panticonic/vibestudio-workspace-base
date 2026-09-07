@@ -4,13 +4,16 @@ import { WEBSITE_NOTIFICATION_COMPATIBILITY_SCRIPT } from "@vibestudio/shared/we
 import type { WebsiteNotificationPermission } from "@vibestudio/shared/websiteNotificationCompatibility";
 
 export function buildWorkspaceWebsiteNotificationScript(
+  expectedOrigin: string,
   initialPermission: WebsiteNotificationPermission,
 ): string {
   return `
 (() => {
   const native = globalThis.__vibestudioWebsiteNotificationsNative;
   if (!native) return;
-  let permission = ${JSON.stringify(initialPermission)};
+  let permission = location.origin === ${JSON.stringify(expectedOrigin)}
+    ? ${JSON.stringify(initialPermission)}
+    : "default";
   let sequence = 0;
   const pending = new Map();
   const listeners = new Set();

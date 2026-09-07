@@ -54,6 +54,7 @@ const rpc: RpcClient = createRpcClient({
   selfId: g.__vibestudioTransport.identity.runtimeId,
   callerKind: "app",
   workspaceId: g.__vibestudioTransport.identity.workspaceId,
+  authorityAcquisition: "wait",
   transport: {
     ...transport,
     onMessage: (handler) =>
@@ -127,6 +128,7 @@ export async function createWorkspaceShellClient(workspaceId: string) {
     selfId: assertPresent(g.__vibestudioTransport).identity.runtimeId,
     callerKind: "app",
     workspaceId: sourceWorkspaceId,
+    authorityAcquisition: "wait",
     transport: {
       ...(transport.stream
         ? {
@@ -134,7 +136,10 @@ export async function createWorkspaceShellClient(workspaceId: string) {
               if (closed)
                 return Promise.reject(new Error("Workspace UI is closed"));
               return transport.stream!(
-                { ...envelope, targetWorkspaceId: workspaceId },
+                {
+                  ...envelope,
+                  destination: { kind: "workspace", workspaceId },
+                },
                 signal,
                 body,
               );
@@ -147,7 +152,10 @@ export async function createWorkspaceShellClient(workspaceId: string) {
               if (closed)
                 return Promise.reject(new Error("Workspace UI is closed"));
               return transport.streamBody!(
-                { ...envelope, targetWorkspaceId: workspaceId },
+                {
+                  ...envelope,
+                  destination: { kind: "workspace", workspaceId },
+                },
                 signal,
                 body,
               );
@@ -156,7 +164,10 @@ export async function createWorkspaceShellClient(workspaceId: string) {
         : {}),
       send: (envelope) => {
         if (closed) return Promise.reject(new Error("Workspace UI is closed"));
-        return transport.send({ ...envelope, targetWorkspaceId: workspaceId });
+        return transport.send({
+          ...envelope,
+          destination: { kind: "workspace", workspaceId },
+        });
       },
       onMessage: (handler) => {
         const release = transport.onMessage((envelope) => {

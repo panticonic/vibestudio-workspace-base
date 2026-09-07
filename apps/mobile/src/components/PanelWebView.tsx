@@ -665,6 +665,13 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
         return "default";
       }
     }, [onWebsiteNotification, panelId, url]);
+    const initialWebsiteNotificationOrigin = useMemo(() => {
+      try {
+        return new URL(url).origin;
+      } catch {
+        return "";
+      }
+    }, [url]);
     const webViewRef = useRef<WebView>(null);
     const [hasError, setHasError] = useState(false);
     const [isLoading, setIsLoading] = useState(true);
@@ -1492,7 +1499,7 @@ const PanelWebViewImpl = forwardRef<PanelWebViewHandle, PanelWebViewProps>(
           onFileDownload={
             Platform.OS === "ios" ? handleFileDownload : undefined
           }
-          injectedJavaScriptBeforeContentLoaded={`${buildWorkspaceWebsiteNotificationScript(initialWebsiteNotificationPermission)}\n${
+          injectedJavaScriptBeforeContentLoaded={`${buildWorkspaceWebsiteNotificationScript(initialWebsiteNotificationOrigin, initialWebsiteNotificationPermission)}\n${
             managed
               ? buildBridgeBootstrapScript(
                   panelInit,

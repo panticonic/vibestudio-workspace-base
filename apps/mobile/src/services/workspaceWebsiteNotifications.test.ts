@@ -1,4 +1,5 @@
 import {
+  buildWorkspaceWebsiteNotificationScript,
   createWebsiteNotificationHandler,
   WorkspaceWebsiteNotificationCoordinator,
   type WebsiteNotificationHost,
@@ -6,6 +7,44 @@ import {
 import type { ToastInput } from "../state/toastAtoms";
 
 describe("mobile website notifications", () => {
+  test("does not expose one origin's remembered permission after a redirect and hydrates the actual origin", async () => {
+    const script = buildWorkspaceWebsiteNotificationScript(
+      "https://expected.example",
+      "granted",
+    );
+    const posted: string[] = [];
+    const native: {
+      onmessage?: (event: { data: string }) => void;
+      postMessage(message: string): void;
+    } = {
+      postMessage: (message) => posted.push(message),
+    };
+    const context = {
+      __vibestudioWebsiteNotificationsNative: native,
+      location: { origin: "https://redirected.example" },
+      Event,
+      EventTarget,
+      DOMException,
+      Promise,
+      Map,
+      Set,
+    } as Record<string, unknown> & {
+      Notification?: { permission: string };
+    };
+    runInNewContext(script, context);
+
+    expect(context.Notification?.permission).toBe("default");
+    const permissionRequest = JSON.parse(posted[0]!) as { requestId: string };
+    native.onmessage?.({
+      data: JSON.stringify({
+        requestId: permissionRequest.requestId,
+        ok: true,
+        value: "granted",
+      }),
+    });
+    await Promise.resolve();
+    expect(context.Notification?.permission).toBe("granted");
+  });
   test("routes only bounded native-attested operations and cancels pending work", async () => {
     let release!: (value: "granted") => void;
     const host: WebsiteNotificationHost = {
@@ -120,3 +159,4 @@ describe("mobile website notifications", () => {
     expect(lifecycle).toContainEqual([3, replacement, "click"]);
   });
 });
+import { runInNewContext } from "node:vm";

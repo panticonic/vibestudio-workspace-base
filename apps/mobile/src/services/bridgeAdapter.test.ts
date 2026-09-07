@@ -832,7 +832,7 @@ describe("bridgeAdapter native app navigation", () => {
   it("rejects cross-workspace addressing without executing native navigation", async () => {
     const f = fixture();
     const envelope = f.request("app.openShellSurface", [{ kind: "settings" }]);
-    envelope.targetWorkspaceId = "workspace-b";
+    envelope.destination = { kind: "workspace", workspaceId: "workspace-b" };
     await f.adapter.handle("panel:tree/a", "postEnvelope", [envelope]);
     expect(f.openShellSurface).not.toHaveBeenCalled();
     expect(f.deliverToPanel).toHaveBeenCalledWith(

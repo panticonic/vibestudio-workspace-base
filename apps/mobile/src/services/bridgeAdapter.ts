@@ -239,8 +239,9 @@ export function createBridgeAdapter(deps: {
     let response: RpcEnvelope;
     try {
       if (
-        envelope.targetWorkspaceId &&
-        envelope.targetWorkspaceId !== deps.workspaceId
+        envelope.destination &&
+        (envelope.destination.kind !== "workspace" ||
+          envelope.destination.workspaceId !== deps.workspaceId)
       ) {
         throw new RpcBoundaryError(
           "Native shell navigation belongs to the initiating workspace",
