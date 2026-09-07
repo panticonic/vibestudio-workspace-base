@@ -600,13 +600,12 @@ export default function SetupHub({
 
       <Flex direction="column" gap="1">
         <Text size="2" weight="bold">
-          Optional templates
+          Explore workspaces
         </Text>
         <Text size="1" color="gray">
-          Templates are reviewed bundles of panels, skills, and other workspace
-          additions for a particular outcome. Loading them contacts Vibestudio's
-          verified template registry; nothing is installed until you review and
-          approve a selection.
+          Explore workspaces with panels, skills, and tools for a particular task.
+          Browsing contacts Vibestudio's workspace catalog. A selection creates a
+          separate workspace after you review and approve it.
         </Text>
         <Box>
           <Button
@@ -617,15 +616,15 @@ export default function SetupHub({
           >
             <BusyReloadIcon busy={loadingTemplates} />
             {loadingTemplates
-              ? "Loading templates…"
+              ? "Loading workspaces…"
               : templatesLoaded
-                ? "Refresh optional templates"
-                : "Load optional templates"}
+                ? "Refresh workspace catalog"
+                : "Browse workspaces"}
           </Button>
         </Box>
         {templatesLoaded && templateSnapshots.length === 0 ? (
           <Text size="1" color="gray">
-            No optional templates are available right now.
+            No optional workspaces are available right now.
           </Text>
         ) : null}
         {templateSnapshots.map((definition) => {

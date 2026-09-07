@@ -338,14 +338,15 @@ describe("SetupHub", () => {
       </Theme>,
     );
 
-    expect(view.getByText(/reviewed bundles of panels, skills/i)).toBeTruthy();
+    expect(view.getByText(/workspaces with panels, skills/i)).toBeTruthy();
     expect(
-      view.getByText(/contacts Vibestudio's verified template registry/i),
+      view.getByText(/contacts Vibestudio's workspace catalog/i),
     ).toBeTruthy();
+    expect(view.getByText(/separate workspace after you review and approve/i)).toBeTruthy();
     expect(loaders.templates).not.toHaveBeenCalled();
 
     fireEvent.click(
-      view.getByRole("button", { name: "Load optional templates" }),
+      view.getByRole("button", { name: "Browse workspaces" }),
     );
     await waitFor(() => expect(loaders.templates).toHaveBeenCalledOnce());
     expect(view.getByText("Examples")).toBeTruthy();
@@ -364,7 +365,7 @@ describe("SetupHub", () => {
     );
 
     fireEvent.click(
-      view.getByRole("button", { name: "Load optional templates" }),
+      view.getByRole("button", { name: "Browse workspaces" }),
     );
 
     expect(
@@ -397,10 +398,10 @@ describe("SetupHub", () => {
     );
 
     fireEvent.click(
-      view.getByRole("button", { name: "Load optional templates" }),
+      view.getByRole("button", { name: "Browse workspaces" }),
     );
     const loadTemplates = view.getByRole("button", {
-      name: "Loading templates…",
+      name: "Loading workspaces…",
     });
     expect(loadTemplates.querySelector("svg")?.style.animation).toBe(
       "spin 0.8s linear infinite",
@@ -421,7 +422,7 @@ describe("SetupHub", () => {
       </Theme>,
     );
 
-    expect(view.getByText("Optional templates")).toBeTruthy();
+    expect(view.getByText("Explore workspaces")).toBeTruthy();
     expect(
       view.getAllByRole("button", { name: "Review & create" }),
     ).toHaveLength(3);
