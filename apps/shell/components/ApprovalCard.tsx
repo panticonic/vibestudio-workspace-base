@@ -91,6 +91,7 @@ import {
 
 export interface ApprovalCardProps {
   workspaceLabel?: string;
+  presentationKey?: string;
   approval: PendingApproval;
   caller: CallerInfo;
   /** Queue position for the navigator; null when a single approval is pending. */
@@ -120,6 +121,7 @@ export type ApprovalCardLayout = "card" | "dialog";
 
 export function ApprovalCard({
   workspaceLabel,
+  presentationKey,
   approval,
   caller,
   queue,
@@ -197,7 +199,7 @@ export function ApprovalCard({
     );
   }
   const emitForApproval = (intent: ApprovalCardIntentBody) => {
-    emit({ ...intent, approvalId: approval.approvalId });
+    emit({ ...intent, approvalId: approval.approvalId, presentationKey });
   };
   const handleKeyboardDecision = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.target instanceof Element && event.target.closest("input, textarea, select")) return;
@@ -417,7 +419,18 @@ export function ApprovalCard({
       aria-busy={actionPending}
     >
       <span key={approval.approvalId} className="approval-attention-pulse" aria-hidden="true" />
-      {workspaceLabel && <div style={{ padding: "8px 16px", borderBottom: "1px solid var(--gray-5)", fontSize: 12, color: "var(--gray-11)" }}>Workspace · <strong>{workspaceLabel}</strong></div>}
+      {workspaceLabel && (
+        <div
+          style={{
+            padding: "8px 16px",
+            borderBottom: "1px solid var(--gray-5)",
+            fontSize: 12,
+            color: "var(--gray-11)"
+          }}
+        >
+          Workspace · <strong>{workspaceLabel}</strong>
+        </div>
+      )}
       <div className="approval-card-scroll">
         <Flex align="start" gap="3" className="approval-card-body">
           <Box className="approval-icon-box" data-beacon="true">

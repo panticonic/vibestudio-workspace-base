@@ -14,6 +14,8 @@ import {
 import { TemplateBrowser } from "@workspace/template-management/react";
 import type { HubWorkspaceEntry } from "@vibestudio/service-schemas/hubControl";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import { systemWorkspaceId } from "../shell/client";
+import { useApprovalPresentation } from "./ApprovalPresentationContext";
 import { workspaceLabel } from "../shell/workspaceLabel";
 import {
   workspaceChooserDialogOpenAtom,
@@ -22,6 +24,7 @@ import {
 
 export function WorkspaceChooser() {
   const { hubControl, templates } = useShellWorkspaceClient();
+  const approvalPresentation = useApprovalPresentation();
   const close = useSetAtom(workspaceChooserDialogOpenAtom);
   const [template, setTemplate] = useAtom(workspaceChooserTemplateAtom);
   const [workspaces, setWorkspaces] = useState<HubWorkspaceEntry[]>([]);
@@ -90,10 +93,7 @@ export function WorkspaceChooser() {
     }
   };
   return (
-    <Box
-      p={{ initial: "3", sm: "5" }}
-      style={{ maxHeight: "80vh", overflow: "auto" }}
-    >
+    <Box p="0" style={{ maxHeight: "80vh", overflow: "auto" }}>
       <Flex direction="column" gap="4">
         <Flex align="center" justify="between" gap="3">
           {mode === "source" && !created ? (
@@ -105,7 +105,7 @@ export function WorkspaceChooser() {
               {created
                 ? `${created.name} is ready`
                 : mode === "list"
-                  ? "Your workspaces"
+                  ? "Choose where to work"
                   : "Room for a new idea"}
             </Heading>
           )}
@@ -143,6 +143,18 @@ export function WorkspaceChooser() {
             client={templates}
             initialPin={template ?? undefined}
             onCreate={create}
+            onReviewPending={(approvalId) => {
+              void systemWorkspaceId
+                .then((ownerId) => {
+                  approvalPresentation.request(ownerId, approvalId);
+                  close(false);
+                })
+                .catch((cause: unknown) => {
+                  setError(
+                    cause instanceof Error ? cause.message : String(cause),
+                  );
+                });
+            }}
           />
         ) : mode === "blank" ? (
           <Flex direction="column" gap="3">

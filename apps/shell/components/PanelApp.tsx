@@ -36,7 +36,8 @@ export function PanelApp() {
 function PanelAppContent() {
   const { notification, panel, hostCommands } = useShellWorkspaceClient();
   const visible = useWorkspaceVisible();
-  const workspaceId = useWorkspaceNavigationHost()?.workspaceId ?? "system";
+  const navigationHost = useWorkspaceNavigationHost();
+  const workspaceId = navigationHost?.workspaceId ?? "system";
 
   const effectiveTheme = useThemeSynchronizer();
   const themeConfig = useAtomValue(themeConfigAtom);
@@ -214,7 +215,7 @@ function PanelAppContent() {
 
 
   return (
-    <Flex direction="column" height="100dvh" style={{ overflow: "hidden" }}>
+    <Flex direction="column" height="100%" style={{ flex: "1 1 0", minWidth: 0, minHeight: 0, overflow: "hidden" }}>
       <NextPanelBuildWarmup />
       <TitleBar
         title={currentTitle}
@@ -224,6 +225,10 @@ function PanelAppContent() {
         onPanelContextMenu={showPanelContextMenu}
         paneChromeState={paneChromeState}
         onPaneChromeCommand={handlePaneChromeCommand}
+      />
+      <div
+        className="workspace-desktop-notifications"
+        ref={visible ? navigationHost?.setNotificationHost : undefined}
       />
       <NotificationBar />
       <UserNotificationBar />

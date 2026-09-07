@@ -15,7 +15,16 @@ import { useShellWorkspaceClient } from "../shell/workspaceContext";
  * - Context menu for panel actions
  */
 
-import { useState, useCallback, useEffect, useMemo, useRef, memo, type CSSProperties } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  memo,
+  type CSSProperties,
+} from "react";
 import { useTouchDevice } from "@workspace/react/responsive";
 import { useAtomValue } from "jotai";
 import {
@@ -46,9 +55,7 @@ import {
 } from "../shell/hooks/index.js";
 import { isPanelClosePointerButton } from "@vibestudio/shared/panelCommands";
 
-import {
-  pinnedPanelIdsAtom,
-} from "../state/appModeAtoms.js";
+import { pinnedPanelIdsAtom } from "../state/appModeAtoms.js";
 import { assertPresent } from "../utils/assertPresent";
 import { PanelIcon } from "./PanelIcon";
 import { buildGuides } from "./panelTreeGuides.js";
@@ -96,7 +103,10 @@ const COLORS = {
   dropIndicator: "var(--accent-9)",
 } as const;
 
-function getWindowPositionFromMouseEvent(e: React.MouseEvent): { x: number; y: number } {
+function getWindowPositionFromMouseEvent(e: React.MouseEvent): {
+  x: number;
+  y: number;
+} {
   if (Number.isFinite(e.clientX) && Number.isFinite(e.clientY)) {
     return {
       x: Math.round(e.clientX),
@@ -356,7 +366,9 @@ const SortableTreeItem = memo(
     // Cmd/Ctrl-click forces open-beside (D8); plain click replaces in place.
     const handleSelect = useCallback(
       (e?: React.MouseEvent) => {
-        onSelect(panel.id, { openBeside: Boolean(e && (e.metaKey || e.ctrlKey)) });
+        onSelect(panel.id, {
+          openBeside: Boolean(e && (e.metaKey || e.ctrlKey)),
+        });
       },
       [onSelect, panel.id]
     );
@@ -571,7 +583,12 @@ const SortableTreeItem = memo(
             <Tooltip content="Pinned — exempt from auto-unload">
               <DrawingPinFilledIcon
                 aria-label="Pinned"
-                style={{ flexShrink: 0, color: "var(--gray-11)", width: 12, height: 12 }}
+                style={{
+                  flexShrink: 0,
+                  color: "var(--gray-11)",
+                  width: 12,
+                  height: 12,
+                }}
               />
             </Tooltip>
           )}
@@ -681,7 +698,9 @@ interface EndDropZoneProps {
 }
 
 function EndDropZone({ isOver, projectedDepth, isDragging }: EndDropZoneProps) {
-  const { attributes, listeners, setNodeRef } = useSortable({ id: END_DROP_ZONE_ID });
+  const { attributes, listeners, setNodeRef } = useSortable({
+    id: END_DROP_ZONE_ID,
+  });
 
   const showIndicator = isOver && projectedDepth !== null;
 
@@ -919,6 +938,9 @@ function buildSidebarRows(
 // ============================================================================
 
 interface LazyPanelTreeSidebarProps {
+  /** The one scroll owner shared by every workspace section. */
+  scrollElement: HTMLElement | null;
+  revealSelection: boolean;
   selectedId: string | null;
   /** All panels currently visible in the layout; `selectedId` is the focused one. */
   visibleIds?: ReadonlySet<string>;
@@ -929,6 +951,8 @@ interface LazyPanelTreeSidebarProps {
 }
 
 export function LazyPanelTreeSidebar({
+  scrollElement,
+  revealSelection,
   selectedId,
   visibleIds,
   ancestorIds,
@@ -1086,7 +1110,6 @@ export function LazyPanelTreeSidebar({
     }
   }, []);
 
-
   const handleAddChild = useCallback(
     async (parentId: string) => {
       if (collapsedIds.has(parentId)) {
@@ -1153,30 +1176,66 @@ export function LazyPanelTreeSidebar({
     }
   }, [loadingSearch, search, searchCursor, searchResults, trimmedQuery]);
 
-  // Scroll container ref for the virtualizer.
-  // Uses a plain div with overflow:auto instead of Radix ScrollArea,
-  // because the virtualizer needs the scroll element to have a measurable
-  // client height from CSS layout (not from content).
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [listElement, setListElement] = useState<HTMLDivElement | null>(null);
+  const [scrollMargin, setScrollMargin] = useState<number | null>(null);
+  const measureListOffset = useCallback(() => {
+    if (!scrollElement || !listElement) return;
+    setScrollMargin(
+      listElement.getBoundingClientRect().top -
+        scrollElement.getBoundingClientRect().top +
+        scrollElement.scrollTop -
+        scrollElement.clientTop
+    );
+  }, [listElement, scrollElement]);
+  // Parent renders can insert or reorder whole workspace sections without
+  // changing this list's own dimensions.
+  useLayoutEffect(measureListOffset);
+  useLayoutEffect(() => {
+    if (!scrollElement || !listElement) return;
+    const observer = new ResizeObserver(measureListOffset);
+    // The list's origin moves when earlier workspace sections expand, load
+    // rows, or show diagnostics. Observe those layout owners as well as this
+    // list, so an unchanged list height cannot leave its offset stale.
+    for (let node: Element | null = listElement; node; node = node.parentElement) {
+      observer.observe(node);
+      if (node === scrollElement) break;
+      for (
+        let sibling = node.previousElementSibling;
+        sibling;
+        sibling = sibling.previousElementSibling
+      ) {
+        observer.observe(sibling);
+      }
+    }
+    return () => observer.disconnect();
+  }, [listElement, scrollElement, measureListOffset]);
 
   // Virtual list — only mount items in/near the viewport.
   // +1 for the EndDropZone at the bottom.
   const virtualizer = useVirtualizer({
     count: rows.length + 1,
-    getScrollElement: () => scrollRef.current,
+    getScrollElement: () => scrollElement,
+    scrollMargin: scrollMargin ?? 0,
     estimateSize: (index) => (rows[index]?.kind === "owner-band" ? OWNER_BAND_HEIGHT : ROW_HEIGHT),
     overscan: 10,
   });
 
-  // Scroll selected item into view via virtualizer
+  // Only a new selection in the focused workspace may move the common
+  // sidebar. Background row loads and section resizing preserve its position.
+  const revealedSelection = useRef<string | null>(null);
   useEffect(() => {
-    if (selectedId) {
+    if (!revealSelection) {
+      revealedSelection.current = null;
+      return;
+    }
+    if (scrollMargin !== null && selectedId && revealedSelection.current !== selectedId) {
       const index = rows.findIndex((row) => row.kind === "panel" && row.item.id === selectedId);
       if (index >= 0) {
+        revealedSelection.current = selectedId;
         virtualizer.scrollToIndex(index, { align: "auto", behavior: "smooth" });
       }
     }
-  }, [selectedId, rows, virtualizer]);
+  }, [revealSelection, selectedId, rows, virtualizer, scrollMargin]);
 
   const diagnostics =
     treeLoadError || selfIdentityError ? (
@@ -1217,7 +1276,7 @@ export function LazyPanelTreeSidebar({
 
   if (flattenedItems.length === 0) {
     return (
-      <Flex direction="column" style={{ flex: 1, minHeight: 0 }}>
+      <Flex direction="column">
         {diagnostics}
         <Flex
           direction="column"
@@ -1225,7 +1284,7 @@ export function LazyPanelTreeSidebar({
           justify="center"
           gap="2"
           px="4"
-          style={{ flex: 1, textAlign: "center" }}
+          style={{ paddingBlock: 12, textAlign: "center" }}
         >
           <VibestudioLogo size={48} variant="symbol" />
           <Text size="2" weight="medium" style={{ color: "var(--gray-12)" }}>
@@ -1254,7 +1313,7 @@ export function LazyPanelTreeSidebar({
   const virtualItems = virtualizer.getVirtualItems();
 
   return (
-    <Flex direction="column" style={{ flex: 1, minHeight: 0 }}>
+    <Flex direction="column">
       {diagnostics}
       <Flex
         align="center"
@@ -1303,11 +1362,7 @@ export function LazyPanelTreeSidebar({
           </IconButton>
         ) : null}
       </Flex>
-      <div
-        ref={scrollRef}
-        className="panel-tree-scroll"
-        style={{ flex: 1, minHeight: 0, overflowY: "auto" }}
-      >
+      <div ref={setListElement} className="panel-tree-scroll">
         <Box
           style={{
             position: "relative",
@@ -1325,7 +1380,7 @@ export function LazyPanelTreeSidebar({
                     top: 0,
                     left: 0,
                     width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
+                    transform: `translateY(${virtualRow.start - (scrollMargin ?? 0)}px)`,
                   }}
                 >
                   <EndDropZone
@@ -1347,7 +1402,7 @@ export function LazyPanelTreeSidebar({
                     top: 0,
                     left: 0,
                     width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
+                    transform: `translateY(${virtualRow.start - (scrollMargin ?? 0)}px)`,
                   }}
                 >
                   <OwnerBandHeader
@@ -1369,7 +1424,7 @@ export function LazyPanelTreeSidebar({
                     top: 0,
                     left: 0,
                     width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
+                    transform: `translateY(${virtualRow.start - (scrollMargin ?? 0)}px)`,
                     paddingLeft: ROW_PADDING_LEFT + row.depth * INDENTATION_WIDTH,
                   }}
                 >
@@ -1399,7 +1454,7 @@ export function LazyPanelTreeSidebar({
                     top: 0,
                     left: 0,
                     width: "100%",
-                    transform: `translateY(${virtualRow.start}px)`,
+                    transform: `translateY(${virtualRow.start - (scrollMargin ?? 0)}px)`,
                     paddingLeft: ROW_PADDING_LEFT,
                   }}
                 >
@@ -1431,7 +1486,7 @@ export function LazyPanelTreeSidebar({
                   top: 0,
                   left: 0,
                   width: "100%",
-                  transform: `translateY(${virtualRow.start}px)`,
+                  transform: `translateY(${virtualRow.start - (scrollMargin ?? 0)}px)`,
                 }}
               >
                 <SortableTreeItem

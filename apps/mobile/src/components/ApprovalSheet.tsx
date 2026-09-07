@@ -178,7 +178,14 @@ export interface ApprovalSheetProps {
   workspaceName?: string;
   workspaceNames?: Readonly<Record<string, string>>;
   onClose?: () => void;
-  approvals: PendingApproval[];
+  approval: PendingApproval | null;
+  queue: {
+    index: number;
+    total: number;
+    onPrevious: () => void;
+    onNext: () => void;
+    status?: { message: string; actionLabel?: string; onAction?: () => void };
+  };
   onResolve: (
     approvalId: string,
     decision: ApprovalDecision,
@@ -239,7 +246,8 @@ export function ApprovalSheet({
   workspaceName,
   workspaceNames,
   onClose,
-  approvals,
+  approval: current,
+  queue,
   onResolve,
   onSubmitClientConfig,
   onSubmitCredentialInput,
@@ -252,16 +260,7 @@ export function ApprovalSheet({
   const workspaceVisible = useWorkspaceVisible();
   const colors = useAtomValue(themeColorsAtom);
   const { height: viewportHeight } = useWindowDimensions();
-  const [browseIndex, setBrowseIndex] = useState(0);
-  useEffect(() => {
-    setBrowseIndex((idx) => {
-      if (approvals.length === 0) return 0;
-      if (idx >= approvals.length) return approvals.length - 1;
-      return idx;
-    });
-  }, [approvals.length]);
-
-  const current = approvals[browseIndex] ?? approvals[0] ?? null;
+  const browseIndex = queue.index;
   const sourceWorkspaceId =
     current?.kind === "capability"
       ? current.snapshot?.sourceWorkspaceId
@@ -280,7 +279,7 @@ export function ApprovalSheet({
       workspaceName ??
       targetWorkspaceId)
     : "";
-  const queueLength = approvals.length;
+  const queueLength = queue.total;
   const canPrev = queueLength > 1 && browseIndex > 0;
   const canNext = queueLength > 1 && browseIndex < queueLength - 1;
   const [values, setValues] = useState<Record<string, string>>({});
@@ -552,6 +551,33 @@ export function ApprovalSheet({
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.scrollContent}
               >
+                {queue.status && (
+                  <View style={{ paddingVertical: 8 }}>
+                    <Text
+                      accessibilityLiveRegion="polite"
+                      style={[
+                        typeRamp.caption,
+                        { color: colors.textSecondary },
+                      ]}
+                    >
+                      {queue.status.message}
+                    </Text>
+                    {queue.status.onAction && (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={queue.status.actionLabel}
+                        onPress={queue.status.onAction}
+                        style={{ minHeight: 44, justifyContent: "center" }}
+                      >
+                        <Text
+                          style={[typeRamp.bodyStrong, { color: colors.text }]}
+                        >
+                          {queue.status.actionLabel}
+                        </Text>
+                      </Pressable>
+                    )}
+                  </View>
+                )}
                 {workspaceName && (
                   <Text
                     style={[typeRamp.caption, { color: colors.textSecondary }]}
@@ -585,10 +611,8 @@ export function ApprovalSheet({
                   queueIndex={browseIndex}
                   canPrev={canPrev}
                   canNext={canNext}
-                  onPrev={() => setBrowseIndex((idx) => Math.max(0, idx - 1))}
-                  onNext={() =>
-                    setBrowseIndex((idx) => Math.min(queueLength - 1, idx + 1))
-                  }
+                  onPrev={queue.onPrevious}
+                  onNext={queue.onNext}
                 />
                 {current.kind === "capability" && current.authorityRow ? (
                   <View

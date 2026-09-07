@@ -1,7 +1,7 @@
 .workspace-stack {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 6px;
   min-width: 0;
   padding: 8px;
   color: var(--gray-12);
@@ -47,6 +47,7 @@
   background: var(--gray-4);
 }
 .workspace-section {
+  flex: 0 0 auto;
   min-width: 0;
   border-radius: 12px;
   border: 1px solid transparent;
@@ -60,7 +61,7 @@
   margin-top: 6px;
   border-top-color: var(--gray-5);
   border-radius: 0 0 12px 12px;
-  padding-top: 10px;
+  padding-top: 6px;
 }
 .workspace-section-heading {
   display: flex;

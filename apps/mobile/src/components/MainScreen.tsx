@@ -1003,7 +1003,6 @@ export function MainScreen() {
     refreshTree();
     const eventNames = [
       "external-open:open",
-      "notification:show",
       "apps:lifecycle",
       "workspace:revision-bumped",
     ] as const;
@@ -1062,43 +1061,6 @@ export function MainScreen() {
         });
       },
     );
-    const handleNotification = (payload: unknown) => {
-      const notif = payload as {
-        id?: string;
-        title?: string;
-        message?: string;
-        type?: string;
-        consent?: {
-          provider?: string;
-          scopes?: string[];
-          callerTitle?: string;
-        };
-      };
-      if (notif.type === "consent" && notif.id) {
-        const provider = notif.consent?.provider ?? "service";
-        const scopes = notif.consent?.scopes?.join(", ") ?? "access";
-        const callerTitle = notif.consent?.callerTitle ?? "A panel";
-        pushToast({
-          title: notif.title ?? "OAuth access requested",
-          message: `${callerTitle} wants to connect to ${provider} (${scopes}).`,
-          tone: "info",
-        });
-      } else {
-        pushToast({
-          title: notif.title ?? "Vibestudio",
-          message: notif.message ?? "",
-          tone: "info",
-        });
-      }
-    };
-    const unsubNotification = shellClient.events.on(
-      "notification:show",
-      handleNotification,
-    );
-    const unsubDirectNotification = shellClient.onDirectEvent(
-      "notification:show",
-      handleNotification,
-    );
     const unsubAppLifecycle = shellClient.events.on(
       "apps:lifecycle",
       (payload) => {
@@ -1138,8 +1100,6 @@ export function MainScreen() {
       unsubCreated();
       unsubNav();
       unsubExternal();
-      unsubNotification();
-      unsubDirectNotification();
       unsubAppLifecycle();
       unsubWorkspaceRevision();
       for (const name of eventNames) {

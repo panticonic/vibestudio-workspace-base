@@ -57,6 +57,7 @@ vi.mock("../shell/useDirectShellEvent", () => ({
 import { useShellEvent } from "../shell/useShellEvent";
 import { useDirectShellEvent } from "../shell/useDirectShellEvent";
 import { NotificationBar } from "./NotificationBar";
+import { WorkspaceNavigationHostContext } from "../shell/workspaceContext";
 
 function renderBar() {
   render(
@@ -108,6 +109,67 @@ describe("NotificationBar", () => {
     shellClient.show.mockClear();
     shellClient.reportAction.mockClear();
     shellClient.dismiss.mockClear();
+  });
+
+  it("shows a background workspace notification in the visible host and keeps its action", async () => {
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const focus = vi.fn();
+    const view = render(
+      <WorkspaceNavigationHostContext.Provider
+        value={{
+          element: null,
+          scrollElement: null,
+          notificationHost: host,
+          setNotificationHost: vi.fn(),
+          workspaceId: "personal",
+          workspaceLabel: "Personal",
+          workspaceNames: { personal: "Personal", system: "System" },
+          sidebarVisible: true,
+          toggleSidebar: vi.fn(),
+          focus,
+        }}
+      >
+        <div hidden>
+          <NotificationBar />
+        </div>
+      </WorkspaceNavigationHostContext.Provider>,
+    );
+    try {
+      emitDirectShellEvent("notification:show", {
+        id: "personal-job",
+        type: "info",
+        title: "Your job finished",
+        ttl: 0,
+        actions: [
+          {
+            id: "open-result",
+            label: "Open result",
+            command: { type: "panel.open", source: "panels/chat" },
+          },
+        ],
+      });
+      expect(host.textContent).toContain("Your job finished");
+      expect(view.container.textContent).not.toContain("Your job finished");
+      fireEvent.click(
+        screen.getByRole("button", { name: "Personal · Open workspace" }),
+      );
+      expect(focus).toHaveBeenCalledOnce();
+      fireEvent.click(screen.getByRole("button", { name: "Open result" }));
+      await waitFor(() =>
+        expect(shellClient.reportAction).toHaveBeenCalledWith(
+          "personal-job",
+          "open-result",
+        ),
+      );
+      expect(shellClient.createPanel).toHaveBeenCalledWith("panels/chat", {
+        focus: true,
+        stateArgs: undefined,
+      });
+    } finally {
+      view.unmount();
+      host.remove();
+    }
   });
 
   it("renders notifications addressed directly to the authenticated account", () => {

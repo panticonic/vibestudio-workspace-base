@@ -11,12 +11,19 @@ import {
   type ApprovalStateController,
 } from "@vibestudio/shell-core/approvalState";
 import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
+import { actionableRuntimeApprovals } from "@vibestudio/shared/approvalVisibility";
 import type { PendingApproval } from "@vibestudio/shared/approvals";
 import {
   type WorkspacePushScope,
   type WorkspaceApprovalTarget,
 } from "@vibestudio/shared/workspacePushScope";
-import { approvalDeepLinkAtom } from "../state/approvalDeepLinkAtom";
+import {
+  approvalPresentationKey,
+  createApprovalPresentationState,
+  reconcileApprovalPresentation,
+  selectApprovalPresentation,
+  stepApprovalPresentation,
+} from "@vibestudio/shared/approvalPresentation";
 import { drainBackgroundActionQueue } from "./backgroundActionQueue";
 import { createStore } from "jotai";
 import { Platform } from "react-native";
@@ -67,8 +74,94 @@ export class MobileWorkspaceDirectory {
   workspaceCreation: { template?: TemplateExactPin } | null = null;
   /** Account metadata for unopened workspaces; live controllers refine connected queues. */
   readonly pendingApprovalCounts = new Map<string, number>();
-  approvalWorkspaceId: string | null = null;
+  approvalPresentation = createApprovalPresentationState();
+  private requestedApproval: {
+    workspaceId: string;
+    approvalId?: string;
+    phase?: "loading";
+  } | null = null;
+
+  get approvalItems() {
+    return this.entries.flatMap((entry) =>
+      (this.sessions.get(entry.workspaceId)?.approvals ?? []).map(
+        (approval) => ({
+          workspaceId: entry.workspaceId,
+          approvalId: approval.approvalId,
+          actionable: approval.lifecycle?.state !== "preparing",
+          approval,
+        }),
+      ),
+    );
+  }
+
+  get selectedApproval() {
+    return this.approvalItems.find(
+      (item) =>
+        approvalPresentationKey(item) === this.approvalPresentation.selectedKey,
+    );
+  }
+
+  get approvalWorkspaceId(): string | null {
+    return (
+      (this.requestedApproval?.phase === "loading"
+        ? null
+        : this.requestedApproval?.workspaceId) ??
+      (this.approvalPresentation.open
+        ? (this.selectedApproval?.workspaceId ?? null)
+        : null)
+    );
+  }
+
+  stepApproval(delta: number): void {
+    this.requestedApproval = null;
+    this.approvalPresentation = stepApprovalPresentation(
+      this.approvalPresentation,
+      this.approvalItems,
+      delta,
+    );
+    this.changed();
+  }
+
+  private reconcileApprovals(): void {
+    const wasOpen =
+      this.approvalPresentation.open || this.requestedApproval !== null;
+    const items = this.approvalItems;
+    this.approvalPresentation = reconcileApprovalPresentation(
+      this.approvalPresentation,
+      items,
+    );
+    const requested = this.requestedApproval;
+    if (requested?.phase === "loading") return;
+    if (requested) {
+      const item = items.find(
+        (item) =>
+          item.workspaceId === requested.workspaceId &&
+          (!requested.approvalId || item.approvalId === requested.approvalId),
+      );
+      if (item) {
+        this.approvalPresentation = selectApprovalPresentation(
+          this.approvalPresentation,
+          items,
+          approvalPresentationKey(item),
+        );
+        this.requestedApproval = null;
+      } else if (
+        this.sessions.get(requested.workspaceId)?.approvals !== null &&
+        this.sessions.get(requested.workspaceId)?.state === "ready"
+      ) {
+        this.requestedApproval = null;
+      }
+    }
+    if (!this.requestedApproval && wasOpen && !items.length) {
+      const loading = this.unloadedApprovalWorkspaces.find(
+        ({ state }) => state !== "unopened",
+      );
+      if (loading)
+        this.requestedApproval = { workspaceId: loading.entry.workspaceId };
+    }
+  }
   private revision = 0;
+  private selectionGeneration = 0;
   private readonly listeners = new Set<() => void>();
   private readonly opening = new Map<string, Promise<MobileWorkspaceSession>>();
   private disposed = false;
@@ -92,6 +185,7 @@ export class MobileWorkspaceDirectory {
   };
   getSnapshot = (): number => this.revision;
   private changed(): void {
+    this.reconcileApprovals();
     this.revision += 1;
     for (const listener of this.listeners) listener();
   }
@@ -131,7 +225,8 @@ export class MobileWorkspaceDirectory {
       for (const id of this.pendingApprovalCounts.keys()) {
         if (!accessible.has(id)) {
           this.pendingApprovalCounts.delete(id);
-          if (this.approvalWorkspaceId === id) this.approvalWorkspaceId = null;
+          if (this.requestedApproval?.workspaceId === id)
+            this.requestedApproval = null;
         }
       }
       for (const entry of entries) {
@@ -152,7 +247,8 @@ export class MobileWorkspaceDirectory {
           this.expanded.delete(id);
           this.presented.delete(id);
           this.pendingApprovalCounts.delete(id);
-          if (this.approvalWorkspaceId === id) this.approvalWorkspaceId = null;
+          if (this.requestedApproval?.workspaceId === id)
+            this.requestedApproval = null;
         }
       }
       this.error = null;
@@ -243,9 +339,14 @@ export class MobileWorkspaceDirectory {
             client.events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, listener),
           filter: filterRuntimeApprovals,
           onChange: (pending) => {
+            if (this.sessions.get(workspaceId) !== session || this.disposed)
+              return;
             session.approvals = pending;
             session.approvalError = null;
-            this.updateApprovalCount(workspaceId, pending.length);
+            this.updateApprovalCount(
+              workspaceId,
+              actionableRuntimeApprovals(pending).length,
+            );
             this.changed();
           },
           onError: (error, phase) => {
@@ -287,14 +388,16 @@ export class MobileWorkspaceDirectory {
     if (!this.entries.some((entry) => entry.workspaceId === workspaceId)) {
       throw new Error("You do not have access to this workspace");
     }
+    const selectionGeneration = ++this.selectionGeneration;
     this.activeWorkspaceId = workspaceId;
     this.presented.add(workspaceId);
     this.expanded.add(workspaceId);
     this.changed();
     const session = await this.open(workspaceId);
+    if (selectionGeneration !== this.selectionGeneration) return;
     if (panelId) await session.client.panels.focus(panelId);
     // A slower workspace opening cannot take focus back from a later gesture.
-    if (this.activeWorkspaceId !== workspaceId) return;
+    if (selectionGeneration !== this.selectionGeneration) return;
     await getNativeAppStorage().setItem(this.selectionKey, workspaceId);
     this.changed();
   }
@@ -387,8 +490,6 @@ export class MobileWorkspaceDirectory {
   updateApprovalCount(workspaceId: string, count: number): void {
     if (this.pendingApprovalCounts.get(workspaceId) === count) return;
     this.pendingApprovalCounts.set(workspaceId, count);
-    if (count === 0 && this.approvalWorkspaceId === workspaceId)
-      this.approvalWorkspaceId = null;
     this.changed();
   }
 
@@ -415,22 +516,45 @@ export class MobileWorkspaceDirectory {
   }
 
   async openApproval(target: WorkspaceApprovalTarget): Promise<void> {
-    const session = await this.resolveNotificationWorkspace(target);
-    session.store.set(approvalDeepLinkAtom, target.approvalId);
-    this.approvalWorkspaceId = target.workspaceId;
-    this.changed();
+    await this.requestApproval(target.workspaceId, target.approvalId, () =>
+      this.resolveNotificationWorkspace(target),
+    );
+  }
+
+  get unloadedApprovalWorkspaces() {
+    return this.entries.flatMap((entry) => {
+      if (!(this.pendingApprovalCounts.get(entry.workspaceId) ?? 0)) return [];
+      const session = this.sessions.get(entry.workspaceId);
+      if (
+        session?.state === "ready" &&
+        session.approvals !== null &&
+        !session.approvalError
+      )
+        return [];
+      const state = !session
+        ? "unopened"
+        : session.state === "failed" || session.approvalError
+          ? "failed"
+          : "loading";
+      return [{ entry, state }];
+    });
   }
 
   openApprovals(workspaceId?: string): void {
+    const pendingOwners = [...this.pendingApprovalCounts]
+      .filter(([, count]) => count > 0)
+      .map(([id]) => id);
     const target =
-      workspaceId ??
-      (this.activeWorkspaceId &&
-      this.pendingApprovalCounts.get(this.activeWorkspaceId)
-        ? this.activeWorkspaceId
-        : [...this.pendingApprovalCounts].find(([, count]) => count > 0)?.[0]);
-    this.approvalWorkspaceId = target ?? null;
-    if (target)
-      void this.open(target)
+      workspaceId ?? (this.selectedApproval ? undefined : pendingOwners[0]);
+    this.requestedApproval = target ? { workspaceId: target } : null;
+    this.approvalPresentation = { ...this.approvalPresentation, open: true };
+    // Opening the shared queue connects its pending owners, without presenting
+    // their panel trees or changing the user's focused workspace.
+    for (const ownerId of new Set([
+      ...pendingOwners,
+      ...(target ? [target] : []),
+    ])) {
+      void this.open(ownerId)
         .then(async (session) => {
           if (session.approvalError) {
             session.approvalError = null;
@@ -439,11 +563,52 @@ export class MobileWorkspaceDirectory {
           }
         })
         .catch(() => this.changed());
+    }
     this.changed();
   }
 
+  selectApproval(workspaceId: string, approvalId: string): Promise<void> {
+    return this.requestApproval(workspaceId, approvalId, () =>
+      this.open(workspaceId),
+    );
+  }
+
+  private async requestApproval(
+    workspaceId: string,
+    approvalId: string,
+    resolveSession: () => Promise<MobileWorkspaceSession>,
+  ): Promise<void> {
+    const request: NonNullable<MobileWorkspaceDirectory["requestedApproval"]> =
+      { workspaceId, approvalId, phase: "loading" };
+    this.requestedApproval = request;
+    // Verification/loading owns an intent, not authority to show another
+    // request. Later Close, Next, or Open gestures retire this exact intent.
+    try {
+      const session = await resolveSession();
+      if (this.requestedApproval !== request) return;
+      await session.approvalState?.refresh("manual");
+      if (this.requestedApproval !== request) return;
+      if (
+        this.sessions.get(workspaceId) !== session ||
+        !session.approvals?.some(
+          (approval) => approval.approvalId === approvalId,
+        )
+      ) {
+        throw new Error("This review is no longer pending.");
+      }
+      delete request.phase;
+      this.changed();
+    } catch (error) {
+      if (this.requestedApproval !== request) return;
+      this.requestedApproval = null;
+      this.changed();
+      throw error;
+    }
+  }
+
   closeApprovals(): void {
-    this.approvalWorkspaceId = null;
+    this.requestedApproval = null;
+    this.approvalPresentation = { ...this.approvalPresentation, open: false };
     this.changed();
   }
 

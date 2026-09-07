@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  pendingReviewNotice,
+  isReviewPending,
+} from "@vibestudio/shared/authority/reviewPending";
 import type {
   TemplateExactPin,
   TemplateInspection,
@@ -44,7 +48,9 @@ export function WorkspaceCreateSheet({
   const [inspecting, setInspecting] = useState(Boolean(template));
   const [showContents, setShowContents] = useState(false);
   const [inspectionAttempt, setInspectionAttempt] = useState(0);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const review = pendingReviewNotice(error);
+  const awaitingSystemReview = isReviewPending(error);
   const approvalWorkspaceId =
     created?.workspaceId ?? directory.systemWorkspaceId;
   const approvalCount =
@@ -63,10 +69,7 @@ export function WorkspaceCreateSheet({
         setName((current) => current || result.presentation?.name || "");
       })
       .catch((failure: unknown) => {
-        if (live)
-          setError(
-            failure instanceof Error ? failure.message : String(failure),
-          );
+        if (live) setError(failure);
       })
       .finally(() => {
         if (live) setInspecting(false);
@@ -93,7 +96,7 @@ export function WorkspaceCreateSheet({
       await directory.activate(entry.workspaceId);
       onCreated();
     } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
+      setError(error);
     } finally {
       pending.current = false;
       setBusy(false);
@@ -260,18 +263,36 @@ export function WorkspaceCreateSheet({
               },
             ]}
           />
-          {approvalCount > 0 && (
+          {review && (
+            <Button
+              label="Open review"
+              onPress={() =>
+                void directory
+                  .selectApproval(approvalWorkspaceId, review.approvalId)
+                  .catch(setError)
+              }
+            />
+          )}
+          {!review && approvalCount > 0 && (
             <Button
               label={`Review ${approvalCount} pending ${approvalCount === 1 ? "approval" : "approvals"}`}
               onPress={() => directory.openApprovals(approvalWorkspaceId)}
             />
           )}
-          {error && (
+          {awaitingSystemReview && (
+            <Text
+              accessibilityLiveRegion="polite"
+              style={[type.body, { color: colors.textSecondary }]}
+            >
+              {review?.message ?? "A System setup review is waiting for you."}
+            </Text>
+          )}
+          {error !== null && !awaitingSystemReview && (
             <Text
               accessibilityRole="alert"
               style={[type.caption, { color: colors.danger }]}
             >
-              {error}
+              {error instanceof Error ? error.message : String(error)}
             </Text>
           )}
           <Button

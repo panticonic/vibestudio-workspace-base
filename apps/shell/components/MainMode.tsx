@@ -12,6 +12,10 @@ import {
 import { useShellEvent } from "../shell/useShellEvent";
 import { useShellOverlay } from "../shell/useShellOverlay";
 import { ConnectionSettingsDialog } from "./ConnectionSettingsDialog";
+import {
+  ApprovalPresentationContext,
+  useApprovalPresentationController,
+} from "./ApprovalPresentationContext";
 import { WorkspaceDesktop } from "./WorkspaceDesktop";
 import { WorkspaceChooser } from "./WorkspaceChooser";
 import { WorkspaceConnectionOverlay } from "./WorkspaceConnectionOverlay";
@@ -22,7 +26,9 @@ import { WorkspaceConnectionOverlay } from "./WorkspaceConnectionOverlay";
  * lazy, but the panel chrome itself is required for first useful paint.
  */
 export default function MainMode() {
-  const { view } = useShellWorkspaceClient();
+  const client = useShellWorkspaceClient();
+  const { view } = client;
+  const approvalPresentation = useApprovalPresentationController(client);
 
   const workspaceChooserOpen = useAtomValue(workspaceChooserDialogOpenAtom);
   const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
@@ -34,10 +40,7 @@ export default function MainMode() {
   // panel tree, which breadcrumb mode unmounts, but this event arrives in both.
   useShellEvent(
     "open-settings",
-    useCallback(
-      (target) => setSettingsTarget(target),
-      [setSettingsTarget],
-    ),
+    useCallback((target) => setSettingsTarget(target), [setSettingsTarget]),
   );
 
   // Register shell overlays — hides panel views so dialogs aren't obscured
@@ -78,7 +81,7 @@ export default function MainMode() {
   }, []);
 
   return (
-    <>
+    <ApprovalPresentationContext.Provider value={approvalPresentation}>
       <WorkspaceDesktop />
 
       {/* Workspace Chooser Dialog (for switching workspaces in main mode) */}
@@ -86,6 +89,8 @@ export default function MainMode() {
         open={workspaceChooserOpen}
         onOpenChange={setWorkspaceChooserOpen}
         maxWidth="920px"
+        title="Workspaces"
+        description="Open a workspace, or create one from an app or source."
       >
         <WorkspaceChooser />
       </AppDialog>
@@ -96,8 +101,10 @@ export default function MainMode() {
       <ConnectionSettingsDialog
         section={settingsTarget?.section ?? null}
         workspaceId={settingsTarget?.workspaceId}
-        onSectionChange={(section) => setSettingsTarget(section ? { ...settingsTarget, section } : null)}
+        onSectionChange={(section) =>
+          setSettingsTarget(section ? { ...settingsTarget, section } : null)
+        }
       />
-    </>
+    </ApprovalPresentationContext.Provider>
   );
 }

@@ -1,6 +1,16 @@
 // @vitest-environment jsdom
 
-import React from "react";
+import React, { useEffect } from "react";
+import {
+  ApprovalPresentationContext,
+  useApprovalPresentationController,
+} from "./ApprovalPresentationContext";
+import {
+  useShellWorkspaceClient,
+  ShellWorkspaceClientContext,
+  WorkspaceNavigationHostContext,
+  WorkspaceVisibilityContext,
+} from "../shell/workspaceContext";
 import {
   act,
   fireEvent,
@@ -68,6 +78,7 @@ const overlay = vi.hoisted(() => ({
     props?: {
       approval?: { approvalId?: string };
       queue?: unknown;
+      presentationKey?: string;
       decisionError?: unknown;
       iconUrls?: Record<string, string>;
     };
@@ -150,6 +161,8 @@ const fullSurface = vi.hoisted(() => ({
     actionPending?: boolean;
     decisionError?: string | null;
     emit?: (intent: unknown) => void;
+    rawEmit?: (intent: unknown) => void;
+    queue?: unknown;
     onClose?: () => void;
   } | null,
 }));
@@ -157,8 +170,18 @@ vi.mock("./ApprovalFullSurface", () => ({
   ApprovalFullSurface: (props: {
     approval: { approvalId: string };
     onClose: () => void;
+    presentationKey: string;
+    emit: (intent: unknown) => void;
   }) => {
-    fullSurface.props = props;
+    fullSurface.props = {
+      ...props,
+      rawEmit: props.emit,
+      emit: (intent) =>
+        props.emit({
+          ...(intent as object),
+          presentationKey: props.presentationKey,
+        }),
+    };
     return React.createElement(
       "div",
       { "data-testid": "full-surface" },
@@ -171,7 +194,11 @@ import { ConsentApprovalBar } from "./ConsentApprovalBar";
 
 function emit(intent: ApprovalCardIntent): void {
   act(() => {
-    overlay.onIntent?.(intent);
+    overlay.onIntent?.({
+      ...intent,
+      presentationKey:
+        intent.presentationKey ?? overlay.options?.props?.presentationKey,
+    });
   });
 }
 
@@ -290,6 +317,21 @@ function installReviewApproval(
   };
 }
 
+function PresentedBar() {
+  const presentation = useApprovalPresentationController(
+    useShellWorkspaceClient(),
+  );
+  useEffect(() => {
+    presentation.setHost(document.body);
+    presentation.setAnchorId("app-approval-host:system");
+  }, [presentation.setHost, presentation.setAnchorId]);
+  return (
+    <ApprovalPresentationContext.Provider value={presentation}>
+      <ConsentApprovalBar />
+    </ApprovalPresentationContext.Provider>
+  );
+}
+
 function mountBar() {
   // jsdom doesn't lay out, so stub the anchor host's rect to a real size — the
   // coordinator only opens the overlay once it has a non-empty anchor.
@@ -310,12 +352,190 @@ function mountBar() {
   document.body.appendChild(host);
   return render(
     <Theme>
-      <ConsentApprovalBar />
+      <PresentedBar />
     </Theme>,
   );
 }
 
 describe("ConsentApprovalBar coordinator", () => {
+  it("renders a background owner in the shared surface and rejects another workspace's identical-ID intent", async () => {
+    const request = installReviewApproval("same");
+    const personalResolve = vi.fn(async () => ({
+      approvalId: "same",
+      mode: "install" as const,
+      decision: "cancelled" as const,
+      heading: "Cancelled",
+      parts: [],
+    }));
+    let finishTeam!: (value: unknown[]) => void;
+    const teamPending = new Promise<unknown[]>((resolve) => {
+      finishTeam = resolve;
+    });
+    function Owner({ id }: { id: string }) {
+      const client = useShellWorkspaceClient();
+      return (
+        <ShellWorkspaceClientContext.Provider
+          value={{
+            ...client,
+            shellApproval: {
+              ...client.shellApproval,
+              listPending: () =>
+                id === "personal"
+                  ? Promise.resolve([request])
+                  : (teamPending as ReturnType<
+                      typeof client.shellApproval.listPending
+                    >),
+              resolveInstallReview:
+                personalResolve as typeof client.shellApproval.resolveInstallReview,
+            },
+          }}
+        >
+          <WorkspaceNavigationHostContext.Provider
+            value={{
+              element: null,
+              scrollElement: null,
+              notificationHost: document.body,
+              setNotificationHost: () => {},
+              workspaceId: id,
+              workspaceLabel: id,
+              workspaceNames: { personal: "Personal", team: "Team" },
+              sidebarVisible: true,
+              toggleSidebar: () => {},
+              focus: () => {
+                throw new Error("Approval must not switch workspace");
+              },
+            }}
+          >
+            <WorkspaceVisibilityContext.Provider value={false}>
+              <ConsentApprovalBar />
+            </WorkspaceVisibilityContext.Provider>
+          </WorkspaceNavigationHostContext.Provider>
+        </ShellWorkspaceClientContext.Provider>
+      );
+    }
+    function Window({ team }: { team: boolean }) {
+      const presentation = useApprovalPresentationController(
+        useShellWorkspaceClient(),
+      );
+      useEffect(() => {
+        presentation.setHost(document.body);
+      }, [presentation.setHost]);
+      return (
+        <ApprovalPresentationContext.Provider value={presentation}>
+          <Owner id="personal" />
+          {team && <Owner id="team" />}
+        </ApprovalPresentationContext.Provider>
+      );
+    }
+    const view = render(<Window team />);
+    try {
+      await screen.findByTestId("full-surface");
+      expect(fullSurface.props?.approval?.approvalId).toBe("same");
+      // Bypass the card test stub's stamping to exercise the actual coordinator gate.
+      const raw = fullSurface.props as typeof fullSurface.props & {
+        rawEmit?: (intent: unknown) => void;
+      };
+      expect(raw?.rawEmit).toBeTypeOf("function");
+      act(() =>
+        raw?.rawEmit?.({
+          type: "resolve-install-review",
+          approvalId: "same",
+          presentationKey: JSON.stringify(["team", "same"]),
+          resolution: { decision: "cancel" },
+        }),
+      );
+      expect(personalResolve).not.toHaveBeenCalled();
+      view.rerender(<Window team={false} />);
+      await act(async () => finishTeam([request]));
+      expect(fullSurface.props?.approval?.approvalId).toBe("same");
+      expect(fullSurface.props?.queue).toBeNull();
+      act(() =>
+        fullSurface.props?.emit?.({
+          type: "resolve-install-review",
+          approvalId: "same",
+          resolution: { decision: "cancel" },
+        }),
+      );
+      await waitFor(() =>
+        expect(personalResolve).toHaveBeenCalledWith("same", {
+          decision: "cancel",
+        }),
+      );
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it("rejects delayed native intents after the same workspace request is restored under a new owner", async () => {
+    shellClient.listPending.mockResolvedValue([
+      capabilityApproval({ approvalId: "same", title: "Access" }),
+    ]);
+    const first = mountBar();
+    await waitFor(() =>
+      expect(overlay.options?.props?.presentationKey).toBeTruthy(),
+    );
+    const oldKey = overlay.options?.props?.presentationKey;
+    emit({ type: "minimize", approvalId: "same" });
+    emit({
+      type: "decide",
+      approvalId: "same",
+      presentationKey: oldKey,
+      decision: "once",
+    });
+    expect(shellClient.resolve).not.toHaveBeenCalled();
+    first.unmount();
+    const second = mountBar();
+    try {
+      await waitFor(() =>
+        expect(overlay.options?.props?.presentationKey).toBeTruthy(),
+      );
+      expect(overlay.options?.props?.presentationKey).not.toBe(oldKey);
+      emit({
+        type: "decide",
+        approvalId: "same",
+        presentationKey: oldKey,
+        decision: "once",
+      });
+      expect(shellClient.resolve).not.toHaveBeenCalled();
+      emit({ type: "decide", approvalId: "same", decision: "once" });
+      expect(shellClient.resolve).toHaveBeenCalledWith("same", "once");
+    } finally {
+      second.unmount();
+    }
+  });
+
+  it("does not resurrect a withdrawn request when its in-flight decision is rejected", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    let reject!: (error: Error) => void;
+    shellClient.resolve.mockImplementationOnce(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        }),
+    );
+    shellClient.listPending.mockResolvedValueOnce([
+      capabilityApproval({ approvalId: "removed", title: "Removed request" }),
+    ]);
+    const view = mountBar();
+    try {
+      await waitFor(() => expect(overlay.options?.open).toBe(true));
+      emit({ type: "decide", decision: "once", approvalId: "removed" });
+      const listener = shellClient.onEvent.mock.calls.find(
+        ([event]) => event === "shell-approval:pending-changed",
+      )?.[1];
+      act(() => listener?.({ pending: [] }));
+      await act(async () => reject(new Error("Workspace access removed")));
+      await waitFor(() =>
+        expect(shellClient.listPending).toHaveBeenCalledTimes(2),
+      );
+      expect(overlay.options).toBeNull();
+      expect(screen.queryByText("Removed request")).toBeNull();
+    } finally {
+      view.unmount();
+      errors.mockRestore();
+    }
+  });
+
   beforeEach(() => {
     overlay.options = null;
     overlay.onIntent = null;
@@ -384,7 +604,7 @@ describe("ConsentApprovalBar coordinator", () => {
     const setInterval = vi
       .spyOn(window, "setInterval")
       .mockImplementation(captureHeartbeat);
-    const view = render(React.createElement(ConsentApprovalBar));
+    const view = render(React.createElement(PresentedBar));
     try {
       expect(shellClient.heartbeat).toHaveBeenCalledTimes(1);
       await waitFor(() =>
@@ -991,7 +1211,7 @@ describe("ConsentApprovalBar coordinator", () => {
     shellClient.resolveInstallReview.mockRejectedValueOnce(
       new Error("review write blocked"),
     );
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.listPending.mockResolvedValue([
       installReviewApproval("startup"),
     ]);
     mountBar();
@@ -1306,7 +1526,7 @@ describe("ConsentApprovalBar coordinator", () => {
   it("surfaces a failed decision back through the overlay props", async () => {
     const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     shellClient.resolve.mockRejectedValueOnce(new Error("resolve blocked"));
-    shellClient.listPending.mockResolvedValueOnce([
+    shellClient.listPending.mockResolvedValue([
       capabilityApproval({ approvalId: "solo", title: "Lonely" }),
     ]);
     mountBar();

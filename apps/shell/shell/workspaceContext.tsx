@@ -13,10 +13,12 @@ export const useWorkspaceVisible = () => useContext(WorkspaceVisibilityContext);
 
 export const WorkspaceNavigationHostContext = createContext<{
   element: HTMLElement | null;
+  scrollElement: HTMLElement | null;
+  notificationHost: HTMLElement | null;
+  setNotificationHost(element: HTMLElement | null): void;
   workspaceId: string;
   workspaceLabel: string;
   workspaceNames: Readonly<Record<string, string>>;
-  reviewRequest: number;
   sidebarVisible: boolean;
   toggleSidebar(): void;
   focus(): void;

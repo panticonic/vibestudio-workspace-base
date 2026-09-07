@@ -42,6 +42,7 @@ const WINDOW_MARGIN = 32;
 
 export interface ApprovalFullSurfaceProps {
   workspaceLabel?: string;
+  presentationKey?: string;
   approval: PendingApproval;
   caller: CallerInfo;
   queue: ApprovalQueueInfo | null;
@@ -85,6 +86,7 @@ export function useReturnFocus(): void {
 
 export function ApprovalFullSurface({
   workspaceLabel,
+  presentationKey,
   approval,
   caller,
   queue,
@@ -92,7 +94,7 @@ export function ApprovalFullSurface({
   actionPending,
   appearance,
   emit,
-  onClose,
+  onClose
 }: ApprovalFullSurfaceProps) {
   // Hide the native panel views while this is up. Without it the dialog renders
   // correctly and is covered by whatever panel happens to be on screen.
@@ -118,7 +120,7 @@ export function ApprovalFullSurface({
           padding: 0,
           overflow: "hidden",
           zIndex: OVERLAY_Z.dialog as unknown as number,
-          boxShadow: "var(--elevation-overlay)",
+          boxShadow: "var(--elevation-overlay)"
         }}
       >
         {/*
@@ -132,7 +134,8 @@ export function ApprovalFullSurface({
         <ApprovalCard
           key={approval.approvalId}
           workspaceLabel={workspaceLabel}
-      approval={approval}
+          presentationKey={presentationKey}
+          approval={approval}
           caller={caller}
           queue={queue}
           decisionError={decisionError}

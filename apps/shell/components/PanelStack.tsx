@@ -1497,6 +1497,10 @@ export const PanelStack = memo(function PanelStack({
         {navigationHost?.element &&
           createPortal(
             <LazyPanelTreeSidebar
+              scrollElement={navigationHost.scrollElement}
+              revealSelection={
+                workspaceVisible && navigationHost.sidebarVisible
+              }
               selectedId={focusedPanelId}
               visibleIds={visibleIdSet}
               ancestorIds={ancestorIds}

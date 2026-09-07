@@ -3,6 +3,7 @@ import { WorkspaceCreateSheet } from "../components/WorkspaceCreateSheet";
 import { WorkspaceApprovalSurface } from "../components/WorkspaceApprovalSurface";
 import { pushToastAtom } from "../state/toastAtoms";
 import { useSyncExternalStore } from "react";
+import { WorkspaceNotificationSubscriber } from "../components/WorkspaceNotificationSubscriber";
 import {
   View,
   Text,
@@ -107,6 +108,16 @@ function RetainedWorkspaceScreens({
   const ready = selectedSession?.state === "ready";
   return (
     <View style={{ flex: 1, backgroundColor: colors.background }}>
+      {[...directory.sessions.values()]
+        .filter((session) => session.state === "ready")
+        .map((session) => (
+          <WorkspaceNotificationSubscriber
+            key={session.workspaceId}
+            directory={directory}
+            session={session}
+            notify={notify}
+          />
+        ))}
       {[...directory.sessions.values()]
         .filter(
           (session) =>

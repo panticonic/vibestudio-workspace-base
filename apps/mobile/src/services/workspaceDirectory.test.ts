@@ -1,3 +1,4 @@
+import type { PendingApproval } from "@vibestudio/shared/approvals";
 import { MobileWorkspaceDirectory } from "./workspaceDirectory";
 import { activePanelIdAtom } from "../state/navigationAtoms";
 import { shellClientAtom } from "../state/shellClientAtom";
@@ -172,6 +173,26 @@ describe("mobile workspace directory", () => {
     await directory.dispose();
   });
 
+  it("keeps the latest panel choice while the same workspace is opening", async () => {
+    const { directory } = fixture();
+    await directory.init();
+    let finish!: () => void;
+    mockOpening.set(
+      "project",
+      new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+    );
+    const first = directory.activate("project", "older-panel");
+    const second = directory.activate("project", "newer-panel");
+    finish();
+    await Promise.all([first, second]);
+    const session = directory.sessions.get("project")!;
+    expect(session.client.panels.focus).toHaveBeenCalledTimes(1);
+    expect(session.client.panels.focus).toHaveBeenCalledWith("newer-panel");
+    await directory.dispose();
+  });
+
   it("creates in the captured workspace without reclaiming focus after another gesture", async () => {
     const { directory } = fixture();
     await directory.init();
@@ -208,6 +229,16 @@ describe("mobile workspace directory", () => {
         workspaceId: "project",
       }),
     ).rejects.toThrow("another account");
+    expect(account.openWorkspace).toHaveBeenCalledTimes(2);
+    await expect(
+      directory.openApproval({
+        serverId: "srv_aaaaaaaaaaaaaaaaaaaaaaaa",
+        userId: "bob",
+        workspaceId: "project",
+        approvalId: "wrong-account-review",
+      }),
+    ).rejects.toThrow("another account");
+    expect(directory.approvalWorkspaceId).toBeNull();
     expect(account.openWorkspace).toHaveBeenCalledTimes(2);
     await directory.dispose();
   });
@@ -267,5 +298,144 @@ it("shows unopened workspace attention without opening sessions and removes revo
   );
   await directory.refresh();
   expect(directory.pendingApprovalCounts.has("project")).toBe(false);
+  await directory.dispose();
+});
+
+it("presents background approvals without switching workspace, preserves selection, and navigates colliding IDs safely", async () => {
+  const { directory } = fixture();
+  await directory.init();
+  const system = directory.sessions.get("system")!;
+  const personal = directory.sessions.get("personal")!;
+  const request = {
+    approvalId: "same-id",
+    callerId: "worker-1",
+    callerKind: "worker" as const,
+    repoPath: "workers/example",
+    effectiveVersion: "v1",
+    requestedAt: 1,
+    kind: "capability" as const,
+    capability: "read",
+    title: "Read document",
+  };
+  jest
+    .mocked(system.client.shellApproval.listPending)
+    .mockResolvedValue([request]);
+  await system.approvalState!.refresh("manual");
+  expect(directory.approvalWorkspaceId).toBe("system");
+  expect(directory.activeWorkspaceId).toBe("personal");
+  directory.closeApprovals();
+  await system.approvalState!.refresh("manual");
+  expect(directory.approvalWorkspaceId).toBeNull();
+  jest
+    .mocked(personal.client.shellApproval.listPending)
+    .mockResolvedValue([request]);
+  await personal.approvalState!.refresh("manual");
+  expect(directory.approvalWorkspaceId).toBe("system");
+  directory.stepApproval(-1);
+  expect(directory.approvalWorkspaceId).toBe("personal");
+  expect(directory.activeWorkspaceId).toBe("personal");
+  jest.mocked(personal.client.shellApproval.listPending).mockResolvedValue([]);
+  await personal.approvalState!.refresh("manual");
+  expect(directory.approvalWorkspaceId).toBe("system");
+  directory.closeApprovals();
+  await expect(
+    directory.selectApproval("system", "missing-review"),
+  ).rejects.toThrow("no longer pending");
+  expect(directory.approvalWorkspaceId).toBeNull();
+  await directory.selectApproval("system", "same-id");
+  expect(directory.approvalWorkspaceId).toBe("system");
+  expect(directory.activeWorkspaceId).toBe("personal");
+  await directory.dispose();
+});
+
+it("loads unopened pending owners into the global queue without presenting or focusing their panels", async () => {
+  const { directory, account } = fixture();
+  await directory.init();
+  const request = {
+    approvalId: "same-id",
+    callerId: "worker-1",
+    callerKind: "worker" as const,
+    repoPath: "workers/example",
+    effectiveVersion: "v1",
+    requestedAt: 1,
+    kind: "capability" as const,
+    capability: "read",
+    title: "Read document",
+  };
+  const personal = directory.sessions.get("personal")!;
+  jest
+    .mocked(personal.client.shellApproval.listPending)
+    .mockResolvedValue([request]);
+  await personal.approvalState!.refresh("manual");
+  directory.updateApprovalCount("project", 1);
+  let finish!: () => void;
+  mockOpening.set(
+    "project",
+    new Promise<void>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  directory.openApprovals();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(account.openWorkspace).toHaveBeenCalledWith(
+    "project",
+    expect.any(Function),
+  );
+  expect(directory.unloadedApprovalWorkspaces).toEqual([
+    expect.objectContaining({ state: "loading" }),
+  ]);
+  expect(directory.activeWorkspaceId).toBe("personal");
+  expect(directory.presented.has("project")).toBe(false);
+  const project = directory.sessions.get("project")!;
+  jest
+    .mocked(project.client.shellApproval.listPending)
+    .mockResolvedValue([request]);
+  finish();
+  await directory.open("project");
+  await project.approvalState!.refresh("manual");
+  expect(directory.approvalItems.map(({ workspaceId }) => workspaceId)).toEqual(
+    ["personal", "project"],
+  );
+  expect(directory.approvalWorkspaceId).toBe("personal");
+  directory.stepApproval(1);
+  expect(directory.approvalWorkspaceId).toBe("project");
+  expect(directory.activeWorkspaceId).toBe("personal");
+  expect(directory.presented.has("project")).toBe(false);
+  await directory.dispose();
+});
+
+it("does not reopen a dismissed shared queue when an earlier exact selection finishes refreshing", async () => {
+  const { directory } = fixture();
+  await directory.init();
+  const system = directory.sessions.get("system")!;
+  const request = {
+    approvalId: "exact-review",
+    callerId: "worker-1",
+    callerKind: "worker" as const,
+    repoPath: "workers/example",
+    effectiveVersion: "v1",
+    requestedAt: 1,
+    kind: "capability" as const,
+    capability: "read",
+    title: "Read document",
+  };
+  jest
+    .mocked(system.client.shellApproval.listPending)
+    .mockResolvedValue([request]);
+  await system.approvalState!.refresh("manual");
+  let finish!: () => void;
+  jest.spyOn(system.approvalState!, "refresh").mockImplementationOnce(
+    () =>
+      new Promise<PendingApproval[]>((resolve) => {
+        finish = () => resolve([request]);
+      }),
+  );
+  const selecting = directory.selectApproval("system", "exact-review");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  directory.closeApprovals();
+  finish();
+  await selecting;
+  expect(directory.approvalWorkspaceId).toBeNull();
+  expect(directory.activeWorkspaceId).toBe("personal");
   await directory.dispose();
 });

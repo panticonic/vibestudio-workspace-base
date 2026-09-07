@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { panel as panelService, workspace } from "../shell/client";
+import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { usePanelTree, useRootPanels } from "../shell/hooks/PanelTreeContext";
 import {
   applyLayoutAction,
@@ -61,6 +61,7 @@ export function usePanelLayout(
   viewportWidth: number,
   viewportHeight: number
 ): UsePanelLayoutResult {
+  const { panel: panelService, workspace } = useShellWorkspaceClient();
   const { panelMap, parentMap, initialized, refreshing } = usePanelTree();
   const { panels: rootPanels, loading: rootLoading } = useRootPanels();
 
@@ -105,7 +106,7 @@ export function usePanelLayout(
         workspaceIdRef.current = typeof active === "string" ? active : "";
       })
       .catch((error) => console.warn("[usePanelLayout] Failed to load active workspace:", error));
-  }, []);
+  }, [workspace]);
 
   const schedulePersist = useCallback(() => {
     if (persistTimerRef.current !== null) window.clearTimeout(persistTimerRef.current);
@@ -121,7 +122,7 @@ export function usePanelLayout(
         .savePanelLayout(persisted)
         .catch((error) => console.warn("[usePanelLayout] persist failed:", error));
     }, PERSIST_DEBOUNCE_MS);
-  }, []);
+  }, [panelService]);
   useEffect(
     () => () => {
       if (persistTimerRef.current !== null) window.clearTimeout(persistTimerRef.current);
@@ -210,7 +211,7 @@ export function usePanelLayout(
     return () => {
       cancelled = true;
     };
-  }, [restored, rootLoading, initialized, schedulePersist]);
+  }, [restored, rootLoading, initialized, schedulePersist, panelService]);
 
   // The placement model's invariant is that a restored layout is empty iff the
   // workspace has no roots. Query-first discovery may lag presentation or
@@ -241,7 +242,7 @@ export function usePanelLayout(
     void panelService
       .setFocusedPanelId(focusedPanelId)
       .catch((error) => console.warn("[usePanelLayout] Failed to persist focused panel:", error));
-  }, [restored, focusedPanelId]);
+  }, [restored, focusedPanelId, panelService]);
 
   const visiblePanelIds = useMemo(
     () => layout.columns.flatMap((column) => column.panes.map((pane) => pane.panelId)),

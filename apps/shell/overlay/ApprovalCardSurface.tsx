@@ -24,6 +24,7 @@ import type { OverlaySurfaceComponentProps } from "./types";
 
 export interface ApprovalCardSurfaceProps {
   workspaceLabel?: string;
+  presentationKey?: string;
   /** Exact caller icon resources already fetched by the owning chrome client. */
   iconUrls?: Record<string, string>;
   approval: PendingApproval;
@@ -49,7 +50,13 @@ function isApprovalCardSurfaceProps(value: unknown): value is ApprovalCardSurfac
 
 export function ApprovalCardSurface({ props, emitIntent }: OverlaySurfaceComponentProps) {
   if (!isApprovalCardSurfaceProps(props)) return null;
-  return <ApprovalCardSurfaceInner {...props} emitIntent={emitIntent} />;
+  return (
+    <ApprovalCardSurfaceInner
+      key={props.presentationKey ?? props.approval.approvalId}
+      {...props}
+      emitIntent={emitIntent}
+    />
+  );
 }
 
 type Waiter = {
@@ -59,6 +66,7 @@ type Waiter = {
 
 function ApprovalCardSurfaceInner({
   workspaceLabel,
+  presentationKey,
   iconUrls,
   approval,
   queue,
@@ -116,10 +124,11 @@ function ApprovalCardSurfaceInner({
           type: "fetch-blob",
           hash,
           approvalId,
+          presentationKey,
           ...(existing ? { refresh: true } : {})
         });
       }),
-    [approvalId]
+    [approvalId, presentationKey]
   );
 
   return (
@@ -127,6 +136,7 @@ function ApprovalCardSurfaceInner({
       <ApprovalCard
         key={approvalId}
         workspaceLabel={workspaceLabel}
+        presentationKey={presentationKey}
         approval={approval}
         caller={caller}
         queue={queue}

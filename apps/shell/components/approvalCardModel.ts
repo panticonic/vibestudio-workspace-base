@@ -66,6 +66,7 @@ export type ApprovalCardIntentBody =
   | { type: "open-in-workspace-history"; target: WorkspaceHistoryTarget };
 export type ApprovalCardIntent = {
   approvalId: string;
+  presentationKey?: string;
 } & ApprovalCardIntentBody;
 
 /**

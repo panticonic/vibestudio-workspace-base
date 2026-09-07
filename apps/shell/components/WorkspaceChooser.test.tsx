@@ -11,14 +11,19 @@ import { Provider, createStore } from "jotai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const clients = vi.hoisted(() => ({
   templates: { catalog: vi.fn(), inspect: vi.fn() },
+  review: vi.fn(),
   hubControl: {
     listWorkspaces: vi.fn(),
     createWorkspace: vi.fn(),
     routeWorkspace: vi.fn(),
   },
 }));
+vi.mock("../shell/client", () => ({ systemWorkspaceId: Promise.resolve("system-id") }));
 vi.mock("../shell/workspaceContext", () => ({
   useShellWorkspaceClient: () => clients,
+}));
+vi.mock("./ApprovalPresentationContext", () => ({
+  useApprovalPresentation: () => ({ request: clients.review }),
 }));
 const pin = {
   url: "git+https://example.test/garden.git",
@@ -80,6 +85,29 @@ function draw(prefill = false) {
   return store;
 }
 describe("WorkspaceChooser", () => {
+  it("opens the exact source setup review without navigating the active workspace", async () => {
+    clients.templates.inspect.mockRejectedValue(
+      Object.assign(new Error("Review pending"), {
+        code: "EREVIEWPENDING",
+        data: {
+          authorityFailure: {
+            reasonCode: "review-pending",
+            remediation: {
+              review: { approvalId: "setup-review", title: "System setup" },
+            },
+          },
+        },
+      }),
+    );
+    const store = draw(true);
+    fireEvent.click(await screen.findByRole("button", { name: "Open review" }));
+    await waitFor(() =>
+      expect(clients.review).toHaveBeenCalledWith("system-id", "setup-review"),
+    );
+    expect(clients.hubControl.routeWorkspace).not.toHaveBeenCalled();
+    expect(store.get(workspaceChooserDialogOpenAtom)).toBe(false);
+  });
+
   it("routes by immutable workspace id through the retained account session", async () => {
     const store = draw();
     fireEvent.click(

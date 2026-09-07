@@ -1,4 +1,5 @@
-import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import { createPortal } from "react-dom";
+import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 /**
  * NotificationBar — centralized notification display in the shell chrome area.
  *
@@ -93,6 +94,7 @@ function panelOpenInstruction(value: unknown): {
 }
 
 export function NotificationBar() {
+  const navigationHost = useWorkspaceNavigationHost();
   const { app, browserEnvironment, extensions, notification, panel, supervisedUnits } = useShellWorkspaceClient();
 
   const [notifications, setNotifications] = useState<Map<string, NotificationPayload>>(new Map());
@@ -289,8 +291,15 @@ export function NotificationBar() {
     });
   };
 
-  return (
-    <div ref={barRef} data-shell-top-chrome="notification-bar">
+  const content = (
+    <div ref={barRef} data-shell-top-chrome="notification-bar" aria-live="polite">
+      {navigationHost && (
+        <Flex px="3" py="1" style={{ background: TYPE_BG[current.type] }}>
+          <Button size="1" variant="ghost" color="gray" onClick={navigationHost.focus}>
+            {navigationHost.workspaceLabel} · Open workspace
+          </Button>
+        </Flex>
+      )}
       <ToastNotification
         key={current.id}
         notification={current}
@@ -302,6 +311,9 @@ export function NotificationBar() {
       />
     </div>
   );
+  return navigationHost?.notificationHost
+    ? createPortal(content, navigationHost.notificationHost)
+    : content;
 }
 
 // ---- Toast (info/success/warning/error) ----

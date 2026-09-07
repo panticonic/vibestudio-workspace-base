@@ -145,3 +145,35 @@ it("allows ordinary panels to inspect and request host review without creating a
   expect(onOpenInApp).toHaveBeenCalledWith(inspection);
   expect(screen.queryByRole("button", { name: "Create workspace" })).toBeNull();
 });
+
+it("presents the exact pending review and retries only when requested", async () => {
+  const failure = Object.assign(new Error("internal extension status"), {
+    code: "EREVIEWPENDING",
+    errorData: {
+      authorityFailure: {
+        reasonCode: "review-pending",
+        remediation: {
+          kind: "resolve-open-review",
+          review: { approvalId: "review-templates", title: "System tools" },
+        },
+      },
+    },
+  });
+  const client = {
+    catalog: vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(null),
+    inspect: vi.fn(),
+  };
+  const onReviewPending = vi.fn();
+  render(
+    <Theme>
+      <TemplateBrowser client={client} onReviewPending={onReviewPending} />
+    </Theme>,
+  );
+  await screen.findByText("Waiting for you to finish reviewing System tools.");
+  expect(screen.queryByText("internal extension status")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Open review" }));
+  expect(onReviewPending).toHaveBeenCalledWith("review-templates");
+  expect(client.catalog).toHaveBeenCalledTimes(1);
+  fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+  await waitFor(() => expect(client.catalog).toHaveBeenCalledTimes(2));
+});

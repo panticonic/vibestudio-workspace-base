@@ -1,5 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
+  pendingReviewNotice,
+  isReviewPending,
+} from "@vibestudio/shared/authority/reviewPending";
+import {
   Badge,
   Box,
   Button,
@@ -181,15 +185,20 @@ export function TemplateBrowser({
   onCreate,
   onOpenInApp,
   initialPin,
+  onReviewPending,
 }: {
   client: BrowserClient;
   initialPin?: TemplateExactPin;
+  onReviewPending?: (approvalId: string) => void;
   onCreate?: CreateTemplateWorkspace;
   onOpenInApp?: (inspection: TemplateInspection) => Promise<void>;
 }) {
   const [catalog, setCatalog] = useState<TemplateCatalogSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+  const [attempt, setAttempt] = useState(0);
+  const review = pendingReviewNotice(error);
+  const awaitingReview = isReviewPending(error);
   const [query, setQuery] = useState("");
   const [url, setUrl] = useState("");
   const [credential, setCredential] = useState("");
@@ -201,13 +210,14 @@ export function TemplateBrowser({
     live.current = true;
     let active = true;
     setLoading(true);
+    setError(null);
     client
       .catalog()
       .then((value) => {
         if (active) setCatalog(value);
       })
       .catch((error) => {
-        if (active) setError(errorMessage(error));
+        if (active) setError(error);
       })
       .finally(() => {
         if (active) setLoading(false);
@@ -217,7 +227,7 @@ export function TemplateBrowser({
       live.current = false;
       generation.current += 1;
     };
-  }, [client]);
+  }, [client, attempt]);
   const inspect = async (locator: TemplateLocator) => {
     const operation = ++generation.current;
     setInspecting(true);
@@ -227,8 +237,7 @@ export function TemplateBrowser({
       if (live.current && operation === generation.current)
         setInspection(result);
     } catch (error) {
-      if (live.current && operation === generation.current)
-        setError(errorMessage(error));
+      if (live.current && operation === generation.current) setError(error);
     } finally {
       if (live.current && operation === generation.current)
         setInspecting(false);
@@ -236,7 +245,7 @@ export function TemplateBrowser({
   };
   useEffect(() => {
     if (initialPin) void inspect({ pin: initialPin });
-  }, [initialPin, client]);
+  }, [initialPin, client, attempt]);
   if (inspection && onCreate)
     return (
       <TemplateWorkspaceReview
@@ -270,8 +279,35 @@ export function TemplateBrowser({
         </Text>
       </Box>
       {error ? (
-        <Callout.Root color="red" role="alert">
-          <Callout.Text>{error}</Callout.Text>
+        <Callout.Root
+          color={awaitingReview ? "amber" : "red"}
+          role={awaitingReview ? "status" : "alert"}
+        >
+          <Callout.Text>
+            {awaitingReview
+              ? (review?.message ??
+                "A workspace setup review is waiting for you.")
+              : errorMessage(error)}
+          </Callout.Text>
+          {awaitingReview && (
+            <Flex direction="column" gap="2">
+              {review && onReviewPending ? (
+                <Button onClick={() => onReviewPending(review.approvalId)}>
+                  Open review
+                </Button>
+              ) : (
+                <Text size="2">
+                  Open Approvals to finish this review, then check again.
+                </Text>
+              )}
+              <Button
+                variant="soft"
+                onClick={() => setAttempt((value) => value + 1)}
+              >
+                Check again
+              </Button>
+            </Flex>
+          )}
         </Callout.Root>
       ) : null}
       {inspection ? (
@@ -291,9 +327,7 @@ export function TemplateBrowser({
               size="3"
               mt="3"
               onClick={() =>
-                void onOpenInApp(inspection).catch((error) =>
-                  setError(errorMessage(error)),
-                )
+                void onOpenInApp(inspection).catch((error) => setError(error))
               }
             >
               Continue in app

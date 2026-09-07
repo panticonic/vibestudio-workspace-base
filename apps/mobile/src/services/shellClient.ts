@@ -8,7 +8,6 @@ import type { PanelRegistry } from "@vibestudio/shared/panelRegistry";
 import type { RpcEnvelope } from "@vibestudio/rpc";
 import { decodePanelStateArgs } from "@vibestudio/shared/panelStateArgs";
 import type { ThemeAppearance } from "@vibestudio/shared/types";
-import type { WorkspaceConfig } from "@vibestudio/workspace-contracts/types";
 import { Appearance } from "react-native";
 import { WorkspaceClient } from "@vibestudio/service-schemas/clients/shellWorkspaceClient";
 import { EventsClient } from "@vibestudio/service-schemas/clients/eventsClient";
@@ -407,7 +406,7 @@ class MobilePanels implements PanelHost {
     }
   }
 
-  async loadTreeForPaint(workspaceConfig?: WorkspaceConfig): Promise<void> {
+  async loadTreeForPaint(): Promise<void> {
     const panelManager = this.requireManager();
     await this.ensureRegistered();
     const groups = await this.treeCache.loadRootGroups(true);
@@ -419,26 +418,6 @@ class MobilePanels implements PanelHost {
         }),
       ),
     );
-    const existingSources = new Set(
-      groups.groups.flatMap(
-        (group) =>
-          this.treeCache
-            .getGroup({
-              kind: "roots",
-              ownerUserId: group.ownerUserId,
-            })
-            ?.nodes.flatMap((node) => (node.source ? [node.source] : [])) ?? [],
-      ),
-    );
-    for (const initial of workspaceConfig?.initPanels ?? []) {
-      if (existingSources.has(initial.source)) continue;
-      await panelManager.create(initial.source, {
-        isRoot: true,
-        addAsRoot: true,
-        stateArgs: initial.stateArgs,
-      });
-      existingSources.add(initial.source);
-    }
     const roots = (
       await Promise.all(
         groups.groups.flatMap(
@@ -452,28 +431,12 @@ class MobilePanels implements PanelHost {
       )
     ).filter((panel): panel is Panel => panel !== null);
     this.registry.repopulate(roots);
-    const ownGroup =
-      groups.groups.find(
-        (group) => group.ownerUserId === this.deps.getSelfUserId(),
-      ) ?? groups.groups[0];
-    const firstRoot = ownGroup
-      ? this.treeCache.getGroup({
-          kind: "roots",
-          ownerUserId: ownGroup.ownerUserId,
-        })?.nodes[0]
-      : undefined;
-    if (firstRoot) {
-      const slotId = asPanelSlotId(firstRoot.slotId);
-      const panel = await panelManager.getPanel(slotId);
-      if (panel) {
-        await panelManager.notifyFocused(slotId);
-        this.deps.navigateToPanel(firstRoot.slotId);
-      }
-    }
+    // MainScreen owns focus for this workspace and selects a first root only
+    // when its current selection is absent. Hydration must not navigate.
   }
 
-  async reconcile(workspaceConfig?: WorkspaceConfig): Promise<void> {
-    await this.loadTreeForPaint(workspaceConfig);
+  async reconcile(): Promise<void> {
+    await this.loadTreeForPaint();
     await this.syncRuntimeLeases();
   }
 
@@ -1497,7 +1460,7 @@ export class ShellClient {
             revision: restored.tree.revision,
           });
         } else {
-          await this.panels.loadTreeForPaint(info.config);
+          await this.panels.loadTreeForPaint();
           await this.persistStartupSnapshot(info.config.id);
           smokePhase("workspace-shell-ready", { source: "live-tree" });
         }
@@ -1675,7 +1638,7 @@ export class ShellClient {
           this.ensureReactNativeHostTargetReady(signal),
         ]);
         await (refreshTree
-          ? this.panels.reconcile(info.config)
+          ? this.panels.reconcile()
           : this.panels.completeColdStart());
         if (this.disposed || signal.aborted) {
           await deferredResults;

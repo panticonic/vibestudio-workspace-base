@@ -1,3 +1,5 @@
+import { useApprovalPresentation } from "./ApprovalPresentationContext";
+import { APPROVAL_OVERLAY_HOST_ID } from "./ConsentApprovalBar";
 import { WorkspaceIconsContext } from "../shell/workspaceIconsContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -34,7 +36,6 @@ import { ConnectionStatusBadge } from "./ConnectionStatusBadge";
 import { ThemeSettings } from "./ThemeSettings";
 import "./workspaceDesktop.css";
 
-import { filterRuntimeApprovals } from "@vibestudio/shared/bootstrapApprovals";
 import type { PanelLocation } from "@vibestudio/shared/panelLocation";
 
 type ClientOwner = Awaited<ReturnType<typeof createWorkspaceShellClient>>;
@@ -46,6 +47,7 @@ type OpenWorkspace = ClientOwner & {
 /** System owns this window. Each retained child owns its store, clients, tree and drafts. */
 export function WorkspaceDesktop() {
   const presentationStore = useStore();
+  const approvalPresentation = useApprovalPresentation();
   const [catalog, setCatalog] = useState<HubWorkspaceEntry[]>([]);
   const [opened, setOpened] = useState<OpenWorkspace[]>([]);
   const epoch = useRef(0);
@@ -62,16 +64,27 @@ export function WorkspaceDesktop() {
   const [expanded, setExpanded] = useState(new Set<string>());
   const [busy, setBusy] = useState(new Set<string>());
   const [error, setError] = useState<string | null>(null);
+  const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
+  const [notificationHost, setNotificationHost] = useState<HTMLElement | null>(
+    null,
+  );
   const [treeHosts, setTreeHosts] = useState(new Map<string, HTMLElement>());
   const treeRefs = useRef(
     new Map<string, (element: HTMLDivElement | null) => void>(),
   );
   const setSettings = useSetAtom(settingsDialogAtom);
   const setChooser = useSetAtom(workspaceChooserDialogOpenAtom);
-  const [reviewRequests, setReviewRequests] = useState(
-    new Map<string, number>(),
-  );
-  const [approvals, setApprovals] = useState(new Map<string, number>());
+  useEffect(() => {
+    approvalPresentation.setHost(notificationHost);
+    approvalPresentation.setAnchorId(
+      focusedId ? `${APPROVAL_OVERLAY_HOST_ID}:${focusedId}` : null,
+    );
+  }, [
+    notificationHost,
+    focusedId,
+    approvalPresentation.setHost,
+    approvalPresentation.setAnchorId,
+  ]);
   const [disconnected, setDisconnected] = useState(new Set<string>());
 
   const open = useCallback(
@@ -151,9 +164,6 @@ export function WorkspaceDesktop() {
         setCatalog(entries);
         const visible = new Set(entries.map((entry) => entry.workspaceId));
         accessibleIds.current = visible;
-        setApprovals(
-          (counts) => new Map([...counts].filter(([id]) => visible.has(id))),
-        );
         for (const [id, owner] of owners.current) {
           if (!visible.has(id)) {
             owner.close();
@@ -161,7 +171,13 @@ export function WorkspaceDesktop() {
           }
         }
         setOpened([...owners.current.values()]);
-        await Promise.all([open(pair.personal), open(pair.system)]);
+        await Promise.all([
+          open(pair.personal),
+          open(pair.system),
+          ...entries
+            .filter((entry) => entry.pendingApprovalCount > 0)
+            .map(open),
+        ]);
         if (focusWorkspaceId) {
           const target = entries.find(
             (entry) => entry.workspaceId === focusWorkspaceId,
@@ -285,7 +301,6 @@ export function WorkspaceDesktop() {
       if (live && location) void handle(location);
     });
     return () => {
-      live = false;
       release();
     };
   }, [open]);
@@ -317,6 +332,13 @@ export function WorkspaceDesktop() {
     }
     return callback;
   };
+  const reviewApprovals = (id: string) => {
+    setChooser(false);
+    approvalPresentation.request(id);
+    const workspace = catalog.find((entry) => entry.workspaceId === id);
+    if (workspace)
+      void open(workspace).catch((error) => setError(String(error)));
+  };
   const sections: WorkspaceSection[] = catalog.map((workspace) => ({
     workspace,
     state: busy.has(workspace.workspaceId)
@@ -328,8 +350,12 @@ export function WorkspaceDesktop() {
         : "closed",
     expanded: expanded.has(workspace.workspaceId),
     focused: workspace.workspaceId === focusedId,
-    approvalCount:
-      approvals.get(workspace.workspaceId) ?? workspace.pendingApprovalCount,
+    approvalCount: owners.current.has(workspace.workspaceId)
+      ? approvalPresentation.entries.filter(
+          (entry) =>
+            entry.workspaceId === workspace.workspaceId && entry.actionable,
+        ).length
+      : workspace.pendingApprovalCount,
     tree: (
       <div
         className="workspace-tree-host"
@@ -346,6 +372,7 @@ export function WorkspaceDesktop() {
           hidden={!sidebarVisible}
         >
           <WorkspaceStack
+            scrollRef={setScrollElement}
             sections={sections}
             onToggleExpanded={(id) => {
               if (!owners.current.has(id)) {
@@ -364,12 +391,7 @@ export function WorkspaceDesktop() {
             onCreatePanel={(id) => {
               void createPanel(id);
             }}
-            onReviewApprovals={(id) => {
-              setReviewRequests((requests) =>
-                new Map(requests).set(id, (requests.get(id) ?? 0) + 1),
-              );
-              void select(id);
-            }}
+            onReviewApprovals={reviewApprovals}
             onAddWorkspace={() => setChooser(true)}
           />
           <Flex className="workspace-desktop-controls" gap="2" align="center">
@@ -417,6 +439,9 @@ export function WorkspaceDesktop() {
                   >
                     <WorkspaceNavigationHostContext.Provider
                       value={{
+                        scrollElement,
+                        notificationHost,
+                        setNotificationHost,
                         element:
                           treeHosts.get(owner.workspace.workspaceId) ?? null,
                         workspaceId: owner.workspace.workspaceId,
@@ -427,8 +452,6 @@ export function WorkspaceDesktop() {
                             workspaceLabel(entry),
                           ]),
                         ),
-                        reviewRequest:
-                          reviewRequests.get(owner.workspace.workspaceId) ?? 0,
                         sidebarVisible,
                         toggleSidebar: () =>
                           setSidebarVisible((visible) => !visible),
@@ -450,18 +473,6 @@ export function WorkspaceDesktop() {
                             return next;
                           })
                         }
-                        onApprovals={(count) =>
-                          setApprovals((values) => {
-                            if (
-                              values.get(owner.workspace.workspaceId) === count
-                            )
-                              return values;
-                            return new Map(values).set(
-                              owner.workspace.workspaceId,
-                              count,
-                            );
-                          })
-                        }
                       />
                     </WorkspaceNavigationHostContext.Provider>
                   </WorkspaceVisibilityContext.Provider>
@@ -478,44 +489,23 @@ export function WorkspaceDesktop() {
 function WorkspacePanelOwner({
   owner,
   visible,
-  onApprovals,
   onConnection,
 }: {
   owner: OpenWorkspace;
   visible: boolean;
-  onApprovals(count: number): void;
   onConnection(connected: boolean): void;
 }) {
   const connection = useRef(onConnection);
   connection.current = onConnection;
-  const report = useRef(onApprovals);
-  report.current = onApprovals;
   useEffect(() => {
-    let live = true;
-    const refresh = () =>
-      owner.client.shellApproval
-        .listPending()
-        .then((pending) => {
-          if (live) report.current(filterRuntimeApprovals(pending).length);
-        })
-        .catch(console.warn);
-    void refresh();
     const releaseStatus = owner.client.events.on(
       "server-connection-changed",
       (event) => connection.current(event.status === "connected"),
     );
     void owner.client.events.subscribe("server-connection-changed");
-    const release = owner.client.events.on(
-      "shell-approval:pending-changed",
-      (event) => report.current(filterRuntimeApprovals(event.pending).length),
-    );
-    void owner.client.events.subscribe("shell-approval:pending-changed");
     return () => {
-      live = false;
       releaseStatus();
       void owner.client.events.unsubscribe("server-connection-changed");
-      release();
-      void owner.client.events.unsubscribe("shell-approval:pending-changed");
     };
   }, [owner]);
   return (

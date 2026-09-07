@@ -10,7 +10,8 @@
   "dependencies": {
     "@vibestudio/service-schemas": "workspace:*",
     "@workspace/template-registry": "workspace:*",
-    "@radix-ui/themes": "^3.3.0"
+    "@radix-ui/themes": "^3.3.0",
+    "@vibestudio/shared": "workspace:*"
   },
   "peerDependencies": {
     "react": "^19.0.0",

@@ -359,7 +359,13 @@ function renderSheet(
   overrides: Partial<React.ComponentProps<typeof ApprovalSheet>> = {},
 ) {
   const props = {
-    approvals: Array.isArray(approval) ? approval : [approval],
+    approval: Array.isArray(approval) ? approval[0]! : approval,
+    queue: {
+      index: 0,
+      total: Array.isArray(approval) ? approval.length : 1,
+      onPrevious: jest.fn(),
+      onNext: jest.fn(),
+    },
     onResolve: jest.fn(async () => undefined),
     onSubmitClientConfig: jest.fn(async () => undefined),
     onSubmitCredentialInput: jest.fn(async () => undefined),
@@ -367,7 +373,30 @@ function renderSheet(
     onResolveInstallReview: jest.fn(async () => undefined),
     ...overrides,
   };
-  const view = render(<ApprovalSheet {...props} />);
+  const items = Array.isArray(approval) ? approval : [approval];
+  function ControlledSheet() {
+    const [index, setIndex] = React.useState(0);
+    return (
+      <ApprovalSheet
+        {...props}
+        approval={items[index] ?? null}
+        queue={{
+          index,
+          total: items.length,
+          onPrevious: () => setIndex((value) => Math.max(0, value - 1)),
+          onNext: () =>
+            setIndex((value) => Math.min(items.length - 1, value + 1)),
+        }}
+      />
+    );
+  }
+  const view = render(
+    Array.isArray(approval) ? (
+      <ControlledSheet />
+    ) : (
+      <ApprovalSheet {...props} />
+    ),
+  );
   return { ...view, props };
 }
 
@@ -996,7 +1025,8 @@ describe("ApprovalSheet", () => {
 
     rerender(
       <ApprovalSheet
-        approvals={[{ ...credential, oauthAudienceDomainMismatch: false }]}
+        approval={{ ...credential, oauthAudienceDomainMismatch: false }}
+        queue={{ index: 0, total: 1, onPrevious: jest.fn(), onNext: jest.fn() }}
         onResolve={jest.fn()}
         onSubmitClientConfig={jest.fn()}
         onSubmitCredentialInput={jest.fn()}
@@ -1208,7 +1238,8 @@ describe("ApprovalSheet", () => {
 
     rerender(
       <ApprovalSheet
-        approvals={[{ ...credentialInput, approvalId: "approval-2" }]}
+        approval={{ ...credentialInput, approvalId: "approval-2" }}
+        queue={{ index: 0, total: 1, onPrevious: jest.fn(), onNext: jest.fn() }}
         onResolve={jest.fn()}
         onSubmitClientConfig={jest.fn()}
         onSubmitCredentialInput={jest.fn()}
