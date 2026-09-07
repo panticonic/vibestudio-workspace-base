@@ -347,6 +347,6 @@
     "apps/mobile/jest.setup.ts",
     "apps/mobile/**/*.test.ts",
     "apps/mobile/**/*.test.tsx",
-    "panels/terminal/vscode-upstream"
+    "docs/upstream/vscode-terminal"
   ]
 }
