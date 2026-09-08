@@ -70,8 +70,10 @@
     "@workspace/agentic-protocol": "workspace:*",
     "@workspace/runtime": "workspace:*",
     "@workspace/testkit": "workspace:*",
+    "@workspace-skills/workspace-dev": "workspace:*",
     "@workspace-skills/vibestudio-vcs": "workspace:*",
-    "zod": "^3.25.76",
-    "@workspace-skills/workspace-dev": "workspace:*"
+    "@vibestudio/workspace": "workspace:*",
+    "yaml": "^2.8.0",
+    "zod": "^3.25.76"
   }
 }

@@ -36,6 +36,7 @@ import type { TestAuthorityPolicy } from "./types.js";
 import type { BlobReader } from "@workspace/agentic-protocol";
 import { createRecoveryCoordinator } from "@vibestudio/shell-core/recoveryCoordinator";
 import { evalInPanel } from "@workspace/testkit";
+import { publishAtomicPanelStoreFixture } from "./atomic-panel-store-fixture.js";
 
 // This runner is eval'd server-side (in the orchestrating agent's EvalDO), so it
 // uses the portable client surface — NOT panel-only `getStateArgs`/`slotId`.
@@ -512,6 +513,12 @@ export class HeadlessRunner {
     return this.requireWorkspaceRepoFixtureLifecycle().prepare();
   }
 
+  async publishAtomicPanelStoreFixture() {
+    const contextId = this.requireWorkspaceRepoFixtureLifecycle().taskContextId;
+    if (!contextId) throw new Error("Atomic panel-store fixture has no prepared task context");
+    return publishAtomicPanelStoreFixture({ vcs, blobstore, contextId });
+  }
+
   /**
    * Retire the exact task-authored scope. Published work on this context's
    * first-parent line is counteracted; concurrent integration-parent work is
@@ -682,7 +689,7 @@ export class HeadlessRunner {
         }
         return rpcConfig.stream(targetId, method, args, options);
       },
-      on: (event, listener) => rpcConfig.on(event, listener),
+      on: (event, listener, website) => rpcConfig.on(event, listener, website),
       ...(rpcConfig.registerResidentSession
         ? {
             registerResidentSession: (...args) => {
