@@ -171,30 +171,6 @@ it("allows ordinary panels to inspect and request host review without creating a
   expect(screen.queryByRole("button", { name: "Create workspace" })).toBeNull();
 });
 
-it("reviews a host-validated local candidate without remote inspection", async () => {
-  const client = {
-    inspect: vi.fn(),
-  };
-  const onCreate = vi.fn(async () => undefined);
-  render(
-    <Theme>
-      <TemplateBrowser
-        client={client}
-        candidates={[inspection]}
-        onCreate={onCreate}
-      />
-    </Theme>,
-  );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Explore Garden" }),
-  );
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
-  });
-  expect(onCreate).toHaveBeenCalledWith("garden", pin);
-  expect(client.inspect).not.toHaveBeenCalled();
-});
-
 it("presents the exact pending review and retries only when requested", async () => {
   const failure = Object.assign(new Error("internal extension status"), {
     code: "EREVIEWPENDING",

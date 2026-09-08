@@ -45,9 +45,6 @@ template:
     - package.json
     - types/assets.d.ts
     - tsconfig.json
-templateRegistry:
-  url: git+https://github.com/panticonic/vibestudio-template-registry.git
-  ref: refs/heads/main
 systemEpoch: 0
 defaultRepo: projects/default
 defaultAgentConfig:

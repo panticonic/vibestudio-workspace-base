@@ -194,7 +194,6 @@ interface TemplateBrowserProps {
   initialPin?: TemplateExactPin;
   initialSourceUrl?: string;
   initialInspection?: TemplateInspection;
-  candidates?: readonly TemplateInspection[];
   onReviewPending?: (approvalId: string) => void;
   onCreate?: CreateTemplateWorkspace;
   listSourceAccounts?: () => Promise<StoredCredentialSummary[]>;
@@ -225,7 +224,6 @@ function WorkspaceSourceSession({
   initialPin,
   initialSourceUrl,
   initialInspection,
-  candidates = [],
   onReviewPending,
   onChooseFolder,
   onCreateFresh,
@@ -497,33 +495,6 @@ function WorkspaceSourceSession({
               Choose folder…
             </Button>
           </Box>
-        </Flex>
-      ) : null}
-      {candidates.length > 0 ? (
-        <Flex direction="column" gap="3">
-          <Heading size="3">Local workspaces</Heading>
-          <Grid columns={{ initial: "1", sm: "2" }} gap="3">
-            {candidates.map((candidate) => (
-              <Card key={JSON.stringify(candidate.pin)}>
-                <Heading size="3">
-                  {candidate.presentation?.name ?? "Workspace source"}
-                </Heading>
-                {candidate.presentation?.description ? (
-                  <Text as="p" size="2" color="gray" mt="2">
-                    {candidate.presentation.description}
-                  </Text>
-                ) : null}
-                <Button
-                  size="3"
-                  variant="soft"
-                  mt="3"
-                  onClick={() => setInspection(candidate)}
-                >
-                  Explore {candidate.presentation?.name ?? "workspace"}
-                </Button>
-              </Card>
-            ))}
-          </Grid>
         </Flex>
       ) : null}
       {sourceKind === "git" ? (

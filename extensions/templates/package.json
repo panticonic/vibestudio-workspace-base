@@ -13,17 +13,13 @@
         "onInvoke"
       ],
       "methodAuthority": {
-        "catalog": {
+        "resolveSource": {
           "effect": {
-            "kind": "userland-capability",
-            "capability": "workspace.templates.catalog.read",
-            "resource": {
-              "kind": "receiver"
-            }
+            "kind": "open"
           },
           "website": {
-            "kind": "eligible",
-            "rationale": "Returns catalog entries and registry coordinates. The configured registry may be private; this shares its metadata with the requester."
+            "kind": "closed",
+            "reason": "Websites use the reviewed templates.inspect operation."
           }
         },
         "inspect": {
@@ -69,19 +65,6 @@
             "kind": "closed",
             "reason": "Controls workspace source authoring or inspection requiring source disclosure review."
           }
-        },
-        "suggestRegistryEntry": {
-          "effect": {
-            "kind": "userland-capability",
-            "capability": "workspace.templates.publish",
-            "resource": {
-              "kind": "receiver"
-            }
-          },
-          "website": {
-            "kind": "closed",
-            "reason": "Controls workspace source authoring or inspection requiring source disclosure review."
-          }
         }
       }
     },
@@ -102,24 +85,6 @@
           "grantScopes": [
             "once",
             "task",
-            "session"
-          ]
-        },
-        {
-          "name": "workspace.templates.catalog.read",
-          "title": "View the configured template catalog",
-          "action": "view this workspace’s configured template catalog",
-          "description": "Returns catalog entries and registry coordinates. The configured registry may be private; this shares its metadata with the requester.",
-          "tier": "gated",
-          "sensitivity": "read",
-          "resourceType": "workspace.templates",
-          "presentation": {
-            "domain": "sharing",
-            "verb": "see"
-          },
-          "notability": "headline",
-          "grantScopes": [
-            "once",
             "session"
           ]
         },
@@ -189,7 +154,6 @@
     "@vibestudio/service-schemas": "workspace:*",
     "@vibestudio/workspace": "workspace:*",
     "@vibestudio/workspace-contracts": "workspace:*",
-    "@workspace/template-registry": "workspace:*",
     "yaml": "^2.8.0"
   }
 }

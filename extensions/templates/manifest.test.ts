@@ -2,11 +2,11 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 describe("templates authority manifest", () => {
-  it("requires disclosure permission for configured catalogs and private source inspection", () => {
+  it("keeps exact source inspection gated", () => {
     const manifest = JSON.parse(
       readFileSync(new URL("./package.json", import.meta.url), "utf8"),
     );
-    for (const method of ["catalog", "inspect"]) {
+    for (const method of ["inspect"]) {
       const declared = manifest.vibestudio.extension.methodAuthority[method];
       expect(declared.website.kind).toBe("eligible");
       expect(declared.effect.kind).toBe("userland-capability");
@@ -25,12 +25,11 @@ describe("templates authority manifest", () => {
       readFileSync(new URL("./package.json", import.meta.url), "utf8"),
     );
     expect(Object.keys(manifest.vibestudio.extension.methodAuthority)).toEqual([
-      "catalog",
+      "resolveSource",
       "inspect",
       "inspectAuthoring",
       "authoringParts",
       "publishAuthoring",
-      "suggestRegistryEntry",
     ]);
     expect(JSON.stringify(manifest)).not.toContain("context.boundary");
     expect(JSON.stringify(manifest)).not.toContain("workspace.storage.delete");

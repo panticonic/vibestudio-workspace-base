@@ -19,7 +19,7 @@ describe("template UI caller authority", () => {
     "apps/shell",
     "apps/mobile",
   ]) {
-    for (const method of ["catalog", "inspect"]) {
+    for (const method of ["inspect"]) {
       it(`${unit} can acquire ${method} authority for the declared receiver only`, () => {
         const manifest = JSON.parse(
           readFileSync(
