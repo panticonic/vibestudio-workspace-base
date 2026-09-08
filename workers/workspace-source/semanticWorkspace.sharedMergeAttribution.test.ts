@@ -6,7 +6,7 @@ import {
   SemanticWorkspace,
   type SemanticDispatchRequest,
   type SemanticDispatchResult,
-} from "./semanticWorkspace.js";
+} from "./semanticWorkspace.testHost.js";
 import { SemanticVcsStore } from "./semanticVcsStore.js";
 
 const timestamp = "2026-09-08T00:00:00.000Z";
@@ -51,68 +51,17 @@ describe("SemanticWorkspace shared merge attribution", () => {
       [contentHash("ours\n"), "ours\n"],
       [contentHash("theirs\n"), "theirs\n"],
     ]);
-    const prepareContent = (
-      result: SemanticDispatchResult,
-    ): SemanticDispatchResult => {
-      let current = result;
-      while ((current as { kind: string }).kind === "host-content") {
-        const request = (
-          current as unknown as { request: Record<string, unknown> }
-        ).request;
-        const blobs = request["blobs"] as Array<{
-          contentHash: string;
-          base64: string;
-        }>;
-        current = (
-          semantic as unknown as {
-            acknowledgeContent(input: {
-              request: Record<string, unknown>;
-              contentHashes: string[];
-            }): SemanticDispatchResult;
-          }
-        ).acknowledgeContent({
-          request,
-          contentHashes: blobs.map(({ contentHash }) => contentHash).sort(),
-        });
-      }
-      return current;
-    };
     const acknowledgeRead = (
       result: SemanticDispatchResult,
     ): SemanticDispatchResult => {
       if (result.kind !== "host-read") return result;
-      return prepareContent(
-        semantic.acknowledgeHostRead({
-          request: result.request,
-          files: (result.request["contentHashes"] as string[]).map((hash) => ({
-            contentHash: hash,
-            text: texts.get(hash)!,
-          })),
-        }),
-      );
-    };
-    const acknowledgeEdit = (
-      result: SemanticDispatchResult,
-      baseText: string,
-    ): SemanticDispatchResult => {
-      if (result.kind === "host-read") return acknowledgeRead(result);
-      if (result.kind !== "effects-pending")
-        throw new Error("text edit did not request bytes");
-      const observation = result.effects.find(
-        (candidate) => candidate.kind === "observe-content",
-      );
-      if (!observation) return prepareContent(result);
-      return prepareContent(
-        semantic.acknowledgeEffect({
-          effectId: observation.effectId,
-          payloadDigest: observation.payloadDigest,
-          receipt: {
-            files: [
-              { contentHash: contentHash(baseText), base64: btoa(baseText) },
-            ],
-          },
-        }),
-      );
+      return semantic.acknowledgeHostRead({
+        request: result.request,
+        files: (result.request["contentHashes"] as string[]).map((hash) => ({
+          contentHash: hash,
+          text: texts.get(hash)!,
+        })),
+      });
     };
     const acknowledge = (result: SemanticDispatchResult): void => {
       if (result.kind !== "effects-pending") return;
@@ -170,29 +119,27 @@ describe("SemanticWorkspace shared merge attribution", () => {
       "context:source",
       "command:genesis",
     );
-    const createdDispatch = prepareContent(
-      await semantic.dispatch("edit", {
-        ingress,
-        input: {
-          contextId: "context:source",
-          commandId: "command:create",
-          expectedWorkingHead: initial.working.ref,
-          changes: [
-            {
-              kind: "repository-create",
-              repoPath: "packages/fixture",
-              files: [
-                {
-                  path: "index.ts",
-                  content: { kind: "text", text: "base\n" },
-                  mode: 0o644,
-                },
-              ],
-            },
-          ],
-        },
-      }),
-    );
+    const createdDispatch = await semantic.dispatch("edit", {
+      ingress,
+      input: {
+        contextId: "context:source",
+        commandId: "command:create",
+        expectedWorkingHead: initial.working.ref,
+        changes: [
+          {
+            kind: "repository-create",
+            repoPath: "packages/fixture",
+            files: [
+              {
+                path: "index.ts",
+                content: { kind: "text", text: "base\n" },
+                mode: 0o644,
+              },
+            ],
+          },
+        ],
+      },
+    });
     const created = pending<{
       workingHead: { kind: "application"; applicationId: string };
     }>(createdDispatch);
@@ -219,7 +166,7 @@ describe("SemanticWorkspace shared merge attribution", () => {
     if (!file || file.state.presence !== "placed")
       throw new Error("missing file");
 
-    const sourceDispatch = acknowledgeEdit(
+    const sourceDispatch = acknowledgeRead(
       await semantic.dispatch("edit", {
         ingress,
         input: {
@@ -236,7 +183,6 @@ describe("SemanticWorkspace shared merge attribution", () => {
           ],
         },
       }),
-      "base\n",
     );
     const sourceEdit = pending<{
       workingHead: { kind: "application"; applicationId: string };
@@ -250,7 +196,7 @@ describe("SemanticWorkspace shared merge attribution", () => {
       "Source",
     );
 
-    const targetDispatch = acknowledgeEdit(
+    const targetDispatch = acknowledgeRead(
       await semantic.dispatch("edit", {
         ingress,
         input: {
@@ -267,7 +213,6 @@ describe("SemanticWorkspace shared merge attribution", () => {
           ],
         },
       }),
-      "base\n",
     );
     const sharedTarget = pending<{
       workingHead: { kind: "application"; applicationId: string };
