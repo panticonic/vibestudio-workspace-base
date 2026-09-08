@@ -884,14 +884,14 @@ export function createShellWorkspaceClient(
     list: () => hubControlClient.listWorkspaces(),
     create: (
       name: string,
-      opts?: {
-        forkFrom?: string;
+      opts: {
+        operationId: string;
         rootTemplate?: WorkspaceTemplatePin;
       },
     ) =>
       hubControlClient.createWorkspace({
         workspace: name,
-        ...(opts?.forkFrom ? { forkFrom: opts.forkFrom } : {}),
+        operationId: opts.operationId,
         ...(opts?.rootTemplate ? { rootTemplate: opts.rootTemplate } : {}),
       }),
     select: async (name: string) => {

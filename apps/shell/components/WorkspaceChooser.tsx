@@ -1,3 +1,5 @@
+import { submitWorkspaceCreation, readWorkspaceCreationSubmission } from "@vibestudio/service-schemas/clients/workspaceCreationClient";
+import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/types";
 import { useEffect, useRef, useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import {
@@ -11,7 +13,7 @@ import {
   Text,
   TextField,
 } from "@radix-ui/themes";
-import { TemplateBrowser } from "@workspace/template-management/react";
+import { TemplateBrowser } from "@workspace/react/templates";
 import type { HubWorkspaceEntry } from "@vibestudio/service-schemas/hubControl";
 import { sameWorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
 import {
@@ -40,7 +42,7 @@ export function WorkspaceChooser() {
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<HubWorkspaceEntry | null>(null);
+  const [created, setCreated] = useState<WorkspaceCreationReceipt | null>(null);
   const [candidateDiscovery, setCandidateDiscovery] = useState<
     | { status: "loading" }
     | { status: "failed"; error: string }
@@ -55,6 +57,24 @@ export function WorkspaceChooser() {
     ({ pin }) => template !== null && sameWorkspaceTemplatePin(pin, template),
   );
   const pending = useRef(false);
+  const [restoring, setRestoring] = useState(true);
+  const [recoveryNotice, setRecoveryNotice] = useState("");
+  const [recoveredInput, setRecoveredInput] = useState<ReturnType<typeof readWorkspaceCreationSubmission>>(null);
+  useEffect(() => {
+    let live = true;
+    void hubControl.getProfile(undefined).then(profile => {
+      if (!live) return;
+      if (!profile) throw new Error("The authenticated account is unavailable.");
+      const saved = readWorkspaceCreationSubmission(localStorage.getItem(`workspace-creation:${profile.userId}`));
+      if (saved) {
+        setRecoveredInput(saved);
+        setName(saved.workspace); setTemplate(saved.rootTemplate ?? null);
+        setMode(saved.rootTemplate ? "source" : "blank");
+        setRecoveryNotice(`A previous creation of ${saved.workspace} may have completed. Continue to check its result before submitting anything again.`);
+      }
+    }).catch(error => { if (live) setError(String(error)); }).finally(() => { if (live) setRestoring(false); });
+    return () => { live = false; };
+  }, [hubControl, setTemplate]);
   useEffect(() => {
     let live = true;
     hubControl
@@ -110,15 +130,24 @@ export function WorkspaceChooser() {
     workspace: string,
     rootTemplate?: import("@vibestudio/service-schemas/templates").TemplateExactPin,
   ) => {
-    if (pending.current) return;
+    if (pending.current || restoring) return;
     pending.current = true;
     setBusy(true);
     setError(null);
     try {
-      const entry = await hubControl.createWorkspace({
-        workspace,
-        ...(rootTemplate ? { rootTemplate } : {}),
+      const profile = await hubControl.getProfile(undefined);
+    if (!profile) throw new Error("The authenticated account is unavailable; workspace creation was not submitted.");
+      const entry = await submitWorkspaceCreation(hubControl, {
+        workspace, ...(rootTemplate ? { rootTemplate } : {}),
+      }, {
+        key: `workspace-creation:${profile.userId}`,
+        getItem: key => localStorage.getItem(key),
+        setItem: (key, value) => localStorage.setItem(key, value),
+        removeItem: key => localStorage.removeItem(key),
+        newOperationId: () => crypto.randomUUID(),
       });
+      setRecoveredInput(null); setRecoveryNotice("");
+      if (entry.state === "deleted") throw new Error("The earlier creation completed, but its workspace was deleted. Choose Create again only to install a new workspace.");
       setCreated(entry);
       await open(entry.workspaceId);
     } catch (error) {
@@ -157,6 +186,7 @@ export function WorkspaceChooser() {
             </Button>
           ) : null}
         </Flex>
+        {recoveryNotice ? <Callout.Root><Callout.Text>{recoveryNotice}</Callout.Text></Callout.Root> : null}
         {candidateDiscovery.status === "failed" ? (
           <Callout.Root color="red" role="alert">
             <Callout.Text>{candidateDiscovery.error}</Callout.Text>
@@ -174,6 +204,10 @@ export function WorkspaceChooser() {
             onClick={() => void open(created.workspaceId)}
           >
             Open workspace
+          </Button>
+        ) : restoring ? <Spinner /> : recoveredInput ? (
+          <Button disabled={busy} onClick={() => void create(recoveredInput.workspace, recoveredInput.rootTemplate)}>
+            Continue previous creation
           </Button>
         ) : mode === "source" &&
           template &&

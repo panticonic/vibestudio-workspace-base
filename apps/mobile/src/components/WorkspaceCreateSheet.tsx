@@ -8,7 +8,7 @@ import type {
   TemplateInspection,
 } from "@vibestudio/service-schemas/templates";
 import { sameWorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
-import type { MobileHubWorkspace } from "@vibestudio/mobile-iroh";
+import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/types";
 import {
   KeyboardAvoidingView,
   Modal,
@@ -30,7 +30,7 @@ import { X, Workflow } from "../design/icons";
 /** Creates one ordinary workspace through the existing account control API. */
 export function WorkspaceCreateSheet({
   directory,
-  template,
+  template: requestedTemplate,
   onClose,
   onCreated,
 }: {
@@ -39,12 +39,15 @@ export function WorkspaceCreateSheet({
   onClose(): void;
   onCreated(): void;
 }) {
+  const [template, setTemplate] = useState(requestedTemplate);
+  const [restoring, setRestoring] = useState(true);
+  const [recoveryNotice, setRecoveryNotice] = useState("");
   const colors = useAtomValue(themeColorsAtom);
   const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
-  const [created, setCreated] = useState<MobileHubWorkspace | null>(null);
+  const [created, setCreated] = useState<WorkspaceCreationReceipt | null>(null);
   const [inspection, setInspection] = useState<TemplateInspection | null>(null);
   const [candidates, setCandidates] = useState<TemplateInspection[]>([]);
   const [candidateError, setCandidateError] = useState<unknown>(null);
@@ -64,6 +67,15 @@ export function WorkspaceCreateSheet({
       ? inspection
       : null;
   const selectedTemplate = template ?? currentInspection?.pin;
+  useEffect(() => {
+    let live = true;
+    void directory.pendingWorkspaceCreation().then(saved => {
+      if (!live || !saved) return;
+      setName(saved.workspace); setTemplate(saved.rootTemplate);
+      setRecoveryNotice(`A previous creation of ${saved.workspace} may have completed. Continue to check its result before submitting anything again.`);
+    }).catch(error => { if (live) setError(error); }).finally(() => { if (live) setRestoring(false); });
+    return () => { live = false; };
+  }, [directory]);
   useEffect(() => {
     let live = true;
     setInspecting(Boolean(template));
@@ -103,7 +115,7 @@ export function WorkspaceCreateSheet({
   const create = async () => {
     const capturedName = name.trim();
     if (
-      pending.current ||
+      pending.current || restoring ||
       (!created && (!capturedName || (selectedTemplate && !currentInspection)))
     )
       return;
@@ -114,6 +126,8 @@ export function WorkspaceCreateSheet({
       const entry =
         created ??
         (await directory.createWorkspace(capturedName, currentInspection?.pin));
+      setRecoveryNotice("");
+      if (entry.state === "deleted") throw new Error("The earlier creation completed, but its workspace was deleted. Choose Create again only to install a new workspace.");
       setCreated(entry);
       await directory.activate(entry.workspaceId);
       onCreated();
@@ -292,11 +306,12 @@ export function WorkspaceCreateSheet({
               )}
             </View>
           )}
+          {recoveryNotice ? <Text accessibilityRole="text" style={[type.body, { color: colors.textSecondary }]}>{recoveryNotice}</Text> : null}
           <TextInput
             autoFocus={!selectedTemplate}
             value={name}
             onChangeText={setName}
-            editable={!busy && !created}
+            editable={!busy && !created && !restoring && !recoveryNotice}
             placeholder="Workspace name"
             accessibilityLabel="Workspace name"
             placeholderTextColor={colors.textTertiary}
@@ -355,7 +370,7 @@ export function WorkspaceCreateSheet({
                   : "Creating workspace…"
                 : created
                   ? "Open workspace"
-                  : "Create workspace"
+                  : recoveryNotice ? "Continue previous creation" : "Create workspace"
             }
             variant="filled"
             loading={busy}

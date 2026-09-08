@@ -1,3 +1,5 @@
+import { submitWorkspaceCreation, readWorkspaceCreationSubmission } from "@vibestudio/service-schemas/clients/workspaceCreationClient";
+import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/types";
 import { clearWorkspaceCookies } from "./workspaceBrowserProfile";
 import { extensionsMethods } from "@vibestudio/service-schemas/extensions";
 import { workspaceName as displayWorkspaceName } from "./workspaceName";
@@ -577,20 +579,30 @@ export class MobileWorkspaceDirectory {
     return this.hubControl.listTemplateCandidates();
   }
 
+  async pendingWorkspaceCreation() {
+    const profile = await this.hubControl.getProfile(undefined);
+    if (!profile) throw new Error("The authenticated account is unavailable.");
+    return readWorkspaceCreationSubmission(await getNativeAppStorage().getItem(`workspace-creation:${profile.userId}`));
+  }
+
   async createWorkspace(
     name: string,
     rootTemplate?: TemplateExactPin,
-  ): Promise<MobileHubWorkspace> {
-    const entry = await this.hubControl.createWorkspace({
-      workspace: name,
-      ...(rootTemplate ? { rootTemplate } : {}),
+  ): Promise<WorkspaceCreationReceipt> {
+    const profile = await this.hubControl.getProfile(undefined);
+    if (!profile) throw new Error("The authenticated account is unavailable; workspace creation was not submitted.");
+    const storage = getNativeAppStorage();
+    const receipt = await submitWorkspaceCreation(this.hubControl, {
+      workspace: name, ...(rootTemplate ? { rootTemplate } : {}),
+    }, {
+      key: `workspace-creation:${profile.userId}`,
+      getItem: key => storage.getItem(key),
+      setItem: (key, value) => storage.setItem(key, value),
+      removeItem: key => storage.removeItem(key),
+      newOperationId: () => crypto.randomUUID(),
     });
-    this.entries = [
-      ...this.entries.filter((item) => item.workspaceId !== entry.workspaceId),
-      entry,
-    ];
-    this.changed();
-    return entry;
+    await this.refresh();
+    return receipt;
   }
 
   async createPanel(workspaceId: string): Promise<void> {
