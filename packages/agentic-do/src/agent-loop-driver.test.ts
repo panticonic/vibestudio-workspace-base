@@ -396,7 +396,7 @@ describe("AgentLoopDriver", () => {
       .rows.map(
         (row) => JSON.parse(row.payload_ref_json) as Record<string, unknown>,
       )
-      .filter((payload) => payload.role === "assistant");
+      .filter((payload) => payload["role"] === "assistant");
 
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
