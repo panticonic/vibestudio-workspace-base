@@ -515,6 +515,20 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
   const replayLiveBuffer: ClientIngressMessage[] = [];
   const replayMessageKeys = new Set<string>();
   const MAX_REPLAY_MESSAGE_KEYS = 2000;
+  let retainedProjectionTruncated = false;
+
+  function retainDurableEvent(event: IncomingEvent): void {
+    if (replayMode === "skip" || event.delivery === "signal") return;
+    replayEvents.push(event);
+    const retainedLimit = opts.replayMessageLimit ?? DEFAULT_CHANNEL_REPLAY_PAGE_LIMIT;
+    if (replayEvents.length <= retainedLimit) return;
+    replayEvents.splice(0, replayEvents.length - retainedLimit);
+    retainedProjectionTruncated = true;
+    serverHasMoreBefore = true;
+    serverFirstEnvelopeSeq = replayEvents.find(
+      (retained) => typeof retained.pubsubId === "number"
+    )?.pubsubId;
+  }
 
   // Roster dedup
   const rosterOpIds = new Set<number>();
@@ -823,13 +837,15 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
         if (msg.channelConfig) serverChannelConfig = msg.channelConfig;
         if (typeof msg.totalCount === "number") serverTotalCount = msg.totalCount;
         if (typeof msg.envelopeCount === "number") serverEnvelopeCount = msg.envelopeCount;
-        if (typeof msg.firstEnvelopeSeq === "number") {
-          serverFirstEnvelopeSeq = msg.firstEnvelopeSeq;
-        } else {
-          serverFirstEnvelopeSeq = undefined;
+        if (!emitRecoveryReplay) {
+          if (!retainedProjectionTruncated) {
+            serverFirstEnvelopeSeq =
+              typeof msg.firstEnvelopeSeq === "number" ? msg.firstEnvelopeSeq : undefined;
+          }
+          serverHasMoreBefore =
+            (typeof msg.hasMoreBefore === "boolean" ? msg.hasMoreBefore : false) ||
+            retainedProjectionTruncated;
         }
-        serverHasMoreBefore =
-          typeof msg.hasMoreBefore === "boolean" ? msg.hasMoreBefore : undefined;
 
         if (replayComplete) {
           break;
@@ -975,17 +991,20 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
           // of being stranded in a replay buffer with no future ready boundary.
           if (event.phase === "replay") {
             if (replayComplete) {
-              if (replayMode !== "skip") replayEvents.push(event);
+              if (replayMode !== "skip") retainDurableEvent(event);
               eventsFanout.emit(event);
             } else if (replayMode !== "skip") {
               if (!bufferingReplay) {
                 bufferingReplay = true;
               }
-              replayEvents.push(event);
+              retainDurableEvent(event);
               if (emitRecoveryReplay) eventsFanout.emit(event);
             }
           } else {
-            // Emit live events
+            // Keep the bounded durable window authoritative for subscribers
+            // that mount after ready (for example, a chat view returning from
+            // another panel). Signals are intentionally never retained.
+            retainDurableEvent(event);
             eventsFanout.emit(event);
           }
         }
@@ -1893,8 +1912,10 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
   function resetReplayProjectionForRecovery(): void {
     currentRoster = {};
     rosterOpIds.clear();
-    replayMessageKeys.clear();
-    replayEvents.length = 0;
+    // Durable replay already retained by this client remains the projection
+    // basis for late subscribers after a transport replacement. The recovery
+    // subscription contributes only the gap after lastSeenSeq; replacing the
+    // basis with that gap makes a remounted transcript show only recent work.
     replayLiveBuffer.length = 0;
     replayCatchupPromise = null;
     bufferingReplay = replayMode !== "skip";

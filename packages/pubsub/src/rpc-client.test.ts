@@ -2403,6 +2403,206 @@ describe("connectViaRpc", () => {
       await client.close();
     });
 
+    it("retains the complete replay basis and its earlier-history cursor across recovery", async () => {
+      const coordinator = createRecoveryCoordinator();
+      const mock = createMockRpc();
+      const client = connectViaRpc({
+        rpc: mock.rpc as any,
+        channel: CHANNEL,
+        recoveryCoordinator: coordinator,
+      });
+
+      mock.emit({
+        stream: "log",
+        phase: "replay",
+        id: 100,
+        type: AGENTIC_EVENT_PAYLOAD_KIND,
+        payload: messageEvent("msg-100", "retained history", "agent-1"),
+        senderId: "agent-1",
+        ts: Date.now(),
+      });
+      mock.emit({
+        kind: "ready",
+        contextId: "ctx-123",
+        totalCount: 600,
+        envelopeCount: 500,
+        firstEnvelopeSeq: 1,
+        hasMoreBefore: true,
+      });
+      await client.ready();
+      mock.emit({
+        stream: "log",
+        phase: "live",
+        id: 101,
+        type: AGENTIC_EVENT_PAYLOAD_KIND,
+        payload: messageEvent("msg-101", "retained live message", "agent-1"),
+        senderId: "agent-1",
+        ts: Date.now(),
+      });
+
+      await coordinator.run("resubscribe");
+      mock.emit({
+        stream: "log",
+        phase: "replay",
+        id: 102,
+        type: AGENTIC_EVENT_PAYLOAD_KIND,
+        payload: messageEvent("msg-102", "recovered gap", "agent-1"),
+        senderId: "agent-1",
+        ts: Date.now(),
+      });
+      mock.emit({
+        kind: "ready",
+        contextId: "ctx-123",
+        totalCount: 601,
+        envelopeCount: 1,
+        firstEnvelopeSeq: 102,
+        hasMoreBefore: false,
+      });
+      await vi.waitFor(() => expect(client.connected).toBe(true));
+
+      const events = client.events({ includeReplay: true });
+      await expect(events.next()).resolves.toMatchObject({
+        value: { payload: { causality: { messageId: "msg-100" } } },
+      });
+      await expect(events.next()).resolves.toMatchObject({
+        value: { payload: { causality: { messageId: "msg-101" } } },
+      });
+      await expect(events.next()).resolves.toMatchObject({
+        value: { payload: { causality: { messageId: "msg-102" } } },
+      });
+      expect(client.hasMoreBefore).toBe(true);
+
+      await client.close();
+    });
+
+    it("keeps the retained cursor when initial replay exceeds the client window", async () => {
+      const mock = createMockRpc();
+      const client = connectViaRpc({
+        rpc: mock.rpc as any,
+        channel: CHANNEL,
+        replayMessageLimit: 2,
+      });
+
+      for (let id = 1; id <= 3; id++) {
+        mock.emit({
+          stream: "log",
+          phase: "replay",
+          id,
+          type: AGENTIC_EVENT_PAYLOAD_KIND,
+          payload: messageEvent(`msg-${id}`, `history ${id}`, "agent-1"),
+          senderId: "agent-1",
+          ts: Date.now(),
+        });
+      }
+      mock.emit({
+        kind: "ready",
+        contextId: "ctx-123",
+        envelopeCount: 3,
+        firstEnvelopeSeq: 1,
+        hasMoreBefore: false,
+      });
+      await client.ready();
+
+      expect(client.firstEnvelopeSeq).toBe(2);
+      expect(client.hasMoreBefore).toBe(true);
+      const events = client.events({ includeReplay: true });
+      await expect(events.next()).resolves.toMatchObject({
+        value: { payload: { causality: { messageId: "msg-2" } } },
+      });
+      await expect(events.next()).resolves.toMatchObject({
+        value: { payload: { causality: { messageId: "msg-3" } } },
+      });
+
+      await client.close();
+    });
+
+    it("bounds retained history across repeated recoveries and exposes earlier history", async () => {
+      const coordinator = createRecoveryCoordinator();
+      const mock = createMockRpc();
+      const client = connectViaRpc({
+        rpc: mock.rpc as any,
+        channel: CHANNEL,
+        replayMessageLimit: 2,
+        recoveryCoordinator: coordinator,
+      });
+
+      await emitReplayAndReady(mock.emit, []);
+      await client.ready();
+      for (let id = 1; id <= 3; id++) {
+        mock.emit({
+          stream: "log",
+          phase: "live",
+          id,
+          type: AGENTIC_EVENT_PAYLOAD_KIND,
+          payload: messageEvent(`msg-${id}`, `message ${id}`, "agent-1"),
+          senderId: "agent-1",
+          ts: Date.now(),
+        });
+      }
+      await vi.waitFor(() => expect(client.hasMoreBefore).toBe(true));
+
+      const recovered = vi.fn();
+      client.onReady(recovered);
+      for (let id = 4; id <= 5; id++) {
+        await coordinator.run("resubscribe");
+        mock.emit({
+          stream: "log",
+          phase: "replay",
+          id,
+          type: AGENTIC_EVENT_PAYLOAD_KIND,
+          payload: messageEvent(`msg-${id}`, `recovered message ${id}`, "agent-1"),
+          senderId: "agent-1",
+          ts: Date.now(),
+        });
+        mock.emit({
+          kind: "ready",
+          contextId: "ctx-123",
+          envelopeCount: 1,
+          firstEnvelopeSeq: id,
+          hasMoreBefore: false,
+        });
+        await vi.waitFor(() => expect(recovered).toHaveBeenCalledTimes(id - 3));
+      }
+      mock.emit({
+        stream: "signal",
+        messageId: "typing-1",
+        type: "signal",
+        payload: { content: "typing" },
+        senderId: "agent-1",
+        ts: Date.now(),
+      });
+
+      const events = client.events({ includeReplay: true });
+      await expect(events.next()).resolves.toMatchObject({
+        value: { payload: { causality: { messageId: "msg-4" } } },
+      });
+      await expect(events.next()).resolves.toMatchObject({
+        value: { payload: { causality: { messageId: "msg-5" } } },
+      });
+      expect(client.hasMoreBefore).toBe(true);
+      expect(client.firstEnvelopeSeq).toBe(4);
+
+      mock.rpc.call.mockResolvedValueOnce({
+        logEvents: [
+          {
+            id: 3,
+            messageId: "event-3",
+            type: AGENTIC_EVENT_PAYLOAD_KIND,
+            payload: messageEvent("msg-3", "evicted message", "agent-1"),
+            senderId: "agent-1",
+            ts: Date.now(),
+          },
+        ],
+        snapshots: [],
+        ready: { firstEnvelopeSeq: 3, hasMoreBefore: true },
+      });
+      const earlier = await client.getReplayBefore(client.firstEnvelopeSeq!, 2);
+      expect(earlier.logEvents.map(({ id }) => id)).toEqual([3]);
+      expect(mock.rpc.call).toHaveBeenLastCalledWith(DO_TARGET, "getReplayBefore", [4, 2]);
+
+      await client.close();
+    });
+
     it("recovers a terminated channel resource while the host transport remains connected", async () => {
       const coordinator = createRecoveryCoordinator();
       const mock = createMockRpc();
