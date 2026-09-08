@@ -96,6 +96,7 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
     ReturnType<typeof browserData.previewImport>
   > | null>(null);
   const [job, setJob] = useState<ImportJobSnapshot | null>(null);
+  const [publicOperationId, setPublicOperationId] = useState<string | null>(null);
   const [sensitiveStatus, setSensitiveStatus] = useState<SensitiveBrowserImportStatus | null>(
     () => {
       const checkpoint = readSensitiveImportCheckpoint();
@@ -114,6 +115,7 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
     setTypes(new Set(available));
     setPreview(null);
     setJob(null);
+    setPublicOperationId(null);
     const checkpoint = readSensitiveImportCheckpoint();
     setSensitiveStatus(
       checkpointMatchesSelection(checkpoint, props.selection) ? (checkpoint?.status ?? null) : null
@@ -126,14 +128,15 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
   }, [selectionKey]);
 
   useEffect(() => {
-    if (!job || isTerminalImportPhase(job.phase)) return;
+    const jobId = publicOperationId ?? job?.jobId;
+    if (!jobId || (job?.jobId === jobId && isTerminalImportPhase(job.phase))) return;
     // A poll that throws must not become an unhandled rejection every 500ms.
     // Losing the extension mid-import is exactly when the panel has to stay
     // legible, so report the failure and stop asking rather than spinning.
     let consecutiveFailures = 0;
     const timer = setInterval(() => {
       void browserData
-        .getImportJob(job.jobId)
+        .getImportJob(jobId)
         .then((next) => {
           consecutiveFailures = 0;
           if (next) setJob(next);
@@ -148,7 +151,7 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
         });
     }, 500);
     return () => clearInterval(timer);
-  }, [job?.jobId, job?.phase]);
+  }, [publicOperationId, job?.jobId, job?.phase]);
 
   useEffect(() => {
     if (!sensitiveStatus || sensitiveStatus.state !== "running") return;
@@ -212,6 +215,7 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
   };
 
   const startImport = async () => {
+    setJob(null);
     setBusy("import");
     setError(null);
     try {
@@ -228,7 +232,11 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
               dataTypes: sensitive,
             }
           : null,
-        () => crypto.randomUUID()
+        () => crypto.randomUUID(),
+        (update) => {
+          if (update.publicOperationId) setPublicOperationId(update.publicOperationId);
+          if (update.sensitiveStatus) setSensitiveStatus(update.sensitiveStatus);
+        }
       );
       setJob(result.job);
       setSensitiveStatus(result.sensitiveStatus);
@@ -240,6 +248,7 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
     } catch (cause) {
       setError(classifyError(cause).message);
     } finally {
+      setPublicOperationId(null);
       setBusy(null);
     }
   };
@@ -270,7 +279,7 @@ export function MigrateTab(props: { selection: ImportSourceSelection; now: numbe
     setError(null);
     try {
       const status = await browserData.startSensitiveImport(checkpoint.request);
-      writeSensitiveImportCheckpoint({ request: checkpoint.request, status });
+      await writeSensitiveImportCheckpoint({ request: checkpoint.request, status });
       setSensitiveStatus(status);
     } catch (cause) {
       setError(classifyError(cause).message);
@@ -514,8 +523,10 @@ function readSensitiveImportCheckpoint(): SensitiveImportCheckpoint | null {
   return checkpoint as SensitiveImportCheckpoint;
 }
 
-function writeSensitiveImportCheckpoint(checkpoint: SensitiveImportCheckpoint): void {
-  panel.stateArgs.set({
+async function writeSensitiveImportCheckpoint(
+  checkpoint: SensitiveImportCheckpoint
+): Promise<void> {
+  await panel.stateArgs.set({
     ...panel.stateArgs.get(),
     sensitiveImport: checkpoint,
   });

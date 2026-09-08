@@ -92,10 +92,11 @@ describe("browser import workflow", () => {
       h.store,
       publicSelection,
       sensitiveSelection,
-      () => "sealed-1"
+      () => "sealed-1",
+      vi.fn()
     );
 
-    expect(h.client.startImport).toHaveBeenCalledWith(publicSelection);
+    expect(h.client.startImport).toHaveBeenCalledWith(publicSelection, "sealed-1");
     expect(h.client.startSensitiveImport).toHaveBeenCalledWith({
       ...sensitiveSelection,
       operationId: "sealed-1",
@@ -107,6 +108,103 @@ describe("browser import workflow", () => {
     });
   });
 
+  it("waits for asynchronous checkpoint persistence before starting either import", async () => {
+    const h = harness();
+    let releaseSave!: () => void;
+    const saving = new Promise<void>((resolve) => {
+      releaseSave = resolve;
+    });
+    const store = {
+      read: h.store.read,
+      write: vi.fn(async (checkpoint: SensitiveImportCheckpoint) => {
+        await saving;
+        h.store.write(checkpoint);
+      }),
+    };
+    const status = { operationId: "sealed-1", state: "complete" as const, counts: [] };
+    vi.mocked(h.client.startImport).mockResolvedValue(publicJob);
+    vi.mocked(h.client.startSensitiveImport).mockResolvedValue(status);
+    const report = vi.fn();
+    const starting = startSelectedImports(
+      h.client,
+      store,
+      publicSelection,
+      sensitiveSelection,
+      () => "sealed-1",
+      report
+    );
+
+    expect(store.write).toHaveBeenCalledOnce();
+    expect(store.read()).toBeNull();
+    expect(h.client.startImport).not.toHaveBeenCalled();
+    expect(h.client.startSensitiveImport).not.toHaveBeenCalled();
+    expect(report).not.toHaveBeenCalled();
+    releaseSave();
+
+    await expect(starting).resolves.toMatchObject({ errors: [], sensitiveStatus: status });
+    expect(report).toHaveBeenCalledWith({
+      sensitiveStatus: {
+        operationId: "sealed-1",
+        state: "running",
+        counts: [],
+      },
+    });
+    expect(h.checkpoint?.status).toEqual(status);
+  });
+
+  it("reports protected completion while the public import is still running", async () => {
+    const h = harness();
+    let finishPublic!: (job: ImportJobSnapshot) => void;
+    vi.mocked(h.client.startImport).mockReturnValue(
+      new Promise((resolve) => {
+        finishPublic = resolve;
+      })
+    );
+    const status = { operationId: "sealed-1", state: "complete" as const, counts: [] };
+    vi.mocked(h.client.startSensitiveImport).mockResolvedValue(status);
+    const report = vi.fn();
+    let settled = false;
+    const starting = startSelectedImports(
+      h.client,
+      h.store,
+      publicSelection,
+      sensitiveSelection,
+      () => "sealed-1",
+      report
+    ).then((result) => {
+      settled = true;
+      return result;
+    });
+    await vi.waitFor(() => expect(report).toHaveBeenCalledWith({ sensitiveStatus: status }));
+    expect(report).toHaveBeenCalledWith({ publicOperationId: "sealed-1" });
+    expect(h.checkpoint?.status).toEqual(status);
+    expect(settled).toBe(false);
+    finishPublic(publicJob);
+    await expect(starting).resolves.toMatchObject({ errors: [], sensitiveStatus: status });
+  });
+
+  it("does not start either import if its retry checkpoint cannot be saved", async () => {
+    const h = harness();
+    const store = {
+      read: h.store.read,
+      write: vi.fn(async () => {
+        throw new Error("Checkpoint save failed");
+      }),
+    };
+    await expect(
+      startSelectedImports(
+        h.client,
+        store,
+        publicSelection,
+        sensitiveSelection,
+        () => "sealed-1",
+        vi.fn()
+      )
+    ).rejects.toThrow("Checkpoint save failed");
+    expect(h.client.startImport).not.toHaveBeenCalled();
+    expect(h.client.startSensitiveImport).not.toHaveBeenCalled();
+  });
+
   it("reuses the persisted id after a lost start response and remount observation resumes it", async () => {
     const h = harness();
     vi.mocked(h.client.startSensitiveImport).mockRejectedValueOnce(new Error("response lost"));
@@ -115,7 +213,8 @@ describe("browser import workflow", () => {
       h.store,
       null,
       sensitiveSelection,
-      () => "sealed-1"
+      () => "sealed-1",
+      vi.fn()
     );
     expect(first.sensitiveStatus).toMatchObject({
       operationId: "sealed-1",
@@ -133,7 +232,8 @@ describe("browser import workflow", () => {
       h.store,
       null,
       sensitiveSelection,
-      () => "must-not-be-used"
+      () => "must-not-be-used",
+      vi.fn()
     );
     expect(h.client.startSensitiveImport).toHaveBeenLastCalledWith({
       ...sensitiveSelection,

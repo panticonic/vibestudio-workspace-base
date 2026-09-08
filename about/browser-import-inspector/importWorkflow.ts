@@ -14,7 +14,7 @@ export interface SensitiveImportCheckpoint {
 
 export interface SensitiveCheckpointStore {
   read(): SensitiveImportCheckpoint | null;
-  write(checkpoint: SensitiveImportCheckpoint): void;
+  write(checkpoint: SensitiveImportCheckpoint): void | Promise<void>;
 }
 
 export interface SelectedImportResult {
@@ -43,33 +43,44 @@ export async function startSelectedImports(
   checkpointStore: SensitiveCheckpointStore,
   publicSelection: NonSensitiveBrowserImportSelection | null,
   sensitiveSelection: SensitiveBrowserImportSelection | null,
-  createOperationId: () => string
+  createOperationId: () => string,
+  report: (update: {
+    publicOperationId?: string;
+    sensitiveStatus?: SensitiveBrowserImportStatus;
+  }) => void
 ): Promise<SelectedImportResult> {
   const pending = sensitiveSelection
     ? pendingSensitiveRequest(checkpointStore.read(), sensitiveSelection, createOperationId)
     : null;
-  if (pending) {
-    checkpointStore.write({
-      request: pending,
-      status: {
-        operationId: pending.operationId,
-        state: "running",
-        counts: [],
-      },
-    });
+  const pendingStatus: SensitiveBrowserImportStatus | null = pending
+    ? { operationId: pending.operationId, state: "running", counts: [] }
+    : null;
+  if (pending && pendingStatus) {
+    await checkpointStore.write({ request: pending, status: pendingStatus });
   }
 
+  const publicOperationId = publicSelection ? createOperationId() : null;
+  if (publicOperationId) report({ publicOperationId });
+  if (pendingStatus) report({ sensitiveStatus: pendingStatus });
   const [publicResult, sensitiveResult] = await Promise.allSettled([
-    publicSelection ? client.startImport(publicSelection) : Promise.resolve(null),
-    pending ? client.startSensitiveImport(pending) : Promise.resolve(null),
+    publicSelection && publicOperationId
+      ? client.startImport(publicSelection, publicOperationId)
+      : Promise.resolve(null),
+    pending
+      ? client.startSensitiveImport(pending).then(async (status) => {
+          await checkpointStore.write({ request: pending, status });
+          report({ sensitiveStatus: status });
+          return status;
+        })
+      : Promise.resolve(null),
   ]);
   const status =
     sensitiveResult.status === "fulfilled"
       ? sensitiveResult.value
       : pending
-        ? (checkpointStore.read()?.status ?? null)
+        ? (checkpointStore.read()?.status ?? pendingStatus)
         : null;
-  if (pending && status) checkpointStore.write({ request: pending, status });
+  if (pending && status) await checkpointStore.write({ request: pending, status });
   return {
     job: publicResult.status === "fulfilled" ? publicResult.value : null,
     sensitiveStatus: status,
@@ -88,7 +99,7 @@ export async function observeSensitiveCheckpoint(
     return checkpoint?.status ?? null;
   }
   const status = await client.observeSensitiveImport(checkpoint.request.operationId);
-  checkpointStore.write({ request: checkpoint.request, status });
+  await checkpointStore.write({ request: checkpoint.request, status });
   return status;
 }
 
@@ -114,7 +125,7 @@ export async function cancelSelectedImports(
     sensitiveResult.status === "fulfilled" ? sensitiveResult.value : sensitiveStatus;
   const checkpoint = checkpointStore.read();
   if (checkpoint && nextSensitive && checkpoint.request.operationId === nextSensitive.operationId) {
-    checkpointStore.write({ request: checkpoint.request, status: nextSensitive });
+    await checkpointStore.write({ request: checkpoint.request, status: nextSensitive });
   }
   return {
     job: publicResult.status === "fulfilled" ? publicResult.value : job,
