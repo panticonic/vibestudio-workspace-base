@@ -21,86 +21,154 @@
         "doctor": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "listDevices": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "listIosSimulators": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "buildAndroid": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "installAndroid": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "installIos": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "launchAndroid": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "launchIos": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "clearAndroidApp": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "adbReverse": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "screenshot": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "screenshotIos": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "verify": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "verifyWorkspaceReady": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "logcat": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "logsIos": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         },
         "shell": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls developer devices and native debug infrastructure."
           }
         }
       }

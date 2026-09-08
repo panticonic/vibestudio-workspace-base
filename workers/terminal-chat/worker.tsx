@@ -52,7 +52,7 @@ export class TerminalChatWorker extends DurableObjectBase {
 
   protected createTables(): void {}
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -102,8 +102,7 @@ export class TerminalChatWorker extends DurableObjectBase {
             call: <R,>(t: string, m: string, a: unknown[]) => rpc.call<R>(t, m, a),
             stream: (t: string, m: string, a: unknown[], options?: { signal?: AbortSignal }) =>
               rpc.stream(t, m, a, options),
-            on: (event: string, listener: (event: { payload: unknown }) => void) =>
-              rpc.on(event, listener),
+            on: (event, listener, website) => rpc.on(event, listener, website),
             selfId: rpc.selfId,
           },
         },
@@ -136,7 +135,7 @@ export class TerminalChatWorker extends DurableObjectBase {
     }
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -145,7 +144,7 @@ export class TerminalChatWorker extends DurableObjectBase {
   async [SESSION_METHODS.onInput](event: TerminalInputEvent): Promise<void> {
     this.session?.emitInput(decodeInputData(event));
   }
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -154,21 +153,21 @@ export class TerminalChatWorker extends DurableObjectBase {
   async [SESSION_METHODS.onResize](event: TerminalResizeEvent): Promise<void> {
     this.session?.emitResize(event.size);
   }
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
   })
   async [SESSION_METHODS.onFocus](): Promise<void> {}
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
   })
   async [SESSION_METHODS.onBlur](): Promise<void> {}
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -177,7 +176,7 @@ export class TerminalChatWorker extends DurableObjectBase {
   async [SESSION_METHODS.repaint](): Promise<void> {
     if (this.vm) this.instance?.rerender(this.renderTree());
   }
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",

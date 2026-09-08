@@ -16,26 +16,46 @@
         "checkPanel": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Reads workspace source and compiler state; website code is checked in its independent build."
           }
         },
         "check": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Reads workspace source and compiler state; website code is checked in its independent build."
           }
         },
         "getTypeInfo": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Reads workspace source and compiler state; website code is checked in its independent build."
           }
         },
         "getCompletions": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Reads workspace source and compiler state; website code is checked in its independent build."
           }
         },
         "getBrowserTypeDefinitions": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Reads workspace source and compiler state; website code is checked in its independent build."
           }
         }
       }

@@ -3066,6 +3066,7 @@ describe("PubSubChannel", () => {
   it("declares inspection as a receiver-enforced channel capability", async () => {
     const { instance } = await createGadBackedChannel();
     expect(rpcMethodAuthority(instance, "inspectAgent")).toMatchObject({
+      website: { kind: "closed" },
       principals: ["host", "user", "code"],
       effect: {
         kind: "userland-capability",

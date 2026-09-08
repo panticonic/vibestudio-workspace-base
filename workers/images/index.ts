@@ -232,7 +232,7 @@ export class ImagesDO extends DurableObjectBase {
     return this.nextAlarmAfterRequest() ?? null;
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -309,7 +309,7 @@ export class ImagesDO extends DurableObjectBase {
     }
     return this.getJob(id);
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -322,7 +322,7 @@ export class ImagesDO extends DurableObjectBase {
     if (!row) throw new Error(`Unknown image job ${id}`);
     return JSON.parse(String(row["job_json"])) as ImageGenerationJob;
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -336,7 +336,7 @@ export class ImagesDO extends DurableObjectBase {
     this.active.get(id)?.abort(new Error("Image generation cancelled"));
     return cancelled;
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -356,7 +356,7 @@ export class ImagesDO extends DurableObjectBase {
     this.saveJob(retried);
     return retried;
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -375,7 +375,7 @@ export class ImagesDO extends DurableObjectBase {
     });
     await this.reconcileRetentions();
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -390,7 +390,7 @@ export class ImagesDO extends DurableObjectBase {
       throw new Error(`Image asset ${id} is not retained`);
     return row.asset;
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -402,7 +402,7 @@ export class ImagesDO extends DurableObjectBase {
     if (base64 === null) throw new Error(`Retained image content ${asset.digest} is missing`);
     return { asset, base64 };
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -434,7 +434,7 @@ export class ImagesDO extends DurableObjectBase {
       createdAt: Date.now(),
     });
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -453,7 +453,7 @@ export class ImagesDO extends DurableObjectBase {
       await this.reconcileAsset(asset.id);
     });
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -472,7 +472,7 @@ export class ImagesDO extends DurableObjectBase {
       await this.reconcileAsset(assetId);
     });
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -534,7 +534,7 @@ export class ImagesDO extends DurableObjectBase {
     }
     return direction;
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",
@@ -551,7 +551,7 @@ export class ImagesDO extends DurableObjectBase {
     if (!row) throw new Error(`Unknown art direction ${ref.id}:${ref.version}`);
     return JSON.parse(String(row["direction_json"])) as ArtDirection;
   }
-  @rpc({
+  @rpc({ website: {"kind":"eligible","rationale":"Connected websites may request this bounded operation with the ordinary resource and disclosure grants."},
     principals: ["host", "user", "code", "session", "mission"],
     effect: { kind: "open" },
     tier: "open",

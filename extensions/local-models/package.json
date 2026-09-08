@@ -26,106 +26,190 @@
         "status": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "listModels": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "ensureLoaded": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "installModel": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "getLoopbackAuth": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "getHardwareProfile": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "searchCatalog": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "startDownloadJob": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "downloadModel": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "pauseDownload": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "resumeDownload": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "cancelDownload": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "listDownloads": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "removeModel": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "importDir": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "setModelConfig": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "benchmarkModel": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "restartServer": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "tailServerLogLines": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "tailServerLog": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         },
         "capabilities": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Controls profile-scoped model processes, account state and local downloads."
           }
         }
       }

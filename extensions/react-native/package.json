@@ -5,7 +5,7 @@
   "type": "module",
   "vibestudio": {
     "displayName": "React Native Build Provider",
-    "icon": "⚛️",
+    "icon": "\u269b\ufe0f",
     "entry": "index.ts",
     "sourcemap": true,
     "extension": {
@@ -25,11 +25,19 @@
         "build": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Builds native applications using developer infrastructure."
           }
         },
         "buildArtifact": {
           "effect": {
             "kind": "open"
+          },
+          "website": {
+            "kind": "closed",
+            "reason": "Builds native applications using developer infrastructure."
           }
         }
       }

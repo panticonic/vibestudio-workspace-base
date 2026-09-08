@@ -63,8 +63,14 @@ it("binds System RPC identity before its first request and isolates destination 
   expect(project.client.app).not.toBe(module.app);
   const systemEvent = vi.fn();
   const projectEvent = vi.fn();
-  state.clients[0]!.on("changed", systemEvent);
-  state.clients[1]!.on("changed", projectEvent);
+  state.clients[0]!.on("changed", systemEvent, {
+    kind: "eligible",
+    rationale: "This test explicitly permits website receiver entry.",
+  });
+  state.clients[1]!.on("changed", projectEvent, {
+    kind: "eligible",
+    rationale: "This test explicitly permits website receiver entry.",
+  });
   const deliver = (workspaceId: string) => {
     const caller = {
       callerId: "main",

@@ -199,7 +199,7 @@ export class QuickfireSessionsDO extends DurableObjectBase {
     ]);
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -280,7 +280,7 @@ export class QuickfireSessionsDO extends DurableObjectBase {
     return this.present(this.row(input.slotId)!, "fresh");
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -297,7 +297,7 @@ export class QuickfireSessionsDO extends DurableObjectBase {
     return { cleared: true };
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -328,7 +328,7 @@ export class QuickfireSessionsDO extends DurableObjectBase {
     return this.present(this.row(input.slotId)!, "promoted");
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",

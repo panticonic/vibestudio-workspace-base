@@ -251,8 +251,11 @@ export function createShellWorkspaceClient(
   const hostLaunch = new HostLaunchClient((service, method, args) =>
     rpc.call("main", `${service}.${method}`, args),
   );
-  const websiteConnections = createTypedServiceClient("websiteHosting", { list: websiteHostingMethods.list },
-    (service, method, args) => rpc.call("main", `${service}.${method}`, args));
+  const websiteConnections = createTypedServiceClient(
+    "websiteHosting",
+    { list: websiteHostingMethods.list },
+    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
+  );
   const shellPresenceClient = createTypedServiceClient(
     "shellPresence",
     shellPresenceMethods,
@@ -751,8 +754,13 @@ export function createShellWorkspaceClient(
   // =============================================================================
   const hostCommandRegistry = new HostCommandRegistry();
 
-  rpc.on(HOST_COMMAND_CONTRIBUTION_EVENT, (event) =>
-    hostCommandRegistry.accept(event), {"kind":"closed","reason":"This listener consumes host or implementation lifecycle events."},
+  rpc.on(
+    HOST_COMMAND_CONTRIBUTION_EVENT,
+    (event) => hostCommandRegistry.accept(event),
+    {
+      kind: "closed",
+      reason: "This listener consumes host or implementation lifecycle events.",
+    },
   );
 
   const hostCommands = {
@@ -1228,7 +1236,12 @@ export function createShellWorkspaceClient(
     on: <E extends EventName>(
       event: E,
       listener: (payload: EventPayloads[E]) => void,
-    ) => rpc.on(event, ({ payload }) => listener(payload as EventPayloads[E]), {"kind":"closed","reason":"This listener consumes host or implementation lifecycle events."}),
+    ) =>
+      rpc.on(event, ({ payload }) => listener(payload as EventPayloads[E]), {
+        kind: "closed",
+        reason:
+          "This listener consumes host or implementation lifecycle events.",
+      }),
   };
   const notification = {
     show: (

@@ -39,19 +39,19 @@ export function registerHostService(rpc: RpcClient, deps: HostServiceDeps): void
     if (!authorized(req.caller, frame.sessionId, HOST_METHODS.onFrame)) return; // drop
     if (frame.data.length > maxFrameBytes) return; // drop oversized frames
     void deps.sessions.onFrame(frame);
-  });
+  }, {"kind":"closed","reason":"This handler controls an internal execution or presentation surface."});
 
   rpc.expose(HOST_METHODS.setTitle, (req) => {
     const [sessionId, title] = req.args as [string, string];
     if (!authorized(req.caller, sessionId, HOST_METHODS.setTitle)) return;
     deps.sessions.setTitle(sessionId, String(title ?? "").slice(0, 80));
-  });
+  }, {"kind":"closed","reason":"This handler controls an internal execution or presentation surface."});
 
   rpc.expose(HOST_METHODS.requestClose, (req) => {
     const [sessionId, reason] = req.args as [string, string | undefined];
     if (!authorized(req.caller, sessionId, HOST_METHODS.requestClose)) return;
     void deps.sessions.close(sessionId, reason ?? "closed by worker");
-  });
+  }, {"kind":"closed","reason":"This handler controls an internal execution or presentation surface."});
 
   rpc.expose(HOST_METHODS.setRawMode, (req) => {
     const [sessionId, enabled] = req.args as [string, boolean];
@@ -63,5 +63,5 @@ export function registerHostService(rpc: RpcClient, deps: HostServiceDeps): void
     if (deps.isOverlayOpen()) return { ok: false, reason: "overlay-open" };
     deps.setRealRawMode(Boolean(enabled));
     return { ok: true };
-  });
+  }, {"kind":"closed","reason":"This handler controls an internal execution or presentation surface."});
 }
