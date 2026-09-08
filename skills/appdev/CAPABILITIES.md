@@ -84,7 +84,7 @@ There is no app capability that grants a generic workspace SQL database. Use a
 worker Durable Object service for app data: the service's
 `authority.principals` must include the authenticated principal families that
 may resolve it, and each DO method must declare matching
-`@rpc({ principals, effect, tier, sensitivity })` receiver policy. Keep the DO methods
+`@rpc({ website, principals, effect, tier, sensitivity })` receiver policy. Keep the DO methods
 app-shaped (`listItems`, `saveSettings`, `appendEvent`) rather than exposing
 raw SQL to trusted client renderers.
 

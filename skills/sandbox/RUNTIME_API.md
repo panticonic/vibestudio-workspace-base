@@ -390,7 +390,7 @@ const rows = await rpc.call(store.targetId, "listTodos", []);
 
 The worker must also admit the caller in two places: the live service
 `authority.principals` gate and each exposed DO method's
-`@rpc({ principals, effect, tier, sensitivity })` receiver policy.
+`@rpc({ website, principals, effect, tier, sensitivity })` receiver policy.
 See [workspace-dev/WORKERS.md](../workspace-dev/WORKERS.md#durable-object-backed-app-databases)
 for the schema, declaration, partition-key, and testing recipe.
 

@@ -157,6 +157,7 @@ The DO methods must also admit app callers:
 
 ```ts
 @rpc({
+  website: { kind: "closed", reason: "Private todo rows are restricted to the installed app." },
   principals: ["user", "code"],
   effect: { kind: "open" },
   tier: "open",

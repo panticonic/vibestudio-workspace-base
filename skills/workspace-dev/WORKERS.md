@@ -634,12 +634,16 @@ A method with no `@rpc` is private to the DO and cannot be invoked over the
 relay; forgetting `@rpc` fails loud ("not exposed"). Mark every method a caller
 should reach.
 
-### Layer 2 — `@rpc({ principals, effect, tier, sensitivity })` receiver policy
+### Layer 2 — `@rpc({ website, principals, effect, tier, sensitivity })` receiver policy
 
 The RPC relay is open between authenticated participants, so the recipient must
 gate. Every relay-reachable workspace method declares the authenticated principal
 families it accepts (`"host" | "user" | "code"`), its effect, reviewed tier, and
-sensitivity. Missing policy is default-deny. An unprotected workspace service
+sensitivity. Each receiver also makes the mandatory independent website choice:
+`eligible` with a rationale or `closed` with a concrete reason. Eligibility
+does not grant authority; connected websites must still satisfy the actual
+resource and disclosure contract. See [website authority](../capabilities/references/website-authority.md).
+Missing policy is default-deny. An unprotected workspace service
 method uses literal `effect: { kind: "open" }`; the live service declaration
 adds its independent target requirement. A provider-owned protected method uses
 a literal `userland-capability` effect matching `authority.provides`. Keep the
