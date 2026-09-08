@@ -54,11 +54,6 @@
             "kind": "open"
           }
         },
-        "suggestRegistryEntry": {
-          "effect": {
-            "kind": "open"
-          }
-        },
         "publishTemplate": {
           "effect": {
             "kind": "open"
