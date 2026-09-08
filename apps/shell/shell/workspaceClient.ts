@@ -244,6 +244,7 @@ export function createShellWorkspaceClient(
   ownership: {
     workspaceId: string | Promise<string>;
     nativePresentation: NativePanelPresentation;
+    recoveryCoordinator?: import("@vibestudio/shell-core/recoveryCoordinator").RecoveryCoordinator;
     hubRpc: RpcClient;
   },
 ) {
@@ -1347,6 +1348,7 @@ export function createShellWorkspaceClient(
     return connectViaRpc({
       rpc,
       channel: channelId,
+      recoveryCoordinator: ownership.recoveryCoordinator,
       channelTargetId: options.channelTargetId,
       contextId,
       protocol: CHANNEL_SERVICE_PROTOCOL,

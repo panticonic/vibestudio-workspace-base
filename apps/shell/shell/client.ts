@@ -1,3 +1,7 @@
+import {
+  createRecoveryCoordinator,
+  type RecoveryKind,
+} from "@vibestudio/shell-core/recoveryCoordinator";
 /** Stable startup client and exports used by shell entry points. */
 import {
   createRpcClient,
@@ -25,6 +29,10 @@ export * from "./workspaceClient";
 const g = globalThis as unknown as {
   __vibestudioWorkspaceConnection?: NativeWorkspaceConnectionBridge;
   __vibestudioTransport?: {
+    onRecovery?: (
+      kind: RecoveryKind,
+      handler: (workspaceId?: string) => void | Promise<void>,
+    ) => () => void;
     identity: { workspaceId: string; runtimeId: string };
     send: (envelope: RpcEnvelope) => Promise<void>;
     onMessage: (handler: (envelope: RpcEnvelope) => void) => () => void;
@@ -76,6 +84,7 @@ export const startupWorkspaceClient = createShellWorkspaceClient(rpc, {
   workspaceId: systemWorkspaceId,
   nativePresentation: nativePanelPresentation,
   hubRpc,
+  recoveryCoordinator: systemOwner.recoveryCoordinator,
 });
 /** The startup workspace client; never rebound when focus changes. */
 export const {
@@ -125,6 +134,22 @@ export const {
 function createOwnerRpc(destination: RpcDestination) {
   let closed = false;
   const releases = new Set<() => void>();
+  const recoveryCoordinator = createRecoveryCoordinator();
+  for (const kind of ["resubscribe", "cold-recover"] as const) {
+    const release = g.__vibestudioTransport?.onRecovery?.(
+      kind,
+      (workspaceId) => {
+        if (
+          !closed &&
+          destination.kind === "workspace" &&
+          destination.workspaceId === workspaceId
+        )
+          return recoveryCoordinator.run(kind);
+        return undefined;
+      },
+    );
+    if (release) releases.add(release);
+  }
   const statuses = new Set<
     (status: import("@vibestudio/rpc").RpcConnectionStatus) => void
   >();
@@ -207,6 +232,7 @@ function createOwnerRpc(destination: RpcDestination) {
   });
   return {
     rpc: scopedRpc,
+    recoveryCoordinator,
     close() {
       if (closed) return;
       closed = true;
@@ -225,6 +251,7 @@ export async function createWorkspaceShellClient(workspaceId: string) {
     workspaceId,
     nativePresentation: nativePanelPresentation,
     hubRpc,
+    recoveryCoordinator: owner.recoveryCoordinator,
   });
   const client = {
     ...scoped,

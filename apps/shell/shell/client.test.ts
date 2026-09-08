@@ -4,10 +4,20 @@ import {
   type RpcClient,
   type RpcEnvelope,
 } from "@vibestudio/rpc";
-const state = vi.hoisted(() => ({ clients: [] as RpcClient[] }));
+const state = vi.hoisted(() => ({
+  clients: [] as RpcClient[],
+  recoveries:
+    [] as import("@vibestudio/shell-core/recoveryCoordinator").RecoveryCoordinator[],
+}));
 vi.mock("./workspaceClient", () => ({
   createShellApprovalClient: () => ({}),
-  createShellWorkspaceClient: (rpc: RpcClient) => {
+  createShellWorkspaceClient: (
+    rpc: RpcClient,
+    ownership: {
+      recoveryCoordinator: import("@vibestudio/shell-core/recoveryCoordinator").RecoveryCoordinator;
+    },
+  ) => {
+    state.recoveries.push(ownership.recoveryCoordinator);
     state.clients.push(rpc);
     return {
       unitIcons: { close: vi.fn() },
@@ -23,6 +33,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.resetModules();
   state.clients.length = 0;
+  state.recoveries.length = 0;
 });
 it("binds System RPC identity before its first request and isolates destination events", async () => {
   const handlers = new Set<(envelope: RpcEnvelope) => void>();
@@ -252,4 +263,50 @@ it("routes server calls and replies independently of a workspace named hub", asy
     { kind: "workspace", workspaceId: "hub" },
   ]);
   workspace.close();
+});
+
+it("recovers only the addressed workspace and retires its recovery listeners on close", async () => {
+  const handlers = new Map<
+    string,
+    Set<(workspaceId?: string) => void | Promise<void>>
+  >();
+  vi.stubGlobal("__vibestudioTransport", {
+    identity: { workspaceId: "system", runtimeId: "@workspace-apps/shell" },
+    send: vi.fn(async () => {}),
+    onMessage: () => () => {},
+    onRecovery: (
+      kind: string,
+      handler: (workspaceId?: string) => void | Promise<void>,
+    ) => {
+      const listeners = handlers.get(kind) ?? new Set();
+      handlers.set(kind, listeners);
+      listeners.add(handler);
+      return () => listeners.delete(handler);
+    },
+  });
+  vi.stubGlobal("__vibestudioWorkspaceConnection", {
+    getCurrent: async () => ({
+      version: 1,
+      phase: "online",
+      mode: "local",
+      since: 1,
+    }),
+    onChange: () => () => {},
+  });
+  const module = await import("./client");
+  const project = await module.createWorkspaceShellClient("project");
+  const systemReplay = vi.fn(),
+    projectReplay = vi.fn();
+  state.recoveries[0]!.registerResubscribeHandler("test", systemReplay);
+  state.recoveries[1]!.registerResubscribeHandler("test", projectReplay);
+  await Promise.all(
+    [...handlers.get("resubscribe")!].map((handler) => handler("project")),
+  );
+  expect(projectReplay).toHaveBeenCalledOnce();
+  expect(systemReplay).not.toHaveBeenCalled();
+  project.close();
+  await Promise.all(
+    [...handlers.get("resubscribe")!].map((handler) => handler("project")),
+  );
+  expect(projectReplay).toHaveBeenCalledOnce();
 });
