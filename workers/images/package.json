@@ -4,6 +4,15 @@
   "private": true,
   "type": "module",
   "vibestudio": {
+    "tests": [
+      {
+        "name": "native",
+        "runtime": "native",
+        "include": [
+          "**/*.test.ts"
+        ]
+      }
+    ],
     "title": "Images",
     "icon": "\ud83c\udfa8",
     "kind": "worker",

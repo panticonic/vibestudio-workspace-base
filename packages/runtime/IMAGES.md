@@ -6,6 +6,32 @@ the connected model provider. The native `imagegen` tool uses this service too;
 its optional `outputPath` is an ordinary semantic VCS save of the original bytes.
 Generation does not rebuild a panel or change its source.
 
+
+Initialized panel runtimes can use the global client:
+
+```ts
+import { images } from "@workspace/runtime";
+```
+
+Workers and Durable Objects such as `AiChatWorker` that receive a scoped RPC
+but do not initialize the global runtime must construct the same client from
+that RPC. This keeps calls on the admitted execution and uses the identical
+service protocol:
+
+```ts
+import { createImagesClient } from "@workspace/runtime/images";
+
+const images = createImagesClient(execution?.rpc ?? this.rpc);
+const job = await images.generate({
+  requestId,
+  prompt,
+});
+const completed = await images.wait(job.id);
+```
+
+Do not initialize a second global runtime or create a parallel image transport
+for this case.
+
 Persist a job ID as soon as generation starts, then observe it from any reopened
 view. Persist the returned `ImageAsset` in application state, never bytes, data
 URLs, or local object URLs. Replaying an identical `requestId` returns its job;

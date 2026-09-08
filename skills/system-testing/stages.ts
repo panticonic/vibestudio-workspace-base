@@ -47,6 +47,7 @@ import { intentDiscoveryTests } from "./tests/intent-discovery.js";
 import { provenanceQuestionTests } from "./tests/provenance-questions.js";
 import { imageGenerationTests } from "./tests/image-generation.js";
 import { imagePanelTests } from "./tests/image-panel.js";
+import { adventureCampaignTests } from "./tests/adventure-campaign-play.js";
 
 export {
   agentCapabilityTests,
@@ -70,6 +71,8 @@ export {
   harnessToolTests,
   imageGenerationTests,
   imagePanelTests,
+  // Opt in when the examples adventure units are included in the tested workspace.
+  adventureCampaignTests,
   intentDiscoveryTests,
   messagingTests,
   interactionSurfaceTests,
