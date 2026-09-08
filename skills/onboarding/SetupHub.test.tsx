@@ -7,6 +7,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { lintRendererSource } from "@workspace/agentic-core";
 import SetupHub from "./SetupHub.js";
+import { resolveOnboardingTemplateSelection } from "./routing.js";
 import type { SetupCapabilitySnapshot } from "./snapshot.js";
 import type { OptionalTemplateSnapshot } from "./templates.js";
 import {
@@ -338,16 +339,20 @@ describe("SetupHub", () => {
       </Theme>,
     );
 
-    expect(view.getByText(/Start a separate workspace with panels, agents/i)).toBeTruthy();
+    expect(
+      view.getByText(/Start a separate workspace with panels, agents/i),
+    ).toBeTruthy();
     expect(
       view.getByText(/featured workspaces from Vibestudio's catalog/i),
     ).toBeTruthy();
-    expect(view.getByRole("link", { name: "Open workspace chooser" }).getAttribute("href")).toContain("workspace-chooser");
+    expect(
+      view
+        .getByRole("link", { name: "Open workspace chooser" })
+        .getAttribute("href"),
+    ).toContain("workspace-chooser");
     expect(loaders.templates).not.toHaveBeenCalled();
 
-    fireEvent.click(
-      view.getByRole("button", { name: "Browse workspaces" }),
-    );
+    fireEvent.click(view.getByRole("button", { name: "Browse workspaces" }));
     await waitFor(() => expect(loaders.templates).toHaveBeenCalledOnce());
     expect(view.getByText("Examples")).toBeTruthy();
   });
@@ -364,9 +369,7 @@ describe("SetupHub", () => {
       </Theme>,
     );
 
-    fireEvent.click(
-      view.getByRole("button", { name: "Browse workspaces" }),
-    );
+    fireEvent.click(view.getByRole("button", { name: "Browse workspaces" }));
 
     expect(
       await view.findByText(
@@ -397,9 +400,7 @@ describe("SetupHub", () => {
       "spin 0.8s linear infinite",
     );
 
-    fireEvent.click(
-      view.getByRole("button", { name: "Browse workspaces" }),
-    );
+    fireEvent.click(view.getByRole("button", { name: "Browse workspaces" }));
     const loadTemplates = view.getByRole("button", {
       name: "Loading workspaces…",
     });
@@ -415,7 +416,12 @@ describe("SetupHub", () => {
   });
 
   it("shows optional templates and sends available choices through structured review", async () => {
-    const send = vi.fn(async () => undefined);
+    const send = vi.fn(
+      async (
+        _content: string,
+        _options?: { metadata?: Record<string, unknown> },
+      ) => undefined,
+    );
     const view = render(
       <Theme>
         <SetupHub scope={setupScope({ templates })} chat={{ send }} />
@@ -446,5 +452,10 @@ describe("SetupHub", () => {
         },
       ),
     );
+    const interaction = send.mock.calls[0]?.[1]?.metadata?.interaction;
+    expect(resolveOnboardingTemplateSelection(interaction)).toEqual({
+      ownerSkillPath: "skills/templates/SKILL.md",
+      selection,
+    });
   });
 });

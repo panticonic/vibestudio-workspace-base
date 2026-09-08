@@ -26,7 +26,7 @@ export interface ResolvedOnboardingSelection {
 export interface OnboardingTemplateInteraction {
   source: typeof ONBOARDING_INTERACTION_SOURCE;
   kind: "onboarding-template";
-  action: "add";
+  action: "create-workspace";
   targetId: string;
   catalogId: string;
   registryCommit: string;
@@ -40,7 +40,7 @@ export interface ResolvedOnboardingTemplateSelection {
 
 export function onboardingInteraction(
   targetId: string,
-  action: SetupAction
+  action: SetupAction,
 ): OnboardingInteraction {
   return {
     source: ONBOARDING_INTERACTION_SOURCE,
@@ -51,28 +51,32 @@ export function onboardingInteraction(
 }
 
 export function onboardingTemplateInteraction(
-  selection: OnboardingTemplateSelection
+  selection: OnboardingTemplateSelection,
 ): OnboardingTemplateInteraction {
   return {
     source: ONBOARDING_INTERACTION_SOURCE,
     kind: "onboarding-template",
-    action: "add",
+    action: "create-workspace",
     targetId: `template.${selection.catalogId}`,
     ...selection,
   };
 }
 
 export function resolveOnboardingTemplateSelection(
-  interaction: unknown
+  interaction: unknown,
 ): ResolvedOnboardingTemplateSelection {
-  if (!interaction || typeof interaction !== "object" || Array.isArray(interaction)) {
+  if (
+    !interaction ||
+    typeof interaction !== "object" ||
+    Array.isArray(interaction)
+  ) {
     throw new Error("Onboarding template selection metadata is missing.");
   }
   const value = interaction as Record<string, unknown>;
   if (
     value["source"] !== ONBOARDING_INTERACTION_SOURCE ||
     value["kind"] !== "onboarding-template" ||
-    value["action"] !== "add" ||
+    value["action"] !== "create-workspace" ||
     typeof value["targetId"] !== "string" ||
     typeof value["catalogId"] !== "string" ||
     typeof value["registryCommit"] !== "string" ||
@@ -93,9 +97,13 @@ export function resolveOnboardingTemplateSelection(
 
 export function resolveOnboardingSelection(
   interaction: unknown,
-  catalog: readonly OnboardingCapabilityDefinition[] = onboardingCatalog
+  catalog: readonly OnboardingCapabilityDefinition[] = onboardingCatalog,
 ): ResolvedOnboardingSelection {
-  if (!interaction || typeof interaction !== "object" || Array.isArray(interaction)) {
+  if (
+    !interaction ||
+    typeof interaction !== "object" ||
+    Array.isArray(interaction)
+  ) {
     throw new Error("Onboarding selection metadata is missing.");
   }
   const value = interaction as Record<string, unknown>;
@@ -109,7 +117,9 @@ export function resolveOnboardingSelection(
   }
   const capability = catalog.find((entry) => entry.id === value["targetId"]);
   if (!capability) {
-    throw new Error(`Unknown or retired onboarding capability: ${value["targetId"]}`);
+    throw new Error(
+      `Unknown or retired onboarding capability: ${value["targetId"]}`,
+    );
   }
   const action = value["action"] as SetupAction;
   const target = capability.actions?.[action];
@@ -120,6 +130,8 @@ export function resolveOnboardingSelection(
     capability,
     action,
     target,
-    ...(capability.ownerSkillPath ? { ownerSkillPath: capability.ownerSkillPath } : {}),
+    ...(capability.ownerSkillPath
+      ? { ownerSkillPath: capability.ownerSkillPath }
+      : {}),
   };
 }

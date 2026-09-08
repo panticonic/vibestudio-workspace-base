@@ -9,54 +9,64 @@ import {
 describe("onboarding selection routing", () => {
   it("resolves a stable capability id to its owner workflow", () => {
     const resolved = resolveOnboardingSelection(
-      onboardingInteraction("connection.github", "setup")
+      onboardingInteraction("connection.github", "setup"),
     );
     expect(resolved).toEqual(
       expect.objectContaining({
         action: "setup",
         ownerSkillPath: "skills/github/SKILL.md",
         target: { via: "owner-skill" },
-      })
+      }),
     );
   });
 
   it("fails visibly for unknown ids and unsupported actions", () => {
     expect(() =>
-      resolveOnboardingSelection(onboardingInteraction("connection.retired", "setup"))
+      resolveOnboardingSelection(
+        onboardingInteraction("connection.retired", "setup"),
+      ),
     ).toThrow("Unknown or retired onboarding capability");
     expect(() =>
-      resolveOnboardingSelection(onboardingInteraction("connection.github", "change"))
+      resolveOnboardingSelection(
+        onboardingInteraction("connection.github", "change"),
+      ),
     ).toThrow("does not offer the change action");
   });
 
   it("routes browser migration to its cohesive first-party workflow", () => {
     expect(
-      resolveOnboardingSelection(onboardingInteraction("migration.browser-environment", "setup"))
+      resolveOnboardingSelection(
+        onboardingInteraction("migration.browser-environment", "setup"),
+      ),
     ).toEqual(
       expect.objectContaining({
         target: { via: "panel", path: "about/browser-import-inspector" },
-      })
+      }),
     );
   });
 
   it("routes model setup to the model-settings workflow instead of an agent questionnaire", () => {
     expect(
-      resolveOnboardingSelection(onboardingInteraction("connection.ai-provider", "setup"))
+      resolveOnboardingSelection(
+        onboardingInteraction("connection.ai-provider", "setup"),
+      ),
     ).toEqual(
       expect.objectContaining({
         target: { via: "model-settings" },
-      })
+      }),
     );
   });
 
   it("routes recurring-work intent to the Automations owner workflow", () => {
     expect(
-      resolveOnboardingSelection(onboardingInteraction("capability.automations", "explore"))
+      resolveOnboardingSelection(
+        onboardingInteraction("capability.automations", "explore"),
+      ),
     ).toEqual(
       expect.objectContaining({
         ownerSkillPath: "skills/automations/SKILL.md",
         target: { via: "conversation" },
-      })
+      }),
     );
   });
 
@@ -65,7 +75,7 @@ describe("onboarding selection routing", () => {
       resolveOnboardingSelection({
         ...onboardingInteraction("connection.device", "setup"),
         action: "install" as never,
-      })
+      }),
     ).toThrow("connection.device does not offer the install action");
   });
 
@@ -75,17 +85,27 @@ describe("onboarding selection routing", () => {
       registryCommit: "a".repeat(40),
       registrySnapshot: `v1-sha256:${"b".repeat(64)}`,
     };
-    expect(resolveOnboardingTemplateSelection(onboardingTemplateInteraction(selection))).toEqual(
+    expect(
+      resolveOnboardingTemplateSelection(
+        onboardingTemplateInteraction(selection),
+      ),
+    ).toEqual(
       expect.objectContaining({
         ownerSkillPath: "skills/templates/SKILL.md",
         selection,
-      })
+      }),
     );
     expect(() =>
       resolveOnboardingTemplateSelection({
         ...onboardingTemplateInteraction(selection),
         targetId: "template.retired",
-      })
+      }),
+    ).toThrow("Onboarding template selection metadata is invalid");
+    expect(() =>
+      resolveOnboardingTemplateSelection({
+        ...onboardingTemplateInteraction(selection),
+        action: "add",
+      }),
     ).toThrow("Onboarding template selection metadata is invalid");
   });
 });

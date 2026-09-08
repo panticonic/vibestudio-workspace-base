@@ -29,6 +29,11 @@ import {
   type OptionalTemplateSnapshot,
 } from "./templates";
 
+import {
+  onboardingInteraction,
+  onboardingTemplateInteraction,
+} from "./routing";
+
 interface SetupHubProps {
   chat: {
     send: (
@@ -409,12 +414,7 @@ export default function SetupHub({
     try {
       await chat.send(readableAction(definition, action), {
         metadata: {
-          interaction: {
-            source: "onboarding-setup-hub",
-            kind: "onboarding-capability",
-            action,
-            targetId: definition.id,
-          },
+          interaction: onboardingInteraction(definition.id, action),
         },
       });
     } catch {
@@ -433,13 +433,7 @@ export default function SetupHub({
     try {
       await chat.send(`Review ${definition.title} and create a new workspace`, {
         metadata: {
-          interaction: {
-            source: "onboarding-setup-hub",
-            kind: "onboarding-template",
-            action: "create-workspace",
-            targetId: definition.id,
-            ...definition.selection,
-          },
+          interaction: onboardingTemplateInteraction(definition.selection),
         },
       });
     } catch {
@@ -604,13 +598,12 @@ export default function SetupHub({
           Explore workspaces
         </Text>
         <Text size="1" color="gray">
-          Start a separate workspace with panels, agents, and tools for your next project.
+          Start a separate workspace with panels, agents, and tools for your
+          next project.
         </Text>
         <Box>
           <Button size="2" asChild>
-            <a href={workspaceChooserLink}>
-              Open workspace chooser
-            </a>
+            <a href={workspaceChooserLink}>Open workspace chooser</a>
           </Button>
         </Box>
         <Text size="1" color="gray">
