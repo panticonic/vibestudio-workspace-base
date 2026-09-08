@@ -89,7 +89,7 @@ export class MobileWorkspaceDirectory {
   personalWorkspaceId = "";
   systemWorkspaceId = "";
   error: string | null = null;
-  workspaceCreation: { template?: TemplateExactPin } | null = null;
+  workspaceCreation: { template?: TemplateExactPin; sourceUrl?: string } | null = null;
   /** Account metadata for unopened workspaces; live controllers refine connected queues. */
   readonly pendingApprovalCounts = new Map<string, number>();
   approvalPresentation = createApprovalPresentationState();
@@ -548,9 +548,8 @@ export class MobileWorkspaceDirectory {
     await this.open(workspaceId);
   }
 
-  requestWorkspaceCreation(template?: TemplateExactPin): void {
-    if (this.workspaceCreation) return;
-    this.workspaceCreation = template ? { template } : {};
+  requestWorkspaceCreation(source: { template?: TemplateExactPin; sourceUrl?: string } = {}): void {
+    this.workspaceCreation = source;
     this.changed();
   }
 
@@ -559,7 +558,7 @@ export class MobileWorkspaceDirectory {
     this.changed();
   }
 
-  async inspectWorkspaceTemplate(pin: TemplateExactPin) {
+  async inspectWorkspaceTemplate(locator: import("@vibestudio/service-schemas/templates").TemplateLocator) {
     const system = await this.open(this.systemWorkspaceId);
     const extensions = createTypedServiceClient(
       "extensions",
@@ -572,7 +571,7 @@ export class MobileWorkspaceDirectory {
       templatesMethods,
       (extension, method, args) => extensions.invoke(extension, method, args),
     );
-    return templates.inspect({ pin });
+    return templates.inspect(locator);
   }
 
   async listWorkspaceTemplateCandidates() {

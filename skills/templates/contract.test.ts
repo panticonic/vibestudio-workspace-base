@@ -4,7 +4,9 @@ import { describe, expect, it } from "vitest";
 describe("templates skill public contract", () => {
   it("documents the current exact-pin and authoring contract", () => {
     const root = new URL(".", import.meta.url);
-    const contract = JSON.parse(fs.readFileSync(new URL("public-contract.json", root), "utf8")) as {
+    const contract = JSON.parse(
+      fs.readFileSync(new URL("public-contract.json", root), "utf8"),
+    ) as {
       methods: Record<string, { arguments: string[] }>;
       invariants: string[];
     };
@@ -14,30 +16,35 @@ describe("templates skill public contract", () => {
 
     expect(Object.keys(contract.methods).sort()).toEqual([
       "authoringParts",
-      "catalog",
       "inspect",
       "inspectAuthoring",
       "publishAuthoring",
-      "suggestRegistryEntry",
     ]);
-    expect(contract.methods["catalog"]!.arguments).toEqual(["optional { refresh: true }"]);
-    expect(contract.methods["inspect"]!.arguments.join(" ")).toContain("{ pin }");
-    expect(contract.methods["inspect"]!.arguments.join(" ")).toContain("registrySnapshot");
-    expect(contract.methods["inspectAuthoring"]!.arguments.join(" ")).toContain("parts");
-    expect(contract.methods["publishAuthoring"]!.arguments.join(" ")).toContain(
-      "expectedFingerprint"
+    expect(contract.methods["inspect"]!.arguments.join(" ")).toContain(
+      "{ pin }",
     );
-    expect(contract.methods["suggestRegistryEntry"]!.arguments.join(" ")).toContain("publication");
+    expect(contract.methods["inspectAuthoring"]!.arguments.join(" ")).toContain(
+      "parts",
+    );
+    expect(contract.methods["publishAuthoring"]!.arguments.join(" ")).toContain(
+      "expectedFingerprint",
+    );
 
     expect(prose).toContain("exact immutable `pin`");
     expect(prose).toContain("creating a new standalone workspace");
     expect(prose).toContain("ordinary VCS compare and merge operations");
     expect(skill).toContain(
-      'extensions.invoke("@workspace-extensions/templates", "catalog", [])'
+      'extensions.invoke("@workspace-extensions/templates", "inspect", [',
     );
     expect(invariants).toContain("inspect resolves once to an exact pin");
-    expect(invariants).toContain("workspace creation consumes the exact inspected pin");
-    expect(invariants).toContain("source integration into an existing workspace uses ordinary VCS comparison and merge");
-    expect(invariants).toContain("publication does not create installed layers, runtime authority, or registry promotion");
+    expect(invariants).toContain(
+      "workspace creation consumes the exact inspected pin",
+    );
+    expect(invariants).toContain(
+      "source integration into an existing workspace uses ordinary VCS comparison and merge",
+    );
+    expect(invariants).toContain(
+      "publication does not create installed layers, runtime authority",
+    );
   });
 });

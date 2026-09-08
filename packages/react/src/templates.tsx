@@ -12,7 +12,6 @@ import {
   Flex,
   Grid,
   Heading,
-  Spinner,
   Text,
   TextField,
 } from "@radix-ui/themes";
@@ -185,52 +184,55 @@ export function TemplateWorkspaceReview({
   );
 }
 
-/** Catalog and source inspection are read-only; the host supplies workspace creation. */
-export function TemplateBrowser({
-  client,
-  onCreate,
-  onOpenInApp,
-  initialPin,
-  initialInspection,
-  candidates = [],
-  onReviewPending,
-}: {
+interface TemplateBrowserProps {
   client: BrowserClient;
   initialPin?: TemplateExactPin;
+  initialSourceUrl?: string;
   initialInspection?: TemplateInspection;
   candidates?: readonly TemplateInspection[];
   onReviewPending?: (approvalId: string) => void;
   onCreate?: CreateTemplateWorkspace;
+  onChooseFolder?: () => Promise<TemplateInspection | null>;
   onOpenInApp?: (inspection: TemplateInspection) => Promise<void>;
-}) {
+}
+
+/** Each externally selected source owns one review session and its async work. */
+export function TemplateBrowser(props: TemplateBrowserProps) {
+  return (
+    <WorkspaceSourceSession
+      key={JSON.stringify(
+        props.initialInspection?.pin ??
+          props.initialPin ??
+          props.initialSourceUrl ??
+          null,
+      )}
+      {...props}
+    />
+  );
+}
+
+function WorkspaceSourceSession({
+  client,
+  onCreate,
+  onOpenInApp,
+  initialPin,
+  initialSourceUrl,
+  initialInspection,
+  candidates = [],
+  onReviewPending,
+  onChooseFolder,
+}: TemplateBrowserProps) {
   const [error, setError] = useState<unknown>(null);
-  const [attempt, setAttempt] = useState(0);
+  const lastLocator = useRef<TemplateLocator | null>(null);
   const review = pendingAuthorityNotice(error);
   const awaitingReview = isAuthorityPending(error);
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(initialSourceUrl ?? "");
   const [credential, setCredential] = useState("");
-  const [inspectionState, setInspectionState] = useState<{
-    inspection: TemplateInspection;
-    requestedPin: TemplateExactPin;
-  } | null>(null);
+  const [currentInspection, setInspection] =
+    useState<TemplateInspection | null>(initialInspection ?? null);
   const [inspecting, setInspecting] = useState(false);
   const generation = useRef(0);
   const live = useRef(true);
-  const requestedPin = initialInspection?.pin ?? initialPin;
-  const currentInspection = initialInspection
-    ? initialInspection
-    : inspectionState &&
-        (!requestedPin ||
-          (sameWorkspaceTemplatePin(
-            inspectionState.requestedPin,
-            requestedPin,
-          ) &&
-            sameWorkspaceTemplatePin(
-              inspectionState.inspection.pin,
-              requestedPin,
-            )))
-      ? inspectionState.inspection
-      : null;
   useEffect(() => {
     live.current = true;
     return () => {
@@ -239,6 +241,7 @@ export function TemplateBrowser({
     };
   }, []);
   const inspect = async (locator: TemplateLocator) => {
+    lastLocator.current = locator;
     const operation = ++generation.current;
     setInspecting(true);
     setError(null);
@@ -252,10 +255,7 @@ export function TemplateBrowser({
           "The inspected source does not match the selected workspace. Review the source again.",
         );
       if (live.current && operation === generation.current)
-        setInspectionState({
-          inspection: result,
-          requestedPin: "pin" in locator ? locator.pin : result.pin,
-        });
+        setInspection(result);
     } catch (error) {
       if (live.current && operation === generation.current) setError(error);
     } finally {
@@ -264,22 +264,14 @@ export function TemplateBrowser({
     }
   };
   useEffect(() => {
-    if (initialInspection) {
-      generation.current += 1;
-      setInspectionState({
-        inspection: initialInspection,
-        requestedPin: initialInspection.pin,
-      });
-      setError(null);
-      setInspecting(false);
-    } else if (initialPin) void inspect({ pin: initialPin });
-  }, [initialInspection, initialPin, client, attempt]);
+    if (!initialInspection && initialPin) void inspect({ pin: initialPin });
+  }, [initialInspection, initialPin, client]);
   if (currentInspection && onCreate)
     return (
       <TemplateWorkspaceReview
         inspection={currentInspection}
         onCreate={onCreate}
-        onBack={() => setInspectionState(null)}
+        onBack={() => setInspection(null)}
       />
     );
   const canInspect = (() => {
@@ -319,7 +311,9 @@ export function TemplateBrowser({
               )}
               <Button
                 variant="soft"
-                onClick={() => setAttempt((value) => value + 1)}
+                onClick={() => {
+                  if (lastLocator.current) void inspect(lastLocator.current);
+                }}
               >
                 Check again
               </Button>
@@ -354,6 +348,25 @@ export function TemplateBrowser({
           ) : null}
         </Card>
       ) : null}
+      {onChooseFolder ? (
+        <Flex direction="column" gap="2">
+          <Heading size="3">From a folder on this computer</Heading>
+          <Text size="2" color="gray">Use a workspace folder, including changes you haven’t committed.</Text>
+          <Box>
+            <Button size="3" variant="soft" disabled={inspecting} loading={inspecting} onClick={() => {
+              const operation = ++generation.current;
+              setInspecting(true); setError(null);
+              void onChooseFolder().then(result => {
+                if (live.current && operation === generation.current && result) setInspection(result);
+              }).catch(error => {
+                if (live.current && operation === generation.current) setError(error);
+              }).finally(() => {
+                if (live.current && operation === generation.current) setInspecting(false);
+              });
+            }}>Choose folder…</Button>
+          </Box>
+        </Flex>
+      ) : null}
       {candidates.length > 0 ? (
         <Flex direction="column" gap="3">
           <Heading size="3">Local workspaces</Heading>
@@ -372,12 +385,7 @@ export function TemplateBrowser({
                   size="3"
                   variant="soft"
                   mt="3"
-                  onClick={() =>
-                    setInspectionState({
-                      inspection: candidate,
-                      requestedPin: candidate.pin,
-                    })
-                  }
+                  onClick={() => setInspection(candidate)}
                 >
                   Explore {candidate.presentation?.name ?? "workspace"}
                 </Button>
@@ -443,8 +451,15 @@ export function TemplateBrowser({
           {workspaceExamples.map((entry) => (
             <Card key={entry.url}>
               <Heading size="3">{entry.name}</Heading>
-              <Text as="p" size="2" color="gray" mt="2">{entry.description}</Text>
-              <Button mt="3" variant="soft" disabled={inspecting} onClick={() => void inspect({ url: entry.url })}>
+              <Text as="p" size="2" color="gray" mt="2">
+                {entry.description}
+              </Text>
+              <Button
+                mt="3"
+                variant="soft"
+                disabled={inspecting}
+                onClick={() => void inspect({ url: entry.url })}
+              >
                 Review {entry.name}
               </Button>
             </Card>

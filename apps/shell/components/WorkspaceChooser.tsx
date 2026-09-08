@@ -1,4 +1,7 @@
-import { submitWorkspaceCreation, readWorkspaceCreationSubmission } from "@vibestudio/service-schemas/clients/workspaceCreationClient";
+import {
+  submitWorkspaceCreation,
+  readWorkspaceCreationSubmission,
+} from "@vibestudio/service-schemas/clients/workspaceCreationClient";
 import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/types";
 import { useEffect, useRef, useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
@@ -7,7 +10,6 @@ import {
   Button,
   Callout,
   Flex,
-  Heading,
   Spinner,
   Text,
   TextField,
@@ -23,6 +25,7 @@ import { useApprovalPresentation } from "./ApprovalPresentationContext";
 import {
   workspaceChooserDialogOpenAtom,
   workspaceChooserTemplateAtom,
+  workspaceCreationSourceUrlAtom,
 } from "../state/appModeAtoms";
 
 export function WorkspaceChooser() {
@@ -30,6 +33,7 @@ export function WorkspaceChooser() {
   const desktop = useWorkspaceDesktopHost();
   const approvalPresentation = useApprovalPresentation();
   const close = useSetAtom(workspaceChooserDialogOpenAtom);
+  const [sourceUrl, setSourceUrl] = useAtom(workspaceCreationSourceUrlAtom);
   const [template, setTemplate] = useAtom(workspaceChooserTemplateAtom);
   const [mode, setMode] = useState<"blank" | "source">("source");
   const [busy, setBusy] = useState(false);
@@ -52,21 +56,38 @@ export function WorkspaceChooser() {
   const pending = useRef(false);
   const [restoring, setRestoring] = useState(true);
   const [recoveryNotice, setRecoveryNotice] = useState("");
-  const [recoveredInput, setRecoveredInput] = useState<ReturnType<typeof readWorkspaceCreationSubmission>>(null);
+  const [recoveredInput, setRecoveredInput] =
+    useState<ReturnType<typeof readWorkspaceCreationSubmission>>(null);
   useEffect(() => {
     let live = true;
-    void hubControl.getProfile(undefined).then(profile => {
-      if (!live) return;
-      if (!profile) throw new Error("The authenticated account is unavailable.");
-      const saved = readWorkspaceCreationSubmission(localStorage.getItem(`workspace-creation:${profile.userId}`));
-      if (saved) {
-        setRecoveredInput(saved);
-        setName(saved.workspace); setTemplate(saved.rootTemplate ?? null);
-        setMode(saved.rootTemplate ? "source" : "blank");
-        setRecoveryNotice(`A previous creation of ${saved.workspace} may have completed. Continue to check its result before submitting anything again.`);
-      }
-    }).catch(error => { if (live) setError(String(error)); }).finally(() => { if (live) setRestoring(false); });
-    return () => { live = false; };
+    void hubControl
+      .getProfile(undefined)
+      .then((profile) => {
+        if (!live) return;
+        if (!profile)
+          throw new Error("The authenticated account is unavailable.");
+        const saved = readWorkspaceCreationSubmission(
+          localStorage.getItem(`workspace-creation:${profile.userId}`),
+        );
+        if (saved) {
+          setRecoveredInput(saved);
+          setName(saved.workspace);
+          setTemplate(saved.rootTemplate ?? null);
+          setMode(saved.rootTemplate ? "source" : "blank");
+          setRecoveryNotice(
+            `A previous creation of ${saved.workspace} may have completed. Continue to check its result before submitting anything again.`,
+          );
+        }
+      })
+      .catch((error) => {
+        if (live) setError(String(error));
+      })
+      .finally(() => {
+        if (live) setRestoring(false);
+      });
+    return () => {
+      live = false;
+    };
   }, [hubControl, setTemplate]);
   useEffect(() => {
     let live = true;
@@ -95,6 +116,7 @@ export function WorkspaceChooser() {
     try {
       await desktop.openWorkspace(workspaceId);
       setTemplate(null);
+      setSourceUrl(null);
       close(false);
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error));
@@ -112,18 +134,30 @@ export function WorkspaceChooser() {
     setError(null);
     try {
       const profile = await hubControl.getProfile(undefined);
-    if (!profile) throw new Error("The authenticated account is unavailable; workspace creation was not submitted.");
-      const entry = await submitWorkspaceCreation(hubControl, {
-        workspace, ...(rootTemplate ? { rootTemplate } : {}),
-      }, {
-        key: `workspace-creation:${profile.userId}`,
-        getItem: key => localStorage.getItem(key),
-        setItem: (key, value) => localStorage.setItem(key, value),
-        removeItem: key => localStorage.removeItem(key),
-        newOperationId: () => crypto.randomUUID(),
-      });
-      setRecoveredInput(null); setRecoveryNotice("");
-      if (entry.state === "deleted") throw new Error("The earlier creation completed, but its workspace was deleted. Choose Create again only to install a new workspace.");
+      if (!profile)
+        throw new Error(
+          "The authenticated account is unavailable; workspace creation was not submitted.",
+        );
+      const entry = await submitWorkspaceCreation(
+        hubControl,
+        {
+          workspace,
+          ...(rootTemplate ? { rootTemplate } : {}),
+        },
+        {
+          key: `workspace-creation:${profile.userId}`,
+          getItem: (key) => localStorage.getItem(key),
+          setItem: (key, value) => localStorage.setItem(key, value),
+          removeItem: (key) => localStorage.removeItem(key),
+          newOperationId: () => crypto.randomUUID(),
+        },
+      );
+      setRecoveredInput(null);
+      setRecoveryNotice("");
+      if (entry.state === "deleted")
+        throw new Error(
+          "The earlier creation completed, but its workspace was deleted. Choose Create again only to install a new workspace.",
+        );
       setCreated(entry);
       await open(entry.workspaceId);
     } catch (error) {
@@ -138,15 +172,27 @@ export function WorkspaceChooser() {
       <Flex direction="column" gap="4">
         {!created && !template && !recoveredInput ? (
           <Flex gap="2" role="group" aria-label="Workspace starting point">
-            <Button variant={mode === "source" ? "solid" : "soft"} disabled={busy} onClick={() => setMode("source")}>
+            <Button
+              variant={mode === "source" ? "solid" : "soft"}
+              disabled={busy}
+              onClick={() => setMode("source")}
+            >
               From an example or source
             </Button>
-            <Button variant={mode === "blank" ? "solid" : "soft"} disabled={busy} onClick={() => setMode("blank")}>
+            <Button
+              variant={mode === "blank" ? "solid" : "soft"}
+              disabled={busy}
+              onClick={() => setMode("blank")}
+            >
               Start blank
             </Button>
           </Flex>
         ) : null}
-        {recoveryNotice ? <Callout.Root><Callout.Text>{recoveryNotice}</Callout.Text></Callout.Root> : null}
+        {recoveryNotice ? (
+          <Callout.Root>
+            <Callout.Text>{recoveryNotice}</Callout.Text>
+          </Callout.Root>
+        ) : null}
         {candidateDiscovery.status === "failed" ? (
           <Callout.Root color="red" role="alert">
             <Callout.Text>{candidateDiscovery.error}</Callout.Text>
@@ -165,8 +211,15 @@ export function WorkspaceChooser() {
           >
             Open workspace
           </Button>
-        ) : restoring ? <Spinner /> : recoveredInput ? (
-          <Button disabled={busy} onClick={() => void create(recoveredInput.workspace, recoveredInput.rootTemplate)}>
+        ) : restoring ? (
+          <Spinner />
+        ) : recoveredInput ? (
+          <Button
+            disabled={busy}
+            onClick={() =>
+              void create(recoveredInput.workspace, recoveredInput.rootTemplate)
+            }
+          >
             Continue previous creation
           </Button>
         ) : mode === "source" &&
@@ -181,6 +234,8 @@ export function WorkspaceChooser() {
           candidateDiscovery.status === "failed" ? null : mode === "source" ? (
           <TemplateBrowser
             client={templates}
+            onChooseFolder={desktop.inspectWorkspaceFolder}
+            initialSourceUrl={sourceUrl ?? undefined}
             candidates={templateCandidates}
             initialInspection={localInspection}
             initialPin={localInspection ? undefined : (template ?? undefined)}

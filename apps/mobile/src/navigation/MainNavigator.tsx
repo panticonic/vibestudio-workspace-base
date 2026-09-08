@@ -154,8 +154,10 @@ function RetainedWorkspaceScreens({
         })}
       {directory.workspaceCreation && (
         <WorkspaceCreateSheet
+          key={JSON.stringify(directory.workspaceCreation)}
           directory={directory}
           template={directory.workspaceCreation.template}
+          sourceUrl={directory.workspaceCreation.sourceUrl}
           onClose={() => directory.closeWorkspaceCreation()}
           onCreated={() => directory.closeWorkspaceCreation()}
         />

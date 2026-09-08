@@ -11,6 +11,7 @@ const pin = {
 };
 function fixture(options: { pendingReview?: boolean } = {}) {
   const directory = {
+    pendingWorkspaceCreation: jest.fn(async () => null),
     systemWorkspaceId: "system",
     pendingApprovalCounts: new Map(
       options.pendingReview ? [["system", 1]] : [],
@@ -77,7 +78,7 @@ it("reinspects an exact source and waits for explicit named creation", async () 
       "Task Board",
     ),
   );
-  expect(directory.inspectWorkspaceTemplate).toHaveBeenCalledWith(pin);
+  expect(directory.inspectWorkspaceTemplate).toHaveBeenCalledWith({ pin });
   expect(directory.createWorkspace).not.toHaveBeenCalled();
   expect(view.getByText(pin.url)).toBeTruthy();
   fireEvent.changeText(view.getByLabelText("Workspace name"), "My board");
@@ -282,4 +283,41 @@ it("rejects an inspection for a different exact source", async () => {
   fireEvent.press(create);
   expect(directory.createWorkspace).not.toHaveBeenCalled();
   expect(onCreated).not.toHaveBeenCalled();
+});
+
+it("reviews a website source URL before creating its exact workspace", async () => {
+  const { directory, view, onCreated } = fixture();
+  view.unmount();
+  directory.inspectWorkspaceTemplate.mockClear();
+  const source = render(
+    <WorkspaceCreateSheet
+      directory={directory as unknown as MobileWorkspaceDirectory}
+      sourceUrl="https://example.com/task-board.git"
+      onClose={jest.fn()}
+      onCreated={onCreated}
+    />,
+  );
+  expect(source.getByLabelText("Workspace source address").props.value).toBe(
+    "https://example.com/task-board.git",
+  );
+  fireEvent.changeText(source.getByLabelText("Workspace name"), "My board");
+  expect(
+    source.getByRole("button", { name: "Create workspace" }).props
+      .accessibilityState.disabled,
+  ).toBe(true);
+  expect(directory.createWorkspace).not.toHaveBeenCalled();
+  fireEvent.press(source.getByRole("button", { name: "Review source" }));
+  await waitFor(() =>
+    expect(source.getByLabelText("Workspace name").props.value).toBe(
+      "Task Board",
+    ),
+  );
+  expect(directory.inspectWorkspaceTemplate).toHaveBeenCalledWith({
+    url: "https://example.com/task-board.git",
+  });
+  expect(directory.createWorkspace).not.toHaveBeenCalled();
+  fireEvent.press(source.getByRole("button", { name: "Create workspace" }));
+  await waitFor(() =>
+    expect(directory.createWorkspace).toHaveBeenCalledWith("Task Board", pin),
+  );
 });

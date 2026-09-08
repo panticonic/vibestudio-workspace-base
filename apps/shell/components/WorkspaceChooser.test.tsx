@@ -10,9 +10,11 @@ import { Theme } from "@radix-ui/themes";
 import { Provider, createStore } from "jotai";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const clients = vi.hoisted(() => ({
-  templates: { catalog: vi.fn(), inspect: vi.fn() },
+  templates: { inspect: vi.fn() },
   review: vi.fn(),
   hubControl: {
+    getProfile: vi.fn(),
+    workspaceCreationReceipt: vi.fn(),
     listWorkspaces: vi.fn(),
     listTemplateCandidates: vi.fn(),
     createWorkspace: vi.fn(),
@@ -42,17 +44,16 @@ const inspection = {
   repositories: ["panels/garden"],
   files: [],
 };
-const catalog = {
-  version: 1,
-  systemEpoch: 1,
-  coordinates: { ...pin, url: "git+https://example.test/catalog.git" },
-  stale: false,
-  entries: [],
-};
 afterEach(cleanup);
 beforeEach(() => {
   vi.resetAllMocks();
-  clients.templates.catalog.mockResolvedValue(catalog);
+  const storage = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+  });
+  clients.hubControl.getProfile.mockResolvedValue({ userId: "alice" });
   clients.templates.inspect.mockResolvedValue(inspection);
   clients.hubControl.listWorkspaces.mockResolvedValue([
     {
@@ -127,15 +128,12 @@ describe("WorkspaceChooser", () => {
     expect(clients.hubControl.createWorkspace).not.toHaveBeenCalled();
   });
 
-  it("routes by immutable workspace id through the retained account session", async () => {
-    const store = draw();
-    fireEvent.click(
-      await screen.findByRole("button", { name: /Shared garden/ }),
-    );
-    await waitFor(() =>
-      expect(clients.openWorkspace).toHaveBeenCalledWith("shared-id"),
-    );
-    expect(store.get(workspaceChooserDialogOpenAtom)).toBe(false);
+  it("opens creation directly without duplicating the sidebar workspace list", async () => {
+    draw();
+    await screen.findByRole("textbox", { name: "Workspace source address" });
+    expect(clients.hubControl.listWorkspaces).not.toHaveBeenCalled();
+    expect(screen.queryByRole("button", { name: /Shared garden/ })).toBeNull();
+    expect(clients.openWorkspace).not.toHaveBeenCalled();
   });
   it("reinspects an exact panel-supplied source and waits for explicit creation", async () => {
     draw(true);
@@ -148,6 +146,7 @@ describe("WorkspaceChooser", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
     await waitFor(() =>
       expect(clients.hubControl.createWorkspace).toHaveBeenCalledWith({
+        operationId: expect.any(String),
         workspace: "my-garden",
         rootTemplate: pin,
       }),
@@ -167,9 +166,6 @@ describe("WorkspaceChooser", () => {
     clients.hubControl.listTemplateCandidates.mockResolvedValue([inspection]);
     draw();
     fireEvent.click(
-      await screen.findByRole("button", { name: "Explore apps & sources" }),
-    );
-    fireEvent.click(
       await screen.findByRole("button", { name: "Explore Garden" }),
     );
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace name" }), {
@@ -178,6 +174,7 @@ describe("WorkspaceChooser", () => {
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
     await waitFor(() =>
       expect(clients.hubControl.createWorkspace).toHaveBeenCalledWith({
+        operationId: expect.any(String),
         workspace: "local-garden",
         rootTemplate: pin,
       }),
@@ -189,9 +186,7 @@ describe("WorkspaceChooser", () => {
       new Error("Connection interrupted"),
     );
     draw();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "New workspace" }),
-    );
+    fireEvent.click(await screen.findByRole("button", { name: "Start blank" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Workspace name" }), {
       target: { value: "garden" },
     });
@@ -201,6 +196,7 @@ describe("WorkspaceChooser", () => {
     await waitFor(() => expect(clients.openWorkspace).toHaveBeenCalledTimes(2));
     expect(clients.hubControl.createWorkspace).toHaveBeenCalledTimes(1);
     expect(clients.hubControl.createWorkspace).toHaveBeenCalledWith({
+      operationId: expect.any(String),
       workspace: "garden",
     });
   });

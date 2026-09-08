@@ -31,20 +31,35 @@ import { X, Workflow } from "../design/icons";
 export function WorkspaceCreateSheet({
   directory,
   template: requestedTemplate,
+  sourceUrl,
   onClose,
   onCreated,
 }: {
   directory: MobileWorkspaceDirectory;
   template?: TemplateExactPin;
+  sourceUrl?: string;
   onClose(): void;
   onCreated(): void;
 }) {
-  const [template, setTemplate] = useState(requestedTemplate);
+  const [recoveredSource, setRecoveredSource] = useState<{
+    template?: TemplateExactPin;
+  } | null>(null);
+  const template = recoveredSource
+    ? recoveredSource.template
+    : requestedTemplate;
   const [restoring, setRestoring] = useState(true);
   const [recoveryNotice, setRecoveryNotice] = useState("");
   const colors = useAtomValue(themeColorsAtom);
   const insets = useSafeAreaInsets();
   const [name, setName] = useState("");
+  const [url, setUrl] = useState(sourceUrl ?? "");
+  const sourceRequest = useRef(0);
+  useEffect(
+    () => () => {
+      sourceRequest.current += 1;
+    },
+    [directory, requestedTemplate, sourceUrl],
+  );
   const [busy, setBusy] = useState(false);
   const pending = useRef(false);
   const [created, setCreated] = useState<WorkspaceCreationReceipt | null>(null);
@@ -69,12 +84,25 @@ export function WorkspaceCreateSheet({
   const selectedTemplate = template ?? currentInspection?.pin;
   useEffect(() => {
     let live = true;
-    void directory.pendingWorkspaceCreation().then(saved => {
-      if (!live || !saved) return;
-      setName(saved.workspace); setTemplate(saved.rootTemplate);
-      setRecoveryNotice(`A previous creation of ${saved.workspace} may have completed. Continue to check its result before submitting anything again.`);
-    }).catch(error => { if (live) setError(error); }).finally(() => { if (live) setRestoring(false); });
-    return () => { live = false; };
+    void directory
+      .pendingWorkspaceCreation()
+      .then((saved) => {
+        if (!live || !saved) return;
+        setName(saved.workspace);
+        setRecoveredSource({ template: saved.rootTemplate });
+        setRecoveryNotice(
+          `A previous creation of ${saved.workspace} may have completed. Continue to check its result before submitting anything again.`,
+        );
+      })
+      .catch((error) => {
+        if (live) setError(error);
+      })
+      .finally(() => {
+        if (live) setRestoring(false);
+      });
+    return () => {
+      live = false;
+    };
   }, [directory]);
   useEffect(() => {
     let live = true;
@@ -92,7 +120,8 @@ export function WorkspaceCreateSheet({
           sameWorkspaceTemplatePin(pin, template),
         );
         const result =
-          local ?? (await directory.inspectWorkspaceTemplate(template));
+          local ??
+          (await directory.inspectWorkspaceTemplate({ pin: template }));
         if (!live) return;
         if (!sameWorkspaceTemplatePin(result.pin, template))
           throw new Error(
@@ -115,8 +144,11 @@ export function WorkspaceCreateSheet({
   const create = async () => {
     const capturedName = name.trim();
     if (
-      pending.current || restoring ||
-      (!created && (!capturedName || (selectedTemplate && !currentInspection)))
+      pending.current ||
+      restoring ||
+      (!created &&
+        (!capturedName ||
+          ((selectedTemplate || url.trim()) && !currentInspection)))
     )
       return;
     pending.current = true;
@@ -127,7 +159,10 @@ export function WorkspaceCreateSheet({
         created ??
         (await directory.createWorkspace(capturedName, currentInspection?.pin));
       setRecoveryNotice("");
-      if (entry.state === "deleted") throw new Error("The earlier creation completed, but its workspace was deleted. Choose Create again only to install a new workspace.");
+      if (entry.state === "deleted")
+        throw new Error(
+          "The earlier creation completed, but its workspace was deleted. Choose Create again only to install a new workspace.",
+        );
       setCreated(entry);
       await directory.activate(entry.workspaceId);
       onCreated();
@@ -205,6 +240,52 @@ export function WorkspaceCreateSheet({
                 ? "Review this source, then give its new workspace a name. It starts separately from your other workspaces."
                 : "A separate place for a project, with its own panels, agents and basic tools."}
           </Text>
+          {!selectedTemplate && !created && (
+            <View style={{ gap: spacing.sm }}>
+              <Text style={[type.bodyStrong, { color: colors.text }]}>
+                From a Git URL
+              </Text>
+              <TextInput
+                accessibilityLabel="Workspace source address"
+                value={url}
+                onChangeText={setUrl}
+                editable={!inspecting}
+                autoCapitalize="none"
+                autoCorrect={false}
+                placeholder="https://github.com/owner/workspace"
+                style={{
+                  color: colors.text,
+                  borderWidth: 1,
+                  borderColor: colors.border,
+                  padding: spacing.md,
+                  borderRadius: radius.md,
+                }}
+              />
+              <Button
+                label="Review source"
+                disabled={busy || inspecting || !url.trim()}
+                onPress={() => {
+                  const request = ++sourceRequest.current;
+                  setInspecting(true);
+                  setError(null);
+                  void directory
+                    .inspectWorkspaceTemplate({ url: url.trim() })
+                    .then((result) => {
+                      if (request !== sourceRequest.current) return;
+                      setInspection(result);
+                      setName(result.presentation?.name ?? "");
+                    })
+                    .catch((error) => {
+                      if (request === sourceRequest.current) setError(error);
+                    })
+                    .finally(() => {
+                      if (request === sourceRequest.current)
+                        setInspecting(false);
+                    });
+                }}
+              />
+            </View>
+          )}
           {!selectedTemplate && candidates.length > 0 && (
             <View style={{ gap: spacing.sm }}>
               <Text style={[type.bodyStrong, { color: colors.text }]}>
@@ -306,7 +387,14 @@ export function WorkspaceCreateSheet({
               )}
             </View>
           )}
-          {recoveryNotice ? <Text accessibilityRole="text" style={[type.body, { color: colors.textSecondary }]}>{recoveryNotice}</Text> : null}
+          {recoveryNotice ? (
+            <Text
+              accessibilityRole="text"
+              style={[type.body, { color: colors.textSecondary }]}
+            >
+              {recoveryNotice}
+            </Text>
+          ) : null}
           <TextInput
             autoFocus={!selectedTemplate}
             value={name}
@@ -370,7 +458,9 @@ export function WorkspaceCreateSheet({
                   : "Creating workspace…"
                 : created
                   ? "Open workspace"
-                  : recoveryNotice ? "Continue previous creation" : "Create workspace"
+                  : recoveryNotice
+                    ? "Continue previous creation"
+                    : "Create workspace"
             }
             variant="filled"
             loading={busy}
@@ -378,7 +468,9 @@ export function WorkspaceCreateSheet({
               busy ||
               (!created &&
                 (!name.trim() ||
-                  Boolean(selectedTemplate && !currentInspection)))
+                  Boolean(
+                    (selectedTemplate || url.trim()) && !currentInspection,
+                  )))
             }
             onPress={() => void create()}
           />

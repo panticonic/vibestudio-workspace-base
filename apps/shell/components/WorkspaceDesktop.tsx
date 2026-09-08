@@ -442,7 +442,7 @@ export function WorkspaceDesktop({ children }: { children?: ReactNode }) {
 
   return (
     <ShellPresentationStoreContext.Provider value={presentationStore}>
-      <WorkspaceDesktopHostContext.Provider value={{ openWorkspace }}>
+      <WorkspaceDesktopHostContext.Provider value={{ openWorkspace, inspectWorkspaceFolder: (globalThis as unknown as { __vibestudioApp?: { inspectWorkspaceFolder(): Promise<import("@vibestudio/service-schemas/templates").TemplateInspection | null> } }).__vibestudioApp?.inspectWorkspaceFolder }}>
         <div className="workspace-desktop">
           <header
             className="workspace-desktop-titlebar"

@@ -1979,9 +1979,7 @@ export function MainScreen({
       if (!shellClient || !workspaceDirectory)
         throw new Error("The workspace is unavailable");
       if (target.kind === "workspace-chooser") {
-        if (target.template)
-          workspaceDirectory.requestWorkspaceCreation(target.template);
-        else navigation.dispatch(DrawerActions.openDrawer());
+        workspaceDirectory.requestWorkspaceCreation(target);
         return;
       }
       const workspaceId = target.workspaceId ?? shellClient.workspaceId;

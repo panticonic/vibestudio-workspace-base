@@ -29,6 +29,7 @@ export const pinMutationSeqAtom = atom<number>(0);
  * Whether workspace chooser dialog is open
  */
 export const workspaceChooserDialogOpenAtom = atom(false);
+export const workspaceCreationSourceUrlAtom = atom<string | null>(null);
 /** A source hint opens review only; creation still requires the user's action. */
 export const workspaceChooserTemplateAtom = atom<
   import("@vibestudio/workspace-contracts/types").WorkspaceTemplatePin | null

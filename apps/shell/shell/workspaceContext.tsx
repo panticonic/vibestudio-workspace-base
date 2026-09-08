@@ -30,6 +30,7 @@ export const useWorkspaceNavigationHost = () =>
 
 export const WorkspaceDesktopHostContext = createContext<{
   openWorkspace(workspaceId: string): Promise<void>;
+  inspectWorkspaceFolder?(): Promise<import("@vibestudio/service-schemas/templates").TemplateInspection | null>;
 } | null>(null);
 export const useWorkspaceDesktopHost = () => {
   const host = useContext(WorkspaceDesktopHostContext);

@@ -10,7 +10,7 @@ import { Theme } from "@radix-ui/themes";
 import { Provider, createStore } from "jotai";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const clients = vi.hoisted(() => ({
-  templates: { catalog: vi.fn(), inspect: vi.fn() },
+  templates: { inspect: vi.fn() },
   hubControl: {
     listWorkspaces: vi.fn(),
     listTemplateCandidates: vi.fn(),
@@ -41,17 +41,9 @@ const inspection = {
   repositories: ["panels/garden"],
   files: [],
 };
-const catalog = {
-  version: 1,
-  systemEpoch: 1,
-  coordinates: { ...pin, url: "git+https://example.test/catalog.git" },
-  stale: false,
-  entries: [],
-};
 afterEach(cleanup);
 beforeEach(() => {
   vi.resetAllMocks();
-  clients.templates.catalog.mockResolvedValue(catalog);
   clients.templates.inspect.mockResolvedValue(inspection);
   clients.hubControl.listWorkspaces.mockResolvedValue([
     {
@@ -102,13 +94,13 @@ it("hands the reviewed exact source to the canonical workspace chooser", async (
   expect(clients.hubControl.routeWorkspace).not.toHaveBeenCalled();
 });
 
-it("opens the shared approval presenter for a catalog acquisition", async () => {
-  clients.templates.catalog.mockRejectedValueOnce(
+it("opens the shared approval presenter for a source acquisition", async () => {
+  clients.templates.inspect.mockRejectedValueOnce(
     Object.assign(new Error("wrapped extension failure"), {
       code: "EACQUIRE",
       errorData: {
         acquisition: {
-          acquisitionId: "acq-catalog-network",
+          acquisitionId: "acq-source-network",
           renderedAction: "read responses from github.com",
           pending: true,
         },
@@ -122,11 +114,16 @@ it("opens the shared approval presenter for a catalog acquisition", async () => 
       </Theme>
     </Provider>,
   );
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Workspace source address" }),
+    { target: { value: "https://github.com/example/workspace" } },
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Review workspace" }));
   fireEvent.click(await screen.findByRole("button", { name: "Open approval" }));
   await waitFor(() =>
     expect(approvalPresentation.request).toHaveBeenCalledWith(
       "system-id",
-      "acq-catalog-network",
+      "acq-source-network",
     ),
   );
 });

@@ -7,6 +7,7 @@ import { Theme } from "@radix-ui/themes";
 import {
   workspaceChooserDialogOpenAtom,
   workspaceChooserTemplateAtom,
+  workspaceCreationSourceUrlAtom,
 } from "../state/appModeAtoms";
 import {
   effectiveThemeAtom,
@@ -34,6 +35,7 @@ export function App() {
   const loadThemePreference = useSetAtom(loadThemePreferenceAtom);
   const loadThemeConfig = useSetAtom(loadThemeConfigAtom);
   const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
+  const setWorkspaceCreationSourceUrl = useSetAtom(workspaceCreationSourceUrlAtom);
   const setWorkspaceChooserTemplate = useSetAtom(workspaceChooserTemplateAtom);
   // Hand the window to the hosted shell immediately. MainMode belongs to the
   // normal startup surface and is bundled with it; optional heavyweight
@@ -80,9 +82,10 @@ export function App() {
       input: import("@vibestudio/shared/events").EventPayloads["open-workspace-switcher"],
     ) => {
       setWorkspaceChooserTemplate(input?.template ?? null);
+      setWorkspaceCreationSourceUrl(input?.sourceUrl ?? null);
       setWorkspaceChooserOpen(true);
     },
-    [setWorkspaceChooserOpen, setWorkspaceChooserTemplate],
+    [setWorkspaceChooserOpen, setWorkspaceChooserTemplate, setWorkspaceCreationSourceUrl],
   );
   useShellEvent("open-workspace-switcher", handleOpenWorkspaceSwitcher);
 

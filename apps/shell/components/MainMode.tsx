@@ -7,6 +7,8 @@ import { isRpcConnectionLost } from "@vibestudio/rpc";
 import {
   settingsDialogAtom,
   workspaceChooserDialogOpenAtom,
+  workspaceChooserTemplateAtom,
+  workspaceCreationSourceUrlAtom,
   shellOverlayActiveAtom,
 } from "../state/appModeAtoms";
 
@@ -32,6 +34,8 @@ export default function MainMode() {
   const approvalPresentation = useApprovalPresentationController(client);
 
   const workspaceChooserOpen = useAtomValue(workspaceChooserDialogOpenAtom);
+  const setCreationTemplate = useSetAtom(workspaceChooserTemplateAtom);
+  const setCreationSource = useSetAtom(workspaceCreationSourceUrlAtom);
   const setWorkspaceChooserOpen = useSetAtom(workspaceChooserDialogOpenAtom);
   const settingsTarget = useAtomValue(settingsDialogAtom);
   const setSettingsTarget = useSetAtom(settingsDialogAtom);
@@ -95,13 +99,16 @@ export default function MainMode() {
   return (
     <ApprovalPresentationContext.Provider value={approvalPresentation}>
       <WorkspaceDesktop>
-        {/* Workspace Chooser Dialog (for switching workspaces in main mode) */}
+        {/* Workspace creation */}
         <AppDialog
           open={workspaceChooserOpen}
-          onOpenChange={setWorkspaceChooserOpen}
+          onOpenChange={(open) => {
+            setWorkspaceChooserOpen(open);
+            if (!open) { setCreationTemplate(null); setCreationSource(null); }
+          }}
           maxWidth="920px"
-          title="Workspaces"
-          description="Open a workspace, or create one from an app or source."
+          title="Add workspace"
+          description="Start a separate space for your panels, files and conversations."
         >
           <WorkspaceChooser />
         </AppDialog>
