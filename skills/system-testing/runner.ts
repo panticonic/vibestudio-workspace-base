@@ -503,6 +503,11 @@ export class HeadlessRunner {
    * repository only on that local line; task-created variants deliberately
    * begin with no repository and derive ownership from the task's work.
    */
+  /** The already prepared fixture context, for deterministic source probes. */
+  get workspaceRepoFixtureContextId(): string | null {
+    return this.workspaceRepoFixtureLifecycle?.taskContextId ?? null;
+  }
+
   async prepareWorkspaceRepoFixture(): Promise<WorkspaceRepoFixtureState> {
     return this.requireWorkspaceRepoFixtureLifecycle().prepare();
   }

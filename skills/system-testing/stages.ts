@@ -45,6 +45,8 @@ import { mobileTests } from "./tests/mobile.js";
 import { deliveryHardeningTests } from "./tests/delivery-hardening.js";
 import { intentDiscoveryTests } from "./tests/intent-discovery.js";
 import { provenanceQuestionTests } from "./tests/provenance-questions.js";
+import { imageGenerationTests } from "./tests/image-generation.js";
+import { imagePanelTests } from "./tests/image-panel.js";
 
 export {
   agentCapabilityTests,
@@ -66,6 +68,8 @@ export {
   gitInteropTests,
   harnessResilienceTests,
   harnessToolTests,
+  imageGenerationTests,
+  imagePanelTests,
   intentDiscoveryTests,
   messagingTests,
   interactionSurfaceTests,
@@ -152,6 +156,8 @@ export function allTests(): TestCase[] {
     ...trustedUnitAuthoringTests,
     ...localModelTests,
     ...harnessToolTests,
+    ...imageGenerationTests,
+    ...imagePanelTests,
     ...mobileTests,
     ...deliveryHardeningTests,
     ...intentDiscoveryTests,

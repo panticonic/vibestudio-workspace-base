@@ -171,6 +171,27 @@ services:
       - vibestudio.workspace-presentation.v1
     source: workers/workspace-presentation
     title: Workspace presentation
+  - action: generate and manage reusable image assets
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+        - session
+        - mission
+    description: Generate durable image assets, manage art direction, and read retained image content.
+    durableObject:
+      className: ImagesDO
+    name: images
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.images.v1
+    source: workers/images
+    title: Generated image assets
   - action: read or change which AI models your workspace uses
     authority:
       binding: declared
@@ -298,6 +319,9 @@ singletonObjects:
   - className: ModelSettingsDO
     key: workspace-model-settings
     source: workers/model-settings
+  - className: ImagesDO
+    key: workspace-images
+    source: workers/images
   - className: QuickfireSessionsDO
     key: workspace-quickfire
     source: workers/quickfire-service

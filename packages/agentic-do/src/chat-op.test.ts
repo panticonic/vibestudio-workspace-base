@@ -1245,7 +1245,7 @@ describe("AgentVesselBase automation ingress", () => {
 });
 
 describe("AgentVesselBase finite channel delivery", () => {
-  it("returns the retained outcome after a response-loss retry", async () => {
+  it("admits large canonical events and retains the outcome after a response-loss retry", async () => {
     const vessel = await makePromptProbe();
     vessel.useDeliveredDecisionContext = true;
     const clientCreationsBeforeDelivery = vessel.channelClientCreations;
@@ -1265,7 +1265,7 @@ describe("AgentVesselBase finite channel delivery", () => {
             {
               blockId: "delivery-message:block",
               type: "text",
-              content: "hello",
+              content: "A".repeat(3_000_000),
             },
           ],
           outcome: "completed",
@@ -1315,6 +1315,14 @@ describe("AgentVesselBase finite channel delivery", () => {
       },
     };
 
+    const sql = (vessel as unknown as { sql: { exec: (...args: any[]) => any } }).sql;
+    const exec = sql.exec.bind(sql);
+    sql.exec = (query, ...bindings) => {
+      if (String(query).includes("channel_delivery_admissions") && bindings.some((value) => typeof value === "string" && value.length > 1_000_000)) {
+        throw new Error("SQLITE_TOOBIG");
+      }
+      return exec(query, ...bindings);
+    };
     await expect(vessel.acceptChannelDelivery(input)).resolves.toMatchObject({
       deliveryId: input.deliveryId,
       disposition: "processed",
@@ -1323,6 +1331,10 @@ describe("AgentVesselBase finite channel delivery", () => {
       deliveryId: input.deliveryId,
       disposition: "duplicate",
     });
+    await expect(vessel.acceptChannelDelivery({ ...input, eventSequence: 2 })).rejects.toThrow("mismatched duplicate");
+    const admission = sql.exec("SELECT * FROM channel_delivery_admissions WHERE delivery_id = ?", input.deliveryId).toArray()[0];
+    expect(admission).not.toHaveProperty("envelope_json");
+    expect(JSON.stringify(admission).length).toBeLessThan(2_000);
     expect(vessel.channelClientCreations).toBe(clientCreationsBeforeDelivery);
   });
 });

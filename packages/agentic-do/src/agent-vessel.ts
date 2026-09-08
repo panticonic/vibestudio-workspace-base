@@ -837,7 +837,6 @@ export abstract class AgentVesselBase extends PanelDurableObjectBase {
         participant_id TEXT NOT NULL,
         subscription_revision INTEGER NOT NULL,
         event_sequence INTEGER NOT NULL,
-        envelope_json TEXT,
         agentic_context_json TEXT,
         state TEXT NOT NULL CHECK (state IN ('admitted', 'processed', 'declined')),
         outcome_json TEXT,
@@ -3686,12 +3685,11 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     const stored = this.subscriptions
       .listStored()
       .find(({ channelId }) => channelId === delivery.channelId);
-    const envelopeJson = JSON.stringify(delivery.envelope);
     const agenticContextJson = JSON.stringify(delivery.agenticContext);
     const existing = this.sql
       .exec(
         `SELECT channel_id, participant_id, subscription_revision, event_sequence,
-                envelope_json, agentic_context_json, state, outcome_json
+                agentic_context_json, state, outcome_json
            FROM channel_delivery_admissions WHERE delivery_id = ?`,
         delivery.deliveryId,
       )
@@ -3703,11 +3701,9 @@ This is one admitted recurring-automation tick. If this tick establishes that th
         Number(existing["subscription_revision"]) !==
           delivery.subscriptionRevision ||
         Number(existing["event_sequence"]) !== delivery.eventSequence ||
-        // Terminal rows shed their envelope bytes (storage bound); the
-        // deterministic delivery id plus the coordinate columns above remain
-        // the duplicate identity. Compare bytes only while retained.
-        (existing["envelope_json"] !== null &&
-          existing["envelope_json"] !== envelopeJson) ||
+        // The host resolves the immutable canonical channel event before
+        // delivery. Its routing coordinate is the admission identity; keeping
+        // another payload copy here would create a second event store.
         (existing["agentic_context_json"] !== null &&
           existing["agentic_context_json"] !== agenticContextJson)
       ) {
@@ -3752,8 +3748,8 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       this.sql.exec(
         `INSERT OR REPLACE INTO channel_delivery_admissions (
            delivery_id, channel_id, participant_id, subscription_revision,
-           event_sequence, envelope_json, agentic_context_json, state, outcome_json, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, NULL, NULL, 'declined', ?, ?, ?)`,
+           event_sequence, agentic_context_json, state, outcome_json, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, NULL, 'declined', ?, ?, ?)`,
         delivery.deliveryId,
         delivery.channelId,
         delivery.participantId,
@@ -3770,14 +3766,13 @@ This is one admitted recurring-automation tick. If this tick establishes that th
       this.sql.exec(
         `INSERT INTO channel_delivery_admissions (
            delivery_id, channel_id, participant_id, subscription_revision,
-           event_sequence, envelope_json, agentic_context_json, state, outcome_json, created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'admitted', NULL, ?, ?)`,
+           event_sequence, agentic_context_json, state, outcome_json, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, 'admitted', NULL, ?, ?)`,
         delivery.deliveryId,
         delivery.channelId,
         delivery.participantId,
         delivery.subscriptionRevision,
         delivery.eventSequence,
-        envelopeJson,
         agenticContextJson,
         now,
         now,
@@ -3812,7 +3807,7 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     };
     this.sql.exec(
       `UPDATE channel_delivery_admissions
-          SET state = 'processed', outcome_json = ?, envelope_json = NULL,
+          SET state = 'processed', outcome_json = ?,
               agentic_context_json = NULL, updated_at = ?
         WHERE delivery_id = ?`,
       JSON.stringify(outcome),

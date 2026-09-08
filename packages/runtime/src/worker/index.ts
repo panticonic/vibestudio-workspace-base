@@ -170,6 +170,7 @@ export const getParent = runtimeMember("getParent");
 export const getParentWithContract = runtimeMember("getParentWithContract");
 export const gad = runtimeMember("gad");
 export const blobstore = runtimeMember("blobstore");
+export const images = runtimeMember("images");
 export const workspace = runtimeMember("workspace");
 export const runtime = runtimeMember("runtime");
 export const credentials = runtimeMember("credentials");
@@ -472,3 +473,5 @@ export function handleWorkerRpc(
   }
   return null;
 }
+
+export type * from "../shared/images.js";

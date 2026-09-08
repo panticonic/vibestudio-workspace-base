@@ -61,6 +61,7 @@ template:
     - workers/development
     - workers/missions
     - workers/model-settings
+    - workers/images
     - workers/phone-provisioning
     - workers/pubsub-channel
     - workers/quickfire-service
@@ -175,6 +176,27 @@ services:
         - code
     durableObject:
       className: WorkspacePresentationDO
+  - source: workers/images
+    name: images
+    title: Generated image assets
+    action: generate and manage reusable image assets
+    description: Generate durable image assets, manage art direction, and read retained image content.
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.images.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+        - session
+        - mission
+    durableObject:
+      className: ImagesDO
   - source: workers/model-settings
     name: models
     title: AI model settings
@@ -302,6 +324,9 @@ singletonObjects:
   - source: workers/model-settings
     className: ModelSettingsDO
     key: workspace-model-settings
+  - source: workers/images
+    className: ImagesDO
+    key: workspace-images
   - source: workers/quickfire-service
     className: QuickfireSessionsDO
     key: workspace-quickfire

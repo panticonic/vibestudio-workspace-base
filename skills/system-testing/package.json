@@ -14,6 +14,15 @@
           },
           "tier": "gated",
           "evidence": "intentional-broad"
+        },
+        {
+          "capability": "workspace-service:images",
+          "resource": {
+            "kind": "exact",
+            "key": "do:workers/images:ImagesDO:workspace"
+          },
+          "tier": "gated",
+          "evidence": "exact"
         }
       ],
       "serviceRequests": [
@@ -27,6 +36,10 @@
         },
         {
           "protocol": "vibestudio.missions.v1",
+          "availability": "required"
+        },
+        {
+          "protocol": "vibestudio.images.v1",
           "availability": "required"
         }
       ],
@@ -58,6 +71,7 @@
     "@workspace/runtime": "workspace:*",
     "@workspace/testkit": "workspace:*",
     "@workspace-skills/vibestudio-vcs": "workspace:*",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "@workspace-skills/workspace-dev": "workspace:*"
   }
 }

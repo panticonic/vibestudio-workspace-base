@@ -77,6 +77,23 @@ async function workspace(workspaceId: string) {
         });
         continue;
       }
+      if (result.kind === "host-content") {
+        const request = result.request;
+        const prepared = request["blobs"] as Array<{
+          contentHash: string;
+          base64: string;
+        }>;
+        for (const blob of prepared) {
+          const value = Buffer.from(blob.base64, "base64");
+          expect(sha256Hex(value)).toBe(blob.contentHash);
+          blobs.set(blob.contentHash, value);
+        }
+        result = semantic.acknowledgeContent({
+          request,
+          contentHashes: prepared.map((blob) => blob.contentHash).sort(),
+        });
+        continue;
+      }
       const effect = result.effects[0]!;
       let receipt: Record<string, unknown>;
       if (effect.kind === "observe-content") {

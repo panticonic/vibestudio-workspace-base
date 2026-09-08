@@ -1018,6 +1018,7 @@ export class PubSubChannel extends DurableObjectBase {
     if (!input.workerId || input.limit < 1) {
       throw new Error("claimReadyWork: invalid claim request");
     }
+    this.deliveryProjection.cursor();
     this.adoptDurableWorkWorkerGeneration(input.workerId);
     const claims = this.ctx.storage.transactionSync(() => {
       this.materializeDueMaintenance(input.now);
@@ -1132,7 +1133,7 @@ export class PubSubChannel extends DurableObjectBase {
           relationshipRevision,
           deliveryId,
         );
-        const delivery: ChannelDeliveryInput = {
+        const delivery: Omit<ChannelDeliveryInput, "envelope"> & { envelopeId: string } = {
           deliveryId,
           channelId: this.objectKey,
           channelRef: {
@@ -1143,9 +1144,7 @@ export class PubSubChannel extends DurableObjectBase {
           participantId,
           subscriptionRevision: Number(row["subscription_revision"]),
           eventSequence: Number(row["event_sequence"]),
-          envelope: JSON.parse(
-            String(row["envelope_json"]),
-          ) as RpcChannelMessage,
+          envelopeId: String(row["event_id"]),
           agenticContext:
             row["active_invocation_route"] === "direct"
               ? (JSON.parse(
@@ -1245,7 +1244,7 @@ export class PubSubChannel extends DurableObjectBase {
     return this.ctx.storage.transactionSync(() => {
       const row = this.sql
         .exec(
-          `SELECT claimed_by, claim_generation, state, created_at, envelope_json
+          `SELECT claimed_by, claim_generation, state, created_at, event_kind
              FROM channel_delivery_mailbox
             WHERE delivery_id = ?`,
           request.itemId,
@@ -1273,32 +1272,16 @@ export class PubSubChannel extends DurableObjectBase {
           ),
         );
       }
-      if (typeof row["envelope_json"] === "string") {
-        try {
-          const envelope = JSON.parse(String(row["envelope_json"])) as {
-            event?: { payload?: { kind?: unknown } };
-          };
-          const kind = envelope.event?.payload?.kind;
-          if (
-            kind === "invocation.completed" ||
-            kind === "invocation.failed" ||
-            kind === "invocation.cancelled" ||
-            kind === "invocation.abandoned"
-          ) {
-            this.recordDeliveryLatency(
-              "result-to-caller-settlement",
-              Math.max(0, Date.now() - Number(row["created_at"])),
-            );
-          }
-        } catch {
-          // Malformed envelopes are classified by the delivery consumer. The
-          // latency observer never becomes an alternate validation path.
-        }
+      const kind = row["event_kind"];
+      if (kind === "invocation.completed" || kind === "invocation.failed" ||
+          kind === "invocation.cancelled" || kind === "invocation.abandoned") {
+        this.recordDeliveryLatency("result-to-caller-settlement",
+          Math.max(0, Date.now() - Number(row["created_at"])));
       }
       this.sql.exec(
         `UPDATE channel_delivery_mailbox
             SET state = ?, claimed_by = NULL,
-                envelope_json = NULL, agentic_context_json = NULL,
+                agentic_context_json = NULL,
                 terminal_outcome_json = ?
           WHERE delivery_id = ?
             AND claimed_by = ?

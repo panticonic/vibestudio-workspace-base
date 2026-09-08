@@ -395,9 +395,6 @@ export abstract class AgentWorkerBase extends AgentVesselBase {
         context: mutationContext,
         visibility,
         observations: fileObservations,
-        // Image dispatch needs a vision-capable Responses model independently
-        // of the conversation route (which may be Spark or another provider).
-        resolveSession: (signal) => resolveCodexSession(signal, "gpt-5.5"),
       }),
       createReadTool(cwd, fs, {
         rpc: toolRpc,

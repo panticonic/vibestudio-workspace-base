@@ -128,6 +128,7 @@ export const {
   getParentWithContract,
   gad,
   blobstore,
+  images,
   workspace,
   runtime,
   credentials,
@@ -286,3 +287,5 @@ export const adblock = helpfulNamespace("adblock", createAdBlockApi(rpc));
 // helpers themselves live behind `@workspace/runtime/internal/diagnostics`.
 import { installPanelErrorDiagnosticLauncher } from "./errorDebugChat.js";
 installPanelErrorDiagnosticLauncher({ slotId: _slotId, contextId });
+
+export type * from "../shared/images.js";

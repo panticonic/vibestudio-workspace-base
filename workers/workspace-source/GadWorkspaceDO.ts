@@ -1565,9 +1565,9 @@ export class GadWorkspaceDO extends DurableObjectBase {
           },
         );
         if (ensured.kind !== "complete") {
-          if (ensured.kind === "host-read") {
+          if (ensured.kind === "host-read" || ensured.kind === "host-content") {
             throw new Error(
-              "Workspace initialization emitted an unsupported host read",
+              "Workspace initialization emitted unsupported transient preparation",
             );
           }
           return this.workspaceSourcePendingInspection(
@@ -1998,6 +1998,14 @@ export class GadWorkspaceDO extends DurableObjectBase {
   }): unknown {
     this.ensureReady();
     return this.semanticWorkspace().acknowledgeHostRead(input.acknowledgement);
+  }
+
+  @schemaRpc()
+  vcsSemanticContentAck(input: {
+    acknowledgement: { request: GadJsonRecord; contentHashes: string[] };
+  }): unknown {
+    this.ensureReady();
+    return this.semanticWorkspace().acknowledgeContent(input.acknowledgement);
   }
 
   @schemaRpc()
