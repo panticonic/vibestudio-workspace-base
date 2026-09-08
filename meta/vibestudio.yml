@@ -1,10 +1,493 @@
-apps:
-  - source: apps/shell
-  - source: apps/mobile
-  - source: apps/remote-cli
+template:
+  name: Vibestudio Base
+  description: Default Vibestudio system workspace.
+  repositories:
+    - about/about
+    - about/adblock
+    - about/automations
+    - about/bookmarks
+    - about/browser-import-inspector
+    - about/collection
+    - about/credentials
+    - about/downloads
+    - about/help
+    - about/history
+    - about/keyboard-shortcuts
+    - about/local-models
+    - about/new
+    - about/permissions
+    - about/server-logs
+    - about/templates
+    - about/testbench
+    - about/workspace-history
+    - apps/mobile
+    - apps/remote-cli
+    - apps/shell
+    - apps/terminal-browser
+    - extensions/browser-data
+    - extensions/claude-code
+    - extensions/file-tools
+    - extensions/git-bridge
+    - extensions/image-service
+    - extensions/local-models
+    - extensions/mobile-debug
+    - extensions/pdf-ingest
+    - extensions/react-native
+    - extensions/shell
+    - extensions/templates
+    - extensions/test-runner
+    - extensions/typecheck-service
+    - packages/about-shared
+    - packages/agent-loop
+    - packages/agentic-chat
+    - packages/agentic-core
+    - packages/agentic-do
+    - packages/agentic-protocol
+    - packages/agentic-session
+    - packages/cdp-client
+    - packages/channel-fork
+    - packages/channel-policies
+    - packages/collection-orchestration
+    - packages/eval
+    - packages/harness
+    - packages/integrations
+    - packages/mobile-navigation
+    - packages/model-catalog
+    - packages/omnibox-core
+    - packages/pi-ai
+    - packages/pi-core
+    - packages/pubsub
+    - packages/quickfire-core
+    - packages/react
+    - packages/runtime
+    - packages/svelte
+    - packages/template-management
+    - packages/template-registry
+    - packages/terminal-host-protocol
+    - packages/terminal-shim
+    - packages/test-runtime
+    - packages/testkit
+    - packages/tool-ui
+    - packages/ui
+    - packages/vcs-engine
+    - packages/workspace-transfer
+    - panels/chat
+    - panels/terminal
+    - panels/tour
+    - projects/default
+    - skills/agents
+    - skills/agentic-development
+    - skills/api-integrations
+    - skills/appdev
+    - skills/architecture
+    - skills/automations
+    - skills/capabilities
+    - skills/extensiondev
+    - skills/gad-context
+    - skills/github
+    - skills/local-models
+    - skills/memory
+    - skills/messaging
+    - skills/mobile-system-testing
+    - skills/onboarding
+    - skills/performance
+    - skills/phone-setup
+    - skills/provenance-orientation
+    - skills/provenance-tuning
+    - skills/remote-access
+    - skills/sandbox
+    - skills/server-logs
+    - skills/system-testing
+    - skills/templates
+    - skills/terminal
+    - skills/vibestudio-vcs
+    - skills/web-research
+    - skills/workspace-dev
+    - templates/default
+    - templates/svelte
+    - templates/vanilla
+    - workers/agent-worker
+    - workers/browser-data
+    - workers/development
+    - workers/explorer-agent
+    - workers/linked-agent
+    - workers/model-settings
+    - workers/images
+    - workers/missions
+    - workers/phone-provisioning
+    - workers/pubsub-channel
+    - workers/quickfire-service
+    - workers/silent-agent-worker
+    - workers/system-agent
+    - workers/system-test-runner
+    - workers/terminal-chat
+    - workers/test-agent
+    - workers/workspace-presentation
+    - workers/testkit-driver
+    - workers/workspace-source
+  files:
+    - meta/distributions/base.yml
+    - meta/distributions/personal.yml
+    - meta/distributions/system.yml
+    - .ignore
+    - .gitattributes
+    - package.json
+    - tests/distributions/browser-data-onboarding.integration.test.ts
+    - tests/helpers/ledgerTest.ts
+    - types/assets.d.ts
+    - tsconfig.integration.json
+    - tsconfig.integration.mobile.json
+    - tsconfig.json
+templateRegistry:
+  url: git+https://github.com/panticonic/vibestudio-template-registry.git
+  ref: refs/heads/main
+systemEpoch: 0
+defaultRepo: projects/default
 defaultAgentConfig:
   model: openai-codex:gpt-5.6-sol
-defaultRepo: projects/default
+initPanels:
+  - source: panels/chat
+    stateArgs:
+      initialPrompt: I just opened this workspace for the first time, help me get onboarded.
+      systemPrompt: >
+        You are the Vibestudio onboarding assistant. Welcome new users and help
+        them make Vibestudio ready for the work they actually want to do. Setup
+        is durable preparation; immediately usable capabilities and ordinary
+        tasks are not unfinished setup.
+
+
+        ## Opening turn
+
+
+        Read `skills/onboarding/SKILL.md`, give a welcome of at most two short
+        paragraphs, then render `skills/onboarding/SetupHub.tsx` with
+        `inline_ui` using the stable ID `onboarding-setup-overview`. Do not run
+        a leading `client_eval` or pass snapshot props; the checked-in component
+        loads and caches capability state itself. It contacts the optional
+        template registry only after the user chooses its explained load
+        action. The inline overview owns the onboarding UI; do not load or
+        publish an action bar. If rendering is unavailable, give a concise
+        plain-text fallback and do not invent status.
+
+
+        ## Selection routing
+
+
+        Inline UI choices arrive as a readable message plus a structured
+        `interaction` object beside the readable user message. Never infer a
+        route from the button label. For `kind: "onboarding-capability"`, use
+        `client_eval` to statically import `executeOnboardingSelection` from
+        `@workspace-skills/onboarding` and call it with the complete structured
+        interaction object. This validates the catalog route in the inviting
+        panel and performs About, panel, or shell navigation. If it returns
+        `handled: false`, follow its returned owner target:
+
+        - `owner-skill`: read the exact returned `ownerSkillPath` and use that
+          capability's workflow.
+
+        - `model-settings`: use the model-settings service and its existing
+          provider/default workflow.
+
+        - `conversation`: explain or start using the ready capability; do not
+          invent setup status.
+
+
+        For `kind: "onboarding-template"`, use `client_eval` to statically
+        import `resolveOnboardingTemplateSelection`, call it with the complete
+        interaction, then read its returned Templates skill. Inspect its
+        registry-bound `selection` and create an ordinary new workspace from
+        the returned exact pin.
+
+        Development checkouts selected at launch are private host candidates.
+        Direct the user to the native workspace chooser to review and create
+        them as separate workspaces; never import them into Personal or ask the
+        current workspace to fetch their unpublished checkpoint pin remotely.
+
+
+        Unknown or retired IDs are visible errors. There is no string-matching
+        fallback.
+
+        The component handles capability checks and manual refresh itself.
+        After setup, reconnect, success, failure, or another relevant external
+        change, render `SetupHub.tsx` again with the
+        same stable ID and no snapshot props. This bumps the card and signals it
+        to refresh. Do not claim that the card now shows a particular row,
+        status, or action: owner state loads asynchronously and the card is the
+        authoritative observation.
+        Provider secrets are collected only
+        through trusted credential APIs, never in chat or inline component
+        state.
+
+
+        ## Presentation rules
+
+
+        The verified template catalog is the source of the onboarding template
+        presentation. Do not infer installed layers or template status. Do not enumerate an independent feature menu,
+        inspect private owner storage, count credentials as proof of a live
+        connection, create completion flags, or report a universal setup score.
+        Optional configuration is neutral unless a selected workflow failed. A
+        connection with stored credentials is connected-unverified until the
+        explicit live check succeeds.
+
+        Ask one question at a time after the overview and adapt to the user's
+        intent. Use `feedback_custom` when a setup workflow must wait for user
+        input, `inline_ui` for durable observations, and the compact action bar
+        only for preparing, resume, reopen, or retry state. This workspace may
+        run on the selected local or self-hosted server; never claim that every
+        operation runs on the user's current machine.
+singletonObjects:
+  - source: workers/workspace-source
+    className: GadWorkspaceDO
+    key: workspace
+  - source: workers/workspace-presentation
+    className: WorkspacePresentationDO
+    key: workspace-presentation
+  - source: workers/model-settings
+    className: ModelSettingsDO
+    key: workspace-model-settings
+  - source: workers/images
+    className: ImagesDO
+    key: workspace-images
+  - source: workers/quickfire-service
+    className: QuickfireSessionsDO
+    key: workspace-quickfire
+  - source: workers/testkit-driver
+    className: TestkitDriverDO
+    key: workspace-testkit-driver
+  - source: workers/phone-provisioning
+    className: PhoneProvisioningDO
+    key: workspace-phone-provisioning
+  - source: workers/development
+    className: DevelopmentDO
+    key: workspace-development
+  - source: workers/missions
+    className: MissionsDO
+    key: workspace-missions
+services:
+  - source: workers/workspace-source
+    name: gad.workspace
+    title: Workspace source
+    action: manage your workspace files, history, and setup
+    description: Manages your workspace's files, version history, and initial setup.
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.workspace-source.v1
+      - vibestudio.gad.workspace.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+        - session
+        - mission
+    durableObject:
+      className: GadWorkspaceDO
+  - source: workers/pubsub-channel
+    name: channel
+    title: Conversations
+    action: send and receive messages in your conversations
+    description:
+      Access your workspace's conversations, including sending messages
+      and reading replies.
+    notability: everyday
+    presentation:
+      domain: sharing
+      verb: act
+      substanceKind: send
+    protocols:
+      - vibestudio.channel.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+        - session
+        - mission
+    durableObject:
+      className: PubSubChannel
+      context: creator
+  - source: workers/browser-data
+    name: browser.data
+    title: Browser data
+    action: use browser history, bookmarks, downloads, and preferences
+    description: Access your browser history, bookmarks, downloads, and saved preferences.
+    notability: everyday
+    presentation:
+      domain: web
+      verb: see
+    protocols:
+      - vibestudio.browser-data.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+    durableObject:
+      className: BrowserDataDO
+  - source: workers/workspace-presentation
+    name: workspace.presentation
+    title: Workspace presentation
+    action: manage panel titles, search, and launcher usage
+    description: Manage how panels, search results, and the app launcher are organized.
+    notability: everyday
+    presentation:
+      domain: computer
+      verb: manage
+    protocols:
+      - vibestudio.workspace-presentation.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+    durableObject:
+      className: WorkspacePresentationDO
+  - source: workers/images
+    name: images
+    title: Generated image assets
+    action: generate and manage reusable image assets
+    description: Generate durable image assets, manage art direction, and read retained image content.
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.images.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+        - session
+        - mission
+    durableObject:
+      className: ImagesDO
+  - source: workers/model-settings
+    name: models
+    title: AI model settings
+    action: read or change which AI models your workspace uses
+    description: Read or change the AI model and provider settings for this workspace.
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.models.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+        - session
+        - mission
+    durableObject:
+      className: ModelSettingsDO
+  - source: workers/quickfire-service
+    name: quickfire
+    title: Command conversations
+    action: manage panel-bound command conversations
+    description: Owns durable Quickfire conversations attached to panel slots.
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.quickfire.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+    durableObject:
+      className: QuickfireSessionsDO
+  - source: workers/testkit-driver
+    name: testkit-driver
+    title: Test runner
+    action: run workspace tests and record results
+    description: Run this workspace's test suite and record results.
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: act
+    protocols:
+      - vibestudio.testkit-driver.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+        - session
+    durableObject:
+      className: TestkitDriverDO
+  - source: workers/phone-provisioning
+    name: phone.provisioning
+    title: Connected phones
+    action: manage connected phones
+    description: Discover, install, and pair phones through a connected desktop.
+    notability: headline
+    presentation:
+      domain: people
+      verb: manage
+    protocols:
+      - vibestudio.phone-provisioning.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+    durableObject:
+      className: PhoneProvisioningDO
+  - source: workers/development
+    name: development
+    title: Development
+    action: manage development sessions
+    description: Build and test workspace changes before they're saved.
+    notability: everyday
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.development.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+    durableObject:
+      className: DevelopmentDO
+  - source: workers/missions
+    name: missions
+    title: Automated tasks
+    action: manage automated tasks
+    description: Launch automated tasks immediately, then inspect and control their running definitions.
+    notability: headline
+    presentation:
+      domain: automation
+      verb: manage
+    protocols:
+      - vibestudio.missions.v1
+    authority:
+      binding: declared
+      principals:
+        - host
+        - user
+        - code
+    durableObject:
+      className: MissionsDO
 extensions:
   - source: extensions/git-bridge
   - source: extensions/templates
@@ -19,19 +502,27 @@ extensions:
   - source: extensions/mobile-debug
   - source: extensions/react-native
   - source: extensions/local-models
-git:
-  remotes:
-    projects:
-      vibestudio:
-        origin:
-          branch: main
-          url: https://github.com/panticonic/vibestudio
-  upstreams:
-    projects:
-      vibestudio:
-        autoPush: false
-        branch: main
-        remote: origin
+apps:
+  - source: apps/shell
+  - source: apps/mobile
+  - source: apps/remote-cli
+providers:
+  evalEngine:
+    source: "@workspace/eval"
+  evalRuntime:
+    source: "@workspace/runtime"
+  cdpClient:
+    source: "@workspace/cdp-client"
+  browserData:
+    extension: extensions/browser-data
+  gitInterop:
+    extension: extensions/git-bridge
+  claudeCode:
+    extension: extensions/claude-code
+trust:
+  chromeApps:
+    - apps/shell
+    - apps/mobile
 hostTargets:
   electron:
     app: apps/shell
@@ -41,307 +532,16 @@ hostTargets:
       - extensions/react-native
   terminal:
     app: apps/remote-cli
-initPanels:
-  - source: panels/chat
-    stateArgs:
-      initialPrompt: I just opened this workspace for the first time, help me get onboarded.
-      systemPrompt: |
-        You are the Vibestudio onboarding assistant. Welcome new users and help them make Vibestudio ready for the work they actually want to do. Setup is durable preparation; immediately usable capabilities and ordinary tasks are not unfinished setup.
-
-        ## Opening turn
-
-        Read `skills/onboarding/SKILL.md`, give a welcome of at most two short paragraphs, then render `skills/onboarding/SetupHub.tsx` with `inline_ui` using the stable ID `onboarding-setup-overview`. Do not run a leading `client_eval` or pass snapshot props; the checked-in component loads and caches capability state itself. It contacts the optional template registry only after the user chooses its explained load action. The inline overview owns the onboarding UI; do not load or publish an action bar. If rendering is unavailable, give a concise plain-text fallback and do not invent status.
-
-        ## Selection routing
-
-        Inline UI choices arrive as a readable message plus a structured `interaction` object beside the readable user message. Never infer a route from the button label. For `kind: "onboarding-capability"`, use `client_eval` to statically import `executeOnboardingSelection` from `@workspace-skills/onboarding` and call it with the complete structured interaction object. This validates the catalog route in the inviting panel and performs About, panel, or shell navigation. If it returns `handled: false`, follow its returned owner target:
-        - `owner-skill`: read the exact returned `ownerSkillPath` and use that
-          capability's workflow.
-
-        - `model-settings`: use the model-settings service and its existing
-          provider/default workflow.
-
-        - `conversation`: explain or start using the ready capability; do not
-          invent setup status.
-
-
-        For `kind: "onboarding-template"`, use `client_eval` to statically import `resolveOnboardingTemplateSelection`, call it with the complete interaction, then read its returned Templates skill. Inspect its registry-bound `selection` and create an ordinary new workspace from the returned exact pin.
-
-        Unknown or retired IDs are visible errors. There is no string-matching fallback.
-        The component handles capability checks and manual refresh itself. After setup, reconnect, success, failure, or another relevant external change, render `SetupHub.tsx` again with the same stable ID and no snapshot props. This bumps the card and signals it to refresh. Do not claim that the card now shows a particular row, status, or action: owner state loads asynchronously and the card is the authoritative observation. Provider secrets are collected only through trusted credential APIs, never in chat or inline component state.
-
-        ## Presentation rules
-
-        The verified template catalog is the source of the onboarding template presentation. Do not infer installed layers or template status. Do not enumerate an independent feature menu, inspect private owner storage, count credentials as proof of a live connection, create completion flags, or report a universal setup score. Optional configuration is neutral unless a selected workflow failed. A connection with stored credentials is connected-unverified until the explicit live check succeeds.
-        Ask one question at a time after the overview and adapt to the user's intent. Use `feedback_custom` when a setup workflow must wait for user input, `inline_ui` for durable observations, and the compact action bar only for preparing, resume, reopen, or retry state. This workspace may run on the selected local or self-hosted server; never claim that every operation runs on the user's current machine.
-providers:
-  browserData:
-    extension: extensions/browser-data
-  cdpClient:
-    source: "@workspace/cdp-client"
-  claudeCode:
-    extension: extensions/claude-code
-  evalEngine:
-    source: "@workspace/eval"
-  evalRuntime:
-    source: "@workspace/runtime"
-  gitInterop:
-    extension: extensions/git-bridge
-services:
-  - action: manage your workspace files, history, and setup
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-        - session
-        - mission
-    description: Manages your workspace's files, version history, and initial setup.
-    durableObject:
-      className: GadWorkspaceDO
-    name: gad.workspace
-    notability: everyday
-    presentation:
-      domain: automation
-      verb: manage
-    protocols:
-      - vibestudio.workspace-source.v1
-      - vibestudio.gad.workspace.v1
-    source: workers/workspace-source
-    title: Workspace source
-  - action: send and receive messages in your conversations
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-        - session
-        - mission
-    description: Access your workspace's conversations, including sending messages and reading replies.
-    durableObject:
-      className: PubSubChannel
-      context: creator
-    name: channel
-    notability: everyday
-    presentation:
-      domain: sharing
-      substanceKind: send
-      verb: act
-    protocols:
-      - vibestudio.channel.v1
-    source: workers/pubsub-channel
-    title: Conversations
-  - action: use browser history, bookmarks, downloads, and preferences
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-    description: Access your browser history, bookmarks, downloads, and saved preferences.
-    durableObject:
-      className: BrowserDataDO
-    name: browser.data
-    notability: everyday
-    presentation:
-      domain: web
-      verb: see
-    protocols:
-      - vibestudio.browser-data.v1
-    source: workers/browser-data
-    title: Browser data
-  - action: manage panel titles, search, and launcher usage
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-    description: Manage how panels, search results, and the app launcher are organized.
-    durableObject:
-      className: WorkspacePresentationDO
-    name: workspace.presentation
-    notability: everyday
-    presentation:
-      domain: computer
-      verb: manage
-    protocols:
-      - vibestudio.workspace-presentation.v1
-    source: workers/workspace-presentation
-    title: Workspace presentation
-  - action: generate and manage reusable image assets
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-        - session
-        - mission
-    description: Generate durable image assets, manage art direction, and read retained image content.
-    durableObject:
-      className: ImagesDO
-    name: images
-    notability: everyday
-    presentation:
-      domain: automation
-      verb: manage
-    protocols:
-      - vibestudio.images.v1
-    source: workers/images
-    title: Generated image assets
-  - action: read or change which AI models your workspace uses
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-        - session
-        - mission
-    description: Read or change the AI model and provider settings for this workspace.
-    durableObject:
-      className: ModelSettingsDO
-    name: models
-    notability: everyday
-    presentation:
-      domain: automation
-      verb: manage
-    protocols:
-      - vibestudio.models.v1
-    source: workers/model-settings
-    title: AI model settings
-  - action: manage panel-bound command conversations
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-    description: Owns durable Quickfire conversations attached to panel slots.
-    durableObject:
-      className: QuickfireSessionsDO
-    name: quickfire
-    notability: everyday
-    presentation:
-      domain: automation
-      verb: manage
-    protocols:
-      - vibestudio.quickfire.v1
-    source: workers/quickfire-service
-    title: Command conversations
-  - action: run workspace tests and record results
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-        - session
-    description: Run this workspace's test suite and record results.
-    durableObject:
-      className: TestkitDriverDO
-    name: testkit-driver
-    notability: everyday
-    presentation:
-      domain: automation
-      verb: act
-    protocols:
-      - vibestudio.testkit-driver.v1
-    source: workers/testkit-driver
-    title: Test runner
-  - action: manage connected phones
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-    description: Discover, install, and pair phones through a connected desktop.
-    durableObject:
-      className: PhoneProvisioningDO
-    name: phone.provisioning
-    notability: headline
-    presentation:
-      domain: people
-      verb: manage
-    protocols:
-      - vibestudio.phone-provisioning.v1
-    source: workers/phone-provisioning
-    title: Connected phones
-  - action: manage development sessions
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-    description: Build and test workspace changes before they're saved.
-    durableObject:
-      className: DevelopmentDO
-    name: development
-    notability: everyday
-    presentation:
-      domain: automation
-      verb: manage
-    protocols:
-      - vibestudio.development.v1
-    source: workers/development
-    title: Development
-  - action: manage automated tasks
-    authority:
-      binding: declared
-      principals:
-        - host
-        - user
-        - code
-    description: Launch automated tasks immediately, then inspect and control their running definitions.
-    durableObject:
-      className: MissionsDO
-    name: missions
-    notability: headline
-    presentation:
-      domain: automation
-      verb: manage
-    protocols:
-      - vibestudio.missions.v1
-    source: workers/missions
-    title: Automated tasks
-singletonObjects:
-  - className: GadWorkspaceDO
-    key: workspace
-    source: workers/workspace-source
-  - className: WorkspacePresentationDO
-    key: workspace-presentation
-    source: workers/workspace-presentation
-  - className: ModelSettingsDO
-    key: workspace-model-settings
-    source: workers/model-settings
-  - className: ImagesDO
-    key: workspace-images
-    source: workers/images
-  - className: QuickfireSessionsDO
-    key: workspace-quickfire
-    source: workers/quickfire-service
-  - className: TestkitDriverDO
-    key: workspace-testkit-driver
-    source: workers/testkit-driver
-  - className: PhoneProvisioningDO
-    key: workspace-phone-provisioning
-    source: workers/phone-provisioning
-  - className: DevelopmentDO
-    key: workspace-development
-    source: workers/development
-  - className: MissionsDO
-    key: workspace-missions
-    source: workers/missions
-systemEpoch: 0
-templateRegistry:
-  ref: refs/heads/main
-  url: git+https://github.com/panticonic/vibestudio-template-registry.git
-trust:
-  chromeApps:
-    - apps/shell
-    - apps/mobile
+git:
+  remotes:
+    projects:
+      vibestudio:
+        origin:
+          url: https://github.com/panticonic/vibestudio
+          branch: main
+  upstreams:
+    projects:
+      vibestudio:
+        remote: origin
+        branch: main
+        autoPush: false
