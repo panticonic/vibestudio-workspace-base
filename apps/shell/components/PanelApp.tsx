@@ -1,3 +1,4 @@
+import { WebsiteConnectionsProvider } from "../shell/hooks/WebsiteConnections";
 import { hubApprovalSource } from "../shell/client";
 import { useShellWorkspaceClient, useWorkspaceVisible, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 import { useEffect, useState, useRef, useCallback } from "react";
@@ -23,7 +24,7 @@ import { NextPanelBuildWarmup } from "./NextPanelBuildWarmup";
 
 export function PanelApp() {
   return (
-    <PanelTreeProvider>
+    <WebsiteConnectionsProvider><PanelTreeProvider>
       <LayoutDragProvider>
         <PanelDndProvider>
           <NavigationProvider>
@@ -31,7 +32,7 @@ export function PanelApp() {
           </NavigationProvider>
         </PanelDndProvider>
       </LayoutDragProvider>
-    </PanelTreeProvider>
+    </PanelTreeProvider></WebsiteConnectionsProvider>
   );
 }
 

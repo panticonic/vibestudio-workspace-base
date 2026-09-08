@@ -13,3 +13,13 @@ export const shellClientAtom = atom<ShellClient | null>(null);
 
 /** UI revision for durable tree invalidations and local presentation changes. */
 export const panelTreeRevisionAtom = atom(0);
+
+/** The owner prevents a previous workspace's connection labels surviving a switch. */
+export const websiteConnectionSnapshotAtom = atom<{
+  owner: ShellClient | null;
+  entries: ReadonlyMap<string, import("@vibestudio/shell-core/websiteConnections").WebsiteConnectionEntry>;
+}>({ owner: null, entries: new Map() });
+export const websiteConnectionsAtom = atom(get => {
+  const snapshot = get(websiteConnectionSnapshotAtom);
+  return snapshot.owner === get(shellClientAtom) ? snapshot.entries : new Map();
+});

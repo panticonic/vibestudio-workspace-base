@@ -1,3 +1,4 @@
+import { PanelTrustBadge } from "./PanelTrustBadge";
 /**
  * AppBar -- Top chrome for the mobile workspace app.
  *
@@ -297,6 +298,7 @@ export function AppBar({
                 </Text>
               ) : null}
             </View>
+            {activePanelId && activePanelIdentity && <PanelTrustBadge panelId={activePanelId} {...activePanelIdentity} showWorkspace />}
             {isLoading || creatingPanel ? (
               <ActivityIndicator
                 size="small"

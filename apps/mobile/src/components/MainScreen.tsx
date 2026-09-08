@@ -1,3 +1,5 @@
+import { observeWebsiteConnections } from "@vibestudio/shell-core/websiteConnections";
+import { websiteConnectionSnapshotAtom } from "../state/shellClientAtom";
 import type { MobileShellSurface } from "../services/mobileShellSurfaces";
 import { asPanelEntityId } from "@vibestudio/shared/panel/ids";
 import { parseShellSurfaceLink } from "@vibestudio/shared/shellSurface";
@@ -234,6 +236,19 @@ export function MainScreen({
     );
   }, [navigation, persistentNavigation, workspaceVisible]);
   const shellClient = useAtomValue(shellClientAtom);
+  const setWebsiteConnections = useSetAtom(websiteConnectionSnapshotAtom);
+  useEffect(() => {
+    setWebsiteConnections({ owner: shellClient, entries: new Map() });
+    if (!shellClient) return;
+    return observeWebsiteConnections({
+      list: () => shellClient.websiteConnections.list(),
+      listen: changed => shellClient.events.on("website:connection-changed", changed),
+      subscribe: () => shellClient.events.subscribe("website:connection-changed"),
+      unsubscribe: () => shellClient.events.unsubscribe("website:connection-changed"),
+      changed: entries => setWebsiteConnections({ owner: shellClient, entries }),
+      error: error => console.warn("[MainScreen] Website connection inventory failed", error),
+    });
+  }, [shellClient, setWebsiteConnections]);
   const panelTreeRevision = useAtomValue(panelTreeRevisionAtom);
   const setPanelTreeRevision = useSetAtom(panelTreeRevisionAtom);
   const setActivePanelMetadata = useSetAtom(activePanelMetadataAtom);

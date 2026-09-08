@@ -1,3 +1,4 @@
+import { PanelTrustBadge } from "./PanelTrustBadge";
 import {
   useShellWorkspaceClient,
   useWorkspaceNavigationHost,
@@ -1456,6 +1457,7 @@ function HoverableBreadcrumbItem({
           size={BREADCRUMB_ICON_SIZE}
           fallback={source?.startsWith("browser:") ? "browser" : "panel"}
         />
+        <PanelTrustBadge panelId={panelId} source={source} />
         <Text
           as="span"
           size="2"

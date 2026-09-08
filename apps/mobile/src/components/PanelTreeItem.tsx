@@ -1,3 +1,4 @@
+import { PanelTrustBadge } from "./PanelTrustBadge";
 /**
  * PanelTreeItem -- Individual tree node in the panel drawer.
  *
@@ -224,6 +225,7 @@ export function PanelTreeItem({
             >
               {item.title}
             </Text>
+            <PanelTrustBadge panelId={item.id} source={item.source} kind={item.kind} />
           </Pressable>
 
           {/* Pin indicator — quiet glyph, only when pinned */}

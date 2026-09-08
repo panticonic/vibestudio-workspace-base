@@ -1,3 +1,4 @@
+import { PanelTrustBadge } from "./PanelTrustBadge";
 import { useShellWorkspaceClient, useWorkspaceNavigationHost } from "../shell/workspaceContext";
 /**
  * LazyPanelTreeSidebar - Sortable panel tree sidebar with drag-and-drop.
@@ -565,6 +566,7 @@ const SortableTreeItem = memo(
             fallback={panel.source?.startsWith("browser:") ? "browser" : "panel"}
           />
 
+          <PanelTrustBadge panelId={panel.id} source={panel.source} />
           {/* Title — the focal element; brightened + weighted when selected */}
           <Text
             size="2"

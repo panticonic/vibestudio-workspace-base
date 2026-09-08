@@ -76,6 +76,7 @@ import { shellApprovalMethods } from "@vibestudio/service-schemas/shellApproval"
 import { blobstoreMethods } from "@vibestudio/service-schemas/blobstore";
 import { panelRuntimeMethods } from "@vibestudio/service-schemas/panelRuntime";
 import { credentialsMethods } from "@vibestudio/service-schemas/credentials";
+import { websiteHostingMethods } from "@vibestudio/service-schemas/websiteHosting";
 import { pushMethods } from "@vibestudio/service-schemas/push";
 import {
   QUICKFIRE_SERVICE_PROTOCOL,
@@ -1125,6 +1126,10 @@ export class ShellClient {
   readonly workspaces: WorkspaceClient;
   readonly hubControl: ReturnType<typeof createHubControlClient>;
   readonly events: EventsClient;
+  readonly websiteConnections = createTypedServiceClient(
+    "websiteHosting", { list: websiteHostingMethods.list },
+    (service, method, args) => this.transport.call("main", `${service}.${method}`, args),
+  );
   readonly shellApproval: ShellApprovalClient;
   /** Content-addressed reads used by approval diff review and file inspection. */
   readonly blobstore: BlobstoreClient;
