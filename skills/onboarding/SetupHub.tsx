@@ -383,8 +383,8 @@ export default function SetupHub({
 
   // Mounting always refreshes owner state. Re-rendering the stable inline UI
   // changes renderedAt, which is the agent's explicit external refresh signal.
-  // Once the user has loaded the registry, refresh its local installation
-  // projection too without contacting the moving registry again.
+  // Once the user has loaded the registry, reread its cached catalog snapshot
+  // too without contacting the moving registry again.
   useEffect(() => {
     void refreshCapabilities();
     if (templatesLoadedRef.current) void loadTemplates(false);

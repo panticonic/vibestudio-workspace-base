@@ -206,7 +206,7 @@ export const onboardingCatalog: readonly OnboardingCapabilityDefinition[] = [
   {
     id: "connection.device",
     title: "Devices",
-    summary: "Install Vibestudio on a phone and pair it to this workspace.",
+    summary: "Install Vibestudio on a phone and connect to your workspaces.",
     category: "access",
     role: "connection",
     scope: "device",
