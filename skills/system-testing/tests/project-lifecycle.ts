@@ -8,6 +8,7 @@ import {
   type TestExecutionResult,
   type TestOrchestrationContext,
 } from "../types.js";
+import { systemTestFailure, type SystemTestFailure } from "../structured-error.js";
 import { panelControlAuthorityPolicy, PANEL_AUTOMATION_RESOURCE } from "../panel-authority.js";
 import { findLastAgentMessage, getToolCalls, type InvocationCardPayloadLike } from "./_helpers.js";
 import {
@@ -741,8 +742,7 @@ function validateTaskManagementApp(result: TestExecutionResult) {
 }
 
 function validateAtomicPanelStore(result: TestExecutionResult) {
-  const base = completedScenarioEvidence(result);
-  if (!base.passed) return base;
+  if (result.error) return { passed: false, reason: result.error };
   const captured = result.diagnostics?.["atomicPanelStore"];
   if (!isRecord(captured) || captured["source"] !== "system-test-harness") {
     return {
@@ -807,7 +807,7 @@ function validateAtomicPanelStore(result: TestExecutionResult) {
       row["capability"] === expectedCapability &&
       resourceScope?.["kind"] === "exact" &&
       resourceScope["key"] === expectedResource &&
-      row["statement"] === "allowed"
+      row["statement"] === "declared"
     );
   });
   const grant = permissions.filter(isRecord).find(
@@ -838,6 +838,23 @@ function validateAtomicPanelStore(result: TestExecutionResult) {
         "No exact version-scoped install permission was independently observed before panel open",
     };
   }
+  const permissionsAfterReload = Array.isArray(captured["permissionsAfterReload"])
+    ? captured["permissionsAfterReload"].filter(isRecord)
+    : [];
+  if (
+    permissionsAfterReload.some((record) => {
+      const authority = isRecord(record["authority"]) ? record["authority"] : null;
+      return (
+        authority?.["capability"] === expectedCapability &&
+        authority["provenance"] === "acquisition"
+      );
+    })
+  ) {
+    return {
+      passed: false,
+      reason: "The first panel use acquired a runtime grant after publication clearance",
+    };
+  }
   const declaredFor = isRecord(binding) ? binding["declaredFor"] : null;
   const declaredBinding =
     binding === "declared" || (Array.isArray(declaredFor) && declaredFor.includes(panelPath));
@@ -862,22 +879,30 @@ function validateAtomicPanelStore(result: TestExecutionResult) {
   }
   const written = captured["written"];
   const afterReload = captured["afterReload"];
+  const afterRebuild = captured["afterRebuild"];
   const before = captured["before"];
   const after = captured["after"];
+  const rebuilt = captured["rebuilt"];
+  const rebuiltSnapshot = captured["rebuiltSnapshot"];
   if (
     typeof written !== "string" ||
     written.length < 8 ||
     written !== afterReload ||
+    written !== afterRebuild ||
     !isRecord(before) ||
     !isRecord(after) ||
+    !isRecord(rebuilt) ||
+    !isRecord(rebuiltSnapshot) ||
     before["panelId"] !== after["panelId"] ||
+    before["panelId"] !== rebuilt["panelId"] ||
     before["source"] !== panelPath ||
-    after["source"] !== panelPath
+    after["source"] !== panelPath ||
+    rebuilt["source"] !== panelPath
   ) {
     return {
       passed: false,
       reason:
-        "The harness did not write, reload, and read the same exact panel through its rendered UI",
+        "The harness did not write, reload, rebuild, and read the same exact panel through its rendered UI",
     };
   }
   return { passed: true, reason: undefined };
@@ -887,39 +912,20 @@ async function orchestrateAtomicPanelStore(
   context: TestOrchestrationContext
 ): Promise<TestExecutionResult> {
   const startedAt = Date.now();
-  const session = await context.runner.spawn();
   let handle: Awaited<ReturnType<typeof context.runner.openPanelClient>> | null = null;
   let error: string | undefined;
+  let failure: SystemTestFailure | undefined;
   let captured: Record<string, unknown> = { source: "system-test-harness" };
   try {
-    await context.sendAndWait(
-      session,
-      "Create a small notes panel and a Durable Object store as exactly two new workspace repositories. Declare the store as a named workspace service in workspace meta and declare the panel's exact gated request for it. The panel must expose a text input with `data-testid=note-input`, a save button with `data-testid=save-note`, and the loaded value with `data-testid=stored-note`. Publish the panel, store, and meta update together in one atomic task publication. Do not open the panel or call the store after publication; the harness will verify the installed result.",
-      "atomic panel-store publication"
-    );
-    const executionSoFar = { messages: [...session.messages], duration: 0 } as TestExecutionResult;
-    const created = completedScenarioEvidence(executionSoFar);
-    if (!created.passed) throw new Error(created.reason);
-    if (
-      created.evidence.calls.some((call) =>
-        String(call.arguments?.["code"] ?? "").includes("openPanel")
-      )
-    ) {
-      throw new Error("Publication agent opened the panel before the harness permission check");
-    }
-    const paths = created.evidence.calls
-      .flatMap(returnedRecords)
-      .flatMap((record) => (typeof record["created"] === "string" ? [record["created"]] : []));
-    const panelPath = paths.find((path) => path.startsWith("panels/"));
-    const storePath = paths.find((path) => path.startsWith("workers/"));
-    if (!panelPath || !storePath) throw new Error("Publication returned no panel/store paths");
+    const publication = await context.runner.publishAtomicPanelStoreFixture();
+    const { panelPath, storePath } = publication;
 
     const installedBeforeOpen = await context.runner.inspectInstalledWorkspace();
     const permissionsBeforeOpen = await context.runner.listPermissions();
     handle = await context.runner.openPanelClient(panelPath, {
       parentId: null,
       focus: false,
-      contextId: session.agentContextId ?? undefined,
+      contextId: publication.contextId,
     });
     const beforeObservation = await handle.observe();
     const written = `atomic-note-${crypto.randomUUID()}`;
@@ -946,7 +952,11 @@ async function orchestrateAtomicPanelStore(
     }
     await context.runner.evalInPanelClient(
       handle,
-      `(() => { const input = document.querySelector('[data-testid="note-input"]'); const save = document.querySelector('[data-testid="save-note"]'); if (!(input instanceof HTMLInputElement) || !(save instanceof HTMLElement)) throw new Error('notes controls missing'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ${JSON.stringify(written)}); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); save.click(); return true; })()`
+      `(() => { const input = document.querySelector('[data-testid="note-input"]'); if (!(input instanceof HTMLInputElement)) throw new Error('note input missing'); const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set; setter?.call(input, ${JSON.stringify(written)}); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); return input.value; })()`
+    );
+    await context.runner.evalInPanelClient(
+      handle,
+      `(() => { const save = document.querySelector('[data-testid="save-note"]'); if (!(save instanceof HTMLElement)) throw new Error('save control missing'); save.click(); return true; })()`
     );
     const readStored = () =>
       context.runner.evalInPanelClient<string>(
@@ -966,38 +976,42 @@ async function orchestrateAtomicPanelStore(
     await handle.reload();
     const afterObservation = await handle.observe();
     const afterReload = await waitForStored();
+    await handle.rebuild();
+    const rebuiltObservation = await handle.observe();
+    const rebuiltSnapshot = await handle.snapshot();
+    const afterRebuild = await waitForStored();
+    const permissionsAfterReload = await context.runner.listPermissions();
     captured = {
       source: "system-test-harness",
       panelPath,
       storePath,
       installedBeforeOpen,
       permissionsBeforeOpen,
+      permissionsAfterReload,
       written,
       afterReload,
+      afterRebuild,
       before: beforeObservation,
       after: afterObservation,
+      rebuilt: rebuiltObservation,
+      rebuiltSnapshot,
     };
   } catch (cause) {
-    error = cause instanceof Error ? cause.message : String(cause);
+    failure = systemTestFailure("atomic-panel-store", cause);
+    error = failure.error.message;
   }
   const execution: TestExecutionResult = {
-    messages: [...session.messages],
+    messages: [],
     duration: Date.now() - startedAt,
     diagnostics: { atomicPanelStore: captured },
     ...(error ? { error } : {}),
+    ...(failure ? { failure } : {}),
   };
   try {
     await handle?.archive();
   } catch (cause) {
     execution.cleanupErrors = [`archive: ${cause instanceof Error ? cause.message : String(cause)}`];
-  }
-  try {
-    await session.close();
-  } catch (cause) {
-    execution.cleanupErrors = [
-      ...(execution.cleanupErrors ?? []),
-      `close: ${cause instanceof Error ? cause.message : String(cause)}`,
-    ];
+    execution.cleanupFailures = [systemTestFailure("atomic-panel-store-archive", cause)];
   }
   return execution;
 }
@@ -1256,7 +1270,7 @@ export const projectLifecycleTests: TestCase[] = [
     resources: [PANEL_AUTOMATION_RESOURCE],
     prompt: "Harness-orchestrated atomic panel/store publication and live UI persistence check.",
     orchestrate: orchestrateAtomicPanelStore,
-    validation: "agent-evidence",
+    validation: "harness",
     validate: validateAtomicPanelStore,
   },
   {

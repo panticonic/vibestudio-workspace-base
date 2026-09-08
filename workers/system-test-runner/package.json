@@ -46,6 +46,18 @@
           "evidence": "intentional-broad"
         },
         {
+          "capability": "workspace-service:development",
+          "resource": {
+            "kind": "exact",
+            "key": "do:workers/development:DevelopmentDO:workspace-development"
+          },
+          "tier": "gated",
+          "evidence": "exact",
+          "packages": [
+            "@workspace-skills/system-testing"
+          ]
+        },
+        {
           "capability": "subagents.create",
           "resource": {
             "kind": "prefix",
@@ -80,6 +92,18 @@
           },
           "tier": "gated",
           "evidence": "intentional-broad"
+        },
+        {
+          "capability": "workspace-service:models",
+          "resource": {
+            "kind": "exact",
+            "key": "do:workers/model-settings:ModelSettingsDO:workspace-model-settings"
+          },
+          "tier": "gated",
+          "evidence": "exact",
+          "packages": [
+            "@workspace-skills/system-testing"
+          ]
         }
       ]
     }

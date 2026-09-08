@@ -58,6 +58,53 @@ function mutation(applicationId: string) {
 }
 
 describe("project lifecycle prompts", () => {
+  it("retains bounded structured diagnostics when atomic publication is rejected", async () => {
+    const test = projectLifecycleTests.find(
+      ({ name }) => name === "atomic-panel-store-install-clearance"
+    )!;
+    const error = Object.assign(new Error("Candidate build failed"), {
+      name: "RemoteRpcError",
+      code: "BuildGateFailed",
+      errorData: {
+        code: "BuildGateFailed",
+        candidateState: "failed",
+        affectedUnits: ["apps/mobile"],
+        diagnostics: [{ message: "Type checking failed", diagnosticHandle: "diag:mobile" }],
+        credentialToken: "must-not-leak",
+      },
+    });
+
+    const result = await test.orchestrate!({
+      runner: {
+        publishAtomicPanelStoreFixture: async () => {
+          throw error;
+        },
+      } as never,
+      remainingTimeMs: () => 10_000,
+      sendAndWait: async () => {
+        throw new Error("Agent turn must not be used");
+      },
+    });
+
+    expect(result.error).toBe("Candidate build failed");
+    expect(result.failure).toEqual({
+      phase: "atomic-panel-store",
+      error: {
+        name: "RemoteRpcError",
+        message: "Candidate build failed",
+        code: "BuildGateFailed",
+        errorData: {
+          code: "BuildGateFailed",
+          candidateState: "failed",
+          affectedUnits: ["apps/mobile"],
+          diagnostics: [{ message: "Type checking failed", diagnosticHandle: "diag:mobile" }],
+          credentialToken: "[redacted]",
+        },
+        diagnosticHandles: ["diag:mobile"],
+      },
+    });
+  });
+
   it("keep panel lifecycle prompts goal-level", () => {
     const panelPrompts = projectLifecycleTests
       .filter((test) => test.name.startsWith("panel-"))
@@ -146,7 +193,7 @@ describe("project lifecycle prompts", () => {
                     kind: "exact",
                     key: "do:workers/atomic-notes-store:NotesStore:workspace",
                   },
-                  statement: "allowed",
+                  statement: "declared",
                 },
               ],
             },
@@ -192,10 +239,14 @@ describe("project lifecycle prompts", () => {
             },
           },
         ],
+        permissionsAfterReload: [],
         written: "unique-note",
         afterReload: "unique-note",
+        afterRebuild: "unique-note",
         before: { panelId: "panel:atomic", source: panelPath, phase: "ready" },
         after: { panelId: "panel:atomic", source: panelPath, phase: "ready" },
+        rebuilt: { panelId: "panel:atomic", source: panelPath, phase: "ready" },
+        rebuiltSnapshot: { panelId: "panel:atomic", phase: "ready" },
       },
     };
 
@@ -204,6 +255,32 @@ describe("project lifecycle prompts", () => {
     const diagnostic = withoutGrant.diagnostics?.["atomicPanelStore"] as Record<string, unknown>;
     diagnostic["permissionsBeforeOpen"] = [];
     expect(test.validate(withoutGrant)).toMatchObject({ passed: false });
+    const withConflatedDeclarationAndGrant = structuredClone(result);
+    (
+      (
+        withConflatedDeclarationAndGrant.diagnostics?.["atomicPanelStore"] as {
+          installedBeforeOpen: { units: Array<{ authorityRows?: Array<Record<string, unknown>> }> };
+        }
+      ).installedBeforeOpen.units[0]!.authorityRows![0]!
+    )["statement"] = "allowed";
+    expect(test.validate(withConflatedDeclarationAndGrant)).toMatchObject({ passed: false });
+    const withRuntimeAcquisition = structuredClone(result);
+    (
+      withRuntimeAcquisition.diagnostics?.["atomicPanelStore"] as {
+        permissionsAfterReload: unknown[];
+      }
+    ).permissionsAfterReload = [
+      {
+        authority: {
+          capability: "workspace-service:atomic-notes-store",
+          provenance: "acquisition",
+        },
+      },
+    ];
+    expect(test.validate(withRuntimeAcquisition)).toEqual({
+      passed: false,
+      reason: "The first panel use acquired a runtime grant after publication clearance",
+    });
     for (const mutation of [
       { effectiveVersion: "wrong-version" },
       { authority: { effect: "deny" } },
