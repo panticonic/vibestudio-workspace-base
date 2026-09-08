@@ -1,14 +1,22 @@
-import type { RpcClient, RpcCallOptions, RpcStreamOptions } from "@vibestudio/rpc";
+import type {
+  RpcClient,
+  RpcCallOptions,
+  RpcStreamOptions,
+} from "@vibestudio/rpc";
 
 /** The small, portable conversation surface used by connected applications.
  * It deliberately delegates to the workspace's existing channel service: the
  * channel log remains the conversation store and the channel stream remains
  * the model/agent delivery path. */
 export interface ConversationClient {
-  history(channelId: string, options?: RpcCallOptions): Promise<unknown>;
-  send(channelId: string, text: string, options?: Record<string, unknown>): Promise<unknown>;
+  history(channelTargetId: string, options?: RpcCallOptions): Promise<unknown>;
+  send(
+    channelTargetId: string,
+    text: string,
+    options?: Record<string, unknown>,
+  ): Promise<unknown>;
   subscribe(
-    channelId: string,
+    channelTargetId: string,
     participantId: string,
     metadata: Record<string, unknown>,
     onRecord: (record: unknown) => void | Promise<void>,
@@ -17,37 +25,33 @@ export interface ConversationClient {
 }
 
 export function createConversationClient(rpc: RpcClient): ConversationClient {
-  const resolve = async (channelId: string, options?: RpcCallOptions) => {
-    const service = await rpc.call<{ kind: string; targetId?: string }>(
-      "main",
-      "workers.resolveService",
-      ["vibestudio.channel.v1", channelId],
-      options,
-    );
-    if (service.kind !== "durable-object" || !service.targetId) {
-      throw new Error("Channel service must resolve to a Durable Object RPC target");
-    }
-    return service.targetId;
-  };
-
   return {
-    history: async (channelId, options) => {
-      const target = await resolve(channelId, options);
-      return rpc.call(target, "getReplayAfter", [{ after: 0 }], options);
+    history: (channelTargetId, options) => {
+      return rpc.call(
+        channelTargetId,
+        "getReplayAfter",
+        [{ after: 0 }],
+        options,
+      );
     },
-    send: async (channelId, text, options) => {
-      const target = await resolve(channelId, options);
-      return rpc.call(target, "sendAsCaller", [text, options ?? {}]);
+    send: (channelTargetId, text, options) => {
+      return rpc.call(channelTargetId, "sendAsCaller", [text, options ?? {}]);
     },
-    subscribe: async (channelId, participantId, metadata, onRecord, options) => {
-      const target = await resolve(channelId, options);
+    subscribe: async (
+      channelTargetId,
+      participantId,
+      metadata,
+      onRecord,
+      options,
+    ) => {
       const response = await rpc.stream(
-        target,
+        channelTargetId,
         "subscribe",
         [participantId, metadata],
         options,
       );
-      if (!response.body) throw new Error("Conversation subscription returned no body");
+      if (!response.body)
+        throw new Error("Conversation subscription returned no body");
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let pending = "";

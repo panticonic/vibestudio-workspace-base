@@ -76,6 +76,29 @@ contracts. Worker `@rpc` options and extension method schemas carry the same
 `website` policy; omission is a definition error. Streams and event callbacks
 need the same deliberate review as request/response methods.
 
+### Shared workspace conversations
+
+Use the portable conversation client exported by `@workspace/runtime` in both
+an installed panel and a connected website:
+
+```ts
+const chat = createConversationClient(rpc);
+await chat.history(channelTargetId);
+await chat.send(channelTargetId, text);
+await chat.subscribe(channelTargetId, "website-participant", metadata, onRecord, { signal });
+```
+
+`channelTargetId` is the host-resolved exact Durable Object target, for example
+`do:workers/pubsub-channel:PubSubChannel:<channel-key>`. It is not a channel
+name that the website resolves through `workers.resolveService`; service
+discovery remains host-controlled. The channel log is the ordinary workspace
+conversation store. Website replay, send, and subscribe are individually
+reviewed operations, remain subject to normal workspace membership and model
+approvals, and never return account credentials. Abort the subscription when a
+document disconnects, unmounts, changes conversation, or the user stops the
+stream; accepted durable work is governed by its receiver's cancellation
+contract and is not implicitly rolled back by document retirement.
+
 ## Treat disconnection as runtime retirement
 
 Subscribe to `workspaceConnection` and dispose the subscription on unmount.
