@@ -124,7 +124,7 @@ async function readHostTopology(runtime: RuntimeModule): Promise<OnboardingHostT
     },
     remote: {
       availability: workspaceList ? "available" : "unknown",
-      route: currentConnectionRoute(gatewayConfig.serverUrl),
+      route: currentConnectionRoute(gatewayConfig?.serverUrl ?? ""),
       workspaceCount: workspaceList?.length ?? 0,
     },
   };
