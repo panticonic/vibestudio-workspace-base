@@ -158,6 +158,11 @@ export class QuickfireSessionsDO extends DurableObjectBase {
     return {
       slotId: row.slot_id,
       channelId: row.channel_id,
+      channelTargetId: doTargetId({
+        source: CHANNEL_SOURCE,
+        className: CHANNEL_CLASS,
+        objectKey: row.channel_id,
+      }),
       contextId: row.context_id,
       agentEntityId: row.agent_entity_id,
       state,

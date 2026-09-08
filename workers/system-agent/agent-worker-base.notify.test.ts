@@ -148,6 +148,8 @@ class TestNotifyWorker extends SystemAgentWorker {
     const closed = this.closedChannels;
     const memberships = this.memberships;
     return {
+      resolveTarget: async () =>
+        `do:workers/pubsub-channel:PubSubChannel:${channelId}`,
       send: async (
         participantId: string,
         messageId: string,
@@ -358,6 +360,7 @@ describe("notify", () => {
       title: "The nightly build is red.",
       data: {
         channelId: "ch-home",
+        channelTargetId: "do:workers/pubsub-channel:PubSubChannel:ch-home",
         messageId: "say:call-esc",
         senderParticipantId: "do:self",
         rung: "inbox",
@@ -462,6 +465,7 @@ describe("notify", () => {
           title: "Report ready",
           priority: "normal",
           channelId: "ch-home",
+          channelTargetId: "do:workers/pubsub-channel:PubSubChannel:ch-home",
           messageId: "say:call-push",
         }),
       },

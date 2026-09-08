@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { rpcMethodAuthority } from "@vibestudio/rpc";
+import {
+  evaluateAuthority,
+  requirementForPrincipals,
+} from "@vibestudio/shared/authorization";
 import { successfulTestRpcFetch } from "@vibestudio/durable/test-utils";
 import {
   createTestDO,
@@ -271,9 +275,8 @@ async function createGadBackedChannel(
   });
   const gadTarget = "do:workers/workspace-source:GadWorkspaceDO:workspace";
   const blobs = new Map<string, string>();
-  // Inject a mock RPC client. The DO base now holds a ConnectionlessRpcClient
-  // ({ client, respond, deliver }) behind the `rpc` getter; pre-setting
-  // `_connectionless` short-circuits the real (network) client construction.
+  // Initialize the real connectionless responder so calls through createTestDO
+  // exercise receiver dispatch. Only replace its outbound client operations.
   const mockClient = {
     emit: vi.fn(async (target: string, _event: string, payload: unknown) => {
       options.emittedTargets?.push(target);
@@ -347,15 +350,13 @@ async function createGadBackedChannel(
     exposeAll: () => {},
     on: () => () => {},
   };
-  (
+  void (channel.instance as unknown as { rpc: unknown }).rpc;
+  const connectionless = (
     channel.instance as unknown as {
-      _connectionless: { client: unknown; respond: unknown; deliver: unknown };
+      _connectionless: { client: Record<string, unknown> };
     }
-  )._connectionless = {
-    client: mockClient,
-    respond: async () => null,
-    deliver: () => {},
-  };
+  )._connectionless;
+  Object.assign(connectionless.client, mockClient);
   return { gad, blobs, ...channel };
 }
 
@@ -679,6 +680,111 @@ describe("PubSubChannel", () => {
     ).rejects.toThrow(
       "publish: participant panel:other cannot be used by caller panel:nav-current",
     );
+  });
+
+  it("admits human participant operations without admitting provider settlement", async () => {
+    const { instance, gad, callAs } = await createGadBackedChannel();
+    setRpcCaller(instance, "shell:alice", "shell", null, "usr_alice");
+    await instance.subscribe("shell:alice", {
+      contextId: "ctx-1",
+      name: "Alice",
+      type: "client",
+    });
+
+    await expect(
+      callAs(
+        {
+          callerId: "shell:alice",
+          callerKind: "shell",
+          userId: "usr_alice",
+        },
+        "publish",
+        "user:usr_alice",
+        AGENTIC_EVENT_PAYLOAD_KIND,
+        agenticEvent(),
+      ),
+    ).resolves.toMatchObject({ id: expect.any(Number) });
+    const published = await gad.instance.readChannelEnvelopes({
+      channelId: "channel-1",
+    });
+    expect(published.items.at(-1)).toMatchObject({
+      from: { id: "user:usr_alice" },
+      payloadKind: AGENTIC_EVENT_PAYLOAD_KIND,
+    });
+    setRpcCaller(instance, "shell:bob", "shell", null, "usr_bob");
+    await expect(
+      instance.publish(
+        "user:usr_alice",
+        AGENTIC_EVENT_PAYLOAD_KIND,
+        agenticEvent(),
+      ),
+    ).rejects.toThrow(
+      /participant user:usr_alice cannot be used by caller shell:bob/u,
+    );
+    const userContext = structuredClone(
+      createTestDirectAuthority({ callerKind: "agent", method: "publish" })
+        .context,
+    );
+    userContext.authorizingOrigin = {
+      kind: "user",
+      principal: "user:usr_alice",
+    };
+    userContext.actingUser = "user:usr_alice";
+    userContext.executingCode = null;
+    userContext.initiatorChain = ["user:usr_alice"];
+
+    const decisionFor = (method: string) => {
+      const declaration = rpcMethodAuthority(instance, method)!;
+      expect(declaration.principals).toBeDefined();
+      return evaluateAuthority({
+        context: userContext,
+        requirement: requirementForPrincipals(
+          declaration.principals!,
+          `rpc:${method}`,
+        ),
+        resourceKey: "do:workers/pubsub-channel:PubSubChannel:channel-1",
+        grants: [],
+        tier: declaration.tier,
+      });
+    };
+    for (const method of [
+      "publish",
+      "recordReceipt",
+      "sendSignal",
+      "updateMetadata",
+      "setTypingState",
+      "callMethod",
+    ]) {
+      expect(rpcMethodAuthority(instance, method)?.principals).toEqual([
+        "user",
+        "code",
+      ]);
+      expect(decisionFor(method)).toMatchObject({
+        allowed: true,
+        code: "allowed",
+      });
+    }
+    expect(rpcMethodAuthority(instance, "getReplayBefore")?.principals).toEqual(
+      ["host", "user", "code"],
+    );
+    expect(decisionFor("getReplayBefore")).toMatchObject({
+      allowed: true,
+      code: "allowed",
+    });
+    for (const method of [
+      "submitMethodResult",
+      "submitMethodProgress",
+      "claimMethodCall",
+      "markMethodCallExecutionStarted",
+    ]) {
+      expect(rpcMethodAuthority(instance, method)?.principals).toEqual([
+        "code",
+      ]);
+      expect(decisionFor(method)).toMatchObject({
+        allowed: false,
+        code: "receiver-rejected",
+      });
+    }
   });
 
   it("does not let agent callers inject arbitrary roster participants", async () => {

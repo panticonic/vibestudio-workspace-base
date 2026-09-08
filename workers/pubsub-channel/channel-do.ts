@@ -3166,7 +3166,7 @@ export class PubSubChannel extends DurableObjectBase {
    * annotate (never mutate) the envelope.
    */
   @rpc({
-    principals: ["code"],
+    principals: ["user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -3240,7 +3240,7 @@ export class PubSubChannel extends DurableObjectBase {
    * Receipts are a monotone projection and reach live external clients only
    * as disposable presentation signals; replay reads the durable snapshot. */
   @rpc({
-    principals: ["code"],
+    principals: ["user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -3512,7 +3512,7 @@ export class PubSubChannel extends DurableObjectBase {
 
   /** Send a non-durable signal message. */
   @rpc({
-    principals: ["code"],
+    principals: ["user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -3545,7 +3545,7 @@ export class PubSubChannel extends DurableObjectBase {
 
   /** Replace a participant's metadata entirely. */
   @rpc({
-    principals: ["code"],
+    principals: ["user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -3628,7 +3628,7 @@ export class PubSubChannel extends DurableObjectBase {
   }
 
   @rpc({
-    principals: ["code"],
+    principals: ["user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
@@ -4078,6 +4078,7 @@ export class PubSubChannel extends DurableObjectBase {
         }
         await this.inviteIndex.call<void>("putChannelMembership", {
           channelId: this.objectKey,
+          channelTargetId: this.rpcSelfId,
           userId,
           memberId,
           handle: String(row["handle"]),
@@ -4218,7 +4219,7 @@ export class PubSubChannel extends DurableObjectBase {
   }
 
   @rpc({
-    principals: ["host", "code"],
+    principals: ["host", "user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "read",
@@ -4563,7 +4564,7 @@ export class PubSubChannel extends DurableObjectBase {
   // ── Method calls (calls.ts — pending_calls is a declared cache) ──────────
 
   @rpc({
-    principals: ["code"],
+    principals: ["user", "code"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "write",
