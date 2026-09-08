@@ -1,4 +1,8 @@
-import { commandAvailability, reduceArgSession, startArgSession } from "@workspace/omnibox-core";
+import {
+  commandAvailability,
+  reduceArgSession,
+  startArgSession,
+} from "@workspace/omnibox-core";
 import type { ArgSession, SurfaceContext } from "@workspace/omnibox-core";
 import { buildMobileSlate, type MobileSlateDeps } from "./slate";
 
@@ -6,11 +10,23 @@ function deps(overrides: Partial<MobileSlateDeps> = {}): MobileSlateDeps {
   return {
     activePanelId: "panel:tree/root/0",
     panels: {
-      createAboutPanel: jest.fn(async (page: string) => ({ id: `about-${page}`, title: page })),
+      createAboutPanel: jest.fn(async (page: string) => ({
+        id: `about-${page}`,
+        title: page,
+      })),
       createRootPanel: jest.fn(async () => ({ id: "root-1", title: "root" })),
-      createChildPanel: jest.fn(async () => ({ id: "child-1", title: "child" })),
-      createBrowserUrlPanel: jest.fn(async () => ({ id: "browser-1", title: "browser" })),
-      observe: jest.fn(async () => ({ source: "panels/sales", contextId: "ctx-1" })),
+      createChildPanel: jest.fn(async () => ({
+        id: "child-1",
+        title: "child",
+      })),
+      createBrowserUrlPanel: jest.fn(async () => ({
+        id: "browser-1",
+        title: "browser",
+      })),
+      observe: jest.fn(async () => ({
+        source: "panels/sales",
+        contextId: "ctx-1",
+      })),
       getBrowserAddressOptions: jest.fn(async (query: string) => ({
         query,
         suggestions: [],
@@ -18,7 +34,10 @@ function deps(overrides: Partial<MobileSlateDeps> = {}): MobileSlateDeps {
     },
     quickfire: {
       clear: jest.fn(async () => ({ cleared: true })),
-      promote: jest.fn(async () => ({ channelId: "channel-1" })),
+      promote: jest.fn(async () => ({
+        channelId: "channel-1",
+        channelTargetId: "do:workers/pubsub-channel:PubSubChannel:channel-1",
+      })),
       list: jest.fn(async () => []),
     },
     performPanelCommand: jest.fn(),
@@ -36,11 +55,23 @@ const mobileContext: SurfaceContext = {
   platform: "mobile",
   openPanels: {
     entries: [
-      { id: "panel:tree/root/1", title: "Import wizard", source: "panels/import" },
-      { id: "panel:tree/root/2", title: "Sales dashboard", source: "panels/sales" },
+      {
+        id: "panel:tree/root/1",
+        title: "Import wizard",
+        source: "panels/import",
+      },
+      {
+        id: "panel:tree/root/2",
+        title: "Sales dashboard",
+        source: "panels/sales",
+      },
     ],
   },
-  focusedPanel: { panelId: "panel:tree/root/0", title: "Sales", addressable: true },
+  focusedPanel: {
+    panelId: "panel:tree/root/0",
+    title: "Sales",
+    addressable: true,
+  },
 };
 
 describe("mobile slate", () => {
@@ -66,25 +97,45 @@ describe("mobile slate", () => {
   it("routes panel actions through the app's existing native command switch", async () => {
     const slate = buildMobileSlate();
     const slateDeps = deps();
-    await slate.find((command) => command.id === "panel.reload")!.run({}, slateDeps);
-    expect(slateDeps.performPanelCommand).toHaveBeenCalledWith("reload-panel", "panel:tree/root/0");
+    await slate
+      .find((command) => command.id === "panel.reload")!
+      .run({}, slateDeps);
+    expect(slateDeps.performPanelCommand).toHaveBeenCalledWith(
+      "reload-panel",
+      "panel:tree/root/0",
+    );
 
-    await slate.find((command) => command.id === "panel.close")!.run({}, slateDeps);
-    expect(slateDeps.performPanelCommand).toHaveBeenCalledWith("archive", "panel:tree/root/0");
+    await slate
+      .find((command) => command.id === "panel.close")!
+      .run({}, slateDeps);
+    expect(slateDeps.performPanelCommand).toHaveBeenCalledWith(
+      "archive",
+      "panel:tree/root/0",
+    );
   });
 
   it("round-trips a prompted enum argument into the run", async () => {
-    const theme = buildMobileSlate().find((command) => command.id === "view.theme")!;
+    const theme = buildMobileSlate().find(
+      (command) => command.id === "view.theme",
+    )!;
     const opened = startArgSession(theme, { restoreQuery: ">theme" });
     expect(opened.kind).toBe("session");
     const session = (opened as { session: ArgSession }).session;
 
     // A value the enum does not offer never reaches the run.
-    const rejected = reduceArgSession(session, { type: "enter", value: "chartreuse" });
+    const rejected = reduceArgSession(session, {
+      type: "enter",
+      value: "chartreuse",
+    });
     expect(rejected.kind).toBe("session");
-    expect((rejected as { session: ArgSession }).session.error).toMatch(/must be one of/u);
+    expect((rejected as { session: ArgSession }).session.error).toMatch(
+      /must be one of/u,
+    );
 
-    const accepted = reduceArgSession(session, { type: "enter", value: "dark" });
+    const accepted = reduceArgSession(session, {
+      type: "enter",
+      value: "dark",
+    });
     expect(accepted.kind).toBe("execute");
     const args = (accepted as { args: Record<string, string> }).args;
     const slateDeps = deps();
@@ -94,27 +145,37 @@ describe("mobile slate", () => {
   });
 
   it("round-trips an inline URL argument and opens a browser panel", async () => {
-    const openUrl = buildMobileSlate().find((command) => command.id === "nav.open-url")!;
-    const opened = startArgSession(openUrl, { prefilled: { url: "example.com" } });
+    const openUrl = buildMobileSlate().find(
+      (command) => command.id === "nav.open-url",
+    )!;
+    const opened = startArgSession(openUrl, {
+      prefilled: { url: "example.com" },
+    });
     expect(opened.kind).toBe("execute");
     const slateDeps = deps();
     const outcome = await openUrl.run(
       (opened as { args: Record<string, string> }).args,
-      slateDeps
+      slateDeps,
     );
     expect(slateDeps.panels.createBrowserUrlPanel).toHaveBeenCalledWith(
       null,
       "https://example.com/",
-      { focus: true }
+      { focus: true },
     );
     expect(outcome.close).toBe(true);
   });
 
   it("suggests open panels for the panel argument and navigates to the choice", async () => {
-    const focus = buildMobileSlate().find((command) => command.id === "panel.focus")!;
+    const focus = buildMobileSlate().find(
+      (command) => command.id === "panel.focus",
+    )!;
     const suggestions = focus.args?.[0]?.suggest?.("import", mobileContext);
     expect(suggestions).toEqual([
-      { value: "panel:tree/root/1", label: "Import wizard", meta: "panels/import" },
+      {
+        value: "panel:tree/root/1",
+        label: "Import wizard",
+        meta: "panels/import",
+      },
     ]);
     const slateDeps = deps();
     await focus.run({ panel: "panel:tree/root/1" }, slateDeps);
@@ -122,7 +183,9 @@ describe("mobile slate", () => {
   });
 
   it("hands quickfire.ask off to the quickfire sheet rather than running inline", async () => {
-    const ask = buildMobileSlate().find((command) => command.id === "quickfire.ask")!;
+    const ask = buildMobileSlate().find(
+      (command) => command.id === "quickfire.ask",
+    )!;
     expect(await ask.run({ prompt: "why is this slow" }, deps())).toEqual({
       close: true,
       quickfire: { prompt: "why is this slow" },
@@ -130,16 +193,25 @@ describe("mobile slate", () => {
   });
 
   it("promotes into a chat panel attached to the same channel", async () => {
-    const promote = buildMobileSlate().find((command) => command.id === "quickfire.promote")!;
+    const promote = buildMobileSlate().find(
+      (command) => command.id === "quickfire.promote",
+    )!;
     const slateDeps = deps();
     await promote.run({}, slateDeps);
-    expect(slateDeps.quickfire.promote).toHaveBeenCalledWith("panel:tree/root/0");
-    expect(slateDeps.openChatPanelForChannel).toHaveBeenCalledWith("channel-1");
+    expect(slateDeps.quickfire.promote).toHaveBeenCalledWith(
+      "panel:tree/root/0",
+    );
+    expect(slateDeps.openChatPanelForChannel).toHaveBeenCalledWith(
+      "channel-1",
+      "do:workers/pubsub-channel:PubSubChannel:channel-1",
+    );
     expect(slateDeps.panels.createChildPanel).not.toHaveBeenCalled();
   });
 
   it("says so when a panel has no conversation to promote", async () => {
-    const promote = buildMobileSlate().find((command) => command.id === "quickfire.promote")!;
+    const promote = buildMobileSlate().find(
+      (command) => command.id === "quickfire.promote",
+    )!;
     const slateDeps = deps({
       quickfire: {
         clear: jest.fn(async () => ({ cleared: false })),
@@ -153,17 +225,22 @@ describe("mobile slate", () => {
   });
 
   it("copies the canonical share link, not the raw source", async () => {
-    const copy = buildMobileSlate().find((command) => command.id === "panel.copy-link")!;
+    const copy = buildMobileSlate().find(
+      (command) => command.id === "panel.copy-link",
+    )!;
     const slateDeps = deps();
     await copy.run({}, slateDeps);
-    const copied = (slateDeps.copyText as jest.Mock).mock.calls[0]![0] as string;
+    const copied = (slateDeps.copyText as jest.Mock).mock
+      .calls[0]![0] as string;
     expect(copied).toContain("vibestudio.app/panel");
     expect(copied).toContain(encodeURIComponent("panels/sales"));
     expect(copied).toContain("ctx-1");
   });
 
   it("takes workspace switching to Settings instead of performing it inline", async () => {
-    const command = buildMobileSlate().find((entry) => entry.id === "workspace.switch")!;
+    const command = buildMobileSlate().find(
+      (entry) => entry.id === "workspace.switch",
+    )!;
     const slateDeps = deps();
     const outcome = await command.run({ workspace: "beta" }, slateDeps);
     expect(slateDeps.openWorkspaceSettings).toHaveBeenCalled();
@@ -172,7 +249,10 @@ describe("mobile slate", () => {
 
   it("hides panel-scoped commands when nothing is focused", () => {
     const slate = buildMobileSlate();
-    const noPanel: SurfaceContext = { platform: "mobile", openPanels: { entries: [] } };
+    const noPanel: SurfaceContext = {
+      platform: "mobile",
+      openPanels: { entries: [] },
+    };
     const reload = slate.find((command) => command.id === "panel.reload")!;
     expect(commandAvailability(reload, noPanel)).toBe("hidden");
     expect(commandAvailability(reload, mobileContext)).toBe(true);

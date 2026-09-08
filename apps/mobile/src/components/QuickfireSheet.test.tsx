@@ -1,23 +1,30 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import { QuickfireSheet } from "./QuickfireSheet";
-import { commandSheetAtom, quickfireSheetAtom } from "../state/commandSheetAtoms";
-import type { QuickfireSessionFacts, QuickfireTransport } from "@workspace/quickfire-core/session";
+import {
+  commandSheetAtom,
+  quickfireSheetAtom,
+} from "../state/commandSheetAtoms";
+import type {
+  QuickfireSessionFacts,
+  QuickfireTransport,
+} from "@workspace/quickfire-core/session";
 
 jest.mock("react-native-safe-area-context", () => {
   const { View } = jest.requireActual("react-native");
   return {
     useSafeAreaInsets: () => ({ top: 0, right: 0, bottom: 0, left: 0 }),
-    SafeAreaView: View
+    SafeAreaView: View,
   };
 });
 
 const fresh: QuickfireSessionFacts = {
   channelId: "channel-1",
+  channelTargetId: "do:workers/pubsub-channel:PubSubChannel:channel-1",
   contextId: "ctx-1",
   state: "fresh",
   messageCount: null,
-  lastActivityAt: null
+  lastActivityAt: null,
 };
 
 function channelClient() {
@@ -25,19 +32,19 @@ function channelClient() {
     clientId: "user:me",
     events: () => ({
       [Symbol.asyncIterator]: () => ({
-        next: () => new Promise<IteratorResult<unknown>>(() => {})
-      })
+        next: () => new Promise<IteratorResult<unknown>>(() => {}),
+      }),
     }),
     ready: () => Promise.resolve(),
     close: jest.fn(async () => undefined),
     send: jest.fn(async () => undefined),
-    callMethod: jest.fn(() => ({ result: Promise.resolve() }))
+    callMethod: jest.fn(() => ({ result: Promise.resolve() })),
   };
 }
 
 function transportFor(
   session: QuickfireSessionFacts = fresh,
-  overrides: Partial<QuickfireTransport> = {}
+  overrides: Partial<QuickfireTransport> = {},
 ) {
   const client = channelClient();
   const transport = {
@@ -45,7 +52,7 @@ function transportFor(
     clear: jest.fn(async () => ({ cleared: true, archived: 1 })),
     promote: jest.fn(async () => ({ ...session, state: "promoted" as const })),
     connectToChannel: jest.fn(() => client as never),
-    ...overrides
+    ...overrides,
   } as unknown as QuickfireTransport;
   return { transport, client };
 }
@@ -53,7 +60,7 @@ function transportFor(
 function renderSheet(
   transport: QuickfireTransport,
   openChatPanel = jest.fn(async () => {}),
-  openLink = jest.fn()
+  openLink = jest.fn(),
 ) {
   const store = createStore();
   const utils = render(
@@ -64,7 +71,7 @@ function renderSheet(
         openChatPanel={openChatPanel}
         openLink={openLink}
       />
-    </Provider>
+    </Provider>,
   );
   return { ...utils, store, openChatPanel, openLink };
 }
@@ -83,8 +90,15 @@ describe("QuickfireSheet", () => {
     act(() => store.set(quickfireSheetAtom, { slotId: "panel:tree/root/0" }));
     await waitFor(() =>
       expect(transport.sessionFor).toHaveBeenCalledWith("panel:tree/root/0", {
-        fresh: false
-      })
+        fresh: false,
+      }),
+    );
+    expect(transport.connectToChannel).toHaveBeenCalledWith(
+      "channel-1",
+      "ctx-1",
+      expect.objectContaining({
+        channelTargetId: "do:workers/pubsub-channel:PubSubChannel:channel-1",
+      }),
     );
     expect(queryByTestId("quickfire-sheet")).not.toBeNull();
   });
@@ -95,18 +109,20 @@ describe("QuickfireSheet", () => {
     act(() =>
       store.set(quickfireSheetAtom, {
         slotId: "slot",
-        draft: "why is the chart cut off?"
-      })
+        draft: "why is the chart cut off?",
+      }),
     );
     await waitFor(() => getByTestId("quickfire-compose"));
-    expect(getByTestId("quickfire-compose").props.value).toBe("why is the chart cut off?");
+    expect(getByTestId("quickfire-compose").props.value).toBe(
+      "why is the chart cut off?",
+    );
     await act(async () => {
       fireEvent(getByTestId("quickfire-compose"), "submitEditing");
     });
     await waitFor(() =>
       expect(client.send).toHaveBeenCalledWith("why is the chart cut off?", {
-        mentions: ["quickfire"]
-      })
+        mentions: ["quickfire"],
+      }),
     );
   });
 
@@ -129,10 +145,14 @@ describe("QuickfireSheet", () => {
     const { transport } = transportFor();
     const { store, getByLabelText } = renderSheet(transport);
     act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
-    await waitFor(() => getByLabelText("Clear this conversation and return to commands"));
+    await waitFor(() =>
+      getByLabelText("Clear this conversation and return to commands"),
+    );
 
     await act(async () => {
-      fireEvent.press(getByLabelText("Clear this conversation and return to commands"));
+      fireEvent.press(
+        getByLabelText("Clear this conversation and return to commands"),
+      );
     });
     expect(transport.clear).toHaveBeenCalledWith("slot");
     expect(transport.sessionFor).toHaveBeenCalledTimes(1);
@@ -145,7 +165,7 @@ describe("QuickfireSheet", () => {
       ...fresh,
       state: "resumed",
       messageCount: 3,
-      lastActivityAt: Date.now() - 2 * 60 * 60 * 1000
+      lastActivityAt: Date.now() - 2 * 60 * 60 * 1000,
     });
     const { store, findByTestId } = renderSheet(transport);
     act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
@@ -156,16 +176,26 @@ describe("QuickfireSheet", () => {
   it("offers the promoted branch instead of a compose row, and no channel is joined", async () => {
     const { transport } = transportFor({ ...fresh, state: "promoted" });
     const openChatPanel = jest.fn(async () => {});
-    const { store, queryByTestId, getByLabelText } = renderSheet(transport, openChatPanel);
+    const { store, queryByTestId, getByLabelText } = renderSheet(
+      transport,
+      openChatPanel,
+    );
     act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
-    await waitFor(() => getByLabelText("Open the chat panel this conversation continued into"));
+    await waitFor(() =>
+      getByLabelText("Open the chat panel this conversation continued into"),
+    );
     expect(queryByTestId("quickfire-compose")).toBeNull();
     expect(transport.connectToChannel).not.toHaveBeenCalled();
     getByLabelText("Start a new conversation here");
     await act(async () => {
-      fireEvent.press(getByLabelText("Open the chat panel this conversation continued into"));
+      fireEvent.press(
+        getByLabelText("Open the chat panel this conversation continued into"),
+      );
     });
-    expect(openChatPanel).toHaveBeenCalledWith("channel-1");
+    expect(openChatPanel).toHaveBeenCalledWith(
+      "channel-1",
+      "do:workers/pubsub-channel:PubSubChannel:channel-1",
+    );
   });
 
   it("promotion opens the chat panel on the same channel", async () => {
@@ -173,12 +203,27 @@ describe("QuickfireSheet", () => {
     const openChatPanel = jest.fn(async () => {});
     const { store, getByLabelText } = renderSheet(transport, openChatPanel);
     act(() => store.set(quickfireSheetAtom, { slotId: "slot" }));
-    await waitFor(() => expect(getByLabelText("Move this conversation into a chat panel, keeping its history")).toBeEnabled());
+    await waitFor(() =>
+      expect(
+        getByLabelText(
+          "Move this conversation into a chat panel, keeping its history",
+        ),
+      ).toBeEnabled(),
+    );
     await act(async () => {
-      fireEvent.press(getByLabelText("Move this conversation into a chat panel, keeping its history"));
+      fireEvent.press(
+        getByLabelText(
+          "Move this conversation into a chat panel, keeping its history",
+        ),
+      );
     });
     expect(transport.promote).toHaveBeenCalledWith("slot");
-    await waitFor(() => expect(openChatPanel).toHaveBeenCalledWith("channel-1"));
+    await waitFor(() =>
+      expect(openChatPanel).toHaveBeenCalledWith(
+        "channel-1",
+        "do:workers/pubsub-channel:PubSubChannel:channel-1",
+      ),
+    );
   });
 
   it("dismissing is a view change: it leaves the channel but never clears", async () => {

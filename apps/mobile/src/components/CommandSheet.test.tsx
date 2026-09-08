@@ -1,7 +1,10 @@
 import { act, fireEvent, render, waitFor } from "@testing-library/react-native";
 import { Provider, createStore } from "jotai";
 import { CommandSheet } from "./CommandSheet";
-import { commandSheetAtom, quickfireSheetAtom } from "../state/commandSheetAtoms";
+import {
+  commandSheetAtom,
+  quickfireSheetAtom,
+} from "../state/commandSheetAtoms";
 import type { MobileSlateDeps } from "../commands/slate";
 
 jest.mock("react-native-safe-area-context", () => {
@@ -19,8 +22,14 @@ function slateDeps(overrides: Partial<MobileSlateDeps> = {}): MobileSlateDeps {
       createAboutPanel: jest.fn(async () => ({ id: "about", title: "about" })),
       createRootPanel: jest.fn(async () => ({ id: "root", title: "root" })),
       createChildPanel: jest.fn(async () => ({ id: "child", title: "child" })),
-      createBrowserUrlPanel: jest.fn(async () => ({ id: "browser", title: "browser" })),
-      observe: jest.fn(async () => ({ source: "panels/sales", contextId: "ctx" })),
+      createBrowserUrlPanel: jest.fn(async () => ({
+        id: "browser",
+        title: "browser",
+      })),
+      observe: jest.fn(async () => ({
+        source: "panels/sales",
+        contextId: "ctx",
+      })),
       getBrowserAddressOptions: jest.fn(async (query: string) => ({
         query,
         suggestions: [],
@@ -28,7 +37,10 @@ function slateDeps(overrides: Partial<MobileSlateDeps> = {}): MobileSlateDeps {
     },
     quickfire: {
       clear: jest.fn(async () => ({ cleared: true, archived: 1 })),
-      promote: jest.fn(async () => ({ channelId: "channel" })),
+      promote: jest.fn(async () => ({
+        channelId: "channel",
+        channelTargetId: "do:workers/pubsub-channel:PubSubChannel:channel",
+      })),
       list: jest.fn(async () => []),
     },
     performPanelCommand: jest.fn(),
@@ -59,12 +71,16 @@ function renderSheet(options?: {
           canGoBack: true,
         }}
         openPanels={[
-          { id: "panel:tree/root/1", title: "Import wizard", source: "panels/import" },
+          {
+            id: "panel:tree/root/1",
+            title: "Import wizard",
+            source: "panels/import",
+          },
         ]}
         contributedCommands={[]}
         runContributedCommand={jest.fn(() => true)}
       />
-    </Provider>
+    </Provider>,
   );
   return { ...utils, store, deps };
 }
@@ -81,7 +97,9 @@ describe("CommandSheet", () => {
     act(() => store.set(commandSheetAtom, { mode: "all" }));
     await waitFor(() => expect(queryByTestId("command-sheet")).not.toBeNull());
     fireEvent.changeText(getByTestId("command-sheet-input"), "reload");
-    await waitFor(() => expect(queryByTestId("command-row-command:panel.reload")).not.toBeNull());
+    await waitFor(() =>
+      expect(queryByTestId("command-row-command:panel.reload")).not.toBeNull(),
+    );
   });
 
   it("runs a command with no arguments and dismisses", async () => {
@@ -92,7 +110,10 @@ describe("CommandSheet", () => {
     fireEvent.changeText(getByTestId("command-sheet-input"), ">close panel");
     await waitFor(() => getByTestId("command-row-command:panel.close"));
     fireEvent.press(getByTestId("command-row-command:panel.close"));
-    expect(deps.performPanelCommand).toHaveBeenCalledWith("archive", "panel:tree/root/0");
+    expect(deps.performPanelCommand).toHaveBeenCalledWith(
+      "archive",
+      "panel:tree/root/0",
+    );
   });
 
   it("prompts for an argument instead of executing, then runs with the chosen option", async () => {
@@ -106,7 +127,9 @@ describe("CommandSheet", () => {
     fireEvent.press(getByTestId("command-row-command:view.theme"));
     // The command did not run — it opened an argument session offering its enum.
     expect(deps.setThemePreference).not.toHaveBeenCalled();
-    await waitFor(() => expect(queryByTestId("command-row-option:mode:dark")).not.toBeNull());
+    await waitFor(() =>
+      expect(queryByTestId("command-row-option:mode:dark")).not.toBeNull(),
+    );
 
     fireEvent.press(getByTestId("command-row-option:mode:dark"));
     expect(deps.setThemePreference).toHaveBeenCalledWith("dark");
@@ -128,13 +151,16 @@ describe("CommandSheet", () => {
     const { getByTestId } = renderSheet({ store });
     act(() => store.set(commandSheetAtom, { mode: "all" }));
     await waitFor(() => getByTestId("command-sheet-input"));
-    fireEvent.changeText(getByTestId("command-sheet-input"), "/why is this slow");
+    fireEvent.changeText(
+      getByTestId("command-sheet-input"),
+      "/why is this slow",
+    );
     await waitFor(() =>
       expect(store.get(quickfireSheetAtom)).toEqual({
         slotId: "panel:tree/root/0",
         draft: "why is this slow",
         panelTitle: "panel:tree/root/0",
-      })
+      }),
     );
     await waitFor(() => expect(store.get(commandSheetAtom)).toBeNull());
   });
@@ -169,15 +195,21 @@ describe("CommandSheet", () => {
     act(() => store.set(commandSheetAtom, { mode: "goto" }));
     fireEvent.changeText(getByTestId("command-sheet-input"), "@example");
     await waitFor(() =>
-      expect(queryByTestId("command-row-history:https://example.com/docs")).not.toBeNull()
+      expect(
+        queryByTestId("command-row-history:https://example.com/docs"),
+      ).not.toBeNull(),
     );
-    expect(queryByTestId("command-row-history:https://search.test/?q=%s")).toBeNull();
+    expect(
+      queryByTestId("command-row-history:https://search.test/?q=%s"),
+    ).toBeNull();
 
-    fireEvent.press(getByTestId("command-row-history:https://example.com/docs"));
+    fireEvent.press(
+      getByTestId("command-row-history:https://example.com/docs"),
+    );
     expect(deps.panels.createBrowserUrlPanel).toHaveBeenCalledWith(
       null,
       "https://example.com/docs",
-      { focus: true }
+      { focus: true },
     );
   });
 
@@ -191,7 +223,7 @@ describe("CommandSheet", () => {
     fireEvent.press(getByTestId("command-row-command:nav.history"));
     // The sheet stays up, now narrowed to history by a visible token.
     await waitFor(() =>
-      expect(getByTestId("command-sheet-input").props.value).toBe("@history: ")
+      expect(getByTestId("command-sheet-input").props.value).toBe("@history: "),
     );
     expect(store.get(commandSheetAtom)).not.toBeNull();
   });
@@ -203,6 +235,8 @@ describe("CommandSheet", () => {
     fireEvent.changeText(getByTestId("command-sheet-input"), ">devtools");
     await waitFor(() => getByTestId("command-sheet-input"));
     expect(queryByTestId("command-row-command:debug.devtools")).toBeNull();
-    expect(queryByTestId("command-row-command:debug.shell-devtools")).toBeNull();
+    expect(
+      queryByTestId("command-row-command:debug.shell-devtools"),
+    ).toBeNull();
   });
 });

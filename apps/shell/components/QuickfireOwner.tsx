@@ -524,6 +524,7 @@ export function QuickfireOwner() {
       return {
         kind: "conversation",
         channelId: conversationBinding.channelId,
+        channelTargetId: conversationBinding.channelTargetId,
         contextId: conversationBinding.contextId,
         clientId: `conversation:${conversationBinding.channelId}`,
         ...(conversationBinding.focusMessageId
@@ -1029,9 +1030,9 @@ export function QuickfireOwner() {
     if (state.conversation) {
       // A conversation surface has nothing to promote: its chat panel is
       // found-or-opened (never duplicated), landing on the envelope it opened on.
-      const { channelId, focusMessageId } = state.conversation;
+      const { channelId, channelTargetId, focusMessageId } = state.conversation;
       close({ restoreFocus: false });
-      await userNotifications.openChannel(channelId, {
+      await userNotifications.openChannel(channelId, channelTargetId, {
         ...(focusMessageId ? { focusMessageId } : {}),
       });
       return;

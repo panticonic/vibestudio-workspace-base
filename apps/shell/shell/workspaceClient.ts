@@ -66,7 +66,6 @@ import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient"
 import {
   createDurableObjectServiceClient,
   createGadServiceClient,
-  type DurableObjectServiceClient,
 } from "@vibestudio/shared/workspaceServiceRpc";
 import type { ChannelInvite } from "@vibestudio/shared/channelInvites";
 import {
@@ -1010,27 +1009,12 @@ export function createShellWorkspaceClient(
   // =============================================================================
   const CHANNEL_SERVICE_PROTOCOL = "vibestudio.channel.v1";
   const userNotificationStore = createGadServiceClient(rpc);
-  const resolvedChannelClients = new Map<string, DurableObjectServiceClient>();
-
-  function channelClient(channelId: string): DurableObjectServiceClient {
-    let client = resolvedChannelClients.get(channelId);
-    if (!client) {
-      client = createDurableObjectServiceClient(
-        rpc,
-        CHANNEL_SERVICE_PROTOCOL,
-        channelId,
-      );
-      resolvedChannelClients.set(channelId, client);
-    }
-    return client;
-  }
-
   async function describeChannelInvite(
     invite: ChannelInvite,
   ): Promise<ShellChannelInvite> {
-    const config = await channelClient(invite.channelId).call<{
+    const config = await rpc.call<{
       title?: string;
-    } | null>("getConfig");
+    } | null>(invite.channelTargetId, "getConfig", []);
     return {
       ...invite,
       channelTitle: config?.title?.trim() || invite.channelId,
@@ -1116,12 +1100,11 @@ export function createShellWorkspaceClient(
      * the channel itself — Gad has no honest source for a title.
      */
     async describeConversation(
-      channelId: string,
+      channelTargetId: string,
     ): Promise<{ contextId: string; title: string | null }> {
-      const service = channelClient(channelId);
       const [config, contextId] = await Promise.all([
-        service.call<{ title?: string } | null>("getConfig"),
-        service.call<string | null>("getContextId"),
+        rpc.call<{ title?: string } | null>(channelTargetId, "getConfig", []),
+        rpc.call<string | null>(channelTargetId, "getContextId", []),
       ]);
       if (!contextId) {
         throw new Error(
@@ -1140,6 +1123,7 @@ export function createShellWorkspaceClient(
      */
     async openChannel(
       channelId: string,
+      channelTargetId: string,
       opts?: { focusMessageId?: string },
     ): Promise<{ id: string }> {
       const profile = await account.getProfile();
@@ -1193,10 +1177,9 @@ export function createShellWorkspaceClient(
         return { id: existingId };
       }
 
-      const service = channelClient(channelId);
       const [config, contextId] = await Promise.all([
-        service.call<{ title?: string } | null>("getConfig"),
-        service.call<string | null>("getContextId"),
+        rpc.call<{ title?: string } | null>(channelTargetId, "getConfig", []),
+        rpc.call<string | null>(channelTargetId, "getContextId", []),
       ]);
       if (!contextId) {
         throw new Error(
@@ -1349,11 +1332,16 @@ export function createShellWorkspaceClient(
   function connectToChannel(
     channelId: string,
     contextId: string,
-    options: { clientId?: string; replayMessageLimit?: number } = {},
+    options: {
+      channelTargetId: string;
+      clientId?: string;
+      replayMessageLimit?: number;
+    },
   ): PubSubClient {
     return connectViaRpc({
       rpc,
       channel: channelId,
+      channelTargetId: options.channelTargetId,
       contextId,
       protocol: CHANNEL_SERVICE_PROTOCOL,
       // `stream`, not `collect`: the transcript is reduced from the event stream,

@@ -1008,7 +1008,7 @@ html[data-overlay-dragging] * {
   align-items: center;
   display: flex;
   gap: 8px;
-  justify-content: space-between;
+  justify-content: flex-start;
   min-width: 0;
 }
 
@@ -1017,6 +1017,7 @@ html[data-overlay-dragging] * {
   display: flex;
   flex-shrink: 0;
   gap: 4px;
+  margin-inline-start: auto;
 }
 
 /* A part's own sentence, ellipsized to one line so the list stays scannable. */
@@ -1156,6 +1157,10 @@ html[data-overlay-dragging] * {
     align-items: flex-start;
     flex-direction: column;
     gap: 2px;
+  }
+
+  .install-review-part-meta {
+    margin-inline-start: 0;
   }
 }
 

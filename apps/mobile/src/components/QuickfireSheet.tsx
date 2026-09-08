@@ -85,7 +85,7 @@ export interface QuickfireSheetProps {
    * Open (or focus) the chat panel that owns a promoted conversation. Mobile
    * has no panes, so this is the detail view swapping to the chat panel.
    */
-  openChatPanel: (channelId: string) => Promise<void>;
+  openChatPanel: (channelId: string, channelTargetId: string) => Promise<void>;
   /**
    * Open a destination an agent wrote. Routed through the app's own address
    * handling so a workspace link becomes a panel; only genuinely external
@@ -115,6 +115,7 @@ export function QuickfireSheet({
       return {
         kind: "conversation",
         channelId: conversation.channelId,
+        channelTargetId: conversation.channelTargetId,
         contextId: conversation.contextId,
         clientId: `conversation:${conversation.channelId}`,
         ...(conversation.focusMessageId
@@ -290,7 +291,7 @@ export function QuickfireSheet({
           });
           return;
         }
-        await openChatPanel(promoted.channelId);
+        await openChatPanel(promoted.channelId, promoted.channelTargetId);
         close();
       })
       .catch(report("Could not open the chat panel"));
@@ -298,11 +299,12 @@ export function QuickfireSheet({
 
   const handleFocusPromoted = useCallback(() => {
     const channelId = view.channelId;
-    if (!channelId) return;
-    void openChatPanel(channelId)
+    const channelTargetId = view.channelTargetId;
+    if (!channelId || !channelTargetId) return;
+    void openChatPanel(channelId, channelTargetId)
       .then(() => close())
       .catch(report("Could not open the chat panel"));
-  }, [close, openChatPanel, report, view.channelId]);
+  }, [close, openChatPanel, report, view.channelId, view.channelTargetId]);
 
   /**
    * The same compose view the desktop chrome builds. Assembling it here is what

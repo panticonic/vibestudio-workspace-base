@@ -174,6 +174,7 @@ function transportFor(
 
 const fresh: QuickfireSessionFacts = {
   channelId: "channel-1",
+  channelTargetId: "do:workers/pubsub-channel:PubSubChannel:channel-1",
   contextId: "ctx-1",
   state: "fresh",
   messageCount: null,
@@ -202,6 +203,7 @@ describe("useQuickfireSessionCore", () => {
     // The bound slot is the participant this client claims, the way a panel
     // caller passes its slot id; replay streams so the reducer sees it.
     expect(connectToChannel).toHaveBeenCalledWith("channel-1", "ctx-1", {
+      channelTargetId: "do:workers/pubsub-channel:PubSubChannel:channel-1",
       clientId: "panel:tree/root/0",
       // Replay is deliberately wider than the rendered tail: "12 earlier
       // entries" is only an offer the surface can keep if the client already
@@ -210,6 +212,25 @@ describe("useQuickfireSessionCore", () => {
     });
     expect(result.current.view.channelId).toBe("channel-1");
     expect(result.current.view.hasConversation).toBe(true);
+  });
+
+  it("rejects a slot session without its exact channel target", async () => {
+    const { transport, connectToChannel } = transportFor(fresh, {
+      sessionFor: vi.fn(async () => ({
+        ...fresh,
+        channelTargetId: undefined,
+      })) as unknown as QuickfireTransport["sessionFor"],
+    });
+    const { result } = renderHook(() =>
+      useQuickfireSessionCore("panel:tree/root/0", transport),
+    );
+
+    await waitFor(() =>
+      expect(result.current.view.error).toBe(
+        "Quickfire session has no channel target identity",
+      ),
+    );
+    expect(connectToChannel).not.toHaveBeenCalled();
   });
 
   it("surfaces the resume chip for an existing conversation", async () => {
@@ -420,6 +441,7 @@ describe("useQuickfireSessionCore conversation source (messaging plan §4.8)", (
   const conversation = {
     kind: "conversation" as const,
     channelId: "channel-notify",
+    channelTargetId: "do:workers/pubsub-channel:PubSubChannel:channel-notify",
     contextId: "ctx-notify",
     clientId: "conversation:channel-notify",
     focusMessageId: "say:call-1",
@@ -437,6 +459,8 @@ describe("useQuickfireSessionCore conversation source (messaging plan §4.8)", (
       "channel-notify",
       "ctx-notify",
       {
+        channelTargetId:
+          "do:workers/pubsub-channel:PubSubChannel:channel-notify",
         clientId: "conversation:channel-notify",
         replayMessageLimit: REPLAY_LIMIT,
       },

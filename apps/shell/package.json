@@ -363,6 +363,15 @@
           "evidence": "intentional-broad"
         },
         {
+          "capability": "workspace.gateway.access",
+          "resource": {
+            "kind": "prefix",
+            "prefix": ""
+          },
+          "tier": "gated",
+          "evidence": "intentional-broad"
+        },
+        {
           "capability": "workspace.members.manage",
           "resource": {
             "kind": "prefix",

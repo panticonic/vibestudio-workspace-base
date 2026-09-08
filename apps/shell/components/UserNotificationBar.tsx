@@ -1,7 +1,14 @@
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSetAtom } from "jotai";
-import { Badge, Button, Flex, IconButton, Spinner, Text } from "@radix-ui/themes";
+import {
+  Badge,
+  Button,
+  Flex,
+  IconButton,
+  Spinner,
+  Text,
+} from "@radix-ui/themes";
 import {
   ChatBubbleIcon,
   ChevronDownIcon,
@@ -10,7 +17,10 @@ import {
   InfoCircledIcon,
   ReloadIcon,
 } from "@radix-ui/react-icons";
-import { type ShellChannelInvite, type ShellUserNotification } from "../shell/client";
+import {
+  type ShellChannelInvite,
+  type ShellUserNotification,
+} from "../shell/client";
 import type { AgentMessageNotificationData } from "@vibestudio/shared/userNotifications";
 import { SHELL_APPROVAL_PENDING_CHANGED_EVENT } from "@vibestudio/shell-core/approvalState";
 
@@ -37,7 +47,7 @@ function firstLine(text: string | undefined): string {
  * not read as two unrelated interruptions. Non-agent entries group by kind.
  */
 export function groupNotifications(
-  notifications: readonly ShellUserNotification[]
+  notifications: readonly ShellUserNotification[],
 ): Array<{ key: string; entries: ShellUserNotification[] }> {
   const groups = new Map<string, ShellUserNotification[]>();
   for (const entry of notifications) {
@@ -59,12 +69,22 @@ export function groupNotifications(
  * account events, and reconciled after host reconnect. There is no timer poll.
  */
 export function UserNotificationBar() {
-  const { userNotifications, events, notification: shellToast } = useShellWorkspaceClient();
+  const {
+    userNotifications,
+    events,
+    notification: shellToast,
+  } = useShellWorkspaceClient();
 
-  const [notifications, setNotifications] = useState<ShellUserNotification[]>([]);
+  const [notifications, setNotifications] = useState<ShellUserNotification[]>(
+    [],
+  );
   const [loading, setLoading] = useState(true);
-  const [busyNotificationId, setBusyNotificationId] = useState<string | null>(null);
-  const [openedNotificationId, setOpenedNotificationId] = useState<string | null>(null);
+  const [busyNotificationId, setBusyNotificationId] = useState<string | null>(
+    null,
+  );
+  const [openedNotificationId, setOpenedNotificationId] = useState<
+    string | null
+  >(null);
   const [error, setError] = useState<string | null>(null);
   /**
    * Not an error (U6). While a review covering this workspace's parts is open,
@@ -72,10 +92,11 @@ export function UserNotificationBar() {
    * `Notifications could not be loaded` and offering a Retry described a failure
    * that had not happened and an action that could not work.
    */
-  const [awaitingReview, setAwaitingReview] = useState<PendingReviewNotice | null>(null);
+  const [awaitingReview, setAwaitingReview] =
+    useState<PendingReviewNotice | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [expandedMessages, setExpandedMessages] = useState<ReadonlySet<string>>(
-    () => new Set()
+    () => new Set(),
   );
   /** History (acknowledged entries), loaded only when the person asks (§4.10.8). */
   const [history, setHistory] = useState<ShellUserNotification[] | null>(null);
@@ -102,7 +123,11 @@ export function UserNotificationBar() {
       seenIds.current = new Set(next.map((entry) => entry.id));
       if (previouslySeen) {
         for (const entry of next) {
-          if (previouslySeen.has(entry.id) || entry.agentMessage?.rung !== "interrupt") continue;
+          if (
+            previouslySeen.has(entry.id) ||
+            entry.agentMessage?.rung !== "interrupt"
+          )
+            continue;
           void shellToast
             .show({
               type: "info",
@@ -160,14 +185,17 @@ export function UserNotificationBar() {
 
   useDirectShellEvent(
     "user-notifications-changed",
-    useCallback(() => void refresh(), [refresh])
+    useCallback(() => void refresh(), [refresh]),
   );
 
   // Finishing the review is what unblocks this, so the answer arrives on its
   // own and the line clears itself. Nothing to retry, nothing to dismiss.
   useEffect(() => {
     if (!awaitingReview) return;
-    const off = events.on(SHELL_APPROVAL_PENDING_CHANGED_EVENT, () => void refresh());
+    const off = events.on(
+      SHELL_APPROVAL_PENDING_CHANGED_EVENT,
+      () => void refresh(),
+    );
     void events.subscribe(SHELL_APPROVAL_PENDING_CHANGED_EVENT);
     return () => {
       off();
@@ -180,8 +208,8 @@ export function UserNotificationBar() {
       ({ status }: { status: "connected" | "connecting" | "disconnected" }) => {
         if (status === "connected") void refresh();
       },
-      [refresh]
-    )
+      [refresh],
+    ),
   );
 
   const toggleHistory = useCallback(async () => {
@@ -191,7 +219,10 @@ export function UserNotificationBar() {
     }
     setHistoryBusy(true);
     try {
-      const all = await userNotifications.list({ includeAcknowledged: true, limit: 50 });
+      const all = await userNotifications.list({
+        includeAcknowledged: true,
+        limit: 50,
+      });
       setHistory(all.filter((entry) => entry.acknowledgedAt !== undefined));
     } catch (cause) {
       setError(errorMessage(cause));
@@ -202,7 +233,9 @@ export function UserNotificationBar() {
 
   const removeLocal = useCallback((id: string) => {
     requestVersion.current += 1;
-    setNotifications((current) => current.filter((notification) => notification.id !== id));
+    setNotifications((current) =>
+      current.filter((notification) => notification.id !== id),
+    );
     setOpenedNotificationId((current) => (current === id ? null : current));
     setExpandedMessages((current) => {
       if (!current.has(id)) return current;
@@ -228,7 +261,7 @@ export function UserNotificationBar() {
         setBusyNotificationId(null);
       }
     },
-    [removeLocal]
+    [removeLocal],
   );
 
   /**
@@ -245,25 +278,32 @@ export function UserNotificationBar() {
   const acknowledgeInvitesFor = useCallback(
     async (channelId: string) => {
       const invites = notifications.filter(
-        (entry) => entry.channelInvite?.channelId === channelId
+        (entry) => entry.channelInvite?.channelId === channelId,
       );
       for (const invite of invites) {
         await userNotifications.acknowledge(invite.id).catch(() => undefined);
         removeLocal(invite.id);
       }
     },
-    [notifications, removeLocal]
+    [notifications, removeLocal],
   );
 
   const openAgentMessage = useCallback(
-    async (notification: ShellUserNotification, message: AgentMessageNotificationData) => {
+    async (
+      notification: ShellUserNotification,
+      message: AgentMessageNotificationData,
+    ) => {
       setBusyNotificationId(notification.id);
       setError(null);
       let opened = false;
       try {
-        await userNotifications.openChannel(message.channelId, {
-          focusMessageId: message.messageId,
-        });
+        await userNotifications.openChannel(
+          message.channelId,
+          message.channelTargetId,
+          {
+            focusMessageId: message.messageId,
+          },
+        );
         opened = true;
         setOpenedNotificationId(notification.id);
         await userNotifications.acknowledge(notification.id);
@@ -274,13 +314,13 @@ export function UserNotificationBar() {
         setError(
           opened
             ? `Conversation opened, but the notification could not be cleared: ${detail}`
-            : detail
+            : detail,
         );
       } finally {
         setBusyNotificationId(null);
       }
     },
-    [acknowledgeInvitesFor, removeLocal]
+    [acknowledgeInvitesFor, removeLocal],
   );
 
   /**
@@ -289,14 +329,20 @@ export function UserNotificationBar() {
    * it, so the entry is acknowledged once the surface is requested.
    */
   const replyToAgentMessage = useCallback(
-    async (notification: ShellUserNotification, message: AgentMessageNotificationData) => {
+    async (
+      notification: ShellUserNotification,
+      message: AgentMessageNotificationData,
+    ) => {
       setBusyNotificationId(notification.id);
       setError(null);
       let opened = false;
       try {
-        const conversation = await userNotifications.describeConversation(message.channelId);
+        const conversation = await userNotifications.describeConversation(
+          message.channelTargetId,
+        );
         openConversationSurface({
           channelId: message.channelId,
+          channelTargetId: message.channelTargetId,
           contextId: conversation.contextId,
           focusMessageId: message.messageId,
           replyTo: {
@@ -315,13 +361,13 @@ export function UserNotificationBar() {
         setError(
           opened
             ? `Conversation opened, but the notification could not be cleared: ${detail}`
-            : detail
+            : detail,
         );
       } finally {
         setBusyNotificationId(null);
       }
     },
-    [acknowledgeInvitesFor, openConversationSurface, removeLocal]
+    [acknowledgeInvitesFor, openConversationSurface, removeLocal],
   );
 
   // The interrupt toast's "Reply" action (plan §4.10.9) lands here.
@@ -333,7 +379,7 @@ export function UserNotificationBar() {
       if (payload.actionId !== "reply" || !target.agentMessage) return;
       void replyToAgentMessage(target, target.agentMessage);
     },
-    [replyToAgentMessage]
+    [replyToAgentMessage],
   );
   useShellEvent("notification:action", handleToastAction);
   useDirectShellEvent("notification:action", handleToastAction);
@@ -344,7 +390,10 @@ export function UserNotificationBar() {
       setError(null);
       let opened = false;
       try {
-        await userNotifications.openChannel(invite.channelId);
+        await userNotifications.openChannel(
+          invite.channelId,
+          invite.channelTargetId,
+        );
         opened = true;
         setOpenedNotificationId(notification.id);
         await userNotifications.acknowledge(notification.id);
@@ -354,13 +403,13 @@ export function UserNotificationBar() {
         setError(
           opened
             ? `Conversation opened, but the notification could not be cleared: ${message}`
-            : message
+            : message,
         );
       } finally {
         setBusyNotificationId(null);
       }
     },
-    [removeLocal]
+    [removeLocal],
   );
 
   if (notifications.length === 0) {
@@ -398,7 +447,12 @@ export function UserNotificationBar() {
         <Text size="1" color="amber" style={{ flex: 1 }} title={error}>
           Notifications could not be loaded: {error}
         </Text>
-        <Button size="1" variant="ghost" color="amber" onClick={() => void refresh()}>
+        <Button
+          size="1"
+          variant="ghost"
+          color="amber"
+          onClick={() => void refresh()}
+        >
           <ReloadIcon /> Retry
         </Button>
       </Flex>
@@ -447,7 +501,9 @@ export function UserNotificationBar() {
               <Text color="gray"> · from @{entryMessage.senderHandle}</Text>
             ) : null}
             <Text color="gray">
-              {messageExpanded ? ` · ${entry.message}` : ` · ${firstLine(entry.message)}`}
+              {messageExpanded
+                ? ` · ${entry.message}`
+                : ` · ${firstLine(entry.message)}`}
             </Text>
           </span>
           {messageExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}
@@ -475,17 +531,34 @@ export function UserNotificationBar() {
     );
   };
 
-  const renderRow = (entry: ShellUserNotification, options: { count?: number }) => {
+  const renderRow = (
+    entry: ShellUserNotification,
+    options: { count?: number },
+  ) => {
     const rowInvite = entry.channelInvite;
     const rowMessage = entry.agentMessage;
     const rowBusy = busyNotificationId === entry.id;
     const rowOpened = openedNotificationId === entry.id;
     return (
-      <Flex key={entry.id} align="center" gap="2" wrap="wrap" style={{ minHeight: 30 }}>
-        {rowInvite || rowMessage ? <ChatBubbleIcon aria-hidden /> : <InfoCircledIcon aria-hidden />}
+      <Flex
+        key={entry.id}
+        align="center"
+        gap="2"
+        wrap="wrap"
+        style={{ minHeight: 30 }}
+      >
+        {rowInvite || rowMessage ? (
+          <ChatBubbleIcon aria-hidden />
+        ) : (
+          <InfoCircledIcon aria-hidden />
+        )}
         {renderSummary(entry)}
         {options.count && options.count > 1 ? (
-          <Badge color="gray" variant="soft" title={`${options.count} messages from this agent`}>
+          <Badge
+            color="gray"
+            variant="soft"
+            title={`${options.count} messages from this agent`}
+          >
             ×{options.count}
           </Badge>
         ) : null}
@@ -528,7 +601,9 @@ export function UserNotificationBar() {
           disabled={rowBusy}
           onClick={() => void dismiss(entry)}
           aria-label={
-            rowInvite ? `Dismiss invitation to ${rowInvite.channelTitle}` : `Dismiss ${entry.title}`
+            rowInvite
+              ? `Dismiss invitation to ${rowInvite.channelTitle}`
+              : `Dismiss ${entry.title}`
           }
           title="Dismiss without opening"
         >
@@ -553,13 +628,21 @@ export function UserNotificationBar() {
       }}
     >
       <Flex align="center" gap="2" wrap="wrap">
-        {invite || agentMessage ? <ChatBubbleIcon aria-hidden /> : <InfoCircledIcon aria-hidden />}
+        {invite || agentMessage ? (
+          <ChatBubbleIcon aria-hidden />
+        ) : (
+          <InfoCircledIcon aria-hidden />
+        )}
         <Badge color="blue" variant="soft" radius="full">
           {invite ? "Invitation" : agentMessage ? "Message" : "Notification"}
         </Badge>
         {renderSummary(notification)}
         {groupSize > 1 ? (
-          <Badge color="gray" variant="soft" title={`${groupSize} messages from this agent`}>
+          <Badge
+            color="gray"
+            variant="soft"
+            title={`${groupSize} messages from this agent`}
+          >
             ×{groupSize}
           </Badge>
         ) : null}
@@ -572,7 +655,11 @@ export function UserNotificationBar() {
               ? `${notifications.length} pending notifications`
               : "All notifications and history"
           }
-          aria-label={others > 0 ? `${notifications.length} pending notifications` : "Notification history"}
+          aria-label={
+            others > 0
+              ? `${notifications.length} pending notifications`
+              : "Notification history"
+          }
           aria-expanded={expanded}
           onClick={() => setExpanded((value) => !value)}
         >
@@ -598,7 +685,9 @@ export function UserNotificationBar() {
             <Button
               size="1"
               disabled={busy || opened}
-              onClick={() => void replyToAgentMessage(notification, agentMessage)}
+              onClick={() =>
+                void replyToAgentMessage(notification, agentMessage)
+              }
               title="Reply to this agent right here"
             >
               {busy ? <Spinner size="1" /> : null}
@@ -622,7 +711,9 @@ export function UserNotificationBar() {
           disabled={busy}
           onClick={() => void dismiss(notification)}
           aria-label={
-            invite ? `Dismiss invitation to ${invite.channelTitle}` : `Dismiss ${notification.title}`
+            invite
+              ? `Dismiss invitation to ${invite.channelTitle}`
+              : `Dismiss ${notification.title}`
           }
           title="Dismiss without opening"
         >
@@ -639,26 +730,43 @@ export function UserNotificationBar() {
           style={{ borderTop: "1px solid var(--accent-a5)" }}
         >
           {groups.map((group) =>
-            renderRow(group.entries[0]!, { count: group.entries.length })
+            renderRow(group.entries[0]!, { count: group.entries.length }),
           )}
           <Flex align="center" gap="2" pt="1">
-            <Button size="1" variant="ghost" color="gray" disabled={historyBusy} onClick={() => void toggleHistory()}>
+            <Button
+              size="1"
+              variant="ghost"
+              color="gray"
+              disabled={historyBusy}
+              onClick={() => void toggleHistory()}
+            >
               {historyBusy ? <Spinner size="1" /> : null}
               {history ? "Hide acknowledged" : "Show acknowledged"}
             </Button>
           </Flex>
-          {history
-            ? history.length === 0
-              ? (
-                <Text size="1" color="gray">
-                  Nothing acknowledged yet.
-                </Text>
-              )
-              : history.map((entry) => (
-                <Flex key={entry.id} align="center" gap="2" style={{ opacity: 0.7 }}>
-                  <Text size="1" color="gray" style={{ flex: 1, minWidth: 0 }} truncate>
+          {history ? (
+            history.length === 0 ? (
+              <Text size="1" color="gray">
+                Nothing acknowledged yet.
+              </Text>
+            ) : (
+              history.map((entry) => (
+                <Flex
+                  key={entry.id}
+                  align="center"
+                  gap="2"
+                  style={{ opacity: 0.7 }}
+                >
+                  <Text
+                    size="1"
+                    color="gray"
+                    style={{ flex: 1, minWidth: 0 }}
+                    truncate
+                  >
                     {entry.channelInvite?.channelTitle ?? entry.title}
-                    {entry.agentMessage?.senderHandle ? ` · from @${entry.agentMessage.senderHandle}` : ""}
+                    {entry.agentMessage?.senderHandle
+                      ? ` · from @${entry.agentMessage.senderHandle}`
+                      : ""}
                     {" · read"}
                   </Text>
                   {entry.agentMessage ? (
@@ -668,9 +776,13 @@ export function UserNotificationBar() {
                       color="gray"
                       onClick={() =>
                         void userNotifications
-                          .openChannel(entry.agentMessage!.channelId, {
-                            focusMessageId: entry.agentMessage!.messageId,
-                          })
+                          .openChannel(
+                            entry.agentMessage!.channelId,
+                            entry.agentMessage!.channelTargetId,
+                            {
+                              focusMessageId: entry.agentMessage!.messageId,
+                            },
+                          )
                           .catch((cause) => setError(errorMessage(cause)))
                       }
                     >
@@ -679,7 +791,8 @@ export function UserNotificationBar() {
                   ) : null}
                 </Flex>
               ))
-            : null}
+            )
+          ) : null}
         </Flex>
       ) : null}
     </Flex>

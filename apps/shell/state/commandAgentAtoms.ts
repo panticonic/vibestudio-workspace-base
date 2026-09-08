@@ -22,7 +22,9 @@ export interface CommandAgentOpenRequest {
   sequence: number;
 }
 
-export const commandAgentRequestAtom = atom<CommandAgentOpenRequest | null>(null);
+export const commandAgentRequestAtom = atom<CommandAgentOpenRequest | null>(
+  null,
+);
 
 /**
  * Ask for the overlay in the same state the accelerator produces: the palette,
@@ -38,7 +40,7 @@ export const openCommandAgentAtom = atom(
       ...(request?.panelId ? { panelId: request.panelId } : {}),
       sequence: (previous?.sequence ?? 0) + 1,
     });
-  }
+  },
 );
 
 /**
@@ -49,6 +51,7 @@ export const openCommandAgentAtom = atom(
  */
 export interface ConversationSurfaceRequest {
   channelId: string;
+  channelTargetId: string;
   contextId: string;
   /** The envelope to land on; replies thread under it. */
   focusMessageId?: string;
@@ -59,7 +62,8 @@ export interface ConversationSurfaceRequest {
   sequence: number;
 }
 
-export const conversationSurfaceRequestAtom = atom<ConversationSurfaceRequest | null>(null);
+export const conversationSurfaceRequestAtom =
+  atom<ConversationSurfaceRequest | null>(null);
 
 export const openConversationSurfaceAtom = atom(
   null,
@@ -69,5 +73,5 @@ export const openConversationSurfaceAtom = atom(
       ...request,
       sequence: (previous?.sequence ?? 0) + 1,
     });
-  }
+  },
 );

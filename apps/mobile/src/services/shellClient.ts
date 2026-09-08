@@ -1155,10 +1155,13 @@ export class ShellClient {
       limit?: number;
     }): Promise<UserNotification[]>;
     acknowledge(id: string): Promise<boolean>;
-    openChannel(channelId: string): Promise<{ id: string; title: string }>;
+    openChannel(
+      channelId: string,
+      channelTargetId: string,
+    ): Promise<{ id: string; title: string }>;
     /** Facts the conversation sheet binds to (messaging plan §4.8). */
     describeConversation(
-      channelId: string,
+      channelTargetId: string,
     ): Promise<{ contextId: string; title: string | null }>;
   };
   readonly credentials: Credentials;
@@ -1295,11 +1298,16 @@ export class ShellClient {
   connectToChannel(
     channelId: string,
     contextId: string,
-    options: { clientId?: string; replayMessageLimit?: number } = {},
+    options: {
+      channelTargetId: string;
+      clientId?: string;
+      replayMessageLimit?: number;
+    },
   ): PubSubClient {
     return connectViaRpc({
       rpc: this.transport,
       channel: channelId,
+      channelTargetId: options.channelTargetId,
       contextId,
       protocol: "vibestudio.channel.v1",
       // See the desktop client: the transcript is reduced from the event
@@ -1394,22 +1402,6 @@ export class ShellClient {
       openShellSurface: (target) => this.openShellSurface(target),
     });
     const userNotificationStore = createGadServiceClient(this.transport);
-    const channelClients = new Map<
-      string,
-      ReturnType<typeof createDurableObjectServiceClient>
-    >();
-    const channelClient = (channelId: string) => {
-      let client = channelClients.get(channelId);
-      if (!client) {
-        client = createDurableObjectServiceClient(
-          this.transport,
-          "vibestudio.channel.v1",
-          channelId,
-        );
-        channelClients.set(channelId, client);
-      }
-      return client;
-    };
     this.userNotifications = {
       list: async (input) =>
         (
@@ -1425,16 +1417,23 @@ export class ShellClient {
             { id },
           )
         ).acknowledged,
-      openChannel: async (channelId) => {
+      openChannel: async (channelId, channelTargetId) => {
         const existing = await this.findOwnedChannelPanel(channelId);
         if (existing) {
           await this.panels.focus(existing.id);
           return { id: existing.id, title: existing.title };
         }
-        const service = channelClient(channelId);
         const [config, contextId] = await Promise.all([
-          service.call<{ title?: string } | null>("getConfig"),
-          service.call<string | null>("getContextId"),
+          this.transport.call<{ title?: string } | null>(
+            channelTargetId,
+            "getConfig",
+            [],
+          ),
+          this.transport.call<string | null>(
+            channelTargetId,
+            "getContextId",
+            [],
+          ),
         ]);
         if (!contextId) {
           throw new Error(
@@ -1447,11 +1446,18 @@ export class ShellClient {
           stateArgs: { channelName: channelId },
         });
       },
-      describeConversation: async (channelId) => {
-        const service = channelClient(channelId);
+      describeConversation: async (channelTargetId) => {
         const [config, contextId] = await Promise.all([
-          service.call<{ title?: string } | null>("getConfig"),
-          service.call<string | null>("getContextId"),
+          this.transport.call<{ title?: string } | null>(
+            channelTargetId,
+            "getConfig",
+            [],
+          ),
+          this.transport.call<string | null>(
+            channelTargetId,
+            "getContextId",
+            [],
+          ),
         ]);
         if (!contextId) {
           throw new Error(

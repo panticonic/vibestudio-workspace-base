@@ -1562,13 +1562,19 @@ export function MainScreen({
     void (async () => {
       try {
         if (link.channelId) {
+          if (!link.channelTargetId) {
+            throw new Error(
+              "Conversation notification has no channel target identity",
+            );
+          }
           const conversation =
             await shellClient.userNotifications.describeConversation(
-              link.channelId,
+              link.channelTargetId,
             );
           openQuickfireSheet({
             conversation: {
               channelId: link.channelId,
+              channelTargetId: link.channelTargetId,
               contextId: conversation.contextId,
               ...(link.messageId ? { focusMessageId: link.messageId } : {}),
               ...(link.senderParticipantId
@@ -1633,9 +1639,12 @@ export function MainScreen({
    * the same path as the sheet's ⧉ — one promotion behavior, not two.
    */
   const openChatPanelForChannel = useCallback(
-    async (channelId: string) => {
+    async (channelId: string, channelTargetId: string) => {
       if (!shellClient) return;
-      const opened = await shellClient.userNotifications.openChannel(channelId);
+      const opened = await shellClient.userNotifications.openChannel(
+        channelId,
+        channelTargetId,
+      );
       activatePanel(opened.id);
       refreshTree();
     },
@@ -2403,6 +2412,7 @@ export function MainScreen({
     try {
       await shellClient.userNotifications.openChannel(
         currentChannelInvite.channelId,
+        currentChannelInvite.channelTargetId,
       );
       await shellClient.userNotifications.acknowledge(
         currentUserNotification.id,
@@ -2464,7 +2474,10 @@ export function MainScreen({
             if (!notification) return;
             const invite = channelInviteFromNotification(notification);
             if (invite)
-              await shellClient.userNotifications.openChannel(invite.channelId);
+              await shellClient.userNotifications.openChannel(
+                invite.channelId,
+                invite.channelTargetId,
+              );
             await shellClient.userNotifications.acknowledge(notification.id);
             setUserNotifications((current) =>
               current.filter((entry) => entry.id !== id),

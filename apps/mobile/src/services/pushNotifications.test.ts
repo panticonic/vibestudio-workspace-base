@@ -386,6 +386,7 @@ describe("pushNotifications", () => {
           body: "3 stories",
           priority: "high",
           channelId: "ch-news",
+          channelTargetId: "do:workers/pubsub-channel:PubSubChannel:ch-news",
           messageId: "say:call-1",
           senderParticipantId: "do:news",
           senderHandle: "news",
@@ -402,6 +403,7 @@ describe("pushNotifications", () => {
         data: expect.objectContaining({
           kind: "user-inbox",
           channelId: "ch-news",
+          channelTargetId: "do:workers/pubsub-channel:PubSubChannel:ch-news",
           messageId: "say:call-1",
         }),
         android: expect.objectContaining({

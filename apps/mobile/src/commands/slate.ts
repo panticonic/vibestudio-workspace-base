@@ -17,7 +17,10 @@
  */
 import type { CommandSpec } from "@workspace/omnibox-core";
 import { browserUrlFromEntry } from "@workspace/omnibox-core";
-import { buildSlateDefinitions, HISTORY_SCOPE_TOKEN } from "@workspace/quickfire-core";
+import {
+  buildSlateDefinitions,
+  HISTORY_SCOPE_TOKEN,
+} from "@workspace/quickfire-core";
 import type { QuickfireMode } from "@workspace/quickfire-core";
 import type { BrowserAddressOptions } from "@vibestudio/shared/panelChrome";
 import { createPanelShareUrl } from "@vibestudio/shared/panelLocation";
@@ -46,19 +49,21 @@ export interface MobileSlatePanels {
   createAboutPanel(page: string): Promise<{ id: string; title: string }>;
   createRootPanel(
     source: string,
-    options?: { focus?: boolean; stateArgs?: Record<string, unknown> }
+    options?: { focus?: boolean; stateArgs?: Record<string, unknown> },
   ): Promise<{ id: string; title: string }>;
   createChildPanel(
     parentId: string,
     source: string,
-    options?: { focus?: boolean; stateArgs?: Record<string, unknown> }
+    options?: { focus?: boolean; stateArgs?: Record<string, unknown> },
   ): Promise<{ id: string; title: string }>;
   createBrowserUrlPanel(
     parentId: string | null,
     url: string,
-    options?: { focus?: boolean }
+    options?: { focus?: boolean },
   ): Promise<{ id: string; title: string }>;
-  observe(panelId: string): Promise<{ source: string; contextId: string | null }>;
+  observe(
+    panelId: string,
+  ): Promise<{ source: string; contextId: string | null }>;
   /**
    * Ranked browser history / bookmarks / open-page rows for the omnibox.
    * Same call the address field in `AppBar` already makes, so the command
@@ -69,7 +74,10 @@ export interface MobileSlatePanels {
 
 export interface MobileSlateQuickfire {
   clear(slotId: string): Promise<{ cleared: boolean }>;
-  promote(slotId: string): Promise<{ channelId: string } | null>;
+  promote(slotId: string): Promise<{
+    channelId: string;
+    channelTargetId: string;
+  } | null>;
   list(): Promise<QuickfireSessionSummary[]>;
 }
 
@@ -94,7 +102,10 @@ export interface MobileSlateDeps {
    * dedupe-aware path the quickfire sheet's ⧉ uses, so the slate command and
    * the sheet place one panel, never two.
    */
-  openChatPanelForChannel: (channelId: string) => Promise<void>;
+  openChatPanelForChannel: (
+    channelId: string,
+    channelTargetId: string,
+  ) => Promise<void>;
   /** Workspace switching is a native re-route + bundle reload; it lives in Settings. */
   openWorkspaceSettings: () => void;
   showQuickfireConversations: (rows: QuickfireSessionSummary[]) => void;
@@ -102,7 +113,7 @@ export interface MobileSlateDeps {
 
 export type MobileSlateRun = (
   args: Record<string, string>,
-  deps: MobileSlateDeps
+  deps: MobileSlateDeps,
 ) => Promise<MobileCommandOutcome> | MobileCommandOutcome;
 
 export interface MobileSlateCommand extends CommandSpec {
@@ -118,7 +129,8 @@ const MOBILE_RUNS: Record<string, MobileSlateRun> = {
     return { close: true };
   },
   "panel.close": (_args, deps) => {
-    if (deps.activePanelId) deps.performPanelCommand("archive", deps.activePanelId);
+    if (deps.activePanelId)
+      deps.performPanelCommand("archive", deps.activePanelId);
     return { close: true };
   },
   "panel.focus": ({ panel: panelId }, deps) => {
@@ -126,19 +138,23 @@ const MOBILE_RUNS: Record<string, MobileSlateRun> = {
     return { close: true };
   },
   "panel.pin": (_args, deps) => {
-    if (deps.activePanelId) deps.performPanelCommand("toggle-pin", deps.activePanelId);
+    if (deps.activePanelId)
+      deps.performPanelCommand("toggle-pin", deps.activePanelId);
     return { message: "Panel pinned", tone: "success" };
   },
   "panel.unpin": (_args, deps) => {
-    if (deps.activePanelId) deps.performPanelCommand("toggle-pin", deps.activePanelId);
+    if (deps.activePanelId)
+      deps.performPanelCommand("toggle-pin", deps.activePanelId);
     return { message: "Panel unpinned", tone: "success" };
   },
   "panel.reload": (_args, deps) => {
-    if (deps.activePanelId) deps.performPanelCommand("reload-panel", deps.activePanelId);
+    if (deps.activePanelId)
+      deps.performPanelCommand("reload-panel", deps.activePanelId);
     return { message: "Panel reloaded", tone: "success" };
   },
   "panel.duplicate": (_args, deps) => {
-    if (deps.activePanelId) deps.performPanelCommand("duplicate", deps.activePanelId);
+    if (deps.activePanelId)
+      deps.performPanelCommand("duplicate", deps.activePanelId);
     return { close: true };
   },
   "panel.copy-link": async (_args, deps) => {
@@ -151,24 +167,29 @@ const MOBILE_RUNS: Record<string, MobileSlateRun> = {
       createPanelShareUrl({
         source: observation.source,
         ...(observation.contextId ? { contextId: observation.contextId } : {}),
-      })
+      }),
     );
     return { message: "Panel link copied", tone: "success" };
   },
 
   // ---- Navigate ------------------------------------------------------------
   "nav.back": (_args, deps) => {
-    if (deps.activePanelId) deps.performPanelCommand("back", deps.activePanelId);
+    if (deps.activePanelId)
+      deps.performPanelCommand("back", deps.activePanelId);
     return { close: true };
   },
   "nav.forward": (_args, deps) => {
-    if (deps.activePanelId) deps.performPanelCommand("forward", deps.activePanelId);
+    if (deps.activePanelId)
+      deps.performPanelCommand("forward", deps.activePanelId);
     return { close: true };
   },
   "nav.open-url": async ({ url }, deps) => {
     const resolved = url ? browserUrlFromEntry(url) : null;
     if (!resolved) {
-      return { message: "That doesn't look like a web address.", tone: "warning" };
+      return {
+        message: "That doesn't look like a web address.",
+        tone: "warning",
+      };
     }
     await deps.panels.createBrowserUrlPanel(null, resolved, { focus: true });
     return { close: true };
@@ -176,7 +197,9 @@ const MOBILE_RUNS: Record<string, MobileSlateRun> = {
 
   // Not a navigation: it re-scopes the sheet to `@` narrowed to recent pages
   // by the visible `history:` token (§1.2 sub-scope).
-  "nav.history": () => ({ scope: { mode: "goto", query: `${HISTORY_SCOPE_TOKEN} ` } }),
+  "nav.history": () => ({
+    scope: { mode: "goto", query: `${HISTORY_SCOPE_TOKEN} ` },
+  }),
 
   // ---- Quickfire -----------------------------------------------------------
   // Desktop switches the one overlay into `/` mode; mobile hands off to the
@@ -206,9 +229,15 @@ const MOBILE_RUNS: Record<string, MobileSlateRun> = {
     if (!panelId) return {};
     const promoted = await deps.quickfire.promote(panelId);
     if (!promoted) {
-      return { message: "This panel has no conversation to open", tone: "warning" };
+      return {
+        message: "This panel has no conversation to open",
+        tone: "warning",
+      };
     }
-    await deps.openChatPanelForChannel(promoted.channelId);
+    await deps.openChatPanelForChannel(
+      promoted.channelId,
+      promoted.channelTargetId,
+    );
     return { close: true };
   },
   "quickfire.list": async (_args, deps) => {
@@ -278,7 +307,8 @@ export function buildMobileSlate(): MobileSlateCommand[] {
     .map((spec) => {
       const run = MOBILE_RUNS[spec.id];
       // A definition mobile advertises but cannot perform would be a dead row.
-      if (!run) throw new Error(`Mobile slate has no implementation for "${spec.id}"`);
+      if (!run)
+        throw new Error(`Mobile slate has no implementation for "${spec.id}"`);
       return { ...spec, run };
     });
 }

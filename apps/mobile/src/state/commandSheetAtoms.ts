@@ -45,6 +45,7 @@ export interface QuickfireSheetRequest {
    */
   conversation?: {
     channelId: string;
+    channelTargetId: string;
     contextId: string;
     focusMessageId?: string;
     replyTo?: { participantId: string; handle?: string };

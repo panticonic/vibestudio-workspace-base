@@ -16,38 +16,58 @@ const toastClient = vi.hoisted(() => ({
   dismiss: vi.fn(),
 }));
 const watchedEventHandlers = vi.hoisted(
-  () => new Map<string, (payload: Record<string, unknown>) => void>()
+  () => new Map<string, (payload: Record<string, unknown>) => void>(),
 );
 const directEventHandlers = vi.hoisted(
-  () => new Map<string, (payload: Record<string, unknown>) => void>()
+  () => new Map<string, (payload: Record<string, unknown>) => void>(),
 );
 
 vi.mock("../shell/client", () => ({
   userNotifications: shellClient,
   notification: toastClient,
-  events: { on: () => () => undefined, subscribe: async () => undefined, unsubscribe: async () => undefined },
+  events: {
+    on: () => () => undefined,
+    subscribe: async () => undefined,
+    unsubscribe: async () => undefined,
+  },
 }));
 vi.mock("../shell/useShellEvent", () => ({
-  useShellEvent: (event: string, callback: (payload: Record<string, unknown>) => void) => {
+  useShellEvent: (
+    event: string,
+    callback: (payload: Record<string, unknown>) => void,
+  ) => {
     watchedEventHandlers.set(event, callback);
   },
 }));
 vi.mock("../shell/useDirectShellEvent", () => ({
-  useDirectShellEvent: (event: string, callback: (payload: Record<string, unknown>) => void) => {
+  useDirectShellEvent: (
+    event: string,
+    callback: (payload: Record<string, unknown>) => void,
+  ) => {
     directEventHandlers.set(event, callback);
   },
 }));
 vi.mock("@radix-ui/themes", () => ({
-  Badge: ({ children, title }: { children?: React.ReactNode; title?: string }) => (
-    <span title={title}>{children}</span>
-  ),
-  Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+  Badge: ({
+    children,
+    title,
+  }: {
+    children?: React.ReactNode;
+    title?: string;
+  }) => <span title={title}>{children}</span>,
+  Button: ({
+    children,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button {...props}>{children}</button>
   ),
   Flex: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
     <div {...props}>{children}</div>
   ),
-  IconButton: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+  IconButton: ({
+    children,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
     <button {...props}>{children}</button>
   ),
   Spinner: () => <span>Loading</span>,
@@ -76,7 +96,7 @@ import { UserNotificationBar } from "./UserNotificationBar";
 
 function channelNotification(
   channelId: string,
-  patch: Partial<ShellUserNotification> = {}
+  patch: Partial<ShellUserNotification> = {},
 ): ShellUserNotification {
   return {
     id: `channel.invite:${channelId}`,
@@ -87,6 +107,7 @@ function channelNotification(
     revision: 1,
     channelInvite: {
       channelId,
+      channelTargetId: `do:workers/pubsub-channel:PubSubChannel:${channelId}`,
       channelTitle: `Conversation ${channelId}`,
       userId: "usr_bob",
       memberId: "user:usr_bob",
@@ -104,9 +125,8 @@ function channelNotification(
   };
 }
 
-
 function agentMessageNotification(
-  patch: Partial<ShellUserNotification> = {}
+  patch: Partial<ShellUserNotification> = {},
 ): ShellUserNotification {
   return {
     id: "agent.message:say:call-1:usr_bob",
@@ -118,6 +138,7 @@ function agentMessageNotification(
     revision: 1,
     agentMessage: {
       channelId: "ch-build",
+      channelTargetId: "do:workers/pubsub-channel:PubSubChannel:ch-build",
       messageId: "say:call-1",
       senderParticipantId: "do:builder",
       senderHandle: "builder",
@@ -141,7 +162,10 @@ describe("UserNotificationBar", () => {
   });
 
   it("renders a channel invitation from the generic inbox", async () => {
-    shellClient.list.mockResolvedValue([channelNotification("one"), channelNotification("two")]);
+    shellClient.list.mockResolvedValue([
+      channelNotification("one"),
+      channelNotification("two"),
+    ]);
     render(<UserNotificationBar />);
 
     expect(await screen.findByText("Conversation one")).toBeTruthy();
@@ -176,7 +200,7 @@ describe("UserNotificationBar", () => {
             active -= 1;
             resolve([]);
           });
-        })
+        }),
     );
     render(<UserNotificationBar />);
     await waitFor(() => expect(shellClient.list).toHaveBeenCalledTimes(1));
@@ -185,7 +209,7 @@ describe("UserNotificationBar", () => {
       directEventHandlers.get("user-notifications-changed")?.({ changedAt });
       watchedEventHandlers.get("server-connection-changed")?.({
         status: "connected",
-        isRemote: true
+        isRemote: true,
       });
     }
     expect(shellClient.list).toHaveBeenCalledTimes(1);
@@ -213,7 +237,9 @@ describe("UserNotificationBar", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: "Join" }));
 
-    await waitFor(() => expect(screen.queryByText("Conversation one")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText("Conversation one")).toBeNull(),
+    );
     expect(order).toEqual(["open", "acknowledge"]);
     expect(shellClient.acknowledge).toHaveBeenCalledWith("channel.invite:one");
   });
@@ -232,9 +258,13 @@ describe("UserNotificationBar", () => {
     ]);
     render(<UserNotificationBar />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "Dismiss Build complete" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Dismiss Build complete" }),
+    );
 
-    await waitFor(() => expect(screen.queryByText("Build complete")).toBeNull());
+    await waitFor(() =>
+      expect(screen.queryByText("Build complete")).toBeNull(),
+    );
     expect(shellClient.acknowledge).toHaveBeenCalledWith("build:done");
   });
 
@@ -295,9 +325,11 @@ describe("UserNotificationBar", () => {
 
     await waitFor(() => expect(order).toEqual(["open", "acknowledge"]));
     // The envelope the sender escalated is the one the panel is asked to show.
-    expect(shellClient.openChannel).toHaveBeenCalledWith("ch-build", {
-      focusMessageId: "say:call-1",
-    });
+    expect(shellClient.openChannel).toHaveBeenCalledWith(
+      "ch-build",
+      "do:workers/pubsub-channel:PubSubChannel:ch-build",
+      { focusMessageId: "say:call-1" },
+    );
   });
 
   it("groups several messages from one agent into one row with a count", async () => {
@@ -309,6 +341,7 @@ describe("UserNotificationBar", () => {
         createdAt: 30,
         agentMessage: {
           channelId: "ch-build",
+          channelTargetId: "do:workers/pubsub-channel:PubSubChannel:ch-build",
           messageId: "say:call-2",
           senderParticipantId: "do:builder",
           senderHandle: "builder",
@@ -320,7 +353,9 @@ describe("UserNotificationBar", () => {
 
     // Newest first, and the group count instead of a second interruption.
     expect(await screen.findByText("Fixed it.")).toBeTruthy();
-    expect(screen.getByTitle("2 messages from this agent").textContent).toBe("×2");
+    expect(screen.getByTitle("2 messages from this agent").textContent).toBe(
+      "×2",
+    );
   });
 
   it("replies in place through the conversation surface, then acknowledges", async () => {
@@ -330,9 +365,13 @@ describe("UserNotificationBar", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Reply" }));
 
     await waitFor(() =>
-      expect(shellClient.acknowledge).toHaveBeenCalledWith("agent.message:say:call-1:usr_bob")
+      expect(shellClient.acknowledge).toHaveBeenCalledWith(
+        "agent.message:say:call-1:usr_bob",
+      ),
     );
-    expect(shellClient.describeConversation).toHaveBeenCalledWith("ch-build");
+    expect(shellClient.describeConversation).toHaveBeenCalledWith(
+      "do:workers/pubsub-channel:PubSubChannel:ch-build",
+    );
     // The full panel is NOT opened for an in-place reply.
     expect(shellClient.openChannel).not.toHaveBeenCalled();
   });
@@ -343,6 +382,7 @@ describe("UserNotificationBar", () => {
         id: "agent.message:say:call-0:usr_bob",
         agentMessage: {
           channelId: "ch-build",
+          channelTargetId: "do:workers/pubsub-channel:PubSubChannel:ch-build",
           messageId: "say:call-0",
           senderParticipantId: "do:builder",
           rung: "interrupt",
@@ -360,6 +400,7 @@ describe("UserNotificationBar", () => {
         title: "Deploy blocked",
         agentMessage: {
           channelId: "ch-build",
+          channelTargetId: "do:workers/pubsub-channel:PubSubChannel:ch-build",
           messageId: "say:call-9",
           senderParticipantId: "do:builder",
           rung: "interrupt",
@@ -368,7 +409,9 @@ describe("UserNotificationBar", () => {
     ]);
     directEventHandlers.get("user-notifications-changed")?.({ changedAt: 30 });
     await waitFor(() => expect(toastClient.show).toHaveBeenCalledTimes(1));
-    expect(toastClient.show.mock.calls[0]?.[0]).toMatchObject({ title: "Deploy blocked" });
+    expect(toastClient.show.mock.calls[0]?.[0]).toMatchObject({
+      title: "Deploy blocked",
+    });
   });
 
   it("keeps the entry when opening fails, so a person never loses the message", async () => {
@@ -378,7 +421,9 @@ describe("UserNotificationBar", () => {
 
     fireEvent.click(await screen.findByText("Open"));
 
-    await waitFor(() => expect(screen.getByText(/panel host is down/)).toBeTruthy());
+    await waitFor(() =>
+      expect(screen.getByText(/panel host is down/)).toBeTruthy(),
+    );
     expect(shellClient.acknowledge).not.toHaveBeenCalled();
   });
 });
