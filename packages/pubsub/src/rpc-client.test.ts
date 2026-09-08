@@ -1368,7 +1368,7 @@ describe("connectViaRpc", () => {
                 { ok: true },
                 {
                   attachments: [
-                    { data: "aGVsbG8=", mimeType: "text/plain", name: "hello.txt" },
+                    { data: new TextEncoder().encode("hello"), mimeType: "text/plain", name: "hello.txt" },
                   ],
                 }
               ),
