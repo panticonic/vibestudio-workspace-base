@@ -579,7 +579,9 @@ export function sensitiveStatusAsJob(
     status.state === "running"
       ? "copying"
       : status.state === "complete"
-        ? "complete"
+        ? status.counts.some((count) => count.errors > 0)
+          ? "partial"
+          : "complete"
         : status.state === "cancelled"
           ? "cancelled"
           : "failed";
@@ -598,7 +600,10 @@ export function sensitiveStatusAsJob(
       ...count,
       itemsProcessed: count.read,
     })),
-    warnings: [],
+    warnings: status.counts.flatMap((count) => {
+      if (count.dataType !== "cookies" || count.skipped === 0) return [];
+      return [`${count.skipped} cookies were skipped. Some website sign-ins may not transfer.`];
+    }),
     error: status.error,
     resumable: status.state === "running",
   };

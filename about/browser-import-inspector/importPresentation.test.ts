@@ -282,3 +282,42 @@ describe("sealed sensitive import presentation", () => {
     });
   });
 });
+
+describe("protected import outcomes", () => {
+  it("surfaces skipped cookies without claiming that sign-in sessions transferred", () => {
+    const job = sensitiveStatusAsJob(
+      {
+        operationId: "cookies",
+        state: "complete",
+        counts: [
+          {
+            dataType: "cookies",
+            read: 942,
+            stored: 942,
+            skipped: 2864,
+            errors: 0,
+          },
+        ],
+      },
+      undefined,
+      desktopSelection
+    );
+    expect(job.warnings).toEqual([
+      "2864 cookies were skipped. Some website sign-ins may not transfer.",
+    ]);
+    expect(job.phase).toBe("complete");
+  });
+
+  it("shows a terminal protected import with record errors as partial", () => {
+    const job = sensitiveStatusAsJob(
+      {
+        operationId: "cookies",
+        state: "complete",
+        counts: [{ dataType: "cookies", read: 4, stored: 3, skipped: 0, errors: 1 }],
+      },
+      undefined,
+      desktopSelection
+    );
+    expect(job.phase).toBe("partial");
+  });
+});
