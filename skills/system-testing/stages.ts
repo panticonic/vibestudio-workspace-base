@@ -47,6 +47,8 @@ import { intentDiscoveryTests } from "./tests/intent-discovery.js";
 import { provenanceQuestionTests } from "./tests/provenance-questions.js";
 import { imageGenerationTests } from "./tests/image-generation.js";
 import { imagePanelTests } from "./tests/image-panel.js";
+import { adventureUiReviewTests } from "./tests/adventure-ui-review.js";
+import { adventureTurnProfileTests } from "./tests/adventure-turn-profile.js";
 import { adventureCampaignTests } from "./tests/adventure-campaign-play.js";
 
 export {
@@ -73,6 +75,8 @@ export {
   imagePanelTests,
   // Opt in when the examples adventure units are included in the tested workspace.
   adventureCampaignTests,
+  adventureTurnProfileTests,
+  adventureUiReviewTests,
   intentDiscoveryTests,
   messagingTests,
   interactionSurfaceTests,
