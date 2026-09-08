@@ -46,6 +46,7 @@ import type {
   MethodAdvertisement,
   JsonSchema,
   MethodExecutionContext,
+  MethodExecutionResult,
 } from "./protocol-types.js";
 import {
   AGENTIC_EVENT_PAYLOAD_KIND,
@@ -58,7 +59,7 @@ import {
   type MessageTier,
   type ParticipantRef,
 } from "@workspace/agentic-protocol";
-import { AgenticError } from "./protocol-types.js";
+import { AgenticError, METHOD_EXECUTION_RESULT } from "./protocol-types.js";
 import { ErrorMessageSchema, SignalMessageSchema } from "./protocol.js";
 import { createFanout } from "./async-queue.js";
 import { base64ToUint8Array } from "./image-utils.js";
@@ -1544,9 +1545,13 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
           })
         );
       },
-      resultWithAttachments: <R>(content: R, attachments: AttachmentInput[]) => ({
+      result: <R>(
+        content: R,
+        options: { attachments?: AttachmentInput[]; isError?: boolean } = {}
+      ): MethodExecutionResult<R> => ({
+        [METHOD_EXECUTION_RESULT]: true,
         content,
-        attachments,
+        ...options,
       }),
     };
 
@@ -1589,22 +1594,21 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
       if (
         result &&
         typeof result === "object" &&
-        "attachments" in (result as Record<string, unknown>) &&
-        "content" in (result as Record<string, unknown>)
+        METHOD_EXECUTION_RESULT in result
       ) {
-        const withAttachments = result as {
-          content: unknown;
-          attachments: AttachmentInput[];
-        };
+        const terminal = result as MethodExecutionResult<unknown>;
         terminalSubmitted = await submitMethodResult(
           event.invocationId,
           event.transportCallId,
-          withAttachments.content,
-          false,
+          terminal.content,
+          terminal.isError === true,
           {
             callerId: event.senderId,
             turnId: event.turnId,
-            attachments: withAttachments.attachments,
+            ...(terminal.attachments ? { attachments: terminal.attachments } : {}),
+            ...(terminal.isError
+              ? { terminalOutcome: "tool_error", terminalReasonCode: "method_result_error" }
+              : {}),
             providerClaimGeneration,
           }
         );

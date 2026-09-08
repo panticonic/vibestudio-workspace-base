@@ -1345,7 +1345,7 @@ describe("connectViaRpc", () => {
 
   describe("method execution", () => {
     it("executes registered method and publishes result back", async () => {
-      const executeFn = vi.fn().mockResolvedValue({ answer: 42 });
+      const executeFn = vi.fn().mockResolvedValue({ success: false });
 
       const client = connectViaRpc({
         rpc: mockRpc as any,
@@ -1355,6 +1355,11 @@ describe("connectViaRpc", () => {
             description: "compute something",
             parameters: z.object({ x: z.number() }),
             execute: executeFn,
+          },
+          computeError: {
+            parameters: z.object({}),
+            execute: async (_args: unknown, context: MethodExecutionContext) =>
+              context.result({ details: { success: false, error: "boom" } }, { isError: true }),
           },
         },
       });
@@ -1418,11 +1423,49 @@ describe("connectViaRpc", () => {
       // Args: doTarget, "submitMethodResult", pid, transportCallId, content, isError, opts
       const resultArgs = resultCall![2] as unknown[];
       expect(resultArgs[1]).toBe(TRANSPORT_ID_1);
-      expect(resultArgs[2]).toEqual({ answer: 42 });
+      // An ordinary payload that happens to contain success:false remains data.
+      expect(resultArgs[2]).toEqual({ success: false });
       expect(resultArgs[3]).toBe(false);
       expect(resultArgs[4]).toMatchObject({
         invocationId: CALL_ID_1,
         turnId: "turn-1",
+      });
+
+      mockRpc.call.mockClear();
+      emit({
+        stream: "log",
+        phase: "live",
+        id: 201,
+        type: AGENTIC_EVENT_PAYLOAD_KIND,
+        payload: invocation(
+          "invocation.started",
+          "invocation-error",
+          {
+            name: "computeError",
+            request: {},
+            transport: {
+              kind: "channel",
+              channelId: CHANNEL,
+              target: { kind: "panel", id: SELF_ID, participantId: SELF_ID },
+              transportCallId: "transport-error",
+            },
+          },
+          { transportCallId: "transport-error", turnId: "turn-error" }
+        ),
+        senderId: "caller-1",
+        ts: Date.now(),
+      });
+      await vi.waitFor(() => {
+        const errorCall = mockRpc.call.mock.calls.find(
+          (call: unknown[]) => call[1] === "submitMethodResult"
+        );
+        expect(errorCall?.[2]).toMatchObject([
+          expect.anything(),
+          "transport-error",
+          { details: { success: false, error: "boom" } },
+          true,
+          expect.objectContaining({ terminalOutcome: "tool_error" }),
+        ]);
       });
 
       await client.close();
