@@ -44,9 +44,12 @@ semantic provenance/VCS graph with a committed event and exact working head.
 Contexts, source, and runtime state stay inside their workspace. The native
 client runs from the user's System workspace; `about/new` opens locally in the
 current workspace. Workspace creation and selection belong to the native
-client's authenticated hub controls. Public application RPC forwarding between
-workspaces remains closed pending a receiver-trust decision; a workspace-qualified
-transport target does not enable it.
+client's authenticated hub controls. Cross-workspace RPC selects an explicit
+destination and requires the receiver method's declared exposure, the source's
+outgoing policy, and the destination's incoming policy. Passing those checks
+still requires the operation's ordinary authority; an approval cannot override
+a hard workspace policy. See [Sandbox](../sandbox/SKILL.md) and its runtime API
+reference for calls from agents.
 
 ### Contexts
 

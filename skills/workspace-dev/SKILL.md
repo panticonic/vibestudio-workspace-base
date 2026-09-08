@@ -10,10 +10,12 @@ materialized source and state. A context is a branch inside the workspace, not
 a cross-workspace source loader. Quickfire stays with the workspace of its
 target panel. Personal and System are private per-user workspaces; native
 client code comes from the user's System workspace, while `about/new` and
-other workspace-local pages load locally. Do not add cross-workspace source
-loading or application RPC forwarding. The transport can carry qualified
-identities, but forwarding remains closed pending the receiver-trust versus
-per-invocation-isolation decision.
+other workspace-local pages load locally. Cross-workspace integration uses
+ordinary RPC with an explicit destination; it does not load that workspace's
+source. The receiver must expose the method for cross-workspace use, and both
+the source's outgoing policy and destination's incoming policy must allow it
+before ordinary operation authority is considered. See [RPC.md](RPC.md) for
+the calling contract. Do not create a separate forwarding channel.
 
 Use [app development](../appdev/SKILL.md) for trusted apps and [extension
 development](../extensiondev/SKILL.md) for trusted Node services.

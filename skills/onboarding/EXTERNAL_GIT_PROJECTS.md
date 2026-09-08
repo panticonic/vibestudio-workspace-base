@@ -19,6 +19,13 @@ while still tracking an upstream Git remote. Common examples:
 Supported parent directories are `panels`, `packages`, `workers`,
 `skills`, `about`, `templates`, and `projects`.
 
+To use an app distributed as a workspace template, follow
+[Templates](../templates/SKILL.md) to inspect its exact source and open a new
+workspace. Importing a repository here edits source inside the current workspace;
+use it for a template only when the user wants to work on that template's source.
+The workspace chooser also handles local candidates selected with
+`--template-checkout`.
+
 ## Config Shape
 
 Shared remotes live under `git.remotes.<parent>.<name>.<remoteName>`.
