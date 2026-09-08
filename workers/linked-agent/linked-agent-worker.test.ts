@@ -204,17 +204,6 @@ class TestableLinkedAgentWorker extends LinkedAgentWorker {
       .toArray();
   }
 
-  terminalIntentRows(): Array<Record<string, unknown>> {
-    return this.sql
-      .exec(
-        `SELECT wake_id, channel_id, wake_kind, payload_json, disposition
-           FROM agent_wake_queue
-          WHERE wake_kind = 'subagent-terminal-publish'
-          ORDER BY created_at`,
-      )
-      .toArray();
-  }
-
   seedTerminalReceiptsForTest(count: number): void {
     for (let index = 0; index < count; index += 1) {
       const seq = Number(
@@ -809,6 +798,25 @@ describe("LinkedAgentWorker", () => {
     expect(worker.queueRows()).toHaveLength(0);
   });
 
+  it("does not bridge a retained follow-up that the provider resumes out-of-band", async () => {
+    const worker = await makeWorker();
+    await openTestBridge(worker);
+
+    await worker.processChannelEvent(
+      "ch-1",
+      completedMessageEvent({
+        id: 13,
+        messageId: "subagent-followup:call-followup",
+        senderId: "do:parent",
+        text: "continue the task",
+        to: [
+          { kind: "participant", participantId: worker.selfParticipantId() },
+        ],
+      }) as never,
+    );
+    expect(worker.queueRows()).toHaveLength(0);
+  });
+
   it("blocks sealed external input even when its display metadata looks benign", async () => {
     const worker = await makeWorker();
     await openTestBridge(worker);
@@ -1394,69 +1402,80 @@ describe("LinkedAgentWorker", () => {
     expect(worker.queueRows()).toHaveLength(0);
   });
 
-  it("settles the run as failed when the headless process exits without complete", async () => {
+  it("publishes a failed external assignment as an ordinary report and closed turn", async () => {
     const worker = await makeWorker(SUBAGENT_STATE_ARGS);
     worker.testCallerKind = "extension";
     worker.testCallerId = "@workspace-extensions/claude-code";
 
     const result = await worker.reportExternalExit({
       runId: "run-9",
+      messageId: "subagent-seed:run-9",
       code: 1,
       signal: null,
     });
     expect(result).toEqual({ ok: true, settled: true });
-    expect(worker.terminalIntentRows()).toHaveLength(1);
-    expect(
-      JSON.parse(String(worker.terminalIntentRows()[0]!["payload_json"])),
-    ).toMatchObject({
-      runId: "run-9",
-      taskChannelId: "ch-1",
-      parentRef: "do:parent-vessel",
-      outcome: "failed",
-      sourceEventId: "child-source-event",
-    });
-    expect(String(worker.terminalIntentRows()[0]!["payload_json"])).toContain(
-      "exit code 1",
+    const events = worker.gadCalls.flatMap((call) =>
+      call.method === "appendLogEvent"
+        ? ((call.args["events"] as
+            | Array<Record<string, unknown>>
+            | undefined) ?? [])
+        : [],
     );
-
-    // A duplicate report no-ops.
-    const again = await worker.reportExternalExit({
-      runId: "run-9",
-      code: 1,
-      signal: null,
-    });
-    expect(again).toEqual({ ok: true, settled: false });
-    expect(worker.terminalIntentRows()).toHaveLength(1);
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          payloadKind: "message.completed",
+          payload: expect.objectContaining({
+            blocks: [
+              expect.objectContaining({
+                content: expect.stringContaining("exit code 1"),
+              }),
+            ],
+          }),
+        }),
+        expect.objectContaining({ payloadKind: "turn.closed" }),
+      ]),
+    );
   });
 
-  it("settles a typed supervised result and rejects a foreign controller", async () => {
+  it("publishes distinct retained external results for successive assignment messages", async () => {
     const worker = await makeWorker(SUBAGENT_STATE_ARGS);
     worker.testCallerKind = "extension";
     worker.testCallerId = "@workspace-extensions/claude-code";
 
-    expect(
-      await worker.reportExternalResult({
-        runId: "run-9",
-        code: 0,
-        outcome: "success",
-        report: "audit complete",
-      }),
-    ).toEqual({ ok: true, settled: true });
-    expect(
-      JSON.parse(String(worker.terminalIntentRows()[0]!["payload_json"])),
-    ).toMatchObject({
+    await worker.reportExternalResult({
       runId: "run-9",
-      outcome: "completed",
-      report: "audit complete",
+      messageId: "subagent-seed:run-9",
+      code: 0,
+      outcome: "success",
+      report: "first audit complete",
     });
+    await worker.reportExternalResult({
+      runId: "run-9",
+      messageId: "subagent-followup:call-2",
+      code: 0,
+      outcome: "success",
+      report: "second audit complete",
+    });
+    const events = worker.gadCalls.flatMap((call) =>
+      call.method === "appendLogEvent"
+        ? ((call.args["events"] as
+            | Array<Record<string, unknown>>
+            | undefined) ?? [])
+        : [],
+    );
     expect(
-      await worker.reportExternalResult({
-        runId: "run-9",
-        code: 0,
-        outcome: "success",
-        report: "duplicate",
-      }),
-    ).toEqual({ ok: true, settled: false });
+      events.filter((event) => event["payloadKind"] === "message.completed"),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          envelopeId: expect.stringContaining("subagent-seed:run-9"),
+        }),
+        expect.objectContaining({
+          envelopeId: expect.stringContaining("subagent-followup:call-2"),
+        }),
+      ]),
+    );
 
     const foreign = await makeWorker(SUBAGENT_STATE_ARGS);
     foreign.testCallerKind = "extension";
@@ -1464,38 +1483,23 @@ describe("LinkedAgentWorker", () => {
     await expect(
       foreign.reportExternalResult({
         runId: "run-9",
+        messageId: "subagent-seed:run-9",
         outcome: "success",
         report: "forged",
       }),
     ).rejects.toThrow(/is not controller/);
-    expect(foreign.terminalIntentRows()).toHaveLength(0);
   });
 
-  it("ignores an exit report after a real complete or for a foreign run", async () => {
+  it("ignores a result for a foreign retained run", async () => {
     const worker = await makeWorker(SUBAGENT_STATE_ARGS);
-    // Real completion via the bridge first (agent caller).
-    await worker.completeFromBridge({ report: "done", outcome: "success" });
-    expect(worker.terminalIntentRows()).toHaveLength(1);
-
     worker.testCallerKind = "extension";
     worker.testCallerId = "@workspace-extensions/claude-code";
-    const afterComplete = await worker.reportExternalExit({
-      runId: "run-9",
-      code: 0,
-    });
-    expect(afterComplete).toEqual({ ok: true, settled: false });
-    expect(worker.terminalIntentRows()).toHaveLength(1);
-
-    // Foreign runId on a fresh duty-bearing vessel: refused.
-    const other = await makeWorker(SUBAGENT_STATE_ARGS);
-    other.testCallerKind = "extension";
-    other.testCallerId = "@workspace-extensions/claude-code";
     expect(
-      await other.reportExternalExit({ runId: "run-OTHER", code: 1 }),
-    ).toEqual({
-      ok: true,
-      settled: false,
-    });
-    expect(other.terminalIntentRows()).toHaveLength(0);
+      await worker.reportExternalExit({
+        runId: "run-OTHER",
+        messageId: "subagent-seed:run-OTHER",
+        code: 1,
+      }),
+    ).toEqual({ ok: true, settled: false });
   });
 });

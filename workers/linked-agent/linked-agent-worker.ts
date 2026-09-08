@@ -36,7 +36,6 @@ import {
   enqueueChannelSubscriptionBytes,
 } from "@workspace/pubsub";
 
-const COMPLETED_KEY = "linked:completed";
 const PRIMARY_CHANNEL_KEY = "linked:primaryChannelId";
 const OPEN_TURN_KEY = "linked:openTurn";
 const SESSION_KEY = "linked:session";
@@ -337,6 +336,11 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   }
 
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host"],
     effect: { kind: "open" },
     tier: "open",
@@ -463,6 +467,11 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   }
 
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host"],
     effect: { kind: "open" },
     tier: "open",
@@ -978,7 +987,11 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     // prompt (`claude -p <task>`); relaying it here would hand the session its
     // task twice (live push + attach replay). It stays on the channel for
     // trajectory visibility and `channel history`, just not in the bridge queue.
-    if (event.messageId.startsWith("subagent-seed:")) return;
+    if (
+      event.messageId.startsWith("subagent-seed:") ||
+      event.messageId.startsWith("subagent-followup:")
+    )
+      return;
     if (!sourceMessageId) {
       throw new Error(
         `linked input ${event.messageId} has no canonical source message identity; refusing an unwalkable turn`,
@@ -1019,9 +1032,14 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     }
   }
 
-  // ── Outbound: say / complete (plan §7.2) ───────────────────────────────────
+  // ── Outbound reports ───────────────────────────────────────────────────────
 
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host"],
     effect: { kind: "open" },
     tier: "open",
@@ -1112,33 +1130,17 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     return { ok: true, messageId, channelId };
   }
 
-  @rpc({
-    principals: ["host"],
-    effect: { kind: "open" },
-    tier: "open",
-    sensitivity: "read",
-  })
-  async completeFromBridge(opts: {
-    report: string;
-    outcome?: "success" | "failed";
-  }): Promise<{ ok: boolean }> {
-    this.requireBridgeCaller("completeFromBridge");
-    await this.completeAsSubagent(
-      typeof opts?.report === "string" ? opts.report : "",
-      opts?.outcome === "failed" ? "failed" : "success",
-    );
-    // Remembered so a process-exit report after a real complete is a no-op
-    // (belt on top of the parent-side post-terminal idempotency).
-    this.setStateValue(COMPLETED_KEY, "1");
-    return { ok: true };
-  }
-
   /**
    * Authoritative terminal result from the extension supervising a headless
    * external engine. The exact controller identity is stamped into STATE_ARGS
    * when the vessel is created; no unrelated extension may settle the run.
    */
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -1146,6 +1148,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   })
   async reportExternalResult(opts: {
     runId?: string;
+    messageId?: string;
     report?: string;
     outcome?: "success" | "failed";
     code?: number | null;
@@ -1155,17 +1158,12 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     if (!sub) return { ok: true, settled: false };
     if (!opts?.runId || opts.runId !== sub.runId)
       return { ok: true, settled: false };
-    if (this.getStateValue(COMPLETED_KEY)) return { ok: true, settled: false };
-    this.setStateValue(COMPLETED_KEY, "1");
     await this.closeCurrentBridge();
     const report =
       typeof opts.report === "string" && opts.report.trim()
         ? opts.report.trim()
         : `External agent completed with exit code ${opts.code ?? "unknown"} and no report.`;
-    await this.completeAsSubagent(
-      report,
-      opts.outcome === "failed" ? "failed" : "success",
-    );
+    await this.publishExternalAssignmentReport(opts.messageId, report);
     return { ok: true, settled: true };
   }
 
@@ -1180,6 +1178,11 @@ export class LinkedAgentWorker extends AgentWorkerBase {
    * unrelated extension cannot forge a terminal exit.
    */
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -1187,6 +1190,7 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   })
   async reportExternalExit(opts: {
     runId?: string;
+    messageId?: string;
     code?: number | null;
     signal?: string | null;
   }): Promise<{ ok: boolean; settled: boolean }> {
@@ -1195,23 +1199,77 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     if (!sub) return { ok: true, settled: false };
     if (opts?.runId && opts.runId !== sub.runId)
       return { ok: true, settled: false };
-    if (this.getStateValue(COMPLETED_KEY)) return { ok: true, settled: false };
-    this.setStateValue(COMPLETED_KEY, "1");
     await this.closeCurrentBridge();
     const exitDesc =
       typeof opts?.signal === "string" && opts.signal
         ? `signal ${opts.signal}`
         : `exit code ${opts?.code ?? "unknown"}`;
-    await this.completeAsSubagent(
-      `Claude Code session exited (${exitDesc}) without calling complete. ` +
-        "Settled as failed; inspect the task channel transcript and the child " +
+    await this.publishExternalAssignmentReport(
+      opts.messageId,
+      `Claude Code session exited (${exitDesc}) without a final result. ` +
+        "Inspect the task channel transcript and the child " +
         "context for partial work.",
-      "failed",
     );
     return { ok: true, settled: true };
   }
 
+  protected override async subagentExecutionActive(): Promise<boolean> {
+    return this.bridgeStream !== null || this.openTurn() !== null;
+  }
+
+  private async publishExternalAssignmentReport(
+    assignmentMessageId: string | undefined,
+    report: string,
+  ): Promise<void> {
+    if (
+      typeof assignmentMessageId !== "string" ||
+      (!assignmentMessageId.startsWith("subagent-seed:") &&
+        !assignmentMessageId.startsWith("subagent-followup:"))
+    ) {
+      throw new Error(
+        "external assignment result requires its canonical task message id",
+      );
+    }
+    await this.closeOpenTurn("external assignment settled by its provider");
+    const channelId = this.primaryChannelId();
+    if (!channelId) throw new Error("external assignment has no task channel");
+    const participantId = this.participantId();
+    const turnId = ids.turnId(channelId, assignmentMessageId, participantId);
+    const messageId = `external-report:${assignmentMessageId}`;
+    await this.appendTrajectory(channelId, [
+      this.triggeredTurnOpenedItem(turnId, assignmentMessageId),
+      {
+        envelopeId: ids.messageTerminal(messageId),
+        payloadKind: "message.completed",
+        payload: {
+          protocol: AGENTIC_PROTOCOL_VERSION,
+          role: "assistant",
+          blocks: [
+            { blockId: `${messageId}:block:0`, type: "text", content: report },
+          ],
+          outcome: "completed",
+          tier: "primary",
+          metadata: { source: "external-provider-result" },
+        },
+        causality: { turnId, messageId },
+        publish: true,
+      },
+      {
+        envelopeId: ids.turnClosed(turnId),
+        payloadKind: "turn.closed",
+        payload: { protocol: AGENTIC_PROTOCOL_VERSION },
+        causality: { turnId },
+        publish: true,
+      },
+    ]);
+  }
+
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host"],
     effect: { kind: "open" },
     tier: "open",
@@ -1277,6 +1335,11 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   }
 
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -1408,6 +1471,11 @@ export class LinkedAgentWorker extends AgentWorkerBase {
   // ── Observable trajectory and causal recording from hooks (plan §7.4) ─────
 
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host"],
     effect: { kind: "open" },
     tier: "open",
@@ -2367,7 +2435,6 @@ export class LinkedAgentWorker extends AgentWorkerBase {
     forkPointPubsubId: number;
   }): Promise<void> {
     await this.closeCurrentBridge();
-    this.setStateValue(COMPLETED_KEY, "");
     this.setStateValue(OPEN_TURN_KEY, "");
     this.setStateValue(SESSION_KEY, "");
     this.setStateValue(PRIMARY_CHANNEL_KEY, ctx.newChannelId);

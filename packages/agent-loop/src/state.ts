@@ -146,6 +146,8 @@ export interface AgentLoopConfig {
    *  nothing. Read it through `isNotifyOnlyPolicy`; only ever write
    *  "notify-only". */
   publishPolicy?: "all" | "turn-final" | "notify-only" | "say-only";
+  /** Participant audience for this agent's primary end-of-turn response. */
+  finalResponseParticipantId?: string;
   /** Max subagent nesting depth (enforced at spawn by the vessel). Absent ⇒
    *  the vessel's implementation default. */
   maxSubagentDepth?: number;
@@ -210,10 +212,10 @@ export interface AgentTurnMetadata {
    *  deferred post-turn queue and promoted (one per turn) after close, instead
    *  of steering the open turn. */
   deliverAfterTurn?: boolean;
-  /** Exact retained child run whose terminal report this deferred prompt
-   * carries. Runtime-owned: it lets a same-turn suspend release the report
-   * without treating every completed-but-unintegrated child as pending input. */
-  supervisedTerminalRunId?: string;
+  /** Exact retained child run whose deferred report this prompt carries.
+   * Runtime-owned: it lets a same-turn suspend release the report once the
+   * child's current turn closes without retiring the collaborator. */
+  supervisedRunId?: string;
   /**
    * A machine-stable user-interface selection carried by the same message as
    * its readable text. The context builder exposes this bounded structure to

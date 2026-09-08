@@ -63,20 +63,6 @@ function validateSubagentDiff(result: TestExecutionResult, integrate: boolean) {
       reason: "The child launch receipt did not identify its exact run",
     };
   }
-  const task = result.messages.find(
-    (message) =>
-      message.task?.id === spawn.id &&
-      message.task.execution.status === "complete" &&
-      message.task.execution.terminalOutcome === "success" &&
-      message.task.execution.isError !== true
-  )?.task;
-  const sourceEventId = record(record(task?.execution.result)?.["details"])?.["sourceEventId"];
-  if (typeof sourceEventId !== "string" || !sourceEventId) {
-    return {
-      passed: false,
-      reason: "The exact terminal child did not retain a committed source event",
-    };
-  }
   const inspection = calls.find((call) => {
     if (
       call.name !== "inspect_subagent" ||
@@ -92,16 +78,20 @@ function validateSubagentDiff(result: TestExecutionResult, integrate: boolean) {
     return (
       sameRunReference(details?.["runId"], runHandle) &&
       integration?.["state"] === "unattempted" &&
-      integration["sourceEventId"] === sourceEventId
+      typeof integration["sourceEventId"] === "string" &&
+      integration["sourceEventId"].length > 0
     );
   });
   if (!inspection) {
     return {
       passed: false,
       reason:
-        "No bounded diff joined the exact terminal child's committed event to an unintegrated parent state",
+        "No bounded diff identified the child's committed event against the unintegrated parent state",
     };
   }
+  const sourceEventId = String(
+    record(callDetails(inspection)?.["semanticIntegration"])?.["sourceEventId"]
+  );
   const diff = protocolText(inspection);
   const escapedEvent = sourceEventId.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
   if (
@@ -160,7 +150,95 @@ function validateSubagentDiff(result: TestExecutionResult, integrate: boolean) {
   return noIncompleteInvocations(result);
 }
 
+function validateSubagentFollowup(result: TestExecutionResult) {
+  const base = validateAgentCompletionReport(result);
+  if (!base.passed) return base;
+  const calls = getToolCalls(result);
+  const successful = (call: (typeof calls)[number]) =>
+    call.execution?.status === "complete" && call.execution.isError !== true;
+  const launches = calls.filter((call) => call.name === "spawn_subagent" && successful(call));
+  const handle = launches[0] ? callDetails(launches[0])?.["runId"] : undefined;
+  if (launches.length !== 1 || typeof handle !== "string") {
+    return {
+      passed: false,
+      reason: "The follow-up did not retain exactly one collaborator",
+    };
+  }
+  const inspections = calls.filter(
+    (call) =>
+      call.name === "inspect_subagent" &&
+      call.arguments?.["query"] === "diff" &&
+      sameRunReference(call.arguments?.["runId"], handle) &&
+      successful(call)
+  );
+  const first = inspections[0];
+  const last = inspections.at(-1);
+  const source = (call: (typeof calls)[number] | undefined) =>
+    call ? record(callDetails(call)?.["semanticIntegration"])?.["sourceEventId"] : undefined;
+  if (
+    !first ||
+    !last ||
+    first === last ||
+    typeof source(first) !== "string" ||
+    typeof source(last) !== "string" ||
+    source(first) === source(last)
+  ) {
+    return {
+      passed: false,
+      reason: "The same child's two reviewed commits were not observed",
+    };
+  }
+  const followup = calls.find((call) => {
+    const to = call.arguments?.["to"];
+    const refs = Array.isArray(to) ? to : [to];
+    return (
+      call.name === "notify" &&
+      successful(call) &&
+      calls.indexOf(call) > calls.indexOf(first) &&
+      calls.indexOf(call) < calls.indexOf(last) &&
+      refs.some(
+        (ref) =>
+          typeof ref === "string" &&
+          ref.startsWith("run:") &&
+          sameRunReference(ref.slice(4), handle)
+      )
+    );
+  });
+  if (!followup)
+    return {
+      passed: false,
+      reason: "No successful follow-up reached the retained child",
+    };
+  const merged = calls.some((call) => {
+    const details = callDetails(call);
+    const resolution = record(record(details?.["review"])?.["resolution"]);
+    return (
+      call.name === "merge_subagent" &&
+      successful(call) &&
+      calls.indexOf(call) > calls.indexOf(last) &&
+      sameRunReference(call.arguments?.["runId"], handle) &&
+      details?.["sourceEventId"] === source(last) &&
+      resolution?.["complete"] === true &&
+      resolution["concluded"] === true &&
+      resolution["remainingCoordinateCount"] === 0
+    );
+  });
+  if (!merged) return { passed: false, reason: "The follow-up commit was not integrated" };
+  return noIncompleteInvocations(result);
+}
+
 export const agentOrchestrationTests: TestCase[] = [
+  {
+    name: "subagent-followup-after-report",
+    description:
+      "A finished collaborator accepts follow-up work in its retained context and the parent integrates the resulting commit",
+    category: "agent-orchestration",
+    workspaceRepoFixture: BUILDABLE_PACKAGE_WORKSPACE_REPO_FIXTURE,
+    prompt:
+      "Ask a fresh subagent to add a small deterministic typed export named firstValue in the disposable package and report back when finished. Review that committed change without merging it. Then ask that same subagent to add a second typed export named secondValue using firstValue. Review the new committed diff and integrate it. Keep the same collaborator and its work context throughout; summarize both changes.",
+    validation: "agent-evidence",
+    validate: validateSubagentFollowup,
+  },
   {
     name: "subagent-diff-inspection",
     description:

@@ -9,14 +9,18 @@ describe("agent orchestration scenarios", () => {
     for (const test of agentOrchestrationTests) {
       expect(agentGoalPromptFindings(test.prompt), test.name).toEqual([]);
       expect(test.validation, test.name).toBe(
-        ["subagent-diff-inspection", "subagent-reviewed-merge"].includes(test.name)
+        [
+          "subagent-diff-inspection",
+          "subagent-reviewed-merge",
+          "subagent-followup-after-report",
+        ].includes(test.name)
           ? "agent-evidence"
           : undefined
       );
     }
   });
 
-  it("joins the reviewed diff to the exact terminal child's committed event", () => {
+  it("joins the reviewed context commit to the exact merge source without a completion record", () => {
     const test = agentOrchestrationTests.find(({ name }) => name === "subagent-diff-inspection")!;
     const runId = "spawn-run-with-a-long-canonical-identity";
     const runHandle = "spawn-run-with-a-long-ca…";
@@ -67,18 +71,7 @@ describe("agent orchestration scenarios", () => {
             kind: "message",
             senderId: "agent",
             complete: true,
-            contentType: "task",
-            task: {
-              id: runId,
-              taskType: "subagent",
-              title: "Add an export",
-              execution: {
-                status: "complete",
-                terminalOutcome: "success",
-                description: "",
-                result: { details: { sourceEventId } },
-              },
-            },
+            content: "The typed export is committed and ready for review.",
           },
           invocation(
             "inspect_subagent",
@@ -104,6 +97,65 @@ describe("agent orchestration scenarios", () => {
           },
         ],
       }) as TestExecutionResult;
+
+    const followupTest = agentOrchestrationTests.find(
+      ({ name }) => name === "subagent-followup-after-report"
+    )!;
+    const continued = execution();
+    const secondEvent = "workspace-event:followup-commit";
+    continued.messages.splice(
+      -1,
+      0,
+      invocation(
+        "notify",
+        "followup",
+        { to: [`run:${runHandle}`], content: "Add secondValue" },
+        {}
+      ),
+      invocation(
+        "inspect_subagent",
+        "inspect-followup",
+        { runId: runHandle, query: "diff" },
+        {
+          runId: runHandle,
+          semanticIntegration: {
+            state: "unattempted",
+            sourceEventId: secondEvent,
+          },
+        }
+      ),
+      invocation(
+        "merge_subagent",
+        "merge-followup",
+        { runId: runHandle },
+        {
+          runId: runHandle,
+          sourceEventId: secondEvent,
+          review: {
+            resolution: {
+              complete: true,
+              concluded: true,
+              remainingCoordinateCount: 0,
+            },
+          },
+        }
+      )
+    );
+    expect(followupTest.validate(continued).passed).toBe(true);
+    const missingFollowup = {
+      ...continued,
+      messages: continued.messages.filter((message) => message.id !== "followup"),
+    };
+    expect(followupTest.validate(missingFollowup).passed).toBe(false);
+    expect(followupTest.validate(execution()).passed).toBe(false);
+    const newCollaborator = {
+      ...continued,
+      messages: [
+        ...continued.messages,
+        invocation("spawn_subagent", "replacement", {}, { runId: "another-run" }),
+      ],
+    };
+    expect(followupTest.validate(newCollaborator).passed).toBe(false);
 
     expect(test.validate(execution())).toEqual({
       passed: true,
@@ -158,7 +210,11 @@ describe("agent orchestration scenarios", () => {
           runId: runHandle,
           sourceEventId,
           review: {
-            resolution: { complete: false, concluded: false, remainingCoordinateCount: 1 },
+            resolution: {
+              complete: false,
+              concluded: false,
+              remainingCoordinateCount: 1,
+            },
           },
         }
       )

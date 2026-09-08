@@ -374,6 +374,37 @@ function deferred<T>() {
 }
 
 describe("AgentLoopDriver", () => {
+  it("addresses a primary final response to a configured supervisor", async () => {
+    const harness = await makeHarness({
+      config: {
+        ...config,
+        finalResponseParticipantId: "participant:parent",
+      },
+      script: { model: [textReply("finished")], tool: [] },
+    });
+
+    await harness.driver.handleIncoming(CHANNEL, promptIncoming());
+    await settle(harness.driver);
+
+    const rows = inspectSql<{ rows: Array<{ payload_ref_json: string }> }>(
+      harness.gad,
+      `SELECT payload_ref_json FROM log_events
+       WHERE log_id = ? AND payload_kind = 'message.completed'
+       ORDER BY seq`,
+      [LOG_ID],
+    )
+      .rows.map(
+        (row) => JSON.parse(row.payload_ref_json) as Record<string, unknown>,
+      )
+      .filter((payload) => payload.role === "assistant");
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      tier: "primary",
+      to: [{ kind: "participant", participantId: "participant:parent" }],
+    });
+  });
+
   it("journals a model-free automation eval as one visible invocation and closes from its result", async () => {
     const closed: Parameters<NonNullable<DriverDeps["onTurnClosed"]>>[0][] = [];
     const observed: EffectDescriptor[] = [];
