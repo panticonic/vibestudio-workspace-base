@@ -925,19 +925,17 @@ export type GitHubPagesObservation =
       files: number;
     };
 
-/** Observe an existing publication. Retrying observation never creates a repo, pushes, or changes Pages. */
-export async function observeGitHubPagesPublication(
-  github: Pick<GitHubClient, "getPages" | "getLatestPagesBuild">,
-  input: {
-    owner: string;
-    repository: string;
-    branch: string;
-    commit: string;
-    buildId: string;
-    signal?: AbortSignal;
-  },
-  readPublic: (url: string, signal?: AbortSignal) => Promise<Response>,
-): Promise<GitHubPagesObservation> {
+/** Retain this receipt after Git publication; retries observe the same commit and build. */
+export interface GitHubPagesPublication {
+  owner: string;
+  repository: string;
+  branch: string;
+  commit: string;
+  buildId: string;
+  signal?: AbortSignal;
+}
+
+function assertPagesPublication(input: GitHubPagesPublication): void {
   if (
     !/^[a-f0-9]{40}$/.test(input.commit) ||
     !/^[a-f0-9]{64}$/.test(input.buildId)
@@ -946,6 +944,32 @@ export async function observeGitHubPagesPublication(
       "Publication observation requires the exact reviewed commit and build identity",
     );
   input.signal?.throwIfAborted();
+}
+
+/** Enable the existing /docs owner, then verify its actual publication. Never creates or pushes a repository. */
+export async function configureGitHubPagesPublication(
+  github: Pick<
+    GitHubClient,
+    "ensurePagesSource" | "getPages" | "getLatestPagesBuild"
+  >,
+  input: GitHubPagesPublication,
+  readPublic: (url: string, signal?: AbortSignal) => Promise<Response>,
+): Promise<GitHubPagesObservation> {
+  assertPagesPublication(input);
+  await github.ensurePagesSource(input.owner, input.repository, {
+    branch: input.branch,
+    path: "/docs",
+  });
+  return observeGitHubPagesPublication(github, input, readPublic);
+}
+
+/** Observe an existing publication. Retrying observation never creates a repo, pushes, or changes Pages. */
+export async function observeGitHubPagesPublication(
+  github: Pick<GitHubClient, "getPages" | "getLatestPagesBuild">,
+  input: GitHubPagesPublication,
+  readPublic: (url: string, signal?: AbortSignal) => Promise<Response>,
+): Promise<GitHubPagesObservation> {
+  assertPagesPublication(input);
   const site = await github.getPages(input.owner, input.repository);
   if (!site) return { state: "not-configured" };
   const siteUrl = site.html_url;

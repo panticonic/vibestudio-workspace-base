@@ -57,3 +57,9 @@ be compared and integrated normally.
 Read [Git Bridge](../../extensions/git-bridge/SKILL.md) for upstream status,
 pull, push, divergence, credentials, and provider publication. Don't duplicate
 that sync machinery here.
+
+## Websites
+
+For the build, exact-source review, Git publication, Pages configuration and
+read-only deployment recovery workflow, read [GitHub Pages](PAGES.md). Use the
+existing `publish-pages` account choice and retain the exact commit/build receipt.

@@ -940,3 +940,9 @@ export function formatGitHubOnboardingStatus(
     lines.push(`nextActions=${status.nextActions.join(" | ")}`);
   return lines.join("\n");
 }
+
+export {
+  enableGitHubPages,
+  observeGitHubPages,
+  type GitHubPagesPublication,
+} from "./pages.js";

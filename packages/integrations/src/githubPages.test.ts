@@ -8,7 +8,7 @@ const site = {
   public: true,
   build_type: "legacy",
   source: { branch: "main", path: "/docs" },
-};
+} as const;
 function fixture(responses: Response[]) {
   const fetch = vi.fn(async () => {
     const response = responses.shift();
@@ -186,4 +186,54 @@ it("verifies the exact served build and every reviewed file under the project pr
     observedCommit: "c".repeat(40),
   });
   expect(read).not.toHaveBeenCalled();
+});
+
+describe("reviewed Pages configuration workflow", () => {
+  it("validates the publication before allowing configuration", async () => {
+    const { configureGitHubPagesPublication } = await import("./github.js");
+    const github = {
+      ensurePagesSource: vi.fn(),
+      getPages: vi.fn(),
+      getLatestPagesBuild: vi.fn(),
+    };
+    await expect(
+      configureGitHubPagesPublication(
+        github,
+        {
+          owner: "owner",
+          repository: "app",
+          branch: "main",
+          commit: "unreviewed",
+          buildId: "b".repeat(64),
+        },
+        vi.fn(),
+      ),
+    ).rejects.toThrow("exact reviewed commit");
+    expect(github.ensurePagesSource).not.toHaveBeenCalled();
+  });
+
+  it("configures /docs and reports pending publication without claiming deployment", async () => {
+    const { configureGitHubPagesPublication } = await import("./github.js");
+    const publication = {
+      owner: "owner",
+      repository: "app",
+      branch: "main",
+      commit: "a".repeat(40),
+      buildId: "b".repeat(64),
+    };
+    const github = {
+      ensurePagesSource: vi.fn(async () => site),
+      getPages: vi.fn(async () => site),
+      getLatestPagesBuild: vi.fn(async () => null),
+    };
+    const readPublic = vi.fn();
+    await expect(
+      configureGitHubPagesPublication(github, publication, readPublic),
+    ).resolves.toMatchObject({ state: "building" });
+    expect(github.ensurePagesSource).toHaveBeenCalledWith("owner", "app", {
+      branch: "main",
+      path: "/docs",
+    });
+    expect(readPublic).not.toHaveBeenCalled();
+  });
 });

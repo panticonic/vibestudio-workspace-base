@@ -41,7 +41,8 @@ export function ConnectionControl() {
 
 Call `connectWorkspace()` directly from a fresh user action. A page cannot open
 connection consent from a timer, import, background retry, or resource request.
-The isolated provider consumes each trusted input before asynchronous admission.
+The host consumes trusted input before asynchronous admission; page message payloads
+cannot manufacture that evidence.
 After denial, let the user choose Connect again. Never automate the approval
 surface or disguise another action as Connect.
 
@@ -117,7 +118,8 @@ creation, source publication, Pages configuration, and remote push are external
 effects requiring their ordinary authority. Never use `gh auth`, copy a token
 into the page, or report a URL live merely because a push succeeded. Verify the
 reviewed commit, served build manifest, and assets. The automated end-to-end
-publication workflow remains unfinished.
+configuration and observation helpers are documented in [GitHub Pages](../github/PAGES.md);
+real public deployment acceptance remains outstanding.
 
 For template offers and exact-source inspection, see [templates](../templates/SKILL.md).
 A template link opens trusted review; it grants no website workspace access.
