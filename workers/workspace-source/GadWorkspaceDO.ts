@@ -6886,6 +6886,13 @@ export class GadWorkspaceDO extends DurableObjectBase {
       input?.channelId,
       "putChannelMembership",
     );
+    const channelTargetId =
+      typeof input?.channelTargetId === "string"
+        ? input.channelTargetId.trim()
+        : "";
+    if (!channelTargetId) {
+      throw new Error("putChannelMembership: channelTargetId is required");
+    }
     this.assertInviteChannelAuthority(channelId, "putChannelMembership");
     const memberId = `user:${userId}`;
     if (input?.memberId !== memberId) {
@@ -6939,6 +6946,7 @@ export class GadWorkspaceDO extends DurableObjectBase {
           {
             userId,
             channelId,
+            channelTargetId,
             memberId,
             handle,
             addedBy,
