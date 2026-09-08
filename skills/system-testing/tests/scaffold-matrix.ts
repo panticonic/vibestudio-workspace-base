@@ -9,7 +9,10 @@ import {
   type WorkspaceRepoCreationScope,
 } from "../types.js";
 import { getToolCalls } from "./_helpers.js";
-import { completedScenarioEvidence, walkRecords } from "./_scenario-evidence.js";
+import {
+  completedScenarioEvidence,
+  walkRecords,
+} from "./_scenario-evidence.js";
 
 type ExecutableScaffold = {
   name: string;
@@ -89,7 +92,7 @@ function details(value: unknown): Record<string, unknown> | null {
 function createdScaffold(
   record: Record<string, unknown>,
   projectType: ExecutableScaffold["projectType"] | "project",
-  section: ExecutableScaffold["section"] | "projects"
+  section: ExecutableScaffold["section"] | "projects",
 ): boolean {
   const preflight = record["preflight"];
   const publication = record["publication"];
@@ -106,7 +109,10 @@ function createdScaffold(
   );
 }
 
-function successfulBuildReceipt(record: Record<string, unknown>, target: string): boolean {
+function successfulBuildReceipt(
+  record: Record<string, unknown>,
+  target: string,
+): boolean {
   const receipt = record["receipt"];
   if (
     !isRecord(receipt) ||
@@ -133,12 +139,15 @@ function successfulBuildReceipt(record: Record<string, unknown>, target: string)
       (build) =>
         isRecord(build) &&
         typeof build["target"] === "string" &&
-        typeof build["buildKey"] === "string"
+        typeof build["buildKey"] === "string",
     )
   );
 }
 
-function validateExecutableScaffold(result: TestExecutionResult, variant: ExecutableScaffold) {
+function validateExecutableScaffold(
+  result: TestExecutionResult,
+  variant: ExecutableScaffold,
+) {
   const base = completedScenarioEvidence(result, ["eval", "verify"]);
   if (!base.passed) return base;
   const calls = getToolCalls(result);
@@ -148,21 +157,32 @@ function validateExecutableScaffold(result: TestExecutionResult, variant: Execut
       call.execution?.status === "complete" &&
       call.execution.isError !== true &&
       walkRecords([details(call.execution.result)]).some((record) =>
-        createdScaffold(record, variant.projectType, variant.section)
-      )
+        createdScaffold(record, variant.projectType, variant.section),
+      ),
   );
   if (createIndex < 0) {
-    return { passed: false, reason: `No published ${variant.projectType} scaffold was returned` };
+    return {
+      passed: false,
+      reason: `No published ${variant.projectType} scaffold was returned`,
+    };
   }
   const target = walkRecords([details(calls[createIndex]!.execution?.result)])
     .map((record) => record["created"])
     .find(
       (value): value is string =>
-        typeof value === "string" && value.startsWith(`${variant.section}/`)
+        typeof value === "string" && value.startsWith(`${variant.section}/`),
     );
-  if (!target) return { passed: false, reason: "The scaffold result had no exact repository path" };
+  if (!target)
+    return {
+      passed: false,
+      reason: "The scaffold result had no exact repository path",
+    };
   const buildIndex = calls.findIndex((call, index) => {
-    if (index <= createIndex || call.name !== "verify" || call.execution?.isError === true) {
+    if (
+      index <= createIndex ||
+      call.name !== "verify" ||
+      call.execution?.isError === true
+    ) {
       return false;
     }
     const value = details(call.execution?.result);
@@ -172,7 +192,8 @@ function validateExecutableScaffold(result: TestExecutionResult, variant: Execut
     ? { passed: true, reason: undefined }
     : {
         passed: false,
-        reason: "The published scaffold was not followed by a clean exact build receipt",
+        reason:
+          "The published scaffold was not followed by a clean exact build receipt",
       };
 }
 
@@ -180,10 +201,13 @@ function validateContentScaffold(result: TestExecutionResult) {
   const base = completedScenarioEvidence(result, ["eval"]);
   if (!base.passed) return base;
   return walkRecords(base.evidence.evalValues).some((record) =>
-    createdScaffold(record, "project", "projects")
+    createdScaffold(record, "project", "projects"),
   )
     ? { passed: true, reason: undefined }
-    : { passed: false, reason: "No published content-only project scaffold was returned" };
+    : {
+        passed: false,
+        reason: "No published content-only project scaffold was returned",
+      };
 }
 
 export const scaffoldMatrixTests: TestCase[] = [
@@ -195,15 +219,15 @@ export const scaffoldMatrixTests: TestCase[] = [
       workspaceRepoFixture: variant.fixture,
       prompt: variant.prompt,
       validate: (result) => validateExecutableScaffold(result, variant),
-    })
+    }),
   ),
   {
     name: "scaffold-content-project-preflight",
-    description: "Publish the content-only project scaffold",
+    description: "Publish a local content-only project repository",
     category: "scaffold-matrix",
     workspaceRepoFixture: CREATED_PROJECT_WORKSPACE_REPO_FIXTURE,
     prompt:
-      "Create and publish a brand-new isolated content-only workspace project from the standard scaffold and report its validated preflight result.",
+      "Create and publish a brand-new isolated content-only project repository (projectType `project`) inside this workspace from the standard project scaffold, then report its validated preflight result.",
     validate: validateContentScaffold,
   },
 ];
