@@ -16,7 +16,6 @@ const clients = vi.hoisted(() => ({
     getProfile: vi.fn(),
     workspaceCreationReceipt: vi.fn(),
     listWorkspaces: vi.fn(),
-    listTemplateCandidates: vi.fn(),
     createWorkspace: vi.fn(),
     routeWorkspace: vi.fn(),
   },
@@ -63,7 +62,6 @@ beforeEach(() => {
       lastOpened: 1,
     },
   ]);
-  clients.hubControl.listTemplateCandidates.mockResolvedValue([]);
   clients.hubControl.createWorkspace.mockResolvedValue({
     workspaceId: "new-id",
     name: "garden",
@@ -116,18 +114,6 @@ describe("WorkspaceChooser", () => {
     expect(store.get(workspaceChooserDialogOpenAtom)).toBe(false);
   });
 
-  it("reports candidate discovery failure instead of silently hiding selected sources", async () => {
-    clients.hubControl.listTemplateCandidates.mockRejectedValue(
-      new Error("candidate transport unavailable"),
-    );
-    draw(true);
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "Could not load workspace sources: candidate transport unavailable",
-    );
-    expect(clients.templates.inspect).not.toHaveBeenCalled();
-    expect(clients.hubControl.createWorkspace).not.toHaveBeenCalled();
-  });
-
   it("opens creation directly without duplicating the sidebar workspace list", async () => {
     draw();
     await screen.findByRole("textbox", { name: "Workspace source address" });
@@ -154,32 +140,6 @@ describe("WorkspaceChooser", () => {
     await waitFor(() =>
       expect(clients.openWorkspace).toHaveBeenCalledWith("new-id"),
     );
-  });
-  it("uses the host-validated candidate for an exact onboarding pin", async () => {
-    clients.hubControl.listTemplateCandidates.mockResolvedValue([inspection]);
-    draw(true);
-
-    await screen.findByRole("button", { name: "Create workspace" });
-    expect(clients.templates.inspect).not.toHaveBeenCalled();
-  });
-  it("creates directly from a host-validated local candidate", async () => {
-    clients.hubControl.listTemplateCandidates.mockResolvedValue([inspection]);
-    draw();
-    fireEvent.click(
-      await screen.findByRole("button", { name: "Explore Garden" }),
-    );
-    fireEvent.change(screen.getByRole("textbox", { name: "Workspace name" }), {
-      target: { value: "local-garden" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
-    await waitFor(() =>
-      expect(clients.hubControl.createWorkspace).toHaveBeenCalledWith({
-        operationId: expect.any(String),
-        workspace: "local-garden",
-        rootTemplate: pin,
-      }),
-    );
-    expect(clients.templates.inspect).not.toHaveBeenCalled();
   });
   it("reopens an already-created workspace after route failure without creating another", async () => {
     clients.openWorkspace.mockRejectedValueOnce(

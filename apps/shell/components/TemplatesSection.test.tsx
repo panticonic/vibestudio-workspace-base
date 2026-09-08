@@ -11,9 +11,9 @@ import { Provider, createStore } from "jotai";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 const clients = vi.hoisted(() => ({
   templates: { inspect: vi.fn() },
+  credentials: { listStoredCredentials: vi.fn(async () => []) },
   hubControl: {
     listWorkspaces: vi.fn(),
-    listTemplateCandidates: vi.fn(),
     createWorkspace: vi.fn(),
     routeWorkspace: vi.fn(),
   },
@@ -53,7 +53,6 @@ beforeEach(() => {
       lastOpened: 1,
     },
   ]);
-  clients.hubControl.listTemplateCandidates.mockResolvedValue([]);
   clients.hubControl.createWorkspace.mockResolvedValue({
     workspaceId: "new-id",
     name: "garden",
@@ -125,21 +124,5 @@ it("opens the shared approval presenter for a source acquisition", async () => {
       "system-id",
       "acq-source-network",
     ),
-  );
-});
-
-it("reports local candidate discovery failure", async () => {
-  clients.hubControl.listTemplateCandidates.mockRejectedValueOnce(
-    new Error("candidate transport unavailable"),
-  );
-  render(
-    <Provider store={createStore()}>
-      <Theme>
-        <TemplatesSection />
-      </Theme>
-    </Provider>,
-  );
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Could not load workspace sources: candidate transport unavailable",
   );
 });

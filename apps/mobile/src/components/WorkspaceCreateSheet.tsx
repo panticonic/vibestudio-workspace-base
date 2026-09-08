@@ -67,8 +67,6 @@ export function WorkspaceCreateSheet({
   const pending = useRef(false);
   const [created, setCreated] = useState<WorkspaceCreationReceipt | null>(null);
   const [inspection, setInspection] = useState<TemplateInspection | null>(null);
-  const [candidates, setCandidates] = useState<TemplateInspection[]>([]);
-  const [candidateError, setCandidateError] = useState<unknown>(null);
   const [inspecting, setInspecting] = useState(Boolean(template));
   const [showContents, setShowContents] = useState(false);
   const [inspectionAttempt, setInspectionAttempt] = useState(0);
@@ -112,19 +110,12 @@ export function WorkspaceCreateSheet({
     setInspecting(Boolean(template));
     setInspection(null);
     setError(null);
-    setCandidateError(null);
     void (async () => {
       try {
-        const available = await directory.listWorkspaceTemplateCandidates();
-        if (!live) return;
-        setCandidates(available);
         if (!template) return;
-        const local = available.find(({ pin }) =>
-          sameWorkspaceTemplatePin(pin, template),
-        );
-        const result =
-          local ??
-          (await directory.inspectWorkspaceTemplate({ pin: template }));
+        const result = await directory.inspectWorkspaceTemplate({
+          pin: template,
+        });
         if (!live) return;
         if (!sameWorkspaceTemplatePin(result.pin, template))
           throw new Error(
@@ -134,8 +125,7 @@ export function WorkspaceCreateSheet({
         setName((current) => current || result.presentation?.name || "");
       } catch (failure) {
         if (!live) return;
-        if (template) setError(failure);
-        else setCandidateError(failure);
+        setError(failure);
       } finally {
         if (live) setInspecting(false);
       }
@@ -349,34 +339,6 @@ export function WorkspaceCreateSheet({
                 }}
               />
             </View>
-          )}
-          {!selectedTemplate && candidates.length > 0 && (
-            <View style={{ gap: spacing.sm }}>
-              <Text style={[type.bodyStrong, { color: colors.text }]}>
-                Local workspaces
-              </Text>
-              {candidates.map((candidate) => (
-                <Button
-                  key={JSON.stringify(candidate.pin)}
-                  label={`Explore ${candidate.presentation?.name ?? "workspace"}`}
-                  onPress={() => {
-                    setInspection(candidate);
-                    setName(candidate.presentation?.name ?? "");
-                    setCandidateError(null);
-                  }}
-                />
-              ))}
-            </View>
-          )}
-          {candidateError !== null && !selectedTemplate && (
-            <Text
-              accessibilityRole="alert"
-              style={[type.caption, { color: colors.danger }]}
-            >
-              {candidateError instanceof Error
-                ? candidateError.message
-                : String(candidateError)}
-            </Text>
           )}
           {selectedTemplate && !created && (
             <View

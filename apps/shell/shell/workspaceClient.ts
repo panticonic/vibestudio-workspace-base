@@ -89,7 +89,7 @@ import {
 } from "@vibestudio/shared/panelChrome";
 import { getSharedPanelAddressOptions } from "@workspace/omnibox-core";
 import type { WorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
-import { createTemplateManagementClient } from "@workspace/template-management";
+import { createShellTemplateManagementClient } from "@workspace/template-management";
 import { createWorkspacePresentationClient } from "@workspace/runtime/workspace-presentation";
 import { HostCommandRegistry } from "@vibestudio/shell-core/panelCommandRegistry";
 import {
@@ -917,8 +917,10 @@ export function createShellWorkspaceClient(
   // Template mutations return immediately after asking through the normal
   // approval surface. The shell intentionally renders that state as a human
   // message rather than exposing the approval record identity.
-  const templates = createTemplateManagementClient((extension, method, args) =>
-    extensionsClient.invoke(extension, method, args),
+  const templates = createShellTemplateManagementClient(
+    (extension, method, args) =>
+      extensionsClient.invoke(extension, method, args),
+    (service, method, args) => rpc.call("main", `${service}.${method}`, args),
   );
   const credentials = {
     listStoredCredentials: () => credentialsClient.listStoredCredentials(),

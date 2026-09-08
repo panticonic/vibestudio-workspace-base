@@ -5,9 +5,8 @@ import {
 import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/types";
 import { useEffect, useRef, useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
-import { Box, Button, Callout, Flex, Spinner, Text } from "@radix-ui/themes";
+import { Box, Button, Callout, Flex, Spinner } from "@radix-ui/themes";
 import { TemplateBrowser } from "@workspace/react/templates";
-import { sameWorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
 import {
   useShellWorkspaceClient,
   useWorkspaceDesktopHost,
@@ -30,19 +29,6 @@ export function WorkspaceChooser() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<WorkspaceCreationReceipt | null>(null);
-  const [candidateDiscovery, setCandidateDiscovery] = useState<
-    | { status: "loading" }
-    | { status: "failed"; error: string }
-    | {
-        status: "ready";
-        candidates: import("@vibestudio/service-schemas/templates").TemplateInspection[];
-      }
-  >({ status: "loading" });
-  const templateCandidates =
-    candidateDiscovery.status === "ready" ? candidateDiscovery.candidates : [];
-  const localInspection = templateCandidates.find(
-    ({ pin }) => template !== null && sameWorkspaceTemplatePin(pin, template),
-  );
   const pending = useRef(false);
   const [restoring, setRestoring] = useState(true);
   const [recoveryNotice, setRecoveryNotice] = useState("");
@@ -77,24 +63,6 @@ export function WorkspaceChooser() {
       live = false;
     };
   }, [hubControl, setTemplate]);
-  useEffect(() => {
-    let live = true;
-    hubControl
-      .listTemplateCandidates()
-      .then((candidates) => {
-        if (live) setCandidateDiscovery({ status: "ready", candidates });
-      })
-      .catch((cause: unknown) => {
-        if (live)
-          setCandidateDiscovery({
-            status: "failed",
-            error: `Could not load workspace sources: ${cause instanceof Error ? cause.message : String(cause)}`,
-          });
-      });
-    return () => {
-      live = false;
-    };
-  }, [hubControl]);
   const open = async (workspaceId: string) => {
     setBusy(true);
     setError(null);
@@ -160,11 +128,6 @@ export function WorkspaceChooser() {
             <Callout.Text>{recoveryNotice}</Callout.Text>
           </Callout.Root>
         ) : null}
-        {candidateDiscovery.status === "failed" ? (
-          <Callout.Root color="red" role="alert">
-            <Callout.Text>{candidateDiscovery.error}</Callout.Text>
-          </Callout.Root>
-        ) : null}
         {error ? (
           <Callout.Root color="red" role="alert">
             <Callout.Text>{error}</Callout.Text>
@@ -189,20 +152,13 @@ export function WorkspaceChooser() {
           >
             Continue previous creation
           </Button>
-        ) : template && candidateDiscovery.status === "loading" ? (
-          <Flex gap="2" role="status">
-            <Spinner />
-            <Text size="2">Loading workspace source…</Text>
-          </Flex>
-        ) : template && candidateDiscovery.status === "failed" ? null : (
+        ) : (
           <TemplateBrowser
             listSourceAccounts={credentials?.listStoredCredentials}
             client={templates}
             onChooseFolder={desktop.inspectWorkspaceFolder}
             initialSourceUrl={sourceUrl ?? undefined}
-            candidates={templateCandidates}
-            initialInspection={localInspection}
-            initialPin={localInspection ? undefined : (template ?? undefined)}
+            initialPin={template ?? undefined}
             onCreate={create}
             onCreateFresh={(name) => create(name)}
             onReviewPending={(approvalId) => {

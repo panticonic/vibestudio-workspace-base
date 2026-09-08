@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
 import { useSetAtom } from "jotai";
-import { Callout, Tabs } from "@radix-ui/themes";
+import { Tabs } from "@radix-ui/themes";
 import { TemplateBrowser } from "@workspace/react/templates";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import {
@@ -32,61 +31,25 @@ export function TemplatesSection(
 }
 
 function TemplateCreationSection() {
-  const { templates, hubControl, credentials } = useShellWorkspaceClient();
+  const { templates, credentials } = useShellWorkspaceClient();
   const approvalPresentation = useApprovalPresentation();
   const closeSettings = useSetAtom(settingsDialogAtom);
   const openWorkspaceChooser = useSetAtom(workspaceChooserDialogOpenAtom);
   const selectTemplate = useSetAtom(workspaceChooserTemplateAtom);
-  const [candidates, setCandidates] = useState<
-    import("@vibestudio/service-schemas/templates").TemplateInspection[]
-  >([]);
-  const [candidateError, setCandidateError] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    hubControl
-      .listTemplateCandidates()
-      .then((value) => {
-        if (live) {
-          setCandidates(value);
-          setCandidateError(null);
-        }
-      })
-      .catch((cause: unknown) => {
-        if (live) {
-          setCandidates([]);
-          setCandidateError(
-            cause instanceof Error ? cause.message : String(cause),
-          );
-        }
-      });
-    return () => {
-      live = false;
-    };
-  }, [hubControl]);
   return (
-    <>
-      {candidateError ? (
-        <Callout.Root color="red" role="alert">
-          <Callout.Text>
-            Could not load workspace sources: {candidateError}
-          </Callout.Text>
-        </Callout.Root>
-      ) : null}
-      <TemplateBrowser
-        client={templates}
-        listSourceAccounts={credentials.listStoredCredentials}
-        candidates={candidates}
-        onReviewPending={(approvalId) => {
-          void systemWorkspaceId.then((ownerId) => {
-            approvalPresentation.request(ownerId, approvalId);
-          });
-        }}
-        onOpenInApp={async ({ pin }) => {
-          selectTemplate(pin);
-          closeSettings(null);
-          openWorkspaceChooser(true);
-        }}
-      />
-    </>
+    <TemplateBrowser
+      client={templates}
+      listSourceAccounts={credentials.listStoredCredentials}
+      onReviewPending={(approvalId) => {
+        void systemWorkspaceId.then((ownerId) => {
+          approvalPresentation.request(ownerId, approvalId);
+        });
+      }}
+      onOpenInApp={async ({ pin }) => {
+        selectTemplate(pin);
+        closeSettings(null);
+        openWorkspaceChooser(true);
+      }}
+    />
   );
 }
