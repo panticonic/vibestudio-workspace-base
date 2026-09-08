@@ -1,6 +1,7 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { Buffer } from "node:buffer";
+import YAML from "yaml";
 import {
   canonicalJson,
   compareUtf16CodeUnits,
@@ -17,6 +18,8 @@ import {
   normalizeTemplateGitUrl,
   TEMPLATE_SOURCE_MANIFEST_PATH,
 } from "@vibestudio/workspace/templateCoordinates";
+import { validateTemplateSnapshotInventory } from "@vibestudio/workspace/templateManifest";
+import { WorkspaceTemplateAuthoringMetadataSchema } from "@vibestudio/workspace-contracts/workspaceConfigSchema";
 import { resolveGitHubPublishOperation } from "@workspace/integrations/github";
 import { getRemoteProvider } from "@workspace/integrations/remoteProviders";
 import { GitBridge, type ProtectedRepositorySnapshot } from "./bridge.js";
@@ -166,6 +169,14 @@ export class TemplatePublishEngine {
         });
       }
     }
+    const parsedManifest = YAML.parse(input.manifest) as Record<string, unknown>;
+    const inventory = WorkspaceTemplateAuthoringMetadataSchema.parse(
+      parsedManifest["template"]
+    );
+    validateTemplateSnapshotInventory(
+      { repositories: inventory.repositories, files: inventory.files },
+      expectedTreeEntries.map((entry) => entry.path)
+    );
     const expectedTree = canonicalTree(expectedTreeEntries);
     const tag = versionTag(input.version);
     const requestFingerprint = `v1-sha256:${sha256HexSyncText(

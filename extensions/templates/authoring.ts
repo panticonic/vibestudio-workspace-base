@@ -18,6 +18,7 @@ import { normalizeWorkspaceRepoPath } from "@vibestudio/workspace/remotes";
 import { WorkspaceConfigTopLayerSchema } from "@vibestudio/workspace-contracts/workspaceConfigSchema";
 import { WORKSPACE_PACKAGE_SCOPES } from "@vibestudio/workspace-contracts/sourceDirs";
 import type { WorkspaceConfig } from "@vibestudio/workspace-contracts/types";
+import { parseTemplateManifestContent } from "@vibestudio/workspace/templateManifest";
 import type { ExtensionContextLike } from "./context.js";
 import type { SemanticWorkspaceObservation } from "./workspace.js";
 
@@ -84,6 +85,7 @@ function selectedGitMap<T>(
 function projectManifest(
   config: WorkspaceConfig,
   selected: ReadonlySet<string>,
+  files: readonly string[],
   presentation: { name: string; description: string },
   includeWorkspaceDefaults: boolean
 ): string {
@@ -180,9 +182,26 @@ function projectManifest(
     template: {
       ...presentation,
       repositories: [...selected].sort(compareUtf16CodeUnits),
-      files: [],
+      files: [...files].sort(compareUtf16CodeUnits),
     },
   });
+}
+
+async function standaloneFiles(
+  ctx: ExtensionContextLike,
+  observation: SemanticWorkspaceObservation
+): Promise<string[]> {
+  const resolved = await repository(ctx, observation, META_REPOSITORY);
+  const file = await ctx.rpc.call<VcsReadFileResult>("main", "vcs.readFile", {
+    state: observation.mainState,
+    repositoryId: resolved.repositoryId,
+    file: { kind: "path", path: "vibestudio.yml" },
+  });
+  if (!file) throw new Error("Workspace meta/vibestudio.yml disappeared");
+  return parseTemplateManifestContent(
+    text(file),
+    observation.runtimeTop.systemEpoch
+  ).inventory.files;
 }
 
 async function repository(
@@ -370,6 +389,7 @@ export async function inspectTemplateAuthoring(
   const manifest = projectManifest(
     observation.runtimeTop as WorkspaceConfig,
     new Set(includedParts.filter((repoPath) => repoPath !== META_REPOSITORY)),
+    await standaloneFiles(ctx, observation),
     { name, description },
     selectableParts.every((repoPath) => included.has(repoPath) || inherited.has(repoPath))
   );

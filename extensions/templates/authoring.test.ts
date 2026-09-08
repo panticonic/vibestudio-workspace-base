@@ -14,20 +14,37 @@ function observation(eventId: string) {
 function context() {
   return {
     rpc: {
-      call: vi.fn(async (_target: string, method: string) => {
-        if (method === "vcs.resolveRepository") {
-          return { repositoryId: "repository:news", repoPath: "panels/news" };
-        }
-        if (method === "vcs.readFile") {
-          return {
-            content: {
-              kind: "text",
-              text: JSON.stringify({ name: "@workspace-panels/news" }),
-            },
-          };
-        }
-        throw new Error(`unexpected method ${method}`);
-      }),
+      call: vi.fn(
+        async (
+          _target: string,
+          method: string,
+          input: { repoPath?: string; repositoryId?: string },
+        ) => {
+          if (method === "vcs.resolveRepository") {
+            return {
+              repositoryId: `repository:${input.repoPath}`,
+              repoPath: input.repoPath,
+            };
+          }
+          if (method === "vcs.readFile") {
+            if (input.repositoryId === "repository:meta") {
+              return {
+                content: {
+                  kind: "text",
+                  text: "systemEpoch: 0\ntemplate:\n  name: Source\n  repositories: [panels/news]\n  files: [meta/distributions/base.yml]\n",
+                },
+              };
+            }
+            return {
+              content: {
+                kind: "text",
+                text: JSON.stringify({ name: "@workspace-panels/news" }),
+              },
+            };
+          }
+          throw new Error(`unexpected method ${method}`);
+        },
+      ),
     },
   };
 }
@@ -56,7 +73,7 @@ describe("template authoring source closure", () => {
     expect(YAML.parse(first.manifest).template).toEqual(
       expect.objectContaining({
         repositories: ["panels/news"],
-        files: [],
+        files: ["meta/distributions/base.yml"],
       }),
     );
   });

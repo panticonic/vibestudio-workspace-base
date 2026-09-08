@@ -113,7 +113,8 @@ function metaSnapshot(): ProtectedRepositorySnapshot {
 function publicationInput(
   overrides: Partial<Parameters<TemplatePublishEngine["publish"]>[0]> = {},
 ): Parameters<TemplatePublishEngine["publish"]>[0] {
-  const manifest = "systemEpoch: 59\n";
+  const manifest =
+    "systemEpoch: 59\ntemplate:\n  name: News\n  repositories: [panels/news]\n  files: []\n";
   return {
     operationId: "publish-news-v1",
     expectedMainEventId: "event:main",
@@ -304,11 +305,16 @@ describe("TemplatePublishEngine", () => {
       protectedSnapshot(),
     ]);
     const input = publicationInput({
+      manifest:
+        "systemEpoch: 59\ntemplate:\n  name: News\n  repositories: [panels/news]\n  files: [meta/distributions/base.yml]\n",
       parts: [
         { repoPath: "meta", subdir: "meta" },
         { repoPath: "panels/news", subdir: "panels/news" },
       ],
     });
+    input.manifestDigest = `v1-sha256:${sha256Hex(
+      new TextEncoder().encode(input.manifest),
+    )}`;
     const result = await fixture.engine.publish(input);
     const tree = state.trees.get(result.commit)!;
 
