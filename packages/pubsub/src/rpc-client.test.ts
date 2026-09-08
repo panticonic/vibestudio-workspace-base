@@ -2415,6 +2415,30 @@ describe("connectViaRpc", () => {
   });
 
   describe("channel membership, invitations, and presence", () => {
+    it("reads participants from the exact channel target without rediscovery", async () => {
+      const client = connectViaRpc({
+        rpc: mockRpc as any,
+        channel: CHANNEL,
+        channelTargetId: DO_TARGET,
+      });
+      mockRpc.call.mockClear();
+      mockRpc.call.mockResolvedValue([
+        { participantId: "do:workers/agent:Agent:scribe", metadata: { handle: "scribe" } },
+      ]);
+
+      await expect(client.getParticipants()).resolves.toEqual([
+        { participantId: "do:workers/agent:Agent:scribe", metadata: { handle: "scribe" } },
+      ]);
+      expect(mockRpc.call).toHaveBeenCalledWith(DO_TARGET, "getParticipants", []);
+      expect(mockRpc.call).not.toHaveBeenCalledWith(
+        "main",
+        "workers.resolveService",
+        expect.anything()
+      );
+
+      await client.close();
+    });
+
     it("unwraps the typed channel management responses", async () => {
       const client = connectViaRpc({ rpc: mockRpc as any, channel: CHANNEL });
       await Promise.resolve();

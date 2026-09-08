@@ -2213,6 +2213,10 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
     return result.members;
   }
 
+  async function getParticipants(): Promise<Array<{ participantId: string; metadata: T }>> {
+    return callChannel("getParticipants");
+  }
+
   async function listInvitesForMe(): Promise<ChannelInvite[]> {
     const result = await callChannel<{ invites: ChannelInvite[] }>("listInvitesForMe");
     return result.invites;
@@ -2782,6 +2786,7 @@ export function connectViaRpc<T extends ParticipantMetadata = ParticipantMetadat
   return {
     publish,
     updateMetadata,
+    getParticipants,
     setTyping,
     ready,
     close,
