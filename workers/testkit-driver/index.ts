@@ -70,7 +70,7 @@ export class TestkitDriverDO extends DurableObjectBase {
   }
 
   /** Open a raw CDP session to a panel. Approval-gated via panelCdp. */
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -91,7 +91,7 @@ export class TestkitDriverDO extends DurableObjectBase {
     return { sessionId };
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -108,7 +108,7 @@ export class TestkitDriverDO extends DurableObjectBase {
   }
 
   /** Start buffering a CDP event stream for cursor-based draining. */
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -127,7 +127,7 @@ export class TestkitDriverDO extends DurableObjectBase {
   }
 
   /** Drain buffered events after `cursor`; returns the new cursor. */
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -142,7 +142,7 @@ export class TestkitDriverDO extends DurableObjectBase {
     return { events, cursor: events.length > 0 ? events[events.length - 1]!.seq : cursor };
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -161,7 +161,7 @@ export class TestkitDriverDO extends DurableObjectBase {
    * the compact ref returns. For profile-around-an-action flows the caller
    * uses cdpOpen + Profiler.* commands via cdpSend instead.
    */
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -194,7 +194,7 @@ export class TestkitDriverDO extends DurableObjectBase {
   }
 
   /** Heap snapshot of a panel; artifact to context fs, compact ref returned. */
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
@@ -227,7 +227,7 @@ export class TestkitDriverDO extends DurableObjectBase {
   }
 
   /** Liveness probe for ensureWorker-style readiness checks. */
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",

@@ -54,8 +54,8 @@ async function orchestrate(
         Date.now() + Math.min(budget, context.remainingTimeMs() ?? budget);
       while (Date.now() < end) {
         const f = await read();
-        evidence.lastFrame = f;
-        if (f?.pending === "builder") evidence.builderObserved = true;
+        evidence["lastFrame"] = f;
+        if (f?.pending === "builder") evidence["builderObserved"] = true;
         if (f?.error) throw new Error(label + ": " + f.error);
         if (f && predicate(f)) return f;
         await new Promise((resolve) => setTimeout(resolve, 350));
@@ -72,7 +72,7 @@ async function orchestrate(
       await page
         .getByRole("button", { name: "The harbour lamp", exact: false })
         .click();
-      evidence.before = await wait("shining lamp", (f) =>
+      evidence["before"] = await wait("shining lamp", (f) =>
         f.light.includes("shining"),
       );
       await page
@@ -81,29 +81,29 @@ async function orchestrate(
           "Fold my oilskin wrap double and put it over the harbour lamp so its light is blocked.",
         );
       await page.locator("#adventure-intention").press("Enter");
-      evidence.after = await wait(
+      evidence["after"] = await wait(
         "programmed covering",
         (f) =>
           f.enabled &&
           !f.pending &&
-          f.tick > evidence.before.tick &&
-          f.narration !== evidence.before.narration &&
+          f.tick > evidence["before"].tick &&
+          f.narration !== evidence["before"].narration &&
           f.light.includes("blocked by a covering"),
       );
-      evidence.painted = await wait(
+      evidence["painted"] = await wait(
         "visible consequence illustrated",
         (f) =>
           f.loaded &&
           f.fresh === "true" &&
           !f.scene &&
-          f.asset !== evidence.before.asset,
+          f.asset !== evidence["before"].asset,
         360000,
       );
     } finally {
       await page.close();
     }
     const shot = await active.cdp.screenshot({ format: "png" });
-    evidence.screenshot = {
+    evidence["screenshot"] = {
       ...(await blobstore.putBase64(shot.data)),
       mimeType: shot.mimeType,
       width: shot.width,
@@ -116,14 +116,14 @@ async function orchestrate(
         f.ready &&
         f.enabled &&
         !f.pending &&
-        f.asset === evidence.painted.asset,
+        f.asset === evidence["painted"].asset,
     );
     const reopened = await active.cdp.page();
     try {
       await reopened
         .getByRole("button", { name: "The harbour lamp", exact: false })
         .click();
-      evidence.reloaded = await wait("persistent covering", (f) =>
+      evidence["reloaded"] = await wait("persistent covering", (f) =>
         f.light.includes("blocked by a covering"),
       );
     } finally {
@@ -133,7 +133,7 @@ async function orchestrate(
     result.error = String(cause);
     if (handle)
       try {
-        evidence.failure = {
+        evidence["failure"] = {
           observation: await handle.observe(),
           diagnosis: await handle.diagnose(),
         };
@@ -145,7 +145,7 @@ async function orchestrate(
       } catch (cause) {
         (result.cleanupErrors ??= []).push(String(cause));
       }
-    evidence.cleanupComplete = !result.cleanupErrors?.length;
+    evidence["cleanupComplete"] = !result.cleanupErrors?.length;
     result.duration = Date.now() - start;
   }
   return result;
@@ -161,21 +161,21 @@ export const adventureProgrammedInteractionTests: TestCase[] = [
       "Fold the oilskin wrap and use it to cover the harbour lamp, blocking its light.",
     orchestrate,
     validate(execution) {
-      const e = execution.diagnostics?.programmedInteraction as
+      const e = execution.diagnostics?.["programmedInteraction"] as
         | Record<string, any>
         | undefined;
-      if (execution.error || !e?.cleanupComplete)
+      if (execution.error || !e?.["cleanupComplete"])
         return {
           passed: false,
           reason: execution.error || "Cleanup incomplete",
         };
-      if (e.builderObserved)
+      if (e["builderObserved"])
         return {
           passed: false,
           reason:
             "Existing manipulation mechanics required a builder round trip",
         };
-      if (e.reloaded.tick !== e.after.tick || e.reloaded.key !== e.after.key)
+      if (e["reloaded"].tick !== e["after"].tick || e["reloaded"].key !== e["after"].key)
         return {
           passed: false,
           reason: "Reload did not preserve the manipulation",

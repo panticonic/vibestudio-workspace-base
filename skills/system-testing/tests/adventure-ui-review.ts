@@ -72,7 +72,7 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
     const end = Date.now() + Math.min(budget, context.remainingTimeMs() ?? budget);
     while (Date.now() < end) {
       const frame = await read(handle);
-      evidence.lastFrame = frame;
+      evidence["lastFrame"] = frame;
       if (frame?.error) throw new Error(label + ": " + frame.error);
       if (frame && predicate(frame)) return frame;
       await new Promise((resolve) => setTimeout(resolve, 350));
@@ -81,7 +81,7 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
   };
   const capture = async (handle: (typeof handles)[number], name: string) => {
     const shot = await handle.cdp.screenshot({ format: "png" });
-    evidence.screenshots.push({
+    evidence["screenshots"].push({
       name,
       ...(await blobstore.putBase64(shot.data)),
       mimeType: shot.mimeType,
@@ -112,7 +112,7 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
       )
         throw new Error(label + " composer cannot be reached and focused by ordinary scrolling");
       assertReadingRoom(frame, label);
-      (evidence.reachability ??= []).push({ label, frame });
+      (evidence["reachability"] ??= []).push({ label, frame });
       await page.locator(".adventure-masthead").scrollIntoViewIfNeeded();
     } finally {
       try {
@@ -163,7 +163,7 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
         await page.getByRole("button", { name: "Close journal" }).click();
         await wait(handle, id + " close journal", (f) => !f.journalOpen);
         await page.getByRole("button", { name: "Close details" }).click();
-        evidence.freeInspection.push({
+        evidence["freeInspection"].push({
           id,
           before: opening.tick,
           after: inspected.tick,
@@ -180,7 +180,7 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
       if (mobile.overflow) throw new Error(id + " mobile content overflows horizontally");
       await checkNaturalScroll(handle, id + " mobile");
       await capture(handle, id + "-mobile");
-      evidence.openings.push({ id, desktop: opening, mobile });
+      evidence["openings"].push({ id, desktop: opening, mobile });
       await clearViewport(handle);
     }
     const handle = handles[0]!;
@@ -212,7 +212,7 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
       );
       if (answered.tick !== before.tick) throw new Error("The question advanced fictional time");
       assertReadingRoom(answered, "Answered story");
-      evidence.keyboard = { before, answered, shiftEnter: true };
+      evidence["keyboard"] = { before, answered, shiftEnter: true };
       await page.locator("details.adventure-journey-menu > summary").click();
       await page.getByRole("button", { name: "Begin a new journey" }).click();
       const fresh = await wait(
@@ -234,7 +234,7 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
       );
       if (resumed.tick !== answered.tick || fresh.key === resumed.key)
         throw new Error("Journey switching did not preserve the earlier save");
-      evidence.journeys = {
+      evidence["journeys"] = {
         previous: answered.key,
         fresh: fresh.key,
         resumed: resumed.key,
@@ -250,12 +250,12 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
     result.error = String(cause);
     if (active)
       try {
-        evidence.failure = {
+        evidence["failure"] = {
           observation: await active.observe(),
           diagnosis: await active.diagnose(),
         };
       } catch (diagnosticError) {
-        evidence.diagnosticError = String(diagnosticError);
+        evidence["diagnosticError"] = String(diagnosticError);
       }
   } finally {
     for (const handle of handles)
@@ -264,7 +264,7 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
       } catch (cause) {
         (result.cleanupErrors ??= []).push(String(cause));
       }
-    evidence.cleanupComplete = !result.cleanupErrors?.length;
+    evidence["cleanupComplete"] = !result.cleanupErrors?.length;
     result.duration = Date.now() - started;
   }
   return result;
@@ -280,18 +280,18 @@ export const adventureUiReviewTests: TestCase[] = [
     orchestrate,
     validate(execution) {
       const evidence = execution.diagnostics?.["adventureUi"] as Record<string, any> | undefined;
-      if (execution.error || !evidence?.cleanupComplete)
+      if (execution.error || !evidence?.["cleanupComplete"])
         return {
           passed: false,
           reason: execution.error ?? "Cleanup incomplete",
         };
       if (
-        evidence.openings?.length !== 3 ||
-        evidence.screenshots?.length !== 6 ||
-        evidence.freeInspection?.length !== 3 ||
-        evidence.reachability?.length !== 6 ||
-        !evidence.keyboard?.shiftEnter ||
-        !evidence.journeys
+        evidence["openings"]?.length !== 3 ||
+        evidence["screenshots"]?.length !== 6 ||
+        evidence["freeInspection"]?.length !== 3 ||
+        evidence["reachability"]?.length !== 6 ||
+        !evidence["keyboard"]?.shiftEnter ||
+        !evidence["journeys"]
       )
         return {
           passed: false,

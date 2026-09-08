@@ -374,7 +374,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     }
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     requires: SYSTEM_TEST_OPERATOR,
     effect: { kind: "open" },
     tier: "open",
@@ -390,7 +390,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     );
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     requires: SYSTEM_TEST_OPERATOR,
     effect: { kind: "open" },
     tier: "open",
@@ -409,7 +409,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     );
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     requires: SYSTEM_TEST_OPERATOR,
     effect: { kind: "open" },
     tier: "open",
@@ -478,7 +478,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     }
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     requires: SYSTEM_TEST_OPERATOR,
     effect: { kind: "open" },
     tier: "open",
@@ -502,7 +502,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     };
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     requires: SYSTEM_TEST_OPERATOR,
     effect: { kind: "open" },
     tier: "open",
@@ -534,7 +534,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     return { summary: record.summary };
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     requires: SYSTEM_TEST_OPERATOR,
     effect: { kind: "open" },
     tier: "open",
@@ -552,7 +552,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     return { released: released.existed };
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     requires: SYSTEM_TEST_OPERATOR,
     effect: { kind: "open" },
     tier: "open",
@@ -614,7 +614,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     return { summary: record.summary };
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     requires: SYSTEM_TEST_OPERATOR,
     effect: { kind: "open" },
     tier: "open",
@@ -630,7 +630,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     );
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     requires: SYSTEM_TEST_OPERATOR,
     effect: { kind: "open" },
     tier: "open",
@@ -665,7 +665,7 @@ export class SystemTestRunnerDO extends DurableObjectBase {
     };
   }
 
-  @rpc({
+  @rpc({ website: {"kind":"closed","reason":"This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation."},
     requires: SYSTEM_TEST_OPERATOR,
     effect: { kind: "open" },
     tier: "open",

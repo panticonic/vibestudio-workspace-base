@@ -55,7 +55,7 @@ async function orchestrate(
         Date.now() + Math.min(budget, context.remainingTimeMs() ?? budget);
       while (Date.now() < end) {
         const f = await read();
-        evidence.lastFrame = f;
+        evidence["lastFrame"] = f;
         if (f?.error) throw new Error(label + ": " + f.error);
         if (f && predicate(f)) return f;
         await new Promise((resolve) => setTimeout(resolve, 350));
@@ -63,12 +63,12 @@ async function orchestrate(
       throw new Error(label + " timed out");
     };
     await setViewport(active, { width: 1440, height: 1000 });
-    evidence.opening = await wait(
+    evidence["opening"] = await wait(
       "usable opening",
       (f) => f.ready && f.enabled && !f.pending,
     );
-    evidence.openToUsableMs = Date.now() - started;
-    evidence.question = await profilePanelInteraction(
+    evidence["openToUsableMs"] = Date.now() - started;
+    evidence["question"] = await profilePanelInteraction(
       active,
       async (page) => {
         await page
@@ -77,58 +77,58 @@ async function orchestrate(
             "Describe the customs-house exterior from here, without moving or doing anything. This is only a question.",
           );
         await page.locator('button[type="submit"]').click();
-        evidence.afterQuestion = await wait(
+        evidence["afterQuestion"] = await wait(
           "question response",
           (f) =>
             f.enabled &&
             !f.pending &&
-            f.narration !== evidence.opening.narration,
+            f.narration !== evidence["opening"].narration,
         );
       },
       { label: "question submit to response and available composer" },
     );
-    evidence.openToFirstResponseMs = Date.now() - started;
-    evidence.movement = await profilePanelInteraction(
+    evidence["openToFirstResponseMs"] = Date.now() - started;
+    evidence["movement"] = await profilePanelInteraction(
       active,
       async (page) => {
         await page
           .locator("#adventure-intention")
           .fill("Walk to the quay. Do not speak or perform any other action.");
         await page.locator('button[type="submit"]').click();
-        evidence.afterMovement = await wait(
+        evidence["afterMovement"] = await wait(
           "walk and available composer",
           (f) =>
             f.location === "quay" &&
-            f.tick > evidence.afterQuestion.tick &&
-            f.narration !== evidence.afterQuestion.narration &&
+            f.tick > evidence["afterQuestion"].tick &&
+            f.narration !== evidence["afterQuestion"].narration &&
             f.enabled &&
             !f.pending,
         );
       },
       { label: "walk submit to response and available composer" },
     );
-    evidence.painted = await wait(
+    evidence["painted"] = await wait(
       "generated quay painting",
       (f) =>
         f.location === "quay" &&
         f.loaded &&
         f.asset &&
-        f.asset !== evidence.opening.asset &&
+        f.asset !== evidence["opening"].asset &&
         !f.pending &&
         (!f.scene || f.scene === "complete" || f.scene === "ready"),
       360000,
     );
     await setViewport(active, { width: 390, height: 844, mobile: true });
-    evidence.mobile = await read();
+    evidence["mobile"] = await read();
     const shot = await active.cdp.screenshot({ format: "png" });
-    evidence.screenshot = {
+    evidence["screenshot"] = {
       ...(await blobstore.putBase64(shot.data)),
       mimeType: shot.mimeType,
       width: shot.width,
       height: shot.height,
     };
     await active.reload();
-    evidence.reloaded = await wait(
+    evidence["reloaded"] = await wait(
       "durable reload",
       (f) =>
         f.ready &&
@@ -136,13 +136,13 @@ async function orchestrate(
         f.loaded &&
         !f.pending &&
         f.location === "quay" &&
-        f.asset === evidence.painted.asset,
+        f.asset === evidence["painted"].asset,
     );
   } catch (cause) {
     result.error = String(cause);
     if (handle)
       try {
-        evidence.failure = {
+        evidence["failure"] = {
           observation: await handle.observe(),
           diagnosis: await handle.diagnose(),
         };
@@ -154,7 +154,7 @@ async function orchestrate(
       } catch (cause) {
         (result.cleanupErrors ??= []).push(String(cause));
       }
-    evidence.cleanupComplete = !result.cleanupErrors?.length;
+    evidence["cleanupComplete"] = !result.cleanupErrors?.length;
     result.duration = Date.now() - started;
   }
   return result;
@@ -168,17 +168,17 @@ export const adventureTurnProfileTests: TestCase[] = [
       "Native profiles of question and movement through the real adventure panel, plus generated art, mobile and reload",
     orchestrate,
     validate(execution) {
-      const e = execution.diagnostics?.adventureProfile as
+      const e = execution.diagnostics?.["adventureProfile"] as
         | Record<string, any>
         | undefined;
-      if (execution.error || !e?.cleanupComplete)
+      if (execution.error || !e?.["cleanupComplete"])
         return {
           passed: false,
           reason: execution.error || "Cleanup incomplete",
         };
-      if (e.afterQuestion.tick !== e.opening.tick)
+      if (e["afterQuestion"].tick !== e["opening"].tick)
         return { passed: false, reason: "A question advanced fictional time" };
-      if (e.mobile.overflow || e.reloaded.tick !== e.painted.tick)
+      if (e["mobile"].overflow || e["reloaded"].tick !== e["painted"].tick)
         return {
           passed: false,
           reason: "Mobile overflow or changed state on reload",
