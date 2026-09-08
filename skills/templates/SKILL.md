@@ -62,7 +62,10 @@ or authority settings.
 Native System clients use `prepareSelectedTransfer` from
 `@workspace/workspace-transfer`. It is a shared client implementation over the
 existing authenticated `vcs` and `blobstore` services, not an application RPC
-bridge. Public application calls between workspaces remain closed.
+bridge. Application RPC uses an explicit workspace destination, deliberately
+exposed receiver methods, and both workspaces' boundary policies in addition
+to ordinary operation authority; see [RPC](../workspace-dev/RPC.md). Source
+transfer does not create an RPC permission or share runtime state.
 
 Read `vcs.mainState()` to capture protected main directly without creating an
 observation context. Capture the source workspace, exact VCS state and explicitly selected
