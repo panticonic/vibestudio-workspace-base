@@ -70,8 +70,9 @@ export function createRuntime(deps: RuntimeDeps) {
 
   _initStateArgsRuntime(slotId, (service, method, args) => base.rpc.call(service, method, args));
   exposeAgentApi(base.expose);
+  let stateArgsListenerId: number | undefined;
   if (typeof shell?.addEventListener === "function") {
-    shell.addEventListener((event: string, payload: unknown) => {
+    stateArgsListenerId = shell.addEventListener((event: string, payload: unknown) => {
       if (event === "runtime:stateArgsChanged") {
         _applyStateArgsFromHost((payload ?? {}) as Record<string, unknown>);
       }
@@ -148,6 +149,10 @@ export function createRuntime(deps: RuntimeDeps) {
 
     contextId: base.contextId,
     destroy: () => {
+      if (stateArgsListenerId !== undefined) {
+        shell.removeEventListener(stateArgsListenerId);
+        stateArgsListenerId = undefined;
+      }
       globalThis.removeEventListener?.("vibestudio:panel-boot", onPanelBoot);
       bootReporter.dispose();
       base.destroy();

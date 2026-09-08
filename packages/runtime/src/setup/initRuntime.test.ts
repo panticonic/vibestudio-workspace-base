@@ -106,6 +106,38 @@ describe("initRuntime", () => {
     vi.unstubAllGlobals();
   });
 
+  it("removes shell state subscriptions when the panel runtime is destroyed", () => {
+    const panelWindow = stubPanelWindow();
+    const listeners = new Map<number, (event: string, payload: unknown) => void>();
+    let nextListenerId = 0;
+    g.__vibestudioGatewayConfig = {
+      serverUrl: "https://gateway.test",
+      token: "test-token",
+    };
+    g.__vibestudioEntityId = "panel:panel-1";
+    g.__vibestudioSlotId = "panel:tree/slot-1";
+    g.__vibestudioContextId = "ctx-1";
+    g.__vibestudioKind = "panel";
+    g.__vibestudioShell = {
+      addEventListener: (listener: (event: string, payload: unknown) => void) => {
+        const id = nextListenerId++;
+        listeners.set(id, listener);
+        return id;
+      },
+      removeEventListener: (id: number) => listeners.delete(id),
+    };
+    const { runtime } = initRuntime({ createTransport });
+    const emitState = (state: Record<string, unknown>) => {
+      for (const listener of listeners.values()) listener("runtime:stateArgsChanged", state);
+    };
+    emitState({ title: "Current document" });
+    expect(panelWindow.__vibestudioStateArgs).toEqual({ title: "Current document" });
+    runtime.destroy();
+    expect(listeners.size).toBe(0);
+    emitState({ title: "Later document" });
+    expect(panelWindow.__vibestudioStateArgs).toEqual({ title: "Current document" });
+  });
+
   it("uses the injected canonical panel id as the RPC self id", () => {
     g.__vibestudioEntityId = "panel:panel-1";
     g.__vibestudioSlotId = "panel:tree/slot-1";
