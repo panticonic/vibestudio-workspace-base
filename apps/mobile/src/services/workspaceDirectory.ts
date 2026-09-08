@@ -573,6 +573,10 @@ export class MobileWorkspaceDirectory {
     return templates.inspect({ pin });
   }
 
+  async listWorkspaceTemplateCandidates() {
+    return this.hubControl.listTemplateCandidates();
+  }
+
   async createWorkspace(
     name: string,
     rootTemplate?: TemplateExactPin,

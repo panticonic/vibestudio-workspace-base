@@ -13,9 +13,11 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
 import { WorkspaceDesktop } from "./WorkspaceDesktop";
 import {
   useWorkspaceNavigationHost,
+  useWorkspaceDesktopHost,
   useWorkspaceVisible,
 } from "../shell/workspaceContext";
 import { effectiveThemeAtom, themeModeAtom } from "../state/themeAtoms";
@@ -61,6 +63,7 @@ const api = vi.hoisted(() => {
     catalog,
     calls,
     route: vi.fn(async () => {}),
+    list: vi.fn(async () => catalog),
     incomingSurface: vi.fn(async (): Promise<unknown> => null),
     open: vi.fn(async (id: string) => {
       const create = vi.fn(async () => ({ id: "panel" }));
@@ -100,7 +103,7 @@ vi.mock("../shell/client", () => ({
       personal: api.catalog[0],
       system: api.catalog[1],
     }),
-    listWorkspaces: async () => api.catalog,
+    listWorkspaces: api.list,
     routeWorkspace: api.route,
   },
   directEvents: { on: () => () => {} },
@@ -132,17 +135,154 @@ vi.mock("./ThemeSettings", () => ({ ThemeSettings: () => null }));
 vi.mock("./ConnectionStatusBadge", () => ({
   ConnectionStatusBadge: () => null,
 }));
-function Desktop() {
+function Desktop({ children }: { children?: ReactNode }) {
   const presentation = useApprovalPresentationController(
     useShellWorkspaceClient(),
   );
   return (
     <ApprovalPresentationContext.Provider value={presentation}>
-      <WorkspaceDesktop />
+      <WorkspaceDesktop>{children}</WorkspaceDesktop>
     </ApprovalPresentationContext.Provider>
   );
 }
+function OpenWorkspace({ workspaceId }: { workspaceId: string }) {
+  const desktop = useWorkspaceDesktopHost();
+  return (
+    <button
+      onClick={() =>
+        void desktop.openWorkspace(workspaceId).catch(() => undefined)
+      }
+    >
+      Open created workspace
+    </button>
+  );
+}
 describe("desktop workspace ownership", () => {
+  it("resolves a newly-created catalog entry into a retained owner before focusing it", async () => {
+    const result = render(
+      <Desktop>
+        <OpenWorkspace workspaceId="created" />
+      </Desktop>,
+    );
+    try {
+      await screen.findByLabelText("personal draft");
+      await waitFor(() =>
+        expect(api.route).toHaveBeenCalledWith({ workspaceId: "personal" }),
+      );
+      const createdEntry = {
+        workspaceId: "created",
+        name: "Created",
+        running: true,
+        pendingApprovalCount: 0,
+        lastOpened: 0,
+      };
+      api.list.mockResolvedValueOnce([...api.catalog, createdEntry]);
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open created workspace" }),
+      );
+
+      const created = await screen.findByLabelText("created draft");
+      await waitFor(() =>
+        expect(created.getAttribute("data-visible")).toBe("true"),
+      );
+      expect(api.open).toHaveBeenCalledWith("created");
+      expect(api.route).toHaveBeenCalledWith({ workspaceId: "created" });
+    } finally {
+      result.unmount();
+      api.list.mockImplementation(async () => api.catalog);
+    }
+  });
+
+  it.each(["resolve", "reject"] as const)(
+    "keeps the later selection when a delayed lookup settles: %s",
+    async (outcome) => {
+      const result = render(
+        <Desktop>
+          <OpenWorkspace workspaceId="later-created" />
+        </Desktop>,
+      );
+      let finish!: (entries: typeof api.catalog) => void;
+      let fail!: (error: Error) => void;
+      try {
+        await screen.findByLabelText("personal draft");
+        await waitFor(() =>
+          expect(
+            screen
+              .getByLabelText("personal draft")
+              .getAttribute("data-visible"),
+          ).toBe("true"),
+        );
+        api.list.mockImplementationOnce(
+          () =>
+            new Promise((resolve, reject) => {
+              finish = resolve;
+              fail = reject;
+            }),
+        );
+        api.route.mockClear();
+        fireEvent.click(
+          screen.getByRole("button", { name: "Open created workspace" }),
+        );
+        await waitFor(() => expect(finish).toBeDefined());
+        fireEvent.click(screen.getByRole("button", { name: "Open System" }));
+        await waitFor(() =>
+          expect(
+            screen.getByLabelText("system draft").getAttribute("data-visible"),
+          ).toBe("true"),
+        );
+        await act(async () => {
+          if (outcome === "resolve")
+            finish([
+              ...api.catalog,
+              {
+                workspaceId: "later-created",
+                name: "Created",
+                running: true,
+                pendingApprovalCount: 0,
+                lastOpened: 0,
+              },
+            ]);
+          else fail(new Error("Delayed lookup failed"));
+        });
+        expect(screen.queryByText("Delayed lookup failed")).toBeNull();
+        expect(
+          screen.getByLabelText("system draft").getAttribute("data-visible"),
+        ).toBe("true");
+        expect(api.route.mock.calls).toEqual([[{ workspaceId: "system" }]]);
+        expect(screen.queryByLabelText("later-created draft")).toBeNull();
+      } finally {
+        result.unmount();
+        api.list.mockImplementation(async () => api.catalog);
+      }
+    },
+  );
+
+  it("shows an authoritative catalog failure while selecting a newly-created id", async () => {
+    const result = render(
+      <Desktop>
+        <OpenWorkspace workspaceId="missing-created" />
+      </Desktop>,
+    );
+    try {
+      await screen.findByLabelText("personal draft");
+      await waitFor(() =>
+        expect(api.route).toHaveBeenCalledWith({ workspaceId: "personal" }),
+      );
+      api.list.mockRejectedValueOnce(new Error("Catalog refresh unavailable"));
+
+      fireEvent.click(
+        screen.getByRole("button", { name: "Open created workspace" }),
+      );
+
+      expect(
+        await screen.findByText("Catalog refresh unavailable"),
+      ).toBeTruthy();
+      expect(api.open).not.toHaveBeenCalledWith("missing-created");
+    } finally {
+      result.unmount();
+      api.list.mockImplementation(async () => api.catalog);
+    }
+  });
   it("clears the native presentation error when the compositor recovers without a workspace switch", async () => {
     const result = render(<Desktop />);
     try {

@@ -13,7 +13,11 @@ import {
 } from "@radix-ui/themes";
 import { TemplateBrowser } from "@workspace/template-management/react";
 import type { HubWorkspaceEntry } from "@vibestudio/service-schemas/hubControl";
-import { useShellWorkspaceClient } from "../shell/workspaceContext";
+import { sameWorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
+import {
+  useShellWorkspaceClient,
+  useWorkspaceDesktopHost,
+} from "../shell/workspaceContext";
 import { systemWorkspaceId } from "../shell/client";
 import { useApprovalPresentation } from "./ApprovalPresentationContext";
 import { workspaceLabel } from "../shell/workspaceLabel";
@@ -24,6 +28,7 @@ import {
 
 export function WorkspaceChooser() {
   const { hubControl, templates } = useShellWorkspaceClient();
+  const desktop = useWorkspaceDesktopHost();
   const approvalPresentation = useApprovalPresentation();
   const close = useSetAtom(workspaceChooserDialogOpenAtom);
   const [template, setTemplate] = useAtom(workspaceChooserTemplateAtom);
@@ -36,6 +41,19 @@ export function WorkspaceChooser() {
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [created, setCreated] = useState<HubWorkspaceEntry | null>(null);
+  const [candidateDiscovery, setCandidateDiscovery] = useState<
+    | { status: "loading" }
+    | { status: "failed"; error: string }
+    | {
+        status: "ready";
+        candidates: import("@vibestudio/service-schemas/templates").TemplateInspection[];
+      }
+  >({ status: "loading" });
+  const templateCandidates =
+    candidateDiscovery.status === "ready" ? candidateDiscovery.candidates : [];
+  const localInspection = templateCandidates.find(
+    ({ pin }) => template !== null && sameWorkspaceTemplatePin(pin, template),
+  );
   const pending = useRef(false);
   useEffect(() => {
     let live = true;
@@ -55,13 +73,31 @@ export function WorkspaceChooser() {
     };
   }, [hubControl]);
   useEffect(() => {
+    let live = true;
+    hubControl
+      .listTemplateCandidates()
+      .then((candidates) => {
+        if (live) setCandidateDiscovery({ status: "ready", candidates });
+      })
+      .catch((cause: unknown) => {
+        if (live)
+          setCandidateDiscovery({
+            status: "failed",
+            error: `Could not load workspace sources: ${cause instanceof Error ? cause.message : String(cause)}`,
+          });
+      });
+    return () => {
+      live = false;
+    };
+  }, [hubControl]);
+  useEffect(() => {
     if (template) setMode("source");
   }, [template]);
   const open = async (workspaceId: string) => {
     setBusy(true);
     setError(null);
     try {
-      await hubControl.routeWorkspace({ workspaceId });
+      await desktop.openWorkspace(workspaceId);
       setTemplate(null);
       close(false);
     } catch (error) {
@@ -95,12 +131,8 @@ export function WorkspaceChooser() {
   return (
     <Box p="0" style={{ maxHeight: "80vh", overflow: "auto" }}>
       <Flex direction="column" gap="4">
-        <Flex align="center" justify="between" gap="3">
-          {mode === "source" && !created ? (
-            <Text size="2" color="gray">
-              Workspaces
-            </Text>
-          ) : (
+        <Flex align="center" justify={mode === "source" && !created ? "end" : "between"} gap="3">
+          {mode === "source" && !created ? null : (
             <Heading size="5">
               {created
                 ? `${created.name} is ready`
@@ -125,6 +157,11 @@ export function WorkspaceChooser() {
             </Button>
           ) : null}
         </Flex>
+        {candidateDiscovery.status === "failed" ? (
+          <Callout.Root color="red" role="alert">
+            <Callout.Text>{candidateDiscovery.error}</Callout.Text>
+          </Callout.Root>
+        ) : null}
         {error ? (
           <Callout.Root color="red" role="alert">
             <Callout.Text>{error}</Callout.Text>
@@ -138,10 +175,21 @@ export function WorkspaceChooser() {
           >
             Open workspace
           </Button>
-        ) : mode === "source" ? (
+        ) : mode === "source" &&
+          template &&
+          candidateDiscovery.status === "loading" ? (
+          <Flex gap="2" role="status">
+            <Spinner />
+            <Text size="2">Loading workspace source…</Text>
+          </Flex>
+        ) : mode === "source" &&
+          template &&
+          candidateDiscovery.status === "failed" ? null : mode === "source" ? (
           <TemplateBrowser
             client={templates}
-            initialPin={template ?? undefined}
+            candidates={templateCandidates}
+            initialInspection={localInspection}
+            initialPin={localInspection ? undefined : (template ?? undefined)}
             onCreate={create}
             onReviewPending={(approvalId) => {
               void systemWorkspaceId

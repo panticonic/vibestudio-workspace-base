@@ -94,18 +94,18 @@ export default function MainMode() {
 
   return (
     <ApprovalPresentationContext.Provider value={approvalPresentation}>
-      <WorkspaceDesktop />
-
-      {/* Workspace Chooser Dialog (for switching workspaces in main mode) */}
-      <AppDialog
-        open={workspaceChooserOpen}
-        onOpenChange={setWorkspaceChooserOpen}
-        maxWidth="920px"
-        title="Workspaces"
-        description="Open a workspace, or create one from an app or source."
-      >
-        <WorkspaceChooser />
-      </AppDialog>
+      <WorkspaceDesktop>
+        {/* Workspace Chooser Dialog (for switching workspaces in main mode) */}
+        <AppDialog
+          open={workspaceChooserOpen}
+          onOpenChange={setWorkspaceChooserOpen}
+          maxWidth="920px"
+          title="Workspaces"
+          description="Open a workspace, or create one from an app or source."
+        >
+          <WorkspaceChooser />
+        </AppDialog>
+      </WorkspaceDesktop>
 
       <WorkspaceConnectionOverlay
         onOpenSettings={() => setSettingsTarget({ section: "connection" })}

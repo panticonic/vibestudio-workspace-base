@@ -20,6 +20,12 @@ Use [public-contract.json](public-contract.json) for exact method shapes and
 
 ## Discover and create
 
+Open the host workspace chooser to discover development checkouts selected for
+the current launch. The host validates and presents those private exact
+snapshots; their filesystem paths never enter workspace code. Selecting one
+creates a new workspace from its exact pin. Do not send that pin through remote
+Git inspection because its checkpoint commit may intentionally be unpublished.
+
 Read `catalog` without arguments for cached rendering. Refresh only after an
 explicit user action with `[{ refresh: true }]`. Catalog selections remain
 bound to the returned `coordinates.commit` and `coordinates.snapshot`.

@@ -28,6 +28,15 @@ export const WorkspaceNavigationHostContext = createContext<{
 export const useWorkspaceNavigationHost = () =>
   useContext(WorkspaceNavigationHostContext);
 
+export const WorkspaceDesktopHostContext = createContext<{
+  openWorkspace(workspaceId: string): Promise<void>;
+} | null>(null);
+export const useWorkspaceDesktopHost = () => {
+  const host = useContext(WorkspaceDesktopHostContext);
+  if (!host) throw new Error("Workspace desktop owner is unavailable");
+  return host;
+};
+
 export const ShellPresentationStoreContext = createContext<ReturnType<
   typeof createStore
 > | null>(null);

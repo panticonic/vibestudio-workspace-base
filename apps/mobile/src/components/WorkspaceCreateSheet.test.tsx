@@ -1,6 +1,7 @@
 import { fireEvent, render, waitFor } from "@testing-library/react-native";
 import { WorkspaceCreateSheet } from "./WorkspaceCreateSheet";
 import type { MobileWorkspaceDirectory } from "../services/workspaceDirectory";
+import type { TemplateInspection } from "@vibestudio/service-schemas/templates";
 
 const pin = {
   url: "git+https://example.com/task-board.git",
@@ -20,6 +21,9 @@ function fixture(options: { pendingReview?: boolean } = {}) {
         : [],
     ),
     openApprovals: jest.fn(),
+    listWorkspaceTemplateCandidates: jest.fn(
+      async (): Promise<TemplateInspection[]> => [],
+    ),
     selectApproval: jest.fn(async () => undefined),
     inspectWorkspaceTemplate: jest.fn(async () => {
       if (options.pendingReview)
@@ -83,6 +87,141 @@ it("reinspects an exact source and waits for explicit named creation", async () 
   expect(directory.activate).toHaveBeenCalledWith("board");
 });
 
+it("creates from a host-validated local candidate without remote inspection", async () => {
+  const { directory, view, onCreated } = fixture();
+  view.rerender(
+    <WorkspaceCreateSheet
+      directory={directory as unknown as MobileWorkspaceDirectory}
+      onClose={jest.fn()}
+      onCreated={onCreated}
+    />,
+  );
+  directory.listWorkspaceTemplateCandidates.mockResolvedValueOnce([
+    {
+      pin,
+      presentation: { name: "Task Board" },
+      repositories: ["panels/board"],
+      files: ["package.json"],
+    },
+  ]);
+  view.unmount();
+  directory.inspectWorkspaceTemplate.mockClear();
+  const local = render(
+    <WorkspaceCreateSheet
+      directory={directory as unknown as MobileWorkspaceDirectory}
+      onClose={jest.fn()}
+      onCreated={onCreated}
+    />,
+  );
+  fireEvent.press(
+    await local.findByRole("button", { name: "Explore Task Board" }),
+  );
+  fireEvent.changeText(local.getByLabelText("Workspace name"), "My board");
+  fireEvent.press(local.getByRole("button", { name: "Create workspace" }));
+  await waitFor(() => expect(onCreated).toHaveBeenCalled());
+  expect(directory.inspectWorkspaceTemplate).not.toHaveBeenCalled();
+  expect(directory.createWorkspace).toHaveBeenCalledWith("My board", pin);
+});
+
+it("uses the host inspection for an exact local pin handed to the sheet", async () => {
+  const { directory, view, onCreated } = fixture();
+  view.unmount();
+  directory.inspectWorkspaceTemplate.mockClear();
+  directory.listWorkspaceTemplateCandidates.mockResolvedValueOnce([
+    {
+      pin,
+      presentation: { name: "Local checkout" },
+      repositories: ["panels/board"],
+      files: ["package.json"],
+    },
+  ]);
+  const local = render(
+    <WorkspaceCreateSheet
+      directory={directory as unknown as MobileWorkspaceDirectory}
+      template={pin}
+      onClose={jest.fn()}
+      onCreated={onCreated}
+    />,
+  );
+  await waitFor(() =>
+    expect(local.getByLabelText("Workspace name").props.value).toBe(
+      "Local checkout",
+    ),
+  );
+  fireEvent.press(local.getByRole("button", { name: "Create workspace" }));
+  await waitFor(() => expect(onCreated).toHaveBeenCalled());
+  expect(directory.inspectWorkspaceTemplate).not.toHaveBeenCalled();
+  expect(directory.createWorkspace).toHaveBeenCalledWith("Local checkout", pin);
+});
+
+it("cannot create from a stale inspection while an exact pin changes", async () => {
+  const { directory, view, onCreated } = fixture();
+  await waitFor(() =>
+    expect(view.getByLabelText("Workspace name").props.value).toBe(
+      "Task Board",
+    ),
+  );
+  const nextPin = { ...pin, commit: "c".repeat(40) };
+  directory.listWorkspaceTemplateCandidates.mockImplementationOnce(
+    () => new Promise<TemplateInspection[]>(() => undefined),
+  );
+  view.rerender(
+    <WorkspaceCreateSheet
+      directory={directory as unknown as MobileWorkspaceDirectory}
+      template={nextPin}
+      onClose={jest.fn()}
+      onCreated={onCreated}
+    />,
+  );
+  const create = view.getByRole("button", { name: "Create workspace" });
+  expect(create.props.accessibilityState.disabled).toBe(true);
+  fireEvent.press(create);
+  expect(directory.createWorkspace).not.toHaveBeenCalled();
+});
+
+it("does not send a supplied pin to remote Git when local discovery fails", async () => {
+  const { directory, view, onCreated } = fixture();
+  view.unmount();
+  directory.inspectWorkspaceTemplate.mockClear();
+  directory.listWorkspaceTemplateCandidates.mockRejectedValueOnce(
+    new Error("Local candidates unavailable"),
+  );
+  const local = render(
+    <WorkspaceCreateSheet
+      directory={directory as unknown as MobileWorkspaceDirectory}
+      template={pin}
+      onClose={jest.fn()}
+      onCreated={onCreated}
+    />,
+  );
+  await local.findByText("Local candidates unavailable");
+  expect(directory.inspectWorkspaceTemplate).not.toHaveBeenCalled();
+  expect(directory.createWorkspace).not.toHaveBeenCalled();
+});
+
+it("keeps blank workspace creation available when local candidates fail to load", async () => {
+  const { directory, view, onCreated } = fixture();
+  view.unmount();
+  directory.listWorkspaceTemplateCandidates.mockRejectedValueOnce(
+    new Error("Local candidates unavailable") as never,
+  );
+  const local = render(
+    <WorkspaceCreateSheet
+      directory={directory as unknown as MobileWorkspaceDirectory}
+      onClose={jest.fn()}
+      onCreated={onCreated}
+    />,
+  );
+  await local.findByText("Local candidates unavailable");
+  fireEvent.changeText(local.getByLabelText("Workspace name"), "Blank board");
+  fireEvent.press(local.getByRole("button", { name: "Create workspace" }));
+  await waitFor(() => expect(onCreated).toHaveBeenCalled());
+  expect(directory.createWorkspace).toHaveBeenCalledWith(
+    "Blank board",
+    undefined,
+  );
+});
+
 it("retries opening a created workspace without creating it again", async () => {
   const { directory, view, onCreated } = fixture();
   directory.activate.mockRejectedValueOnce(
@@ -117,4 +256,30 @@ it("shows the captured System setup review instead of a raw extension failure", 
     "review-templates",
   );
   expect(directory.createWorkspace).not.toHaveBeenCalled();
+});
+
+it("rejects an inspection for a different exact source", async () => {
+  const { directory, view, onCreated } = fixture();
+  await waitFor(() =>
+    expect(view.getByLabelText("Workspace name").props.value).toBe(
+      "Task Board",
+    ),
+  );
+  const nextPin = { ...pin, commit: "c".repeat(40) };
+  view.rerender(
+    <WorkspaceCreateSheet
+      directory={directory as unknown as MobileWorkspaceDirectory}
+      template={nextPin}
+      onClose={jest.fn()}
+      onCreated={onCreated}
+    />,
+  );
+  await view.findByText(
+    "The inspected source does not match the selected workspace. Review the source again.",
+  );
+  const create = view.getByRole("button", { name: "Create workspace" });
+  expect(create.props.accessibilityState.disabled).toBe(true);
+  fireEvent.press(create);
+  expect(directory.createWorkspace).not.toHaveBeenCalled();
+  expect(onCreated).not.toHaveBeenCalled();
 });

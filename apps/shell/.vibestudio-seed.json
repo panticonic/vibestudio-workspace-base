@@ -3,8 +3,8 @@
   "unitKind": "app",
   "name": "@workspace-apps/shell",
   "sourceRepo": "apps/shell",
-  "sourceDigest": "9b9fe66b77cb94bb90aa74b30b248c39af099ff0d7ac830bd97a010bb7a574ba",
+  "sourceDigest": "5e21cd71504436548ca62ccc794ab8b817877c2abb5863bdafed4a2a911df987",
   "signatureKeyId": "vibestudio-dev-seed-v1",
-  "signature": "vibestudio-dev-seed-sha256:3b07ed41db403a8e2da21c437bd8242248b9db3c9894bd9063b3f9824bcdcdaa",
+  "signature": "vibestudio-dev-seed-sha256:7ba6b9606a03c7433c5b50a654b0869f29c96f3c943a63cffb2f7709c44eaa92",
   "createdBy": "vibestudio"
 }

@@ -7,6 +7,7 @@ import type {
   TemplateExactPin,
   TemplateInspection,
 } from "@vibestudio/service-schemas/templates";
+import { sameWorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
 import type { MobileHubWorkspace } from "@vibestudio/mobile-iroh";
 import {
   KeyboardAvoidingView,
@@ -45,6 +46,8 @@ export function WorkspaceCreateSheet({
   const pending = useRef(false);
   const [created, setCreated] = useState<MobileHubWorkspace | null>(null);
   const [inspection, setInspection] = useState<TemplateInspection | null>(null);
+  const [candidates, setCandidates] = useState<TemplateInspection[]>([]);
+  const [candidateError, setCandidateError] = useState<unknown>(null);
   const [inspecting, setInspecting] = useState(Boolean(template));
   const [showContents, setShowContents] = useState(false);
   const [inspectionAttempt, setInspectionAttempt] = useState(0);
@@ -55,25 +58,44 @@ export function WorkspaceCreateSheet({
     created?.workspaceId ?? directory.systemWorkspaceId;
   const approvalCount =
     directory.pendingApprovalCounts.get(approvalWorkspaceId) ?? 0;
+  const currentInspection =
+    inspection &&
+    (!template || sameWorkspaceTemplatePin(inspection.pin, template))
+      ? inspection
+      : null;
+  const selectedTemplate = template ?? currentInspection?.pin;
   useEffect(() => {
-    if (!template) return;
     let live = true;
-    setInspecting(true);
+    setInspecting(Boolean(template));
     setInspection(null);
     setError(null);
-    void directory
-      .inspectWorkspaceTemplate(template)
-      .then((result) => {
+    setCandidateError(null);
+    void (async () => {
+      try {
+        const available = await directory.listWorkspaceTemplateCandidates();
         if (!live) return;
+        setCandidates(available);
+        if (!template) return;
+        const local = available.find(({ pin }) =>
+          sameWorkspaceTemplatePin(pin, template),
+        );
+        const result =
+          local ?? (await directory.inspectWorkspaceTemplate(template));
+        if (!live) return;
+        if (!sameWorkspaceTemplatePin(result.pin, template))
+          throw new Error(
+            "The inspected source does not match the selected workspace. Review the source again.",
+          );
         setInspection(result);
         setName((current) => current || result.presentation?.name || "");
-      })
-      .catch((failure: unknown) => {
-        if (live) setError(failure);
-      })
-      .finally(() => {
+      } catch (failure) {
+        if (!live) return;
+        if (template) setError(failure);
+        else setCandidateError(failure);
+      } finally {
         if (live) setInspecting(false);
-      });
+      }
+    })();
     return () => {
       live = false;
     };
@@ -82,7 +104,7 @@ export function WorkspaceCreateSheet({
     const capturedName = name.trim();
     if (
       pending.current ||
-      (!created && (!capturedName || (template && !inspection)))
+      (!created && (!capturedName || (selectedTemplate && !currentInspection)))
     )
       return;
     pending.current = true;
@@ -91,7 +113,7 @@ export function WorkspaceCreateSheet({
     try {
       const entry =
         created ??
-        (await directory.createWorkspace(capturedName, inspection?.pin));
+        (await directory.createWorkspace(capturedName, currentInspection?.pin));
       setCreated(entry);
       await directory.activate(entry.workspaceId);
       onCreated();
@@ -165,11 +187,39 @@ export function WorkspaceCreateSheet({
           <Text style={[type.body, { color: colors.textSecondary }]}>
             {created
               ? `${created.name} has been created. You can retry opening it.`
-              : template
+              : selectedTemplate
                 ? "Review this source, then give its new workspace a name. It starts separately from your other workspaces."
                 : "A separate place for a project, with its own panels, agents and basic tools."}
           </Text>
-          {template && !created && (
+          {!selectedTemplate && candidates.length > 0 && (
+            <View style={{ gap: spacing.sm }}>
+              <Text style={[type.bodyStrong, { color: colors.text }]}>
+                Local workspaces
+              </Text>
+              {candidates.map((candidate) => (
+                <Button
+                  key={JSON.stringify(candidate.pin)}
+                  label={`Explore ${candidate.presentation?.name ?? "workspace"}`}
+                  onPress={() => {
+                    setInspection(candidate);
+                    setName(candidate.presentation?.name ?? "");
+                    setCandidateError(null);
+                  }}
+                />
+              ))}
+            </View>
+          )}
+          {candidateError !== null && !selectedTemplate && (
+            <Text
+              accessibilityRole="alert"
+              style={[type.caption, { color: colors.danger }]}
+            >
+              {candidateError instanceof Error
+                ? candidateError.message
+                : String(candidateError)}
+            </Text>
+          )}
+          {selectedTemplate && !created && (
             <View
               style={{
                 gap: spacing.sm,
@@ -181,32 +231,33 @@ export function WorkspaceCreateSheet({
               <Text style={[type.bodyStrong, { color: colors.text }]}>
                 {inspecting
                   ? "Checking source…"
-                  : (inspection?.presentation?.name ?? "Workspace source")}
+                  : (currentInspection?.presentation?.name ??
+                    "Workspace source")}
               </Text>
-              {inspection?.presentation?.description && (
+              {currentInspection?.presentation?.description && (
                 <Text style={[type.body, { color: colors.textSecondary }]}>
-                  {inspection.presentation.description}
+                  {currentInspection.presentation.description}
                 </Text>
               )}
               <Text
                 selectable
                 style={[type.caption, { color: colors.textSecondary }]}
               >
-                {template.url}
+                {selectedTemplate.url}
               </Text>
               <Text
                 selectable
                 style={[type.micro, { color: colors.textTertiary }]}
               >
-                Commit {template.commit}
+                Commit {selectedTemplate.commit}
               </Text>
               <Text
                 selectable
                 style={[type.micro, { color: colors.textTertiary }]}
               >
-                Snapshot {template.snapshot}
+                Snapshot {selectedTemplate.snapshot}
               </Text>
-              {inspection && (
+              {currentInspection && (
                 <>
                   <Pressable
                     accessibilityRole="button"
@@ -217,7 +268,7 @@ export function WorkspaceCreateSheet({
                     <Text style={[type.bodyStrong, { color: colors.primary }]}>
                       {showContents
                         ? "Hide contents"
-                        : `View ${inspection.repositories.length} workspace units and ${inspection.files.length} files`}
+                        : `View ${currentInspection.repositories.length} workspace units and ${currentInspection.files.length} files`}
                     </Text>
                   </Pressable>
                   {showContents && (
@@ -225,14 +276,15 @@ export function WorkspaceCreateSheet({
                       selectable
                       style={[type.caption, { color: colors.textSecondary }]}
                     >
-                      {[...inspection.repositories, ...inspection.files].join(
-                        "\n",
-                      )}
+                      {[
+                        ...currentInspection.repositories,
+                        ...currentInspection.files,
+                      ].join("\n")}
                     </Text>
                   )}
                 </>
               )}
-              {!inspecting && !inspection && (
+              {!inspecting && !currentInspection && (
                 <Button
                   label="Check source again"
                   onPress={() => setInspectionAttempt((attempt) => attempt + 1)}
@@ -241,7 +293,7 @@ export function WorkspaceCreateSheet({
             </View>
           )}
           <TextInput
-            autoFocus={!template}
+            autoFocus={!selectedTemplate}
             value={name}
             onChangeText={setName}
             editable={!busy && !created}
@@ -309,7 +361,9 @@ export function WorkspaceCreateSheet({
             loading={busy}
             disabled={
               busy ||
-              (!created && (!name.trim() || Boolean(template && !inspection)))
+              (!created &&
+                (!name.trim() ||
+                  Boolean(selectedTemplate && !currentInspection)))
             }
             onPress={() => void create()}
           />

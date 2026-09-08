@@ -1,9 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useSetAtom } from "jotai";
-import { Button, Callout, Flex, Text, Tabs } from "@radix-ui/themes";
+import { Callout, Tabs } from "@radix-ui/themes";
 import { TemplateBrowser } from "@workspace/template-management/react";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
-import { settingsDialogAtom } from "../state/appModeAtoms";
+import {
+  settingsDialogAtom,
+  workspaceChooserDialogOpenAtom,
+  workspaceChooserTemplateAtom,
+} from "../state/appModeAtoms";
 import { SourceCopySection } from "./SourceCopySection";
 import { systemWorkspaceId } from "../shell/client";
 import { useApprovalPresentation } from "./ApprovalPresentationContext";
@@ -31,51 +35,57 @@ function TemplateCreationSection() {
   const { templates, hubControl } = useShellWorkspaceClient();
   const approvalPresentation = useApprovalPresentation();
   const closeSettings = useSetAtom(settingsDialogAtom);
-  const [created, setCreated] = useState<{
-    workspaceId: string;
-    name: string;
-  } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const open = async (workspaceId: string) => {
-    try {
-      await hubControl.routeWorkspace({ workspaceId });
-      closeSettings(null);
-    } catch (error) {
-      setError(error instanceof Error ? error.message : String(error));
-    }
-  };
-  if (created)
-    return (
-      <Flex direction="column" gap="3">
-        <Text size="4" weight="bold">
-          {created.name} is ready
-        </Text>
-        {error ? (
-          <Callout.Root color="red">
-            <Callout.Text>{error}</Callout.Text>
-          </Callout.Root>
-        ) : null}
-        <Button size="3" onClick={() => void open(created.workspaceId)}>
-          Open workspace
-        </Button>
-      </Flex>
-    );
+  const openWorkspaceChooser = useSetAtom(workspaceChooserDialogOpenAtom);
+  const selectTemplate = useSetAtom(workspaceChooserTemplateAtom);
+  const [candidates, setCandidates] = useState<
+    import("@vibestudio/service-schemas/templates").TemplateInspection[]
+  >([]);
+  const [candidateError, setCandidateError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    hubControl
+      .listTemplateCandidates()
+      .then((value) => {
+        if (live) {
+          setCandidates(value);
+          setCandidateError(null);
+        }
+      })
+      .catch((cause: unknown) => {
+        if (live) {
+          setCandidates([]);
+          setCandidateError(
+            cause instanceof Error ? cause.message : String(cause),
+          );
+        }
+      });
+    return () => {
+      live = false;
+    };
+  }, [hubControl]);
   return (
-    <TemplateBrowser
-      client={templates}
-      onReviewPending={(approvalId) => {
-        void systemWorkspaceId.then((ownerId) => {
-          approvalPresentation.request(ownerId, approvalId);
-        });
-      }}
-      onCreate={async (name, pin) => {
-        const entry = await hubControl.createWorkspace({
-          workspace: name,
-          rootTemplate: pin,
-        });
-        setCreated(entry);
-        await open(entry.workspaceId);
-      }}
-    />
+    <>
+      {candidateError ? (
+        <Callout.Root color="red" role="alert">
+          <Callout.Text>
+            Could not load workspace sources: {candidateError}
+          </Callout.Text>
+        </Callout.Root>
+      ) : null}
+      <TemplateBrowser
+        client={templates}
+        candidates={candidates}
+        onReviewPending={(approvalId) => {
+          void systemWorkspaceId.then((ownerId) => {
+            approvalPresentation.request(ownerId, approvalId);
+          });
+        }}
+        onOpenInApp={async ({ pin }) => {
+          selectTemplate(pin);
+          closeSettings(null);
+          openWorkspaceChooser(true);
+        }}
+      />
+    </>
   );
 }

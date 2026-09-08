@@ -10,6 +10,7 @@ import {
 import { Theme } from "@radix-ui/themes";
 import { afterEach, expect, it, vi } from "vitest";
 import { TemplateBrowser, TemplateWorkspaceReview } from "./TemplateBrowser";
+import { sameWorkspaceTemplatePin } from "@vibestudio/service-schemas/templates";
 const pin = {
   url: "git+https://example.test/garden.git",
   ref: "refs/heads/main",
@@ -96,15 +97,18 @@ it("does not let a stale source inspection replace the currently requested sourc
       <TemplateBrowser client={client} initialPin={pin} onCreate={onCreate} />
     </Theme>,
   );
-  view.rerender(
-    <Theme>
-      <TemplateBrowser
-        client={client}
-        initialPin={nextPin}
-        onCreate={onCreate}
-      />
-    </Theme>,
-  );
+  act(() => {
+    view.rerender(
+      <Theme>
+        <TemplateBrowser
+          client={client}
+          initialInspection={undefined}
+          initialPin={nextPin}
+          onCreate={onCreate}
+        />
+      </Theme>,
+    );
+  });
   await screen.findByRole("heading", { name: "Next garden" });
   await act(async () => {
     finishOld(inspection);
@@ -114,6 +118,48 @@ it("does not let a stale source inspection replace the currently requested sourc
     fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
   });
   expect(onCreate).toHaveBeenCalledWith("next-garden", nextPin);
+});
+it("withdraws a reviewed source when its requested pin changes", async () => {
+  let finishNext!: (value: typeof inspection) => void;
+  const nextPin = { ...pin, commit: "d".repeat(40) };
+  expect(sameWorkspaceTemplatePin(pin, nextPin)).toBe(false);
+  const client = {
+    catalog: vi.fn(async () => null),
+    inspect: vi.fn(
+      () =>
+        new Promise<typeof inspection>((resolve) => {
+          finishNext = resolve;
+        }),
+    ),
+  };
+  const onCreate = vi.fn(async () => undefined);
+  const view = render(
+    <Theme>
+      <TemplateBrowser
+        client={client}
+        initialInspection={inspection}
+        onCreate={onCreate}
+      />
+    </Theme>,
+  );
+  expect(screen.getByRole("heading", { name: "Garden" })).toBeTruthy();
+  await act(async () => {
+    view.rerender(
+      <Theme>
+        <TemplateBrowser
+          client={client}
+          initialPin={nextPin}
+          onCreate={onCreate}
+        />
+      </Theme>,
+    );
+  });
+  expect(screen.queryByRole("heading", { name: "Garden" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Create workspace" })).toBeNull();
+  await act(async () => {
+    finishNext({ ...inspection, pin: nextPin });
+  });
+  await screen.findByRole("heading", { name: "Garden" });
 });
 it("allows ordinary panels to inspect and request host review without creating a workspace", async () => {
   const onOpenInApp = vi.fn(async () => undefined);
@@ -144,6 +190,33 @@ it("allows ordinary panels to inspect and request host review without creating a
   );
   expect(onOpenInApp).toHaveBeenCalledWith(inspection);
   expect(screen.queryByRole("button", { name: "Create workspace" })).toBeNull();
+});
+
+it("reviews a host-validated local candidate without remote inspection when the catalog fails", async () => {
+  const client = {
+    catalog: vi.fn(async () => {
+      throw new Error("Catalog unavailable");
+    }),
+    inspect: vi.fn(),
+  };
+  const onCreate = vi.fn(async () => undefined);
+  render(
+    <Theme>
+      <TemplateBrowser
+        client={client}
+        candidates={[inspection]}
+        onCreate={onCreate}
+      />
+    </Theme>,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Explore Garden" }),
+  );
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Create workspace" }));
+  });
+  expect(onCreate).toHaveBeenCalledWith("garden", pin);
+  expect(client.inspect).not.toHaveBeenCalled();
 });
 
 it("presents the exact pending review and retries only when requested", async () => {
@@ -179,24 +252,27 @@ it("presents the exact pending review and retries only when requested", async ()
 });
 
 it("presents a queued runtime acquisition instead of its wrapped error", async () => {
-  const failure = Object.assign(new Error("Extension templates.catalog invocation failed"), {
-    code: "EACQUIRE",
-    errorKind: "access",
-    errorData: {
-      acquisition: {
-        acquisitionId: "acq-templates-network",
-        ownerRuntimeId: "panel-system",
-        snapshotDigest: "snapshot",
-        capability: "network.response.read",
-        resourceKey: "https://github.com",
-        tier: "gated",
-        cardType: "permission.gated",
-        renderedAction: "read responses from github.com",
-        pending: true,
+  const failure = Object.assign(
+    new Error("Extension templates.catalog invocation failed"),
+    {
+      code: "EACQUIRE",
+      errorKind: "access",
+      errorData: {
+        acquisition: {
+          acquisitionId: "acq-templates-network",
+          ownerRuntimeId: "panel-system",
+          snapshotDigest: "snapshot",
+          capability: "network.response.read",
+          resourceKey: "https://github.com",
+          tier: "gated",
+          cardType: "permission.gated",
+          renderedAction: "read responses from github.com",
+          pending: true,
+        },
+        authorityFailure: { reasonCode: "approval-required" },
       },
-      authorityFailure: { reasonCode: "approval-required" },
     },
-  });
+  );
   const client = {
     catalog: vi.fn().mockRejectedValueOnce(failure).mockResolvedValue(null),
     inspect: vi.fn(),
@@ -207,11 +283,36 @@ it("presents a queued runtime acquisition instead of its wrapped error", async (
       <TemplateBrowser client={client} onReviewPending={onReviewPending} />
     </Theme>,
   );
-  await screen.findByText("Your approval is needed to read responses from github.com.");
-  expect(screen.queryByText("Extension templates.catalog invocation failed")).toBeNull();
+  await screen.findByText(
+    "Your approval is needed to read responses from github.com.",
+  );
+  expect(
+    screen.queryByText("Extension templates.catalog invocation failed"),
+  ).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Open approval" }));
   expect(onReviewPending).toHaveBeenCalledWith("acq-templates-network");
   expect(client.catalog).toHaveBeenCalledTimes(1);
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   await waitFor(() => expect(client.catalog).toHaveBeenCalledTimes(2));
+});
+
+it("rejects an inspection response that differs from the selected exact source", async () => {
+  const client = {
+    catalog: vi.fn().mockResolvedValue(null),
+    inspect: vi.fn().mockResolvedValue({
+      ...inspection,
+      pin: { ...pin, commit: "c".repeat(40) },
+    }),
+  };
+  const onCreate = vi.fn();
+  render(
+    <Theme>
+      <TemplateBrowser client={client} initialPin={pin} onCreate={onCreate} />
+    </Theme>,
+  );
+  await screen.findByText(
+    "The inspected source does not match the selected workspace. Review the source again.",
+  );
+  expect(screen.queryByRole("button", { name: "Create workspace" })).toBeNull();
+  expect(onCreate).not.toHaveBeenCalled();
 });

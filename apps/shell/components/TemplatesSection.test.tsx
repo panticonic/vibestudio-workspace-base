@@ -13,6 +13,7 @@ const clients = vi.hoisted(() => ({
   templates: { catalog: vi.fn(), inspect: vi.fn() },
   hubControl: {
     listWorkspaces: vi.fn(),
+    listTemplateCandidates: vi.fn(),
     createWorkspace: vi.fn(),
     routeWorkspace: vi.fn(),
   },
@@ -22,7 +23,9 @@ vi.mock("./SourceCopySection", () => ({ SourceCopySection: () => null }));
 vi.mock("../shell/workspaceContext", () => ({
   useShellWorkspaceClient: () => clients,
 }));
-vi.mock("../shell/client", () => ({ systemWorkspaceId: Promise.resolve("system-id") }));
+vi.mock("../shell/client", () => ({
+  systemWorkspaceId: Promise.resolve("system-id"),
+}));
 vi.mock("./ApprovalPresentationContext", () => ({
   useApprovalPresentation: () => approvalPresentation,
 }));
@@ -58,6 +61,7 @@ beforeEach(() => {
       lastOpened: 1,
     },
   ]);
+  clients.hubControl.listTemplateCandidates.mockResolvedValue([]);
   clients.hubControl.createWorkspace.mockResolvedValue({
     workspaceId: "new-id",
     name: "garden",
@@ -68,12 +72,14 @@ beforeEach(() => {
 });
 
 import { TemplatesSection } from "./TemplatesSection";
-import { settingsDialogAtom } from "../state/appModeAtoms";
-it("reviews a source, creates its exact snapshot and retries opening without duplicating it", async () => {
+import {
+  settingsDialogAtom,
+  workspaceChooserDialogOpenAtom,
+  workspaceChooserTemplateAtom,
+} from "../state/appModeAtoms";
+it("hands the reviewed exact source to the canonical workspace chooser", async () => {
   const store = createStore();
-  clients.hubControl.routeWorkspace.mockRejectedValueOnce(
-    new Error("Connection interrupted"),
-  );
+  store.set(settingsDialogAtom, { section: "templates" });
   render(
     <Provider store={store}>
       <Theme>
@@ -87,19 +93,13 @@ it("reviews a source, creates its exact snapshot and retries opening without dup
   );
   fireEvent.click(screen.getByRole("button", { name: "Review workspace" }));
   fireEvent.click(
-    await screen.findByRole("button", { name: "Create workspace" }),
+    await screen.findByRole("button", { name: "Continue in app" }),
   );
-  await screen.findByText("Connection interrupted");
-  expect(clients.hubControl.createWorkspace).toHaveBeenCalledWith({
-    workspace: "garden",
-    rootTemplate: pin,
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Open workspace" }));
-  await waitFor(() =>
-    expect(clients.hubControl.routeWorkspace).toHaveBeenCalledTimes(2),
-  );
-  expect(clients.hubControl.createWorkspace).toHaveBeenCalledTimes(1);
+  expect(store.get(workspaceChooserTemplateAtom)).toEqual(pin);
+  expect(store.get(workspaceChooserDialogOpenAtom)).toBe(true);
   expect(store.get(settingsDialogAtom)).toBeNull();
+  expect(clients.hubControl.createWorkspace).not.toHaveBeenCalled();
+  expect(clients.hubControl.routeWorkspace).not.toHaveBeenCalled();
 });
 
 it("opens the shared approval presenter for a catalog acquisition", async () => {
@@ -128,5 +128,21 @@ it("opens the shared approval presenter for a catalog acquisition", async () => 
       "system-id",
       "acq-catalog-network",
     ),
+  );
+});
+
+it("reports local candidate discovery failure", async () => {
+  clients.hubControl.listTemplateCandidates.mockRejectedValueOnce(
+    new Error("candidate transport unavailable"),
+  );
+  render(
+    <Provider store={createStore()}>
+      <Theme>
+        <TemplatesSection />
+      </Theme>
+    </Provider>,
+  );
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Could not load workspace sources: candidate transport unavailable",
   );
 });

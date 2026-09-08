@@ -22,6 +22,7 @@ import type {
   TemplateInspection,
   TemplateLocator,
 } from "@vibestudio/service-schemas/templates";
+import { sameWorkspaceTemplatePin } from "@vibestudio/service-schemas/templates";
 import type { TemplateManagementClient } from "./index.js";
 
 type BrowserClient = Pick<TemplateManagementClient, "catalog" | "inspect">;
@@ -71,7 +72,7 @@ export function TemplateWorkspaceReview({
     }
   };
   return (
-    <Flex direction="column" gap="4">
+    <Flex direction="column" gap="4" style={{ minWidth: 0 }}>
       <Box>
         <Badge color="gray" variant="soft">
           New workspace
@@ -86,16 +87,12 @@ export function TemplateWorkspaceReview({
         ) : null}
       </Box>
       <Card variant="surface">
-        <Flex direction="column" gap="2">
+        <Flex direction="column" gap="2" style={{ minWidth: 0 }}>
           <Text size="2" weight="medium">
             Source you’re opening
           </Text>
           <Text as="div" size="2" style={{ overflowWrap: "anywhere" }}>
             {sourceAddress(inspection.pin)}
-          </Text>
-          <Text size="1" color="gray">
-            {inspection.pin.ref.replace(/^refs\/(heads|tags)\//, "")} ·{" "}
-            {inspection.pin.commit.slice(0, 12)}
           </Text>
           <details>
             <summary
@@ -108,6 +105,14 @@ export function TemplateWorkspaceReview({
             >
               View source details
             </summary>
+            <Text
+              as="div"
+              size="1"
+              color="gray"
+              style={{ overflowWrap: "anywhere" }}
+            >
+              {inspection.pin.ref} · {inspection.pin.commit}
+            </Text>
             <Text as="div" size="1" style={{ overflowWrap: "anywhere" }}>
               {inspection.pin.snapshot}
             </Text>
@@ -120,6 +125,7 @@ export function TemplateWorkspaceReview({
                 paddingInlineStart: 20,
                 maxHeight: 180,
                 overflow: "auto",
+                overflowWrap: "anywhere",
                 fontSize: 12,
               }}
             >
@@ -185,10 +191,14 @@ export function TemplateBrowser({
   onCreate,
   onOpenInApp,
   initialPin,
+  initialInspection,
+  candidates = [],
   onReviewPending,
 }: {
   client: BrowserClient;
   initialPin?: TemplateExactPin;
+  initialInspection?: TemplateInspection;
+  candidates?: readonly TemplateInspection[];
   onReviewPending?: (approvalId: string) => void;
   onCreate?: CreateTemplateWorkspace;
   onOpenInApp?: (inspection: TemplateInspection) => Promise<void>;
@@ -202,10 +212,28 @@ export function TemplateBrowser({
   const [query, setQuery] = useState("");
   const [url, setUrl] = useState("");
   const [credential, setCredential] = useState("");
-  const [inspection, setInspection] = useState<TemplateInspection | null>(null);
+  const [inspectionState, setInspectionState] = useState<{
+    inspection: TemplateInspection;
+    requestedPin: TemplateExactPin;
+  } | null>(null);
   const [inspecting, setInspecting] = useState(false);
   const generation = useRef(0);
   const live = useRef(true);
+  const requestedPin = initialInspection?.pin ?? initialPin;
+  const currentInspection = initialInspection
+    ? initialInspection
+    : inspectionState &&
+        (!requestedPin ||
+          (sameWorkspaceTemplatePin(
+            inspectionState.requestedPin,
+            requestedPin,
+          ) &&
+            sameWorkspaceTemplatePin(
+              inspectionState.inspection.pin,
+              requestedPin,
+            )))
+      ? inspectionState.inspection
+      : null;
   useEffect(() => {
     live.current = true;
     let active = true;
@@ -234,8 +262,18 @@ export function TemplateBrowser({
     setError(null);
     try {
       const result = await client.inspect(locator);
+      if (
+        "pin" in locator &&
+        !sameWorkspaceTemplatePin(result.pin, locator.pin)
+      )
+        throw new Error(
+          "The inspected source does not match the selected workspace. Review the source again.",
+        );
       if (live.current && operation === generation.current)
-        setInspection(result);
+        setInspectionState({
+          inspection: result,
+          requestedPin: "pin" in locator ? locator.pin : result.pin,
+        });
     } catch (error) {
       if (live.current && operation === generation.current) setError(error);
     } finally {
@@ -244,15 +282,22 @@ export function TemplateBrowser({
     }
   };
   useEffect(() => {
-    if (initialPin) void inspect({ pin: initialPin });
-  }, [initialPin, client, attempt]);
-  if (inspection && onCreate)
+    if (initialInspection) {
+      generation.current += 1;
+      setInspectionState({
+        inspection: initialInspection,
+        requestedPin: initialInspection.pin,
+      });
+      setError(null);
+      setInspecting(false);
+    } else if (initialPin) void inspect({ pin: initialPin });
+  }, [initialInspection, initialPin, client, attempt]);
+  if (currentInspection && onCreate)
     return (
       <TemplateWorkspaceReview
-        key={JSON.stringify(inspection.pin)}
-        inspection={inspection}
+        inspection={currentInspection}
         onCreate={onCreate}
-        onBack={() => setInspection(null)}
+        onBack={() => setInspectionState(null)}
       />
     );
   const entries = (catalog?.entries ?? []).filter((entry) =>
@@ -293,7 +338,9 @@ export function TemplateBrowser({
             <Flex direction="column" gap="2">
               {review && onReviewPending ? (
                 <Button onClick={() => onReviewPending(review.approvalId)}>
-                  {review.kind === "acquisition" ? "Open approval" : "Open review"}
+                  {review.kind === "acquisition"
+                    ? "Open approval"
+                    : "Open review"}
                 </Button>
               ) : (
                 <Text size="2">
@@ -310,30 +357,64 @@ export function TemplateBrowser({
           )}
         </Callout.Root>
       ) : null}
-      {inspection ? (
+      {currentInspection ? (
         <Card>
           <Heading size="3">
-            {inspection.presentation?.name ?? "Workspace source"}
+            {currentInspection.presentation?.name ?? "Workspace source"}
           </Heading>
           <Text as="p" size="2" color="gray" mt="2">
-            {inspection.presentation?.description}
+            {currentInspection.presentation?.description}
           </Text>
           <Text as="div" size="1" mt="2" style={{ overflowWrap: "anywhere" }}>
-            {sourceAddress(inspection.pin)} ·{" "}
-            {inspection.pin.commit.slice(0, 12)}
+            {sourceAddress(currentInspection.pin)} ·{" "}
+            {currentInspection.pin.commit.slice(0, 12)}
           </Text>
           {onOpenInApp ? (
             <Button
               size="3"
               mt="3"
               onClick={() =>
-                void onOpenInApp(inspection).catch((error) => setError(error))
+                void onOpenInApp(currentInspection).catch((error) =>
+                  setError(error),
+                )
               }
             >
               Continue in app
             </Button>
           ) : null}
         </Card>
+      ) : null}
+      {candidates.length > 0 ? (
+        <Flex direction="column" gap="3">
+          <Heading size="3">Local workspaces</Heading>
+          <Grid columns={{ initial: "1", sm: "2" }} gap="3">
+            {candidates.map((candidate) => (
+              <Card key={JSON.stringify(candidate.pin)}>
+                <Heading size="3">
+                  {candidate.presentation?.name ?? "Workspace source"}
+                </Heading>
+                {candidate.presentation?.description ? (
+                  <Text as="p" size="2" color="gray" mt="2">
+                    {candidate.presentation.description}
+                  </Text>
+                ) : null}
+                <Button
+                  size="3"
+                  variant="soft"
+                  mt="3"
+                  onClick={() =>
+                    setInspectionState({
+                      inspection: candidate,
+                      requestedPin: candidate.pin,
+                    })
+                  }
+                >
+                  Explore {candidate.presentation?.name ?? "workspace"}
+                </Button>
+              </Card>
+            ))}
+          </Grid>
+        </Flex>
       ) : null}
       <Flex direction="column" gap="3">
         <Flex justify="between" align="center">
