@@ -39,6 +39,7 @@ import type {
   AttachmentInput,
   AgentDebugPayload,
   IncomingEvent,
+  MethodExecutionContext,
 } from "@workspace/pubsub";
 import {
   AGENTIC_EVENT_PAYLOAD_KIND,
@@ -496,7 +497,7 @@ export class HeadlessSession {
         imports: z.record(z.string(), z.string()).optional(),
         props: z.record(z.unknown()).optional(),
       }),
-      execute: async (args: unknown) => {
+      execute: async (args: unknown, context: MethodExecutionContext) => {
         const {
           id: requestedId,
           code,
@@ -512,7 +513,10 @@ export class HeadlessSession {
         };
         const trimmedPath = path?.trim();
         if (!trimmedPath && !code)
-          return { ok: false, error: "Missing code or path" };
+          return context.result(
+            { ok: false, error: "Missing code or path" },
+            { isError: true },
+          );
 
         const id = requestedId?.trim() || crypto.randomUUID();
         const source = trimmedPath
@@ -549,7 +553,7 @@ export class HeadlessSession {
         maxHeight: z.number().optional(),
         clear: z.boolean().optional(),
       }),
-      execute: async (args: unknown) => {
+      execute: async (args: unknown, context: MethodExecutionContext) => {
         const { path, imports, props, maxHeight, clear } = args as {
           path?: string;
           imports?: Record<string, string>;
@@ -576,7 +580,11 @@ export class HeadlessSession {
         }
 
         const trimmedPath = path?.trim();
-        if (!trimmedPath) return { ok: false, error: "Missing path" };
+        if (!trimmedPath)
+          return context.result(
+            { ok: false, error: "Missing path" },
+            { isError: true },
+          );
 
         const id = crypto.randomUUID();
         const eventPayload: AgenticEvent<"ui.action_bar.updated">["payload"] = {

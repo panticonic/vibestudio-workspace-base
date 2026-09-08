@@ -792,23 +792,39 @@ describe("HeadlessSession", () => {
         "inline_ui",
         "load_action_bar",
       ]);
+      const result = vi.fn((content, options) => ({ content, ...options }));
+      const methodContext = { result } as never;
+
+      await expect(
+        registeredMethods["inline_ui"]!.execute({}, methodContext),
+      ).resolves.toMatchObject({
+        content: { ok: false, error: "Missing code or path" },
+        isError: true,
+      });
+      await expect(
+        registeredMethods["load_action_bar"]!.execute({}, methodContext),
+      ).resolves.toMatchObject({
+        content: { ok: false, error: "Missing path" },
+        isError: true,
+      });
+      expect(result).toHaveBeenCalledTimes(2);
 
       await registeredMethods["inline_ui"]!.execute(
         {
           id: "setup-overview",
           code: "export default function App() { return null; }",
         },
-        {} as never,
+        methodContext,
       );
       await registeredMethods["load_action_bar"]!.execute(
         {
           path: "skills/test/ActionBar.tsx",
         },
-        {} as never,
+        methodContext,
       );
       await registeredMethods["load_action_bar"]!.execute(
         { clear: true },
-        {} as never,
+        methodContext,
       );
     } finally {
       connect.mockRestore();
