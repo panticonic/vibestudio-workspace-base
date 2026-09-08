@@ -3752,6 +3752,67 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     });
   });
 
+  it("keeps a successful child live until its semantic work is committed", async () => {
+    const probe = await makeChildCompletionProbe();
+    probe.respondToVcs(
+      "status",
+      semanticStatus(
+        "ctx-1",
+        "event:base",
+        { kind: "application", applicationId: "application:dirty" },
+        false,
+      ),
+      semanticStatus(
+        "ctx-1",
+        "event:child-commit",
+        { kind: "event", eventId: "event:child-commit" },
+        true,
+      ),
+    );
+
+    await expect(
+      probe.completeOwnRunForTest("Implemented the change.", "success"),
+    ).rejects.toMatchObject({
+      code: "IntegrationIncomplete",
+      errorData: {
+        operation: "complete-subagent",
+        runId: "child-run-1",
+        workingChangeCount: 1,
+      },
+    });
+    expect(probe.ownTerminalWakeForTest()).toBeNull();
+
+    await expect(
+      probe.completeOwnRunForTest("Implemented and committed the change.", "success"),
+    ).resolves.toMatchObject({ terminate: true });
+    expect(probe.ownTerminalWakeForTest()).toMatchObject({
+      payload: { sourceEventId: "event:child-commit" },
+    });
+  });
+
+  it("allows a failed child to report retained uncommitted work", async () => {
+    const probe = await makeChildCompletionProbe();
+    probe.respondToVcs(
+      "status",
+      semanticStatus(
+        "ctx-1",
+        "event:base",
+        { kind: "application", applicationId: "application:partial" },
+        false,
+      ),
+    );
+
+    await expect(
+      probe.completeOwnRunForTest("Blocked with partial work retained.", "failed"),
+    ).resolves.toMatchObject({ terminate: true });
+    expect(probe.ownTerminalWakeForTest()).toMatchObject({
+      payload: {
+        outcome: "failed",
+        sourceEventId: null,
+      },
+    });
+  });
+
   it("inherits the parent's effective Pi model, unattended settings, and system prompt", async () => {
     const probe = await makeSubagentSpawnProbe({
       systemPrompt: "system-test-parent-prompt",

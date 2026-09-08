@@ -9260,6 +9260,23 @@ This is one admitted recurring-automation tick. If this tick establishes that th
     const childStatus = await createSubagentVcsClient(this.rpc).status({
       contextId,
     });
+    if (outcome === "completed" && !childStatus.clean) {
+      throw Object.assign(
+        new Error(
+          `subagent ${sub.runId} has uncommitted semantic work; commit the child context before completing`,
+        ),
+        {
+          code: "IntegrationIncomplete",
+          errorData: {
+            code: "IntegrationIncomplete",
+            operation: "complete-subagent",
+            runId: sub.runId,
+            contextId,
+            workingChangeCount: childStatus.workingCounts.changes,
+          },
+        },
+      );
+    }
     const sourceEventId =
       childStatus.clean && childStatus.committed.kind === "event"
         ? childStatus.committed.eventId
