@@ -285,7 +285,12 @@ export class ModelSettingsDO extends DurableObjectBase {
   protected createTables(): void {}
 
   @rpc({
-    principals: ["host", "user", "code", "session", "mission"],
+    website: {
+      kind: "eligible",
+      rationale:
+        "The model catalog is secret-free metadata needed by portable connected chat clients; credential use remains separately gated.",
+    },
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "read",
@@ -295,7 +300,12 @@ export class ModelSettingsDO extends DurableObjectBase {
   }
 
   @rpc({
-    principals: ["host", "user", "code", "session", "mission"],
+    website: {
+      kind: "eligible",
+      rationale:
+        "The resolved model settings expose model choice and secret-free availability; they do not disclose credential material or grant model use.",
+    },
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "read",
@@ -309,7 +319,12 @@ export class ModelSettingsDO extends DurableObjectBase {
   }
 
   @rpc({
-    principals: ["host", "user", "code", "session", "mission"],
+    website: {
+      kind: "eligible",
+      rationale:
+        "The default model projection is secret-free metadata used to initialize portable connected chat clients; selecting or using a credential remains separately gated.",
+    },
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "read",
@@ -319,7 +334,12 @@ export class ModelSettingsDO extends DurableObjectBase {
   }
 
   @rpc({
-    principals: ["host", "user", "code", "session", "mission"],
+    website: {
+      kind: "eligible",
+      rationale:
+        "Availability inspection returns only requested model metadata and never transports credential material; model use remains separately authorized.",
+    },
+    principals: ["host", "user", "code", "session", "mission", "website"],
     effect: { kind: "open" },
     tier: "open",
     sensitivity: "read",
@@ -348,6 +368,11 @@ export class ModelSettingsDO extends DurableObjectBase {
   }
 
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host", "code"],
     effect: { kind: "open" },
     tier: "open",
