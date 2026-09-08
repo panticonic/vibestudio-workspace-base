@@ -22,7 +22,6 @@ import {
 import { RpcBoundaryError } from "@vibestudio/rpc";
 import { createRecoveryCoordinator } from "@vibestudio/shell-core/recoveryCoordinator";
 import { encodeEventWatchRecord } from "@vibestudio/shared/events";
-import { ledgerTest } from "../../../tests/helpers/ledgerTest.js";
 import { z } from "zod";
 
 const CHANNEL = "test-channel";
@@ -2157,7 +2156,7 @@ describe("connectViaRpc", () => {
       await client.close();
     });
 
-    ledgerTest("channel.reconnect.authority-neutral", async () => {
+    it("ledger:channel.reconnect.authority-neutral", async () => {
       let recover!: () => Promise<void>;
       const registerResubscribeHandler = vi.fn((_id: string, handler: () => Promise<void>) => {
         recover = handler;

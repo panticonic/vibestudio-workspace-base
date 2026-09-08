@@ -9,7 +9,6 @@ import {
   createTestDO,
   createTestDirectAuthority,
 } from "@workspace/runtime/worker/test-utils";
-import { ledgerTest } from "../../tests/helpers/ledgerTest.js";
 import {
   AGENTIC_EVENT_PAYLOAD_KIND,
   AGENTIC_PROTOCOL_VERSION,
@@ -381,7 +380,7 @@ describe("PubSubChannel", () => {
     expect(schedule!.wakeAt).toBeLessThanOrEqual(Date.now() + 250);
   });
 
-  ledgerTest("channel.locked.exact-admission", async () => {
+  it("ledger:channel.locked.exact-admission", async () => {
     const workerId = "do:workers/system-agent:SystemAgentWorker:user-alice";
     const { instance } = await createGadBackedChannel({
       rpcCall: (target, method, args) => {
@@ -653,7 +652,7 @@ describe("PubSubChannel", () => {
     });
   });
 
-  ledgerTest("channel.ordinary.authenticated-admission", async () => {
+  it("ledger:channel.ordinary.authenticated-admission", async () => {
     const { instance } = await createGadBackedChannel();
     setRpcCaller(instance, "panel:nav-current", "panel", "panel:slot-stable");
 
@@ -838,7 +837,7 @@ describe("PubSubChannel", () => {
     ).resolves.toMatchObject({ ok: true });
   });
 
-  ledgerTest("channel.presence.canonical-human", async () => {
+  it("ledger:channel.presence.canonical-human", async () => {
     const emittedTargets: string[] = [];
     const { instance, sql } = await createGadBackedChannel({ emittedTargets });
 
@@ -1014,7 +1013,7 @@ describe("PubSubChannel", () => {
     );
   });
 
-  ledgerTest("channel.invitation.discovery-metadata", async () => {
+  it("ledger:channel.invitation.discovery-metadata", async () => {
     const { instance, gad } = await createGadBackedChannel({
       rpcCall: (_target, method, args) => {
         if (method === "account.isMember") return args[0] === "usr_bob";
@@ -3152,7 +3151,7 @@ describe("PubSubChannel", () => {
     ]);
   });
 
-  ledgerTest("channel.fork.context-and-log-origin", async () => {
+  it("ledger:channel.fork.context-and-log-origin", async () => {
     const parent = await createGadBackedChannel({
       channelKey: "channel-parent",
     });

@@ -10,7 +10,6 @@
  */
 import { createServer } from "node:http";
 import { describe, expect, it, vi } from "vitest";
-import { ledgerTest } from "../../../tests/helpers/ledgerTest.js";
 import { createTestDO } from "@workspace/runtime/worker/test-utils";
 import { ids, type AgentTurnMetadata } from "@workspace/agent-loop";
 import { logIdForChannel } from "@vibestudio/trajectory-identity";
@@ -3921,7 +3920,7 @@ describe("AgentVesselBase.runDeferredSpawn", () => {
     ).toBe(false);
   });
 
-  ledgerTest("execution.agent-spawn", async () => {
+  it("ledger:execution.agent-spawn", async () => {
     const probe = await makeSubagentSpawnProbe();
 
     await probe.spawnForTest(CHANNEL, "inv-source-identity", {
