@@ -220,6 +220,10 @@ describe("PanelDurableObjectBase panelTree handles", () => {
       protected createTables(): void {}
 
       @rpc({
+        website: {
+          kind: "eligible",
+          rationale: "Explicit receiver exposure for this test fixture.",
+        },
         principals: ["host", "user", "code"],
         effect: { kind: "open" },
         tier: "open",
@@ -308,6 +312,10 @@ describe("PanelDurableObjectBase panelTree handles", () => {
       protected createTables(): void {}
 
       @rpc({
+        website: {
+          kind: "eligible",
+          rationale: "Explicit receiver exposure for this test fixture.",
+        },
         principals: ["host", "user", "code"],
         effect: { kind: "open" },
         tier: "open",
@@ -440,6 +448,10 @@ describe("PanelDurableObjectBase panelTree handles", () => {
       protected createTables(): void {}
 
       @rpc({
+        website: {
+          kind: "eligible",
+          rationale: "Explicit receiver exposure for this test fixture.",
+        },
         principals: ["host", "user", "code"],
         effect: { kind: "open" },
         tier: "open",
@@ -556,6 +568,10 @@ describe("PanelDurableObjectBase panelTree handles", () => {
       protected createTables(): void {}
 
       @rpc({
+        website: {
+          kind: "eligible",
+          rationale: "Explicit receiver exposure for this test fixture.",
+        },
         principals: ["host", "user", "code"],
         effect: { kind: "open" },
         tier: "open",
@@ -651,6 +667,10 @@ describe("PanelDurableObjectBase panelTree handles", () => {
       protected createTables(): void {}
 
       @rpc({
+        website: {
+          kind: "eligible",
+          rationale: "Explicit receiver exposure for this test fixture.",
+        },
         principals: ["host", "user", "code"],
         effect: { kind: "open" },
         tier: "open",

@@ -381,6 +381,7 @@ export abstract class DurableObjectBase {
       }
       return {
         requires: bindMethodCapability(authority.requirement, methodCapability),
+        website: wireMethod.website,
         effect: resolvedEffect,
         tier: tier.tier,
         sensitivity,
@@ -392,6 +393,7 @@ export abstract class DurableObjectBase {
     if (!codeSource || !authority.principals.includes("code")) {
       return {
         principals: authority.principals,
+        website: wireMethod.website,
         effect: resolvedEffect,
         tier: tier.tier,
         sensitivity,
@@ -418,6 +420,7 @@ export abstract class DurableObjectBase {
           value: codeSource,
         }),
       ),
+      website: wireMethod.website,
       effect: resolvedEffect,
       tier: tier.tier,
       sensitivity,
@@ -662,6 +665,19 @@ export abstract class DurableObjectBase {
           this,
           rpcExposedMethodNames(this),
           Object.prototype,
+        ),
+        Object.fromEntries(
+          [...rpcExposedMethodNames(this)].map((name) => {
+            const policy = this.rpcAuthorityDeclaration(
+              name,
+              (this.constructor as typeof DurableObjectBase).rpcMethods?.[name],
+            );
+            if (!policy)
+              throw new Error(
+                `RPC method ${name} lacks an authority declaration`,
+              );
+            return [name, policy.website];
+          }),
         ),
       );
       this._connectionless = connectionless;
@@ -1760,6 +1776,11 @@ export abstract class DurableObjectBase {
   }
 
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host"],
     effect: { kind: "open" },
     tier: "open",
@@ -1773,6 +1794,11 @@ export abstract class DurableObjectBase {
    * durable sender retries when no receiver is active; this method owns no
    * stream, timer, or durable relationship state. */
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["host"],
     effect: { kind: "open" },
     tier: "open",
@@ -1785,6 +1811,11 @@ export abstract class DurableObjectBase {
   }
 
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["code"],
     effect: { kind: "open" },
     tier: "open",
@@ -1800,6 +1831,11 @@ export abstract class DurableObjectBase {
   }
 
   @rpc({
+    website: {
+      kind: "closed",
+      reason:
+        "This receiver owns workspace orchestration or retained workspace data; websites require a reviewed bounded operation.",
+    },
     principals: ["code"],
     effect: { kind: "open" },
     tier: "open",
