@@ -1,9 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   onboardingInteraction,
-  onboardingTemplateInteraction,
   resolveOnboardingSelection,
-  resolveOnboardingTemplateSelection,
 } from "./routing.js";
 
 describe("onboarding selection routing", () => {
@@ -77,35 +75,5 @@ describe("onboarding selection routing", () => {
         action: "install" as never,
       }),
     ).toThrow("connection.device does not offer the install action");
-  });
-
-  it("resolves optional template choices to the canonical Templates owner and URL", () => {
-    const selection = {
-      catalogId: "news",
-      registryCommit: "a".repeat(40),
-      registrySnapshot: `v1-sha256:${"b".repeat(64)}`,
-    };
-    expect(
-      resolveOnboardingTemplateSelection(
-        onboardingTemplateInteraction(selection),
-      ),
-    ).toEqual(
-      expect.objectContaining({
-        ownerSkillPath: "skills/templates/SKILL.md",
-        selection,
-      }),
-    );
-    expect(() =>
-      resolveOnboardingTemplateSelection({
-        ...onboardingTemplateInteraction(selection),
-        targetId: "template.retired",
-      }),
-    ).toThrow("Onboarding template selection metadata is invalid");
-    expect(() =>
-      resolveOnboardingTemplateSelection({
-        ...onboardingTemplateInteraction(selection),
-        action: "add",
-      }),
-    ).toThrow("Onboarding template selection metadata is invalid");
   });
 });

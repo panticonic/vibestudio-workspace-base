@@ -4,7 +4,6 @@ import {
   type SetupAction,
   type SetupActionTarget,
 } from "./catalog";
-import type { OnboardingTemplateSelection } from "./templates";
 
 export const ONBOARDING_INTERACTION_KIND = "onboarding-capability";
 export const ONBOARDING_INTERACTION_SOURCE = "onboarding-setup-hub";
@@ -23,21 +22,6 @@ export interface ResolvedOnboardingSelection {
   ownerSkillPath?: string;
 }
 
-export interface OnboardingTemplateInteraction {
-  source: typeof ONBOARDING_INTERACTION_SOURCE;
-  kind: "onboarding-template";
-  action: "create-workspace";
-  targetId: string;
-  catalogId: string;
-  registryCommit: string;
-  registrySnapshot: string;
-}
-
-export interface ResolvedOnboardingTemplateSelection {
-  ownerSkillPath: "skills/templates/SKILL.md";
-  selection: OnboardingTemplateSelection;
-}
-
 export function onboardingInteraction(
   targetId: string,
   action: SetupAction,
@@ -47,51 +31,6 @@ export function onboardingInteraction(
     kind: ONBOARDING_INTERACTION_KIND,
     action,
     targetId,
-  };
-}
-
-export function onboardingTemplateInteraction(
-  selection: OnboardingTemplateSelection,
-): OnboardingTemplateInteraction {
-  return {
-    source: ONBOARDING_INTERACTION_SOURCE,
-    kind: "onboarding-template",
-    action: "create-workspace",
-    targetId: `template.${selection.catalogId}`,
-    ...selection,
-  };
-}
-
-export function resolveOnboardingTemplateSelection(
-  interaction: unknown,
-): ResolvedOnboardingTemplateSelection {
-  if (
-    !interaction ||
-    typeof interaction !== "object" ||
-    Array.isArray(interaction)
-  ) {
-    throw new Error("Onboarding template selection metadata is missing.");
-  }
-  const value = interaction as Record<string, unknown>;
-  if (
-    value["source"] !== ONBOARDING_INTERACTION_SOURCE ||
-    value["kind"] !== "onboarding-template" ||
-    value["action"] !== "create-workspace" ||
-    typeof value["targetId"] !== "string" ||
-    typeof value["catalogId"] !== "string" ||
-    typeof value["registryCommit"] !== "string" ||
-    typeof value["registrySnapshot"] !== "string" ||
-    value["targetId"] !== `template.${value["catalogId"]}`
-  ) {
-    throw new Error("Onboarding template selection metadata is invalid.");
-  }
-  return {
-    ownerSkillPath: "skills/templates/SKILL.md",
-    selection: {
-      catalogId: value["catalogId"],
-      registryCommit: value["registryCommit"],
-      registrySnapshot: value["registrySnapshot"],
-    },
   };
 }
 

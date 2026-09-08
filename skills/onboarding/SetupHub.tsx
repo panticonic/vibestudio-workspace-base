@@ -24,15 +24,7 @@ import {
   composeOnboardingCapabilities,
   type SetupCapabilitySnapshot,
 } from "./snapshot";
-import {
-  loadOptionalTemplateSnapshot,
-  type OptionalTemplateSnapshot,
-} from "./templates";
-
-import {
-  onboardingInteraction,
-  onboardingTemplateInteraction,
-} from "./routing";
+import { onboardingInteraction } from "./routing";
 
 interface SetupHubProps {
   chat: {
@@ -49,23 +41,9 @@ interface SetupHubProps {
 interface SetupHubCache {
   catalog: readonly OnboardingCapabilityDefinition[];
   snapshot: SetupCapabilitySnapshot[];
-  templates?: OptionalTemplateSnapshot[];
-  templatesLoaded?: boolean;
 }
 
 const CACHE_KEY = "onboardingSetupOverview";
-
-function boundedErrorMessage(error: unknown): string {
-  const message =
-    error instanceof Error
-      ? error.message
-      : typeof error === "string"
-        ? error
-        : "Unknown error";
-  const normalized = message.replace(/\s+/g, " ").trim();
-  if (normalized.length === 0) return "Unknown error";
-  return normalized.length <= 500 ? normalized : `${normalized.slice(0, 497)}…`;
-}
 
 function readCache(
   scope: Record<string, unknown> | undefined,
@@ -74,8 +52,6 @@ function readCache(
   if (!value || typeof value !== "object") return undefined;
   const candidate = value as Partial<SetupHubCache>;
   if (!Array.isArray(candidate.catalog) || !Array.isArray(candidate.snapshot))
-    return undefined;
-  if (candidate.templates !== undefined && !Array.isArray(candidate.templates))
     return undefined;
   return candidate as SetupHubCache;
 }
@@ -286,22 +262,13 @@ export default function SetupHub({
   const [snapshots, setSnapshots] = useState<SetupCapabilitySnapshot[]>(
     cached?.snapshot ?? [],
   );
-  const [templateSnapshots, setTemplateSnapshots] = useState<
-    OptionalTemplateSnapshot[]
-  >(cached?.templates ?? []);
   const [catalog, setCatalog] = useState<
     readonly OnboardingCapabilityDefinition[]
   >(cached?.catalog ?? []);
-  const [templatesLoaded, setTemplatesLoaded] = useState(
-    cached?.templatesLoaded === true,
-  );
   const [loadingCapabilities, setLoadingCapabilities] = useState(false);
-  const [loadingTemplates, setLoadingTemplates] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const capabilityRequest = useRef(0);
-  const templateRequest = useRef(0);
-  const templatesLoadedRef = useRef(templatesLoaded);
   const byId = new Map(snapshots.map((snapshot) => [snapshot.id, snapshot]));
   const definitions = catalog.filter((entry) => byId.has(entry.id));
   const ready = catalog.filter((entry) => entry.role === "ready-capability");
@@ -356,44 +323,11 @@ export default function SetupHub({
     [saveCache],
   );
 
-  const loadTemplates = useCallback(
-    async (refreshCatalog = true) => {
-      const request = ++templateRequest.current;
-      setLoadingTemplates(true);
-      setError(null);
-      try {
-        const templates = await loadOptionalTemplateSnapshot({
-          refreshCatalog,
-        });
-        if (request !== templateRequest.current) return;
-        setTemplateSnapshots(templates);
-        setTemplatesLoaded(true);
-        await saveCache({ templates, templatesLoaded: true });
-      } catch (failure) {
-        if (request === templateRequest.current) {
-          setError(
-            `Couldn't load optional templates: ${boundedErrorMessage(failure)}`,
-          );
-        }
-      } finally {
-        if (request === templateRequest.current) setLoadingTemplates(false);
-      }
-    },
-    [saveCache],
-  );
-
-  useEffect(() => {
-    templatesLoadedRef.current = templatesLoaded;
-  }, [templatesLoaded]);
-
   // Mounting always refreshes owner state. Re-rendering the stable inline UI
   // changes renderedAt, which is the agent's explicit external refresh signal.
-  // Once the user has loaded the registry, reread its cached catalog snapshot
-  // too without contacting the moving registry again.
   useEffect(() => {
     void refreshCapabilities();
-    if (templatesLoadedRef.current) void loadTemplates(false);
-  }, [inlineUi?.renderedAt, loadTemplates, refreshCapabilities]);
+  }, [inlineUi?.renderedAt, refreshCapabilities]);
 
   async function sendInteraction(
     definition: OnboardingCapabilityDefinition,
@@ -421,23 +355,6 @@ export default function SetupHub({
       setError(
         `Couldn't send “${readableAction(definition, action)}”. Try again.`,
       );
-    } finally {
-      setPending(null);
-    }
-  }
-
-  async function sendTemplateInteraction(definition: OptionalTemplateSnapshot) {
-    const key = `${definition.id}:create-workspace`;
-    setPending(key);
-    setError(null);
-    try {
-      await chat.send(`Review ${definition.title} and create a new workspace`, {
-        metadata: {
-          interaction: onboardingTemplateInteraction(definition.selection),
-        },
-      });
-    } catch {
-      setError(`Couldn't request ${definition.title}. Try again.`);
     } finally {
       setPending(null);
     }
@@ -603,64 +520,9 @@ export default function SetupHub({
         </Text>
         <Box>
           <Button size="2" asChild>
-            <a href={workspaceChooserLink}>Open workspace chooser</a>
+            <a href={workspaceChooserLink}>Add workspace</a>
           </Button>
         </Box>
-        <Text size="1" color="gray">
-          Or browse featured workspaces from Vibestudio's catalog below.
-        </Text>
-        <Box>
-          <Button
-            size="1"
-            variant="soft"
-            disabled={loadingTemplates || pending !== null}
-            onClick={() => void loadTemplates(true)}
-          >
-            <BusyReloadIcon busy={loadingTemplates} />
-            {loadingTemplates
-              ? "Loading workspaces…"
-              : templatesLoaded
-                ? "Refresh workspace catalog"
-                : "Browse workspaces"}
-          </Button>
-        </Box>
-        {templatesLoaded && templateSnapshots.length === 0 ? (
-          <Text size="1" color="gray">
-            No optional workspaces are available right now.
-          </Text>
-        ) : null}
-        {templateSnapshots.map((definition) => {
-          return (
-            <Card key={definition.id} size="1">
-              <Flex align="center" justify="between" gap="2" wrap="wrap">
-                <Box style={{ minWidth: 0, flex: "1 1 220px" }}>
-                  <Text as="div" size="2" weight="medium">
-                    {definition.title}
-                  </Text>
-                  <Text as="div" size="1" color="gray">
-                    {definition.description}
-                  </Text>
-                </Box>
-                <Flex align="center" gap="2">
-                  <Button
-                    size="1"
-                    variant="soft"
-                    disabled={pending !== null}
-                    onClick={() => void sendTemplateInteraction(definition)}
-                  >
-                    {pending === `${definition.id}:create-workspace` ? (
-                      <>
-                        <BusyReloadIcon busy /> Sending…
-                      </>
-                    ) : (
-                      "Review & create"
-                    )}
-                  </Button>
-                </Flex>
-              </Flex>
-            </Card>
-          );
-        })}
       </Flex>
 
       <Separator size="4" />

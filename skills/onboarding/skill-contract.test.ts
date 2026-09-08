@@ -1,7 +1,7 @@
 import * as fs from "node:fs";
 import { describe, expect, it } from "vitest";
 
-describe("onboarding skill template handoff", () => {
+describe("onboarding skill handoff", () => {
   it("takes React and the theme from the panel realm rather than owning them", () => {
     const manifest = JSON.parse(
       fs.readFileSync(new URL("package.json", import.meta.url), "utf8"),
@@ -21,17 +21,16 @@ describe("onboarding skill template handoff", () => {
     );
   });
 
-  it("routes selected registry outcomes through Templates", () => {
+  it("routes workspace creation directly to the shell surface", () => {
     const skill = fs
       .readFileSync(new URL("SKILL.md", import.meta.url), "utf8")
       .replace(/\s+/gu, " ");
 
-    expect(skill).toContain("Template-registry discovery is user-initiated");
-    expect(skill).toContain("resolveOnboardingTemplateSelection");
-    expect(skill).toContain("exact registry-bound selection");
-    expect(skill).toContain("[Templates](../templates/SKILL.md)");
-    expect(skill).toContain("Templates owns inspection and exact source selection for workspace creation");
-    expect(skill).toContain("Creating from a template opens a separate workspace");
+    expect(skill).toContain("**Add workspace** opens the shell-owned creation surface");
+    expect(skill).toContain("folder, URL");
+    expect(skill).toContain("validated local checkout");
+    expect(skill).not.toContain("template-registry");
+    expect(skill).not.toContain("onboarding-template");
     expect(skill).not.toContain("contextIntegration");
     expect(skill).not.toContain("vibestudio-template-examples.git");
   });

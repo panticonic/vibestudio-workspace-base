@@ -1,6 +1,6 @@
 ---
 name: onboarding
-description: Open the state-aware setup overview, route selections to owner workflows, refresh state, or inspect templates for new workspaces.
+description: Open the state-aware setup overview, route selections to owner workflows, refresh state, or add a separate workspace.
 ---
 
 # Onboarding
@@ -23,8 +23,6 @@ uses its panel cache immediately, then reads capability-owner state. A failed
 owner read becomes an honest unknown or unavailable row without suppressing
 other capabilities.
 
-Template-registry discovery is user-initiated through the overview — don't
-contact the registry during initial capability load.
 The host workspace chooser is the discovery surface for development checkouts
 selected at launch. Open it without a template pin so the host can present its
 validated exact candidates; never ask the current workspace to inspect a local
@@ -38,8 +36,6 @@ complete interaction object, never its label:
 - **Capability interaction**: call `executeOnboardingSelection` from
   `@workspace-skills/onboarding` through `client_eval` (navigation is
   client-affine).
-- **Template interaction**: call `resolveOnboardingTemplateSelection`, then pass
-  its exact registry-bound selection to [Templates](../templates/SKILL.md).
 
 Follow the returned discriminant. A committed panel slot with unconfirmed
 readiness must not be opened again. Owner-skill, model-setting, and conversation
@@ -71,8 +67,10 @@ cancelled, or changes externally, render the same component ID with no snapshot
 props. Report the operation but don't claim a row's refreshed state before the
 component reads it.
 
-Creating from a template opens a separate workspace. Keep this conversation in
-its owning workspace; creation does not integrate source into its context.
+**Add workspace** opens the shell-owned creation surface for a folder, URL,
+website deep link, or validated local checkout. It creates a separate
+workspace. Keep this conversation in its owning workspace; creation does not
+integrate source into its context.
 For explicit source copies or merges, inspect the destination's ordinary VCS
 result before claiming that the changes are available there.
 
@@ -87,9 +85,7 @@ result before claiming that the changes are available there.
   feedback questions or a custom approval UI.
 - Treat recurring work as an immediately usable agent capability, not setup.
   Automations owns its schedule, execution, history, and supervision.
-- Onboarding may suggest catalog entries; Templates owns inspection and exact
-  source selection for workspace creation. There is no installed-layer or
-  automatic update workflow.
+- The shell owns exact source inspection and workspace creation.
 
 Read [GETTING_STARTED.md](GETTING_STARTED.md) for the execution recipe,
 [OVERVIEW.md](OVERVIEW.md) for product concepts, and

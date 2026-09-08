@@ -7,9 +7,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { lintRendererSource } from "@workspace/agentic-core";
 import SetupHub from "./SetupHub.js";
-import { resolveOnboardingTemplateSelection } from "./routing.js";
 import type { SetupCapabilitySnapshot } from "./snapshot.js";
-import type { OptionalTemplateSnapshot } from "./templates.js";
 import {
   onboardingCatalog,
   type OnboardingCapabilityDefinition,
@@ -17,15 +15,10 @@ import {
 
 const loaders = vi.hoisted(() => ({
   capabilities: vi.fn(),
-  templates: vi.fn(),
 }));
 
 vi.mock("./snapshot.js", () => ({
   composeOnboardingCapabilities: loaders.capabilities,
-}));
-
-vi.mock("./templates.js", () => ({
-  loadOptionalTemplateSnapshot: loaders.templates,
 }));
 
 const googleCapability: OnboardingCapabilityDefinition = {
@@ -42,11 +35,6 @@ const googleCapability: OnboardingCapabilityDefinition = {
   setup: { statusAdapter: "google", successDescription: "Verified live." },
 };
 const catalog = [...onboardingCatalog, googleCapability];
-const selection = {
-  catalogId: "examples",
-  registryCommit: "a".repeat(40),
-  registrySnapshot: `v1-sha256:${"b".repeat(64)}`,
-};
 
 const observedAt = new Date().toISOString();
 const snapshots: SetupCapabilitySnapshot[] = [
@@ -72,58 +60,17 @@ const snapshots: SetupCapabilitySnapshot[] = [
     observedAt,
   },
 ];
-const templates: OptionalTemplateSnapshot[] = [
-  {
-    id: "template.examples",
-    title: "Examples",
-    description: "Sample panels and workers.",
-    state: "available",
-    summary: "Available to review and add.",
-    observedAt,
-    selection,
-  },
-  {
-    id: "template.news",
-    title: "News",
-    description: "News tools.",
-    state: "available",
-    summary: "Available as a separate workspace.",
-    observedAt,
-    selection: { ...selection, catalogId: "news" },
-  },
-  {
-    id: "template.spectrolite",
-    title: "Spectrolite",
-    description: "MDX writing.",
-    state: "available",
-    summary: "Available as a separate workspace.",
-    observedAt,
-    selection: { ...selection, catalogId: "spectrolite" },
-  },
-];
-
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((done) => {
-    resolve = done;
-  });
-  return { promise, resolve };
-}
 
 function setupScope(
   options: {
     catalog?: readonly OnboardingCapabilityDefinition[];
     snapshot?: SetupCapabilitySnapshot[];
-    templates?: OptionalTemplateSnapshot[];
   } = {},
 ): Record<string, unknown> {
   return {
     onboardingSetupOverview: {
       catalog: options.catalog ?? catalog,
       snapshot: options.snapshot ?? snapshots,
-      ...(options.templates
-        ? { templates: options.templates, templatesLoaded: true }
-        : {}),
     },
   };
 }
@@ -131,8 +78,6 @@ function setupScope(
 beforeEach(() => {
   loaders.capabilities.mockReset();
   loaders.capabilities.mockResolvedValue({ catalog, snapshot: snapshots });
-  loaders.templates.mockReset();
-  loaders.templates.mockResolvedValue(templates);
 });
 
 describe("SetupHub", () => {
@@ -269,193 +214,18 @@ describe("SetupHub", () => {
     expect(save).toHaveBeenCalled();
   });
 
-  it("refreshes setup capabilities and the source catalog after new source arrives", async () => {
-    const baseCatalog = onboardingCatalog;
-    const baseSnapshots = snapshots.filter(
-      (snapshot) => snapshot.id !== "connection.google-workspace",
-    );
-    const googleTemplate: OptionalTemplateSnapshot = {
-      id: "template.google-workspace",
-      title: "Google Workspace",
-      description: "Connect Google Workspace.",
-      state: "available",
-      summary: "Available to review and add.",
-      observedAt,
-      selection: { ...selection, catalogId: "google-workspace" },
-    };
-    loaders.capabilities
-      .mockResolvedValueOnce({ catalog: baseCatalog, snapshot: baseSnapshots })
-      .mockResolvedValueOnce({ catalog, snapshot: snapshots });
-    loaders.templates
-      .mockResolvedValueOnce([googleTemplate])
-      .mockResolvedValueOnce([{ ...googleTemplate, state: "available" }]);
-    const scope: Record<string, unknown> = {
-      onboardingSetupOverview: {
-        catalog: baseCatalog,
-        snapshot: baseSnapshots,
-        templates: [googleTemplate],
-        templatesLoaded: true,
-      },
-    };
-    const view = render(
-      <Theme>
-        <SetupHub
-          chat={{ send: vi.fn() }}
-          scope={scope}
-          inlineUi={{
-            id: "onboarding-setup-overview",
-            renderedAt: "before-install",
-          }}
-        />
-      </Theme>,
-    );
-
-    await waitFor(() => expect(loaders.templates).toHaveBeenCalledTimes(1));
-    view.rerender(
-      <Theme>
-        <SetupHub
-          chat={{ send: vi.fn() }}
-          scope={scope}
-          inlineUi={{
-            id: "onboarding-setup-overview",
-            renderedAt: "after-install",
-          }}
-        />
-      </Theme>,
-    );
-
-    await waitFor(() => expect(loaders.templates).toHaveBeenCalledTimes(2));
-    expect(loaders.templates).toHaveBeenLastCalledWith({
-      refreshCatalog: false,
-    });
-    expect(view.getAllByText("Google Workspace")).toHaveLength(2);
-    expect(view.getByRole("button", { name: "Check connection" })).toBeTruthy();
-  });
-
-  it("explains templates and contacts the registry only after an explicit load", async () => {
+  it("offers one direct Add workspace route", async () => {
     const view = render(
       <Theme>
         <SetupHub scope={setupScope()} chat={{ send: vi.fn() }} />
       </Theme>,
     );
-
+    const link = await view.findByRole("link", { name: "Add workspace" });
+    expect(link.getAttribute("href")).toBe(
+      "vibestudio://surface?v=1&kind=workspace-chooser",
+    );
     expect(
-      view.getByText(/Start a separate workspace with panels, agents/i),
-    ).toBeTruthy();
-    expect(
-      view.getByText(/featured workspaces from Vibestudio's catalog/i),
-    ).toBeTruthy();
-    expect(
-      view
-        .getByRole("link", { name: "Open workspace chooser" })
-        .getAttribute("href"),
-    ).toContain("workspace-chooser");
-    expect(loaders.templates).not.toHaveBeenCalled();
-
-    fireEvent.click(view.getByRole("button", { name: "Browse workspaces" }));
-    await waitFor(() => expect(loaders.templates).toHaveBeenCalledOnce());
-    expect(view.getByText("Examples")).toBeTruthy();
-  });
-
-  it("shows the concrete optional-template failure", async () => {
-    loaders.templates.mockRejectedValueOnce(
-      new Error(
-        "Template registry system epoch 58 does not match workspace system epoch 59; a workspace-source upgrade is required",
-      ),
-    );
-    const view = render(
-      <Theme>
-        <SetupHub scope={setupScope()} chat={{ send: vi.fn() }} />
-      </Theme>,
-    );
-
-    fireEvent.click(view.getByRole("button", { name: "Browse workspaces" }));
-
-    expect(
-      await view.findByText(
-        /registry system epoch 58 does not match workspace system epoch 59/i,
-      ),
-    ).toBeTruthy();
-  });
-
-  it("animates refresh icons while setup and template data are loading", async () => {
-    const capabilityLoad = deferred<{
-      catalog: typeof catalog;
-      snapshot: typeof snapshots;
-    }>();
-    const templateLoad = deferred<OptionalTemplateSnapshot[]>();
-    loaders.capabilities.mockReturnValue(capabilityLoad.promise);
-    loaders.templates.mockReturnValue(templateLoad.promise);
-    const view = render(
-      <Theme>
-        <SetupHub scope={setupScope()} chat={{ send: vi.fn() }} />
-      </Theme>,
-    );
-
-    const refresh = view.getByRole("button", {
-      name: "Refresh setup overview",
-    });
-    await waitFor(() => expect(refresh.textContent).toContain("Refreshing…"));
-    expect(refresh.querySelector("svg")?.style.animation).toBe(
-      "spin 0.8s linear infinite",
-    );
-
-    fireEvent.click(view.getByRole("button", { name: "Browse workspaces" }));
-    const loadTemplates = view.getByRole("button", {
-      name: "Loading workspaces…",
-    });
-    expect(loadTemplates.querySelector("svg")?.style.animation).toBe(
-      "spin 0.8s linear infinite",
-    );
-
-    await act(async () => {
-      capabilityLoad.resolve({ catalog, snapshot: snapshots });
-      templateLoad.resolve(templates);
-    });
-    await waitFor(() => expect(view.getByText("Examples")).toBeTruthy());
-  });
-
-  it("shows optional templates and sends available choices through structured review", async () => {
-    const send = vi.fn(
-      async (
-        _content: string,
-        _options?: { metadata?: Record<string, unknown> },
-      ) => undefined,
-    );
-    const view = render(
-      <Theme>
-        <SetupHub scope={setupScope({ templates })} chat={{ send }} />
-      </Theme>,
-    );
-
-    expect(view.getByText("Explore workspaces")).toBeTruthy();
-    expect(
-      view.getAllByRole("button", { name: "Review & create" }),
-    ).toHaveLength(3);
-
-    fireEvent.click(
-      view.getAllByRole("button", { name: "Review & create" })[0]!,
-    );
-    await waitFor(() =>
-      expect(send).toHaveBeenCalledWith(
-        "Review Examples and create a new workspace",
-        {
-          metadata: {
-            interaction: {
-              source: "onboarding-setup-hub",
-              kind: "onboarding-template",
-              action: "create-workspace",
-              targetId: "template.examples",
-              ...selection,
-            },
-          },
-        },
-      ),
-    );
-    const interaction = send.mock.calls[0]?.[1]?.metadata?.["interaction"];
-    expect(resolveOnboardingTemplateSelection(interaction)).toEqual({
-      ownerSkillPath: "skills/templates/SKILL.md",
-      selection,
-    });
+      view.queryByText(/featured workspaces|workspace catalog/i),
+    ).toBeNull();
   });
 });
