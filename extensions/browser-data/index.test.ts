@@ -233,6 +233,7 @@ function makeContext(callerKind: string | null = "shell", callerId = "shell") {
         };
       }
       if (method === "browserEnvironment.releaseImportSource") return undefined;
+      if (method === "getImportJob") return null;
       if (method === "addBookmarksBatch") return 1;
       if (method === "addBookmark") return 42;
       if (method === "getBookmarks") return [{ id: 1, title: "Example" }];
@@ -667,8 +668,8 @@ describe("@workspace-extensions/browser-data", () => {
       hostId: host!.hostId,
       sourceId: "opaque-chrome",
       dataTypes: ["bookmarks"],
-    });
-    expect(["queued", "discovering", "reading"]).toContain(result.phase);
+    }, "public-operation");
+    expect(result.phase).toBe("complete");
     await vi.waitFor(async () => {
       expect(
         ((await api.getImportJob(result.jobId)) as { phase?: string } | null)
@@ -705,7 +706,7 @@ describe("@workspace-extensions/browser-data", () => {
         hostId: host!.hostId,
         sourceId: "opaque-chrome",
         dataTypes: ["cookies"],
-      }),
+      }, "public-operation"),
     ).rejects.toMatchObject({ code: "EUNSUPPORTED" });
     expect(rpcCall.mock.calls.map((call) => call[1])).not.toContain(
       "addCookiesBatch",

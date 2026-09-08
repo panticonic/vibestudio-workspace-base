@@ -417,16 +417,17 @@ export async function activate(ctx: ExtensionContextLike) {
         );
       }
     ),
-    startImport: guarded("startImport", async (selection: BrowserImportSelection) => {
+    startImport: guarded("startImport", async (selection: BrowserImportSelection, operationId: string) => {
       const { identity } = await currentIdentity();
       await ensureImportHosts(identity);
       assertNonSensitiveImportSelection(selection);
-      const started = await coordinator.start(identity, selection);
-      void coordinator.waitForJob(identity, started.jobId).then((completed) => {
-        reportImportHealth(ctx, completed);
-        ctx.emit("import-complete", completed);
-      });
-      return started;
+      const started = await coordinator.start(identity, selection, operationId, ctx.invocation.signal?.() ?? undefined);
+      // The initiating RPC owns the import's authority through its final batch.
+      // The caller knows the operation ID and can observe/cancel while awaiting this result.
+      const completed = await coordinator.waitForJob(identity, started.jobId);
+      reportImportHealth(ctx, completed);
+      ctx.emit("import-complete", completed);
+      return completed;
     }),
     startSensitiveImport: guarded(
       "startSensitiveImport",
@@ -483,11 +484,10 @@ export async function activate(ctx: ExtensionContextLike) {
       if (!existing) throw new Error(`Browser import job was not found: ${jobId}`);
       assertNonSensitiveImportDataTypes(existing.requestedDataTypes);
       const resumed = await coordinator.resume(identity, jobId);
-      void coordinator.waitForJob(identity, resumed.jobId).then((completed) => {
-        reportImportHealth(ctx, completed);
-        ctx.emit("import-complete", completed);
-      });
-      return resumed;
+      const completed = await coordinator.waitForJob(identity, resumed.jobId);
+      reportImportHealth(ctx, completed);
+      ctx.emit("import-complete", completed);
+      return completed;
     }),
     getImportJob: guarded("getImportJob", async (jobId: string) => {
       const { identity } = await currentIdentity();
