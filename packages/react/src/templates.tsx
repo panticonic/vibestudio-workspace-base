@@ -17,15 +17,15 @@ import {
   TextField,
 } from "@radix-ui/themes";
 import type {
-  TemplateCatalogSnapshot,
   TemplateExactPin,
   TemplateInspection,
   TemplateLocator,
 } from "@vibestudio/service-schemas/templates";
 import { sameWorkspaceTemplatePin } from "@vibestudio/service-schemas/templates";
-import type { TemplateManagementClient } from "./index.js";
+import { workspaceExamples } from "@workspace/template-management";
+import type { TemplateManagementClient } from "@workspace/template-management";
 
-type BrowserClient = Pick<TemplateManagementClient, "catalog" | "inspect">;
+type BrowserClient = Pick<TemplateManagementClient, "inspect">;
 export type CreateTemplateWorkspace = (
   name: string,
   pin: TemplateExactPin,
@@ -203,13 +203,10 @@ export function TemplateBrowser({
   onCreate?: CreateTemplateWorkspace;
   onOpenInApp?: (inspection: TemplateInspection) => Promise<void>;
 }) {
-  const [catalog, setCatalog] = useState<TemplateCatalogSnapshot | null>(null);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<unknown>(null);
   const [attempt, setAttempt] = useState(0);
   const review = pendingAuthorityNotice(error);
   const awaitingReview = isAuthorityPending(error);
-  const [query, setQuery] = useState("");
   const [url, setUrl] = useState("");
   const [credential, setCredential] = useState("");
   const [inspectionState, setInspectionState] = useState<{
@@ -236,26 +233,11 @@ export function TemplateBrowser({
       : null;
   useEffect(() => {
     live.current = true;
-    let active = true;
-    setLoading(true);
-    setError(null);
-    client
-      .catalog()
-      .then((value) => {
-        if (active) setCatalog(value);
-      })
-      .catch((error) => {
-        if (active) setError(error);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
     return () => {
-      active = false;
       live.current = false;
       generation.current += 1;
     };
-  }, [client, attempt]);
+  }, []);
   const inspect = async (locator: TemplateLocator) => {
     const operation = ++generation.current;
     setInspecting(true);
@@ -300,12 +282,6 @@ export function TemplateBrowser({
         onBack={() => setInspectionState(null)}
       />
     );
-  const entries = (catalog?.entries ?? []).filter((entry) =>
-    [entry.name, entry.description, ...entry.tags]
-      .join(" ")
-      .toLowerCase()
-      .includes(query.trim().toLowerCase()),
-  );
   const canInspect = (() => {
     try {
       return ["https:", "http:"].includes(
@@ -317,12 +293,6 @@ export function TemplateBrowser({
   })();
   return (
     <Flex direction="column" gap="5">
-      <Box>
-        <Heading size="5">A workspace for what’s next</Heading>
-        <Text as="p" color="gray" size="2" mt="2">
-          Explore an app or bring a workspace from its source address.
-        </Text>
-      </Box>
       {error ? (
         <Callout.Root
           color={awaitingReview ? "amber" : "red"}
@@ -419,7 +389,6 @@ export function TemplateBrowser({
       <Flex direction="column" gap="3">
         <Flex justify="between" align="center">
           <Heading size="3">From a source address</Heading>
-          <Badge color="gray">Your choice</Badge>
         </Flex>
         <TextField.Root
           size="3"
@@ -469,67 +438,14 @@ export function TemplateBrowser({
         </Flex>
       </Flex>
       <Flex direction="column" gap="3">
-        <Heading size="3">Browse workspaces</Heading>
-        {loading ? (
-          <Flex role="status" gap="2">
-            <Spinner />
-            <Text size="2">Loading the catalog…</Text>
-          </Flex>
-        ) : null}
-        {catalog?.entries.length ? (
-          <TextField.Root
-            size="3"
-            aria-label="Search workspaces"
-            placeholder="Find something to explore…"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        ) : null}
-        {catalog?.stale ? (
-          <Text size="1" color="gray">
-            Showing the last verified catalog.
-          </Text>
-        ) : null}
-        {!loading && entries.length === 0 ? (
-          <Text as="p" size="2" color="gray">
-            {query
-              ? "No workspaces match that search."
-              : "More workspaces will appear here. You can open one from its source address above."}
-          </Text>
-        ) : null}
+        <Heading size="3">Start from an example</Heading>
         <Grid columns={{ initial: "1", sm: "2" }} gap="3">
-          {entries.map((entry) => (
-            <Card
-              key={entry.id}
-              style={{ display: "flex", flexDirection: "column", gap: 12 }}
-            >
-              <Flex align="center" gap="2">
-                <Heading size="3">{entry.name}</Heading>
-                {entry.recommended ? <Badge size="1">Featured</Badge> : null}
-              </Flex>
-              <Text as="p" size="2" color="gray" style={{ flex: 1 }}>
-                {entry.description}
-              </Text>
-              <Flex gap="1" wrap="wrap">
-                {entry.tags.slice(0, 3).map((tag) => (
-                  <Badge key={tag} color="gray" variant="soft">
-                    {tag}
-                  </Badge>
-                ))}
-              </Flex>
-              <Button
-                size="3"
-                variant="soft"
-                disabled={inspecting}
-                onClick={() =>
-                  void inspect({
-                    catalogId: entry.id,
-                    registryCommit: catalog!.coordinates.commit,
-                    registrySnapshot: catalog!.coordinates.snapshot,
-                  })
-                }
-              >
-                Explore {entry.name}
+          {workspaceExamples.map((entry) => (
+            <Card key={entry.url}>
+              <Heading size="3">{entry.name}</Heading>
+              <Text as="p" size="2" color="gray" mt="2">{entry.description}</Text>
+              <Button mt="3" variant="soft" disabled={inspecting} onClick={() => void inspect({ url: entry.url })}>
+                Review {entry.name}
               </Button>
             </Card>
           ))}

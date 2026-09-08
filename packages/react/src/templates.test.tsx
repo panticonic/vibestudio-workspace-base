@@ -9,7 +9,7 @@ import {
 } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
 import { afterEach, expect, it, vi } from "vitest";
-import { TemplateBrowser, TemplateWorkspaceReview } from "./TemplateBrowser";
+import { TemplateBrowser, TemplateWorkspaceReview } from "./templates";
 import { sameWorkspaceTemplatePin } from "@vibestudio/service-schemas/templates";
 const pin = {
   url: "git+https://example.test/garden.git",

@@ -4,7 +4,7 @@ import {
 } from "@vibestudio/service-schemas/templates";
 import { createTypedServiceClient } from "@vibestudio/shared/typedServiceClient";
 
-/** The same schema owns inspection, catalog and authoring signatures on every runtime. */
+/** The same schema owns inspection and authoring signatures on every runtime. */
 export type TemplateManagementClient = TemplatesClient;
 export function createTemplateManagementClient(
   invoke: (
@@ -20,3 +20,11 @@ export function createTemplateManagementClient(
       invoke("@workspace-extensions/templates", method, args),
   );
 }
+
+/** Ordinary source addresses; inspection resolves and reviews their exact contents. */
+export const workspaceExamples = [
+  { name: "Examples", description: "Explore sample panels, agents and tools.", url: "https://github.com/panticonic/vibestudio-template-examples" },
+  { name: "Google Workspace", description: "Connect Google Workspace and work with a Gmail agent.", url: "https://github.com/panticonic/vibestudio-template-google-workspace" },
+  { name: "News", description: "Collect feeds and brief the news.", url: "https://github.com/panticonic/vibestudio-template-news" },
+  { name: "Spectrolite", description: "Write and edit MDX with collaborative agents.", url: "https://github.com/panticonic/vibestudio-template-spectrolite" },
+] as const;

@@ -1,7 +1,7 @@
 import { extensions } from "@workspace/runtime";
 import { createShellSurfaceLink } from "@vibestudio/shared/shellSurface";
 import { createTemplateManagementClient } from "@workspace/template-management";
-import { TemplateBrowser } from "@workspace/template-management/react";
+import { TemplateBrowser } from "@workspace/react/templates";
 import { AboutPage, AboutThemeRoot } from "@workspace/about-shared/ui";
 
 const templates = createTemplateManagementClient((extension, method, args) =>

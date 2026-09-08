@@ -3,7 +3,6 @@ import type { WorkspaceCreationReceipt } from "@vibestudio/workspace-contracts/t
 import { useEffect, useRef, useState } from "react";
 import { useAtom, useSetAtom } from "jotai";
 import {
-  Badge,
   Box,
   Button,
   Callout,
@@ -14,7 +13,6 @@ import {
   TextField,
 } from "@radix-ui/themes";
 import { TemplateBrowser } from "@workspace/react/templates";
-import type { HubWorkspaceEntry } from "@vibestudio/service-schemas/hubControl";
 import { sameWorkspaceTemplatePin } from "@vibestudio/workspace-contracts/types";
 import {
   useShellWorkspaceClient,
@@ -22,7 +20,6 @@ import {
 } from "../shell/workspaceContext";
 import { systemWorkspaceId } from "../shell/client";
 import { useApprovalPresentation } from "./ApprovalPresentationContext";
-import { workspaceLabel } from "../shell/workspaceLabel";
 import {
   workspaceChooserDialogOpenAtom,
   workspaceChooserTemplateAtom,
@@ -34,11 +31,7 @@ export function WorkspaceChooser() {
   const approvalPresentation = useApprovalPresentation();
   const close = useSetAtom(workspaceChooserDialogOpenAtom);
   const [template, setTemplate] = useAtom(workspaceChooserTemplateAtom);
-  const [workspaces, setWorkspaces] = useState<HubWorkspaceEntry[]>([]);
-  const [mode, setMode] = useState<"list" | "blank" | "source">(
-    template ? "source" : "list",
-  );
-  const [loading, setLoading] = useState(true);
+  const [mode, setMode] = useState<"blank" | "source">("source");
   const [busy, setBusy] = useState(false);
   const [name, setName] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -75,23 +68,6 @@ export function WorkspaceChooser() {
     }).catch(error => { if (live) setError(String(error)); }).finally(() => { if (live) setRestoring(false); });
     return () => { live = false; };
   }, [hubControl, setTemplate]);
-  useEffect(() => {
-    let live = true;
-    hubControl
-      .listWorkspaces()
-      .then((entries) => {
-        if (live) setWorkspaces(entries);
-      })
-      .catch((error) => {
-        if (live) setError(String(error));
-      })
-      .finally(() => {
-        if (live) setLoading(false);
-      });
-    return () => {
-      live = false;
-    };
-  }, [hubControl]);
   useEffect(() => {
     let live = true;
     hubControl
@@ -160,32 +136,16 @@ export function WorkspaceChooser() {
   return (
     <Box p="0" style={{ maxHeight: "80vh", overflow: "auto" }}>
       <Flex direction="column" gap="4">
-        <Flex align="center" justify={mode === "source" && !created ? "end" : "between"} gap="3">
-          {mode === "source" && !created ? null : (
-            <Heading size="5">
-              {created
-                ? `${created.name} is ready`
-                : mode === "list"
-                  ? "Choose where to work"
-                  : "Room for a new idea"}
-            </Heading>
-          )}
-          {mode !== "list" && !created ? (
-            <Button
-              variant="ghost"
-              color="gray"
-              size="3"
-              disabled={busy}
-              onClick={() => {
-                setMode("list");
-                setTemplate(null);
-                setError(null);
-              }}
-            >
-              All workspaces
+        {!created && !template && !recoveredInput ? (
+          <Flex gap="2" role="group" aria-label="Workspace starting point">
+            <Button variant={mode === "source" ? "solid" : "soft"} disabled={busy} onClick={() => setMode("source")}>
+              From an example or source
             </Button>
-          ) : null}
-        </Flex>
+            <Button variant={mode === "blank" ? "solid" : "soft"} disabled={busy} onClick={() => setMode("blank")}>
+              Start blank
+            </Button>
+          </Flex>
+        ) : null}
         {recoveryNotice ? <Callout.Root><Callout.Text>{recoveryNotice}</Callout.Text></Callout.Root> : null}
         {candidateDiscovery.status === "failed" ? (
           <Callout.Root color="red" role="alert">
@@ -238,7 +198,7 @@ export function WorkspaceChooser() {
                 });
             }}
           />
-        ) : mode === "blank" ? (
+        ) : (
           <Flex direction="column" gap="3">
             <Text size="2" color="gray">
               Start with the shared basics and make it your own.
@@ -268,44 +228,6 @@ export function WorkspaceChooser() {
               Create workspace
             </Button>
           </Flex>
-        ) : (
-          <>
-            <Text size="2" color="gray">
-              Each workspace keeps its own panels, files and conversations.
-            </Text>
-            {loading ? (
-              <Flex gap="2" role="status">
-                <Spinner />
-                <Text size="2">Loading workspaces…</Text>
-              </Flex>
-            ) : null}
-            <Flex direction="column" gap="2">
-              {workspaces.map((workspace) => (
-                <Button
-                  key={workspace.workspaceId}
-                  size="3"
-                  variant="surface"
-                  color="gray"
-                  disabled={busy}
-                  onClick={() => void open(workspace.workspaceId)}
-                  style={{ justifyContent: "space-between", minHeight: 56 }}
-                >
-                  <Text weight="medium">{workspaceLabel(workspace)}</Text>
-                  <Badge color="gray">
-                    {workspace.privateRole ? "Only you" : "Workspace"}
-                  </Badge>
-                </Button>
-              ))}
-            </Flex>
-            <Flex gap="3" wrap="wrap" mt="2">
-              <Button size="3" onClick={() => setMode("blank")}>
-                New workspace
-              </Button>
-              <Button size="3" variant="soft" onClick={() => setMode("source")}>
-                Explore apps & sources
-              </Button>
-            </Flex>
-          </>
         )}
       </Flex>
     </Box>

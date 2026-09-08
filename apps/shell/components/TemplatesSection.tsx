@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSetAtom } from "jotai";
 import { Callout, Tabs } from "@radix-ui/themes";
-import { TemplateBrowser } from "@workspace/template-management/react";
+import { TemplateBrowser } from "@workspace/react/templates";
 import { useShellWorkspaceClient } from "../shell/workspaceContext";
 import {
   settingsDialogAtom,
