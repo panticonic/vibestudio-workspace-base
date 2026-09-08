@@ -179,7 +179,7 @@ export function PanelTreeItem({
               pointerEvents="none"
               style={[
                 StyleSheet.absoluteFillObject,
-                { backgroundColor: trust.tint },
+                { backgroundColor: trust.tint, borderRadius: radius.md },
               ]}
             />
           )}
