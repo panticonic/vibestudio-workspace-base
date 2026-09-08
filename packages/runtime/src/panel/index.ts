@@ -66,31 +66,21 @@ const gatewayFetch = createGatewayFetch(
 );
 const {
   parentId: runtimeParentId,
-  parentEntityId: runtimeParentEntityId,
   rpc,
   contextId,
 } = bootstrapRuntime;
 
-// --- Panel handle bridge: openPanel/getPanelHandle/panelTree/
-// openExternal/onChildCreated all resolve through this singleton. ---
-import { _initPanelHandleBridge } from "./handle.js";
+// The factory owns one handle runtime for parent access and all panel operations.
 import type { ShellSurfaceKind, ShellSurfaceTarget } from "@vibestudio/shared/shellSurface";
-_initPanelHandleBridge(rpc, {
-  selfId: _slotId,
-  selfRpcTargetId: _entityId,
-  parentId: runtimeParentId,
-  parentRpcTargetId: runtimeParentEntityId,
-  effectiveVersion: config.effectiveVersion,
-});
-import {
-  openExternal as _hostOpenExternal,
-  openPanel as _hostOpenPanel,
-  createPanelSlot as _hostCreatePanelSlot,
-  getPanelHandle as _hostGetPanelHandle,
-  panelTree as _hostPanelTree,
-  onChildCreated as _onChildCreated,
-  onChildCreationError as _onChildCreationError,
-} from "./handle.js";
+const {
+  openExternal: _hostOpenExternal,
+  openPanel: _hostOpenPanel,
+  createPanelSlot: _hostCreatePanelSlot,
+  getPanelHandle: _hostGetPanelHandle,
+  panelTree: _hostPanelTree,
+  onChildCreated: _onChildCreated,
+  onChildCreationError: _onChildCreationError,
+} = bootstrapRuntime.panelRuntime;
 export type { PanelHandle } from "./handle.js";
 
 // --- The portable runtime surface — derived ONCE here (identical to worker +
@@ -286,6 +276,6 @@ export const adblock = helpfulNamespace("adblock", createAdBlockApi(rpc));
 // Wire the panel error-boundary launcher as a side effect; the diagnostic
 // helpers themselves live behind `@workspace/runtime/internal/diagnostics`.
 import { installPanelErrorDiagnosticLauncher } from "./errorDebugChat.js";
-installPanelErrorDiagnosticLauncher({ slotId: _slotId, contextId });
+installPanelErrorDiagnosticLauncher({ slotId: _slotId, contextId, panelRuntime: bootstrapRuntime.panelRuntime });
 
 export type * from "../shared/images.js";

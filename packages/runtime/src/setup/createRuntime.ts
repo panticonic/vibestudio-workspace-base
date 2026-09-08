@@ -9,7 +9,7 @@ import { createBaseRuntime } from "./createBaseRuntime.js";
 import type { EndpointInfo } from "../core/index.js";
 import type { GatewayConfig } from "../shared/globals.js";
 import { createParentHandleApi } from "../shared/handles.js";
-import { createPanelRuntime } from "../shared/panelRuntime.js";
+import { createPanelHandleApi } from "../panel/handle.js";
 import type { RuntimeFs, ThemeAppearance } from "../types.js";
 import { _applyStateArgsFromHost, _initStateArgsRuntime } from "../panel/stateArgs.js";
 import { exposeAgentApi } from "../panel/agentApi.js";
@@ -80,29 +80,12 @@ export function createRuntime(deps: RuntimeDeps) {
   }
 
   const parentSlotId = parentRuntimeId ? (deps.parentId ?? parentRuntimeId) : null;
-  const panelRuntime = createPanelRuntime({
-    rpc: base.rpc,
-    ...(typeof shell?.focusPanel === "function"
-      ? { focusPanel: (panelId, focusOptions) => shell.focusPanel(panelId, focusOptions) }
-      : {}),
+  const panelRuntime = createPanelHandleApi(base.rpc, {
     selfId: slotId,
     selfRpcTargetId: entityId,
-    parentId: deps.parentId,
-    defaultOpenParentId: slotId,
-    requesterPanelId: slotId,
+    parentId: parentSlotId,
+    parentRpcTargetId: parentRuntimeId,
     effectiveVersion: deps.effectiveVersion ?? null,
-    initialMetadata: parentSlotId
-      ? [
-          {
-            id: parentSlotId,
-            title: parentSlotId,
-            source: parentSlotId,
-            kind: "workspace",
-            parentId: null,
-            rpcTargetId: parentRuntimeId,
-          },
-        ]
-      : [],
   });
 
   const parentHandleOrNull = parentSlotId ? panelRuntime.getPanelHandle(parentSlotId) : null;
@@ -124,6 +107,7 @@ export function createRuntime(deps: RuntimeDeps) {
     fs: base.fs,
     workers: base.workers,
 
+    panelRuntime,
     resolveParent,
     parent: parentApi.parent,
     getParent: parentApi.getParent,
@@ -155,6 +139,7 @@ export function createRuntime(deps: RuntimeDeps) {
       }
       globalThis.removeEventListener?.("vibestudio:panel-boot", onPanelBoot);
       bootReporter.dispose();
+      panelRuntime.destroy();
       base.destroy();
     },
   };
