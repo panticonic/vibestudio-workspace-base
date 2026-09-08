@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { RpcCaller } from "@vibestudio/rpc";
-import type { StoredCredentialSummary } from "../shared/credentials.js";
-import { connect, initPanelCredentials } from "./credentials.js";
+import type { StoredCredentialSummary } from "./credentials.js";
+import { createCredentialClient } from "./credentials.js";
 
 const storedCredential: StoredCredentialSummary = {
   id: "cred-1",
@@ -19,7 +19,7 @@ const storedCredential: StoredCredentialSummary = {
   metadata: {},
 };
 
-describe("panel credential OAuth API", () => {
+describe("runtime credential OAuth API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
@@ -31,12 +31,12 @@ describe("panel credential OAuth API", () => {
       }
       throw new Error(`unexpected method: ${method}`);
     });
-    initPanelCredentials({
+    const client = createCredentialClient({
       call: callMock as RpcCaller["call"],
       stream: vi.fn(async () => new Response()) as unknown as RpcCaller["stream"],
     });
 
-    await expect(connect({
+    await expect(client.connect({
       flow: {
         type: "oauth2-auth-code-pkce",
         authorizeUrl: "https://auth.example.com/oauth/authorize",

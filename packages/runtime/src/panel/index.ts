@@ -104,10 +104,6 @@ const _panelHost: RuntimeHost = {
 };
 const _core = createHostedRuntime(_panelHost);
 
-// Credentials still seeds the `@workspace/runtime/panel/credentials` singleton.
-import { initPanelCredentials } from "./credentials.js";
-initPanelCredentials(rpc);
-
 // Portable top-level surface (callMain/parent/getParent/getParentWithContract +
 // every rpc-mediated namespace + panel-tree affordances) — sourced from _core so
 // panel ≡ worker ≡ eval.

@@ -300,9 +300,6 @@
       "@workspace/runtime/worker/credentials": [
         "./packages/runtime/src/worker/credentials.ts"
       ],
-      "@workspace/runtime/panel/credentials": [
-        "./packages/runtime/src/panel/credentials.ts"
-      ],
       "@workspace/runtime/worker/test-utils": [
         "./packages/runtime/src/worker/durable-test-utils.ts"
       ],
