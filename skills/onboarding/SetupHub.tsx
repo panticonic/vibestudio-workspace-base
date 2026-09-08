@@ -16,6 +16,7 @@ import {
 } from "@radix-ui/react-icons";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  workspaceChooserLink,
   type OnboardingCapabilityDefinition,
   type SetupAction,
 } from "./catalog";
@@ -603,9 +604,17 @@ export default function SetupHub({
           Explore workspaces
         </Text>
         <Text size="1" color="gray">
-          Explore workspaces with panels, skills, and tools for a particular task.
-          Browsing contacts Vibestudio's workspace catalog. A selection creates a
-          separate workspace after you review and approve it.
+          Start a separate workspace with panels, agents, and tools for your next project.
+        </Text>
+        <Box>
+          <Button size="2" asChild>
+            <a href={workspaceChooserLink}>
+              Open workspace chooser
+            </a>
+          </Button>
+        </Box>
+        <Text size="1" color="gray">
+          Or browse featured workspaces from Vibestudio's catalog below.
         </Text>
         <Box>
           <Button

@@ -25,6 +25,10 @@ other capabilities.
 
 Template-registry discovery is user-initiated through the overview — don't
 contact the registry during initial capability load.
+The host workspace chooser is the discovery surface for development checkouts
+selected at launch. Open it without a template pin so the host can present its
+validated exact candidates; never ask the current workspace to inspect a local
+candidate through its remote Git URL.
 
 ## Route a selection
 

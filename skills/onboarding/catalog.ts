@@ -1,7 +1,10 @@
 import {
+  createShellSurfaceLink,
   validateShellSurfaceTarget,
   type ShellSurfaceDescriptor,
 } from "@vibestudio/shared/shellSurface";
+
+export const workspaceChooserLink = createShellSurfaceLink({ kind: "workspace-chooser" });
 
 export type OnboardingRole =
   | "connection"

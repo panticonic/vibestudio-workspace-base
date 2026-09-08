@@ -338,11 +338,11 @@ describe("SetupHub", () => {
       </Theme>,
     );
 
-    expect(view.getByText(/workspaces with panels, skills/i)).toBeTruthy();
+    expect(view.getByText(/Start a separate workspace with panels, agents/i)).toBeTruthy();
     expect(
-      view.getByText(/contacts Vibestudio's workspace catalog/i),
+      view.getByText(/featured workspaces from Vibestudio's catalog/i),
     ).toBeTruthy();
-    expect(view.getByText(/separate workspace after you review and approve/i)).toBeTruthy();
+    expect(view.getByRole("link", { name: "Open workspace chooser" }).getAttribute("href")).toContain("workspace-chooser");
     expect(loaders.templates).not.toHaveBeenCalled();
 
     fireEvent.click(

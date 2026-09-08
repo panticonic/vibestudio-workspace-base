@@ -16,9 +16,15 @@ configuration is optional. A missing owner for a capability shipped in base is
 unavailable, not installable.
 
 The component loads installed capability definitions and statuses directly.
-It does not load optional templates on mount. The user must choose **Load
-optional templates** after reading the explanation that templates are reviewed
-sources for new workspaces and discovery contacts the verified registry.
+**Open workspace chooser** opens the client's workspace creation surface,
+including exact local candidates selected with `--template-checkout`. The host
+owns their inspection and acquisition; do not inspect a local candidate through
+its remote Git URL. Creating a workspace keeps the Personal onboarding
+conversation in place.
+
+The optional **Browse workspaces** action loads featured entries from the
+verified registry. This network discovery does not run on mount. Both routes
+review a source before creating a separate workspace.
 
 ## Handle a choice
 
