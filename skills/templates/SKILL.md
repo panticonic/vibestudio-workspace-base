@@ -29,6 +29,10 @@ Git inspection because its checkpoint commit may intentionally be unpublished.
 Read `catalog` without arguments for cached rendering. Refresh only after an
 explicit user action with `[{ refresh: true }]`. Catalog selections remain
 bound to the returned `coordinates.commit` and `coordinates.snapshot`.
+The result is `null` when no catalog is cached. Otherwise `entries` is the
+template array: use `entries.length` for the template count. `coordinates`
+identifies the verified registry snapshot; it does not describe a workspace
+that has already been created.
 
 Use the extension's complete installed unit name when invoking it:
 
