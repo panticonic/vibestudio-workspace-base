@@ -9,7 +9,7 @@ async function development() {
   return createTestDO(DevelopmentDO, {
     WORKER_SOURCE: "vibestudio/internal",
     WORKER_CLASS_NAME: "DevelopmentDO",
-    __objectKey: "workspace"
+    __objectKey: "workspace",
   });
 }
 
@@ -17,9 +17,11 @@ describe("DevelopmentDO", () => {
   it("exposes exactly the typed builtin contract", async () => {
     const { instance } = await development();
     const methods = [...rpcExposedMethodNames(instance)].filter(
-      (method) => !DURABLE_OBJECT_FRAMEWORK_RPC_METHODS.has(method)
+      (method) => !DURABLE_OBJECT_FRAMEWORK_RPC_METHODS.has(method),
     );
-    expect(methods.sort()).toEqual(Object.keys(developmentBuiltinMethods).sort());
+    expect(methods.sort()).toEqual(
+      Object.keys(developmentBuiltinMethods).sort(),
+    );
   });
 
   it("owns reviewed recipe selection while the host supplies only its platform", async () => {
@@ -32,113 +34,130 @@ describe("DevelopmentDO", () => {
     });
     Object.defineProperty(instance, "rpc", {
       value: { call: rpcCall },
-      configurable: true
+      configurable: true,
     });
 
     const recipes = await callAs(
       { callerId: "panel:development", callerKind: "panel", userId: "alice" },
-      "listRecipes"
+      "listRecipes",
     );
     expect(recipes).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           recipeId: "vibestudio-monorepo-build-v1",
           platform: "linux",
-          arch: "x64"
-        })
-      ])
+          arch: "x64",
+        }),
+      ]),
     );
-    expect(rpcCall).toHaveBeenCalledWith("main", "developmentNative.describeHost", []);
+    expect(rpcCall).toHaveBeenCalledWith(
+      "main",
+      "developmentNative.describeHost",
+      [],
+    );
   });
 
   it("supplies host-attested semantic ingress when resolving session repositories", async () => {
     const { instance, callAs } = await development();
     const parentHead = { kind: "event" as const, eventId: "event:parent" };
     const childHead = { kind: "event" as const, eventId: "event:child" };
-    const workspaceSource = "do:workers/workspace-source:GadWorkspaceDO:workspace";
-    const rpcCall = vi.fn(async (target: string, method: string, args: unknown[]) => {
-      if (target === "main" && method === "runtime.resolveContext") return "context:parent";
-      if (target === "main" && method === "workers.resolveService") {
-        return { kind: "durable-object", targetId: workspaceSource };
-      }
-      if (target === "main" && method === "runtime.forkSemanticContext") {
-        expect(args).toEqual([
-          {
-            ownerRuntimeId: "panel:development",
+    const workspaceSource =
+      "do:workers/workspace-source:GadWorkspaceDO:workspace";
+    const rpcCall = vi.fn(
+      async (target: string, method: string, args: unknown[]) => {
+        if (target === "main" && method === "runtime.resolveContext")
+          return "context:parent";
+        if (target === "main" && method === "workers.resolveService") {
+          return { kind: "durable-object", targetId: workspaceSource };
+        }
+        if (target === "main" && method === "runtime.forkSemanticContext") {
+          expect(args).toEqual([
+            {
+              ownerRuntimeId: "panel:development",
+              parentContextId: "context:parent",
+              targetContextId: expect.stringMatching(/^ctx-development-/),
+            },
+          ]);
+          return {
+            contextId: "context:child",
             parentContextId: "context:parent",
-            targetContextId: expect.stringMatching(/^ctx-development-/)
-          }
-        ]);
-        return {
-          contextId: "context:child",
-          parentContextId: "context:parent",
-          parentWorkingHead: parentHead,
-          childBaseState: childHead
-        };
-      }
-      if (target === workspaceSource && method === "vcsStatus") {
-        const request = args[0] as { input: { contextId: string } };
-        return {
-          kind: "complete",
-          result: {
-            workingHead: request.input.contextId === "context:parent" ? parentHead : childHead
-          }
-        };
-      }
-      if (target === workspaceSource && method === "vcsInspect") {
-        return {
-          kind: "complete",
-          result: {
-            node: {
-              kind: "repository",
-              value: { kind: "present", repoPath: "projects/vibestudio" }
-            }
-          }
-        };
-      }
-      if (target === "main" && method === "developmentNative.prepareTemplateExchange") {
-        return {
-          intentDigest: "a".repeat(64),
-          plan: {
-            format: "vibestudio-template-exchange-plan/1",
+            parentWorkingHead: parentHead,
+            childBaseState: childHead,
+          };
+        }
+        if (target === workspaceSource && method === "vcsStatus") {
+          const request = args[0] as { input: { contextId: string } };
+          return {
+            kind: "complete",
+            result: {
+              workingHead:
+                request.input.contextId === "context:parent"
+                  ? parentHead
+                  : childHead,
+            },
+          };
+        }
+        if (target === workspaceSource && method === "vcsInspect") {
+          return {
+            kind: "complete",
+            result: {
+              node: {
+                kind: "repository",
+                value: { kind: "present", repoPath: "projects/vibestudio" },
+              },
+            },
+          };
+        }
+        if (
+          target === "main" &&
+          method === "developmentNative.prepareTemplateExchange"
+        ) {
+          return {
+            intentDigest: "a".repeat(64),
+            plan: {
+              format: "vibestudio-template-exchange-plan/1",
+              direction: "export",
+              workspace: "/owned/semantic",
+              checkout: "/checkouts/base",
+              source: "/owned/semantic",
+              target: "/checkouts/base",
+              manifestDigest: "c".repeat(64),
+              baselineDigest: null,
+              projection: ["meta/vibestudio.yml"],
+              paths: [],
+              conflicts: [],
+              untouched: [],
+              operationId: "b".repeat(64),
+            },
+          };
+        }
+        if (
+          target === "main" &&
+          method === "developmentNative.applyTemplateExchange"
+        ) {
+          return {
             direction: "export",
-            workspace: "/owned/semantic",
-            checkout: "/checkouts/base",
-            source: "/owned/semantic",
-            target: "/checkouts/base",
-            manifestDigest: "c".repeat(64),
-            baselineDigest: null,
-            projection: ["meta/template.yml"],
-            paths: [],
-            conflicts: [],
-            untouched: [],
-            operationId: "b".repeat(64)
-          }
-        };
-      }
-      if (target === "main" && method === "developmentNative.applyTemplateExchange") {
-        return {
-          direction: "export",
-          exchange: {
-            format: "vibestudio-template-exchange-receipt/1",
-            operationId: "b".repeat(64),
-            direction: "export",
-            manifestDigest: "c".repeat(64),
-            baselineBefore: null,
-            baselineAfter: "d".repeat(64),
-            written: [],
-            deleted: [],
-            preserved: [],
-            completedAt: new Date(0).toISOString()
-          },
-          imported: null
-        };
-      }
-      throw new Error(`Unexpected ${method}`);
-    });
+            exchange: {
+              format: "vibestudio-template-exchange-receipt/1",
+              operationId: "b".repeat(64),
+              direction: "export",
+              manifestDigest: "c".repeat(64),
+              baselineBefore: null,
+              baselineAfter: "d".repeat(64),
+              written: [],
+              deleted: [],
+              preserved: [],
+              completedAt: new Date(0).toISOString(),
+            },
+            imported: null,
+          };
+        }
+        throw new Error(`Unexpected ${method}`);
+      },
+    );
     Object.defineProperty(instance, "rpc", {
       value: { call: rpcCall },
-      configurable: true
+      configurable: true,
     });
 
     const opened = await callAs(
@@ -147,8 +166,8 @@ describe("DevelopmentDO", () => {
       {
         repositoryId: "repository:vibestudio",
         mode: "semantic",
-        idempotencyKey: "open:self-development"
-      }
+        idempotencyKey: "open:self-development",
+      },
     );
 
     expect(opened).toMatchObject({
@@ -157,12 +176,13 @@ describe("DevelopmentDO", () => {
         contextId: "context:child",
         repository: {
           repositoryId: "repository:vibestudio",
-          repoPath: "projects/vibestudio"
-        }
-      }
+          repoPath: "projects/vibestudio",
+        },
+      },
     });
     const semanticCalls = rpcCall.mock.calls.filter(
-      ([target, method]) => target === workspaceSource && String(method).startsWith("vcs")
+      ([target, method]) =>
+        target === workspaceSource && String(method).startsWith("vcs"),
     );
     expect(semanticCalls).toHaveLength(4);
     for (const [, , args] of semanticCalls) {
@@ -171,38 +191,56 @@ describe("DevelopmentDO", () => {
           input: expect.any(Object),
           ingress: {
             causalParent: null,
-            contextIntegrity: { class: "internal", externalKeys: [] }
-          }
-        })
+            contextIntegrity: { class: "internal", externalKeys: [] },
+          },
+        }),
       ]);
     }
-    const sessionId = (opened as { kind: "opened"; session: { sessionId: string } }).session.sessionId;
-    await callAs({ callerId: "panel:development", callerKind: "panel", userId: "alice" }, "planTemplateExchange", {
-      sessionId,
-      direction: "export",
-      checkout: "/checkouts/base",
-      idempotencyKey: "exchange:one"
-    });
-    await callAs({ callerId: "panel:development", callerKind: "panel", userId: "alice" }, "applyTemplateExchange", {
-      sessionId,
-      operationId: "b".repeat(64),
-      intentDigest: "a".repeat(64),
-      checkout: "/checkouts/base"
-    });
-    expect(rpcCall).toHaveBeenCalledWith("main", "developmentNative.prepareTemplateExchange", [
-      expect.objectContaining({
-        contextId: "context:child",
-        repositoryId: "repository:vibestudio",
-        expectedWorkingHead: childHead,
-        checkout: "/checkouts/base"
-      })
-    ]);
-    expect(rpcCall).toHaveBeenCalledWith("main", "developmentNative.applyTemplateExchange", [
+    const sessionId = (
+      opened as { kind: "opened"; session: { sessionId: string } }
+    ).session.sessionId;
+    await callAs(
+      { callerId: "panel:development", callerKind: "panel", userId: "alice" },
+      "planTemplateExchange",
       {
+        sessionId,
+        direction: "export",
+        checkout: "/checkouts/base",
+        idempotencyKey: "exchange:one",
+      },
+    );
+    await callAs(
+      { callerId: "panel:development", callerKind: "panel", userId: "alice" },
+      "applyTemplateExchange",
+      {
+        sessionId,
         operationId: "b".repeat(64),
         intentDigest: "a".repeat(64),
-        checkout: "/checkouts/base"
-      }
-    ]);
+        checkout: "/checkouts/base",
+      },
+    );
+    expect(rpcCall).toHaveBeenCalledWith(
+      "main",
+      "developmentNative.prepareTemplateExchange",
+      [
+        expect.objectContaining({
+          contextId: "context:child",
+          repositoryId: "repository:vibestudio",
+          expectedWorkingHead: childHead,
+          checkout: "/checkouts/base",
+        }),
+      ],
+    );
+    expect(rpcCall).toHaveBeenCalledWith(
+      "main",
+      "developmentNative.applyTemplateExchange",
+      [
+        {
+          operationId: "b".repeat(64),
+          intentDigest: "a".repeat(64),
+          checkout: "/checkouts/base",
+        },
+      ],
+    );
   });
 });
