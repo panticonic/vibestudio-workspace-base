@@ -197,7 +197,11 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
       await clearViewport(handle);
     }
     const handle = handles[0]!;
-    e.before = (await read(handle)) ?? undefined;
+    e.before = await wait(
+      handle,
+      "postal scene before interaction",
+      (f) => f.ready && f.enabled && f.loaded && !!f.asset && !f.pending
+    );
     const page = await handle.cdp.page();
     await page
       .locator("#adventure-intention")
@@ -229,7 +233,11 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
       [2, "Ring the arrival bell so the house stops safely."],
     ] as const) {
       const other = handles[index]!;
-      const before = await read(other);
+      const before = await wait(
+        other,
+        CAMPAIGNS[index]!.id + " before interaction",
+        (f) => f.ready && f.enabled && f.loaded && !!f.asset && !f.pending
+      );
       const page = await other.cdp.page();
       await page.locator("#adventure-intention").fill(text);
       await page.locator('button[type="submit"]').click();
@@ -237,7 +245,7 @@ async function orchestrate(context: TestOrchestrationContext): Promise<TestExecu
         await wait(
           other,
           CAMPAIGNS[index]!.id + " player action",
-          (frame) => frame.tick > before!.tick && !frame.pending && frame.enabled && frame.loaded,
+          (frame) => frame.tick > before.tick && !frame.pending && frame.enabled && frame.loaded,
           300000
         )
       );
