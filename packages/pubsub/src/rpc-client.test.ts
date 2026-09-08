@@ -1361,6 +1361,18 @@ describe("connectViaRpc", () => {
             execute: async (_args: unknown, context: MethodExecutionContext) =>
               context.result({ details: { success: false, error: "boom" } }, { isError: true }),
           },
+          computeAttachment: {
+            parameters: z.object({}),
+            execute: async (_args: unknown, context: MethodExecutionContext) =>
+              context.result(
+                { ok: true },
+                {
+                  attachments: [
+                    { data: "aGVsbG8=", mimeType: "text/plain", name: "hello.txt" },
+                  ],
+                }
+              ),
+          },
         },
       });
 
@@ -1465,6 +1477,47 @@ describe("connectViaRpc", () => {
           { details: { success: false, error: "boom" } },
           true,
           expect.objectContaining({ terminalOutcome: "tool_error" }),
+        ]);
+      });
+
+      mockRpc.call.mockClear();
+      emit({
+        stream: "log",
+        phase: "live",
+        id: 202,
+        type: AGENTIC_EVENT_PAYLOAD_KIND,
+        payload: invocation(
+          "invocation.started",
+          "invocation-attachment",
+          {
+            name: "computeAttachment",
+            request: {},
+            transport: {
+              kind: "channel",
+              channelId: CHANNEL,
+              target: { kind: "panel", id: SELF_ID, participantId: SELF_ID },
+              transportCallId: "transport-attachment",
+            },
+          },
+          { transportCallId: "transport-attachment", turnId: "turn-attachment" }
+        ),
+        senderId: "caller-1",
+        ts: Date.now(),
+      });
+      await vi.waitFor(() => {
+        const attachmentCall = mockRpc.call.mock.calls.find(
+          (call: unknown[]) => call[1] === "submitMethodResult"
+        );
+        expect(attachmentCall?.[2]).toMatchObject([
+          expect.anything(),
+          "transport-attachment",
+          { ok: true },
+          false,
+          expect.objectContaining({
+            attachments: [
+              expect.objectContaining({ mimeType: "text/plain", name: "hello.txt" }),
+            ],
+          }),
         ]);
       });
 
